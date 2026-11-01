@@ -66,6 +66,10 @@ pub struct TblastxArgs {
         help = "BLAST database name (a nucleotide database without parsed Seq-ids)"
     )]
     pub db: Option<String>,
+    /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
+    /// `-no_taxid_expansion` (line DI-8).
+    #[command(flatten)]
+    pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     // DB size
@@ -80,6 +84,35 @@ pub struct TblastxArgs {
     // (`subjects::SubjectSetNumbers`).
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
+    // ```c++
+    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
+    // ```
+    #[arg(
+        long = "show_gis",
+        default_value_t = false,
+        help = "Show NCBI GIs in deflines?"
+    )]
+    pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
+    // ```c++
+    //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
+    // ```
+    // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
+    #[arg(
+        long = "parse_deflines",
+        default_value_t = false,
+        help = "Should the query and subject defline(s) be parsed?"
+    )]
+    pub parse_deflines: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    // ```
+    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     #[arg(long, default_value_t = 10.0, value_parser = tblastx_real)]
     pub evalue: f64,
     // NCBI blast_args.cpp:578-583: a double of at least 0; the lookup table takes its
@@ -201,6 +234,12 @@ pub struct TblastxArgs {
     // by `soft_masking`.
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
+    // arg_desc.AddFlag(kArgUseLCaseMasking,
+    //     "Use lower case filtering in query and subject sequence(s)?", true);
+    // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
+    #[arg(long)]
+    pub lcase_masking: bool,
 
     /// Two-hit window size for triggering ungapped extension (default: 40, or the matrix's
     /// suggestion; `window`). Smaller values are more strict, larger values are more sensitive.
@@ -255,6 +294,7 @@ pub struct TblastxArgs {
     #[arg(
         long = "subject_loc",
         value_name = "RANGE",
+        conflicts_with_all = crate::blastinput::db_filter::DB_FILTER_OPTIONS,
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
@@ -262,6 +302,12 @@ pub struct TblastxArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// by the command line before the search where a tabular field list shows a name of the
+    /// taxonomy database (`algorithm::tblastx::tabular`); `None` elsewhere (`run_local`'s callers
+    /// give no search path: not found, DECISIONS 7 of line CLI C2). Not a public option.
+    #[arg(skip)]
+    pub tabular_taxdb: Option<bool>,
 }
 
 /// What NCBI's score block makes of the `-matrix` name of an ungapped search.

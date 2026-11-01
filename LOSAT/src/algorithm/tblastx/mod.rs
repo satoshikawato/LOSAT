@@ -35,6 +35,10 @@ pub(crate) mod scoring;
 pub mod stage_dump;
 pub(crate) mod subjects;
 pub mod sum_stats_linking;
+// NCBI c++/src/algo/blast/format/blast_format.cpp:770-834 (`CBlastTabularInfo`): the tabular
+// reports with a field list or a delimiter and outfmt 10 and 20, once per run, from the final hit
+// list (`report::tabular`).
+mod tabular;
 pub mod tracing;
 pub mod translation;
 mod ungapped_hit_sort;
@@ -45,7 +49,9 @@ mod x_link_timing;
 mod x_rpt_par;
 // EXPERIMENT (LOSAT_X_TBXSCANBF): the lookup scan without a branch on the presence vector.
 mod x_scan_bf;
+// EXPERIMENT (LOSAT_X_TBXBOARD): units and link groups handed out by one board per search.
 pub mod x_seed_bucket;
+pub(crate) mod x_work_board;
 
 pub use args::TblastxArgs;
 pub use blast_engine::run;

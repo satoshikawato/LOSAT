@@ -24,6 +24,8 @@ pub mod seqid;
 // NCBI objtools/blast/seqdb_writer (CWriteDB) and app/blastdb/makeblastdb.cpp:
 // writer of BLAST database volumes.
 pub mod writedb;
+// NCBI app/blastdb/blastdbcmd.cpp: the BLAST database client (its -info).
+pub mod blastdbcmd;
 
 #[cfg(target_arch = "wasm32")]
 pub mod web_api;

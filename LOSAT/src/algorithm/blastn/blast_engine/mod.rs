@@ -19,7 +19,7 @@ mod run;
 // Re-export the main run function
 pub use run::run;
 pub use run::run_local;
-// EXPERIMENT (LOSAT_X_BNLUTDROP, LOSAT_X_QGROUPPAR, LOSAT_X_BNQDROP, LOSAT_X_QPREPPAR,
+// LOSAT_X_BNLUTDROP (graduated), EXPERIMENT (LOSAT_X_QGROUPPAR, LOSAT_X_BNQDROP, LOSAT_X_QPREPPAR,
 // LOSAT_X_BNTBRANGELOG): the summary lines `main` prints at exit (no NCBI counterpart).
 pub use run::x_lut_drop_print_summary;
 pub use run::x_qgroup_par_print_summary;
@@ -406,7 +406,7 @@ pub fn filter_hsps(
         output_hits.push(Hit {
             identity: hit.identity,
             length: hit.length,
-            mismatch: hit.mismatch,
+            mismatch: hit.mismatch as i64,
             gapopen: hit.gapopen,
             q_start: hit.q_start,
             q_end: hit.q_end,

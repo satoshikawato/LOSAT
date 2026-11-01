@@ -1,13 +1,12 @@
-//! A query batch's lookup tables dropped when its preliminary stage ends (`LOSAT_X_BNLUTDROP`,
-//! `src/algorithm/blastn/blast_engine/x_lut_drop.rs`) on whole searches.
+//! A query batch's lookup tables dropped when its preliminary stage ends
+//! (`src/algorithm/blastn/blast_engine/x_lut_drop.rs`) on whole searches.
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is
-//! `0`. It changes when the tables are freed, not what the search computes: the traceback reads
-//! the HSPs that the preliminary stage kept, and the tables are passed to the scan only (so the
+//! It changes when the tables are freed, not what the search computes: the traceback reads the
+//! HSPs that the preliminary stage kept, and the tables are passed to the scan only (so the
 //! compiler shows that the traceback does not read them). The property under test is that the
-//! report does not depend on it and that the default run took the new path: with `LOSAT_TIMING`
-//! the default run prints `[TIMING] x_bn_lut_drop: batches=` with a count above 0, and `=0`
-//! prints no such line. Every task builds its own kind of table (megablast the contiguous
+//! search drops the tables of its batches (with `LOSAT_TIMING` it prints
+//! `[TIMING] x_bn_lut_drop: batches=` with a count above 0) and that the report at four threads
+//! equals the one-thread report. Every task builds its own kind of table (megablast the contiguous
 //! megablast table, blastn and blastn-short the small or the direct table, dc-megablast the
 //! discontiguous tables), against a subject file (`-subject`) and a database (`-db`), at one and
 //! four threads. That those bytes equal NCBI's is the business of the fixture suites.
@@ -15,7 +14,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BNLUTDROP", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 const TASKS: [&str; 4] = ["megablast", "dc-megablast", "blastn", "blastn-short"];
 
@@ -55,24 +53,24 @@ fn letters(path: &Path) -> String {
 }
 
 /// The query (the first 4,000 letters of LC738874) and a database of LC738868 made with
-/// `losat makedb`, in `dir`.
+/// `losat makeblastdb`, in `dir`.
 fn inputs(dir: &TestDir) -> (PathBuf, PathBuf) {
     let genome = letters(&fasta("LC738874.fasta"));
     let query = dir.0.join("q4000.fna");
     std::fs::write(&query, format!(">q4000\n{}\n", &genome[..4_000])).expect("write the query");
     let db = dir.0.join("lc738868");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fasta("LC738868.fasta"))
         .args(["-dbtype", "nucl"])
         .arg("-out")
         .arg(&db)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run LOSAT makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (query, db)
@@ -125,11 +123,10 @@ fn dropped_batches(stderr: &str) -> Option<u64> {
     })
 }
 
-// The default drops each batch's tables after its preliminary stage and says so with
-// LOSAT_TIMING; `LOSAT_X_BNLUTDROP=0` holds them to the end of the batch and prints no line. The
-// reports are equal, and the same at four threads.
+// The search drops each batch's tables after its preliminary stage and says so with
+// LOSAT_TIMING. The report is the same at four threads.
 #[test]
-fn the_report_does_not_depend_on_when_the_tables_are_dropped() {
+fn the_batches_drop_their_tables_and_the_report_is_the_same_at_four_threads() {
     let dir = TestDir::new("report");
     let (query, db) = inputs(&dir);
     let subject = fasta("LC738868.fasta");
@@ -142,9 +139,6 @@ fn the_report_does_not_depend_on_when_the_tables_are_dropped() {
                 dropped_batches(&stderr).is_some_and(|count| count > 0),
                 "{what}: no batch dropped its tables: {stderr}"
             );
-            let (report, stderr) = search(task, &query, subjects, 1, &[TIMING, SWITCH_OFF]);
-            assert_eq!(report, default, "{what} {SWITCH_OFF:?}");
-            assert_eq!(dropped_batches(&stderr), None, "{what} {SWITCH_OFF:?}");
             let (report, stderr) = search(task, &query, subjects, 4, &[]);
             assert_eq!(report, default, "{what} threads 4");
             assert_eq!(stderr, "", "{what} threads 4");

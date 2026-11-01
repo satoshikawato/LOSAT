@@ -104,9 +104,8 @@
 //! (`x_compute_window_lpt`). The window's results are read by job index as without it. With it on,
 //! the `[TIMING] x_bpredopar:` line ends with `lpt_windows=<windows computed so>`.
 //!
-//! `LOSAT_X_BPREDOWINEXPAND` (a switch of the strict set, on by default from the pull request that
-//! added it; it acts only where this path runs) leaves each compact preliminary list
-//! (`x_prelim_compact.rs`) as it is until
+//! This path (graduated 2026-10-27; the switch was `LOSAT_X_BPREDOWINEXPAND`) leaves each compact
+//! preliminary list (`x_prelim_compact.rs`) as it is until
 //! a window reaches it, instead of expanding the lists of all queries before the redo: before each
 //! window the lists from the first one not expanded are expanded in query order, by the same
 //! `x_expand_hit_list`, until the queries expanded from the window's start hold more jobs than a
@@ -200,15 +199,6 @@ pub(crate) fn x_bp_seg_win() -> Option<usize> {
     })
 }
 
-// No NCBI counterpart: reads the LOSAT_X_BPREDOWINEXPAND switch once; it does not change any value
-// NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): a strict-set switch, on unless it is `0`. It acts only
-/// where this path runs with compact lists.
-pub(crate) fn x_bp_redo_win_expand() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPREDOWINEXPAND"))
-}
-
 /// Jobs per thread that a window holds at most, unless `LOSAT_X_BPREDOPARWINDOW` gives another
 /// number.
 const X_WINDOW_JOBS_PER_THREAD: usize = 64;
@@ -244,13 +234,13 @@ pub(crate) struct XRedoParSearch<'a, P> {
     /// `blast_engine::query_nomask_sequence`.
     pub query_nomask: fn(&QueryContext) -> &[u8],
     pub search_spaces: &'a [SearchSpace],
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): or a database's listed subjects, read per match.
+    /// The encoded subject set, or a database's listed subjects, read per match.
     pub subjects: super::x_redo_subjects::XRedoSubjects<'a>,
     /// Each query's batch (`kappa_query_batches`): the heaps its early termination test reads.
     pub query_batches: &'a [Range<usize>],
     pub matrix: ScoringMatrix,
     pub gapped_params: &'a KarlinParams,
-    pub gapped_gumbel: &'a BlastGumbelBlk,
+    pub gapped_gumbel: Option<&'a BlastGumbelBlk>,
     pub evalue: f64,
     /// `build_redo_align_params` of `run_resolved_in_pool`.
     pub build_redo_align_params: &'a P,
@@ -324,7 +314,7 @@ fn x_list_matches<H>(list: &BlastpHitList<H>) -> usize {
 }
 
 /// The matches of each query: those of its compact list while it is not expanded
-/// (LOSAT_X_BPREDOWINEXPAND; `compact` is empty or has one entry per query), else those of its
+/// (`compact` is empty or has one entry per query), else those of its
 /// preliminary hit list.
 fn x_query_matches(
     lists: &[Option<BlastpHitList>],
@@ -575,7 +565,7 @@ fn x_local_match(lists: &[Option<BlastpHitList>], matched: XMatch) -> &BlastpHsp
         .hsplist_array[matched.position]
 }
 
-/// EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the compact preliminary lists (`x_prelim_compact.rs`) that
+/// The compact preliminary lists (`x_prelim_compact.rs`) that
 /// the windows expand as they reach them, in query order.
 pub(crate) struct XExpandAhead<'a> {
     /// A query's compact list until it is expanded into its preliminary hit list.
@@ -636,7 +626,7 @@ impl<'a> XExpandAhead<'a> {
             window.next.map_or(self.expanded_to == lists.len(), |next| {
                 next.q_idx < self.expanded_to
             }),
-            "BPREDOWINEXPAND: a window from {start:?} reads past the expanded lists (next {:?}, {} of {} expanded)",
+            "a window from {start:?} reads past the expanded lists (next {:?}, {} of {} expanded)",
             window.next,
             self.expanded_to,
             lists.len()
@@ -1064,7 +1054,7 @@ fn x_replay(
 /// The windows of a search, each computed (`compute`, with the lists and the heaps as the replay
 /// of the windows before left them) and then replayed in stream order into `heaps`. A query's
 /// preliminary list is released after the replay of the window that holds its last match. With
-/// `expand` (LOSAT_X_BPREDOWINEXPAND), the compact lists are expanded ahead of each window.
+/// `expand`, the compact lists are expanded ahead of each window.
 #[allow(clippy::too_many_arguments)]
 fn x_redo_windows(
     lists: &mut [Option<BlastpHitList>],
@@ -1240,7 +1230,7 @@ fn x_print_timing(counts: &XCounts) {
 
 /// EXPERIMENT (LOSAT_X_BPREDOPAR): the redo of a search in jobs of a few matches, into `heaps`
 /// (the redone heaps of the search). The preliminary lists are released after their redo, as the
-/// one-thread loop releases them. With `compact` (LOSAT_X_BPREDOWINEXPAND, one
+/// one-thread loop releases them. With `compact` (one
 /// entry per query), a query's compact list stands for its list until the windows expand it; none
 /// is left afterwards. Returns the number of lists released.
 pub(crate) fn x_redo_par_run<P>(
@@ -2615,7 +2605,7 @@ mod tests {
                         query_batches: &fixture.batches,
                         matrix: ScoringMatrix::Blosum62,
                         gapped_params: &fixture.gapped_params,
-                        gapped_gumbel: &fixture.gapped_gumbel,
+                        gapped_gumbel: Some(&fixture.gapped_gumbel),
                         evalue: 10.0,
                         build_redo_align_params: &build,
                         timing: false,
@@ -2743,7 +2733,7 @@ mod tests {
                         query_batches: &fixture.batches,
                         matrix: ScoringMatrix::Blosum62,
                         gapped_params: &fixture.gapped_params,
-                        gapped_gumbel: &fixture.gapped_gumbel,
+                        gapped_gumbel: Some(&fixture.gapped_gumbel),
                         evalue: 10.0,
                         build_redo_align_params: &build,
                         timing: false,

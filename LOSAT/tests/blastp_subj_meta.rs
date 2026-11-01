@@ -1,14 +1,11 @@
 //! blastp's block search (`LOSAT_X_BPQBLOCK`) with the subjects' tabular IDs and titles made once
-//! for all blocks (`LOSAT_X_BPSUBJMETA`, `src/algorithm/blastp/blast_engine/x_subject_meta.rs`) on
-//! whole searches.
+//! for all blocks (`src/algorithm/blastp/blast_engine/x_subject_meta.rs`) on whole searches.
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`, on unless its variable is `0`; the
-//! searches here set it to `0` unless they name it, `PREVIOUS_DEFAULT`), and it acts only in the
-//! `-subject` block search. These tests compare the report, standard error and exit code with the
-//! switch off and on; the reach rows of the run with the switch on (`LOSAT_X_REACH`,
-//! `tests/reach_support`) show whether the path ran (the block search writes tabular format 6
-//! only; outfmt 0, `-db` and a subject whose ID cannot be written take the search of all queries
-//! or have no subject records).
+//! The stored values belong to the `-subject` block search (no switch of their own since
+//! 2026-10-31). These tests compare the report, standard error and exit code of that block search
+//! with the search of all queries (`LOSAT_X_BPQBLOCK=0`); the reach rows of the block run
+//! (`LOSAT_X_REACH`, `tests/reach_support`) show that it took blocks. A subject whose ID cannot be
+//! written is refused before any block runs, as in the search of all queries.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
 //! ```c++
@@ -36,7 +33,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),
     ("LOSAT_X_BPREDOPAR", "0"),
-    ("LOSAT_X_BPSUBJMETA", "0"),
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
@@ -133,10 +129,9 @@ fn with<'a>(base: &[(&'a str, &'a str)], extra: &[(&'a str, &'a str)]) -> Vec<(&
     base.iter().chain(extra).copied().collect()
 }
 
-const ON: (&str, &str) = ("LOSAT_X_BPSUBJMETA", "1");
-
-/// The switch off and on give the same report, standard error and exit code; returns the run
-/// without the switch and the reach rows of the run with it (`LOSAT_X_BPSUBJMETA`).
+/// The block search (`base` names `LOSAT_X_BPQBLOCK`) and the search of all queries
+/// (`LOSAT_X_BPQBLOCK=0`) give the same report, standard error and exit code; returns the run of
+/// the search of all queries and the reach rows of the block run.
 fn same_runs(
     dir: &Path,
     task: &str,
@@ -159,31 +154,39 @@ fn same_runs_with(
     extra: &[&str],
 ) -> (Run, reach_support::Reach) {
     let what = format!("{task} {base:?} threads {threads} outfmt {outfmt} {extra:?}");
-    let off = blastp_with(dir, task, subject, threads, base, outfmt, extra);
-    let reach = reach_support::Reach::new("subj_meta");
-    let on = blastp_with(
+    let all = blastp_with(
         dir,
         task,
         subject,
         threads,
-        &with(base, &[ON, reach.var()]),
+        &with(base, &[("LOSAT_X_BPQBLOCK", "0")]),
         outfmt,
         extra,
     );
-    assert!(on.stdout == off.stdout, "{what}: the report differs");
-    assert_eq!(on.stderr, off.stderr, "{what}: standard error differs");
-    assert_eq!(on.code, off.code, "{what}: the exit code differs");
-    (off, reach)
+    let reach = reach_support::Reach::new("subj_meta");
+    let blocks = blastp_with(
+        dir,
+        task,
+        subject,
+        threads,
+        &with(base, &[reach.var()]),
+        outfmt,
+        extra,
+    );
+    assert!(blocks.stdout == all.stdout, "{what}: the report differs");
+    assert_eq!(blocks.stderr, all.stderr, "{what}: standard error differs");
+    assert_eq!(blocks.code, all.code, "{what}: the exit code differs");
+    (all, reach)
 }
 
 // The block search in blocks of one query batch and of about 20,000 letters: every block's output
-// stage takes the stored IDs and titles, and the rows and standard error are those without the
-// switch. The IDs and titles are made once per block search (`XBlockSubjects::new`) and read at the
+// stage takes the stored IDs and titles, and the rows and standard error are those of the search
+// of all queries. The IDs and titles are made once per block search (`XBlockSubjects::new`) and read at the
 // start of each block's search and by its output, the same code at any thread count and in both
 // tasks (the task chooses only the lookup table, which neither reads nor writes these values):
 // blastp at 4 threads in both block sizes, blastp-fast at 1 thread in blocks of 20,000.
 #[test]
-fn block_search_reports_with_the_switch_are_the_reports_without_it() {
+fn block_search_reports_are_the_reports_of_the_search_of_all_queries() {
     let dir = test_dir("blocks");
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
@@ -193,17 +196,13 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     ] {
         for &letters in sizes {
             let base = [("LOSAT_X_BPQBLOCK", letters)];
-            let (off, reach) = same_runs(&dir, task, &subject, threads, &base, "6");
+            let (all, reach) = same_runs(&dir, task, &subject, threads, &base, "6");
             let what = format!("{task} threads {threads} blocks of {letters}");
-            assert_eq!(off.code, Some(0), "{what}: {}", off.stderr);
-            assert!(!off.stdout.is_empty(), "{what}: the fixture pair has rows");
+            assert_eq!(all.code, Some(0), "{what}: {}", all.stderr);
+            assert!(!all.stdout.is_empty(), "{what}: the fixture pair has rows");
             assert!(
                 reach.sides("LOSAT_X_BPQBLOCK").0,
                 "{what}: the block search did not run"
-            );
-            assert!(
-                reach.sides("LOSAT_X_BPSUBJMETA").0,
-                "{what}: the stored IDs were not made"
             );
         }
     }
@@ -211,66 +210,6 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     let base = [("LOSAT_X_BPQBLOCK", "1"), ("LOSAT_X_BPSUBJRUN", "1")];
     let (_, reach) = same_runs(&dir, "blastp-fast", &subject, 4, &base, "6");
     assert!(reach.sides("LOSAT_X_BPQBLOCK").0);
-    assert!(reach.sides("LOSAT_X_BPSUBJMETA").0);
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-// Where the block search takes no tabular IDs (outfmt 0, whose report shows titles; with
-// `LOSAT_X_BPQBLOCKFMT` it is written in blocks) or has no subject records (`-db`), the switch
-// writes the same report (outfmt 0 at 4 threads: the thread count chooses only the writer of the
-// stored titles, `x_pairwise_par`, which gets the same bytes). In the search of all queries and
-// with `-db` its new side is not taken (`LOSAT_X_REACH`).
-#[test]
-fn the_switch_does_not_act_without_the_subject_block_search() {
-    let dir = test_dir("other-paths");
-    let subject = fixture("MejoMJNV.faa");
-    let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    let base = [("LOSAT_X_BPQBLOCK", "1")];
-    let (off, _) = same_runs(&dir, "blastp", &subject, 4, &base, "0");
-    assert_eq!(off.code, Some(0), "{}", off.stderr);
-    assert!(!off.stdout.is_empty());
-    // The search of all queries (no block search; the default searches this fixture in blocks).
-    let (_, reach) = same_runs(
-        &dir,
-        "blastp",
-        &subject,
-        4,
-        &[("LOSAT_X_BPQBLOCK", "0")],
-        "6",
-    );
-    let sides = reach.sides("LOSAT_X_BPSUBJMETA");
-    assert_eq!(
-        sides,
-        (false, false),
-        "the search of all queries made stored IDs"
-    );
-    // A database made with `losat makedb`; its block search reads the definition lines per block.
-    let name = dir.join("MejoMJNV");
-    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
-        .arg("-in")
-        .arg(fixture("MejoMJNV.faa"))
-        .args(["-dbtype", "prot"])
-        .arg("-out")
-        .arg(&name)
-        .output()
-        .expect("run losat makedb");
-    assert!(
-        output.status.success(),
-        "makedb: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let db = [OsStr::new("-db"), name.as_os_str()];
-    let (off, reach) = same_runs(&dir, "blastp-fast", &db, 4, &base, "6");
-    assert_eq!(off.code, Some(0), "{}", off.stderr);
-    assert!(!off.stdout.is_empty());
-    assert!(
-        reach.sides("LOSAT_X_BPQBLOCK").0,
-        "the -db block search did not run"
-    );
-    // The block search builds its (empty) subject records, so it marks the reference side only.
-    let sides = reach.sides("LOSAT_X_BPSUBJMETA");
-    assert_eq!(sides, (false, true), "a database search made stored IDs?");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -298,13 +237,13 @@ fn subject_file_with_an_undecodable_reported_title(dir: &Path, first_row: &[u8])
 }
 
 // A reported subject whose tabular ID cannot be written: the run is refused with the same message,
-// exit code and rows (none: LOSAT rejects it before any format is written) with the switch off and
-// on. The block search is not taken for such a subject set (`x_query_block_plan`), so the switch
-// is not reached; this test shows that the switch does not change the refusal. The check of the
-// stored values with such records is tested in `x_subject_meta.rs`. One search setting: the plan
-// refuses such a subject set whatever the block size, before any block runs, at any thread count.
+// exit code and rows (none: LOSAT rejects it before any format is written) in the block search and
+// in the search of all queries. The block search is not taken for such a subject set
+// (`x_query_block_plan`), so no block runs and no stored value is made. The check of the stored
+// values with such records is tested in `x_subject_meta.rs`. One search setting: the plan refuses
+// such a subject set whatever the block size, before any block runs, at any thread count.
 #[test]
-fn a_reported_subject_without_a_tabular_id_is_refused_alike_with_the_switch() {
+fn a_reported_subject_without_a_tabular_id_is_refused_alike_in_blocks() {
     let dir = test_dir("undecodable");
     let subject = fixture("MejoMJNV.faa");
     let reference = blastp(
@@ -324,15 +263,15 @@ fn a_reported_subject_without_a_tabular_id_is_refused_alike_with_the_switch() {
     let path = subject_file_with_an_undecodable_reported_title(&dir, first_row);
     let subject = [OsStr::new("-subject"), path.as_os_str()];
     let base = [("LOSAT_X_BPQBLOCK", "1")];
-    let (off, _) = same_runs(&dir, "blastp", &subject, 4, &base, "6");
-    assert_ne!(off.code, Some(0));
+    let (all, _) = same_runs(&dir, "blastp", &subject, 4, &base, "6");
+    assert_ne!(all.code, Some(0));
     assert!(
-        off.stderr
+        all.stderr
             .contains("has a title whose first word starts with 'Subject_'"),
         "{}",
-        off.stderr
+        all.stderr
     );
-    assert!(off.stdout.is_empty());
+    assert!(all.stdout.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -389,11 +328,11 @@ fn subject_file_with_retitled_reported_subjects(
 // Subjects whose tabular ID is not the title's first word: an empty title (`unnamed`), a
 // whitespace-only title, `Subject_` first words (NCBI generates their definition line: `Subject_99`,
 // a cp1252 / latin-1 byte, `Subject_ `, `Subject_3`) and `lcl|Subject_7`. With the stored IDs the
-// block search writes the same rows, in the columns that show the ID, accession and title, with
+// block search writes the same rows as the search of all queries, in the columns that show the ID, accession and title, with
 // `-max_target_seqs 3`, in blastp-fast (the IDs are made the same way in both tasks; its report,
 // as blastp's, shows all seven retitled subjects).
 #[test]
-fn generated_subject_ids_are_written_alike_with_the_switch() {
+fn generated_subject_ids_are_written_alike_in_blocks() {
     let dir = test_dir("generated-ids");
     let original = fixture("MejoMJNV.faa");
     let reference = blastp(
@@ -419,7 +358,7 @@ fn generated_subject_ids_are_written_alike_with_the_switch() {
     let outfmt = "6 qseqid sseqid sacc saccver stitle slen evalue bitscore";
     let base = [("LOSAT_X_BPQBLOCK", "1")];
     let task = "blastp-fast";
-    let (off, reach) = same_runs_with(
+    let (all, reach) = same_runs_with(
         &dir,
         task,
         &subject,
@@ -428,15 +367,15 @@ fn generated_subject_ids_are_written_alike_with_the_switch() {
         outfmt,
         &["-max_target_seqs", "3"],
     );
-    assert_eq!(off.code, Some(0), "{task}: {}", off.stderr);
+    assert_eq!(all.code, Some(0), "{task}: {}", all.stderr);
     assert!(
-        reach.sides("LOSAT_X_BPSUBJMETA").0,
-        "{task}: the stored IDs were not made"
+        reach.sides("LOSAT_X_BPQBLOCK").0,
+        "{task}: the block search did not run"
     );
     // The generated IDs are in the report, so the stored IDs were written.
     for generated in [&b"unnamed"[..], b"Subject_99"] {
         assert!(
-            off.stdout.windows(generated.len()).any(|w| w == generated),
+            all.stdout.windows(generated.len()).any(|w| w == generated),
             "{task}: {} is not in the report",
             String::from_utf8_lossy(generated)
         );

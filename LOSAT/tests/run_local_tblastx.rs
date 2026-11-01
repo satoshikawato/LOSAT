@@ -15,14 +15,30 @@ mod run_local_support;
 use std::process::Command;
 
 use run_local_support::{
-    assert_observer_ranges, fixture_sequence, reader_records, run_formats, Run, TempFasta,
+    assert_observer_ranges, cli_out_path, fixture_sequence, reader_records, run_formats, Run,
+    TempFasta,
 };
 use LOSAT::algorithm::tblastx::TblastxArgs;
 use LOSAT::api::local_blast::{run_local_tblastx, FormatOutput, OutputSink, ReportOutputs};
 use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 10] = ["0", "6", "7", "8", "9", "12", "5", "15", "16", "11"];
+/// The last three are the custom tabular reports of the shared writer (line CLI C2, PR 2).
+const FORMATS: [&str; 13] = [
+    "0",
+    "6",
+    "7",
+    "8",
+    "9",
+    "12",
+    "5",
+    "15",
+    "16",
+    "11",
+    "10 delim=| std qseq sseq sframe",
+    "7 std qseq sseq btop positive ppos frames qcovs qcovhsp",
+    "20 qseqid sseqid evalue sstrand",
+];
 
 /// Two queries against three subjects cut from two genomes; the first query overlaps
 /// two subjects.
@@ -76,7 +92,7 @@ impl Inputs {
 
     /// The CLI output file and standard error of one single-format run.
     fn cli(&self, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
-        let out = self.query.0.with_extension(format!("cli{outfmt}.out"));
+        let out = cli_out_path(&self.query.0, outfmt);
         let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")
@@ -193,6 +209,11 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     ] {
         let result = inputs.run(&FORMATS, extra, true);
         assert_observer_ranges(&result, [0, 1, 2], &format!("tblastx {extra:?}"));
+        // One row per HSP in the custom tabular report too (outfmt 10, no comment lines).
+        assert_eq!(
+            run_local_support::assert_tabular_ranges(&result, 10, None, "tblastx outfmt 10"),
+            result.hits.len()
+        );
     }
 }
 
@@ -208,7 +229,9 @@ fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();
     let queries = queries(&inputs.query.0);
     let subjects = subjects(&inputs.subject.0);
-    for outfmt in ["2", "6 qseqid", "abc"] {
+    // A delimiter that a field separates its entries with is NCBI's error
+    // (blast_args.cpp:2753-2792, `s_ValidateCustomDelim`).
+    for outfmt in ["2", "6 delim=; qseqid staxids", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![

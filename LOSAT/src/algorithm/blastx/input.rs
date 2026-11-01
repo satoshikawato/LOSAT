@@ -48,6 +48,41 @@ pub struct FastaRecord {
     /// has none either (the archive then writes `>` and the title).
     pub source: Option<Box<crate::blastinput::fasta_reader::RecordSource>>,
 }
+
+impl FastaRecord {
+    /// The Seq-ids `-parse_deflines` read, `None` without the option
+    /// (`fasta_reader::FastaRecord::believed`).
+    pub fn believed(&self) -> Option<&crate::blastinput::fasta_reader::believed::BelievedIds> {
+        self.source.as_ref()?.believed.as_deref()
+    }
+
+    /// What `Query=` and `# Query:` show (`fasta_reader::FastaRecord::query_line`).
+    pub fn query_line(&self) -> std::borrow::Cow<'_, str> {
+        if self.believed().is_none() || self.title.is_empty() {
+            return match self.believed() {
+                Some(_) => std::borrow::Cow::Borrowed(&self.internal_id),
+                None => std::borrow::Cow::Borrowed(&self.title),
+            };
+        }
+        std::borrow::Cow::Owned(format!("{} {}", self.internal_id, self.title))
+    }
+
+    /// The id of the record in NCBI's warnings (`fasta_reader::FastaRecord::warning_id`).
+    pub fn warning_id(&self) -> &[u8] {
+        match self.believed() {
+            Some(ids) => &ids.warning_id,
+            None => self.internal_id.as_bytes(),
+        }
+    }
+
+    /// The Seq-id of the record in the Seq-aligns and the archive.
+    pub fn seq_id(&self) -> crate::report::seqid::SeqId<'_> {
+        match self.believed() {
+            Some(ids) => crate::report::seqid::SeqId::Db(&ids.best),
+            None => crate::report::seqid::SeqId::Local(&self.internal_id),
+        }
+    }
+}
 #[derive(Debug, Clone)]
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:974-995
 // ```c++
@@ -78,6 +113,8 @@ pub struct InputWarning {
     pub line: usize,
     pub kind: &'static str,
     pub positions: Vec<usize>,
+    /// The message of kind `defline_id` (the Seq-id warnings of `-parse_deflines`).
+    pub text: Vec<u8>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:319-343
@@ -342,6 +379,7 @@ pub(crate) fn parse_fasta_batches_with_warnings(
         lowercase,
         batch_size,
         false,
+        None,
         deliver,
         warn,
     )
@@ -381,9 +419,13 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     lowercase: bool,
     batch_size: usize,
     keep_defline: bool,
+    parse_deflines: Option<crate::report::archive::bioseq::SeqLocStrand>,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<Vec<FastaRecord>> {
+    let mut believed_keys = std::collections::HashSet::new();
+    let mut believed_generated = 0;
+    let mut believed_molecule = None;
     let mut batch_start = 0;
     let mut batch_length = 0;
 
@@ -601,7 +643,23 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             //             }
             //             if( NStr::StartsWith(next_line, ">?") ) {
             // ```
-            let title_bytes = trim_input_start(&line[1..]);
+            let believed = match parse_deflines {
+                Some(strand) => Some(read_believed_defline(
+                    line,
+                    protein,
+                    strand,
+                    keep_defline,
+                    line_index as u64 + 1,
+                    &mut believed_keys,
+                    &mut believed_generated,
+                    warn,
+                )?),
+                None => None,
+            };
+            let title_bytes = match &believed {
+                Some(defline) => trim_input_start(&line[defline.title_search..]),
+                None => trim_input_start(&line[1..]),
+            };
             let end = title_bytes
                 .iter()
                 .skip(1)
@@ -689,25 +747,54 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 line: line_index + 1,
                 kind,
                 positions: Vec::new(),
+                text: Vec::new(),
             });
             if let Some(warning) = &pending_title_warning {
                 warn(warning)?;
             }
             let mut record = new_record(records.len(), protein, title);
-            if keep_defline {
+            believed_molecule = None;
+            if keep_defline || believed.is_some() {
                 record.source = Some(Box::new(crate::blastinput::fasta_reader::RecordSource {
-                    defline: header.to_vec(),
+                    defline: if keep_defline {
+                        header.to_vec()
+                    } else {
+                        Vec::new()
+                    },
                     uncut: None,
+                    believed: believed.as_ref().map(|defline| defline.ids.clone()),
+                    cut_from: 0,
                 }));
+            }
+            if let Some(defline) = believed {
+                record.internal_id = defline.ids.bare_id();
+                believed_molecule = defline.molecule;
             }
             current = Some(record);
             raw_residues = 0;
             continue;
         }
+        if parse_deflines.is_some() && current.is_none() {
+            return Err(FastaParseError(format!(
+                "CFastaReader: Input doesn't start with a defline or comment around line {}",
+                line_index + 1
+            ))
+            .into());
+        }
         let record =
             current.get_or_insert_with(|| new_record(records.len(), protein, String::new()));
         if raw_residues == 0 {
             check_data_line(line, line_index + 1)?;
+        }
+        if believed_molecule.is_some_and(|named| named != protein)
+            && !crate::blastinput::fasta_reader::believed::reads_the_same_in_both(line)
+        {
+            anyhow::bail!(
+                "the Seq-id of the record on line {} names the other molecule under \
+                 -parse_deflines (NCBI BLAST+ reads its letters as that molecule); this is not \
+                 supported by LOSAT's BLASTX",
+                line_index + 1
+            );
         }
         let mut bad = Vec::new();
         let mut hyphens = false;
@@ -724,7 +811,10 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             }
             let upper = c.to_ascii_uppercase();
             let allowed = if protein {
-                b"ABCDEFGHIJKLMNOPQRSTUVWXYZ*".contains(&upper)
+                // The letters `ABCDEFGHIJKLMNOPQRSTUVWXYZ*`, tested without a table in memory:
+                // `contains` on a static table first steps byte by byte to an aligned address,
+                // so its cost per letter depended on where the linker placed the table.
+                matches!(upper, b'A'..=b'Z' | b'*')
             } else {
                 b"ABCDGHKMNRSTUVWY".contains(&upper)
             };
@@ -756,6 +846,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 line: line_index + 1,
                 kind: "hyphens",
                 positions: Vec::new(),
+                text: Vec::new(),
             };
             warn(&warning)?;
             record.warnings.push(warning);
@@ -765,6 +856,9 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 line: line_index + 1,
                 kind: "invalid_residues",
                 positions: bad,
+                text: crate::blastinput::fasta_reader::believed::nuc_or_prot(believed_molecule)
+                    .as_bytes()
+                    .to_vec(),
             };
             warn(&warning)?;
             record.warnings.push(warning);
@@ -792,6 +886,69 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
 //                              m_Config.GetLocalIdPrefix()));
 //     m_InputReader->SetIDGenerator(*idgen);
 // ```
+/// A defline under `-parse_deflines` (`fasta_reader::believed`).
+struct BelievedLine {
+    title_search: usize,
+    ids: std::sync::Arc<crate::blastinput::fasta_reader::believed::BelievedIds>,
+    molecule: Option<bool>,
+}
+
+/// `fasta_reader::reader::parse_believed_def_line` for BLASTX's reader.
+fn read_believed_defline(
+    line: &[u8],
+    protein: bool,
+    strand: crate::report::archive::bioseq::SeqLocStrand,
+    keep_defline: bool,
+    line_number: u64,
+    keys: &mut std::collections::HashSet<u64>,
+    generated: &mut usize,
+    warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
+) -> Result<BelievedLine> {
+    use crate::blastinput::fasta_reader::believed::{
+        duplicate_id, generated_ids, named_molecule, parse_believed_defline,
+        refuse_range_in_archive, BelievedIds,
+    };
+    let mut written = Ok(());
+    let parsed = parse_believed_defline(line, protein, "blastx", line_number, &mut |message| {
+        if written.is_ok() {
+            written = warn(&InputWarning {
+                line: line_number as usize,
+                kind: "defline_id",
+                positions: Vec::new(),
+                text: message.to_vec(),
+            });
+        }
+    });
+    written?;
+    let parsed = parsed.map_err(FastaParseError)?;
+    if parsed.range && keep_defline {
+        return Err(refuse_range_in_archive("query", "BLASTX"));
+    }
+    let molecule = named_molecule(&parsed.ids);
+    let ids = if parsed.ids.is_empty() || parsed.range {
+        *generated += 1;
+        generated_ids(&format!(
+            "{}_{generated}",
+            if protein { "Subject" } else { "Query" }
+        ))
+    } else {
+        parsed.ids
+    };
+    if let Some(refusal) = duplicate_id(
+        &ids,
+        keys,
+        if protein { "subject" } else { "query" },
+        "BLASTX",
+    ) {
+        return Err(refusal);
+    }
+    Ok(BelievedLine {
+        title_search: parsed.title_search,
+        ids: std::sync::Arc::new(BelievedIds::new(ids, strand)),
+        molecule,
+    })
+}
+
 fn new_record(index: usize, protein: bool, title: String) -> FastaRecord {
     FastaRecord {
         internal_id: format!(
@@ -1349,6 +1506,10 @@ pub(crate) struct FastaStream<R: Read> {
     /// Whether the input has no stream position, as a pipe has none (`tellg() < 0` of
     /// `IsIStreamEmpty`; `input_files::has_stream_position`): then it is never empty.
     no_position: bool,
+    /// `-parse_deflines` (`fasta_reader::believed`).
+    pub(crate) parse_deflines: bool,
+    /// `-strand`, read with `-parse_deflines`.
+    pub(crate) strand: crate::report::archive::bioseq::SeqLocStrand,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
 // ```c++
@@ -1414,6 +1575,8 @@ impl<R: Read> FastaStream<R> {
             // ```
             backend_available: None,
             no_position: false,
+            parse_deflines: false,
+            strand: crate::report::archive::bioseq::SeqLocStrand::Both,
         }
     }
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
@@ -2083,12 +2246,14 @@ pub(crate) fn parse_fasta_stream_keeping<R: Read>(
     if stream.at_eof() {
         return Ok(Vec::new());
     }
+    let parse_deflines = stream.parse_deflines.then_some(stream.strand);
     let records = parse_fasta_lines(
         stream,
         protein,
         lowercase,
         batch_size,
         keep_defline,
+        parse_deflines,
         deliver,
         warn,
     )?;

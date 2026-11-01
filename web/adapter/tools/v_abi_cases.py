@@ -17,7 +17,9 @@ and for each supported output format the frozen SHA-256 where one exists.
   per program, with NCBI's frozen hashes, and per program one search whose first query batch
   fails after the outfmt 0 prolog (`"expect": "failure"`: queries without residues only).
 - quick: a few searches per program with repository paths, compared with the native
-  CLI only (for CI), and the NCBI-frozen numdesc searches with two hit list sizes.
+  CLI only (for CI), the NCBI-frozen numdesc searches with two hit list sizes, the
+  NCBI-frozen BLASTN `-ungapped` searches (four tasks, two input pairs) and three NCBI-frozen
+  BLASTN X-drop / `-no_greedy` searches (DI-6).
 
 Both suites add a TBLASTX search over several subjects, which the threaded reactor
 reduces in the wasm-threads-only path. `--group fasta_input` writes that group of the full
@@ -122,7 +124,7 @@ def fasta_input() -> list[dict]:
     LOSAT/tests/fasta_input_fixtures.py that NCBI runs on files (no standard input, no
     environment, one thread) and completes in every format of the search, whose inputs
     `register` accepts (no `>?` gap line: maintainer decision 3), without the
-    `-lcase_masking` rows that LOSAT's TBLASTX and BLASTP reject. One search per program,
+    `-lcase_masking` rows that LOSAT's BLASTP rejects. One search per program,
     task, inputs and options, with NCBI's frozen hash of each fixture's format; per program
     FASTA_INPUT_SEARCHES of them, taken in turn from each family of inputs (the variant
     name's first word, and the BLASTN task), and the first-batch failure."""
@@ -140,7 +142,7 @@ def fasta_input() -> list[dict]:
         paths = [fixtures.ENGINE / fixtures.rp(query), fixtures.ENGINE / fixtures.rp(subject)]
         if not all(path.is_file() for path in paths) or any(b">?" in path.read_bytes() for path in paths):
             continue
-        if "-lcase_masking" in args and program in ("tblastx", "blastp"):
+        if "-lcase_masking" in args and program == "blastp":
             continue
         argv = [program, "-query", fixtures.rp(query), "-subject", fixtures.rp(subject)]
         argv += ["-task", task] if task else []
@@ -209,7 +211,7 @@ def quick() -> list[dict]:
     first_blastp = next(search for search in searches if search["program"] == "blastp")
     searches.append({**first_blastp, "argv": first_blastp["argv"] + ["-dbsize", "1000000"],
                      "cases": [case + ".dbsize" for case in first_blastp["cases"]], "frozen": {}})
-    # BLASTP in blocks (LOSAT_X_BPQBLOCKWEB): a query of about 200,000 letters, four blocks of
+    # BLASTP in blocks (LOSAT_X_BPQBLOCK): a query of about 200,000 letters, four blocks of
     # LOSAT_X_BPQBLOCK's 50,000 letters, with the compressed lookup table of blastp-fast.
     searches.append({"program": "blastp", "argv": ["blastp", "-task", "blastp-fast",
                      "-query", "LOSAT/tests/fasta/NZ_CP006932.faa", "-subject", "LOSAT/tests/fasta/SicyWSV.faa"],
@@ -224,6 +226,37 @@ def quick() -> list[dict]:
     searches += [search for search in outfmt0_fixtures()
                  if set(search["cases"]) & {f"numdesc.{program}.nd4_na2" for program in FORMATS}
                  | {"numdesc.blastn.split_na3"}]
+    # BLASTN -ungapped (O4a-1; abi_v2.md does not list it: the adapter passes the argv to the CLI's parser): the
+    # four tasks on the t2 pair and on the ambrun pair (a subject with a run of N and an R, which the ungapped
+    # re-evaluation splits), the NCBI-frozen hashes of outfmt 0, 7 (the rows of the outfmt 0 manifest) and, for t2, 6 (the regression
+    # manifest); every search is also compared with the native CLI.
+    ungapped = {f"ungapped.{task}.{pair}.{fmt}" for task in ("mb", "bn", "dc", "short") for pair in ("t2", "amb")
+                for fmt in ("0", "5", "7", "15", "16")}
+    chosen = [search for search in outfmt0_fixtures() if set(search["cases"]) & ungapped]
+    # The frozen outfmt 6 of the t2 pair (LOSAT/tests/fixtures/blastn_regression/manifest.tsv; no stderr).
+    sys.path.insert(0, str(REPO / "LOSAT/tests"))
+    import blastn_regression_fixtures as regression  # noqa: E402  (the manifest reader)
+    rows = {row["case_id"]: row for row in regression.read_manifest()}
+    present = {(search["program"], tuple(search["argv"])): search for search in searches}
+    for search in chosen:
+        row = next((rows[case.removesuffix(".0")] for case in search["cases"] if case.endswith(".t2.0")), None)
+        if row and row["exit"] == "0" and not row["stderr_sha256"]:
+            search["frozen"]["6"] = row["stdout_sha256"]
+        # A search the lines above already hold gains the frozen outfmt 6; it is not run twice.
+        held = present.get((search["program"], tuple(search["argv"])))
+        if held is None:
+            searches.append(search)
+        else:
+            held["frozen"].update(search["frozen"])
+    # BLASTN -xdrop_ungap, -xdrop_gap, -xdrop_gap_final, -window_size, -off_diagonal_range and -no_greedy (DI-6;
+    # the adapter passes the argv to the CLI's parser): the NCBI-frozen outfmt 0 rows of the outfmt 0 manifest
+    # (pyani ANIb's options, the greedy X-drop and -no_greedy of megablast), each also compared with the native CLI.
+    present = {(search["program"], tuple(search["argv"])): search for search in searches}
+    for search in outfmt0_fixtures():
+        if not set(search["cases"]) & {"xdrop.anib.bn.0", "xdrop.mb.gap5.0", "xdrop.mb.nogreedy.0"}:
+            continue
+        if present.get((search["program"], tuple(search["argv"]))) is None:
+            searches.append(search)
     return searches
 
 

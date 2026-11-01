@@ -61,7 +61,8 @@ pub(crate) fn x_mapped_capacity(elements: usize, size: usize) -> usize {
     }
 }
 
-/// No NCBI counterpart (LOSAT_X_BPDBKEEP): the capacity, in elements of `size` bytes, of a buffer
+/// No NCBI counterpart (LOSAT_X_BPDBKEEP; LOSAT_X_TBNLUTLEAN, TBLASTN's lookup tables): the
+/// capacity, in elements of `size` bytes, of a buffer
 /// of `elements` that glibc maps whatever its size and whose free leaves the mmap threshold as it
 /// is (above glibc's ceiling; `elements` elsewhere). Its pages beyond those touched are not
 /// resident.
@@ -147,7 +148,7 @@ impl<T: Copy> XPool<T> {
         self.take_touched(need, usize::MAX)
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `take` among the idle buffers that touched at most twice
+    /// `take` among the idle buffers that touched at most twice
     /// the bytes of `need`: a buffer lent for as long as it is used (a TBLASTN frame) holds its
     /// touched pages, which the pool's idle bound no longer counts.
     pub(crate) fn x_take_near(&self, need: usize) -> Option<Vec<T>> {
@@ -210,7 +211,7 @@ impl<T: Copy> XPool<T> {
         x_reserve_mapped(v, additional);
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): forgets the buffer at `v`, lent by `take` and kept by its
+    /// Forgets the buffer at `v`, lent by `take` and kept by its
     /// user (a TBLASTN store made of a read buffer, freed and never given back), so that a buffer
     /// mapped later at the same address does not inherit its touched bytes.
     pub(crate) fn x_disown(&self, v: &[T]) {
@@ -219,7 +220,7 @@ impl<T: Copy> XPool<T> {
         st.lent.retain(|&(a, _)| a != addr);
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): frees every idle buffer (the last TBLASTN `-db` stream of
+    /// Frees every idle buffer (the last TBLASTN `-db` stream of
     /// the process is closed, and its frames would stay resident until the next search).
     pub(crate) fn x_clear_idle(&self) {
         let freed = {
@@ -269,7 +270,7 @@ impl<T: Copy> XPool<T> {
 }
 
 /// No NCBI counterpart: the pool of byte buffers: BLASTN's database reads and BLASTNA letters
-/// (LOSAT_X_BNMAPPED), TBLASTN's `-db` reads and large frames (LOSAT_X_TBNDBSTREAM).
+/// (LOSAT_X_BNMAPPED), TBLASTN's `-db` reads and large frames.
 pub(crate) static X_BYTES: XPool<u8> = XPool::new(x_pool_idle_bytes);
 
 /// No NCBI counterpart: the elements sorted at a time with `sort_by` before they are merged in
@@ -479,7 +480,7 @@ mod tests {
         }
     }
 
-    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): `x_take_near`, `x_disown` and `x_clear_idle`.
+    // `x_take_near`, `x_disown` and `x_clear_idle`.
     #[test]
     fn pool_lends_near_buffers_forgets_kept_ones_and_clears() {
         let pool: XPool<u8> = XPool::new(|| 64 << 20);

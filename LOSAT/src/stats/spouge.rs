@@ -972,7 +972,20 @@ mod tests {
                 f[1].parse().unwrap(),
                 f[2].parse().unwrap(),
             );
-            assert_eq!(actual.to_bits(), hex(f[4]), "{row}");
+            let want = hex(f[4]);
+            // The ErfC port above is plain double and double-double arithmetic, so its rows
+            // are exact on every platform. `blast_spouge_stoe` also calls the platform `exp`
+            // three times (the two `exp(-0.5 * f * f)` terms and `exp(-lambda * y)`), and the
+            // E value multiplies them into a product. Apple's libm differs from glibc's by
+            // an ULP per call (PD-LOSAT-PLATFORM-LIBM): platform-checks run 41062695644 read
+            // 2 ULP on macOS arm64 (row `54521 99 256`) and 4 ULP on macOS x64 (row
+            // `24337 600 112`). macOS accepts up to 8 ULP, every other OS stays exact.
+            let max_ulp = if cfg!(target_os = "macos") { 8 } else { 0 };
+            assert!(
+                actual.to_bits().abs_diff(want) <= max_ulp,
+                "{row}: bits {} want {want} (at most {max_ulp} ULP apart)",
+                actual.to_bits()
+            );
         }
         assert_eq!((erfc.lines().count(), spouge.lines().count()), (337, 177));
     }

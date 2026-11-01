@@ -189,6 +189,10 @@ struct RunState {
     log: DiagLog,
     /// The `EffectiveSearchSpace` of the last searched batch (`None` before one).
     last_search_space: Option<i64>,
+    /// The `TaxidList` or `NegativeTaxidList` program option (`set_database_filter`).
+    database_list: Option<options::Param>,
+    /// A list kept no sequence and `-searchsp` is not given (`set_database_filter`).
+    empty_database: bool,
     /// Whether the diagnostics that are written now are not the archive's (the warnings that
     /// another format of the same search writes, which a run of the archive alone does not).
     muted: bool,
@@ -361,10 +365,44 @@ impl ArchiveHandle {
     pub fn search_space_option(&self, searched: Option<i64>) -> Option<i64> {
         self.with_state(|state| {
             if searched.is_some() {
-                state.last_search_space = searched;
+                state.last_search_space = if state.empty_database {
+                    Some(0)
+                } else {
+                    searched
+                };
             }
             state.last_search_space
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173
+    // ```c++
+    //     Int8 total_length = BlastSeqSrcGetTotLenStats(seqsrc);
+    //     if (total_length <= 0)
+    //         total_length = BlastSeqSrcGetTotLen(seqsrc);
+    //     Int4 num_seqs = BlastSeqSrcGetNumSeqsStats(seqsrc);
+    //     if (num_seqs <= 0)
+    //         num_seqs = BlastSeqSrcGetNumSeqs(seqsrc);
+    //
+    //     CEffectiveSearchSpaceCalculator calc(full_query_fact, *options,
+    //                                          num_seqs, total_length,
+    //                                          full_data->m_ScoreBlk->GetPointer());
+    // ```
+    /// What the database's list makes of the request: its `program-options` parameter
+    /// (`DbFilterArgs::archive_parameter`), and `empty_database` when a list kept no sequence
+    /// and `-searchsp` is not given. The `EffectiveSearchSpace` option is then 0
+    /// (`BLAST_CalcEffLengths` returns at once for a database length of 0, blast_setup.c:729-732),
+    /// though the statistics of the results read the length of OID 0 (`SeqDb::statistics_numbers`).
+    pub fn set_database_filter(&self, list: Option<options::Param>, empty_database: bool) {
+        self.with_state(|state| {
+            state.database_list = list;
+            state.empty_database = empty_database;
+        });
+    }
+
+    /// The `TaxidList` or `NegativeTaxidList` program option (`set_database_filter`).
+    pub fn database_list(&self) -> Option<options::Param> {
+        self.with_state(|state| state.database_list.clone())
     }
 }
 
@@ -421,8 +459,9 @@ impl std::error::Error for TitleRefusal {}
 /// it (`PrintErrorArchive` after its `CATCH_ALL`): the errors of the application's `Run`,
 /// i.e. NCBI's own error texts, one message per diagnostic, severity `eDiag_Error`. LOSAT's own
 /// refusals (and the argument errors raised before the application runs) write none.
-/// `subject_file` is whether the error came from opening the `-query` file or reading the
-/// `-subject` file, whose "Command line argument error" NCBI raises inside `Run`.
+/// `subject_file` is whether the error came before the output was opened (the taxid or seqid
+/// list, opening the `-query` file, reading the `-subject` file); NCBI raises the "Command line
+/// argument error" of those files inside `Run`.
 pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Message>> {
     let native = error.downcast_ref::<crate::cli::NativeError>()?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251

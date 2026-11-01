@@ -581,39 +581,31 @@ fn x_frame_capacity(length: usize) -> usize {
     }
 }
 
-// No NCBI counterpart: reads the LOSAT_X_TBNFRAMEREUSE variable once; it does not change any value
-// NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): a switch of the strict set (`utils/xswitch.rs`), on unless
-/// it is `0`. With it a thread keeps the frames of a
-/// dropped subject plan (`x_reuse_frame`) for the next plan it translates from a packed subject
-/// (`x_frame_buffer`).
-fn x_frame_reuse() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNFRAMEREUSE"))
-}
-
+// No NCBI counterpart for the reuse (graduated 2026-10-27; the switch was
+// `LOSAT_X_TBNFRAMEREUSE`): a thread keeps the frames of a dropped subject plan (`x_reuse_frame`)
+// for the next plan it translates from a packed subject (`x_frame_buffer`).
 // No NCBI counterpart for the reuse: NCBI allocates a subject's translation buffer
 // (`BLAST_GetAllTranslations`) and frees it after the subject (blast_engine.c:627-631); here a
 // thread gives the frames of a dropped plan to its next plan. The residues written are the same.
-/// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): the largest frame capacity a thread keeps for its next
+/// The largest frame capacity a thread keeps for its next
 /// plan, and how many frames it keeps (those of one plan). A thread holds at most 1.5 MiB so.
 const X_REUSED_FRAME: usize = 256 << 10;
 const X_REUSED_FRAMES: usize = 6;
 
 thread_local! {
-    /// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): the frames this thread keeps between subject plans.
+    /// The frames this thread keeps between subject plans.
     static X_FRAMES: std::cell::RefCell<Vec<Vec<u8>>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): a frame of `length` bytes with a sentinel at both ends,
-/// whose other bytes the caller writes, every one of them. With the switch, a frame of at most
+/// A frame of `length` bytes with a sentinel at both ends,
+/// whose other bytes the caller writes, every one of them. A frame of at most
 /// `X_REUSED_FRAME` bytes is one this thread kept (`x_reuse_frame`), its bytes not cleared, which
 /// saves the allocation and the zero fill of a new one; otherwise a new zeroed frame of
-/// `x_frame_capacity`. EXPERIMENT (LOSAT_X_TBNDBSTREAM): while a `-db` stream is open, a frame of
+/// `x_frame_capacity`. While a `-db` stream is open, a frame of
 /// `X_MAPPED_FRAME` bytes or more is an idle buffer of `utils::x_mapped::X_BYTES` that touched at
 /// most twice its bytes, if it holds one (its pages resident), zeroed to `length`.
 fn x_frame_buffer(length: usize) -> Vec<u8> {
-    let kept = if length <= X_REUSED_FRAME && x_frame_reuse() {
+    let kept = if length <= X_REUSED_FRAME {
         X_FRAMES.with(|frames| frames.borrow_mut().pop())
     } else if length >= X_MAPPED_FRAME && super::x_db_stream::x_frames_pooled() {
         crate::utils::x_mapped::X_BYTES.x_take_near(length)
@@ -642,14 +634,14 @@ fn x_frame_buffer(length: usize) -> Vec<u8> {
     frame
 }
 
-/// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): keeps `frame`, a frame of a dropped subject plan, for
-/// this thread's next `x_frame_buffer`, if the switch is on, its capacity is at most
+/// Keeps `frame`, a frame of a dropped subject plan, for
+/// this thread's next `x_frame_buffer`, if its capacity is at most
 /// `X_REUSED_FRAME` and the thread keeps fewer than `X_REUSED_FRAMES`; drops it otherwise.
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): while a `-db` stream is open, a frame of a capacity of
+/// While a `-db` stream is open, a frame of a capacity of
 /// `X_MAPPED_FRAME` bytes or more goes to `utils::x_mapped::X_BYTES` instead (which frees the idle
 /// buffers beyond its bound).
 pub(super) fn x_reuse_frame(mut frame: Vec<u8>) {
-    if frame.capacity() == 0 || frame.capacity() > X_REUSED_FRAME || !x_frame_reuse() {
+    if frame.capacity() == 0 || frame.capacity() > X_REUSED_FRAME {
         if frame.capacity() >= X_MAPPED_FRAME && super::x_db_stream::x_frames_pooled() {
             crate::utils::x_mapped::X_BYTES.give(&mut frame);
         }
@@ -1015,7 +1007,7 @@ pub(super) fn x_packed_subject_plan(
     x_packed_plan(store, db_gencode).map(Arc::new)
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): [`x_packed_subject_plan`] of a database sequence's packed
+/// [`x_packed_subject_plan`] of a database sequence's packed
 /// bytes and length, read in a block of the sequence file (`XDbStream::plan_with`), without its
 /// store: the plan reads nothing else of a packed subject.
 pub(super) fn x_packed_bytes_plan(
@@ -1738,6 +1730,7 @@ mod tests {
                             ScoringMatrix::Blosum62,
                             3,
                             &lookup,
+                            &Default::default(),
                             None,
                         )
                         .unwrap();
@@ -1818,6 +1811,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 3,
                 &lookup,
+                &Default::default(),
                 None,
             )
             .unwrap()
@@ -1953,6 +1947,7 @@ mod tests {
                         ScoringMatrix::Blosum62,
                         3,
                         &lookup,
+                        &Default::default(),
                         None,
                     )
                     .unwrap();
@@ -1980,6 +1975,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 3,
                 &lookup,
+                &Default::default(),
                 None,
             )
         };
@@ -2049,7 +2045,7 @@ mod tests {
         }
     }
 
-    // No NCBI counterpart: test of LOSAT_X_TBNFRAMEREUSE; it does not change any value NCBI computes.
+    // No NCBI counterpart: test of the frame reuse; it does not change any value NCBI computes.
     // The frames of a dropped plan make the next plan of the thread, shorter or longer, without
     // being cleared, and that plan is still the reference plan of its letters.
     #[test]
@@ -2072,14 +2068,12 @@ mod tests {
             x_plan_difference(&next, &reference_plan(&short, 1, false)),
             None
         );
-        if x_frame_reuse() {
-            assert!(next
-                .as_ref()
-                .unwrap()
-                .frames
-                .iter()
-                .all(|frame| frames.contains(&frame.aa_seq.as_ptr())));
-        }
+        assert!(next
+            .as_ref()
+            .unwrap()
+            .frames
+            .iter()
+            .all(|frame| frames.contains(&frame.aa_seq.as_ptr())));
         drop(next);
         let longer = letters(b"ACGTMRSVWYHKDBN-acgtmrsvwyhkdbn", 9_002, 9);
         assert_eq!(

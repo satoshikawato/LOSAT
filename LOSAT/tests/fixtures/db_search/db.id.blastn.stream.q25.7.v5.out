@@ -1,0 +1,201 @@
+# BLASTN 2.17.0+
+# Query: ref|NM_000001.1| alpha mRNA [Homo sapiens]
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+ref|NM_000001.1|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+ref|NM_000001.1|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+ref|NM_000001.1|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: gi|654321|gb|AF000002.3| gi plus gb nucleotide
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+gi|654321|gb|AF000002.3|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+gi|654321|gb|AF000002.3|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+gi|654321|gb|AF000002.3|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: emb|AJ000003.1| emb nucleotide
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+emb|AJ000003.1|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+emb|AJ000003.1|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+emb|AJ000003.1|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: dbj|AB000004.1| dbj nucleotide
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+dbj|AB000004.1|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+dbj|AB000004.1|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+dbj|AB000004.1|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: ref|NC_000005.11| chromosome-like
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+ref|NC_000005.11|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+ref|NC_000005.11|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+ref|NC_000005.11|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: lcl|mynuc6 local id nucleotide
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+lcl|mynuc6	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+lcl|mynuc6	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+lcl|mynuc6	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: gnl|mydb|nuc7 general id nucleotide
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+gnl|mydb|nuc7	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+gnl|mydb|nuc7	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+gnl|mydb|nuc7	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: NM_000008.2 bare refseq accession
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+NM_000008.2	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+NM_000008.2	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+NM_000008.2	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: AB000009 bare ddbj accession without version
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+AB000009	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+AB000009	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+AB000009	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: mynuc_10 bare non-accession word
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+mynuc_10	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+mynuc_10	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+mynuc_10	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: gi|1111 gi only
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+gi|1111	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+gi|1111	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+gi|1111	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: tpg|BK000012.1| third-party nucleotide
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+tpg|BK000012.1|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+tpg|BK000012.1|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+tpg|BK000012.1|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: gb|AF000013.1|LOCUS13 gb with a locus name
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+gb|AF000013.1|LOCUS13	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+gb|AF000013.1|LOCUS13	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+gb|AF000013.1|LOCUS13	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: pat|US|1234567|14 patent nucleotide
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+pat|US|1234567|14	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+pat|US|1234567|14	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+pat|US|1234567|14	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: gi|1515|gb|AF000015.1|
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+gi|1515|gb|AF000015.1|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+gi|1515|gb|AF000015.1|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+gi|1515|gb|AF000015.1|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: lcl|Subject_30
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+lcl|Subject_30	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+lcl|Subject_30	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+lcl|Subject_30	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: lcl|Subject_31 nucleotide subject title
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+lcl|Subject_31	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+lcl|Subject_31	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+lcl|Subject_31	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: tpg|BK000018.1|
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+tpg|BK000018.1|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+tpg|BK000018.1|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+tpg|BK000018.1|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: ref|NC_000019.1|
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+ref|NC_000019.1|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+ref|NC_000019.1|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+ref|NC_000019.1|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: ref|XM_000020.1| first definition line without a gi
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+ref|XM_000020.1|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+ref|XM_000020.1|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+ref|XM_000020.1|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: gb|AF000021.1| a long nucleotide title that goes past the sixty byte wrap of the alignment heading line of outfmt zero
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+gb|AF000021.1|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+gb|AF000021.1|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+gb|AF000021.1|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: lcl|Subject_22|gb|AF000022.1| subject id beside an accession
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+lcl|Subject_22|gb|AF000022.1|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+lcl|Subject_22|gb|AF000022.1|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+lcl|Subject_22|gb|AF000022.1|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: ref|NR_000023.1|
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+ref|NR_000023.1|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+ref|NR_000023.1|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+ref|NR_000023.1|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: gnl|ti|123 trace id nucleotide
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+gnl|ti|123	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+gnl|ti|123	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+gnl|ti|123	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLASTN 2.17.0+
+# Query: tpe|BN000025.1| third party embl nucleotide
+# Database: tests/db_search/ids/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+tpe|BN000025.1|	BN000025.1	100.000	488	0	0	1	488	1	488	0.0	902
+tpe|BN000025.1|	ti:123	100.000	488	0	0	1	488	1	488	0.0	902
+tpe|BN000025.1|	NR_000023.1	100.000	488	0	0	1	488	1	488	0.0	902
+# BLAST processed 25 queries

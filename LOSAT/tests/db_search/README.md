@@ -23,6 +23,13 @@ FASTA files:
   `blastp -subject tests/fasta/PajaWSV.faa -outfmt 6` prints 1), then `nohit`, a 72-residue low-complexity
   glycine/serine sequence for which NCBI `-db paja` reports no hit. For the whole file: 4 rows with `-db`, 2
   rows with `-subject` (outfmt 6).
+- `gapmix.faa` (DI-12): six proteins of the CDS translations of Salmonella Typhi CT18 (AL513382.1, from the
+  drop-in survey's Roary data, the first six of at least 120 residues without `-`) with `-`: one inserted in
+  the middle (`ins1_pA`), one replacing a residue (`rep1_pA`), a run of three (`ins3_pB`), one at the
+  end (`end1_pC`), two at the start (`lead2_pC`), at the start, in the middle and at the end (`sme_pD`), one every
+  15 residues (`every15_pE`), none (`ctrl_pF`), and records of `-` only (`allgap5`, `onegap`).
+  `gapmix_q.faa`: the six proteins without `-`; `gapmix_q.fna`: the same back-translated with one codon per
+  letter (the BLASTX queries).
 - `nohit.faa`: `GGGGG`, a query without hits in `nophr` (the database of `LOSAT/tests/seqdb/prot.faa`).
 - `empty.faa`: an empty query file.
 - `split_q.faa`: one query of 20,600 letters (a fixed pseudo-random filler with records p10, p05, p06 and p01 of
@@ -38,6 +45,8 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "residues O U * B Z J X" -blastdb_version 4
     makeblastdb -in tests/db_search/residues_gap.faa -dbtype prot -out tests/db_search/residues_gap \
         -title "residues O U * - B Z J X" -blastdb_version 4
+    makeblastdb -in tests/db_search/gapmix.faa -dbtype prot -out tests/db_search/gapmix \
+        -title "gap character - at the start, in the middle, at the end, alone" -blastdb_version 4
     makeblastdb -in tests/fasta/PajaWSV.faa -dbtype prot -out tests/db_search/paja \
         -title "PajaWSV proteins" -blastdb_version 4
     makeblastdb -in tests/db_search/o_stored.faa -dbtype prot -out tests/db_search/o_stored \
@@ -68,6 +77,7 @@ of `tests/fasta/LC738875.fasta` and `AP027202.fasta`, two related viruses, mutat
   `c_amb`, 4 % substitutions), `q_d_minus` (reverse complement of `d_mut_15pct` bases, 12 % substitutions),
   `q_e_p` (1600 bases of `e_p2k`, 20 % substitutions) and `q_nohit` (900 random bases).
 - `nslice_nohit.fna`: `q_nohit` alone.
+- `nslice_qa.fna`: `q_a` alone (one query, for `-query_loc` and `-subject_loc`; rows `db.tab.bn.qloc.6`, `tab.bn.loc.6`).
 - `nnophr.nin` and `nnophr.nsq` are copies of `LOSAT/tests/seqdb/db/nucl_v4.nin` and `.nsq`: the nucleotide
   database without its header file (NCBI's `blastn` fails with exit 2 when it opens the header file).
 
@@ -115,6 +125,25 @@ Run from `LOSAT/`:
     makeblastdb -in tests/db_search/tgc4.fna -dbtype nucl -out tests/db_search/tgc4 \
         -title "slices of a genetic code 4 genome" -blastdb_version 4
     rm tests/db_search/tslice.njs tests/db_search/tgc4.njs
+
+TBLASTN tblastn-fast inputs (rows `tfast.*` of `outfmt0_manifest.tsv` and `db.tfast.*`, line DI4: AMRFinderPlus runs
+`tblastn -subject GENOME -query AMRProt.fa -task tblastn-fast -word_size 5 -window_size 15 -threshold 100 ...`),
+written by `make_tfast_amr_inputs.py` from the nucleotide sequences of ABRicate's `ncbi` database (NCBI's AMR
+reference genes, `db/ncbi/sequences`; the accessions are in the files):
+
+- `tfast_amr.fna`: two contigs of seeded random spacer DNA with ten AMR genes: forward (TEM-1, CTX-M-15, Sul1,
+  Tet(A)), reverse-complemented (KPC-2, NDM-1, QnrS1), with about 5 % substituted bases (OXA-48 forward, Erm(B)
+  reverse-complemented), the first 60 % of VanA, and a run of 40 N. The database `tfast_amr` is these contigs.
+- `tfast_amr_q.faa`: thirteen proteins (translations): TEM-116 and CTX-M-14 (other alleles of the families in the
+  contigs), the eight others in the contigs, and SHV-12 (related to TEM), OXA-1 and APH(3')-Ia (not in them).
+
+Run from `LOSAT/`:
+
+    python3 tests/db_search/make_tfast_amr_inputs.py ABRICATE/db/ncbi/sequences tests/db_search
+    mv tests/db_search/tfast_amr_s.fna tests/db_search/tfast_amr.fna
+    makeblastdb -in tests/db_search/tfast_amr.fna -dbtype nucl -out tests/db_search/tfast_amr \
+        -title "synthetic contigs with AMR genes" -blastdb_version 4
+    rm tests/db_search/tfast_amr.njs
 
 Translated-query inputs (BLASTX rows, `db.blastx.*`), written by `make_blastx_inputs.py` (run from `LOSAT/`;
 slices of `tests/fasta/MelaMJNV.fasta`, proteins of `tests/fasta/PemoMJNVA.faa`; the decoy proteins and the query
@@ -228,7 +257,9 @@ NCBI `tblastx -db xslice_flip -query tests/db_search/xslice_q.fna -outfmt 6 -num
 for `xslice`). `db.tblastx.dbsize.0` and `.6` use `-dbsize 1000000000` (112 rows in outfmt 6): at that value a
 search that feeds `-dbsize` to the link cutoffs gives 111 rows, at 100000000 it gave the same bytes.
 
-`residues_gap` is the database LOSAT rejects (a stored `-`). The other databases of the rows are the ones of
+`residues_gap` and `gapmix` hold stored `-` (NCBIstdaa 0), which NCBI searches as a residue that scores
+`BLAST_SCORE_MIN` against every letter and its reports show as the letter of a gap (rows `db.residues_gap.*`,
+`db.gap.*`). The other databases of the rows are the ones of
 `LOSAT/tests/seqdb/db` (see `LOSAT/tests/seqdb/README.md`). A rebuild changes the dates stored in the index
 files, so the frozen outputs (`Posted date:` lines) must then be frozen again:
 `python3 LOSAT/tests/db_search_fixtures.py freeze --ncbi-bin DIR`.
@@ -362,7 +393,10 @@ from their Seq-ids), `ids/nrefuse_v5` from `ids/nrefuse.fna` (`lcl|777` before `
 formatters do not find again) and the two volumes `ids/njoined_a` and `ids/njoined_b` of the alias
 `ids/njoined.nal` (`gb|AF000040|` and `gb|AF000040.1|`, whose hits NCBI's XML and outfmt 0 join). Queries:
 `LOSAT/tests/seqid/fasta/qnucl.fa` (BLASTN, TBLASTX) and `qprot.fa` (TBLASTN); the second query of each has
-no hit. TBLASTN and TBLASTX run with `-max_hsps 1` to keep the frozen files small.
+no hit. TBLASTN and TBLASTX run with `-max_hsps 1` to keep the frozen files small. `ids/nambig_v4` (from
+`ids/nambig.fna`: a record with ambiguity data) has no row; the unit test of blastn's report stream reads it.
+Rows `db.id.blastn.stream.q25.*` (line DBID, blastn's report stream of these databases): the 25 records of
+`ids/nucl.fna` as queries in batches of `BATCH_SIZE=1500`, each batch with hits.
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
@@ -386,3 +420,99 @@ Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTD
   NCBI's 256-slot taxonomy cache of a volume (`CSeqDBVol::m_TaxCache`), so NCBI writes the offset error again after a fetch
   of 150, as often as its order of fetches makes it (twice for the row's query, once for the same query with a version 4
   database or an absolute `BLASTDB`); LOSAT refuses the run. `tm_cache151` (151 instead of 150) is the control: once.
+
+## Taxid filtering (DI-8a)
+
+Rows `db.tf.*`: `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and `-no_taxid_expansion` with `-db`, five
+programs. `taxfilter/` holds the inputs and what `make_taxfilter.py MAKEBLASTDB TAXONOMY4BLAST_SQLITE` builds from them
+(makeblastdb 2.17.0, version 5, `-parse_seqids` with a taxid map; `.pjs` and `.njs` dropped):
+
+- `tfp.faa` and `tfp.map`: 23 Swiss-Prot globins of mammals, birds, reptiles, amphibians and fishes (the HBA_HUMAN hits of
+  the DI-8 probe); the records of P69905.2, P01923.1, Q9TS35.2 and P63107.2 carry a second definition line (control-A) of a
+  bird or another mammal. Database `tfp` (one volume).
+- `tfn.fna` and `tfn.map`: 16 globin cDNAs of human (Ensembl GRCh38), zebrafish and fly; human HBA1 (ENST00000320868.9) carries
+  a second definition line of a zebrafish transcript, zebrafish hbaa1 (ENSDART00000113098.5) one of a fly transcript.
+  Database `tfn` in two volumes (`-max_file_sz 4KB`: OIDs 0-11 and 12-15) under one LMDB.
+- `taxonomy4blast.sqlite3`: the 226 rows of NCBI's taxonomy file (the copy distributed with swissprot) for the taxids of both
+  maps and all their ancestors, in a new file with the source's schema text. NCBI reads the table `TaxidInfo` and its index
+  only, so a taxid's descendants within the databases are those of the whole file. The rows reach it by `BLASTDB=tests/db_search/taxfilter`;
+  the `nosql` rows leave it out of reach (NCBI's warning, no restriction).
+- `root/taxonomy4blast.sqlite3`: the same file without the rows of 7227 (fly) and 8237 (tuna). The rows `db.tf.bp.root.6` and
+  `db.tf.tbn.root.6` freeze NCBI's `-taxids 131567` (the root's only child there) with it, and `tests/db_taxid_root.rs`
+  checks that LOSAT's `-taxids 1` writes those bytes (taxid 1 is its own parent: NCBI's expansion of it does not end;
+  DI-8 DECISIONS 10).
+- `q.faa` (HBA_HUMAN) and `q.fna` (human HBA1 cDNA): the queries. `tl_crlf.txt` (40674 and 8782 with CRLF line ends, an
+  empty line and blanks) and `tl_neg.txt` (9443): the taxid lists.
+
+The `v4` rows search `x16_taxid` and `x16_ntaxid` (version 4 databases with taxids, above).
+
+## Seqid lists (DI-8b)
+
+Rows `db.sa8.*`: the `ext` `use_this_seqid` of a positive list on the Seq-align formats and what it limits, on
+`taxfilter/tfp`, `taxfilter/tfn` and `useseqid/`. `useseqid/` holds `p5m`, `p5mt` (protein, version 5, the records of
+`p_m.fa`: a text id and a local id on one OID, a GI that is the Seq-align id, a local id first, a PRF name, PDB ids) and
+`n5m` (nucleotide, `n_m.fa`), written by NCBI BLAST+ 2.17.0:
+`makeblastdb -in p_m.fa -dbtype prot -out p5m -parse_seqids -blastdb_version 5 -taxid 9606 -title p5m`,
+`makeblastdb -in p_m.fa -dbtype prot -out p5mt -parse_seqids -blastdb_version 5 -taxid_map p_m.map -title p5mt`,
+`makeblastdb -in n_m.fa -dbtype nucl -out n5m -parse_seqids -blastdb_version 5 -taxid 562 -title n5m`;
+`makeblastdb -in n_l.fa -dbtype nucl -out n5l -parse_seqids -blastdb_version 5 -taxid 562 -title n5l` (a local id and a
+text id on one OID). `q.faa`, `q.fna`, `qx.fna` are the queries, `qnn.fna`, `qxx.fna` the queries with two copies apart (two
+ungapped HSPs per subject), and `sl_m.txt` a seqid list.
+
+Rows `db.sl.*`: `-seqidlist` and `-negative_seqidlist` with `-db`, five programs, on `taxfilter/tfp`, `taxfilter/tfn`
+(two volumes), `ids/prot_v5`, `ids/nucl_v5` (version 5) and `ids/prot_v4`, `ids/nucl_v4` (version 4, string ISAM).
+`seqidlist/` holds the lists, written by `seqidlist/make_seqidlist.py`:
+
+- text lists in the forms NCBI's reader takes (white-space separated tokens, a leading `>` skipped, `#` to the end of the
+  line a comment, CRLF lines): `sl_tfp.txt` (five Swiss-Prot ids of tfp, with and without versions, one in FASTA form, and an
+  unknown id), `sl_tfp_neg.txt` (the same ids without versions: a versionless id excludes the versioned stored id),
+  `sl_tfn.txt` (four local ids across tfn's two volumes), `sl_prot.txt` and `sl_nucl.txt` (every Seq-id form of
+  `ids/prot_v5` and `ids/nucl_v5`: tpg, RefSeq and Swiss-Prot without versions, a pdb chain, local ids, a general id as
+  `db:tag`, a versionless accession of an OID of several definition lines, a gi that NCBI drops), `sl_gi.txt` (gi ids only:
+  NCBI's `Empty seqid list` warning and no restriction on a version 5 database, no OID on a version 4 one),
+  `sl_comment.txt` (no id: no list), `sl_none.txt` (ids no database has: NCBI searches an empty database, LOSAT refuses),
+  `sl_empty.txt` (0 bytes: NCBI's `Failed to map seqidlist file ` error);
+- binary lists in the format of `blastdb_aliastool -seqid_file_out` (NUL, file size, count, title, date, database length
+  and, when it is not 0, the database's date and volume names, then the ids with a one-byte length): `sl_tfp.bsl` and
+  `sl_nucl.bsl` (the processed ids of the text lists: no warning), `sl_tfp_badlen.bsl` (a database length that is not
+  tfp's: NCBI's `Seqidlist file db info does not match input db` warning, the list is used).
+
+The negative lists on `ids/prot_v5`, `ids/prot_v4`, `ids/nucl_v5` and `ids/nucl_v4` (rows `db.sl.bp.nforms.6`,
+`db.sl.bp.v4neg.6`, `db.sl.bp.v4gi.6`, `db.sl.bn.nforms.6`, `db.sl.bn.v4neg.6`) are `losat-rejection` rows: those databases
+hold sequences whose every definition line has only a gi or a ti, and a negative seqid list leaves such a sequence without a
+line (`CSeqDBNegativeList::FindId` matches no gi or ti): NCBI searches it and drops its hits from the report without notice,
+LOSAT refuses when the sequence is to be reported (`the seqid list keeps sequence N of the volume but none of its definition
+lines`, DI-8b DECISIONS 17). A positive list that selects such a sequence is refused before the search.
+
+`ids/noacc_v5` (three proteins of `ids/ids_q.faa`, `makeblastdb -dbtype prot -blastdb_version 5` without `-parse_seqids`,
+NCBI 2.17.0) has no accession table: a seqid list on it is NCBI's `BLAST Database error: DB contains no accession info.`
+(row `db.sl.bp.noacc.6`, rc 2).
+
+A list file that is not on the search path (NCBI: `Error: NCBI C++ Exception: ... To be memory mapped the file must
+exist: ''`, exit 255, with the path of NCBI's build tree) is checked by `tests/cli_v2.rs`, not by a row.
+
+## Ungapped nucleotide databases (line NP, O4a-1)
+
+`ungapped_abr` (the 33 genes of `LOSAT/tests/fixtures/blastn_regression/inputs/culling_abricate_genes.fa`, as `ungapped_abr.fna`) is built like
+the mlst databases (parsed Seq-ids and a hash index), `ungapped_ambrun` (the subject `ambrun_s.fa`, a stretch with 30 `N` and one `R` inside a match)
+without, `ungapped_re` (the six subjects of `re_s.fa`: N every other base, a run of N, IUPAC codes, a minus-strand copy) without; rows
+`db.blastn.ungapped*` (`blastn -ungapped`). Run from `LOSAT/`:
+
+    makeblastdb -in tests/db_search/ungapped_abr.fna -dbtype nucl -out tests/db_search/ungapped_abr \
+        -parse_seqids -hash_index -title PubMLST -blastdb_version 4
+    makeblastdb -in tests/db_search/ungapped_ambrun.fna -dbtype nucl -out tests/db_search/ungapped_ambrun \
+        -title "ambiguity run" -blastdb_version 4
+    makeblastdb -in tests/db_search/ungapped_re.fna -dbtype nucl -out tests/db_search/ungapped_re \
+        -title "ungapped re-evaluation" -blastdb_version 4
+    rm tests/db_search/ungapped_abr.njs tests/db_search/ungapped_ambrun.njs tests/db_search/ungapped_re.njs
+
+`mejo` is `LOSAT/tests/fasta/MejoMJNV.fasta` (one sequence, 401,182 bases) as pyani ANIb builds its databases
+(`makeblastdb -dbtype nucl -in FILE -title STEM -out OUT`, no parsed Seq-ids; version 4 for the repository), the
+subject of rows `db.xdrop.*` (DI-6: the X-drops, `-window_size`, `-off_diagonal_range` and `-no_greedy`) and of some of
+rows `db.minraw.*` (DI-6b: `-min_raw_gapped_score`; the queries
+`tests/fasta/outfmt0/anib_frags*.fna` are 1020-nt fragments of `MelaMJNV.fasta`, pyani's fragment size). Run from `LOSAT/`:
+
+    losat makeblastdb -dbtype nucl -in tests/fasta/MejoMJNV.fasta -title MejoMJNV -out tests/db_search/mejo -blastdb_version 4
+    rm tests/db_search/mejo.njs
+
+The rows `db.blastn.ungapped_rej.*` (outfmt 8, 11, 17 with `-ungapped`) are refusals until O4a-2.

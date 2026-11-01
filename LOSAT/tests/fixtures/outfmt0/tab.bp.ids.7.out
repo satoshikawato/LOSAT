@@ -1,0 +1,73 @@
+# BLASTP 2.17.0+
+# Query: qp1 query protein one
+# Database: User specified sequence set (Input: tests/db_search/ids/prot.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query id, query gi, query acc., query length, subject id, subject ids, subject gi, subject gis, subject acc., subject accs., subject length
+# 53 hits found
+qp1	ref|XP_000001.1|	89.286	140	12	1	1	140	1	137	9.26e-93	255	qp1	0	qp1	140	ref|XP_000001.1|	ref|XP_000001.1|	0	0	ref|XP_000001.1|	ref|XP_000001.1|	137
+qp1	ref|XP_900001.1|	87.857	140	14	1	1	140	1	137	2.94e-91	251	qp1	0	qp1	140	ref|XP_900001.1|	ref|XP_900001.1|	0	0	ref|XP_900001.1|	ref|XP_900001.1|	137
+qp1	gi|123456|ref|NP_000002.1|	87.857	140	14	1	1	140	1	137	2.94e-91	251	qp1	0	qp1	140	gi|123456|ref|NP_000002.1|	gi|123456|ref|NP_000002.1|	0	0	gi|123456|ref|NP_000002.1|	gi|123456|ref|NP_000002.1|	137
+qp1	ref|XP_910001.1|	86.429	140	16	1	1	140	1	137	1.94e-89	247	qp1	0	qp1	140	ref|XP_910001.1|	ref|XP_910001.1|	0	0	ref|XP_910001.1|	ref|XP_910001.1|	137
+qp1	sp|Q00003|ABC_MOUSE	86.429	140	16	1	1	140	1	137	1.94e-89	247	qp1	0	qp1	140	sp|Q00003|ABC_MOUSE	sp|Q00003|ABC_MOUSE	0	0	sp|Q00003|ABC_MOUSE	sp|Q00003|ABC_MOUSE	137
+qp1	emb|CAA00005.1|	85.000	140	18	1	1	140	1	137	2.99e-87	241	qp1	0	qp1	140	emb|CAA00005.1|	emb|CAA00005.1|	0	0	emb|CAA00005.1|	emb|CAA00005.1|	137
+qp1	ref|XP_920001.1|	85.000	140	18	1	1	140	1	137	7.93e-87	240	qp1	0	qp1	140	ref|XP_920001.1|	ref|XP_920001.1|	0	0	ref|XP_920001.1|	ref|XP_920001.1|	137
+qp1	tr|A0A000|A0A000_YEAST	85.000	140	18	1	1	140	1	137	7.93e-87	240	qp1	0	qp1	140	tr|A0A000|A0A000_YEAST	tr|A0A000|A0A000_YEAST	0	0	tr|A0A000|A0A000_YEAST	tr|A0A000|A0A000_YEAST	137
+qp1	pdb|1ABC|A	84.286	140	19	1	1	140	1	137	1.37e-85	237	qp1	0	qp1	140	pdb|1ABC|A	pdb|1ABC|A	0	0	pdb|1ABC|A	pdb|1ABC|A	137
+qp1	dbj|BAA00006.1|	82.857	140	21	1	1	140	1	137	7.05e-84	233	qp1	0	qp1	140	dbj|BAA00006.1|	dbj|BAA00006.1|	0	0	dbj|BAA00006.1|	dbj|BAA00006.1|	137
+qp1	pir||S00007	80.000	140	25	1	1	140	1	137	3.47e-80	223	qp1	0	qp1	140	pir||S00007	pir||S00007	0	0	pir||S00007	pir||S00007	137
+qp1	prf||0008123A	78.571	140	27	1	1	140	1	137	1.53e-77	217	qp1	0	qp1	140	prf||0008123A	prf||0008123A	0	0	prf||0008123A	prf||0008123A	137
+qp1	lcl|myprot9	77.857	140	28	1	1	140	1	137	3.63e-76	213	qp1	0	qp1	140	lcl|myprot9	lcl|myprot9	0	0	lcl|myprot9	lcl|myprot9	137
+qp1	gnl|mydb|prot10	77.143	140	29	1	1	140	1	137	1.82e-74	209	qp1	0	qp1	140	gnl|mydb|prot10	gnl|mydb|prot10	0	0	gnl|mydb|prot10	gnl|mydb|prot10	137
+qp1	XP_000011.2	75.000	140	32	1	1	140	1	137	1.05e-72	204	qp1	0	qp1	140	XP_000011.2	XP_000011.2	0	0	XP_000011.2	XP_000011.2	137
+qp1	P00012	75.714	140	31	1	1	140	1	137	3.43e-71	201	qp1	0	qp1	140	P00012	P00012	0	0	P00012	P00012	137
+qp1	myprot_13	74.286	140	33	1	1	140	1	137	4.75e-69	195	qp1	0	qp1	140	myprot_13	myprot_13	0	0	myprot_13	myprot_13	137
+qp1	gb|AAA00017.1|LOCUS17	72.857	140	35	1	1	140	1	137	4.86e-69	195	qp1	0	qp1	140	gb|AAA00017.1|LOCUS17	gb|AAA00017.1|LOCUS17	0	0	gb|AAA00017.1|LOCUS17	gb|AAA00017.1|LOCUS17	137
+qp1	gi|1414	70.000	140	39	1	1	140	1	137	4.64e-67	190	qp1	0	qp1	140	gi|1414	gi|1414	0	0	gi|1414	gi|1414	137
+qp1	gi|1818|gb|AAA00018.1|	68.571	140	41	1	1	140	1	137	1.86e-65	186	qp1	0	qp1	140	gi|1818|gb|AAA00018.1|	gi|1818|gb|AAA00018.1|	0	0	gi|1818|gb|AAA00018.1|	gi|1818|gb|AAA00018.1|	137
+qp1	tpg|DAA00016.1|	72.340	141	34	3	1	140	1	137	1.70e-64	184	qp1	0	qp1	140	tpg|DAA00016.1|	tpg|DAA00016.1|	0	0	tpg|DAA00016.1|	tpg|DAA00016.1|	137
+qp1	sp|P00019.3|NAME_HUMAN	67.143	140	43	1	1	140	1	137	2.95e-60	173	qp1	0	qp1	140	sp|P00019.3|NAME_HUMAN	sp|P00019.3|NAME_HUMAN	0	0	sp|P00019.3|NAME_HUMAN	sp|P00019.3|NAME_HUMAN	137
+qp1	lcl|Subject_36	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	lcl|Subject_36	lcl|Subject_36	0	0	lcl|Subject_36	lcl|Subject_36	60
+qp1	pdb|5ABC|D	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	pdb|5ABC|D	pdb|5ABC|D	0	0	pdb|5ABC|D	pdb|5ABC|D	60
+qp1	ref|WP_100014.1|	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	ref|WP_100014.1|	ref|WP_100014.1|	0	0	ref|WP_100014.1|	ref|WP_100014.1|	60
+qp1	ref|NC_100013.1|	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	ref|NC_100013.1|	ref|NC_100013.1|	0	0	ref|NC_100013.1|	ref|NC_100013.1|	60
+qp1	tpe|BK100012.1|	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	tpe|BK100012.1|	tpe|BK100012.1|	0	0	tpe|BK100012.1|	tpe|BK100012.1|	60
+qp1	pdb|4ABC|	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	pdb|4ABC|	pdb|4ABC|	0	0	pdb|4ABC|	pdb|4ABC|	60
+qp1	lcl|Subject_30	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	lcl|Subject_30	lcl|Subject_30	0	0	lcl|Subject_30	lcl|Subject_30	60
+qp1	lcl|Subject_29|pdb|3ABC|C	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	lcl|Subject_29|pdb|3ABC|C	lcl|Subject_29|pdb|3ABC|C	0	0	lcl|Subject_29|pdb|3ABC|C	lcl|Subject_29|pdb|3ABC|C	60
+qp1	lcl|Subject_28|tpg|DAA10008.1|	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	lcl|Subject_28|tpg|DAA10008.1|	lcl|Subject_28|tpg|DAA10008.1|	0	0	lcl|Subject_28|tpg|DAA10008.1|	lcl|Subject_28|tpg|DAA10008.1|	60
+qp1	lcl|Subject_27	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	lcl|Subject_27	lcl|Subject_27	0	0	lcl|Subject_27	lcl|Subject_27	60
+qp1	ref|NP_100006.1|	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	ref|NP_100006.1|	ref|NP_100006.1|	0	0	ref|NP_100006.1|	ref|NP_100006.1|	60
+qp1	pat|US|7654321|3	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	pat|US|7654321|3	pat|US|7654321|3	0	0	pat|US|7654321|3	pat|US|7654321|3	60
+qp1	pdb|2XYY|	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	pdb|2XYY|	pdb|2XYY|	0	0	pdb|2XYY|	pdb|2XYY|	60
+qp1	pdb|2XYZ|B	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	pdb|2XYZ|B	pdb|2XYZ|B	0	0	pdb|2XYZ|B	pdb|2XYZ|B	60
+qp1	tpg|DAA10002.1|	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	tpg|DAA10002.1|	tpg|DAA10002.1|	0	0	tpg|DAA10002.1|	tpg|DAA10002.1|	60
+qp1	tpg|DAA10001.1|	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	tpg|DAA10001.1|	tpg|DAA10001.1|	0	0	tpg|DAA10001.1|	tpg|DAA10001.1|	60
+qp1	sp|P11111.1|ONE_HUMAN	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	sp|P11111.1|ONE_HUMAN	sp|P11111.1|ONE_HUMAN	0	0	sp|P11111.1|ONE_HUMAN	sp|P11111.1|ONE_HUMAN	60
+qp1	lcl|Subject_8	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	lcl|Subject_8	lcl|Subject_8	0	0	lcl|Subject_8	lcl|Subject_8	60
+qp1	lcl|Subject_7	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	lcl|Subject_7	lcl|Subject_7	0	0	lcl|Subject_7	lcl|Subject_7	60
+qp1	pgp|EP|0238993|7	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	pgp|EP|0238993|7	pgp|EP|0238993|7	0	0	pgp|EP|0238993|7	pgp|EP|0238993|7	60
+qp1	lcl|123	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	lcl|123	lcl|123	0	0	lcl|123	lcl|123	60
+qp1	prf|ABC|DEF	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	prf|ABC|DEF	prf|ABC|DEF	0	0	prf|ABC|DEF	prf|ABC|DEF	60
+qp1	pat|EP|0123456A1|7	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	pat|EP|0123456A1|7	pat|EP|0123456A1|7	0	0	pat|EP|0123456A1|7	pat|EP|0123456A1|7	60
+qp1	pat|US|RE33188|1	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	pat|US|RE33188|1	pat|US|RE33188|1	0	0	pat|US|RE33188|1	pat|US|RE33188|1	60
+qp1	gnl|ti|123	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	gnl|ti|123	gnl|ti|123	0	0	gnl|ti|123	gnl|ti|123	60
+qp1	lcl|long1	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	lcl|long1	lcl|long1	0	0	lcl|long1	lcl|long1	60
+qp1	gi|3000000000|gb|AAA00100.1|	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	gi|3000000000|gb|AAA00100.1|	gi|3000000000|gb|AAA00100.1|	0	0	gi|3000000000|gb|AAA00100.1|	gi|3000000000|gb|AAA00100.1|	60
+qp1	bbm|123	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	bbm|123	bbm|123	0	0	bbm|123	bbm|123	60
+qp1	gpp|GPP123|	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	gpp|GPP123|	gpp|GPP123|	0	0	gpp|GPP123|	gpp|GPP123|	60
+qp1	tpd|BK000013.1|	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	tpd|BK000013.1|	tpd|BK000013.1|	0	0	tpd|BK000013.1|	tpd|BK000013.1|	60
+qp1	tpe|BK000012.1|	96.667	60	2	0	1	60	1	60	1.36e-40	121	qp1	0	qp1	140	tpe|BK000012.1|	tpe|BK000012.1|	0	0	tpe|BK000012.1|	tpe|BK000012.1|	60
+# BLASTP 2.17.0+
+# Query: qp2 unrelated protein
+# Database: User specified sequence set (Input: tests/db_search/ids/prot.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query id, query gi, query acc., query length, subject id, subject ids, subject gi, subject gis, subject acc., subject accs., subject length
+# 5 hits found
+qp2	gnl|mydb|prot10	30.435	23	14	1	4	26	45	65	0.45	17.3	qp2	0	qp2	45	gnl|mydb|prot10	gnl|mydb|prot10	0	0	gnl|mydb|prot10	gnl|mydb|prot10	137
+qp2	gnl|mydb|prot10	28.571	14	10	0	24	37	1	14	5.1	14.2	qp2	0	qp2	45	gnl|mydb|prot10	gnl|mydb|prot10	0	0	gnl|mydb|prot10	gnl|mydb|prot10	137
+qp2	pir||S00007	29.412	17	12	0	6	22	94	110	0.65	16.5	qp2	0	qp2	45	pir||S00007	pir||S00007	0	0	pir||S00007	pir||S00007	137
+qp2	P00012	35.294	17	11	0	6	22	94	110	0.73	16.5	qp2	0	qp2	45	P00012	P00012	0	0	P00012	P00012	137
+qp2	sp|P00019.3|NAME_HUMAN	50.000	10	5	0	32	41	70	79	3.7	14.6	qp2	0	qp2	45	sp|P00019.3|NAME_HUMAN	sp|P00019.3|NAME_HUMAN	0	0	sp|P00019.3|NAME_HUMAN	sp|P00019.3|NAME_HUMAN	137
+# BLASTP 2.17.0+
+# Query: qnone no hits
+# Database: User specified sequence set (Input: tests/db_search/ids/prot.faa)
+# 0 hits found
+# BLAST processed 3 queries

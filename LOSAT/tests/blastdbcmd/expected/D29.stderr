@@ -1,0 +1,8 @@
+Error: [blastdbcmd] Invalid filtering algorithm ID: 5
+Error: [blastdbcmd] Skipped gnl|BL_ORD_ID|2
+Error: [blastdbcmd] Entry not found: nosuch
+Error: [blastdbcmd] Skipped nosuch
+Error: [blastdbcmd] Entry not found: 7
+Error: [blastdbcmd] Skipped 7
+Error: [blastdbcmd] Invalid filtering algorithm ID: 21
+Error: [blastdbcmd] Skipped gnl|BL_ORD_ID|0

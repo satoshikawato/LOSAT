@@ -1653,7 +1653,7 @@ fn recompute_num_identities_impl<const BLOSUM62: bool>(
             hsp.num_ident = num_ident;
             hsp.num_positives = num_positives;
             hsp.gapopen = gap_opens;
-            hsp.mismatch = alignment_len.saturating_sub(num_ident + gap_letters);
+            hsp.mismatch = alignment_len.saturating_sub(num_ident + gap_letters) as i64;
             hsp.identity = if alignment_len > 0 {
                 (num_ident as f64 * 100.0) / (alignment_len as f64)
             } else {
@@ -1688,7 +1688,7 @@ fn recompute_num_identities_impl<const BLOSUM62: bool>(
         hsp.length = q_span;
         hsp.num_ident = num_ident;
         hsp.num_positives = num_positives;
-        hsp.mismatch = q_span.saturating_sub(num_ident);
+        hsp.mismatch = q_span.saturating_sub(num_ident) as i64;
         hsp.gapopen = 0;
         hsp.identity = if q_span > 0 {
             (num_ident as f64 * 100.0) / (q_span as f64)
@@ -1767,7 +1767,7 @@ fn adjust_evalues_for_composition(
 fn evaluate_and_purge(
     hsp_list: &mut BlastpHspList,
     params: &KarlinParams,
-    gumbel_params: &BlastGumbelBlk,
+    gumbel_params: Option<&BlastGumbelBlk>,
     query_workspace: &BlastpKappaQueryWorkspace,
     subject_length: i32,
     expect_value: f64,
@@ -1792,14 +1792,25 @@ fn evaluate_and_purge(
     // }
     // ```
     let eval_params = scaled_karlin_params(params, score_divisor);
-    for hsp in &mut hsp_list.hsps {
-        hsp.e_value = blast_spouge_stoe(
-            hsp.raw_score,
-            &eval_params,
-            gumbel_params,
-            query_workspace.query_length,
-            subject_length,
-        );
+    match gumbel_params {
+        Some(gumbel_params) => {
+            for hsp in &mut hsp_list.hsps {
+                hsp.e_value = blast_spouge_stoe(
+                    hsp.raw_score,
+                    &eval_params,
+                    gumbel_params,
+                    query_workspace.query_length,
+                    subject_length,
+                );
+            }
+        }
+        None => {
+            let search_space = query_workspace.redo_query_info.eff_search_space;
+            for hsp in &mut hsp_list.hsps {
+                hsp.e_value = search_space
+                    * (-eval_params.lambda * hsp.raw_score as f64 + eval_params.k.ln()).exp();
+            }
+        }
     }
     update_best_evalue(hsp_list);
     if let Some(comp_p_value) = pvalue_for_this_pair.filter(|p| (0.0..=1.0).contains(p)) {
@@ -1849,7 +1860,7 @@ pub(crate) fn postprocess_preliminary_hits(
     subject: &[u8],
     matrix: ScoringMatrix,
     karlin_params: &KarlinParams,
-    gumbel_params: &BlastGumbelBlk,
+    gumbel_params: Option<&BlastGumbelBlk>,
     redo_align_params: &BlastRedoAlignParams,
     expect_value: f64,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1719-1720
@@ -2076,7 +2087,7 @@ pub(crate) fn postprocess_preliminary_hits(
                     hsp.length,
                     hsp.num_ident,
                     hsp.num_positives,
-                    hsp.length.saturating_sub(hsp.num_ident.saturating_add(hsp.mismatch)),
+                    hsp.length as i64 - hsp.num_ident as i64 - hsp.mismatch,
                     hsp.gapopen,
                     hsp.mismatch,
                     hsp.identity,
@@ -2175,7 +2186,7 @@ pub(crate) fn x_newton_lanes_prefetch_matches(
             .iter()
             .map(super::blast_engine::preliminary_hit_from_local_match_hsp)
             .collect();
-        // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database, dropped after the match (the
+        // Read from the database, dropped after the match (the
         // redo reads it again); on an error nothing is computed ahead, and the redo of the match
         // reaches the error itself.
         let Ok(subject) = subjects.read(local_match.oid) else {
@@ -2618,7 +2629,7 @@ mod tests {
         let (_best_score, best_evalue) = evaluate_and_purge(
             &mut hsp_list,
             &params,
-            &gumbel,
+            Some(&gumbel),
             &query_workspace,
             200,
             10.0,
@@ -2667,7 +2678,7 @@ mod tests {
         let (_best_score, best_evalue) = evaluate_and_purge(
             &mut hsp_list,
             &params,
-            &gumbel,
+            Some(&gumbel),
             &query_workspace,
             200,
             10.0,

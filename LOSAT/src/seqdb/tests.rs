@@ -148,6 +148,11 @@ fn check_sequence(block: &SequenceBlock, i: usize, letters: &[u8], what: &str) {
                 encode_iupac_to_blastna(&upper).as_slice(),
                 "{what}: BLASTNA"
             );
+            assert_eq!(
+                block.nucleotide_iupac(i).expect("IUPAC"),
+                upper,
+                "{what}: IUPAC"
+            );
             // The 2-bit data: the base itself, or for an ambiguity code one of
             // the bases it stands for (makeblastdb picks one at random).
             let packed = block.nucleotide_packed(i);
@@ -554,6 +559,7 @@ fn both_ambiguity_formats_are_read() {
     assert_eq!(block.ambiguity_bytes(6), [0, 0, 0, 0]);
     assert!(block.ambiguity_runs(6).unwrap().is_empty());
     assert_eq!(block.nucleotide_blastna(6).unwrap(), [15, 2, 15]);
+    assert_eq!(block.nucleotide_iupac(6).unwrap(), b"G");
 }
 
 fn open_error(name: &str, seqtype: SeqType) -> SeqDbError {
@@ -1111,7 +1117,7 @@ fn a_name_is_a_list_as_for_ncbi() {
 }
 
 /// One database name is a path taken as it is: a space or a double quote in
-/// it does not split it (the entry point of `losat makedb`, whose output name
+/// it does not split it (the entry point of `losat makeblastdb`, whose output name
 /// is one name).
 #[test]
 fn one_name_is_not_a_list() {
@@ -1234,7 +1240,18 @@ fn ambiguity_data_that_do_not_fit_the_sequence() {
         let db = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
         db.read_sequence(4).unwrap()
     };
+    // The letters of the BLASTNA decode (the formatter's: `BLASTNA_TO_IUPACNA`).
+    let letters_of = |blastna: &[u8]| -> Vec<u8> {
+        blastna[1..blastna.len() - 1]
+            .iter()
+            .map(|&code| b"ACGTRYMKWSBDHVN-"[usize::from(code & 0xF)])
+            .collect()
+    };
     let intact = read(&original).nucleotide_blastna(0).unwrap();
+    assert_eq!(
+        read(&original).nucleotide_iupac(0).unwrap(),
+        letters_of(&intact)
+    );
     // BLASTNA: N = 14, R = 4, Y = 5; the stored 2-bit bases are 0..=3.
     assert_eq!(intact[1 + 30..1 + 35], [14; 5]);
     assert_eq!((intact[1 + 55], intact[1 + 59]), (4, 5));
@@ -1245,6 +1262,10 @@ fn ambiguity_data_that_do_not_fit_the_sequence() {
     let mut past_end = original.clone();
     past_end[72..76].copy_from_slice(&[0x50, 0, 0, 74]);
     let clipped = read(&past_end).nucleotide_blastna(0).unwrap();
+    assert_eq!(
+        read(&past_end).nucleotide_iupac(0).unwrap(),
+        letters_of(&clipped)
+    );
     assert_eq!(clipped[1 + 30..1 + 35], [14; 5]);
     assert!(clipped[1 + 55] < 4, "R is not restored");
     assert!(
@@ -1256,6 +1277,10 @@ fn ambiguity_data_that_do_not_fit_the_sequence() {
     let mut crossing = original.clone();
     crossing[76..80].copy_from_slice(&[0xf4, 0, 0, 72]);
     let crossed = read(&crossing).nucleotide_blastna(0).unwrap();
+    assert_eq!(
+        read(&crossing).nucleotide_iupac(0).unwrap(),
+        letters_of(&crossed)
+    );
     assert_eq!(crossed.len(), 74 + 2);
     assert_eq!(crossed[1 + 72..1 + 74], [14, 14]);
     assert_eq!(crossed[75], BLASTNA_SENTINEL);
@@ -1268,10 +1293,14 @@ fn ambiguity_data_that_do_not_fit_the_sequence() {
         block.nucleotide_blastna(0),
         Err(SeqDbError::Format { message, .. }) if message.contains("shorter than their count")
     ));
+    assert_eq!(
+        block.nucleotide_iupac(0).unwrap_err().to_string(),
+        block.nucleotide_blastna(0).unwrap_err().to_string()
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `SeqDb::x_nucleotide_check` of a block of one sequence and
+/// `SeqDb::x_nucleotide_check` of a block of one sequence and
 /// `read_block` of the same block give the same length and ambiguity runs, or the same errors.
 /// Returns whether they failed.
 fn check_as_read_block(db: &SeqDb, range: BlockRange, what: &str) -> bool {
@@ -1675,7 +1704,7 @@ fn check_search_path_row(
             let db = opened.unwrap_or_else(|e| panic!("{id}: NCBI opens it, LOSAT: {e:?}"));
             assert_eq!(String::from_utf8_lossy(db.title()), *title, "{id}: title");
             assert_eq!(db.num_seqs().to_string(), *sequences, "{id}: sequences");
-            let listed = super::alias::test_info_volumes(name, SeqType::Protein, search).unwrap();
+            let listed = super::alias::info_volumes(name, SeqType::Protein, search).unwrap();
             let expected: Vec<String> = volumes.split(" | ").map(place).collect();
             assert_eq!(listed, expected, "{id}: volumes");
         }

@@ -19,11 +19,188 @@ use crate::algorithm::{blastn, blastp, blastx, psiblast, tblastn, tblastx};
 // const string kArgNumThreads("num_threads");
 // ```
 // LOSAT retains its program subcommand; search parameter names are NCBI names.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3815-3826
+// ```c++
+// string& CArgDescriptions::PrintUsage(string& str, bool detailed) const
+// {
+//     CPrintUsage x(*this);
+//     list<string> arr;
+//
+//     // SYNOPSIS
+//     arr.push_back("USAGE");
+//     x.AddSynopsis(arr, m_UsageName, "    ");
+//
+//     // DESCRIPTION
+//     arr.push_back(kEmptyStr);
+//     x.AddDescription(arr, detailed);
+// ```
+// `-help` and `-h` open with NCBI's two headings, `USAGE` and `DESCRIPTION`: tools that call
+// BLAST+ look for them (BRIG takes a `blastn -help` that prints `USAGE` as BLAST+ found).
+// The options follow in clap's layout.
+const NCBI_HELP_TEMPLATE: &str = "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\n{all-args}";
+
+/// The top level's `-help`: NCBI's headings, and what the entry names need.
+const LOSAT_HELP_TEMPLATE: &str =
+    "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\n{all-args}\n\n{after-help}";
+
+/// The names that run a program without its subcommand word (`entry_argv`), as `losat
+/// --install-shims` links them. No NCBI counterpart: NCBI has one executable per program.
+pub const ENTRY_NAMES: [&str; 8] = [
+    "blastn",
+    "blastp",
+    "blastx",
+    "tblastn",
+    "tblastx",
+    "psiblast",
+    "makeblastdb",
+    "blastdbcmd",
+];
+
+/// The program of an executable called `argv0`: its file name without `.exe`, when that is one
+/// of `ENTRY_NAMES`.
+fn entry_program(argv0: &std::ffi::OsStr) -> Option<&'static str> {
+    let path = std::path::Path::new(argv0);
+    if !path
+        .extension()
+        .map_or(true, |extension| extension.eq_ignore_ascii_case("exe"))
+    {
+        return None;
+    }
+    let stem = path.file_stem()?.to_str()?;
+    // Windows finds `blastn.exe` for the word `BLASTN`, which is then `argv[0]`.
+    #[cfg(windows)]
+    let stem = stem.to_ascii_lowercase();
+    ENTRY_NAMES.into_iter().find(|name| *name == stem)
+}
+
+/// The words of the command line as `losat PROGRAM ...` reads them: an executable called by the
+/// name of a program (`ENTRY_NAMES`) runs that program, with the texts of `losat PROGRAM`. Any
+/// other name is `losat`, and its words stay as they are.
+pub fn entry_argv<I, S>(argv: I) -> Vec<OsString>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    let mut words: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+    if let Some(program) = words.first().and_then(|argv0| entry_program(argv0)) {
+        words[0] = format!("losat{}", std::env::consts::EXE_SUFFIX).into();
+        words.insert(1, program.into());
+    }
+    words
+}
+
+/// The words that ask for `install_shims`: `-install-shims` is how the top level's `-help` shows
+/// it (`render_message` writes long options with one dash).
+pub const INSTALL_SHIMS_WORDS: [&str; 2] = ["--install-shims", "-install-shims"];
+
+/// `losat --install-shims [DIR]`: makes the `ENTRY_NAMES` in `DIR` (default: the directory of
+/// this executable) and returns their paths. Each is a symbolic link to this executable, relative
+/// when it lies in `DIR` so that the directory can move; Windows, where a link needs a privilege,
+/// gets a copy. A name made by an earlier LOSAT (a link to a `losat`, or a copy of one) is
+/// replaced. Any other file of that name is an error and nothing is made: it may be NCBI's
+/// program. No NCBI counterpart.
+pub fn install_shims(dir: Option<&std::ffi::OsStr>) -> Result<Vec<std::path::PathBuf>, String> {
+    let exe = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .map_err(|error| format!("cannot find this executable: {error}"))?;
+    let exe_dir = exe
+        .parent()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
+    let dir = dir.map_or_else(|| exe_dir.clone(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
+    let dir = std::fs::canonicalize(&dir)
+        .map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
+    let mut missing = Vec::new();
+    let mut stale = Vec::new();
+    let mut paths = Vec::new();
+    let mut taken = Vec::new();
+    for name in ENTRY_NAMES {
+        let path = dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+        if std::fs::symlink_metadata(&path).is_err() {
+            missing.push(path.clone());
+        } else if is_this_executable(&path, &exe) {
+            // Already made by this executable: kept.
+        } else if is_earlier_shim(&path) {
+            stale.push(path.clone());
+        } else {
+            taken.push(path.display().to_string());
+        }
+        paths.push(path);
+    }
+    if !taken.is_empty() {
+        return Err(format!(
+            "these files exist and are not this executable; nothing was installed: {}",
+            taken.join(" ")
+        ));
+    }
+    for path in &stale {
+        std::fs::remove_file(path)
+            .map_err(|error| format!("cannot replace {}: {error}", path.display()))?;
+    }
+    for path in missing.into_iter().chain(stale) {
+        make_shim(&exe, &exe_dir == &dir, &path)
+            .map_err(|error| format!("cannot make {}: {error}", path.display()))?;
+    }
+    Ok(paths)
+}
+
+/// Whether `path` was made by `install_shims` of another `losat` (an upgrade, a move): a link
+/// whose target is named `losat`, which may be gone, or a file with LOSAT's `-version` text (a
+/// Windows copy, a copy of an older build).
+fn is_earlier_shim(path: &std::path::Path) -> bool {
+    let losat = format!("losat{}", std::env::consts::EXE_SUFFIX);
+    if let Ok(target) = std::fs::read_link(path) {
+        return target
+            .file_name()
+            .is_some_and(|name| name == losat.as_str());
+    }
+    const MARKER: &[u8] = b" Package: LOSAT ";
+    std::fs::read(path)
+        .is_ok_and(|bytes| bytes.windows(MARKER.len()).any(|window| window == MARKER))
+}
+
+/// Whether `path` is a link to `exe`, or `exe` itself.
+#[cfg(not(windows))]
+fn is_this_executable(path: &std::path::Path, exe: &std::path::Path) -> bool {
+    std::fs::canonicalize(path).is_ok_and(|target| target == exe)
+}
+
+/// Whether `path` is a copy of `exe`.
+#[cfg(windows)]
+fn is_this_executable(path: &std::path::Path, exe: &std::path::Path) -> bool {
+    match (std::fs::read(path), std::fs::read(exe)) {
+        (Ok(shim), Ok(this)) => shim == this,
+        _ => false,
+    }
+}
+
+#[cfg(unix)]
+fn make_shim(exe: &std::path::Path, same_dir: bool, path: &std::path::Path) -> std::io::Result<()> {
+    match exe.file_name().filter(|_| same_dir) {
+        Some(file_name) => std::os::unix::fs::symlink(file_name, path),
+        None => std::os::unix::fs::symlink(exe, path),
+    }
+}
+
+#[cfg(windows)]
+fn make_shim(exe: &std::path::Path, _: bool, path: &std::path::Path) -> std::io::Result<()> {
+    std::fs::copy(exe, path).map(|_| ())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn make_shim(_: &std::path::Path, _: bool, _: &std::path::Path) -> std::io::Result<()> {
+    Err(std::io::ErrorKind::Unsupported.into())
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "losat",
     version,
-    about = "Pure-Rust pairwise alignment with NCBI-verified fixtures and genetic-code exceptions"
+    about = "Pure-Rust pairwise alignment with NCBI-verified fixtures and genetic-code exceptions",
+    help_template = LOSAT_HELP_TEMPLATE,
+    after_help = "To call the programs by NCBI's names (blastn, makeblastdb, ...), link them with:\n  losat -install-shims [DIR]   (default: the directory of this executable)"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -39,16 +216,21 @@ pub enum Commands {
     //                                   "Translated Query-Protein Subject BLAST"));
     // ```
     /// Translated nucleotide query vs protein subject (local blastx)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastx(blastx::BlastxArgs),
     /// Pairwise nucleotide alignment (megablast [default], blastn)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastn(blastn::BlastnArgs),
     /// Pairwise protein alignment (blastp)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastp(blastp::BlastpArgs),
     /// Pairwise 6-frame translated nucleotide alignment (tblastx)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Tblastx(tblastx::TblastxArgs),
     // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
     // static const string kProgram("tblastn"); SetTask("tblastn");
     /// Protein query vs translated nucleotide subject (local tblastn)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Tblastn(tblastn::TblastnArgs),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
     // ```c++
@@ -58,6 +240,7 @@ pub enum Commands {
     //                                           "Position-Specific Iterated BLAST"));
     // ```
     /// Position-Specific Iterated BLAST (psiblast; its first round)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Psiblast(psiblast::PsiblastArgs),
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
     // ```c++
@@ -65,7 +248,8 @@ pub enum Commands {
     //                   "Application to create BLAST databases, version "
     //                   + CBlastVersion().Print());
     // ```
-    /// Create a BLAST database from a FASTA file (makeblastdb, format version 4)
+    /// makeblastdb: create a BLAST database from a FASTA file, format version 4
+    #[command(name = "makeblastdb", help_template = NCBI_HELP_TEMPLATE)]
     Makedb(crate::writedb::makeblastdb::MakedbArgs),
 }
 
@@ -141,6 +325,16 @@ where
             translated.push("--help".into());
             continue;
         }
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:76-77
+        // ```c++
+        // static const char* s_AutoHelp     = "h";
+        // static const char* s_AutoHelpFull = "help";
+        // ```
+        // `-h` is the short usage of every NCBI program (rc 0); clap's `-h` is its short help.
+        if text == "-h" {
+            translated.push("-h".into());
+            continue;
+        }
         if text == "--version" && std::ptr::eq(scope, &command) {
             translated.push(token);
             continue;
@@ -163,7 +357,7 @@ where
             && input.len() == 0
             && matches!(
                 scope.get_name(),
-                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "makedb"
+                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "makeblastdb"
             )
         {
             continue;
@@ -323,7 +517,8 @@ pub fn render_message(error: &clap::Error) -> String {
 // ```
 // The options of NCBI blastn 2.17.0+ (-help) that LOSAT's BLASTN does not implement
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
-// (`blastn/args.rs`); the database masks and `-searchsp` are not.
+// (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
+// (DI-6) and `-min_raw_gapped_score` (DI-6b); the database masks are not.
 fn is_unported_blastn_arg(name: &str) -> bool {
     matches!(
         name,
@@ -335,38 +530,16 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "export_search_strategy"
             | "filtering_db"
             | "gilist"
-            | "h"
             | "html"
             | "import_search_strategy"
             | "index_name"
             | "line_length"
-            | "min_raw_gapped_score"
-            | "mt_mode"
             | "negative_gilist"
-            | "negative_seqidlist"
-            | "negative_taxidlist"
-            | "negative_taxids"
-            | "no_greedy"
-            | "no_taxid_expansion"
-            | "off_diagonal_range"
-            | "parse_deflines"
             | "remote"
-            | "searchsp"
-            | "seqidlist"
-            | "show_gis"
-            | "soft_masking"
             | "sorthits"
             | "sorthsps"
-            | "taxidlist"
-            | "taxids"
-            | "ungapped"
-            | "use_index"
             | "version"
             | "window_masker_taxid"
-            | "window_size"
-            | "xdrop_gap"
-            | "xdrop_gap_final"
-            | "xdrop_ungap"
     )
 }
 
@@ -392,29 +565,17 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "entrez_query"
             | "export_search_strategy"
             | "gilist"
-            | "h"
             | "html"
             | "import_search_strategy"
             | "ipglist"
             | "lcase_masking"
             | "line_length"
-            | "mt_mode"
             | "negative_gilist"
             | "negative_ipglist"
-            | "negative_seqidlist"
-            | "negative_taxidlist"
-            | "negative_taxids"
-            | "no_taxid_expansion"
-            | "parse_deflines"
             | "remote"
-            | "searchsp"
-            | "seqidlist"
-            | "show_gis"
             | "sorthits"
             | "sorthsps"
             | "subject_besthit"
-            | "taxidlist"
-            | "taxids"
             | "version"
             | "xdrop_gap"
             | "xdrop_gap_final"
@@ -456,8 +617,15 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
             | "save_each_pssm"
             | "save_pssm_after_last_round"
             | "sum_stats"
-    ) || (is_unported_blastp_arg(name)
-        && !matches!(name, "db_hard_mask" | "db_soft_mask" | "mt_mode"))
+            // Line DI-8 ported these to BLASTP's database search, not to PSIBLAST's.
+            | "negative_seqidlist"
+            | "negative_taxidlist"
+            | "negative_taxids"
+            | "no_taxid_expansion"
+            | "seqidlist"
+            | "taxidlist"
+            | "taxids"
+    ) || (is_unported_blastp_arg(name) && !matches!(name, "db_hard_mask" | "db_soft_mask"))
 }
 
 fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
@@ -486,14 +654,14 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     //     arg_desc->AddFlag("hash_index",
     //                       "Create index of sequence hash values.",
     // ```
-    // makeblastdb's options that LOSAT's makedb does not serve are named in
+    // makeblastdb's options that LOSAT's makeblastdb does not serve are named in
     // its refusal (AGENTS.md rule 2: explicit unsupported errors).
-    if scope.get_name() == "makedb"
+    if scope.get_name() == "makeblastdb"
         && crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.contains(&name)
     {
         return clap::Error::raw(
             ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's makedb"),
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's makeblastdb"),
         );
     }
     if scope.get_name() == "blastn" && is_unported_blastn_arg(name) {
@@ -545,6 +713,61 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     )
 }
 
+/// The text `-version` prints for `argv` (`losat <program> ... -version ...`), or `None` when
+/// `argv` has no such request.
+///
+/// NCBI's application reads `-version` before its arguments (`ncbi_preparsed_toolkit_word`,
+/// ncbiapp.cpp:926-1001): anywhere before `--`, in an option's value place too
+/// (`blastn -out -version` prints the version), and also when other arguments are invalid.
+/// The text is the two lines of `fVersionInfo | fPackageShort`:
+/// the program name and version, then the package. NCBI's second line names its own
+/// package and build date; LOSAT's names LOSAT and the BLAST+ release its output follows.
+/// `makeblastdb` prints `makeblastdb`, as NCBI's program does. `main` prints the
+/// text on stdout and exits 0, before any argument is parsed. The top level `losat --version`
+/// is clap's and is not read here.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-977
+/// ```c++
+///             } else if ( NStr::strcmp(argv[i], s_ArgVersion) == 0 ) {
+///                 delete[] v;
+///                 // Print VERSION
+///                 cout << GetFullVersion().Print( appname, CVersionAPI::fVersionInfo | CVersionAPI::fPackageShort );
+///                 diag_context.DiscardMessages();
+///                 return 0;
+/// ```
+pub fn ncbi_version_request<I, S>(argv: I) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    let tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+    let command = Cli::command();
+    let program = command.find_subcommand(tokens.get(1)?.to_str()?)?;
+    let name = match program.get_name() {
+        "blastn" => "blastn",
+        "blastp" => "blastp",
+        "blastx" => "blastx",
+        "tblastn" => "tblastn",
+        "tblastx" => "tblastx",
+        "psiblast" => "psiblast",
+        "makeblastdb" => "makeblastdb",
+        _ => return None,
+    };
+    for token in &tokens[2..] {
+        match token.to_str().unwrap_or("") {
+            "--" => return None,
+            "-version" => {
+                return Some(format!(
+                    "{name}: 2.17.0+\n Package: LOSAT {}, output compatible with blast 2.17.0\n",
+                    env!("CARGO_PKG_VERSION")
+                ));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001
 // ```c++
 //         for (int i = 1;  i < argc;  i++) {
@@ -577,7 +800,10 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
 // NCBI's application reads these words anywhere before `--`, also where another option
 // expects its value: `-out -version` prints the version, and `-out -dryrun` loses the
 // value of `-out`. LOSAT rejects each of them (decision D9), so the first one found is
-// rejected there as it is in an option's place, rather than read as the value.
+// rejected there as it is in an option's place, rather than read as the value. The command
+// line never brings `-version` here: `main` prints the version before parsing
+// (`ncbi_version_request`). The Web engine, which parses its options here and has no
+// version to print, refuses it.
 fn ncbi_preparsed_toolkit_word(tokens: &[OsString]) -> Option<&str> {
     for token in tokens {
         let text = token.to_str().unwrap_or("");
@@ -652,27 +878,15 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "entrez_query"
             | "export_search_strategy"
             | "gilist"
-            | "h"
             | "html"
             | "import_search_strategy"
             | "in_pssm"
             | "line_length"
-            | "mt_mode"
             | "negative_gilist"
-            | "negative_seqidlist"
-            | "negative_taxidlist"
-            | "negative_taxids"
-            | "no_taxid_expansion"
-            | "parse_deflines"
             | "remote"
-            | "searchsp"
-            | "seqidlist"
-            | "show_gis"
             | "sorthits"
             | "sorthsps"
             | "subject_besthit"
-            | "taxidlist"
-            | "taxids"
             | "use_sw_tback"
             | "version"
             | "xdrop_ungap"
@@ -701,29 +915,17 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "entrez_query"
             | "export_search_strategy"
             | "gilist"
-            | "h"
             | "html"
             | "import_search_strategy"
-            | "lcase_masking"
             | "line_length"
             | "max_intron_length"
             | "negative_gilist"
-            | "negative_seqidlist"
-            | "negative_taxidlist"
-            | "negative_taxids"
-            | "no_taxid_expansion"
-            | "parse_deflines"
             | "remote"
-            | "searchsp"
-            | "seqidlist"
-            | "show_gis"
             | "sorthits"
             | "sorthsps"
             | "strand"
             | "subject_besthit"
             | "sum_stats"
-            | "taxidlist"
-            | "taxids"
             | "version"
             | "xdrop_ungap"
     )
@@ -743,20 +945,12 @@ fn is_unported_blastx_arg(name: &str) -> bool {
         name,
         "query_loc"
             | "subject_loc"
-            | "show_gis"
             | "line_length"
             | "html"
             | "sorthits"
             | "sorthsps"
             | "gilist"
-            | "seqidlist"
             | "negative_gilist"
-            | "negative_seqidlist"
-            | "taxids"
-            | "negative_taxids"
-            | "taxidlist"
-            | "negative_taxidlist"
-            | "no_taxid_expansion"
             | "entrez_query"
             | "db_soft_mask"
             | "db_hard_mask"
@@ -764,14 +958,11 @@ fn is_unported_blastx_arg(name: &str) -> bool {
             | "negative_ipglist"
             | "best_hit_overhang"
             | "best_hit_score_edge"
-            | "searchsp"
             | "import_search_strategy"
             | "export_search_strategy"
             | "xdrop_ungap"
             | "xdrop_gap"
             | "xdrop_gap_final"
-            | "parse_deflines"
-            | "mt_mode"
             | "remote"
             | "use_sw_tback"
     )

@@ -83,7 +83,7 @@ use crate::report::blast_xml2::framing::{side_file_open_error, side_file_write_e
 use crate::report::blast_xml2::{
     FsSideFiles, RunSideFiles, SideFiles, Xml2Document, Xml2Kind, Xml2Run, Xml2Target, Xml2Writer,
 };
-use crate::report::query_warnings::INVALID_QUERY_MESSAGE;
+use crate::report::query_warnings::{EMPTY_DATABASE_MESSAGE, INVALID_QUERY_MESSAGE};
 use crate::report::serial::seqalign::seqalign_evalue;
 
 const PROGRAM: &str = "BLASTX";
@@ -174,13 +174,16 @@ fn query_stats(
 /// The messages of a query's result (the warnings the other formats write to standard error,
 /// `report::query_warning`): the Karlin-Altschul message of a batch NCBI did not search, and
 /// the message of a record without letters.
-fn query_messages(query: &FastaRecord, search_skipped: bool) -> Vec<String> {
+fn query_messages(query: &FastaRecord, search_skipped: bool, filtered_empty: bool) -> Vec<String> {
     let mut messages = Vec::new();
     if search_skipped {
         messages.push(INVALID_QUERY_MESSAGE.to_string());
     }
     if query.sequence.is_empty() {
         messages.push("Sequence contains no data".to_string());
+    }
+    if filtered_empty && !search_skipped {
+        messages.push(EMPTY_DATABASE_MESSAGE.to_string());
     }
     messages
 }
@@ -522,13 +525,19 @@ impl SideFiles for HeldSideFiles {
 
 /// The `QueryText` of a query, refused as the writer refuses it. `search_skipped`: NCBI did not
 /// search the query's batch (its message then carries the query's id, made of its title).
-fn query_text(query: &FastaRecord, search_skipped: bool, has_hits: bool) -> Result<QueryText> {
+fn query_text(
+    query: &FastaRecord,
+    search_skipped: bool,
+    filtered_empty: bool,
+    has_hits: bool,
+) -> Result<QueryText> {
     names::query_text(
         PROGRAM,
-        &query.internal_id,
+        query.warning_id(),
+        query.believed(),
         query.title.as_bytes(),
         false,
-        &query_messages(query, search_skipped),
+        &query_messages(query, search_skipped, filtered_empty),
         has_hits,
     )
     .map_err(|error| anyhow::Error::new(XmlRefusal(error.to_string())))
@@ -552,8 +561,8 @@ pub(super) fn prescan_queries(file: std::fs::File, lowercase: bool) -> Result<bo
         super::query_setup::BATCH_SIZE,
         &mut |batch| {
             for query in batch {
-                query_text(query, false, true)?;
-                may_be_refused |= query_text(query, true, true).is_err();
+                query_text(query, false, false, true)?;
+                may_be_refused |= query_text(query, true, false, true).is_err();
             }
             Ok(())
         },
@@ -699,7 +708,12 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
             let has_hits = lists.iter().any(|list| reported(list, options.gapped));
-            texts.push(query_text(query, batch.search_skipped, has_hits)?);
+            texts.push(query_text(
+                query,
+                batch.search_skipped,
+                options.filtered_empty,
+                has_hits,
+            )?);
             for list in lists.iter().filter(|list| reported(list, options.gapped)) {
                 if let std::collections::hash_map::Entry::Vacant(slot) =
                     subject_cache.entry(list.oid)

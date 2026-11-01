@@ -127,6 +127,10 @@ pub struct BlastnArgs {
         help = "BLAST database name (a nucleotide database without parsed Seq-ids)"
     )]
     pub db: Option<String>,
+    /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
+    /// `-no_taxid_expansion` (line DI-8).
+    #[command(flatten)]
+    pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     // DB size
@@ -141,6 +145,35 @@ pub struct BlastnArgs {
     // (`BlastnArgs::db_length`).
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
+    // ```c++
+    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
+    // ```
+    #[arg(
+        long = "show_gis",
+        default_value_t = false,
+        help = "Show NCBI GIs in deflines?"
+    )]
+    pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
+    // ```c++
+    //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
+    // ```
+    // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
+    #[arg(
+        long = "parse_deflines",
+        default_value_t = false,
+        help = "Should the query and subject defline(s) be parsed?"
+    )]
+    pub parse_deflines: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    // ```
+    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     #[arg(long, default_value = "megablast", help = "Task to execute: megablast, blastn, dc-megablast or blastn-short", long_help = "Implemented tasks: megablast, blastn, dc-megablast and blastn-short. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST. An omitted option takes the default of the task.", value_parser = blastn_task)]
     pub task: String,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:708-730
@@ -180,6 +213,47 @@ pub struct BlastnArgs {
     pub word_size: Option<usize>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3169-3181
+    // ```c++
+    //     if (m_MTMode >= 0) {
+    //     	arg_desc.AddDefaultKey(kArgMTMode, "int_value",
+    //                                "Multi-thread mode to use in BLAST search:\n "
+    //                                "0 auto split by database or queries \n "
+    //                                "1 split by queries\n "
+    //                                "2 split by database",
+    //                                CArgDescriptions::eInteger,
+    //                                NStr::IntToString(0));
+    //     	arg_desc.SetConstraint(kArgMTMode,
+    //                                new CArgAllowValuesBetween(0, 2, true));
+    //     	arg_desc.SetDependency(kArgMTMode,
+    //                                CArgDescriptions::eRequires,
+    //                                kArgNumThreads);
+    //     }
+    // ```
+    /// `-mt_mode` is read and has no effect: LOSAT's output is the same at every thread count
+    /// and for every value, and equals NCBI's `-num_threads 1` output (Owner 2026-10-13;
+    /// CLI DECISIONS 5). NCBI's `-mt_mode 1` (and `0` when it chooses to split by queries)
+    /// runs the queries in batches and writes the end of an outfmt 0 report or each XML
+    /// document per batch (`blastn_app.cpp:134-170`, `blastx_app.cpp` `x_RunMTBySplitQuery`);
+    /// that framing is not reproduced. The value must be 0 to 2 and `-num_threads` must be
+    /// given with it, as in NCBI (clap's `requires` ignores a default value).
+    #[arg(long, value_name = "int_value", value_parser = crate::blastinput::value_parsers::ncbi_mt_mode, requires = "num_threads", help = "Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output does not depend on it)")]
+    pub mt_mode: Option<u8>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3354-3363
+    // ```c++
+    //     arg_desc.AddDefaultKey(
+    //             kArgUseIndex, "boolean",
+    //             "Use MegaBLAST database index",
+    //             CArgDescriptions::eBoolean, NStr::BoolToString(kDfltArgUseIndex));
+    //     arg_desc.AddOptionalKey(
+    //             kArgIndexName, "string",
+    //             "MegaBLAST database index name (deprecated; use only for old style indices)",
+    //             CArgDescriptions::eString );
+    // ```
+    /// `-use_index false` (NCBI's default) is accepted and changes nothing; `true` is refused
+    /// by the value parser: LOSAT has no MegaBLAST database index. `-index_name` stays unported.
+    #[arg(long, value_name = "boolean", value_parser = crate::blastinput::value_parsers::blastn_use_index, help = "Use MegaBLAST database index (only false is supported) [default: false]")]
+    pub use_index: Option<bool>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:142-146
     // ```c
     //     	string des = "Expectation value (E) threshold for saving hits. Default = 10";
@@ -342,6 +416,16 @@ pub struct BlastnArgs {
     // ```
     #[arg(long = "lcase_masking", default_value_t = false)]
     pub lcase_masking: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:365-368
+    // ```c++
+    //         arg_desc.AddDefaultKey(kArgLookupTableMaskingOnly, "soft_masking",
+    //                         "Apply filtering locations as soft masks",
+    //                         CArgDescriptions::eBoolean,
+    //                         kDfltArgLookupTableMaskingOnlyNucl);
+    // ```
+    // Read by `soft_masking`.
+    #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: true]")]
+    pub soft_masking: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:358-363
     // ```c++
     //         arg_desc.AddOptionalKey(kArgWindowMaskerDatabase, "window_masker_db",
@@ -365,6 +449,12 @@ pub struct BlastnArgs {
     /// gives the counts files it holds under their names.
     #[arg(skip)]
     pub window_masker_counts: Option<std::sync::Arc<dyn crate::utils::winmask::CountsSource>>,
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// by the command line before the search where a tabular field list shows a name of the
+    /// taxonomy database (`algorithm::blastn::tabular`); `None` elsewhere (`run_local`'s callers
+    /// give no search path: not found). Not a public option.
+    #[arg(skip)]
+    pub tabular_taxdb: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
     // ```c++
     //         arg_desc.AddDefaultKey(kArgStrand, "strand",
@@ -400,6 +490,7 @@ pub struct BlastnArgs {
     #[arg(
         long = "subject_loc",
         value_name = "RANGE",
+        conflicts_with_all = crate::blastinput::db_filter::DB_FILTER_OPTIONS,
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
@@ -420,6 +511,126 @@ pub struct BlastnArgs {
     /// higher-scoring hits, delete the hit (default: 0, no culling).
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-917,929-929
+    // ```c++
+    //     arg_desc.AddFlag(kArgUngapped, "Perform ungapped alignment only?", true);
+    // ...
+    //     opt.SetGappedMode(!args[kArgUngapped]);
+    // ```
+    /// Perform ungapped alignment only.
+    #[arg(long)]
+    pub ungapped: bool,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:212-229,276-286
+    // ```c++
+    //         arg_desc.AddOptionalKey(kArgUngappedXDropoff, "float_value",
+    //                             "X-dropoff value (in bits) for ungapped extensions",
+    //                             CArgDescriptions::eDouble);
+    // ...
+    //             arg_desc.AddOptionalKey(kArgGappedXDropoff, "float_value",
+    //                  "X-dropoff value (in bits) for preliminary gapped extensions",
+    //                  CArgDescriptions::eDouble);
+    // ...
+    //             arg_desc.AddOptionalKey(kArgFinalGappedXDropoff, "float_value",
+    //                          "X-dropoff value (in bits) for final gapped alignment",
+    //                          CArgDescriptions::eDouble);
+    // ...
+    //     if (args.Exist(kArgUngappedXDropoff) && args[kArgUngappedXDropoff]) {
+    //         opt.SetXDropoff(args[kArgUngappedXDropoff].AsDouble());
+    //     }
+    //
+    //     if (args.Exist(kArgGappedXDropoff) && args[kArgGappedXDropoff]) {
+    //         opt.SetGapXDropoff(args[kArgGappedXDropoff].AsDouble());
+    //     }
+    //
+    //     if (args.Exist(kArgFinalGappedXDropoff) && args[kArgFinalGappedXDropoff]) {
+    //         opt.SetGapXDropoffFinal(args[kArgFinalGappedXDropoff].AsDouble());
+    //     }
+    // ```
+    // An omitted value keeps the default of the task (`coordination.rs` `task_defaults`: the
+    // nucleotide handles of api/blast_nucl_options.cpp:163-193 and disc_nucl_options.cpp:66-84).
+    // The ungapped X-drop of megablast is 0 (its handle sets the window only, and the options
+    // are calloc'd, api/blast_options_local_priv.cpp:54): the raw X-drop is then the word cutoff
+    // (blast_parameters.c:378-381). The values are bits; NCBI converts them to raw scores once,
+    // with the smallest Lambda of the batch (`scoring.rs` `gap_x_dropoffs`, `run.rs`
+    // `x_dropoff_init`).
+    #[arg(long, value_parser = blastn_real, help = "X-dropoff value (in bits) for ungapped extensions (default: 20 for blastn, dc-megablast and blastn-short; megablast uses the ungapped cutoff score)")]
+    pub xdrop_ungap: Option<f64>,
+    #[arg(long, value_parser = blastn_real, help = "X-dropoff value (in bits) for preliminary gapped extensions (default: 25 for megablast, 30 for the other tasks)")]
+    pub xdrop_gap: Option<f64>,
+    #[arg(long, value_parser = blastn_real, help = "X-dropoff value (in bits) for final gapped alignment (default: 100)")]
+    pub xdrop_gap_final: Option<f64>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:663-665,681-685
+    // ```c++
+    //     arg_desc.AddFlag(kArgNoGreedyExtension,
+    //                      "Use non-greedy dynamic programming extension",
+    //                      true);
+    // ...
+    //     if (cmd_line_args.Exist(kArgNoGreedyExtension) &&
+    //         cmd_line_args[kArgNoGreedyExtension]) {
+    //         options.SetGapExtnAlgorithm(eDynProgScoreOnly);
+    //         options.SetGapTracebackAlgorithm(eDynProgTbck);
+    //     }
+    // ```
+    // The X-drops keep the task's defaults (megablast's greedy 25 bits). With the gap costs
+    // 0/0 of megablast NCBI refuses the search (`scoring.rs` `check_scoring_options`).
+    /// Use non-greedy dynamic programming extension.
+    #[arg(long)]
+    pub no_greedy: bool,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:701-704,739-741
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgMinRawGappedScore, "int_value",
+    //                             "Minimum raw gapped score to keep an alignment "
+    //                             "in the preliminary gapped and traceback stages",
+    //                             CArgDescriptions::eInteger);
+    // ...
+    //     if (args[kArgMinRawGappedScore]) {
+    //         options.SetCutoffScore(args[kArgMinRawGappedScore].AsInteger());
+    //     }
+    // ```
+    // No constraint on the value: 0 and below keep the cutoff of the e-value
+    // (`coordination.rs` `configure_task`).
+    #[arg(long, value_parser = ncbi_integer, help = "Minimum raw gapped score to keep an alignment in the preliminary gapped and traceback stages")]
+    pub min_raw_gapped_score: Option<i32>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:475-481,487-497
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgWindowSize, "int_value",
+    //                             "Multiple hits window size, use 0 to specify "
+    //                             "1-hit algorithm",
+    //                             CArgDescriptions::eInteger);
+    //     arg_desc.SetConstraint(kArgWindowSize,
+    //                            new CArgAllowValuesGreaterThanOrEqual(0));
+    // ...
+    //     if (args[kArgWindowSize]) {
+    //         opt.SetWindowSize(args[kArgWindowSize].AsInteger());
+    //     } else {
+    //         int window = -1;
+    //         BLAST_GetSuggestedWindowSize(opt.GetProgramType(),
+    //                                      opt.GetMatrixName(),
+    //                                      &window);
+    // ```
+    // BLASTN has no matrix (no suggested window), so an omitted value keeps the default of the
+    // task (`coordination.rs` `determine_window_size`).
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm (default: 40 for dc-megablast, 0 for the other tasks)")]
+    pub window_size: Option<i32>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:505-511,518-522
+    // ```c++
+    //     arg_desc.AddDefaultKey(kArgOffDiagonalRange, "int_value",
+    //                             "Number of off-diagonals to search for the 2nd hit, "
+    //                             "use 0 to turn off",
+    //                             CArgDescriptions::eInteger,
+    //                             NStr::IntToString(kDfltOffDiagonalRange));
+    //     arg_desc.SetConstraint(kArgOffDiagonalRange,
+    //                            new CArgAllowValuesGreaterThanOrEqual(0));
+    // ...
+    //     if (args[kArgOffDiagonalRange]) {
+    //         opt.SetOffDiagonalRange(args[kArgOffDiagonalRange].AsInteger());
+    //     } else {
+    //         opt.SetOffDiagonalRange(0);
+    //     }
+    // ```
+    // NCBI refuses a range without a window (`scoring.rs` `check_scoring_options`).
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Number of off-diagonals to search for the 2nd hit, use 0 to turn off (default: 0)")]
+    pub off_diagonal_range: Option<i32>,
     // NCBI blastn has no such option (the LOSAT-only option was removed, AGENTS.md rule 5).
     #[arg(skip = false)]
     pub verbose: bool,
@@ -530,8 +741,28 @@ impl BlastnArgs {
         self.culling_limit.unwrap_or(0)
     }
 
+    /// `-searchsp`, 0 without it (`CBlastOptions::SetEffectiveSearchSpace`).
+    pub fn options_searchsp(&self) -> i64 {
+        self.searchsp.unwrap_or(0)
+    }
+
     pub fn db_length(&self) -> i64 {
         self.dbsize.unwrap_or(0)
+    }
+
+    /// `-soft_masking` (`mask_at_hash`): `false` writes the query's masks into the searched copy
+    /// of the query (`mask_query_letters`). The task's `ClearFilterOptions` does not change the
+    /// value: blastn-short takes the default as well.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
+    /// ```c++
+    /// CFilteringArgs::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
+    /// {
+    ///     if (args[kArgLookupTableMaskingOnly]) {
+    ///         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
+    /// ```
+    pub fn soft_masking(&self) -> bool {
+        self.soft_masking.unwrap_or(true)
     }
 
     /// Reads the `-dust` value (`parse_dust_filtering`) where NCBI's filtering handler reads
@@ -600,7 +831,33 @@ impl BlastnArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::QueryStrand;
+    use super::{BlastnArgs, QueryStrand};
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        args: BlastnArgs,
+    }
+
+    // `-soft_masking` takes NCBI's boolean spellings (`NStr::StringToBool`); its default is true,
+    // also for blastn-short (the handler comes after `ClearFilterOptions`).
+    #[test]
+    fn soft_masking_sets_mask_at_hash() {
+        let soft = |extra: &[&str]| {
+            let mut argv = vec!["losat", "--query", "q.fa", "--subject", "s.fa"];
+            argv.extend_from_slice(extra);
+            TestCli::parse_from(argv).args.soft_masking()
+        };
+        assert!(soft(&[]));
+        assert!(soft(&["--task", "blastn-short"]));
+        for value in ["true", "T", "1", "YES"] {
+            assert!(soft(&["--soft_masking", value]), "{value}");
+        }
+        for value in ["false", "F", "0", "no"] {
+            assert!(!soft(&["--soft_masking", value]), "{value}");
+        }
+    }
 
     #[test]
     fn the_strand_option_is_read_once() {

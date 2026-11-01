@@ -24,6 +24,9 @@ test:
     - losat blastn --help
     - losat blastp --help
     - losat tblastx --help
+    - blastn -version
+    - makeblastdb -version
+    - blastdbcmd -version
 
 about:
   home: https://github.com/satoshikawato/LOSAT

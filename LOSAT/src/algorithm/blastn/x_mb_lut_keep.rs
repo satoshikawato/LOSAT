@@ -41,7 +41,8 @@
 //! on the batch's letters, only on its table's cells (4^11 or 4^12), so one kept table serves the
 //! search's batches whichever layout each one takes: `CBatchSizeMixer`'s full batches are laid out
 //! as CSR and its probe batches as chains (dc-megablast of 31,168 cDNAs: 18 CSR builds and 19
-//! chain builds of 4^11 cells). A fresh table has room for two elements more than its cells, so a
+//! chain builds of 4^11 cells; at 4^12 cells LOSAT_X_MBCSR's size rule can take the small batches
+//! and leave the full ones as chains). A fresh table has room for two elements more than its cells, so a
 //! later CSR can take it.
 //!
 //! Why it matters for memory. glibc maps a block of at least its mmap threshold (128 KiB at the
@@ -70,8 +71,9 @@
 //! The prefault round. On a kept table the round of LOSAT_X_MBLUTPREFAULT does not run: it exists
 //! to map the pages of a fresh table by writing them before the fill reads them (its module
 //! documentation, `x_mb_lookup_once.rs`), and a kept table's pages are mapped already (written by
-//! the zeroing or by an earlier fill). Its writes are zeros over zeros, so the arrays are the same
-//! either way.
+//! an earlier fill or by the zeroing, which writes every cell of the build: the cells past those
+//! that builds wrote too, as a packed CSR of LOSAT_X_BNCSRPACK writes only the start of a table).
+//! Its writes are zeros over zeros, so the arrays are the same either way.
 //!
 //! Where. Only the batch loop of `run_in_pool` keeps a table, for the batches it searches (and the
 //! query chunks of a split batch). Until 2026-10-28 it kept none while the query-batch slots of
@@ -84,7 +86,8 @@
 //! table, the probe batch's `next_pos` and the rest of a small batch) stays below the full
 //! batch's (the same table, a full batch's `next_pos` and the rest), so the search's peak is the
 //! full batch's as before. With LOSAT_X_BNLUTDROP a batch drops its tables before its traceback,
-//! and the kept table stays resident through it (16 MiB of 4^11 cells, 64 MiB of 4^12); the
+//! and the kept table stays resident through it (16 MiB of 4^11 cells, 64 MiB of 4^12; what a
+//! packed CSR wrote, less); the
 //! peaks above are measured with it.
 //!
 //! Timing: with LOSAT_TIMING, `[TIMING] x_mb_lut_keep: kept= fresh= csr= zero=` gives the loop's
@@ -132,10 +135,10 @@ impl Keep {
 
     /// A table for a build of `cells` cells, its first `cells` elements 0, and the number of its
     /// first elements that may hold values once the build has filled it: the kept one when it has
-    /// at least that many elements (`true`; the build uses its first `cells`), with the elements of
-    /// its first `cells` that earlier fills wrote set to 0 (the written elements past them stay as
-    /// they are and stay counted); else a fresh `vec![0; cells]` (`false`), after the kept one is
-    /// freed. `on_pool`: the build runs on a pool of two threads or more, which writes the zeros.
+    /// at least that many elements (`true`; the build uses its first `cells`), with its first
+    /// `cells` elements written with 0 (the written elements past them stay as they are and stay
+    /// counted); else a fresh `vec![0; cells]` (`false`), after the kept one is freed. `on_pool`:
+    /// the build runs on a pool of two threads or more, which writes the zeros.
     pub(super) fn take(&self, cells: usize, on_pool: bool) -> (Vec<u32>, bool, usize) {
         let kept = self.kept.lock().unwrap_or_else(|e| e.into_inner()).take();
         // The reference side is a kept table too small for this build (the first build of a loop
@@ -153,7 +156,13 @@ impl Keep {
             return (table, false, cells);
         };
         let start = super::x_mb_lookup_par::timing_on().then(std::time::Instant::now);
-        zero(&mut table[..dirty.min(cells)], on_pool);
+        // Every element of the build's cells, also those past `dirty`, which no build wrote: a
+        // packed CSR (LOSAT_X_BNCSRPACK) writes only the start of its `offsets`, so the rest of a
+        // table it gave back may be pages never mapped. The fill reads a cell before it writes it,
+        // and on such a page the read maps the zero page and the write copies it, a TLB flush of
+        // every CPU the search runs on; writing first maps the page as the prefault round does on
+        // a fresh table. Elsewhere `dirty` covers the cells already, and this writes the same.
+        zero(&mut table[..cells], on_pool);
         if let Some(start) = start {
             ZERO_NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
@@ -344,6 +353,49 @@ mod tests {
         }
     }
 
+    // LOSAT_X_MBCSR: the batches of a search can take either side of its size rule at 4^12 cells, so
+    // a chains build can follow a CSR build on one keep; it is the fresh build.
+    #[test]
+    fn chains_after_a_csr_of_4_12_cells_are_the_fresh_build() {
+        let mut rng = Lcg(0x6b65_6571);
+        let keep = Arc::new(Keep::default());
+        let (queries, offsets, masks, word_length, _) = random_case(&mut rng);
+        let word_length = word_length.max(12);
+        let refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+        let build = |keep: Option<&Arc<Keep>>, letters: Option<u64>| {
+            build_mb_lookup(
+                &refs,
+                &offsets,
+                word_length,
+                12,
+                &masks,
+                None,
+                0,
+                1_000_000,
+                false,
+                keep,
+                letters,
+            )
+        };
+        drop(build(Some(&keep), None));
+        let csr = build(Some(&keep), Some(u64::MAX));
+        assert_eq!(
+            csr.x_csr.is_some(),
+            super::super::x_bn_csr::x_will_pack(false) && super::super::x_bn_csr::x_mb12_on()
+        );
+        drop(csr);
+        let fresh = build(None, None);
+        let built = build(Some(&keep), None);
+        let next_pos_len = queries
+            .iter()
+            .zip(&offsets)
+            .map(|(q, &o)| o.max(0) as usize + q.len())
+            .max()
+            .unwrap_or(0)
+            + 1;
+        assert_same(&built, &fresh, 1 << 24, next_pos_len, "chains after a CSR");
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1262
     // ```c
     //    mb_lt->hashtable = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
@@ -354,7 +406,9 @@ mod tests {
     // whole-search tests cover): every build equals the same build on a fresh table, every build
     // of no more cells than the kept table takes it (filled by earlier builds), and the elements
     // past the start that builds wrote stay 0. With LOSAT_X_MB24 the newest-first tables of 4^12
-    // cells take the words of their 3-byte heads, fewer than 4^12.
+    // cells take the words of their 3-byte heads, fewer than 4^12. With LOSAT_X_BNCSRPACK a
+    // newest-first table of 4^8 to 4^11 cells is CSR at any size, so those tables are built in
+    // reading order here, which keeps their chains (the switch off builds them newest first too).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -376,7 +430,8 @@ mod tests {
                     let lut = LUTS[case % LUTS.len()];
                     let word_length = word_length.max(lut);
                     let refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
-                    let ascending = case % 3 == 1;
+                    let ascending = case % 3 == 1
+                        || (super::super::x_bn_csr::x_will_pack(false) && (8..=11).contains(&lut));
                     let fresh = build_mb_lookup(
                         &refs,
                         &offsets,
@@ -387,6 +442,7 @@ mod tests {
                         0,
                         1_000_000,
                         ascending,
+                        None,
                         None,
                     );
                     let next_pos_len = queries
@@ -423,6 +479,7 @@ mod tests {
                         1_000_000,
                         ascending,
                         Some(&keep),
+                        None,
                     );
                     let dirty = match before {
                         Some((len, dirty, written)) if len >= cells => {

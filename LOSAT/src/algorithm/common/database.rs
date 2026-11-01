@@ -3,8 +3,9 @@
 //! as the command line reports them, the `Database:` lines of the pairwise report, and the
 //! rules for the stored titles of the reported sequences. BLASTP (stage DB-3), BLASTN
 //! (stage DB-4) and TBLASTN (stage DB-5) use them with their own name in LOSAT's refusals;
-//! TBLASTN also reads a nucleotide database whole into packed subjects
-//! (`read_nucleotide_stores`).
+//! TBLASTX reads a nucleotide database whole into packed subjects
+//! (`read_nucleotide_stores`), and TBLASTN each sequence where it searches it
+//! (`x_read_nucleotide_store`).
 //!
 //! The reader (`crate::seqdb`) knows nothing of the command line; this module maps its
 //! errors to NCBI's application errors (`crate::cli::NativeError`) and to LOSAT's
@@ -88,6 +89,66 @@ pub(crate) fn open_database(
         DatabaseOpenError::Registry(reason) => refusal(&reason, program),
         DatabaseOpenError::Reader(error) => database_error(error, program),
     })
+}
+
+/// Restricts the search's database `db` to the taxid or seqid list of the command line
+/// (line DI-8, `DbFilterArgs::resolve`; none: the whole database), as NCBI's `CSeqDB` opened
+/// with the list (`SeqDb::restrict`): NCBI's errors are `BLAST Database error: <text>` with
+/// exit status 2 (`database_error`), and the warnings NCBI writes go to `diagnostics`
+/// (`LOG_POST(Warning << ...)`: the text alone; `ERR_POST`: `Warning: [<program>] <text>`,
+/// the program in lower case as `SetDiagPostPrefix` names it; an `ERR_POST` of an error
+/// before a throw: `Error: [<program>] <text>`), before an error too.
+pub(crate) fn restrict_database(
+    db: &mut SeqDb,
+    list: Option<&crate::seqdb::DbList>,
+    diagnostics: &mut dyn std::io::Write,
+    program: &str,
+) -> Result<()> {
+    let Some(list) = list else {
+        return Ok(());
+    };
+    let mut warnings = Vec::new();
+    let restricted = db.restrict(list, &mut warnings);
+    let prefix = program.to_ascii_lowercase();
+    for warning in warnings {
+        let line = match warning {
+            crate::seqdb::ListWarning::Log(text) => text,
+            crate::seqdb::ListWarning::Posted(text) => format!("Warning: [{prefix}] {text}"),
+            crate::seqdb::ListWarning::Error(text) => format!("Error: [{prefix}] {text}"),
+        };
+        diagnostics.write_all(line.as_bytes())?;
+        diagnostics.write_all(b"\n")?;
+    }
+    restricted.map_err(|error| database_error(error, program))
+}
+
+/// Tells the BLAST archive of the run (`archive`, `None` without one) what the database's list
+/// makes of its request (`ArchiveHandle::set_database_filter`). `dbsize` is whether `-dbsize` is
+/// given: with a list that keeps no sequence the `EffectiveSearchSpace` option then counts the
+/// length adjustment with no sequence, which the searches do not compute (probes E14 and E17 of
+/// line DI-8): LOSAT refuses it.
+pub(crate) fn note_archive_database_filter(
+    archive: Option<&crate::report::archive::ArchiveHandle>,
+    filter: &crate::blastinput::db_filter::DbFilterArgs,
+    list_taxids: &[i32],
+    filtered_empty: bool,
+    searchsp: bool,
+    dbsize: bool,
+    program: &str,
+) -> Result<()> {
+    let Some(handle) = archive else {
+        return Ok(());
+    };
+    if filtered_empty && dbsize {
+        anyhow::bail!(
+            "-dbsize with -outfmt 11 and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
+        );
+    }
+    handle.set_database_filter(
+        filter.archive_parameter(list_taxids),
+        filtered_empty && !searchsp,
+    );
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
@@ -229,11 +290,11 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
     Ok(stores)
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the checks of `read_nucleotide_stores` without the copy. The
+/// The checks of `read_nucleotide_stores` without the copy (TBLASTN's `-db` search, which reads
+/// its subjects where it searches them, `x_read_nucleotide_store`). The
 /// database is read in the same blocks, and every sequence's length and ambiguity runs are read
-/// with the same errors in the same order; only the lengths are kept, by ordinal id. A search
-/// that reads its subjects where it searches them (`x_read_nucleotide_store`) fails the query
-/// batch that the copy would fail, with the same text. A block of one sequence (one longer than
+/// with the same errors in the same order; only the lengths are kept, by ordinal id. The search
+/// fails the query batch that the copy would fail, with the same text. A block of one sequence (one longer than
 /// a block, or the last of its volume) is checked without its 2-bit data
 /// (`SeqDb::x_nucleotide_check`): a human chromosome is not read here only to be dropped.
 pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<usize>> {
@@ -270,7 +331,7 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
     Ok(lengths)
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): sequence `ordinal` of `db` as `read_nucleotide_stores` packs
+/// Sequence `ordinal` of `db` as `read_nucleotide_stores` packs
 /// it (`PackedNucleotide::from_stored` of the stored 2-bit data, length and ambiguity runs), read
 /// with one read of the sequence file. The errors are those of `read_nucleotide_stores` for the
 /// same sequence. With `mapped`, the bytes are read into a buffer that glibc maps from 1 MiB on,
@@ -301,24 +362,8 @@ pub(crate) fn x_read_nucleotide_store(
     ))
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): sequence `i` of `block` (ordinal id `ordinal`), a block of
-/// `SeqDb::read_block`, as `read_nucleotide_stores` packs it, with its errors.
-pub(crate) fn x_nucleotide_store_in(
-    block: &crate::seqdb::SequenceBlock,
-    i: usize,
-    ordinal: u32,
-    program: &str,
-) -> Result<PackedNucleotide> {
-    let (length, runs) = stored_parts(block, i, ordinal, program)?;
-    Ok(PackedNucleotide::from_stored(
-        block.nucleotide_packed(i),
-        length,
-        &runs,
-    ))
-}
-
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the length of sequence `i` of `block` (ordinal id
-/// `ordinal`), with the errors of `x_nucleotide_store_in`, without the store.
+/// The length of sequence `i` of `block` (ordinal id
+/// `ordinal`), with the errors of the sequence's store (`x_read_nucleotide_store`), without the store.
 pub(crate) fn x_nucleotide_length_in(
     block: &crate::seqdb::SequenceBlock,
     i: usize,
@@ -403,8 +448,9 @@ pub(crate) fn pairwise_database(db: &SeqDb, name: &str) -> PairwiseDatabase {
             title.to_vec()
         },
         date: db.date().to_string(),
-        num_sequences: u64::from(db.num_seqs()),
-        total_letters: db.total_length(),
+        // The whole database's, also with a taxid list (`SeqDb::printed_num_seqs`).
+        num_sequences: u64::from(db.printed_num_seqs()),
+        total_letters: db.printed_total_length(),
     }
 }
 
@@ -514,17 +560,60 @@ pub(crate) fn read_header(
     query: usize,
     program: &str,
 ) -> Result<ReportedHeader> {
-    match db.read_header(ordinal) {
+    reported_header(db, db.read_header(ordinal), ordinal, query, program)
+}
+
+/// The `read_header` of the header `header` of the sequence `ordinal` of `db`.
+fn reported_header(
+    db: &SeqDb,
+    header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>,
+    ordinal: u32,
+    query: usize,
+    program: &str,
+) -> Result<ReportedHeader> {
+    match header {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set, db.is_version5())
-                .map(|subject| ReportedHeader::Parsed(std::sync::Arc::new(subject)))
                 .map_err(|reason| parsed_refusal(ordinal, &reason, program))
+                .and_then(|subject| {
+                    refuse_id_of_a_query(&subject, ordinal, program)?;
+                    Ok(ReportedHeader::Parsed(std::sync::Arc::new(
+                        subject
+                            .showing_gis(db.reports_show_gis())
+                            .under_positive_list(db.has_positive_list()),
+                    )))
+                })
         }
         Ok(crate::seqdb::SequenceHeader::Ordinal(deflines)) => {
             stored_title(Ok(deflines), ordinal, query, program).map(ReportedHeader::Stored)
         }
         Err(error) => Err(header_read_error(error, query, program)),
     }
+}
+
+/// With `-parse_deflines`, LOSAT's refusal of a reported database sequence whose Seq-align id is
+/// the id of a query: NCBI's scope finds the query instead, so its reports show the query's title
+/// and letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8).
+fn refuse_id_of_a_query(
+    subject: &crate::report::db_subject::ParsedSubject,
+    ordinal: u32,
+    program: &str,
+) -> Result<()> {
+    use crate::blastinput::fasta_reader::believed::{query_has_key, query_keys_kept};
+    if !query_keys_kept() {
+        return Ok(());
+    }
+    let mut keys = Vec::new();
+    crate::report::db_subject::scope_keys(subject, &mut keys);
+    if query_has_key(&keys) {
+        return Err(parsed_refusal(
+            ordinal,
+            "has the Seq-id of a query read with -parse_deflines (NCBI BLAST+ shows the query \
+             for it)",
+            program,
+        ));
+    }
+    Ok(())
 }
 
 /// LOSAT's refusal of a reported database sequence with parsed Seq-ids (`parsed_refusal`,
@@ -622,18 +711,20 @@ pub(crate) fn check_shown_parsed_subject(
     ordinal: u32,
     program: &str,
 ) -> Result<()> {
-    let (start, title) = subject.description(protein);
     let generated = subject.heading_generates_title();
-    let heading_reads_past_end = generated
-        && subject
-            .bioseq_title(protein, false)
-            .is_ok_and(|defline| defline.reads_past_end);
-    if protein && (title.reads_past_end || heading_reads_past_end) {
-        return Err(parsed_refusal(
-            ordinal,
-            "has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0)",
-            program,
-        ));
+    if protein {
+        let (_, title) = subject.description(protein);
+        let heading_reads_past_end = generated
+            && subject
+                .bioseq_title(protein, false)
+                .is_ok_and(|defline| defline.reads_past_end);
+        if title.reads_past_end || heading_reads_past_end {
+            return Err(parsed_refusal(
+                ordinal,
+                "has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0)",
+                program,
+            ));
+        }
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:913-916
     // ```c++
@@ -645,7 +736,7 @@ pub(crate) fn check_shown_parsed_subject(
     // ```
     // The unsigned length wraps for an id longer than 65 bytes: NCBI 2.17.0 then pads the
     // line with spaces without end (probe of the ID2a review, `tests/db_search/ids/refuse.faa`).
-    if start.len() > 65 {
+    if subject.description_start().len() > 65 {
         return Err(parsed_refusal(
             ordinal,
             "has an outfmt 0 description id longer than 65 bytes (NCBI BLAST+ 2.17.0 pads the description line without end)",
@@ -713,7 +804,7 @@ pub(crate) fn check_reported_parsed(
     }
     if shown.tabular {
         subject
-            .tabular_ids(protein)
+            .check_tabular_ids(protein)
             .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program))?;
     }
     Ok(())
@@ -745,18 +836,202 @@ pub(crate) fn tabular_subject_ids(
         .enumerate()
         .map(
             |(rank, (record, &ordinal))| match parsed.get(rank).and_then(Option::as_deref) {
-                Some(subject) => {
-                    let [_, _, accession_version] =
-                        subject.tabular_ids(protein).map_err(|problem| {
-                            parsed_refusal(ordinal, &format!("has {problem}"), program)
-                        })?;
-                    Ok(std::sync::Arc::from(accession_version))
-                }
+                Some(subject) => subject
+                    .tabular_saccver(protein)
+                    .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program)),
                 None => tabular_subject_id(&record.title, ordinal, protein, program)
                     .map(std::sync::Arc::from),
             },
         )
         .collect()
+}
+
+// No NCBI counterpart: bounds LOSAT's own check before the search (`reports_may_refuse`).
+/// The most sequences of a database with parsed Seq-ids whose headers a program's check before
+/// the search reads with `reports_may_refuse` (blastn's `x_parsed_refusal`, tblastx's
+/// `report_stream::check`). The check decodes each header (2.3-5.6 us at one thread with
+/// tblastx's 18S, line DBID ID4t fix 2b) and keeps 16 bytes per join key with outfmt 0, so this
+/// bounds the pass to a few seconds and some tens of MiB; a larger database (NCBI's `nt` and
+/// `core_nt`) keeps its reports after the batch loop, as before the stream took databases with
+/// parsed Seq-ids. The volumes' sequences count (`SeqDb::printed_num_seqs`), also under a taxid
+/// list: the range walks decode the excluded sequences of every range they read.
+pub(crate) const PARSED_CHECK_SEQUENCES_MAX: u32 = 1 << 20;
+
+/// Why a report of some sequence of a database could be refused (`reports_may_refuse`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReportRefusal {
+    /// A header that does not read, or a sequence whose stored title, tabular id or parsed
+    /// Seq-ids the reports refuse.
+    Headers,
+    /// Two sequences whose Seq-align ids NCBI takes for one (`refuse_joined_hits`).
+    Joined,
+    /// A taxid that does not decode, or a lookup of the taxonomy database that could be refused,
+    /// where the batches' prefetch reads them (`prefetch_messages`).
+    Taxonomy,
+}
+
+// No NCBI counterpart: LOSAT's check whether one of its own refusals can come where a report of
+// the search names a sequence of the database; it changes no value NCBI computes.
+/// Whether a report that names any sequence of `db` could be refused by LOSAT, with the reports
+/// `shown`: every sequence's header is read as the reports read it (`read_header`) and checked as
+/// they check it (`check_reported_title`, `tabular_subject_id` for the tabular formats,
+/// `check_reported_parsed` with `taxdb_found` where outfmt 0 is shown, as `reported_subjects`
+/// asks). Where the reports join following hits (`shown.joined`), no two sequences with parsed
+/// Seq-ids may be joined (`refuse_joined_hits`): the sequences that share a key of their Seq-align
+/// ids (`db_subject::join_keys`; joined ones always share one) are read again and compared
+/// (`joined_in_reports`). With `prefetch` (the batches' prefetch of a search with `taxdb.bti` on
+/// the search path) the taxids that the prefetch looks up must read (a stored title's first one,
+/// every one of a sequence with parsed Seq-ids, as `prefetch_messages` reads them) and no lookup
+/// of them may be refused (`taxids_may_refuse`). A reader error is a refusal too. The headers are
+/// read in `pool`; nothing is written and no state of the run changes. `None`: no report of any
+/// sequence can be refused.
+pub(crate) fn reports_may_refuse(
+    db: &SeqDb,
+    shown: ParsedShown,
+    protein: bool,
+    taxdb_found: bool,
+    prefetch: bool,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    program: &str,
+) -> Option<ReportRefusal> {
+    /// What the pass keeps: the join keys with their sequence, and the prefetch's taxids.
+    #[derive(Default)]
+    struct Kept {
+        keys: Vec<(u64, u32)>,
+        taxids: Vec<i32>,
+    }
+    impl Kept {
+        fn join(mut self, mut other: Kept) -> std::result::Result<Kept, ReportRefusal> {
+            self.keys.append(&mut other.keys);
+            self.taxids.append(&mut other.taxids);
+            Ok(self)
+        }
+    }
+    let check = |kept: &mut Kept,
+                 ordinal: u32,
+                 header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>|
+     -> std::result::Result<(), ReportRefusal> {
+        match reported_header(db, header, ordinal, 0, program) {
+            Ok(ReportedHeader::Stored(stored)) => {
+                check_reported_title(stored.replaced_bytes, ordinal, program)
+                    .map_err(|_| ReportRefusal::Headers)?;
+                if shown.tabular {
+                    tabular_subject_id(&stored.title, ordinal, protein, program)
+                        .map_err(|_| ReportRefusal::Headers)?;
+                }
+                if prefetch {
+                    let taxids = db
+                        .defline_taxids(ordinal)
+                        .map_err(|_| ReportRefusal::Taxonomy)?;
+                    kept.taxids
+                        .extend(taxids.first().copied().filter(|&taxid| taxid > 0));
+                }
+            }
+            Ok(ReportedHeader::Parsed(subject)) => {
+                check_reported_parsed(
+                    &subject,
+                    shown,
+                    protein,
+                    shown.pairwise && taxdb_found,
+                    ordinal,
+                    program,
+                )
+                .map_err(|_| ReportRefusal::Headers)?;
+                if shown.joined {
+                    let mut keys = Vec::new();
+                    crate::report::db_subject::join_keys(&subject, &mut keys);
+                    kept.keys.extend(keys.into_iter().map(|key| (key, ordinal)));
+                }
+                if prefetch {
+                    kept.taxids.extend(subject.volume_taxids());
+                }
+            }
+            Err(_) => return Err(ReportRefusal::Headers),
+        }
+        Ok(())
+    };
+    let check_range = |mut kept: Kept,
+                       range: &crate::seqdb::BlockRange|
+     -> std::result::Result<Kept, ReportRefusal> {
+        let mut refusal = None;
+        db.visit_sequence_headers(*range, |ordinal, header| {
+            refusal = check(&mut kept, ordinal, header).err();
+            refusal.is_none()
+        });
+        refusal.map_or(Ok(kept), Err)
+    };
+    let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
+    let all = || -> std::result::Result<Kept, ReportRefusal> {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if pool.enabled() {
+            use rayon::prelude::*;
+            return pool.install(|| {
+                ranges
+                    .par_iter()
+                    .try_fold(Kept::default, check_range)
+                    .try_reduce(Kept::default, Kept::join)
+            });
+        }
+        let _ = pool;
+        ranges.iter().try_fold(Kept::default(), check_range)
+    };
+    let mut kept = match all() {
+        Ok(kept) => kept,
+        Err(refusal) => return Some(refusal),
+    };
+    kept.keys.sort_unstable();
+    for shared_key in kept.keys.chunk_by(|a, b| a.0 == b.0) {
+        let mut ordinals: Vec<u32> = shared_key.iter().map(|&(_, ordinal)| ordinal).collect();
+        ordinals.dedup();
+        if ordinals.len() < 2 {
+            continue;
+        }
+        let mut subjects = Vec::with_capacity(ordinals.len());
+        for ordinal in ordinals {
+            match read_header(db, ordinal, 0, program) {
+                Ok(ReportedHeader::Parsed(subject)) => subjects.push(subject),
+                _ => return Some(ReportRefusal::Headers),
+            }
+        }
+        for (index, a) in subjects.iter().enumerate() {
+            if subjects[index + 1..]
+                .iter()
+                .any(|b| crate::report::db_subject::joined_in_reports(a, b))
+            {
+                return Some(ReportRefusal::Joined);
+            }
+        }
+    }
+    kept.taxids.sort_unstable();
+    kept.taxids.dedup();
+    (prefetch && taxids_may_refuse(db, &kept.taxids)).then_some(ReportRefusal::Taxonomy)
+}
+
+/// Whether the lookup of one of `taxids` in the taxonomy database on the search path of `db`
+/// could be refused, as the batches' prefetch looks them up (`prefetch_messages`); `false`
+/// without `taxdb.bti` there. One pass over the index usually finds that no lookup of any taxid
+/// can fail (`TaxDb::any_lookup_may_fail`); else each one is looked up once. Both use a taxonomy
+/// handle of their own (as `taxdb_may_refuse`'s database side does), so the run's handle and
+/// messages are as they would be without this call. The prefetch's refusal of NCBI's cache
+/// (`TaxdbRun::cache_collision`) comes at the run's first prefetch, before any report.
+fn taxids_may_refuse(db: &SeqDb, taxids: &[i32]) -> bool {
+    if !db.taxdb_found() || taxids.is_empty() {
+        return false;
+    }
+    let Some(search_path) = db.search_path() else {
+        return false;
+    };
+    let taxdb = crate::seqdb::taxdb::LazyTaxDb::new(search_path.clone());
+    if matches!(taxdb.any_lookup_may_fail(), Ok(false)) {
+        return false;
+    }
+    let mut messages = Vec::new();
+    taxids
+        .iter()
+        .any(|&taxid| taxdb.names(taxid, &mut messages).is_err())
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886
@@ -793,7 +1068,7 @@ pub(crate) fn tabular_subject_ids(
 //   <the stored title>
 // as often as the formatter reads the definition line: twice per subject for the
 // default outfmt 6, three times for `6 sseqid stitle`, five times for outfmt 0. The
-// number of readings is the formatter's, not ported; makeblastdb and `losat makedb`
+// number of readings is the formatter's, not ported; makeblastdb and `losat makeblastdb`
 // store `#` for such a byte, so only a header file written otherwise holds one.
 /// LOSAT's rejection of the reported database sequence `ordinal` (one with rows in the
 /// final hit lists) whose stored title held a byte outside ' ' ..= '~' (`replaced_bytes`,
@@ -857,15 +1132,15 @@ const NCBISTDAA_GAP: u8 = 0;
 //                 i == AMINOACID_TO_NCBISTDAA['O'] ||
 //                 i == AMINOACID_TO_NCBISTDAA['-'] ||
 // ```
-// A stored gap character (0, which makeblastdb writes for `-` in a protein FASTA)
-// never aligns in NCBI (row and column 0 stay `BLAST_SCORE_MIN`) and NCBI's formatter
-// then counts it as a gap of the alignment; LOSAT's kernels read byte 0 as the end of a
-// sequence, so a sequence that holds one is rejected. A byte that is no NCBIstdaa
-// residue (28 or more) indexes NCBI's matrix past its rows and is rejected too.
+// A stored gap character (0, which makeblastdb writes for `-` in a protein FASTA) is a
+// residue that scores `BLAST_SCORE_MIN` against every letter (row and column 0), as LOSAT's
+// kernels score it: an ungapped extension stops at it and a gapped alignment goes round it
+// with a gap. A byte that is no NCBIstdaa residue (28 or more) indexes NCBI's matrix past
+// its rows and is rejected.
 /// LOSAT's refusal of the protein database sequence `ordinal` (`with_sentinels`: its
 /// residues with the byte before and the byte after them in the sequence file) when
-/// `program` cannot search it as NCBI does: a sequence not between two 0 bytes, one
-/// that holds the gap character, or one with a byte that is no NCBIstdaa residue.
+/// `program` cannot search it as NCBI does: a sequence not between two 0 bytes, or one
+/// with a byte that is no NCBIstdaa residue.
 pub(crate) fn check_protein_sequence(
     with_sentinels: &[u8],
     ordinal: u64,
@@ -878,34 +1153,13 @@ pub(crate) fn check_protein_sequence(
         );
     }
     let residues = &with_sentinels[1..with_sentinels.len() - 1];
-    // Every residue must be a byte other than the gap and below BLASTAA_SIZE: with the gap byte
-    // 0 (asserted below), the residues 1..BLASTAA_SIZE, the bytes whose `residue - 1` (wrapping,
-    // so the gap becomes 255) is below BLASTAA_SIZE - 1. The largest such difference, taken over
-    // all bytes without an early exit, is a loop the compiler vectorizes; the early exit of
-    // `all` made it a loop over single bytes (LOSAT-only cost; NCBI checks nothing here).
-    const _: () = assert!(
-        NCBISTDAA_GAP == 0
-            && crate::utils::matrix::BLASTAA_SIZE > 1
-            && crate::utils::matrix::BLASTAA_SIZE <= 256
-    );
-    const FIRST: u8 = NCBISTDAA_GAP + 1;
-    const LETTERS: usize = crate::utils::matrix::BLASTAA_SIZE - FIRST as usize;
-    let largest = residues
-        .iter()
-        .map(|&residue| residue.wrapping_sub(FIRST))
-        .max()
-        .unwrap_or(0);
-    if usize::from(largest) < LETTERS {
+    // Every residue must be a byte below BLASTAA_SIZE. The largest byte, taken over all bytes
+    // without an early exit, is a loop the compiler vectorizes; the early exit of `all` made it a
+    // loop over single bytes (LOSAT-only cost; NCBI checks nothing here).
+    const _: () = assert!(crate::utils::matrix::BLASTAA_SIZE <= 256);
+    let largest = residues.iter().copied().max().unwrap_or(0);
+    if usize::from(largest) < crate::utils::matrix::BLASTAA_SIZE {
         return Ok(());
-    }
-    if let Some(position) = residues
-        .iter()
-        .position(|&residue| residue == NCBISTDAA_GAP)
-    {
-        bail!(
-            "database sequence {ordinal} holds a gap character ('-') at position {}; a protein database sequence with gap characters is not supported by LOSAT's {program} (NCBI BLAST+ never aligns the character and then counts it as a gap of the alignment)",
-            position + 1
-        );
     }
     if let Some(position) = residues
         .iter()
@@ -919,111 +1173,21 @@ pub(crate) fn check_protein_sequence(
     Ok(())
 }
 
-/// Bytes of the sequence file that one read of `read_protein_stores` holds at most
+/// Bytes of the sequence file that one read of `x_check_protein_stores` holds at most
 /// (`SeqDb::next_block`). No NCBI counterpart: NCBI maps the volume files. The size
 /// changes nothing but the number of reads.
 const PROTEIN_STORE_BLOCK_BYTES: u64 = 1 << 20;
 
-/// The sequences of a protein database as its sequence files store them: NCBIstdaa
-/// bytes, each sequence followed by the sentinel byte 0 (and the first preceded by
-/// one), in ordinal order, with the totals of the index files. NCBI searches these
-/// bytes in place (blast_engine.c:1404, `eBlastEncodingProtein`), and its traceback and
-/// composition redo read them again; a program that holds them all searches, redoes and
-/// shows the bytes NCBI does.
-#[derive(Debug)]
-pub(crate) struct StoredProteins {
-    /// The sentinel, then each sequence and the sentinel after it.
-    bytes: Vec<u8>,
-    /// Where each sequence's residues start in `bytes`, and one more entry: sequence
-    /// `i` is `bytes[starts[i]..starts[i + 1] - 1]`.
-    starts: Vec<usize>,
-    /// The total length of the index files (`CSeqDB::GetTotalLength`).
-    total_length: u64,
-}
-
-impl StoredProteins {
-    /// The number of sequences.
-    pub(crate) fn len(&self) -> usize {
-        self.starts.len() - 1
-    }
-
-    /// Whether the database holds no sequence.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// The length of sequence `ordinal`.
-    pub(crate) fn length(&self, ordinal: usize) -> usize {
-        self.starts[ordinal + 1] - self.starts[ordinal] - 1
-    }
-
-    /// The residues of sequence `ordinal` followed by the sentinel byte 0.
-    pub(crate) fn residues_with_sentinel(&self, ordinal: usize) -> &[u8] {
-        &self.bytes[self.starts[ordinal]..self.starts[ordinal + 1]]
-    }
-
-    /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `residues_with_sentinel` with the sentinel before the
-    /// residues (the store's first byte, or the sentinel after the sequence before).
-    pub(crate) fn x_residues_with_sentinels(&self, ordinal: usize) -> &[u8] {
-        &self.bytes[self.starts[ordinal] - 1..self.starts[ordinal + 1]]
-    }
-
-    /// The total length of the index files.
-    pub(crate) fn total_length(&self) -> u64 {
-        self.total_length
-    }
-
-    /// The length of the longest sequence (0 for an empty database).
-    pub(crate) fn max_length(&self) -> usize {
-        (0..self.len()).map(|i| self.length(i)).max().unwrap_or(0)
-    }
-}
-
 /// Reads every sequence of the protein database `db` once, in blocks of
-/// `PROTEIN_STORE_BLOCK_BYTES` in ordinal order, as its sequence files store them. A
-/// reader error is NCBI's error of the preliminary search (`search_read_error`: NCBI
-/// reads every sequence there); a sequence `program` cannot search as NCBI does is
-/// LOSAT's refusal (`check_protein_sequence`).
-pub(crate) fn read_protein_stores(db: &SeqDb, program: &str) -> Result<StoredProteins> {
-    let sequences = db.num_seqs() as usize;
-    let mut bytes = Vec::with_capacity(
-        usize::try_from(db.total_length())
-            .unwrap_or(0)
-            .saturating_add(sequences + 1),
-    );
-    let mut starts = Vec::with_capacity(sequences + 1);
-    bytes.push(NCBISTDAA_GAP);
-    let mut next_ordinal = 0u32;
-    while let Some(range) = db.next_block(next_ordinal, PROTEIN_STORE_BLOCK_BYTES) {
-        let block = db
-            .read_block(range)
-            .map_err(|error| search_read_error(error, program))?;
-        for i in 0..block.len() {
-            let with_sentinels = block.protein_with_sentinels(i);
-            check_protein_sequence(
-                with_sentinels,
-                u64::from(range.first_ordinal) + i as u64,
-                program,
-            )?;
-            starts.push(bytes.len());
-            bytes.extend_from_slice(&with_sentinels[1..]);
-        }
-        next_ordinal = range.end_ordinal();
-    }
-    starts.push(bytes.len());
-    Ok(StoredProteins {
-        bytes,
-        starts,
-        total_length: db.total_length(),
-    })
-}
-
-/// EXPERIMENT (LOSAT_X_BXDBSTREAM): `read_protein_stores` without the store: the same reads in
-/// the same blocks and the same checks in the same order, with the same errors, the number of
-/// residues of each sequence handed to `each` (ordinal id, residues) and its bytes dropped with
-/// its block. A search that reads the sequences again later (BLASTX's passes,
-/// `blastx/x_db_stream.rs`) knows from it that they read, and what the store's
-/// `max_length` would be.
+/// `PROTEIN_STORE_BLOCK_BYTES` in ordinal order, as its sequence files store them, and checks
+/// them: a reader error is NCBI's error of the preliminary search (`search_read_error`: NCBI
+/// reads every sequence there); a sequence `program` cannot search as NCBI does is LOSAT's
+/// refusal (`check_protein_sequence`). The number of residues of each sequence is handed to
+/// `each` (ordinal id, residues) and its bytes are dropped with its block. A search that reads
+/// the sequences again later (BLASTX's passes, `blastx/x_db_stream.rs`) knows from it that they
+/// read, and the length of the longest. NCBI searches the stored bytes in place
+/// (blast_engine.c:1404, `eBlastEncodingProtein`) and its traceback and composition redo read
+/// them again; the passes read the bytes NCBI does.
 pub(crate) fn x_check_protein_stores(
     db: &SeqDb,
     program: &str,
@@ -1062,16 +1226,16 @@ mod tests {
         check_protein_sequence(&stored(residues), 7, "blastx").map_err(|e| e.to_string())
     }
 
-    /// The check before the single pass (an `all` over the residues).
-    fn accepted_before(residues: &[u8]) -> bool {
+    /// The check as an `all` over the residues.
+    fn accepted_by_all(residues: &[u8]) -> bool {
         residues
             .iter()
-            .all(|&residue| residue != NCBISTDAA_GAP && usize::from(residue) < BLASTAA_SIZE)
+            .all(|&residue| usize::from(residue) < BLASTAA_SIZE)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1593 (quoted at
-    // `check_protein_sequence`): the gap byte and bytes past the matrix are what the check
-    // refuses. Not a port of an NCBI unit case.
+    // `check_protein_sequence`): the bytes past the matrix are what the check refuses; the gap
+    // byte is a residue of the matrix. Not a port of an NCBI unit case.
     #[test]
     fn the_check_accepts_the_letters_and_names_the_first_bad_byte() {
         let first = NCBISTDAA_GAP + 1;
@@ -1079,39 +1243,32 @@ mod tests {
         assert_eq!(check(&[]), Ok(()));
         assert_eq!(check(&[first]), Ok(()));
         assert_eq!(check(&[last]), Ok(()));
-        let letters: Vec<u8> = (0..1_000).map(|i| [first, last][i % 2]).collect();
+        assert_eq!(check(&[NCBISTDAA_GAP]), Ok(()));
+        let letters: Vec<u8> = (0..1_000)
+            .map(|i| [first, last, NCBISTDAA_GAP][i % 3])
+            .collect();
         assert_eq!(check(&letters), Ok(()));
-        // (byte, words of the refusal, the character after its position)
-        for (bad, says, after) in [
-            (NCBISTDAA_GAP, "gap character", ';'),
-            (BLASTAA_SIZE as u8, "no NCBIstdaa residue", ','),
-            (255, "no NCBIstdaa residue", ','),
-        ] {
+        for bad in [BLASTAA_SIZE as u8, 255] {
             for length in [1, 2, 31, 32, 33, 100, 1_000] {
                 for at in [0, length / 2, length - 1] {
                     let mut residues = letters[..length].to_vec();
                     residues[at] = bad;
                     let error = check(&residues).unwrap_err();
                     assert!(
-                        error.contains(says)
-                            && error.contains(&format!("position {}{after}", at + 1)),
+                        error.contains("no NCBIstdaa residue")
+                            && error.contains(&format!("position {},", at + 1)),
                         "byte {bad} at {at} of {length}: {error}"
                     );
                 }
             }
         }
-        // A gap before a byte past the matrix is reported as the gap, as before.
-        let mut residues = letters[..10].to_vec();
-        residues[7] = NCBISTDAA_GAP;
-        residues[3] = 200;
-        assert!(check(&residues).unwrap_err().contains("gap character"));
         // The sentinels.
         assert!(check_protein_sequence(&[1, first, 0], 7, "blastx").is_err());
         assert!(check_protein_sequence(&[0, first, 1], 7, "blastx").is_err());
     }
 
-    // Random residues around the letters' bounds: the single pass accepts exactly what the
-    // `all` accepted.
+    // Random residues around the letters' bounds: the single pass accepts exactly what an `all`
+    // accepts.
     #[test]
     fn the_check_accepts_what_the_check_before_it_accepted() {
         let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
@@ -1130,7 +1287,7 @@ mod tests {
             }
             assert_eq!(
                 check(&residues).is_ok(),
-                accepted_before(&residues),
+                accepted_by_all(&residues),
                 "{residues:?}"
             );
         }
@@ -1162,6 +1319,9 @@ pub(crate) struct TaxdbRun {
     /// The refusal of a run whose prefetch NCBI's cache makes write the offset error more than
     /// once, as a reader's refusal ([`TaxdbRun::cache_collision`]).
     collision: std::sync::OnceLock<Option<(std::path::PathBuf, String)>>,
+    /// The texts of opening the database when the rows of a tabular report opened it, kept for
+    /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
+    rows_open: std::sync::Mutex<Vec<String>>,
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
@@ -1291,6 +1451,30 @@ impl TaxdbRun {
     /// drops.
     pub(crate) fn prefetch_refused(&self, db: &SeqDb) -> bool {
         self.cache_collision(db).is_some()
+    }
+
+    /// The open of the database by the rows of a query batch whose report looks names up, made
+    /// after the batch's prefetch ([`prefetch_messages`]) and before the next batch's: NCBI writes
+    /// a batch's rows before it fetches the next batch, and a plural name looks taxid 0 up, which
+    /// the prefetch does not, so the run's first lookup can be such a row's. The texts of opening,
+    /// when this call opens the database, are kept for the rows ([`tabular_names`]). Nothing
+    /// without `taxdb.bti` on the search path.
+    pub(crate) fn open_for_rows(&self, db: &SeqDb, program: &str) -> Result<()> {
+        if !self.found(db) {
+            return Ok(());
+        }
+        let Some(search_path) = db.search_path() else {
+            return Ok(());
+        };
+        let texts = self
+            .taxdb(search_path)
+            .open()
+            .map_err(|error| taxdb_error(error, program))?;
+        self.rows_open
+            .lock()
+            .expect("the texts of opening")
+            .extend(texts);
+        Ok(())
     }
 
     /// The run's taxonomy database, a handle that opens it at its first name asked for.
@@ -1511,6 +1695,60 @@ pub(crate) fn read_reported_taxonomy(
         parsed_taxonomy[rank] = answers;
     }
     Ok((taxids, taxonomy, parsed_taxonomy, notes))
+}
+
+/// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search (`x_CheckTaxDB`'s
+/// `SeqDB_ResolveDbPath("taxdb.bti")`: the current directory, `BLASTDB` and the registry's
+/// `[BLAST] BLASTDB`, as a database is looked for, `seqdb::SearchPath`). A registry value that
+/// LOSAT does not read as NCBI is its refusal, as for `-db`; `program` names it.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
+/// ```c++
+/// void CBlastTabularInfo::x_CheckTaxDB()
+/// {
+///    	if( x_IsFieldRequested(eSubjectSciNames) ||
+///     ...
+///    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
+///    		if(resolved.empty())
+/// ```
+pub(crate) fn subject_taxdb_found(settings: &ApplicationSettings, program: &str) -> Result<bool> {
+    let registry = match &settings.blastdb {
+        Ok(value) => value.as_deref(),
+        Err(reason) => bail!("{reason}; this is not supported by LOSAT's {program}"),
+    };
+    let path =
+        SearchPath::from_environment(registry).map_err(|error| database_error(error, program))?;
+    Ok(path.resolve_file("taxdb.bti").is_some())
+}
+
+/// The names of the taxonomy database that the rows of a tabular report with a name field look
+/// up (`report::tabular::TabularNames`) for its subjects `taxonomies`, through the run's
+/// database; `None` without a name field or without `taxdb.bti` on the search path (every lookup
+/// fails, silently). A taxonomy database that LOSAT cannot read as NCBI does is refused as in
+/// [`read_reported_taxonomy`], before any byte of the report.
+pub(crate) fn tabular_names<'t>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    spec: &crate::report::tabular::TabularSpec,
+    taxonomies: impl IntoIterator<Item = &'t crate::report::tabular::TabularTaxonomy>,
+    program: &str,
+) -> Result<Option<crate::report::tabular::TabularNames>> {
+    if !spec.needs().taxonomy_names || !run.found(db) {
+        return Ok(None);
+    }
+    let Some(search_path) = db.search_path() else {
+        return Ok(None);
+    };
+    let names = crate::report::tabular::TabularNames::look_up(
+        spec,
+        &run.taxdb(search_path),
+        taxonomies,
+        program,
+    )
+    .map_err(|error| taxdb_error(error, program))?;
+    // The texts of opening of an open by the rows of an earlier batch ([`TaxdbRun::open_for_rows`]).
+    let opened = std::mem::take(&mut *run.rows_open.lock().expect("the texts of opening"));
+    Ok(Some(names.opened_before(opened)))
 }
 
 /// NCBI's messages about the taxonomy database when a query batch prefetches the subjects it

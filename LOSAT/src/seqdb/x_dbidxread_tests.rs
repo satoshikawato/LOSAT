@@ -363,6 +363,103 @@ fn damaged_headers_read_in_ranges_as_one_by_one() {
 }
 
 #[test]
+fn a_header_is_read_alike_alone_and_in_a_range() {
+    let ids = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/ids");
+    for (path, seqtype) in [
+        (fixture_db_dir().join("prot_v4"), SeqType::Protein),
+        (fixture_db_dir().join("prot_mv"), SeqType::Protein),
+        (fixture_db_dir().join("nucl_v5"), SeqType::Nucleotide),
+        (fixture_db_dir().join("nucl_mv"), SeqType::Nucleotide),
+        (ids.join("nucl_v4"), SeqType::Nucleotide),
+        (ids.join("nucl_v5"), SeqType::Nucleotide),
+        (ids.join("njoined"), SeqType::Nucleotide),
+        (ids.join("prot_v4"), SeqType::Protein),
+        (ids.join("refuse_v5"), SeqType::Protein),
+    ] {
+        let db = SeqDb::open(path.to_str().unwrap(), seqtype).unwrap();
+        let parsed = check_headers(&db, &path);
+        assert_eq!(parsed > 0, path.starts_with(&ids), "{path:?}");
+    }
+    // A taxid list leaves out sequences and definition lines (`SeqDb::restrict_taxids`).
+    for list in [
+        TaxidList::Positive([9606].into_iter().collect()),
+        TaxidList::Negative([9606].into_iter().collect()),
+    ] {
+        let path = ids.join("nucl_v5");
+        let mut db = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+        let whole = db.num_seqs();
+        db.restrict_taxids(&list).unwrap();
+        assert!(db.num_seqs() > 0 && db.num_seqs() < whole, "{list:?}");
+        assert!(check_headers(&db, &path) > 0, "{list:?}");
+    }
+    // A seqid list too. The negative list keeps a sequence without any of its lines here, which
+    // both reads refuse alike (`no_line_kept`).
+    for negative in [false, true] {
+        let path = ids.join("nucl_v5");
+        let mut db = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+        let whole = db.num_seqs();
+        let file =
+            super::seqidlist::read_si_list(b"AF000002.3\nAJ000003.1\n", &mut Vec::new()).unwrap();
+        let list = DbList::Seqids(SeqidList { negative, file });
+        db.restrict(&list, &mut Vec::new()).unwrap();
+        assert!(db.num_seqs() > 0 && db.num_seqs() < whole, "{negative}");
+        if !negative {
+            assert!(check_headers(&db, &path) > 0);
+            continue;
+        }
+        let mut refused = 0;
+        for range in db.header_ranges(1024) {
+            assert!(db.visit_sequence_headers(range, |ordinal, header| {
+                let walked = header.err().map(|error| error.to_string());
+                refused += usize::from(walked.is_some());
+                let alone = db.read_header(ordinal).err();
+                assert_eq!(walked, alone.map(|error| error.to_string()), "{ordinal}");
+                true
+            }));
+        }
+        assert!(refused > 0);
+    }
+}
+
+/// Checks `visit_sequence_headers` and `read_header` of every sequence of `db` against
+/// `deflines` and `defline_set`; returns how many records with parsed Seq-ids it saw.
+fn check_headers(db: &SeqDb, path: &Path) -> usize {
+    let mut parsed = 0;
+    for max_seqs in [1, 3, 1024] {
+        let mut headers = Vec::new();
+        for range in db.header_ranges(max_seqs) {
+            assert!(db.visit_sequence_headers(range, |ordinal, header| {
+                headers.push((ordinal, header.unwrap()));
+                true
+            }));
+            // `visit` ends the walk.
+            let mut calls = 0;
+            assert!(!db.visit_sequence_headers(range, |_, _| {
+                calls += 1;
+                false
+            }));
+            assert_eq!(calls, 1, "{path:?}");
+        }
+        let expected: Vec<_> = (0..db.num_seqs())
+            .map(|ordinal| {
+                // A record with parsed Seq-ids is what `deflines` does not read.
+                let header = match db.deflines(ordinal) {
+                    Err(error) if error.is_parsed_seqids() => {
+                        parsed += 1;
+                        SequenceHeader::Parsed(db.defline_set(ordinal).unwrap())
+                    }
+                    deflines => SequenceHeader::Ordinal(deflines.unwrap()),
+                };
+                assert_eq!(db.read_header(ordinal).unwrap(), header, "{path:?}");
+                (ordinal, header)
+            })
+            .collect();
+        assert_eq!(headers, expected, "{path:?}");
+    }
+    parsed
+}
+
+#[test]
 fn database_ranges_cover_every_sequence_once() {
     for name in ["prot_v4", "prot_mv", "nucl_v5", "nucl_mv", "empty"] {
         let seqtype = if name.starts_with("nucl") {

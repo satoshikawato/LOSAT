@@ -351,8 +351,9 @@ struct XTreeIndex {
     s_min: i32,
     nq: usize,
     ns: usize,
-    /// Per cell: 1 + index of its first entry, 0 = empty. Allocated on the
-    /// first HSP.
+    /// Per cell: 1 + index of its first entry, 0 = empty. Grown on the first HSP
+    /// that needs the size, and all zero between trees: `clear` resets the cells in
+    /// `used_cells`, so a new tree does not fill the grid again.
     head: Vec<u32>,
     /// The cells with a non-zero head, for `clear`.
     used_cells: Vec<u32>,
@@ -415,8 +416,6 @@ impl XTreeIndex {
         self.s_min = s_min;
         self.nq = (q_span >> shift) + 1;
         self.ns = (s_span >> shift) + 1;
-        self.head.clear();
-        self.used_cells.clear();
         self.clear();
     }
 
@@ -483,7 +482,7 @@ impl XTreeIndex {
             }
             return;
         }
-        if self.head.is_empty() {
+        if self.head.len() < self.nq * self.ns {
             self.head.resize(self.nq * self.ns, 0);
         }
         for q in q_a..=q_b {
@@ -1110,7 +1109,7 @@ impl BlastIntervalTree {
             )
             .then_some(*tree_hsp)
         };
-        if !x.head.is_empty() {
+        if !x.used_cells.is_empty() {
             let cell =
                 x.q_cell(query_start + hsp.query_offset) * x.ns + x.s_cell(hsp.subject_offset);
             let mut at = x.head[cell];
@@ -1993,6 +1992,9 @@ mod tests {
         let mut contained = 0usize;
         let mut queries = 0usize;
         let mut unlinked = 0usize;
+        // One tree for all trials, as the scratch keeps it: its grid changes size between
+        // trials and must come back empty each time.
+        let mut indexed = BlastIntervalTree::new(0, 1, 0, 1);
         for trial in 0..trials {
             let q_len = [300i32, 5_000, 80_000, 3_000_000][trial % 4];
             let s_len = [400i32, 9_000, 120_000, 2_000_000][(trial / 4) % 4];
@@ -2000,7 +2002,7 @@ mod tests {
             let mut walk = BlastIntervalTree::new(0, 2 * q_len + 1, 0, s_len + 1);
             // The walk answers while the index is dropped (as when tracing is on).
             walk.x.usable = false;
-            let mut indexed = BlastIntervalTree::new(0, 2 * q_len + 1, 0, s_len + 1);
+            indexed.reset_with_bounds(0, 2 * q_len + 1, 0, s_len + 1);
             let mut added: Vec<(TreeHsp, i32)> = Vec::new();
             let count = 200 + rng.below(1500) as usize;
             for _ in 0..count {

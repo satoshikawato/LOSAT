@@ -11,6 +11,7 @@
 
 use std::io::Read;
 
+use super::defline_ids;
 use super::line_reader::BufferedLineReader;
 use super::pack::{self, Coding, Segment};
 use super::title::printable_string;
@@ -22,6 +23,8 @@ use crate::blastinput::fasta_reader::reader::{
 use crate::blastinput::fasta_reader::stream::{
     input_space, trim_input_end, trim_input_space, trim_input_start,
 };
+use crate::seqid::model::{ObjectId, ParsedSeqId};
+use crate::seqid::rank::{best_rank_score, find_best};
 use crate::writedb::bioseq::SeqData;
 
 /// The problems that `CFastaBioseqSource` tells the reader to ignore.
@@ -40,8 +43,8 @@ const IGNORED_PROBLEMS: [Problem; 3] = [
 
 /// A `CObjReaderParseException` of the reader: its message (`GetMsg()`).
 #[derive(Debug)]
-pub(super) struct ParseError {
-    pub(super) message: String,
+pub(crate) struct ParseError {
+    pub(crate) message: String,
 }
 
 /// What ends `ReadOneSeq` without a record.
@@ -103,8 +106,13 @@ pub(super) enum SeqInst {
 /// A record as `CFastaReader::ReadOneSeq` returns it.
 #[derive(Debug)]
 pub(super) struct Record {
-    /// `Seq-id local id`, the number that `CSeqIdGenerator` gave the record.
+    /// `Seq-id local id`, the number that `CSeqIdGenerator` gave the record (without
+    /// `-parse_seqids`).
     pub(super) local_id: u64,
+    /// The ids of the record (with `-parse_seqids`).
+    pub(super) ids: Vec<ParsedSeqId>,
+    /// The other id of the record's Seq-hist alignment (an id with a range).
+    pub(super) hist_old_id: Option<ParsedSeqId>,
     /// The `DefLine` field of the `CFastaReader` user object.
     pub(super) defline_field: Vec<u8>,
     /// The title descriptor (`x_ApplyMods`), if the record has one.
@@ -284,8 +292,15 @@ struct RecordState {
     defline_field: Vec<u8>,
     /// The title descriptor.
     title_descr: Option<Vec<u8>>,
-    /// The local ID of the record.
+    /// The local ID of the record (without `-parse_seqids`).
     local_id: u64,
+    /// `fRequireID | fParseRawID` (`-parse_seqids`), else `fNoParseID`.
+    parse_ids: bool,
+    /// The Bioseq's ids (with `-parse_seqids`).
+    ids: Vec<ParsedSeqId>,
+    /// The id of the definition line that a range replaced (the other row of the
+    /// Seq-hist alignment).
+    hist_old_id: Option<ParsedSeqId>,
     /// The bad positions of a data line, reused.
     bad_positions: Vec<u32>,
 }
@@ -385,12 +400,15 @@ impl<R: Read> FastaReader<R> {
     /// ```
     /// The registry value `BLAST/MAX_SEQID_LENGTH` (build_db.cpp:738-747) is not read:
     /// LOSAT has no `.ncbirc`, and without `-parse_seqids` no ID is parsed.
-    pub(super) fn new(input: R, protein: bool) -> Self {
+    pub(super) fn new(input: R, protein: bool, parse_ids: bool) -> Self {
         Self {
             lines: BufferedLineReader::new(input),
             id_counter: 1,
             state: RecordState {
                 protein,
+                parse_ids,
+                ids: Vec::new(),
+                hist_old_id: None,
                 seq_data: Vec::new(),
                 gaps: Vec::new(),
                 current_gap_length: 0,
@@ -407,6 +425,11 @@ impl<R: Read> FastaReader<R> {
     /// `CBioseq::IsAa()` of every record: the molecule is the input's (`assemble_seq`).
     pub(super) fn is_protein(&self) -> bool {
         self.state.protein
+    }
+
+    /// `fRequireID | fParseRawID` (`-parse_seqids`).
+    pub(super) fn parses_ids(&self) -> bool {
+        self.state.parse_ids
     }
 
     /// One record.
@@ -575,7 +598,8 @@ impl<R: Read> FastaReader<R> {
                     // A gap line: a data line, read again below.
                     self.lines.unget_line();
                 } else if need_defline {
-                    state.parse_def_line(next_line, &mut self.id_counter);
+                    let line_number = self.lines.line_number();
+                    state.parse_def_line(next_line, &mut self.id_counter, line_number, warn)?;
                     need_defline = false;
                     continue;
                 } else {
@@ -626,6 +650,8 @@ impl<R: Read> FastaReader<R> {
             .map_err(|_| ReadError::OutOfMemory)?;
         Ok(Record {
             local_id: state.local_id,
+            ids: std::mem::take(&mut state.ids),
+            hist_old_id: state.hist_old_id.take(),
             defline_field: std::mem::take(&mut state.defline_field),
             title_descr: state.title_descr.take(),
             inst,
@@ -730,15 +756,75 @@ impl RecordState {
     /// `defline` starts with `>` except for an empty line (`BufferedLineReader`'s module
     /// comment), which returns before the test of its first character. The molecule is
     /// not set here (`fForceType`), and no range is parsed (`fNoParseID`).
-    fn parse_def_line(&mut self, defline: &[u8], id_counter: &mut u64) {
+    fn parse_def_line(
+        &mut self,
+        defline: &[u8],
+        id_counter: &mut u64,
+        line_number: u64,
+        warn: Warn<'_>,
+    ) -> Result<(), ParseError> {
         self.titles.clear();
+        self.ids.clear();
+        self.hist_old_id = None;
         let len = defline.len();
+        let mut has_range = false;
         if len > 1 && !defline[1..].iter().all(|&byte| input_space(byte)) {
             let start = 1 + defline[1..]
                 .iter()
                 .position(|&byte| !input_space(byte))
                 .unwrap_or(len - 1);
-            let title_start = start;
+            let mut title_start = start;
+            if self.parse_ids {
+                // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:181-207
+                // ```c++
+                //     else
+                //     {
+                //         pos = start;
+                //         while (pos < len && defline[pos] > ' ') {
+                //             pos++;
+                //         }
+                //
+                //         if ( ! (fFastaFlags & CFastaReader::fDisableParseRange) ) {
+                //             range_len = ParseRange(defline.substr(start, pos - start),
+                //                     data.range_start, data.range_end, pMessageListener);
+                //         }
+                //
+                //         auto id_string = defline.substr(start, pos - start - range_len);
+                //         if (NStr::IsBlank(id_string)) {
+                //             NCBI_THROW2(CObjReaderParseException, eFormat,
+                //                 "Unable to locate sequence id in definition line", 0);
+                //         }
+                //
+                //         title_start = pos;
+                //         x_ProcessIDs(id_string,
+                //                 info,
+                //                 data.ids,
+                //                 pMessageListener,
+                //                 fn_idcheck);
+                //
+                //         data.has_range = (range_len>0);
+                //     }
+                // ```
+                // `defline[pos]` is a `char`, signed on the platforms makeblastdb is
+                // compared with (x86-64): a byte from 0x80 up is below ' ' and ends the id.
+                let mut pos = start;
+                while pos < len && (defline[pos] as i8) > (b' ' as i8) {
+                    pos += 1;
+                }
+                let (range_len, _, _) = defline_ids::parse_range(&defline[start..pos]);
+                let id_string = &defline[start..pos - range_len];
+                if id_string.iter().all(|&byte| input_space(byte)) {
+                    return Err(ParseError {
+                        message: "Unable to locate sequence id in definition line".to_string(),
+                    });
+                }
+                title_start = pos;
+                self.ids = defline_ids::process_ids(id_string, self.protein, line_number, warn)?;
+                has_range = range_len > 0;
+            }
+            while title_start < len && input_space(defline[title_start]) {
+                title_start += 1;
+            }
             if title_start < len {
                 let end = title_start
                     + 1
@@ -751,9 +837,69 @@ impl RecordState {
                 });
             }
         }
-        self.local_id = *id_counter;
-        *id_counter += 1;
+        if self.parse_ids {
+            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:576-583
+            // ```c++
+            //     if (data.ids.empty()) {
+            //         if (TestFlag(fRequireID)) {
+            //             // No [usable] IDs
+            //             FASTA_ERROR(LineNumber(),
+            //                 "CFastaReader: Defline lacks a proper ID around line " << LineNumber(),
+            //                 CObjReaderParseException::eNoIDs );
+            //         }
+            //     }
+            // ```
+            if self.ids.is_empty() {
+                return Err(ParseError {
+                    message: format!(
+                        "CFastaReader: Defline lacks a proper ID around line {line_number}"
+                    ),
+                });
+            }
+            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:619-644
+            // ```c++
+            // void CFastaReader::PostProcessIDs(
+            //     const CBioseq::TId& defline_ids,
+            //     const string& /*defline*/,
+            //     const bool has_range,
+            //     const TSeqPos range_start,
+            //     const TSeqPos range_end)
+            // {
+            //     if (defline_ids.empty()) {
+            //         GenerateID();
+            //     }
+            //     else {
+            //         SetIDs() = defline_ids;
+            //     }
+            //
+            //     if (has_range) {
+            //         auto old_id = FindBestChoice(GetIDs(), CSeq_id::BestRank);
+            //         // generate a new ID, and record its relation to the given one(s).
+            //         SetIDs().clear();
+            //         GenerateID();
+            //
+            //         CRef<CSeq_align> align = xCreateAlignment(old_id,
+            //             GetIDs().front(), range_start, range_end);
+            //
+            //         m_CurrentSeq->SetInst().SetHist().SetAssembly().push_back(align);
+            //     }
+            // }
+            // ```
+            // The alignment is kept as its other id (`CBioseq::GetNonLocalId` reads it).
+            if has_range {
+                let old_id = find_best(&self.ids, best_rank_score).cloned();
+                self.ids.clear();
+                self.ids
+                    .push(ParsedSeqId::Local(ObjectId::Id(*id_counter as i32)));
+                *id_counter += 1;
+                self.hist_old_id = old_id;
+            }
+        } else {
+            self.local_id = *id_counter;
+            *id_counter += 1;
+        }
         self.defline_field = printable_string(defline).into_owned();
+        Ok(())
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:710-771

@@ -1,0 +1,9 @@
+gnl|BL_ORD_ID|0 5-20 minus
+gnl|BL_ORD_ID|1 minus
+gnl|BL_ORD_ID|2 abc-5
+gnl|BL_ORD_ID|3 0-5
+gnl|BL_ORD_ID|4 MINUS
+gnl|BL_ORD_ID|5 minus 3-9
+gnl|BL_ORD_ID|6 3-9 minus 11
+gnl|BL_ORD_ID|7 5
+gnl|BL_ORD_ID|8 -5

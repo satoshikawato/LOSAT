@@ -29,6 +29,7 @@ use super::results::HspList;
 use super::runtime::BatchResults;
 use super::seqalign::{query_records, SeqalignSubjects};
 use crate::blastinput::app::Program;
+use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
@@ -46,6 +47,7 @@ use crate::stats::tables::KarlinParams;
 pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Blastx, &args.task);
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     inputs.evalue = Some(args.evalue);
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
@@ -54,8 +56,20 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps;
     inputs.sum_stats = args.sum_stats;
-    // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`).
-    inputs.threshold = args.threshold.map(|threshold| threshold as i32);
+    // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`), converted
+    // as the x86-64 build does (`INT_MIN` past `Int4`, as the lookup table takes it:
+    // `ncbi_int4_from_double`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
+    // ```c++
+    // CBlastOptions::SetWordThreshold(double w)
+    // {
+    //     ...
+    //     if (m_Remote) {
+    //         m_Remote->SetValue(eBlastOpt_WordThreshold, static_cast<int>(w));
+    //     }
+    // }
+    // ```
+    inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
     inputs.soft_masking = Some(args.soft_masking);
@@ -209,11 +223,8 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
         karlin: valid.map(|parameters| (parameters.ungapped.clone(), gapped)),
         search_space: valid.map_or(0, |parameters| parameters.search_space),
         length_adjustment: valid.map_or(0, |parameters| i64::from(parameters.length_adjustment)),
-        context0_space: if parameters[0].valid {
-            parameters[0].search_space
-        } else {
-            0
-        },
+        // An invalid context keeps `-searchsp`, else 0 (`effective_lengths`).
+        context0_space: parameters[0].search_space,
     }
 }
 
@@ -238,6 +249,10 @@ fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
 fn bioseq_input<'a>(record: &'a FastaRecord, defline: &'a [u8], protein: bool) -> BioseqInput<'a> {
     BioseqInput {
         id: &record.internal_id,
+        ids: record.believed().map(|ids| ids.ids.as_slice()),
+        seq_loc: record
+            .believed()
+            .and_then(|ids| ids.seq_loc(0, record.sequence.len() as i32 - 1)),
         defline,
         title: record.title.as_bytes(),
         letters: &record.sequence,
@@ -283,6 +298,7 @@ fn results_masks(call: &ArchiveCall<'_>) -> Vec<MaskEntry> {
                 if !intervals.is_empty() {
                     masks.push(MaskEntry {
                         id: query.internal_id.clone(),
+                        best: query.believed().map(|ids| ids.best.clone()),
                         frame: frame_of(context.frame),
                         intervals,
                     });
@@ -306,6 +322,7 @@ fn lcase_masks(call: &ArchiveCall<'_>) -> Vec<MaskEntry> {
             for frame in [Frame::Plus1, Frame::Minus1] {
                 masks.push(MaskEntry {
                     id: query.internal_id.clone(),
+                    best: query.believed().map(|ids| ids.best.clone()),
                     frame,
                     intervals: vec![(from, to)],
                 });
@@ -347,7 +364,7 @@ impl<'a> AlignSource for BlastxAligns<'a> {
                     &mut hsp_records,
                 )?;
                 let query_record = QueryRecord {
-                    id: SeqId::Local(&query.internal_id),
+                    id: query.seq_id(),
                     searched_length: i32::try_from(query.sequence.len())?,
                     offset: 0,
                 };
@@ -567,6 +584,7 @@ mod tests {
                     ParamValue::Boolean(false) => "boolean:False".to_string(),
                     ParamValue::Real(value) => format!("real:{}", posix(*value)),
                     ParamValue::Str(value) => format!("string:{value}"),
+                    ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
                 };
                 format!("{}={value}", param.name)
             })
@@ -634,6 +652,38 @@ mod tests {
             }
         }
         inputs
+    }
+
+    // A `-threshold` past `Int4` (2147483648, 1e10, +inf, 1e999) is recorded as `INT_MIN`, as
+    // NCBI BLAST+ 2.17.0 converts it (the lookup table takes the same value). NCBI's build writes
+    // it as `-8` in the archive, from a signed overflow that LOSAT does not reproduce
+    // (`report/serial/asn_text.rs` `itoa_i32`).
+    #[test]
+    fn a_threshold_past_int4_is_recorded_as_int_min() {
+        let inputs = |value: &str| {
+            option_inputs(&parse(&["-threshold", value]).unwrap_or_else(|| panic!("{value}")))
+        };
+        let listed = |threshold: &str| {
+            let case = CASES
+                .iter()
+                .find(|case| case.0 == "opt_thr_frac")
+                .expect("opt_thr_frac");
+            case.2.replace(
+                "WordThreshold=integer:11",
+                &format!("WordThreshold=integer:{threshold}"),
+            )
+        };
+        for value in ["2147483648", "1e10", "+inf", "1e999"] {
+            assert_eq!(
+                render(&algorithm_options(&inputs(value))),
+                listed("-2147483648"),
+                "{value}"
+            );
+        }
+        assert_eq!(
+            render(&algorithm_options(&inputs("2147483647.5"))),
+            listed("2147483647")
+        );
     }
 
     #[test]

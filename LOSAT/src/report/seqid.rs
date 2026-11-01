@@ -1,10 +1,10 @@
 //! NCBI's Seq-id of the sequences that LOSAT reports, and its printings.
 //!
-//! LOSAT reads queries and `-subject` subjects without `-parse_deflines` (refused), so a
-//! reported sequence has one of three Seq-ids: the local ID that NCBI's FASTA reader
+//! A reported sequence has one of three Seq-ids: the local ID that NCBI's FASTA reader
 //! generates (`Query_N`, `Subject_N`), the ordinal ID of a sequence of a database without
 //! parsed Seq-ids (`gnl|BL_ORD_ID|<oid>`), or a Seq-id that a database built with
-//! `-parse_seqids` stores (`SeqId::Db`, chosen and printed by `crate::seqid`). The serial
+//! `-parse_seqids` stores or `-parse_deflines` read from a query's defline (`SeqId::Db`, chosen
+//! and printed by `crate::seqid`). The serial
 //! formats (outfmt 8, 9, 11, 12) write the Seq-id object itself (`SeqId::write`); the other
 //! printings (the title's first word, `gnl|BL_ORD_ID|0`, `BL_ORD_ID:0`, ...) join this type
 //! with the formats that use them.
@@ -238,7 +238,10 @@ fn write_parsed<E: Encoder>(id: &ParsedSeqId, enc: &mut E) {
         ParsedSeqId::Pdb(id) => {
             enc.begin_sequence("PDB-seq-id");
             enc.member("mol", 0);
+            // `mol PDB-mol-id` (seqloc.asn), a named VisibleString (`begin_named`).
+            enc.begin_named("PDB-mol-id");
             enc.visible_str(&id.mol);
+            enc.end_named();
             enc.end_member();
             let chain = match id.chain {
                 Some(chain) => Some(chain),

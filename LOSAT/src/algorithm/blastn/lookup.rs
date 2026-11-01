@@ -1005,7 +1005,7 @@ impl MbLookupTable {
     fn x_csr_each(&self, index: u64, mut callback: impl FnMut(u32)) {
         debug_assert!(self.x_csr.is_some());
         if let Some(csr) = self.x_csr.as_ref() {
-            for &q_off_1 in csr.run(index as usize) {
+            for &q_off_1 in csr.x_run_any(index as usize) {
                 callback(q_off_1);
             }
         }
@@ -1122,7 +1122,7 @@ impl TwoStageLookup {
         let mut hashtable = vec![0u32; cells];
         let mut next_pos = vec![0u32; next_pos_len];
         for (cell, head) in hashtable.iter_mut().enumerate() {
-            let run = csr.run(cell);
+            let run = csr.x_run_any(cell);
             if let Some(&first) = run.first() {
                 *head = first;
                 for w in run.windows(2) {
@@ -1208,7 +1208,7 @@ impl TwoStageLookup {
     #[inline(never)]
     fn x_csr_contains(&self, lut_kmer: u64, q_off_1: u32) -> bool {
         if let Some(csr) = self.mb_lookup.x_csr.as_ref() {
-            return x_bn_csr::contains(csr.run(lut_kmer as usize), q_off_1);
+            return x_bn_csr::contains(csr.x_run_any(lut_kmer as usize), q_off_1);
         }
         debug_assert!(self.disc.as_ref().is_some_and(|d| d.x_csr.is_some()));
         self.disc
@@ -1222,7 +1222,7 @@ impl TwoStageLookup {
     #[inline(never)]
     fn x_csr_count(&self, lut_kmer: u64) -> usize {
         if let Some(csr) = self.mb_lookup.x_csr.as_ref() {
-            return csr.run(lut_kmer as usize).len();
+            return csr.x_run_any(lut_kmer as usize).len();
         }
         debug_assert!(self.disc.as_ref().is_some_and(|d| d.x_csr.is_some()));
         self.disc
@@ -1945,6 +1945,7 @@ fn build_mb_lookup(
     approx_table_entries: usize,
     ascending_cells: bool,
     x_keep: Option<&std::sync::Arc<x_mb_lut_keep::Keep>>,
+    x_scan_letters: Option<u64>,
 ) -> MbLookupTable {
     debug_assert_eq!(queries_blastna.len(), query_offsets.len());
     // No NCBI counterpart: the start of the `[TIMING] x_mb_lookup_build` interval (LOSAT_TIMING).
@@ -1971,7 +1972,13 @@ fn build_mb_lookup(
     // Dispatch point of LOSAT_X_BNCSR: a table laid out as CSR (`x_bn_csr.rs`) has neither
     // `hashtable` nor `next_pos`; its `offsets` (a cell's start, one element per cell) is built in
     // the table the batch loop's keep holds, so the loop does not hold that table beside this one.
-    let x_csr_layout = x_bn_csr::plan(&x_words, table_size, db_word_counts.is_some(), debug_mode);
+    let x_csr_layout = x_bn_csr::plan(
+        &x_words,
+        table_size,
+        db_word_counts.is_some(),
+        debug_mode,
+        x_scan_letters,
+    );
     let max_query_offset = queries_blastna
         .iter()
         .zip(query_offsets.iter())
@@ -2090,8 +2097,20 @@ fn build_mb_lookup(
     };
     let mut x_filled = x_mb_lookup_par::FillStats::default();
     if x_csr_layout {
-        let (x_offsets, x_length, x_dirty) =
+        let (mut x_offsets, mut x_length, x_dirty) =
             x_csr_keep.map_or((Vec::new(), 0, 0), |keep| keep.take_buffer(table_size + 2));
+        // EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head writes one element per non-empty cell, so
+        // the buffer a fresh build gives back to the keep is the zeroed table `Keep::take` makes for
+        // a chains build (two elements more), of which the build wrote its first elements: a later
+        // chains build of the loop takes it (zeroing what was written) as it takes an unpacked
+        // CSR's offsets.
+        if x_csr_keep.is_some()
+            && x_offsets.capacity() == 0
+            && x_bn_csr::x_will_pack(x_words.ascending_cells)
+        {
+            x_offsets = vec![0u32; table_size + 2];
+            x_length = table_size + 2;
+        }
         let (csr, on_pool) = x_bn_csr::build(
             &x_words,
             table_size,
@@ -2268,11 +2287,13 @@ pub fn build_two_stage_lookup(
         approx_table_entries,
         ascending_cells,
         None,
+        None,
     )
 }
 
 /// `build_two_stage_lookup` with the batch loop's keep of LOSAT_X_MBLUTKEEP (`x_keep`: the
-/// table is built on the kept one when it has the size, and goes back to it when dropped).
+/// table is built on the kept one when it has the size, and goes back to it when dropped) and the
+/// letters the search scans (`x_scan_letters`, LOSAT_X_MBCSR's size rule).
 pub(crate) fn build_two_stage_lookup_kept(
     queries_blastna: &[&[u8]],
     query_offsets: &[i32],
@@ -2284,6 +2305,7 @@ pub(crate) fn build_two_stage_lookup_kept(
     approx_table_entries: usize,
     ascending_cells: bool,
     x_keep: Option<&std::sync::Arc<x_mb_lut_keep::Keep>>,
+    x_scan_letters: Option<u64>,
 ) -> TwoStageLookup {
     let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
 
@@ -2305,6 +2327,7 @@ pub(crate) fn build_two_stage_lookup_kept(
         approx_table_entries,
         ascending_cells,
         x_keep,
+        x_scan_letters,
     );
 
     TwoStageLookup {

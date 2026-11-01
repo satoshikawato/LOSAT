@@ -44,6 +44,8 @@ const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const BUILD: &str = "[TIMING] x_mb_lookup_build: ";
 const ONCE: &str = "[TIMING] x_mb_lookup_once: ";
 const KEEP: &str = "[TIMING] x_mb_lut_keep: ";
+const PACK_ON: (&str, &str) = ("LOSAT_X_BNCSRPACK", "1");
+const CSR_BUILDS: &str = "[TIMING] x_bn_csr: ";
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -133,6 +135,9 @@ fn blastn(task: &str, query: &Path, threads: u32, switches: &[(&str, &str)]) -> 
             std::env::temp_dir().join(format!("losat_mblutkeep_worker_{}.log", std::process::id())),
         );
     }
+    // LOSAT_X_BNCSRPACK lays out every contiguous table of 4^8 to 4^11 cells as CSR, with no
+    // chains to fill: `-task blastn`'s tables keep the chains these tests are about with it off.
+    command.env("LOSAT_X_BNCSRPACK", "0");
     let output = command
         .arg("blastn")
         .args(["-task", task])
@@ -281,6 +286,43 @@ fn shorter_tables_are_the_start_of_the_kept_table() {
     }
     let query = query_file("mixed", &records);
     check_counts("megablast", &query, &[BATCH], 4, 1);
+}
+
+// With LOSAT_X_BNCSRPACK on (the helper turns it off) the pieces' tables of 4^11 cells above are
+// packed CSR (no size rule): after the genome's chains their `offsets` take the kept table of 4^12
+// cells (`csr=`); pieces first, the first one takes the zeroed table that a fresh packed build
+// hands the keep (`lookup.rs`), the others take it from the keep, and the genome's chains find it
+// too small. The report equals the one with the keep off.
+#[test]
+fn packed_tables_share_the_kept_table_with_chains() {
+    let (long, short) = (letters("LC738868.fasta"), letters("LC738869.fasta"));
+    let pieces: Vec<(String, &str)> = (0..4)
+        .map(|i| {
+            (
+                format!("LC738869_{i}"),
+                &short[i * 65_000..i * 65_000 + 100_000],
+            )
+        })
+        .collect();
+    let genome = ("LC738868".to_string(), long.as_str());
+    for (name, genome_first, fresh, csr) in
+        [("packed_after", true, 1, 4), ("packed_first", false, 2, 3)]
+    {
+        let mut records = pieces.clone();
+        if genome_first {
+            records.insert(0, genome.clone());
+        } else {
+            records.push(genome.clone());
+        }
+        let query = query_file(name, &records);
+        let stderr = check_counts("megablast", &query, &[BATCH, PACK_ON], 0, fresh);
+        assert_eq!(field(&stderr, KEEP, "csr="), csr, "{name}:\n{stderr}");
+        assert_eq!(
+            field(&stderr, CSR_BUILDS, "builds="),
+            4,
+            "{name}:\n{stderr}"
+        );
+    }
 }
 
 // dc-megablast (discontiguous tables of 4^11 cells) and blastn (megablast tables of 4^11 cells) of

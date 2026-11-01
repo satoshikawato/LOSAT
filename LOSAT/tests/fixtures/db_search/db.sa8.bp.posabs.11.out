@@ -1,0 +1,353 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">P69905.2 RecName: Full=Hemoglobin subunit
+ alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+ Contains: RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+ Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+ Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan
+ paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+ Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName:
+ Full=Hemopressin [Pan troglodytes]"
+                  }
+                }
+              },
+              title "P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+ Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName:
+ Full=Hemopressin [Homo sapiens] >P69906.2 RecName: Full=Hemoglobin subunit
+ alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+ Contains: RecName: Full=Hemopressin [Pan paniscus] >P69907.2 RecName:
+ Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+ Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan
+ troglodytes]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 142,
+              seq-data ncbieaa "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPH
+FDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHA
+SLDKFLASVSTVLTSKYR"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/taxfilter/tfp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 42483
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+            9606
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 733
+          },
+          {
+            id str "blast_score",
+            value int 733
+          },
+          {
+            id str "e_value",
+            value real { 455693996786659, 10, -120 }
+          },
+          {
+            id str "bit_score",
+            value real { 286959521427464, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 142
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 142
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P69905",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "seqid:P69905.2"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 461
+          },
+          {
+            id str "blast_score",
+            value int 461
+          },
+          {
+            id str "e_value",
+            value real { 141769855619053, 10, -78 }
+          },
+          {
+            id str "bit_score",
+            value real { 182185236777944, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 88
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 114
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P09105",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "seqid:P09105.2"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 446
+          },
+          {
+            id str "blast_score",
+            value int 446
+          },
+          {
+            id str "e_value",
+            value real { 265918127590525, 10, -76 }
+          },
+          {
+            id str "bit_score",
+            value real { 176407243139184, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 85
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 110
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P02008",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "seqid:P02008.2"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 318984985166634, 10, -15 },
+        k { 130238418667706, 10, -15 },
+        h { 384901552979004, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 42483",
+      "Effective search space used: 42483",
+      "Length adjustment: 23"
+    }
+  }
+}

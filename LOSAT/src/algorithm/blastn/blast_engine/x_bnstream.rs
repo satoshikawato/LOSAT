@@ -31,13 +31,24 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
+/// No NCBI counterpart (scheduling only): what narrows a window while many bytes of results wait
+/// for the owner. Past `floor` items after the last one handed over, an item is claimed only
+/// while `waiting_bytes` (kept by the caller) is at most `max_bytes`. The item at the start of the
+/// window is always within `floor`, so the owner always gets to hand it over.
+pub(super) struct WaitingBound<'a> {
+    pub(super) floor: usize,
+    pub(super) waiting_bytes: &'a AtomicUsize,
+    pub(super) max_bytes: usize,
+}
+
 /// No NCBI counterpart (scheduling only): items `0..n`, the next one to claim, the count the
 /// owner has handed over, and a ring of `window` slots for the results waiting for it (item
 /// `i` in slot `i % window`).
-struct Window<R> {
+struct Window<'a, R> {
     n: usize,
     window: usize,
     assist: bool,
+    bound: Option<WaitingBound<'a>>,
     next: AtomicUsize,
     handed: AtomicUsize,
     slots: Vec<Mutex<Option<R>>>,
@@ -54,12 +65,12 @@ enum Claim {
 
 // No NCBI counterpart: marks the window as failed if a search unwinds, so that the owner stops
 // waiting for its result.
-struct Searching<'a, R> {
-    window: &'a Window<R>,
+struct Searching<'a, 'b, R> {
+    window: &'a Window<'b, R>,
     done: bool,
 }
 
-impl<R> Drop for Searching<'_, R> {
+impl<R> Drop for Searching<'_, '_, R> {
     fn drop(&mut self) {
         if !self.done {
             self.window.failed.store(true, Ordering::Release);
@@ -69,21 +80,22 @@ impl<R> Drop for Searching<'_, R> {
 
 // No NCBI counterpart: when the owner leaves its loop (at the end, or unwinding), the helpers
 // that wait for room in the window stop waiting.
-struct Closing<'a, R>(&'a Window<R>);
+struct Closing<'a, 'b, R>(&'a Window<'b, R>);
 
-impl<R> Drop for Closing<'_, R> {
+impl<R> Drop for Closing<'_, '_, R> {
     fn drop(&mut self) {
         self.0.failed.store(true, Ordering::Release);
     }
 }
 
-impl<R> Window<R> {
-    fn new(n: usize, window: usize, assist: bool) -> Self {
+impl<'a, R> Window<'a, R> {
+    fn new(n: usize, window: usize, assist: bool, bound: Option<WaitingBound<'a>>) -> Self {
         let window = window.clamp(1, n.max(1));
         Self {
             n,
             window,
             assist,
+            bound,
             next: AtomicUsize::new(0),
             handed: AtomicUsize::new(0),
             slots: (0..window).map(|_| Mutex::new(None)).collect(),
@@ -102,6 +114,13 @@ impl<R> Window<R> {
             }
             if next >= handed + self.window {
                 return Claim::Full;
+            }
+            if let Some(bound) = &self.bound {
+                if next >= handed + bound.floor
+                    && bound.waiting_bytes.load(Ordering::Relaxed) > bound.max_bytes
+                {
+                    return Claim::Full;
+                }
             }
             match self.next.compare_exchange_weak(
                 next,
@@ -295,10 +314,24 @@ pub(super) fn search_in_order<S, R: Send>(
     search: &(impl Fn(&mut S, usize) -> R + Sync),
     hand_over: &mut (dyn FnMut(usize, R) + Send),
 ) {
+    search_in_order_bounded(n, window, assist, None, init, search, hand_over);
+}
+
+/// No NCBI counterpart (scheduling only): `search_in_order` with a window that `bound` narrows
+/// (`WaitingBound`).
+pub(super) fn search_in_order_bounded<S, R: Send>(
+    n: usize,
+    window: usize,
+    assist: bool,
+    bound: Option<WaitingBound<'_>>,
+    init: &(impl Fn() -> S + Sync),
+    search: &(impl Fn(&mut S, usize) -> R + Sync),
+    hand_over: &mut (dyn FnMut(usize, R) + Send),
+) {
     if n == 0 {
         return;
     }
-    let shared = Window::new(n, window, assist);
+    let shared = Window::new(n, window, assist, bound);
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -327,7 +360,7 @@ pub(super) fn search_in_order<S, R: Send>(
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod tests {
-    use super::search_in_order;
+    use super::{search_in_order, search_in_order_bounded, WaitingBound};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn pool(threads: usize) -> rayon::ThreadPool {
@@ -585,6 +618,54 @@ mod tests {
                 })
             });
             assert!(outcome.is_err(), "item {failing}");
+        }
+    }
+
+    // While the bytes are above the bound, no item past `floor` is claimed until the owner hands
+    // the first ones over; below it, the claims go on to the whole window. Item 0 holds the start
+    // of the window until the other threads have gone as far as they may.
+    #[test]
+    fn the_bytes_narrow_the_window_to_its_floor() {
+        const N: usize = 64;
+        const WINDOW: usize = 32;
+        const FLOOR: usize = 8;
+        for (waiting, last_while_held) in [(1usize, FLOOR - 1), (0, WINDOW - 1)] {
+            let waiting_bytes = AtomicUsize::new(waiting);
+            let highest = AtomicUsize::new(0);
+            let mut handed = Vec::new();
+            pool(4).install(|| {
+                search_in_order_bounded(
+                    N,
+                    WINDOW,
+                    true,
+                    Some(WaitingBound {
+                        floor: FLOOR,
+                        waiting_bytes: &waiting_bytes,
+                        max_bytes: 0,
+                    }),
+                    &|| (),
+                    &|_: &mut (), i| {
+                        highest.fetch_max(i, Ordering::SeqCst);
+                        if i == 0 {
+                            let deadline =
+                                std::time::Instant::now() + std::time::Duration::from_secs(30);
+                            while highest.load(Ordering::SeqCst) < last_while_held
+                                && std::time::Instant::now() < deadline
+                            {
+                                std::thread::yield_now();
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            assert_eq!(highest.load(Ordering::SeqCst), last_while_held);
+                        }
+                        i
+                    },
+                    &mut |i, value| {
+                        assert_eq!(i, value);
+                        handed.push(i);
+                    },
+                );
+            });
+            assert_eq!(handed, (0..N).collect::<Vec<_>>(), "waiting {waiting}");
         }
     }
 

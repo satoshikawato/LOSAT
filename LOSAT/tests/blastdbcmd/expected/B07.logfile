@@ -1,0 +1,2 @@
+Error: Unknown argument: "foo"
+Error:  (CArgException::eInvalidArg) Unknown argument: "foo"

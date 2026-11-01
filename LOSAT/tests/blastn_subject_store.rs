@@ -41,7 +41,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),
     ("LOSAT_X_BPREDOPAR", "0"),
-    ("LOSAT_X_BPSUBJMETA", "0"),
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
@@ -345,11 +344,10 @@ fn the_subjects_are_held_packed_by_default() {
 
 // No NCBI counterpart: where the switch acts. A subject range (`-subject_loc`) keeps the
 // letters (the records are cut before the search), so the variable changes nothing there and no
-// subject is held packed. With `LOSAT_X_BNUNGAPCOUNT=0` (the ported ungapped loops) the subjects
-// are still held packed and the report is the same.
+// subject is held packed. Without a range, at one thread, the subjects are held packed and the
+// report is the same.
 #[test]
-fn a_subject_range_keeps_the_letters_and_the_ported_ungapped_count_loops_read_the_packed_subjects()
-{
+fn a_subject_range_keeps_the_letters_and_a_search_without_a_range_holds_the_packed_subjects() {
     let (queries, subjects) = inputs();
     let long = long_subjects(subjects);
     let ranged = ["-outfmt", "0", "-subject_loc", "100-5000", "-lcase_masking"];
@@ -363,8 +361,7 @@ fn a_subject_range_keeps_the_letters_and_the_ported_ungapped_count_loops_read_th
 
     let options = ["-outfmt", "0", "-num_threads", "1"];
     let (expected, messages, _) = blastn(queries, subjects, &options, &[]);
-    let previous = ("LOSAT_X_BNUNGAPCOUNT", "0");
-    let (report, store_messages, stats) = blastn(queries, subjects, &options, &[previous, STORE]);
+    let (report, store_messages, stats) = blastn(queries, subjects, &options, &[STORE]);
     assert!(report == expected);
     assert_eq!(store_messages, messages);
     assert_eq!(counter(&stats, "subjects"), 6);

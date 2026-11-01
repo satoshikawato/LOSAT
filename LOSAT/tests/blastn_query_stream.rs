@@ -40,7 +40,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),
     ("LOSAT_X_BPREDOPAR", "0"),
-    ("LOSAT_X_BPSUBJMETA", "0"),
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
@@ -703,7 +702,7 @@ fn standard_input_and_pipes_are_read_once() {
     }
 }
 
-/// A database (`-db`, made by `losat makedb` from four genomes): the off bytes, every format,
+/// A database (`-db`, made by `losat makeblastdb` from four genomes): the off bytes, every format,
 /// each at one thread count, the reports per batch.
 #[test]
 fn a_database_search_gives_the_off_bytes() {
@@ -716,13 +715,13 @@ fn a_database_search_gives_the_off_bytes() {
     std::fs::write(dir.path("set.fna"), set).unwrap();
     let db = dir.path("set").to_str().unwrap().to_string();
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(dir.path("set.fna"))
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
-    assert!(output.status.success(), "makedb");
+        .expect("run losat makeblastdb");
+    assert!(output.status.success(), "makeblastdb");
     for (task, outfmt, threads) in [
         ("dc-megablast", "0", 4),
         ("blastn", "6", 1),

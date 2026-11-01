@@ -33,7 +33,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),
     ("LOSAT_X_BPREDOPAR", "0"),
-    ("LOSAT_X_BPSUBJMETA", "0"),
     ("LOSAT_X_DCCSR", "0"),
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
@@ -129,7 +128,7 @@ fn queries() -> Temp {
     Temp(path)
 }
 
-/// The database made by `losat makedb` from LC738868, LC738869 and LC738870 (in a directory of
+/// The database made by `losat makeblastdb` from LC738868, LC738869 and LC738870 (in a directory of
 /// this test, removed when dropped), and its name.
 fn database() -> (Temp, String) {
     let dir = Temp(temp_path("db"));
@@ -142,15 +141,15 @@ fn database() -> (Temp, String) {
     std::fs::write(&set, bytes).unwrap();
     let db = dir.0.join("set").to_str().unwrap().to_string();
     let output = losat()
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&set)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (dir, db)

@@ -1,0 +1,8 @@
+NM_000001
+AF000002.3 mynuc6
+mydb:nuc7
+NM_000008.2
+AB000009
+gi|1111
+Subject_30
+AF000020

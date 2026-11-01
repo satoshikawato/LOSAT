@@ -69,8 +69,11 @@
 //!   costs), no negative `CHUNK_SIZE` (the refusal in `search_query_chunks`), search spaces that
 //!   cannot overflow (`SearchSpace`), subjects whose report ids are all supported (a subject set's
 //!   `tabular_subject_ids`, made once here), and with `-db` stored data that the traceback and the
-//!   reports read without a refusal: every definition line (as blastp's block search does) and
-//!   the ambiguity data of every sequence, which the preliminary stage does not read
+//!   reports read without a refusal: every definition line (as blastp's block search does; with
+//!   parsed Seq-ids every header as the reports read and check it, and no two sequences that
+//!   outfmt 0 would join, `common::database::reports_may_refuse`, line DBID, for a database of at
+//!   most `common::database::PARSED_CHECK_SEQUENCES_MAX` sequences, `Off::LargeParsed`) and the
+//!   ambiguity data of every sequence, which the preliminary stage does not read
 //!   (`database::x_streaming_refusal`; one pass over the database's sequences before the search,
 //!   in the pool). With one batch (the first batch takes every query record) nothing can come
 //!   after it, so none of these checks is made and no subject value is made ahead (the one call
@@ -85,7 +88,9 @@
 //!   so with the switch a block comes after the warnings of the batches before it (the same
 //!   lines in another order).
 //!
-//! Off (the reports after the loop, as without the switch): the switch off; outputs other
+//! Off (the reports after the loop, as without the switch): the switch off; a tabular report
+//! with a field list or a delimiter, and outfmt 10 and 20 (`Off::CustomTabular`: its refusals of
+//! taxonomy names and of the stored data it reads are made in its report call); outputs other
 //! than one format of the command line's kind (the hit records and the format observer of the Web
 //! adapter, whose HSP numbers count over the whole search; file sinks, which are created when
 //! their report is written; two or more formats, which the library API allows on one stream,
@@ -105,8 +110,9 @@
 //! Outfmt 17 (SAM) streams also where a stored title or ambiguity data of the database could be
 //! refused in a later batch (`Off::Titles`, `Off::Ambiguity`; `Ready::sam_despite`): the document
 //! is written only by `SamDocument::finish`, which no refusal of LOSAT's follows, and a SAM report
-//! call writes nothing to standard error (`writes_query_warnings`), so a refusal in a later batch
-//! still finds nothing written, as in the one call after the loop. Not with `taxdb.bti` on the
+//! call writes to standard error only its batch's query warnings, which the one call after the
+//! loop writes before the same refusal, so a refusal in a later batch finds the same bytes written
+//! as in the one call after the loop. Not with `taxdb.bti` on the
 //! search path: each batch's report call then writes the taxonomy database's messages of its
 //! prefetch (DBID item T, above).
 //! `finish_sam` at NCBI's five error sites writes the document of the batches before as in the off
@@ -115,10 +121,11 @@
 //!
 //! Memory: a batch's lists, flags, masks, Karlin-Altschul blocks and search spaces are dropped
 //! after its write, and so are its queries' warnings. Kept for the whole search, as without the
-//! switch: one (empty) warnings slot per query, and with `-db` the stored title of every distinct
-//! sequence that a batch reported (`database::DatabaseTitles`, at most the database's sequences
-//! and at most the queries times the hit list size), which the next batches read instead of
-//! reading the definition line again.
+//! switch: one (empty) warnings slot per query, and with `-db` the header of every distinct
+//! sequence that a batch reported (`database::DatabaseTitles`: its stored title or its parsed
+//! Seq-ids and titles, `ReportedHeader`; at most the database's sequences and at most the queries
+//! times the hit list size), which the next batches read instead of reading the definition line
+//! again.
 //!
 //! With `LOSAT_X_STATS` and the switch,
 //! `[X_STATS] RPTSTREAM batches= queries= off= one_batch= check_s=` (batches: the batches whose
@@ -171,19 +178,33 @@ pub(super) enum Off {
     Xml,
     /// A negative `CHUNK_SIZE`.
     ChunkSize,
+    /// An ungapped (`-ungapped`) search with a query of 2^30 letters or more, which LOSAT refuses
+    /// in the batch that holds it (the word cutoff's doubled length overflows NCBI's `Int4`): a
+    /// later batch's refusal would come after the first batch's reports.
+    UngappedCutoff,
     /// A database length times a query length that could overflow NCBI's 64-bit search space.
     SearchSpace,
     /// A subject of the set whose tabular id LOSAT refuses.
     SubjectIds,
-    /// A database whose definition lines do not all read as the reports read them (outfmt 17
-    /// streams all the same).
+    /// A database whose definition lines do not all read as the reports read them, or with
+    /// parsed Seq-ids a header that the reports could refuse (outfmt 17 streams all the same).
     Titles,
+    /// A database with parsed Seq-ids two of whose sequences outfmt 0 would join
+    /// (`shared::refuse_joined_hits`, `database::x_streaming_refusal`).
+    Joined,
+    /// A database with parsed Seq-ids of more sequences than its check before the search reads
+    /// (`common::database::PARSED_CHECK_SEQUENCES_MAX`).
+    LargeParsed,
     /// A database sequence whose ambiguity data the traceback cannot decode (outfmt 17 streams
     /// all the same).
     Ambiguity,
     /// A lookup of the taxonomy database that could be refused, where the batches' prefetch
     /// reads it (outfmt 0, 6, 7 and 17 with `taxdb.bti` on the search path).
     Taxonomy,
+    /// A tabular report with a field list or a delimiter, or outfmt 10 or 20
+    /// (`BlastnOutputFormat::CustomTabular`), which is written after the loop (the module doc
+    /// has the reason).
+    CustomTabular,
 }
 
 impl Off {
@@ -195,11 +216,15 @@ impl Off {
             Off::Xml => "xml",
             Off::Scoring => "scoring",
             Off::ChunkSize => "chunk_size",
+            Off::UngappedCutoff => "ungapped_cutoff",
             Off::SearchSpace => "search_space",
             Off::SubjectIds => "subject_ids",
             Off::Titles => "titles",
+            Off::Joined => "joined",
+            Off::LargeParsed => "large_parsed",
             Off::Ambiguity => "ambiguity",
             Off::Taxonomy => "taxonomy",
+            Off::CustomTabular => "custom_tabular",
         }
     }
 }
@@ -455,6 +480,18 @@ fn check(
     {
         return Err(Off::Xml);
     }
+    // The custom tabular reports (line CLI C2, PR 1): their writer refuses a name of the
+    // taxonomy database for a subject with a taxid (DECISIONS 3) and reads the taxids and
+    // definition lines of the reported sequences, which a later batch's report call would do
+    // after the first batch's rows were written; and outfmt 20's header line comes with the
+    // first report. They keep the one report call after the search, where every refusal comes
+    // before the first byte, and never take the streamed path of the default 6 and 7.
+    if output_formats
+        .iter()
+        .any(|format| format.tabular_spec().is_some())
+    {
+        return Err(Off::CustomTabular);
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
     // ```c++
     //     TSeqPos size_read = 0;
@@ -501,6 +538,13 @@ fn check(
     }
     if batching.split.negative_chunk_size() {
         return Err(Off::ChunkSize);
+    }
+    if args.ungapped
+        && !lengths.iter().all(|&length| {
+            crate::algorithm::blastn::ungapped::cutoff_context_length_supported(length)
+        })
+    {
+        return Err(Off::UngappedCutoff);
     }
     // The search space of a context (`search_query_batch`): the effective database length
     // `db - n x a` (at least 1) times the effective query length `q - a` (at least 1), with the
@@ -561,28 +605,35 @@ fn check(
                 .first()
                 .is_some_and(|format| format.prefetches_subjects())
                 && db.taxdb_found();
-            match database::x_streaming_refusal(db, prefetch, pool) {
+            let sam = output_formats
+                .iter()
+                .any(|format| format.sam_spec().is_some());
+            // Outfmt 17 without the prefetch streams whatever the pass finds (below), so a
+            // database with parsed Seq-ids, whose pass reads every header as the reports read
+            // it, is not read for it.
+            if sam && !prefetch && db.parsed() {
+                return Ok(Ready {
+                    cache: None,
+                    one_batch: false,
+                    sam_despite: Some(Off::Titles),
+                });
+            }
+            let shown = database::parsed_shown(output_formats);
+            match database::x_streaming_refusal(db, shown, prefetch, pool) {
                 // Outfmt 17 writes no byte before its end (`SamDocument::finish`, which no
-                // refusal of LOSAT's follows) and nothing to standard error with its report calls
-                // (a SAM format writes no query warnings, `writes_query_warnings`), so a
-                // refusal in a later batch (a stored title, ambiguity data) still finds nothing
-                // written, as in the one call after the loop: the stream acts. Not where the
+                // refusal of LOSAT's follows) and to standard error with its report calls only
+                // the batch's query warnings, which the one call after the loop writes before
+                // the same refusal, so a refusal in a later batch (a stored title, ambiguity
+                // data) finds the same bytes written: the stream acts. Not where the
                 // prefetch reads the taxonomy database: its messages are written with each
                 // batch's report call, which a title's refusal in a later batch's report call
                 // (`database::reported_subjects`) would follow, where the one call after the
                 // loop writes nothing before it.
-                Some(off @ (Off::Titles | Off::Ambiguity))
-                    if !prefetch
-                        && output_formats
-                            .iter()
-                            .any(|format| format.sam_spec().is_some()) =>
-                {
-                    Ok(Ready {
-                        cache: None,
-                        one_batch: false,
-                        sam_despite: Some(off),
-                    })
-                }
+                Some(off @ (Off::Titles | Off::Ambiguity)) if !prefetch && sam => Ok(Ready {
+                    cache: None,
+                    one_batch: false,
+                    sam_despite: Some(off),
+                }),
                 Some(off) => Err(off),
                 None => Ok(Ready {
                     cache: None,

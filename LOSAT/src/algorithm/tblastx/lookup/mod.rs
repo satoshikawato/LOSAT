@@ -33,9 +33,13 @@ pub use backbone::{
     build_direct_lookup, build_ncbi_lookup, BackboneCell, BackboneCell16, BlastAaLookupTable,
     XCell, XHit, AA_HITS_PER_CELL,
 };
+// LOSAT_X_TBNLUTLEAN: the summary line `main` prints at exit (re-exported by `tblastn`). No NCBI
+// counterpart: it prints counters and changes no value NCBI computes.
+pub use backbone::x_tbn_lut_print_summary;
 pub(crate) use backbone::{
-    build_ncbi_lookup_for_profile, prepare_blosum62_lookup_query_for_word_size,
-    x_lookup_contexts_for_profile, x_lookup_table_for_profile,
+    build_ncbi_lookup_for_profile, ideal_karlin_params_of,
+    prepare_blosum62_lookup_query_for_word_size, x_lookup_contexts_for_profile,
+    x_lookup_query_for_profile, x_lookup_table_for_profile,
 };
 
 use crate::stats::KarlinParams;
@@ -232,7 +236,7 @@ pub(crate) use backbone::{XAaSpares, XBpLookup};
 // The comparison of two tables, for the unit tests (lookup/x_lut_direct.rs).
 #[cfg(test)]
 pub(crate) use backbone::{x_assert_same_table_as, x_same_table};
-// LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
+// The BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
 // by searches of two threads or more; x_lut_direct.rs).
 pub(crate) use backbone::{x_bx_pooled_for, x_give_back_pooled};
 

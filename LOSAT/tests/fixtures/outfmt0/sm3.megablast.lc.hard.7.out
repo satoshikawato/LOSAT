@@ -1,0 +1,9 @@
+# BLASTN 2.17.0+
+# Query: qn1 lcase
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/x16n_lcase_s.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+qn1	sn1	96.875	160	5	0	41	200	56	215	5.03e-76	268
+qn1	sn2	86.190	210	23	2	231	440	254	51	3.97e-62	222
+qn1	sn2	85.890	163	20	2	41	200	447	285	1.46e-46	171
+# BLAST processed 1 queries

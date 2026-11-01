@@ -9,7 +9,7 @@ const { inspectArtifact, prepareArtifact, unsignedWasiImports, createSharedMemor
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Keep the parallel command's memory operations valid across V8 isolates.
-const { guardSharedMemory } = require("./wasi_shared_memory");
+const { guardSharedMemory, guardRecord } = require("./wasi_shared_memory");
 // The table of the files the command opens (wasi_files.js).
 const { sharedFileTable, sharedFileImports, sharedFileViews } = require("./wasi_files");
 
@@ -208,6 +208,9 @@ function pruneGuardCache(dir) {
 }
 
 function guardSharedMemoryCached(bytes, inputSha256 = sha256(bytes)) {
+  // An artifact guarded at build time (`wasi_shared_memory.js guard`) runs as it is: there is
+  // nothing to compute, and nothing is written to the cache.
+  if (guardRecord(bytes) !== null) return { ...guardSharedMemory(bytes), cache: "guarded" };
   const named = process.env.LOSAT_WASI_GUARD_CACHE;
   if (named === "0") return { ...guardSharedMemory(bytes), cache: "off" };
   if (named === "") throw new Error("LOSAT_WASI_GUARD_CACHE must name a directory or be 0");
@@ -252,11 +255,21 @@ function guardSharedMemoryCached(bytes, inputSha256 = sha256(bytes)) {
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
+// Host diagnostics only (LOSAT_WASI_THREADS_DEBUG): the guard counts of this run, or of the build.
+function guardSummary(guarded) {
+  if (guarded.fill + guarded.copy === 0 && guarded.record) {
+    return `shared-memory guards: ${guarded.record.fill} fills, ${guarded.record.copy} copies (guarded at build time)`;
+  }
+  return `shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies`;
+}
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
 // Apply the same shared-memory compatibility guard before main or worker
 // compilation. Workers normally receive this already compiled module.
 async function compileThreadedModule(wasmPath) {
   const guarded = guardSharedMemory(fs.readFileSync(wasmPath));
-  debug(`shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies`);
+  debug(guardSummary(guarded));
   return WebAssembly.compile(guarded.bytes);
 }
 
@@ -501,7 +514,7 @@ async function prepareThreadHost(wasmPath, kind) {
   const identity = prepareArtifact(bytes, kind, module, inputSha256).identity;
   const timings = { read_and_hash_seconds: (inspected-start)/1000, guard_seconds: (guardedAt-inspected)/1000,
     guarded_compile_seconds: (performance.now()-guardedAt)/1000 };
-  debug(`shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies`);
+  debug(guardSummary(guarded));
   return { identity, timings, create: (argv = [], options = {}) =>
     instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) };
 }

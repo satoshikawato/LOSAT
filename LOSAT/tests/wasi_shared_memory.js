@@ -18,6 +18,19 @@
 // Binary encoding: WebAssembly Core spec, binary/modules and binary/instructions.
 // Accept the wasm32 instruction set emitted by this command target; reject
 // unsupported encodings explicitly instead of guessing instruction boundaries.
+//
+// The guarded module carries the custom section GUARD_SECTION (the guard's version and
+// counts). A module that has it is returned as it is, so a host may guard every module it
+// compiles and a module guarded at build time is not guarded twice. The build guards the
+// threaded artifacts with the command line at the end of this file (`guard`, `verify`), so
+// that every host, browsers included, gets guarded bytes (release v0.2.0 DECISIONS 52).
+
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+
+const GUARD_SECTION = "losat.shared_memory_guard";
+const GUARD_VERSION = 1;
+const WASM_HEADER = Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]);
 
 function uleb(value) {
   const bytes = [];
@@ -138,15 +151,48 @@ function guardedBody(copy) {
   ]);
 }
 
-function guardSharedMemory(bytes) {
-  if (!WebAssembly.validate(bytes)) throw new Error("invalid input Wasm module");
+function sectionsOf(bytes) {
   const reader = new Reader(bytes);
   const header = reader.take(8);
+  if (!WASM_HEADER.equals(Buffer.from(header))) throw new Error("not a Wasm 1.0 module");
   const sections = [];
   while (reader.pos < bytes.length) {
     const id = reader.byte();
     sections.push({ id, bytes: reader.take(reader.uint()) });
   }
+  return { header, sections };
+}
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// Host compatibility only. The record of a module that guardSharedMemory wrote:
+// { version, fill, copy }, or null. A module whose encoding cannot be read has none
+// (guardSharedMemory then rejects it as invalid).
+function guardRecord(bytes) {
+  let payload = null;
+  try {
+    for (const s of sectionsOf(bytes).sections) {
+      if (s.id !== 0) continue;
+      const r = new Reader(s.bytes);
+      if (Buffer.from(r.take(r.uint())).toString("utf8") === GUARD_SECTION) payload = s.bytes.subarray(r.pos);
+    }
+  } catch {
+    return null;
+  }
+  if (payload === null) return null;
+  let record;
+  try { record = JSON.parse(Buffer.from(payload).toString("utf8")); } catch { record = null; }
+  const count = (value) => Number.isSafeInteger(value) && value >= 0;
+  if (record === null || typeof record !== "object" || record.version !== GUARD_VERSION
+      || !count(record.fill) || !count(record.copy) || record.fill + record.copy === 0) {
+    throw new Error(`unsupported ${GUARD_SECTION} record: ${Buffer.from(payload).toString("utf8").slice(0, 80)}`);
+  }
+  return { version: record.version, fill: record.fill, copy: record.copy };
+}
+
+// The sections that the guard rewrites, read once for guarding and for verifying.
+function layout(bytes) {
+  const { header, sections } = sectionsOf(bytes);
   const get = (id) => {
     const found = sections.find((s) => s.id === id);
     if (!found) throw new Error(`missing Wasm section ${id}`);
@@ -180,56 +226,167 @@ function guardSharedMemory(bytes) {
   const tr = new Reader(types.bytes);
   const typeCount = tr.uint();
   // One type index per entry (recursive/GC type groups are unsupported).
+  const typeEntries = [];
   for (let i = 0; i < typeCount; i += 1) {
+    const at = tr.pos;
     if (tr.byte() !== 0x60) throw new Error("unsupported Wasm function type");
     for (let j = 0; j < 2; j += 1) {
       const count = tr.uint();
       for (let k = 0; k < count; k += 1) tr.type();
     }
+    typeEntries.push(types.bytes.subarray(at, tr.pos));
   }
   tr.end();
   const functions = get(3);
   const fr = new Reader(functions.bytes);
   const functionCount = fr.uint();
   const functionEntries = functions.bytes.subarray(fr.pos);
+  const functionTypes = [];
+  for (let i = 0; i < functionCount; i += 1) functionTypes.push(fr.uint());
+  fr.end();
   const code = get(10);
   const cr = new Reader(code.bytes);
   if (cr.uint() !== functionCount) throw new Error("Wasm function/code count mismatch");
-  const counts = { fill: 0, copy: 0 };
   const bodies = [];
-  for (let i = 0; i < functionCount; i += 1) {
-    const body = cr.take(cr.uint());
-    const r = new Reader(body);
-    const locals = r.uint();
-    for (let j = 0; j < locals; j += 1) { r.uint(); r.type(); }
+  for (let i = 0; i < functionCount; i += 1) bodies.push(cr.take(cr.uint()));
+  cr.end();
+  return { header, sections, types, typeCount, typeEntries, functions, functionCount, functionEntries,
+    functionTypes, code, bodies, imports };
+}
+
+// Calls `visit(bulk, before, after)` for every instruction of a function body, after its
+// locals; `bulk` is "fill", "copy" or null.
+function walk(body, visit) {
+  const r = new Reader(body);
+  const locals = r.uint();
+  for (let j = 0; j < locals; j += 1) { r.uint(); r.type(); }
+  while (r.pos < body.length) {
+    const before = r.pos;
+    visit(instruction(r), before, r.pos);
+  }
+}
+
+const GUARD_TYPE = Buffer.from([0x60, 3, 0x7f, 0x7f, 0x7f, 0]);
+
+function guardSharedMemory(bytes) {
+  // A module that this guard wrote is returned as it is (nothing guarded by this call).
+  const record = guardRecord(bytes);
+  if (record !== null) return { bytes, fill: 0, copy: 0, record };
+  if (!WebAssembly.validate(bytes)) throw new Error("invalid input Wasm module");
+  const m = layout(bytes);
+  const { types, typeCount, functions, functionCount, functionEntries, code, imports } = m;
+  const counts = { fill: 0, copy: 0 };
+  const bodies = m.bodies.map((body) => {
     const chunks = [];
     let start = 0;
-    while (r.pos < body.length) {
-      const before = r.pos;
-      const bulk = instruction(r);
-      if (bulk) {
-        chunks.push(body.subarray(start, before), Buffer.from([0x10]),
-          uleb(imports + functionCount + (bulk === "copy" ? 1 : 0)));
-        counts[bulk] += 1;
-        start = r.pos;
-      }
-    }
+    walk(body, (bulk, before, after) => {
+      if (!bulk) return;
+      chunks.push(body.subarray(start, before), Buffer.from([0x10]),
+        uleb(imports + functionCount + (bulk === "copy" ? 1 : 0)));
+      counts[bulk] += 1;
+      start = after;
+    });
     chunks.push(body.subarray(start));
-    bodies.push(sized(Buffer.concat(chunks)));
-  }
-  cr.end();
-  if (counts.fill + counts.copy === 0) return { bytes, ...counts };
+    return sized(Buffer.concat(chunks));
+  });
+  if (counts.fill + counts.copy === 0) return { bytes, ...counts, record: null };
   const originalTypes = new Reader(types.bytes);
   originalTypes.uint();
-  types.bytes = Buffer.concat([uleb(typeCount + 1), types.bytes.subarray(originalTypes.pos),
-    Buffer.from([0x60, 3, 0x7f, 0x7f, 0x7f, 0])]);
+  types.bytes = Buffer.concat([uleb(typeCount + 1), types.bytes.subarray(originalTypes.pos), GUARD_TYPE]);
   functions.bytes = Buffer.concat([uleb(functionCount + 2), functionEntries,
     uleb(typeCount), uleb(typeCount)]);
   code.bytes = Buffer.concat([uleb(functionCount + 2), ...bodies,
     sized(guardedBody(false)), sized(guardedBody(true))]);
-  const guarded = Buffer.concat([header, ...sections.map((s) => section(s.id, s.bytes))]);
+  const written = { version: GUARD_VERSION, ...counts };
+  const marker = section(0, Buffer.concat([sized(Buffer.from(GUARD_SECTION)), Buffer.from(JSON.stringify(written))]));
+  const guarded = Buffer.concat([m.header, ...m.sections.map((s) => section(s.id, s.bytes)), marker]);
   if (!WebAssembly.validate(guarded)) throw new Error("invalid guarded Wasm module");
-  return { bytes: guarded, ...counts };
+  return { bytes: guarded, ...counts, record: written };
 }
 
-module.exports = { guardSharedMemory };
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// Host compatibility only. Throws unless `bytes` is a module that guardSharedMemory wrote:
+// its record, the two helpers last with the guard's type and bodies, no memory.fill or
+// memory.copy anywhere else, and as many calls of each helper as the record counts. A host
+// trusts the record; the build checks the artifact it ships with this.
+function verifyGuarded(bytes) {
+  const record = guardRecord(bytes);
+  if (record === null) throw new Error(`the module has no ${GUARD_SECTION} section`);
+  if (!WebAssembly.validate(bytes)) throw new Error("invalid Wasm module");
+  const m = layout(bytes);
+  const n = m.functionCount;
+  if (n < 2) throw new Error("the guard's helpers are missing");
+  const guardType = m.typeEntries.length - 1;
+  if (!GUARD_TYPE.equals(Buffer.from(m.typeEntries[guardType]))
+      || m.functionTypes[n - 2] !== guardType || m.functionTypes[n - 1] !== guardType) {
+    throw new Error("the guard's helpers do not have the guard's type");
+  }
+  if (!Buffer.from(m.bodies[n - 2]).equals(guardedBody(false)) || !Buffer.from(m.bodies[n - 1]).equals(guardedBody(true))) {
+    throw new Error("the guard's helpers are not the guard's bodies");
+  }
+  const helpers = [m.imports + n - 2, m.imports + n - 1];
+  const calls = [0, 0];
+  for (let i = 0; i < n - 2; i += 1) {
+    const body = m.bodies[i];
+    walk(body, (bulk, before) => {
+      if (bulk) throw new Error(`function ${m.imports + i} has an unguarded memory.${bulk}`);
+      if (body[before] !== 0x10) return;
+      const r = new Reader(body);
+      r.pos = before + 1;
+      const target = helpers.indexOf(r.uint());
+      if (target >= 0) calls[target] += 1;
+    });
+  }
+  if (calls[0] !== record.fill || calls[1] !== record.copy) {
+    throw new Error(`the record counts ${record.fill} fills and ${record.copy} copies, the code calls the helpers ${calls[0]} and ${calls[1]} times`);
+  }
+  return record;
+}
+
+const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+
+// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// CATCH_ALL(status); return status;
+// Build step: `guard <input.wasm> <output.wasm>` writes the guarded module (through a
+// temporary file and a rename) and prints its record as JSON; `verify <file.wasm>` checks a
+// guarded module. Either exits 1 with the reason, and `guard` writes nothing, when the
+// module cannot be guarded (an encoding the reader declines), has nothing to guard, or does
+// not verify: a build never ships an unguarded threaded module without noticing.
+function main(argv) {
+  const [command, input, output] = argv;
+  if (command === "guard" && input && output && argv.length === 3) {
+    const bytes = fs.readFileSync(input);
+    const result = guardSharedMemory(bytes);
+    if (result.record === null) {
+      throw new Error(`${input}: no memory.fill or memory.copy to guard (is it a threaded module?)`);
+    }
+    verifyGuarded(result.bytes);
+    const temp = `${output}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`;
+    try {
+      fs.writeFileSync(temp, result.bytes, { flag: "wx" });
+      fs.renameSync(temp, output);
+    } catch (err) {
+      fs.rmSync(temp, { force: true });
+      throw err;
+    }
+    return { input_sha256: sha256(bytes), output_sha256: sha256(result.bytes), output_bytes: result.bytes.length,
+      ...result.record, guarded_before: result.fill + result.copy === 0, guard_sha256: sha256(fs.readFileSync(__filename)) };
+  }
+  if (command === "verify" && input && argv.length === 2) {
+    const bytes = fs.readFileSync(input);
+    return { sha256: sha256(bytes), output_bytes: bytes.length, ...verifyGuarded(bytes) };
+  }
+  throw new Error("usage: wasi_shared_memory.js guard <input.wasm> <output.wasm> | verify <file.wasm>");
+}
+
+if (require.main === module) {
+  try {
+    process.stdout.write(`${JSON.stringify(main(process.argv.slice(2)))}\n`);
+  } catch (err) {
+    process.stderr.write(`wasi_shared_memory.js: ${err.message}\n`);
+    process.exitCode = 1;
+  }
+}
+
+module.exports = { guardSharedMemory, guardRecord, verifyGuarded, GUARD_SECTION };

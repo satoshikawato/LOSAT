@@ -9,6 +9,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -952,6 +953,39 @@ class AggregateTests(unittest.TestCase):
                 self.run_aggregate(contract, root / "inputs", root / "outputs")
 
 
+# A module with an imported shared memory and one memory.fill (WebAssembly Core binary format).
+def _section(section_id: int, payload: bytes) -> bytes:
+    return bytes([section_id, len(payload)]) + payload
+
+
+_FILL_MODULE = (
+    b"\x00asm\x01\x00\x00\x00"
+    + _section(1, bytes([1, 0x60, 3, 0x7F, 0x7F, 0x7F, 0]))
+    + _section(2, bytes([1, 3]) + b"env" + bytes([6]) + b"memory" + bytes([2, 3, 1, 4]))
+    + _section(3, bytes([1, 0]))
+    + _section(10, bytes([1, 11, 0, 0x20, 0, 0x20, 1, 0x20, 2, 0xFC, 11, 0, 0x0B]))
+)
+
+
+class ThreadedGuardTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "needs Node.js")
+    def test_threaded_artifact_must_carry_a_verified_shared_memory_guard(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        raw, guarded = Path(temp.name) / "raw.wasm", Path(temp.name) / "guarded.wasm"
+        raw.write_bytes(_FILL_MODULE)
+        with self.assertRaisesRegex(release.ReleaseFailure, "no verified shared-memory guard"):
+            release.threaded_guard_record("node", REPO_ROOT, raw)
+        subprocess.run(
+            ["node", str(REPO_ROOT / "LOSAT/tests/wasi_shared_memory.js"), "guard", str(raw), str(guarded)],
+            check=True,
+            capture_output=True,
+        )
+        record = release.threaded_guard_record("node", REPO_ROOT, guarded)
+        self.assertEqual((record["version"], record["fill"], record["copy"]), (1, 1, 0))
+        self.assertEqual(record["sha256"], hashlib.sha256(guarded.read_bytes()).hexdigest())
+
+
 class WorkflowTests(unittest.TestCase):
     @unittest.skipUnless(WORKFLOW_PATH.exists(), "PR 3 adds the workflow")
     def test_release_workflow_is_manual_read_only_and_non_publishing(self) -> None:
@@ -974,6 +1008,9 @@ class WorkflowTests(unittest.TestCase):
         ):
             self.assertIn(target, workflow)
         self.assertIn("prepare_release_candidate_v020.py", workflow)
+        # The threaded artifact is assembled from the guarded module.
+        self.assertIn("node LOSAT/tests/wasi_shared_memory.js guard", workflow)
+        self.assertIn("--binary .tmp/release-readiness/threaded-guarded/losat.wasm", workflow)
 
 
 if __name__ == "__main__":

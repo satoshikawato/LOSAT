@@ -419,6 +419,33 @@ test("the default guard cache directory follows each platform's convention", () 
   assert.equal(defaultGuardCacheDir({}, "win32"), path.join(home, "AppData", "Local", "losat", "wasi-guard"));
 });
 
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// An artifact guarded at build time (`wasi_shared_memory.js guard`) runs as it is: the host
+// does not guard it again and writes nothing to the guard cache.
+test("the host runs an artifact guarded at build time as it is, without a guard cache entry", () => {
+  const { guardSharedMemory } = require("./wasi_shared_memory");
+  const { guardSharedMemoryCached } = require("./wasi_thread_host");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-built-"));
+  try {
+    const bytes = spawner(2, { bulk: true });
+    const built = guardSharedMemory(bytes).bytes;
+    const reference = runThreaded(bytes, [], { LOSAT_WASI_GUARD_CACHE: "0" });
+    assert.equal(reference.status, 3, reference.stderr);
+    const cache = path.join(directory, "cache");
+    const result = runThreaded(built, [], { LOSAT_WASI_GUARD_CACHE: cache, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(result.status, 3, result.stderr);
+    assert.equal(result.stdout, reference.stdout);
+    assert.match(result.stderr, /shared-memory guards: 1 fills, 1 copies \(guarded at build time\)/);
+    assert.doesNotMatch(result.stderr, /guard cache/);
+    assert.equal(fs.existsSync(cache), false);
+    const cached = guardSharedMemoryCached(built);
+    assert.deepEqual([cached.cache, cached.bytes, cached.fill, cached.copy], ["guarded", built, 0, 0]);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("the guard cache keeps the entries used last", () => {
   const { guardSharedMemoryCached } = require("./wasi_thread_host");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-keep-"));

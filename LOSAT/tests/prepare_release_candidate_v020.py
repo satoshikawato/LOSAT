@@ -429,6 +429,26 @@ def check_smoke_record(record: object, contract: dict[str, object], label: str) 
         raise ReleaseFailure(f"smoke record of {label} differs from the contract")
 
 
+# NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+# CATCH_ALL(status); return status;
+# Host compatibility only: the threaded Wasm artifact is published with the shared-memory
+# guard (`LOSAT/tests/wasi_shared_memory.js guard`, release v0.2.0 DECISIONS 52), so that
+# browser hosts run guarded bytes too. An artifact whose guard does not verify is refused.
+def threaded_guard_record(node: str, repo_root: Path, binary: Path) -> dict[str, object]:
+    result = subprocess.run(
+        [node, str(repo_root / "LOSAT/tests/wasi_shared_memory.js"), "verify", str(binary)],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        raise ReleaseFailure(
+            f"the threaded Wasm artifact has no verified shared-memory guard: {result.stderr.strip()}"
+        )
+    return json.loads(result.stdout)
+
+
 def assemble_binary(args: argparse.Namespace, kind: str) -> None:
     repo_root = args.repo_root.resolve()
     output_dir = args.output_dir.resolve()
@@ -450,6 +470,7 @@ def assemble_binary(args: argparse.Namespace, kind: str) -> None:
         node=args.node if kind == "wasm" else None,
     )
     wasm_identity: object = None
+    guard_record: object = None
     runner: Path | None = None
     if kind == "native":
         observed_architecture = binary_architecture(binary)
@@ -489,6 +510,8 @@ def assemble_binary(args: argparse.Namespace, kind: str) -> None:
                 f"invalid {WASM_KIND_BY_TARGET[args.target]} artifact: {inspection.stderr.strip()}"
             )
         wasm_identity = json.loads(inspection.stdout)
+        if args.target == "wasm32-wasip1-threads":
+            guard_record = threaded_guard_record(args.node, repo_root, binary)
         observed_architecture = "wasm32"
         command_prefix = wasm_command_prefix(args.node, runner, binary)
 
@@ -534,6 +557,8 @@ def assemble_binary(args: argparse.Namespace, kind: str) -> None:
     if kind == "wasm":
         metadata["binary"]["wasi_identity"] = wasm_identity
         metadata["binary"]["runner_script"] = spec["runner_script"]
+        if args.target == "wasm32-wasip1-threads":
+            metadata["binary"]["shared_memory_guard"] = guard_record
     entries = archive_entries(
         repo_root, root_name, str(spec["binary_name"]), binary, metadata
     )

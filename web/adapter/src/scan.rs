@@ -53,12 +53,47 @@ pub struct ScanRecord {
     pub layout: LineLayout,
     /// Count of every byte value in the sequence (kinds 1 and 2: the stored residues,
     /// upper-cased).
-    pub residue_counts: Box<[u64; 256]>,
+    pub residue_counts: ResidueCounts,
+}
+
+/// The byte values that occur in a sequence with their counts, in byte order. A record keeps
+/// these alone: a table of all 256 values for each record was 2 KiB per record until the scan's
+/// response is written, 57 of the 148 MiB that `register` took on 28,000 16S sequences, and the
+/// linear memory does not shrink (docs/web/abi_v2.md §6).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ResidueCounts(Box<[(u8, u64)]>);
+
+impl ResidueCounts {
+    pub fn from_table(table: &[u64; 256]) -> Self {
+        Self(
+            (0u8..=255)
+                .zip(table)
+                .filter(|&(_, &count)| count != 0)
+                .map(|(byte, &count)| (byte, count))
+                .collect(),
+        )
+    }
+
+    /// The byte values that occur and their counts, in byte order.
+    pub fn iter(&self) -> impl Iterator<Item = (u8, u64)> + '_ {
+        self.0.iter().copied()
+    }
+
+    /// The count of every byte value.
+    pub fn table(&self) -> [u64; 256] {
+        let mut table = [0; 256];
+        for (byte, count) in self.iter() {
+            table[byte as usize] = count;
+        }
+        table
+    }
 }
 
 /// Per-record state while its sequence lines are read.
 struct RecordBuilder {
     record: ScanRecord,
+    /// The counts of the residues committed so far (`ScanRecord::residue_counts` at the end).
+    residue_counts: Box<[u64; 256]>,
     /// The header had a description (the text after the ID).
     has_description: bool,
     /// Residues committed on the current line.
@@ -84,8 +119,9 @@ impl RecordBuilder {
                 end_offset: sequence_offset,
                 length: 0,
                 layout: LineLayout::Uniform { width: 0, eol: 1 },
-                residue_counts: Box::new([0; 256]),
+                residue_counts: ResidueCounts::default(),
             },
+            residue_counts: Box::new([0; 256]),
             has_description,
             line_residues: 0,
             uniform: None,
@@ -108,7 +144,7 @@ impl RecordBuilder {
             next += CHECKPOINT_EVERY;
         }
         for &byte in bytes {
-            self.record.residue_counts[byte as usize] += 1;
+            self.residue_counts[byte as usize] += 1;
         }
         self.record.length += count;
         self.line_residues += count;
@@ -161,6 +197,7 @@ impl RecordBuilder {
 
     fn finish(mut self, end_offset: u64) -> (ScanRecord, bool) {
         self.record.end_offset = end_offset;
+        self.record.residue_counts = ResidueCounts::from_table(&self.residue_counts);
         self.record.layout = match (self.uniform_possible, self.uniform) {
             (true, Some((width, eol))) => LineLayout::Uniform { width, eol },
             (true, None) => LineLayout::Uniform { width: 0, eol: 1 },
@@ -480,17 +517,14 @@ pub fn to_json(records: &[ScanRecord]) -> String {
         }
         out.push_str(",\"residue_counts\":{");
         let mut first = true;
-        for (byte, &count) in record.residue_counts.iter().enumerate() {
-            if count == 0 {
-                continue;
-            }
+        for (byte, count) in record.residue_counts.iter() {
             if !first {
                 out.push(',');
             }
             first = false;
             // Printable ASCII residues are their own keys; other bytes are "0xNN".
             let key = if (0x21..=0x7e).contains(&byte) {
-                (byte as u8 as char).to_string()
+                (byte as char).to_string()
             } else {
                 format!("0x{byte:02x}")
             };

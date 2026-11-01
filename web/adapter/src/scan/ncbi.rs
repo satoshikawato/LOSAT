@@ -42,7 +42,7 @@
 //!   (`Forward`), which happens only where NCBI's line reader joins two lines of the file
 //!   (a CR line end inside a file of LF line ends, or the reverse).
 
-use super::{LineLayout, ScanRecord, CHECKPOINT_EVERY};
+use super::{LineLayout, ResidueCounts, ScanRecord, CHECKPOINT_EVERY};
 
 /// Bytes of a regular file that an `ifstream` buffers at once (`FastaStream::new` in
 /// `LOSAT/src/blastinput/fasta_reader/stream.rs`, checked against an independent C++ oracle).
@@ -1041,7 +1041,7 @@ impl Builder {
             end_offset,
             length: self.length,
             layout,
-            residue_counts: self.residue_counts,
+            residue_counts: ResidueCounts::from_table(&self.residue_counts),
         })
     }
 }

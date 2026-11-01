@@ -904,7 +904,7 @@ fn check_record(
         counts[residue as usize] += 1;
     }
     assert_eq!(
-        *got.residue_counts, counts,
+        got.residue_counts.table(), counts,
         "{context}: residue counts {index}"
     );
     assert_eq!(&got.layout, layout, "{context}: layout {index}");

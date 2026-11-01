@@ -216,7 +216,7 @@ fn check_scan(
         }
         scan.id == record_id(record.title())
             && scan.length == record.seq().len() as u64
-            && *scan.residue_counts == counts
+            && scan.residue_counts.table() == counts
     };
     if scanned.len() != records.len()
         || scanned
@@ -294,7 +294,9 @@ mod tests {
         longer[0].length += 1;
         assert!(check_scan("query", &longer, &records).is_err());
         let mut recounted = scanned.clone();
-        recounted[0].residue_counts[b'A' as usize] += 1;
+        let mut table = recounted[0].residue_counts.table();
+        table[b'A' as usize] += 1;
+        recounted[0].residue_counts = scan::ResidueCounts::from_table(&table);
         assert!(check_scan("query", &recounted, &records).is_err());
     }
 

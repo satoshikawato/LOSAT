@@ -216,7 +216,7 @@ fn check_scan(
         }
         scan.id == record_id(record.title())
             && scan.length == record.seq().len() as u64
-            && scan.residue_counts.table() == counts
+            && scan.residue_counts.equals_table(&counts)
     };
     if scanned.len() != records.len()
         || scanned

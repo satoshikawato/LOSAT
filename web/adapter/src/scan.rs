@@ -65,13 +65,19 @@ pub struct ResidueCounts(Box<[(u8, u64)]>);
 
 impl ResidueCounts {
     pub fn from_table(table: &[u64; 256]) -> Self {
-        Self(
-            (0u8..=255)
-                .zip(table)
-                .filter(|&(_, &count)| count != 0)
-                .map(|(byte, &count)| (byte, count))
-                .collect(),
-        )
+        let mut counts = Vec::with_capacity(table.iter().filter(|&&count| count != 0).count());
+        for (byte, &count) in table.iter().enumerate() {
+            if count != 0 {
+                counts.push((byte as u8, count));
+            }
+        }
+        Self(counts.into_boxed_slice())
+    }
+
+    /// Whether these are the counts of `table`.
+    pub fn equals_table(&self, table: &[u64; 256]) -> bool {
+        self.0.len() == table.iter().filter(|&&count| count != 0).count()
+            && self.iter().all(|(byte, count)| table[byte as usize] == count)
     }
 
     /// The byte values that occur and their counts, in byte order.

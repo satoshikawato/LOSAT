@@ -161,9 +161,9 @@ records the search as failed and goes on with the next round in a new process.
   run locally with the toolchain capture mocked and `--allow-unfilled-lineage` (guarded: `WASM_ARTIFACT_READY`, smoke 5/5;
   unguarded: refused with "no verified shared-memory guard"; `verify_release_archive_v020.py`
   passes the guarded archive).
-- `release-readiness-v020.yml` on GitHub. `wasm-threading.yml` passed on the branch at aaf15116a
-  (run 41303426863); both threaded artifacts of that run verify (`losat-threaded-command.wasm`
-  `eb75215caf76f336...`, `losat-threaded-reactor.wasm` `5d113fa43ffd2d5f...`).
+- `release-readiness-v020.yml` on GitHub. `wasm-threading.yml` passed on the branch at a4e0e6785
+  (run 41311290599); both threaded artifacts of that run verify (`losat-threaded-command.wasm`
+  `36b3bb99df7e6f38...`, `losat-threaded-reactor.wasm` `200182cfe21d209c...`).
 - LOSAT Web reactors built from this branch's head (the step-1 runs used `dev` 5ce40a9e0;
   the guard is applied by the Vite build in both).
 - gbdraw's own port (`gbdraw/web/js/services/losat-shared-memory-guard.js`) does not know the

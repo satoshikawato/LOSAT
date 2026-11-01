@@ -5,7 +5,7 @@
 //! What differs from the search of a FASTA subject set (`-subject`):
 //!
 //! - the subjects are the database's sequences, each read where it is searched, as packed
-//!   subjects (`TblastnDatabase::x_stream`, `x_db_stream.rs`): the preliminary stage translates the stored
+//!   subjects (`TblastnDatabase::x_stream`, `common/x_db_stream.rs`): the preliminary stage translates the stored
 //!   2-bit data (makeblastdb's bases for the ambiguous ones, NCBI's preliminary input) and
 //!   the traceback and the reports read the stored ambiguity codes; the search's subject
 //!   index is the ordinal id;
@@ -27,6 +27,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use crate::algorithm::common::database::{self as shared, ParsedShown, ReportedHeader};
+use crate::algorithm::common::x_db_stream::XDbStream;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::db_subject::ParsedSubject;
@@ -38,7 +39,7 @@ use super::stage_d_pipeline::DatabaseNumbers;
 use super::stage_d_results::KappaResultHitList;
 
 /// The program that LOSAT's refusals name.
-pub(super) const PROGRAM: &str = "TBLASTN";
+const PROGRAM: &str = "TBLASTN";
 
 /// The database of a `-db` search: the opened database and its name as NCBI keeps it
 /// (`TblastnArgs::database_name`: the `-db` value without white space at its ends).
@@ -249,9 +250,9 @@ impl TblastnDatabase {
     }
 
     /// The database read where it is searched by `threads` threads, after the checks of
-    /// `common::database::x_check_nucleotide_stores` (`x_db_stream.rs`).
-    pub(super) fn x_stream(&self, threads: usize) -> Result<super::x_db_stream::XDbStream<'_>> {
-        super::x_db_stream::XDbStream::new(&self.db, threads)
+    /// `common::database::x_check_nucleotide_stores` (`common/x_db_stream.rs`).
+    pub(super) fn x_stream(&self, threads: usize) -> Result<XDbStream<'_>> {
+        XDbStream::new(&self.db, threads, PROGRAM)
     }
 }
 

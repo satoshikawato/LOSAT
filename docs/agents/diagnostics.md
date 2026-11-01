@@ -6642,7 +6642,7 @@ Scheduling (each value computed by one thread with the original function; order 
   and no `[X_SHADOW] TBNDBSTREAM` line; always on; every `-db` search) (TBLASTN `-db`, memory): the search reads each
   database sequence where it searches it instead of the copy of
   the whole database that `TblastnDatabase::read_stores` made before the first query batch (`read_stores` is deleted;
-  `common::database::read_nucleotide_stores` stays for TBLASTX; `tblastn/x_db_stream.rs`, exactness argument in its header). The database is checked once before the first batch
+  `common::database::read_nucleotide_stores` stays for TBLASTX; `common/x_db_stream.rs`, exactness argument in its header). The database is checked once before the first batch
   with the blocks and checks of the copy (`common::database::x_check_nucleotide_stores`: the same error fails the
   same batch with the same text; a block of one sequence, a long one, is checked from its last 2-bit byte and its
   ambiguity data, `SeqDb::x_nucleotide_check`) and only the lengths of its sequences are kept. The preliminary search reads a

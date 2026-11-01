@@ -6291,7 +6291,7 @@ fn post_process_hits_and_write(
     let pairwise_hits = if outputs.hits.is_some()
         || (outputs.observer.is_some() && output_formats.contains(&BlastnOutputFormat::Pairwise))
     {
-        Some(rows_of(0..hit_lists.len())?)
+        Some(Arc::new(rows_of(0..hit_lists.len())?))
     } else {
         None
     };
@@ -6301,7 +6301,7 @@ fn post_process_hits_and_write(
     // ```
     // The caller receives the same final result that every formatter prints.
     if let (Some(hits_sink), Some(hits)) = (outputs.hits.as_mut(), pairwise_hits.as_ref()) {
-        hits_sink(hits);
+        hits_sink(Arc::clone(hits));
     }
     // Built before any format is written, so that a report that cannot be made fails the
     // run without output.

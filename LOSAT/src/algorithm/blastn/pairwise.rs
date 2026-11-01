@@ -350,6 +350,11 @@ fn context_rows_into(
     let subject = subject_letters(ss, se);
     let ungapped = [GapEditOp::Sub((qe - qs) as u32)];
     let ops = hsp.gap_info.as_deref().unwrap_or(&ungapped);
+    // The rows live in a `PairwiseHit` while the reports are written: their exact size, not
+    // what growing leaves (a third more on the alignments of the BLASTN hit records).
+    let columns = ops.iter().map(|op| op.num() as usize).sum();
+    query_row.reserve_exact(columns);
+    subject_row.reserve_exact(columns);
     // Offsets into the two segments.
     let (mut q, mut s) = (0, 0);
     for op in ops {

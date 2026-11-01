@@ -2131,8 +2131,9 @@ fn write_tblastx_outputs(
         &run.ranges.input.placements,
         run.ranges.subject_placements,
     );
+    let pairwise = pairwise.map(std::sync::Arc::new);
     if let (Some(hits_sink), Some(pairwise)) = (outputs.hits.as_mut(), pairwise.as_ref()) {
-        hits_sink(pairwise);
+        hits_sink(std::sync::Arc::clone(pairwise));
     }
     // Built before any format is written, so that a report that cannot be made fails the
     // run without output (`tabular_subject_ids`).

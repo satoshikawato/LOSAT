@@ -293,7 +293,7 @@ pub(super) fn render(
             .iter()
             .any(|format| format_number(format.outfmt) == 0)
     {
-        Some(pairwise_hits(
+        Some(std::sync::Arc::new(pairwise_hits(
             query_records,
             subject_records,
             subject_letters,
@@ -303,13 +303,13 @@ pub(super) fn render(
             seg,
             mask_lowercase,
             ranges,
-        )?)
+        )?))
     } else {
         None
     };
     if let (Some(hits_sink), Some(pairwise_hits)) = (outputs.hits.as_mut(), pairwise_hits.as_ref())
     {
-        hits_sink(pairwise_hits);
+        hits_sink(std::sync::Arc::clone(pairwise_hits));
     }
     // The warnings of each query are written before its report, once, with the first
     // format (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the

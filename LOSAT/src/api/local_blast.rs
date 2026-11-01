@@ -243,6 +243,9 @@ impl<'o> FormatProbe<'o> {
     }
 }
 
+/// The receiver of the final hit list (`ReportOutputs::hits`).
+pub type HitsSink<'a> = dyn FnMut(std::sync::Arc<Vec<PairwiseHit>>) + Send + 'a;
+
 // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:195-295
 // ```c
 // CRef<CLocalDbAdapter> db_adapter;
@@ -283,8 +286,9 @@ pub struct ReportOutputs<'a> {
     pub diagnostics: &'a mut (dyn Write + Send),
     /// Receives the final, sorted hit list with rendered alignments, once per call. It may come
     /// before or after the reports are written (blastp's query blocks hand it over after the
-    /// last block, `LOSAT_X_BPQBLOCK`).
-    pub hits: Option<&'a mut (dyn FnMut(&[PairwiseHit]) + Send)>,
+    /// last block, `LOSAT_X_BPQBLOCK`). The list is shared, not copied: it holds an alignment's
+    /// rows for every HSP, which the reports read while the caller keeps it for its records.
+    pub hits: Option<&'a mut HitsSink<'a>>,
     /// Receives the row and section boundaries of each HSP in each format. The events of one
     /// format come in that format's write order; those of different formats may interleave in
     /// any order (blastp's query blocks write every format block by block).
@@ -321,7 +325,7 @@ impl ReportOutputs<'_> {
             diagnostics: &mut tee,
             hits: hits
                 .as_mut()
-                .map(|hits| &mut **hits as &mut (dyn FnMut(&[PairwiseHit]) + Send)),
+                .map(|hits| &mut **hits as &mut HitsSink<'_>),
             observer: observer
                 .as_mut()
                 .map(|observer| &mut **observer as &mut (dyn FormatObserver + Send)),

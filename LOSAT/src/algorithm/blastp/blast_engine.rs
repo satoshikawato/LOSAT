@@ -6106,15 +6106,10 @@ fn search(
                     let records_before = x_records.as_ref().map_or(0, Vec::len);
                     let x_first_query =
                         u32::try_from(block.start).expect("a query index of the call fits q_idx");
-                    let mut x_collect = |found: &[PairwiseHit]| {
-                        if let Some(records) = x_records.as_mut() {
-                            records.extend(found.iter().map(|record| {
-                                let mut record = record.clone();
-                                record.hit.q_idx += x_first_query;
-                                record
-                            }));
-                        }
-                    };
+                    // The block's rows, shared with its reports until the block has ended.
+                    let mut x_found = Vec::new();
+                    let mut x_collect =
+                        |found: std::sync::Arc<Vec<PairwiseHit>>| x_found.push(found);
                     // EXPERIMENT (LOSAT_X_BPQBLOCK): the caller's observer with the block's HSP
                     // indices moved past the blocks before.
                     let mut x_offset = observer.as_deref_mut().map(|inner| XOffsetObserver {
@@ -6132,7 +6127,7 @@ fn search(
                             .collect(),
                         diagnostics: &mut **diagnostics,
                         hits: x_want_records
-                            .then_some(&mut x_collect as &mut (dyn FnMut(&[PairwiseHit]) + Send)),
+                            .then_some(&mut x_collect as &mut crate::api::local_blast::HitsSink<'_>),
                         observer: x_offset
                             .as_mut()
                             .map(|offset| offset as &mut (dyn FormatObserver + Send)),
@@ -6168,6 +6163,17 @@ fn search(
                         )
                     })?;
                     drop(block_outputs);
+                    if let Some(records) = x_records.as_mut() {
+                        for found in x_found {
+                            // The block has ended, its reports hold no row: the rows move here.
+                            let found = std::sync::Arc::try_unwrap(found)
+                                .unwrap_or_else(|shared| shared.as_ref().clone());
+                            records.extend(found.into_iter().map(|mut record| {
+                                record.hit.q_idx += x_first_query;
+                                record
+                            }));
+                        }
+                    }
                     x_hsps_before += x_records.as_ref().map_or(0, Vec::len) - records_before;
                 }
                 for sink in &mut sinks {
@@ -6177,8 +6183,8 @@ fn search(
             })?;
         if searched_in_blocks {
             // EXPERIMENT (LOSAT_X_BPQBLOCK): the hit records of all queries, once.
-            if let (Some(sink), Some(records)) = (hits.as_mut(), x_records.as_ref()) {
-                sink(records);
+            if let (Some(sink), Some(records)) = (hits.as_mut(), x_records.take()) {
+                sink(std::sync::Arc::new(records));
             }
             return Ok(());
         }
@@ -11076,9 +11082,10 @@ fn run_resolved_in_pool(
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
     // ```
     // The caller receives the same final result that every formatter prints.
+    let pairwise_hits = pairwise_hits.map(std::sync::Arc::new);
     if let (Some(hits_sink), Some(pairwise_hits)) = (outputs.hits.as_mut(), pairwise_hits.as_ref())
     {
-        hits_sink(pairwise_hits);
+        hits_sink(std::sync::Arc::clone(pairwise_hits));
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1553-1554
@@ -11978,7 +11985,10 @@ fn run_resolved_in_pool(
                     subjects: tabular_subjects,
                     unsearched: &query_batch_skipped,
                     hits_found: psiblast_hits_found.as_deref(),
-                    rows: needs.rows.then_some(pairwise_hits.as_deref()).flatten(),
+                    rows: needs
+                        .rows
+                        .then_some(pairwise_hits.as_deref().map(Vec::as_slice))
+                        .flatten(),
                     prolog: reports.x_prolog,
                     epilog: reports
                         .epilog

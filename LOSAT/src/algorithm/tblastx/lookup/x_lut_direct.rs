@@ -1589,11 +1589,12 @@ fn x_build_direct_in<C: XVec>(
 // at `x_build_direct`): the appends of s_AddWordHits for s ascending, then BlastAaLookupFinalize's
 // layout. No NCBI counterpart for the form (memory only): the passes of `x_build_direct_in` with
 // every temporary freed by the build. TBLASTN builds the table of each query batch on the thread
-// of the batch's first subject, the batches side by side; a thread's glibc arena keeps the high
-// water of what the thread allocated, so the reference build's chains, exact backbone and cell
-// vectors (3.4 MiB for 18,000 query letters) stayed in each building thread's arena under what
-// its search allocated later. Here the exact backbone is the counting sort of
-// `x_for_each_exact_word`'s words (as `x_counted_sources`: the sources in ascending cell order,
+// of the batch's first subject (the batches side by side), or on the batch's pool before its
+// subjects (`x_build_lean_in`); a thread's glibc arena keeps the high water of what the thread
+// allocated, so the reference build's chains, exact backbone and cell vectors (3.4 MiB for 18,000
+// query letters) stayed in each building thread's arena under what its search allocated later.
+// Here the exact backbone is the counting sort of `x_for_each_exact_word`'s words (as
+// `x_counted_sources`: the sources in ascending cell order,
 // each one's offsets in chain order), the lists T(s) of the present sources are made once, in
 // source order, into one vector (no memo outlives the build), the count pass runs as each list is
 // made, and the counts become the cells' fill cursors once the layout has read them (a cell of
@@ -1606,6 +1607,7 @@ fn x_build_direct_in<C: XVec>(
 /// memo, every temporary freed by the build (TBLASTN). `Err(prepared)` where `x_build_direct`
 /// declines (diagnostics mode, whose prints read the chains, or a backbone index wider than 16 bits,
 /// which no table of LOSAT's TBLASTN has: word size 3, or 2 with BLOSUM45).
+#[cfg(test)]
 #[inline(never)]
 pub(super) fn x_build_lean(
     prepared: PreparedLookupQuery,
@@ -1884,7 +1886,8 @@ const X_CLAIM_SPINS: u32 = 1 << 12;
 // short, and a job taken while waiting, such as another batch's search, could hold the caller far
 // longer than the part; the scope's own wait at its end, for a helper that claimed nothing, can
 // still run one). A part that panics still counts as ended, and the scope raises its panic.
-/// EXPERIMENT (LOSAT_X_BXBUILDPAR): `f(part)` for each part, its results in part order.
+/// `f(part)` for each part, its results in part order: the partitioned build of
+/// EXPERIMENT (LOSAT_X_BXBUILDPAR) and TBLASTN's lean build on a pool (`x_build_lean_in`).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")

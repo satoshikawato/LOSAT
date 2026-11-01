@@ -1133,18 +1133,7 @@ pub(crate) fn x_lookup_contexts_for_profile_in_pool(
     Some(contexts)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
-// ```c
-// BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-//                       &lookup_wrap->lut);
-// ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
-// BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
-//                           query, lookup_segments, 0);
-// ```
-// The table is built from the concatenated query, its lookup segments, the matrix and the
-// threshold; it reads no Karlin parameter. This function skips the Karlin computation and builds
-// the same table (the contexts it fills carry default Karlin parameters, which the table build
-// does not read).
+// No NCBI counterpart: `x_lookup_table_for_profile_in` without a pool (one thread).
 /// The table `build_ncbi_lookup_for_profile` returns, for a caller that drops
 /// the contexts (graduated 2026-10-22, was `LOSAT_X_LUTSPLIT`). The
 /// per-context Karlin parameters are the only part of the preparation the
@@ -1158,6 +1147,18 @@ pub(crate) fn x_lookup_table_for_profile(
     x_lookup_table_for_profile_in(queries, threshold, matrix, word_length, None)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
+// ```c
+// BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+//                       &lookup_wrap->lut);
+// ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+// BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+//                           query, lookup_segments, 0);
+// ```
+// The table is built from the concatenated query, its lookup segments, the matrix and the
+// threshold; it reads no Karlin parameter. This function skips the Karlin computation and builds
+// the same table (the contexts it fills carry default Karlin parameters, which the table build
+// does not read).
 /// `x_lookup_table_for_profile`, the lean build's lists made on `pool`'s threads when it has two or
 /// more (`x_lut_direct::x_build_lean_in`); the same table.
 pub(crate) fn x_lookup_table_for_profile_in(

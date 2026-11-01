@@ -402,17 +402,19 @@ fn x_query_frames_of(query_frames: Vec<QueryFrame>, queries: &[&[u8]]) -> Result
 //                                  query, lookup_segments, 0);
 // ```
 // NCBI builds the lookup table once per query batch. XQuerySide keeps the query frames and the
-// lookup table for all subjects of one query set; the first subject that needs a part builds it,
-// exactly as every subject did before.
+// lookup table for all subjects of one query set. The frames are the ones the batch's setup masked
+// (`x_with_frames`); the table is built before the subjects on a pool of two or more threads
+// (`x_build_lookup_on`), otherwise by the first subject that needs it.
 /// The query-side state of the unit-wise preliminary stage for one query set, shared by all
 /// its subjects (graduated 2026-10-22, was `LOSAT_X_TBNQSIDE`).
 ///
 /// The masked query frames and the neighbourhood lookup table depend on the
 /// queries and the word-finder options, not on the subject, yet the stage is
 /// entered once per subject and rebuilt them every time (NCBI builds its
-/// lookup table once per query batch, `lookup_wrap.c:91-100`). The first
-/// subject that needs a part computes it, exactly as before; the others read
-/// it. One value serves one query set with one set of options only.
+/// lookup table once per query batch, `lookup_wrap.c:91-100`). The frames come
+/// from the batch's setup (`x_with_frames`); the table is built once, before the
+/// subjects (`x_build_lookup_on`) or by the first subject that needs it, and the
+/// others read it. One value serves one query set with one set of options only.
 pub(super) struct XQuerySide {
     frames: std::sync::OnceLock<XQueryFrames>,
     /// Held while `frames` is being made, so that subjects searched at the
@@ -721,8 +723,9 @@ fn x_preliminary_protein_hsps_by_unit(
         &x_query_side.lookup,
         &x_query_side.compressed,
         x_subject,
-        // Without soft masking the frames are the lookup query's (both `encode_tblastn_lookup_query`
-        // with the profile's SEG and lowercase options), masked once for the batch.
+        // Without soft masking the frames are the lookup query's (both
+        // `encode_tblastn_lookup_query` with the profile's SEG and lowercase options), masked once
+        // for the batch.
         (!profile.soft_masking).then_some(query_frames.as_slice()),
     )?
     else {

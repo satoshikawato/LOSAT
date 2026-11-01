@@ -417,12 +417,17 @@ fn x_build_compressed(
     mask_lowercase: bool,
     threshold: i32,
     word_length: usize,
+    // The query set's frames as the table's query, made once for the batch (`x_scan_plan`).
+    x_frames: Option<&[QueryFrame]>,
 ) -> Result<XCompressedLookup> {
     use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_tbn_build_compressed_lookup;
-    let query_frames: Vec<_> = queries
-        .iter()
-        .map(|query| vec![encode_tblastn_lookup_query(query, seg, mask_lowercase)])
-        .collect();
+    let query_frames: Vec<_> = match x_frames {
+        Some(frames) => frames.iter().map(|frame| vec![frame.clone()]).collect(),
+        None => queries
+            .iter()
+            .map(|query| vec![encode_tblastn_lookup_query(query, seg, mask_lowercase)])
+            .collect(),
+    };
     let (query, locations) =
         crate::algorithm::tblastx::lookup::x_lookup_query_for_profile(&query_frames, word_length);
     x_tbn_build_compressed_lookup(
@@ -458,9 +463,18 @@ fn x_compressed_plan_lookup(
     mask_lowercase: bool,
     threshold: i32,
     word_length: usize,
+    x_frames: Option<&[QueryFrame]>,
 ) -> Result<(XPlanLookup, i32)> {
-    let table = x_compressed
-        .table(|| x_build_compressed(queries, seg, mask_lowercase, threshold, word_length))?;
+    let table = x_compressed.table(|| {
+        x_build_compressed(
+            queries,
+            seg,
+            mask_lowercase,
+            threshold,
+            word_length,
+            x_frames,
+        )
+    })?;
     let longest_chain = match &*table {
         XCompressedLookup::Reference(table) => table.longest_chain,
         XCompressedLookup::Flat(table) => table.longest_chain,
@@ -1073,7 +1087,8 @@ pub(super) fn x_scan_plan(
         )
     };
     // The table depends on the query set and the word-finder options only; the first subject that
-    // gets here builds it (`XQuerySide`, was LOSAT_X_TBNQSIDE).
+    // gets here builds it (`XQuerySide`, was LOSAT_X_TBNQSIDE), unless the batch built it before
+    // its subjects (`XQuerySide::x_build_lookup_on`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
     // ```c
     //        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
@@ -1104,6 +1119,7 @@ pub(super) fn x_scan_plan(
             mask_lowercase,
             threshold,
             word_length,
+            x_frames,
         )?
     } else {
         let lookup = std::sync::Arc::clone(x_lookup.get_or_init(x_build_lookup));

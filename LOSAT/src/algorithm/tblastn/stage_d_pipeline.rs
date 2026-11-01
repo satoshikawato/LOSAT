@@ -2354,16 +2354,16 @@ fn query_set_setup(
     // Reuse the Stage C score-frequency calculation on the query bytes after
     // BlastSetUp_MaskQuery, which precedes BlastSetup_ScoreBlkInit at
     // pinned blast_setup.c:614-654.
-    let encode = |query: &Vec<u8>| {
-        // Diagnostic (LOSAT_TIMING): with `marked`, the query's encoding and SEG go to the
+    let encode = |query: &Vec<u8>, timed: bool| {
+        // Diagnostic (LOSAT_TIMING): with `timed`, the query's encoding and SEG go to the
         // common line (utils/xtiming.rs). No NCBI counterpart.
         let frame = if inputs.profile.soft_masking {
-            if marked {
+            if timed {
                 encode_protein_query_frame_with_seg_timed(query, None)
             } else {
                 encode_protein_query_frame_with_seg(query, None)
             }
-        } else if marked {
+        } else if timed {
             super::search_seed::encode_tblastn_lookup_query_timed(
                 query,
                 inputs.profile.seg,
@@ -2385,15 +2385,25 @@ fn query_set_setup(
     let working_frames: Vec<_> = match x_pool {
         Some(pool) => {
             use rayon::prelude::*;
-            pool.install(|| queries.par_iter().map(encode).collect())
+            // Diagnostic (LOSAT_TIMING): with `marked`, the queries' encoding and SEG on the pool
+            // as one interval of this thread (`seg`; the timed encoders mark the calling thread's
+            // own intervals). No NCBI counterpart.
+            let t_seg = if marked {
+                crate::utils::xtiming::clock()
+            } else {
+                None
+            };
+            let frames = pool.install(|| queries.par_iter().map(|q| encode(q, false)).collect());
+            crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
+            frames
         }
-        None => queries.iter().map(encode).collect(),
+        None => queries.iter().map(|q| encode(q, marked)).collect(),
     };
     #[cfg(not(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     )))]
-    let working_frames: Vec<_> = queries.iter().map(encode).collect();
+    let working_frames: Vec<_> = queries.iter().map(|q| encode(q, marked)).collect();
     // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803;
     // c++/src/algo/blast/core/lookup_wrap.c:91-100:
     // Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
@@ -2412,8 +2422,10 @@ fn query_set_setup(
     // lookup table. x_lookup_contexts_for_profile returns the contexts without building the table,
     // which the search builds where it needs it (lookup_wrap.c:91-100).
     // Diagnostic (LOSAT_TIMING): the query's lookup contexts for the common line
-    // (utils/xtiming.rs), with `marked`. The table the scan reads is built by the first subject
-    // inside the search (`x_scan_plan`), so it is part of `search`. No NCBI counterpart.
+    // (utils/xtiming.rs), with `marked`. The table the scan reads is built inside the search
+    // (before its subjects on a pool of two or more threads, `XQuerySide::x_build_lookup_on`,
+    // else by the first subject that needs it, `x_scan_plan`), so it is part of `search`. No NCBI
+    // counterpart.
     let t_build_lookup = if marked {
         crate::utils::xtiming::clock()
     } else {
@@ -2743,8 +2755,8 @@ fn run_preliminary_subjects_into(
         super::search_gapped::XQuerySide::x_with_frames(inputs.frames, inputs.queries)?;
     // A batch searched with a pool of two or more threads inside it builds its table before its
     // subjects, on the pool (`XQuerySide::x_build_lookup_on`): the subjects would otherwise wait
-    // while the first one builds it on its thread. A batch on one thread (side by side, or `-num_threads 1`)
-    // builds it at its first subject that needs it. Scheduling only.
+    // while the first one builds it on its thread. A batch on one thread (side by side, or
+    // `-num_threads 1`) builds it at its first subject that needs it. Scheduling only.
     if let Some(pool) = pool.filter(|pool| pool.enabled() && pool.threads() > 1) {
         x_query_side.x_build_lookup_on(inputs.search, pool);
     }

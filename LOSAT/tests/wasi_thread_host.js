@@ -1,19 +1,36 @@
-const { Worker, isMainThread, parentPort, workerData } = require("worker_threads");
-const { WASI } = require("wasi");
+const { Worker, SHARE_ENV } = require("worker_threads");
 const fs = require("fs");
-const crypto = require("node:crypto");
-const os = require("node:os");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
-const { inspectArtifact, prepareArtifact, unsignedWasiImports, createSharedMemory } = require("./wasi_artifact");
+const { inspectArtifact, prepareArtifact, createSharedMemory } = require("./wasi_artifact");
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
-// Keep the parallel command's memory operations valid across V8 isolates.
-const { guardSharedMemory } = require("./wasi_shared_memory");
+// Keep the parallel command's memory operations valid across V8 isolates (wasi_shared_memory.js,
+// loaded when a module is guarded here, not when the guard cache has the guarded bytes).
+const guardSharedMemory = bytes => require("./wasi_shared_memory").guardSharedMemory(bytes);
 // The table of the files the command opens (wasi_files.js).
-const { sharedFileTable, sharedFileImports, sharedFileViews } = require("./wasi_files");
+const { sharedFileTable, sharedFileViews } = require("./wasi_files");
+// What every thread of the command runs on, and the file that a thread worker loads.
+const {
+  DEBUG, debug, writeError, START_STATE, START_ORDER, START_TID, START_ARG, SLOT_STATE, START_WORDS,
+  SLOT_READY, SLOT_TAKEN, SLOT_PREPARING, instantiateWithMemory,
+} = require("./wasi_thread_worker");
+const WORKER_FILE = require.resolve("./wasi_thread_worker");
+// Thread workers share this process's environment (SHARE_ENV) instead of each copying it at its
+// creation, which this thread does for every worker (15 workers: 14 instead of 18 ms on ws). They
+// only read it (createWasi).
+// Their V8 heaps may grow to just under 2 GiB, not to V8's default: an isolate whose old
+// generation may reach 2 GiB gets its own copy of V8's embedded builtins in its code range
+// (--short-builtin-calls), 1.8 MiB of RSS per worker: a process with the 15 idle workers of a
+// 16-thread command held 323 MiB on ws with no limit or 2048 MiB, 296 MiB with 2047 or 1024 MiB.
+// Their young generations stay at 1 MiB, which V8 would grow from 2.25 to 4 MiB once a worker
+// allocates (up to 3 MiB of RSS per worker); after its start a worker allocates only the small
+// views of its file calls (sharedFileImports). At 16 threads on ws the peak RSS of 9 commands
+// fell by 13 to 32 MiB with the old limit alone and by 40 to 76 MiB with both; none was slower.
+// A worker's heap holds its WASI context and its instance; the guest's memory is the shared
+// memory, outside it.
+const WORKER_LIMITS = Object.freeze({ maxOldGenerationSizeMb: 2047, maxYoungGenerationSizeMb: 1 });
 
-const DEBUG = process.env.LOSAT_WASI_THREADS_DEBUG === "1";
 const WORKER_START_TIMEOUT_MS = parsePositiveIntEnv(
   "LOSAT_WASI_THREADS_START_TIMEOUT_MS",
   30000,
@@ -43,12 +60,6 @@ function parsePositiveIntEnv(name, fallback) {
     throw new Error(`${name} must be a positive integer`);
   }
   return parsed;
-}
-
-function debug(message) {
-  if (DEBUG) {
-    fs.writeSync(2, `[losat-wasi-threads] ${message}\n`);
-  }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3207-3222
@@ -119,7 +130,11 @@ function refillCount(argv) {
 // A write keeps the GUARD_CACHE_KEEP entries used last (a hit marks its entry used).
 const GUARD_CACHE_FORMAT = 1;
 const GUARD_CACHE_KEEP = 8;
-const sha256 = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
+// node:crypto is loaded at its first use: with the guard cache's index (prepareThreadHost), the
+// cached module is compiling before anything is hashed.
+let cryptoModule = null;
+const crypto = () => cryptoModule ??= require("node:crypto");
+const sha256 = bytes => crypto().createHash("sha256").update(bytes).digest("hex");
 let guardVersionKey = null;
 function guardVersion() {
   if (guardVersionKey === null) guardVersionKey = sha256(fs.readFileSync(require.resolve("./wasi_shared_memory")));
@@ -132,30 +147,60 @@ function guardCacheRecord(inputSha256, guarded) {
   return { ...fields, record_sha256: sha256(JSON.stringify(fields)) };
 }
 
-function readGuardCache(stem, inputSha256) {
-  let record, bytes;
+// The checks of a cached entry: its sidecar (`record`) names this input and guard version and
+// covers its own fields, and the guarded bytes have the recorded length and SHA-256.
+function validGuardEntry(record, bytesLength, bytesSha256, inputSha256) {
+  if (record === null || typeof record !== "object") return false;
+  const { record_sha256: recordSha256, ...fields } = record;
+  const count = value => Number.isSafeInteger(value) && value >= 0;
+  return recordSha256 === sha256(JSON.stringify(fields)) && fields.format === GUARD_CACHE_FORMAT
+    && fields.input_sha256 === inputSha256 && fields.guard_version === guardVersion()
+    && count(fields.fill) && count(fields.copy) && fields.output_bytes === bytesLength
+    && fields.output_sha256 === bytesSha256
+    // guardSharedMemory returns its input unchanged exactly when it guards nothing.
+    && (fields.fill + fields.copy === 0) === (fields.output_sha256 === inputSha256);
+}
+
+// The sidecar and the guarded bytes of an entry, unchecked.
+function readGuardEntry(stem) {
   try {
-    record = JSON.parse(fs.readFileSync(`${stem}.json`, "utf8"));
-    bytes = fs.readFileSync(`${stem}.wasm`);
+    return { record: JSON.parse(fs.readFileSync(`${stem}.json`, "utf8")), bytes: fs.readFileSync(`${stem}.wasm`) };
   } catch (err) {
     if (err.code === "ENOENT") return { cache: "miss" };
     if (err instanceof SyntaxError) return { cache: "invalid" };
     throw err;
   }
-  if (record === null || typeof record !== "object") return { cache: "invalid" };
-  const { record_sha256: recordSha256, ...fields } = record;
-  const count = value => Number.isSafeInteger(value) && value >= 0;
-  const valid = recordSha256 === sha256(JSON.stringify(fields)) && fields.format === GUARD_CACHE_FORMAT
-    && fields.input_sha256 === inputSha256 && fields.guard_version === guardVersion()
-    && count(fields.fill) && count(fields.copy) && fields.output_bytes === bytes.length
-    && fields.output_sha256 === sha256(bytes)
-    // guardSharedMemory returns its input unchanged exactly when it guards nothing.
-    && (fields.fill + fields.copy === 0) === (fields.output_sha256 === inputSha256);
-  return valid ? { cache: "hit", bytes, fill: fields.fill, copy: fields.copy } : { cache: "invalid" };
+}
+
+function readGuardCache(stem, inputSha256) {
+  const entry = readGuardEntry(stem);
+  if (entry.cache) return entry;
+  const { record, bytes } = entry;
+  return validGuardEntry(record, bytes.length, sha256(bytes), inputSha256)
+    ? { cache: "hit", bytes, fill: record.fill, copy: record.copy } : { cache: "invalid" };
+}
+
+// A whole file read into the start of `into`; the view of the bytes read. A file longer than
+// `into` is an error (RangeError), as one that changes while it is read may be.
+function readInto(file, into) {
+  const fd = fs.openSync(file, "r");
+  try {
+    const size = fs.fstatSync(fd).size;
+    if (size > into.length) throw new RangeError(`${file} is larger than its buffer`);
+    let done = 0;
+    while (done < size) {
+      const read = fs.readSync(fd, into, done, size - done, done);
+      if (read === 0) throw new RangeError(`${file} ended while it was read`);
+      done += read;
+    }
+    return into.subarray(0, size);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 function writeAtomic(file, data) {
-  const temp = `${file}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`;
+  const temp = `${file}.${process.pid}.${crypto().randomBytes(6).toString("hex")}.tmp`;
   try {
     fs.writeFileSync(temp, data, { flag: "wx" });
     fs.renameSync(temp, file);
@@ -176,23 +221,26 @@ function defaultGuardCacheDir(env = process.env, platform = process.platform, ho
 }
 
 function homeDir() {
-  try { return os.homedir(); } catch { return ""; }
+  try { return require("node:os").homedir(); } catch { return ""; }
 }
 
 const GUARD_ENTRY = /^guarded-[0-9a-f]{64}-[0-9a-f]{64}\.json$/;
-const GUARD_LEFTOVER = /^guarded-[0-9a-f]{64}-[0-9a-f]{64}\.wasm(?:\..*\.tmp)?$|^guarded-.*\.json\..*\.tmp$/;
+const GUARD_LEFTOVER = /^guarded-[0-9a-f]{64}-[0-9a-f]{64}\.wasm(?:\..*\.tmp)?$|^(?:guarded|index)-.*\.json\..*\.tmp$/;
 // Older than this, bytes without a sidecar and temporary files are left over from a run that
 // stopped between its writes; a younger one may belong to a run that is writing now.
 const GUARD_LEFTOVER_MS = 3_600_000;
-// Removes the entries (sidecar and bytes) beyond the GUARD_CACHE_KEEP used last, and leftovers.
+// Removes the entries (sidecar and bytes) beyond the GUARD_CACHE_KEEP used last, the index files
+// beyond the GUARD_CACHE_KEEP used last, and leftovers.
 function pruneGuardCache(dir) {
-  const entries = [];
+  const entries = [], indexes = [];
   const names = fs.readdirSync(dir);
   const sidecars = new Set(names.filter((name) => GUARD_ENTRY.test(name)));
   for (const name of names) {
     try {
       if (sidecars.has(name)) {
         entries.push({ stem: path.join(dir, name.slice(0, -5)), used: fs.statSync(path.join(dir, name)).mtimeMs });
+      } else if (GUARD_INDEX.test(name)) {
+        indexes.push({ file: path.join(dir, name), used: fs.statSync(path.join(dir, name)).mtimeMs });
       } else if (GUARD_LEFTOVER.test(name) && !sidecars.has(name.replace(/\.wasm$/, ".json"))) {
         const file = path.join(dir, name);
         if (Date.now() - fs.statSync(file).mtimeMs > GUARD_LEFTOVER_MS) fs.rmSync(file, { force: true });
@@ -205,13 +253,21 @@ function pruneGuardCache(dir) {
     fs.rmSync(`${stem}.json`, { force: true });
     fs.rmSync(`${stem}.wasm`, { force: true });
   }
+  indexes.sort((a, b) => b.used - a.used);
+  for (const { file } of indexes.slice(GUARD_CACHE_KEEP)) fs.rmSync(file, { force: true });
+}
+
+// The cache's directory, or null when the cache is off (LOSAT_WASI_GUARD_CACHE=0, or no default).
+function guardCacheDir() {
+  const named = process.env.LOSAT_WASI_GUARD_CACHE;
+  if (named === "0") return null;
+  if (named === "") throw new Error("LOSAT_WASI_GUARD_CACHE must name a directory or be 0");
+  return named ?? defaultGuardCacheDir();
 }
 
 function guardSharedMemoryCached(bytes, inputSha256 = sha256(bytes)) {
   const named = process.env.LOSAT_WASI_GUARD_CACHE;
-  if (named === "0") return { ...guardSharedMemory(bytes), cache: "off" };
-  if (named === "") throw new Error("LOSAT_WASI_GUARD_CACHE must name a directory or be 0");
-  const dir = named ?? defaultGuardCacheDir();
+  const dir = guardCacheDir();
   if (dir === null) return { ...guardSharedMemory(bytes), cache: "off" };
   // The default directory may be unusable (no home, read-only, a file in the way).
   const unusable = (err) => {
@@ -252,6 +308,99 @@ function guardSharedMemoryCached(bytes, inputSha256 = sha256(bytes)) {
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
+// Host-only (LOSAT_WASI_GUARD_CACHE): the cache's index. An entry is named by the SHA-256 of the
+// input, so finding it reads and hashes the whole input before the compile can start, and the
+// hit then hashes the cached bytes too (the 9-10 MB command: about 40 ms on ws, where the compile
+// takes about 30). An index file named by the identity of the input file (device, inode, size,
+// and the modification and change times in ns) records the input's SHA-256 and the guard version
+// that an earlier run found. The cached guarded bytes are then compiled at once, and every check
+// of a hit (readGuardCache: the input's SHA-256, from the input read again, the guard version,
+// the sidecar, the length and SHA-256 of the cached bytes) is made while V8 compiles, before the
+// module is used. A check that fails discards that module, and the input is read and guarded as
+// without the index. A write or a rename of the input usually changes its change time and so its
+// index name. Where the timestamps are coarse the name can stay the same after a rewrite, and
+// then the SHA-256 check of the input rejects the index. The index saves only the time before
+// the compile, never a check.
+const GUARD_INDEX = /^index-\d+-\d+-\d+-\d+-\d+\.json$/;
+const HEX64 = /^[0-9a-f]{64}$/;
+const guardIndexFile = (dir, stat) =>
+  path.join(dir, `index-${stat.dev}-${stat.ino}-${stat.size}-${stat.mtimeNs}-${stat.ctimeNs}.json`);
+
+// After a run that found or wrote the entry of this input (`stat`, taken after its read).
+function writeGuardIndex(stat, inputSha256) {
+  try {
+    const dir = guardCacheDir();
+    if (dir === null || stat === null) return;
+    const index = { format: GUARD_CACHE_FORMAT, input_sha256: inputSha256, guard_version: guardVersion() };
+    writeAtomic(guardIndexFile(dir, stat), `${JSON.stringify(index)}\n`);
+    // Each new copy or build of a module adds an index file, also when its entry exists.
+    pruneGuardCache(dir);
+  } catch (err) {
+    debug(`guard cache index not written (${err.message})`);
+  }
+}
+
+// The module compiled from the cached guarded bytes that the input's index names, with the input
+// and its SHA-256, or null when there is no index, no entry, or a check fails. `compileStarted`
+// runs once the compile has started (createThreadHost's early workers).
+async function compileIndexedGuard(wasmPath, compileStarted) {
+  let dir, stat, index, stem, record, buffer, cached;
+  try {
+    dir = guardCacheDir();
+    if (dir === null) return null;
+    stat = fs.statSync(wasmPath, { bigint: true });
+    index = JSON.parse(fs.readFileSync(guardIndexFile(dir, stat), "utf8"));
+    if (!index || index.format !== GUARD_CACHE_FORMAT || !HEX64.test(index.input_sha256)
+      || !HEX64.test(index.guard_version)) return null;
+    stem = path.join(dir, `guarded-${index.input_sha256}-${index.guard_version}`);
+    record = JSON.parse(fs.readFileSync(`${stem}.json`, "utf8"));
+    // The guard replaces instructions and adds a few functions: its output is never twice the input.
+    if (!record || !Number.isSafeInteger(record.output_bytes) || record.output_bytes < 0
+      || record.output_bytes > 2 * Number(stat.size) + 65536) return null;
+    // One buffer for the cached bytes and then the input: V8 copies the bytes when the compile
+    // starts, and a new 10 MB buffer costs its page faults (about 6 ms on ws).
+    buffer = Buffer.allocUnsafe(Math.max(record.output_bytes, Number(stat.size)));
+    cached = readInto(`${stem}.wasm`, buffer);
+  } catch (err) {
+    debug(`guard cache index not used (${err.message})`);
+    return null;
+  }
+  const compiled = WebAssembly.compile(cached);
+  // Bytes that do not compile fail the checks below like any other stale entry.
+  compiled.catch(() => {});
+  compileStarted();
+  let input, inputSha256;
+  try {
+    const cachedLength = cached.length, cachedSha256 = sha256(cached);
+    input = readInto(wasmPath, buffer);
+    inputSha256 = sha256(input);
+    if (inputSha256 !== index.input_sha256 || index.guard_version !== guardVersion()
+      || !validGuardEntry(record, cachedLength, cachedSha256, inputSha256)) {
+      debug(`guard cache index stale: ${stem}.wasm`);
+      return null;
+    }
+  } catch (err) {
+    debug(`guard cache index not used (${err.message})`);
+    return null;
+  }
+  let module;
+  try {
+    module = await compiled;
+  } catch (err) {
+    debug(`guard cache index: cached bytes did not compile (${err.message})`);
+    return null;
+  }
+  const now = new Date();
+  try {
+    fs.utimesSync(`${stem}.json`, now, now);
+    fs.utimesSync(guardIndexFile(dir, stat), now, now);
+  } catch { /* only the order of pruning */ }
+  debug(`guard cache index hit: ${stem}.wasm`);
+  return { module, input, inputSha256, fill: record.fill, copy: record.copy };
+}
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
 // Apply the same shared-memory compatibility guard before main or worker
 // compilation. Workers normally receive this already compiled module.
 async function compileThreadedModule(wasmPath) {
@@ -259,34 +408,6 @@ async function compileThreadedModule(wasmPath) {
   debug(`shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies`);
   return WebAssembly.compile(guarded.bytes);
 }
-
-function writeError(err) {
-  const message = err && err.stack ? err.stack : String(err);
-  fs.writeSync(2, `${message}\n`);
-}
-
-// NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
-// catch (const std::exception& e) {
-//     LOG_POST(Error << "Error: " << e.what());
-//     exit_code = BLAST_UNKNOWN_ERROR;
-// }
-// A Wasm trap cannot unwind Rust/Rayon's shared state. The main thread may be
-// blocked inside Wasm, unable to receive a Worker error/exit event. Terminate
-// this command process from the failing worker after flushing its diagnostic;
-// process.exit() in a Node Worker would terminate only that worker.
-function failWorker(err) {
-  writeError(err);
-  process.kill(process.pid, "SIGTERM");
-}
-
-// Control words shared with a thread worker: the start confirmation (every worker); for a
-// worker that waits for its thread (a LOSAT_WASI_PRESPAWN standby worker, or a reactor's
-// worker whose earlier thread returned, LOSAT_WASI_RECYCLE), the start order with the tid and
-// startArg; and for a recycled worker, whether it waits for a thread (SLOT_STATE).
-const START_STATE = 0, START_ORDER = 1, START_TID = 2, START_ARG = 3, SLOT_STATE = 4, START_WORDS = 5;
-// SLOT_STATE: a thread runs (or the worker boots for its first thread), the worker waits for a
-// thread, the host gave it one, or its thread returned and it instantiates the module again.
-const SLOT_RUNNING = 0, SLOT_READY = 1, SLOT_TAKEN = 2, SLOT_PREPARING = 3;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
 // ```c++
@@ -306,117 +427,6 @@ function recycleWorkers(kind) {
   const raw = process.env.LOSAT_WASI_RECYCLE ?? "1";
   if (raw !== "0" && raw !== "1") throw new Error("LOSAT_WASI_RECYCLE must be 0 or 1");
   return kind === "threaded-reactor" && raw === "1";
-}
-
-function markWorkerStart(control, state) {
-  const view = new Int32Array(control);
-  Atomics.store(view, START_STATE, state);
-  Atomics.notify(view, START_STATE, 1);
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
-// ```c++
-//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-//         (*thread)->Run();
-//     }
-// ```
-// A standby or recycled worker blocks here, after instantiation, until spawnThread assigns
-// it a thread. The order is consumed, so a recycled worker waits again after this thread.
-function waitForStartOrder(control) {
-  const view = new Int32Array(control);
-  while (Atomics.load(view, START_ORDER) === 0) Atomics.wait(view, START_ORDER, 0);
-  const order = { tid: Atomics.load(view, START_TID), startArg: Atomics.load(view, START_ARG) };
-  Atomics.store(view, START_ORDER, 0);
-  return order;
-}
-
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
-// (*thread)->Run(); (*thread)->Join(&result);
-// Node 18/24 lib/wasi.js initialize binds memory and optionally calls _initialize.
-// Child entry has its own thread-pointer initialization; do not rerun main CRT.
-function initializeWasiThreadInstance(wasi, instance) {
-  wasi.initialize({ exports: { memory: instance.exports.memory } });
-}
-
-function createWasi(args) {
-  return new WASI({
-    version: "preview1",
-    // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-    // CATCH_ALL(status)
-    // return status;
-    // Handle the command's exit explicitly on every supported Node version.
-    returnOnExit: true,
-    args,
-    env: { ...process.env, PWD: process.cwd() },
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729
-// ```c++
-//             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-//             if ( !fstrm->is_open() ) {
-//                 delete fstrm;
-// ```
-// Preserve lexical filenames at the recorded host cwd.
-// Root preopen permits absolute paths; PWD initializes the guest cwd for
-// relative filenames through std::env::set_current_dir, without rewriting argv.
-    preopens: { "/": "/" },
-  });
-}
-
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
-// CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
-// A module may import host functions besides WASI, such as the output stream of the
-// LOSAT Web adapter (docs/web/abi_v2.md). The main instance receives the functions the
-// caller provides; a worker instance imports the same names but never calls them, so
-// each one there traps if it is called.
-function hostImports(module, provided = {}) {
-  const imports = {};
-  for (const { module: name, name: field, kind } of WebAssembly.Module.imports(module)) {
-    if (kind !== "function" || ["env", "wasi", "wasi_snapshot_preview1"].includes(name)) continue;
-    imports[name] = imports[name] || {};
-    imports[name][field] = (provided[name] && provided[name][field]) || (() => {
-      throw new Error(`${name}.${field} is not available on this thread`);
-    });
-  }
-  return imports;
-}
-
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
-// CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
-// The native command's write to standard output or error blocks while the reader drains a
-// full pipe. A Worker started with Node's default stdio opens process.stdout and
-// process.stderr, and Node sets a pipe there non-blocking, so the guest's fd_write to a full
-// pipe returns EAGAIN (WASI errno 6). Node's uv_fs_write returns EAGAIN only when it wrote
-// nothing (a partial write returns its count), so the host waits 1 ms (Atomics.wait, which
-// Node allows on every thread) and repeats the same write until the pipe takes it.
-const WASI_ERRNO_AGAIN = 6;
-const STDIO_WAIT = new Int32Array(new SharedArrayBuffer(4));
-
-function blockingStdioWrite(fdWrite) {
-  return (fd, iovs, iovsLen, nwritten) => {
-    for (;;) {
-      const errno = fdWrite(fd, iovs, iovsLen, nwritten);
-      if (errno !== WASI_ERRNO_AGAIN || (fd !== 1 && fd !== 2)) return errno;
-      Atomics.wait(STDIO_WAIT, 0, 0, 1);
-    }
-  };
-}
-
-function createImports(wasi, memory, spawnThread, extra, files) {
-  const wasiImport = unsignedWasiImports(wasi.wasiImport);
-  const local = { ...wasiImport, fd_write: blockingStdioWrite(wasiImport.fd_write) };
-  return {
-    ...extra,
-    env: { memory },
-    wasi: { "thread-spawn": spawnThread },
-    wasi_snapshot_preview1: files ? { ...local, ...sharedFileImports(files, memory, local) } : local,
-  };
-}
-
-async function instantiateWithMemory(module, memory, args, spawnThread, provided, wasi = createWasi(args), files = null) {
-  const instance = await WebAssembly.instantiate(
-    module,
-    createImports(wasi, memory, spawnThread, hostImports(module, provided), files),
-  );
-  return { instance, wasi };
 }
 
 async function instantiateMain(module, args, spawnThread, limits, provided, files) {
@@ -443,14 +453,21 @@ async function terminateWorkers(workers) {
 // Host-owned lifecycle records count attempts, ready confirmations, and real exit
 // events separately. Test-only failure injection never changes search behavior.
 async function createThreadHost(wasmPath, kind, argv = [], options = {}) {
-  // LOSAT_WASI_PRESPAWN: a command's standby workers start booting here, while the module is
-  // read, guarded and compiled, and get the module and the memory once they exist (`early`).
-  // Booting one is most of a thread's start (Node's worker bootstrap: 0.1-0.3 s for 15 workers at
-  // once), so they no longer start only after the compile.
-  const early = kind === "threaded-command" && !recycleWorkers(kind)
-    ? bootEarlyWorkers(prespawnCount(argv), options.fault) : [];
+  // LOSAT_WASI_PRESPAWN: a command's standby workers start booting while the module is compiled,
+  // and get the module and the memory once they exist (`early`). Booting one is most of a
+  // thread's start (Node's worker bootstrap: 0.1-0.3 s for 15 workers at once), so they do not
+  // start only after the compile. They are created once the compile has started: with the guard
+  // cache's index right after the cached guarded bytes are read and handed to V8
+  // (compileIndexedGuard; the input read and both hashes then run after the workers exist), else
+  // after the module is read and guarded. The reads of the module come before the workers on the
+  // path without the index: a read of the 10 MB module right after 15 workers were created took
+  // 5-15 ms instead of 2 (ws node 0), and with the workers created first the guest started at 121
+  // instead of 78 ms.
+  const count = kind === "threaded-command" && !recycleWorkers(kind) ? prespawnCount(argv) : 0;
+  let early = [];
   try {
-    return await (await prepareThreadHost(wasmPath, kind)).create(argv, early.length ? { ...options, early } : options);
+    const prepared = await prepareThreadHost(wasmPath, kind, () => { early = bootEarlyWorkers(count, options.fault); });
+    return await prepared.create(argv, early.length ? { ...options, early } : options);
   } catch (err) {
     await terminateWorkers(new Set(early.map(slot => slot.worker)));
     throw err;
@@ -466,7 +483,7 @@ function bootEarlyWorkers(count, fault) {
     const control = new SharedArrayBuffer(4 * START_WORDS);
     let worker;
     try {
-      worker = new Worker(__filename, { workerData: { control, standby: index, early: true, fault: fault || null } });
+      worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { control, standby: index, early: true, fault: fault || null } });
     } catch { break; }
     worker.unref();
     early.push({ worker, control });
@@ -480,9 +497,23 @@ function bootEarlyWorkers(count, fault) {
 // instance/memory/worker set. There is no global cache or retained search pool
 // (LOSAT_WASI_GUARD_CACHE keeps only guarded bytes on disk); a reactor's
 // thread workers stay with its host between searches (LOSAT_WASI_RECYCLE) until close().
-async function prepareThreadHost(wasmPath, kind) {
+async function prepareThreadHost(wasmPath, kind, compiling = () => {}) {
   const start = performance.now();
+  // createThreadHost boots its early workers at the first compile that starts, while V8 compiles.
+  let started = false;
+  const compileStarted = () => { if (!started) { started = true; compiling(); } };
+  const indexed = await compileIndexedGuard(wasmPath, compileStarted);
+  if (indexed) {
+    const identity = prepareArtifact(indexed.input, kind, indexed.module, indexed.inputSha256).identity;
+    const timings = { read_and_hash_seconds: 0, guard_seconds: 0, guarded_compile_seconds: (performance.now()-start)/1000 };
+    debug(`shared-memory guards: ${indexed.fill} fills, ${indexed.copy} copies`);
+    const { module } = indexed;
+    return { identity, timings, create: (argv = [], options = {}) =>
+      instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) };
+  }
   const bytes = fs.readFileSync(wasmPath);
+  let stat = null;
+  try { stat = fs.statSync(wasmPath, { bigint: true }); } catch { /* no index for this run */ }
   // One compile: the identity (imports, exports) is read from the guarded module, whose imports
   // and exports are the input's (the guard rewrites only memory.fill and memory.copy), instead of
   // compiling the input too (about 40 ms for the 9 MB command). An input that cannot be guarded
@@ -493,12 +524,15 @@ async function prepareThreadHost(wasmPath, kind) {
   try {
     guarded = guardSharedMemoryCached(bytes, inputSha256);
     guardedAt = performance.now();
-    module = await WebAssembly.compile(guarded.bytes);
+    const compiled = WebAssembly.compile(guarded.bytes);
+    compileStarted();
+    module = await compiled;
   } catch (err) {
     inspectArtifact(bytes, kind);
     throw err;
   }
   const identity = prepareArtifact(bytes, kind, module, inputSha256).identity;
+  if (guarded.cache !== "off") writeGuardIndex(stat, inputSha256);
   const timings = { read_and_hash_seconds: (inspected-start)/1000, guard_seconds: (guardedAt-inspected)/1000,
     guarded_compile_seconds: (performance.now()-guardedAt)/1000 };
   debug(`shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies`);
@@ -544,13 +578,23 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   //     }
   // ```
   // A standby worker becomes the guest's thread only here: it receives this tid and
-  // startArg, and the guest gets the tid after the same start confirmation as a new worker.
+  // startArg. The guest gets the tid after the start confirmation only from a worker that still
+  // boots (the paragraph below).
+  // A worker that already waits for its order (SLOT_READY) has instantiated the module and only
+  // takes the order and starts the thread: the spawn returns the tid without waiting for its start
+  // confirmation, as pthread_create returns before the new thread runs (each confirmation is a
+  // wake-up of that worker, ~0.5 ms, one after another for the 15 threads of a 16-thread pool on
+  // ws). From here a failure of that thread ends the command as it does after a confirmation (the
+  // worker's failWorker). A worker that still boots or instantiates is waited for as before, so a
+  // worker that never starts still ends the command with the start timeout.
   const startStandby = (slot, tid, startArg) => {
     const view = new Int32Array(slot.control);
+    const waiting = Atomics.compareExchange(view, SLOT_STATE, SLOT_READY, SLOT_TAKEN) === SLOT_READY;
     slot.tid = tid; slot.worker.ref();
     workers.add(slot.worker); exits.set(slot.worker, slot.exited); event("spawned", { tid, standby: slot.index });
     Atomics.store(view, START_TID, tid); Atomics.store(view, START_ARG, startArg);
     Atomics.store(view, START_ORDER, 1); Atomics.notify(view, START_ORDER, 1);
+    if (waiting) { event("ready", { tid, waiting: true }); return tid; }
     return awaitThreadStart(view, tid);
   };
   // LOSAT_WASI_RECYCLE: a recycled worker's guest thread ends with the worker's `returned`
@@ -565,7 +609,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   };
   const recycledWorker = (data) => {
     const control = new SharedArrayBuffer(4 * START_WORDS);
-    const worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
+    const worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
       control, files, fault: options.fault || null, recycle: true, ...data } });
     const slot = { index: nextSlot++, worker, control, state: new Int32Array(control), tid: data.tid ?? null };
     if (data.tid === undefined) Atomics.store(slot.state, SLOT_STATE, SLOT_PREPARING);
@@ -636,7 +680,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     const control = new SharedArrayBuffer(4 * START_WORDS), view = new Int32Array(control);
     let worker;
     try {
-      worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
+      worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
         startArg, tid, control, files, fault: options.fault || null } });
     } catch (err) { event("spawn_rejected", { tid, error: String(err) }); return -1; }
     workers.add(worker); event("spawned", { tid });
@@ -677,7 +721,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
           worker = early.worker;
           worker.postMessage({ module, wasmPath, args, memory: mainMemory, files });
         } else {
-          worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
+          worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
             control, files, standby: index, fault: options.fault || null } });
         }
       } catch (err) { event("standby_rejected", { standby: index, error: String(err) }); return; }
@@ -734,92 +778,3 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   };
 }
 module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir };
-
-if (!isMainThread) {
-  const { control, fault, standby, recycle, early } = workerData;
-  // An early worker (createThreadHost) boots before the module and the memory exist and gets
-  // them in one message (`init`) from prespawnWorkers.
-  let { module: workerModule, wasmPath, args, memory, files } = workerData;
-  // A standby worker (LOSAT_WASI_PRESPAWN) learns its tid and startArg from its start order,
-  // and so does a recycled worker (LOSAT_WASI_RECYCLE) for every thread after its first.
-  let { startArg, tid } = workerData;
-  const name = standby === undefined ? `tid=${tid}` : `standby=${standby}`;
-  // NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
-  // LOG_POST(Error << "Error: " << e.what());
-  // exit_code = BLAST_UNKNOWN_ERROR;
-  process.on("uncaughtException", failWorker);
-  // NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
-  // LOG_POST(Error << "Error: " << e.what()); exit_code = BLAST_UNKNOWN_ERROR;
-  // This handler runs in the worker even while the caller is blocked in Wasm.
-  let completed = false;
-  process.on("exit", code => {
-    if (!completed) failWorker(new Error(`WASI worker ${tid ?? `standby ${standby}`} exited unexpectedly with code ${code}`));
-  });
-
-  Promise.resolve()
-    .then(async () => {
-      debug(`worker boot ${name}`);
-      if (fault === "startup-timeout") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
-      if (fault === "startup-error") throw new Error("injected worker startup error");
-      if (early) {
-        ({ module: workerModule, wasmPath, args, memory, files } =
-          await new Promise(resolve => parentPort.once("message", resolve)));
-      }
-      const module = workerModule || await compileThreadedModule(wasmPath);
-      const spawnThread = () => -1;
-      const view = new Int32Array(control);
-      let waits = standby !== undefined, wasi = null;
-      for (;;) {
-        debug(waits ? `worker instantiate ${name}` : `worker instantiate tid=${tid} start_arg=${startArg}`);
-        // A new instance on the shared memory for every guest thread, recycled worker or not. A
-        // recycled worker keeps its one WASI context (bound once to the same shared memory): a
-        // new context per thread would hold one more open preopen descriptor for each thread.
-        const created = wasi === null;
-        const instantiated = await instantiateWithMemory(module, memory, args, spawnThread, undefined, wasi ?? undefined, files);
-        const { instance } = instantiated;
-        wasi = instantiated.wasi;
-        if (created) initializeWasiThreadInstance(wasi, instance);
-        if (typeof instance.exports.wasi_thread_start !== "function") {
-          throw new Error(`${wasmPath} does not export wasi_thread_start`);
-        }
-        if (waits) {
-          if (recycle) { Atomics.store(view, SLOT_STATE, SLOT_READY); Atomics.notify(view, SLOT_STATE); }
-          debug(`worker standby ${name}`);
-          ({ tid, startArg } = waitForStartOrder(control));
-          debug(`worker ${name} takes tid=${tid} start_arg=${startArg}`);
-        }
-        debug(`worker start tid=${tid}`);
-        markWorkerStart(control, 1);
-        if (fault === "trap") throw new WebAssembly.RuntimeError("injected worker trap");
-        if (fault === "abnormal-exit") process.exit(23);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
-        // ```c++
-        //     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-        //         (*thread)->Run();
-        //     }
-        // ```
-        // Host memory only. This instance may be older than the guest's last growth of the
-        // shared memory: a standby worker (or a recycled one, not measured) instantiated
-        // before pthread_create allocated this thread's stack and TLS and grew the memory for
-        // them. In 12 of 4,800 runs of one 16-thread check (2026-10-25, Node 24.21.0) this
-        // isolate's view of the memory still ended below those after the thread trapped
-        // "memory access out of bounds" at its first atomic store (`self->tid` in its TLS),
-        // although plain loads of its start arguments there had passed; 2 more failed the
-        // same way with the message hidden. memory.grow(0) updates this isolate's view (the
-        // header of wasi_shared_memory.js): 0 of 2,800 (docs/evidence/wasm_oob_20261025/).
-        memory.grow(0);
-        instance.exports.wasi_thread_start(tid, startArg);
-        debug(`worker done tid=${tid}`);
-        if (!recycle) break;
-        // Claimable when the next instance is ready; until then the host may wait for it.
-        Atomics.store(view, SLOT_STATE, SLOT_PREPARING);
-        parentPort.postMessage({ type: "returned", tid });
-        waits = true;
-      }
-      completed = true;
-      if (parentPort) {
-        parentPort.close();
-      }
-    })
-    .catch(failWorker);
-}

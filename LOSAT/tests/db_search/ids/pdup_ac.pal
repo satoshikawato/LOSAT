@@ -1,0 +1,5 @@
+#
+# Alias file of line DBID, N1
+#
+TITLE pdup_ac (two databases, parsed Seq-ids)
+DBLIST pdup_a pdup_c

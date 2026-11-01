@@ -108,7 +108,7 @@ pub struct PsiblastArgs {
         long,
         value_name = "NAME",
         conflicts_with_all = ["subject", "subject_loc"],
-        help = "BLAST database name (a protein database without parsed Seq-ids)"
+        help = "BLAST database name (a protein database, with or without parsed Seq-ids)"
     )]
     pub db: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
@@ -327,6 +327,8 @@ impl PsiblastArgs {
             show_gis: false,
             parse_deflines: false,
             searchsp: None,
+            // PSIBLAST's parser refuses `-lcase_masking` (line NP ported it to BLASTP).
+            lcase_masking: false,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-50
             // ```c++
             // CPSIBlastOptionsHandle::CPSIBlastOptionsHandle(EAPILocality locality)

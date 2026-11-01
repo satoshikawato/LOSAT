@@ -98,6 +98,11 @@ impl FormatSpec {
         })
     }
 
+    /// Whether a specifier writes the letters of the sequence (`%s`).
+    pub fn writes_letters(&self) -> bool {
+        self.need_seq
+    }
+
     /// Whether a specifier asks for the ASN.1 text of a definition line (`%d`), which LOSAT
     /// does not write (line BDC DECISIONS 9).
     pub fn asks_asn_text(&self) -> bool {
@@ -194,6 +199,57 @@ impl FormatSpec {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:187-201
+    // ```c++
+    //         case 'o':
+    //             m_Out << NStr::NumericToString(oid);
+    //             break;
+    //         ...
+    //         case 'l':
+    //             m_Out << NStr::NumericToString(m_BlastDb.GetSeqLength(oid));
+    //             break;
+    // ```
+    // `Write(-1, config)` (`-ipg` of a PIG no volume holds): the sequence, its hash and the
+    // definition lines are read before the line (`x_GetSeq`, `x_GetSeqHash`, `GetHdr`), and
+    // each read throws `OID not found`; without them the line is written up to `%l`, whose
+    // length throws, and `%o` is `-1`.
+    /// NCBI's `Write` of the OID -1: the part of the line it writes, then `OID not found`
+    /// where it reads the database.
+    pub fn write_missing_oid(&self, out: &mut dyn Write) -> Result<(), Stop> {
+        let missing = || Stop::Ncbi(super::retrieve::OID_NOT_FOUND.to_string());
+        if self.need_seq || self.need_hash || self.get_defline {
+            return Err(missing());
+        }
+        let mut line = Vec::new();
+        for (i, &kind) in self.types.iter().enumerate() {
+            line.extend_from_slice(&self.separators[i]);
+            match kind {
+                b'o' => line.extend_from_slice(b"-1"),
+                b'l' => {
+                    out.write_all(&line).map_err(Stop::io)?;
+                    return Err(missing());
+                }
+                b'm' | b'd' => {
+                    return Err(Stop::Refused(format!(
+                        "the -outfmt specifier %{} is not supported by LOSAT's {}",
+                        kind as char,
+                        super::PROGRAM
+                    )));
+                }
+                other => {
+                    out.write_all(&line).map_err(Stop::io)?;
+                    let mut message = b"Unrecognized format specification: '%".to_vec();
+                    message.push(other);
+                    message.push(b'\'');
+                    return Err(Stop::NcbiBytes(message));
+                }
+            }
+        }
+        line.extend_from_slice(&self.separators[self.types.len()]);
+        line.push(b'\n');
+        out.write_all(&line).map_err(Stop::io)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:165-262
     // ```c++
     // void CBlastDB_SeqFormatter::x_Print(CSeqDB::TOID oid, vector<string> & defline_data, vector<string> & other_fields)
@@ -241,7 +297,7 @@ impl FormatSpec {
                 b'a' => line.extend_from_slice(&fields.accession),
                 b'i' => line.extend_from_slice(&fields.seq_id),
                 b'g' => line.extend_from_slice(fields.gi.as_bytes()),
-                b'o' => line.extend_from_slice(oid.to_string().as_bytes()),
+                b'o' => line.extend_from_slice(source.db.oid(oid).to_string().as_bytes()),
                 b't' => line.extend_from_slice(&fields.title),
                 b'h' => line.extend_from_slice(hash.as_bytes()),
                 b'l' => line.extend_from_slice(length.to_string().as_bytes()),

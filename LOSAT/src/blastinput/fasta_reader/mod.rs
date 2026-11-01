@@ -636,9 +636,9 @@ impl<R: Read> FastaInputSource<R> {
         }
     }
 
-    /// EXPERIMENT (LOSAT_X_QSCANPAR): a reader over `input`, a part of a query file that starts at a
-    /// record start (`x_query_scan_par.rs`); its stream is a file's without the readable-byte hint,
-    /// which only the pushback of a `\r` reads.
+    /// LOSAT_X_QSTREAM's first reading in parts: a reader over `input`, a part of a query file that
+    /// starts at a record start (`x_query_scan_par.rs`); its stream is a file's without the
+    /// readable-byte hint, which only the pushback of a `\r` reads.
     #[cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
     pub(crate) fn x_from_reader(input: R, config: ReaderConfig) -> Self {
         Self::from_stream(FastaStream::new(input), config)

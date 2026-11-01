@@ -1,14 +1,15 @@
 //! The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle): blastp's
 //! `LOSAT_X_BPREDOPAR`, `LOSAT_X_BPREDOLPT`, `LOSAT_X_BPDBCUT` and
 //! `LOSAT_X_BPLKPAHEAD`, and blastn's `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARFOLD`,
-//! `LOSAT_X_QDUSTPAR`, `LOSAT_X_DIAGLV`, `LOSAT_X_QPREPPAR` and `LOSAT_X_RPTSTREAM` (and
-//! `LOSAT_X_QBATCHPAR`, which was removed on 2026-10-28). Each has its own test file, whose
+//! `LOSAT_X_DIAGLV`, `LOSAT_X_QPREPPAR` and `LOSAT_X_RPTSTREAM` (and
+//! `LOSAT_X_QBATCHPAR`, which was removed on 2026-10-28, and `LOSAT_X_QDUSTPAR`, folded into
+//! `LOSAT_X_QPREPPAR` on 2026-11-01). Each has its own test file, whose
 //! searches run with the others off (the default before). Here the searches run with the default
 //! (no variable) and give the report of each switch off (`=0`) and of all of them off, with the
 //! same standard error. And the default runs them: the `[TIMING] x_bpredopar:` line of BPREDOPAR,
 //! with BPREDOLPT's `lpt_windows=`, comes without a variable and not with `LOSAT_X_BPREDOPAR=0`.
-//! `LOSAT_X_REACH`, set in the default run of a search, shows that BPLKPAHEAD, BPDBCUT, DIAGLV, QDUSTPAR and
-//! QPREPPAR take their own paths on these searches.
+//! `LOSAT_X_REACH`, set in the default run of a search, shows that BPLKPAHEAD, BPDBCUT, DIAGLV and QPREPPAR
+//! take their own paths on these searches.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -28,7 +29,6 @@ const BLASTN: &[&str] = &[
     "LOSAT_X_DIAGLV",
     "LOSAT_X_PAIRPARDISC",
     "LOSAT_X_PAIRPARFOLD",
-    "LOSAT_X_QDUSTPAR",
     "LOSAT_X_QPREPPAR",
     "LOSAT_X_RPTSTREAM",
 ];
@@ -321,9 +321,9 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
         );
         // The rows of the default run above. DIAGLV: the reference fold took the diag-hash path
         // with level bounds (its mark is in the reference fold only, not in the strips folds).
-        // QDUSTPAR: the query dusting ran on the pool. QPREPPAR: the pool ran the batch (the
-        // mark fires for any batch with more than one context at 2+ threads).
-        for switch in ["LOSAT_X_DIAGLV", "LOSAT_X_QDUSTPAR", "LOSAT_X_QPREPPAR"] {
+        // QPREPPAR: the pool ran the batch (the mark fires for any batch with more than one
+        // context at 2+ threads; the query dusting is one of its maps).
+        for switch in ["LOSAT_X_DIAGLV", "LOSAT_X_QPREPPAR"] {
             let sides = reach.sides(switch);
             assert!(
                 sides.0,

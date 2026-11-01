@@ -108,7 +108,7 @@ pub(crate) fn handle_for(
     if !archive_requested {
         return Ok(None);
     }
-    ArchiveHandle::for_program(&option_inputs(args, dust), args.db.as_deref(), "BLASTN").map(Some)
+    ArchiveHandle::for_program(&option_inputs(args, dust), args.database_name(), "BLASTN").map(Some)
 }
 
 /// `report::archive::check_titles` for BLASTN's records.

@@ -1,0 +1,8 @@
+# BLASTP 2.17.0+
+# Query: qp1 lcase
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bp_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+qp1	sp1	85.950	121	14	1	12	132	12	129	1.51e-70	196
+qp1	sp2	71.074	121	29	2	15	131	15	133	7.17e-49	141
+# BLAST processed 1 queries

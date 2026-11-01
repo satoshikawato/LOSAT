@@ -1,0 +1,75 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/sml_bp_s_lc.faa).
+           2 sequences; 279 total letters
+
+
+
+Query= qp1 lcase
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp1 subject protein alpha lower 30-70                                 196     2e-70
+
+
+> sp1 subject protein alpha lower 30-70
+Length=137
+
+ Score = 196 bits (498),  Expect = 2e-70, Method: Compositional matrix adjust.
+ Identities = 104/121 (86%), Positives = 108/121 (89%), Gaps = 3/121 (2%)
+
+Query  12   FAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMkyefssdihpCNLWICWIPKE  71
+            FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSD    + WICWIPKE
+Sbjct  12   FAVRRKVMDDPKIRDGPMAvmkgwenycwpanmswkvlmkyefssd---ihpwicwipke  68
+
+Query  72   MATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMV  131
+              TPGWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DANFEKLKI H+MV
+Sbjct  69   qqTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMV  128
+
+Query  132  G  132
+            G
+Sbjct  129  G  129
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.137    0.526    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 28680
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/sml_bp_s_lc.faa).
+    Posted date:  Unknown
+  Number of letters in database: 279
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 20
+Window for multiple hits: 40

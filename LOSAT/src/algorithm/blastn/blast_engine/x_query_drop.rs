@@ -1,6 +1,11 @@
-//! EXPERIMENT (LOSAT_X_BNQDROP; in the strict set since 2026-10-25: on unless it is `0`): the
-//! letters of a query batch's records dropped once the batch has encoded them, where nothing reads
-//! them after the search, instead of holding them until the end of the search.
+//! EXPERIMENT (LOSAT_X_BNQPACK; in the strict set since 2026-10-25: on unless it is `0`): the query
+//! records read before the search held in a store that the batch loop takes them out of, their
+//! letters packed from the reading on, made again when the loop takes their batch and dropped once
+//! the batch has encoded them, where nothing reads them after the search, instead of holding every
+//! record's letters until the end of the search. Until 2026-11-01 the store had a switch of its own
+//! (LOSAT_X_BNQDROP) and packed only files of two of the task's largest batches or more; both were
+//! folded into this switch then (line SF S3, family bn-query-read: below two batches packing read
+//! the same time and memory, see `docs/agents/diagnostics.md`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
 //! ```c++
@@ -12,8 +17,8 @@
 //! own encoded copy (`SetupQueries_OMF`). No NCBI counterpart for the drop: it is memory only.
 //!
 //! What it changes. Where the query records are read before the search (`search_cli` without
-//! LOSAT_X_QSTREAM acting), `search_cli` holds every record, with its IUPAC letters, until the
-//! search ends, and `search_query_batch` encodes each batch's letters into its BLASTNA buffer (both
+//! LOSAT_X_QSTREAM acting), `search_cli` held every record, with its IUPAC letters, until the
+//! search ended, and `search_query_batch` encodes each batch's letters into its BLASTNA buffer (both
 //! strands and sentinels), which the scan and the traceback read. After the encoding the letters
 //! are read only by the batch's query chunks (`search_query_chunks`: their cut, DUST and encoding)
 //! and by the reports that show a query's letters. With the switch, where the rule below holds,
@@ -54,17 +59,13 @@
 //! Timing: with LOSAT_TIMING, `[TIMING] x_bn_q_drop: batches= records= letters=` gives the number
 //! of batches and records whose letters were dropped, and their letters.
 //!
-//! EXPERIMENT (LOSAT_X_BNQPACK; in the strict set since 2026-10-25: on unless it is `0`): the letters
-//! of the records that wait in the store packed from the reading on. Dropping a batch's letters after
-//! its encoding frees them late: the letters of every record were touched while the file was read,
-//! and the pages stay with the process (the heap reuses them for later allocations, so the peak
-//! falls by little; plan v4 line A10 session 19, the `RssAnon` trace of 31,168 cDNAs). With the
-//! switch, where the store acts (the rule above) and the query file holds at least two of the task's
-//! largest batches (`packs`: the bytes of the file against `x_query_batch_letters`, as
-//! LOSAT_X_QSTREAM's `Batch`; standard input, without a size, is not packed), the reader packs each
-//! nucleotide record as it assembles it (`FastaInputSource::x_pack_letters`: 2-bit codes, the runs of
-//! other bytes, the lowercase mask as intervals, `sequence::packed_letters`) in place of the copy of
-//! its buffer, which the next record reuses; the store keeps the packed letters beside the records
+//! The letters packed. Dropping a batch's letters after its encoding alone frees them late: the
+//! letters of every record were touched while the file was read, and the pages stay with the process
+//! (the heap reuses them for later allocations, so the peak falls by little; plan v4 line A10 session
+//! 19, the `RssAnon` trace of 31,168 cDNAs). So where the store acts (the rule above), the reader
+//! packs each nucleotide record as it assembles it (`FastaInputSource::x_pack_letters`: 2-bit codes,
+//! the runs of other bytes, the lowercase mask as intervals, `sequence::packed_letters`) in place of
+//! the copy of its buffer, which the next record reuses; the store keeps the packed letters beside the records
 //! (`Store::new`), and the loop makes a batch's letters again when it takes the batch (`Store::take`,
 //! by the search pool's threads with two or more), before any reader of them (WindowMasker, DUST, the
 //! encoding). The letters made again are the reader's, byte for byte (`U` read as `T`, the lowercase
@@ -87,27 +88,10 @@ use crate::blastinput::seq_range::QueryInput;
 use crate::sequence::packed_letters::PackedLetters;
 use crate::utils::threading::SearchPool;
 
-/// No NCBI counterpart: LOSAT_X_BNQDROP (read once).
+/// No NCBI counterpart: LOSAT_X_BNQPACK (read once).
 pub(super) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNQDROP"))
-}
-
-/// No NCBI counterpart: LOSAT_X_BNQPACK (read once).
-pub(super) fn pack_on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNQPACK"))
-}
-
-/// No NCBI counterpart: whether `search_cli` packs the letters of the records it reads before the
-/// search (LOSAT_X_BNQPACK): where they go into a `Store` (`Rule::acts`, LOSAT_X_BNQDROP on) and the
-/// query file holds at least two of the task's largest batches (`file_bytes` against
-/// `batch_letters`, as LOSAT_X_QSTREAM's `Batch`): with fewer, the first batch holds most letters
-/// anyway, and packing them would only cost time. Standard input (no size) is not packed.
-pub(super) fn packs(store_acts: bool, file_bytes: Option<u64>, batch_letters: u64) -> bool {
-    store_acts
-        && pack_on()
-        && file_bytes.is_some_and(|bytes| bytes >= batch_letters.saturating_mul(2))
 }
 
 /// No NCBI counterpart: what `search_cli` knows of a search when it decides whether the switch
@@ -135,8 +119,8 @@ impl Rule<'_> {
 /// The query records read before a search, which the batch loop takes out batch by batch, in
 /// order (`x_query_stream::Queries::Taken`).
 pub(super) struct Store {
-    /// The records the loop has not taken, the packed letters of those packed (LOSAT_X_BNQPACK), and
-    /// how many records the loop has taken.
+    /// The records the loop has not taken, the packed letters of those packed, and how many
+    /// records the loop has taken.
     left: Mutex<Left>,
     /// Every record searched whole (no `-query_loc`).
     query_input: QueryInput,
@@ -238,7 +222,7 @@ impl Store {
         } = &mut *left;
         anyhow::ensure!(
             range.start == *taken && range.len() <= records.len(),
-            "LOSAT_X_BNQDROP: the batch of the records {range:?} after those up to {taken}"
+            "LOSAT_X_BNQPACK: the batch of the records {range:?} after those up to {taken}"
         );
         *taken = range.end;
         let mut batch: Vec<FastaRecord> = records.by_ref().take(range.len()).collect();
@@ -266,8 +250,8 @@ impl Store {
     }
 }
 
-/// No NCBI counterpart: the letters of a batch's packed records made again (LOSAT_X_BNQPACK), by the
-/// search pool where it has two threads or more (each record by one thread).
+/// No NCBI counterpart: the letters of a batch's packed records made again, by the search pool
+/// where it has two threads or more (each record by one thread).
 fn unpack(
     batch: &mut [FastaRecord],
     stores: Vec<Option<Arc<PackedLetters>>>,
@@ -359,7 +343,7 @@ impl BatchQueries<'_> {
 static BATCHES: AtomicU64 = AtomicU64::new(0);
 static RECORDS: AtomicU64 = AtomicU64::new(0);
 static LETTERS: AtomicU64 = AtomicU64::new(0);
-// No NCBI counterpart (LOSAT_X_BNQPACK): the records packed as they were read, their letters and
+// No NCBI counterpart: the records packed as they were read, their letters and
 // the bytes held for them, and the time spent making their letters again (with LOSAT_TIMING).
 static PACKED: AtomicU64 = AtomicU64::new(0);
 static PACKED_LETTERS: AtomicU64 = AtomicU64::new(0);

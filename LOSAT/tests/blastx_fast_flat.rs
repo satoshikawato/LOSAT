@@ -12,7 +12,8 @@
 //! switch, for subjects read from FASTA (`-subject`) and from a database (`-db`), on one thread
 //! and on several. That reports equal NCBI's is the business of the BLASTX fixtures. The same for
 //! the units searched at a time with this table (`LOSAT_X_BXCLUTCAP`, `blastx/x_bx_mem.rs`), which
-//! is scheduling only, and the side of its rule each run takes.
+//! is scheduling only, and the side of its rule each run takes; and the memory of the tables and of
+//! a batch's end (`LOSAT_X_BXCLUTPOOL`, `LOSAT_X_BXENDMEM`).
 //!
 //! The query is long enough to be split into chunks, and a batch of short records follows it, so
 //! that several tables are built in one search.
@@ -23,6 +24,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const REFERENCE_TABLE: (&str, &str) = ("LOSAT_X_BPCLUT", "0");
 const NO_UNIT_RULE: (&str, &str) = ("LOSAT_X_BXCLUTCAP", "0");
+const NO_KEPT_VECTORS: (&str, &str) = ("LOSAT_X_BXCLUTPOOL", "0");
+const WORD_TABLE_AND_COPY: (&str, &str) = ("LOSAT_X_BXENDMEM", "0");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -156,6 +159,29 @@ fn unit_rule_sides(dir: &Path, query: &Path, target: &[&str], threads: &str) -> 
         }
     }
     sides
+}
+
+// The tables built on kept vectors (`LOSAT_X_BXCLUTPOOL`) and the batch's end without the word-hash
+// tables and the copy of the residues (`LOSAT_X_BXENDMEM`) give the same report. The subjects are
+// the query's own proteins, so that composition-based statistics runs its near-identical test.
+#[test]
+fn kept_vectors_and_the_batch_end_give_the_same_report() {
+    let dir = temp_dir("kept");
+    let subject = fixture("AP027133.faa");
+    let db = make_db(&dir, &subject);
+    let query = write_query(&dir);
+    let subject = subject.to_str().unwrap();
+    let db = db.to_str().unwrap();
+    for target in [["-subject", subject], ["-db", db]] {
+        for threads in ["1", "4"] {
+            let new = search(&[], &dir, &query, &target, threads);
+            assert!(!new.is_empty(), "{target:?} n{threads}: no hits");
+            for off in [NO_KEPT_VECTORS, WORD_TABLE_AND_COPY] {
+                let other = search(&[off], &dir, &query, &target, threads);
+                assert_eq!(new, other, "{target:?} n{threads} {off:?}");
+            }
+        }
+    }
 }
 
 #[test]

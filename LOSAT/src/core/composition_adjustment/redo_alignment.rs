@@ -2168,31 +2168,60 @@ fn find_num_identical(
         return 0;
     }
 
+    let mut hash = 0u64;
+    num_identical_by(
+        query_seq,
+        subject_seq,
+        max_shift,
+        |s_pos, fresh_hash, query_positions| {
+            if fresh_hash {
+                hash = get_hash(&subject_seq[s_pos..], NEAR_IDENTICAL_WORD_SIZE);
+            } else {
+                hash <<= 5;
+                hash &= NEAR_IDENTICAL_HASH_MASK;
+                hash += u64::from(subject_seq[s_pos + NEAR_IDENTICAL_WORD_SIZE - 1]);
+            }
+            query_positions
+                .into_iter()
+                .find(|&q_pos| query_hashes[q_pos] == hash)
+        },
+    )
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1166-1188
+// ```c
+// for (s_pos = 0; s_pos < subject_len - word_size; s_pos++) {
+//     ...
+//     for (q_pos = query_from; q_pos < query_len - word_size; q_pos++) {
+//         if (query_hashes[q_pos] == hash) {
+//             break;
+//         }
+//     }
+// }
+// ```
+/// The loop of `s_FindNumIdentical`, on `query_seq` and `subject_seq` of at least the word size.
+/// `find` gets the subject position, whether the hash loop must hash the word afresh, and the query
+/// positions to test in order; it returns the first of them whose word equals the subject's.
+fn num_identical_by(
+    query_seq: &[u8],
+    subject_seq: &[u8],
+    max_shift: usize,
+    mut find: impl FnMut(usize, bool, std::ops::Range<usize>) -> Option<usize>,
+) -> usize {
     let mut query_from = 0usize;
     let mut subject_from = 0usize;
     let mut num_identical = 0usize;
     let mut matched_last = false;
-    let mut hash = 0u64;
 
     let last_subject_start = subject_seq.len() - NEAR_IDENTICAL_WORD_SIZE;
     let last_query_start = query_seq.len() - NEAR_IDENTICAL_WORD_SIZE;
     let mut s_pos = 0usize;
     while s_pos < last_subject_start {
-        if s_pos == 0 || matched_last {
-            hash = get_hash(&subject_seq[s_pos..], NEAR_IDENTICAL_WORD_SIZE);
-        } else {
-            hash <<= 5;
-            hash &= NEAR_IDENTICAL_HASH_MASK;
-            hash += u64::from(subject_seq[s_pos + NEAR_IDENTICAL_WORD_SIZE - 1]);
-        }
-
-        let mut matched_q = None;
-        for q_pos in query_from..last_query_start {
-            if query_hashes[q_pos] == hash {
-                matched_q = Some(q_pos);
-                break;
-            }
-        }
+        let matched_q = find(
+            s_pos,
+            s_pos == 0 || matched_last,
+            query_from..last_query_start,
+        );
 
         if let Some(query_start) = matched_q {
             let subject_start = s_pos;
@@ -2225,6 +2254,59 @@ fn find_num_identical(
     num_identical
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1153-1188 (see
+// `find_num_identical`); c++/src/algo/blast/core/blast_kappa.c:2235-2272 (`build_query_word_hashes`)
+// ```c
+//     for (q_pos = query_from; q_pos < query_len - word_size; q_pos++) {
+//         if (query_hashes[q_pos] == hash) {
+//             break;
+//         }
+//     }
+// ```
+/// EXPERIMENT (LOSAT_X_BXENDMEM): `find_num_identical` without the table of the query's word
+/// hashes: `word_residues` are the residues of the whole query context from the first position the
+/// table slice would start at. A hash is its word's letters in 5 bits each and residues are below
+/// 32, so two hashes are equal exactly where the 8 letters are; the table's last entry is the one
+/// its loop leaves 0 (`build_query_word_hashes`), equal only to a subject word of 8 letters 0.
+fn x_find_num_identical_on_residues(
+    query_seq: &[u8],
+    word_residues: &[u8],
+    table_entries: usize,
+    last_is_zero: bool,
+    subject_seq: &[u8],
+    max_shift: usize,
+) -> usize {
+    let required_query_hashes = query_seq.len().saturating_sub(NEAR_IDENTICAL_WORD_SIZE);
+    if query_seq.len() < NEAR_IDENTICAL_WORD_SIZE
+        || table_entries < required_query_hashes
+        || subject_seq.len() < NEAR_IDENTICAL_WORD_SIZE
+    {
+        return 0;
+    }
+    let word = |residues: &[u8], at: usize| {
+        let bytes: [u8; NEAR_IDENTICAL_WORD_SIZE] = residues[at..at + NEAR_IDENTICAL_WORD_SIZE]
+            .try_into()
+            .expect("a slice of the word size");
+        u64::from_ne_bytes(bytes)
+    };
+    let zero_entry = table_entries.wrapping_sub(1);
+    num_identical_by(
+        query_seq,
+        subject_seq,
+        max_shift,
+        |s_pos, _, query_positions| {
+            let subject_word = word(subject_seq, s_pos);
+            query_positions.into_iter().find(|&q_pos| {
+                if last_is_zero && q_pos == zero_entry {
+                    subject_word == 0
+                } else {
+                    word(word_residues, q_pos) == subject_word
+                }
+            })
+        },
+    )
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1259-1312
 // ```c
 // static Boolean
@@ -2245,6 +2327,93 @@ pub fn test_near_identical(
     query_offset: i32,
     query_words: Option<&[u64]>,
     align: &BlastCompoAlignment,
+) -> bool {
+    near_identical_by(
+        seq_data,
+        seq_offset,
+        query_data,
+        query_offset,
+        align,
+        |query_word_start, query_seq, subject_seq| {
+            let query_words = query_words.unwrap_or(&[]);
+            let query_word_slice = if query_word_start <= query_words.len() {
+                &query_words[query_word_start..]
+            } else {
+                &[]
+            };
+            find_num_identical(
+                query_seq,
+                query_word_slice,
+                subject_seq,
+                NEAR_IDENTICAL_MAX_SHIFT,
+            )
+        },
+    )
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1322-1333 (see
+// `test_near_identical`)
+// ```c
+// num_identical += s_FindNumIdentical(queryData->data + qStart + query_right_len,
+//                         query_words + qStart + query_right_len,
+//                         query_len - query_left_len - query_right_len,
+//                         seqData->data + sStart + subject_right_len,
+//                         subject_len - subject_left_len - subject_right_len,
+//                         max_shift);
+// ```
+/// EXPERIMENT (LOSAT_X_BXENDMEM): `test_near_identical` with `query_words` the table
+/// `build_query_word_hashes(query_context)` would make, read from `query_context` instead
+/// (`x_find_num_identical_on_residues`).
+pub(crate) fn x_test_near_identical_on_residues(
+    seq_data: &BlastCompoSequenceData,
+    seq_offset: i32,
+    query_data: &BlastCompoSequenceData,
+    query_offset: i32,
+    query_context: &[u8],
+    align: &BlastCompoAlignment,
+) -> bool {
+    near_identical_by(
+        seq_data,
+        seq_offset,
+        query_data,
+        query_offset,
+        align,
+        |query_word_start, query_seq, subject_seq| {
+            // The table has `length - word size + 1` entries; a start past them leaves no slice.
+            let entries = (query_context.len() + 1).saturating_sub(NEAR_IDENTICAL_WORD_SIZE);
+            let table_entries = entries.saturating_sub(query_word_start);
+            x_find_num_identical_on_residues(
+                query_seq,
+                query_context.get(query_word_start..).unwrap_or(&[]),
+                table_entries,
+                // Entry 0 is hashed even in a table of one entry.
+                entries > 1,
+                subject_seq,
+                NEAR_IDENTICAL_MAX_SHIFT,
+            )
+        },
+    )
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1259-1312
+// ```c
+// static Boolean
+// s_TestNearIdentical(const BlastCompo_SequenceData* seqData,
+//                     const int seqOffset,
+//                     const BlastCompo_SequenceData* queryData,
+//                     const int queryOffset,
+//                     const Uint8* query_words,
+//                     const BlastCompo_Alignment* align)
+// ```
+/// The statements of `s_TestNearIdentical`; `find_identical` is its call of `s_FindNumIdentical`
+/// (the query words' start, the query's middle slice, the subject's middle slice).
+fn near_identical_by(
+    seq_data: &BlastCompoSequenceData,
+    seq_offset: i32,
+    query_data: &BlastCompoSequenceData,
+    query_offset: i32,
+    align: &BlastCompoAlignment,
+    find_identical: impl FnOnce(usize, &[u8], &[u8]) -> usize,
 ) -> bool {
     let q_start_i32 = align.query_start - query_offset;
     let q_end_i32 = align.query_end - query_offset - 1;
@@ -2307,19 +2476,10 @@ pub fn test_near_identical(
     // `s_FindNumIdentical` returns 0 and NCBI still evaluates the final
     // identity fraction. Do not convert a missing or exhausted hash slice
     // into an immediate `false`.
-    let query_words = query_words.unwrap_or(&[]);
-    let query_word_start = q_start + query_right_len;
-    let query_word_slice = if query_word_start <= query_words.len() {
-        &query_words[query_word_start..]
-    } else {
-        &[]
-    };
-
-    num_identical += find_num_identical(
+    num_identical += find_identical(
+        q_start + query_right_len,
         &query_seq[query_right_len..query_seq.len() - query_left_len],
-        query_word_slice,
         &subject_seq[subject_right_len..subject_seq.len() - subject_left_len],
-        NEAR_IDENTICAL_MAX_SHIFT,
     );
 
     (num_identical as f64) / (align_len as f64) > MIN_FRACTION_NEAR_IDENTICAL
@@ -4373,5 +4533,75 @@ mod tests {
         let align = make_align(96, 0, 100, 0, 100, 0);
 
         assert!(test_near_identical(&subject, 0, &query, 0, None, &align));
+    }
+    // LOSAT_X_BXENDMEM: the test on the residues gives the table's answer: letters from small
+    // alphabets (so that words repeat), ranges not starting at 0 (the table is read at the range's
+    // offsets, as NCBI reads it), and subjects with runs of letter 0 (the table's last entry).
+    #[test]
+    fn near_identical_on_residues_equals_the_table() {
+        let mut x = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move |n: u64| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x % n
+        };
+        let mut true_answers = 0;
+        for round in 0..20_000 {
+            let letters = [2, 3, 28][round % 3];
+            let context: Vec<u8> = (0..4 + next(120)).map(|_| next(letters) as u8).collect();
+            let begin = next(1 + context.len() as u64 / 2) as usize;
+            let end = begin + next(1 + (context.len() - begin) as u64) as usize;
+            if end == begin {
+                continue;
+            }
+            let orig = BlastCompoSequenceData::from_ncbistdaa(&context);
+            let query = BlastCompoSequenceData::from_ncbistdaa(&context[begin..end]);
+            let mut subject: Vec<u8> = (0..4 + next(120))
+                .map(|_| {
+                    if next(2) == 0 {
+                        context[next(context.len() as u64) as usize]
+                    } else {
+                        next(letters) as u8
+                    }
+                })
+                .collect();
+            if next(4) == 0 && subject.len() > 20 {
+                subject[2..14].fill(0);
+            }
+            let subject = BlastCompoSequenceData::from_ncbistdaa(&subject);
+            let query_start = begin as i32 + next(1 + (end - begin) as u64 / 4) as i32;
+            let query_end = end as i32 - next(1 + (end - begin) as u64 / 4) as i32;
+            let match_start = next(1 + subject.data().len() as u64 / 4) as i32;
+            let match_end =
+                subject.data().len() as i32 - next(1 + subject.data().len() as u64 / 4) as i32;
+            if query_start >= query_end || match_start >= match_end {
+                continue;
+            }
+            let align = blast_compo_alignment_new(
+                1,
+                EMatrixAdjustRule::DontAdjustMatrix,
+                query_start,
+                query_end,
+                0,
+                match_start,
+                match_end,
+                1,
+                None,
+            );
+            let table = build_query_word_hashes(orig.data());
+            let want = test_near_identical(&subject, 0, &query, begin as i32, Some(&table), &align);
+            let got = x_test_near_identical_on_residues(
+                &subject,
+                0,
+                &query,
+                begin as i32,
+                orig.data(),
+                &align,
+            );
+            assert_eq!(got, want, "round {round}");
+            true_answers += usize::from(want);
+        }
+        assert!(true_answers > 100, "true answers {true_answers}");
     }
 }

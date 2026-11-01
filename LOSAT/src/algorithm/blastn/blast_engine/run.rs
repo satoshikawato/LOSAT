@@ -168,8 +168,9 @@ mod x_bnstream;
 #[path = "x_lut_drop.rs"]
 mod x_lut_drop;
 
-// EXPERIMENT (LOSAT_X_BNQDROP): the letters of a query batch's records dropped once the batch has
-// encoded them, where no report reads them.
+// EXPERIMENT (LOSAT_X_BNQPACK): the query records read before the search held packed in a store,
+// each batch's letters made again when the loop takes it and dropped once the batch has encoded
+// them, where no report reads them.
 #[path = "x_query_drop.rs"]
 mod x_query_drop;
 
@@ -247,8 +248,8 @@ mod x_query_stream;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279 (the batch reading that
 // LOSAT_X_QSTREAM's first reading precedes).
-// EXPERIMENT (LOSAT_X_QSCANPAR): that first reading cut into parts at record starts and read by
-// the search's threads (a child module, beside `x_query_stream`, which calls it).
+// That first reading cut into parts at record starts and read by the search's threads (a child
+// module, beside `x_query_stream`, which calls it).
 #[path = "x_query_scan_par.rs"]
 mod x_query_scan_par;
 
@@ -276,7 +277,7 @@ pub fn x_lut_drop_print_summary() {
     x_lut_drop::print_summary();
 }
 
-/// EXPERIMENT (LOSAT_X_BNQDROP): the summary line `main` prints at exit (LOSAT_TIMING). No NCBI
+/// EXPERIMENT (LOSAT_X_BNQPACK): the summary line `main` prints at exit (LOSAT_TIMING). No NCBI
 /// counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_query_drop_print_summary() {
     x_query_drop::print_summary();
@@ -7541,13 +7542,10 @@ fn search_cli(
     let shared_standard_input =
         args.query.as_os_str() == "-" && args.subject_path().as_os_str() == "-";
     // EXPERIMENT (LOSAT_X_QSTREAM): what its rule reads (`x_query_stream::Rule`): the task and the
-    // largest query batch. EXPERIMENT (LOSAT_X_BNQPACK) reads the query file's size and that batch
-    // too (`x_query_drop::packs`).
-    let x_file_bytes = x_query_file_bytes(&args.query);
-    let x_batch_letters = x_query_batch_letters(&args.task);
+    // largest query batch.
     let x_rule = x_query_stream::Rule {
         megablast: args.task == "megablast",
-        batch_letters: x_batch_letters,
+        batch_letters: x_query_batch_letters(&args.task),
     };
     // EXPERIMENT (LOSAT_X_QSTREAM): whether the query file is read a second time, batch by batch
     // (a second handle on it, at the position its reader starts from), where the reports may be
@@ -7559,21 +7557,16 @@ fn search_cli(
         x_rpt_stream::switch_on() && !args.parse_deflines,
         x_rule,
     );
-    // EXPERIMENT (LOSAT_X_BNQDROP): whether the records read before the search move into a store
+    // EXPERIMENT (LOSAT_X_BNQPACK): whether the records read before the search move into a store
     // that the batch loop takes them out of (`x_query_drop::Rule`), decided before the reading so
-    // that EXPERIMENT (LOSAT_X_BNQPACK) can pack their letters as they are read.
-    let x_drop_rule = !x_opening.acts()
-        && x_query_drop::on()
-        && x_query_drop::Rule {
-            formats: &output_formats,
-            query_range: query_range.is_some(),
-            hit_records: outputs.hits.is_some(),
-        }
-        .acts();
-    let x_pack = x_query_drop::packs(x_drop_rule, x_file_bytes, x_batch_letters);
-    if x_drop_rule && x_query_drop::pack_on() {
-        crate::utils::xreach::x_reach!("LOSAT_X_BNQPACK", x_pack);
+    // that their letters are packed as they are read.
+    let x_store_rule = x_query_drop::Rule {
+        formats: &output_formats,
+        query_range: query_range.is_some(),
+        hit_records: outputs.hits.is_some(),
     }
+    .acts();
+    let x_store_acts = !x_opening.acts() && x_query_drop::on() && x_store_rule;
     let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders)
         .with_defline(args.archive.is_some())
         .with_parse_deflines(args.parse_deflines)
@@ -7615,7 +7608,7 @@ fn search_cli(
             args.num_threads,
         )?;
         (Vec::new(), end, store)
-    } else if x_pack {
+    } else if x_store_acts {
         let (QueryRecords { records, end }, packed) =
             crate::blastinput::fasta_reader::x_read_queries_packed(&mut query_source);
         x_packed = packed;
@@ -7647,17 +7640,17 @@ fn search_cli(
         ),
         (None, None) => unreachable!("`run` reads the subjects of a search without -db"),
     };
-    // EXPERIMENT (LOSAT_X_BNQDROP): where no report reads the queries' letters, the records read
+    // EXPERIMENT (LOSAT_X_BNQPACK): where no report reads the queries' letters, the records read
     // before the search move into a store that the batch loop takes them out of, so a batch can drop
-    // its letters once it has encoded them (`x_query_drop.rs`).
-    let x_taken = !x_store.acts() && x_query_drop::on() && {
-        crate::utils::xreach::x_reach!("LOSAT_X_BNQDROP", x_drop_rule);
-        x_drop_rule
-    };
+    // its letters once it has encoded them (`x_query_drop.rs`). The reach of the switch is recorded
+    // here, after the reading, for the searches that reach it.
+    if !x_store.acts() && x_query_drop::on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_BNQPACK", x_store_rule);
+    }
     let x_taken_store;
     let queries = if x_store.acts() {
         SearchQueries::Streamed(&x_store)
-    } else if x_taken {
+    } else if x_store_acts {
         x_taken_store = x_query_drop::Store::new(records, x_packed);
         SearchQueries::Taken(&x_taken_store)
     } else {
@@ -7981,7 +7974,7 @@ fn run_local_formats(
 enum SearchQueries<'a> {
     Records(&'a [FastaRecord]),
     Streamed(&'a x_query_stream::Store),
-    /// EXPERIMENT (LOSAT_X_BNQDROP): records read before the search that the batch loop takes out
+    /// EXPERIMENT (LOSAT_X_BNQPACK): records read before the search that the batch loop takes out
     /// of their store (`x_query_drop.rs`).
     Taken(&'a x_query_drop::Store),
 }
@@ -7997,7 +7990,7 @@ fn search(
 ) -> Result<()> {
     // EXPERIMENT (LOSAT_X_QSTREAM): a streamed search has no records here (its reading is never
     // `Records`), and its query input comes from the lengths of the first reading; EXPERIMENT
-    // (LOSAT_X_BNQDROP) a taken one has its records in its store, with its query input.
+    // (LOSAT_X_BNQPACK) a taken one has its records in its store, with its query input.
     let query_records: &[FastaRecord] = match queries {
         SearchQueries::Records(records) => records,
         SearchQueries::Streamed(_) | SearchQueries::Taken(_) => &[],
@@ -8898,7 +8891,7 @@ fn run_in_pool(
     // The warnings written before each query's report (`QueryWarnings`).
     let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); lengths.len()];
     let mut query_eff_searchsp = Vec::with_capacity(2 * lengths.len());
-    // EXPERIMENT (LOSAT_X_QSTREAM, LOSAT_X_BNQDROP): the searched records of the batches taken,
+    // EXPERIMENT (LOSAT_X_QSTREAM, LOSAT_X_BNQPACK): the searched records of the batches taken,
     // kept where a writer reads them after their batch: the reports after the loop and the
     // error paths that write the reports of the batches before (LOSAT_X_RPTSTREAM not acting).
     // Without the switches the records read before the search are those.
@@ -9630,7 +9623,7 @@ fn run_in_pool(
                 *query_warnings = Vec::new();
             }
         }
-        // EXPERIMENT (LOSAT_X_QSTREAM, LOSAT_X_BNQDROP): the batch's records are kept for a later
+        // EXPERIMENT (LOSAT_X_QSTREAM, LOSAT_X_BNQPACK): the batch's records are kept for a later
         // writer (moved when the loop took them out of their store), or dropped.
         if keep {
             let searched = batch_records.into_searched();
@@ -9705,17 +9698,6 @@ fn run_in_pool(
         )
     })?;
     Ok(())
-}
-
-// No NCBI counterpart (when LOSAT reads the records only): it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BNQPACK): the length of the query file in bytes, as NCBI's `CFile` gives it
-/// (`stat`, through symbolic links); `None` for standard input (`-`) or a path that cannot be
-/// read.
-fn x_query_file_bytes(query: &std::path::Path) -> Option<u64> {
-    if query == std::path::Path::new("-") {
-        return None;
-    }
-    std::fs::metadata(query).ok().map(|metadata| metadata.len())
 }
 
 // No NCBI counterpart (when LOSAT reads the records only): it changes no value NCBI computes.
@@ -11419,7 +11401,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         }
         _ => None,
     };
-    // EXPERIMENT (LOSAT_X_BNQDROP): the encoding and the query chunks were the last readers of the
+    // EXPERIMENT (LOSAT_X_BNQPACK): the encoding and the query chunks were the last readers of the
     // batch's letters; records held by the caller alone drop them here, before the lookup tables
     // are built (`x_query_drop.rs`). The search reads only the records' count from here on.
     let SequenceData {

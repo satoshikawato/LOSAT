@@ -571,12 +571,14 @@ fn open_error(name: &str, seqtype: SeqType) -> SeqDbError {
 
 #[test]
 fn databases_that_need_unread_data_are_rejected() {
-    // A database with parsed Seq-ids opens; the check of the search programs
-    // that read ordinal ids only refuses it, as the reader's open did before.
+    // A database with parsed Seq-ids opens and says so; the decoder of the ordinal ids
+    // refuses its headers, as the reader's open did before.
     for name in ["prot_ids_v4", "prot_ids_v5"] {
         let db =
             SeqDb::open(&db_name(name), SeqType::Protein).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let error = db.check_ordinal_ids().expect_err("parsed Seq-ids");
+        assert!(db.has_parsed_seqids().unwrap(), "{name}");
+        let error = db.deflines(0).expect_err("parsed Seq-ids");
+        assert!(error.is_parsed_seqids(), "{name}: {error}");
         assert!(
             matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("parsed Seq-ids")),
             "{name}: {error}"
@@ -584,16 +586,15 @@ fn databases_that_need_unread_data_are_rejected() {
         assert!(
             error.to_string().ends_with(&format!(
                 "{name}.phr: unsupported database: the database stores parsed Seq-ids \
-                 (makeblastdb -parse_seqids, or a database distributed by NCBI); LOSAT's search \
-                 programs read them, its psiblast reads databases built without -parse_seqids \
-                 only"
+                 (makeblastdb -parse_seqids, or a database distributed by NCBI), which the \
+                 decoder of the ordinal ids does not read"
             )),
             "{name}: {error}"
         );
         assert_eq!(db.defline_set(0).unwrap().deflines.len(), 1, "{name}");
     }
     let db = SeqDb::open(&db_name("prot_v4"), SeqType::Protein).unwrap();
-    db.check_ordinal_ids().unwrap();
+    assert!(!db.has_parsed_seqids().unwrap());
     for (name, key) in [("alias_gilist", "GILIST")] {
         let error = open_error(name, SeqType::Protein);
         assert!(
@@ -875,14 +876,39 @@ fn alias_lines_are_read_as_ncbi_reads_them() {
         ]
     );
     assert_eq!(
-        test_split_quoted(b"one \"two words\"  three\"four\" five"),
+        test_split_quoted(b"one \"two words\"  three\"four\" five", false),
         [b"one".as_slice(), b"two words", b"three", b"four", b"five"]
     );
-    assert!(test_split_quoted(b"  ").is_empty());
+    assert!(test_split_quoted(b"  ", false).is_empty());
     assert_eq!(
-        test_split_quoted(b"\"open quote"),
+        test_split_quoted(b"\"open quote", false),
         [b"open quote".as_slice()]
     );
+    // The reports keep the quotes (`SeqDB_SplitQuoted(..., true)`), and NCBI's `i++` past a
+    // closing quote also skips the byte after it.
+    assert_eq!(
+        test_split_quoted(b"\"a b\" \"c\"", true),
+        [b"\"a b\"".as_slice(), b"\"c\""]
+    );
+    assert_eq!(
+        test_split_quoted(b"\"a\"b c", true),
+        [b"\"a\"".as_slice(), b"c"]
+    );
+    assert_eq!(
+        test_split_quoted(b"x\"open", true),
+        [b"x".as_slice(), b"\"open"]
+    );
+    // The names the reports open alone: white space at their ends dropped, empty ones left
+    // out (probe DI-8f K01, K02: `<db>` of XML2).
+    assert_eq!(
+        super::alias::report_names(" db/n5t  db/nc5 "),
+        ["db/n5t", "db/nc5"]
+    );
+    assert_eq!(
+        super::alias::report_names("\"db/n5t\" \"db/nc5\""),
+        ["\"db/n5t\"", "\"db/nc5\""]
+    );
+    assert_eq!(super::alias::report_names("a\t b"), ["a", "b"]);
 }
 
 /// BER bytes of one `Blast-def-line-set` with one definition line.
@@ -1101,13 +1127,44 @@ fn a_name_is_a_list_as_for_ncbi() {
         SeqDb::open(&quoted, SeqType::Protein).unwrap().num_seqs(),
         10
     );
-    // Two names: several databases in one search are not supported.
-    let two = format!("{prot_v4} {}", db_name("prot_old"));
-    let error = SeqDb::open(&two, SeqType::Protein).unwrap_err();
-    assert!(
-        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("several databases")),
-        "{error}"
-    );
+    // Two names: the databases of both are searched as one, and the reports keep one record
+    // per name in the order of the list (DI-8 DECISIONS 29).
+    let prot_old = db_name("prot_old");
+    let alone = |name: &str| {
+        let mut db = SeqDb::open(name, SeqType::Protein).unwrap();
+        db.read_name_records(name).unwrap();
+        db
+    };
+    let (v4, old) = (alone(&prot_v4), alone(&prot_old));
+    for (list, first, second) in [
+        (format!("{prot_v4} {prot_old}"), &v4, &old),
+        (format!("{prot_old} {prot_v4}"), &old, &v4),
+    ] {
+        let both = alone(&list);
+        assert_eq!(both.num_seqs(), v4.num_seqs() + old.num_seqs(), "{list}");
+        assert_eq!(
+            both.total_length(),
+            v4.total_length() + old.total_length(),
+            "{list}"
+        );
+        assert_eq!(
+            both.name_records(),
+            [
+                first.name_records()[0].clone(),
+                second.name_records()[0].clone()
+            ],
+            "{list}"
+        );
+    }
+    // The same name twice: its volume is opened (and searched) once, the reports show it
+    // twice (probe DI-8f P25, F38).
+    let twice = alone(&format!("{prot_v4} {prot_v4}"));
+    assert_eq!(twice.num_seqs(), v4.num_seqs());
+    assert_eq!(twice.name_records().len(), 2);
+    assert_eq!(twice.name_records()[1], v4.name_records()[0]);
+    // A quoted name keeps its quotes in its record (`GetBlastDbInfo` splits with them).
+    let quoted_db = alone(&quoted);
+    assert_eq!(quoted_db.name_records()[0].name, quoted);
     let error = SeqDb::open("  ", SeqType::Protein).unwrap_err();
     assert!(
         matches!(&error, SeqDbError::NotFound(message)
@@ -1655,11 +1712,21 @@ fn check_search_path_row(
         (&row[0], &row[1], &row[2], &row[3], &row[4], &row[5]);
     // The tables hold the value of blastp's `-db`, which the program trims. A
     // search program reads the first header of each volume right after it opens the
-    // database (`algorithm::common::database::refuse_parsed_seqids`, or `check_seqids`
-    // where it reads parsed Seq-ids too); the tables' databases have none.
+    // database (`algorithm::common::database::check_seqids`).
     let name = db_argument_name(name);
     let opened = SeqDb::open_in(name, SeqType::Protein, search)
-        .and_then(|db| db.check_ordinal_ids().map(|()| db));
+        .and_then(|db| db.has_parsed_seqids().map(|parsed| (db, parsed)));
+    // A database with parsed Seq-ids, which the search programs read (line DBID); NCBI's
+    // outcome is that of its formatters (an `other` row).
+    if losat == "parsed" {
+        let (_, parsed) = opened.unwrap_or_else(|e| panic!("{id}: LOSAT does not open it: {e:?}"));
+        assert!(parsed, "{id}: parsed Seq-ids");
+        return;
+    }
+    let opened = opened.map(|(db, parsed)| {
+        assert!(!parsed, "{id}: parsed Seq-ids");
+        db
+    });
 
     // A volume without its sequence file: NCBI's search fails when it reads
     // the first sequence, with the search stage's own text and exit status.

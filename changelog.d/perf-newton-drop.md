@@ -1,0 +1,1 @@
+- `tblastn`: Newton results of the composition adjustment computed ahead and never asked for are dropped when the next ones are computed ahead, instead of staying in each thread's store until it holds 512; reports do not change, and `LOSAT_X_NEWTONDROP=0` keeps them ([`docs/agents/diagnostics.md`](docs/agents/diagnostics.md)).

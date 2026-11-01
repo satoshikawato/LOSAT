@@ -6126,8 +6126,9 @@ fn search(
                             })
                             .collect(),
                         diagnostics: &mut **diagnostics,
-                        hits: x_want_records
-                            .then_some(&mut x_collect as &mut crate::api::local_blast::HitsSink<'_>),
+                        hits: x_want_records.then_some(
+                            &mut x_collect as &mut crate::api::local_blast::HitsSink<'_>,
+                        ),
                         observer: x_offset
                             .as_mut()
                             .map(|offset| offset as &mut (dyn FormatObserver + Send)),

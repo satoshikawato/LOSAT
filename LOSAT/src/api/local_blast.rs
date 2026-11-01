@@ -323,9 +323,7 @@ impl ReportOutputs<'_> {
                 })
                 .collect(),
             diagnostics: &mut tee,
-            hits: hits
-                .as_mut()
-                .map(|hits| &mut **hits as &mut HitsSink<'_>),
+            hits: hits.as_mut().map(|hits| &mut **hits as &mut HitsSink<'_>),
             observer: observer
                 .as_mut()
                 .map(|observer| &mut **observer as &mut (dyn FormatObserver + Send)),

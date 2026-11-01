@@ -1,5 +1,7 @@
 //! Protein sequence encoding helpers for BLASTP
 
+use crate::algorithm::blastx::query_setup::combine_masks;
+use crate::algorithm::tblastn::archive::lowercase_runs;
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa};
 use crate::utils::seg::{SegMasker, SegParams};
@@ -122,6 +124,58 @@ pub fn encode_protein_query_frame_soft_masked(
     encode_query_frame::<true>(seq, seg, timed)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1239-1256
+// ```c
+//     if (filter_options->segOptions) { ... SeqBufferSeg(...) ... }
+//     ...
+//         BlastSeqLoc *lcase_mask_slp = NULL;
+//         if (query_blk->lcase_mask && query_blk->lcase_mask->seqloc_array)
+//         {
+//             ASSERT(context < query_blk->lcase_mask->total_size);
+//             lcase_mask_slp = query_blk->lcase_mask->seqloc_array[context];
+//             /* Set location list to NULL to allow safe memory deallocation,
+//               ownership transferred to filter_out. */
+//             query_blk->lcase_mask->seqloc_array[context] = NULL;
+//         }
+//         BlastSeqLocAppend(filter_out, lcase_mask_slp);
+//         status = BlastSeqLocCombine(filter_out, 0);
+// ```
+/// The query frame of a BLASTP search with `-lcase_masking`: its SEG intervals (none without
+/// `-seg`) and its lower-case runs in `seg_masks`, combined as NCBI combines them. Without `soft`
+/// the frame keeps an unmasked copy and its masked letters become X. Cold and out of line (no NCBI
+/// counterpart: code placement only), so that the callers keep the default path's code.
+#[cold]
+#[inline(never)]
+pub fn encode_protein_query_frame_lcase(
+    seq: &[u8],
+    seg: Option<&SegParams>,
+    soft: bool,
+    timed: bool,
+) -> QueryFrame {
+    let mut frame = encode_query_frame::<true>(seq, seg, timed);
+    // SEG's intervals first, as `BlastSeqLocAppend(filter_out, lcase_mask_slp)`: the sort of
+    // `BlastSeqLocCombine` compares only the left ends, and a one-letter run on the first letter of
+    // a SEG interval is merged only in this order (the results' masks).
+    let mut masks: Vec<(i32, i32)> = frame
+        .seg_masks
+        .iter()
+        .map(|&(start, end)| (start as i32, end as i32 - 1))
+        .collect();
+    masks.extend(lowercase_runs(seq));
+    frame.seg_masks = combine_masks(masks)
+        .into_iter()
+        .map(|(from, to)| (from as usize, to as usize + 1))
+        .collect();
+    if !soft && !frame.seg_masks.is_empty() {
+        frame.aa_seq_nomask = Some(frame.aa_seq.clone());
+        for &(start, end) in &frame.seg_masks {
+            // Past the leading sentinel.
+            frame.aa_seq[1 + start..1 + end].fill(ncbistdaa::X);
+        }
+    }
+    frame
+}
+
 // `MASK_AT_HASH` is a const parameter so that the default (hard) instance and its callers keep the
 // code they had before `-soft_masking` (one instance per value).
 fn encode_query_frame<const MASK_AT_HASH: bool>(
@@ -230,6 +284,41 @@ mod tests {
         assert_ne!(soft.aa_seq, hard.aa_seq);
         let none = encode_protein_query_frame_soft_masked(seq, None, false);
         assert!(none.seg_masks.is_empty() && none.aa_seq == soft.aa_seq);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1253-1254
+    // ```c
+    //         BlastSeqLocAppend(filter_out, lcase_mask_slp);
+    //         status = BlastSeqLocCombine(filter_out, 0);
+    // ```
+    // A lower-case run joins the SEG intervals; hard writes X and keeps the letters in the copy,
+    // soft keeps the letters.
+    #[test]
+    fn test_lcase_query_masks_join_seg_intervals() {
+        let upper =
+            b"MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKQQQQQQQQQQQQQQQQQQQQQGWENYCWPANMSWKVLMKYEFSSD";
+        let mut seq = upper.to_vec();
+        seq[2..6].make_ascii_lowercase();
+        let seg = SegParams::default();
+        let letters = encode_protein_sequence(upper).aa_seq;
+
+        let hard = encode_protein_query_frame_lcase(&seq, Some(&seg), false, false);
+        let without = encode_protein_query_frame_with_seg(upper, Some(&seg));
+        let mut expected = vec![(2, 6)];
+        expected.extend_from_slice(&without.seg_masks);
+        assert_eq!(hard.seg_masks, expected);
+        assert_eq!(hard.aa_seq_nomask.as_deref(), Some(&letters[..]));
+        assert_eq!(hard.aa_seq[3..7], [ncbistdaa::X; 4]);
+
+        let soft = encode_protein_query_frame_lcase(&seq, Some(&seg), true, false);
+        assert_eq!(soft.seg_masks, expected);
+        assert_eq!(soft.aa_seq, letters);
+        assert!(soft.aa_seq_nomask.is_none());
+
+        // No lower case and no SEG: no copy, as without the flag.
+        let none = encode_protein_query_frame_lcase(upper, None, false, false);
+        assert!(none.seg_masks.is_empty() && none.aa_seq_nomask.is_none());
+        assert_eq!(none.aa_seq, letters);
     }
 
     #[test]

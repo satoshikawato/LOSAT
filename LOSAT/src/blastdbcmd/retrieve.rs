@@ -1469,7 +1469,7 @@ mod tests {
             "gnl|BL_ORD_ID|3\n  gnl|BL_ORD_ID|4\t3-\t\n\n   \nx 1-5 21\r\n",
         )
         .unwrap();
-        let lines = read_batch(file.to_str().unwrap()).unwrap();
+        let lines = read_batch("entry_batch", file.to_str().unwrap()).unwrap();
         assert_eq!(
             lines,
             [
@@ -1480,7 +1480,7 @@ mod tests {
         );
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(
-            matches!(read_batch("in/nosuch.txt"), Err(Stop::Ncbi(message))
+            matches!(read_batch("entry_batch", "in/nosuch.txt"), Err(Stop::Ncbi(message))
             if message == "Argument \"entry_batch\". File is not accessible:  `in/nosuch.txt'")
         );
     }

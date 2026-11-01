@@ -102,8 +102,17 @@ fn expected(name: &str) -> Vec<u8> {
 /// `j/jtax5`: a taxonomy over the taxids of `p5`). `K13` (`-taxids 1`, which never ends in NCBI:
 /// taxid 1 is its own parent) is the approved difference of DI-8 DECISIONS 10, its expected
 /// output NCBI's run of the explicit list of every taxid that taxid 1 reaches (K25).
+/// A case: id, the taxonomy directory of `BLASTDB`, Unix only, words, NCBI's exit status.
+type Case = (
+    &'static str,
+    Option<&'static str>,
+    bool,
+    &'static [&'static str],
+    i32,
+);
+
 #[rustfmt::skip]
-const CASES: &[(&str, Option<&str>, bool, &[&str], i32)] = &[
+const CASES: &[Case] = &[
     ("J160", None, true, &["-list", "j/lst"], 0),
     ("J161", None, true, &["-list", "j/lst", "-list_outfmt", "%f|%p|%t|%d|%l|%n|%U|%v"], 0),
     ("J163", None, true, &["-list", "j/lst", "-dbtype", "prot", "-list_outfmt", "%f %t"], 0),

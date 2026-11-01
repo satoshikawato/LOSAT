@@ -189,12 +189,13 @@ pub const DB_FILTER_OPTIONS: [&str; 7] = [
 //             LOG_POST(Warning << "The -taxids command line option requires additional data files. Please see the section 'Taxonomic filtering for BLAST databases' in https://www.ncbi.nlm.nih.gov/books/NBK569839/ for details.");
 //         }
 // ```
-const NO_TAXONOMY_WARNING: &str = "The -taxids command line option requires additional data \
+pub(crate) const NO_TAXONOMY_WARNING: &str =
+    "The -taxids command line option requires additional data \
      files. Please see the section 'Taxonomic filtering for BLAST databases' in \
      https://www.ncbi.nlm.nih.gov/books/NBK569839/ for details.\n";
 
 /// NCBI's default name of the taxonomy file (`kDefaultName`, tax4blastsqlite.cpp).
-const TAXONOMY_FILE: &str = "taxonomy4blast.sqlite3";
+pub(crate) const TAXONOMY_FILE: &str = "taxonomy4blast.sqlite3";
 
 impl DbFilterArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2486-2503
@@ -557,7 +558,7 @@ fn stream_lines(bytes: &[u8]) -> Vec<Vec<u8>> {
 // (corelib/ncbistr.cpp, `NStr::StringToInt`): white space may surround the number; a sign (`+` or `-`) may lead it; the digits are
 // decimal and the value must fit a signed 32-bit integer.
 /// `NStr::StringToNumeric<TTaxId>` of a list entry, `None` for NCBI's exception.
-fn string_to_int(token: &[u8]) -> Option<i32> {
+pub(crate) fn string_to_int(token: &[u8]) -> Option<i32> {
     let text = std::str::from_utf8(token).ok()?;
     let text = text.trim_matches(|c: char| c.is_ascii_whitespace());
     let (negative, digits) = match text.as_bytes().first()? {

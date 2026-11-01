@@ -465,6 +465,27 @@ test("the host runs an artifact guarded at build time as it is, without a guard 
 // prepareThreadHost frees the module's bytes once the compile has copied them (freeBytes): a view
 // of a whole ArrayBuffer is detached at once; a part of Node's Buffer pool or of a larger buffer
 // is left as it is.
+test("prepareThreadHost frees the buffer of a module guarded at build time", async () => {
+  const { prepareThreadHost } = require("./wasi_thread_host");
+  const { guardSharedMemory } = require("./wasi_shared_memory");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-free-"));
+  const { transfer } = ArrayBuffer.prototype;
+  const saved = process.env.LOSAT_WASI_GUARD_CACHE;
+  const freed = [];
+  try {
+    process.env.LOSAT_WASI_GUARD_CACHE = "0";
+    ArrayBuffer.prototype.transfer = function (...args) { freed.push(this.byteLength); return transfer.apply(this, args); };
+    const file = path.join(directory, "command.wasm");
+    fs.writeFileSync(file, guardSharedMemory(spawner(2, { bulk: true })).bytes);
+    await prepareThreadHost(file, "threaded-command");
+    assert.deepEqual(freed, [33 << 20]);
+  } finally {
+    ArrayBuffer.prototype.transfer = transfer;
+    if (saved === undefined) delete process.env.LOSAT_WASI_GUARD_CACHE; else process.env.LOSAT_WASI_GUARD_CACHE = saved;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("freeBytes frees only a view of a whole ArrayBuffer", () => {
   const { freeBytes } = require("./wasi_thread_host");
   const whole = Buffer.allocUnsafeSlow(1 << 20).fill(1);

@@ -103,6 +103,34 @@ This is the cost for a host that had no guard, such as a browser host. The Node 
 guarded code since S09: its module is the same as before plus the 64-byte section, and it now
 skips the guard and its cache at load.
 
+### Peak RSS of the Node runner
+
+A module guarded at build time has no guard-cache index, so it takes the host's plain load path.
+Before this fix that path kept the module's bytes (12.7 MB) until the process ended, while #689
+frees them on the index path. `prepareThreadHost` now reads into the same 33 MiB buffer and frees
+it after the compile. Separate processes, `/usr/bin/time`, 8 threads, order rotated per round, one
+discarded run per arm (`scripts/run_mem.py`). Arms: A = `dev` 01a1e3809 host and the raw command
+(index hit), B = the same host and the guarded command, C = this branch's host and the guarded
+command. Load 4.7-18.5, 6 rounds, MiB, median:
+
+| Case | A | B | C | C - B, median of rounds |
+| --- | ---: | ---: | ---: | ---: |
+| blastx -db | 203.6 | 219.8 | 200.6 | -19.8 |
+| dc-megablast | 316.2 | 326.6 | 313.1 | -11.8 |
+| blastp | 222.0 | 226.6 | 214.9 | -12.4 |
+| tblastx | 535.7 | 532.7 | 491.8 | -27.6 (rounds -58.8 to +8.5) |
+
+A second run, 9 rounds at load 9.6-13.9, adds a null arm N (B again). C/B against N/B, median of
+rounds:
+
+| Case | Peak RSS C/B | N/B | Wall C/B | N/B | CPU C/B | N/B |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| blastp | x0.947 | x1.001 | x0.991 | x0.992 | x0.985 | x0.992 |
+| tblastx | x1.031 | x1.029 | x1.008 | x1.068 | x0.997 | x1.010 |
+
+blastp falls by about 5 % in every round; tblastx stays within its spread. No time cost shows.
+One output hash per case.
+
 ### One trap of the raw arm in Node
 
 The first attempt of this A/B ran at load 8.6-69.7 and is not used for timing
@@ -120,9 +148,9 @@ records the search as failed and goes on with the next round in a new process.
 ## What the guard does not cover
 
 - It wraps `memory.fill` and `memory.copy` only. Each threaded module keeps 4 `memory.init`
-  instructions (`__wasm_init_memory` 3, `__wasm_init_tls` 1), and none of the 12 traps above was
-  one. LOSAT's hosts refresh the bounds before a thread starts (`wasi_thread_worker.js`,
-  `web/app/src/infra/reactor/instance.ts`); gbdraw's host at 900992caf does not.
+  instructions: 3 in `__wasm_init_memory` (the module's start) and 1 in `__wasm_init_tls`, which
+  `__pthread_create` reaches through `__copy_tls` in the spawning thread. None of the 12 traps
+  above was one; a trap there was not measured.
 - Atomic accesses are not guarded. Line WO (`release-v020`, 2026-11-01) reports a trap of the same
   kind at Liftoff's atomics in V8 and plans to widen the guard on top of this change.
 
@@ -152,6 +180,7 @@ records the search as failed and goes on with the next round in a new process.
   (tblastn ran separately, its inputs copied from the workstation).
 - `results/node_ab_first_run_trap.jsonl`, `results/node_ab_first_run_trap.log`: the first attempt,
   with the trap.
+- `results/node_rss_three_arms.jsonl`, `results/node_rss_null.jsonl`: peak RSS of the runner.
 - `scripts/`: the harnesses as run (`serve.py`, `run.py`, `rounds.sh`, `harness.html` from
   gbdraw's evidence, `losat_web_guard_measure.sh`, `command_harness_tables.py`) and the timing (`wasm_guard_ab.js`,
-  `run_ab.sh`, `summarize_ab.py`); paths point at the session's scratch directories.
+  `run_ab.sh`, `summarize_ab.py`, `run_mem.py`); paths point at the session's scratch directories.

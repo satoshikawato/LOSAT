@@ -15,9 +15,9 @@
 // refreshes the current isolate synchronously, including memory.grow(0).
 // Guard using unsigned i64 ranges; refresh only when cached bounds are too small,
 // then execute the original operation once. Genuine invalid ranges still trap.
-// memory.init stays as it is: only __wasm_init_memory and __wasm_init_tls use it, at the
-// start of the module and of a thread (LOSAT's hosts refresh the bounds before a thread
-// starts: wasi_thread_worker.js, web/app/src/infra/reactor/instance.ts).
+// memory.init stays as it is: only __wasm_init_memory (the module's start) and __wasm_init_tls
+// use it, the latter in the spawning thread, called from pthread_create right after the malloc
+// of the block, with function entries (stack checks) in between.
 // Binary encoding: WebAssembly Core spec, binary/modules and binary/instructions.
 // Accept the wasm32 instruction set emitted by this command target; reject
 // unsupported encodings explicitly instead of guessing instruction boundaries.

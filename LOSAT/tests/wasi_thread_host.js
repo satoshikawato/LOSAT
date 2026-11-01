@@ -548,9 +548,12 @@ async function prepareThreadHost(wasmPath, kind, compiling = () => {}) {
     return { identity, timings, create: (argv = [], options = {}) =>
       instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) };
   }
-  const bytes = fs.readFileSync(wasmPath);
   let stat = null;
   try { stat = fs.statSync(wasmPath, { bigint: true }); } catch { /* no index for this run */ }
+  // Freed below, as in compileIndexedGuard (INDEX_BUFFER_BYTES). An artifact guarded at build
+  // time never has an index, so this is the path by which it keeps none of its bytes.
+  const buffer = stat === null ? fs.readFileSync(wasmPath) : Buffer.allocUnsafeSlow(Math.max(Number(stat.size), INDEX_BUFFER_BYTES));
+  const bytes = stat === null ? buffer : readInto(wasmPath, buffer);
   // One compile: the identity (imports, exports) is read from the guarded module, whose imports
   // and exports are the input's (the guard rewrites only memory.fill and memory.copy), instead of
   // compiling the input too (about 40 ms for the 9 MB command). An input that cannot be guarded
@@ -569,6 +572,7 @@ async function prepareThreadHost(wasmPath, kind, compiling = () => {}) {
     throw err;
   }
   const identity = prepareArtifact(bytes, kind, module, inputSha256).identity;
+  freeBytes(buffer);
   // An artifact guarded at build time has no cache entry for an index to name.
   if (guarded.cache !== "off" && guarded.cache !== "guarded") writeGuardIndex(stat, inputSha256);
   const timings = { read_and_hash_seconds: (inspected-start)/1000, guard_seconds: (guardedAt-inspected)/1000,

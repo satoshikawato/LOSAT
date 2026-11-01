@@ -173,8 +173,8 @@ guard cache). `guard` exits 1 and writes nothing when the reader declines an
 instruction encoding, when the module has no `memory.fill` or `memory.copy`, or
 when its output does not verify; `verify` exits 1 unless the two helpers, the
 call sites and the counts are the guard's own. `memory.init` is not guarded: only
-`__wasm_init_memory` and `__wasm_init_tls` use it, and this runner refreshes the
-bounds before a thread starts. Adapter parsing
+`__wasm_init_memory` (the module's start) and `__wasm_init_tls` (the spawning
+thread, from `pthread_create`) use it. Adapter parsing
 and compilation are included in the measured startup time. Keep `run_losat_wasi_threads.js`,
 `wasi_thread_host.js`, `wasi_thread_worker.js`, `wasi_artifact.js`,
 `wasi_shared_memory.js`, and `wasi_files.js` together when copying the runner; set

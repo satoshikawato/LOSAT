@@ -19,6 +19,13 @@ const WORKER_FILE = require.resolve("./wasi_thread_worker");
 // Thread workers share this process's environment (SHARE_ENV) instead of each copying it at its
 // creation, which this thread does for every worker (15 workers: 14 instead of 18 ms on ws). They
 // only read it (createWasi).
+// Their V8 heaps may grow to just under 2 GiB, not to V8's default: an isolate whose old
+// generation may reach 2 GiB gets its own copy of V8's embedded builtins in its code range
+// (--short-builtin-calls), 1.8 MiB of RSS per worker: a process with the 15 idle workers of a
+// 16-thread command held 323 MiB on ws with no limit or 2048 MiB, 296 MiB with 2047 or 1024 MiB.
+// A worker's heap holds its WASI context and its instance; the guest's memory is the shared
+// memory, outside it.
+const WORKER_LIMITS = Object.freeze({ maxOldGenerationSizeMb: 2047 });
 
 const WORKER_START_TIMEOUT_MS = parsePositiveIntEnv(
   "LOSAT_WASI_THREADS_START_TIMEOUT_MS",
@@ -468,7 +475,7 @@ function bootEarlyWorkers(count, fault) {
     const control = new SharedArrayBuffer(4 * START_WORDS);
     let worker;
     try {
-      worker = new Worker(WORKER_FILE, { env: SHARE_ENV, workerData: { control, standby: index, early: true, fault: fault || null } });
+      worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { control, standby: index, early: true, fault: fault || null } });
     } catch { break; }
     worker.unref();
     early.push({ worker, control });
@@ -592,7 +599,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   };
   const recycledWorker = (data) => {
     const control = new SharedArrayBuffer(4 * START_WORDS);
-    const worker = new Worker(WORKER_FILE, { env: SHARE_ENV, workerData: { module, wasmPath, args, memory: mainMemory,
+    const worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
       control, files, fault: options.fault || null, recycle: true, ...data } });
     const slot = { index: nextSlot++, worker, control, state: new Int32Array(control), tid: data.tid ?? null };
     if (data.tid === undefined) Atomics.store(slot.state, SLOT_STATE, SLOT_PREPARING);
@@ -663,7 +670,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     const control = new SharedArrayBuffer(4 * START_WORDS), view = new Int32Array(control);
     let worker;
     try {
-      worker = new Worker(WORKER_FILE, { env: SHARE_ENV, workerData: { module, wasmPath, args, memory: mainMemory,
+      worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
         startArg, tid, control, files, fault: options.fault || null } });
     } catch (err) { event("spawn_rejected", { tid, error: String(err) }); return -1; }
     workers.add(worker); event("spawned", { tid });
@@ -704,7 +711,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
           worker = early.worker;
           worker.postMessage({ module, wasmPath, args, memory: mainMemory, files });
         } else {
-          worker = new Worker(WORKER_FILE, { env: SHARE_ENV, workerData: { module, wasmPath, args, memory: mainMemory,
+          worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
             control, files, standby: index, fault: options.fault || null } });
         }
       } catch (err) { event("standby_rejected", { standby: index, error: String(err) }); return; }

@@ -1538,6 +1538,18 @@ impl SeqDb {
         if !self.is_version5() {
             return Ok(());
         }
+        // One LMDB file (one database, or an alias of the volumes of one): nothing to mix, and
+        // nothing opened.
+        let lmdb_path = |volume: &super::volume::Volume| {
+            let name = volume.index().lmdb_file.as_deref().unwrap_or_default();
+            volume
+                .base()
+                .with_file_name(String::from_utf8_lossy(name).as_ref())
+        };
+        let first = lmdb_path(&self.volumes[0]);
+        if self.volumes[1..].iter().all(|volume| lmdb_path(volume) == first) {
+            return Ok(());
+        }
         // A volume list that the LMDB files do not describe is refused by the lookups.
         let Ok(entries) = self.lmdb_entries() else {
             return Ok(());

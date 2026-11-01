@@ -145,7 +145,7 @@ function guardVersion() {
 
 function guardCacheRecord(inputSha256, guarded) {
   const fields = { format: GUARD_CACHE_FORMAT, input_sha256: inputSha256, guard_version: guardVersion(),
-    output_sha256: sha256(guarded.bytes), output_bytes: guarded.bytes.length, fill: guarded.fill, copy: guarded.copy, atomic: guarded.atomic };
+    output_sha256: sha256(guarded.bytes), output_bytes: guarded.bytes.length, fill: guarded.fill, copy: guarded.copy, grow: guarded.grow, atomic: guarded.atomic };
   return { ...fields, record_sha256: sha256(JSON.stringify(fields)) };
 }
 
@@ -157,10 +157,10 @@ function validGuardEntry(record, bytesLength, bytesSha256, inputSha256) {
   const count = value => Number.isSafeInteger(value) && value >= 0;
   return recordSha256 === sha256(JSON.stringify(fields)) && fields.format === GUARD_CACHE_FORMAT
     && fields.input_sha256 === inputSha256 && fields.guard_version === guardVersion()
-    && count(fields.fill) && count(fields.copy) && count(fields.atomic) && fields.output_bytes === bytesLength
+    && count(fields.fill) && count(fields.copy) && count(fields.grow) && count(fields.atomic) && fields.output_bytes === bytesLength
     && fields.output_sha256 === bytesSha256
     // guardSharedMemory returns its input unchanged exactly when it guards nothing.
-    && (fields.fill + fields.copy + fields.atomic === 0) === (fields.output_sha256 === inputSha256);
+    && (fields.fill + fields.copy + fields.grow + fields.atomic === 0) === (fields.output_sha256 === inputSha256);
 }
 
 // The sidecar and the guarded bytes of an entry, unchecked.
@@ -179,7 +179,7 @@ function readGuardCache(stem, inputSha256) {
   if (entry.cache) return entry;
   const { record, bytes } = entry;
   return validGuardEntry(record, bytes.length, sha256(bytes), inputSha256)
-    ? { cache: "hit", bytes, fill: record.fill, copy: record.copy, atomic: record.atomic } : { cache: "invalid" };
+    ? { cache: "hit", bytes, fill: record.fill, copy: record.copy, grow: record.grow, atomic: record.atomic } : { cache: "invalid" };
 }
 
 // A whole file read into the start of `into`; the view of the bytes read. A file longer than
@@ -325,7 +325,7 @@ function guardSharedMemoryCached(bytes, inputSha256 = sha256(bytes)) {
 // m_NumThreads = num_threads;
 // Host diagnostics only (LOSAT_WASI_THREADS_DEBUG): the guard counts of this run, or of the build.
 function guardSummary(guarded) {
-  if (guarded.fill + guarded.copy + guarded.atomic === 0 && guarded.record) {
+  if (guarded.fill + guarded.copy + guarded.grow + guarded.atomic === 0 && guarded.record) {
     return `shared-memory guards: ${guarded.record.fill} fills, ${guarded.record.copy} copies, ${guarded.record.atomic} atomics (guarded at build time)`;
   }
   return `shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies, ${guarded.atomic} atomics`;
@@ -432,7 +432,7 @@ async function compileIndexedGuard(wasmPath, compileStarted) {
     fs.utimesSync(guardIndexFile(dir, stat), now, now);
   } catch { /* only the order of pruning */ }
   debug(`guard cache index hit: ${stem}.wasm`);
-  return { module, buffer, input, inputSha256, fill: record.fill, copy: record.copy, atomic: record.atomic };
+  return { module, buffer, input, inputSha256, fill: record.fill, copy: record.copy, grow: record.grow, atomic: record.atomic };
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222

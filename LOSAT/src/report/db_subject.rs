@@ -565,6 +565,15 @@ impl ParsedSubject {
 
     /// The XML `Hit_id` and `Hit_accession` of a `-subject` record (`of_record`; `Hit_def` is the
     /// generated title, `bioseq_title`).
+    /// Whether the `Score`-best id of the subject Bioseq is a local id (XML2 then writes no
+    /// accession of a `-subject` record, `SubjectNames::of_believed`).
+    pub fn has_local_best_id(&self) -> bool {
+        matches!(
+            find_best(&self.target().ids, text_score),
+            Some(ParsedSeqId::Local(_))
+        )
+    }
+
     pub fn record_xml_ids(&self) -> (Vec<u8>, Vec<u8>) {
         let mut id = Vec::new();
         label::seqid_list_string(&self.target().ids, true, &mut id);

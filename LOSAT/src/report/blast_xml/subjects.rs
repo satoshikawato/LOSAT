@@ -128,13 +128,37 @@ impl SubjectNames {
         }
         names::check_text(&id)?;
         names::check_text(&title.text)?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:393-406
+        // ```c++
+        //         	CRef<CSeq_id> best_id = FindBestChoice(ids, CSeq_id::Score);
+        //         	if(!best_id->IsLocal()) {
+        //         		CSeq_id_Handle id_handle = CSeq_id_Handle::GetHandle(*best_id);
+        //         		string accession = CAlignFormatUtil::GetLabel(id_handle.GetSeqId());
+        //         		if(accession != kEmptyStr)
+        //         			hit_exp->SetAccession(accession);
+        //         	}
+        //
+        //    			hit_exp->SetTitle(sequence::CDeflineGenerator().GenerateDefline(subj_handle));
+        // ```
+        // The XML2 `HitDescr` of a record whose best id is not local has its accession too.
+        let descriptions = if subject.has_local_best_id() {
+            Vec::new()
+        } else {
+            vec![HitDescription {
+                id: id.clone(),
+                accession: accession.clone(),
+                title: Some(title.text.clone()),
+                taxid: 0,
+                taxonomy: HitTaxonomy::Unnamed,
+            }]
+        };
         Ok(SubjectNames {
             id,
             title: title.text,
             accession,
             taxid: 0,
             taxonomy: HitTaxonomy::Unnamed,
-            descriptions: Vec::new(),
+            descriptions,
             volume_taxids: Vec::new(),
         })
     }

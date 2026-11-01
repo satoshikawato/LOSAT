@@ -433,7 +433,8 @@ pub fn split_queries(
         //             TMaskedQueryRegions split_mask =
         //                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
         // ```
-        // Each run is one letter longer inside a chunk (`restrict_masks`).
+        // Each run is one letter longer inside a chunk, and a run that starts on the chunk's last
+        // letter is dropped (`restrict_masks`).
         let runs: Vec<MaskedInterval> = record
             .lowercase_masks
             .iter()

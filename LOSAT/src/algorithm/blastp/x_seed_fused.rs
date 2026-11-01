@@ -1581,6 +1581,163 @@ unsafe fn x_scan_cells_avx2_cross<
     X_CROSS_STAGE.set(stage);
 }
 
+/// PROBE (line SF S3 s4): the cross-cell loop with the cells found on presence bytes.
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+pub(crate) fn x_scan_two_hit_cross_byte<F>(
+    defer: bool,
+    short: bool,
+    lookup: &BlastAaLookupTable,
+    presence: &[u8],
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    mut candidate: F,
+) -> [u64; 4]
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let test = XDiagTest {
+        diag_offset,
+        window,
+        word_size,
+        prefetch: X_PREFETCH_DISTANCE,
+    };
+    let table = &mut XDiagTable::new(diag_array, diag_mask);
+    assert!(x_cross_available());
+    assert!((0..=i64::from(table.mask) + 1).contains(&i64::from(lookup.query_length)));
+    let mut counts = XCrossCounts::default();
+    // SAFETY: as x_scan_cells_cross.
+    unsafe {
+        match (short, defer) {
+            (true, true) => x_scan_cells_avx2_cross_byte::<true, true, X_CROSS_CHUNK, F>(
+                lookup, presence, subject, subject_length, table, test, &mut candidate, &mut counts,
+            ),
+            (true, false) => x_scan_cells_avx2_cross_byte::<true, false, X_CROSS_CHUNK, F>(
+                lookup, presence, subject, subject_length, table, test, &mut candidate, &mut counts,
+            ),
+            (false, true) => x_scan_cells_avx2_cross_byte::<false, true, X_CROSS_CHUNK, F>(
+                lookup, presence, subject, subject_length, table, test, &mut candidate, &mut counts,
+            ),
+            (false, false) => x_scan_cells_avx2_cross_byte::<false, false, X_CROSS_CHUNK, F>(
+                lookup, presence, subject, subject_length, table, test, &mut candidate, &mut counts,
+            ),
+        }
+    }
+    let XDiagCounts {
+        cells,
+        hits,
+        candidates,
+    } = counts.diag;
+    [cells, hits, candidates, counts.splits]
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,popcnt")]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn x_scan_cells_avx2_cross_byte<const SHORT: bool, const DEFER: bool, const CHUNK: usize, F>(
+    lookup: &BlastAaLookupTable,
+    presence: &[u8],
+    subject: &[u8],
+    subject_length: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    counts: &mut XCrossCounts,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    use crate::algorithm::tblastn::x_scan_byte::{candidates_avx2, X_BLOCK as BYTE_BLOCK};
+    let mut stage = X_CROSS_STAGE.take();
+    {
+        let cross = XCross::<CHUNK>::new::<DEFER>(&mut stage);
+        let mut staged = 0usize;
+        let word_length = lookup.word_length as usize;
+        assert_eq!(word_length, 3);
+        let mut padded = [0u8; 8];
+        let (bytes, s_last) = if subject_length >= word_length {
+            (&subject[..subject_length], subject_length - word_length)
+        } else {
+            let n = subject.len().min(word_length);
+            padded[..n].copy_from_slice(&subject[..n]);
+            (&padded[..word_length], 0)
+        };
+        let backbone = &lookup.backbone;
+        let overflow = &lookup.overflow;
+        let mut index = [0u16; BYTE_BLOCK];
+        let mut cand = [MaybeUninit::<u16>::uninit(); BYTE_BLOCK];
+        let mut first = 0usize;
+        while first <= s_last {
+            let last = s_last.min(first + BYTE_BLOCK - 1);
+            let n = candidates_avx2(&bytes[first..last + 3], presence, &mut index, &mut cand);
+            for c in &cand[..n] {
+                let k = c.assume_init() as usize;
+                let hits = backbone
+                    .get_unchecked(*index.get_unchecked(k) as usize)
+                    .hits(overflow);
+                let s = (first + k) as i32;
+                staged = if SHORT && hits.len() <= X_DIAG_LANES {
+                    x_cross_cell_short::<DEFER, CHUNK, F>(
+                        cross, staged, hits, s, table, test, candidate, counts,
+                    )
+                } else {
+                    x_cross_cell::<DEFER, CHUNK, F>(
+                        cross, staged, hits, s, table, test, candidate, counts,
+                    )
+                };
+            }
+            first = last + 1;
+        }
+        x_cross_drain::<DEFER, CHUNK, F>(cross, staged, true, table, test, candidate, counts);
+    }
+    X_CROSS_STAGE.set(stage);
+}
+
+/// PROBE: x_cross_cell for a cell of at most eight hits: one register.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,popcnt")]
+#[inline]
+#[allow(clippy::too_many_arguments)]
+unsafe fn x_cross_cell_short<const DEFER: bool, const CHUNK: usize, F>(
+    cross: XCross<'_, CHUNK>,
+    mut staged: usize,
+    hits: &[i32],
+    s: i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    counts: &mut XCrossCounts,
+) -> usize
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    use std::arch::x86_64::*;
+    counts.diag.add_staged(hits.len());
+    let subject = _mm256_set1_epi32(s);
+    let mask = _mm256_set1_epi32(table.mask);
+    let in_piece = _mm256_cmpgt_epi32(
+        _mm256_set1_epi32(hits.len() as i32),
+        _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7),
+    );
+    let query = _mm256_maskload_epi32(hits.as_ptr(), in_piece);
+    let coords = _mm256_and_si256(_mm256_sub_epi32(query, subject), mask);
+    let at = cross.coord().add(staged);
+    _mm256_storeu_si256(at.cast(), coords);
+    _mm256_storeu_si256(at.add(XCross::<CHUNK>::STRIDE).cast(), subject);
+    staged += hits.len();
+    if staged >= CHUNK {
+        staged =
+            x_cross_drain::<DEFER, CHUNK, F>(cross, staged, false, table, test, candidate, counts);
+    }
+    staged
+}
+
 /// Branch-free scan (LOSAT_X_BXSCANBF, graduated 2026-10-26 for blastx): [`x_scan_cells`], or [`x_scan_cells_bf`] when `BRANCH_FREE` (the
 /// same calls). One loop per instantiation, so `on_cell` has one call site and is inlined.
 #[inline(always)]

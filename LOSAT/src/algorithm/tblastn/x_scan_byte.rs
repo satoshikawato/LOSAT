@@ -86,7 +86,7 @@ use std::sync::Arc;
 
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): subject words whose indexes are made before their hits are
 /// copied.
-const X_BLOCK: usize = 256;
+pub(crate) const X_BLOCK: usize = 256;
 
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the index mask of a table of word size 3 and 5-bit letters.
 const X_MASK: usize = (1 << 15) - 1;
@@ -602,7 +602,7 @@ fn list(index: &[u16], presence: &[u8], cand: &mut [MaybeUninit<u16>; X_BLOCK]) 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline(never)]
-unsafe fn candidates_avx2(
+pub(crate) unsafe fn candidates_avx2(
     letters: &[u8],
     presence: &[u8],
     index: &mut [u16; X_BLOCK],

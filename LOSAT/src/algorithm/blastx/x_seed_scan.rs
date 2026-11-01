@@ -193,6 +193,16 @@ impl XKeptPresence {
     }
 }
 
+impl XKeptPresence {
+    /// PROBE (line SF S3 s4): the table's presence bytes for the fused loop.
+    pub(super) fn x_bytes_of<'a>(&'a self, table: &BlastAaLookupTable) -> Option<&'a [u8]> {
+        self.presence
+            .get_or_init(|| x_table_presence(table))
+            .as_ref()
+            .map(|(bytes, _)| &bytes[..])
+    }
+}
+
 impl Default for XKeptPresence {
     fn default() -> Self {
         Self::new()

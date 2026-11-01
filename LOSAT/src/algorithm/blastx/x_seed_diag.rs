@@ -658,6 +658,64 @@ fn x_word_finder_fused_or_sent(
     }
 }
 
+/// PROBE (line SF S3 s4): 0 = the loop of dev, 1 = cross on presence bytes, 2 = and one register
+/// for a cell of at most eight hits.
+fn x_probe_byte() -> u8 {
+    static P: OnceLock<u8> = OnceLock::new();
+    *P.get_or_init(|| {
+        std::env::var("LOSAT_X_PROBE_BXBYTE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+/// PROBE: `x_scan_two_hit_with`, or the probe's scan.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn x_scan_probe<F>(
+    mode: XCellTest,
+    table: &BlastAaLookupTable,
+    kept: &XKeptPresence,
+    subject: &[u8],
+    length: usize,
+    entries: &mut [crate::algorithm::tblastx::blast_extend::DiagStruct],
+    mask: i32,
+    offset: i32,
+    window: i32,
+    word: i32,
+    candidate: F,
+) -> [u64; 4]
+where
+    F: FnMut(i32, i32, i32, i32, &mut crate::algorithm::tblastx::blast_extend::DiagStruct),
+{
+    #[cfg(target_arch = "x86_64")]
+    if let XCellTest::Cross { defer } = mode {
+        let probe = x_probe_byte();
+        if probe != 0 {
+            if let Some(presence) = kept.x_bytes_of(table) {
+                return crate::algorithm::blastp::x_seed_fused::x_scan_two_hit_cross_byte(
+                    defer,
+                    probe == 2,
+                    table,
+                    presence,
+                    subject,
+                    length,
+                    entries,
+                    mask,
+                    offset,
+                    window,
+                    word,
+                    candidate,
+                );
+            }
+        }
+    }
+    x_scan_two_hit_with(
+        mode, true, table, subject, length, entries, mask, offset, window, word, candidate,
+    )
+}
+
 /// EXPERIMENT (LOSAT_X_BXDIAG): `x_word_finder_direct`'s two-hit stage for one subject on the
 /// standard lookup table `table`, with the scan and the diagonal test fused (cell test `mode`;
 /// the branch-free scan, BXSCANBF, graduated); also returns the cells tested in
@@ -701,10 +759,10 @@ fn x_word_finder_fused(
     let length = subject.len().saturating_sub(1);
     let mut hits = Vec::new();
     let counts = x_with_context_table(batch, kept, |contexts| {
-        x_scan_two_hit_with(
+        x_scan_probe(
             mode,
-            true,
             table,
+            kept,
             subject,
             length,
             &mut diagonals.entries,
@@ -845,10 +903,10 @@ fn x_word_finder_fused_sent(
         // The candidate closure with the extension `two_hit::<$shadow>`.
         macro_rules! scan {
             ($shadow:literal) => {
-                x_scan_two_hit_with(
+                x_scan_probe(
                     mode,
-                    true,
                     table,
+                    kept,
                     subject,
                     length,
                     &mut diagonals.entries,

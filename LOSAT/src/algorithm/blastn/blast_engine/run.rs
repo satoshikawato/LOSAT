@@ -5566,7 +5566,8 @@ struct BlastnReportInputs<'a> {
     database_reader: Option<&'a database::BlastnDatabase>,
     /// The reported sequences with parsed Seq-ids of a database search, by rank
     /// (`database::ReportedSubjects::parsed`; empty without them): their ids and titles come from
-    /// their definition lines.
+    /// their definition lines. Of a subject set, the records whose ids `-parse_deflines` read, by
+    /// subject index (`db_subject::parsed_records`).
     database_parsed: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
     /// Whether the hit lists were finished after each query batch's traceback (a database
     /// search, `run_in_pool`), not by `post_process_hits_and_write`.
@@ -5884,15 +5885,7 @@ fn tabular_subject_ids(
 ) -> Result<Vec<Arc<[u8]>>> {
     let ids: Vec<Option<Arc<[u8]>>> = subjects
         .iter()
-        .map(|subject| {
-            crate::report::defline::tabular_subject_id(
-                subject.local_id.as_bytes(),
-                &subject.title,
-                false,
-            )
-            .ok()
-            .map(Arc::from)
-        })
+        .map(|subject| subject.subject_tabular_id(false).ok().map(Arc::from))
         .collect();
     for hit_list in hit_lists.iter().flatten() {
         for hsp_list in &hit_list.hsplist_array {
@@ -6794,6 +6787,13 @@ fn post_process_hits_and_write(
                         } else {
                             crate::report::blast_xml2::Xml2Target::Subjects(subject_records.len())
                         },
+                        subject_names: if is_database {
+                            None
+                        } else {
+                            crate::report::blast_xml2::subject_names(
+                                subject_records.iter().map(FastaRecord::believed),
+                            )
+                        },
                         gapped: !report.ungapped,
                         cbs: 0,
                         query_gencode: None,
@@ -6967,6 +6967,7 @@ fn write_custom_tabular(
         _ => TabularSubjects::Records {
             ids: subject_ids,
             length: &record_length,
+            parsed: report.database_parsed,
         },
     };
     let tab = BlastnTabular {
@@ -7371,7 +7372,9 @@ fn read_cli_subjects(
     let mut subject_source = FastaInputSource::from_argument(
         subject_path,
         subject_file,
-        ReaderConfig::subject("BLASTN", false, settings.data_loaders).with_defline(keep_deflines),
+        ReaderConfig::subject("BLASTN", false, settings.data_loaders)
+            .with_defline(keep_deflines)
+            .with_parse_deflines(args.parse_deflines),
     );
     // EXPERIMENT (LOSAT_X_BNSTORE): without a subject range, each record's letters are packed as
     // soon as it has been read, and the records keep none (`x_read_subject_stores`).
@@ -7564,11 +7567,6 @@ fn search_cli(
     }
     .acts();
     let x_store_acts = !x_opening.acts() && x_query_drop::on() && x_store_rule;
-    crate::blastinput::fasta_reader::believed::refuse_with_subject(
-        args.parse_deflines,
-        args.subject.is_some(),
-        "BLASTN",
-    )?;
     let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders)
         .with_defline(args.archive.is_some())
         .with_parse_deflines(args.parse_deflines)
@@ -10107,6 +10105,20 @@ fn write_reports_untimed(
     } else {
         Vec::new()
     };
+    let records_parsed = if args.parse_deflines && reported.is_none() {
+        crate::report::db_subject::parsed_records(
+            subject_letters
+                .records()
+                .iter()
+                .map(|record| (record.believed(), record.title.as_slice())),
+            args.show_gis,
+            false,
+            output_formats.contains(&BlastnOutputFormat::Pairwise),
+            "BLASTN",
+        )?
+    } else {
+        Vec::new()
+    };
     let report_inputs = BlastnReportInputs {
         queries: query_records,
         subjects: subject_letters,
@@ -10145,7 +10157,9 @@ fn write_reports_untimed(
         },
         database_parsed: reported
             .as_ref()
-            .map_or(&[][..], |reported| reported.parsed.as_slice()),
+            .map_or(records_parsed.as_slice(), |reported| {
+                reported.parsed.as_slice()
+            }),
         finished_hit_lists: reported.is_some(),
         epilog,
         prolog: outputs

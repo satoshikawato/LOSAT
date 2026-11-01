@@ -135,6 +135,7 @@ fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static [u8]) -> XmlR
 
 fn params(target: Xml2Target) -> Xml2Run {
     Xml2Run {
+        subject_names: None,
         target,
         gapped: true,
         cbs: 2,

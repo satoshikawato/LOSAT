@@ -1,2 +1,3 @@
 - `-parse_deflines` with `-subject` searches one record given as both a query and a subject (the same definition line and letters) with BLASTN, BLASTP and TBLASTX, as NCBI BLAST+ 2.17.0 reports it (drop-in DI-7). Outfmt 0 of such a record with masks stays refused, because NCBI draws the masks at the other row's places, and BLASTX and TBLASTN refuse it, because NCBI stops with an error when it reports a hit.
 - The ids that `-parse_deflines` refuses against belong to one search (`seqid::id_scope::IdScope`), no longer to the process.
+- `-parse_deflines` refuses `gb|A.1|NAME` with `gb||NAME` (NCBI's scope finds one by the other) and `gim|n` ids (NCBI cannot resolve them).

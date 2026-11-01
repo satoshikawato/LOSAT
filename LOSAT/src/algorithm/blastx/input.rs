@@ -921,8 +921,9 @@ fn read_believed_defline(
     });
     written?;
     let parsed = parsed.map_err(FastaParseError)?;
+    let role = if protein { "subject" } else { "query" };
     if parsed.range && keep_defline {
-        return Err(refuse_range_in_archive("query", "BLASTX"));
+        return Err(refuse_range_in_archive(role, "BLASTX"));
     }
     let molecule = named_molecule(&parsed.ids);
     let ids = if parsed.ids.is_empty() || parsed.range {
@@ -934,12 +935,7 @@ fn read_believed_defline(
     } else {
         parsed.ids
     };
-    if let Some(refusal) = duplicate_id(
-        &ids,
-        keys,
-        if protein { "subject" } else { "query" },
-        "BLASTX",
-    ) {
+    if let Some(refusal) = duplicate_id(&ids, keys, role, "BLASTX") {
         return Err(refusal);
     }
     Ok(BelievedLine {

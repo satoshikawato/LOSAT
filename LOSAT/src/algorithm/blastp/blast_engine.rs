@@ -2498,6 +2498,33 @@ fn tabular_subject_ids(
         .collect())
 }
 
+/// The tabular subject ids of a subject set under `-parse_deflines`: `tabular_subject_ids`, with
+/// `sseqid`, `sacc` and `saccver` of the records in `parsed` (`ParsedSubject::tabular_ids`).
+#[allow(clippy::type_complexity)]
+fn record_tabular_ids(
+    hit_lists: &[Option<BlastpHitList>],
+    subjects: &[FastaRecord],
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    program: &str,
+) -> Result<(Vec<Arc<[u8]>>, Vec<Option<[Arc<[u8]>; 2]>>)> {
+    let mut ids = tabular_subject_ids(hit_lists, subjects)?;
+    let mut accessions = vec![None; ids.len()];
+    for (index, subject) in parsed.iter().enumerate() {
+        let Some(subject) = subject else {
+            continue;
+        };
+        let [id, accession, version] = subject.tabular_ids(true).map_err(|problem| {
+            anyhow::anyhow!(
+                "the subject record {} has {problem}, which is not supported by LOSAT's {program}",
+                String::from_utf8_lossy(&subject.alignment_fasta())
+            )
+        })?;
+        ids[index] = Arc::from(id);
+        accessions[index] = Some([Arc::from(accession), Arc::from(version)]);
+    }
+    Ok((ids, accessions))
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:225-231
 // ```c++
 // 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
@@ -2513,15 +2540,7 @@ fn tabular_subject_ids(
 fn tabular_subject_id_results(subjects: &[FastaRecord]) -> Vec<Option<Arc<[u8]>>> {
     subjects
         .iter()
-        .map(|subject| {
-            crate::report::defline::tabular_subject_id(
-                subject.local_id.as_bytes(),
-                &subject.title,
-                true,
-            )
-            .ok()
-            .map(Arc::from)
-        })
+        .map(|subject| subject.subject_tabular_id(true).ok().map(Arc::from))
         .collect()
 }
 
@@ -4943,7 +4962,8 @@ fn read_cli_subjects(
         subject_path,
         subject_file,
         ReaderConfig::subject(args.app.name(), true, settings.data_loaders)
-            .with_defline(keep_deflines),
+            .with_defline(keep_deflines)
+            .with_parse_deflines(args.parse_deflines),
     );
     // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
     // counterpart.
@@ -5127,11 +5147,6 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
-    crate::blastinput::fasta_reader::believed::refuse_with_subject(
-        args.parse_deflines,
-        args.subject.is_some(),
-        args.app.name(),
-    )?;
     let mut query_source = FastaInputSource::from_argument(
         &args.query,
         query_file,
@@ -6400,14 +6415,9 @@ fn x_query_block_plan(
     match subject_source {
         BlastpSubjectSource::Fasta(subjects) => {
             if tabular
-                && subjects.iter().any(|subject| {
-                    crate::report::defline::tabular_subject_id(
-                        subject.local_id.as_bytes(),
-                        &subject.title,
-                        true,
-                    )
-                    .is_err()
-                })
+                && subjects
+                    .iter()
+                    .any(|subject| subject.subject_tabular_id(true).is_err())
             {
                 return None;
             }
@@ -11226,9 +11236,35 @@ fn run_resolved_in_pool(
     // `sacc` and `saccver` of the database sequences with parsed Seq-ids, by rank (empty
     // without them: the others' are their `sseqid`).
     let mut subject_accessions: Vec<Option<[Arc<[u8]>; 2]>> = Vec::new();
+    // The records of a subject set whose ids `-parse_deflines` read, by subject index.
+    let records_parsed = if args.parse_deflines && listed_titles.is_none() {
+        crate::report::db_subject::parsed_records(
+            subject_records
+                .iter()
+                .map(|record| (record.believed(), record.title.as_slice())),
+            args.show_gis,
+            true,
+            format_plans
+                .iter()
+                .any(|outfmt| matches!(outfmt, BlastpReport::Text(OutputFormat::Pairwise))),
+            args.app.name(),
+        )?
+    } else {
+        Vec::new()
+    };
     let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> =
         if format_plans.iter().any(|outfmt| outfmt.is_tabular()) {
             match (listed_titles.as_ref(), x_meta) {
+                (None, _) if !records_parsed.is_empty() => {
+                    let (ids, accessions) = record_tabular_ids(
+                        &hit_lists,
+                        subject_records,
+                        &records_parsed,
+                        args.app.name(),
+                    )?;
+                    subject_accessions = accessions;
+                    ids.into()
+                }
                 (Some(titles), _) => {
                     let (ids, accessions) = titles.tabular_subject_ids(&hit_lists)?;
                     subject_accessions = accessions;
@@ -11261,8 +11297,9 @@ fn run_resolved_in_pool(
     };
     let pairwise_database = database.map(database::BlastpDatabase::pairwise_database);
     // The reported database sequences with parsed Seq-ids by rank (empty without them).
-    let listed_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] =
-        listed_titles.as_ref().map_or(&[], |titles| &titles.parsed);
+    let listed_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = listed_titles
+        .as_ref()
+        .map_or(records_parsed.as_slice(), |titles| &titles.parsed);
     // The warnings are written once, with the first format (`QueryWarnings`).
     let mut warning_lines: Option<&[Vec<u8>]> = Some(&query_warning_lines);
     // Each requested format prints the same final result without searching again.
@@ -11684,6 +11721,13 @@ fn run_resolved_in_pool(
                                     subject_records.len(),
                                 )
                             },
+                            subject_names: if database.is_some() {
+                                None
+                            } else {
+                                crate::report::blast_xml2::subject_names(
+                                    subject_records.iter().map(FastaRecord::believed),
+                                )
+                            },
                             gapped: !args.ungapped,
                             cbs: match args.comp_based_stats.mode {
                                 BlastpCompositionMode::NoCompositionBasedStats => 0,
@@ -11901,6 +11945,8 @@ fn run_resolved_in_pool(
                     },
                     _ => super::tabular::TabularSubjects::Records {
                         ids: &subject_ids,
+                        accessions: &subject_accessions,
+                        parsed: listed_parsed,
                         length: &subject_length,
                     },
                 };

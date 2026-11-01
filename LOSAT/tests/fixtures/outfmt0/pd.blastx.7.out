@@ -1,0 +1,28 @@
+# BLASTX 2.17.0+
+# Query: qn1 first half
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/pd_sub_p.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 10 hits found
+qn1	NP_000003.1	100.000	90	0	0	1	270	1	90	3.23e-65	196
+qn1	2DEF_B	100.000	90	0	0	811	1080	1	90	6.43e-65	195
+qn1	P12345.1	100.000	90	0	0	271	540	1	90	1.58e-64	194
+qn1	NP_000006.1	100.000	90	0	0	541	810	1	90	3.40e-64	193
+qn1	NP_000006.1	55.556	9	4	0	767	741	69	77	5.2	16.2
+qn1	123456A	100.000	90	0	0	1081	1350	1	90	8.55e-64	192
+qn1	l2	100.000	90	0	0	1351	1620	1	90	1.13e-63	192
+qn1	l2	29.032	31	17	2	52	129	38	68	9.0	15.4
+qn1	written	18.182	55	42	1	1306	1470	25	76	2.8	16.9
+qn1	unnamed	21.739	46	25	2	409	543	54	89	4.3	16.5
+# BLASTX 2.17.0+
+# Query: qn2 second half
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/pd_sub_p.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+qn2	written	100.000	90	0	0	541	810	1	90	2.78e-64	193
+qn2	unnamed	100.000	90	0	0	271	540	1	90	4.03e-64	193
+qn2	NP_000002.1	100.000	90	0	0	811	1080	1	90	4.25e-64	193
+qn2	plain1	100.000	90	0	0	1	270	1	90	4.88e-64	192
+qn2	CAA12345.1	100.000	90	0	0	1081	1350	1	90	6.09e-64	192
+qn2	db:tag6	100.000	90	0	0	1351	1620	1	90	1.48e-63	191
+qn2	NP_000006.1	45.455	11	6	0	1558	1526	59	69	3.8	16.5
+# BLAST processed 2 queries

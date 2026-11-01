@@ -74,10 +74,12 @@ pub(crate) const COUNTS_BLOCK: [TabularField; 16] = [
 /// reported sequences of a database).
 pub(crate) enum TabularSubjects<'a> {
     /// The records of `-subject`: the tabular id of each (`sseqid`, `sacc`, `saccver`; the
-    /// default report's) and the length of its record.
+    /// default report's), the length of its record, and the ones whose ids `-parse_deflines`
+    /// read (empty without the option).
     Records {
         ids: &'a [Arc<[u8]>],
         length: &'a dyn Fn(usize) -> usize,
+        parsed: &'a [Option<Arc<ParsedSubject>>],
     },
     /// The reported sequences of a database: their tabular ids, ordinal ids, records (with
     /// the stored title of a sequence without parsed Seq-ids), parsed Seq-ids (empty when none
@@ -153,7 +155,42 @@ impl<'a> TabularSubjects<'a> {
             // ```
             // A FASTA subject has no definition lines: its `sall*` are its own ids, its title
             // and taxonomy are empty (`N/A`).
-            TabularSubjects::Records { ids, length } => {
+            TabularSubjects::Records {
+                ids,
+                length,
+                parsed,
+            } => {
+                let length = if spec.has(TabularField::SubjectLength) {
+                    length(s_idx)
+                } else {
+                    0
+                };
+                if let Some(subject) = parsed.get(s_idx).and_then(Option::as_deref) {
+                    let refused = |problem: &str| {
+                        anyhow::anyhow!(
+                            "the subject record {} has {problem}, which is not supported by \
+                             LOSAT's {program}",
+                            String::from_utf8_lossy(&subject.alignment_fasta())
+                        )
+                    };
+                    let [id, accession, accession_version] =
+                        subject.tabular_ids(false).map_err(refused)?;
+                    let all_ids = if needs.all_deflines {
+                        subject.all_tabular_ids(false).map_err(refused)?
+                    } else {
+                        Vec::new()
+                    };
+                    return Ok(SubjectValues {
+                        id: Cow::Owned(id),
+                        accession: Cow::Owned(accession),
+                        accession_version: Cow::Owned(accession_version),
+                        gi: subject.tabular_gi(),
+                        all_ids,
+                        titles: None,
+                        length,
+                        taxonomy: Cow::Owned(TabularTaxonomy::default()),
+                    });
+                }
                 let id: &[u8] = ids.get(s_idx).map_or(&b"unknown"[..], |id| id.as_ref());
                 Ok(SubjectValues {
                     id: Cow::Borrowed(id),
@@ -162,11 +199,7 @@ impl<'a> TabularSubjects<'a> {
                     gi: 0,
                     all_ids: Vec::new(),
                     titles: None,
-                    length: if spec.has(TabularField::SubjectLength) {
-                        length(s_idx)
-                    } else {
-                        0
-                    },
+                    length,
                     taxonomy: Cow::Owned(TabularTaxonomy::default()),
                 })
             }

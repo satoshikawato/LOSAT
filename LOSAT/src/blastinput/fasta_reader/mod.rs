@@ -307,6 +307,24 @@ impl FastaRecord {
         }
     }
 
+    /// The subject ID of the tabular formats of a `-subject` record (`sseqid`, `sacc`, `saccver`
+    /// of the default report): `report::defline::tabular_subject_id`, or with `-parse_deflines`
+    /// the `saccver` of its ids (a record shown as one without the option keeps the first:
+    /// `BelievedIds::subject_local`).
+    pub fn subject_tabular_id(
+        &self,
+        protein: bool,
+    ) -> Result<Vec<u8>, crate::report::defline::UnknownEncoding> {
+        match self.believed() {
+            Some(ids) if !ids.subject_local() => Ok(ids.tabular[2].clone()),
+            _ => crate::report::defline::tabular_subject_id(
+                self.local_id.as_bytes(),
+                &self.title,
+                protein,
+            ),
+        }
+    }
+
     /// The record cut to the residues `from..to_exclusive` of a range (`-query_loc`,
     /// `-subject_loc`): the same local ID and title, the letters (their case too) of the
     /// interval, and no messages (the reader wrote them when it read the whole record).

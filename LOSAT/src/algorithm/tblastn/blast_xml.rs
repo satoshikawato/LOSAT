@@ -271,8 +271,11 @@ pub(super) fn prepare(
             .get(oid)
             .context("TBLASTN subject OID out of range")?;
         subject_names[oid] = Some(match shown.ordinal(oid) {
-            None => SubjectNames::of_record(record.local_id.as_bytes(), record.title(), false)
-                .map_err(|refusal| refusal.error(PROGRAM, "a subject title"))?,
+            None => match record.believed() {
+                Some(ids) => SubjectNames::of_believed(ids, record.title(), false),
+                None => SubjectNames::of_record(record.local_id.as_bytes(), record.title(), false),
+            }
+            .map_err(|refusal| refusal.error(PROGRAM, "a subject title"))?,
             // The taxid is shown by XML2 alone (`taxa` is empty for the other formats).
             Some(ordinal) => match shown.parsed_subject(oid) {
                 Some(parsed) => SubjectNames::of_parsed(
@@ -304,6 +307,12 @@ pub(super) fn prepare(
         target: match shown {
             ShownSubjects::Fasta { .. } => Xml2Target::Subjects(subject_records.len()),
             ShownSubjects::Database { .. } => Xml2Target::Database,
+        },
+        subject_names: match shown {
+            ShownSubjects::Fasta { .. } => crate::report::blast_xml2::subject_names(
+                subject_records.iter().map(FastaRecord::believed),
+            ),
+            ShownSubjects::Database { .. } => None,
         },
         gapped: values.gapped,
         cbs: values.cbs,
@@ -370,7 +379,7 @@ fn query_masks(
 impl PreparedXml {
     /// What the XML2 and JSON documents need of the run beyond outfmt 5's (`Xml2Writer::new`).
     pub(super) fn xml2_run(&self) -> Xml2Run {
-        self.xml2
+        self.xml2.clone()
     }
 
     /// Writes the document of every query of `hitlists` (indexed by query) through `document`

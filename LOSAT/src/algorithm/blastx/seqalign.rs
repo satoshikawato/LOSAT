@@ -138,7 +138,7 @@ pub(super) fn query_records<'a>(
         };
         subject_records.push(SubjectRecord {
             id: match names {
-                SeqalignSubjects::Records => SeqId::Local(&subject.internal_id),
+                SeqalignSubjects::Records => subject.seq_id(),
                 SeqalignSubjects::Database { reported, .. } => match parsed {
                     Some(subject) => SeqId::Db(subject.alignment_id()),
                     None => SeqId::BlOrdId(reported.ordinal(list.oid)),

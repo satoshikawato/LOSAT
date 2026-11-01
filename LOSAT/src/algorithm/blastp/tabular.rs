@@ -98,9 +98,12 @@ pub(super) struct BlastpTabular<'a> {
 /// reported sequences of a database).
 pub(super) enum TabularSubjects<'a> {
     /// The records of `-subject`: the tabular id of each (`sseqid`, `sacc`, `saccver`; the
-    /// default report's) and the length of its record.
+    /// default report's), the length of its record, and of the records whose ids `-parse_deflines`
+    /// read their `sacc` and `saccver` and ids (both empty without the option).
     Records {
         ids: &'a [Arc<[u8]>],
+        accessions: &'a [Option<[Arc<[u8]>; 2]>],
+        parsed: &'a [Option<Arc<ParsedSubject>>],
         length: &'a dyn Fn(usize) -> usize,
     },
     /// The reported sequences of a database: their tabular ids (`sseqid`, and `sacc` and
@@ -152,8 +155,42 @@ impl<'a> TabularSubjects<'a> {
             // ```
             // A FASTA subject has no definition lines: its `sall*` are its own ids, its title
             // and taxonomy are empty (`N/A`).
-            TabularSubjects::Records { ids, length } => {
+            TabularSubjects::Records {
+                ids,
+                accessions,
+                parsed,
+                length,
+            } => {
                 let id: &[u8] = ids.get(s_idx).map_or(&b""[..], |id| id.as_ref());
+                if let Some(subject) = parsed.get(s_idx).and_then(Option::as_deref) {
+                    let (accession, accession_version): (&[u8], &[u8]) =
+                        match accessions.get(s_idx).and_then(Option::as_ref) {
+                            Some([accession, version]) => (accession, version),
+                            None => (id, id),
+                        };
+                    let all_ids = if needs.all_deflines {
+                        subject.all_tabular_ids(true).map_err(|problem| {
+                            anyhow::anyhow!(
+                                "the subject record {} has {problem}, which is not supported by \
+                                 LOSAT's {}",
+                                String::from_utf8_lossy(&subject.alignment_fasta()),
+                                app.name()
+                            )
+                        })?
+                    } else {
+                        Vec::new()
+                    };
+                    return Ok(SubjectValues {
+                        id,
+                        accession,
+                        accession_version,
+                        gi: subject.tabular_gi(),
+                        all_ids,
+                        titles: None,
+                        length: if shows_length { length(s_idx) } else { 0 },
+                        taxonomy: Cow::Owned(TabularTaxonomy::default()),
+                    });
+                }
                 Ok(SubjectValues {
                     id,
                     accession: id,
@@ -694,6 +731,8 @@ mod tests {
             database: "User specified sequence set (Input: s.faa)",
             subjects: TabularSubjects::Records {
                 ids: &ids,
+                accessions: &[],
+                parsed: &[],
                 length: &length,
             },
             unsearched: &[false, true],

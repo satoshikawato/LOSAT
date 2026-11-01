@@ -159,7 +159,11 @@ pub(crate) fn run_pair(
     }
     let mut output = Vec::new();
     let label = Path::new(subject_label);
-    let shown = report::ShownSubjects::Fasta { path: label };
+    let no_parsed = report::RecordsParsed::default();
+    let shown = report::ShownSubjects::Fasta {
+        path: label,
+        parsed: &no_parsed,
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:784-788
     // ```c++
     //         		if(warning != kEmptyStr){

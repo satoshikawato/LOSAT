@@ -42,8 +42,8 @@ use anyhow::Result;
 use super::args::ResolvedOptions;
 use super::input::FastaRecord;
 use super::report::{
-    alignment, has_seqalign, local_id, query_endpoints, query_warning, tabular_io_error,
-    ShownSubjects, TabularFlushError,
+    alignment, has_seqalign, local_id, query_endpoints, query_warning, subject_label,
+    tabular_io_error, ShownSubjects, TabularFlushError,
 };
 use super::runtime::BatchResults;
 use crate::config::ScoringMatrix;
@@ -193,7 +193,7 @@ struct SubjectValues<'a> {
     accession: &'a [u8],
     accession_version: &'a [u8],
     gi: i64,
-    all_ids: &'a [DeflineIds],
+    all_ids: std::borrow::Cow<'a, [DeflineIds]>,
     titles: Option<Vec<&'a [u8]>>,
     length: usize,
     taxonomy: &'a TabularTaxonomy,
@@ -218,14 +218,41 @@ fn subject_values<'a>(
         // ```
         // A FASTA subject has no definition lines: its `sall*` are its own ids (the first
         // word of its title), its title and taxonomy are empty (`N/A`).
+        ShownSubjects::Fasta { parsed, .. }
+            if parsed.tabular.get(oid).is_some_and(Option::is_some) =>
+        {
+            let ids = parsed.tabular[oid].as_ref().expect("the guard");
+            SubjectValues {
+                id: ids.ids[0].as_bytes(),
+                accession: ids.ids[1].as_bytes(),
+                accession_version: ids.ids[2].as_bytes(),
+                gi: parsed.subjects[oid]
+                    .as_deref()
+                    .map_or(0, |subject| subject.tabular_gi()),
+                all_ids: std::borrow::Cow::Borrowed(&ids.all_ids),
+                titles: None,
+                length: subject.sequence.len(),
+                taxonomy: no_taxonomy,
+            }
+        }
+        // A record without a title: its `sseqid` is the first word of its generated title
+        // (`report::subject_label`), its `sall*` its local id (`s_ReplaceLocalId`).
         ShownSubjects::Fasta { .. } => {
-            let id = local_id(subject).as_bytes();
+            let id = subject_label(subject).0.as_bytes();
             SubjectValues {
                 id,
                 accession: id,
                 accession_version: id,
                 gi: 0,
-                all_ids: &[],
+                all_ids: if subject.title.is_empty() {
+                    std::borrow::Cow::Owned(vec![DeflineIds {
+                        id: subject.internal_id.as_bytes().to_vec(),
+                        gi: 0,
+                        accession: subject.internal_id.as_bytes().to_vec(),
+                    }])
+                } else {
+                    std::borrow::Cow::Borrowed(&[])
+                },
                 titles: None,
                 length: subject.sequence.len(),
                 taxonomy: no_taxonomy,
@@ -241,7 +268,7 @@ fn subject_values<'a>(
                 accession: accession.as_bytes(),
                 accession_version: accession_version.as_bytes(),
                 gi: parsed.map_or(0, |subject| subject.tabular_gi()),
-                all_ids: reported.tabular_all_ids(oid),
+                all_ids: std::borrow::Cow::Borrowed(reported.tabular_all_ids(oid)),
                 titles: Some(match parsed {
                     Some(subject) => subject
                         .deflines()
@@ -303,7 +330,7 @@ pub(super) fn write_blastx_tabular(
     //     m_Ostream << "# Database: " << dbname << "\n";
     // ```
     let database: Vec<u8> = match shown {
-        ShownSubjects::Fasta { path } => {
+        ShownSubjects::Fasta { path, .. } => {
             format!("User specified sequence set (Input: {})", path.display()).into_bytes()
         }
         ShownSubjects::Database { name, .. } => name.as_bytes().to_vec(),
@@ -428,7 +455,7 @@ pub(super) fn write_blastx_tabular(
                         accession: values.accession,
                         accession_version: values.accession_version,
                         gi: values.gi,
-                        all_ids: values.all_ids,
+                        all_ids: &values.all_ids,
                         length: values.length,
                         titles: values.titles.as_deref(),
                         taxonomy: values.taxonomy,

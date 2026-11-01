@@ -1,0 +1,28 @@
+# TBLASTN 2.17.0+
+# Query: qp1 first half
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/pd_sub_n.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 10 hits found
+qp1	NM_000003.1	100.000	90	0	0	1	90	1	270	3.23e-65	196
+qp1	NC_000013.1	100.000	90	0	0	91	180	1	270	3.30e-65	196
+qp1	BK000001.1	100.000	90	0	0	271	360	1	270	1.57e-64	194
+qp1	NM_000005.1	100.000	90	0	0	181	270	1	270	3.40e-64	193
+qp1	NM_000005.1	55.556	9	4	0	249	257	227	201	8.6	15.8
+qp1	plain1	100.000	90	0	0	451	540	1	270	1.13e-63	192
+qp1	plain1	29.032	31	17	2	18	43	112	204	9.0	15.4
+qp1	l2	100.000	90	0	0	361	450	1	270	4.23e-63	190
+qp1	written	18.182	55	42	1	436	490	73	228	2.7	16.9
+qp1	written	55.556	9	4	0	509	517	113	139	6.1	16.2
+# TBLASTN 2.17.0+
+# Query: qp2 second half
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/pd_sub_n.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+qp2	written	100.000	90	0	0	181	270	1	270	2.78e-64	193
+qp2	9012	100.000	90	0	0	1	90	1	270	3.40e-64	193
+qp2	NM_000002.1	100.000	90	0	0	271	360	1	270	4.25e-64	193
+qp2	Subject_1	100.000	90	0	0	91	180	1	270	4.77e-64	192
+qp2	s1	100.000	90	0	0	361	450	1	270	6.85e-64	192
+qp2	db:tag5	100.000	90	0	0	451	540	1	270	1.50e-63	191
+qp2	NM_000003.1	32.143	28	19	0	255	282	203	120	4.4	16.5
+# BLAST processed 2 queries

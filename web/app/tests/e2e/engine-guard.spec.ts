@@ -11,7 +11,7 @@ import { ENGINE, NO_ENGINE_REASON } from './support/engine';
 test.skip(ENGINE === undefined, NO_ENGINE_REASON);
 
 const guard = createRequire(import.meta.url)('../../../../LOSAT/tests/wasi_shared_memory.js') as {
-  verifyGuarded(bytes: Uint8Array): { version: number; fill: number; copy: number };
+  verifyGuarded(bytes: Uint8Array): { version: number; fill: number; copy: number; atomic: number };
 };
 
 test('the site serves the threaded engine module with the shared-memory guard', async ({ request, browserName }) => {

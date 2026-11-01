@@ -356,7 +356,8 @@ executed, fails so the list is cleaned. Pull requests run
 `ci_fast_regressions.py` instead: the `capture_outputs.py` cases of the programs
 selected from the changed paths against the S02 baseline and the frozen hashes,
 the `-subject` fixtures of `outfmt0_manifest.tsv` (`check_losat.py`) and the `-db` fixtures of the five programs
-(`db_search_fixtures.py`), without NCBI executables (TBLASTX runs only its short
+(`db_search_fixtures.py`), and the command lines of the downstream tools and each program's common forms
+(`dropin_corpus.py`, inputs and provenance in `dropin_corpus/README.md`), without NCBI executables (TBLASTX runs only its short
 cases; `--all-cases` runs all of them nightly). Both manifests freeze NCBI's
 outfmt 0/6/7 and, in the rows `sa.*` and `db.sa.*`, outfmt 8 (Seq-annot, ASN.1 text),
 12 (Seq-annot, JSON) and 9 (Seq-annot, binary ASN.1; the ids ending `.9`, a subset of the 8

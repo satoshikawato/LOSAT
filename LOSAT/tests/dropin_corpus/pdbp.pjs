@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pdbp",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pq.faa",
+  "number-of-letters": 1845,
+  "number-of-sequences": 5,
+  "last-updated": "2026-10-29T18:29:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 52019,
+  "bytes-to-cache": 1979,
+  "files": [
+    "pdbp.pdb",
+    "pdbp.phr",
+    "pdbp.pin",
+    "pdbp.pog",
+    "pdbp.pos",
+    "pdbp.pot",
+    "pdbp.psq",
+    "pdbp.ptf",
+    "pdbp.pto"
+  ]
+}

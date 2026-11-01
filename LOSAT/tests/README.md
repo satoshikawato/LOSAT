@@ -150,9 +150,31 @@ check per-instance bounds that can lag behind the actual shared memory.
 Before compiling the threaded module, `wasi_shared_memory.js` guards every copy
 and fill. If a range exceeds the instance's cached memory length, it executes
 `memory.grow(0)` to refresh that instance, then performs the original operation.
-This requests no additional pages; real invalid accesses still trap. The
-on-disk Wasm artifact is unchanged, and normal optimizing compilation and
-threading remain enabled. No extra flags or rebuild are needed. Adapter parsing
+This requests no additional pages; real invalid accesses still trap. Normal
+optimizing compilation and threading remain enabled. No extra flags are needed.
+
+The build applies the same guard to the threaded artifacts, so that hosts other
+than this runner (browsers) get guarded bytes too (release v0.2.0 DECISIONS 52):
+`build_wasi_artifacts.py` writes `losat-threaded-command.wasm` and
+`losat-threaded-reactor.wasm` guarded (their JSON records the unguarded SHA-256
+under `shared_memory_guard`), the release workflow guards the threaded release
+artifact, and LOSAT Web's build guards its threaded reactor (`web/app/build/reactors.ts`).
+`prepare_release_candidate_v020.py wasm` takes the threaded artifact with
+`--unguarded-binary`, refuses it unless it is the guard's output of that module,
+and records both hashes in the sidecar; `verify_release_archive_v020.py` and
+`aggregate` refuse a threaded archive without a guard.
+The command line is
+`node wasi_shared_memory.js guard <input.wasm> <output.wasm>` and
+`node wasi_shared_memory.js verify <file.wasm>`; both print a JSON record. A
+guarded module carries a custom section `losat.shared_memory_guard` with the
+guard's version and counts. The runner, and the guard function itself, use a
+module that has it as it is (it is not guarded twice and not written to the
+guard cache). `guard` exits 1 and writes nothing when the reader declines an
+instruction encoding, when the module has no `memory.fill` or `memory.copy`, or
+when its output does not verify; `verify` exits 1 unless the two helpers, the
+call sites and the counts are the guard's own. `memory.init` is not guarded: only
+`__wasm_init_memory` (the module's start) and `__wasm_init_tls` (the spawning
+thread, from `pthread_create`) use it. Adapter parsing
 and compilation are included in the measured startup time. Keep `run_losat_wasi_threads.js`,
 `wasi_thread_host.js`, `wasi_thread_worker.js`, `wasi_artifact.js`,
 `wasi_shared_memory.js`, and `wasi_files.js` together when copying the runner; set
@@ -356,7 +378,8 @@ executed, fails so the list is cleaned. Pull requests run
 `ci_fast_regressions.py` instead: the `capture_outputs.py` cases of the programs
 selected from the changed paths against the S02 baseline and the frozen hashes,
 the `-subject` fixtures of `outfmt0_manifest.tsv` (`check_losat.py`) and the `-db` fixtures of the five programs
-(`db_search_fixtures.py`), without NCBI executables (TBLASTX runs only its short
+(`db_search_fixtures.py`), and the command lines of the downstream tools and each program's common forms
+(`dropin_corpus.py`, inputs and provenance in `dropin_corpus/README.md`), without NCBI executables (TBLASTX runs only its short
 cases; `--all-cases` runs all of them nightly). Both manifests freeze NCBI's
 outfmt 0/6/7 and, in the rows `sa.*` and `db.sa.*`, outfmt 8 (Seq-annot, ASN.1 text),
 12 (Seq-annot, JSON) and 9 (Seq-annot, binary ASN.1; the ids ending `.9`, a subset of the 8

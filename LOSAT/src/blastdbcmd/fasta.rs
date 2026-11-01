@@ -15,7 +15,7 @@ use crate::seqid::parse::parse_ids;
 use crate::seqid::rank::{fasta_aa_score, fasta_na_score, find_best, text_score};
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
-use super::letters::reverse_complement;
+use super::letters::{apply_masks, reverse_complement};
 use super::retrieve::{numeric_target, parse_target, Config, Source, Stop};
 
 /// `CBlastDB_FastaFormatter` with its one `CFastaOstream` (`m_fasta`), whose record of the
@@ -118,6 +118,33 @@ impl FastaFormatter {
             short_header(&set, range, config, &mut text)?;
         }
         let mut letters = source.fasta_letters(oid, range)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:463-477
+        // ```c++
+        //     if(config.m_FiltAlgoId != -1) {
+        //     	CSeqDB::TSequenceRanges masks;
+        //     	s_GetSeqMask(m_BlastDb, oid, config.m_FiltAlgoId, masks);
+        //     	if(!masks.empty()) {
+        //     		CRef<CSeq_loc> mask_loc(new CSeq_loc);
+        //     		s_GetMaskSeqLoc(masks, *mask_loc);
+        //     		mask_loc->SetId( *(FindBestChoice(bioseq->GetId(), CSeq_id::BestRank)));
+        //     		m_BlastDb.GetMaskData(oid, config.m_FiltAlgoId, masks);
+        //     		m_fasta.SetMask(CFastaOstream::eSoftMask, mask_loc);
+        //     	}
+        //     }
+        //     else {
+        //     	CRef<CSeq_loc> empty;
+        //     	m_fasta.SetMask(CFastaOstream::eSoftMask, empty);
+        //     }
+        // ```
+        // The approved differences 3, 5 and 6 of `PD-LOSAT-BLASTDBCMD-DEVIATIONS`, where the
+        // letters are those of NCBI's own `%s` path: the mask goes on before the reverse
+        // complement (NCBI lower-cases the output positions of the reversed letters), over
+        // the whole length of a protein (NCBI's whole-sequence mapper keeps the first third
+        // of it), and a sequence without masks of the algorithm stays in upper case (NCBI
+        // keeps the mask of the batch line before when the Seq-id is the same).
+        if config.filt_algo != -1 {
+            apply_masks(&mut letters, &source.masks(oid, config.filt_algo)?, range);
+        }
         if config.strand_minus {
             reverse_complement(&mut letters);
         }

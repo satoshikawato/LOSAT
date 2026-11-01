@@ -5,7 +5,7 @@ import { expect, type BrowserContext, type CDPSession, type Page } from '@playwr
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { siteHeaders } from '../../../build/headers';
-import { findReactors, losatEngine } from '../../../build/reactors';
+import { findReactors, losatEngine, type Reactors } from '../../../build/reactors';
 import { losatVerification } from '../../../build/verification';
 import { SESSION_LOCK_PREFIX, TMP_DIRECTORY } from '../../../src/infra/data/session';
 import { E2E_ORIGIN } from './origin';
@@ -150,18 +150,19 @@ const TYPES: Readonly<Record<string, string>> = {
  * Builds tests/e2e/harness in memory with Vite; the application build is not touched. The
  * harness build has the engine modules of LOSAT_WEB_REACTORS and the verification table (the
  * composition root imports both), as the application build does, and the test hooks of the
- * Engine worker (`__LOSAT_TEST_HOOKS__`).
+ * Engine worker (`__LOSAT_TEST_HOOKS__`). `reactors` replaces the modules of
+ * LOSAT_WEB_REACTORS (a measurement of another form of the same modules).
  */
-export async function buildHarness(): Promise<HarnessFiles> {
+export async function buildHarness(reactors: Reactors | undefined = REACTORS): Promise<HarnessFiles> {
   const result = await build({
     root: fileURLToPath(new URL('../harness/', import.meta.url)),
     base: '/__harness/',
     configFile: false,
     publicDir: false,
     logLevel: 'warn',
-    plugins: [losatEngine({ reactors: REACTORS }), losatVerification()],
+    plugins: [losatEngine({ reactors }), losatVerification()],
     define: { __LOSAT_TEST_HOOKS__: 'true' },
-    worker: { format: 'es', plugins: () => [losatEngine({ reactors: REACTORS, emit: false })] },
+    worker: { format: 'es', plugins: () => [losatEngine({ reactors, emit: false })] },
     build: { write: false, target: 'es2022', minify: false, modulePreload: false },
   });
   const files = new Map<string, { body: string | Uint8Array; type: string }>();

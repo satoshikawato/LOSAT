@@ -122,6 +122,24 @@ use crate::core::blast_hits::reap_by_query_coverage;
 // No NCBI counterpart: matches per Newton lanes prefetch in the BLASTP redo loops; it does not
 // change any value NCBI computes.
 const X_NEWTON_LANES_MATCHES: usize = 16;
+// No NCBI counterpart: the size limit of the preliminary interval tree's grid index under
+// LOSAT_X_BPTREECELLS (the tree's own limit is 1 << 16 cells); it does not change any value NCBI
+// computes.
+const X_BP_TREE_MAX_CELLS: usize = 1 << 14;
+// No NCBI counterpart: reads the LOSAT_X_BPTREECELLS switch once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPTREECELLS): strict set (on unless `0`). The grid cells of the
+/// preliminary interval tree at most, per subject.
+fn x_bp_tree_max_cells() -> usize {
+    static CELLS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *CELLS.get_or_init(|| {
+        if crate::utils::xswitch::on("LOSAT_X_BPTREECELLS") {
+            X_BP_TREE_MAX_CELLS
+        } else {
+            1 << 16
+        }
+    })
+}
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:142-154
 // ```c
 // typedef struct BlastUngappedData {
@@ -8782,7 +8800,13 @@ fn run_resolved_in_pool(
         //                               0, subject->length+1);
         // ```
         let interval_tree = &mut scratch.preliminary_interval_tree;
-        interval_tree.reset_with_bounds(0, total_query_span, 0, subject.aa_len as i32 + 1);
+        interval_tree.reset_with_bounds_cells(
+            0,
+            total_query_span,
+            0,
+            subject.aa_len as i32 + 1,
+            x_bp_tree_max_cells(),
+        );
         if let Some(timing) = timing.as_ref() {
             BlastpTiming::record_call(
                 &timing.scan_ungapped_ns,
@@ -11959,6 +11983,7 @@ fn run_resolved_in_pool(
                         taxonomy: &taxonomy,
                     },
                     _ => super::tabular::TabularSubjects::Records {
+                        records: subject_records,
                         ids: &subject_ids,
                         accessions: &subject_accessions,
                         parsed: listed_parsed,

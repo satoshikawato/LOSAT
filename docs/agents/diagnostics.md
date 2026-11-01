@@ -5445,6 +5445,19 @@ Scheduling (each value computed by one thread with the original function; order 
   process); `tests/tblastn_newton_drop.rs`: the same report as `=0` at one and four threads, the same counts of
   results solved ahead, taken and dropped, batches kept by default and none with `=0` or `LOSAT_X_NEWTONDROP=0`.
   Always: every prefetch (where NEWTONLANES runs, with NEWTONDROP).
+  Measured 2026-11-01 on the workstation (2x Xeon Gold 6338; base dev 7a835d1f; every output of a case the same
+  bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16
+  CPUs for every run, medians in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): `dmel_b4.faa` x zebrafish
+  cDNAs (`-db`, `-evalue 1e-5 -max_target_seqs 5`) at 16 / 32 / 40 / 48 threads 55 / 84 / 96 / 110 -> 54 / 81 / 92 /
+  106 MiB (x0.981 / x0.966 / x0.959 / x0.963, 16 rounds, lower in 13, 15, 16, 16; NCBI 128 / 139 / 145 / 151); the
+  595 proteins of AP027131 x AP027133 (`-db_gencode 4`) `-subject` at 1 / 16 / 32 / 40 / 48 x0.998 / x0.992 / x1.002 /
+  x1.002 / x0.989 (8 rounds; 74 MiB at 48, NCBI 81 at one thread), `-db` at 48 x0.994 (93 MiB, NCBI 114); BLASTP WSSV
+  x PajaWSV `-subject` at 16 x0.992; `=0` in the same binary x0.999-1.005 of the base. At one thread x0.99922 of the
+  instructions (AP027131 `-subject`) and x0.99999 (`dmel_b4.faa`); BLASTP x0.99960, BLASTX and TBLASTX x1.00000.
+  Time (node 1, cores warmed 3 s before each run, arms alternating in order; the PR's binary against the base, and
+  `=0` in the PR's binary): AP027131 `-subject` at 1 / 16 / 32 threads x0.9954 / x0.9942 / x0.9941 (12, 6, 8 of 12
+  faster), against `=0` x0.9961 / x0.9986 / x1.0015; `dmel_b4.faa` at 1 / 8 / 16 / 32 x0.9992 / x0.9984 / x1.0008 /
+  x0.9992 (5 of 8, 10, 6, 6 of 12 faster), against `=0` x1.0003 / x0.9999 / x1.0001 / x1.0004.
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

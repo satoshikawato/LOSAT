@@ -1,5 +1,6 @@
-//! The numeric ISAM of a volume (`.pni`/`.pnd`, `.nni`/`.nnd`): NCBI's `CSeqDBIsam` for the
-//! lookup of a GI (`IdToOid`). The string ISAM is in [`super::isam`].
+//! The numeric ISAMs of a volume, GIs (`.pni`/`.pnd`, `.nni`/`.nnd`) and PIGs (`.ppi`/`.ppd`):
+//! NCBI's `CSeqDBIsam` for the lookup of a number (`IdToOid`, `PigToOid`). The string ISAM is in
+//! [`super::isam`].
 //!
 //! The index file holds a header and every `page_size`-th row of the data file; the data file
 //! holds the rows, sorted by key: a big-endian key (4 bytes, or 8 for `eNumericLongId`) and a
@@ -119,13 +120,52 @@ impl NumericIsam {
         ) else {
             return Ok(None);
         };
+        Self::from_files(index, data, "GI")
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:136-145
+    // ```c++
+    // CSeqDBVol::x_OpenPigFile(void) const{
+    //     CFastMutexGuard mtx_gurad(m_MtxPig);
+    //     if (m_IsamPig.NotEmpty()) {
+    //     	m_IsamPig->AddReference();
+    //     }
+    //     else if (CSeqDBIsam::IndexExists(m_VolName, (m_IsAA?'p':'n'), 'p') &&
+    //              m_Idx->GetNumOIDs() != 0) {
+    //         m_IsamPig = new CSeqDBIsam(m_Atlas, m_VolName, (m_IsAA?'p':'n'), 'p', ePigId);
+    //     }
+    // }
+    // ```
+    /// The PIG ISAM of the volume `base` (`.ppi`/`.ppd`): `None` when one of its files does not
+    /// exist or the data file has another length than the index says. A file that exists and
+    /// does not open is NCBI's exception of the constructor (no catch here, unlike the GIs).
+    pub fn open_pig_volume(base: &Path, seqtype: SeqType) -> Result<Option<Self>, SeqDbError> {
+        let index_path = with_extension(base, seqtype, "pi");
+        let data_path = with_extension(base, seqtype, "pd");
+        if !(index_path.exists() && data_path.exists()) {
+            return Ok(None);
+        }
+        let opened =
+            || Ok::<_, SeqDbError>((DbFile::open(&index_path)?, DbFile::open(&data_path)?));
+        let Ok((index, data)) = opened() else {
+            return Err(SeqDbError::NotFound(format!(
+                "Error: Could not open input file ({}/{})",
+                index_path.display(),
+                data_path.display()
+            )));
+        };
+        Self::from_files(index, data, "PIG")
+    }
+
+    /// The ISAM of `index` and `data`, an index of the numbers `what` names.
+    fn from_files(index: DbFile, data: DbFile, what: &str) -> Result<Option<Self>, SeqDbError> {
         let bad = |message: String| SeqDbError::Unsupported {
             path: index.path().to_path_buf(),
             message,
         };
         if index.len() < HEADER_BYTES {
             return Err(bad(format!(
-                "a GI index file of {} bytes (NCBI crashes on it)",
+                "a {what} index file of {} bytes (NCBI crashes on it)",
                 index.len()
             )));
         }
@@ -135,13 +175,13 @@ impl NumericIsam {
         let isam_type = word(1);
         if version != ISAM_VERSION || (isam_type != NUMERIC && isam_type != NUMERIC_LONG_ID) {
             return Err(bad(format!(
-                "a GI index file of version {version} and type {isam_type} (NCBI crashes on it)"
+                "a {what} index file of version {version} and type {isam_type} (NCBI crashes on it)"
             )));
         }
         let (num_terms, num_samples, page_size) = (word(3), word(4), word(5));
         if num_terms < 1 || num_samples < 1 || page_size <= MEMORY_ONLY_PAGE_SIZE {
             return Err(bad(format!(
-                "a GI index file of {num_terms} terms, {num_samples} samples and pages of \
+                "a {what} index file of {num_terms} terms, {num_samples} samples and pages of \
                  {page_size} terms"
             )));
         }

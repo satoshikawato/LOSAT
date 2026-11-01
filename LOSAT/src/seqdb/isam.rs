@@ -108,8 +108,9 @@
 //!   index of such a volume; its result is never used and is not computed.
 //! - The warnings that `CSeq_id` posts while parsing a user's id (`ERR_POST` to the diagnostics
 //!   stream) are dropped.
-//! - Exceptions of `SeqDB_SimplifyAccession` that are not NCBI's text (an out-of-range number in
-//!   a `ti` tag, a string tag of `BL_ORD_ID`) are [`SimplifyError::Exception`] with LOSAT's text.
+//! - Exceptions of `SeqDB_SimplifyAccession` that are not a `CSeqIdException` (a `ti` tag that is
+//!   not a number, a string tag of `BL_ORD_ID` or `PIG`) are [`SimplifyError::Exception`] with
+//!   the message NCBI's exception holds.
 //! - The functions assume the C locale (`tolower`, `toupper`, `isdigit`, `atoi`).
 
 use std::path::{Path, PathBuf};
@@ -121,6 +122,7 @@ use crate::seqid::label;
 use crate::seqid::model::{ObjectId, ParsedSeqId, TextseqId};
 use crate::seqid::parse::{parse_ids, seq_id_from_text, which_inverse_seq_id, SeqIdError};
 use crate::seqid::rank::{best_rank_score, find_best};
+use crate::writedb::data_size::printable_string;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:45-55
 // ```c++
@@ -3188,8 +3190,8 @@ pub struct SimplifiedAccession {
 pub enum SimplifyError {
     /// A `CSeqIdException` of `CSeq_id(element)` or of the `db:tag` id.
     SeqId(SeqIdError),
-    /// Another exception (LOSAT's text): a string tag read as a number, an integer read from a
-    /// string tag.
+    /// Another exception, with its message: a string tag read as a number, an integer read from
+    /// a string tag.
     Exception(String),
 }
 
@@ -3225,12 +3227,51 @@ fn string_to_int8(s: &[u8]) -> Option<i64> {
     i64::try_from(n).ok()
 }
 
-/// `CObject_id::GetId()`.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:845-860
+// ```c++
+//     Int8 limdiv = kMax_I8 / base;
+//     Int8 limoff = kMax_I8 % base + (sign ? 1 : 0);
+//     ...
+//     while (char ch = str[pos]) {
+//         int delta;  // corresponding numeric value of 'ch'
+//         // Check digit
+//         if (!s_IsGoodCharForRadix(ch, base, &delta)) {
+//             break;
+//         }
+//         // Check for overflow
+//         if (n >= limdiv  &&  (n > limdiv  ||  delta > limoff)) {
+//             S2N_CONVERSION_ERROR(int8_t, kEmptyStr, ERANGE, pos);
+//         }
+// ```
+/// Whether `NStr::StringToInt8(s)` fails with its ", overflow" message: the digits after an
+/// optional sign overflow before the first other byte (which fails without it).
+fn int8_digits_overflow(s: &[u8]) -> bool {
+    let negative = s.first() == Some(&b'-');
+    let digits = match s.first() {
+        Some(b'-' | b'+') => &s[1..],
+        _ => s,
+    };
+    let limdiv = i64::MAX / 10;
+    let limoff = i64::MAX % 10 + i64::from(negative);
+    let mut n: i64 = 0;
+    for &c in digits.iter().take_while(|c| c.is_ascii_digit()) {
+        let delta = i64::from(c - b'0');
+        if n >= limdiv && (n > limdiv || delta > limoff) {
+            return true;
+        }
+        n = n * 10 + delta;
+    }
+    false
+}
+
+/// `CObject_id::GetId()`: a string tag is NCBI's `CInvalidChoiceSelection` (probe D11 of line
+/// BDC).
 fn object_id_id(tag: &ObjectId) -> Result<i64, SimplifyError> {
     match tag {
         ObjectId::Id(n) => Ok(i64::from(*n)),
         ObjectId::Str(_) => Err(SimplifyError::Exception(
-            "Object-id::GetId: wrong choice selection (str)".to_string(),
+            "CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str"
+                .to_string(),
         )),
     }
 }
@@ -3448,8 +3489,13 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
                 out.num_id = match &dbt.tag {
                     ObjectId::Str(text) => string_to_int8(text).ok_or_else(|| {
                         SimplifyError::Exception(format!(
-                            "Cannot convert string '{}' to Int8",
-                            String::from_utf8_lossy(text)
+                            "Cannot convert string '{}' to Int8{}",
+                            printable_string(text),
+                            if int8_digits_overflow(text) {
+                                ", overflow"
+                            } else {
+                                ""
+                            }
                         ))
                     })?,
                     ObjectId::Id(n) => i64::from(*n),

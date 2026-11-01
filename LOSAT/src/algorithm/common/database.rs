@@ -194,15 +194,6 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
     }
 }
 
-/// LOSAT's refusal of a database with parsed Seq-ids (`SeqDb::check_ordinal_ids`), which
-/// `program` does not search: psiblast calls it right after it opens its database
-/// (`open_database`), so the refusal comes where the reader gave it before; the five search
-/// programs read such a database (`check_seqids`, line DBID ID2a and ID2b).
-pub(crate) fn refuse_parsed_seqids(db: &SeqDb, program: &str) -> Result<()> {
-    db.check_ordinal_ids()
-        .map_err(|error| database_error(error, program))
-}
-
 /// LOSAT's refusal of a database that `program` does not search as NCBI does.
 pub(crate) fn refusal(reason: &str, program: &str) -> anyhow::Error {
     anyhow::anyhow!("{reason}; this database is not supported by LOSAT's {program}")
@@ -639,9 +630,9 @@ pub(crate) fn parsed_refusal(ordinal: u32, reason: &str, program: &str) -> anyho
     )))
 }
 
-/// `refuse_parsed_seqids` of a program that searches databases with parsed Seq-ids too: the
-/// first header of each volume is read right after the database is opened, as before, and only
-/// a header with parsed Seq-ids is let through (`SeqDb::has_parsed_seqids`). Returns whether the
+/// The check of a search program's database right after it is opened: the first header of
+/// each volume is read, as before line DBID, and only a header with parsed Seq-ids is let
+/// through (`SeqDb::has_parsed_seqids`; every search program reads such a database). Returns whether the
 /// database has parsed Seq-ids; such a database is LOSAT's refusal where a variable changes
 /// NCBI's choice of its Seq-ids (`ApplicationSettings::seq_id_rank_variable`).
 pub(crate) fn check_seqids(
@@ -670,19 +661,64 @@ pub(crate) fn refuse_joined_hits<'a>(
     subjects: impl IntoIterator<Item = Option<(u32, &'a crate::report::db_subject::ParsedSubject)>>,
     program: &str,
 ) -> Result<()> {
+    match first_joined(subjects) {
+        Some((before, ordinal)) => Err(anyhow::Error::new(ParsedRefusal(format!(
+            "database sequences {before} and {ordinal} follow each other in the hits of query {} and have Seq-align ids that NCBI BLAST+ takes for one sequence (its XML and outfmt 0 reports show their alignments as one hit); this is not supported by LOSAT's {program}",
+            query + 1
+        )))),
+        None => Ok(()),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1025-1033
+// ```c++
+//         } else {
+//             subid = &((*iter)->GetSeq_id(1));
+//             if(is_first_aln || (!is_first_aln && !subid->Match(*previous_id))){
+//                 ++num_align;
+//             }
+//
+//             if(num_align > number) {
+//                  break;
+//             }
+// ```
+/// LOSAT's refusal of the cut of a hit list longer than `max_target_seqs` (query `query`) to
+/// its first `max_target_seqs` subjects where two of its first `max_target_seqs + 1` HSP lists
+/// (`subjects`, as `refuse_joined_hits` takes them) are parsed subjects that follow each other
+/// with matching Seq-align ids: NCBI's formatter counts their Seq-aligns as those of one
+/// subject (`PruneSeqalign`) and keeps one subject more. psiblast cuts its traceback hit lists
+/// so, which are longer than `-max_target_seqs`.
+pub(crate) fn refuse_joined_cut<'a>(
+    query: usize,
+    max_target_seqs: usize,
+    subjects: impl IntoIterator<Item = Option<(u32, &'a crate::report::db_subject::ParsedSubject)>>,
+    program: &str,
+) -> Result<()> {
+    match first_joined(subjects.into_iter().take(max_target_seqs.saturating_add(1))) {
+        Some((before, ordinal)) => Err(anyhow::Error::new(ParsedRefusal(format!(
+            "database sequences {before} and {ordinal} follow each other in the first {} hits of query {} and have Seq-align ids that NCBI BLAST+ takes for one sequence (it counts them as one of the -max_target_seqs {max_target_seqs} sequences and keeps one more); this is not supported by LOSAT's {program}",
+            max_target_seqs.saturating_add(1),
+            query + 1
+        )))),
+        None => Ok(()),
+    }
+}
+
+/// The ordinal ids of the first two parsed subjects of `subjects` that follow each other and
+/// whose Seq-align ids match (`report::db_subject::joined_in_reports`).
+fn first_joined<'a>(
+    subjects: impl IntoIterator<Item = Option<(u32, &'a crate::report::db_subject::ParsedSubject)>>,
+) -> Option<(u32, u32)> {
     let mut previous: Option<(u32, &crate::report::db_subject::ParsedSubject)> = None;
     for subject in subjects {
         if let (Some((before, a)), Some((ordinal, b))) = (previous, subject) {
             if crate::report::db_subject::joined_in_reports(a, b) {
-                return Err(anyhow::Error::new(ParsedRefusal(format!(
-                    "database sequences {before} and {ordinal} follow each other in the hits of query {} and have Seq-align ids that NCBI BLAST+ takes for one sequence (its XML and outfmt 0 reports show their alignments as one hit); this is not supported by LOSAT's {program}",
-                    query + 1
-                ))));
+                return Some((before, ordinal));
             }
         }
         previous = subject;
     }
-    Ok(())
+    None
 }
 
 /// LOSAT's refusal of a parsed subject whose outfmt 0 title NCBI makes from the source

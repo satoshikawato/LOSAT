@@ -514,7 +514,12 @@ mod tests {
             SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
         let path = tests.join("db_search").join(name);
         TblastnDatabase {
-            db: SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap(),
+            db: {
+                let mut db =
+                    SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+                db.read_name_records(path.to_str().unwrap()).unwrap();
+                db
+            },
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
         }

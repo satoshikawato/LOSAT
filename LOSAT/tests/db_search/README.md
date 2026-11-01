@@ -540,6 +540,8 @@ each name in double quotes (`galaxy`), extra spaces around the names (`space`), 
 directories (`samename`), two version 4 databases (`v4`, `bp.v4`), a version 4 and a version 5 database (`v4v5`: NCBI exits 2,
 `DB list contains both Version 4 and Version 5 dbs`), an empty title (`title`), `-taxids` and `-seqidlist` over both names
 (`tx`, `sl`), the five other programs (`bp`, `bx`, `tbn`, `tbx`; `ps` searches the version 4 pair, because LOSAT's PSIBLAST
-refuses databases with parsed Seq-ids). The two `losat-rejection` rows are LOSAT's refusals of a version 5 pair with and
-without the accession table (`bn.mixed.6`: NCBI stops at the first hit of a parsed sequence) and of an alias that lists the
-volume of another name (`bn.aliasdup.0`).
+refuses databases with parsed Seq-ids). The three `losat-rejection` rows are LOSAT's refusals of a version 5 pair with and
+without the accession table (`bn.mixed.6`: NCBI stops at the first hit of a parsed sequence), of an alias that lists the
+volume of another name (`bn.aliasdup.0`), and of a negative seqid list (`multidb/sl_negpartial.txt`, FBtr0083245 of the
+second volume) on `taxfilter/tfn.00`, the first of the two volumes of one LMDB file (`bn.negpartial.6`: NCBI clears bit -1 of
+its OID mask and crashes).

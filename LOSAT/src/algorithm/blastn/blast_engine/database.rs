@@ -2329,7 +2329,8 @@ mod tests {
         let search =
             SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
         let path = tests.join("db_search").join(name);
-        let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+        let mut db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+        db.read_name_records(path.to_str().unwrap()).unwrap();
         BlastnDatabase {
             metadata: SubjectMetadata {
                 db_len_total: db.total_length() as usize,

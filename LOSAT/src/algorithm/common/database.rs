@@ -64,8 +64,12 @@ pub(crate) fn open_search_database(
         Err(reason) => return Err(DatabaseOpenError::Registry(reason.clone())),
     };
     let path = SearchPath::from_environment(registry).map_err(DatabaseOpenError::Reader)?;
-    let db = SeqDb::open_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)?;
+    let mut db = SeqDb::open_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)?;
     db.check_accession_tables()
+        .map_err(DatabaseOpenError::Reader)?;
+    // What the reports show of each name of the list (NCBI's formatter opens them again
+    // before the search; `pairwise_database`).
+    db.read_name_records(name)
         .map_err(DatabaseOpenError::Reader)?;
     Ok(db)
 }

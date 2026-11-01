@@ -556,23 +556,40 @@ impl SeqDb {
     pub fn open_in(name: &str, seqtype: SeqType, path: &SearchPath) -> Result<Self, SeqDbError> {
         let mut db = Self::open_tree(alias::resolve_in(name, seqtype, path)?, name, seqtype)?;
         db.search_path = Some(path.clone());
-        // The reports open each name of the list again, alone (`NameRecord`); a database
-        // of one name is the database just opened.
-        let names = alias::report_names(name);
-        db.name_records = if let [one] = names.as_slice() {
-            if one == name {
-                vec![db.name_record(one)]
-            } else {
-                Self::open_in(one, seqtype, path)?.name_records
-            }
-        } else {
-            let mut records = Vec::with_capacity(names.len());
-            for one in &names {
-                records.extend(Self::open_in(one, seqtype, path)?.name_records);
-            }
-            records
-        };
         Ok(db)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:150-153
+    // ```c++
+    //         CBlastFormatUtil::GetBlastDbInfo(m_DbInfo, m_DbName, m_DbIsAA,
+    //                                    dbfilt_algorithm, is_remote_search);
+    // ```
+    // In NCBI's formatter (`CBlastFormat`), made by a search program after it opened the
+    // database with its lists and after `Query is Empty!`; `blastdbcmd` makes none.
+    /// Reads what the reports show of each name of the `-db` value `name` (`NameRecord`,
+    /// `name_records`): each name of the list is opened again, alone, along the search path
+    /// the database was opened with; a database of one name is this one, before any list.
+    pub fn read_name_records(&mut self, name: &str) -> Result<(), SeqDbError> {
+        let names = alias::report_names(name);
+        self.name_records = match names.as_slice() {
+            [one] if one == name => vec![self.name_record(one)],
+            _ => {
+                let path = match &self.search_path {
+                    Some(path) => path.clone(),
+                    None => {
+                        SearchPath::new(&std::env::current_dir().unwrap_or_default(), None, None)?
+                    }
+                };
+                let mut records = Vec::with_capacity(names.len());
+                for one in &names {
+                    let mut alone = Self::open_in(one, self.seqtype, &path)?;
+                    alone.read_name_records(one)?;
+                    records.append(&mut alone.name_records);
+                }
+                records
+            }
+        };
+        Ok(())
     }
 
     /// What the reports read of this database under the name `name`, before any list.
@@ -587,7 +604,7 @@ impl SeqDb {
     }
 
     /// One record per name of the `-db` list in the order of the list, a name given twice
-    /// twice (`NameRecord`; empty for a database not opened by `open_in`).
+    /// twice (`NameRecord`; empty before `read_name_records`).
     pub fn name_records(&self) -> &[NameRecord] {
         &self.name_records
     }

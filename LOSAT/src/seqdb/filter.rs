@@ -1150,7 +1150,9 @@ impl LmdbEntry {
     // }
     // ```
     // An excluded OID of a volume the database does not hold becomes `kSeqDBEntryNotFound`,
-    // which NCBI then clears as a bit (`ClearBit(-1)`, undefined); LOSAT drops it.
+    // which NCBI then clears as a bit (`ClearBit(-1)`, undefined): NCBI crashes (SIGSEGV,
+    // exit 139, review of DI-8f: `-db mv/m.00`, or `-db "d1/m d2/m"` whose volumes
+    // interleave). LOSAT refuses the list (PD-LOSAT-NCBI-DEFECTS, rule 3).
     /// The database OIDs that the negative list `ids` excludes in this entry: those whose
     /// every id of the `.nos`/`.pos` file is covered by the listed ids that have them as
     /// first OID.
@@ -1198,10 +1200,20 @@ impl LmdbEntry {
                 excluded.push(current_oid);
             }
         }
-        Ok(excluded
+        excluded
             .into_iter()
-            .filter_map(|oid| self.database_oid(oid))
-            .collect())
+            .map(|oid| {
+                self.database_oid(oid)
+                    .ok_or_else(|| SeqDbError::Unsupported {
+                        path: self.lmdb.clone(),
+                        message: format!(
+                            "the negative seqid list excludes sequence {oid} of the LMDB file, in \
+                         a volume that the database does not hold; NCBI BLAST+ then clears \
+                         bit -1 of its OID mask and crashes"
+                        ),
+                    })
+            })
+            .collect()
     }
 }
 
@@ -1547,7 +1559,10 @@ impl SeqDb {
                 .with_file_name(String::from_utf8_lossy(name).as_ref())
         };
         let first = lmdb_path(&self.volumes[0]);
-        if self.volumes[1..].iter().all(|volume| lmdb_path(volume) == first) {
+        if self.volumes[1..]
+            .iter()
+            .all(|volume| lmdb_path(volume) == first)
+        {
             return Ok(());
         }
         // A volume list that the LMDB files do not describe is refused by the lookups.

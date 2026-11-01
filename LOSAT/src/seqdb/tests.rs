@@ -1129,7 +1129,11 @@ fn a_name_is_a_list_as_for_ncbi() {
     // Two names: the databases of both are searched as one, and the reports keep one record
     // per name in the order of the list (DI-8 DECISIONS 29).
     let prot_old = db_name("prot_old");
-    let alone = |name: &str| SeqDb::open(name, SeqType::Protein).unwrap();
+    let alone = |name: &str| {
+        let mut db = SeqDb::open(name, SeqType::Protein).unwrap();
+        db.read_name_records(name).unwrap();
+        db
+    };
     let (v4, old) = (alone(&prot_v4), alone(&prot_old));
     for (list, first, second) in [
         (format!("{prot_v4} {prot_old}"), &v4, &old),

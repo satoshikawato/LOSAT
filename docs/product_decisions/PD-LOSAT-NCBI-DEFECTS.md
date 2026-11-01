@@ -11,7 +11,8 @@
   version 5 database, and the seqid-list items of rules 2 and 3, line DI-8b);
   1.7 2026-10-31 (exception 6 also for the id lookups of `losat blastdbcmd`, line BDC's BDC2b);
   1.8 2026-11-01 (a version 5 database list that mixes databases with and without accession
-  tables, rule 3, line DI-8f)
+  tables, and a negative seqid list that excludes a sequence of a volume the database does
+  not hold, rule 3, line DI-8f)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -279,6 +280,16 @@ defects are fixed and presented as differences); its PR (DI-8b) asks the maintai
   makeblastdb -parse_seqids ... and without it`; version 1.8, line DI-8 `DECISIONS.md` 31,
   probe DI-8f F42, P14, H09, H15-H19): whether NCBI fails depends on the hits, and
   reproducing that would need the lookup before every batch's reports in every program.
+
+- A negative seqid list that excludes a sequence (every id of its `.nos`/`.pos` record
+  listed) of a volume that the database does not hold, while the database holds other
+  volumes of the same LMDB file (`-db m.00` of a database in several volumes, or `-db "d1/m
+  d2/m"` whose volumes interleave): `x_AdjustOidsOffset` turns that sequence's OID into
+  `kSeqDBEntryNotFound`, and NCBI clears bit -1 of its OID mask and crashes (SIGSEGV, exit
+  139; review of line DI-8f, fixture row `db.mdb.bn.negpartial.6`). LOSAT dropped the OID
+  and searched; it now refuses the list (`the negative seqid list excludes sequence N of the
+  LMDB file, in a volume that the database does not hold`; version 1.8). A positive list on
+  such a database is NCBI's and LOSAT's alike.
 
 ## Ported (rule 4)
 

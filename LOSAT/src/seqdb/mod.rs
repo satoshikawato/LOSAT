@@ -589,6 +589,35 @@ impl SeqDb {
         alias::info_volumes(name, seqtype, path)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-934
+    // ```c++
+    // void CSeqDBAliasNode::FindVolumePaths(vector<string> & vols, vector<string> * alias, bool recursive) const
+    // {
+    //
+    //     set<string> volset;
+    //     set<string> aliset;
+    //
+    //     if (recursive) {
+    //         x_FindVolumePaths(volset, aliset);
+    // ```
+    /// `FindVolumePaths(paths, alias, true)` of the database that [`SeqDb::open_in`] opens
+    /// with the same arguments: every volume path (without extension) and every alias file
+    /// of its alias tree, each once, sorted. No volume file is opened.
+    pub fn volume_and_alias_paths(
+        name: &str,
+        seqtype: SeqType,
+        path: &SearchPath,
+    ) -> Result<(Vec<String>, Vec<String>), SeqDbError> {
+        let tree = alias::resolve_in(name, seqtype, path)?;
+        let volumes: std::collections::BTreeSet<String> = tree.volumes.into_iter().collect();
+        let mut alias_files = std::collections::BTreeSet::new();
+        alias::collect_alias_files(&tree.root, &mut alias_files);
+        Ok((
+            volumes.into_iter().collect(),
+            alias_files.into_iter().collect(),
+        ))
+    }
+
     /// The number of the volume that holds `ordinal` (`CSeqDBVolSet::FindVol`).
     pub fn volume_index(&self, ordinal: u32) -> Result<usize, SeqDbError> {
         self.find_volume(ordinal).map(|(volume, _)| volume)

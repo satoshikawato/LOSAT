@@ -730,9 +730,73 @@ pub fn database_date(volume_dates: &[&str]) -> Result<String, DateError> {
     Ok(date)
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1730-1732
+// ```c++
+// 	CTimeFormat timeFmt = CTimeFormat::GetPredefined(CTimeFormat::eISO8601_DateTimeSec);
+// 	CTime date(GetDate(), kBlastDbDateFormat);
+// 	m->SetLast_updated(date.AsString(timeFmt));
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1512-1520
+// ```c++
+// string CTime::AsString(const CTimeFormat& format, TSeconds out_tz) const
+// {
+//     if ( !IsValid() ) {
+//         NCBI_THROW(CTimeException, eInvalid,
+//                    "Invalid time " + s_TimeDump(*this));
+//     }
+//     if ( IsEmpty() ) {
+//         return kEmptyStr;
+//     }
+// ```
+// The ISO 8601 form is `Y-M-DTh:m:s` (ncbitime.cpp:398, `eISO8601_DateTimeSec`); the
+// stored date has no seconds. An empty date is the empty time, written as the empty
+// string. The constructor has checked the time a date string gives (`IsValid`).
+/// `CTime(date, "b d, Y  H:m P").AsString(eISO8601_DateTimeSec)`, the `last-updated` of
+/// `blastdbcmd -metadata`: `YYYY-MM-DDThh:mm:00`. `Err` with NCBI's message where the
+/// constructor throws (`CTimeException`, or `CStringException` for a number without digits).
+pub fn iso8601_date_time(date: &str) -> Result<String, String> {
+    if date.is_empty() {
+        return Ok(String::new());
+    }
+    match parse_blast_db_date(date) {
+        Ok(time) => Ok(format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:00",
+            time.year, time.month, time.day, time.hour, time.min
+        )),
+        Err(ParseFailure::TimeException(reason)) => Err(reason),
+        Err(ParseFailure::StringException) => {
+            Err(format!("a number of the date '{date}' has no digit"))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_metadata_date_is_iso_8601() {
+        // probe J185-J188 of line BDC: the dates of copies of a version 4 database.
+        assert_eq!(
+            iso8601_date_time("Oct 29, 2026  12:13 AM").as_deref(),
+            Ok("2026-10-29T00:13:00")
+        );
+        assert_eq!(
+            iso8601_date_time("Oct 29, 2026  12:13 PM").as_deref(),
+            Ok("2026-10-29T12:13:00")
+        );
+        assert_eq!(
+            iso8601_date_time("Jan 1, 2026  1:05 AM").as_deref(),
+            Ok("2026-01-01T01:05:00")
+        );
+        assert_eq!(
+            iso8601_date_time("Oct 29, 2026  7:13 PM").as_deref(),
+            Ok("2026-10-29T19:13:00")
+        );
+        // J189, J190: NCBI's constructor throws (exit status 255).
+        assert!(iso8601_date_time("Feb 30, 2026  1:05 PM").is_err());
+        assert!(iso8601_date_time("not a date").is_err());
+    }
 
     // Date strings as makeblastdb 2.17.0 writes them.
     const PM_322: &str = "Oct 12, 2026  3:22 PM";

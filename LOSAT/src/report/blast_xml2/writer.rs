@@ -222,14 +222,19 @@ where
             enc.visible_str(names.join(" ").as_bytes());
             enc.end_variant();
         }
-        Xml2Target::Subjects(count) => {
-            enc.variant_string_list(
-                "Target",
-                "subjects",
-                1,
-                (1..=count).map(|n| format!("Subject_{n}")),
-            );
-        }
+        Xml2Target::Subjects(count) => match &params.subject_names {
+            Some(names) => {
+                enc.variant_string_list("Target", "subjects", 1, names.iter().cloned());
+            }
+            None => {
+                enc.variant_string_list(
+                    "Target",
+                    "subjects",
+                    1,
+                    (1..=count).map(|n| format!("Subject_{n}")),
+                );
+            }
+        },
     }
     enc.end_member();
     write_parameters(enc, run, params);
@@ -482,23 +487,23 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
         H: FnOnce(&mut HitSink<'_>) -> Result<()>,
     {
         self.report.clear();
-        let params = self.params;
+        let params = &self.params;
         let result = match self.document.kind() {
             Xml2Kind::Single16 => {
                 let mut enc = XmlEncoder::xml2_report(&mut self.report);
-                write_report(&mut enc, run, &params, query, &mut self.scratch, hits)
+                write_report(&mut enc, run, params, query, &mut self.scratch, hits)
             }
             Xml2Kind::Files14 => {
                 let mut enc = XmlEncoder::xml2_document(&mut self.report);
-                write_report(&mut enc, run, &params, query, &mut self.scratch, hits)
+                write_report(&mut enc, run, params, query, &mut self.scratch, hits)
             }
             Xml2Kind::Single15 => {
                 let mut enc = JsonEncoder::array_element(&mut self.report);
-                write_report(&mut enc, run, &params, query, &mut self.scratch, hits)
+                write_report(&mut enc, run, params, query, &mut self.scratch, hits)
             }
             Xml2Kind::Files13 => {
                 let mut enc = JsonEncoder::new(&mut self.report);
-                write_report(&mut enc, run, &params, query, &mut self.scratch, hits)
+                write_report(&mut enc, run, params, query, &mut self.scratch, hits)
             }
         };
         if let Err(error) = result {

@@ -1,0 +1,2318 @@
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "tblastn"
+              },
+              "data": {
+                "int": 4
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "n/a"
+              },
+              "data": {
+                "bool": false
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 497
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 497
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 3.22699664072841e-65
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 196.052421510969
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "other": {
+                      "accession": "NM_000003",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 89,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 269,
+                      "strand": "plus",
+                      "id": {
+                        "other": {
+                          "accession": "NM_000003",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 497
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 497
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 3.29622405761245e-65
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 196.052421510969
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "other": {
+                      "name": "NC13",
+                      "accession": "NC_000013",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 90,
+                      "to": 179,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 269,
+                      "strand": "plus",
+                      "id": {
+                        "other": {
+                          "name": "NC13",
+                          "accession": "NC_000013",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 493
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 493
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.56796489643373e-64
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 194.511623207299
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "tpg": {
+                      "accession": "BK000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 270,
+                      "to": 359,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 269,
+                      "strand": "plus",
+                      "id": {
+                        "tpg": {
+                          "accession": "BK000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 490
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 490
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 3.4003978927513e-64
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 193.356024479547
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "gi": 5
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 180,
+                      "to": 269,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 269,
+                      "strand": "plus",
+                      "id": {
+                        "gi": 5
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 29
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 29
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 8.59824037062416
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 15.7790199816472
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 5
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 7
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 2.16666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "gi": 5
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 248,
+                      "to": 256,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 200,
+                      "to": 226,
+                      "strand": "minus",
+                      "id": {
+                        "gi": 5
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 487
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 487
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.12647559226466e-63
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 192.200425751795
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "plain1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 450,
+                      "to": 539,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 269,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "plain1"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 28
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 28
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.01195615052124
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 15.3938204057299
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 9
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 14
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 5.31481481481481
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "plain1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 17,
+                      "to": 33,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 111,
+                      "to": 161,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "plain1"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "plain1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "qp1"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 162,
+                      "to": 164,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "plain1"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "plain1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 34,
+                      "to": 37,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 165,
+                      "to": 176,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "plain1"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "plain1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "qp1"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 177,
+                      "to": 188,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "plain1"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "plain1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 38,
+                      "to": 42,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 189,
+                      "to": 203,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "plain1"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 483
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 483
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.23489687070485e-63
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 190.659627448126
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "l2"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 360,
+                      "to": 449,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 269,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "l2"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 32
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 32
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.70222912330723
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 16.9346187093993
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 10
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 10.6851851851852
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "Subject_7"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 435,
+                      "to": 456,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 72,
+                      "to": 137,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Subject_7"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "Subject_7"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 457,
+                      "to": 459,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "Subject_7"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "Subject_7"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 460,
+                      "to": 489,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 138,
+                      "to": 227,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Subject_7"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 30
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 30
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 6.07674073625664
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 16.1642195575646
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 5
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 2.16666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "Subject_7"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 508,
+                      "to": 516,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 112,
+                      "to": 138,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Subject_7"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "tblastn"
+              },
+              "data": {
+                "int": 4
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "n/a"
+              },
+              "data": {
+                "bool": false
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 491
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 491
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.77995556409299e-64
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 193.741224055464
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp2"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "Subject_7"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 180,
+                      "to": 269,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp2"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 269,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Subject_7"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 490
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 490
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 3.4003978927513e-64
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 193.356024479547
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp2"
+                    }
+                  },
+                  {
+                    "local": {
+                      "id": 9012
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 89,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp2"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 269,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "id": 9012
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 490
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 490
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.24837304517571e-64
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 193.356024479547
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp2"
+                    }
+                  },
+                  {
+                    "other": {
+                      "accession": "NM_000002",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 270,
+                      "to": 359,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp2"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 269,
+                      "strand": "plus",
+                      "id": {
+                        "other": {
+                          "accession": "NM_000002",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 489
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 489
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.77383796988617e-64
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 192.97082490363
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp2"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "Subject_1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 90,
+                      "to": 179,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp2"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 269,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Subject_1"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 488
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 488
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 6.84527649225158e-64
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 192.585625327712
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp2"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "s1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 360,
+                      "to": 449,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp2"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 269,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "s1"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 486
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 486
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.49960184277881e-63
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 191.815226175878
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 90
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp2"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "db",
+                      "tag": {
+                        "str": "tag5"
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 450,
+                      "to": 539,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp2"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 269,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "db",
+                          "tag": {
+                            "str": "tag5"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 31
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 31
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.41406056725492
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 16.549419133482
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 9
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 11
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 5.68518518518519
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "qp2"
+                    }
+                  },
+                  {
+                    "other": {
+                      "accession": "NM_000003",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 254,
+                      "to": 281,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "qp2"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 119,
+                      "to": 202,
+                      "strand": "minus",
+                      "id": {
+                        "other": {
+                          "accession": "NM_000003",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

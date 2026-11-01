@@ -64,6 +64,12 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
                 "{key} is not accepted: a run writes every output format of the program"
             ));
         }
+        // The records are registered and read before the options of a run are known
+        // (`store::register`), so their ids could not be parsed: the run would write the report
+        // of a search without the option.
+        if matches!(key, "-parse_deflines" | "--parse_deflines") {
+            return Err(format!("{key} is not supported by LOSAT Web yet"));
+        }
     }
     // The formats come from `Program::formats`, and every program accepts the CLI's
     // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
@@ -919,6 +925,17 @@ mod tests {
 
     // LOSAT Web gives the engine subject records: BLASTP's `-db` (a database read from
     // files, CLI only until LOSAT Web takes a database) is rejected by `validate` and by
+    // The CLI writes these records' ids from the option; a run here has read them without it.
+    #[test]
+    fn parse_deflines_is_rejected() {
+        for program in ["blastp", "tblastn", "blastn", "tblastx"] {
+            let words = [program, "-query", "q", "-subject", "s", "-parse_deflines"];
+            let expected = "-parse_deflines is not supported by LOSAT Web yet";
+            assert_eq!(validate(&words).unwrap_err(), expected);
+            assert_eq!(run(&words, &[], &[]).unwrap_err(), expected);
+        }
+    }
+
     // `run`, before any search.
     #[test]
     fn a_database_search_is_rejected() {

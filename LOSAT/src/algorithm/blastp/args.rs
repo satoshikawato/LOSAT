@@ -662,6 +662,10 @@ impl BlastpTaskOptions {
 pub struct ResolvedBlastpArgs {
     pub query: PathBuf,
     pub subject: PathBuf,
+    /// `-parse_deflines`, for the reports of the `-subject` records whose ids it read.
+    pub parse_deflines: bool,
+    /// `-show_gis`, for the same reports.
+    pub show_gis: bool,
     /// The `-db` value as NCBI keeps it (`db_name`), when the search is of a database.
     pub db: Option<String>,
     /// `-dbsize` (`eff_len_options->db_length`; 0 when it is not given).
@@ -1044,6 +1048,8 @@ impl BlastpArgs {
         let mut resolved = ResolvedBlastpArgs {
             query: self.query.clone(),
             subject: self.subject.clone().unwrap_or_default(),
+            parse_deflines: self.parse_deflines,
+            show_gis: self.show_gis,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
             // ```c++
             //     if (args.Exist(kArgDb) && args[kArgDb]) {

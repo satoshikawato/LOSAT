@@ -313,8 +313,10 @@ function guardSharedMemoryCached(bytes, inputSha256 = sha256(bytes)) {
 // of a hit (readGuardCache: the input's SHA-256, from the input read again, the guard version,
 // the sidecar, the length and SHA-256 of the cached bytes) is made while V8 compiles, before the
 // module is used. A check that fails discards that module, and the input is read and guarded as
-// without the index. A write or a rename of the input changes its change time and so its index
-// name: the index saves only the time before the compile, never a check.
+// without the index. A write or a rename of the input usually changes its change time and so its
+// index name. Where the timestamps are coarse the name can stay the same after a rewrite, and
+// then the SHA-256 check of the input rejects the index. The index saves only the time before
+// the compile, never a check.
 const GUARD_INDEX = /^index-\d+-\d+-\d+-\d+-\d+\.json$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const guardIndexFile = (dir, stat) =>
@@ -450,11 +452,13 @@ async function createThreadHost(wasmPath, kind, argv = [], options = {}) {
   // LOSAT_WASI_PRESPAWN: a command's standby workers start booting while the module is compiled,
   // and get the module and the memory once they exist (`early`). Booting one is most of a
   // thread's start (Node's worker bootstrap: 0.1-0.3 s for 15 workers at once), so they do not
-  // start only after the compile. They start once the compile has started: with the guard
-  // cache's index right after the cached guarded bytes are read (compileIndexedGuard), else
-  // after the module is read and guarded. The reads come before them: a read of the 10 MB module
-  // right after 15 workers were created took 5-15 ms instead of 2 (ws node 0), and with the
-  // workers created first the guest started at 121 instead of 78 ms.
+  // start only after the compile. They are created once the compile has started: with the guard
+  // cache's index right after the cached guarded bytes are read and handed to V8
+  // (compileIndexedGuard; the input read and both hashes then run after the workers exist), else
+  // after the module is read and guarded. The reads of the module come before the workers on the
+  // path without the index: a read of the 10 MB module right after 15 workers were created took
+  // 5-15 ms instead of 2 (ws node 0), and with the workers created first the guest started at 121
+  // instead of 78 ms.
   const count = kind === "threaded-command" && !recycleWorkers(kind) ? prespawnCount(argv) : 0;
   let early = [];
   try {
@@ -499,8 +503,9 @@ async function prepareThreadHost(wasmPath, kind, compiling = () => {}) {
     const identity = prepareArtifact(indexed.input, kind, indexed.module, indexed.inputSha256).identity;
     const timings = { read_and_hash_seconds: 0, guard_seconds: 0, guarded_compile_seconds: (performance.now()-start)/1000 };
     debug(`shared-memory guards: ${indexed.fill} fills, ${indexed.copy} copies`);
+    const { module } = indexed;
     return { identity, timings, create: (argv = [], options = {}) =>
-      instantiatePreparedHost(wasmPath, kind, indexed.module, identity, argv, options) };
+      instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) };
   }
   const bytes = fs.readFileSync(wasmPath);
   let stat = null;
@@ -569,7 +574,8 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   //     }
   // ```
   // A standby worker becomes the guest's thread only here: it receives this tid and
-  // startArg, and the guest gets the tid after the same start confirmation as a new worker.
+  // startArg. The guest gets the tid after the start confirmation only from a worker that still
+  // boots (the paragraph below).
   // A worker that already waits for its order (SLOT_READY) has instantiated the module and only
   // takes the order and starts the thread: the spawn returns the tid without waiting for its start
   // confirmation, as pthread_create returns before the new thread runs (each confirmation is a

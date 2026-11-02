@@ -224,7 +224,7 @@ defects are fixed and presented as differences); its PR (DI-8b) asks the maintai
 The maintainer accepted this on 2026-10-21 for the tabular `sseqid` of a database with parsed
 Seq-ids (line DBID `DECISIONS.md` 5). NCBI's result is deterministic, so rule 2 would otherwise
 reproduce it. The other places the same table reaches (below) follow under the maintainer's
-standing delegation; the PR of version 1.10 asks the maintainer to accept them.
+standing delegation, which the maintainer accepted on 2026-11-02 with version 1.10.
 
 NCBI's Seq-id table keeps these three types in one tree for the whole process
 (`c++/src/objects/seq/seq_id_tree.cpp:255-259`, `CSeq_id_GB_Tree` `:1707-1719`). While it lives,
@@ -248,8 +248,8 @@ records.
 
 ## Exception 2 on a database with parsed Seq-ids (version 1.10)
 
-Decided under the maintainer's standing delegation (line DBID `DECISIONS.md` 10); the PR of
-version 1.10 asks the maintainer to accept it. For a nucleotide record `lcl|Subject_N , ,` NCBI's
+Decided under the maintainer's standing delegation (line DBID `DECISIONS.md` 10) and accepted by
+the maintainer on 2026-11-02 with version 1.10. For a nucleotide record `lcl|Subject_N , ,` NCBI's
 tabular id is the first word of the generated title, so BLASTN, TBLASTN and TBLASTX crash in
 outfmt 6 as well as in outfmt 0 (SIGSEGV). LOSAT stops at the end of the string and writes `,`,
 which is what NCBI writes for the nearby record `lcl|Subject_N , x`. Other ids with such a title
@@ -348,7 +348,7 @@ do not build it in the tabular formats, and NCBI and LOSAT agree there, as excep
 On a database with parsed Seq-ids NCBI gives these results without failing, and they look wrong
 or need NCBI's object manager to reproduce. LOSAT refuses them instead (line DBID
 `DECISIONS.md` 9, 20 and 21, line DI-7 for the query's id), under the maintainer's standing
-delegation; the PR of version 1.10 asks the maintainer to accept them. Each is a row of the table
+delegation, which the maintainer accepted on 2026-11-02 with version 1.10. Each is a row of the table
 in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md), which also lists refusals that rule 4
 would port:
 

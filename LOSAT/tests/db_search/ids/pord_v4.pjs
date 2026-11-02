@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "pord_v4",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "pord_v4 (parsed Seq-ids)",
+  "number-of-letters": 1100,
+  "number-of-sequences": 5,
+  "last-updated": "2026-11-02T19:08:00",
+  "number-of-volumes": 1,
+  "bytes-total": 1885,
+  "bytes-to-cache": 1234,
+  "files": [
+    "pord_v4.phr",
+    "pord_v4.pin",
+    "pord_v4.pog",
+    "pord_v4.psd",
+    "pord_v4.psi",
+    "pord_v4.psq"
+  ]
+}

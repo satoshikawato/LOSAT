@@ -314,9 +314,11 @@ pub(crate) fn read_titles(
     titles: &mut DatabaseTitles,
 ) -> Result<()> {
     let headers = shared::HeaderReader::new(&database.db);
+    // A subject's HSPs follow each other: one look-up per run of them.
+    let mut previous = None;
     for hsp in ordered {
         let ordinal = hsp.hit.s_idx;
-        if titles.contains_key(&ordinal) {
+        if previous.replace(ordinal) == Some(ordinal) || titles.contains_key(&ordinal) {
             continue;
         }
         let title = shared::read_header(
@@ -342,9 +344,15 @@ pub(crate) fn read_reported(
     ordered: &[TblastxHsp],
     stores: &mut ReportedStores,
 ) -> Result<()> {
+    // A subject's HSPs follow each other: one look-up per run of them.
+    let mut previous = None;
     for hsp in ordered {
-        if let std::collections::btree_map::Entry::Vacant(entry) = stores.entry(hsp.hit.s_idx) {
-            entry.insert(stream.read_shared(hsp.hit.s_idx as usize)?);
+        let ordinal = hsp.hit.s_idx;
+        if previous.replace(ordinal) == Some(ordinal) {
+            continue;
+        }
+        if let std::collections::btree_map::Entry::Vacant(entry) = stores.entry(ordinal) {
+            entry.insert(stream.read_shared(ordinal as usize)?);
         }
     }
     Ok(())

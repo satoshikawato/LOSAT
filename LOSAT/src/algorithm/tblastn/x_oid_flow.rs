@@ -118,21 +118,22 @@ pub(super) fn x_loop_free_on() -> bool {
 /// subject's translation is freed after the subject (blast_engine.c:627-631). Here a thread's loop
 /// over the chunks of the flow (or the owner's reduction) ends: the buffers the thread kept from
 /// one subject to the next go then (`search_gapped::XUnitBuffers`, the frames kept for the next
-/// plan of `x_subject_translate`, the presence bytes of `x_scan_byte`, the letter buffer of
-/// `x_subject_store`). Kept, they stayed in the thread's heap through the query batch's redo or
-/// traceback, under its blocks, until the next batch's loop. A thread that searches a subject
-/// after it makes new ones, as for its first subject (a unit on the pool always starts so): a
-/// new diagonal table's entries all lie beyond the two-hit window, as a kept table's entries do
-/// after NCBI's offset step (blast_extend.c:166-171), so no reported value changes. A thread whose
-/// loop has ended can still run units of a long subject another thread searches, and builds the
-/// presence bytes of the table again for them. `LOSAT_X_TBNLOOPFREE=0` keeps them.
+/// plan of `x_subject_translate`, the letter buffer of `x_subject_store`). Kept, they stayed in
+/// the thread's heap through the query batch's redo or traceback, under its blocks, until the next
+/// batch's loop. A thread that searches a subject after it makes new ones, as for its first
+/// subject (a unit on the pool always starts so): a new diagonal table's entries all lie beyond
+/// the two-hit window, as a kept table's entries do after NCBI's offset step
+/// (blast_extend.c:166-171), so no reported value changes. The presence bytes of `x_scan_byte`
+/// (32 KiB a thread) stay: the chunks of a split query batch are searched in flows of their own
+/// with the same table, and building them again in each flow cost more than they hold (81 KB of
+/// subjects at 32 threads: 1.2 % more instructions and 1,600 more waits). `LOSAT_X_TBNLOOPFREE=0`
+/// keeps them all.
 pub(super) fn x_loop_free() {
     if !x_loop_free_on() {
         return;
     }
     super::search_gapped::x_free_unit_buffers();
     super::x_subject_translate::x_free_kept_frames();
-    super::x_scan_byte::x_free_presence();
     super::x_subject_store::x_free_letters();
 }
 

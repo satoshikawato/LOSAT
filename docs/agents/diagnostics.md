@@ -5331,16 +5331,17 @@ Scheduling (each value computed by one thread with the original function; order 
   reduction in `stage_d_pipeline.rs`): where the subject flow runs (2+ threads and several subjects: `-db`, or
   `-subject` with several subjects), a thread whose loop over the chunks of subjects ends frees the buffers it kept from
   one subject to the next: the unit path's diagonal table, offset pairs, initial hits and gapped alignment scratch
-  (`search_gapped.rs` `XUnitBuffers`), the frames kept for the next plan (`x_subject_translate.rs`), the presence bytes
-  (`x_scan_byte.rs`) and the letter buffer (`x_subject_store.rs`). Kept, they stayed in the thread's heap through the
+  (`search_gapped.rs` `XUnitBuffers`), the frames kept for the next plan (`x_subject_translate.rs`) and the letter
+  buffer (`x_subject_store.rs`). Kept, they stayed in the thread's heap through the
   query batch's redo (or traceback), under its blocks, until the next batch's loop made use of them again (48 threads
   on `dmel_b4.faa` x zebrafish cDNAs: 17 MiB live at the redo's peak). NCBI's search thread frees its word-finder state
   when its loop over the subjects ends and its caller the gapped alignment memory (`blast_engine.c`
   `s_BlastCoreAuxStructFree`, `BLAST_GapAlignStructFree`). A thread that searches a subject afterwards makes new ones,
   as for its first subject and as every unit on the pool does: a new diagonal table's entries all lie beyond the
-  two-hit window, as a kept table's do after NCBI's offset step, so no reported value changes. A thread whose loop
-  has ended can still run units of a long subject another thread searches and builds the presence bytes again for
-  them (32 KiB). One flow runs per query batch searched on a pool (per query chunk of a split batch), so a thread frees
+  two-hit window, as a kept table's do after NCBI's offset step, so no reported value changes. The presence bytes
+  (`x_scan_byte.rs`, 32 KiB a thread) stay: the chunks of a split query batch are searched in flows of their own with
+  the same table, and building them again in each flow cost more than they hold (`dmel_b4.faa` x 81 KB at 32 threads:
+  instructions x1.012 and 1,600 more voluntary context switches, wall about 10 ms of 90). One flow runs per query batch searched on a pool (per query chunk of a split batch), so a thread frees
   and makes its buffers once per batch. Unit test `a_thread_frees_its_kept_frames_when_its_loop_ends`;
   `tests/tblastn_db_stream.rs` `buffers_freed_at_the_end_of_a_threads_loop_give_the_same_reports` (query batches
   searched one after another on one pool, side by side, and on their own pools).

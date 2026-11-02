@@ -128,7 +128,9 @@
 //!   operate within that thread pool." `par_sort_by` is made of a parallel iterator over the
 //!   chunks and of `join`, so every part of the sort runs on those N threads, whether the caller
 //!   is slot zero (one subject) or a worker that runs a subject (several subjects). No other
-//!   pool exists outside tests, and `with_search_pool` refuses to start on a rayon worker.
+//!   pool exists outside tests: `with_search_pool` refuses to start on a rayon worker, except on
+//!   slot zero of a run's pool (`with_run_pool`, the Web adapter's run), where it searches on
+//!   that pool of the same N threads.
 //! - `-num_threads 1`. `with_search_pool` builds no pool and runs the search on the thread that
 //!   called it. The searches this repository starts are called from `main` and from the Web
 //!   adapter (a crate without rayon), neither a rayon worker. `current_thread_index`: "If called

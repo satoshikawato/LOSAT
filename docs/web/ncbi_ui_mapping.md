@@ -37,7 +37,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | 枠「Enter Subject Sequence」（textarea、Clear、Subject subrange、Or, upload file） | 枠「Enter Subject Sequence」（`subject-panel`）。query と同じ形 | 寄せる | |
 | （無い）subject の遺伝暗号 | 「Genetic code」（`param-db_gencode`、TBLASTN・TBLASTX）を Enter Subject Sequence の中に。承認済みの例外の注（`subject-gencode-note`）を保つ | LOSAT だけ | NCBI の 2 配列の画面に subject の遺伝暗号は無い |
 | 枠「Choose Search Set」（Database、Organism、Exclude、Entrez Query） | なし | 採らない | データベースと Taxonomy は LOSAT に無い |
-| LOSAT のレコード一覧と除外、検査の結果、「First lines」 | 各枠の中、ファイルの選択の下（`*-source-*`） | LOSAT だけ | |
+| LOSAT のレコード一覧と除外、検査の結果、「First lines」 | 各枠の中、ファイルの選択の下（`*-source-*`）。「Records」と「First lines」は閉じて出す（NCBI はファイル名だけ。保守者 2026-11-02「レコードがずらっと出てくるのいらない」、DW-34） | LOSAT だけ | 以前は 2〜20 レコードのとき「Records」が開いていた |
 | LOSAT の Combined / Separate | 各枠の中、レコード一覧の下（`*-mode`） | LOSAT だけ | |
 | 枠「Program Selection」：BLASTN の「Optimize for」の radio | 枠「Task Selection」（DW-32）の「Optimize for」の radio（`param-task`、各 radio は `param-task-<task>`）：Highly similar sequences (megablast)、More dissimilar sequences (discontiguous megablast)、Somewhat similar sequences (blastn)、Short sequences (blastn-short) | 寄せる | blastn-short は LOSAT が足す 4 つ目（NCBI は「Short queries」の自動調整で代える）。既定は LOSAT の CLI と同じ megablast（NCBI の 2 配列の画面の既定は blastn）。出力を CLI と比べるため |
 | BLASTP の「Algorithm」の radio（2 配列では blastp だけ） | 「Algorithm」の radio：エンジンの task（blastp (protein-protein BLAST)、Quick BLASTP (blastp-fast)、blastp-short） | 寄せる | task の一覧は `describe` の choices。名前の補いは表示だけ |

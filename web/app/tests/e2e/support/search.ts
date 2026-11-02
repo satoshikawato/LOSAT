@@ -57,7 +57,7 @@ export async function openFiles(
   for (let i = 0; i < files.length; i++) await settled(page, role, before + i);
 }
 
-/** Opens the record list of a source (it starts open for a few records). */
+/** Opens the record list of a source (it starts closed). */
 export async function showRecords(page: Page, role: Role, index = 0): Promise<void> {
   await page
     .getByTestId(`${role}-source-${index}`)

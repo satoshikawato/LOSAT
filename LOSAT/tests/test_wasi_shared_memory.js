@@ -5,7 +5,6 @@ const { execFileSync, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { Worker } = require("node:worker_threads");
 const { test } = require("node:test");
 const { guardSharedMemory, guardRecord, verifyGuarded, GUARD_SECTION } = require("./wasi_shared_memory");
 
@@ -176,56 +175,6 @@ test("invalid modules and unsupported memory layout fail explicitly", () => {
   assert.throws(() => guardSharedMemory(fixture().subarray(0, 30)), /invalid input Wasm/);
   assert.throws(() => guardSharedMemory(fixture({ shared: false })), /shared wasm32 memory/);
 });
-
-for (const [operation, parameters] of [
-  ["fill", [65536, 83, 8]],
-  ["copy destination", [65536, 83, 8]],
-  ["copy source", [64, 65536, 8]],
-]) {
-  test(`another isolate grows memory before ${operation} in a running Wasm consumer`, { timeout: 15000 }, async () => {
-    // Signal the grower, then remain inside Wasm while waiting for publication.
-    // Copy from and fill within the new page without returning through JS first.
-    const consumer = [
-      0x41, 0, 0x41, 1, 0xfe, 0x17, 2, 0,
-      0x03, 0x40,
-      0x41, 0, 0xfe, 0x10, 2, 0, 0x41, 2, 0x47, 0x0d, 0,
-      0x0b,
-      ...args, 0xfc, ...(operation === "fill" ? [11, 0] : [10, 0, 0]),
-    ];
-    const memory = new WebAssembly.Memory({ initial: 1, maximum: 4, shared: true });
-    const i = instance(guardSharedMemory(fixture({ extra: [consumer] })).bytes, memory);
-    new Uint8Array(memory.buffer, 83, 8).fill(83);
-    const worker = new Worker(`
-      const { workerData, parentPort } = require("node:worker_threads");
-      const view = new Int32Array(workerData.buffer);
-      while (Atomics.load(view, 0) !== 1) Atomics.wait(view, 0, 0, 10);
-      workerData.grow(1);
-      new Uint8Array(workerData.buffer, 65536, 8).fill(83);
-      Atomics.store(view, 0, 2);
-      parentPort.postMessage("grown");
-    `, { eval: true, workerData: memory });
-    // A separate worker deadline protects the synchronous Wasm call too.
-    const watchdog = new Worker(`
-      const { workerData, parentPort } = require("node:worker_threads");
-      const timer = setTimeout(() => { Atomics.store(new Int32Array(workerData), 0, 2); }, 8000);
-      parentPort.on("message", () => { clearTimeout(timer); parentPort.close(); });
-    `, { eval: true, workerData: memory.buffer });
-    const done = new Promise((resolve, reject) => {
-      worker.once("message", resolve);
-      worker.once("error", reject);
-      worker.once("exit", (code) => { if (code) reject(new Error(`grower exit ${code}`)); });
-    });
-    try {
-      i.exports.extra0(...parameters);
-      assert.equal(await done, "grown");
-      assert.equal(memory.buffer.byteLength, 131072);
-      assert.deepEqual([...new Uint8Array(memory.buffer, parameters[0], 8)], Array(8).fill(83));
-    } finally {
-      watchdog.postMessage("done");
-      await Promise.all([worker.terminate(), watchdog.terminate()]);
-    }
-  });
-}
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
@@ -459,14 +408,19 @@ test("verifyGuarded rejects an unguarded atomic, a forged helper and a wrong ato
 // --no-wasm-stack-checks): only the helper's compares and memory.grow(0) can refresh the bound.
 // Each probe tells the main thread that it entered, waits in a plain-load loop until the main
 // thread has grown the memory through the module and published an address in the new page, and
-// returns memory.size, the same bound. That the original Wasm is stale here (or traps) is
-// reported, not asserted: an engine may refresh the bound itself. A failure ends in the child's
-// timeout, never in a hung test process.
+// returns memory.size, the same bound. Before publishing, the main thread writes 83 at the
+// published address; bytes 1024-1215 hold 84 from the start. With a second argument the child
+// writes the memory to that file at the end. That the original Wasm is stale here (or traps) is
+// reported, not asserted: an engine may refresh the bound itself (by its source, V8 15.7 does; not run,
+// docs/evidence/wasm_oob_20261101/), and on such an engine these tests cannot tell a guard without
+// its compare from the guard.
+// A failure ends in the child's timeout, never in a hung test process.
 const STALE_CHILD = `
   const { Worker } = require("node:worker_threads");
   const module = new WebAssembly.Module(require("node:fs").readFileSync(process.argv[1]));
   const memory = new WebAssembly.Memory({ initial: 1, maximum: 256, shared: true });
   const view = new Int32Array(memory.buffer);
+  new Uint8Array(memory.buffer, 1024, 192).fill(84);
   const { grow, ...probes } = new WebAssembly.Instance(module, { env: { memory } }).exports;
   const worker = new Worker(\`
     const { workerData, parentPort } = require("node:worker_threads");
@@ -480,23 +434,30 @@ const STALE_CHILD = `
     }
     parentPort.postMessage(outcomes);
   \`, { eval: true, workerData: { module, memory } });
-  worker.once("message", (outcomes) => { console.log(JSON.stringify(outcomes)); process.exit(0); });
+  worker.once("message", (outcomes) => {
+    if (process.argv[2]) require("node:fs").writeFileSync(process.argv[2], new Uint8Array(memory.buffer));
+    console.log(JSON.stringify(outcomes));
+    process.exit(0);
+  });
   worker.once("error", (err) => { console.log("worker error: " + err.message); process.exit(1); });
   for (const _ of Object.keys(probes)) {
     while (Atomics.load(view, 0) === 0) Atomics.wait(view, 0, 0, 10);
     Atomics.store(view, 0, 0);
     const old = grow(1);
+    new Uint8Array(memory.buffer, old * 65536 + 64, 8).fill(83);
     Atomics.store(view, 1, old * 65536 + 64);
   }
 `;
 
-function runStaleChild(bytes, directory, label) {
+function runStaleChild(bytes, directory, label, { dump = false } = {}) {
   const file = path.join(directory, `${label}.wasm`);
+  const memoryFile = path.join(directory, `${label}.memory`);
   fs.writeFileSync(file, bytes);
-  const result = spawnSync(process.execPath, ["--liftoff-only", "--no-wasm-stack-checks", "-e", STALE_CHILD, file],
+  const result = spawnSync(process.execPath, ["--liftoff-only", "--no-wasm-stack-checks", "-e", STALE_CHILD, file, ...(dump ? [memoryFile] : [])],
     { encoding: "utf8", timeout: 30000 });
   assert.equal(result.status, 0, `${label}: status ${result.status} signal ${result.signal}: ${result.stderr}`);
-  return JSON.parse(result.stdout);
+  const outcomes = JSON.parse(result.stdout);
+  return dump ? { outcomes, bytes: fs.readFileSync(memoryFile) } : outcomes;
 }
 
 // The atomic instructions that read memory: all but the stores and notify.
@@ -545,6 +506,42 @@ test("another isolate grows memory through the module: every atomic instruction 
     const expected = Object.fromEntries(Object.keys(probes).map((label, i) => [label, i + 2]));
     assert.deepEqual(outcomes, expected);
     const stale = Object.entries(runStaleChild(original, directory, "original")).filter(([label, value]) => value !== expected[label]);
+    t.diagnostic(`original Wasm: ${stale.length} of ${Object.keys(probes).length} probes stale or trapped`);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// The same for memory.fill and memory.copy, whose bound is checked in the engine's C++ helper
+// (wasm-external-refs.cc) against the same per-instance size. Each probe uses the page that the
+// main thread grew for it, at P = old size + 64, which the main thread filled with 83 before
+// publishing P: fill and copy into P, across the old end of the memory (P - 128, so that a check
+// of the start alone passes), and copy out of P. The main thread then reads every destination.
+test("another isolate grows memory through the module: memory.fill and memory.copy refresh a stale bound", { timeout: 90000 }, (t) => {
+  // i32.const of n (signed LEB128), and P - 128 = 64 bytes below the old end of the memory.
+  const i32 = (n) => { const out = []; for (;;) { const b = n & 127; n >>= 7; if ((n === 0 && !(b & 64)) || (n === -1 && (b & 64))) return [0x41, ...out, b]; out.push(b | 128); } };
+  const P = published, across = [...published, ...i32(-128), 0x6a], len = i32;
+  const probes = {
+    "fill into the new page": [...P, ...i32(85), ...len(8), 0xfc, 11, 0],
+    "fill across the old end": [...across, ...i32(85), ...len(192), 0xfc, 11, 0],
+    "copy into the new page": [...P, ...i32(1024), ...len(8), 0xfc, 10, 0, 0],
+    "copy across the old end": [...across, ...i32(1024), ...len(192), 0xfc, 10, 0, 0],
+    "copy out of the new page": [...i32(2048), ...P, ...len(8), 0xfc, 10, 0, 0],
+  };
+  const original = staleProbes(probes);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-guard-bulk-"));
+  try {
+    const { outcomes, bytes } = runStaleChild(guardSharedMemory(original).bytes, directory, "guarded", { dump: true });
+    assert.deepEqual(outcomes, Object.fromEntries(Object.keys(probes).map((label, i) => [label, i + 2])));
+    // Probe i used page i + 1; P_i = (i + 1) * 65536 + 64.
+    const at = (address, n) => [...bytes.subarray(address, address + n)];
+    const page = (i) => (i + 1) * 65536 + 64;
+    assert.deepEqual(at(page(0), 8), Array(8).fill(85));
+    assert.deepEqual(at(page(1) - 128, 192), Array(192).fill(85));
+    assert.deepEqual(at(page(2), 8), Array(8).fill(84));
+    assert.deepEqual(at(page(3) - 128, 192), Array(192).fill(84));
+    assert.deepEqual(at(2048, 8), Array(8).fill(83));
+    const stale = Object.entries(runStaleChild(original, directory, "original")).filter(([label, value]) => value !== Object.keys(probes).indexOf(label) + 2);
     t.diagnostic(`original Wasm: ${stale.length} of ${Object.keys(probes).length} probes stale or trapped`);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });

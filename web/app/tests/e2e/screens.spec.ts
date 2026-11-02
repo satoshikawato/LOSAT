@@ -3,7 +3,7 @@
 // browsers chosen with --project, and writes full-page PNGs of the same states at a desktop
 // size (1280 x 900) and a phone size (390 x 844). S13 added the states of the results screen
 // (files 07 to 18, which sort after the search screen's 01 to 06); 18 is the window, not the
-// whole page, right after "Open results" (S13 screen review M3). W4b added 19 to 23: the
+// whole page, right after "Run LOSAT" (the results page of the run with its status; S13 screen review M3). W4b added 19 to 23: the
 // Descriptions, the Graphic Summary, the Alignments with two Ranges, the dot plot's popup and a
 // TBLASTN dot plot.
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { fasta, openFiles, openParameters, program, submit, task, waitStatus } from './support/search';
+import { chooseRun, fasta, openFiles, openParameters, pickRun, program, submit, task, waitStatus } from './support/search';
 
 const SCREENS = process.env['LOSAT_WEB_SCREENS'] || undefined;
 test.skip(SCREENS === undefined, 'screen records are taken only with LOSAT_WEB_SCREENS');
@@ -29,6 +29,11 @@ async function shoot(page: Page, browser: string, size: string, name: string, fu
   // Let the elapsed time and the engine's checks settle.
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(directory, `${size}-${name}.png`), fullPage });
+}
+
+/** The number of the run whose option is `option`. */
+async function numberOf(option: Locator): Promise<number> {
+  return Number(/^run-(\d+)-option$/.exec((await option.first().getAttribute('data-testid')) ?? '')![1]);
 }
 
 async function ready(page: Page, role: string, index = 0): Promise<void> {
@@ -69,11 +74,12 @@ for (const size of SIZES) {
     await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
     await shoot(page, browserName, size.name, '02-inputs-refused-region');
 
-    // Exclude the refused record and queue a group of separate searches behind a running one.
+    // Exclude the refused record and start a group of separate searches behind a running one.
     await page.getByTestId('query-source-0-exclude-refused').click();
     await ready(page, 'query');
-    await page.getByTestId('add-to-queue').click();
-    await expect(page.getByTestId('run-1')).toBeVisible();
+    await page.getByTestId('run-losat').click();
+    await expect(page.getByTestId('run-1-option')).toHaveCount(1);
+    await page.getByTestId('tab-search').click();
     await page.getByTestId('subject-source-0-remove').click();
     await page.getByTestId('subject-files').setInputFiles([
       { name: 'a.fa', mimeType: 'text/plain', buffer: Buffer.from('>a\nACGTACGTTTGACCATGGCATGCATGCATTTAGG\n') },
@@ -82,12 +88,14 @@ for (const size of SIZES) {
     await ready(page, 'subject', 0);
     await ready(page, 'subject', 1);
     await page.getByTestId('subject-mode-separate').check();
-    await page.getByTestId('add-to-queue').click();
-    await expect(page.getByTestId('run-3')).toBeVisible();
-    await expect(page.getByTestId('run-1-status')).toHaveText(/completed|failed/, { timeout: 120_000 });
-    await expect(page.getByTestId('run-3-status')).toHaveText(/completed|failed/, { timeout: 120_000 });
-    await page.getByTestId('run-1').locator('summary', { hasText: 'Details' }).click();
-    await shoot(page, browserName, size.name, '03-separate-queue-details');
+    await page.getByTestId('run-losat').click();
+    await expect(page.getByTestId('run-3-option')).toHaveCount(1);
+    await expect(page.getByTestId('run-1-option')).toHaveAttribute('data-status', /completed|failed/, { timeout: 120_000 });
+    await expect(page.getByTestId('run-3-option')).toHaveAttribute('data-status', /completed|failed/, { timeout: 120_000 });
+    await chooseRun(page, 1);
+    await page.getByTestId('results-view-details').click();
+    await shoot(page, browserName, size.name, '03-separate-runs-details');
+    await page.getByTestId('tab-search').click();
 
     // Parameters of the other programs.
     for (const program of ['blastp', 'tblastn', 'tblastx'] as const) {
@@ -118,8 +126,9 @@ for (const size of SIZES) {
     await page.getByTestId('subject-input').fill('>s1 alpha\n');
     await ready(page, 'query');
     await ready(page, 'subject');
-    await page.getByTestId('add-to-queue').click();
-    await expect(page.locator('li[data-testid^="run-"][data-status="failed"]')).toHaveCount(1, { timeout: 60_000 });
+    await page.getByTestId('run-losat').click();
+    await expect(page.locator('[data-testid$="-option"][data-status="failed"]')).toHaveCount(1, { timeout: 60_000 });
+    await page.getByTestId('tab-search').click();
 
     // A search in progress, one cancelled before it started, one waiting, and the notice
     // after the page was hidden.
@@ -134,15 +143,17 @@ for (const size of SIZES) {
       });
       await ready(page, role);
     }
-    const running = page.locator('li[data-testid^="run-"][data-status="running"]');
-    const queued = page.locator('li[data-testid^="run-"][data-status="queued"]');
-    await page.getByTestId('add-to-queue').click();
+    const running = page.locator('[data-testid$="-option"][data-status="running"]');
+    const queued = page.locator('[data-testid$="-option"][data-status="queued"]');
+    await page.getByTestId('run-losat').click();
     await expect(running).toHaveCount(1, { timeout: 60_000 });
-    await page.getByTestId('add-to-queue').click();
+    await page.getByTestId('tab-search').click();
+    await page.getByTestId('run-losat').click();
     await expect(queued).toHaveCount(1);
-    await queued.getByRole('button', { name: 'Cancel' }).click();
+    await page.getByTestId('run-status-cancel').click();
+    await page.getByTestId('tab-search').click();
     await page.getByTestId('param-evalue').fill('1e-10');
-    await page.getByTestId('add-to-queue').click();
+    await page.getByTestId('run-losat').click();
     await expect(queued).toHaveCount(1);
     await page.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true });
@@ -155,8 +166,9 @@ for (const size of SIZES) {
     });
     await expect(page.getByTestId('resume-data')).not.toHaveText('Checking the stored results…');
     await shoot(page, browserName, size.name, '06-running-queued-failed-resume');
-    await queued.getByRole('button', { name: 'Cancel' }).click();
-    await running.getByRole('button', { name: 'Cancel' }).first().click();
+    await page.getByTestId('run-status-cancel').click();
+    await pickRun(page, await numberOf(running));
+    await page.getByTestId('run-status-cancel').click();
   });
 }
 
@@ -178,6 +190,7 @@ async function search(page: Page, id: string, number: number, query: string, sub
   await openFiles(page, 'subject', [{ name: subject.split('/').pop()!, text: fasta(subject) }]);
   await submit(page);
   await waitStatus(page, number, 'completed');
+  await page.getByTestId('tab-search').click();
 }
 
 /**
@@ -195,11 +208,10 @@ async function pressRow(page: Page, row: Locator): Promise<void> {
   await page.mouse.click(box.x + 24, box.y + box.height / 2);
 }
 
-/** Opens a completed run from the queue and waits until its first query's first HSP is read. */
+/** Opens a completed run in the run picker and waits until its first query's first HSP is read. */
 async function openResults(page: Page, number: number): Promise<void> {
-  await page.getByTestId(`run-${number}-open`).click();
-  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(number), { timeout: 60_000 });
-  await page.getByTestId('pane-alignment').click();
+  await chooseRun(page, number);
+  await page.getByTestId('results-view-hits').click();
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready', { timeout: 60_000 });
 }
 
@@ -208,7 +220,9 @@ for (const size of SIZES) {
     await page.setViewportSize({ width: size.width, height: size.height });
     await page.goto('/');
     await expect(page.getByTestId('storage-status')).toBeVisible();
-    const hspRows = page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"]');
+    // The Hits view stays mounted (hidden) beside the dot plot: each has its own HSP table.
+    const hspRows = page.getByTestId('results-hits').getByTestId('hsp-list').locator('[data-testid^="hsp-row-"]');
+    const dotRows = page.getByTestId('results-dotplot').getByTestId('hsp-list').locator('[data-testid^="hsp-row-"]');
     const subjectRow = (text: string) => page.getByTestId('subject-list').locator('[data-testid^="subject-row-"]', { hasText: text });
 
     // Run 1: three queries (one without hits, one on the minus strand) against six subjects;
@@ -222,6 +236,7 @@ for (const size of SIZES) {
     await page.getByTestId('job-title').fill('Many subjects');
     await submit(page);
     await waitStatus(page, 2, 'completed');
+    await page.getByTestId('tab-search').click();
     await page.getByTestId('job-title').fill('');
     await search(page, 'tblastx', 3, 'outfmt0/tblastx_ambig_query.fasta', 'outfmt0/tblastx_ambig_subject.fasta');
     await search(page, 'tblastn', 4, 'outfmt0/e2e_protein_query.faa', 'outfmt0/e2e_amb_subject.fna');
@@ -237,8 +252,8 @@ for (const size of SIZES) {
     await page.getByTestId('results-view-hits').click();
     await subjectRow('msD').click();
     await page.getByTestId('pane-dotplot').click();
-    await expect(hspRows).toHaveCount(2);
-    await pressRow(page, hspRows.nth(1));
+    await expect(dotRows).toHaveCount(2);
+    await pressRow(page, dotRows.nth(1));
     const canvas = page.getByTestId('dotplot-canvas');
     await expect(canvas).toHaveAttribute('data-segments', '2');
     await expect(canvas).toHaveAttribute('data-selected', /^0:\d+$/);
@@ -254,7 +269,6 @@ for (const size of SIZES) {
     await expect(last).toHaveAttribute('data-order', '260');
     await last.click();
     await expect(last).toHaveAttribute('aria-pressed', 'true');
-    await page.getByTestId('pane-alignment').click();
     await expect(page.getByTestId('detail-not-in-outfmt0')).toBeVisible();
     await shoot(page, browserName, size.name, '09-results-hsp-not-in-outfmt0');
 
@@ -298,7 +312,7 @@ for (const size of SIZES) {
 
     // The Graphic Summary of the query with 260 subjects (run 2), the popover of an HSP.
     await openResults(page, 2);
-    await page.getByTestId('results-view-graphic').click();
+    await page.getByTestId('results-view-hits').click();
     const graphic = page.getByTestId('graphic-canvas');
     await expect(graphic).toHaveAttribute('data-rows', '100');
     const bars = JSON.parse((await graphic.getAttribute('data-targets'))!) as { x: number; y: number }[];
@@ -310,7 +324,6 @@ for (const size of SIZES) {
     await openResults(page, 1);
     await page.getByTestId('results-view-hits').click();
     await subjectRow('msD').click();
-    await page.getByTestId('pane-alignment').click();
     await expect(page.locator('[data-testid^="range-0-"]')).toHaveCount(2);
     await page.locator('[data-testid^="range-0-"]').first().getByTestId('range-next').click();
     await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
@@ -332,28 +345,29 @@ for (const size of SIZES) {
     await expect(page.getByTestId('dotplot-selected')).toContainText('subject frame');
     await shoot(page, browserName, size.name, '23-results-tblastn-dotplot');
 
-    // The queue: finished runs with "Open results", a search in progress, one cancelled before
-    // it started, and one waiting (queued after the cancel). BLASTP of a bacterial proteome
-    // against itself keeps the engine busy long enough.
+    // Runs: finished ones in the run picker, a search in progress, one cancelled before it started,
+    // and one waiting (started after the cancel). BLASTP of a bacterial proteome against itself
+    // keeps the engine busy long enough.
     await page.getByTestId('tab-search').click();
     await clearInputs(page);
     await program(page, 'blastp');
     for (const role of ['query', 'subject'] as const) {
       await openFiles(page, role, [{ name: 'NZ_CP006932.faa', text: fasta('NZ_CP006932.faa') }]);
     }
-    const running = page.locator('li[data-testid^="run-"][data-status="running"]');
-    const queued = page.locator('li[data-testid^="run-"][data-status="queued"]');
+    const running = page.locator('[data-testid$="-option"][data-status="running"]');
+    const queued = page.locator('[data-testid$="-option"][data-status="queued"]');
     await submit(page);
     await expect(running).toHaveCount(1, { timeout: 60_000 });
+    await page.getByTestId('tab-search').click();
     await submit(page);
     await expect(queued).toHaveCount(1);
-    await queued.getByRole('button', { name: 'Cancel' }).click();
-    await expect(page.getByTestId('run-6-status')).toHaveText('cancelled');
+    await page.getByTestId('run-status-cancel').click();
+    await expect(page.getByTestId('run-6-option')).toHaveAttribute('data-status', 'cancelled');
+    await page.getByTestId('tab-search').click();
     await submit(page);
     await expect(queued).toHaveCount(1);
-    // The queue shows beside either tab, at the same place (W4b).
-    await page.getByTestId('tab-results').click();
-    await shoot(page, browserName, size.name, '15-results-queue-open-waiting-cancelled');
+    // The results page of the waiting run: its status, the run picker with the other runs.
+    await shoot(page, browserName, size.name, '15-results-run-waiting');
 
     // The results screen for the cancelled run.
     const select = page.getByTestId('results-run');
@@ -370,16 +384,18 @@ for (const size of SIZES) {
     await expect(page.getByTestId('dotplot-canvas')).toHaveAttribute('data-segments', /^[1-9]/);
     await expect(page.getByTestId('dotplot-selected')).toContainText('frames');
     await shoot(page, browserName, size.name, '17-results-translated-dotplot');
-    await page.getByTestId('pane-alignment').click();
+    await page.getByTestId('results-view-hits').click();
 
-    // "Open results" from the search tab: the window right after the tap shows the results' heading.
+    // "Run LOSAT" from the search tab: the window right after the click shows the results' heading
+    // and the status of the new run.
     await page.getByTestId('tab-search').click();
-    await page.getByTestId('run-1-open').click();
+    await submit(page);
     await expect(page.getByTestId('results-heading')).toBeFocused();
     await expect(page.getByTestId('results-heading')).toBeInViewport({ ratio: 1 });
-    await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready', { timeout: 60_000 });
-    await shoot(page, browserName, size.name, '18-results-open-from-queue-window', false);
-    await queued.getByRole('button', { name: 'Cancel' }).click();
-    await running.getByRole('button', { name: 'Cancel' }).first().click();
+    await expect(page.getByTestId('run-status')).toBeVisible();
+    await shoot(page, browserName, size.name, '18-results-after-run-losat-window', false);
+    await page.getByTestId('run-status-cancel').click();
+    await pickRun(page, await numberOf(running));
+    await page.getByTestId('run-status-cancel').click();
   });
 }

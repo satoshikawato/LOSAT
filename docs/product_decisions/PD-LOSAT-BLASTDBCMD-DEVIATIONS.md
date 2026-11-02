@@ -14,9 +14,9 @@
   ([`PD-TBLASTX-LOCAL-SUBJECT-GENCODE`](PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md)), and those of
   items 5 and 6 on 2026-11-01 ("差 5・6 の承認: 承認します", drop-in survey `DECISIONS.md` 33).
   1.4, 2026-11-02 (BDC4, several names in `-db`, drop-in survey `DECISIONS.md` 34): the items hold
-  on a list of names; item 6 covers one accession on two sequences. **That widening of item 6
-  is proposed and waits for the Owner's approval.**
-- Status: Accepted (approved deviations); the widening of item 6 in 1.4 proposed.
+  on a list of names; item 6 covers one accession on two sequences, a widening the Owner
+  approved on 2026-11-02 ("差 6 の拡張を承認", drop-in survey `DECISIONS.md` 34).
+- Status: Accepted (approved deviations).
 
 ## Scope
 

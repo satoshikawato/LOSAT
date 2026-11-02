@@ -18,7 +18,7 @@ const REACTORS = findReactors();
 export const BUILD_HAS_ENGINE = REACTORS !== undefined;
 
 /**
- * Text in the stored outfmt 7 of the BLASTN search of queueSearch: the engine's header, or
+ * Text in the stored outfmt 7 of the BLASTN search of startSearch: the engine's header, or
  * the FakeEngine's marker.
  */
 export const OUTFMT7_MARK = BUILD_HAS_ENGINE ? '# BLASTN 2.17.0+' : 'FAKE ENGINE OUTPUT';
@@ -113,18 +113,18 @@ export async function openApp(context: BrowserContext): Promise<Page> {
   return page;
 }
 
-/** Pastes a query and a subject and queues a BLASTN search. */
-export async function queueSearch(page: Page): Promise<void> {
+/** Pastes a query and a subject and starts a BLASTN search. */
+export async function startSearch(page: Page): Promise<void> {
   await page.getByTestId('tab-search').click();
   await page.getByTestId('query-input').fill('>q1\nACGTACGTACGT\n');
   await page.getByTestId('subject-input').fill('>s1\nACGTACGTACGT\n');
-  await page.getByTestId('add-to-queue').click();
+  await page.getByTestId('run-losat').click();
 }
 
-/** Queues a search and waits until it, run `number`, completes. */
+/** Starts a search and waits until it, run `number`, completes. */
 export async function runSearch(page: Page, number: number): Promise<void> {
-  await queueSearch(page);
-  await expect(page.getByTestId(`run-${number}-status`)).toHaveText('completed');
+  await startSearch(page);
+  await expect(page.getByTestId(`run-${number}-option`)).toHaveAttribute('data-status', 'completed');
 }
 
 /**

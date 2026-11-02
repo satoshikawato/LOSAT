@@ -130,14 +130,21 @@ textarea {
   background: var(--accent-bg);
 }
 
-/* W4b search: the same columns in the Search and Results tabs, so that the queue does not
-   move between them (mapping decision 25); the queue keeps 260 to 300 px and the tables
-   take the rest (S13 screen review H1). */
+/* One column, as NCBI's pages: the search form or the results take the width, and LOSAT's
+   notes (leaving the tab, temporary storage) are a row under them (the queue's column went
+   with the queue, Owner 2026-11-02). */
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
   align-items: start;
+}
+
+.notes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 24px;
+  border-top: 1px solid var(--border);
 }
 
 /* An option name is not broken after its leading hyphen (S13 screen review L2). */
@@ -787,51 +794,41 @@ textarea {
   }
 }
 
-/* Queue and side panels */
+/* The status of a run that has not finished, on its results page; and the side notes. */
 
-.queue {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: grid;
-  gap: 6px;
-}
-
-.run {
-  border: 1px solid var(--border);
+.run-status {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--accent);
   border-radius: 4px;
-  padding: 6px 8px;
-}
-
-.run[data-status='running'],
-.run[data-status='preparing'],
-.run[data-status='finalizing'] {
-  border-color: var(--accent);
   background: var(--accent-bg);
 }
 
-/* A run's card has one layout in every state and at every width (W4b screen review L7): the run
-   and its status badge, its phase and time, its actions at the right, then what it searched. The
-   cards no longer wrap three ways or move between the tabs (W4 screen review low 5, S13 L3). */
-.run-head,
-.run-progress {
+.run-status[data-status='queued'] {
+  border-color: var(--warn-fg);
+  background: var(--warn-bg);
+}
+
+.run-status p {
+  margin: 2px 0;
+}
+
+.run-status-line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 2px 8px;
 }
 
-.run-actions {
+.run-status-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   align-items: center;
   gap: 4px 12px;
-  margin: 2px 0;
+  margin-left: auto;
 }
 
-/* Cancel and Open results are the same size in every card. */
-.run-actions > button:not(.link) {
+.run-status-actions > button:not(.link) {
   font-size: 0.88em;
   padding: 2px 10px;
 }
@@ -846,90 +843,17 @@ textarea {
   white-space: nowrap;
 }
 
-.status {
-  color: var(--muted);
-  font-size: 0.88em;
-  padding: 0 6px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-}
-
-.status[data-status='completed'] {
-  color: var(--ok);
-  border-color: currentColor;
-}
-
-.status[data-status='failed'] {
-  color: var(--error);
-  border-color: currentColor;
-}
-
-.status[data-status='running'],
-.status[data-status='preparing'],
-.status[data-status='finalizing'] {
-  color: var(--accent);
-  border-color: currentColor;
-}
-
-/* Waiting and cancelled runs differ by more than their words (S12's screen review L-e). */
-.status[data-status='queued'] {
-  color: var(--warn-fg);
-  background: var(--warn-bg);
-  border-color: currentColor;
-}
-
-/* A cancelled run: a dashed badge and border, its word not struck through (S13 screen review L7). */
-.status[data-status='cancelled'] {
-  border-style: dashed;
-  border-color: currentColor;
-}
-
-.run[data-status='cancelled'] {
-  border-style: dashed;
-}
-
 .phase {
   font-weight: 600;
-}
-
-/* A finished run's "Took" or "Not started": its badge says how it ended. */
-.run[data-status='completed'] .phase,
-.run[data-status='cancelled'] .phase,
-.run[data-status='failed'] .phase {
-  font-weight: 400;
-  color: var(--muted);
 }
 
 .elapsed {
   font-variant-numeric: tabular-nums;
 }
 
-.diagnostics summary {
-  cursor: pointer;
-  font-size: 0.9em;
-  color: var(--muted);
-}
-
-.diagnostics dl {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px 12px;
-  margin: 4px 0;
-  font-size: 0.88em;
-}
-
-.diagnostics dt {
-  color: var(--muted);
-}
-
-.diagnostics dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 .attention,
 .storage {
-  margin-top: 20px;
+  margin-top: 12px;
   font-size: 0.9em;
 }
 
@@ -1095,6 +1019,19 @@ label.inline {
 
 .hits-view h3 {
   margin: 12px 0 4px;
+}
+
+/* NCBI's classic page: Graphic Summary, Descriptions and Alignments one under the other, each
+   under its own heading. */
+.hits-section {
+  margin: 0 0 16px;
+}
+
+.hits-section .section-heading {
+  margin: 16px 0 6px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 1.1em;
 }
 
 .hits-view h4,
@@ -1300,8 +1237,8 @@ label.inline {
 }
 
 /* #, Bit score, E value, Identity, Length, Mismatches, Gap opens, Query, Subject, [Frames],
-   Orientation, outfmt 0. The columns are 5 px apart: with the frames, the table fits the results'
-   column at 1280 px beside the queue's column of the same width in both tabs (W4b). */
+   Orientation, outfmt 0. The columns are 5 px apart: with the frames, the table fit the results'
+   column at 1280 px beside the queue's column of the same width (W4b). */
 .hsp-grid {
   column-gap: 5px;
   grid-template-columns: 3.5ch 9ch 8.25ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 9.5ch 8.25ch;
@@ -1511,9 +1448,9 @@ pre.range-text {
   overflow-wrap: anywhere;
 }
 
-/* Narrow screens: one column, in the order search, queue, notes (design §3.4). */
+/* Narrow screens: the notes one under the other (design §3.4). */
 @media (max-width: 800px) {
-  .layout {
+  .notes {
     grid-template-columns: minmax(0, 1fr);
   }
 

@@ -16,7 +16,6 @@ import { formatCount } from './format';
 import HspTable from './HspTable.vue';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
-const emit = defineEmits<{ descriptions: [] }>();
 
 /** Ranges shown on each side of the selected one, and added by "Show earlier/later matches". */
 const REACH = 25;
@@ -233,7 +232,6 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
           <button type="button" :disabled="position >= state.subjects.length - 1" data-testid="alignments-next-subject" @click="selectSubject(1)">
             Next
           </button>
-          <button type="button" data-testid="alignments-descriptions" @click="emit('descriptions')">Descriptions</button>
         </span>
       </div>
       <pre v-if="heading !== undefined" class="output subject-heading" data-testid="detail-heading">{{ heading }}</pre>

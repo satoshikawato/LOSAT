@@ -1,6 +1,6 @@
 // The results screen (S13, W4; plan §5.7, design §11): Run -> Query -> Subject -> HSP through
 // the real application, in NCBI BLAST's order and words since W4b (docs/web/ncbi_ui_mapping.md
-// §2): the header block, "Results for", and the tabs Descriptions, Graphic Summary, Alignments,
+// §2): the header block, "Results for", and the tabs Hits (Graphic Summary, Descriptions, Alignments),
 // Dot Plot, Run details and Outputs. The tests run with the FakeEngine build and with the engine
 // build (LOSAT_WEB_REACTORS); what only the engine can show (outfmt 0's frames, a run that the
 // engine refuses, the verification badge of a real run, the bins of real bit scores) is checked in
@@ -19,21 +19,19 @@ import type { OutputFormat } from '../../src/domain/output-format';
 import { optionKey } from '../../src/domain/verification';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { fasta, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
+import { chooseRun, fasta, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
 import { repeats } from './support/synthetic';
 
 type ProgramId = 'blastn' | 'blastp' | 'tblastn' | 'tblastx';
 type Unit = 'nt' | 'aa';
 type Orientation = 'forward' | 'reverse' | 'unknown';
-type Tab = 'hits' | 'graphic' | 'alignment' | 'dotplot' | 'details' | 'outputs';
+type Tab = 'hits' | 'dotplot' | 'details' | 'outputs';
 
 const FORMATS = [0, 6, 7] as const satisfies readonly OutputFormat[];
 const LABELS: Readonly<Record<ProgramId, string>> = { blastn: 'BLASTN', blastp: 'BLASTP', tblastn: 'TBLASTN', tblastx: 'TBLASTX' };
-/** The tabs' test IDs (W4's: the hits view, the HSP's panes, the run's views). */
+/** The tabs' test IDs (the Hits view with its three sections, the dot plot, the run's views). */
 const TABS: Readonly<Record<Tab, string>> = {
   hits: 'results-view-hits',
-  graphic: 'results-view-graphic',
-  alignment: 'pane-alignment',
   dotplot: 'pane-dotplot',
   details: 'results-view-details',
   outputs: 'results-view-outputs',
@@ -171,17 +169,20 @@ async function show(page: Page, tab: Tab): Promise<void> {
   await expect(button).toHaveAttribute('aria-pressed', 'true');
 }
 
-/** Queues the search set in the form and waits until it, run `number`, completes. */
+/**
+ * Starts the search set in the form and waits until it, run `number`, completes; "Run LOSAT"
+ * went to the run's results, and the page goes back to the search form (it keeps its edits).
+ */
 async function run(page: Page, number: number): Promise<void> {
   await submit(page);
   await waitStatus(page, number, 'completed');
+  await page.getByTestId('tab-search').click();
 }
 
-/** Opens a completed run's results from the queue and waits until they are read. */
-async function openFromQueue(page: Page, number: number): Promise<void> {
-  await page.getByTestId(`run-${number}-open`).click();
+/** Opens a completed run's results in the run picker and waits until they are read. */
+async function openRun(page: Page, number: number): Promise<void> {
+  await chooseRun(page, number);
   await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(number));
 }
 
 /** The commands and stored outputs of the run on the results screen, read in its Outputs view; the Descriptions are shown after. */
@@ -199,6 +200,8 @@ async function readOutputs(page: Page, number: number): Promise<{ command: Recor
 
 const subjectRows = (page: Page) => page.getByTestId('subject-list').locator('[data-testid^="subject-row-"]');
 const hspRows = (page: Page) => page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"]');
+/** The HSP rows of the dot plot view's table (the Hits view stays mounted, hidden, with a table of its own). */
+const dotRows = (page: Page) => page.getByTestId('results-dotplot').getByTestId('hsp-list').locator('[data-testid^="hsp-row-"]');
 const rangeBlocks = (page: Page) => page.getByTestId('alignments').locator('section.range-block');
 
 /**
@@ -269,13 +272,11 @@ async function hspId(row: Locator): Promise<string> {
  * subject, its HSP table and detail, and the Descriptions' row. The Descriptions are shown after.
  */
 async function expectSelected(page: Page, id: string, sIdx: number): Promise<void> {
-  await show(page, 'alignment');
   await expect(page.getByTestId('alignments-subject')).toHaveAttribute('data-subject', String(sIdx));
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', id);
   await expect(page.getByTestId(`range-${id.replace(':', '-')}`).getByTestId('hsp-detail')).toHaveCount(1);
   await expect(page.getByTestId(`hsp-row-${id.replace(':', '-')}`)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('hsp-list').locator('[aria-pressed="true"]')).toHaveCount(1);
-  await show(page, 'hits');
   await expect(page.getByTestId(`subject-row-${sIdx}`)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('subject-list').locator('[aria-pressed="true"]')).toHaveCount(1);
 }
@@ -362,7 +363,7 @@ async function expectRanges(page: Page, queryRows: readonly string[][], pairRank
  * hovered HSP the outfmt 6 strings; a click selects the HSP and shows its Range in the Alignments.
  */
 async function expectGraphicSummary(page: Page, queryRows: readonly string[][], qIdx: number, subjects: number): Promise<void> {
-  await show(page, 'graphic');
+  await show(page, 'hits');
   const canvas = page.getByTestId('graphic-canvas');
   const rows = Math.min(subjects, 100);
   await expect(canvas).toHaveAttribute('data-rows', String(rows));
@@ -394,7 +395,7 @@ async function expectGraphicSummary(page: Page, queryRows: readonly string[][], 
   await expect(popover.locator('.graphic-popover-title')).toHaveText(fields[1]!);
   await expect(popover).toContainText(`HSP ${rank + 1} · Bit score ${fields[11]} · E value ${fields[10]}`);
   await canvas.click({ position: { x: target.x, y: target.y } });
-  await expect(page.getByTestId('pane-alignment')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('results-view-hits')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', target.hsp);
   const block = page.getByTestId(`range-${target.hsp.replace(':', '-')}`);
   await expect(block).toBeInViewport();
@@ -489,7 +490,7 @@ for (const c of PROGRAM_CASES) {
     const title = c.id === 'blastn' ? 'Fixtures of outfmt 0, BLASTN' : '';
     if (title !== '') await page.getByTestId('job-title').fill(title);
     await run(page, 1);
-    await openFromQueue(page, 1);
+    await openRun(page, 1);
     await expect(page.getByTestId('results-run').locator('option:checked')).toHaveText(
       `Run 1 · ${LABELS[c.id]} · ${basename(c.query)} vs ${basename(c.subject)}`,
     );
@@ -541,7 +542,7 @@ for (const c of PROGRAM_CASES) {
     ]);
     // Units of the lists.
     await expect(page.getByTestId('subject-sort-length')).toHaveText(`Length (${c.units.subject})`);
-    await show(page, 'alignment');
+    await show(page, 'hits');
     await expect(page.getByTestId('hsp-sort-qStart')).toHaveText(`Query (${c.units.query})`);
     await expect(page.getByTestId('hsp-sort-sStart')).toHaveText(`Subject (${c.units.subject})`);
 
@@ -566,7 +567,7 @@ for (const c of PROGRAM_CASES) {
         await queryRow.click();
         await expect(queryRow).toHaveAttribute('aria-pressed', 'true');
       }
-      await show(page, 'alignment');
+      await show(page, 'hits');
       await expect(detail).toHaveAttribute('data-hsp', new RegExp(`^${qIdx}:`));
       await expect(detail).toHaveAttribute('data-state', 'ready');
       // The query's HSPs are its outfmt 6 rows, by rank.
@@ -609,7 +610,7 @@ for (const c of PROGRAM_CASES) {
         const descriptionText = await text(description);
         const length = (await text(subject.locator('[data-field="length"]'))).replace(/,/g, '');
 
-        await show(page, 'alignment');
+        await show(page, 'hits');
         await expect(page.getByTestId('alignments-subject')).toHaveAttribute('data-subject', String(sIdx));
         await expect(page.getByTestId('alignments-summary')).toHaveText(
           new RegExp(`^\\s*Sequence ID: ${sseqid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+Length: ${count(Number(length))}\\s+Number of Matches: ${count(pairRanks.length)}\\s*$`),
@@ -684,7 +685,7 @@ for (const c of PROGRAM_CASES) {
       }
       seen.queries++;
     }
-    await show(page, 'alignment');
+    await show(page, 'hits');
     await expectTableFits(page, 'hsp-table');
     await show(page, 'hits');
     await expectTableFits(page, 'subject-table');
@@ -733,7 +734,7 @@ for (const c of PROGRAM_CASES) {
     const frames = translated ? await text(page.getByTestId(`hsp-row-${selected!.replace(':', '-')}`).locator('[data-field="frames"]')) : '';
     await show(page, 'dotplot');
     const canvas = page.getByTestId('dotplot-canvas');
-    await expect(canvas).toHaveAttribute('data-segments', (await page.getByTestId('hsp-list').getAttribute('data-count'))!);
+    await expect(canvas).toHaveAttribute('data-segments', (await page.getByTestId('results-dotplot').getByTestId('hsp-list').getAttribute('data-count'))!);
     await expect(page.getByTestId('dotplot')).toContainText(new RegExp(`\\([\\d,]+ ${c.units.query}\\) against subject .* \\([\\d,]+ ${c.units.subject}\\)\\.`));
     await expect(page.getByTestId('dotplot-selected')).toContainText(
       `query ${fields[6]}–${fields[7]} ${c.units.query}, subject ${fields[8]}–${fields[9]} ${c.units.subject}` +
@@ -808,7 +809,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   await openFiles(page, 'query', [{ name: 'many_query.fasta', text: fasta('outfmt0/many_query.fasta') }]);
   await openFiles(page, 'subject', [{ name: 'many_subject.fasta', text: fasta('outfmt0/many_subject.fasta') }]);
   await run(page, 1);
-  await openFromQueue(page, 1);
+  await openRun(page, 1);
   await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', String(total));
   const partial = page.locator('[data-testid="results-notice"][data-kind="outfmt0-partial"]');
   await expect(partial).toContainText(`outfmt 0 shows the alignments of the first ${shown} subjects of this query`);
@@ -819,7 +820,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
 
   // The last subject in the engine's order: the "#" column the other way round. The sort keeps
   // the selected (first) subject, at the list's end now, and shows the list's first rows.
-  await show(page, 'alignment');
+  await show(page, 'hits');
   const selected = await page.getByTestId('hsp-detail').getAttribute('data-hsp');
   await show(page, 'hits');
   await page.getByTestId('subject-sort-order').click();
@@ -828,7 +829,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   await expect.poll(() => subjectList.evaluate((element) => element.scrollTop)).toBe(0);
   await subjectList.evaluate((element) => (element.scrollTop = element.scrollHeight));
   await expect(subjectRows(page).and(page.locator('[aria-pressed="true"]'))).toHaveAttribute('data-order', '1');
-  await show(page, 'alignment');
+  await show(page, 'hits');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', selected!);
   await show(page, 'hits');
   await subjectList.evaluate((element) => (element.scrollTop = 0));
@@ -838,7 +839,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   const sseqid = await text(last.locator('[data-field="sseqid"]'));
   await last.click();
   await expect(last).toHaveAttribute('aria-pressed', 'true');
-  await show(page, 'alignment');
+  await show(page, 'hits');
   for (const row of await hspRows(page).all()) await expect(row.locator('[data-field="outfmt0"]')).toHaveText('not shown');
   await expect(page.getByTestId('detail-not-in-outfmt0')).toContainText(
     `outfmt 0 does not show this HSP. It shows the alignments of the first ${shown} subjects of this query`,
@@ -851,14 +852,14 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   // The Alignments are the tab of the next run opened, and of the results shown again (W4b).
   await page.getByTestId('tab-search').click();
   await page.getByTestId('tab-results').click();
-  await expect(page.getByTestId(TABS.alignment)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
   // outfmt 6 has the HSP; outfmt 0 has no alignment heading for its subject.
   await showOutput(page, 1, 6, false);
   expect((await text(page.getByTestId('result-output'))).split('\n')).toContain(row);
   await showOutput(page, 1, 0, false);
   const escaped = sseqid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   expect(await text(page.getByTestId('result-output'))).not.toMatch(new RegExp(`^> ?${escaped}(\\s|$)`, 'm'));
-  await show(page, 'alignment');
+  await show(page, 'hits');
 
   // An explicit -max_target_seqs that the query's subjects reach (many.mts255.blastn): the
   // notice says that more subjects may match, not that hits were lost.
@@ -867,8 +868,8 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   await openParameters(page);
   await page.getByTestId('param-max_target_seqs').fill(String(limit));
   await run(page, 2);
-  await openFromQueue(page, 2);
-  await expect(page.getByTestId(TABS.alignment)).toHaveAttribute('aria-pressed', 'true');
+  await openRun(page, 2);
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('results-run-options')).toHaveText(`-task blastn -max_target_seqs ${limit}`);
   await expect(page.getByTestId('results-program')).toHaveText('BLASTN (task blastn)');
   const notice = page.locator('[data-testid="results-notice"][data-kind="subject-limit"]');
@@ -897,7 +898,7 @@ test('-num_alignments 3: the records follow the tabular list, and the texts say 
   await openFiles(page, 'query', [{ name: 'split_q.fna', text: fasta('outfmt0/numdesc_split_q.fna') }]);
   await openFiles(page, 'subject', [{ name: 'split_s.fna', text: fasta('outfmt0/numdesc_split_s.fna') }]);
   await run(page, 1);
-  await openFromQueue(page, 1);
+  await openRun(page, 1);
   await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -num_alignments 3');
   await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', '3');
   // The notice counts the subjects whose alignments are linked, and says that the search has a hit list of its own.
@@ -911,7 +912,7 @@ test('-num_alignments 3: the records follow the tabular list, and the texts say 
   expect(await noticeKinds(page)).toEqual(['subject-limit']);
   // The third subject: no outfmt 0 alignment is linked to its HSP.
   await subjectRows(page).last().click();
-  await show(page, 'alignment');
+  await show(page, 'hits');
   const separate = page.getByTestId('detail-not-in-outfmt0');
   await expect(separate).toContainText('No outfmt 0 alignment is linked to this HSP. Its search has a hit list of its own (500 subjects per query)');
   await expect(separate).toContainText('it shows the alignments of its first 3 subjects (-num_alignments).');
@@ -928,7 +929,7 @@ test('-num_alignments 0: outfmt 6 and 7 have no hits, and the notice says so', a
   await openFiles(page, 'query', [{ name: 'split_q.fna', text: fasta('outfmt0/numdesc_split_q.fna') }]);
   await openFiles(page, 'subject', [{ name: 'split_s.fna', text: fasta('outfmt0/numdesc_split_s.fna') }]);
   await run(page, 1);
-  await openFromQueue(page, 1);
+  await openRun(page, 1);
   await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -num_alignments 0');
   const notice = page.locator('[data-testid="results-notice"][data-kind="no-tabular-hits"]');
   await expect(notice).toContainText('-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty');
@@ -953,12 +954,12 @@ test("BLASTN: an HSP of one letter has no orientation in its record; the note po
   await paste(page, 'query', BUILD_HAS_ENGINE ? '>q\nTAGGACGG\n' : '>q1\nACGTACGTACGT\n>q2\nACGTACGTACGT\n>q\nTAGGACGG\n');
   await paste(page, 'subject', '>s\nYCAYAANTNCRGYACT\n');
   await run(page, 1);
-  await openFromQueue(page, 1);
+  await openRun(page, 1);
   // "Results for" only for the FakeEngine's three queries.
   if (BUILD_HAS_ENGINE) await expect(page.getByTestId('query-list')).toHaveCount(0);
   else await page.getByTestId(`query-row-${qIdx}`).click();
   await expect(page.getByTestId('subject-row-0')).toHaveAttribute('aria-pressed', 'true');
-  await show(page, 'alignment');
+  await show(page, 'hits');
   const single = page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"][data-orientation="unknown"]');
   await expect(single).toHaveCount(1);
   await single.click();
@@ -986,7 +987,7 @@ async function panelRun(page: Page): Promise<void> {
   await paste(page, 'query', PANEL_QUERIES);
   await paste(page, 'subject', PANEL_SUBJECTS);
   await run(page, 1);
-  await openFromQueue(page, 1);
+  await openRun(page, 1);
 }
 
 /** Selects the first subject of the selected query with two HSPs, and returns its index. */
@@ -1007,7 +1008,7 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   await expect(page.getByTestId('query-row-0')).toHaveAttribute('aria-pressed', 'true');
   // A subject of the first query with two HSPs; choose its second HSP.
   const sIdx = await subjectWithTwoHsps(page);
-  await show(page, 'alignment');
+  await show(page, 'hits');
   await expect(hspRows(page)).toHaveCount(2);
   const second = hspRows(page).nth(1);
   const id = await hspId(second);
@@ -1015,7 +1016,7 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   await expectSelected(page, id, sIdx);
 
   // The "#" column the other way round: the selected HSP is now first, and still selected.
-  await show(page, 'alignment');
+  await show(page, 'hits');
   await page.getByTestId('hsp-sort-rank').click();
   await expect(page.getByTestId('hsp-sort-rank').locator('..')).toHaveAttribute('aria-sort', 'descending');
   expect(await hspId(hspRows(page).first())).toBe(id);
@@ -1033,7 +1034,7 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   ]) {
     // Each column one way, then the other.
     for (let click = 0; click < 2; click++) {
-      await show(page, sort.startsWith('hsp-') ? 'alignment' : 'hits');
+      await show(page, 'hits');
       await page.getByTestId(sort).click();
       await expect(page.getByTestId(sort).locator('..')).toHaveAttribute('aria-sort', /^(ascending|descending)$/);
       await expectSelected(page, id, sIdx);
@@ -1045,7 +1046,7 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   const otherIdx = await subjectIndex(unselected);
   await page.getByTestId(`subject-row-${otherIdx}`).click();
   await expect(page.getByTestId(`subject-row-${otherIdx}`)).toHaveAttribute('aria-pressed', 'true');
-  await show(page, 'alignment');
+  await show(page, 'hits');
   const firstOfOther = await hspId(hspRows(page).first());
   expect(firstOfOther).not.toBe(id);
   await expectSelected(page, firstOfOther, otherIdx);
@@ -1055,7 +1056,7 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   await expect(page.getByTestId('query-row-1')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('query-row-0')).toHaveAttribute('aria-pressed', 'false');
   const firstSubject = await subjectIndex(subjectRows(page).first());
-  await show(page, 'alignment');
+  await show(page, 'hits');
   const firstHsp = await hspId(hspRows(page).first());
   expect(firstHsp).toMatch(/^1:/);
   await expectSelected(page, firstHsp, firstSubject);
@@ -1067,7 +1068,7 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   await panelRun(page);
   const sIdx = await subjectWithTwoHsps(page);
   const subjectOrder = await subjectRows(page).evaluateAll((rows) => rows.map((row) => Number((row as HTMLElement).dataset['testid']!.replace('subject-row-', ''))));
-  await show(page, 'alignment');
+  await show(page, 'hits');
   const [firstId, secondId] = [await hspId(hspRows(page).nth(0)), await hspId(hspRows(page).nth(1))];
   const [first, second] = [page.getByTestId(`range-${firstId.replace(':', '-')}`), page.getByTestId(`range-${secondId.replace(':', '-')}`)];
   await expect(rangeBlocks(page)).toHaveCount(2);
@@ -1096,7 +1097,7 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', secondId);
   await expect(second.getByTestId('range-label')).toBeInViewport();
 
-  // Previous and Next subject follow the Descriptions' order; "Descriptions" goes back to them.
+  // Previous and Next subject follow the Descriptions' order.
   const at = subjectOrder.indexOf(sIdx);
   const previous = page.getByTestId('alignments-prev-subject');
   const next = page.getByTestId('alignments-next-subject');
@@ -1108,8 +1109,8 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
     await previous.click();
     await expect(page.getByTestId('alignments-subject')).toHaveAttribute('data-subject', String(sIdx));
   }
-  await page.getByTestId('alignments-descriptions').click();
-  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
+  // The Descriptions are on the same page, above the Alignments, with the selected subject marked.
+  await expect(page.getByTestId('section-descriptions')).toBeVisible();
   await expect(page.getByTestId(`subject-row-${sIdx}`)).toHaveAttribute('aria-pressed', 'true');
 
   if (!BUILD_HAS_ENGINE) return;
@@ -1122,11 +1123,11 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
     await openFiles(page, role, [{ name: 'repeat.fna', text: repeats(20, 60) }]);
   }
   await run(page, 2);
-  await openFromQueue(page, 2);
+  await openRun(page, 2);
   await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
   const { asked, failNext } = await watchReads(page);
   const before = await asked();
-  await show(page, 'alignment');
+  await show(page, 'hits');
   const total = Number(await page.getByTestId('hsp-list').getAttribute('data-count'));
   expect(total).toBeGreaterThan(80);
   await expect(rangeBlocks(page)).toHaveCount(26);
@@ -1204,19 +1205,9 @@ test('many queries; view filters change the view, not the search; the notices te
   page,
 }) => {
   await panelRun(page);
-  const queue = page.getByTestId('queue').locator(':scope > li');
-  await expect(queue).toHaveCount(1);
-  // The queue's card has one layout, at the same place beside either tab (W4 screen review low 5).
-  const card = async () => {
-    const [run, open] = [(await page.getByTestId('run-1').boundingBox())!, (await page.getByTestId('run-1-open').boundingBox())!];
-    return [run.x, run.width, run.height, open.x - run.x, open.y - run.y].map(Math.round);
-  };
-  const inResults = await card();
-  await page.getByTestId('tab-search').click();
-  expect(await card()).toEqual(inResults);
-  await page.getByTestId('tab-results').click();
+  await expect(page.getByTestId('run-1-option')).toHaveCount(1);
   // The selection is read in the Alignments; "Results for", "Filter Results" and the notices are above the tabs.
-  await show(page, 'alignment');
+  await show(page, 'hits');
   const detail = page.getByTestId('hsp-detail');
 
   // A query without hits: NCBI's words; the tabs stay.
@@ -1225,12 +1216,12 @@ test('many queries; view filters change the view, not the search; the notices te
   await expect(page.locator('[data-testid="results-notice"][data-kind="no-hits"]')).toHaveText('No significant similarity found for this query.');
   expect(await noticeKinds(page)).toEqual(['no-hits']);
   await expect(page.getByTestId('alignments')).toHaveCount(0);
-  await expect(page.getByTestId(TABS.alignment)).toBeVisible();
+  await expect(page.getByTestId(TABS.hits)).toBeVisible();
   await show(page, 'hits');
   await expect(page.getByTestId('subject-table')).toHaveCount(0);
-  await show(page, 'graphic');
+  await show(page, 'hits');
   await expect(page.getByTestId('graphic-summary')).toHaveCount(0);
-  await show(page, 'alignment');
+  await show(page, 'hits');
 
   // The query picker draws only the rows in view, and finds a query by its ID.
   const list = page.getByTestId('query-list');
@@ -1272,7 +1263,7 @@ test('many queries; view filters change the view, not the search; the notices te
   );
   expect(await noticeKinds(page)).toEqual(['filtered-out']);
   await expect(page.getByTestId('subject-table')).toHaveCount(0);
-  await show(page, 'alignment');
+  await show(page, 'hits');
   await expect(page.getByTestId('hsp-table')).toHaveCount(0);
   await show(page, 'hits');
   await page.getByTestId('results-notice-clear').click();
@@ -1313,9 +1304,8 @@ test('many queries; view filters change the view, not the search; the notices te
   await expect(subjectRows(page)).toHaveCount(Number(subjects));
   expect(await noticeKinds(page)).toEqual([]);
   // None of this was a search.
-  await expect(queue).toHaveCount(1);
   await expect(page.getByTestId('results-run').locator('option:not([disabled])')).toHaveCount(1);
-  await expect(page.getByTestId('run-1-status')).toHaveText('completed');
+  await expect(page.getByTestId('run-1-option')).toHaveAttribute('data-status', 'completed');
 
   if (BUILD_HAS_ENGINE) {
     // A run that fails: a TBLASTX subject record without residues. `register` and `validate`
@@ -1333,7 +1323,6 @@ test('many queries; view filters change the view, not the search; the notices te
     await paste(page, 'subject', '>s1 alpha\n');
     await submit(page);
     await waitStatus(page, 2, 'failed');
-    await expect(page.getByTestId('run-2-open')).toHaveCount(0);
     await page.getByTestId('tab-results').click();
     const select = page.getByTestId('results-run');
     await select.selectOption({ label: 'Run 2 · TBLASTX · query.fa vs subject.fa (failed)' });
@@ -1386,13 +1375,13 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await paste(page, 'query', `>q1\n${dna(21, 20)}\n>q2\n${A}\n`);
   await paste(page, 'subject', `>s1\n${A}${dna(12, 60)}${A}\n`);
   await run(page, 1);
-  await openFromQueue(page, 1);
+  await openRun(page, 1);
   const rows = outfmt6Rows((await readOutputs(page, 1)).text[6]);
   await page.getByTestId('query-row-1').click();
   // The Dot Plot tab has the HSP table under the plot.
   await show(page, 'dotplot');
-  await expect(hspRows(page)).toHaveCount(2);
-  const [firstId, secondId] = [await hspId(hspRows(page).nth(0)), await hspId(hspRows(page).nth(1))];
+  await expect(dotRows(page)).toHaveCount(2);
+  const [firstId, secondId] = [await hspId(dotRows(page).nth(0)), await hspId(dotRows(page).nth(1))];
   const canvas = page.getByTestId('dotplot-canvas');
   await expect(canvas).toHaveAttribute('data-segments', '2');
   await expect(canvas).toHaveAttribute('data-selected', firstId);
@@ -1450,10 +1439,10 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   // An HSP chosen in the list is selected on the plot; "Zoom to HSP" frames it, from a view
   // zoomed in away from it (with the same scale on both axes, the frame of an HSP that spans the
   // whole query is the whole plot).
-  await hspRows(page).nth(1).click();
+  await dotRows(page).nth(1).click();
   await expect(canvas).toHaveAttribute('data-selected', secondId);
-  const [qStart, qEnd] = (await text(hspRows(page).nth(1).locator('[data-field="query"]'))).split('–').map(Number);
-  const [sStart, sEnd] = (await text(hspRows(page).nth(1).locator('[data-field="subject"]'))).split('–').map(Number);
+  const [qStart, qEnd] = (await text(dotRows(page).nth(1).locator('[data-field="query"]'))).split('–').map(Number);
+  const [sStart, sEnd] = (await text(dotRows(page).nth(1).locator('[data-field="subject"]'))).split('–').map(Number);
   await page.getByTestId('dotplot-zoom-in').click();
   await page.getByTestId('dotplot-zoom-in').click();
   await expect.poll(async () => (await span()).x).toBeLessThan(30);
@@ -1473,9 +1462,9 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   const target = targets.find((t) => t.hsp === firstId)!;
   await canvas.click({ position: { x: target.x, y: target.y } });
   await expect(canvas).toHaveAttribute('data-selected', firstId);
-  await expect(hspRows(page).nth(0)).toHaveAttribute('aria-pressed', 'true');
-  await expect(hspRows(page).nth(1)).toHaveAttribute('aria-pressed', 'false');
-  const firstQuery = await text(hspRows(page).nth(0).locator('[data-field="query"]'));
+  await expect(dotRows(page).nth(0)).toHaveAttribute('aria-pressed', 'true');
+  await expect(dotRows(page).nth(1)).toHaveAttribute('aria-pressed', 'false');
+  const firstQuery = await text(dotRows(page).nth(0).locator('[data-field="query"]'));
   await expect(page.getByTestId('dotplot-selected')).toContainText(`query ${firstQuery} nt`);
   const popup = page.getByTestId('dotplot-popup');
   await expect(popup).toHaveAttribute('data-hsp', firstId);
@@ -1503,7 +1492,7 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   // closes it and gives the focus back to the plot.
   await page.keyboard.press('n');
   await expect(canvas).toHaveAttribute('data-selected', secondId);
-  await expect(hspRows(page).nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(dotRows(page).nth(1)).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('Enter');
   await expect(popup).toHaveAttribute('data-hsp', secondId);
   await expect(popup).toBeFocused();
@@ -1523,7 +1512,7 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await expect(popup).toHaveCSS('outline-width', '2px');
   // "Show alignment": the Alignments, with the HSP's Range in view and the focus on its label.
   await popup.getByTestId('dotplot-popup-alignment').click();
-  await expect(page.getByTestId(TABS.alignment)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', secondId);
   const range = page.getByTestId(`range-${secondId.replace(':', '-')}`);
   await expect(range.getByTestId('range-label')).toBeFocused();
@@ -1532,17 +1521,16 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
 
 // --- the phone size (S13 screen review) ------------------------------------------------------------
 
-test('narrow screens: the results are no wider than the screen; "Open results" shows them; the tables show the key values first', async ({ page }) => {
+test('narrow screens: the results are no wider than the screen; "Run LOSAT" opens them; the tables show the key values first', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   // A translated search (frames) of files with long names: the run's label in the run picker is long.
   const c = PROGRAM_CASES.find((programCase) => programCase.id === 'tblastx')!;
   await program(page, c.id);
   await openFiles(page, 'query', [{ name: basename(c.query), text: fasta(c.query) }]);
   await openFiles(page, 'subject', [{ name: basename(c.subject), text: fasta(c.subject) }]);
-  await run(page, 1);
-
-  // The queue is under the search form: "Open results" brings the results' heading into view and focuses it.
-  await page.getByTestId('run-1-open').click();
+  // "Run LOSAT" opens the results of the run: the results' heading comes into view and has the focus.
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
   const heading = page.getByTestId('results-heading');
   await expect(heading).toBeFocused();
   await expect(heading).toBeInViewport();
@@ -1584,14 +1572,14 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   };
   await clickKeepsScroll('subject-table', subjectRows(page).first());
 
-  await show(page, 'alignment');
+  await show(page, 'hits');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
   await expectNoSideScroll(page, 'alignments');
   // The HSP table: the frames before the ranges, so that they are in view (W4 screen review middle 2).
   expect((await columnsInView(page, 'hsp-table')).slice(0, 4)).toEqual(['rank', 'bitscore', 'evalue', 'frames']);
   await clickKeepsScroll('hsp-table', hspRows(page).nth(Math.min(1, (await hspRows(page).count()) - 1)));
   for (const table of ['subject-table', 'hsp-table']) {
-    await show(page, table === 'subject-table' ? 'hits' : 'alignment');
+    await show(page, 'hits');
     await expect(page.getByTestId(`${table}-scroll-hint`)).toBeVisible();
     // Each value is under its header.
     const offsets = await page
@@ -1610,7 +1598,7 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   }
 
   // The Graphic Summary, the dot plot, the run details and the outputs.
-  await show(page, 'graphic');
+  await show(page, 'hits');
   await expect(page.getByTestId('graphic-canvas')).toHaveAttribute('data-rows', /^[1-9]/);
   await expectNoSideScroll(page, 'graphic summary');
   await show(page, 'dotplot');
@@ -1632,13 +1620,14 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   await showOutput(page, 1, 0, false);
   await expectNoSideScroll(page, 'outputs');
 
-  // "Open results" again from the search tab, the page scrolled to the queue at its end, while
-  // the results are read: the heading stays in view.
+  // "Run LOSAT" again from the search tab, the page scrolled to its end, while the results of run 1
+  // are read: the heading of the new run's page comes into view.
   await page.getByTestId('tab-search').click();
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  await page.getByTestId('run-1-open').click();
+  await submit(page);
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
   await expect(heading).toBeFocused();
-  await expect(page.getByTestId('results-outputs')).toBeVisible();
+  await expect(page.getByTestId('run-2-option')).toHaveCount(1);
   await expect(heading).toBeInViewport({ ratio: 1 });
 });
 
@@ -1650,7 +1639,6 @@ test('the Outputs view lays out blocks of lines near the view, and shows, finds 
   await openFiles(page, 'subject', [{ name: 's.fasta', text: fasta('small_test.fasta') }]);
   await submit(page);
   await waitStatus(page, 1, 'completed');
-  await page.getByTestId('tab-results').click();
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
   await page.getByTestId('results-view-outputs').click();
   const output = page.getByTestId('result-output');

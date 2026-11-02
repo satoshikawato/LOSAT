@@ -9,15 +9,19 @@
 //! closure are those of `x_scan_two_hit_compressed`, so the argument of `x_seed_fused_compressed.rs`
 //! carries over unchanged.
 //!
-//! EXPERIMENT (LOSAT_X_BPCLUTSCANBF): on a table with at least LOSAT_X_BPCLUTSCANBFMIN used cells
-//! per 10,000 (`XFlatCompressedLookup::x_scan_bf_pays`) the scan lists the offsets without a branch
-//! on the presence bit (`for_each_cell::<true, _>`, the form of
-//! `x_seed_fused::x_scan_cells_bf`); the list, and so the cells and their order, are the same. That
+//! EXPERIMENT (LOSAT_X_BPCLUTSCANBF): the scan lists the offsets without a branch on the presence
+//! bit (`for_each_cell::<true, _>`, the form of `x_seed_fused::x_scan_cells_bf`, or
+//! `x_list_pairs_lean` below); the list, and so the cells and their order, are the same. That
 //! instance is out of line with a closure of its own type (`x_scan_flat_bf`), so the instance with
-//! the branch, which the other tables take, is compiled as without it. A switch of the strict set
-//! (`utils/xswitch.rs`): on unless it is `0`.
+//! the branch, which `=0` takes, is compiled as without it. Every flat table takes it: until
+//! 2026-11-02 a table with fewer than 500 used cells per 10,000 (`LOSAT_X_BPCLUTSCANBFMIN`) kept
+//! the loop with the branch natively, measured when the list was `for_each_cell`'s (x1.07 the
+//! cycles at 234 per 10,000, #437); with the loops below, single queries of 10 to 739 residues x
+//! UniRef50 volume 00, whose tables kept it, took x0.60-0.68 the cycles of the whole search without
+//! the branch (line SF S3, family bpf-seed-loop). A switch of the strict set (`utils/xswitch.rs`):
+//! on unless it is `0`.
 //!
-//! The dense tables' loops, natively (until 2026-11-02 the switches LOSAT_X_BPFSEED,
+//! The loops after the branch-free list, natively (until 2026-11-02 the switches LOSAT_X_BPFSEED,
 //! LOSAT_X_BPFSTAGE and LOSAT_X_BPFLEAN, folded here by line SF S3, family bpf-seed-loop: each `=0`
 //! was slower on every input measured, #472, #543, #551). On a table that takes the branch-free
 //! list, a subject where `XHitBf::fits` holds runs the loop of `x_scan_flat_fseed_loop`, which
@@ -81,13 +85,6 @@ pub(crate) fn x_bp_clut_scan_bf() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPCLUTSCANBF"))
 }
 
-// No NCBI counterpart: chooses LOSAT's list form; both list the same offsets.
-/// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): whether the fused loop lists `lookup`'s offsets without a
-/// branch on the presence bit: the switch is on and the table has enough cells used.
-pub(crate) fn x_clut_scan_bf(lookup: &XFlatCompressedLookup) -> bool {
-    x_bp_clut_scan_bf() && lookup.x_scan_bf_pays()
-}
-
 /// `x_seed_fused_compressed::x_scan_two_hit_compressed` on the flat table (same arguments).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518
 // ```c
@@ -115,9 +112,8 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
 ) where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
-    // EXPERIMENT (LOSAT_X_BPCLUTSCANBF): on a table with enough cells used, the offsets listed
-    // without a branch on the presence bit (`for_each_cell`).
-    if x_clut_scan_bf(lookup) {
+    // EXPERIMENT (LOSAT_X_BPCLUTSCANBF): the offsets listed without a branch on the presence bit.
+    if x_bp_clut_scan_bf() {
         // The branch-free two-hit test and no read-ahead of the diagonal entries, where the test
         // gives the reference's outcomes (module header).
         if let Some(bf) = x_fseed_on()

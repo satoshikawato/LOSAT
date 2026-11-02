@@ -419,9 +419,6 @@ pub(crate) struct XFlatCompressedLookup {
     pub(crate) compressed_alphabet_size: i32,
     pub(crate) reciprocal_alphabet_size: i32,
     pub(crate) longest_chain: i32,
-    /// The cells with hits (`finalize`'s `count`). EXPERIMENT (LOSAT_X_BPCLUTSCANBF): chooses how
-    /// `for_each_cell` lists the offsets ([`XFlatCompressedLookup::x_scan_bf_pays`]).
-    pub(crate) used_cells: usize,
     pub(crate) pv: Vec<u32>,
     pub(crate) pv_array_bts: i32,
     pub(crate) scaled_compress_table_u8: [i32; 256],
@@ -1135,7 +1132,6 @@ fn x_try_build_flat_with_capacity(
         compressed_alphabet_size: header.alphabet as i32,
         reciprocal_alphabet_size: header.reciprocal_alphabet_size,
         longest_chain,
-        used_cells: nonempty_count,
         pv,
         pv_array_bts: pv_array_bts as i32,
         scaled_compress_table_u8: build_scaled_compress_table_u8(&header.scaled_compress_table),
@@ -1581,7 +1577,6 @@ fn x_buckets_on(
         compressed_alphabet_size: header.alphabet as i32,
         reciprocal_alphabet_size: header.reciprocal_alphabet_size,
         longest_chain,
-        used_cells: nonempty_count,
         pv,
         pv_array_bts: pv_array_bts as i32,
         scaled_compress_table_u8: build_scaled_compress_table_u8(&header.scaled_compress_table),
@@ -2119,15 +2114,6 @@ impl XFlatCompressedLookup {
         // SAFETY: the first `listed` places were written above, within the reserve.
         unsafe { cells.set_len(listed) };
     }
-
-    // No NCBI counterpart: chooses LOSAT's list form; both list the same offsets.
-    /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): whether blastp-fast lists this table's offsets without a
-    /// branch (`for_each_cell::<true, _>`): at least [`x_scan_bf_min`] of every 10,000 backbone
-    /// cells have hits. With fewer, few offsets pass `PV_TEST`, the branch is mostly predicted and
-    /// the list's store at every offset costs more than the mispredicts it saves.
-    pub(crate) fn x_scan_bf_pays(&self) -> bool {
-        x_dense_enough(self.used_cells, self.starts.len() - 1, x_scan_bf_min())
-    }
 }
 
 // No NCBI counterpart: the state of LOSAT's list around its two-offset steps.
@@ -2205,37 +2191,6 @@ unsafe fn x_pairs_loop(
         preshift,
         next_char,
     };
-}
-
-// No NCBI counterpart: the rule of LOSAT_X_BPCLUTSCANBFMIN; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): `used` of `cells` backbone cells reach `min` per 10,000 (a
-/// `min` above 10,000 takes no table).
-fn x_dense_enough(used: usize, cells: usize, min: u64) -> bool {
-    u128::from(used as u64) * 10_000 >= u128::from(min) * cells as u128
-}
-
-// No NCBI counterpart: a tuning value of LOSAT's list form; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BPCLUTSCANBFMIN): the built-in value of [`x_scan_bf_min`]. Natively 500: on
-/// the workstation the branch-free list cost x1.07 the cycles at 234 used cells per 10,000, x1.00 at
-/// 442, x0.96 at 728 and x0.80 at 2,260. On wasm32 0 (every table): in Node the loop with the branch
-/// is the slower one at every density measured, the branch-free list x0.81 the time at 119 and x0.80
-/// at 234.
-const X_SCAN_BF_MIN: u64 = if cfg!(target_arch = "wasm32") { 0 } else { 500 };
-
-// No NCBI counterpart: reads LOSAT_X_BPCLUTSCANBFMIN once; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPCLUTSCANBFMIN): the fewest backbone cells with hits, per 10,000, for which
-/// blastp-fast's scan lists the offsets without a branch (built-in [`X_SCAN_BF_MIN`]); `0` every
-/// table; a value that is not a number takes the built-in one.
-fn x_scan_bf_min() -> u64 {
-    static MIN: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
-    *MIN.get_or_init(|| {
-        std::env::var("LOSAT_X_BPCLUTSCANBFMIN")
-            .ok()
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(X_SCAN_BF_MIN)
-    })
 }
 
 // No NCBI counterpart: how many cells ahead `for_each_cell` reads the slice bounds and the hits.
@@ -2490,7 +2445,6 @@ pub(crate) fn x_assert_same_flat_tables_as(
             && got.compressed_alphabet_size == want.compressed_alphabet_size
             && got.reciprocal_alphabet_size == want.reciprocal_alphabet_size
             && got.longest_chain == want.longest_chain
-            && got.used_cells == want.used_cells
             && got.pv_array_bts == want.pv_array_bts
             && got.scaled_compress_table_u8 == want.scaled_compress_table_u8,
         "{what} table header differs"

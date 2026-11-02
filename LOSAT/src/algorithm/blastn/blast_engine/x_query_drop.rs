@@ -84,11 +84,13 @@
 //! bytes of the record), all read on the calling thread before the pool exists and all freed on one
 //! thread at the end. With the switch the store holds parts (`Part`): one buffer per part with each
 //! record's title, messages and letters (their store, `PackedLetters::append_to`, where the reader
-//! packed them; else the letters) and a table of where each record ends. The reader's record is
-//! dropped once it is copied, so the next record reuses its allocations. The parts are read on the
-//! search's threads where the file can be cut at record starts as LOSAT_X_QSTREAM's first reading
-//! is cut (`x_query_scan_par::store_parts`), else by the search's reader into parts of about 1 MiB
-//! (`read_parts`). When the loop takes a batch, its records are made again from their parts
+//! packed them; else the letters, which from `OWN_LETTERS` keep their own vector, moved in and out)
+//! and a table of where each record ends. The reader's record is dropped once it is copied, so the
+//! next record reuses its allocations. The parts are read on the search's threads where the file
+//! can be cut at record starts as LOSAT_X_QSTREAM's first reading is cut
+//! (`x_query_scan_par::store_parts`), else by the search's reader into parts of at most 1 MiB
+//! (`read_parts`). A complete part gives back the room it did not take (`Part::shrink`), so what
+//! is committed is what is held, also where memory is not overcommitted. When the loop takes a batch, its records are made again from their parts
 //! (`Part::record`, by the pool's threads with two or more): the title and messages copied, the
 //! letters made again (`unpack_from`), the local ID `Query_<n>` from the record's position among all
 //! records, which is the ID the reader's counter gave it (`Part::push` keeps any other ID, the ones

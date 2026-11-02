@@ -6591,6 +6591,18 @@ Scheduling (each value computed by one thread with the original function; order 
   between builds removed the faults but raised ABRicate's call x AMRProt at 8 and 16 threads above dev (43.4 and
   45.6 against 40.0 and 39.5 MiB), so it was not taken. The table equals the unpooled one in every field (unit test
   `pooled_flat_tables_equal_the_unpooled_ones_on_kept_vectors`); reports: `tests/blastx_fast_flat.rs`.
+  Since 2026-11-02 BLASTX's tables hold `u16` query offsets (`XBxCompressedLookup::Flat`; a query batch of more than
+  65,536 letters in its contexts, which happens only when several queries share a batch whose last query is long,
+  keeps `i32` ones and their own pool, `Wide`), and its bucket fill keeps no record: each append goes as it is made to
+  64-entry chunks of its bucket, cut from one arena that is mapped as the record was, so a build's page faults are
+  the record's (`x_bx_buckets_on`, `XBucketChunks`). A build holds the arena and the `u16` hits (6 bytes an append;
+  the record and the `i32` hits held 8) and a table half its hits. Peak `RssAnon` at 16 threads, dev d955d8dfe ->
+  5e0915ae9 (NCBI): Trinity x four_human_proteins 61.3 -> 51.3 (37.0), dmel200 cDNAs x Swiss-Prot 91.9 -> 74.7
+  (56.6), Trinity x Swiss-Prot 71.9 -> 63.3 (57.2), ABRicate's call x AMRProt 40.9 -> 30.6 (33.9), EDL933 x AMRProt
+  101.7 -> 97.6 MiB (124.4); time x0.96-0.99, at 1 thread x0.96-0.98 with 2.6-3.9 MiB less (ws, 3 rounds; the
+  default path and blastp-fast / tblastn-fast at 1 and 8 threads: instructions x1.0000-1.0005, cycles within the
+  null arm). The table equals `x_buckets_on`'s with its offsets narrowed (unit tests
+  `pooled_flat_tables_equal_the_unpooled_ones_on_kept_vectors`, `blastx_tables_take_u16_offsets_up_to_their_letters`).
 - `LOSAT_X_BXENDMEM=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-11-01: on unless
   `=0` or `LOSAT_X_DEFAULT=0`): at the end of a query batch, no table of word hashes per context for the
   near-identical test of composition-based statistics (8 bytes per letter of six frames: 84 MiB for a 5.6 Mb query)

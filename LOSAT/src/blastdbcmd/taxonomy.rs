@@ -63,10 +63,11 @@ pub(super) struct Ended(pub i32);
 // ```
 // `NStr::Split` keeps the empty pieces of `1,,2` and `1,` and gives none for the empty
 // string (probes J101, J102, S36 of line BDC). The lines of the file are those of
-// `NcbiGetlineEOL`, which on Linux ends a line at `\n` alone (a `\r` stays and reads as white
-// space around the number: J109), as `-entry_batch` reads them. Unlike a search program's
-// list (`db_filter`), the id is kept without the taxonomy file (T02), and a line of blanks
-// is read as a number. An id that is not a number escapes NCBI's `Run` as a
+// `NcbiGetlineEOL` (`args::input_lines`), as `-entry_batch` reads them: on Linux a line
+// ends at `\n` alone, and a `\r` stays and reads as white space around the number (J109).
+// Unlike a search program's list (`db_filter`), the id is kept without the taxonomy file
+// (T02), and a line of blanks is read as a number. An id that is not a number escapes
+// NCBI's `Run` as a
 // `CStringException` with the path of NCBI's build in its text (exit status 255: J101,
 // J102, J107, J108, J131, S35), which LOSAT refuses (line BDC DECISIONS 8). `-taxids 1`
 // never ends in NCBI (the parent of taxid 1 is 1, probe J120); LOSAT's walk visits each
@@ -98,9 +99,8 @@ pub(super) fn tax_id_list(
                 ));
                 return Err(Ended(1));
             };
-            bytes
-                .split(|&byte| byte == b'\n')
-                .filter(|line| !line.is_empty())
+            args::input_lines(&bytes, args::LineEnds::HOST)
+                .into_iter()
                 .map(<[u8]>::to_vec)
                 .collect()
         }

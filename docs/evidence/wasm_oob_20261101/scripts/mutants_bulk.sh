@@ -2,7 +2,7 @@
 # Line WO: mutants of the bulk guard (memory.fill, memory.copy) against a test file. Each must fail.
 # usage: mutants_bulk.sh <worktree> <test file> <node>...
 set -u
-WT=$1; TESTS=$2; shift 2; NODES="$*"
+WT=$(realpath "$1"); TESTS=$(realpath "$2"); shift 2; NODES="$*"
 TMP=$(mktemp -d "${TMPDIR:-$HOME}/wo-mutants.XXXXXX")
 cp "$TESTS" "$TMP/test_wasi_shared_memory.js"
 mut() { # name, old text, new text

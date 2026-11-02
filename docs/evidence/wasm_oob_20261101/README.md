@@ -25,7 +25,16 @@ V8 14.6 (Node v26.8.2, `deps/v8/src/wasm/`):
   under dynamic tiering. `FutexEmulation` returns "not equal" without handling interrupts.
 
 So a thread in Liftoff code that reads an address in memory that another thread grew a moment
-ago can trap on it, although the memory is there. Which of those windows the first trap took was
+ago can trap on it, although the memory is there.
+
+V8 has changed this upstream, by its source (not run here): commit
+[34241014](https://chromium.googlesource.com/v8/v8/+/34241014663390c72e08c123faef6fedf395be8e)
+(2026-09-29, "[wasm] Atomic memory.size and dynamic bounds checks for shared memory", crbug
+529880019 and 533026477) makes the bounds checks of a shared memory read the backing store's
+current length. Its test `test/mjsunit/wasm/shared-memory-grow-bounds-check.js` is in
+`branch-heads/15.7` and not in `15.6`, so the change starts at V8 15.7 (Chrome 157). Node 26.8.2
+(V8 14.6), Node 24.21 and Chromium 156 (V8 15.6), where the traps above were measured, do not have
+it. The guard stays needed for those. Which of those windows the first trap took was
 not determined; the fix does not depend on it.
 
 ## Experiments
@@ -175,6 +184,11 @@ mutants fail it on both Nodes; the three tests it replaced passed all of them on
 | no compare | fails | pass |
 | no compare of the copy source | fails | pass |
 | compare of the start address only | fails | pass |
+
+A guard that ran the operation twice would pass the new test (fill and copy give the same bytes
+twice); the differential tests above catch that. The engine side, as for the atomic tests: the
+original Wasm is stale in 5 of 5 probes on Node 24.21 and 26.8.2; on an engine that refreshes the
+bound itself, these tests could not tell a guard without its compare from the guard.
 
 A differential test covers all 66 atomic opcodes against original Wasm, with results, memory and trap
 messages compared at addresses in bounds, at the edge, past it, misaligned and wrapped.

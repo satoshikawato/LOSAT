@@ -411,7 +411,9 @@ test("verifyGuarded rejects an unguarded atomic, a forged helper and a wrong ato
 // returns memory.size, the same bound. Before publishing, the main thread writes 83 at the
 // published address; bytes 1024-1215 hold 84 from the start. With a second argument the child
 // writes the memory to that file at the end. That the original Wasm is stale here (or traps) is
-// reported, not asserted: an engine may refresh the bound itself (V8 15.7 does, commit 34241014).
+// reported, not asserted: an engine may refresh the bound itself (by its source, V8 15.7 does; not run,
+// docs/evidence/wasm_oob_20261101/), and on such an engine these tests cannot tell a guard without
+// its compare from the guard.
 // A failure ends in the child's timeout, never in a hung test process.
 const STALE_CHILD = `
   const { Worker } = require("node:worker_threads");

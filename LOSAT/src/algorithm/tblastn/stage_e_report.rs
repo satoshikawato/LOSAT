@@ -293,7 +293,7 @@ pub(super) fn render(
             .iter()
             .any(|format| format_number(format.outfmt) == 0)
     {
-        Some(pairwise_hits(
+        Some(std::sync::Arc::new(pairwise_hits(
             query_records,
             subject_records,
             subject_letters,
@@ -303,13 +303,13 @@ pub(super) fn render(
             seg,
             mask_lowercase,
             ranges,
-        )?)
+        )?))
     } else {
         None
     };
     if let (Some(hits_sink), Some(pairwise_hits)) = (outputs.hits.as_mut(), pairwise_hits.as_ref())
     {
-        hits_sink(pairwise_hits);
+        hits_sink(std::sync::Arc::clone(pairwise_hits));
     }
     // The warnings of each query are written before its report, once, with the first
     // format (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
@@ -1441,8 +1441,10 @@ fn aligned_sequences(
         display.residue(nucleotides, frame, (base + s as isize) as usize - first)
     };
     const NCBISTDAA_TO_AA: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
-    let mut query_string = String::new();
-    let mut subject_string = String::new();
+    // The rows live in a `PairwiseHit` while the reports are written: their exact size.
+    let columns = script.iter().map(|op| op.num() as usize).sum();
+    let mut query_string = String::with_capacity(columns);
+    let mut subject_string = String::with_capacity(columns);
     for &op in script {
         for _ in 0..op.num() {
             match op {

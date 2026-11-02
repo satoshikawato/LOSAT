@@ -197,6 +197,12 @@ thread_local! {
         std::cell::RefCell::new((std::sync::Weak::new(), Arc::from(Vec::new()), false));
 }
 
+/// PROBE (LOSAT_PROBE_TBNSTAGEDROP bit 4): the presence bytes this thread keeps freed.
+pub(super) fn x_probe_release_presence() {
+    PRESENCE
+        .with(|kept| *kept.borrow_mut() = (std::sync::Weak::new(), Arc::from(Vec::new()), false));
+}
+
 // No NCBI counterpart: the presence vector in another layout, made once per table and thread; it
 // does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the presence bytes of `lookup` (see `build_presence`), built

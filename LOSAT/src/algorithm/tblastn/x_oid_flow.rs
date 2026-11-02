@@ -97,6 +97,32 @@ struct XWaitStats {
 /// `LOSAT_X_TBNFLOWHELP` (strict set; `=0` off): how long a waiting thread that found no job
 /// waits for a change of the flow before it looks for a job again, 100 us unless the variable
 /// gives a number of microseconds from 2 to 1,000,000.
+/// PROBE: `LOSAT_PROBE_TBNSTAGEDROP` bits, read once: what a thread frees when its loop over the
+/// chunks ends (1 = the unit buffers, 2 = the kept frames, 4 = the presence bytes).
+fn x_probe_stage_drop() -> u8 {
+    static V: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("LOSAT_PROBE_TBNSTAGEDROP")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+/// PROBE: frees this thread's kept preliminary buffers named by `LOSAT_PROBE_TBNSTAGEDROP`.
+pub(super) fn x_probe_release_thread() {
+    let bits = x_probe_stage_drop();
+    if bits & 1 != 0 {
+        super::search_gapped::x_probe_release_unit_state();
+    }
+    if bits & 2 != 0 {
+        super::x_subject_translate::x_probe_release_frames();
+    }
+    if bits & 4 != 0 {
+        super::x_scan_byte::x_probe_release_presence();
+    }
+}
+
 pub(super) fn x_flow_help() -> Option<Duration> {
     static HELP: OnceLock<Option<Duration>> = OnceLock::new();
     *HELP.get_or_init(|| {
@@ -300,6 +326,8 @@ impl<T: Send> XOidFlow<T> {
         let mut idle = 0;
         loop {
             if state.closed || state.failed || state.next >= self.chunks.len() {
+                drop(state);
+                x_probe_release_thread();
                 return;
             }
             if let Some(index) = self.take(&mut state) {

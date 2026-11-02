@@ -551,6 +551,12 @@ thread_local! {
     static X_UNIT_STATE: std::cell::Cell<Option<XUnitBuffers>> = const { std::cell::Cell::new(None) };
 }
 
+/// PROBE (LOSAT_PROBE_TBNSTAGEDROP bit 1): this thread's `XUnitBuffers` freed, as NCBI frees its
+/// aux structures when its loop over the subjects ends (blast_engine.c:1605).
+pub(super) fn x_probe_release_unit_state() {
+    drop(X_UNIT_STATE.take());
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812
 // ```c
 //             subject->sequence = translation_buffer + frame_offsets[context] + 1;

@@ -2979,13 +2979,15 @@ fn run_preliminary_subjects_into(
     #[cfg(feature = "parallel")]
     match (x_flow.as_ref(), pool) {
         (Some(flow), Some(pool)) => pool.install(|| {
-            rayon::scope(|scope| {
+            let reduced = rayon::scope(|scope| {
                 for _ in 1..pool.threads() {
                     scope.spawn(|_| flow.work(&x_flow_search));
                 }
                 let _close = super::x_oid_flow::XCloseOnDrop(flow);
                 reduce_subjects()
-            })
+            });
+            super::x_oid_flow::x_probe_release_thread();
+            reduced
         })?,
         _ => reduce_subjects()?,
     }

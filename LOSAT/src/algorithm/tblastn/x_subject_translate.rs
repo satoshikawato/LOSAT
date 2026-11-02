@@ -598,6 +598,11 @@ thread_local! {
     static X_FRAMES: std::cell::RefCell<Vec<Vec<u8>>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
+/// PROBE (LOSAT_PROBE_TBNSTAGEDROP bit 2): the frames this thread keeps freed.
+pub(super) fn x_probe_release_frames() {
+    X_FRAMES.with(|frames| *frames.borrow_mut() = Vec::new());
+}
+
 /// A frame of `length` bytes with a sentinel at both ends,
 /// whose other bytes the caller writes, every one of them. A frame of at most
 /// `X_REUSED_FRAME` bytes is one this thread kept (`x_reuse_frame`), its bytes not cleared, which

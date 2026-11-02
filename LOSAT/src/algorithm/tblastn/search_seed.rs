@@ -988,8 +988,12 @@ pub(super) fn x_scan_plan(
         match subject {
             // The plan is made from the sequence's bytes, read
             // for it (a database sequence has no lower-case letters).
-            XPrelimSubject::Stream(stream, oid) => stream.with_block(oid, |packed, length| {
-                super::x_subject_translate::x_packed_bytes_plan(packed, length, db_gencode)
+            XPrelimSubject::Stream(stream, oid) => stream.with_block(oid, |sequence| {
+                super::x_subject_translate::x_packed_bytes_plan(
+                    sequence.packed(),
+                    sequence.len(),
+                    db_gencode,
+                )
             }),
             XPrelimSubject::Nt(SubjectNt::Letters(letters)) => {
                 match super::x_subject_store::x_plan_store(letters, mask_lowercase) {

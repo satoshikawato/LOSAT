@@ -73,14 +73,16 @@
 }
 
 :root {
-  --page: #eef2f6;
+  --page: #e6f0f3;
+  --page-top: #e2edf8;
+  --page-bottom: #e4f3ee;
   --bg: #ffffff;
   --fg: #1e293b;
   --fg-2: #334155;
   --muted: #64748b;
-  --border: #e2e8f0;
-  --border-strong: #cbd5e1;
-  --panel: #f8fafc;
+  --border: #dbe6ec;
+  --border-strong: #c3d4dd;
+  --panel: #f3f8fa;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --accent-bg: #eff6ff;
@@ -99,14 +101,17 @@
   font-family: 'Inter', 'Noto Sans JP', system-ui, sans-serif;
   font-size: 15px;
   color: var(--fg-2);
-  background: var(--page);
+  /* A soft blue-to-green page behind the white cards (Owner, 2026-11-02): the gradient covers
+     the whole document, so a long page goes from the blue to the green. */
+  background: var(--page) linear-gradient(180deg, var(--page-top), var(--page-bottom)) no-repeat;
+  min-height: 100%;
   line-height: 1.45;
 }
 
 body {
   margin: 0;
   padding: 0 16px 32px;
-  background: var(--page);
+  background: transparent;
 }
 
 h1,
@@ -293,7 +298,7 @@ input[type='radio'] {
   margin: 8px 0;
   padding: 4px;
   border-radius: var(--radius-sm);
-  background: #f1f5f9;
+  background: #eaf2f5;
 }
 
 .tabs button {
@@ -349,7 +354,7 @@ input[type='radio'] {
   padding: 4px;
   margin: 8px 0 4px;
   border-radius: var(--radius-sm);
-  background: #f1f5f9;
+  background: #eaf2f5;
 }
 
 .program-tab {
@@ -523,6 +528,11 @@ input[type='radio'] {
 
 .param-row[data-kind='radio'] .param-control {
   align-items: start;
+}
+
+/* The Job Title fills its row, like the paste box and the drop zone above it (W4b L13). */
+.param-control.fill {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .param-control > input[type='text'] {
@@ -1434,6 +1444,8 @@ label.inline {
   right: 0;
 }
 
+/* Rows are buttons: none of the button look, and the tables' weight, so that the rows' ch are
+   the header's ch (the columns are sized in ch). */
 .pick-row,
 .table-row {
   width: 100%;
@@ -1442,9 +1454,18 @@ label.inline {
   border-bottom: 1px solid var(--panel);
   border-radius: 0;
   background: transparent;
+  box-shadow: none;
   text-align: left;
   padding: 0 8px;
   color: var(--fg);
+  font-weight: 400;
+  transition: background-color 0.15s;
+}
+
+.pick-row:active:not(:disabled),
+.table-row:active:not(:disabled),
+.sort-button:active:not(:disabled) {
+  transform: none;
 }
 
 .pick-row {
@@ -1503,6 +1524,7 @@ label.inline {
   width: 100%;
   border: none;
   background: none;
+  box-shadow: none;
   padding: 0;
   font: inherit;
   color: inherit;

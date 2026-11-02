@@ -118,6 +118,8 @@ pub fn describe(program: &str) -> Result<String, String> {
         }
         out.push(']');
     }
+    out.push_str(",\"defaults\":");
+    crate::defaults::write(&mut out, &crate::defaults::defaults(program)?);
     out.push('}');
     Ok(out)
 }

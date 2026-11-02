@@ -2,6 +2,7 @@
 // in src/infra; the Wasm implementation follows docs/web/abi_v2.md.
 import type { RecordKey } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
+import type { ResolvedDefault } from '../domain/parameters';
 import type { ProgramId } from '../domain/programs';
 
 export interface ParameterDescription {
@@ -10,6 +11,8 @@ export interface ParameterDescription {
   readonly takesValue: boolean;
   readonly defaultValue?: string;
   readonly choices?: readonly string[];
+  /** The default that the engine resolves when the option is left out (`describe`'s `defaults`). */
+  readonly resolvedDefault?: ResolvedDefault;
 }
 
 export interface ProgramDescription {

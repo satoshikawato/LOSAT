@@ -6,6 +6,7 @@
 // validation depends on the build; the Engine worker validates the argv it runs, with its
 // -num_threads, again before the search.
 import { OUTPUT_FORMATS, type OutputFormat } from '../../domain/output-format';
+import type { ResolvedDefault } from '../../domain/parameters';
 import type { ProgramId } from '../../domain/programs';
 import type { EngineGateway, ParameterDescription, ProgramDescription, ValidationResult } from '../../ports/engine';
 import type { ReactorAbi } from './abi';
@@ -24,6 +25,45 @@ interface DescribeJson {
   }>;
   readonly query_gencodes?: readonly number[];
   readonly subject_gencodes?: readonly number[];
+  readonly defaults?: DefaultsJson;
+}
+
+type ValuesJson = Readonly<Record<string, string>>;
+
+/** The *describe* JSON's `defaults` (abi_v2.md §9): tables by task, of all options at once. */
+interface DefaultsJson {
+  readonly tasks: Readonly<Record<string, ValuesJson>>;
+  readonly by: Readonly<Record<string, Readonly<Record<string, Readonly<Record<string, ValuesJson>>>>>>;
+  readonly unless: Readonly<Record<string, readonly string[]>>;
+  readonly given: readonly string[];
+}
+
+/** One option's part of the `defaults` tables; undefined when the engine resolves no value for it. */
+function resolvedDefault(defaults: DefaultsJson | undefined, flag: string): ResolvedDefault | undefined {
+  if (defaults === undefined) return undefined;
+  const byTask: Record<string, string> = {};
+  for (const [task, values] of Object.entries(defaults.tasks)) {
+    const value = values[flag];
+    if (value !== undefined) byTask[task] = value;
+  }
+  if (Object.keys(byTask).length === 0) return undefined;
+  const by: Record<string, Record<string, Record<string, string>>> = {};
+  for (const [other, table] of Object.entries(defaults.by)) {
+    for (const [otherValue, tasks] of Object.entries(table)) {
+      for (const [task, values] of Object.entries(tasks)) {
+        const value = values[flag];
+        if (value === undefined) continue;
+        ((by[other] ??= {})[otherValue] ??= {})[task] = value;
+      }
+    }
+  }
+  const unless = defaults.unless[flag];
+  return {
+    byTask,
+    ...(Object.keys(by).length === 0 ? {} : { by }),
+    ...(unless === undefined ? {} : { unless }),
+    ...(defaults.given.includes(flag) ? { given: true as const } : {}),
+  };
 }
 
 /** Maps the *describe* JSON to the port's field names. */
@@ -33,15 +73,17 @@ export function toProgramDescription(json: unknown): ProgramDescription {
   return {
     program: value.program,
     formats,
-    parameters: value.parameters.map(
-      (parameter): ParameterDescription => ({
+    parameters: value.parameters.map((parameter): ParameterDescription => {
+      const resolved = resolvedDefault(value.defaults, parameter.flag);
+      return {
         flag: parameter.flag,
         help: parameter.help,
         takesValue: parameter.takes_value,
         ...(parameter.default === undefined ? {} : { defaultValue: parameter.default }),
         ...(parameter.choices === undefined ? {} : { choices: parameter.choices }),
-      }),
-    ),
+        ...(resolved === undefined ? {} : { resolvedDefault: resolved }),
+      };
+    }),
     ...(value.query_gencodes === undefined ? {} : { queryGencodes: value.query_gencodes }),
     ...(value.subject_gencodes === undefined ? {} : { subjectGencodes: value.subject_gencodes }),
   };

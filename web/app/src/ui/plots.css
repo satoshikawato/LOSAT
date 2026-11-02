@@ -34,12 +34,29 @@
 .plot-tools {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-bottom: 6px;
 }
 
 .plot-tools button {
   min-height: 28px;
+}
+
+/* The plotted subject, chosen here or by a Descriptions row (the same selection). */
+.plot-subject {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+  font-weight: 600;
+  color: var(--fg);
+  min-width: 0;
+}
+
+.plot-subject select {
+  max-width: min(36em, 70vw);
+  font-weight: 400;
 }
 
 .plot-help {

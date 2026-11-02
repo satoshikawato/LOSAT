@@ -8,7 +8,9 @@
 // computes nothing else: no comparison of the two sequences runs behind it.
 //
 // Zoom (Ctrl or ⌘ and the wheel, buttons, + and -), pan (drag, arrow keys) and selection (click,
-// n and p) act on the same selection as the tables. The wheel alone and a finger moving up or down
+// n and p) act on the same selection as the tables. The subject is chosen in the tool band (the
+// Owner, 2026-11-02: chosen only by a Descriptions row, the plotted pair was a riddle) or by a
+// Descriptions row: one selection. The wheel alone and a finger moving up or down
 // scroll the page (S13 screen review L4). The grid and the HSPs are drawn on a base canvas, the
 // HSPs by colour and opacity class, one stroke each; hover and selection on a canvas above it, so
 // that they redraw cheaply. Input is gathered and drawn once per animation frame. A TBLASTN or
@@ -34,7 +36,7 @@ import {
   type View,
 } from '../domain/plot-geometry';
 import { axisTicks, axisUnit, identityClass, IDENTITY_CLASSES, tickLabel, type AxisTicks } from '../domain/plot-scale';
-import { formatCount, framesLabel, framesPhrase, framesText } from './format';
+import { formatCount, formatCounted, framesLabel, framesPhrase, framesText } from './format';
 import './plots.css';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
@@ -685,11 +687,23 @@ const targets = computed(() => {
   return JSON.stringify(out);
 });
 const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, view.value.y1].map((n) => Math.round(n)).join(','));
+
+function pickSubject(event: Event): void {
+  props.results.selectSubject(Number((event.target as HTMLSelectElement).value));
+}
 </script>
 
 <template>
   <figure class="dot-plot" data-testid="dotplot">
     <div class="plot-tools tool-band">
+      <label class="plot-subject">
+        <span>Subject</span>
+        <select data-testid="dotplot-subject" @change="pickSubject">
+          <option v-for="s in state.subjects" :key="s.sIdx" :value="s.sIdx" :selected="s.sIdx === state.sIdx">
+            {{ s.first.sseqid }} · {{ formatCount(s.length) }} {{ units.subject }} · {{ formatCounted(s.hspCount, 'HSP') }}
+          </option>
+        </select>
+      </label>
       <button type="button" data-testid="dotplot-zoom-in" @click="zoom(1.5)">Zoom in</button>
       <button type="button" data-testid="dotplot-zoom-out" @click="zoom(1 / 1.5)">Zoom out</button>
       <button type="button" data-testid="dotplot-zoom-hsp" :disabled="!selected" @click="zoomToSelected">Zoom to HSP</button>

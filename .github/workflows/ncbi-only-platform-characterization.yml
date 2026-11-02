@@ -1,29 +1,117 @@
-# Bootstrap registration file only.
-#
-# GitHub requires a workflow_dispatch workflow path to exist on the default
-# branch before that path can be dispatched at another ref. The diagnostic
-# implementation intentionally lives on its candidate branch. This default-
-# branch definition is inert and fail-closed if it is ever dispatched directly.
+name: Characterization of blastdbcmd batch line ends (line BDC, BDC5)
 
-name: NCBI-only Platform Characterization (Bootstrap Only)
+run-name: blastdbcmd batch line ends ${{ inputs.candidate_sha }}
+
+# Candidate branch characterize/blastdbcmd-batch-eol only, not for merge: main's bootstrap
+# registration of this path lets it be dispatched at that ref (as characterize/linux-aarch64).
+# NCBI BLAST+ 2.17.0 blastdbcmd and the candidate's LOSAT read the batch files of probe O
+# (LOSAT/tests/bdc5_eol_probe.py: -entry_batch, -taxidlist, -ipg_batch with LF, CRLF, CR and
+# Ctrl-Z, from a file and from the standard input) on Windows x64, macOS arm64 and macOS x64.
+# NcbiGetlineEOL (corelib/ncbistre.cpp:196-208) reads lines differently on each, and
+# CArg_InputFile (corelib/ncbiargs.cpp:695-737) opens the file in text mode on Windows.
+# Then `cargo test --test common blastdbcmd`. The outputs are uploaded; nothing is compared
+# here (the record is frozen by line BDC).
 
 on:
   workflow_dispatch:
     inputs:
       candidate_sha:
-        description: Exact committed and pushed diagnostic candidate SHA
+        description: Exact committed diagnostic candidate SHA
         required: true
         type: string
 
-permissions: {}
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  bootstrap-only:
-    name: Bootstrap only - characterization unavailable on this ref
-    runs-on: ubuntu-latest
+  probe:
+    name: probe O (${{ matrix.platform_id }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform_id: windows-x64
+            runner: windows-2025
+            oracle_archive: ncbi-blast-2.17.0+-x64-win64.tar.gz
+            exe: .exe
+          - platform_id: macos-arm64
+            runner: macos-15
+            oracle_archive: ncbi-blast-2.17.0+-aarch64-macosx.tar.gz
+            exe: ""
+          - platform_id: macos-x64
+            runner: macos-15-intel
+            oracle_archive: ncbi-blast-2.17.0+-x64-macosx.tar.gz
+            exe: ""
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    env:
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      OUT: ${{ github.workspace }}/bdc5-probe-o/${{ matrix.platform_id }}
+      DL: ${{ github.workspace }}/bdc5-download
+      ORACLE: ${{ github.workspace }}/bdc5-oracle
     steps:
-      - name: Refuse characterization from bootstrap workflow
-        shell: bash
+      - name: Validate candidate input
         run: |
-          echo "::error::bootstrap only: dispatch the diagnostic candidate ref, not the default-branch registration workflow"
-          exit 1
+          if [[ ! "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "candidate_sha must be exactly 40 lowercase hex digits" >&2
+            exit 1
+          fi
+      # The fixture databases are read byte for byte; keep Git for Windows from turning them into CRLF.
+      - name: Check out without line-ending conversion
+        if: runner.os == 'Windows'
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 1
+          ref: ${{ inputs.candidate_sha }}
+      - name: Verify exact candidate
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Download, verify and extract NCBI BLAST+ 2.17.0
+        env:
+          ARCHIVE_NAME: ${{ matrix.oracle_archive }}
+          PLATFORM_ID: ${{ matrix.platform_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$DL" "$ORACLE" "$OUT"
+          base_url="https://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/2.17.0"
+          encoded="${ARCHIVE_NAME/+/%2B}"
+          curl --fail --location --retry 3 --output "$DL/$ARCHIVE_NAME" "$base_url/$encoded"
+          curl --fail --location --retry 3 --output "$DL/$ARCHIVE_NAME.md5" "$base_url/$encoded.md5"
+          python LOSAT/tests/certify_platform_native_v010.py verify-archive \
+            --platform-id "$PLATFORM_ID" --archive "$DL/$ARCHIVE_NAME" --checksum "$DL/$ARCHIVE_NAME.md5"
+          python LOSAT/tests/certify_platform_native_v010.py extract-verified-archive \
+            --platform-id "$PLATFORM_ID" --archive "$DL/$ARCHIVE_NAME" --checksum "$DL/$ARCHIVE_NAME.md5" \
+            --destination "$ORACLE"
+      - name: NCBI blastdbcmd, probe O
+        run: |
+          python LOSAT/tests/bdc5_eol_probe.py --run-dir LOSAT/tests/blastdbcmd --out "$OUT/ncbi" \
+            -- "$ORACLE/ncbi-blast-2.17.0+/bin/blastdbcmd${{ matrix.exe }}"
+          cat "$OUT/ncbi/manifest.tsv"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+      - name: Build LOSAT (release)
+        run: cd LOSAT && cargo build --release --locked --bin losat
+      - name: LOSAT blastdbcmd, probe O
+        run: |
+          python LOSAT/tests/bdc5_eol_probe.py --run-dir LOSAT/tests/blastdbcmd --out "$OUT/losat" \
+            -- "$GITHUB_WORKSPACE/LOSAT/target/release/losat${{ matrix.exe }}" blastdbcmd
+          cat "$OUT/losat/manifest.tsv"
+      - name: cargo test --test common blastdbcmd
+        run: |
+          set -o pipefail
+          cd LOSAT
+          cargo test --locked --test common blastdbcmd 2>&1 | tee "$OUT/cargo_test.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: bdc5-probe-o-${{ matrix.platform_id }}
+          path: ${{ env.OUT }}
+          if-no-files-found: error
+          retention-days: 90

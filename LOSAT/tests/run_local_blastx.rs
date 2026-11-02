@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use run_local_support::{
-    assert_observer_ranges, cli_out_path, fixture_sequence, run_formats, temp_path, Run,
+    assert_observer_ranges, assert_tabular_ranges, cli_out_path, fixture_sequence, run_formats,
+    run_formats_with, temp_path, Run,
 };
 use LOSAT::algorithm::blastx::BlastxArgs;
 use LOSAT::api::local_blast::{
@@ -116,9 +117,14 @@ impl Inputs {
 
     /// `run_local` with every format of `formats`.
     fn run(&self, formats: &[&str], extra: &[&str], observe: bool) -> Run {
+        self.run_with(formats, extra, observe, observe)
+    }
+
+    /// `run`, with the observer and the hit records requested apart.
+    fn run_with(&self, formats: &[&str], extra: &[&str], observe: bool, hits: bool) -> Run {
         let queries = queries(&Self::path(&self.query)).expect("query records");
         let subjects = subjects(&Self::path(&self.subject)).expect("subject records");
-        run_formats(formats, observe, |outputs| {
+        run_formats_with(formats, observe, hits, |outputs| {
             run_local_blastx(
                 blastx_args(&self.query, &self.subject, extra),
                 &queries,
@@ -134,6 +140,12 @@ impl Inputs {
         let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .current_dir(crate_dir())
             .env_remove("BATCH_SIZE")
+            // `cargo test --all-features` builds the probe of the pools' workers, which needs a log.
+            .env(
+                "LOSAT_BLASTX_WORKER_LOG",
+                std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+                    .unwrap_or_else(|| temp_path("blastx_worker.log").into_os_string()),
+            )
             .arg("blastx")
             .arg("-query")
             .arg(&self.query)
@@ -275,6 +287,16 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
             }
         }
     }
+    // The observer without the hit records numbers the HSPs of later batches on from those of
+    // the earlier ones, as with them; outfmt 0 need not come first.
+    let inputs = batches.inputs();
+    let tabular = inputs.run_with(&["6", "7"], &["-num_threads", "2"], true, false);
+    assert!(tabular.hits.is_empty());
+    let rows = assert_tabular_ranges(&tabular, 0, Some(1), "observer without hits");
+    let reordered = inputs.run(&["7", "0", "6"], &["-num_threads", "2"], true);
+    assert_observer_ranges(&reordered, [1, 2, 0], "outfmt 7, 0, 6");
+    assert_eq!(rows, reordered.hits.len());
+    assert!(tabular.ranges == [reordered.ranges[2].clone(), reordered.ranges[0].clone()]);
     // The second batch holds the reader's warnings: they come after the reports of the first
     // batch's queries (its query warnings), as the CLI writes them.
     let run = batches.inputs().run(&["6"], &[], false);
@@ -501,6 +523,110 @@ fn the_records_of_ncbis_reader_search_as_blastxs_reader_reads_them() {
     }
     assert!(differences.is_empty(), "{}", differences.join("\n"));
     assert!(with_rows > 200, "{with_rows} cases with rows");
+}
+
+/// The environment variable that makes `waves_child` run (`queued_batches_as_waves`).
+const WAVES_CHILD: &str = "SX_RUN_LOCAL_WAVES_CHILD";
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:345-357
+// ```c
+// 		while (master_node.Processing()) {
+// 			if (!input.AtEOF()) {
+// 			 	if (!master_node.IsFull()) {
+// ...
+// 					int num_q = input.GetQueryBatch(qb, q_index);
+// ```
+// With 2+ threads the batch loop queues the reader's batches; `LOSAT_X_BXFLOW=0` (read once per
+// process) searches them in waves (`x_flush`) instead of the flow (`x_flow`), so a child process
+// of this test binary runs the comparison of several batches with it.
+#[test]
+fn queued_batches_as_waves() {
+    let output = Command::new(std::env::current_exe().expect("test binary"))
+        .args([
+            "run_local_blastx::waves_child",
+            "--exact",
+            "--nocapture",
+            "--test-threads",
+            "1",
+        ])
+        .env(WAVES_CHILD, "1")
+        .env("LOSAT_X_BXFLOW", "0")
+        .env_remove("BATCH_SIZE")
+        .output()
+        .expect("run the child");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("waves compared"), "{stdout}");
+}
+
+/// The child of `queued_batches_as_waves`: without `WAVES_CHILD` it does nothing.
+#[test]
+fn waves_child() {
+    if std::env::var_os(WAVES_CHILD).is_none() {
+        return;
+    }
+    let batches = Batches::new();
+    for threads in ["2", "4"] {
+        assert_matches_cli(
+            &batches.inputs(),
+            &["-num_threads", threads],
+            true,
+            &format!("waves n{threads}"),
+        );
+    }
+    println!("waves compared");
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1361-1365
+// ```c++
+//
+//     // apply source mods *after* figuring out mol type
+//     ITERATE(vector<SLineTextAndLoc>, title_ci, m_CurrentSeqTitles) {
+//         ParseTitle(*title_ci, pMessageListener);
+//     }
+// ```
+// NCBI posts a record's title warning when it assembles the record, after the warnings of its
+// data lines. NCBI BLAST+ 2.17.0 (`blastx -query q.fna -subject s.faa -outfmt 6`, the inputs
+// below) wrote this standard error and the rows that LOSAT writes. BLASTX's own reader (the CLI)
+// writes the title warning first (line NP).
+#[test]
+fn a_records_title_warning_follows_its_data_warnings() {
+    let query = temp_path("blastx_title_order.fna");
+    let subject = temp_path("blastx_title_order.faa");
+    std::fs::write(
+        &query,
+        b">q1 x ACGTACGTACGTACGTACGTACGT\nATGCTGTGTCGCATATTTAAG-GACCACTTGCATCAGGAGTGGCGCGCACCC7AATATAATT\nCTGCGGTGCCACGACGTCCTCCCCTCACGGCGTTGTGCCAACGACTCGGACATGTGGACA\n",
+    )
+    .expect("write query");
+    std::fs::write(
+        &subject,
+        b">s1 t ACDEFGHIKLMNPQRSTVWYACDEFGHIKLMNPQRSTVWYACDEFGHIKLMN\nMLCRIFKDHLHQEW-RAPNIILRCHDVLPSRRCAN1DSDMWTYDMFNCDELHKGDKAHEATQ\n",
+    )
+    .expect("write subject");
+    let inputs = Inputs::new(&query, &subject);
+    let run = inputs.run(&["6"], &[], false);
+    let (ok, output, cli_stderr) = inputs.cli("6", &[]);
+    let _ = std::fs::remove_file(&query);
+    let _ = std::fs::remove_file(&subject);
+    assert!(ok && !output.is_empty() && run.outputs[0] == output);
+    let ncbi = "CFastaReader: Hyphens are invalid and will be ignored around line 2
+FASTA-Reader: Ignoring invalid residues at position(s): On line 2: 36
+FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?
+CFastaReader: Hyphens are invalid and will be ignored around line 2
+FASTA-Reader: Ignoring invalid residues at position(s): On line 2: 53
+FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+";
+    assert_eq!(String::from_utf8_lossy(&run.diagnostics), ncbi);
+    // The CLI writes the same lines, each record's title warning first.
+    let mut cli_lines: Vec<&str> = std::str::from_utf8(&cli_stderr).unwrap().lines().collect();
+    let mut ncbi_lines: Vec<&str> = ncbi.lines().collect();
+    cli_lines.sort_unstable();
+    ncbi_lines.sort_unstable();
+    assert_eq!(cli_lines, ncbi_lines);
 }
 
 /// Where BLASTX's reader (the CLI) and NCBI's reader (`fasta_reader`, LOSAT Web's records) read a

@@ -1603,12 +1603,99 @@ fn x_buckets_on(
     })))
 }
 
-// No NCBI counterpart: the size, as `x_mapped_record_entries`: the cells' indices in their buckets
-// (`x_bx_buckets_on`) are needed only during the build.
-/// EXPERIMENT (LOSAT_X_BXCLUTPOOL): the capacity, in entries, of a pooled bucket fill's `u16`
-/// indices of the cells in their buckets.
-const fn x_mapped_low_entries() -> usize {
-    x_mapped_record_entries() * 2
+// No NCBI counterpart: the entries of a chunk of `XBucketChunks` (256 bytes).
+const X_BX_CHUNK: u32 = 64;
+
+// No NCBI counterpart: BLASTX's bucket fill (`x_bx_buckets_on`) keeps no record of the appends.
+/// The appends of BLASTX's bucket fill, each written as it is made into the chunks of its bucket
+/// of 2^`X_BUCKET_SHIFT` cells, as `query offset << 16 | the cell's index in its bucket`. The
+/// chunks of all buckets are cut from one arena; a bucket's chunks are linked in the order of
+/// their entries, which is the order of the appends.
+struct XBucketChunks {
+    arena: Vec<u32>,
+    /// Per bucket: the arena index its next entry takes. An index at a chunk's start (0 before
+    /// the bucket's first entry) opens a chunk: a bucket's next entry is never the first of the
+    /// chunk it fills.
+    next_entry: Vec<u32>,
+    /// Per bucket: its first and last chunks (`u32::MAX` before the first) and its number of
+    /// chunks.
+    first: Vec<u32>,
+    last: Vec<u32>,
+    chunks: Vec<u32>,
+    /// Per chunk: the next chunk of its bucket.
+    link: Vec<u32>,
+    /// The query offset of the appends being made, above the cells' indices.
+    high: u32,
+    total: usize,
+}
+
+impl XBucketChunks {
+    fn new(buckets: usize, arena: Vec<u32>) -> Self {
+        Self {
+            arena,
+            next_entry: vec![0; buckets],
+            first: vec![u32::MAX; buckets],
+            last: vec![u32::MAX; buckets],
+            chunks: vec![0; buckets],
+            link: Vec::new(),
+            high: 0,
+            total: 0,
+        }
+    }
+
+    /// A new chunk for bucket `b`: the arena index of its first entry.
+    #[cold]
+    #[inline(never)]
+    fn open(&mut self, b: usize) -> u32 {
+        let chunk = self.link.len() as u32;
+        self.arena.resize(self.arena.len() + X_BX_CHUNK as usize, 0);
+        self.link.push(u32::MAX);
+        match self.last[b] {
+            u32::MAX => self.first[b] = chunk,
+            last => self.link[last as usize] = chunk,
+        }
+        self.last[b] = chunk;
+        self.chunks[b] += 1;
+        chunk * X_BX_CHUNK
+    }
+
+    /// The entries of bucket `b`.
+    fn count(&self, b: usize) -> u32 {
+        match self.chunks[b] {
+            0 => 0,
+            n => (n - 1) * X_BX_CHUNK + ((self.next_entry[b] - 1) & (X_BX_CHUNK - 1)) + 1,
+        }
+    }
+
+    /// `visit(entry)` for the entries of bucket `b`, in order.
+    #[inline(always)]
+    fn for_each(&self, b: usize, mut visit: impl FnMut(u32)) {
+        let mut left = self.count(b);
+        let mut chunk = self.first[b];
+        while left != 0 {
+            let n = left.min(X_BX_CHUNK);
+            let at = (chunk * X_BX_CHUNK) as usize;
+            for &entry in &self.arena[at..at + n as usize] {
+                visit(entry);
+            }
+            left -= n;
+            chunk = self.link[chunk as usize];
+        }
+    }
+}
+
+impl XSink for XBucketChunks {
+    #[inline(always)]
+    fn one(&mut self, index: u32) {
+        let b = (index >> X_BUCKET_SHIFT) as usize;
+        let mut at = self.next_entry[b];
+        if at & (X_BX_CHUNK - 1) == 0 {
+            at = self.open(b);
+        }
+        self.arena[at as usize] = self.high | (index & ((1 << X_BUCKET_SHIFT) - 1));
+        self.next_entry[b] = at + 1;
+        self.total += 1;
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (see
@@ -1620,9 +1707,10 @@ const fn x_mapped_low_entries() -> usize {
 // ```
 /// BLASTX's bucket fill: `x_buckets_on`'s table with `u16` offsets, with `pooled` on vectors kept
 /// between builds (`LOSAT_X_BXCLUTPOOL`). An offset above a cell's index in its bucket no longer
-/// fits 32 bits of `hits`, so the partition puts the offsets in `hits` and the indices beside them
-/// in a vector of their own, and drops the record of the appends before the cells are filled.
-/// Declined as `x_buckets_on`, and where the query has more than `X_U16_LETTERS` letters.
+/// fits 32 bits of `hits`, so there is no packed copy of the appends in `hits`: each append goes
+/// as it is made to its bucket's chunks (`XBucketChunks`), in place of the record of the appends
+/// and its partition, and each bucket's cells are filled from them. Declined as `x_buckets_on`,
+/// and where the query has more than `X_U16_LETTERS` letters.
 #[allow(clippy::too_many_arguments)]
 fn x_bx_buckets_on(
     word_size: usize,
@@ -1659,33 +1747,33 @@ fn x_bx_buckets_on(
     // One more entry: the number of hits.
     let mut starts = x_sized_on(kept.starts, backbone_size + 1, false);
 
-    // Appends, over the segments before, inside and between NCBI's tables, recorded as the
-    // count-and-fill builder records them; not counted.
+    // Appends, over the segments before, inside and between NCBI's tables, in the count-and-fill
+    // builder's order, into their buckets' chunks; not counted.
+    let buckets = backbone_size.div_ceil(1 << X_BUCKET_SHIFT);
+    let mask = (1u32 << X_BUCKET_SHIFT) - 1;
     let ranges = x_count_ranges(tables, locations.len());
-    let mut targets: Vec<u32> = if pooled {
-        Vec::with_capacity(x_mapped_record_entries())
-    } else {
-        Vec::new()
-    };
-    let mut per_offset: Vec<(i32, u32)> = Vec::new();
+    let mut appends = XBucketChunks::new(
+        buckets,
+        if pooled {
+            Vec::with_capacity(x_mapped_record_entries())
+        } else {
+            Vec::new()
+        },
+    );
     for (range, is_table) in ranges {
-        let range_start = targets.len();
+        let range_start = appends.total;
         let mut too_large = false;
         let mut declined = false;
         x_for_each_offset(word_size, query, &locations[range], |offset, word| {
-            let before = targets.len();
-            words.for_each_word(word, &mut targets);
-            let appends = targets.len() - before;
-            if appends != 0 {
-                per_offset.push((offset, appends as u32));
-            }
-            if targets.len() > max_appends {
+            appends.high = (offset as u32) << 16;
+            words.for_each_word(word, &mut appends);
+            if appends.total > max_appends {
                 too_large = true;
                 return false;
             }
             // An append takes at most one overflow cell: within the capacity the table's test
             // passes.
-            if is_table && targets.len() - range_start > overflow_cell_capacity {
+            if is_table && appends.total - range_start > overflow_cell_capacity {
                 declined = true;
                 return false;
             }
@@ -1710,79 +1798,28 @@ fn x_bx_buckets_on(
             };
         }
     }
-    let total = targets.len();
+    let total = appends.total;
 
-    // Partition: the buckets' appends in order (a counting sort, stable), bucket b's offsets at
-    // `bucket_starts[b]..bucket_starts[b + 1]` of `hits`, the slots its cells' hits take, and the
-    // cells' indices in the bucket at the same places of `lows`.
-    let buckets = backbone_size.div_ceil(1 << X_BUCKET_SHIFT);
-    let mask = (1u32 << X_BUCKET_SHIFT) - 1;
-    let mut bucket_starts = vec![0u32; buckets + 1];
-    for &index in &targets {
-        bucket_starts[(index >> X_BUCKET_SHIFT) as usize + 1] += 1;
-    }
-    for b in 0..buckets {
-        bucket_starts[b + 1] += bucket_starts[b];
-    }
+    // Per bucket, as `x_buckets_on`: its slots of `hits` after those of the buckets before, the
+    // counts of its cells, their starts, the PV bits and `finalize`'s statistics, the fill from its
+    // chunks, then the scan order of the cells of more than 5 offsets.
     let mut hits = x_sized_on(kept.hits, total, pooled);
-    let mut lows: Vec<u16> = Vec::with_capacity(if pooled {
-        x_mapped_low_entries().max(total)
-    } else {
-        total
-    });
-    {
-        let mut cursors = bucket_starts[..buckets].to_vec();
-        let out = hits.as_mut_ptr();
-        let out_lows = lows.as_mut_ptr();
-        let mut at = 0usize;
-        for &(query_offset, appends) in &per_offset {
-            let end = at + appends as usize;
-            for &index in &targets[at..end] {
-                let cursor = &mut cursors[(index >> X_BUCKET_SHIFT) as usize];
-                // SAFETY: the offsets' appends are `targets` in order, and bucket b's cursor starts
-                // at `bucket_starts[b]` and moves on once per append to the bucket, which the
-                // histogram counted, so it stays below `bucket_starts[b + 1] <= total`, the length
-                // of `hits` and at most the capacity of `lows`.
-                unsafe {
-                    out.add(*cursor as usize)
-                        .write(u16::from_offset(query_offset as u32));
-                    out_lows.add(*cursor as usize).write((index & mask) as u16);
-                }
-                *cursor += 1;
-            }
-            at = end;
-        }
-        // SAFETY: every slot below `total` was written above (the cursors end at the buckets'
-        // ends, `bucket_starts[buckets] == total`).
-        unsafe { lows.set_len(total) };
-    }
-    drop(per_offset);
-    drop(targets);
-
-    // Per bucket, as `x_buckets_on`: the counts of its cells, their starts, the PV bits and
-    // `finalize`'s statistics, the fill (from a copy of the bucket's offsets), then the scan order
-    // of the cells of more than 5 offsets.
     let mut pv = x_zeroed_on(kept.pv, (backbone_size >> PV_ARRAY_BTS) + 1);
     let mut cell_slots = vec![0u32; 1 << X_BUCKET_SHIFT];
     let mut overflowed: Vec<u32> = Vec::new();
     let mut appended: Vec<u16> = Vec::new();
-    let mut part: Vec<u16> = Vec::new();
     let mut nonempty_count = 0usize;
     let mut longest_chain = 0i32;
+    let mut lo = 0u32;
     for b in 0..buckets {
         let first = b << X_BUCKET_SHIFT;
         let cells = (backbone_size - first).min(1 << X_BUCKET_SHIFT);
-        let lo = bucket_starts[b] as usize;
-        let hi = bucket_starts[b + 1] as usize;
-        let bucket_lows = &lows[lo..hi];
         // Each cell's count, then its cursor.
         let slots = &mut cell_slots[..cells];
         slots.fill(0);
-        for &low in bucket_lows {
-            slots[usize::from(low)] += 1;
-        }
+        appends.for_each(b, |entry| slots[(entry & mask) as usize] += 1);
         overflowed.clear();
-        let mut slot = lo as u32;
+        let mut slot = lo;
         for (cell, (start, count)) in starts[first..first + cells]
             .iter_mut()
             .zip(slots.iter_mut())
@@ -1801,16 +1838,12 @@ fn x_bx_buckets_on(
             *count = slot;
             slot += n;
         }
-        part.clear();
-        part.extend_from_slice(&hits[lo..hi]);
-        let out = hits.as_mut_ptr();
-        for (&low, &query_offset) in bucket_lows.iter().zip(&part) {
-            let at = &mut slots[usize::from(low)];
-            // SAFETY: a cell's cursor starts at its start and moves on once per append to the
-            // cell, which the counts counted, so it stays within the bucket's slots `lo..hi`.
-            unsafe { out.add(*at as usize).write(query_offset) };
+        lo = slot;
+        appends.for_each(b, |entry| {
+            let at = &mut slots[(entry & mask) as usize];
+            hits[*at as usize] = (entry >> 16) as u16;
             *at += 1;
-        }
+        });
         // A cursor ends at the cell's end.
         for &cell in &overflowed {
             let cell = cell as usize;
@@ -1825,8 +1858,9 @@ fn x_bx_buckets_on(
             }
         }
     }
+    debug_assert_eq!(lo as usize, total);
     starts[backbone_size] = total as u32;
-    drop(lows);
+    drop(appends);
     let mut pv_array_bts = PV_ARRAY_BTS;
     if (nonempty_count as f64) <= 0.01 * (backbone_size as f64) {
         pv_array_bts += ilog2(backbone_size / (8 * X_TARGET_PV_BYTES));

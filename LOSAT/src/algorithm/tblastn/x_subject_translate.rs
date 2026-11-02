@@ -598,6 +598,23 @@ thread_local! {
     static X_FRAMES: std::cell::RefCell<Vec<Vec<u8>>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
+/// Frees the frames this thread keeps for its next plan, at the end of its loop over the chunks
+/// of the subject flow (`x_oid_flow::x_loop_free`, LOSAT_X_TBNLOOPFREE).
+#[cfg(feature = "parallel")]
+pub(super) fn x_free_kept_frames() {
+    let _ = X_FRAMES.try_with(|frames| {
+        if let Ok(mut frames) = frames.try_borrow_mut() {
+            *frames = Vec::new();
+        }
+    });
+}
+
+/// The number of frames this thread keeps for its next plan.
+#[cfg(all(test, feature = "parallel"))]
+pub(super) fn x_kept_frames() -> usize {
+    X_FRAMES.with(|frames| frames.borrow().len())
+}
+
 /// A frame of `length` bytes with a sentinel at both ends,
 /// whose other bytes the caller writes, every one of them. A frame of at most
 /// `X_REUSED_FRAME` bytes is one this thread kept (`x_reuse_frame`), its bytes not cleared, which

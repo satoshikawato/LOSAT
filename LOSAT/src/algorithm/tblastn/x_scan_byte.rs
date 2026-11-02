@@ -197,6 +197,18 @@ thread_local! {
         std::cell::RefCell::new((std::sync::Weak::new(), Arc::from(Vec::new()), false));
 }
 
+/// Frees the presence bytes this thread keeps, at the end of its loop over the chunks of the
+/// subject flow (`x_oid_flow::x_loop_free`, LOSAT_X_TBNLOOPFREE). The next table this thread scans
+/// with has them built again, as every query batch's table has.
+#[cfg(feature = "parallel")]
+pub(super) fn x_free_presence() {
+    let _ = PRESENCE.try_with(|kept| {
+        if let Ok(mut kept) = kept.try_borrow_mut() {
+            *kept = (std::sync::Weak::new(), Arc::from(Vec::new()), false);
+        }
+    });
+}
+
 // No NCBI counterpart: the presence vector in another layout, made once per table and thread; it
 // does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the presence bytes of `lookup` (see `build_presence`), built

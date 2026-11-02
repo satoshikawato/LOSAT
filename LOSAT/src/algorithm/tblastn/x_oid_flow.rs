@@ -94,6 +94,48 @@ struct XWaitStats {
     jobs: [AtomicU64; 2],
 }
 
+// No NCBI counterpart (memory only; no value changes): reads the LOSAT_X_TBNLOOPFREE variable once.
+/// LOSAT_X_TBNLOOPFREE, in the strict set (on unless `=0`): whether a thread frees the buffers it
+/// keeps between subjects when its loop over the chunks ends (`x_loop_free`).
+pub(super) fn x_loop_free_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNLOOPFREE"))
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1412-1413,1604-1605,1693-1694
+/// ```c
+///     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+///            != BLAST_SEQSRC_EOF) {
+/// ...
+///     word_params = BlastInitialWordParametersFree(word_params);
+///     s_BlastCoreAuxStructFree(aux_struct);
+/// ...
+///     gap_align->sbp = NULL;
+///     gap_align = BLAST_GapAlignStructFree(gap_align);
+/// ```
+/// NCBI's search thread frees its word-finder state (diagonal table, initial hits, offset pairs)
+/// when its loop over the subjects ends, and its caller then the gapped alignment memory; a
+/// subject's translation is freed after the subject (blast_engine.c:627-631). Here a thread's loop
+/// over the chunks of the flow (or the owner's reduction) ends: the buffers the thread kept from
+/// one subject to the next go then (`search_gapped::XUnitBuffers`, the frames kept for the next
+/// plan of `x_subject_translate`, the presence bytes of `x_scan_byte`, the letter buffer of
+/// `x_subject_store`). Kept, they stayed in the thread's heap through the query batch's redo or
+/// traceback, under its blocks, until the next batch's loop. A thread that searches a subject
+/// after it makes new ones, as for its first subject (a unit on the pool always starts so): a
+/// new diagonal table's entries all lie beyond the two-hit window, as a kept table's entries do
+/// after NCBI's offset step (blast_extend.c:166-171), so no reported value changes. A thread whose
+/// loop has ended can still run units of a long subject another thread searches, and builds the
+/// presence bytes of the table again for them. `LOSAT_X_TBNLOOPFREE=0` keeps them.
+pub(super) fn x_loop_free() {
+    if !x_loop_free_on() {
+        return;
+    }
+    super::search_gapped::x_free_unit_buffers();
+    super::x_subject_translate::x_free_kept_frames();
+    super::x_scan_byte::x_free_presence();
+    super::x_subject_store::x_free_letters();
+}
+
 /// `LOSAT_X_TBNFLOWHELP` (strict set; `=0` off): how long a waiting thread that found no job
 /// waits for a change of the flow before it looks for a job again, 100 us unless the variable
 /// gives a number of microseconds from 2 to 1,000,000.
@@ -300,6 +342,8 @@ impl<T: Send> XOidFlow<T> {
         let mut idle = 0;
         loop {
             if state.closed || state.failed || state.next >= self.chunks.len() {
+                drop(state);
+                x_loop_free();
                 return;
             }
             if let Some(index) = self.take(&mut state) {
@@ -555,6 +599,45 @@ mod tests {
                 assert_eq!(by_owner, 0);
             }
         }
+    }
+
+    // LOSAT_X_TBNLOOPFREE: every thread of the pool, and the owner after its reduction, ends its
+    // loop over the chunks without the buffers it kept between subjects (here the kept frames).
+    #[test]
+    fn a_thread_frees_its_kept_frames_when_its_loop_ends() {
+        use crate::algorithm::tblastn::x_subject_translate::{x_kept_frames, x_reuse_frame};
+        // Nothing to check with LOSAT_X_TBNLOOPFREE=0, as in the gate's arm of the switches off.
+        if !x_loop_free_on() {
+            return;
+        }
+        let threads = 4;
+        let search = |subject: usize| {
+            x_reuse_frame(vec![0; 64]);
+            assert!(x_kept_frames() > 0);
+            subject
+        };
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
+        let flow = XOidFlow::new((0..64).map(|i| i..i + 1).collect(), 8, threads - 1);
+        let received = pool.install(|| {
+            let received = rayon::scope(|scope| {
+                for _ in 1..threads {
+                    scope.spawn(|_| flow.work(&search));
+                }
+                let _close = XCloseOnDrop(&flow);
+                let mut received = Vec::new();
+                while let Some(lists) = flow.next_in_order(&search).unwrap() {
+                    received.extend(lists);
+                }
+                received
+            });
+            x_loop_free();
+            received
+        });
+        assert_eq!(received, (0..64).collect::<Vec<_>>());
+        assert_eq!(pool.broadcast(|_| x_kept_frames()), vec![0; threads]);
     }
 
     // No NCBI counterpart: when the owner stops early (an error in the reduction) the other

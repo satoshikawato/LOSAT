@@ -191,6 +191,43 @@ fn a_block_that_ends_with_its_chunk_gives_the_same_reports() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// `LOSAT_X_TBNLOOPFREE`: a thread frees the buffers it kept between subjects when its loop over
+/// the chunks ends, and makes new ones for the next query batch; the reports are those of the
+/// buffers kept to the next batch, with composition-based statistics and without: one query batch,
+/// batches searched one after another on one pool (2 threads with 3 batches; 4 and 8 threads with
+/// 6 batches and no pools of their own), and batches on pools of their own (8 threads).
+#[test]
+fn buffers_freed_at_the_end_of_a_threads_loop_give_the_same_reports() {
+    let dir = temp_dir("loop-free");
+    let (db, query) = inputs(&dir);
+    let own_pools_off = [("BATCH_SIZE", "2000"), ("LOSAT_X_TBNOWNPOOLS", "0")];
+    let cases: [(u32, &[(&str, &str)]); 7] = [
+        (2, &[]),
+        (4, &[]),
+        (8, &[]),
+        (2, &[("BATCH_SIZE", "5000")]),
+        (4, &own_pools_off),
+        (8, &own_pools_off),
+        (8, &[("BATCH_SIZE", "2000")]),
+    ];
+    for (threads, batch) in cases {
+        for args in [
+            &["-outfmt", "6"][..],
+            &["-outfmt", "6", "-comp_based_stats", "0"],
+        ] {
+            let run = |off: &[(&str, &str)]| {
+                let env: Vec<_> = batch.iter().chain(off).copied().collect();
+                tblastn(&query, &db, args, threads, &env)
+            };
+            let (freed, kept) = (run(&[]), run(&[("LOSAT_X_TBNLOOPFREE", "0")]));
+            assert_eq!(freed.0, Some(0), "{}", freed.2);
+            assert!(!freed.1.is_empty());
+            assert_eq!(freed.1, kept.1, "threads {threads} {args:?} {batch:?}");
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 // local_blast.cpp:177-224 (`CheckInternalData`): NCBI does not search a query batch without a
 // valid context, so the sequence file is read by the first batch with one (as
 // `tblastn_db_search.rs` `the_sequence_file_is_read_by_the_first_batch_with_a_valid_context`).

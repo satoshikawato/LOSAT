@@ -2895,6 +2895,12 @@ fn run_preliminary_subjects_into(
     if super::x_oid_flow::x_flow_help().is_some() {
         crate::utils::xreach::x_reach!("LOSAT_X_TBNFLOWHELP", x_chunk_bases.is_some());
     }
+    // LOSAT_X_TBNLOOPFREE: the threads of the flow free the buffers they kept between subjects when
+    // their loops end; no flow, nothing freed here.
+    #[cfg(feature = "parallel")]
+    if super::x_oid_flow::x_loop_free_on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBNLOOPFREE", x_chunk_bases.is_some());
+    }
     #[cfg(feature = "parallel")]
     let x_flow = x_chunk_bases.map(|bases| {
         super::x_oid_flow::XOidFlow::new(
@@ -2979,13 +2985,16 @@ fn run_preliminary_subjects_into(
     #[cfg(feature = "parallel")]
     match (x_flow.as_ref(), pool) {
         (Some(flow), Some(pool)) => pool.install(|| {
-            rayon::scope(|scope| {
+            let reduced = rayon::scope(|scope| {
                 for _ in 1..pool.threads() {
                     scope.spawn(|_| flow.work(&x_flow_search));
                 }
                 let _close = super::x_oid_flow::XCloseOnDrop(flow);
                 reduce_subjects()
-            })
+            });
+            // LOSAT_X_TBNLOOPFREE: the owner's loop has ended too.
+            super::x_oid_flow::x_loop_free();
+            reduced
         })?,
         _ => reduce_subjects()?,
     }

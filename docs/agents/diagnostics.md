@@ -422,6 +422,7 @@ export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNKEEPFEW=1
 export LOSAT_X_TBNLINKCTX=1
 export LOSAT_X_TBNLINKSETS=1
+export LOSAT_X_TBNLOOPFREE=1
 export LOSAT_X_TBNLUTLEAN=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNPAIRCAP=1
@@ -5325,6 +5326,25 @@ Scheduling (each value computed by one thread with the original function; order 
   (5 of 8, 10, 8, 9 faster); the 2 MB cut at 8 / 16 / 32 x0.9913 / x0.9955 / x0.9754; `abr_genes` at 8 / 32 x0.9999 /
   x0.9941; AP027131 `-subject`, which does not run this code, at 1 / 16 / 32 x0.9994 / x1.0007 / x1.0072 (`=0` x0.9983 /
   x0.9979 / x1.0115; cycles x0.9986 / x0.9983 / x1.0004).
+- `LOSAT_X_TBNLOOPFREE=1` tblastn (memory; in the strict set from the pull request that added it, 2026-11-02; `=0`
+  turns it off; `tblastn/x_oid_flow.rs` `x_loop_free`, called where `XOidFlow::work` returns and after the owner's
+  reduction in `stage_d_pipeline.rs`): where the subject flow runs (2+ threads and several subjects: `-db`, or
+  `-subject` with several subjects), a thread whose loop over the chunks of subjects ends frees the buffers it kept from
+  one subject to the next: the unit path's diagonal table, offset pairs, initial hits and gapped alignment scratch
+  (`search_gapped.rs` `XUnitBuffers`), the frames kept for the next plan (`x_subject_translate.rs`), the presence bytes
+  (`x_scan_byte.rs`) and the letter buffer (`x_subject_store.rs`). Kept, they stayed in the thread's heap through the
+  query batch's redo (or traceback), under its blocks, until the next batch's loop made use of them again (48 threads
+  on `dmel_b4.faa` x zebrafish cDNAs: 17 MiB live at the redo's peak). NCBI's search thread frees its word-finder state
+  when its loop over the subjects ends and its caller the gapped alignment memory (`blast_engine.c`
+  `s_BlastCoreAuxStructFree`, `BLAST_GapAlignStructFree`). A thread that searches a subject afterwards makes new ones,
+  as for its first subject and as every unit on the pool does: a new diagonal table's entries all lie beyond the
+  two-hit window, as a kept table's do after NCBI's offset step, so no reported value changes. A thread whose loop
+  has ended can still run units of a long subject another thread searches and builds the presence bytes again for
+  them (32 KiB). One flow runs per query batch searched on a pool (per query chunk of a split batch), so a thread frees
+  and makes its buffers once per batch. Unit test `a_thread_frees_its_kept_frames_when_its_loop_ends`;
+  `tests/tblastn_db_stream.rs` `buffers_freed_at_the_end_of_a_threads_loop_give_the_same_reports` (query batches
+  searched one after another on one pool, side by side, and on their own pools).
+  Reach: where the subject flow runs (new) or not (ref), recorded where the flow is chosen.
 - `LOSAT_X_TBNPAIRCAP=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-26;
   `=0` turns it off; `tblastn/search_seed.rs` `x_scan_plan`, `X_PAIR_ROOM`): the offset-pair array that a unit's scan
   calls fill (one per running unit; the units a thread runs one after another share theirs, `XUnitBuffers`) holds

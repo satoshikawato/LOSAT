@@ -1,0 +1,1 @@
+- `tblastn`: with several threads and several subjects, a thread frees the search buffers it kept between subjects when its share of the subjects is searched, instead of holding them through the composition-based redo or the traceback, which lowers peak memory (`LOSAT_X_TBNLOOPFREE`, on by default; `=0` keeps them); reports are unchanged.

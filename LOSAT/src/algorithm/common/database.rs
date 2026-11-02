@@ -3,9 +3,10 @@
 //! as the command line reports them, the `Database:` lines of the pairwise report, and the
 //! rules for the stored titles of the reported sequences. BLASTP (stage DB-3), BLASTN
 //! (stage DB-4) and TBLASTN (stage DB-5) use them with their own name in LOSAT's refusals;
-//! TBLASTX reads a nucleotide database whole into packed subjects
-//! (`read_nucleotide_stores`), and TBLASTN each sequence where it searches it
-//! (`x_read_nucleotide_store`).
+//! TBLASTN and TBLASTX check a nucleotide database as a copy of it into packed subjects would
+//! be read (`x_check_nucleotide_stores`; the copy, `read_nucleotide_stores`, is the reference of
+//! the unit tests) and read each sequence where they search it (`x_read_nucleotide_store`,
+//! `common::x_db_stream`).
 //!
 //! The reader (`crate::seqdb`) knows nothing of the command line; this module maps its
 //! errors to NCBI's application errors (`crate::cli::NativeError`) and to LOSAT's
@@ -267,7 +268,9 @@ const STORE_BLOCK_BYTES: u64 = 1 << 20;
 /// codes. The file is read in blocks of at most `STORE_BLOCK_BYTES`, each dropped once its
 /// sequences are packed, so the database is held packed only. NCBI reads every sequence's
 /// 2-bit data in the first query batch's preliminary search, so a block that cannot be read
-/// is that search's error (`search_read_error`).
+/// is that search's error (`search_read_error`). The searches read their sequences where they
+/// search them (`common::x_db_stream`); this copy is the reference of the unit tests.
+#[cfg(test)]
 pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<PackedNucleotide>> {
     let mut stores = Vec::with_capacity(db.num_seqs() as usize);
     let mut next_ordinal = 0u32;
@@ -361,15 +364,16 @@ pub(crate) fn x_read_nucleotide_store(
     ))
 }
 
-/// The length of sequence `i` of `block` (ordinal id
-/// `ordinal`), with the errors of the sequence's store (`x_read_nucleotide_store`), without the store.
-pub(crate) fn x_nucleotide_length_in(
+/// The length and the ambiguity runs (as stored) of sequence `i` of `block` (ordinal id
+/// `ordinal`), with the errors of the sequence's store (`x_read_nucleotide_store`), without the
+/// store.
+pub(crate) fn x_nucleotide_parts_in(
     block: &crate::seqdb::SequenceBlock,
     i: usize,
     ordinal: u32,
     program: &str,
-) -> Result<usize> {
-    stored_parts(block, i, ordinal, program).map(|(length, _)| length)
+) -> Result<(usize, Vec<crate::seqdb::AmbiguityRun>)> {
+    stored_parts(block, i, ordinal, program)
 }
 
 /// The length and the ambiguity runs of sequence `i` of `block` (ordinal id `ordinal`), with the

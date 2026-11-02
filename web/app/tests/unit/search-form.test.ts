@@ -27,6 +27,7 @@ import {
   searchSummaryParts,
   sequenceKind,
   type ParameterField,
+  type ProgramId,
 } from '../../src/domain/programs';
 import {
   REGION_FLAG,
@@ -36,6 +37,7 @@ import {
   regionValue,
 } from '../../src/domain/region';
 import { estimateKind, looksLikeOtherKind } from '../../src/domain/sequence-kind';
+import { toProgramDescription } from '../../src/infra/reactor/control';
 
 const valueOption = (flag: string, defaultValue?: string, choices?: readonly string[]): EngineOption => ({
   flag,
@@ -272,90 +274,91 @@ describe('writtenValue', () => {
   });
 });
 
-describe('knownDefault: the defaults that the engine resolves by task and from other options', () => {
+describe("knownDefault: the defaults that the engine resolves (describe's defaults)", () => {
+  // describe.json is the reactor's describe; its `defaults` come from the engine's resolution
+  // (web/adapter/src/defaults.rs, whose tests check each value against the CLI's help).
+  const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+  const optionsOf = (id: ProgramId) => toProgramDescription(described[id]).parameters;
   const blastn = programById('blastn');
   const blastp = programById('blastp');
   const tblastx = programById('tblastx');
-  const task = [valueOption('-task', 'megablast')];
+  const bn = optionsOf('blastn');
+  const bp = optionsOf('blastp');
+  const tx = optionsOf('tblastx');
 
   it('follows the task the search uses, set or the engine default', () => {
-    expect(knownDefault(blastn, '-word_size', {}, task)).toEqual({ defaultValue: '28' });
-    expect(knownDefault(blastn, '-word_size', { '-task': 'blastn' }, task)).toEqual({ defaultValue: '11' });
-    expect(knownDefault(blastn, '-evalue', { '-task': 'blastn-short' }, task)).toEqual({ defaultValue: '1000' });
-    expect(knownDefault(blastn, '-dust', { '-task': 'blastn-short' }, task)).toEqual({ defaultValue: 'no' });
-    // The task is unknown before `describe` comes: so is a default by task.
+    expect(knownDefault(blastn, '-word_size', {}, bn)).toEqual({ defaultValue: '28' });
+    expect(knownDefault(blastn, '-word_size', { '-task': 'blastn' }, bn)).toEqual({ defaultValue: '11' });
+    expect(knownDefault(blastn, '-evalue', { '-task': 'blastn-short' }, bn)).toEqual({ defaultValue: '1000' });
+    expect(knownDefault(blastn, '-dust', { '-task': 'blastn-short' }, bn)).toEqual({ defaultValue: 'no' });
+    // No default is known before `describe` comes.
     expect(knownDefault(blastn, '-word_size', {}, undefined)).toBeUndefined();
   });
 
-  it("holds a matrix's value only while the matrix is the default", () => {
-    expect(knownDefault(blastp, '-gapopen', {}, undefined)).toEqual({ defaultValue: '11' });
-    expect(knownDefault(blastp, '-gapopen', { '-matrix': 'BLOSUM62' }, undefined)).toEqual({ defaultValue: '11' });
-    expect(knownDefault(blastp, '-gapopen', { '-matrix': 'PAM30' }, undefined)).toBeUndefined();
-    expect(knownDefault(blastp, '-threshold', { '-task': 'blastp-fast' }, undefined)).toEqual({ defaultValue: '20' });
-    expect(knownDefault(blastp, '-threshold', { '-word_size': '6' }, [valueOption('-task', 'blastp')])).toBeUndefined();
-    expect(knownDefault(tblastx, '-window_size', { '-matrix': 'PAM70' }, undefined)).toBeUndefined();
+  it("takes a set matrix's values from the engine's table", () => {
+    expect(knownDefault(blastp, '-gapopen', {}, bp)).toEqual({ defaultValue: '11' });
+    expect(knownDefault(blastp, '-gapopen', { '-matrix': 'BLOSUM62' }, bp)).toEqual({ defaultValue: '11' });
+    expect(knownDefault(blastp, '-gapopen', { '-matrix': 'PAM30' }, bp)).toEqual({ defaultValue: '9' });
+    expect(knownDefault(blastp, '-window_size', { '-matrix': 'PAM30' }, bp)).toEqual({ defaultValue: '15' });
+    expect(knownDefault(blastp, '-threshold', { '-matrix': 'PAM30', '-task': 'blastp-fast' }, bp)).toEqual({ defaultValue: '20' });
+    // A matrix that the engine does not hold: the values that it would decide are unknown.
+    expect(knownDefault(blastp, '-gapopen', { '-matrix': 'NOSUCH' }, bp)).toBeUndefined();
+    expect(knownDefault(blastp, '-evalue', { '-matrix': 'PAM30' }, bp)).toEqual({ defaultValue: '10' });
+    expect(knownDefault(tblastx, '-window_size', { '-matrix': 'BLOSUM45' }, tx)).toEqual({ defaultValue: '60' });
+  });
+
+  it("takes a given word size's threshold from the engine's table, and none for two such options set", () => {
+    expect(knownDefault(blastp, '-threshold', { '-task': 'blastp-fast' }, bp)).toEqual({ defaultValue: '20' });
+    expect(knownDefault(blastp, '-threshold', { '-task': 'blastp-fast', '-word_size': '5' }, bp)).toEqual({ defaultValue: '19.3' });
+    expect(knownDefault(blastp, '-threshold', { '-word_size': '6' }, bp)).toEqual({ defaultValue: '21' });
+    expect(knownDefault(blastp, '-threshold', { '-word_size': '6', '-matrix': 'PAM30' }, bp)).toBeUndefined();
+    // Told given only for the task where giving it changes the search.
+    expect(knownDefault(blastp, '-word_size', {}, bp)).toEqual({ defaultValue: '3' });
+    expect(knownDefault(blastp, '-word_size', { '-task': 'blastp-fast' }, bp)).toEqual({ defaultValue: '5', given: true });
   });
 
   it('marks the hit list options given, and shows no default for one while another is set', () => {
-    expect(knownDefault(tblastx, '-max_target_seqs', {}, undefined)).toEqual({ defaultValue: '500', given: true });
-    expect(knownDefault(tblastx, '-max_target_seqs', { '-num_alignments': '3' }, undefined)).toEqual({ given: true });
-    expect(knownDefault(tblastx, '-num_alignments', { '-max_target_seqs': '500' }, undefined)).toEqual({ given: true });
-    expect(knownDefault(tblastx, '-num_descriptions', {}, undefined)).toEqual({ defaultValue: '500', given: true });
+    expect(knownDefault(tblastx, '-max_target_seqs', {}, tx)).toEqual({ defaultValue: '500', given: true });
+    expect(knownDefault(tblastx, '-max_target_seqs', { '-num_alignments': '3' }, tx)).toEqual({ given: true });
+    expect(knownDefault(tblastx, '-num_alignments', { '-max_target_seqs': '500' }, tx)).toEqual({ given: true });
+    expect(knownDefault(tblastx, '-num_descriptions', {}, tx)).toEqual({ defaultValue: '500', given: true });
   });
 
-  it("writes BLASTX's word size even at the task's default: a word size given sets its own threshold", () => {
+  it("writes BLASTX's word size even at the fast task's default: a word size given sets its own threshold", () => {
     const blastx = programById('blastx');
-    const described = [valueOption('-task', 'blastx'), valueOption('-word_size'), valueOption('-threshold')];
-    expect(knownDefault(blastx, '-word_size', { '-task': 'blastx-fast' }, described)).toEqual({ defaultValue: '5', given: true });
-    expect(formParameters(blastx, { '-task': 'blastx-fast', '-word_size': '5' }, described)).toEqual([
+    const bx = optionsOf('blastx');
+    expect(knownDefault(blastx, '-word_size', { '-task': 'blastx-fast' }, bx)).toEqual({ defaultValue: '5', given: true });
+    expect(formParameters(blastx, { '-task': 'blastx-fast', '-word_size': '5' }, bx)).toEqual([
       ['-task', 'blastx-fast'],
       ['-word_size', '5'],
     ]);
-    expect(knownDefault(blastx, '-threshold', { '-task': 'blastx-fast' }, described)).toEqual({ defaultValue: '20' });
-    expect(knownDefault(blastx, '-threshold', { '-task': 'blastx-fast', '-word_size': '5' }, described)).toBeUndefined();
+    expect(knownDefault(blastx, '-threshold', { '-task': 'blastx-fast' }, bx)).toEqual({ defaultValue: '20' });
+    expect(knownDefault(blastx, '-threshold', { '-task': 'blastx-fast', '-word_size': '5' }, bx)).toEqual({ defaultValue: '19.3' });
   });
 
-  it("is the engine's default where the program resolves none", () => {
+  it("is the clap default where the engine resolves none", () => {
+    expect(knownDefault(blastp, '-comp_based_stats', {}, bp)).toEqual({ defaultValue: '2' });
     expect(knownDefault(tblastx, '-evalue', {}, [valueOption('-evalue', '10')])).toEqual({ defaultValue: '10' });
     expect(knownDefault(tblastx, '-evalue', {}, undefined)).toBeUndefined();
   });
 
   it('omits a value equal to a resolved default from the argv, and writes a given option at its default', () => {
-    const described = [...task, ...['-word_size', '-reward', '-gapopen'].map((flag) => valueOption(flag))];
-    expect(formParameters(blastn, { '-task': 'blastn', '-word_size': '11', '-reward': '2', '-gapopen': '5' }, described)).toEqual([
+    expect(formParameters(blastn, { '-task': 'blastn', '-word_size': '11', '-reward': '2', '-gapopen': '5' }, bn)).toEqual([
       ['-task', 'blastn'],
     ]);
-    expect(formParameters(blastn, { '-word_size': '11' }, described)).toEqual([['-word_size', '11']]);
-    expect(formParameters(blastp, { '-matrix': 'PAM30', '-gapopen': '11', '-gapextend': '1' }, undefined)).toEqual([
+    expect(formParameters(blastn, { '-word_size': '11' }, bn)).toEqual([['-word_size', '11']]);
+    expect(formParameters(blastp, { '-matrix': 'PAM30', '-gapopen': '9', '-gapextend': '1' }, bp)).toEqual([['-matrix', 'PAM30']]);
+    expect(formParameters(blastp, { '-matrix': 'PAM30', '-gapopen': '11', '-gapextend': '1' }, bp)).toEqual([
       ['-matrix', 'PAM30'],
       ['-gapopen', '11'],
-      ['-gapextend', '1'],
     ]);
-    expect(formParameters(tblastx, { '-max_target_seqs': '500', '-soft_masking': 'false' }, undefined)).toEqual([['-max_target_seqs', '500']]);
+    expect(formParameters(blastp, { '-task': 'blastp-fast', '-word_size': '5' }, bp)).toEqual([
+      ['-task', 'blastp-fast'],
+      ['-word_size', '5'],
+    ]);
+    expect(formParameters(blastp, { '-word_size': '3' }, bp)).toEqual([]);
+    expect(formParameters(tblastx, { '-max_target_seqs': '500', '-soft_masking': 'false' }, tx)).toEqual([['-max_target_seqs', '500']]);
   });
-
-  // The table is a copy of the CLI's help (programs.ts `ResolvedDefault`): each value must be one
-  // that the help of the option names, in describe.json, the reactor's describe.
-  const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<
-    string,
-    { parameters: { flag: string; help: string; default?: string }[] }
-  >;
-  it.each(PROGRAMS.filter((p) => p.defaults !== undefined).map((p) => [p.id, p] as const))(
-    "%s: every resolved default is a value that the engine's help of the option names",
-    (id, program) => {
-      for (const [flag, resolved] of Object.entries(program.defaults!)) {
-        const option = described[id]!.parameters.find((p) => p.flag === flag);
-        expect(option, `${id} ${flag}`).toBeDefined();
-        const text = `${option!.help} ${option!.default ?? ''}`;
-        expect(text, `${id} ${flag}`).toMatch(/default/i);
-        const values = typeof resolved.value === 'string' ? [resolved.value] : Object.values(resolved.value);
-        for (const value of values) {
-          const word = new RegExp(`(^|[^\\w.-])${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\w.])`);
-          expect(text, `${id} ${flag} ${value}`).toMatch(word);
-        }
-      }
-    },
-  );
 });
 
 describe('fieldList', () => {

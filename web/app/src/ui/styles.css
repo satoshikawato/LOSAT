@@ -73,7 +73,12 @@
 }
 
 :root {
-  --page: #eef1f4;
+  /* Three layers, as NCBI's page (line WR, 2026-11-02): a tinted ground (--page), groups in a
+     lighter tint with a visible edge (--group, --border-strong), and white controls, tables and
+     outputs (--bg). Bands inside a group (toolbars, table heads) are --band. */
+  --page: #d6e3f1;
+  --group: #eef1f4;
+  --band: #e2e7ec;
   --bg: #ffffff;
   --fg: #1e293b;
   --fg-2: #334155;
@@ -197,10 +202,10 @@ input[type='search'],
 select,
 textarea {
   font: inherit;
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-line);
   border-radius: var(--radius-sm);
   padding: 6px 8px;
-  background: var(--panel);
+  background: var(--bg);
   color: var(--fg-2);
   min-width: 0;
   transition:
@@ -239,9 +244,8 @@ input[type='radio'] {
   gap: 4px 14px;
   margin: 0 -16px 12px;
   padding: 10px 16px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  box-shadow: var(--shadow);
+  background: var(--group);
+  border-bottom: 1px solid var(--border-strong);
 }
 
 .app-header h1 {
@@ -399,6 +403,11 @@ input[type='radio'] {
   outline-offset: 1px;
 }
 
+/* The search page in 14 px, as the Algorithm parameters (line WR, 2026-11-02). */
+.search-panel {
+  font-size: 14px;
+}
+
 /* W4b search: the program's sentence under the tabs, as NCBI's, in the panel's type. */
 .program-summary {
   margin: 4px 0 8px;
@@ -406,25 +415,32 @@ input[type='radio'] {
   font-size: 0.92em;
 }
 
-/* W4b search: NCBI's blocks ("Enter Query Sequence", "Program Selection", the sections of
-   "Algorithm parameters"): a light grey panel whose legend is a tab on its top edge, in
-   LOSAT's accent. */
+/* NCBI's blocks ("Enter Query Sequence", "Program Selection", the groups of "Algorithm
+   parameters", the sections of the results): a group in the lighter tint with a visible edge,
+   whose name is a tab on its top edge in the accent (line WR, 2026-11-02). */
 .search-block {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  box-shadow: var(--shadow);
-  margin: 12px 0 0;
-  padding: 6px 14px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--group);
+  margin: 18px 0 0;
+  padding: 4px 12px 10px;
   min-width: 0;
 }
 
+.search-block > legend,
+.section-legend,
+.hits-section > .section-heading {
+  padding: 1px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--group);
+  color: var(--accent);
+  font-size: 1.1em;
+  font-weight: 700;
+}
+
 .search-block > legend {
-  padding: 0 6px;
-  margin-left: -6px;
-  color: var(--fg);
-  font-weight: 600;
-  font-size: 1em;
+  margin-left: -4px;
 }
 
 /* W4b search: a file dragged over a block. */
@@ -653,7 +669,7 @@ input[type='radio'] {
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-sm);
   padding: 6px;
-  background: var(--panel);
+  background: var(--bg);
   transition:
     border-color 0.15s,
     background-color 0.15s;
@@ -699,7 +715,7 @@ textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
-  background: var(--panel);
+  background: var(--bg);
   min-width: 0;
 }
 
@@ -913,12 +929,11 @@ textarea {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 16px;
-  margin: 12px 0 0;
+  margin: 14px 0 0;
   padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  box-shadow: var(--shadow);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--group);
 }
 
 .blast-row p {
@@ -953,33 +968,26 @@ textarea {
   font-size: 1em;
 }
 
-/* A block of inline words, so that the name and the count wrap as text on a phone. */
-.algorithm-parameters {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  box-shadow: var(--shadow);
-  padding: 0 14px 4px;
-}
-
+/* The bar is a group of its own (a block of inline words, so that the name and the count wrap
+   as text on a phone); open, its groups follow on the ground as the blocks above do. */
 .parameters-bar {
   display: block;
   width: 100%;
   min-height: 40px;
-  padding: 8px 0;
-  border: none;
-  border-radius: 0;
-  background: transparent;
+  padding: 8px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--group);
   box-shadow: none;
-  color: var(--fg);
-  font-weight: 600;
-  font-size: 1em;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 1.1em;
   text-align: left;
 }
 
 .parameters-bar:hover:not(:disabled) {
-  background: transparent;
-  color: var(--accent);
+  background: var(--group);
+  color: var(--accent-hover);
 }
 
 .parameters-bar:active:not(:disabled) {
@@ -996,38 +1004,17 @@ textarea {
   padding-bottom: 8px;
 }
 
-/* Algorithm parameters as NCBI's form (line WR, 2026-11-02): a tinted ground under the bar,
-   white groups with a visible edge, each group's name a heading tab in the accent; 14 px type,
-   rows of at most 40 px. */
-.parameters-body {
-  margin: 0 -14px -4px;
-  padding: 2px 14px 14px;
-  border-top: 1px solid var(--border);
-  border-radius: 0 0 var(--radius) var(--radius);
-  background: var(--panel);
-  font-size: 14px;
-}
-
+/* Algorithm parameters as NCBI's form (line WR, 2026-11-02): the groups on the ground, each
+   group's name a tab in the accent; rows of at most 40 px. */
 .parameters-body .search-block {
-  border-color: var(--border-strong);
-  border-radius: var(--radius-sm);
-  box-shadow: none;
   margin-top: 24px;
-  padding: 4px 10px 8px;
 }
 
-/* The group's name as a tab on its top edge, as a legend sits. */
+/* A group's name (a div, not a legend: ParameterForm.vue) as a tab on its top edge. */
 .parameters-body .section-legend {
   grid-column: 1 / -1;
   justify-self: start;
   margin: -17px 0 2px -4px;
-  padding: 1px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--accent);
-  font-size: 1.1em;
-  font-weight: 700;
 }
 
 /* The sections share one label column, as wide as the longest name (wrapped at 22 em), and the
@@ -1183,6 +1170,12 @@ textarea {
     grid-template-columns: 14em minmax(0, 1fr);
   }
 
+  /* "Or, upload file": the button and its words; the whole block takes a dropped file. */
+  .param-control.dropzone {
+    justify-self: start;
+    padding-right: 14px;
+  }
+
   .entry {
     grid-template-columns: minmax(0, 3fr) minmax(15em, 2fr);
   }
@@ -1312,18 +1305,29 @@ textarea {
 pre.output {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--panel);
+  background: var(--bg);
   padding: 8px 10px;
   overflow: auto;
   max-height: 60vh;
 }
 
 .results {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  box-shadow: var(--shadow);
-  padding: 4px 16px 16px;
+  padding: 0 0 16px;
+}
+
+/* The results' groups: the header block, Filter Results, the sections of Hits and the other views. */
+.results-summary,
+.result-filters,
+.hits-section,
+.results-group {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--group);
+}
+
+.results-group {
+  margin: 8px 0 0;
+  padding: 6px 12px 12px;
 }
 
 /* The Outputs view lays out a block of lines only near the view (src/domain/output-chunks.ts). A
@@ -1369,6 +1373,7 @@ label.inline {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   margin: 0;
+  padding: 2px 14px;
 }
 
 .results-summary dt,
@@ -1379,7 +1384,7 @@ label.inline {
 
 .results-summary dt {
   padding-right: 16px;
-  color: var(--muted);
+  color: var(--fg-2);
   font-weight: 600;
 }
 
@@ -1465,15 +1470,14 @@ label.inline {
 /* NCBI's classic page: Graphic Summary, Descriptions and Alignments one under the other, each
    under its own heading. */
 .hits-section {
-  margin: 0 0 16px;
+  margin: 26px 0 0;
+  padding: 0 12px 12px;
 }
 
-.hits-section .section-heading {
-  margin: 18px 0 8px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--border);
-  font-size: 1.05em;
-  font-weight: 600;
+.hits-section > .section-heading {
+  width: max-content;
+  margin: -14px 0 8px -4px;
+  line-height: 1.45;
 }
 
 .hits-view h4,
@@ -1486,13 +1490,10 @@ label.inline {
   flex: 1 1 18em;
   max-width: 28em;
   padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel);
 }
 
-.result-filters input {
-  background: var(--bg);
+.result-filters > h3 {
+  color: var(--accent);
 }
 
 .result-filters .filter-fields {
@@ -1540,7 +1541,7 @@ label.inline {
   margin: 0 0 8px;
   padding: 6px 10px;
   border-radius: var(--radius-sm);
-  background: var(--panel);
+  background: var(--band);
 }
 
 .hits-view .tool-band h3 {
@@ -1700,7 +1701,7 @@ label.inline {
   border-bottom: none;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   padding: 5px calc(8px + var(--row-gutter, 0px)) 5px 8px;
-  background: var(--panel);
+  background: var(--band);
   color: var(--muted);
   align-items: end;
 }

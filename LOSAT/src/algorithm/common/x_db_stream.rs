@@ -37,18 +37,20 @@
 //! - TBLASTX makes the frames of a short subject from the bytes of its block, with the ambiguity
 //!   runs that its store would keep (`XSequence::with_view`), and keeps the block for the frames
 //!   of its letters when it has ambiguous bases; a long one is read alone (`read_shared`) for its
-//!   frames and again for its letters' frames. Each query batch reads the sequences it reports
-//!   once each (`tblastx::database::read_reported`), when a report reads their letters.
+//!   frames, and again for its letters' frames when it has ambiguous bases and hits reach the
+//!   re-evaluation. Each query batch reads the sequences it reports once each
+//!   (`tblastx::database::read_reported`), when a report reads their letters.
 //!
 //! Every read packs the stored bytes as the copy did (`common::database::x_read_nucleotide_store`:
-//! the packing of `PackedNucleotide::from_stored`), so every stage computes the same values on the
+//! the packing of `PackedNucleotide::from_stored`), and a view of a block's bytes gives the letters
+//! and bases of that store (`XSequence::with_view`), so every stage computes the same values on the
 //! same subjects in the same order. A read that fails during the search (a database changed or
 //! damaged after the check, an error of the file system) is an `XReadError` holding the error that
 //! the check gives for the same read; the program decides how the batch that read it fails.
 //! The check does not read the 2-bit data of a block of one sequence but its last byte, so an
 //! error of the disk in the rest comes in the search's read of the sequence and not in the check:
-//! TBLASTX fails the batch that reads it, as the copy failed the first batch with a valid
-//! context, except that a batch without one that comes first and is reported with the batch
+//! TBLASTX fails the batch that reads it, if one does, as the copy failed the first batch with a
+//! valid context, except that a batch without one that comes first and is reported with the batch
 //! (`tblastx::report_stream`) is reported before LOSAT's refusal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:374-376 (the sequence of

@@ -2830,14 +2830,17 @@ fn run_in_pool(
         numbers: &subjects.numbers,
         titles: std::cell::RefCell::new(DatabaseTitles::new()),
         stores: std::cell::RefCell::default(),
-        reads_letters: outputs.formats.iter().any(|format| {
-            match report::output_format(format.outfmt) {
-                report::TblastxOutputFormat::CustomTabular(spec) => {
-                    super::super::tabular::reads_letters(&spec.fields)
-                }
-                _ => true,
-            }
-        }),
+        reads_letters: outputs.hits.is_some()
+            || outputs.observer.is_some()
+            || outputs
+                .formats
+                .iter()
+                .any(|format| match report::output_format(format.outfmt) {
+                    report::TblastxOutputFormat::CustomTabular(spec) => {
+                        super::super::tabular::reads_letters(&spec.fields)
+                    }
+                    _ => true,
+                }),
         v1_titles,
         x_search_pool: parallel_pool,
         queries_written: std::cell::Cell::new(0),
@@ -3614,7 +3617,8 @@ struct BatchReports<'a> {
     /// (`database::read_reported`), read when a report reads letters (`reads_letters`).
     stores: std::cell::RefCell<super::super::database::ReportedStores>,
     /// Whether a report reads the letters of the subjects: every format but a custom tabular
-    /// report without a field that reads them (`tabular::reads_letters`).
+    /// report without a field that reads them (`tabular::reads_letters`), and the hits and the
+    /// observer of a library caller (`report_counts`).
     reads_letters: bool,
     v1_titles: bool,
     /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the search's pool, for the report stage

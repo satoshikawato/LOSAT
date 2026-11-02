@@ -272,7 +272,18 @@ which has the same guard code as dev f62da7f6b but older Rust.
 | 16 | control | 56/56 | 56 | 0/280 |
 | 16 | trial | **0/56** | 0 | 280/280 |
 
-Every completed search in both arms gave the same 7,532 rows. One pair and one program, on few CPUs.
+The same job on the module built at dev f62da7f6b (sha256 2f4cab62...304263; gbdraw Actions
+41360100900, gbdraw's branch at 14187ce53), so the trial is now the final code:
+
+| Threads | Arm | Passes with a trap | Failed passes | Searches completed |
+|---:|---|---:|---:|---:|
+| 4 | control | 11/56 | 1 | 275/280 |
+| 4 | dev f62da7f6b | **0/56** | 0 | 280/280 |
+| 16 | control | 56/56 | 56 | 0/280 |
+| 16 | dev f62da7f6b | **0/56** | 0 | 280/280 |
+
+Every completed search of both runs, in both arms, gave the same 7,532 rows. One pair and one program, on few CPUs; 16 threads
+is a spoofed count, so these are not rates a user would see.
 
 ## What users see
 

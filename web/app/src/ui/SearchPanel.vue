@@ -11,7 +11,7 @@ import { computed, ref, watch } from 'vue';
 import type { Attention, AttentionState } from '../application/attention';
 import type { SearchDraft } from '../application/draft';
 import { effectiveValue, formParameters, placementFlags, sectionsAt } from '../domain/parameters';
-import { PROGRAMS, programById, searchSummary, type InputRole } from '../domain/programs';
+import { PROGRAMS, programById, searchSummaryParts, type InputRole } from '../domain/programs';
 import { useStore } from './useStore';
 import InputPanel from './InputPanel.vue';
 import ParameterField from './ParameterField.vue';
@@ -54,7 +54,7 @@ const describeState = computed(() => {
   return state.value.descriptionError === undefined ? 'loading' : 'failed';
 });
 const taskFields = computed(() => sectionsAt(program.value, options.value, 'program').flatMap((section) => section.fields));
-const summaryLine = computed(() => searchSummary(program.value, effectiveValue('-task', values.value, options.value)));
+const summaryParts = computed(() => searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value)));
 /** The Algorithm parameters that the argv writes: each differs from the engine's default. */
 const changed = computed(() => formParameters(program.value, values.value, options.value, 'algorithm').length);
 /**
@@ -131,7 +131,9 @@ function onThreads(event: Event): void {
       >
         {{ buttonLabel }}
       </button>
-      <p v-if="!program.unavailable" class="search-summary-line" data-testid="search-summary-line">{{ summaryLine }}</p>
+      <p v-if="!program.unavailable" class="search-summary-line" data-testid="search-summary-line">
+        <template v-for="(part, index) in summaryParts" :key="index"><strong v-if="part.strong">{{ part.text }}</strong><template v-else>{{ part.text }}</template></template>
+      </p>
     </div>
 
     <div class="blast-notes">
@@ -198,7 +200,9 @@ function onThreads(event: Event): void {
           >
             {{ buttonLabel }}
           </button>
-          <p class="search-summary-line">{{ summaryLine }}</p>
+          <p class="search-summary-line">
+            <template v-for="(part, index) in summaryParts" :key="index"><strong v-if="part.strong">{{ part.text }}</strong><template v-else>{{ part.text }}</template></template>
+          </p>
         </div>
         <p v-if="state.message && messageBelow" role="status" class="error" data-testid="search-message">
           {{ state.message.text }}

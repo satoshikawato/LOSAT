@@ -80,6 +80,8 @@
   --muted: #64748b;
   --border: #dbe6ec;
   --border-strong: #c3d4dd;
+  /* The edge of a text box or a select in the search form, dark enough to find the controls. */
+  --control-line: #8b9bab;
   --panel: #f3f8fa;
   /* The accent and the status colours are Okabe–Ito's colour-universal palette (Owner,
      2026-11-02, 案 4): blue, bluish green, vermillion and yellow, told apart in every common
@@ -497,13 +499,14 @@ input[type='radio'] {
 }
 
 .param-label {
-  font-weight: 500;
-  color: var(--fg-2);
+  font-weight: 600;
+  color: var(--fg);
   overflow-wrap: anywhere;
 }
 
-.param-label code.flag {
-  font-size: 0.8em;
+/* The option's flag after NCBI's name (W4b: NCBI's words with LOSAT's flags), small and muted. */
+.param-label .flag {
+  font-size: 0.82em;
   font-weight: 400;
   color: var(--muted);
   white-space: nowrap;
@@ -560,11 +563,38 @@ input[type='radio'] {
   color: var(--muted);
 }
 
-/* W4b search: a row of several fields (Match/Mismatch Scores, Gap Costs). */
+/* W4b search: a row of several fields (Match/Mismatch Scores, Gap Costs, NCBI's "Mask"). */
 .param-group {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
+}
+
+/* In Algorithm parameters each field of a row is its name and its control on one line. */
+.parameter-form .param-group {
+  gap: 2px 12px;
+}
+
+.parameter-form .param-inline {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+}
+
+.parameter-form .param-inline .param-control > input[type='text'] {
+  width: 5em;
+}
+
+/* A checkbox of a row keeps its name beside it; the name wraps. */
+.parameter-form .param-check .param-control {
+  flex-wrap: nowrap;
+  gap: 4px 6px;
+}
+
+.parameter-form .param-check .param-label {
+  min-width: 0;
 }
 
 .param-inline {
@@ -966,19 +996,107 @@ textarea {
   padding-bottom: 8px;
 }
 
-/* The sections of Algorithm parameters: flat groups inside the card, with gbdraw's group heading. */
-.parameters-body .search-block {
+/* Algorithm parameters as NCBI's form (line WR, 2026-11-02): a tinted ground under the bar,
+   white groups with a visible edge, each group's name a heading tab in the accent; 14 px type,
+   rows of at most 40 px. */
+.parameters-body {
+  margin: 0 -14px -4px;
+  padding: 2px 14px 14px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
   background: var(--panel);
-  box-shadow: none;
-  margin-top: 10px;
+  font-size: 14px;
 }
 
-.parameters-body .search-block > legend {
-  font-size: 0.78em;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.parameters-body .search-block {
+  border-color: var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  margin-top: 24px;
+  padding: 4px 10px 8px;
+}
+
+/* The group's name as a tab on its top edge, as a legend sits. */
+.parameters-body .section-legend {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin: -17px 0 2px -4px;
+  padding: 1px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--accent);
+  font-size: 1.1em;
+  font-weight: 700;
+}
+
+/* The sections share one label column, as wide as the longest name (wrapped at 22 em), and the
+   controls start next to it; one column below 801 px (W4b). */
+.parameter-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.parameter-form > * {
+  grid-column: 1 / -1;
+}
+
+.parameter-form .param-row {
+  align-items: center;
+  gap: 2px 14px;
+  padding: 3px 6px;
+}
+
+.parameter-form .param-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.parameter-form .param-control > .help {
+  flex-basis: 100%;
+}
+
+.parameter-form input[type='text'],
+.parameter-form select {
+  padding: 3px 6px;
+  border-color: var(--control-line);
+  background: var(--bg);
+}
+
+.parameter-form .param-control > input[type='text'] {
+  width: 8em;
+}
+
+.parameter-form .param-control > input[inputmode='text'] {
+  width: 12em;
+}
+
+.parameter-form .select-clip select {
+  min-width: 0;
+}
+
+/* NCBI's sentence beside a control. */
+.param-hint {
   color: var(--muted);
+}
+
+@media (min-width: 801px) {
+  .parameter-form {
+    grid-template-columns: minmax(10em, max-content) minmax(0, 1fr);
+  }
+
+  .parameter-form .parameter-section,
+  .parameter-form .parameter-section > .param-row {
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
+  }
+
+  .parameter-form .param-row > .param-label {
+    max-width: 22em;
+  }
 }
 
 .bar-mark {
@@ -1131,23 +1249,31 @@ textarea {
   font-size: 0.9em;
 }
 
-/* The engine's help of an option waits behind "?" (stop-describing-ui). */
+/* The engine's help of an option waits behind "?" (stop-describing-ui), a filled circle in the
+   accent as NCBI's. */
 .help-toggle {
-  width: 24px;
-  height: 24px;
+  flex: none;
+  width: 20px;
+  height: 20px;
   padding: 0;
+  border: none;
   border-radius: 50%;
-  border-color: var(--border);
+  background: var(--accent);
   box-shadow: none;
-  color: var(--muted);
-  font-size: 0.85em;
+  color: #fff;
+  font-size: 0.8em;
   font-weight: 700;
   line-height: 1;
 }
 
+.help-toggle:hover:not(:disabled),
 .help-toggle[aria-expanded='true'] {
+  background: var(--accent-hover);
+}
+
+.search-summary-line strong {
   color: var(--accent);
-  border-color: var(--accent);
+  font-weight: 600;
 }
 
 .local-note svg {
@@ -1794,6 +1920,13 @@ pre.range-text {
   }
 
   button.link {
+    min-height: 0;
+  }
+
+  /* The "?" stays a circle, at the 24 px of WCAG 2.5.8. */
+  .help-toggle {
+    width: 24px;
+    height: 24px;
     min-height: 0;
   }
 

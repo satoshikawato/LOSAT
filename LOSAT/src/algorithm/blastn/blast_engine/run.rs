@@ -5663,11 +5663,9 @@ struct BlastnReportInputs<'a> {
     /// for the reports of all batches (`x_rpt_stream::SubjectCache`); `None`: made here.
     subject_cache: Option<&'a x_rpt_stream::SubjectCache>,
     /// EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool that formats the outfmt 0 rows and text
-    /// (`report::x_pairwise_par`); `None`: the serial writer.
+    /// (`report::x_pairwise_par`) and the outfmt 6 / 7 rows (`algorithm::blastn::x_tab_par`);
+    /// `None`: the serial writers.
     x_pairwise_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
-    /// EXPERIMENT (LOSAT_X_BNTABPAR): the pool that formats the outfmt 6 / 7 rows
-    /// (`algorithm::blastn::x_tab_par`); `None`: the serial writer.
-    x_tab_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
     /// `-out`: the base of the side files of outfmt 13 and 14 and of the names their master
     /// file lists.
     out: Option<&'a std::path::Path>,
@@ -6906,7 +6904,7 @@ fn post_process_hits_and_write(
             )?;
         } else {
             crate::algorithm::blastn::x_tab_par::write_output(
-                report.x_tab_pool,
+                report.x_pairwise_pool,
                 &hit_lists,
                 &mut writer,
                 query_ids,
@@ -10266,7 +10264,6 @@ fn write_reports_untimed(
         queries_before: written.queries,
         subject_cache: written.subjects,
         x_pairwise_pool: x_pool.and_then(crate::report::x_pairwise_par::pool),
-        x_tab_pool: x_pool.and_then(crate::algorithm::blastn::x_tab_par::pool),
         out: args.out.as_deref(),
         expect: super::super::coordination::determine_evalue(args),
         dust: args.dust.params().map(|(level, window, linker)| {

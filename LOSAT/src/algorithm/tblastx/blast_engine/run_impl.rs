@@ -1936,12 +1936,9 @@ pub(crate) struct TblastxReportRun<'a> {
     pub v1_titles: bool,
     /// The queries of each batch searched, in order (the documents of the BLAST archive).
     pub archive_spans: &'a [std::ops::Range<usize>],
-    /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the pool the report stage runs on (tblastx/x_rpt_par.rs),
-    /// `None` for the serial stage.
+    /// EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool the report stage runs on (tblastx/x_rpt_par.rs)
+    /// and that formats the outfmt 0 text (`report::x_pairwise_par`), `None` for the serial stage.
     pub x_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
-    /// EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool that formats the outfmt 0 text
-    /// (`report::x_pairwise_par`), `None` for the serial writer.
-    pub x_pairwise_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
 }
 
 /// The database of a `-db` search as its reports show it.
@@ -2305,7 +2302,7 @@ fn write_tblastx_outputs(
                         run.database.map(|database| database.pairwise),
                         probe.as_mut(),
                         warnings.as_mut(),
-                        run.x_pairwise_pool,
+                        run.x_pool,
                     )
                 };
                 match pairwise.as_deref() {
@@ -2332,8 +2329,7 @@ fn write_tblastx_outputs(
                         // and the batches follow each other (`run_batch_loop`); `-db` renumbers
                         // the subjects only (`reported_subjects`).
                         debug_assert!(hits.is_sorted_by_key(|hsp| hsp.hit.q_idx));
-                        let windows =
-                            report::pairwise_windows(&hits, queries.len(), run.x_pairwise_pool);
+                        let windows = report::pairwise_windows(&hits, queries.len(), run.x_pool);
                         if windows.is_empty() {
                             // No query: the prolog and the epilog alone.
                             write(&[], 0..0)?;
@@ -2344,7 +2340,7 @@ fn write_tblastx_outputs(
                             let end =
                                 hits.partition_point(|hsp| (hsp.hit.q_idx as usize) < range.end);
                             let window = &hits[first..end];
-                            // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows as an indexed map on
+                            // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the rows as an indexed map on
                             // the pool.
                             let mut rows = match run.x_pool {
                                 Some(pool) => crate::algorithm::tblastx::x_rpt_par::pairwise_hits(
@@ -2506,7 +2502,7 @@ fn write_tblastx_outputs(
             }
             report::TblastxOutputFormat::Tabular
             | report::TblastxOutputFormat::TabularWithComments => match run.x_pool {
-                // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows formatted on the pool; with the format
+                // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the rows formatted on the pool; with the format
                 // observer (which flushes around every row) the serial writer.
                 Some(pool) if probe.is_none() => {
                     crate::algorithm::tblastx::x_rpt_par::write_tabular(
@@ -2602,7 +2598,7 @@ fn report_counts<S: TbxScore>(
         )
     });
     let engine_counts = if seqalign {
-        // EXPERIMENT (LOSAT_X_TBXRPTPAR): the counts over chunks of the list on the pool.
+        // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the counts over chunks of the list on the pool.
         match run.x_pool {
             Some(pool) => crate::algorithm::tblastx::x_rpt_par::engine_counts(
                 pool,
@@ -2632,7 +2628,7 @@ fn report_counts<S: TbxScore>(
             .iter()
             .any(|format| format.reads_displayed_counts())
     {
-        // EXPERIMENT (LOSAT_X_TBXRPTPAR): the identities over chunks of the list on the pool.
+        // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the identities over chunks of the list on the pool.
         match run.x_pool {
             Some(pool) => crate::algorithm::tblastx::x_rpt_par::set_displayed_identities(
                 pool,
@@ -2661,7 +2657,7 @@ fn report_counts<S: TbxScore>(
     // displayed rows of outfmt 0. Otherwise outfmt 0 makes its rows a window of queries at a
     // time (`rows_up_front`).
     let mut pairwise = rows_up_front(outputs, run, output_formats)
-        // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows as an indexed map on the pool.
+        // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the rows as an indexed map on the pool.
         .then(|| match run.x_pool {
             Some(pool) => crate::algorithm::tblastx::x_rpt_par::pairwise_hits(
                 pool,
@@ -3565,7 +3561,7 @@ struct BatchReports<'a> {
     /// `-db`: the stored titles of the batches' reported sequences (`run_in_pool`).
     titles: std::cell::RefCell<DatabaseTitles>,
     v1_titles: bool,
-    /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the search's pool, for the report stage
+    /// EXPERIMENT (LOSAT_X_PAIRWISEPAR): the search's pool, for the report stage
     /// (`TblastxReportRun::x_pool`).
     x_search_pool: &'a crate::utils::threading::SearchPool<'a>,
     /// The queries whose reports were written: those of the batches that the loop wrote when it
@@ -3738,7 +3734,6 @@ impl BatchReports<'_> {
                 v1_titles: self.v1_titles,
                 archive_spans: &done.spans,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
-                x_pairwise_pool: crate::report::x_pairwise_par::pool(self.x_search_pool),
             },
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);

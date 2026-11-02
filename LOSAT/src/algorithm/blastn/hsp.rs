@@ -1304,7 +1304,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
 
 /// One query's lines of `write_output_blastn_hitlists_to_writer` (outfmt 7's header, then one row
 /// per HSP of its final hit list), without the warnings that come before them. `hsp_index` counts
-/// the rows written so far (the format observer's HSP index). The EXPERIMENT LOSAT_X_BNTABPAR
+/// the rows written so far (the format observer's HSP index). The EXPERIMENT LOSAT_X_PAIRWISEPAR
 /// (`x_tab_par.rs`) formats pieces of queries into buffers with `write_query_header` and
 /// `write_hsp_rows`, the two parts of this function, on the search's pool.
 ///

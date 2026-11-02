@@ -273,7 +273,7 @@ fn displayed_residues<'r>(
 // `pair_counts`). The identities pass needs only the counts, so it reads the residues pair by
 // pair and makes no rows. On LOSAT Web's threaded build (wasi-libc's dlmalloc, one lock for
 // the whole heap) the rows of this pass and of `PairwiseRows::hit` were the allocator's time
-// of the report stage on the pool (TBXRPTPAR): d04 at 8 threads 138-186 ms per search, of
+// of the report stage on the pool (then TBXRPTPAR): d04 at 8 threads 138-186 ms per search, of
 // which 60 ms under this pass (v4-W s8).
 /// `row_counts` of the displayed rows of `hsp` (`displayed_rows`), without making them. The
 /// HSPs are ungapped: both rows have the HSP's length.

@@ -167,7 +167,12 @@ use std::ops::RangeInclusive;
 /// verified and timed with it on and off.
 /// `LOSAT_X_BNTABPAR` (BLASTN's outfmt 6 / 7 rows of a report formatted per query on the search's
 /// pool, `blastn/x_tab_par.rs`) joined the set in the pull request that added it, after it was
-/// verified and timed with it on and off.
+/// verified and timed with it on and off. It and `LOSAT_X_TBXRPTPAR` (TBLASTX's report stage on
+/// the search's pool, `tblastx/x_rpt_par.rs`) were folded into `LOSAT_X_PAIRWISEPAR` on 2026-11-02
+/// (structural line S3): the three formatted reports on the same pool under the same rule (two
+/// threads or more, no format observer), so they left `STRICT_SET` and `LOSAT_X_PAIRWISEPAR=0`
+/// keeps all three serial; TBLASTX's rows take BLASTN's pieces and windows for a query of any
+/// number of rows (before: only one of more than 1,024 rows).
 /// `LOSAT_X_BNCSR` (the chains of BLASTN's contiguous lookup tables of word sizes 9 to 11 laid out
 /// as CSR and scanned through a prefetch ring, `blastn/x_bn_csr.rs`) joined the set in the pull
 /// request that added it, after it was verified and timed with it on and off.
@@ -295,7 +300,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNSEEDLISTS",
     "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
-    "LOSAT_X_BNTABPAR",
     "LOSAT_X_BNTBRANGE",
     "LOSAT_X_BPCLUT",
     "LOSAT_X_BPCLUTSCANBF",
@@ -422,7 +426,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXQFRAMES",
     "LOSAT_X_TBXQSLICE",
     "LOSAT_X_TBXRESOLVE",
-    "LOSAT_X_TBXRPTPAR",
     "LOSAT_X_TBXSCANBF",
     "LOSAT_X_TBXSTORE",
     "LOSAT_X_TBXUNGAPSENT",

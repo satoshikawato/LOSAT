@@ -1,7 +1,13 @@
-//! EXPERIMENT (LOSAT_X_PAIRWISEPAR): the per-query parts of the pairwise reports (outfmt 0) of
-//! BLASTN, TBLASTX and BLASTP formatted on the search's pool, and BLASTN's and BLASTP's outfmt 0
-//! rows (`algorithm/blastn/pairwise.rs`, `pairwise_hits`; `algorithm/blastp/blast_engine.rs`,
-//! `build_pairwise_hits`) made on it.
+//! EXPERIMENT (LOSAT_X_PAIRWISEPAR): the reports formatted on the search's pool. This module holds
+//! the switch (`on`, `pool`) and the one form every report on the pool takes (`write_in_order`):
+//! the per-query parts of the pairwise reports (outfmt 0) of BLASTN, TBLASTX and BLASTP (below),
+//! the outfmt 6 / 7 rows of BLASTN (`algorithm/blastn/x_tab_par.rs`) and TBLASTX
+//! (`algorithm/tblastx/x_rpt_par.rs`, which also runs TBLASTX's report values on the pool), and
+//! BLASTN's and BLASTP's outfmt 0 rows (`algorithm/blastn/pairwise.rs`, `pairwise_hits`;
+//! `algorithm/blastp/blast_engine.rs`, `build_pairwise_hits`) made on it. LOSAT_X_BNTABPAR and
+//! LOSAT_X_TBXRPTPAR, the switches of the tabular rows and of TBLASTX's report stage, were folded
+//! into this one (2026-11-02); TBLASTX's rows now take the windows of BLASTN's rows for queries of
+//! any number of rows (before: only a query of more than 1,024 rows, in windows of its own).
 //!
 //! The writers (`write_blastn_pairwise_report`, `write_tblastx_pairwise_report`,
 //! `write_blastp_pairwise_report` in `pairwise.rs`) run on the thread of the search's loop while
@@ -81,6 +87,17 @@ const PIECE_BYTES: usize = 256 << 10;
 
 /// The estimated bytes of a window per thread of the pool.
 const WINDOW_BYTES_PER_THREAD: usize = 1 << 20;
+
+/// Tabular rows (outfmt 6 / 7) per thread of the pool in one window of pieces.
+pub(crate) const ROWS_PER_THREAD: usize = 2048;
+
+/// Tabular rows of one piece at most (four pieces per thread in a window of one large query).
+pub(crate) const PIECE_ROWS: usize = ROWS_PER_THREAD / 4;
+
+/// The rows of a window of tabular pieces on `pool` (`ROWS_PER_THREAD` per thread).
+pub(crate) fn row_budget(pool: &SearchPool<'_>) -> usize {
+    ROWS_PER_THREAD.saturating_mul(pool.threads().max(1))
+}
 
 // No NCBI counterpart: chooses which threads format the report; it does not change any value NCBI
 // computes. Read once per process.
@@ -453,10 +470,57 @@ fn map<T: Sync, R: Send>(
     items.iter().map(f).collect()
 }
 
+/// The form of every report on the pool: `pieces` taken in chunks, each the pieces up to the one
+/// that brings the chunk's `weight` to `budget` (at least one piece); the pool formats each piece
+/// of a chunk into a buffer of its own (`format`: the buffer and the result of the serial calls
+/// that wrote it), and the calling thread writes the chunk's buffers in order, the warnings of the
+/// query a piece opens (`opens`) before it, before the next chunk is formatted. A piece whose
+/// calls failed has its bytes written, then its error, as the serial writer's buffer would.
+/// Returns the number of chunks.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_in_order<P: Sync, W: Write>(
+    writer: &mut W,
+    pool: &SearchPool<'_>,
+    mut pieces: impl Iterator<Item = P>,
+    budget: usize,
+    weight: impl Fn(&P) -> usize,
+    opens: impl Fn(&P) -> Option<usize>,
+    format: impl Fn(&P) -> (Vec<u8>, io::Result<()>) + Sync,
+    mut warnings: Option<&mut QueryWarnings<'_>>,
+) -> io::Result<usize> {
+    let mut chunks = 0;
+    let mut chunk = Vec::new();
+    loop {
+        let mut total = 0usize;
+        while chunk.is_empty() || total < budget {
+            match pieces.next() {
+                Some(piece) => {
+                    total += weight(&piece);
+                    chunk.push(piece);
+                }
+                None => break,
+            }
+        }
+        if chunk.is_empty() {
+            return Ok(chunks);
+        }
+        let buffers = map(pool, &chunk, &format);
+        for (piece, (buffer, result)) in chunk.iter().zip(buffers) {
+            if let (Some(query), Some(warnings)) = (opens(piece), warnings.as_deref_mut()) {
+                warnings.before_query(query, &mut *writer)?;
+            }
+            writer.write_all(&buffer)?;
+            result?;
+        }
+        chunk.clear();
+        chunks += 1;
+    }
+}
+
 /// The parallel writer (module header): windows of queries grouped on `pool`, their pieces
 /// formatted on `pool` in chunks of at most the budget's estimated bytes (at least one piece),
-/// each chunk written in order by the calling thread before the next. Returns the numbers of
-/// chunks and pieces.
+/// each chunk written in order by the calling thread before the next (`write_in_order`). Returns
+/// the numbers of chunks and pieces.
 fn write_parallel<S: QuerySections, W: Write>(
     writer: &mut W,
     sections: &S,
@@ -504,30 +568,16 @@ fn write_parallel_with<S: QuerySections, W: Write>(
         });
         let first = first_query + window.start;
         let planned = pieces(sections, first, &groups, piece_bytes);
-        let mut at = 0;
-        while at < planned.len() {
-            let mut to = at;
-            let mut bytes = 0usize;
-            while to < planned.len() && (to == at || bytes < budget) {
-                bytes += planned[to].estimate;
-                to += 1;
-            }
-            let chunk = &planned[at..to];
-            let buffers = map(pool, chunk, |&piece| {
-                format_piece(sections, groups[piece.query - first].as_ref(), piece)
-            });
-            for (piece, (buffer, result)) in chunk.iter().zip(buffers) {
-                if piece.part == Part::Head {
-                    if let Some(warnings) = warnings.as_deref_mut() {
-                        warnings.before_query(piece.query, &mut *writer)?;
-                    }
-                }
-                writer.write_all(&buffer)?;
-                result?;
-            }
-            chunks += 1;
-            at = to;
-        }
+        chunks += write_in_order(
+            writer,
+            pool,
+            planned.iter(),
+            budget,
+            |piece| piece.estimate,
+            |piece| (piece.part == Part::Head).then_some(piece.query),
+            |piece| format_piece(sections, groups[piece.query - first].as_ref(), **piece),
+            warnings.as_deref_mut(),
+        )?;
         pieces_written += planned.len();
     }
     Ok((chunks, pieces_written))

@@ -1,5 +1,6 @@
-//! EXPERIMENT (LOSAT_X_BNTABPAR): BLASTN's outfmt 6 / 7 rows of a report formatted on the search's
-//! pool.
+//! EXPERIMENT (LOSAT_X_PAIRWISEPAR): BLASTN's outfmt 6 / 7 rows of a report formatted on the
+//! search's pool (until 2026-11-02 under a switch of their own, LOSAT_X_BNTABPAR, folded into
+//! LOSAT_X_PAIRWISEPAR, `report/x_pairwise_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:828-832
 //! ```c
@@ -17,17 +18,19 @@
 //! report calls at 8, 16 and 32 threads alike (ws, 2026-10-24), 87 % of it in the rows
 //! (`write_hit_fields_bytes`, local perf).
 //!
-//! What the switch changes (read once per process, `mode`), when the caller gives a pool of two
-//! threads or more (`pool`: the search's pool), there is no format observer (`FormatProbe`, which
-//! flushes around every row; the Web adapter) and the BLASTN trace is off (`tracing::enabled`; it logs rows in the serial order): the rows are cut
-//! into pieces (`Piece`) of at most `PIECE_ROWS` rows of one query, the first piece of each query
-//! with its outfmt 7 header (a query without rows is one piece of no row); the pieces are taken in
-//! windows of at least `ROWS_PER_THREAD` rows per thread of the pool (a piece of no row counts as
-//! one), and the pool formats each piece of a window into a buffer of its own with
-//! `write_query_header` and `write_hsp_rows`, the two parts of the serial function of one query
-//! (`write_query_rows`); the calling thread then writes the window's buffers in order, each
-//! query's warnings (`QueryWarnings`) before its first piece, before the next window is formatted.
-//! The last line (`write_tabular_epilog`) stays on the calling thread.
+//! What the switch changes (`x_pairwise_par::pool`: on, and a pool of two threads or more, the
+//! search's pool), when there is no format observer (`FormatProbe`, which flushes around every
+//! row; the Web adapter) and the BLASTN trace is off (`tracing::enabled`; it logs rows in the
+//! serial order): the rows are cut into pieces (`Piece`) of at most `PIECE_ROWS` rows of one
+//! query, the first piece of each query with its outfmt 7 header (a query without rows is one
+//! piece of no row); the pieces are taken in windows of at least `ROWS_PER_THREAD` rows per thread
+//! of the pool (a piece of no row counts as one), and the pool formats each piece of a window into
+//! a buffer of its own with `write_query_header` and `write_hsp_rows`, the two parts of the serial
+//! function of one query (`write_query_rows`); the calling thread then writes the window's buffers
+//! in order, each query's warnings (`QueryWarnings`) before its first piece, before the next
+//! window is formatted (`x_pairwise_par::write_in_order`, the form of every report on the pool).
+//! The last line (`write_tabular_epilog`) stays on the calling thread. TBLASTX's rows take the
+//! same pieces and windows (`algorithm/tblastx/x_rpt_par.rs`).
 //!
 //! Why the bytes are those of the serial writer: the pieces of a query, in order, are its header
 //! and then its HSP lists' rows in order, which is what `write_query_rows` writes for it, into
@@ -39,7 +42,7 @@
 //! only by the format observer, which keeps the serial writer). Writing to a buffer cannot fail,
 //! so a failed write is one of the writer's, which stops the report as before.
 //!
-//! Off (the serial writer): the switch off (`LOSAT_X_BNTABPAR=0`); no pool or one of one thread
+//! Off (the serial writer): the switch off (`LOSAT_X_PAIRWISEPAR=0`); no pool or one of one thread
 //! (`-num_threads 1`, builds without the `parallel` feature, Wasm without threads); a format
 //! observer; the BLASTN trace.
 //!
@@ -54,10 +57,11 @@
 //! change no value NCBI computes.
 
 use std::io::{self, Write};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use crate::api::local_blast::FormatProbe;
 use crate::report::query_warnings::QueryWarnings;
+use crate::report::x_pairwise_par::{self, PIECE_ROWS};
 use crate::report::OutputConfig;
 use crate::utils::threading::SearchPool;
 
@@ -66,18 +70,6 @@ use super::hsp::{
     write_tabular_epilog, BlastnHitList, BlastnOutputFormat,
 };
 
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-use rayon::prelude::*;
-
-/// Rows per thread of the pool in one window of pieces.
-const ROWS_PER_THREAD: usize = 2048;
-
-/// Rows of one piece at most (four pieces per thread in a window of one large query).
-const PIECE_ROWS: usize = ROWS_PER_THREAD / 4;
-
 /// Bytes of a row besides its two ids (eleven tabs, the newline and ten numbers; a tabular row of
 /// the cDNA input is ~100 bytes).
 const ROW_BYTES: usize = 72;
@@ -85,25 +77,8 @@ const ROW_BYTES: usize = 72;
 /// Bytes of outfmt 7's header lines besides the two titles.
 const HEADER_BYTES: usize = 320;
 
-// No NCBI counterpart: reads the switch once (LOSAT_X_BNTABPAR is a strict-set switch: on unless
-// it is `0`). It chooses between two LOSAT code paths with the same result.
-fn mode() -> bool {
-    static MODE: OnceLock<bool> = OnceLock::new();
-    *MODE.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNTABPAR"))
-}
-
-/// The pool the tabular rows are formatted on (`Some` with the switch on and a pool of two
-/// threads or more), or `None` for the serial writer.
-pub(crate) fn pool<'p, 'q>(pool: &'p SearchPool<'q>) -> Option<&'p SearchPool<'q>> {
-    const PARALLEL: bool = cfg!(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ));
-    (PARALLEL && mode() && pool.enabled() && pool.threads() > 1).then_some(pool)
-}
-
-/// `write_output_blastn_hitlists_to_writer`'s report: its rows formatted on `pool` (from `pool`)
-/// where the switch's rule allows, else by the serial writer.
+/// `write_output_blastn_hitlists_to_writer`'s report: its rows formatted on `pool` (from
+/// `x_pairwise_par::pool`) where the switch's rule allows, else by the serial writer.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_output<W: Write>(
     pool: Option<&SearchPool<'_>>,
@@ -122,7 +97,7 @@ pub(crate) fn write_output<W: Write>(
     match pool {
         Some(pool) if probe.is_none() && !super::tracing::enabled() => {
             if !hit_lists.is_empty() {
-                crate::utils::xreach::x_reach!("LOSAT_X_BNTABPAR", true);
+                crate::utils::xreach::x_reach!("LOSAT_X_PAIRWISEPAR", true);
             }
             write_on_pool(
                 pool,
@@ -139,8 +114,8 @@ pub(crate) fn write_output<W: Write>(
             )
         }
         _ => {
-            if mode() && !hit_lists.is_empty() {
-                crate::utils::xreach::x_reach!("LOSAT_X_BNTABPAR", false);
+            if x_pairwise_par::on() && !hit_lists.is_empty() {
+                crate::utils::xreach::x_reach!("LOSAT_X_PAIRWISEPAR", false);
             }
             write_output_blastn_hitlists_to_writer(
                 hit_lists,
@@ -247,11 +222,10 @@ fn write_on_pool<W: Write>(
     subject_title: &str,
     unsearched: &[bool],
     epilog: Option<usize>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: Option<&mut QueryWarnings<'_>>,
 ) -> io::Result<()> {
     let config = OutputConfig::ncbi_compat();
-    let window_rows = ROWS_PER_THREAD.saturating_mul(pool.threads().max(1));
-    let mut pieces = Pieces {
+    let pieces = Pieces {
         hit_lists,
         query_ids,
         subject_ids,
@@ -264,96 +238,57 @@ fn write_on_pool<W: Write>(
         hsp: 0,
         header: true,
     };
-    let format = |piece: &Piece| -> io::Result<Vec<u8>> {
+    let format = |piece: &Piece| {
         let hit_list = hit_lists[piece.q_idx].as_ref();
         let title = query_titles.get(piece.q_idx).map_or(0, |title| title.len());
         let mut buffer = Vec::with_capacity(piece.bytes + if piece.header { title } else { 0 });
-        if piece.header {
-            write_query_header(
-                &mut buffer,
-                piece.q_idx,
-                hit_list,
-                output_format,
-                query_titles,
-                subject_title,
-                unsearched,
-            )?;
-        }
-        // The running HSP index is the format observer's, which this path never has.
-        let mut hsp_index = 0;
-        let lists = hit_list.map_or(&[][..], |list| &list.hsplist_array[..]);
-        let (mut list, mut hsp, mut rows) = (piece.list, piece.hsp, piece.rows);
-        while rows > 0 {
-            let hsps = &lists[list].hsps;
-            let take = (hsps.len() - hsp).min(rows);
-            write_hsp_rows(
-                &mut buffer,
-                &hsps[hsp..hsp + take],
-                query_ids,
-                subject_ids,
-                &config,
-                &mut hsp_index,
-                None,
-            )?;
-            rows -= take;
-            list += 1;
-            hsp = 0;
-        }
-        Ok(buffer)
-    };
-    loop {
-        let mut window = Vec::new();
-        let mut rows = 0;
-        while rows < window_rows {
-            match pieces.next() {
-                Some(piece) => {
-                    rows += piece.rows.max(1);
-                    window.push(piece);
-                }
-                None => break,
-            }
-        }
-        if window.is_empty() {
-            break;
-        }
-        let buffers = map(pool, &window, &format);
-        for (piece, buffer) in window.iter().zip(buffers) {
+        let result = (|| {
             if piece.header {
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    warnings.before_query(piece.q_idx, &mut *writer)?;
-                }
+                write_query_header(
+                    &mut buffer,
+                    piece.q_idx,
+                    hit_list,
+                    output_format,
+                    query_titles,
+                    subject_title,
+                    unsearched,
+                )?;
             }
-            writer.write_all(&buffer?)?;
-        }
-    }
+            // The running HSP index is the format observer's, which this path never has.
+            let mut hsp_index = 0;
+            let lists = hit_list.map_or(&[][..], |list| &list.hsplist_array[..]);
+            let (mut list, mut hsp, mut rows) = (piece.list, piece.hsp, piece.rows);
+            while rows > 0 {
+                let hsps = &lists[list].hsps;
+                let take = (hsps.len() - hsp).min(rows);
+                write_hsp_rows(
+                    &mut buffer,
+                    &hsps[hsp..hsp + take],
+                    query_ids,
+                    subject_ids,
+                    &config,
+                    &mut hsp_index,
+                    None,
+                )?;
+                rows -= take;
+                list += 1;
+                hsp = 0;
+            }
+            Ok(())
+        })();
+        (buffer, result)
+    };
+    x_pairwise_par::write_in_order(
+        writer,
+        pool,
+        pieces,
+        x_pairwise_par::row_budget(pool),
+        |piece| piece.rows.max(1),
+        |piece| piece.header.then_some(piece.q_idx),
+        format,
+        warnings,
+    )?;
     write_tabular_epilog(writer, output_format, epilog)
-}
-
-/// `f` of every piece of `pieces`, in order, on `pool`.
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-fn map<R: Send>(
-    pool: &SearchPool<'_>,
-    pieces: &[Piece],
-    f: &(impl Fn(&Piece) -> R + Sync),
-) -> Vec<R> {
-    pool.install(|| pieces.par_iter().map(f).collect())
-}
-
-/// `f` of every piece of `pieces`, in order (builds without threads, where `pool` gives `None`
-/// and this is never called).
-#[cfg(not(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-)))]
-fn map<R: Send>(
-    _pool: &SearchPool<'_>,
-    pieces: &[Piece],
-    f: &(impl Fn(&Piece) -> R + Sync),
-) -> Vec<R> {
-    pieces.iter().map(f).collect()
 }
 
 #[cfg(all(
@@ -364,6 +299,7 @@ fn map<R: Send>(
 mod tests {
     use super::super::hsp::{BlastnHsp, BlastnHspList};
     use super::*;
+    use crate::report::x_pairwise_par::ROWS_PER_THREAD;
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
     // ```c

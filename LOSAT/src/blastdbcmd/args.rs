@@ -440,23 +440,137 @@ pub(super) fn arg_message(name: &str, what: &str, attr: &str) -> String {
 // ```
 // `-` is the standard input (probes K30-K32 of line BDC). On Linux the stream of a
 // directory opens and reads nothing (K33-K35); an empty name opens nothing (K39).
-/// The bytes of the input file `value` of the argument `name` (`AsInputFile`): `Err` with
-/// NCBI's message (`File is not accessible`) when it does not open.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:580-585
+// ```c++
+// IOS_BASE::openmode CArg_Ios::IosMode(CArgValue::TFileFlags flags)
+// {
+//     IOS_BASE::openmode openmode = (IOS_BASE::openmode) 0;
+//     if (flags & CArgValue::fBinary) {
+//         openmode |= IOS_BASE::binary;
+//     }
+// ```
+// blastdbcmd describes its input files without `fBinary` (blastdbcmd.cpp:928-931, 945-948,
+// 1029-1030): the file and the standard input are read in text mode (`text_mode`).
+/// The bytes of the input file `value` of the argument `name` (`AsInputFile`) as the stream
+/// of LOSAT's platform reads them: `Err` with NCBI's message (`File is not accessible`) when
+/// it does not open.
 pub(super) fn read_input_file(name: &str, value: &str) -> Result<Vec<u8>, String> {
     let not_accessible = || arg_message(name, "File is not accessible", value);
-    if value == "-" {
+    let bytes = if value == "-" {
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut bytes)
             .map_err(|_| not_accessible())?;
-        return Ok(bytes);
-    }
-    if value.is_empty() {
+        bytes
+    } else if value.is_empty() {
         return Err(not_accessible());
+    } else if cfg!(unix) && std::path::Path::new(value).is_dir() {
+        Vec::new()
+    } else {
+        std::fs::read(value).map_err(|_| not_accessible())?
+    };
+    Ok(text_mode(bytes, LineEnds::HOST))
+}
+
+/// The platforms on which NCBI reads the lines of an input file differently: the text mode
+/// of the stream (`text_mode`) and `NcbiGetlineEOL` (`input_lines`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LineEnds {
+    /// Linux and the other systems of NCBI's `#else` (LOSAT's WASI build too).
+    Unix,
+    /// `NCBI_OS_MSWIN`.
+    Windows,
+    /// `NCBI_OS_DARWIN` (macOS).
+    Darwin,
+}
+
+impl LineEnds {
+    /// The platform LOSAT is built for.
+    pub(super) const HOST: LineEnds = if cfg!(windows) {
+        LineEnds::Windows
+    } else if cfg!(target_os = "macos") {
+        LineEnds::Darwin
+    } else {
+        LineEnds::Unix
+    };
+}
+
+/// The bytes of a file that a stream opened in text mode reads on `platform`: on Windows
+/// (the C runtime's text mode, under NCBI's `CNcbiIfstream` and the `cin` that
+/// `NcbiSys_setmode` sets to `O_TEXT`, ncbiargs.cpp:717-720) those before the first Ctrl-Z,
+/// with each `\r\n` read as `\n` (probe O of line BDC: O04, O09-O12); elsewhere the bytes of
+/// the file.
+fn text_mode(mut bytes: Vec<u8>, platform: LineEnds) -> Vec<u8> {
+    if platform != LineEnds::Windows {
+        return bytes;
     }
-    if cfg!(unix) && std::path::Path::new(value).is_dir() {
-        return Ok(Vec::new());
+    if let Some(end) = bytes.iter().position(|&byte| byte == 0x1a) {
+        bytes.truncate(end);
     }
-    std::fs::read(value).map_err(|_| not_accessible())
+    let mut kept = 0;
+    for at in 0..bytes.len() {
+        if !(bytes[at] == b'\r' && bytes.get(at + 1) == Some(&b'\n')) {
+            bytes[kept] = bytes[at];
+            kept += 1;
+        }
+    }
+    bytes.truncate(kept);
+    bytes
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:196-208
+// ```c++
+// CNcbiIstream& NcbiGetlineEOL(CNcbiIstream& is, string& str, SIZE_TYPE* count)
+// {
+// #if   defined(NCBI_OS_MSWIN)
+//     NcbiGetline(is, str, '\n', count);
+//     if (!str.empty()  &&  str[str.length() - 1] == '\r')
+//         str.resize(str.length() - 1);
+// #elif defined(NCBI_OS_DARWIN)
+//     NcbiGetline(is, str, "\r\n", count);
+// #else /* assume UNIX-like EOLs */
+//     NcbiGetline(is, str, '\n', count);
+// #endif //NCBI_OS_...
+//     return is;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:90-104
+// ```c++
+//         SIZE_TYPE delim_pos = delims.find(CT_TO_CHAR_TYPE(ch));
+//         if (delim_pos != NPOS) {
+//             // Special case -- if two different delimiters are back to
+//             // back and in the same order as in delims, treat them as
+//             // a single delimiter (necessary for correct handling of
+//             // DOS/MAC-style CR/LF endings).
+//             ch = is.rdbuf()->sgetc();
+//             if (!CT_EQ_INT_TYPE(ch, CT_EOF)
+//                 &&  delims.find(CT_TO_CHAR_TYPE(ch), delim_pos + 1) != NPOS) {
+//                 is.rdbuf()->sbumpc();
+//                 delim_count = 2;
+//             } else {
+//                 delim_count = 1;
+//             }
+//             break;
+//         }
+// ```
+// The loops of blastdbcmd that read lines so skip the empty ones (`if ( !line.empty() )`,
+// blastdbcmd.cpp:333, 385, 450, 497): on macOS a line then ends at any `\r` or `\n`, and the
+// `\r\n` that NCBI takes for one end leaves no other line.
+/// The lines of an input file (`bytes` as `read_input_file` gives them) that the loops of
+/// `NcbiGetlineEOL` read on `platform`, without the empty ones.
+pub(super) fn input_lines(bytes: &[u8], platform: LineEnds) -> Vec<&[u8]> {
+    let filled = |line: &&[u8]| !line.is_empty();
+    match platform {
+        LineEnds::Unix => bytes.split(|&byte| byte == b'\n').filter(filled).collect(),
+        LineEnds::Windows => bytes
+            .split(|&byte| byte == b'\n')
+            .map(|line| line.strip_suffix(b"\r").unwrap_or(line))
+            .filter(filled)
+            .collect(),
+        LineEnds::Darwin => bytes
+            .split(|&byte| byte == b'\r' || byte == b'\n')
+            .filter(filled)
+            .collect(),
+    }
 }
 
 /// The arguments of one command line: those given and the defaults NCBI adds.
@@ -1485,6 +1599,52 @@ mod tests {
         assert_eq!(printable_string("\u{1}9"), "\\19");
         assert_eq!(printable_string("\u{1}1"), "\\0011");
         assert_eq!(printable_string("é"), "\\303\\251");
+    }
+
+    /// The lines that `NcbiGetlineEOL` reads from `bytes` on `platform`, after the text mode.
+    fn lines(bytes: &str, platform: LineEnds) -> Vec<String> {
+        let bytes = text_mode(bytes.as_bytes().to_vec(), platform);
+        input_lines(&bytes, platform)
+            .into_iter()
+            .map(|line| String::from_utf8(line.to_vec()).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn batch_lines_end_as_on_each_platform_of_ncbi() {
+        use LineEnds::{Darwin, Unix, Windows};
+        // The inputs of probe O of line BDC (BDC5) and the lines NCBI 2.17.0 read from them.
+        let cases: &[(&str, [&[&str]; 3])] = &[
+            ("a\nb\n", [&["a", "b"], &["a", "b"], &["a", "b"]]),
+            ("a\r\nb\r\n", [&["a\r", "b\r"], &["a", "b"], &["a", "b"]]),
+            ("a\rb\r", [&["a\rb\r"], &["a\rb"], &["a", "b"]]),
+            (
+                "a\r\r\nb\r\n",
+                [&["a\r\r", "b\r"], &["a", "b"], &["a", "b"]],
+            ),
+            ("a\n\rb\n", [&["a", "\rb"], &["a", "\rb"], &["a", "b"]]),
+            ("a\r\nb\r", [&["a\r", "b\r"], &["a", "b"], &["a", "b"]]),
+            (
+                "\r\n \r\nb\n",
+                [&["\r", " \r", "b"], &[" ", "b"], &[" ", "b"]],
+            ),
+            ("a\n\x1ab\n", [&["a", "\x1ab"], &["a"], &["a", "\x1ab"]]),
+            (
+                "a\r\x1a\nb\n",
+                [&["a\r\x1a", "b"], &["a"], &["a", "\x1a", "b"]],
+            ),
+            ("a\r\rb\r\n", [&["a\r\rb\r"], &["a\r\rb"], &["a", "b"]]),
+            (
+                "a\r\n\rb\r\n",
+                [&["a\r", "\rb\r"], &["a", "\rb"], &["a", "b"]],
+            ),
+            ("", [&[], &[], &[]]),
+        ];
+        for &(bytes, [unix, windows, darwin]) in cases {
+            assert_eq!(lines(bytes, Unix), unix, "{bytes:?} on Linux");
+            assert_eq!(lines(bytes, Windows), windows, "{bytes:?} on Windows");
+            assert_eq!(lines(bytes, Darwin), darwin, "{bytes:?} on macOS");
+        }
     }
 
     #[test]

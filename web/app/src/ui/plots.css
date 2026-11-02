@@ -43,9 +43,10 @@
   min-height: 28px;
 }
 
-/* The plotted subject, chosen here or by a Descriptions row (the same selection). The list takes a
-   percentage width, so that its longest subject never widens the page: a select sized by its
-   options kept WebKit's 390 px page 90-115 px too wide (CI of #732). */
+/* The plotted subject, chosen here or by a Descriptions row (the same selection). The list has a
+   fixed width that it grows from, so that its longest subject never widens the page: WebKit sizes
+   a select by its longest option unless the width or max-width is a fixed length (not a
+   percentage, not min()); that kept its 390 px page 90-115 px too wide (CI of #732). */
 .plot-subject {
   display: inline-flex;
   align-items: center;
@@ -59,7 +60,7 @@
 
 .plot-subject select {
   flex: 1 1 auto;
-  width: 100%;
+  width: 10em;
   min-width: 0;
   font-weight: 400;
 }

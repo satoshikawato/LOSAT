@@ -2746,7 +2746,7 @@ Rebuilding less:
 - `LOSAT_X_TBXRPTPAR=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads);
   folded into `LOSAT_X_PAIRWISEPAR` on 2026-11-02, structural line S3: the variable is gone, a run ignores
-  it, and `LOSAT_X_PAIRWISEPAR=0` keeps this whole stage serial; the numbers below were measured with the
+  it, and `LOSAT_X_PAIRWISEPAR=0` keeps this stage's work serial (the values and the tabular rows); the numbers below were measured with the
   old switch, `=0` of which is now `LOSAT_X_PAIRWISEPAR=0`; the outfmt 6 / 7 rows now take BLASTN's pieces and
   windows (see `LOSAT_X_BNTABPAR` below) for a query of any number of rows, where until 2026-11-02 only a
   query of more than 1,024 rows was formatted on the pool, in the windows described here)
@@ -2904,7 +2904,7 @@ Rebuilding less:
   2026-10-24 (perf/bn-tab-par, evidence at the end of this entry): on unless it is `0`; folded into
   `LOSAT_X_PAIRWISEPAR` on 2026-11-02, structural line S3: the variable is gone, a run ignores it, and
   `LOSAT_X_PAIRWISEPAR=0` keeps these rows serial, as it keeps TBLASTX's tabular rows and report values
-  (`LOSAT_X_TBXRPTPAR`, folded the same day) and the outfmt 0 text serial; TBLASTX's outfmt 6 / 7 rows now
+  (`LOSAT_X_TBXRPTPAR`, folded the same day) and the outfmt 0 text of the three programs serial; TBLASTX's outfmt 6 / 7 rows now
   take these pieces and windows for every query, one writer loop, `x_pairwise_par::write_in_order`, serves all
   three; the description and numbers below are those of the switch as it was added) the rows of a report are
   formatted on the search's pool: they are cut into pieces of at most 512 rows of one query (the first piece of a
@@ -2918,7 +2918,9 @@ Rebuilding less:
   that query, and the serial writer is those calls in query order. Where: the search's pool, which `write_reports` gets in the batch loop
   and after it; serial with one thread, with the Web adapter's format observer and with the BLASTN trace.
   Memory: the rows of one window (about 6 MiB at 32 threads with ~100-byte rows), also for one query of many rows
-  or many queries without rows. `LOSAT_X_REACH` records the decision once per report call of at least one query
+  or many queries without rows; with outfmt 7 a window also holds the headers of its queries (a query without
+  rows counts as one row, about 150 bytes plus the title each), TBLASTX's windows too since 2026-11-02.
+  `LOSAT_X_REACH` records the decision once per report call of at least one query
   (`switch_reach_expected.tsv`: conditional). Tests: `x_tab_par` unit tests (random hit lists, outfmt 6 and 7, with
   and without the epilog, warnings, 2 / 3 / 8 threads, a query larger than a window: the serial writer's report,
   flushes and warnings in the same order; every row in exactly one piece, in order; a format observer keeps the
@@ -2938,11 +2940,14 @@ Rebuilding less:
   32 threads) 0.96-1.01.
 - `LOSAT_X_PAIRWISEPAR=1` (BLASTN, TBLASTX, BLASTP, speed; in the strict set from the pull request that added it,
   2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads); since
-  2026-11-02 (structural line S3) it is the switch of the whole report stage on the pool: `LOSAT_X_BNTABPAR`
-  (BLASTN's outfmt 6 / 7 rows) and `LOSAT_X_TBXRPTPAR` (TBLASTX's displayed identities, engine counts, outfmt 0
-  rows and outfmt 6 / 7 rows) were folded into it, their variables are gone, and `LOSAT_X_PAIRWISEPAR=0` keeps
-  all of it serial, the outfmt 0 text of the three programs included; the serial forms remain for the Web format
-  observer (text and tabular rows) and the BLASTN trace (tabular rows); `LOSAT_X_REACH` records the decision of
+  2026-11-02 (structural line S3) it is the switch of the report writers on the pool and of TBLASTX's report values:
+  `LOSAT_X_BNTABPAR` (BLASTN's outfmt 6 / 7 rows) and `LOSAT_X_TBXRPTPAR` (TBLASTX's displayed identities, engine
+  counts, outfmt 0 rows and outfmt 6 / 7 rows) were folded into it, their variables are gone, and
+  `LOSAT_X_PAIRWISEPAR=0` keeps the writers serial (the outfmt 0 text and rows of BLASTN, BLASTP and TBLASTX, the
+  outfmt 6 / 7 rows of BLASTN and TBLASTX) and TBLASTX's report values (displayed identities, engine counts); other
+  report work keeps its pool whatever the switch says (BLASTN `-db`'s reported records, the BLAST archive's DUST
+  masks). With the Web format observer the outfmt 0 text and the tabular rows are written serially (the outfmt 0
+  rows and TBLASTX's values stay on the pool); the BLASTN trace keeps BLASTN's tabular rows serial; `LOSAT_X_REACH` records the decision of
   the three sites under this name, TBLASTX's once per report stage) the pairwise
   report (outfmt 0) of BLASTN (every task, `-subject` and `-db`), TBLASTX and BLASTP is formatted on the search's pool
   (`report/x_pairwise_par.rs`, exactness argument in its header). The three writers of `report/pairwise.rs` have one

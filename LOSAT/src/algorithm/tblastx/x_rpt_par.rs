@@ -296,7 +296,7 @@ mod tests {
     use super::*;
     use crate::common::Hit;
     use crate::report::query_warnings::QueryWarnings;
-    use crate::report::x_pairwise_par::ROWS_PER_THREAD;
+    use crate::report::x_pairwise_par::{PIECE_ROWS, ROWS_PER_THREAD};
 
     struct Rng(u64);
 
@@ -361,6 +361,18 @@ mod tests {
         (0..n)
             .map(|i| Arc::<[u8]>::from(format!("{prefix}{i}").into_bytes()))
             .collect()
+    }
+
+    /// `case` with the warnings of the queries in `warned` only.
+    fn warn_only(mut case: Case, warned: &[usize]) -> Case {
+        for (q, warning) in case.warnings.iter_mut().enumerate() {
+            *warning = if warned.contains(&q) {
+                format!("Warning: [tblastx] Query_{q} warning\n").into_bytes()
+            } else {
+                Vec::new()
+            };
+        }
+        case
     }
 
     /// `queries` queries with `rows(query)` rows each (the hits grouped by query, as the final
@@ -544,5 +556,83 @@ mod tests {
         let big = &cases[6];
         assert!(big.hits.len() > 4 * ROWS_PER_THREAD);
         assert!(report_len(&run(big, true, None, None)) > 4 * ROWS_PER_THREAD * 40);
+    }
+
+    /// Windows that begin with the first piece of a warned query, and a warned query 0. The
+    /// budget of a window (a chunk of `write_in_order`) is `ROWS_PER_THREAD` rows per thread of
+    /// the pool; a piece of no row weighs one. At 2 threads the budget is 4,096 rows:
+    /// 8 queries of 512 rows (one piece each) fill it, so the chunks begin with queries 0, 8, 16,
+    /// ...; 4,096 queries without rows fill it, so the second chunk begins with query 4,096.
+    #[test]
+    fn a_chunk_may_begin_with_the_header_piece_of_a_warned_query() {
+        let mut rng = Rng(0xfeed);
+        let full = ROWS_PER_THREAD * 2;
+        assert_eq!(full, 8 * PIECE_ROWS);
+        let mut cases = vec![(
+            warn_only(case(&mut rng, 24, |_, _| PIECE_ROWS), &[0, 8, 16]),
+            vec![0, 8, 16],
+        )];
+        // One row fewer in query 7: query 8 still fits the first chunk (4,095 + 512 rows), so the
+        // second chunk begins with query 9 and the third with query 17; query 8 is warned in the
+        // middle of a chunk.
+        cases.push((
+            warn_only(
+                case(&mut rng, 24, |_, q| {
+                    if q == 7 {
+                        PIECE_ROWS - 1
+                    } else {
+                        PIECE_ROWS
+                    }
+                }),
+                &[0, 8, 9, 17],
+            ),
+            vec![0, 9, 17],
+        ));
+        cases.push((
+            warn_only(case(&mut rng, full + 5, |_, _| 0), &[0, full]),
+            vec![0, full],
+        ));
+        for (case, begin) in &cases {
+            // Where the chunks begin, computed as `write_in_order` takes pieces.
+            let weights: Vec<usize> = (0..case.titles.len())
+                .map(|q| {
+                    case.hits
+                        .iter()
+                        .filter(|hsp| hsp.hit.q_idx as usize == q)
+                        .count()
+                        .clamp(1, PIECE_ROWS)
+                })
+                .collect();
+            let mut starts = vec![0];
+            let mut total = 0;
+            for (q, weight) in weights.iter().enumerate() {
+                if total >= full {
+                    starts.push(q);
+                    total = 0;
+                }
+                total += weight;
+            }
+            for query in begin {
+                assert!(
+                    starts.contains(query),
+                    "chunk starts {starts:?} lack query {query}"
+                );
+            }
+            for threads in [2usize, 3] {
+                crate::utils::threading::with_search_pool(threads, "tblastx", |pool| {
+                    for comments in [false, true] {
+                        for epilog in [None, Some(7)] {
+                            assert_eq!(
+                                run(case, comments, epilog, None),
+                                run(case, comments, epilog, Some(pool)),
+                                "threads {threads} comments {comments} {epilog:?}"
+                            );
+                        }
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            }
+        }
     }
 }

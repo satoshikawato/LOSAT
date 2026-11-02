@@ -7,7 +7,8 @@
 //! is `0`. With it on and two or more threads, the displayed
 //! identities, the outfmt 0 rows and the tabular rows of the final list are computed by the pool's
 //! threads (the Seq-align engine counts of outfmt 8 and 12 too). The reach rows (`LOSAT_X_REACH`,
-//! `tests/reach_support`) show that the pooled stage ran.
+//! `tests/reach_support`) show that the pool was chosen for the stage (the mark is recorded
+//! where the pool is chosen).
 //!
 //! The property under test is that the reports, the messages and the exit status do not depend on
 //! the switch or on the thread count: the searches are compared with the same LOSAT search with the
@@ -158,8 +159,8 @@ fn check_format(outfmt: &str) {
     }
 }
 
-/// Several short queries from AP027131 (each with 1,024 rows or fewer, some with none), written
-/// once: their rows were written serially before 2026-11-02.
+/// Several short queries from AP027131 (each with 1,024 rows or fewer), written once: their
+/// rows were written serially before 2026-11-02.
 fn small_queries() -> &'static Path {
     static QUERIES: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     QUERIES.get_or_init(|| {
@@ -191,6 +192,10 @@ fn rows_per_query(stdout: &[u8]) -> Vec<(String, usize)> {
     counts
 }
 
+/// The bytes and messages of the report do not depend on the switch at 1, 2 and 4 threads for
+/// queries of 1,024 rows or fewer, and the pool was chosen at 2 and 4 threads (the reach mark is
+/// recorded where the pool is chosen, not where the rows are formatted: that the rows are
+/// formatted on it is shown by the unit test of `x_rpt_par.rs`).
 fn check_small_queries(outfmt: &str) {
     let off = tblastx_of(small_queries(), 1, outfmt, &[OFF]);
     assert!(off.status.success(), "{}", stderr(&off));

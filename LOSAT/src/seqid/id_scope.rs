@@ -210,7 +210,9 @@ fn name_kind_key(name: &[u8], accession: bool) -> u64 {
 /// finds by `id` where no sequence it holds has `id` itself (`GetMatchingHandles` with
 /// `eAllowWeakMatch`): for an accession without a version, that accession with one; for a name
 /// with an accession, the name alone; for a name alone, the name with an accession; for a `pir` or
-/// `prf` accession alone, that text as a name alone. A sequence that holds one of them has it among
+/// `prf` accession alone, that text as a name alone; in any letter case and across the alternatives
+/// (`CSeq_id_Mapper::GetMatchingHandles` asks every text tree), without the release that NCBI also
+/// compares for a name (a superset). A sequence that holds one of them has it among
 /// its `kind_keys`. NCBI 2.17.0 shows a query read with `-parse_deflines` that has one for a
 /// reported database sequence, and, where it reads the reported sequences one by one
 /// (`PRE_FETCH_SEQS_LIMIT`), another reported sequence read before (probe of line DBID N2c,

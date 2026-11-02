@@ -26,6 +26,13 @@ same defline (BLASTX).
 proteins. Queries `nweak_q1.fna` (record 1), `nweak_q1.faa` (its protein, TBLASTN) and `nweak_qa2.fna`
 (`gb|AF000082.1|`, record 2, read with -parse_deflines).
 
+`pweak_r.faa` (review 1 of N2c): four pairs, S then T, T's first definition line holding its own id and, after it,
+the second id that S's Seq-align id matches weakly (the shape of the review's FASTA; queries `pweak_r_q<k>.faa` are
+T's letters): 0 S `sp|P00051.1|name_r`, T `gb|FFF00051.1|` with `sp||NAME_R` (the name in another letter case), 1 S
+`tpg|FFF00052.1|NAME_S`, T `gb|FFF00053.1|` with `prf||NAME_S` (a prf holder), 2 S `pir|PIRW3|`, T `gb|FFF00054.1|` with
+`prf||PIRW3` (a pir accession finds a prf name), 3 S `pir|S12347|`, T `gb|FFF00055.1|` with `emb|S12347.1|` (a pir
+accession without a version finds an emb accession with one).
+
 usage: make_weak_fasta.py [--out LOSAT/tests/db_search/ids]
 """
 import argparse
@@ -42,6 +49,9 @@ PWEAK_S = (5, 7, 9)  # the records that are the near copy of the next one
 PWEAK_QUERIES = (0, 3, 4, 6, 8, 10)
 PWEAK_QA = [("qa0", "sp||NAMEW", 0), ("qa1", "gb|FFF00040.1|", 1), ("qa2", "pir||PIRW1", 2),
             ("qa3", "sp|P00045.1|NAMEX", 3), ("qa4", "gb|FFF00041|", 4)]
+# review 1: (S id, T's first definition line: its own id, then the second id), the order of the file
+PWEAK_R = [("sp|P00051.1|name_r", "gb|FFF00051.1|sp||NAME_R"), ("tpg|FFF00052.1|NAME_S", "gb|FFF00053.1|prf||NAME_S"),
+           ("pir|PIRW3|", "gb|FFF00054.1|prf||PIRW3"), ("pir|S12347|", "gb|FFF00055.1|emb|S12347.1|")]
 NWEAK = ["gb|AF000081|", "gb|AF000081.1|", "gb|AF000082|"]
 
 
@@ -90,6 +100,13 @@ def main() -> int:
     (out / "nweak_q1.fna").write_text(f">nq1\n{wrap(nseqs[1])}")
     (out / "nweak_q1.faa").write_text(f">nq1p\n{wrap(target)}")
     (out / "nweak_qa2.fna").write_text(f">gb|AF000082.1| qa_title\n{wrap(nseqs[2])}")
+
+    records = []
+    for k, (sid, tid) in enumerate(PWEAK_R):
+        target = protein()
+        records.append(f">{sid} r{k}_s_title\n{wrap(near_copy(target, 10, AA))}>{tid} r{k}_t_title\n{wrap(target)}")
+        (out / f"pweak_r_q{k}.faa").write_text(f">rq{k}\n{wrap(target)}")
+    (out / "pweak_r.faa").write_text("".join(records))
     return 0
 
 

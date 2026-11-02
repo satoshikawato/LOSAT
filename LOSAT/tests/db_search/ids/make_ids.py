@@ -76,7 +76,8 @@ and `pshare_d.*` (version 5) through `pshare_cd.pal`, and `nshare_v5.*` from `ns
 `pdup_a`, `pdup_b` and `pdup_c`.
 
 Seq-ids that NCBI's scope matches weakly (line DBID N2c; the FASTA comes from `make_weak_fasta.py`): `pweak_v5.*` and
-`pweak_v4.*` from `pweak.faa`, `nweak_v5.*` and `nweak_v4.*` from `nweak.fna`. `--weak-only` builds only these, so
+`pweak_v4.*` from `pweak.faa`, `pweak_r_v5.*` and `pweak_r_v4.*` from `pweak_r.faa` (review 1), `nweak_v5.*` and
+`nweak_v4.*` from `nweak.fna`. `--weak-only` builds only these, so
 that the other databases keep their bytes.
 """
 import argparse
@@ -101,7 +102,7 @@ def records(path: Path) -> list[str]:
 
 
 def build_weak(args: argparse.Namespace) -> None:
-    for name, dbtype, extension in (("pweak", "prot", "faa"), ("nweak", "nucl", "fna")):
+    for name, dbtype, extension in (("pweak", "prot", "faa"), ("pweak_r", "prot", "faa"), ("nweak", "nucl", "fna")):
         for version in (5, 4):
             subprocess.run(
                 [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.{extension}"),

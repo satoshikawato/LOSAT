@@ -459,7 +459,15 @@ pir accession-only id by the name-only id; not the other way. The queries `ids/p
 the first) and are run with `PRE_FETCH_SEQS_LIMIT=N` in `extra_args`, an environment variable of both programs (NCBI
 reads the reported sequences one by one when N is 0 or below the batch's Seq-align count and then writes the names of
 the sequence it read first). LOSAT refuses both cases and every N but 2147483647 (it does not count the Seq-aligns);
-the `ncbi` rows are the searches without the variable or at 2147483647, the sequences with no weak holder and outfmt 8.
+in a version 5 database LOSAT does not reproduce NCBI's lookup and refuses every Seq-align id with a name and every pir or prf id
+without it, in version 4 the lookup of the id decides (a name alone with no other holder is written as NCBI does:
+`db.id.blastp.weak.v4.pf.alone.6`, `v4.pf.none.6`). The `ncbi` rows are the searches without the variable or at 2147483647, the
+version 4 sequences with no weak holder and outfmt 8. Review 1 of N2c: `ids/pweak_r_v5` and `ids/pweak_r_v4` from `ids/pweak_r.faa`,
+four pairs S, T (T's first definition line holds its own id and the second id that S's matches weakly: `gb|FFF00051.1|`
+with `sp||NAME_R` for `sp|P00051.1|name_r` (another letter case), `gb|FFF00053.1|` with `prf||NAME_S` for
+`tpg|FFF00052.1|NAME_S`, `gb|FFF00054.1|` with `prf||PIRW3` for `pir|PIRW3|`, `gb|FFF00055.1|` with `emb|S12347.1|` for
+`pir|S12347|`; queries `ids/pweak_r_q<k>.faa` are T's letters; rows `db.id.blastp.weak.r.*` and `.v4.r.*`: NCBI writes T's names
+for S at `PRE_FETCH_SEQS_LIMIT=0` in both versions, and both its own rows without the variable).
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 

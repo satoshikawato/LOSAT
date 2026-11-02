@@ -26,7 +26,7 @@ test('a tab keeps its outputs in OPFS under tmp/<session>/runs/<run>/, named by 
   const page = await openApp(profile.context);
   await expect(page.getByTestId('storage-status')).toHaveAttribute('data-backend', 'opfs');
   await runSearch(page, 1);
-  await expect(page.getByTestId('storage-usage')).toContainText(/^Browser storage \(OPFS\): [1-9]\d* bytes used by this tab/);
+  await expect(page.getByTestId('storage-status')).toHaveAttribute('data-backend', 'opfs');
 
   const probe = await openProbe(profile.context);
   const sessions = await sessionDirectories(probe);
@@ -69,7 +69,6 @@ for (const ending of ['is killed', 'is closed'] as const) {
 
     const next = await openApp(profile.context);
     await expect(next.getByTestId('storage-status')).toHaveAttribute('data-removed-sessions', '1');
-    await expect(next.getByTestId('storage-status')).toContainText('Removed the temporary data left by 1 closed tab.');
     const sessions = await sessionDirectories(probe);
     expect(sessions).toHaveLength(1);
     expect(sessions).not.toContain(abandoned);

@@ -55,3 +55,13 @@ test('a BLASTN query of white space only is refused with the index scan error, b
   await expect(page.getByTestId('run-1-option')).toHaveCount(0);
   await expect(page.getByTestId('tab-search')).toHaveAttribute('aria-pressed', 'true');
 });
+
+test('the empty Results tab offers "Run a search", which opens the Search tab', async ({ page }) => {
+  await openSearch(page);
+  await page.getByTestId('tab-results').click();
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('results-empty')).toBeVisible();
+  await page.getByTestId('results-run-a-search').click();
+  await expect(page.getByTestId('tab-search')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'false');
+});

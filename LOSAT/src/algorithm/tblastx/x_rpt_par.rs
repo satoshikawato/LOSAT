@@ -50,7 +50,9 @@
 //!
 //! Memory: the outfmt 0 rows are one list of the final list's length in both forms; the tabular
 //! windows hold at most `ROWS_PER_THREAD` x threads rows formatted plus one piece (~3.3 MB at 16
-//! threads for rows of ~100 bytes).
+//! threads for rows of ~100 bytes), with outfmt 7 also the headers of the window's queries (a
+//! query without rows counts as one row: up to `ROWS_PER_THREAD` x threads headers of ~150 bytes
+//! plus the title).
 
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -72,6 +74,10 @@ use super::scoring::TbxScore;
 use rayon::prelude::*;
 
 /// The HSPs of one task (the displayed identities, the engine counts, the outfmt 0 rows).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 const CHUNK: usize = 1024;
 
 // No NCBI counterpart: chooses which threads compute the report's values; it does not change any

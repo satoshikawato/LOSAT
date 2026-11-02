@@ -24,7 +24,7 @@
 //! Each part reads only its query's hits (grouped by subject, `QueryGroup`), the subject titles
 //! and the report's fixed data.
 //!
-//! What the switch changes (read once per process, `mode`), when the caller gives a pool of two
+//! What the switch changes (read once per process, `on`), when the caller gives a pool of two
 //! threads or more (`pool`) and there is no format observer (`FormatProbe`, which flushes around
 //! every subject and HSP; the Web adapter): the queries are taken in windows whose estimated
 //! bytes (`query_estimate`) reach `WINDOW_BYTES_PER_THREAD` per thread (at least one query), and
@@ -107,8 +107,8 @@ pub(crate) fn on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRWISEPAR"))
 }
 
-/// The pool the pairwise writers format on (`Some` with the switch on and a pool of two threads
-/// or more), or `None` for the serial writer.
+/// The pool the reports are formatted on (`Some` with the switch on and a pool of two threads or
+/// more), or `None` for the serial writers.
 pub(crate) fn pool<'p, 'q>(pool: &'p SearchPool<'q>) -> Option<&'p SearchPool<'q>> {
     const PARALLEL: bool = cfg!(all(
         feature = "parallel",
@@ -476,6 +476,7 @@ fn map<T: Sync, R: Send>(
 /// that wrote it), and the calling thread writes the chunk's buffers in order, the warnings of the
 /// query a piece opens (`opens`) before it, before the next chunk is formatted. A piece whose
 /// calls failed has its bytes written, then its error, as the serial writer's buffer would.
+/// `pieces` is asked again after it gave `None` (the callers' iterators stay at `None`).
 /// Returns the number of chunks.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_in_order<P: Sync, W: Write>(

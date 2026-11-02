@@ -169,10 +169,11 @@ use std::ops::RangeInclusive;
 /// pool, `blastn/x_tab_par.rs`) joined the set in the pull request that added it, after it was
 /// verified and timed with it on and off. It and `LOSAT_X_TBXRPTPAR` (TBLASTX's report stage on
 /// the search's pool, `tblastx/x_rpt_par.rs`) were folded into `LOSAT_X_PAIRWISEPAR` on 2026-11-02
-/// (structural line S3): the three formatted reports on the same pool under the same rule (two
-/// threads or more, no format observer), so they left `STRICT_SET` and `LOSAT_X_PAIRWISEPAR=0`
-/// keeps all three serial; TBLASTX's rows take BLASTN's pieces and windows for a query of any
-/// number of rows (before: only one of more than 1,024 rows).
+/// (structural line S3): the three ran report work on the same pool under the same rule (two
+/// threads or more; the text and the tabular rows serial for a format observer, BLASTN's rows also
+/// for its trace), so they left `STRICT_SET` and `LOSAT_X_PAIRWISEPAR=0` keeps all three serial;
+/// TBLASTX's rows take BLASTN's pieces and windows for a query of any number of rows (before:
+/// only one of more than 1,024 rows).
 /// `LOSAT_X_BNCSR` (the chains of BLASTN's contiguous lookup tables of word sizes 9 to 11 laid out
 /// as CSR and scanned through a prefetch ring, `blastn/x_bn_csr.rs`) joined the set in the pull
 /// request that added it, after it was verified and timed with it on and off.

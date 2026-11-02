@@ -23,9 +23,9 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 
 | NCBI の要素 | LOSAT Web | 採否 | 理由・置き場所 |
 |---|---|---|---|
-| program のタブ「blastn \| blastp \| blastx \| tblastn \| tblastx」 | 同じ並びのタブ。表示名は BLASTN・BLASTP・BLASTX・TBLASTN・TBLASTX | 寄せる | 表示名は保守者の決定（DW-21）。BLASTX は SX まで「not available」（W3 の判断 2） |
+| program のタブ「blastn \| blastp \| blastx \| tblastn \| tblastx」 | 同じ並びのタブ。表示名は BLASTN・BLASTP・BLASTX・TBLASTN・TBLASTX。LOSAT ではこれを mode と呼ぶ | 寄せる | 表示名は保守者の決定（DW-21）。呼び方の mode も保守者の決定（DW-32）。BLASTX は SX まで「not available」（W3 の判断 2） |
 | 画面の題「Align Sequences Nucleotide BLAST」など | なし | 採らない | NCBI の製品名の見出しで、ブランドに近い。program のタブと一文で足りる |
-| program の一文（「BLASTN programs search nucleotide subjects using a nucleotide query.」） | タブの下の一文（「BLASTN searches nucleotide subjects using a nucleotide query.」など） | 寄せる | NCBI の 2 配列の画面の一文の形 |
+| program の一文（「BLASTN programs search nucleotide subjects using a nucleotide query.」） | タブの下の一文（「BLASTN mode searches nucleotide subjects using a nucleotide query.」など） | 寄せる | NCBI の 2 配列の画面の一文の形。「programs」は「mode」に（DW-32） |
 | 「Reset page」「Bookmark」 | なし | 採らない | Reset page は開いた大きなファイルの選択も消す（入力は Remove で 1 つずつ外す）。Bookmark は URL に検索の状態を持たない（研究データを URL に入れない、`web/AGENTS.md` 規則 4） |
 | 枠「Enter Query Sequence」 | 枠「Enter Query Sequence」（`query-panel`） | 採る | |
 | 「Enter accession number(s), gi(s), or FASTA sequence(s)」と textarea、「Clear」 | 「Enter FASTA sequence(s)」と textarea（`query-input`）、「Clear」（貼った文字だけを消す） | 寄せる | accession の取得は NCBI への送信になる（`web/AGENTS.md` 規則 4）。FASTA だけを受ける |
@@ -37,9 +37,9 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | 枠「Enter Subject Sequence」（textarea、Clear、Subject subrange、Or, upload file） | 枠「Enter Subject Sequence」（`subject-panel`）。query と同じ形 | 寄せる | |
 | （無い）subject の遺伝暗号 | 「Genetic code」（`param-db_gencode`、TBLASTN・TBLASTX）を Enter Subject Sequence の中に。承認済みの例外の注（`subject-gencode-note`）を保つ | LOSAT だけ | NCBI の 2 配列の画面に subject の遺伝暗号は無い |
 | 枠「Choose Search Set」（Database、Organism、Exclude、Entrez Query） | なし | 採らない | データベースと Taxonomy は LOSAT に無い |
-| LOSAT のレコード一覧と除外、検査の結果、「First lines」 | 各枠の中、ファイルの選択の下（`*-source-*`） | LOSAT だけ | |
+| LOSAT のレコード一覧と除外、検査の結果、「First lines」 | 各枠の中、ファイルの選択の下（`*-source-*`）。「Records」と「First lines」は閉じて出す（NCBI はファイル名だけ。保守者 2026-11-02「レコードがずらっと出てくるのいらない」、DW-34） | LOSAT だけ | 以前は 2〜20 レコードのとき「Records」が開いていた |
 | LOSAT の Combined / Separate | 各枠の中、レコード一覧の下（`*-mode`） | LOSAT だけ | |
-| 枠「Program Selection」：BLASTN の「Optimize for」の radio | 「Optimize for」の radio（`param-task`、各 radio は `param-task-<task>`）：Highly similar sequences (megablast)、More dissimilar sequences (discontiguous megablast)、Somewhat similar sequences (blastn)、Short sequences (blastn-short) | 寄せる | blastn-short は LOSAT が足す 4 つ目（NCBI は「Short queries」の自動調整で代える）。既定は LOSAT の CLI と同じ megablast（NCBI の 2 配列の画面の既定は blastn）。出力を CLI と比べるため |
+| 枠「Program Selection」：BLASTN の「Optimize for」の radio | 枠「Task Selection」（DW-32）の「Optimize for」の radio（`param-task`、各 radio は `param-task-<task>`）：Highly similar sequences (megablast)、More dissimilar sequences (discontiguous megablast)、Somewhat similar sequences (blastn)、Short sequences (blastn-short) | 寄せる | blastn-short は LOSAT が足す 4 つ目（NCBI は「Short queries」の自動調整で代える）。既定は LOSAT の CLI と同じ megablast（NCBI の 2 配列の画面の既定は blastn）。出力を CLI と比べるため |
 | BLASTP の「Algorithm」の radio（2 配列では blastp だけ） | 「Algorithm」の radio：エンジンの task（blastp (protein-protein BLAST)、Quick BLASTP (blastp-fast)、blastp-short） | 寄せる | task の一覧は `describe` の choices。名前の補いは表示だけ |
 | tblastn・tblastx（選ぶものが無く、枠を出さない） | TBLASTN は「Algorithm」（tblastn、tblastn-fast）。TBLASTX は枠を出さない | 寄せる | LOSAT の TBLASTN には task が 2 つある |
 | BLAST のボタンと「Search nucleotide sequence using Megablast (Optimize for highly similar sequences)」 | ボタン「Run LOSAT」（キューが空）／「Run LOSAT (add to queue)」（実行中か待ちがある）、複数の Run は「Run LOSAT (2 runs)」「Run LOSAT (2 runs, add to queue)」（`add-to-queue`）。横に「Search nucleotide subjects with BLASTN, task megablast (optimized for highly similar sequences). Runs in this browser.」の形の一文（`search-summary-line`） | 寄せる | ボタンの名前は保守者の指示（2026-10-10）で「Run LOSAT」（「BLAST」を操作の名前にしない）。キューに積むことはボタンの括弧、この機械で動くことは横の一文で示す（指示書 3.）。一文のうち何を検索するか（「nucleotide subjects」）と program・task（「BLASTN, task megablast (…)」）は、NCBI の「database core_nt」「Megablast (…)」と同じく色付きの太字（line WR、2026-11-02） |
@@ -97,7 +97,7 @@ NCBI の今の結果は、上から操作の行（Edit Search、Save Search、Se
 | 「Job Title」 | 「Job Title」（Run の `title`。無ければ行を出さない） | 採る | |
 | 「RID」と「Search expires on」 | 「Run」：Run の select（`results-run`、Run の番号・program・入力名） | 寄せる | RID に当たるのは Run の番号。期限は無い（作業セッションの中） |
 | 「Download All」 | 「Download All」：タブ「Outputs」へ移る（`results-download-all`） | 寄せる | 原文の outfmt 0/6/7 と診断を書き出す（Outputs） |
-| 「Program」「Blast 2 sequences」と「Citation」 | 「Program」：BLASTN（task megablast）など。横に検証バッジ（`verification-badge`） | 寄せる | Citation は採らない。検証バッジは LOSAT だけ（NCBI と比べた記録） |
+| 「Program」「Blast 2 sequences」と「Citation」 | 「Mode」（DW-32）：BLASTN（task megablast）など。横に検証バッジ（`verification-badge`） | 寄せる | Citation は採らない。検証バッジは LOSAT だけ（NCBI と比べた記録） |
 | （無い） | 「Options」：argv の option（`results-run-options`） | LOSAT だけ | |
 | 「Query ID」「Query Descr」「Query Length」 | 「Query ID」と「Query Length」（1 query の Run） | 寄せる | Query Descr は採らない（Run の記録が持つのは ID と長さ。outfmt 0 の `Query=` の行は Alignments と Outputs で読める） |
 | 「Subject ID」「Subject Descr」「Subject Length」 | 「Subject ID」と「Subject Length」（subject が 1 レコードの Run）。複数なら「Subjects」：入力名とレコード数 | 寄せる | Subject Descr は Descriptions と Alignments に（outfmt 0 の見出し） |
@@ -194,7 +194,7 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 
 保守者の指示（2026-11-02）「基本これでいこう。NCBI 由来の説明文は残す」で、LOSAT Web の文言は [artouc/stop-describing-ui](https://github.com/artouc/stop-describing-ui) の 9 の規則に従う：1 機能でなく操作を名乗る、2 具体的な動詞、3 最も重い帰結だけ残す、4 内部の仕組みは書かない、5 同じ操作で戻せることは説明しない、6 画面が示していることを繰り返さない、7 無いものを言わない（試して失敗する場合を除く）、8 有効にする方法でなく操作そのものを見せる、9 短い行、記号の区切りや長い散文を避ける。規則に通らず何も残らない文は何も出さない。
 
-- **残す（NCBI の文）**：program のタブの下の一文（「BLASTN searches…」）、Job Title の「Enter a descriptive title for your search」、Algorithm parameters の「Parameter values that differ from the default are highlighted in yellow and marked with ♦ sign」と「Restore default search parameters」、Run LOSAT の横の「Search nucleotide subjects with BLASTN, task megablast (…)」（LOSAT が足していた「Runs in this browser.」は消す）、Graphic Summary の「hover to see the title」「click to show alignments」と「Distribution of N HSPs on M subject sequences」、Descriptions・Alignments の見出しと Range の語、「No significant similarity found for this query.」。
+- **残す（NCBI の文）**：mode のタブの下の一文（「BLASTN mode searches…」）、Job Title の「Enter a descriptive title for your search」、Algorithm parameters の「Parameter values that differ from the default are highlighted in yellow and marked with ♦ sign」と「Restore default search parameters」、Run LOSAT の横の「Search nucleotide subjects with BLASTN, task megablast (…)」（LOSAT が足していた「Runs in this browser.」は消す）、Graphic Summary の「hover to see the title」「click to show alignments」と「Distribution of N HSPs on M subject sequences」、Descriptions・Alignments の見出しと Range の語、「No significant similarity found for this query.」。
 - **消す（LOSAT の説明）**：見出しの「Local processing: your sequences stay in this browser.」（鍵のアイコンと「Nothing leaves this browser」に）、Threads の説明、「The engine accepts these options.」と「Checking the options…」（拒否だけ出す）、下書きの readiness の行（押したときの誤りだけ出す）、「Preparing the inputs…」「Search started.」（ボタンが「Starting…」になり、ページが Run へ移る）、subrange の「The whole record is searched…」と「A subject region can be set when…」（当てはまらないときは何も出さない）、「Files are read in place, not copied into the box.」、「The BLASTN engine reads N records.」（チェックのアイコン。拒否の文は残す）、Program Selection の task の列挙（`describe` の help は各欄の「?」の後ろ）、各 option の help の段落（「?」ボタンで開く。欄は既定値を値として示す、§1「既定値」）、Filter Results の注、Graphic Summary の説明文、dot plot の Mouse / Touch の説明と「Each line is an HSP…」、表の「Scroll the table sideways…」、Outputs と Run details の説明の行、「While searching」の段落（検索中の Run のページに「Closing or reloading this tab ends the search」の 1 行だけ）、「Temporary storage」の見出しと使用量（メモリへの退避と掃除の不能の警告だけ）、Run の状態ページの説明（「Waiting for run N」と段階の時刻だけ）、結果タブの空の文（「Run a search」のボタン）。
 - **短くする**：検証バッジ「Engine-supported, outside certified profile」→「Outside certified profile」、「Keep the screen on while a search runs」→ Run LOSAT の行の「Keep screen on while searching」（「The screen stays on until the search ends.」は消す）、subject の遺伝暗号の注、Combined / Separate の説明、重複 ID と塩基・アミノ酸の見た目の注（2 文目を消す）、BLASTX の「not available」の文。
 
@@ -209,13 +209,15 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 | アクセント | 青 `#2563eb`、hover `#1d4ed8`、薄い青 `#eff6ff` | 同じ（`--accent` `--accent-hover` `--accent-bg`） |
 | カード | 角 12 px、1 px の線、薄い影 | NCBI の各ブロック（Enter Query Sequence …）、Run LOSAT の行、Algorithm parameters、Results がカード。Algorithm parameters の中は下の「Algorithm parameters の形」 |
 | ボタン | `.btn-secondary`：白、線、角 8 px、太字、影。`.btn-primary`：青地に白 | 既定のボタンが secondary、`Run LOSAT` と `Filter` が primary |
-| 切り替え | mode switch：灰色の丸い枠の中で、選んだものが白くなり青い字 | Search / Results、program のタブ、結果の Hits / Dot Plot / Run details / Outputs |
+| 切り替え | mode switch：灰色の丸い枠の中で、選んだものが白くなり青い字 | Search / Results と結果の Hits / Dot Plot / Run details / Outputs は灰青の枠の中で、選んだものをアクセントで塗り白い字（案 B、DW-33）。mode のタブは下の「案 B」 |
 | 入力欄 | `.form-input`：角 8 px、薄い灰色の地、focus で青い枠 | 同じ |
 | 通知 | info は青、warning は琥珀 | `.notice` が青、`.warning` `.banner` と ♦ の注が琥珀 |
 
 アイコンは gbdraw の Phosphor を取り込まず、LOSAT の少数のインラインの SVG のまま。
 
 **画面全体の層**（line WR、2026-11-02。保守者「Enter Query Sequence とか General Parameters とかの階層の box、背景白いとちょっと明るすぎる」「背景とかも含めてデザインしなおそう」）：NCBI の画面の 3 層（青みの地、灰色の組、白い入力）に揃える。地 `--page` `#d6e3f1`、組 `--group` `#eef1f4`（Enter Query Sequence・Enter Subject Sequence・Program Selection・Run LOSAT の行・Algorithm parameters の帯とその組・結果の見出しの塊・Filter Results・Graphic Summary・Descriptions・Alignments・Dot Plot・Run details・Outputs）、組の線 `--border-strong`、組の中の帯（表の見出し、道具の行）`--band` `#e2e7ec`、入力・表・出力・レコードの一覧は白。組の名前は全部アクセントの太字のつまみ（`legend`、`.section-legend`、`.section-heading`）。カードの影はやめる。検索のページは 14 px、「Or, upload file」の点線の枠は 801 px 以上で中身の幅（落とす先はブロック全体）。地と組の色は 4 案（`web-refresh-20261102/screens/tones/`：t1 明るい、t2 濃い、t3 NCBI の青、t4 無彩色）を実画面で比べ、t3 を既定にした（Owner-delegated、3 つの token で替えられる）。
+
+**案 B**（line WR、2026-11-02、DW-33。保守者「灰色で見ずらい。ていうか全体的に見ずらい」→ 7 案のキャンバス https://claude.ai/artifact/3mMN84B4YYgL1NG66Pmr4t から「Bにします」）：上の「画面全体の層」の色を替える。見出しの帯は紺 `--header` `#0b3a5e` に白い字（鍵と「Nothing leaves this browser」は `--header-muted` `#d4e6f4`）。地 `--page` `#e9eef3`、組 `--group` は白、組の中の帯 `--band` `#f1f4f7`、線 `--border` `#d3dbe4` / `--border-strong` `#a9b8c7`、入力欄の線 `--control-line` `#7b8a9a`。文字は `--fg` `#0b1a2a`、`--fg-2` `#1c2b3a`、薄い文字 `--muted` `#46576a`（白の上で約 7:1。使える文字はどれも 4.5:1 以上、薄いのは使えない BLASTX のタブだけ）。mode のタブは NCBI の以前のタブの列の形：灰青のつまみ（`--tab` `#d6dfe8`、字 `--tab-fg` `#14263a`）がアクセントの 3 px の線に載り、選んだタブはアクセントで塗り白い字、使えないタブは `--tab-off` `#e6ebf0` に `--tab-off-fg` `#7d8896`。800 px 以下では 5 つのタブが 1 行を等分する（折り返すとつまみが線の下に垂れる）。組の名前のつまみは灰青 `--legend` `#e3eaf1` に濃い字。タブの下の一文は `--fg-2`。
 
 **Algorithm parameters の形**（line WR、2026-11-02。保守者「NCBI と比べるとやっぱ見づらい」）：NCBI の画面の読み方（太い名前、節の名前のつまみ、名前のすぐ横の内容の幅の欄、残りの幅に一文）を gbdraw の見た目の中で取る。開いた中身は地の上に組として並び（上の「画面全体の層」）、節の名前はつまみ（NCBI の legend の位置）にアクセントの色・太字・1.1 em（文字は NCBI のまま「General Parameters」、大文字にしない）。字は 14 px、行は 40 px 以下（1 行の名前で 33〜38 px）。名前は太字（600、`--fg`）、flag はその後ろに小さい薄い字（等幅の 2 行目にしない。W4b：NCBI の名前と LOSAT の flag）。全部の節が 1 つの名前の列（最も長い名前の幅、10〜22 em、CSS subgrid。fieldset には subgrid が効かないので節は `role="group"` の div）を共有し、欄はその横から内容の幅（数は 8 em、文字の値は 12 em、select は選択肢の幅）。欄の線は `--control-line` `#8b9bab`、地は白。「?」は NCBI と同じくアクセントで塗った円に白い「?」（20 px、800 px 以下は 24 px）。Run LOSAT の横の一文は、何を検索するかと program・task を NCBI と同じく色付きの太字にする。800 px 以下は W4b のまま 1 列（名前の下に欄）。1920 px と 1280 px の検査は `web-refresh-20261102/screens/params-*.png`。
 

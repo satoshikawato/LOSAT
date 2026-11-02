@@ -151,7 +151,7 @@ async function toAlignments(id: HspId): Promise<void> {
             </button>
           </dd>
           <template v-if="selected">
-            <dt>Program</dt>
+            <dt>Mode</dt>
             <dd class="results-program">
               <span data-testid="results-program">{{ programText }}</span>
               <VerificationBadge v-if="loaded" :badge="loaded.badge" compact @details="view = 'details'" />

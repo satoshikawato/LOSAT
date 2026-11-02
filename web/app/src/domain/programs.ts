@@ -16,7 +16,7 @@ export type InputRole = 'query' | 'subject';
  * - `text`: free text (numbers too: the engine's parser decides what it accepts).
  * - `choice`: a list; the choices are `describe`'s, or the field's own `choices` where
  *   `describe` writes them only in the help text.
- * - `radio`: a choice shown as radio buttons (the task, NCBI's "Program Selection"); the
+ * - `radio`: a choice shown as radio buttons (the task, in "Task Selection"); the
  *   engine's default is checked while nothing is set.
  * - `boolean`: an option that takes `true` or `false`.
  * - `flag`: an option without a value, written alone.
@@ -52,7 +52,7 @@ export interface ParameterField {
 }
 
 /**
- * Where a section is shown: in "Program Selection", in the query's or the subject's block
+ * Where a section is shown: in "Task Selection", in the query's or the subject's block
  * (the genetic codes), or under "Algorithm parameters".
  */
 export type SectionPlacement = 'program' | 'query' | 'subject' | 'algorithm';
@@ -190,7 +190,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
   {
     id: 'blastn',
     label: 'BLASTN',
-    summary: 'BLASTN searches nucleotide subjects using a nucleotide query.',
+    summary: 'BLASTN mode searches nucleotide subjects using a nucleotide query.',
     searches: 'nucleotide subjects',
     taskNotes: {
       megablast: 'optimized for highly similar sequences',
@@ -204,7 +204,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     fastaParser: 0,
     sections: [
       {
-        title: 'Program Selection',
+        title: 'Task Selection',
         placement: 'program',
         fields: [
           // `describe` lists the tasks only in its help text. LOSAT adds blastn-short, which
@@ -296,7 +296,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
   {
     id: 'blastp',
     label: 'BLASTP',
-    summary: 'BLASTP searches protein subjects using a protein query.',
+    summary: 'BLASTP mode searches protein subjects using a protein query.',
     searches: 'protein subjects',
     taskNotes: { blastp: 'protein-protein BLAST', 'blastp-fast': 'Quick BLASTP' },
     query: 'protein',
@@ -304,7 +304,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     fastaParser: 0,
     sections: [
       {
-        title: 'Program Selection',
+        title: 'Task Selection',
         placement: 'program',
         fields: [
           {
@@ -337,7 +337,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
   {
     id: 'blastx',
     label: 'BLASTX',
-    summary: 'BLASTX searches protein subjects using a translated nucleotide query.',
+    summary: 'BLASTX mode searches protein subjects using a translated nucleotide query.',
     searches: 'protein subjects',
     queryNote: 'translated nucleotide query',
     query: 'nucleotide',
@@ -349,14 +349,14 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
   {
     id: 'tblastn',
     label: 'TBLASTN',
-    summary: 'TBLASTN searches translated nucleotide subjects using a protein query.',
+    summary: 'TBLASTN mode searches translated nucleotide subjects using a protein query.',
     searches: 'translated nucleotide subjects',
     queryNote: 'protein query',
     query: 'protein',
     subject: 'nucleotide',
     fastaParser: 0,
     sections: [
-      { title: 'Program Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
+      { title: 'Task Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
       { title: 'Genetic code', placement: 'subject', fields: [{ flag: '-db_gencode', label: 'Genetic code', kind: 'gencode' }] },
       { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize] },
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats] },
@@ -396,7 +396,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
   {
     id: 'tblastx',
     label: 'TBLASTX',
-    summary: 'TBLASTX searches translated nucleotide subjects using a translated nucleotide query.',
+    summary: 'TBLASTX mode searches translated nucleotide subjects using a translated nucleotide query.',
     searches: 'translated nucleotide subjects',
     queryNote: 'translated nucleotide query',
     query: 'nucleotide',

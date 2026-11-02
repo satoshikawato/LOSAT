@@ -312,7 +312,9 @@ describe("knownDefault: the defaults that the engine resolves (describe's defaul
     expect(knownDefault(blastp, '-threshold', { '-task': 'blastp-fast', '-word_size': '5' }, bp)).toEqual({ defaultValue: '19.3' });
     expect(knownDefault(blastp, '-threshold', { '-word_size': '6' }, bp)).toEqual({ defaultValue: '21' });
     expect(knownDefault(blastp, '-threshold', { '-word_size': '6', '-matrix': 'PAM30' }, bp)).toBeUndefined();
-    expect(knownDefault(blastp, '-word_size', {}, bp)).toEqual({ defaultValue: '3', given: true });
+    // Told given only for the task where giving it changes the search.
+    expect(knownDefault(blastp, '-word_size', {}, bp)).toEqual({ defaultValue: '3' });
+    expect(knownDefault(blastp, '-word_size', { '-task': 'blastp-fast' }, bp)).toEqual({ defaultValue: '5', given: true });
   });
 
   it('marks the hit list options given, and shows no default for one while another is set', () => {
@@ -342,6 +344,7 @@ describe("knownDefault: the defaults that the engine resolves (describe's defaul
       ['-task', 'blastp-fast'],
       ['-word_size', '5'],
     ]);
+    expect(formParameters(blastp, { '-word_size': '3' }, bp)).toEqual([]);
     expect(formParameters(tblastx, { '-max_target_seqs': '500', '-soft_masking': 'false' }, tx)).toEqual([['-max_target_seqs', '500']]);
   });
 });

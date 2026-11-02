@@ -19,8 +19,11 @@ export interface ResolvedDefault {
   readonly by?: Readonly<Record<string, Readonly<Record<string, Readonly<Record<string, string>>>>>>;
   /** The value holds only while none of these options is given (the hit list options). */
   readonly unless?: readonly string[];
-  /** BLAST+ tells the option given from not given: a value set is written even when it equals the default. */
-  readonly given?: true;
+  /**
+   * The tasks where BLAST+ tells the option given from not given: a value set is written even
+   * when it equals the default.
+   */
+  readonly given?: readonly string[];
 }
 
 /** What `describe` says about one option (the fields of ports/engine ParameterDescription). */
@@ -117,7 +120,7 @@ export function knownDefault(
     value = typeof set === 'string' ? table[set]?.[task] : undefined;
   } else if (deciders.length > 1) value = undefined;
   if ((resolved.unless ?? []).some((other) => setValue(program, other, values, options) !== undefined)) value = undefined;
-  if (resolved.given === true) return value === undefined ? { given: true } : { defaultValue: value, given: true };
+  if (resolved.given?.includes(task) === true) return value === undefined ? { given: true } : { defaultValue: value, given: true };
   return value === undefined ? undefined : { defaultValue: value };
 }
 
@@ -135,8 +138,8 @@ function setValue(program: ProgramDescriptor, flag: string, values: FormValues, 
   const field = program.sections.flatMap((section) => section.fields).find((f) => f.flag === flag);
   if (field === undefined) return undefined;
   const option = options?.find((o) => o.flag === flag);
-  if (option?.resolvedDefault?.given === true) return writtenValue(field, values[flag], { given: true });
   const task = effectiveValue('-task', values, options) ?? '';
+  if (option?.resolvedDefault?.given?.includes(task) === true) return writtenValue(field, values[flag], { given: true });
   const known = option === undefined ? undefined : taskDefault(option, task);
   return writtenValue(field, values[flag], known === undefined ? undefined : { defaultValue: known });
 }

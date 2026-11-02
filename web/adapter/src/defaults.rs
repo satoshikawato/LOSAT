@@ -196,9 +196,9 @@ pub struct Defaults {
     pub by: BTreeMap<&'static str, BTreeMap<String, BTreeMap<String, Values>>>,
     /// The options whose default holds only while these other options are not given.
     pub unless: BTreeMap<&'static str, Vec<&'static str>>,
-    /// The options that BLAST+ tells given from not given: given at the default value, they
-    /// change the search.
-    pub given: BTreeSet<&'static str>,
+    /// The options that BLAST+ tells given from not given, with the tasks where it does: given at
+    /// the value shown as the default, they change the search.
+    pub given: BTreeMap<&'static str, BTreeSet<String>>,
 }
 
 /// The argv of a program and task with `extra` options, for `resolved`.
@@ -211,7 +211,8 @@ fn words<'a>(program: Program, task: &'a str, extra: &[&'a str]) -> Vec<&'a str>
     words
 }
 
-/// The tasks of a program, in the order of its parser ("" for a program without -task).
+/// The tasks of a program that the engine resolves, in the order of its parser ("" for a
+/// program without -task).
 fn tasks(program: Program) -> Vec<String> {
     let root = Cli::command();
     let Some(task) = root.find_subcommand(program.name()).and_then(|command| {
@@ -221,19 +222,45 @@ fn tasks(program: Program) -> Vec<String> {
     }) else {
         return vec![String::new()];
     };
-    let listed: Vec<String> = task
+    let mut names: Vec<String> = task
         .get_possible_values()
         .iter()
         .map(|value| value.get_name().to_string())
         .collect();
-    if !listed.is_empty() {
-        return listed;
+    if names.is_empty() {
+        names = BLASTN_TASK_NAMES
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
     }
-    BLASTN_TASK_NAMES
-        .iter()
-        .filter(|name| resolved(&words(program, name, &[])).is_ok())
-        .map(|name| name.to_string())
-        .collect()
+    names.retain(|name| resolved(&words(program, name, &[])).is_ok());
+    names
+}
+
+/// Marks each option of `context` (the values that `extra`, no option or one -matrix or
+/// -word_size value, resolves for `task`) given for the task where giving it at its value there
+/// changes the resolution; `only` limits the options tried.
+fn mark_given(
+    given: &mut BTreeMap<&'static str, BTreeSet<String>>,
+    program: Program,
+    task: &str,
+    extra: &[&str],
+    context: &Values,
+    only: Option<&BTreeSet<&'static str>>,
+) {
+    for (flag, value) in context {
+        if extra.contains(flag)
+            || only.is_some_and(|only| !only.contains(flag))
+            || given.get(flag).is_some_and(|tasks| tasks.contains(task))
+        {
+            continue;
+        }
+        let mut words = words(program, task, extra);
+        words.extend([*flag, value.as_str()]);
+        if resolved(&words).is_ok_and(|values| &values != context) {
+            given.entry(*flag).or_default().insert(task.to_string());
+        }
+    }
 }
 
 pub fn defaults(program: Program) -> Result<Defaults, String> {
@@ -241,7 +268,7 @@ pub fn defaults(program: Program) -> Result<Defaults, String> {
         tasks: BTreeMap::new(),
         by: BTreeMap::new(),
         unless: BTreeMap::new(),
-        given: BTreeSet::new(),
+        given: BTreeMap::new(),
     };
     for task in tasks(program) {
         let values = resolved(&words(program, &task, &[]))?;
@@ -287,6 +314,20 @@ pub fn defaults(program: Program) -> Result<Defaults, String> {
         if changed.is_empty() {
             continue;
         }
+        // The values that the form shows where the decider is given: an option given at one
+        // of them must give the same search, or it is told given for the task.
+        for (probe, by_task) in &tried {
+            for (task, values) in by_task {
+                mark_given(
+                    &mut out.given,
+                    program,
+                    task,
+                    &[decider, probe],
+                    values,
+                    Some(&changed),
+                );
+            }
+        }
         let table = tried
             .into_iter()
             .map(|(probe, by_task)| {
@@ -307,21 +348,12 @@ pub fn defaults(program: Program) -> Result<Defaults, String> {
     }
     for (flag, others) in HIT_LIST {
         out.unless.insert(flag, others.to_vec());
-        out.given.insert(flag);
+        out.given.insert(flag, out.tasks.keys().cloned().collect());
     }
-    // An option given at its own default that changes the resolution (BLASTX's word size
-    // sets its own threshold).
+    // An option given at its task's default that changes the resolution (the word size of
+    // the fast tasks sets NCBI's threshold for it).
     for (task, base) in &out.tasks {
-        for (flag, value) in base {
-            if out.given.contains(flag) {
-                continue;
-            }
-            if let Ok(values) = resolved(&words(program, task, &[*flag, value.as_str()])) {
-                if &values != base {
-                    out.given.insert(*flag);
-                }
-            }
-        }
+        mark_given(&mut out.given, program, task, &[], base, None);
     }
     Ok(out)
 }
@@ -386,14 +418,22 @@ pub fn write(out: &mut String, defaults: &Defaults) {
         }
         out.push(']');
     }
-    out.push_str("},\"given\":[");
-    for (index, flag) in defaults.given.iter().enumerate() {
+    out.push_str("},\"given\":{");
+    for (index, (flag, tasks)) in defaults.given.iter().enumerate() {
         if index > 0 {
             out.push(',');
         }
         json::string(out, flag);
+        out.push_str(":[");
+        for (task_index, task) in tasks.iter().enumerate() {
+            if task_index > 0 {
+                out.push(',');
+            }
+            json::string(out, task);
+        }
+        out.push(']');
     }
-    out.push_str("]}");
+    out.push_str("}}");
 }
 
 #[cfg(test)]
@@ -450,14 +490,6 @@ mod tests {
             let defaults = defaults(program).unwrap();
             for (task, values) in &defaults.tasks {
                 for (flag, value) in values {
-                    // Values that the help does not state as a default (an internal value that
-                    // no field shows, or "no limit").
-                    if matches!(*flag, "-window_size" if program == Program::Blastn)
-                        || matches!(*flag, "-xdrop_gap" | "-xdrop_gap_final" if program == Program::Blastn)
-                        || *flag == "-culling_limit"
-                    {
-                        continue;
-                    }
                     let (text, clap_default) = help(program, flag);
                     let stated = match &clap_default {
                         Some(clap_default) => clap_default == value,
@@ -485,6 +517,26 @@ mod tests {
         assert_eq!(names(Program::Blastx), ["blastx", "blastx-fast"]);
         // TBLASTX has no -task.
         assert_eq!(names(Program::Tblastx), [""]);
+    }
+
+    #[test]
+    fn blastn_resolves_each_tasks_preset() {
+        let blastn = defaults(Program::Blastn).unwrap();
+        let row = |flag: &str| -> Vec<&str> {
+            ["megablast", "dc-megablast", "blastn", "blastn-short"]
+                .iter()
+                .map(|task| blastn.tasks[*task][flag].as_str())
+                .collect()
+        };
+        assert_eq!(row("-word_size"), ["28", "11", "11", "7"]);
+        assert_eq!(row("-reward"), ["1", "2", "2", "1"]);
+        assert_eq!(row("-penalty"), ["-2", "-3", "-3", "-3"]);
+        assert_eq!(row("-gapopen"), ["0", "5", "5", "5"]);
+        assert_eq!(row("-gapextend"), ["0", "2", "2", "2"]);
+        assert_eq!(row("-evalue"), ["10", "10", "10", "1000"]);
+        assert_eq!(row("-dust"), ["20 64 1", "20 64 1", "20 64 1", "no"]);
+        assert_eq!(row("-xdrop_gap"), ["25", "30", "30", "30"]);
+        assert_eq!(row("-window_size"), ["0", "40", "0", "0"]);
     }
 
     #[test]
@@ -537,7 +589,14 @@ mod tests {
                 "{}",
                 program.name()
             );
-            assert!(defaults.given.contains("-word_size"), "{}", program.name());
+            // Told given only where it changes the search: the plain task's word size 3
+            // leaves its threshold.
+            assert_eq!(
+                defaults.given["-word_size"],
+                BTreeSet::from([fast.to_string()]),
+                "{}",
+                program.name()
+            );
         }
         // BLASTX's parser reads word sizes 3 and 5 only.
         let blastx = defaults(Program::Blastx).unwrap();
@@ -556,10 +615,25 @@ mod tests {
     fn the_hit_list_options_are_given_and_exclude_each_other() {
         for program in PROGRAMS {
             let defaults = defaults(program).unwrap();
+            let tasks: BTreeSet<String> = defaults.tasks.keys().cloned().collect();
             for (flag, others) in HIT_LIST {
-                assert!(defaults.given.contains(flag), "{} {flag}", program.name());
+                assert_eq!(defaults.given[flag], tasks, "{} {flag}", program.name());
                 assert_eq!(defaults.unless[flag], others, "{} {flag}", program.name());
             }
+            // No other option is told given, except the fast tasks' word size.
+            let given: Vec<&str> = defaults.given.keys().copied().collect();
+            let expected: &[&str] = match program {
+                Program::Blastn | Program::Tblastx => {
+                    &["-max_target_seqs", "-num_alignments", "-num_descriptions"]
+                }
+                _ => &[
+                    "-max_target_seqs",
+                    "-num_alignments",
+                    "-num_descriptions",
+                    "-word_size",
+                ],
+            };
+            assert_eq!(given, expected, "{}", program.name());
             for values in defaults.tasks.values() {
                 assert_eq!(values["-max_target_seqs"], "500");
                 assert_eq!(values["-num_descriptions"], "500");
@@ -579,7 +653,7 @@ mod tests {
         assert!(out.contains(",\"by\":{\"-matrix\":{\"BLOSUM45\":{\"\":{\"-threshold\":\"16\",\"-window_size\":\"60\"}}"), "{out}");
         assert!(
             out.ends_with(
-                ",\"given\":[\"-max_target_seqs\",\"-num_alignments\",\"-num_descriptions\"]}"
+                ",\"given\":{\"-max_target_seqs\":[\"\"],\"-num_alignments\":[\"\"],\"-num_descriptions\":[\"\"]}}"
             ),
             "{out}"
         );

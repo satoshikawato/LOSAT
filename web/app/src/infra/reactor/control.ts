@@ -35,10 +35,11 @@ interface DefaultsJson {
   readonly tasks: Readonly<Record<string, ValuesJson>>;
   readonly by: Readonly<Record<string, Readonly<Record<string, Readonly<Record<string, ValuesJson>>>>>>;
   readonly unless: Readonly<Record<string, readonly string[]>>;
-  readonly given: readonly string[];
+  /** The tasks where an option is told given from not given, by flag. */
+  readonly given: Readonly<Record<string, readonly string[]>>;
 }
 
-/** One option's part of the `defaults` tables; undefined when the engine resolves no value for it. */
+/** One option's part of the `defaults` tables; undefined when they do not name it. */
 function resolvedDefault(defaults: DefaultsJson | undefined, flag: string): ResolvedDefault | undefined {
   if (defaults === undefined) return undefined;
   const byTask: Record<string, string> = {};
@@ -46,7 +47,6 @@ function resolvedDefault(defaults: DefaultsJson | undefined, flag: string): Reso
     const value = values[flag];
     if (value !== undefined) byTask[task] = value;
   }
-  if (Object.keys(byTask).length === 0) return undefined;
   const by: Record<string, Record<string, Record<string, string>>> = {};
   for (const [other, table] of Object.entries(defaults.by)) {
     for (const [otherValue, tasks] of Object.entries(table)) {
@@ -58,11 +58,13 @@ function resolvedDefault(defaults: DefaultsJson | undefined, flag: string): Reso
     }
   }
   const unless = defaults.unless[flag];
+  const given = defaults.given[flag];
+  if (Object.keys(byTask).length === 0 && unless === undefined && given === undefined) return undefined;
   return {
     byTask,
     ...(Object.keys(by).length === 0 ? {} : { by }),
     ...(unless === undefined ? {} : { unless }),
-    ...(defaults.given.includes(flag) ? { given: true as const } : {}),
+    ...(given === undefined ? {} : { given }),
   };
 }
 

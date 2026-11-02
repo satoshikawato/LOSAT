@@ -77,6 +77,24 @@
 //! `LOSAT_X_BNQSLOTS`, which opened the store to the query-batch slots of LOSAT_X_QBATCHPAR (the
 //! store lent the loop's batch to a slot and copied the records of batches ahead), was removed with
 //! the slots on 2026-10-28.
+//!
+//! The store in parts (EXPERIMENT LOSAT_X_BNQPARTS; in the strict set from the pull request that
+//! added it, on unless it is `0`; it acts wherever the store does). The store above keeps each
+//! record the reader made (its local ID, title and packed letters on the heap, beside the 104
+//! bytes of the record), all read on the calling thread before the pool exists and all freed on one
+//! thread at the end. With the switch the store holds parts (`Part`): one buffer per part with each
+//! record's title, messages and letters (their store, `PackedLetters::append_to`, where the reader
+//! packed them; else the letters) and a table of where each record ends. The reader's record is
+//! dropped once it is copied, so the next record reuses its allocations. The parts are read on the
+//! search's threads where the file can be cut at record starts as LOSAT_X_QSTREAM's first reading
+//! is cut (`x_query_scan_par::store_parts`), else by the search's reader into parts of about 1 MiB
+//! (`read_parts`). When the loop takes a batch, its records are made again from their parts
+//! (`Part::record`, by the pool's threads with two or more): the title and messages copied, the
+//! letters made again (`unpack_from`), the local ID `Query_<n>` from the record's position among all
+//! records, which is the ID the reader's counter gave it (`Part::push` keeps any other ID, the ones
+//! `-parse_deflines` read, beside the part with the record's source). A part is dropped once the
+//! loop has taken all its records. No search value changes. With `LOSAT_X_STATS`,
+//! `[X_STATS] BNQPARTS records= parts= in_parts=` (in_parts: read on the search's threads).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -472,11 +490,12 @@ impl PartLetters {
 }
 
 impl Part {
-    /// An empty part with room for `bytes` bytes.
-    pub(super) fn with_capacity(bytes: usize) -> Part {
+    /// An empty part with room for `bytes` bytes and `records` records.
+    pub(super) fn with_capacity(bytes: usize, records: usize) -> Part {
         Part {
             bytes: Vec::with_capacity(bytes),
-            ..Part::default()
+            records: Vec::with_capacity(records),
+            special: Vec::new(),
         }
     }
 
@@ -576,17 +595,30 @@ fn counted_id(id: &str, id_prefix: &str, n: usize) -> bool {
     })
 }
 
-/// EXPERIMENT (LOSAT_X_BNQPARTS): `x_read_queries_packed` into one part: the records of `source`
-/// (their letters packed as they are read) and how the reading ended, as `read_queries` reads them.
-pub(super) fn read_part<R: std::io::Read>(
+/// EXPERIMENT (LOSAT_X_BNQPARTS): `x_read_queries_packed` into parts of about `PART_BYTES` bytes:
+/// the records of `source` (their letters packed as they are read) and how the reading ended, as
+/// `read_queries` reads them. A part is closed once it holds `PART_BYTES` bytes, so no buffer is
+/// copied as it grows but for the record that passes the mark.
+pub(super) fn read_parts<R: std::io::Read>(
     source: &mut FastaInputSource<R>,
     id_prefix: &str,
-) -> (Part, QueryEnd) {
+) -> (Vec<Part>, QueryEnd) {
+    read_parts_of(source, id_prefix, PART_BYTES)
+}
+
+/// `read_parts` with parts closed at `part_bytes` (the tests make them small).
+fn read_parts_of<R: std::io::Read>(
+    source: &mut FastaInputSource<R>,
+    id_prefix: &str,
+    part_bytes: usize,
+) -> (Vec<Part>, QueryEnd) {
     source.x_pack_letters();
-    let mut part = Part::default();
-    loop {
+    let mut parts = Vec::new();
+    let mut part = Part::with_capacity(part_bytes, part_bytes / 64);
+    let mut read = 0;
+    let end = loop {
         if source.end() {
-            return (part, QueryEnd::Input);
+            break QueryEnd::Input;
         }
         let mut warnings = Vec::new();
         match source.next_sequence(&mut |message: &[u8]| {
@@ -595,17 +627,30 @@ pub(super) fn read_part<R: std::io::Read>(
         }) {
             Ok(record) => {
                 let packed = source.x_take_packed();
-                let n = part.len() + 1;
-                part.push(record, packed, id_prefix, n);
+                read += 1;
+                part.push(record, packed, id_prefix, read);
+                if part.bytes.len() >= part_bytes {
+                    parts.push(std::mem::replace(
+                        &mut part,
+                        Part::with_capacity(part_bytes, part_bytes / 64),
+                    ));
+                }
             }
             Err(ReadError::Parse {
                 code: ParseErrorCode::Eof,
                 ..
-            }) => return (part, QueryEnd::EofError),
-            Err(error) => return (part, QueryEnd::Error { error, warnings }),
+            }) => break QueryEnd::EofError,
+            Err(error) => break QueryEnd::Error { error, warnings },
         }
+    };
+    if part.len() > 0 || parts.is_empty() {
+        parts.push(part);
     }
+    (parts, end)
 }
+
+/// The bytes after which `read_parts` closes a part.
+const PART_BYTES: usize = 1 << 20;
 
 /// No NCBI counterpart: the letters of a batch's packed records made again, by the search pool
 /// where it has two threads or more (each record by one thread).
@@ -732,6 +777,7 @@ pub(super) fn print_summary() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blastinput::fasta_reader::{read_queries, ReaderConfig};
 
     /// Nine records (three batches of three), every second one packed, as `search_cli` stores them.
     fn store() -> (Vec<FastaRecord>, Store) {
@@ -765,6 +811,108 @@ mod tests {
         }
         assert!(!packed.is_empty(), "no record packed");
         (records, Store::new(held, packed))
+    }
+
+    /// The records of `text` as `read_queries` reads them, and how the reading ended.
+    fn read_all(text: &[u8], config: ReaderConfig) -> (Vec<FastaRecord>, String) {
+        let records = read_queries(&mut FastaInputSource::from_bytes(text, config));
+        (records.records, format!("{:?}", records.end))
+    }
+
+    /// The records of `text` read into parts of `part_bytes` and taken back out of their store in
+    /// batches of `batch` records (by a pool of `threads` threads), how the reading ended and the
+    /// number of parts.
+    fn through_parts(
+        text: &[u8],
+        config: ReaderConfig,
+        part_bytes: usize,
+        batch: usize,
+        threads: usize,
+    ) -> (Vec<FastaRecord>, String, usize) {
+        let mut source = FastaInputSource::from_bytes(text, config);
+        let (parts, end) = read_parts_of(&mut source, config.id_prefix, part_bytes);
+        let count = parts.len();
+        let store = Store::from_parts(parts, config.id_prefix, false);
+        let total = store.lengths().len();
+        let take = |pool: &SearchPool<'_>| -> anyhow::Result<Vec<FastaRecord>> {
+            let mut records = Vec::new();
+            for from in (0..total).step_by(batch.max(1)) {
+                records.extend(store.take(from..(from + batch).min(total), pool)?);
+            }
+            Ok(records)
+        };
+        let records = if threads > 1 {
+            crate::utils::threading::with_search_pool(threads, "blastn", take).expect("take")
+        } else {
+            take(&SearchPool::x_serial()).expect("take")
+        };
+        (records, format!("{end:?}"), count)
+    }
+
+    /// FASTA of `records` records: titles, `N` runs, lower case, a record without letters, one
+    /// without an id, ids of several forms (for `-parse_deflines`), then `tail`.
+    fn text(records: usize, tail: &[u8]) -> Vec<u8> {
+        let mut text = Vec::new();
+        for index in 0..records {
+            match index % 7 {
+                0 => text.extend_from_slice(b">\n"),
+                1 => {
+                    text.extend_from_slice(format!(">gi|{index}|ref|NC_{index}.1| t\n").as_bytes())
+                }
+                2 => text.extend_from_slice(format!(">lcl|q{index}\n").as_bytes()),
+                _ => text.extend_from_slice(format!(">read{index} a title {index}\n").as_bytes()),
+            }
+            if index % 11 == 5 {
+                continue;
+            }
+            let letters: Vec<u8> = b"ACGTTGCAAGCTTCGAGATCCTAGGCATTACG"
+                .iter()
+                .cycle()
+                .skip(index)
+                .take(20 + (index * 37) % 300)
+                .copied()
+                .collect();
+            for line in letters.chunks(60) {
+                text.extend_from_slice(line);
+                text.push(b'\n');
+            }
+            if index % 9 == 4 {
+                text.extend_from_slice(b"NNNNNNNNNNacgtacgtacgtnnnnACGT\n");
+            }
+        }
+        text.extend_from_slice(tail);
+        text
+    }
+
+    // The records read into parts and taken back out of their store are the reader's, with how the
+    // reading ended (the end, a blank-line `eEOF`, a reader error) and the reader's messages, also
+    // with the ids `-parse_deflines` reads, across parts and batches of any size, by one thread and
+    // the pool.
+    #[test]
+    fn records_read_into_parts_are_the_readers_records() {
+        let plain = ReaderConfig::query("BLASTN", false, false);
+        let parsed = plain.with_parse_deflines(true);
+        for (tail, ends) in [
+            (b"".as_slice(), "Input"),
+            (b"\n; a comment\n\n".as_slice(), ""),
+            (b">hyphen\nACGT-ACGT\n".as_slice(), "Input"),
+            (b">bad\n%%%%%%%%%%%%%%%%\n".as_slice(), "Error"),
+        ] {
+            for config in [plain, parsed] {
+                let text = text(400, tail);
+                let (expected, end) = read_all(&text, config);
+                assert!(end.starts_with(ends), "{end}");
+                for part_bytes in [1, 700, 5_000, 1 << 20] {
+                    for (batch, threads) in [(1, 1), (37, 1), (64, 4), (500, 3)] {
+                        let (records, got_end, parts) =
+                            through_parts(&text, config, part_bytes, batch, threads);
+                        assert_eq!(got_end, end);
+                        assert_eq!(records, expected, "part_bytes {part_bytes} batch {batch}");
+                        assert!(part_bytes >= 5_000 || parts > 5, "{parts} parts");
+                    }
+                }
+            }
+        }
     }
 
     // The loop's batches taken out of the store are the records read, the packed letters made

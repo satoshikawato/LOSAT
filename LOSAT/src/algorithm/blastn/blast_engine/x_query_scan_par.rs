@@ -70,6 +70,19 @@
 //!
 //! With `LOSAT_X_STATS`, `scan_par=1` in LOSAT_X_QSTREAM's line says that the parts' lengths were
 //! taken (`scan_par=0`: the one-thread reading).
+//!
+//! The records of the store (EXPERIMENT LOSAT_X_BNQPARTS, `store_parts`). Where LOSAT_X_BNQPACK's
+//! store holds the records read before the search, the same parts of the file (the same cut, the
+//! same `read_part` conditions) are read on the same threads into the parts of the store
+//! (`x_query_drop::Part`): each part by a new reader that packs the letters as the search's reader
+//! does, every record kept, in order. A part's records are the first reading's records of those
+//! bytes (the argument above), but for what a new reader numbers from its own start: the local ID
+//! (its counter starts at 1 in each part; the store gives each record the ID of its position among
+//! all records, so a record's ID is checked to be its part reader's counter's) and the line of a
+//! reader message, so a record of a part after the first that has a message leaves the file to the
+//! search's reader. The parts after the first need the parse of their records to have no state
+//! across the file: `-parse_deflines` (its refusal of an id read twice) and the archive are not
+//! read in parts.
 
 #![cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
 
@@ -322,8 +335,9 @@ fn read_part_store(
     use std::sync::atomic::Ordering;
 
     // The store of a part takes about a third of its bytes (titles, and a quarter of a byte per
-    // letter).
-    let mut store = Part::with_capacity(usize::try_from((to - from) / 3).ok()?);
+    // letter); it grows where it needs more.
+    let span = usize::try_from(to.saturating_sub(from)).ok()?;
+    let mut store = Part::with_capacity(span / 2, span / 128);
     if from >= to {
         return Some(store);
     }

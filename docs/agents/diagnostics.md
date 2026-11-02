@@ -319,6 +319,7 @@ export LOSAT_X_BNHLGROW=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNPVONCE=1
 export LOSAT_X_BNQPACK=1
+export LOSAT_X_BNQPARTS=1
 export LOSAT_X_BNSEEDLISTS=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
@@ -3679,6 +3680,32 @@ Scheduling (each value computed by one thread with the original function; order 
   16 threads) of the time (plan v4 line A10 session 19).
 - `LOSAT_X_BNQSLOTS` (REMOVED on 2026-10-28 with `LOSAT_X_QBATCHPAR`, whose slots it served; see the `LOSAT_X_QBATCHPAR`
   entry below). The `LOSAT_X_BNQPACK` store (once `LOSAT_X_BNQDROP`) no longer lends a batch to anything.
+- `LOSAT_X_BNQPARTS=1` (BLASTN, every task; speed and memory; in the strict set from the pull request that added it,
+  2026-11-02, on unless it is `0`; acts wherever the `LOSAT_X_BNQPACK` store acts, whose rule decides its sides) holds
+  the store in parts (`blastn/blast_engine/x_query_drop.rs` `Part`): each part is one buffer of its records' titles,
+  reader messages and packed letters (`sequence/packed_letters.rs` `PackedLetters::append_to`, `unpack_from`; the
+  letters themselves where the reader did not pack them) and a table of where each record ends, and the loop makes a
+  batch's records again from their parts when it takes the batch, by the search pool's threads with two or more (the
+  local ID from the record's position, `Query_<n>`; an ID `-parse_deflines` read and the archive's source wait beside
+  the part). Each record the reader makes is dropped as soon as it is copied into its part, so its allocations are
+  reused by the next record. The parts are read by the search's threads (scoped helpers before the pool exists,
+  `x_query_scan_par.rs` `store_parts`) where `LOSAT_X_QSTREAM`'s first reading would be cut into parts at record
+  starts (two threads or more on unix with the `parallel` feature, a regular file of `LOSAT_X_QSCANPARMIN` bytes or more,
+  4 MiB, no `\r` or `>?` in it, each part read to its end), and also not where a record of a part after the first has
+  a reader message (its text may name a line, counted from the part's start), a record's local ID is not its reader's
+  counter's, `-parse_deflines` (its reader refuses an id read twice across the file) or the archive; elsewhere the
+  search's reader reads the file into parts of about 1 MiB (`read_parts`). Before, the reader kept every record (an
+  ID, a title and a packed store on the heap each, 104 bytes of record and 40 of position beside them) on the
+  calling thread before the pool existed, and the end of the search freed them on one thread. Why the records are the
+  same: a part's records are its reader's (the part reading of `x_query_scan_par.rs`, whose header has the argument);
+  the buffer gives each record's bytes back as they were written, and the local ID a reader's counter gives its
+  `n`th record is `Query_<n>` (checked for every record kept: one whose ID is not that is kept beside its part with its
+  ID). No search value changes; no floating-point operation is involved. With `LOSAT_X_STATS`, `[X_STATS] BNQPARTS
+  records= parts= in_parts=` (in_parts: read on the search's threads). Evidence (workstation, node 0, 2026-11-02, line
+  SF S1 s5, 3 runs each against `=0`, outputs identical): 1,000,000 reads of 150 letters against the 16S database
+  (megablast, `-evalue 1e-5 -max_target_seqs 5`) at 16 threads 4.28 s against 6.01 s, max RSS 343 against 528 MiB,
+  at one thread 21.04 against 20.94 s and 299 against 500 MiB; 31,168 D. melanogaster cDNAs against 3 Mb at 16
+  threads 1.01 against 1.16 s.
 - `LOSAT_X_GREEDYROWFUSE=1` (BLASTN megablast, the distances of the non-affine greedy alignment that `x_greedy_row` runs:
   every traceback, and the score-only calls the fused loop GREEDYFUSE declines; speed; in the strict set from the pull
   request that added it, 2026-10-24; `=0` runs `x_greedy_row_avx2`, the three passes) runs one distance in two passes per

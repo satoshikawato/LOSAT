@@ -7695,17 +7695,13 @@ fn search_cli(
     } else if x_store_acts && x_query_drop::parts_on() {
         // EXPERIMENT (LOSAT_X_BNQPARTS): the records read into the parts of the store, on the
         // search's threads where the file can be cut into parts (each part read to its end: the
-        // reading ended at the end), else by the search's reader into one part.
+        // reading ended at the end), else by the search's reader.
         let (parts, end) = match x_opening.store_parts(query_config, args.num_threads) {
             Some(parts) => {
                 x_parts_read_in_parts = true;
                 (parts, QueryEnd::Input)
             }
-            None => {
-                let (part, end) =
-                    x_query_drop::read_part(&mut query_source, query_config.id_prefix);
-                (vec![part], end)
-            }
+            None => x_query_drop::read_parts(&mut query_source, query_config.id_prefix),
         };
         x_parts = Some(parts);
         (Vec::new(), end, x_query_stream::Store::off(x_opening))

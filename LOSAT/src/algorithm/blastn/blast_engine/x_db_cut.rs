@@ -143,7 +143,12 @@ pub(super) fn x_db_cut_block_bytes(db: &SeqDb, pool: &SearchPool<'_>, parallel: 
     let threads = if parallel { pool.threads() } else { 1 };
     let sequence_bytes = x_sequence_bytes(db);
     let cut = x_cut_block_bytes(sequence_bytes, threads, BLOCK_BYTES);
-    let small = x_bn_db_small().then_some(X_BNDBSMALL_BLOCK_BYTES);
+    // PROBE (v4-D12 s30, not for merge): another largest block.
+    let largest = std::env::var("LOSAT_PROBE_S30BLOCK")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(X_BNDBSMALL_BLOCK_BYTES);
+    let small = x_bn_db_small().then_some(largest);
     let block_bytes = x_cut_block_bytes(sequence_bytes, threads, small.unwrap_or(BLOCK_BYTES));
     crate::utils::xreach::x_reach!("LOSAT_X_BNDBSMALL", block_bytes < cut);
     block_bytes

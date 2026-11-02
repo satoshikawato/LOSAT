@@ -72,7 +72,12 @@
 //! It acts for every BLASTN task with `-db` at more than
 //! one thread; at one thread the blocks are searched one after another, as without it.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+
+// PROBE (v4-D12 s30, not for merge): block search sums of a pass.
+static P_BLK_US: AtomicU64 = AtomicU64::new(0);
+static P_BLK_MAX_US: AtomicU64 = AtomicU64::new(0);
+static P_READ_US: AtomicU64 = AtomicU64::new(0);
 use std::sync::OnceLock;
 
 use anyhow::Result;
@@ -182,13 +187,47 @@ where
     M: FnMut(u32, R) + Send,
 {
     let mut next_ordinal = 0u32;
+    // PROBE (v4-D12 s30, not for merge): one line per pass on stderr.
+    use super::super::x_bnstream as xb;
+    static P_PASS: AtomicUsize = AtomicUsize::new(0);
+    let pass = P_PASS.fetch_add(1, Ordering::Relaxed);
+    let (mut list_us, mut win_us, mut segs, mut nblocks, mut single) = (0u64, 0u64, 0usize, 0usize, 0usize);
+    let t_pass = xb::p_now();
+    for a in [&xb::P_H_US, &xb::P_O_US, &xb::P_TAIL_US, &xb::P_START_US, &xb::P_OWN_ITEMS, &xb::P_OWN_US, &xb::P_ASSIST, &P_BLK_US, &P_BLK_MAX_US, &P_READ_US] {
+        a.store(0, Ordering::Relaxed);
+    }
     loop {
+        let t0 = xb::p_now();
         let blocks = blocks_of(db, next_ordinal, block_bytes, segment.max(1));
+        list_us += xb::p_now() - t0;
         let Some(last) = blocks.last() else {
+            let g = |a: &std::sync::atomic::AtomicU64| a.load(Ordering::Relaxed) as f64 / 1000.0;
+            eprintln!(
+                "PROBE_S30\tpass {pass}\tthreads {}\tblock_bytes {block_bytes}\tsegs {segs}\tblocks {nblocks}\tsingle {single}\tpass_ms {:.1}\tlist_ms {:.1}\twin_ms {:.1}\tH_ms {:.1}\tO_ms {:.1}\ttail_ms {:.1}\tstart_ms {:.1}\town_items {}\town_ms {:.1}\tassist {}\tblk_ms {:.1}\tblk_max_ms {:.1}\tread_ms {:.1}",
+                pool.threads(),
+                (xb::p_now() - t_pass) as f64 / 1000.0,
+                list_us as f64 / 1000.0,
+                win_us as f64 / 1000.0,
+                g(&xb::P_H_US),
+                g(&xb::P_O_US),
+                g(&xb::P_TAIL_US),
+                g(&xb::P_START_US),
+                xb::P_OWN_ITEMS.load(Ordering::Relaxed),
+                g(&xb::P_OWN_US),
+                xb::P_ASSIST.load(Ordering::Relaxed),
+                g(&P_BLK_US),
+                g(&P_BLK_MAX_US),
+                g(&P_READ_US),
+            );
             return Ok(());
         };
+        segs += 1;
+        nblocks += blocks.len();
+        single += blocks.iter().filter(|b| b.end - b.first == 1).count();
         next_ordinal = last.end_ordinal();
+        let t1 = xb::p_now();
         search_window(db, pool, &blocks, block_bytes, new_scratch, search, merge)?;
+        win_us += xb::p_now() - t1;
     }
 }
 
@@ -246,7 +285,9 @@ where
             return Ok(Vec::new());
         }
         let range = blocks[i];
+        let t0 = super::super::x_bnstream::p_now();
         let block = super::x_read_block(db, range).map_err(search_read_error)?;
+        let t1 = super::super::x_bnstream::p_now();
         let mut kept = Vec::new();
         for j in 0..block.len() {
             let ordinal = range.first_ordinal + j as u32;
@@ -255,6 +296,10 @@ where
             }
         }
         super::x_done_block(block);
+        let t2 = super::super::x_bnstream::p_now();
+        P_READ_US.fetch_add(t1 - t0, Ordering::Relaxed);
+        P_BLK_US.fetch_add(t2 - t0, Ordering::Relaxed);
+        P_BLK_MAX_US.fetch_max(t2 - t0, Ordering::Relaxed);
         waiting_bytes.fetch_add(kept_bytes(&kept), Ordering::Relaxed);
         Ok(kept)
     };

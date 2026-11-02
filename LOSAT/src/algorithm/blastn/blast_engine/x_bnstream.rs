@@ -28,8 +28,23 @@
 //! thread also runs its own broadcast job inside a wait for a nested job, so a loop started after
 //! the thread took a job of an item's nested stage would run above that unfinished job.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
+
+// PROBE (v4-D12 s30, not for merge): sums of the waits of a pass, read and reset by `x_db_stream`.
+pub(super) static P_H_US: AtomicU64 = AtomicU64::new(0);
+pub(super) static P_O_US: AtomicU64 = AtomicU64::new(0);
+pub(super) static P_TAIL_US: AtomicU64 = AtomicU64::new(0);
+pub(super) static P_START_US: AtomicU64 = AtomicU64::new(0);
+pub(super) static P_OWN_ITEMS: AtomicU64 = AtomicU64::new(0);
+pub(super) static P_OWN_US: AtomicU64 = AtomicU64::new(0);
+pub(super) static P_ASSIST: AtomicU64 = AtomicU64::new(0);
+static P_DONE_SUM_US: AtomicU64 = AtomicU64::new(0);
+static P_DONE_N: AtomicU64 = AtomicU64::new(0);
+pub(super) fn p_now() -> u64 {
+    static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    T0.get_or_init(std::time::Instant::now).elapsed().as_micros() as u64
+}
 
 /// No NCBI counterpart (scheduling only): what narrows a window while many bytes of results wait
 /// for the owner. Past `floor` items after the last one handed over, an item is claimed only
@@ -153,20 +168,37 @@ impl<'a, R> Window<'a, R> {
         // owner has not yet handed over the subject at the start of the window)
         let mut idle = 0u32;
         let mut nap = 20u64;
+        let mut waiting: Option<u64> = None;
         loop {
             if self.failed.load(Ordering::Acquire) {
+                P_DONE_SUM_US.fetch_add(p_now(), Ordering::Relaxed);
+                P_DONE_N.fetch_add(1, Ordering::Relaxed);
                 return;
             }
             match self.claim(self.handed.load(Ordering::Acquire)) {
                 Claim::Item(i) => {
+                    if let Some(t0) = waiting.take() {
+                        P_H_US.fetch_add(p_now() - t0, Ordering::Relaxed);
+                    }
                     idle = 0;
                     nap = 20;
                     let state = state.get_or_insert_with(init);
                     self.search(i, state, search);
                 }
-                Claim::Done => return,
+                Claim::Done => {
+                    if let Some(t0) = waiting.take() {
+                        P_H_US.fetch_add(p_now() - t0, Ordering::Relaxed);
+                    }
+                    P_DONE_SUM_US.fetch_add(p_now(), Ordering::Relaxed);
+                    P_DONE_N.fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
                 Claim::Full => {
+                    if waiting.is_none() {
+                        waiting = Some(p_now());
+                    }
                     if self.assist && run_pending_job() {
+                        P_ASSIST.fetch_add(1, Ordering::Relaxed);
                         idle = 0;
                         nap = 20;
                         continue;
@@ -195,9 +227,13 @@ impl<'a, R> Window<'a, R> {
         let mut state: Option<S> = None;
         let mut idle = 0u32;
         let mut handed = 0usize;
+        let mut waiting: Option<u64> = None;
         while handed < self.n {
             let slot = handed % self.window;
             if self.ready[slot].load(Ordering::Acquire) {
+                if let Some(t0) = waiting.take() {
+                    P_O_US.fetch_add(p_now() - t0, Ordering::Relaxed);
+                }
                 let result = self.slots[slot]
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -216,11 +252,20 @@ impl<'a, R> Window<'a, R> {
             );
             match self.claim(handed) {
                 Claim::Item(i) => {
+                    if let Some(t0) = waiting.take() {
+                        P_O_US.fetch_add(p_now() - t0, Ordering::Relaxed);
+                    }
                     idle = 0;
                     let state = state.get_or_insert_with(init);
+                    let t0 = p_now();
                     self.search(i, state, search);
+                    P_OWN_ITEMS.fetch_add(1, Ordering::Relaxed);
+                    P_OWN_US.fetch_add(p_now() - t0, Ordering::Relaxed);
                 }
                 Claim::Full | Claim::Done => {
+                    if waiting.is_none() {
+                        waiting = Some(p_now());
+                    }
                     if self.assist && run_pending_job() {
                         idle = 0;
                         continue;
@@ -341,14 +386,24 @@ pub(super) fn search_in_order_bounded<S, R: Send>(
         // The first thread to start its job is the owner.
         let owner = Mutex::new(Some(hand_over));
         let started = AtomicUsize::new(0);
+        P_DONE_SUM_US.store(0, Ordering::Relaxed);
+        P_DONE_N.store(0, Ordering::Relaxed);
         rayon::broadcast(|ctx| {
             let hand_over = owner.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let t0 = p_now();
             wait_for_every_loop(&started, ctx.num_threads());
+            P_START_US.fetch_add(p_now() - t0, Ordering::Relaxed);
             match hand_over {
                 Some(hand_over) => shared.owner(init, search, hand_over),
                 None => shared.helper(init, search),
             }
         });
+        let end = p_now();
+        let n = P_DONE_N.load(Ordering::Relaxed);
+        P_TAIL_US.fetch_add(
+            (end * n).saturating_sub(P_DONE_SUM_US.load(Ordering::Relaxed)),
+            Ordering::Relaxed,
+        );
         return;
     }
     shared.owner(init, search, hand_over);

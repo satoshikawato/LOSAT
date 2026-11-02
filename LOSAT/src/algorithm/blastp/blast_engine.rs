@@ -6542,8 +6542,8 @@ fn x_block_search_refuses_nothing(
 // cells, and a batch's tables have no more words than the batch's offsets add
 // (`CompressedWordCount`): a batch whose words are at most four times the banks' cells cannot fill
 // them; a batch with more leaves the search to the reference path, which tests the batch exactly.
-// The batches are tested one by one, in groups on the pool's threads when it has more than one
-// (each group with its own counter); the outcome is whether all pass.
+// The batches are tested one by one, on the pool's threads when it has more than one, with one
+// counter whose kept counts serve them all; the outcome is whether all pass.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 fn x_block_words_fit(
     args: &ResolvedBlastpArgs,

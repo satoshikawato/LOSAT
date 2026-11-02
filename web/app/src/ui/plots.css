@@ -34,12 +34,39 @@
 .plot-tools {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-bottom: 6px;
 }
 
 .plot-tools button {
   min-height: 28px;
+}
+
+/* The plotted subject, chosen here or by a Descriptions row (the same selection). The label clips
+   its overflow: WebKit kept a scrollable overflow on it as wide as the list's longest subject
+   (a 304 px label, 440 px of overflow) although the list was laid out inside it, and did not
+   recompute it after the options came, so that its 390 px page was 479 px wide (CI of #732;
+   inline-size containment and a percentage or fixed width did not help). The 3 px padding,
+   taken back by the margins, keeps the list's focus ring (2 px at 1 px) inside the clip. */
+.plot-subject {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: -3px 5px -3px -3px;
+  padding: 3px;
+  overflow: hidden;
+  font-weight: 600;
+  color: var(--fg);
+  flex: 0 1 30em;
+  min-width: 0;
+}
+
+.plot-subject select {
+  flex: 1 1 auto;
+  width: 10em;
+  min-width: 0;
+  font-weight: 400;
 }
 
 .plot-help {

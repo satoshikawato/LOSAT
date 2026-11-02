@@ -1541,6 +1541,33 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
 
 // --- the phone size (S13 screen review) ------------------------------------------------------------
 
+
+test('the dot plot: its Subject list chooses the plotted subject, the same selection as a Descriptions row', async ({ page }) => {
+  // The Owner (2026-11-02): chosen only by a Descriptions row on another tab, the plotted pair was
+  // a riddle. q1 is A; both subjects hold it.
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${A}\n`);
+  await paste(page, 'subject', `>s1\n${A}${dna(12, 60)}\n>s2\n${dna(13, 40)}${A}\n`);
+  await run(page, 1);
+  await openRun(page, 1);
+  await show(page, 'dotplot');
+  const select = page.getByTestId('dotplot-subject');
+  const options = select.locator('option');
+  await expect(options).toHaveCount(2);
+  const [first, second] = [(await options.nth(0).getAttribute('value'))!, (await options.nth(1).getAttribute('value'))!];
+  const secondId = (await options.nth(1).textContent())!.trim().split(' · ')[0]!;
+  await expect(select).toHaveValue(first);
+
+  await select.selectOption(second);
+  await expect(page.getByTestId('dotplot-title')).toHaveText(`Plot of q1 vs ${secondId}`);
+  await show(page, 'hits');
+  await expect(page.getByTestId(`subject-row-${second}`)).toHaveAttribute('aria-pressed', 'true');
+
+  // And back: a Descriptions row chooses the plotted subject too.
+  await page.getByTestId(`subject-row-${first}`).click();
+  await show(page, 'dotplot');
+  await expect(select).toHaveValue(first);
+});
 test('narrow screens: the results are no wider than the screen; "Run LOSAT" opens them; the tables show the key values first', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   // A translated search (frames) of files with long names: the run's label in the run picker is long.

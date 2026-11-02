@@ -100,8 +100,7 @@ authoritative, current guidance for agent behavior in LOSAT.
      difference: a `gb`, `emb` or `dbj` id prints the stored type, where NCBI's
      process-wide id table can print the type of another id of the same prefix,
      digit count and version (maintainer, 2026-10-21, for the tabular `sseqid`
-     with `-db`; the other places under the standing delegation,
-     PD-LOSAT-NCBI-DEFECTS 1.10).
+     with `-db`; the other places accepted on 2026-11-02, PD-LOSAT-NCBI-DEFECTS 1.10).
 
 4. NCBI code comments are mandatory for modifications.
    - Every code change must include NCBI C/C++ reference comments with file path

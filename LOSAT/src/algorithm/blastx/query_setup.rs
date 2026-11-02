@@ -392,8 +392,6 @@ pub fn prepare_queries(
             if s.locut > 0.0 { s.locut } else { 2.2 },
             if s.hicut > 0.0 { s.hicut } else { 2.5 },
         )
-        // BLASTX keeps LOSAT's former SEG until SX (plan DW-10).
-        .keeping_all_left_segments()
         // LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the chunks of a split query (split.rs) are masked
         // again after the whole query, mostly over the same segments, so this masker takes the
         // trim of a segment trimmed before on this thread from its memo.

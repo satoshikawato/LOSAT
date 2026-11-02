@@ -658,7 +658,7 @@ mod tests {
             (&b"t"[..], i32::MAX as u32),
         ] {
             let record = defline_set(title, oid, 0, &mut Vec::new());
-            let deflines = crate::seqdb::header::decode_defline_set(&record, path).unwrap();
+            let deflines = crate::seqdb::header::decode_defline_set(&record, path, oid).unwrap();
             assert_eq!(deflines.len(), 1);
             assert_eq!(deflines[0].title, title);
             assert_eq!(deflines[0].volume_ordinal, oid);

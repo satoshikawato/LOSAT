@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pord_x",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pord_x",
+  "number-of-letters": 660,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-02T19:08:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50384,
+  "bytes-to-cache": 776,
+  "files": [
+    "pord_x.pdb",
+    "pord_x.phr",
+    "pord_x.pin",
+    "pord_x.pog",
+    "pord_x.pos",
+    "pord_x.pot",
+    "pord_x.psq",
+    "pord_x.ptf",
+    "pord_x.pto"
+  ]
+}

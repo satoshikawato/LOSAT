@@ -135,16 +135,14 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
             .and_then(|()| LOSAT::algorithm::tblastn::check_options(&args))
             .map_err(|error| format!("{error:#}"))?,
         // The checks of each search's formats, as for BLASTN: BLASTX resolves its options for
-        // each format (the hit list size), and its CLI rejects `-query_loc` and `-subject_loc`.
+        // each format (the hit list size), and its parser rejects `-query_loc` and `-subject_loc`.
         Commands::Blastx(args) => {
             let mut first_error = None;
             for group in &groups {
-                let outfmts: Vec<String> = group.iter().map(u32::to_string).collect();
-                let outfmts: Vec<&str> = outfmts.iter().map(String::as_str).collect();
-                match LOSAT::algorithm::blastx::check_options(&args, &outfmts) {
+                match blastx_group_check(&args, group) {
                     Ok(()) => return Ok(()),
                     Err(error) => {
-                        first_error.get_or_insert(format!("{error:#}"));
+                        first_error.get_or_insert(error);
                     }
                 }
             }
@@ -169,14 +167,30 @@ fn blastn_group_check(
         .map_err(|error| format!("{error:#}"))
 }
 
+/// BLASTX's checks (`blastx::check_options`) for the search of the output formats `group`, as
+/// `run_local` makes them before it searches. `validate` runs it for each search of a run, and
+/// `run` asks it which search is rejected (`group_rejected`).
+fn blastx_group_check(
+    args: &LOSAT::algorithm::blastx::BlastxArgs,
+    group: &[u32],
+) -> Result<(), String> {
+    let outfmts: Vec<String> = group.iter().map(u32::to_string).collect();
+    let outfmts: Vec<&str> = outfmts.iter().map(String::as_str).collect();
+    LOSAT::algorithm::blastx::check_options(args, &outfmts).map_err(|error| format!("{error:#}"))
+}
+
 /// Whether the options' checks reject the search of the output formats `group`, as the CLI
-/// rejects those formats alone because of their hit list size: BLASTN's checks fail
-/// (`blastn_group_check`: a hit list of 0, or a preliminary hit list size below 1), or, for
-/// the other programs, the hit list size is 0. `run` tolerates a failed search of a
-/// two-search run only for this reason (`fails_run`).
+/// rejects those formats alone because of their hit list size: BLASTN's and BLASTX's checks
+/// fail (`blastn_group_check`: a hit list of 0, or a preliminary hit list size below 1;
+/// `blastx_group_check`), or, for the other programs, the hit list size is 0. `run` tolerates
+/// a failed search of a two-search run only for this reason (`fails_run`). With the checks
+/// themselves as the predicate, a search that fails them for another reason than its hit list
+/// (for example `-evalue 0`) is rejected as the other search is, so `run` fails with the
+/// tabular search's error, which `validate` reports.
 fn group_rejected(command: &Commands, group: &[u32]) -> bool {
     match command {
         Commands::Blastn(args) => blastn_group_check(args, group).is_err(),
+        Commands::Blastx(args) => blastx_group_check(args, group).is_err(),
         _ => hit_list_size(command, group[0]) == 0,
     }
 }
@@ -1450,6 +1464,14 @@ mod tests {
             text(&zero[&3]),
             "Warning: [blastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
         );
+        // Both searches fail, each for its own reason (the tabular formats' hit list is checked
+        // before the e-value): the run fails with the tabular search's error, as validate.
+        let both = [&words[..], &["-num_alignments", "0", "-evalue", "0"]].concat();
+        let error = run(&both, &query, &subject).unwrap_err();
+        assert!(error.contains("No hits are being saved"), "{error}");
+        assert_eq!(validate(&both).unwrap_err(), error);
+        let format0 = parse(&both).unwrap().1;
+        assert!(group_rejected(&format0, &[0]) && group_rejected(&format0, &[6, 7]));
     }
 
     // Observer events that break the formatter contract fail the run instead of

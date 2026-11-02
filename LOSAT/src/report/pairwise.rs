@@ -5592,11 +5592,14 @@ fn write_blastx_alignment(
         }
         writeln!(writer)?;
         write_spaces(writer, 7 + width + 2)?;
+        // Both rows may carry lower case (the query's and, with `-lcase_masking`, a `-subject`'s,
+        // `blastx/x_soft_subject.rs`), which NCBI applies only when it prints a row
+        // (showalign.cpp:2495-2521), so the residues are compared in upper case.
         for (&qc, &sc) in qpart.iter().zip(spart) {
-            let qu = qc.to_ascii_uppercase();
-            let middle = if qu == sc {
+            let (qu, su) = (qc.to_ascii_uppercase(), sc.to_ascii_uppercase());
+            let middle = if qu == su {
                 qu
-            } else if is_positive_match(qu as char, sc as char, config.protein_matrix) {
+            } else if is_positive_match(qu as char, su as char, config.protein_matrix) {
                 b'+'
             } else {
                 b' '

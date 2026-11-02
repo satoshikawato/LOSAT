@@ -1664,6 +1664,13 @@ fn write_pairwise(
             }
         }
     }
+    // `-lcase_masking`: the subject rows show their records' lower case too (x_soft_subject.rs).
+    if subjects
+        .iter()
+        .any(|subject| !subject.lowercase_masks.is_empty())
+    {
+        super::x_soft_subject::x_masked_subject_rows(&mut hits, subjects);
+    }
     let report = pairwise_metadata(options, subjects, shown);
     let ids: Vec<std::sync::Arc<str>> = match shown {
         ShownSubjects::Fasta { parsed, .. } => subjects

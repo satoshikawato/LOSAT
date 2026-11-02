@@ -1538,12 +1538,15 @@ label.inline {
   align-items: center;
 }
 
+/* The E value columns are 9.5ch: in Inter an E value of 9 characters ("1.21e-102") is 9.4ch
+   wide, wider than the 8.25ch that fitted the system font, and it ran past its header. */
+
 /* NCBI's order (W4b): #, Description, Score (bits), E value, HSPs, Length, Subject ID. The Subject
    ID column is as wide as its longest value (--id-width, measured by SubjectTable), within 10ch
    and 24ch, and starts 12 px further from the right-aligned lengths; the Description has the rest
    (W4b screen review L8). */
 .subject-grid {
-  grid-template-columns: 4ch minmax(12ch, 1fr) 9ch 8.25ch 7ch 8.25ch calc(clamp(10ch, var(--id-width, 24ch), 24ch) + 12px);
+  grid-template-columns: 4ch minmax(12ch, 1fr) 9ch 9.5ch 7ch 8.25ch calc(clamp(10ch, var(--id-width, 24ch), 24ch) + 12px);
 }
 
 .subject-grid > [data-col='sseqid'],
@@ -1556,11 +1559,11 @@ label.inline {
    column at 1280 px beside the queue's column of the same width (W4b). */
 .hsp-grid {
   column-gap: 5px;
-  grid-template-columns: 3.5ch 9ch 8.25ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 9.5ch 8.25ch;
+  grid-template-columns: 3.5ch 9ch 9.5ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 9.5ch 8.25ch;
 }
 
 .hsp-grid.framed {
-  grid-template-columns: 3.5ch 9ch 8.25ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 6ch 9.5ch 8.25ch;
+  grid-template-columns: 3.5ch 9ch 9.5ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 6ch 9.5ch 8.25ch;
 }
 
 /* The header's columns are the rows' columns: the same borders, and room for the rows'
@@ -1827,7 +1830,7 @@ pre.range-text {
      the same order. Subjects: #, Subject, Score (bits), E value, HSPs, Length, Description. The
      Subject column keeps 12ch, so that IDs with a common prefix stay apart (second screen review). */
   .subject-grid {
-    grid-template-columns: 4ch minmax(12ch, 1fr) 9ch 8.25ch 6ch 8.25ch minmax(16ch, 2fr);
+    grid-template-columns: 4ch minmax(12ch, 1fr) 9ch 9.5ch 6ch 8.25ch minmax(16ch, 2fr);
   }
 
   .subject-grid > [data-col='sseqid'],
@@ -1869,11 +1872,11 @@ pre.range-text {
      Mismatches, Gap opens, outfmt 0. The frames come before the ranges, so that a phone shows
      them (W4 screen review middle 2: the screen ended inside the subject range). */
   .hsp-grid {
-    grid-template-columns: 3.5ch 9ch 8.25ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
+    grid-template-columns: 3.5ch 9ch 9.5ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
   }
 
   .hsp-grid.framed {
-    grid-template-columns: 3.5ch 9ch 8.25ch 6ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
+    grid-template-columns: 3.5ch 9ch 9.5ch 6ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
   }
 
   .hsp-grid > [data-col='frames'],

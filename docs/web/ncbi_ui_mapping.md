@@ -71,18 +71,18 @@ Match/Mismatch と Gap Costs は 2 つの欄のまま（NCBI は「1,-2」「Exi
 
 **横の一文**：NCBI の画面で欄の横に見えている文は Max target sequences の「Select the maximum number of aligned sequences to display」だけ（ほかの文は「?」の helpbox の中、checkbox の名前は「Low complexity regions filter」「Mask for lookup table only」などの label）。この一文を同じ位置に出す（`ParameterField.hint`）。ほかの行に LOSAT の文は足さない（§4）。「?」は今までどおり CLI の help を開く。
 
-**既定値**（line WR、2026-11-02）：欄に示す既定値は、`describe` の clap の既定と、`domain/programs.ts` の各 program の `defaults` の表（エンジンが task や他の option から決め、clap に既定の無いもの）。表の値は CLI の help（`losat <program> -help`、`describe.json` の help と同じ文）から取り、unit test（`search-form.test.ts` の「every resolved default…」）が各値を help の文と照らす。
+**既定値**（line WR、2026-11-02。同日の DW-37 で `describe` が返す形に）：欄に示す既定値はエンジンが解決した値で、`describe` の `defaults`（`web/adapter/src/defaults.rs`、`abi_v2.md` §9）と clap の既定から来る。アダプタはエンジン自身の解決（BLASTP・TBLASTN・BLASTX の `resolve()`、BLASTN の `coordination` の関数、TBLASTX の getter）を task ごとに、また `-matrix` の 9 つ（`ScoringMatrix::ALL`）と `-word_size` 1〜32 の値ごとに呼び、値の変わる option だけを表にする。アプリ（`parameters.ts` の `knownDefault`）は表を引くだけで、program ごとの値も規則も持たない：task の値、書いた `-matrix` か `-word_size` のその値での値（両方を書くと、両方で変わる option は不明）、`unless` の option を書くと不明。各 task の値が CLI の help（または clap の既定）の言う値と同じことは、アダプタの試験（`defaults.rs` の `every_task_default_is_a_value_that_the_help_names`、全 option）が照らす。与えたかを区別する option（`given`）は task ごと：hit list の 3 つ（全 task）と、fast の task の `-word_size`（blastp-fast・tblastn-fast・blastx-fast は 5 を与えると threshold 19.3、与えなければ 20）。select の既定の項目を選び直すと欄は空に戻る（与えない）ので、fast の task で 5 を与えるには「Other」に 5 を打つ。
 
-| program | task で変わるもの | 他の option で変わるもの（その option が既定の間だけ示す） |
+| program | task で変わるもの | 他の option で変わるもの |
 |---|---|---|
 | BLASTN | `-evalue` 10（blastn-short 1000）、`-word_size` 28 / 11 / 11 / 7、`-reward` 1 / 2 / 2 / 1、`-penalty` -2 / -3、`-gapopen` 0 / 5、`-gapextend` 0 / 2、`-dust` 20 64 1（blastn-short no）、`-soft_masking` true | — |
-| BLASTP | `-word_size` 3（blastp-fast 5）、`-evalue` 10、`-matrix` BLOSUM62、`-seg` no、`-soft_masking` false | `-gapopen` 11・`-gapextend` 1・`-window_size` 40（`-matrix`）、`-threshold` 11（blastp-fast 20。`-matrix`・`-word_size`） |
+| BLASTP | `-word_size` 3（blastp-fast 5）、`-evalue` 10、`-matrix` BLOSUM62、`-seg` no、`-soft_masking` false | `-gapopen`・`-gapextend`・`-window_size`・`-threshold` は `-matrix` ごとのエンジンの値（PAM30 で 9・1・15・16）。`-threshold` は与えた `-word_size` での値（5 で 19.3、6 で 21）。`-word_size` は与えたかを区別する（blastp-fast で 5 を与えると threshold は 20 でなく 19.3） |
 | TBLASTN | `-word_size` 3（tblastn-fast 5）、`-evalue` 10、`-matrix` BLOSUM62、`-seg` 12 2.2 2.5、`-soft_masking` false、`-xdrop_gap` 15、`-xdrop_gap_final` 25、`-sum_stats` true | BLASTP と同じ（`-threshold` 13、tblastn-fast 20） |
-| TBLASTX | `-word_size` 3、`-matrix` BLOSUM62、`-soft_masking` false、`-culling_limit` 0 | `-threshold` 13・`-window_size` 40（`-matrix`） |
-| BLASTX | `-word_size` 3（blastx-fast 5）、`-matrix` BLOSUM62、`-gapopen` 11、`-gapextend` 1、`-window_size` 40、`-culling_limit` 0、`-sum_stats` true（`-evalue` 10、`-seg` 12 2.2 2.5、`-soft_masking` false、`-comp_based_stats` 2、`-strand` both は clap の既定。help の文は線 SX が CLI に足した、DW-36） | `-threshold` 12（blastx-fast 20。`-word_size`：与えた word size が threshold を決める、5 なら 19.3。BLASTX の `-word_size` は hit list の 3 つと同じく打てば既定と同じ値でも書く） |
+| TBLASTX | `-word_size` 3、`-matrix` BLOSUM62、`-soft_masking` false、`-culling_limit` 0 | `-threshold`・`-window_size` は `-matrix` ごと（BLOSUM45 で 16・60） |
+| BLASTX | `-word_size` 3（blastx-fast 5）、`-matrix` BLOSUM62、`-gapopen` 11、`-gapextend` 1、`-window_size` 40、`-culling_limit` 0、`-sum_stats` true（`-evalue` 10、`-seg` 12 2.2 2.5、`-soft_masking` false、`-comp_based_stats` 2、`-strand` both は clap の既定。help の文は線 SX が CLI に足した、DW-36） | `-threshold` 12（blastx-fast 20）は与えた `-word_size` での値（5 で 19.3）。`-matrix` は BLOSUM62 だけで何も変えない。`-word_size` は blastx-fast で与えたかを区別する |
 | 5 つとも | `-max_target_seqs` 500、`-num_descriptions` 500、`-num_alignments` 250 | `-max_target_seqs` は他の 2 つが、他の 2 つは `-max_target_seqs` が空の間だけ（BLAST+ は与えたかを区別し、互いに除く） |
 
-Template length・Template type は既定を示さない（2 つを共に与える option で、片方だけ書くと CLI が拒む）。Max HSPs・Percent identity は既定が無い（空 = 制限なし）。この表は仮の出どころ（Owner-delegated 2026-11-02）。本来の経路は `describe` がエンジンの解決した既定（BLASTP・TBLASTN の `resolve()`、TBLASTX の `word_threshold()`・`window()`、`stats::protein_options::suggested_threshold` など）を program・task ごとに返すこと（`web-refresh-20261102/SURVEY.md`）。
+Template length・Template type は既定を示さない（2 つを共に与える option で、片方だけ書くと CLI が拒む）。Max HSPs・Percent identity は既定が無い（空 = 制限なし）。2026-11-02 の版はアプリの `domain/programs.ts` に program ごとの `defaults` の表（CLI の help の写し）と「その option が既定の間だけ示す」の規則を持ち、`-matrix` を変えると関わる欄は空になった（Owner-delegated 2026-11-02 の仮の出どころ）。
 
 ## 2. 結果画面
 

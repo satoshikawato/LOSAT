@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// One option of the search form, with its default, choices and help (`describe`, and the
-// program's resolved defaults): a row (its label left, its control right, as on NCBI's page),
+// One option of the search form, with its default, choices and help (`describe`, with the
+// defaults that the engine resolves): a row (its label left, its control right, as on NCBI's page),
 // or one field of a row of several (`inline`, such as "Match" in "Match/Mismatch Scores", or a
 // checkbox of NCBI's "Mask" row). The control shows the default while the field is empty, as
 // NCBI's form shows its values. A field whose value is written to the argv differs from the

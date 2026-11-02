@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "plook_z",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "plook_z",
+  "number-of-letters": 440,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-02T22:50:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50101,
+  "bytes-to-cache": 547,
+  "files": [
+    "plook_z.pdb",
+    "plook_z.phr",
+    "plook_z.pin",
+    "plook_z.pog",
+    "plook_z.pos",
+    "plook_z.pot",
+    "plook_z.psq",
+    "plook_z.ptf",
+    "plook_z.pto"
+  ]
+}

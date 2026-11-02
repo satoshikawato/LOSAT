@@ -6,6 +6,7 @@
 //! message in `losat_web2_last_error_ptr/len`. Responses and outputs go to the host
 //! through `losat_host.emit` (`emit.rs`).
 
+pub mod defaults;
 pub mod describe;
 pub mod emit;
 pub mod json;

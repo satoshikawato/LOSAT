@@ -375,6 +375,7 @@ fn read_part_store(
         }
     }
     drop(source);
+    store.shrink();
     (!refused).then_some(store)
 }
 

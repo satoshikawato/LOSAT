@@ -236,6 +236,15 @@ impl PackedLetters {
         }
     }
 
+    /// EXPERIMENT (LOSAT_X_BNQPARTS): the bytes `append_to` appends.
+    pub fn stored_bytes(&self) -> usize {
+        self.packed.len()
+            + self
+                .rest
+                .as_ref()
+                .map_or(0, |rest| 9 * rest.others.len() + 8 * rest.lowercase.len())
+    }
+
     /// EXPERIMENT (LOSAT_X_BNQPARTS): appends the store to `out` (the packed bases, then the other
     /// runs and the lower-case intervals), for `unpack_from`.
     pub fn append_to(&self, out: &mut Vec<u8>) -> PackedAt {
@@ -567,6 +576,7 @@ mod tests {
                 let start = buffer.len();
                 let at = store.append_to(&mut buffer);
                 assert_eq!(buffer.len() - start, at.bytes(), "case {index}");
+                assert_eq!(store.stored_bytes(), at.bytes(), "case {index}");
                 assert_eq!(at.len(), store.len());
                 let mut expected = Vec::new();
                 store.unpack_into(&mut expected);

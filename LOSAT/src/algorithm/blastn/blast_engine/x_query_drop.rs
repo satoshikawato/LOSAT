@@ -252,9 +252,9 @@ impl Store {
                 if let PartLetters::Packed(at) = record.letters {
                     packed += 1;
                     packed_letters += at.len() as u64;
+                    bytes += at.bytes() as u64;
                 }
             }
-            bytes += part.bytes.len() as u64;
         }
         if packed > 0 {
             PACKED.fetch_add(packed, Ordering::Relaxed);
@@ -408,13 +408,24 @@ impl PartsLeft {
                 at = (first + part.len()).min(range.end);
             }
         }
+        // The letters of the batch's records that have their own vector, moved out of their parts.
+        let mut owned: Vec<Option<Vec<u8>>> = Vec::new();
+        for (run, &(index, from, offset)) in runs.iter().enumerate() {
+            let end = runs.get(run + 1).map_or(range.len(), |&(_, _, next)| next) - offset + from;
+            for (at, letters) in &mut self.parts[index].1.own {
+                if (from..end).contains(at) {
+                    owned.resize_with(range.len(), || None);
+                    owned[offset + *at - from] = Some(std::mem::take(letters));
+                }
+            }
+        }
         let parts = &self.parts;
         let id_prefix = self.id_prefix;
-        let make = |offset: usize| {
+        let make = |offset: usize, own: Option<Vec<u8>>| {
             let run = runs[runs.partition_point(|&(_, _, from)| from <= offset) - 1];
             let (first, part) = &parts[run.0];
             let index = run.1 + offset - run.2;
-            part.record(index, first + index, id_prefix)
+            part.record(index, first + index, id_prefix, own)
         };
         let batch: Vec<FastaRecord>;
         #[cfg(all(
@@ -423,10 +434,26 @@ impl PartsLeft {
         ))]
         {
             use rayon::prelude::*;
-            batch = if pool.enabled() && pool.threads() > 1 {
-                pool.install(|| (0..range.len()).into_par_iter().map(make).collect())
-            } else {
-                (0..range.len()).map(make).collect()
+            batch = match (pool.enabled() && pool.threads() > 1, owned.is_empty()) {
+                (true, true) => pool.install(|| {
+                    (0..range.len())
+                        .into_par_iter()
+                        .map(|offset| make(offset, None))
+                        .collect()
+                }),
+                (true, false) => pool.install(|| {
+                    owned
+                        .into_par_iter()
+                        .enumerate()
+                        .map(|(offset, own)| make(offset, own))
+                        .collect()
+                }),
+                (false, true) => (0..range.len()).map(|offset| make(offset, None)).collect(),
+                (false, false) => owned
+                    .into_iter()
+                    .enumerate()
+                    .map(|(offset, own)| make(offset, own))
+                    .collect(),
             };
         }
         #[cfg(not(all(
@@ -435,7 +462,12 @@ impl PartsLeft {
         )))]
         {
             let _ = pool;
-            batch = (0..range.len()).map(make).collect();
+            owned.resize_with(range.len(), || None);
+            batch = owned
+                .into_iter()
+                .enumerate()
+                .map(|(offset, own)| make(offset, own))
+                .collect();
         }
         self.taken = range.end;
         while self
@@ -462,7 +494,13 @@ pub(super) struct Part {
     /// The records whose local ID is not the one their reader's counter gave (`-parse_deflines`)
     /// or that carry a source (`FastaRecord::source`): their position in the part, ID and source.
     special: Vec<(usize, String, Option<Box<RecordSource>>)>,
+    /// The letters of the records that the reader did not pack and that have `OWN_LETTERS` or
+    /// more, in their own vector (moved in and out, not copied), by their position in the part.
+    own: Vec<(usize, Vec<u8>)>,
 }
+
+/// The letters of a record the reader did not pack from which the record keeps its own vector.
+const OWN_LETTERS: usize = 1 << 16;
 
 #[derive(Clone, Copy)]
 struct PartRecord {
@@ -477,13 +515,15 @@ struct PartRecord {
 enum PartLetters {
     /// The letters themselves (the reader did not pack them).
     Letters(usize),
+    /// The letters in their own vector (`Part::own`).
+    Own(usize),
     Packed(PackedAt),
 }
 
 impl PartLetters {
     fn len(&self) -> usize {
         match self {
-            PartLetters::Letters(length) => *length,
+            PartLetters::Letters(length) | PartLetters::Own(length) => *length,
             PartLetters::Packed(at) => at.len(),
         }
     }
@@ -496,7 +536,30 @@ impl Part {
             bytes: Vec::with_capacity(bytes),
             records: Vec::with_capacity(records),
             special: Vec::new(),
+            own: Vec::new(),
         }
+    }
+
+    /// The bytes of the buffer that `push` would take for `record` (with the reader's `packed`).
+    pub(super) fn bytes_for(record: &FastaRecord, packed: Option<&PackedLetters>) -> usize {
+        record.title.len()
+            + record.warnings.len()
+            + match packed {
+                Some(store) => store.stored_bytes(),
+                None if record.sequence.len() >= OWN_LETTERS => 0,
+                None => record.sequence.len(),
+            }
+    }
+
+    /// The bytes held in the buffer.
+    pub(super) fn bytes(&self) -> usize {
+        self.bytes.len()
+    }
+
+    /// Gives back the room no record took (a part is complete).
+    pub(super) fn shrink(&mut self) {
+        self.bytes.shrink_to_fit();
+        self.records.shrink_to_fit();
     }
 
     /// The number of records.
@@ -525,6 +588,11 @@ impl Part {
         self.bytes.extend_from_slice(&warnings);
         let letters = match packed {
             Some(store) => PartLetters::Packed(store.append_to(&mut self.bytes)),
+            None if sequence.len() >= OWN_LETTERS => {
+                let length = sequence.len();
+                self.own.push((self.records.len(), sequence));
+                PartLetters::Own(length)
+            }
             None => {
                 self.bytes.extend_from_slice(&sequence);
                 PartLetters::Letters(sequence.len())
@@ -560,8 +628,15 @@ impl Part {
     }
 
     /// Record `index` made again, the input record `ordinal` (from 0) of a reader whose local IDs
-    /// start with `id_prefix`.
-    fn record(&self, index: usize, ordinal: usize, id_prefix: &str) -> FastaRecord {
+    /// start with `id_prefix`; `own` is its letters where they have their own vector (moved out of
+    /// the part by the caller).
+    fn record(
+        &self,
+        index: usize,
+        ordinal: usize,
+        id_prefix: &str,
+        own: Option<Vec<u8>>,
+    ) -> FastaRecord {
         let (title, warnings, letters) = self.parts_of(index);
         let (local_id, source) = match self.special.binary_search_by_key(&index, |(at, _, _)| *at) {
             Ok(found) => {
@@ -573,6 +648,9 @@ impl Part {
         let mut sequence = Vec::new();
         match self.records[index].letters {
             PartLetters::Letters(_) => sequence.extend_from_slice(letters),
+            PartLetters::Own(_) => {
+                sequence = own.expect("the loop takes a record's own letters once");
+            }
             PartLetters::Packed(at) => unpack_from(letters, at, &mut sequence),
         }
         FastaRecord {
@@ -595,10 +673,11 @@ fn counted_id(id: &str, id_prefix: &str, n: usize) -> bool {
     })
 }
 
-/// EXPERIMENT (LOSAT_X_BNQPARTS): `x_read_queries_packed` into parts of about `PART_BYTES` bytes:
-/// the records of `source` (their letters packed as they are read) and how the reading ended, as
-/// `read_queries` reads them. A part is closed once it holds `PART_BYTES` bytes, so no buffer is
-/// copied as it grows but for the record that passes the mark.
+/// EXPERIMENT (LOSAT_X_BNQPARTS): `x_read_queries_packed` into parts of at most `PART_BYTES` bytes
+/// (a record that takes more has a part of its own): the records of `source` (their letters packed
+/// as they are read) and how the reading ended, as `read_queries` reads them. A part is closed before
+/// a record that would pass the mark, so its buffer is not copied as it grows, and then gives back
+/// the room it did not take.
 pub(super) fn read_parts<R: std::io::Read>(
     source: &mut FastaInputSource<R>,
     id_prefix: &str,
@@ -614,7 +693,7 @@ fn read_parts_of<R: std::io::Read>(
 ) -> (Vec<Part>, QueryEnd) {
     source.x_pack_letters();
     let mut parts = Vec::new();
-    let mut part = Part::with_capacity(part_bytes, part_bytes / 64);
+    let mut part = Part::with_capacity(part_bytes, 0);
     let mut read = 0;
     let end = loop {
         if source.end() {
@@ -628,13 +707,14 @@ fn read_parts_of<R: std::io::Read>(
             Ok(record) => {
                 let packed = source.x_take_packed();
                 read += 1;
-                part.push(record, packed, id_prefix, read);
-                if part.bytes.len() >= part_bytes {
-                    parts.push(std::mem::replace(
-                        &mut part,
-                        Part::with_capacity(part_bytes, part_bytes / 64),
-                    ));
+                if part.len() > 0
+                    && part.bytes() + Part::bytes_for(&record, packed.as_ref()) > part_bytes
+                {
+                    let mut done = std::mem::replace(&mut part, Part::with_capacity(part_bytes, 0));
+                    done.shrink();
+                    parts.push(done);
                 }
+                part.push(record, packed, id_prefix, read);
             }
             Err(ReadError::Parse {
                 code: ParseErrorCode::Eof,
@@ -644,12 +724,13 @@ fn read_parts_of<R: std::io::Read>(
         }
     };
     if part.len() > 0 || parts.is_empty() {
+        part.shrink();
         parts.push(part);
     }
     (parts, end)
 }
 
-/// The bytes after which `read_parts` closes a part.
+/// The most bytes of a part of `read_parts` (but for a record that takes more).
 const PART_BYTES: usize = 1 << 20;
 
 /// No NCBI counterpart: the letters of a batch's packed records made again, by the search pool
@@ -892,7 +973,16 @@ mod tests {
     fn records_read_into_parts_are_the_readers_records() {
         let plain = ReaderConfig::query("BLASTN", false, false);
         let parsed = plain.with_parse_deflines(true);
+        // A record that the reader does not pack (a run on almost every letter) and that is long
+        // enough to keep its own vector.
+        let mut dense = b">dense runs\n".to_vec();
+        for line in b"ARCYGKTMNSAW".repeat(6_000).chunks(70) {
+            dense.extend_from_slice(line);
+            dense.push(b'\n');
+        }
+        dense.extend_from_slice(b">after\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n");
         for (tail, ends) in [
+            (dense.as_slice(), "Input"),
             (b"".as_slice(), "Input"),
             (b"\n; a comment\n\n".as_slice(), ""),
             (b">hyphen\nACGT-ACGT\n".as_slice(), "Input"),
@@ -908,6 +998,11 @@ mod tests {
                             through_parts(&text, config, part_bytes, batch, threads);
                         assert_eq!(got_end, end);
                         assert_eq!(records, expected, "part_bytes {part_bytes} batch {batch}");
+                        if tail == dense.as_slice() {
+                            let long = &records[records.len() - 2];
+                            assert!(long.sequence.len() >= OWN_LETTERS);
+                            assert!(PackedLetters::pack(&long.sequence).is_none());
+                        }
                         assert!(part_bytes >= 5_000 || parts > 5, "{parts} parts");
                     }
                 }

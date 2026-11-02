@@ -5,8 +5,6 @@
 //! line (no NCBI counterpart: code placement only), so that the loops of the default path keep
 //! their code. A `-db` subject has no case (the database stores the letters in upper case).
 
-use std::collections::HashMap;
-
 use anyhow::Result;
 
 use super::args::ResolvedOptions;
@@ -206,58 +204,55 @@ pub(super) fn x_scan(
 //         }
 //     }
 // ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4302-4304 (`x_FillLocList`)
+// ```c++
+//             if(interval.GetId().Match(m_AV->GetSeqId(i)) &&
+//                m_AV->GetSeqRange(i).IntersectingWith(loc_range)){
+// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2518-2521
 // ```c++
 //                     } else if (m_SeqLocChar==eLowerCase){
 //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
 //                     }
 // ```
-/// `hits` (the outfmt 0 rows) with each subject row's masked letters in lower case: a query's hits
-/// with a subject show the lower-case runs of the subject's record that meet the closed range
-/// `[offset, end]` of one of their HSPs (the end is one past the HSP). Only records of `-subject`
-/// read with `-lcase_masking` have runs; the caller calls this when one has.
+/// `hits` (the outfmt 0 rows) with each subject row's masked letters in lower case. NCBI keeps the
+/// lower-case runs of the subject's record that meet one of the HSP ranges of the query and the
+/// subject (`[offset, end]`, the end one past the HSP), then each row takes the kept runs that meet
+/// its own range. A run that holds a letter of a row meets that row's HSP, so the rule is: every
+/// letter of a row that lies in a run is in lower case (a run that only touches the end one past the
+/// HSP holds no letter of the row). The runs (`FastaRecord::lowercase_masks`) are sorted and apart.
+/// Only records of `-subject` read with `-lcase_masking` have runs; the caller calls this when one
+/// has.
 #[cold]
 #[inline(never)]
 pub(super) fn x_masked_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaRecord]) {
-    let mut hsp_ranges: HashMap<(u32, u32), Vec<(i32, i32)>> = HashMap::new();
-    for hit in hits.iter() {
-        hsp_ranges
-            .entry((hit.hit.q_idx, hit.hit.s_idx))
-            .or_default()
-            .push(((hit.hit.s_start - 1) as i32, hit.hit.s_end as i32));
-    }
     for hit in hits.iter_mut() {
         let Some(record) = subjects.get(hit.hit.s_idx as usize) else {
             continue;
         };
-        let ranges = &hsp_ranges[&(hit.hit.q_idx, hit.hit.s_idx)];
-        let runs: Vec<(i32, i32)> = record
-            .lowercase_masks
-            .iter()
-            .copied()
-            .filter(|&(from, to)| {
-                ranges
-                    .iter()
-                    .any(|&(offset, end)| from <= end && offset <= to)
-            })
-            .collect();
-        if runs.is_empty() {
+        let runs = &record.lowercase_masks;
+        let mut position = hit.hit.s_start as i32 - 1;
+        // The first run that ends at the row's first letter or after it.
+        let mut next = runs.partition_point(|&(_, to)| to < position);
+        if runs
+            .get(next)
+            .is_none_or(|&(from, _)| from > hit.hit.s_end as i32 - 1)
+        {
             continue;
         }
         let Some(row) = hit.subject_seq.as_mut() else {
             continue;
         };
         let mut bytes = std::mem::take(row).into_bytes();
-        let mut position = hit.hit.s_start as i32 - 1;
         for (column, letter) in bytes.iter_mut().enumerate() {
             // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`).
             if *letter == b'-' && !hit.subject_stored_gaps.contains(&(column as u32)) {
                 continue;
             }
-            if runs
-                .iter()
-                .any(|&(from, to)| from <= position && position <= to)
-            {
+            while runs.get(next).is_some_and(|&(_, to)| to < position) {
+                next += 1;
+            }
+            if runs.get(next).is_some_and(|&(from, _)| from <= position) {
                 letter.make_ascii_lowercase();
             }
             position += 1;

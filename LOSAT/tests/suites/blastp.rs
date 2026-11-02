@@ -17,10 +17,6 @@ mod blastp_diag_defer;
 mod blastp_fast_fill_buckets;
 #[path = "../blastp_fast_scan_bf.rs"]
 mod blastp_fast_scan_bf;
-#[path = "../blastp_fast_seed_bf.rs"]
-mod blastp_fast_seed_bf;
-#[path = "../blastp_fast_stage.rs"]
-mod blastp_fast_stage;
 #[path = "../blastp_hitbf.rs"]
 mod blastp_hitbf;
 #[path = "../blastp_hsp_tie_order.rs"]

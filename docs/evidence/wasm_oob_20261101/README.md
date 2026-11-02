@@ -164,6 +164,18 @@ helper, which a test cannot force, and a stress test of 4 threads over 300 round
 A lost raise leaves the cell too small until the next `memory.grow`, so threads go without the
 refresh for that long.
 
+The bulk guard (`memory.fill`, `memory.copy`) has the same kind of test since 2026-11-02: one
+child process, the same flags, five probes (fill and copy into a page another thread grew, across
+the old end of the memory, and copy out of the new page), and the destination bytes checked. Its
+mutants fail it on both Nodes; the three tests it replaced passed all of them on Node 26.8.2
+(`scripts/mutants_bulk.sh`):
+
+| Mutant of the bulk guard | New test | Old 3 tests |
+|---|---|---|
+| no compare | fails | pass |
+| no compare of the copy source | fails | pass |
+| compare of the start address only | fails | pass |
+
 A differential test covers all 66 atomic opcodes against original Wasm, with results, memory and trap
 messages compared at addresses in bounds, at the edge, past it, misaligned and wrapped.
 

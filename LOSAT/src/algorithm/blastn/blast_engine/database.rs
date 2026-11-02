@@ -866,12 +866,15 @@ where
 /// what `traceback` returns of each, in the order of `listed`. With `parallel` the
 /// sequences are searched in parallel, and each takes a scratch that no worker holds (or makes
 /// one when none is idle) and gives it back when its traceback ends: the stage makes about one
-/// scratch per worker. Before, `map_init` made one per rayon task, and rayon splits a list
-/// into about as many tasks as a thread steals (megablast, 100 queries against 16S rRNA
-/// `-db`, 16 threads: 22,032 scratches of about 100 KiB each for 49,137 listed sequences).
-/// A sequence's result does not depend on what its scratch traced before, as with the tasks
-/// of `map_init`, which also traced runs of sequences that change from one execution to the
-/// next.
+/// scratch per worker (a few more when a worker waiting in a sequence's nested parallel stage
+/// traces another sequence). Before, `map_init` made one per rayon task, and rayon cuts a list
+/// into about twice as many tasks as threads and cuts a task again each time a thread steals
+/// from it (megablast, 100 queries against 16S rRNA `-db`, 16 threads: 22,032 scratches for
+/// 49,137 listed sequences, each with its offset pairs, about 100 KiB filled with zeros, and
+/// the speculative and look-ahead alignment scratches its first traceback makes, one per
+/// thread). A sequence's result does not depend on what its scratch traced before, as with the
+/// tasks of `map_init`, which also traced runs of sequences that change from one execution to
+/// the next.
 ///
 /// EXPERIMENT (LOSAT_X_BNTBRANGE): a sequence of at least `x_tb_range_min` bases is decoded in
 /// the ranges of its kept HSPs only (`spans`: `[from, to)` on the sequence; `x_partial_ranges`),
@@ -947,7 +950,9 @@ where
             listed
                 .par_iter()
                 .map(|entry| {
-                    let mut scratch = idle().pop().unwrap_or_else(new_scratch);
+                    // The lock is released before a new scratch is made.
+                    let held = idle().pop();
+                    let mut scratch = held.unwrap_or_else(new_scratch);
                     let result = one(&mut scratch, entry);
                     idle().push(scratch);
                     result
@@ -1903,11 +1908,12 @@ mod tests {
         }
     }
 
-    // The parallel traceback makes a scratch per worker at most (a sequence takes an idle one;
-    // `map_init` made one per rayon task), and the results come in the order of `listed`: at 1
-    // to 8 threads, uneven work per sequence so that the threads steal from each other.
+    // A traceback without nested parallel work makes a scratch per worker at most (a sequence
+    // takes an idle one; `map_init` made one per rayon task, at least twice the threads), and the
+    // results come in the order of `listed`: at 1 to 8 threads, uneven work per sequence so that
+    // the threads steal from each other.
     #[test]
-    fn the_parallel_traceback_makes_a_scratch_per_worker_at_most() {
+    fn the_parallel_traceback_reuses_the_idle_scratches() {
         use std::sync::atomic::{AtomicU64, Ordering};
         let database = open("nucl_mv");
         let work = |entry: u32| -> u64 {

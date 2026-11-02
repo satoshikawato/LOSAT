@@ -2104,29 +2104,39 @@ Rebuilding less:
   Arabidopsis x zebrafish 366.9 -> 352.7 s and 96 -> 88 MB.
 - `LOSAT_X_BPCLUTSCANBF=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that
   added it, 2026-10-23, line v4-G #11; `=0` turns it off; acts in the fused loop on the flat
-  compressed table of `LOSAT_X_BPCLUT`, on tables with at least `LOSAT_X_BPCLUTSCANBFMIN` used cells per 10,000;
-  the reference compressed table keeps its scan) the flat table's scan (`tblastx/lookup/x_clut_direct.rs`
+  compressed table of `LOSAT_X_BPCLUT`, on every table since 2026-11-02, class always: it records nothing in
+  `LOSAT_X_REACH`, its sides are `LOSAT_X_BPCLUT`'s; the reference compressed table keeps its scan) the flat table's scan (`tblastx/lookup/x_clut_direct.rs`
   `for_each_cell::<true, _>`) writes every subject offset that reaches `PV_TEST` at the end of its list and
   advances the list's length by the presence bit, the form of the standard table's `x_scan_cells_bf` (BPSCANBF). The
   offsets, their indices and their order are those of the loop with the branch, so the cells visited and the
   report are the same (the lib test `flat_scans_give_the_reference_scans_hits` compares both lists with the
   reference scan, `the_flat_loop_is_the_fused_loop_on_the_reference_table` both instances of the fused loop with
-  the reference table's loop, and `tests/blastp_fast_scan_bf.rs` the reports with `=0`'s). The table records its
-  cells with hits (`used_cells`, `finalize`'s count, set by the serial and the parallel builder), and the
-  branch-free list is taken for a table with at least `LOSAT_X_BPCLUTSCANBFMIN` used cells per 10,000 (built-in
-  500 natively and 0 on wasm32; `0` every table): natively, with fewer, few offsets pass `PV_TEST`, the branch is
-  predicted, and the store at every offset costs more than the mispredicts it saves (one core on the workstation,
-  branch-free / branch cycles: 1.071 at 2.3 % of the cells used, 1.001 at 4.4 %, 0.956 at 7.3 %, 0.845 at 14.9 %,
-  0.800 at 22.6 %); in WebAssembly the loop with the branch is the slower one at every density measured (the
-  serial WASI command in Node 26, one instance per search in one process, 3 rounds, workstation node 0: branch-free /
-  branch time 0.81 at 1.2 %, 0.80 at 2.3 %, 0.70 at 7.3 %, 0.81 at 31.6 %; the 357-residue protein 13.33 -> 10.62 s,
-  10 proteins 51.87 -> 42.10 s). The decision is
-  recorded per query block (`LOSAT_X_REACH`). The branch-free instance (`blastp/x_seed_fused_clut.rs`
-  `x_scan_flat_bf`) is out of line with a closure of its own type, so the instance with the branch is compiled as
-  without it; the forms that put the scan in a function of its own, or both lists inline before one visit loop,
+  the reference table's loop, and `tests/blastp_fast_scan_bf.rs` the reports with `=0`'s). Every flat table takes
+  the branch-free list: until 2026-11-02 natively a table with fewer than 500 used cells per 10,000
+  (`LOSAT_X_BPCLUTSCANBFMIN`, built-in 500, 0 on wasm32; the table counted its cells with hits) kept the loop with
+  the branch, a break-even measured in #437 when the list was `for_each_cell::<true, _>` with the branchy test
+  (branch-free / branch cycles 1.071 at 2.3 % of the cells used, 1.001 at 4.4 %, 0.956 at 7.3 %, 0.845 at 14.9 %,
+  0.800 at 22.6 %); the list that the loops after it use now (`x_list_pairs_lean`, two offsets per step, with the
+  staged test) wins at every density, so the rule, the variable and the count are gone. Measured 2026-11-02 on
+  the workstation (node 0, one thread, `cycles:u`, 6 rounds, dev 995281681 with the rule forced both ways, every
+  report identical; UniRef50 2026_03 volume 00 `-db`): on the tables that kept the branch, forcing the list took
+  x0.676 the cycles of the search with 42 residues, x0.637 with 357 residues, x0.602 with 2 proteins (739
+  residues) and x0.678-0.684 with 10, 20 and 30 residues, 6 of 6 rounds below 1, user instructions x0.64-0.67;
+  forcing the branch on the tables that take the list cost x1.18-1.98 (3 proteins x1.725, 5 proteins x1.975, 10
+  proteins x1.608, OrthoFinder's 1/10 of the Arabidopsis proteins x the zebrafish proteome x1.266, the human
+  proteins x the yeast proteome x1.184). blastp-fast's compressed table has words of 5 letters only in LOSAT (6 and
+  7 are refused), so its presence bits are one per cell (NCBI's coarser shift needs a backbone of more than 8 x
+  262,144 cells), and `x_pairs_fit` fails only for subjects shorter than a word. The switch has no rule of its
+  own, so `LOSAT_X_REACH` records nothing for it. The branch-free instance (`blastp/x_seed_fused_clut.rs`
+  `x_scan_flat_bf`) is out of line with a closure of its own type, so the instance with the branch (`=0`) is
+  compiled as without it. In WebAssembly the loop with the branch was the slower one at every density measured
+  (the serial WASI command in Node 26, one instance per search in one process, 3 rounds, workstation node 0:
+  branch-free / branch time 0.81 at 1.2 %, 0.80 at 2.3 %, 0.70 at 7.3 %, 0.81 at 31.6 %; the 357-residue protein
+  13.33 -> 10.62 s, 10 proteins 51.87 -> 42.10 s). The forms that put the scan in a function of its own, or both
+  lists inline before one visit loop,
   ran 0.5-10 % more cycles with the branch. Timed 2026-10-23 on the workstation (node 0 CPUs 8-11; dev cd8e0f89
   and this change's code at 4cd3b735 in turn, its arms `LOSAT_X_BPSCANBF=0` (the branch, at 4cd3b735 still that
-  switch) and `LOSAT_X_BPSCANBFMIN=0` (the branch-free list) standing for the list the built-in 500 chooses; 3
+  switch) and `LOSAT_X_BPSCANBFMIN=0` (the branch-free list) standing for the list the built-in 500 then chose; 3
   rounds, one output hash per case; UniRef50 2026_03 volume 00 `-db`, `-evalue 1e-5`): one thread, a 42-residue
   protein (1.2 % of the cells used) 7.37 -> 7.26 s and the 357-residue protein (2.3 %) 8.35 -> 8.18 s (the branch;
   that instance runs 6 G fewer instructions than dev's), 3 proteins of 1,005 residues (7.3 %) 10.33 -> 9.68 s, 10
@@ -2175,15 +2185,15 @@ Rebuilding less:
   x1.0000; `=0` runs dev's instructions (x1.0000, cycles x0.992-1.031 of dev's in the same rounds). With two or
   more threads the pool builds the table and the switch does not act. In the strict set from its first pull
   request (no measured case slower; AGENTS.md "Speed-up switches").
-  The dense tables' loop after the list. Until 2026-11-02 three more strict-set switches, `LOSAT_X_BPFSEED`,
+  The loop after the list. Until 2026-11-02 three more strict-set switches, `LOSAT_X_BPFSEED`,
   `LOSAT_X_BPFSTAGE` and `LOSAT_X_BPFLEAN`, chose its form; they were folded into it (line SF S3, family
   bpf-seed-loop) and select nothing now: no variable is read, so `=0` and `=1` give the same run. What runs, in
-  `blastp/x_seed_fused_clut.rs`: on a table that takes the branch-free list (the rule above), natively, a subject
+  `blastp/x_seed_fused_clut.rs`: on a table that takes the branch-free list (every flat table, natively), a subject
   where `XHitBf::fits` holds (`1 <= wordsize < window`, `0 <= diag_offset` and `diag_offset + length + 2 window <
   2^30`) runs `x_scan_flat_lean` if `XFlatCompressedLookup::x_pairs_fit` holds (a subject of a word or more, which
   keeps its sentinel, with the 15-letter alphabet and words of 2 to 6 letters), else `x_scan_flat_fseed_loop`; a
-  subject where `XHitBf::fits` fails runs `x_scan_flat_bf`, and wasm32 always runs `x_scan_flat_bf`. Sparse tables
-  and `LOSAT_X_BPCLUTSCANBF=0` keep the loop with the branch (`x_scan_flat_in::<false, _>`). `x_scan_flat_fseed_loop`
+  subject where `XHitBf::fits` fails runs `x_scan_flat_bf`, and wasm32 always runs `x_scan_flat_bf`. Only
+  `LOSAT_X_BPCLUTSCANBF=0` keeps the loop with the branch (`x_scan_flat_in::<false, _>`). `x_scan_flat_fseed_loop`
   gives each hit to blastp's branch-free two-hit test (`XHitBf::test`) first, a flag-1 entry or a candidate on to
   `x_test_hit`, and reads no diagonal entry ahead; `x_scan_flat_lean` makes the list two offsets per step in a loop
   of its own (`x_list_pairs_lean`, `x_pairs_loop`), stages each cell's hits in runs of 8 (`x_lean_copy`, 1,024

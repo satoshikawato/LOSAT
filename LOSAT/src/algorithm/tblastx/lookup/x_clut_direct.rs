@@ -2194,7 +2194,7 @@ unsafe fn x_pairs_loop(
 }
 
 // No NCBI counterpart: how many cells ahead `for_each_cell` reads the slice bounds and the hits.
-// Tuning only. blastp-fast's loop on the dense tables (`x_scan_flat_lean` in
+// Tuning only. blastp-fast's lean loop after the branch-free list (`x_scan_flat_lean` in
 // `blastp/x_seed_fused_clut.rs`) reads ahead as far, over X_STARTS_AHEAD entries past its list, so
 // the hits must not be read further ahead than the bounds.
 pub(crate) const X_STARTS_AHEAD: usize = 16;
@@ -3002,7 +3002,7 @@ mod tests {
     // The scans: on random subjects (letters outside the alphabet none, rare, frequent; short
     // subjects), the flat `scan_subject` gives the reference's hits and rounds for arrays from the
     // longest cell up, and `for_each_cell` gives the same hits, with the branch-free list too
-    // (LOSAT_X_BPCLUTSCANBF); `used_cells` counts the cells with hits.
+    // (LOSAT_X_BPCLUTSCANBF).
     #[test]
     fn flat_scans_give_the_reference_scans_hits() {
         let mut rng = XorShift(0x3c6e_f372_fe94_f82b);
@@ -3023,7 +3023,7 @@ mod tests {
             ));
             assert!(reference.longest_chain > 5, "cells with overflow lists");
             let used = flat.starts.windows(2).filter(|w| w[1] > w[0]).count();
-            assert!(used > 0 && flat.used_cells == used, "used cells");
+            assert!(used > 0, "cells with hits");
             let longest = reference.longest_chain as usize;
             let mut subjects = Vec::new();
             for outside_one_in in [0usize, 50, 6, 2] {
@@ -3076,7 +3076,7 @@ mod tests {
                     );
                     cells = scratch;
                 }
-                // The dense loop's list (`x_list_pairs_lean`, two offsets per step) on a subject of
+                // The lean loop's list (`x_list_pairs_lean`, two offsets per step) on a subject of
                 // a word or more with its sentinel; a shorter one, or one without the sentinel, is
                 // declined.
                 assert_eq!(
@@ -3113,7 +3113,7 @@ mod tests {
         }
     }
 
-    // LOSAT_X_BPCLUTSCANBF's dense loop: `x * 19,088,744 >> 32` is `x / 225` below 15^6, NCBI's
+    // LOSAT_X_BPCLUTSCANBF's lean loop: `x * 19,088,744 >> 32` is `x / 225` below 15^6, NCBI's
     // reciprocal multiply is `x / 15` there (the indices of word lengths up to 6), and the multiply
     // by the inverse of 15 is `x / 15` on its multiples.
     #[test]
@@ -3135,7 +3135,7 @@ mod tests {
         }
     }
 
-    // LOSAT_X_BPCLUTSCANBF's dense loop: the list two offsets per step on word length 6 too, and
+    // LOSAT_X_BPCLUTSCANBF's lean loop: the list two offsets per step on word length 6 too, and
     // the tables and subjects it declines.
     #[test]
     fn the_pairs_scan_lists_word_length_six_and_declines_outside_its_range() {
@@ -3196,17 +3196,6 @@ mod tests {
         assert!(!flat6.x_pairs_fit(&subject, 50), "bits short of 15^6");
     }
 
-    // LOSAT_X_BPCLUTSCANBFMIN: a table takes the branch-free list from `min` used cells per 10,000 up;
-    // `0` takes it for every table, an empty one included.
-    #[test]
-    fn the_branch_free_list_starts_at_min_used_cells_per_ten_thousand() {
-        assert!(x_dense_enough(500, 10_000, 500));
-        assert!(!x_dense_enough(499, 10_000, 500));
-        assert!(x_dense_enough(37_969, 759_376, 500));
-        assert!(!x_dense_enough(37_968, 759_376, 500));
-        assert!(x_dense_enough(0, 759_376, 0));
-        assert!(!x_dense_enough(759_376, 759_376, u64::MAX));
-    }
     // LOSAT_X_BXCLUTPOOL: a table built on vectors another table and another build left (smaller and
     // larger tables in turn, two alive at once) equals the table built without the pool, in every
     // field. The pool is process-wide, so other tests' vectors may be among those taken.
@@ -3232,7 +3221,6 @@ mod tests {
             assert_eq!(got.pv, want.pv, "round {round}");
             assert_eq!(got.hits, want.hits, "round {round}");
             assert_eq!(got.starts, want.starts, "round {round}");
-            assert_eq!(got.used_cells, want.used_cells, "round {round}");
             assert_eq!(got.longest_chain, want.longest_chain, "round {round}");
             assert_eq!(got.pv_array_bts, want.pv_array_bts, "round {round}");
             match round % 3 {

@@ -306,7 +306,7 @@ const X_STAGE_CAP: usize = 1024;
 // The copy of a run after a flush writes X_RUN places of the stage.
 const _: () = assert!(X_RUN <= X_STAGE_CAP);
 
-// No NCBI counterpart: the staged hits of LOSAT's dense tables' loop.
+// No NCBI counterpart: the staged hits of LOSAT's loop after the branch-free list.
 /// Staged hit `i` of [`x_scan_flat_lean`] is `diffs[i] = q - s` and `heres[i] = s + diagonal
 /// offset` (two's complement).
 struct XStage {
@@ -666,8 +666,8 @@ mod tests {
     // subjects with letters outside the alphabet and copies of the query, small diagonal tables: the
     // loop on the flat table makes the candidates and leaves the diagonal table of the loop of
     // `x_seed_fused_compressed.rs` on the reference's table, subject after subject, with the list
-    // of the branch and the branch-free one (LOSAT_X_BPCLUTSCANBF), and so do the dense tables'
-    // loops: the branch-free test (`x_scan_flat_fseed_loop`), the staged one (`x_scan_flat_lean`)
+    // of the branch and the branch-free one (LOSAT_X_BPCLUTSCANBF), and so do the loops after
+    // the list: the branch-free test (`x_scan_flat_fseed_loop`), the staged one (`x_scan_flat_lean`)
     // and the chooser between them (`x_scan_flat_fseed`).
     #[test]
     fn the_flat_loop_is_the_fused_loop_on_the_reference_table() {
@@ -1153,7 +1153,6 @@ mod tests {
             Some(XFlatBuild::Table(table)) => table,
             _ => panic!("flat table"),
         };
-        assert!(flat.x_scan_bf_pays(), "a table with the branch-free list");
         let window = 40;
         let diag_len = 4096usize;
         let diag_mask = diag_len as i32 - 1;

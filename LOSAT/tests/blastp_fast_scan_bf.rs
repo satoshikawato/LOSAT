@@ -1,6 +1,6 @@
 //! blastp-fast's flat compressed scan lists the subject offsets without a branch on the presence
-//! bit on dense tables (`LOSAT_X_BPCLUTSCANBF`, `src/algorithm/tblastx/lookup/x_clut_direct.rs`
-//! `for_each_cell`, `XFlatCompressedLookup::x_scan_bf_pays`) on whole searches.
+//! bit on every query's table (`LOSAT_X_BPCLUTSCANBF`,
+//! `src/algorithm/tblastx/lookup/x_clut_direct.rs` `for_each_cell`) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341
 //! ```c
@@ -15,29 +15,26 @@
 //! `flat_scans_give_the_reference_scans_hits` compares both with the reference scan), so the
 //! property under test is that the report does not depend on it, for subjects read from FASTA
 //! (`-subject`) and from a database (`-db`), at 1 and 2 threads. That reports equal NCBI's is the
-//! business of the BLASTP fixtures. `LOSAT_X_REACH` shows the side each run took: a query block's
-//! table with at least `LOSAT_X_BPCLUTSCANBFMIN` used cells per 10,000 (built-in 500 natively) takes the
-//! branch-free list, a sparser one keeps the branch, and `LOSAT_X_BPCLUTSCANBFMIN=0` takes the list
-//! on every table. Exact blastp builds no compressed table and records no side.
+//! business of the BLASTP fixtures. Every flat compressed table takes the list (until 2026-11-02 a
+//! table with fewer than 500 used cells per 10,000 kept the branch natively); only
+//! `LOSAT_X_BPCLUTSCANBF=0` and the reference compressed table (`LOSAT_X_BPCLUT=0`) keep the loop
+//! with the branch. Exact blastp builds no compressed table, and the switch does not act.
 //!
-//! The dense tables' loops after the list (blastp-fast's fused loop with the branch-free two-hit
-//! test and the staged copy, `src/algorithm/blastp/x_seed_fused_clut.rs`; always taken, natively,
-//! on a table with the branch-free list) are part of the default run here: `LOSAT_X_BPCLUTSCANBF=0`
-//! and the reference compressed table (`LOSAT_X_BPCLUT=0`) keep the loop with the branch, and the
-//! report must not change. The subjects include records shorter than a word, which take the
-//! branch-free test's loop without the staged copy.
+//! The loops after the list (blastp-fast's fused loop with the branch-free two-hit test and the
+//! staged copy, `src/algorithm/blastp/x_seed_fused_clut.rs`; always taken, natively, on a table
+//! with the branch-free list) are part of the default run here, and the report must not change
+//! with the loop with the branch. The subjects include records shorter than a word, which take
+//! the branch-free test's loop without the staged copy.
 //!
 //! The dense query is the first 30 proteins of AP027131 (9,948 residues; its table uses 30.9 % of
-//! the cells), the sparse one its first protein (455 residues; 1.66 %, a third of the built-in
-//! threshold); the subjects are the first 150 proteins of the related AP027133.
+//! the cells), the sparse one its first protein (455 residues; 1.66 %, a table that kept the
+//! branch under the old rule); the subjects are the first 150 proteins of the related AP027133.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-const SWITCH: &str = "LOSAT_X_BPCLUTSCANBF";
 const OFF: (&str, &str) = ("LOSAT_X_BPCLUTSCANBF", "0");
-const EVERY_TABLE: (&str, &str) = ("LOSAT_X_BPCLUTSCANBFMIN", "0");
 const REFERENCE_TABLE: (&str, &str) = ("LOSAT_X_BPCLUT", "0");
 
 fn fixture(name: &str) -> PathBuf {
@@ -153,47 +150,28 @@ struct Run {
     stdout: Vec<u8>,
     stderr: String,
     code: Option<i32>,
-    /// The sides of the switch the run recorded: (new, ref).
-    reached: (bool, bool),
 }
 
-/// `blastp` with `env` and `LOSAT_X_REACH` set to a directory of its own (removed after the run,
-/// with the worker log).
+/// `blastp` with `env` (the worker log is in a directory of its own, removed after the run).
 fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
-    let dir = temp_path("reach");
-    std::fs::create_dir_all(&dir).unwrap();
     let worker_log = temp_path("worker");
     std::fs::create_dir_all(&worker_log).unwrap();
     let output = losat(env, &worker_log.join("worker.log"))
-        .env("LOSAT_X_REACH", &dir)
         .arg("blastp")
         .args(args)
         .output()
         .expect("run LOSAT");
-    let (mut new, mut reference) = (false, false);
-    for file in std::fs::read_dir(&dir).expect("the reach directory") {
-        let text = std::fs::read_to_string(file.unwrap().path()).unwrap();
-        for row in text.lines().skip(1) {
-            let f: Vec<&str> = row.split('\t').collect();
-            if f[0] == SWITCH {
-                new |= f[1] == "1";
-                reference |= f[2] == "1";
-            }
-        }
-    }
-    let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&worker_log);
     Run {
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         code: output.status.code(),
-        reached: (new, reference),
     }
 }
 
-/// Default, `=0` and `LOSAT_X_BPCLUTSCANBFMIN=0` give the same report and messages for blastp-fast
-/// on `-subject` and `-db` at 1 and 2 threads; the dense query's table takes the branch-free list
-/// and the sparse one's keeps the branch unless every table takes the list; `=0` records nothing.
+/// Default and `=0` (and, on one case, the reference compressed table) give the same report and
+/// messages for blastp-fast on `-subject` and `-db` at 1 and 2 threads, for the dense and the
+/// sparse query: the default takes the branch-free list on both tables.
 #[test]
 fn blastp_fast_reports_do_not_depend_on_the_branch_free_list() {
     let inputs = Inputs::new();
@@ -221,31 +199,26 @@ fn blastp_fast_reports_do_not_depend_on_the_branch_free_list() {
                 let on = blastp(&args, &[]);
                 assert_eq!(on.code, Some(0), "{case}: {}", on.stderr);
                 assert!(!on.stdout.is_empty(), "{case}: no hits");
-                assert_eq!(on.reached, (dense, !dense), "{case}: default's side");
-                let mut arms = vec![
-                    ("off", OFF, (false, false)),
-                    ("every table", EVERY_TABLE, (true, false)),
-                ];
+                let mut arms = vec![("off", OFF)];
                 // The reference compressed table, on one case: it builds no flat table and keeps
                 // its loop.
                 if dense && source == "-subject" && threads == "1" {
-                    arms.push(("reference table", REFERENCE_TABLE, (false, true)));
+                    arms.push(("reference table", REFERENCE_TABLE));
                 }
-                for (label, env, reached) in arms {
+                for (label, env) in arms {
                     let run = blastp(&args, &[env]);
                     assert_eq!(run.code, Some(0), "{case} {label}: {}", run.stderr);
                     assert!(run.stdout == on.stdout, "{case} {label}: report differs");
                     assert_eq!(run.stderr, on.stderr, "{case} {label}: messages");
-                    assert_eq!(run.reached, reached, "{case} {label}: side");
                 }
             }
         }
     }
 }
 
-/// Exact blastp builds no compressed table: the same report with `=0`, and no side recorded.
+/// Exact blastp builds no compressed table: the same report with `=0`.
 #[test]
-fn exact_blastp_records_no_side() {
+fn exact_blastp_does_not_depend_on_the_switch() {
     let inputs = Inputs::new();
     let args = [
         "-query",
@@ -258,9 +231,7 @@ fn exact_blastp_records_no_side() {
     let on = blastp(&args, &[]);
     assert_eq!(on.code, Some(0), "{}", on.stderr);
     assert!(!on.stdout.is_empty(), "no hits");
-    assert_eq!(on.reached, (false, false), "default's side");
     let off = blastp(&args, &[OFF]);
     assert_eq!(off.code, Some(0), "{}", off.stderr);
     assert!(off.stdout == on.stdout, "report differs");
-    assert_eq!(off.reached, (false, false), "=0 records a side");
 }

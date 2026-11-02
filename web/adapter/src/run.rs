@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use LOSAT::api::local_blast::{
-    run_local_blastn, run_local_blastp, run_local_tblastn, run_local_tblastx, FormatObserver,
-    FormatOutput, HspIndex, OutputSink, ReportOutputs,
+    run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
+    FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs,
 };
 use LOSAT::blastinput::fasta_reader::FastaRecord;
 use LOSAT::cli::{Cli, Commands};
@@ -15,13 +15,14 @@ use LOSAT::report::PairwiseHit;
 use crate::emit::{emit, StreamWriter, STREAM_DIAGNOSTICS, STREAM_HITS};
 use crate::json;
 
-/// The programs that ABI v2 runs. BLASTX joins in session SX.
+/// The programs that ABI v2 runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Program {
     Blastp,
     Tblastn,
     Blastn,
     Tblastx,
+    Blastx,
 }
 
 impl Program {
@@ -31,7 +32,7 @@ impl Program {
             "tblastn" => Ok(Self::Tblastn),
             "blastn" => Ok(Self::Blastn),
             "tblastx" => Ok(Self::Tblastx),
-            "blastx" => Err("blastx is not available in LOSAT Web ABI v2 yet".into()),
+            "blastx" => Ok(Self::Blastx),
             "psiblast" => Err("psiblast is not available in LOSAT Web ABI v2".into()),
             other => Err(format!("unknown program '{other}'")),
         }
@@ -43,6 +44,7 @@ impl Program {
             Self::Tblastn => "tblastn",
             Self::Blastn => "blastn",
             Self::Tblastx => "tblastx",
+            Self::Blastx => "blastx",
         }
     }
 
@@ -50,7 +52,9 @@ impl Program {
     /// exactly these, each on the stream of the same number.
     pub fn formats(self) -> &'static [u32] {
         match self {
-            Self::Blastp | Self::Tblastn | Self::Blastn | Self::Tblastx => &[0, 6, 7],
+            Self::Blastp | Self::Tblastn | Self::Blastn | Self::Tblastx | Self::Blastx => {
+                &[0, 6, 7]
+            }
         }
     }
 }
@@ -130,6 +134,22 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         Commands::Tblastn(args) => subject_range(args.subject_loc.as_deref(), "TBLASTN")
             .and_then(|()| LOSAT::algorithm::tblastn::check_options(&args))
             .map_err(|error| format!("{error:#}"))?,
+        // The checks of each search's formats, as for BLASTN: BLASTX resolves its options for
+        // each format (the hit list size), and its parser rejects `-query_loc` and `-subject_loc`.
+        Commands::Blastx(args) => {
+            let mut first_error = None;
+            for group in &groups {
+                match blastx_group_check(&args, group) {
+                    Ok(()) => return Ok(()),
+                    Err(error) => {
+                        first_error.get_or_insert(error);
+                    }
+                }
+            }
+            if let Some(error) = first_error {
+                return Err(error);
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -147,14 +167,30 @@ fn blastn_group_check(
         .map_err(|error| format!("{error:#}"))
 }
 
+/// BLASTX's checks (`blastx::check_options`) for the search of the output formats `group`, as
+/// `run_local` makes them before it searches. `validate` runs it for each search of a run, and
+/// `run` asks it which search is rejected (`group_rejected`).
+fn blastx_group_check(
+    args: &LOSAT::algorithm::blastx::BlastxArgs,
+    group: &[u32],
+) -> Result<(), String> {
+    let outfmts: Vec<String> = group.iter().map(u32::to_string).collect();
+    let outfmts: Vec<&str> = outfmts.iter().map(String::as_str).collect();
+    LOSAT::algorithm::blastx::check_options(args, &outfmts).map_err(|error| format!("{error:#}"))
+}
+
 /// Whether the options' checks reject the search of the output formats `group`, as the CLI
-/// rejects those formats alone because of their hit list size: BLASTN's checks fail
-/// (`blastn_group_check`: a hit list of 0, or a preliminary hit list size below 1), or, for
-/// the other programs, the hit list size is 0. `run` tolerates a failed search of a
-/// two-search run only for this reason (`fails_run`).
+/// rejects those formats alone because of their hit list size: BLASTN's and BLASTX's checks
+/// fail (`blastn_group_check`: a hit list of 0, or a preliminary hit list size below 1;
+/// `blastx_group_check`), or, for the other programs, the hit list size is 0. `run` tolerates
+/// a failed search of a two-search run only for this reason (`fails_run`). With the checks
+/// themselves as the predicate, a search that fails them for another reason than its hit list
+/// (for example `-evalue 0`) is rejected as the other search is, so `run` fails with the
+/// tabular search's error, which `validate` reports.
 fn group_rejected(command: &Commands, group: &[u32]) -> bool {
     match command {
         Commands::Blastn(args) => blastn_group_check(args, group).is_err(),
+        Commands::Blastx(args) => blastx_group_check(args, group).is_err(),
         _ => hit_list_size(command, group[0]) == 0,
     }
 }
@@ -303,8 +339,14 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
         Commands::Tblastn(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
         Commands::Blastn(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
         Commands::Tblastx(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
+        // A positive `i32` (the parser's `positive`).
+        Commands::Blastx(a) => [
+            a.max_target_seqs.map(|n| n as usize),
+            a.num_descriptions,
+            a.num_alignments,
+        ],
         // Rejected by `Program::parse`.
-        Commands::Blastx(_) | Commands::Psiblast(_) | Commands::Makedb(_) => [None; 3],
+        Commands::Psiblast(_) | Commands::Makedb(_) => [None; 3],
     }
 }
 
@@ -315,8 +357,10 @@ fn num_threads(command: &Commands) -> usize {
         Commands::Tblastn(a) => a.num_threads,
         Commands::Blastn(a) => a.num_threads,
         Commands::Tblastx(a) => a.num_threads,
+        // A positive `i32` (the parser's `positive`).
+        Commands::Blastx(a) => a.num_threads as usize,
         // Rejected by `Program::parse`.
-        Commands::Blastx(_) | Commands::Psiblast(_) | Commands::Makedb(_) => 1,
+        Commands::Psiblast(_) | Commands::Makedb(_) => 1,
     }
 }
 
@@ -456,7 +500,12 @@ fn search(
                 ordinals = searched_queries(args.query_loc.as_deref(), "TBLASTX", query);
                 run_local_tblastx(args, query, subject, &mut outputs)
             }
-            Commands::Blastx(_) | Commands::Psiblast(_) | Commands::Makedb(_) => {
+            // BLASTX's CLI rejects `-query_loc`: every query is searched.
+            Commands::Blastx(args) => {
+                ordinals = None;
+                run_local_blastx(args, query, subject, &mut outputs)
+            }
+            Commands::Psiblast(_) | Commands::Makedb(_) => {
                 unreachable!("rejected by Program::parse")
             }
         };
@@ -771,7 +820,7 @@ mod tests {
         }
         // -num_descriptions and -num_alignments are accepted (also as `-x=v`),
         // parsed as on the command line; -max_target_seqs excludes both (clap's conflict).
-        for program in ["blastp", "tblastn", "blastn", "tblastx"] {
+        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             for option in [
                 &["-num_descriptions", "3"][..],
                 &["-num_alignments", "0"],
@@ -805,7 +854,10 @@ mod tests {
                 assert!(parse(&both).unwrap_err().contains("cannot be used with"));
             }
         }
-        assert!(parse(&["blastx", "-query", "q", "-subject", "s"]).is_err());
+        assert!(matches!(
+            parse(&["blastx", "-query", "q", "-subject", "s"]),
+            Ok((Program::Blastx, Commands::Blastx(_)))
+        ));
         assert!(parse(&["psiblast", "-query", "q", "-subject", "s"]).is_err());
         // An unknown program and a parser error are the CLI's messages.
         for words in [&["nosuch"][..], &["tblastx", "-query", "q"][..]] {
@@ -817,6 +869,7 @@ mod tests {
             assert_eq!(parse(words).map(|_| ()), cli, "{words:?}");
         }
         assert_eq!(Program::Tblastx.formats(), &[0, 6, 7]);
+        assert_eq!(Program::Blastx.formats(), &[0, 6, 7]);
         // validate rejects BLASTN scoring that NCBI rejects, with NCBI's message.
         // validate reads BLASTN's -dust as the run does.
         let error =
@@ -894,6 +947,26 @@ mod tests {
             let error = validate(&[&tblastx[..], &extra[..]].concat()).unwrap_err();
             assert!(error.starts_with(start), "{error}");
         }
+        // validate reports BLASTX's checks of each search's options, as the run does (NCBI's
+        // errors and LOSAT's refusals); the tabular search that -num_alignments 0 rejects alone
+        // is tolerated, as `run` tolerates it.
+        let blastx = ["blastx", "-query", "q", "-subject", "s"];
+        assert!(validate(&blastx).is_ok());
+        assert!(validate(&[&blastx[..], &["-num_alignments", "0"]].concat()).is_ok());
+        for (extra, start) in [
+            (
+                &["-evalue", "0"][..],
+                "BLAST query/options error: expect value",
+            ),
+            (&["-matrix", "PAM30"], "unsupported BLASTX matrix"),
+            (
+                &["-num_descriptions", "0", "-num_alignments", "0"],
+                "BLAST query/options error: No hits are being saved",
+            ),
+        ] {
+            let error = validate(&[&blastx[..], extra].concat()).unwrap_err();
+            assert!(error.starts_with(start), "{extra:?}: {error}");
+        }
         // An error of the CLI parser keeps the CLI's message.
         for words in [
             &["blastp", "-query", "q", "-subject", "s", "-evalue"][..],
@@ -914,6 +987,16 @@ mod tests {
                 "s",
                 "-db_gencode",
                 "7",
+            ][..],
+            // BLASTX's parser rejects the ranges (until session SXd).
+            &[
+                "blastx",
+                "-query",
+                "q",
+                "-subject",
+                "s",
+                "-query_loc",
+                "1-9",
             ][..],
         ] {
             let cli = LOSAT::cli::try_parse_from::<Cli, _, _>(
@@ -947,7 +1030,7 @@ mod tests {
     // The CLI writes these records' ids from the option; a run here has read them without it.
     #[test]
     fn parse_deflines_is_rejected() {
-        for program in ["blastp", "tblastn", "blastn", "tblastx"] {
+        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             let words = [program, "-query", "q", "-subject", "s", "-parse_deflines"];
             let expected = "-parse_deflines is not supported by LOSAT Web yet";
             assert_eq!(validate(&words).unwrap_err(), expected);
@@ -1078,7 +1161,7 @@ mod tests {
         let one = vec![vec![0, 6, 7]];
         let one_tabular_first = vec![vec![6, 7, 0]];
         let two = vec![vec![6, 7], vec![0]];
-        for program in ["blastp", "tblastn", "blastn", "tblastx"] {
+        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             for (options, expected) in [
                 (&[][..], &one),
                 (&["-max_target_seqs", "3"], &one),
@@ -1334,6 +1417,61 @@ mod tests {
         let blastp = parse(&["blastp", "-num_alignments", "0"]).unwrap().1;
         assert!(group_rejected(&blastp, &[6]));
         assert!(!group_rejected(&blastp, &[0]));
+    }
+
+    // A coding sequence of the protein of `q_idx_is_the_registered_index`.
+    const CODING: &[u8] = b"ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTGAAAGCGCTGCCGGATGCGCAG";
+
+    // BLASTX searches a nucleotide query against protein subjects and writes every format, the
+    // HSP records and the warnings as the other programs do, one search for each hit list size:
+    // with -num_alignments 0 the tabular search fails alone with NCBI's error on stream 3, and
+    // format 0 is written.
+    #[test]
+    fn blastx_runs_as_the_other_programs_do() {
+        let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
+        let query = [FastaRecord::new("q", b"q", CODING)];
+        let subject = [FastaRecord::new("s", b"s", protein)];
+        let words = ["blastx", "-query", "q.fna", "-subject", "s.faa"];
+        let plain = streams(&words, &query, &subject).unwrap();
+        let row = text(&plain[&6]);
+        assert!(
+            row.starts_with("q\ts\t100.000\t66\t0\t0\t1\t198\t1\t66\t"),
+            "{row}"
+        );
+        assert_eq!(row.lines().count(), 1);
+        assert!(text(&plain[&7]).contains("# BLASTX "));
+        assert!(text(&plain[&0]).starts_with("BLASTX "));
+        let records = text(&plain[&1]);
+        assert_eq!(records.lines().count(), 1);
+        assert!(records.contains("\"q_idx\":0"), "{records}");
+        assert!(!records.contains("\"out0\":null"), "{records}");
+        assert!(plain.get(&3).is_none_or(|bytes| bytes.is_empty()));
+        let zero = streams(
+            &[&words[..], &["-num_alignments", "0"]].concat(),
+            &query,
+            &subject,
+        )
+        .unwrap();
+        assert!(text(&zero[&0]).contains("Sequences producing significant alignments"));
+        for stream in [1, 6, 7] {
+            assert!(
+                zero.get(&stream).is_none_or(|bytes| bytes.is_empty()),
+                "stream {stream}"
+            );
+        }
+        // The CLI's standard error for `-outfmt 6`: the hit list size's warning, then NCBI's error.
+        assert_eq!(
+            text(&zero[&3]),
+            "Warning: [blastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+        );
+        // Both searches fail, each for its own reason (the tabular formats' hit list is checked
+        // before the e-value): the run fails with the tabular search's error, as validate.
+        let both = [&words[..], &["-num_alignments", "0", "-evalue", "0"]].concat();
+        let error = run(&both, &query, &subject).unwrap_err();
+        assert!(error.contains("No hits are being saved"), "{error}");
+        assert_eq!(validate(&both).unwrap_err(), error);
+        let format0 = parse(&both).unwrap().1;
+        assert!(group_rejected(&format0, &[0]) && group_rejected(&format0, &[6, 7]));
     }
 
     // Observer events that break the formatter contract fail the run instead of

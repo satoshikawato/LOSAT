@@ -155,8 +155,8 @@ fn scanners() -> &'static Mutex<(u32, HashMap<u32, scan::Scanner>)> {
 
 /// Starts an index scan with parser kind `0` (`bio::io::fasta` 1.6.0, the reader of
 /// BLASTP, TBLASTN, BLASTN and TBLASTX before session SF), `1` (NCBI BLAST+'s reader of
-/// nucleotide input: BLASTN, TBLASTX, the TBLASTN subject) or `2` (NCBI BLAST+'s reader
-/// of protein input: BLASTP, the TBLASTN query).
+/// nucleotide input: BLASTN, TBLASTX, the TBLASTN subject, the BLASTX query) or `2` (NCBI
+/// BLAST+'s reader of protein input: BLASTP, the TBLASTN query, the BLASTX subject).
 #[no_mangle]
 pub extern "C" fn losat_web2_scan_begin(parser: u32) -> i32 {
     guarded(|| {

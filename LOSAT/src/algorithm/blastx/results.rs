@@ -775,7 +775,10 @@ pub(crate) fn prelim_hitlist_size(o: &ResolvedOptions) -> usize {
         if n <= 500 {
             1050
         } else {
-            n * 2 + 50
+            // No NCBI counterpart: a hit list size of 2^31 - 25 or more (`-max_target_seqs` up to
+            // 2^31 - 1) does not wrap where `usize` has 32 bits (LOSAT Web's Wasm), so the size
+            // stays above any subject count there as on the command line.
+            n.saturating_mul(2).saturating_add(50)
         }
     } else if o.gapped {
         (2 * n).max(10).min(n + 50)

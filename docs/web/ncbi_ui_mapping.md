@@ -176,6 +176,8 @@ NCBI の Dot Plot は、題「Plot of <query> vs <subject>」とサーバーが�
 | 不透明度 | identity（`int()` で切り捨て）60 以下 0.4、70 以下 0.6、80 以下 0.8、それより上 1 | outfmt 6 の `pident` の文字列を数として読み、整数に切り捨てて同じ階級に分ける（TS で identities / 長さを計算しない） | 丸めた `pident`（小数 3 桁）の切り捨てで、スクリプトの切り捨てと階級の境界が同じになる |
 | 出力 | SVG のファイル | 画面（Canvas）。SVG の書き出しは採らない（S15 の出力の段階で検討） | 出力の形式と名前は S15 が決める |
 
+**描く subject の選び方**（line WR、2026-11-02、DW-35。保守者「Dotplotの対象配列選択の挙動が謎なんだけどこれわかりづらくない？」）：Dot Plot の道具の帯の先頭に「Subject」の select（`dotplot-subject`）。選んだ query の subject を Descriptions と同じ順に「<sseqid> · <長さ> <単位> · <n> HSPs」で並べる。Descriptions の行と同じ選択で、どちらで選んでももう一方が従う。query は今までどおり結果の上の「Results for」で選び、題「Plot of <query> vs <subject>」に両方が出る。以前は Dot Plot のタブに選ぶ所が無く、Hits のタブで最後に選んだ行の subject を描いていた。
+
 LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+ / −、Ctrl / ⌘ とホイール）、パン（ドラッグ、矢印キー）、HSP の選択（線のクリック、n / p、表）、「Zoom to HSP」「Whole sequences」、`touch-action: pan-y`。新しく、hover で線を太くし、HSP を選ぶ（クリック、Enter）とその HSP のポップアップ（`dotplot-popup`）を出す：outfmt 6 の行の値をそのまま（bit score、E value、identity、query と subject の範囲、翻訳した配列の frame、向き、outfmt 0 に有るか）と「Show alignment」（Alignments のその Range へ）。ポップアップは線の端の脇に置き、線の中点を覆わない（そこに場所が無いときと、描く枠が 600 px 未満の電話の幅では図の下に）。ポップアップは Escape と「Close」で閉じ、キーボードとスクリーンリーダーで届く（focus を移し、閉じたら図に戻す）。描き方は層を分ける：格子と HSP の層（色と不透明度ごとにまとめ、線は 1 本ずつ描き、見えない線（表示の外の線、両端が前の線と同じ画素に来る不透明な線）を省く。重なる多数の線を 1 本の path にすると 2〜3 倍遅かった（W4b の B1）。薄い線の重なりはスクリプトの SVG の線と同じく濃くなる）と、hover・選択の層。ズームとパンは 1 フレームに 1 回だけ描き直す。
 
 ## 3. LOSAT だけのものの置き場所

@@ -579,14 +579,37 @@ impl<'a> HeaderReader<'a> {
     //             dl = RegisterOMDataLoader(seqdb);
     //             scope->AddDataLoader(dl);
     // ```
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:541-551
+    // ```c++
+    //     for ( TTSE_BySeqId::const_iterator it = m_TSE_BySeqId.lower_bound(idh);
+    //           it != m_TSE_BySeqId.end() && it->first == idh; ++it ) {
+    //         if ( !tse || x_IsBetter(idh, *it->second, *tse) ) {
+    //             tse = it->second;
+    //         }
+    //     }
+    // ```
+    // NCBI's scope finds the Seq-align id first among the Bioseqs it already holds, the reported
+    // sequences of the batch (`CDataSource_ScopeInfo::BestResolve` and `x_GetSeqMatch`,
+    // scope_info.cpp:832-850), the first one read where several hold it (`x_IsBetter`), without
+    // case, and asks the data loader only where none holds it. So where another reported
+    // sequence also holds the Seq-align id, NCBI 2.17.0 can write for the subject the names and
+    // identities of that sequence, as its prefetch reads them: `gb|X.1|` with `lcl|555` in its
+    // second definition line for `lcl|555`, also for the hit of another query, and with `lcl|ABC`
+    // for `lcl|abc` (reviews 1 and 2 of line DBID N2b, `blastdb-ids-20261021/R/unfetch_review1`,
+    // `unfetch_review2`), and `gb|X.1|` for a later `emb|X.1|` (line DBID N1). Without its
+    // prefetch (`PRE_FETCH_SEQS_LIMIT`) it also matches ids weakly (`GetMatchingHandles`, an
+    // unversioned accession to its versions), which LOSAT does not model (a known difference of
+    // PD-LOSAT-DATABASE-SEARCH).
     /// What NCBI's lookup of the Seq-align id of the sequence `ordinal`, `subject`, finds in the
     /// database where that is not the sequence (`ParsedSubject::found_instead`): NCBI's
     /// formatters look it up in the search's own database, list included
-    /// (`SeqidLookup::seqid_to_oid`). Another sequence that holds the same definition lines and
-    /// letters is shown as the subject itself (the same record in two volumes or two databases
-    /// of an alias). A lookup that fails is kept for the formats that read the Bioseq; the
-    /// others never look the id up. A subject that no lookup finds (`unfetchable`) is not
-    /// looked up.
+    /// (`SeqidLookup::seqid_to_oids`), and its scope can show another sequence that holds an id it
+    /// takes for the Seq-align id (`defline_set::scope_keys`) where both are reported. Another
+    /// sequence that holds the same definition lines and letters is shown as the subject itself
+    /// (the same record in two volumes or two databases of an alias). A lookup that fails is
+    /// kept for the formats that read the Bioseq; the others never look the id up. A subject
+    /// whose Bioseq NCBI's formatters do not find whatever the lookup gives (`unfetchable`) is
+    /// not looked up.
     fn found_instead(
         &self,
         subject: &crate::report::db_subject::ParsedSubject,
@@ -611,15 +634,50 @@ impl<'a> HeaderReader<'a> {
                 Err(error) => return failed(error),
             },
         };
-        match lookup.seqid_to_oid(subject.alignment_id()) {
-            Ok(Some(oid)) if oid == self.db.oid(ordinal) => None,
-            Ok(Some(oid)) => {
-                let other = self.db.ordinal_of(oid);
-                (!self.same_record(ordinal, other)).then_some(FoundInstead::Sequence(other))
+        let id = subject.alignment_id();
+        let oids = match lookup.seqid_to_oids(id, true) {
+            Ok(oids) => oids,
+            Err(error) => return failed(error),
+        };
+        let own = self.db.oid(ordinal);
+        let Some(&first) = oids.first() else {
+            return Some(FoundInstead::Nothing);
+        };
+        if first != own {
+            let other = self.db.ordinal_of(first);
+            if !self.same_record(ordinal, other) {
+                return Some(FoundInstead::Sequence(other));
             }
-            Ok(None) => Some(FoundInstead::Nothing),
-            Err(error) => failed(error),
         }
+        let folded = match lookup.case_folded_oids(id) {
+            Ok(oids) => oids,
+            Err(error) => return failed(error),
+        };
+        let mut keys = Vec::new();
+        crate::report::db_subject::scope_keys(subject, &mut keys);
+        oids.iter()
+            .chain(&folded)
+            .filter(|&&oid| oid != own)
+            .map(|&oid| self.db.ordinal_of(oid))
+            .find(|&other| self.holds_scope_key(other, &keys) && !self.same_record(ordinal, other))
+            .map(FoundInstead::AlsoHeld)
+    }
+
+    /// Whether a Seq-id of the sequence `ordinal` has one of the scope keys `keys`
+    /// (`defline_set::scope_keys`): NCBI's scope can show it for a Seq-align id of those keys.
+    fn holds_scope_key(&self, ordinal: u32, keys: &[u64]) -> bool {
+        let Ok(crate::seqdb::SequenceHeader::Parsed(set)) = self.db.read_header(ordinal) else {
+            return false;
+        };
+        let mut held = Vec::new();
+        set.deflines
+            .iter()
+            .flat_map(|defline| &defline.ids)
+            .any(|id| {
+                held.clear();
+                crate::seqid::defline_set::scope_keys(id, &mut held);
+                held.iter().any(|key| keys.contains(key))
+            })
     }
 
     /// Whether the sequences `a` and `b` hold the same definition lines, as the reports read
@@ -677,7 +735,7 @@ fn reported_header(
     let db = headers.db;
     match header {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
-            crate::report::db_subject::ParsedSubject::new(set, db.is_version5())
+            crate::report::db_subject::ParsedSubject::new(set)
                 .map_err(|reason| parsed_refusal(ordinal, &reason, program))
                 .and_then(|subject| {
                     refuse_id_of_a_query(db, &subject, ordinal, program)?;
@@ -2415,7 +2473,7 @@ mod taxdb_prepass_tests {
         (0..db.num_seqs())
             .map(|ordinal| {
                 let set = db.defline_set(ordinal).unwrap();
-                crate::report::db_subject::ParsedSubject::new(set, db.is_version5()).unwrap()
+                crate::report::db_subject::ParsedSubject::new(set).unwrap()
             })
             .collect()
     }
@@ -2455,6 +2513,75 @@ mod taxdb_prepass_tests {
                 (Ok(()), None) => {}
                 (Err(error), Some(text)) => assert!(error.contains(text), "{name}: {error}"),
                 (got, _) => panic!("{name}: {got:?}"),
+            }
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    #[test]
+    fn a_seq_align_id_of_any_kind_is_left_to_the_lookup() {
+        // tests/db_search/ids/make_look_fasta.py (line DBID N2b): `None`, NCBI's formatters find the
+        // sequence itself; else the text of the refusal.
+        let cwd = empty_cwd("any_kind");
+        let other = |n: u32| format!("lookup gives database sequence {n} first");
+        let none = "formatters do not find the sequence".to_string();
+        let held = |n: u32| format!("which database sequence {n} also holds");
+        for (name, ordinal, want) in [
+            ("ids/plook_v5", 1, None),
+            ("ids/plook_v5", 2, None),
+            ("ids/plook_v5", 3, None),
+            ("ids/plook_v5", 4, Some(none.clone())),
+            ("ids/plook_v5", 5, None),
+            ("ids/plook_v5", 6, Some(other(5))),
+            ("ids/plook_v5", 8, Some(other(7))),
+            ("ids/plook_v5", 9, None),
+            ("ids/plook_v5", 10, None),
+            ("ids/plook_v5", 11, Some(other(4))),
+            ("ids/plook_v5", 12, Some(none.clone())),
+            ("ids/plook_v5", 13, None),
+            ("ids/plook_v4", 1, Some(none.clone())),
+            ("ids/plook_v4", 2, Some(none.clone())),
+            ("ids/plook_v4", 3, None),
+            ("ids/plook_v4", 4, Some(none.clone())),
+            ("ids/plook_v4", 5, Some(other(6))),
+            ("ids/plook_v4", 9, None),
+            ("ids/plook_v4", 11, Some(other(4))),
+            ("ids/plook_v4", 12, Some(none.clone())),
+            ("ids/plook_vz", 16, None),
+            // Another sequence holds the Seq-align id (review 1 of N2b): NCBI's scope shows it
+            // where both are reported.
+            ("ids/pshare_v5", 0, Some(held(1))),
+            ("ids/pshare_v5", 1, None),
+            ("ids/pshare_v4", 0, Some(held(1))),
+            ("ids/pshare_ab", 0, Some(held(1))),
+            // Ids that differ in case alone (review 2 of N2b), and a later copy of a record whose
+            // id a third sequence also holds.
+            ("ids/pshare_v5", 4, Some(held(5))),
+            ("ids/pshare_v4", 4, Some(held(5))),
+            ("ids/pshare_cd", 0, Some(held(2))),
+            ("ids/pshare_cd", 1, Some(held(3))),
+            ("ids/pdup_abc", 0, Some(held(2))),
+            ("ids/pdup_abc", 1, Some(held(2))),
+            (
+                "ids/pshare_v5",
+                2,
+                Some("whose lookup in the database fails".to_string()),
+            ),
+        ] {
+            let db = db_search(name, None, &cwd);
+            let headers = HeaderReader::new(&db);
+            let ReportedHeader::Parsed(subject) =
+                read_header(&headers, ordinal, 0, "BLASTP").unwrap()
+            else {
+                panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
+            };
+            assert!(!subject.unfetchable(), "{name} {ordinal}");
+            match (subject.fetched(), want) {
+                (Ok(()), None) => {}
+                (Err(error), Some(text)) => {
+                    assert!(error.contains(&text), "{name} {ordinal}: {error}")
+                }
+                (got, _) => panic!("{name} {ordinal}: {got:?}"),
             }
         }
         std::fs::remove_dir_all(&cwd).unwrap();

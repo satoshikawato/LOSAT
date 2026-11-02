@@ -425,6 +425,27 @@ plus the first ordinal id of the volume, so its own number finds the sequence, w
 parsed Seq-ids; another n finds no sequence or another one, which LOSAT refuses in the formats that read the
 Bioseq. No record names `gnl|BL_ORD_ID|0`: makeblastdb stores it with a string tag.
 
+Seq-align ids that NCBI's formatters look up like any other (line DBID N2b; rows `db.id.*.look.*`): `make_ids.py`
+writes, from the FASTA of `ids/make_look_fasta.py`, `ids/plook_v5` and `ids/plook_v4` from `ids/plook.faa` (an
+accession, `bbs|123`, `nat|NA000001.1|`, `lcl|777`, `gnl|PIG|124`, `bbs|300` then `lcl|300` and `lcl|301` then
+`bbs|301` (one key each), `gnl|BL_ORD_ID|n` beside an accession with n its own number on two definition lines and on
+one, the number of the PIG sequence and of no sequence, `bbs|500|gb|...|`, `lcl|778` beside an accession; each hit by
+its query `ids/plook_q<k>.faa`, `.fna` for BLASTX), `ids/plook_z` from `ids/plook_z.faa`, read after `plook_v5` through
+the alias `ids/plook_vz.pal` (its second sequence holds `gnl|BL_ORD_ID|1`, its own number in its volume), and
+`ids/nlook_v5` and `ids/nlook_v4` from `ids/nlook.fna` (queries `ids/nlook_q<k>.fna` and `.faa`, `ids/nlook_qall.fna`
+and `ids/nlook_qfound.fna` for the report streams). Version 5 finds `bbs|`, `nat|` and `lcl|<integer>` by their LMDB
+keys unless an earlier sequence holds the key; version 4 finds neither `bbs|` nor `nat|`; no version finds `gnl|PIG|`.
+A Seq-align id that another sequence also holds (review 1 of N2b): `ids/pshare_v5` and `ids/pshare_v4` from
+`ids/pshare.faa` (`lcl|555`, then `gb|FFF00030.1|` with `lcl|555` in a second definition line and nearly the same
+letters, so that the query `ids/pshare_q1.faa` hits both and NCBI's scope shows the second for the first; a
+`gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag, query `ids/pshare_q2.faa`), `ids/pshare_a` and
+`ids/pshare_b` (`bbs|123` in each) through the alias `ids/pshare_ab.pal` (query `ids/pshare_b_q0.faa`), and
+`ids/nshare_v5` from `ids/nshare.fna` (query `ids/nshare_q1.fna`). Ids that differ in case alone (review 2 of N2b):
+`ids/pshare.faa` 4 `lcl|abc` and 5 with `lcl|ABC` (query `ids/pshare_q5.faa`), and `ids/pshare_c` (`pdb|1ABC|A`,
+`gnl|db|abc`) and `ids/pshare_d` (`pdb|1abc|A`, `gnl|DB|ABC`) through the alias `ids/pshare_cd.pal` (queries
+`ids/pshare_d_q<k>.faa`); `ids/pdup_abc.pal` reads the copies `pdup_a` and `pdup_b` and the record of another title
+`pdup_c`.
+
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
 Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTDB=tests/seqdb/taxdb/offset_last_past_end`

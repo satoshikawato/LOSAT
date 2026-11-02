@@ -1,0 +1,7 @@
+# BLASTP 2.17.0+
+# Query: pordq2 query of record 2
+# Database: tests/db_search/ids/pord_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+pordq2	ordinal	100.000	220	0	0	1	220	1	220	1.49e-173	464
+# BLAST processed 1 queries

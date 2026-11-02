@@ -1227,6 +1227,32 @@ pub fn render_queries(
     queries_before: usize,
     xml2: Option<&mut super::blast_xml::RunXml2>,
 ) -> Result<()> {
+    render_queries_with(
+        writer,
+        stderr,
+        options,
+        queries,
+        subjects,
+        shown,
+        batches,
+        queries_before,
+        xml2,
+        None,
+    )
+}
+
+/// What LOSAT Web's `run_local` (`local.rs`) adds to the reports of one batch in one format.
+pub(super) struct LocalReport<'a, 'p> {
+    /// The format's observer (`api::local_blast::FormatProbe`).
+    pub probe: Option<&'a mut crate::api::local_blast::FormatProbe<'p>>,
+    /// The index of the batch's first reported HSP in the run's hit list.
+    pub first_hsp: crate::api::local_blast::HspIndex,
+    /// The batch's hits (`pairwise_hits`), when they are made already.
+    pub hits: Option<&'a [crate::report::pairwise::PairwiseHit]>,
+}
+
+/// Sorts the HSPs of each list of `batches` by e-value, the order of every report.
+pub(super) fn sort_lists(batches: &mut [BatchResults]) {
     for batch in batches.iter_mut() {
         for lists in &mut batch.queries {
             for list in lists {
@@ -1234,8 +1260,40 @@ pub fn render_queries(
             }
         }
     }
+}
+
+/// The number of HSPs that the reports of `batches` show (`has_seqalign`).
+pub(super) fn reported_hsps(batches: &[BatchResults], gapped: bool) -> usize {
+    batches
+        .iter()
+        .flat_map(|batch| batch.queries.iter().flatten())
+        .map(|list| list.hsps.iter().filter(|h| has_seqalign(h, gapped)).count())
+        .sum()
+}
+
+/// `render_queries`, with what `run_local` adds (`local`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn render_queries_with(
+    writer: &mut impl Write,
+    stderr: &mut dyn Write,
+    options: &ResolvedOptions,
+    queries: &[FastaRecord],
+    subjects: &[FastaRecord],
+    shown: &ShownSubjects<'_>,
+    batches: &mut [BatchResults],
+    queries_before: usize,
+    xml2: Option<&mut super::blast_xml::RunXml2>,
+    local: Option<LocalReport<'_, '_>>,
+) -> Result<()> {
+    sort_lists(batches);
+    let (mut probe, first_hsp, made_hits) = match local {
+        Some(local) => (local.probe, local.first_hsp, local.hits),
+        None => (None, 0, None),
+    };
     if options.outfmt == 0 {
-        return write_pairwise(writer, stderr, options, queries, subjects, shown, batches);
+        return write_pairwise(
+            writer, stderr, options, queries, subjects, shown, batches, made_hits, probe, first_hsp,
+        );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1441
     // ```c++
@@ -1324,6 +1382,7 @@ pub fn render_queries(
     // ```
     let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
     let comments = options.outfmt == 7;
+    let mut next_hsp = first_hsp;
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
@@ -1475,7 +1534,16 @@ pub fn render_queries(
                             .iter()
                             .map(|f| field_value(f, query, &shown_subject, hsp, &a))
                             .collect();
+                        if let Some(probe) = probe.as_deref_mut() {
+                            writer.flush()?;
+                            probe.begin(next_hsp);
+                        }
                         writeln!(writer, "{}", values.join("	"))?;
+                        if let Some(probe) = probe.as_deref_mut() {
+                            writer.flush()?;
+                            probe.end(next_hsp);
+                        }
+                        next_hsp += 1;
                     }
                 }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
@@ -1519,6 +1587,7 @@ pub fn render_queries(
 //         Blast_HSPListSortByEvalue(hsp_list);
 //
 // ```
+#[allow(clippy::too_many_arguments)]
 fn write_pairwise(
     writer: &mut impl Write,
     stderr: &mut dyn Write,
@@ -1527,28 +1596,20 @@ fn write_pairwise(
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
+    made_hits: Option<&[crate::report::pairwise::PairwiseHit]>,
+    probe: Option<&mut crate::api::local_blast::FormatProbe<'_>>,
+    first_hsp: crate::api::local_blast::HspIndex,
 ) -> Result<()> {
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
-    // ```c++
-    //         alnVec->SetGapChar('-');
-    //         alnVec->SetGenCode(m_QueryGeneticCode, 0);
-    //         alnVec->SetGenCode(m_DbGeneticCode, 1);
-    //         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
-    //         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
-    // ```
-    let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
+    use crate::config::ScoringMatrix;
     use crate::report::pairwise::{
-        write_blastx_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport,
-        BlastxPairwiseOptions, PairwiseConfig, PairwiseHit,
+        write_blastx_pairwise_report, BlastpPairwiseQuery, BlastxPairwiseOptions, PairwiseConfig,
     };
-    use crate::{common::Hit, config::ScoringMatrix};
-    let mut hits = Vec::new();
     let mut qinfo = Vec::new();
     let mut valid = Vec::new();
     let mut skipped = Vec::new();
     let mut warnings = Vec::new();
     for batch in batches {
-        for (qidx, lists) in batch.queries.iter().enumerate() {
+        for qidx in 0..batch.queries.len() {
             let absolute = batch.query_ordinal + qidx;
             let query = &queries[absolute];
             let first = (qidx * 6..qidx * 6 + 6).find(|&c| batch.parameters[c].valid);
@@ -1600,6 +1661,102 @@ fn write_pairwise(
             ));
             valid.push(first.is_some());
             skipped.push(batch.search_skipped);
+        }
+    }
+    let made;
+    let hits = match made_hits {
+        Some(hits) => hits,
+        None => {
+            made = pairwise_hits(options, queries, subjects, shown, batches)?;
+            &made
+        }
+    };
+    let report = pairwise_metadata(options, subjects, shown);
+    let ids: Vec<std::sync::Arc<str>> = match shown {
+        ShownSubjects::Fasta { parsed, .. } => subjects
+            .iter()
+            .enumerate()
+            .map(|(index, s)| match parsed.shown(index) {
+                Some(subject) => {
+                    let label = crate::report::pairwise::database_description_label(
+                        b"",
+                        Some(subject),
+                        true,
+                    );
+                    std::sync::Arc::from(String::from_utf8_lossy(&label).as_ref())
+                }
+                None => std::sync::Arc::from(subject_label(s).0),
+            })
+            .collect(),
+        ShownSubjects::Database { reported, .. } => reported.descriptions(),
+    };
+    let database = match shown {
+        ShownSubjects::Fasta { .. } => None,
+        ShownSubjects::Database {
+            pairwise, reported, ..
+        } => Some((*pairwise, reported.stored_titles(), reported.parsed())),
+    };
+    let records_parsed = match shown {
+        ShownSubjects::Fasta { parsed, .. } => parsed.subjects.as_slice(),
+        ShownSubjects::Database { .. } => &[],
+    };
+    let config = PairwiseConfig {
+        program: "blastx".into(),
+        protein_matrix: ScoringMatrix::Blosum62,
+        ..PairwiseConfig::default()
+    };
+    write_blastx_pairwise_report(
+        hits,
+        writer,
+        stderr,
+        &warnings,
+        &config,
+        &qinfo,
+        &valid,
+        &skipped,
+        &ids,
+        &report,
+        &BlastxPairwiseOptions {
+            word_threshold: options.threshold,
+            gapped: options.gapped,
+            sum_stats: options.sum_stats,
+            num_descriptions: options.num_descriptions as usize,
+            num_alignments: options.num_alignments as usize,
+        },
+        database,
+        records_parsed,
+        probe,
+        first_hsp,
+    )?;
+    Ok(())
+}
+
+/// The hits of the HSPs that the reports of `batches` show (`has_seqalign`), in the order of the
+/// reports (the lists sorted by e-value, `sort_lists`); `q_idx` is the query's index in `queries`.
+/// Outfmt 0 writes them (`write_pairwise`), and LOSAT Web's `run_local` hands them to its caller.
+pub(super) fn pairwise_hits(
+    options: &ResolvedOptions,
+    queries: &[FastaRecord],
+    subjects: &[FastaRecord],
+    shown: &ShownSubjects<'_>,
+    batches: &[BatchResults],
+) -> Result<Vec<crate::report::pairwise::PairwiseHit>> {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
+    // ```c++
+    //         alnVec->SetGapChar('-');
+    //         alnVec->SetGenCode(m_QueryGeneticCode, 0);
+    //         alnVec->SetGenCode(m_DbGeneticCode, 1);
+    //         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
+    //         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
+    // ```
+    let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
+    use crate::common::Hit;
+    use crate::report::pairwise::PairwiseHit;
+    let mut hits = Vec::new();
+    for batch in batches {
+        for (qidx, lists) in batch.queries.iter().enumerate() {
+            let absolute = batch.query_ordinal + qidx;
+            let query = &queries[absolute];
             for list in lists {
                 let subject = &subjects[list.oid];
                 for hsp in &list.hsps {
@@ -1664,69 +1821,15 @@ fn write_pairwise(
             }
         }
     }
-    // `-lcase_masking`: the subject rows show their records' lower case too (x_soft_subject.rs).
+    // `-lcase_masking`: the subject rows show their records' lower case too (x_soft_subject.rs), in
+    // outfmt 0 and in the hits that LOSAT Web's `run_local` hands out, as the query rows do.
     if subjects
         .iter()
         .any(|subject| !subject.lowercase_masks.is_empty())
     {
         super::x_soft_subject::x_masked_subject_rows(&mut hits, subjects);
     }
-    let report = pairwise_metadata(options, subjects, shown);
-    let ids: Vec<std::sync::Arc<str>> = match shown {
-        ShownSubjects::Fasta { parsed, .. } => subjects
-            .iter()
-            .enumerate()
-            .map(|(index, s)| match parsed.shown(index) {
-                Some(subject) => {
-                    let label = crate::report::pairwise::database_description_label(
-                        b"",
-                        Some(subject),
-                        true,
-                    );
-                    std::sync::Arc::from(String::from_utf8_lossy(&label).as_ref())
-                }
-                None => std::sync::Arc::from(subject_label(s).0),
-            })
-            .collect(),
-        ShownSubjects::Database { reported, .. } => reported.descriptions(),
-    };
-    let database = match shown {
-        ShownSubjects::Fasta { .. } => None,
-        ShownSubjects::Database {
-            pairwise, reported, ..
-        } => Some((*pairwise, reported.stored_titles(), reported.parsed())),
-    };
-    let records_parsed = match shown {
-        ShownSubjects::Fasta { parsed, .. } => parsed.subjects.as_slice(),
-        ShownSubjects::Database { .. } => &[],
-    };
-    let config = PairwiseConfig {
-        program: "blastx".into(),
-        protein_matrix: ScoringMatrix::Blosum62,
-        ..PairwiseConfig::default()
-    };
-    write_blastx_pairwise_report(
-        &hits,
-        writer,
-        stderr,
-        &warnings,
-        &config,
-        &qinfo,
-        &valid,
-        &skipped,
-        &ids,
-        &report,
-        &BlastxPairwiseOptions {
-            word_threshold: options.threshold,
-            gapped: options.gapped,
-            sum_stats: options.sum_stats,
-            num_descriptions: options.num_descriptions as usize,
-            num_alignments: options.num_alignments as usize,
-        },
-        database,
-        records_parsed,
-    )?;
-    Ok(())
+    Ok(hits)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:226-244

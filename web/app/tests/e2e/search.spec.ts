@@ -294,7 +294,7 @@ test('the region of a role with one record: the drag, the fields, the limits and
 
 test("the options form: the engine's defaults are not written; tasks, templates and genetic codes", async ({ page }) => {
   await program(page, 'tblastx');
-  // TBLASTX has no task (no Program Selection); its genetic codes are in the query's and the subject's blocks.
+  // TBLASTX has no task (no Task Selection); its genetic codes are in the query's and the subject's blocks.
   await expect(page.getByTestId('program-selection')).toHaveCount(0);
   await expect(page.getByTestId('query-panel').getByTestId('param-query_gencode')).toBeVisible();
   await expect(page.getByTestId('subject-panel').getByTestId('param-db_gencode')).toBeVisible();
@@ -489,10 +489,10 @@ test.describe('leaving and returning', () => {
 });
 
 test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
-  await expect(page.getByTestId('program-summary')).toHaveText('BLASTN searches nucleotide subjects using a nucleotide query.');
+  await expect(page.getByTestId('program-summary')).toHaveText('BLASTN mode searches nucleotide subjects using a nucleotide query.');
   await expect(page.getByTestId('query-panel').locator('legend').first()).toHaveText('Enter Query Sequence');
   await expect(page.getByTestId('subject-panel').locator('legend').first()).toHaveText('Enter Subject Sequence');
-  await expect(page.getByTestId('program-selection').locator('legend')).toHaveText('Program Selection');
+  await expect(page.getByTestId('program-selection').locator('legend')).toHaveText('Task Selection');
   // The blocks one under the other, in NCBI's order.
   const order = ['program-tabs', 'program-summary', 'query-panel', 'subject-panel', 'program-selection', 'run-losat', 'algorithm-parameters'];
   const tops = [];
@@ -524,7 +524,7 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   await expect(page.locator('[data-testid^="query-source-"][data-status]')).toHaveCount(1);
   await expect(page.getByTestId('query-source-0')).toContainText('q.fa');
 
-  // Program Selection: BLASTN's "Optimize for", the engine's default task checked.
+  // Task Selection: BLASTN's "Optimize for", the engine's default task checked.
   await expect(page.getByTestId('param-task-field')).toContainText('Optimize for');
   await expect(page.getByTestId('param-task').getByRole('radio')).toHaveCount(4);
   await expect(page.getByTestId('param-task')).toHaveAccessibleName(/^Optimize for -task/);
@@ -579,7 +579,7 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   await expect(page.getByTestId('param-gapopen')).toHaveAccessibleName('Existence -gapopen');
 
   await program(page, 'blastp');
-  await expect(page.getByTestId('program-summary')).toHaveText('BLASTP searches protein subjects using a protein query.');
+  await expect(page.getByTestId('program-summary')).toHaveText('BLASTP mode searches protein subjects using a protein query.');
   await expect(page.getByTestId('param-task-field')).toContainText('Algorithm');
   await expect(page.getByTestId('param-task').locator('label', { has: page.getByTestId('param-task-blastp') })).toHaveText(
     'blastp (protein-protein BLAST)',
@@ -627,7 +627,7 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   await expect(page.getByTestId('param-reward-field')).toHaveClass(/\bchanged\b/);
   await expect(page.getByTestId('param-penalty-field')).not.toHaveClass(/\bchanged\b/);
   await expect(toggle).toContainText('(2 changed)');
-  // The task is chosen in Program Selection: it is not counted. Match 2 is the blastn task's
+  // The task is chosen in Task Selection: it is not counted. Match 2 is the blastn task's
   // default: it is neither counted nor written any more.
   await task(page, 'blastn');
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');

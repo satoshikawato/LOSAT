@@ -412,6 +412,19 @@ do not compare equal, so NCBI finds no sequence); `gb|DDD00004|` before `gb|DDD0
 sequence found holds the same definition lines and letters (`pdup_ab`); `-negative_seqidlist
 seqidlist/sl_pfound_neg.txt` leaves `gb|AAA00001.1|` out of the search, and NCBI's lookup with it.
 
+Sequences whose only Seq-id is `gnl|BL_ORD_ID|n` (line DBID N2a; rows `db.id.*.ord.*`): `make_ids.py` writes, from
+the FASTA of `ids/make_ord_fasta.py`, `ids/pord_v5` and `ids/pord_v4` from `ids/pord.faa` (two accessions, then
+`gnl|BL_ORD_ID|2`, its own number, `gnl|BL_ORD_ID|6`, the number of no sequence, and `gnl|BL_ORD_ID|1`, the
+number of a sequence with an accession; each hit by its query `ids/pord_q<k>.faa`, `.fna` for BLASTX), `ids/pord_x`
+from `ids/pord_x.faa`, read after `pord_v5` through the alias `ids/pord_vx.pal`, which lists it first (NCBI orders
+the volumes of an alias by their base names; there `gnl|BL_ORD_ID|6` of `pord_v5` is the number of the second sequence of `pord_x`, whose
+`gnl|BL_ORD_ID|1` is its own number in its volume), and `ids/nord_v5` and `ids/nord_v4` from `ids/nord.fna`
+(`gnl|BL_ORD_ID|3` first, the number of no sequence, then `gnl|BL_ORD_ID|1` and an accession; queries
+`ids/nord_q<k>.fna` and `.faa`, and `ids/nord_qall.fna` with the three in reverse order). NCBI looks n up
+plus the first ordinal id of the volume, so its own number finds the sequence, which LOSAT reads as one without
+parsed Seq-ids; another n finds no sequence or another one, which LOSAT refuses in the formats that read the
+Bioseq. No record names `gnl|BL_ORD_ID|0`: makeblastdb stores it with a string tag.
+
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
 Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTDB=tests/seqdb/taxdb/offset_last_past_end`

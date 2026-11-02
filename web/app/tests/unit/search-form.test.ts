@@ -624,7 +624,7 @@ describe('program descriptors', () => {
     const titles = program.sections.filter((s) => s.placement === 'algorithm').map((s) => s.title);
     expect(titles.map((title) => order.indexOf(title))).toEqual([...titles.map((title) => order.indexOf(title))].sort((a, b) => a - b));
     expect(titles.every((title) => order.includes(title))).toBe(true);
-    // The task is chosen with radio buttons in Program Selection, before every other option.
+    // The task is chosen with radio buttons in Task Selection, before every other option.
     const task = program.sections.flatMap((s) => s.fields).find((f) => f.flag === '-task');
     if (task !== undefined) {
       expect(task.kind).toBe('radio');

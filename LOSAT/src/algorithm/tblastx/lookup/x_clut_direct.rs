@@ -3680,7 +3680,7 @@ mod tests {
                 assert_eq!(got.hits, want.hits, "{what}");
                 assert_eq!(got.starts, want.starts, "{what}");
                 assert_eq!(got.pv, want.pv, "{what}");
-                    assert_eq!(got.longest_chain, want.longest_chain, "{what}");
+                assert_eq!(got.longest_chain, want.longest_chain, "{what}");
                 assert_eq!(got.pv_array_bts, want.pv_array_bts, "{what}");
                 assert_eq!(got.word_length, want.word_length, "{what}");
             };

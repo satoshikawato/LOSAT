@@ -55,8 +55,8 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 use anyhow::Result;
 
 use crate::algorithm::common::database as shared;
-use crate::seqdb::{SeqDb, SequenceBlock};
-use crate::sequence::packed_subject::PackedNucleotide;
+use crate::seqdb::{AmbiguityRun, SeqDb, SequenceBlock};
+use crate::sequence::packed_subject::{x_stored_runs, PackedNucleotide, PackedRef};
 
 /// A read of the database that failed during the search, with
 /// the error that the check (`XDbStream::new`) gives for the same read.
@@ -234,17 +234,17 @@ impl<'a> XDbStream<'a> {
         self.stores.read_once(oid, || self.read(oid))
     }
 
-    /// `make` of the packed bytes and the length of sequence `oid`, from the bytes of its block
-    /// (`x_block_grid`), with the errors of its store but without the store. The thread keeps the
-    /// last block it used; a block that another thread holds or reads is shared
-    /// (`XSharedReads::read_once`). A block of one sequence (a long one) is read alone and shared
-    /// (`read_shared`). The thread's block is out of its cell while `make` runs: a nested call
-    /// (a pool thread that takes another subject while it waits) does not borrow it. A thread that
-    /// searches a chunk of subjects (`x_plan_chunk`) lets its block go with the chunk.
+    /// `make` of sequence `oid` (`XSequence`), from the bytes of its block (`x_block_grid`), with
+    /// the errors of its store but without the store. The thread keeps the last block it used; a
+    /// block that another thread holds or reads is shared (`XSharedReads::read_once`). A block of
+    /// one sequence (a long one) is read alone and shared (`read_shared`). The thread's block is
+    /// out of its cell while `make` runs: a nested call (a pool thread that takes another subject
+    /// while it waits) does not borrow it. A thread that searches a chunk of subjects
+    /// (`x_plan_chunk`) lets its block go with the chunk.
     pub(crate) fn with_block<R>(
         &self,
         oid: usize,
-        make: impl FnOnce(&[u8], usize) -> Result<R>,
+        make: impl FnOnce(XSequence<'_>) -> Result<R>,
     ) -> Result<R> {
         let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
         let mut kept = X_PLAN_BLOCK.with(std::cell::Cell::take);
@@ -260,7 +260,7 @@ impl<'a> XDbStream<'a> {
             let (first, end) = (self.grid[number], self.grid[number + 1]);
             if end - first == 1 {
                 let store = self.read_shared(oid)?;
-                return make(store.packed(), store.len());
+                return make(XSequence::Store(&store));
             }
             // LOSAT_X_TBNPLANCUT: the block goes with this thread's chunk.
             crate::utils::xreach::x_reach!(
@@ -278,8 +278,15 @@ impl<'a> XDbStream<'a> {
         let block = kept.as_ref().expect("a block holds the sequence");
         let i = (ordinal - block.first) as usize;
         let made = self
-            .length_in(&block.block, i, oid)
-            .and_then(|length| make(block.block.nucleotide_packed(i), length));
+            .parts_in(&block.block, i, oid)
+            .and_then(|(length, runs)| {
+                make(XSequence::Block {
+                    block: &block.block,
+                    i,
+                    length,
+                    runs,
+                })
+            });
         X_PLAN_BLOCK.with(|cell| cell.set(kept));
         made
     }
@@ -297,11 +304,65 @@ impl<'a> XDbStream<'a> {
             .map_err(|error| XReadError(shared::search_read_error(error, self.program)).into())
     }
 
-    /// The length of sequence `oid`, sequence `i` of `block`, with the errors of its store
-    /// (`XReadError`).
-    fn length_in(&self, block: &SequenceBlock, i: usize, oid: usize) -> Result<usize> {
-        shared::x_nucleotide_length_in(block, i, oid as u32, self.program)
+    /// The length and the ambiguity runs of sequence `oid`, sequence `i` of `block`, with the
+    /// errors of its store (`XReadError`).
+    pub(crate) fn parts_in(
+        &self,
+        block: &SequenceBlock,
+        i: usize,
+        oid: usize,
+    ) -> Result<(usize, Vec<AmbiguityRun>)> {
+        shared::x_nucleotide_parts_in(block, i, oid as u32, self.program)
             .map_err(|error| XReadError(error).into())
+    }
+}
+
+/// A sequence that `XDbStream::with_block` gives.
+pub(crate) enum XSequence<'b> {
+    /// Sequence `i` of a block of several, with its length and its ambiguity runs as stored.
+    Block {
+        block: &'b Arc<SequenceBlock>,
+        i: usize,
+        length: usize,
+        runs: Vec<AmbiguityRun>,
+    },
+    /// A long sequence (a block of its own), read alone and shared (`XDbStream::read_shared`).
+    Store(&'b Arc<PackedNucleotide>),
+}
+
+impl XSequence<'_> {
+    /// The packed bytes, as the store's (`PackedNucleotide::packed`).
+    pub(crate) fn packed(&self) -> &[u8] {
+        match self {
+            Self::Block { block, i, .. } => block.nucleotide_packed(*i),
+            Self::Store(store) => store.packed(),
+        }
+    }
+
+    /// The number of bases.
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Self::Block { length, .. } => *length,
+            Self::Store(store) => store.len(),
+        }
+    }
+
+    /// `f` of the sequence as its store reads it (`PackedRef`): the store's view, or the block's
+    /// bytes with the runs that the store keeps (`x_stored_runs`).
+    pub(crate) fn with_view<R>(self, f: impl FnOnce(PackedRef<'_>) -> R) -> R {
+        match self {
+            Self::Block {
+                block,
+                i,
+                length,
+                mut runs,
+            } => {
+                let packed = block.nucleotide_packed(i);
+                x_stored_runs(packed, length, &mut runs);
+                f(PackedRef::x_stored(packed, length, &runs))
+            }
+            Self::Store(store) => f(store.view()),
+        }
     }
 }
 
@@ -569,9 +630,9 @@ mod tests {
                     let (packed, length) = stored(&stream, oid);
                     assert_eq!(length, stream.length(oid));
                     stream
-                        .with_block(oid, |bytes, made| {
-                            assert_eq!(made, length, "{oid}");
-                            assert_eq!(bytes, packed, "{oid}");
+                        .with_block(oid, |sequence| {
+                            assert_eq!(sequence.len(), length, "{oid}");
+                            assert_eq!(sequence.packed(), packed, "{oid}");
                             Ok(())
                         })
                         .unwrap();
@@ -592,17 +653,17 @@ mod tests {
         let (packed, _) = stored(&stream, first);
         let (inner, _) = stored(&stream, other);
         stream
-            .with_block(first, |bytes, _| {
-                stream.with_block(other, |nested, _| {
-                    assert_eq!(nested, inner);
+            .with_block(first, |sequence| {
+                stream.with_block(other, |nested| {
+                    assert_eq!(nested.packed(), inner);
                     Ok(())
                 })?;
-                assert_eq!(bytes, packed);
+                assert_eq!(sequence.packed(), packed);
                 Ok(())
             })
             .unwrap();
         let reads = stream.block_reads.load(Ordering::Relaxed);
-        stream.with_block(first, |_, _| Ok(())).unwrap();
+        stream.with_block(first, |_| Ok(())).unwrap();
         assert_eq!(stream.block_reads.load(Ordering::Relaxed), reads);
     }
 
@@ -619,7 +680,7 @@ mod tests {
             .find(|block| block[1] - block[0] > 2)
             .expect("a block of three sequences or more");
         let (first, end) = (block[0], block[1]);
-        let ask = |ordinal: u32| stream.with_block(ordinal as usize, |_, _| Ok(())).unwrap();
+        let ask = |ordinal: u32| stream.with_block(ordinal as usize, |_| Ok(())).unwrap();
         let held = || {
             let kept = X_PLAN_BLOCK.with(std::cell::Cell::take);
             let seen = kept.as_ref().map(|kept| {
@@ -676,7 +737,7 @@ mod tests {
                 scope.spawn(|| {
                     for oid in 0..stream.count() {
                         together.wait();
-                        stream.with_block(oid, |_, _| Ok(())).unwrap();
+                        stream.with_block(oid, |_| Ok(())).unwrap();
                     }
                 });
             }
@@ -709,8 +770,11 @@ mod tests {
                                 break;
                             }
                             stream
-                                .with_block(oid, |bytes, length| {
-                                    assert_eq!((bytes, length), (&*stores[oid].0, stores[oid].1));
+                                .with_block(oid, |sequence| {
+                                    assert_eq!(
+                                        (sequence.packed(), sequence.len()),
+                                        (&*stores[oid].0, stores[oid].1)
+                                    );
                                     Ok(())
                                 })
                                 .unwrap();

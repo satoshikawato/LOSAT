@@ -99,6 +99,15 @@ const ROW_FIELDS: [TabularField; 8] = [
     TabularField::PercentIdentical,
 ];
 
+/// Whether the custom tabular report of `fields` reads the letters of the subjects: a field of
+/// `ROW_FIELDS` or of `COUNTS_BLOCK` (`write_tblastx_tabular`). Its other fields read the HSP,
+/// the titles and the lengths only.
+pub(crate) fn reads_letters(fields: &[TabularField]) -> bool {
+    fields
+        .iter()
+        .any(|field| ROW_FIELDS.contains(field) || COUNTS_BLOCK.contains(field))
+}
+
 /// Writes outfmt 20's line of the field names and its formatter's warning
 /// (`common::tabular::write_tabular_prolog`); nothing for the other kinds.
 ///

@@ -3,6 +3,7 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c
 
 use super::*;
+use crate::algorithm::common::x_db_stream::XReadError;
 use crate::algorithm::tblastn::search_seed::{translated_chunk_scan_ranges, TranslatedChunk};
 use crate::algorithm::tblastx::database::DatabaseTitles;
 use crate::algorithm::tblastx::hit_collector::HitCollector;
@@ -143,12 +144,13 @@ enum ShownSubjects<'a> {
         )>,
     },
     /// `-db`: the `-db` value (outfmt 7's `# Database:` line), the database's `Database:` lines
-    /// (outfmt 0), and the sequences by ordinal id, whose reported ones the reports show by
-    /// rank (`database::reported_subjects`).
+    /// (outfmt 0), and the stream of its sequences (`None` when they could not be read: nothing
+    /// is reported), from which the batch loop reads the reported ones (`database::read_reported`)
+    /// that the reports show by rank (`database::reported_subjects`).
     Database {
         database: &'a super::super::database::TblastxDatabase,
         pairwise: crate::report::pairwise::PairwiseDatabase,
-        stores: &'a [crate::sequence::packed_subject::PackedNucleotide],
+        stream: Option<&'a crate::algorithm::common::x_db_stream::XDbStream<'a>>,
     },
 }
 
@@ -1741,30 +1743,32 @@ fn search(
     //        ...
     //        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
     // ```
-    // `-db`: the database's sequences, read once for every batch (`TblastxDatabase::read_stores`)
-    // where NCBI reads them first, in the preliminary search of the first batch with a valid
-    // context (a batch without one is not searched, `CheckInternalData`). A database without
-    // sequences (BLASTN's `Database memory map file error`) or a sequence file that cannot be
-    // read fails that batch, after the reports of the batches before (`run_in_pool`), and
-    // LOSAT's refusal of a damaged file stops the run there; a run without such a batch never
-    // reads the file.
+    // `-db`: the database checked once before the first batch (`TblastxDatabase::x_stream`), as a
+    // copy of its sequences would be read, and its sequences read where each batch searches them
+    // (`Subjects::Stream`); NCBI reads them first in the preliminary search of the first batch
+    // with a valid context (a batch without one is not searched, `CheckInternalData`). A
+    // database without sequences (BLASTN's `Database memory map file error`) or a sequence file
+    // that cannot be read fails that batch, after the reports of the batches before
+    // (`run_in_pool`), and LOSAT's refusal of a damaged file stops the run there; a run without
+    // such a batch never searches the file. A read that fails during a batch's search (a database
+    // changed after the check) fails that batch in the same way (`XReadFailure`).
     let whole_subjects = Placements::default();
-    let (stores, stores_error) = match &source {
+    let (stream, stores_error) = match &source {
         SubjectSource::Database(database) => {
-            let read = if database.printed_num_seqs() == 0 {
+            let opened = if database.printed_num_seqs() == 0 {
                 Err(crate::algorithm::common::database::PreliminaryReadError(
                     "Database memory map file error",
                 )
                 .into())
             } else {
-                database.read_stores()
+                database.x_stream(args.num_threads)
             };
-            match read {
-                Ok(stores) => (stores, None),
-                Err(error) => (Vec::new(), Some(error)),
+            match opened {
+                Ok(stream) => (Some(stream), None),
+                Err(error) => (None, Some(error)),
             }
         }
-        SubjectSource::Fasta { .. } => (Vec::new(), None),
+        SubjectSource::Fasta { .. } => (None, None),
     };
     // EXPERIMENT (LOSAT_X_TBXSTORE): the reports read the stores by record.
     let x_ordinals: Vec<u32> = match &source {
@@ -1813,16 +1817,15 @@ fn search(
         ),
         SubjectSource::Database(database) => (
             RunSubjects {
-                subjects: if stores_error.is_some() {
-                    Subjects::Unreadable
-                } else {
-                    Subjects::Stored(&stores)
+                subjects: match &stream {
+                    Some(stream) => Subjects::Stream(stream),
+                    None => Subjects::Unreadable,
                 },
                 numbers: database.numbers(args.dbsize).with_searchsp(args.searchsp),
                 shown: ShownSubjects::Database {
                     database,
                     pairwise: database.pairwise_database(),
-                    stores: &stores,
+                    stream: stream.as_ref(),
                 },
             },
             &whole_subjects,
@@ -2826,6 +2829,15 @@ fn run_in_pool(
         subjects: &subjects.shown,
         numbers: &subjects.numbers,
         titles: std::cell::RefCell::new(DatabaseTitles::new()),
+        stores: std::cell::RefCell::default(),
+        reads_letters: outputs.formats.iter().any(|format| {
+            match report::output_format(format.outfmt) {
+                report::TblastxOutputFormat::CustomTabular(spec) => {
+                    super::super::tabular::reads_letters(&spec.fields)
+                }
+                _ => true,
+            }
+        }),
         v1_titles,
         x_search_pool: parallel_pool,
         queries_written: std::cell::Cell::new(0),
@@ -3366,6 +3378,17 @@ fn run_batch_loop(
                 outputs.diagnostics.write_all(&batch_warnings)?;
                 return Err(crate::blastinput::app::engine_error(read_error.0));
             }
+            Err(error) if error.is::<XReadError>() => {
+                // A read of the database that failed during the batch's search (`XReadFailure`):
+                // as the database that could not be read above, with the error that the check
+                // gives for the same read.
+                let XReadError(error) = error.downcast::<XReadError>()?;
+                let read_error =
+                    error.downcast::<crate::algorithm::common::database::PreliminaryReadError>()?;
+                reports.write_before_failed_batch(outputs, done, &warnings)?;
+                outputs.diagnostics.write_all(&batch_warnings)?;
+                return Err(crate::blastinput::app::engine_error(read_error.0));
+            }
             Err(error) => match error.downcast::<ErrorAfterBatchReports>() {
                 // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:203-209
                 // ```c
@@ -3415,6 +3438,34 @@ fn run_batch_loop(
                         return Err(failure.error);
                     }
                     Err(error) => return Err(error),
+                }
+            }
+            // The sequences that the batch reports, read once each where NCBI fetches them before
+            // the batch's reports (`BlastFormatter_PreFetchSequenceData`, below), when a report
+            // reads their letters: with the reports of each batch (`report_stream`) they go after
+            // them, else they stay to the reports after the loop, as the titles do. A read that
+            // fails fails this batch as a read of its search does (above).
+            if let (
+                ShownSubjects::Database {
+                    stream: Some(stream),
+                    ..
+                },
+                true,
+            ) = (&subjects.shown, reports.reads_letters)
+            {
+                let read = super::super::database::read_reported(
+                    stream,
+                    ordered,
+                    &mut reports.stores.borrow_mut(),
+                );
+                if let Err(error) = read {
+                    let XReadError(error) = error.downcast::<XReadError>()?;
+                    let read_error = error
+                        .downcast::<crate::algorithm::common::database::PreliminaryReadError>(
+                    )?;
+                    reports.write_before_failed_batch(outputs, done, &warnings)?;
+                    outputs.diagnostics.write_all(&batch_warnings)?;
+                    return Err(crate::blastinput::app::engine_error(read_error.0));
                 }
             }
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-205
@@ -3515,6 +3566,7 @@ fn run_batch_loop(
                 spans: vec![0..count],
             };
             reports.write(outputs, batch_done, &warnings, false)?;
+            reports.stores.borrow_mut().clear();
             for query_warnings in &mut warnings[start..end] {
                 *query_warnings = Vec::new();
             }
@@ -3564,6 +3616,12 @@ struct BatchReports<'a> {
     numbers: &'a SubjectSetNumbers,
     /// `-db`: the stored titles of the batches' reported sequences (`run_in_pool`).
     titles: std::cell::RefCell<DatabaseTitles>,
+    /// `-db`: the stores of the reported sequences of the batches not yet reported
+    /// (`database::read_reported`), read when a report reads letters (`reads_letters`).
+    stores: std::cell::RefCell<super::super::database::ReportedStores>,
+    /// Whether a report reads the letters of the subjects: every format but a custom tabular
+    /// report without a field that reads them (`tabular::reads_letters`).
+    reads_letters: bool,
     v1_titles: bool,
     /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the search's pool, for the report stage
     /// (`TblastxReportRun::x_pool`).
@@ -3632,7 +3690,7 @@ impl BatchReports<'_> {
             ShownSubjects::Database {
                 database,
                 pairwise,
-                stores,
+                stream,
             } => {
                 let formats: Vec<report::TblastxOutputFormat> = outputs
                     .formats
@@ -3651,14 +3709,15 @@ impl BatchReports<'_> {
                     database,
                     &self.titles.borrow(),
                     &mut hits,
-                    stores,
+                    *stream,
+                    self.reads_letters.then_some(&*self.stores.borrow()),
                     shown,
                 )?;
                 (
                     reported_subjects.records.as_slice(),
-                    report::SubjectLetters::Stored {
-                        stores,
-                        ordinals: &reported_subjects.ordinals,
+                    report::SubjectLetters::Database {
+                        lengths: &reported_subjects.lengths,
+                        stores: &reported_subjects.stores,
                     },
                     Some(ReportDatabase {
                         name: database.name(),
@@ -4279,12 +4338,10 @@ fn search_query_batch<S: TbxScore>(
         && !use_serial_scan_chunks
         && (std::env::var_os("LOSAT_TBLASTX_PARALLEL_CHUNKS").is_some()
             || (cfg!(all(target_arch = "wasm32", feature = "wasm-threads"))
-                && subjects.lengths().any(|length| {
-                    tblastx_estimated_subject_chunk_work_items(
-                        length,
-                        tblastx_max_dbseq_len_for_run(),
-                    ) > 1
-                })));
+                && tblastx_estimated_subject_chunk_work_items(
+                    subjects.longest_and_total().0,
+                    tblastx_max_dbseq_len_for_run(),
+                ) > 1));
     crate::utils::threading::report_stage(
         "tblastx",
         "subjects",
@@ -4607,6 +4664,10 @@ fn search_query_batch<S: TbxScore>(
     if matches!(subjects, Subjects::Unreadable) {
         return Err(SubjectsUnreadable.into());
     }
+    // `-db`: the read of the database that failed in this batch's search, if one does (a database
+    // changed or damaged after the check, an error of the file system): the batch fails with it
+    // once every subject before it is searched (`XReadFailure`).
+    let x_read_failure = crate::algorithm::tblastx::subjects::XReadFailure::new();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:521-528
     // ```c
     //        } else {
@@ -5013,6 +5074,12 @@ fn search_query_batch<S: TbxScore>(
         let lookup_ref: &crate::algorithm::tblastx::lookup::BlastAaLookupTable =
             x_seed_stage.tables();
         let x_pair_par_ref: Option<&x_pair_par::XPairPar<S>> = x_units_stage.tables().as_ref();
+        // A subject after a read of the database that failed is not searched; it leaves through
+        // the stages above, as a subject too short to search does.
+        if x_read_failure.skips(s_idx) {
+            emit_subject_hits(st, s_idx);
+            return;
+        }
         // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
         // return word_length * 3 + 2;
         // if (subject->length < min_subj_seq_length) { ... continue; }
@@ -5052,8 +5119,19 @@ fn search_query_batch<S: TbxScore>(
         // which have the same number and lengths (`s_frames_listed`). For a subject without
         // ambiguous bases both are the same frames.
         let mut x_letter_frames_later = false;
+        // `-db`: the block of a short sequence with ambiguous bases, kept for the frames of its
+        // letters (`Subjects::x_letter_frames`).
+        let mut x_kept = None;
         let (s_frames, s_frames_preliminary_owned) = {
-            let (frames, of_letters) = subjects.x_preliminary_frames(s_idx, &db_code);
+            let (frames, of_letters, kept) = match subjects.x_preliminary_frames(s_idx, &db_code) {
+                Ok(made) => made,
+                Err(error) => {
+                    x_read_failure.fail(s_idx, error);
+                    emit_subject_hits(st, s_idx);
+                    return;
+                }
+            };
+            x_kept = kept;
             if of_letters {
                 (frames, None)
             } else {
@@ -7019,7 +7097,15 @@ fn search_query_batch<S: TbxScore>(
             x_letter_frames = if prelinked_ungapped_hits.is_empty() {
                 Vec::new()
             } else {
-                subjects.x_letter_frames(s_idx, &db_code)
+                match subjects.x_letter_frames(s_idx, &db_code, x_kept.take()) {
+                    Ok(frames) => frames,
+                    Err(error) => {
+                        x_read_failure.fail(s_idx, error);
+                        st.hits.clear();
+                        emit_subject_hits(st, s_idx);
+                        return;
+                    }
+                }
             };
             x_lap.lap(XStage::Translate);
             (&x_letter_frames, &x_letter_frames)
@@ -7913,6 +7999,9 @@ fn search_query_batch<S: TbxScore>(
         if let Some(lines) = x_link_timer.lines() {
             x_timing.extend(lines);
         }
+    }
+    if let Some(error) = x_read_failure.take() {
+        return Err(error);
     }
     if x_seed_end.is_none() {
         for line in x_timing.drain(..) {

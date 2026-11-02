@@ -4,16 +4,21 @@
 //!
 //! What differs from the search of a FASTA subject set (`-subject`):
 //!
-//! - the subjects are the database's sequences, read once, in ordinal order, as packed
-//!   subjects (`TblastxDatabase::read_stores`): the preliminary stage translates the stored
-//!   2-bit data (makeblastdb's bases for the ambiguous ones, NCBI's preliminary input) and
-//!   the ungapped re-evaluation and the reports read the stored ambiguity codes
-//!   (`subjects::Subjects::Stored`); the search's subject index is the ordinal id;
+//! - the subjects are the database's sequences, checked once as a copy of them would be read
+//!   (`TblastxDatabase::x_stream`) and read where each query batch searches them, in blocks of
+//!   the sequence file shared by the threads, a long sequence alone
+//!   (`subjects::Subjects::Stream`, `common::x_db_stream`): the preliminary stage translates the
+//!   stored 2-bit data (makeblastdb's bases for the ambiguous ones, NCBI's preliminary input) and
+//!   the ungapped re-evaluation reads the stored ambiguity codes, as the packed store of the
+//!   sequence (`PackedNucleotide::from_stored`) gives them; the search's subject index is the
+//!   ordinal id. A read that fails during the search fails its query batch with the error that
+//!   the check gives for it;
 //! - the set-level numbers come from the index files (`TblastxDatabase::numbers`): the
 //!   number of sequences and the total length (an `Int8`); TBLASTX has no Gumbel block, so
 //!   the shortest length a database answers does not enter;
 //! - the definition lines of the reported sequences are read after each query batch's search
-//!   (`read_titles`), and the reports show the database (`TblastxDatabase::name`,
+//!   (`read_titles`), and so are the sequences when a report reads their letters
+//!   (`read_reported`); the reports show the database (`TblastxDatabase::name`,
 //!   `pairwise_database`) and the stored titles of the reported sequences only
 //!   (`reported_subjects`), or the definition lines of those with parsed Seq-ids
 //!   (`report::db_subject`, line DBID ID2b).
@@ -28,6 +33,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use crate::algorithm::common::database::{self as shared, ParsedShown, ReportedHeader};
+use crate::algorithm::common::x_db_stream::XDbStream;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::db_subject::ParsedSubject;
@@ -258,9 +264,12 @@ impl TblastxDatabase {
         )
     }
 
-    /// The database's sequences by ordinal id (`common::database::read_nucleotide_stores`).
-    pub(crate) fn read_stores(&self) -> Result<Vec<PackedNucleotide>> {
-        shared::read_nucleotide_stores(&self.db, PROGRAM)
+    /// The database's stream (`common::x_db_stream::XDbStream`): the database checked as a copy
+    /// of its sequences would be read, with the same errors, and its sequences read where each
+    /// query batch searches them (`subjects::Subjects::Stream`) and reports them
+    /// (`read_reported`).
+    pub(crate) fn x_stream(&self, threads: usize) -> Result<XDbStream<'_>> {
+        XDbStream::new(&self.db, threads, PROGRAM)
     }
 }
 
@@ -321,6 +330,26 @@ pub(crate) fn read_titles(
     Ok(())
 }
 
+/// The stores of the sequences that the reported hits of the query batches read so far name, by
+/// ordinal id (`read_reported`).
+pub(crate) type ReportedStores = BTreeMap<u32, Arc<PackedNucleotide>>;
+
+/// Reads the sequences that the reported hits `ordered` of a query batch name into `stores`, once
+/// each (`XDbStream::read_shared`: a long sequence that a search holds is not read again), for
+/// the letters of the reports. A read that fails is an `XReadError` (it fails the batch).
+pub(crate) fn read_reported(
+    stream: &XDbStream<'_>,
+    ordered: &[TblastxHsp],
+    stores: &mut ReportedStores,
+) -> Result<()> {
+    for hsp in ordered {
+        if let std::collections::btree_map::Entry::Vacant(entry) = stores.entry(hsp.hit.s_idx) {
+            entry.insert(stream.read_shared(hsp.hit.s_idx as usize)?);
+        }
+    }
+    Ok(())
+}
+
 /// NCBI's messages about the taxonomy database when the query batch whose reported hits are
 /// `ordered` (subjects named by ordinal id, as `read_titles` reads them) prefetches the subjects
 /// it reports (`shared::prefetch_messages`): the sequences the hits name, with the definition
@@ -349,8 +378,12 @@ pub(crate) struct ReportedSubjects {
     pub(crate) ordinals: Vec<u32>,
     /// The records of the ranks: `gnl|BL_ORD_ID|n` and the stored title (a sequence with parsed
     /// Seq-ids: the title of its first definition line), without letters (the reports read them
-    /// from the stored codes, `report::SubjectLetters::Stored`).
+    /// from the stores, `report::SubjectLetters::Database`).
     pub(crate) records: Vec<FastaRecord>,
+    /// The number of bases of each rank.
+    pub(crate) lengths: Vec<u32>,
+    /// The store of each rank (`read_reported`), or none when no report reads letters.
+    pub(crate) stores: Vec<Arc<PackedNucleotide>>,
     /// The sequences with parsed Seq-ids by rank (empty when none is reported): their ids and
     /// titles come from their definition lines (`report::db_subject`).
     pub(crate) parsed: Vec<Option<Arc<ParsedSubject>>>,
@@ -359,8 +392,8 @@ pub(crate) struct ReportedSubjects {
 /// The reported database sequences of `ordered` (the reported hits of all query batches in
 /// report order, subjects named by ordinal id): the hits name them by rank from here on (the
 /// rank grows with the ordinal id, so every comparison that breaks a tie by the subject index
-/// gives the same order), and their records (`titles`, by ordinal id; each is a sequence of
-/// `stores`) are kept for the reports. A reported sequence whose stored title LOSAT does not
+/// gives the same order), and their records (`titles`, by ordinal id), lengths (`stream`) and,
+/// when a report reads letters, stores (`stores`, `read_reported`) are kept for the reports. A reported sequence whose stored title LOSAT does not
 /// report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports
 /// `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`).
@@ -368,7 +401,8 @@ pub(crate) fn reported_subjects(
     database: &TblastxDatabase,
     titles: &DatabaseTitles,
     ordered: &mut [TblastxHsp],
-    stores: &[PackedNucleotide],
+    stream: Option<&XDbStream<'_>>,
+    stores: Option<&ReportedStores>,
     shown: ParsedShown,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = ordered.iter().map(|hsp| hsp.hit.s_idx).collect();
@@ -381,6 +415,8 @@ pub(crate) fn reported_subjects(
         hsp.hit.s_idx = u32::try_from(rank).context("TBLASTX subject rank out of range")?;
     }
     let mut records = Vec::with_capacity(ordinals.len());
+    let mut lengths = Vec::with_capacity(ordinals.len());
+    let mut kept = Vec::new();
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
     for (rank, &ordinal) in ordinals.iter().enumerate() {
         let header = titles
@@ -403,10 +439,14 @@ pub(crate) fn reported_subjects(
                 subject.first_title().to_vec()
             }
         };
-        anyhow::ensure!(
-            (ordinal as usize) < stores.len(),
-            "database sequence {ordinal} was not read"
-        );
+        let stream = stream.with_context(|| format!("database sequence {ordinal} was not read"))?;
+        lengths.push(stream.length(ordinal as usize) as u32);
+        if let Some(stores) = stores {
+            let store = stores
+                .get(&ordinal)
+                .with_context(|| format!("database sequence {ordinal} was not read"))?;
+            kept.push(Arc::clone(store));
+        }
         records.push(FastaRecord {
             // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
             // (line DI-8).
@@ -447,6 +487,8 @@ pub(crate) fn reported_subjects(
     Ok(ReportedSubjects {
         ordinals,
         records,
+        lengths,
+        stores: kept,
         parsed,
     })
 }

@@ -296,63 +296,25 @@ impl PackedNucleotide {
 
     /// `from_stored` of packed bytes already held in `packed`.
     fn from_stored_box(packed: Box<[u8]>, length: usize, runs: &[AmbiguityRun]) -> Self {
-        let mut clipped: Vec<AmbiguityRun> = Vec::with_capacity(runs.len());
-        let mut in_order = true;
-        let mut previous_end = 0usize;
-        for run in runs {
-            let position = i64::from(run.offset as i32);
-            let row_end = position + i64::from(run.length);
-            if row_end <= 0 {
-                continue;
-            }
-            if position >= length as i64 {
-                break;
-            }
-            let start = position.max(0) as usize;
-            let end = row_end.min(length as i64) as usize;
-            in_order &= start >= previous_end;
-            previous_end = previous_end.max(end);
-            clipped.push(AmbiguityRun {
-                offset: start as u32,
-                length: (end - start) as u32,
-                ncbi4na: run.ncbi4na & 0x0F,
-            });
-        }
-        let mut store = Self {
+        let mut ambiguity = runs.to_vec();
+        x_stored_runs(&packed, length, &mut ambiguity);
+        Self {
             packed,
             length,
-            ambiguity: Box::default(),
+            ambiguity: ambiguity.into_boxed_slice(),
             lowercase: Box::default(),
-        };
-        if in_order {
-            store.ambiguity = clipped.into_boxed_slice();
-            return store;
         }
-        let mut codes = Vec::new();
-        store.unpack_into(&mut codes, [1, 2, 4, 8]);
-        let stored = codes.clone();
-        for run in &clipped {
-            let start = run.offset as usize;
-            codes[start..start + run.length as usize].fill(run.ncbi4na);
+    }
+
+    /// The packed bases and the ambiguity runs, borrowed (`PackedRef`): the readers of letters
+    /// and bases below are the view's.
+    #[inline]
+    pub fn view(&self) -> PackedRef<'_> {
+        PackedRef {
+            packed: &self.packed,
+            length: self.length,
+            ambiguity: &self.ambiguity,
         }
-        let mut rebuilt: Vec<AmbiguityRun> = Vec::new();
-        for (index, (&code, &base)) in codes.iter().zip(&stored).enumerate() {
-            if code == base {
-                continue;
-            }
-            match rebuilt.last_mut() {
-                Some(run) if run.ncbi4na == code && (run.offset + run.length) as usize == index => {
-                    run.length += 1
-                }
-                _ => rebuilt.push(AmbiguityRun {
-                    offset: index as u32,
-                    length: 1,
-                    ncbi4na: code,
-                }),
-            }
-        }
-        store.ambiguity = rebuilt.into_boxed_slice();
-        store
     }
 
     /// The number of bases.
@@ -390,25 +352,12 @@ impl PackedNucleotide {
     /// The 2-bit code (0-3) of base `index` as packed (an ambiguous base as resolved).
     #[inline]
     fn code(&self, index: usize) -> u8 {
-        (self.packed[index >> 2] >> (6 - 2 * (index & 3))) & 3
+        self.view().code(index)
     }
 
     /// Clears `out` and writes one byte per base from the packed codes through `map`.
     fn unpack_into(&self, out: &mut Vec<u8>, map: [u8; 4]) {
-        out.clear();
-        out.reserve(self.length);
-        let whole = self.length / 4;
-        for &byte in &self.packed[..whole] {
-            out.extend_from_slice(&[
-                map[usize::from(byte >> 6)],
-                map[usize::from((byte >> 4) & 3)],
-                map[usize::from((byte >> 2) & 3)],
-                map[usize::from(byte & 3)],
-            ]);
-        }
-        for index in whole * 4..self.length {
-            out.push(map[usize::from(self.code(index))]);
-        }
+        self.view().unpack_into(out, map)
     }
 
     /// Overwrites the bases of every ambiguity run in `out` with `map[ncbi4na]`.
@@ -430,33 +379,15 @@ impl PackedNucleotide {
     }
 
     /// The letters `[from, to)` in upper case (the letters a report row shows).
+    #[inline]
     pub fn letters_into(&self, from: usize, to: usize, out: &mut Vec<u8>) {
-        assert!(
-            from <= to && to <= self.length,
-            "letters out of the subject"
-        );
-        out.clear();
-        out.resize(to - from, 0);
-        self.letters_to(from, out);
+        self.view().letters_into(from, to, out)
     }
 
-    // No NCBI counterpart: LOSAT's speed (no buffer of its own); the letters of `letters_into`.
     /// `letters_into` of the letters `[from, from + out.len())`, into `out`.
+    #[inline]
     pub fn letters_to(&self, from: usize, out: &mut [u8]) {
-        let to = from + out.len();
-        self.bases_into(from, out);
-        // the runs are in order and do not overlap: the first that ends after `from` on
-        let first = self
-            .ambiguity
-            .partition_point(|run| (run.offset + run.length) as usize <= from);
-        for run in self.ambiguity[first..].iter() {
-            let start = (run.offset as usize).max(from);
-            if start >= to {
-                break;
-            }
-            let end = (run.offset as usize + run.length as usize).min(to);
-            out[start - from..end - from].fill(NCBI4NA_TO_IUPACNA[usize::from(run.ncbi4na)]);
-        }
+        self.view().letters_to(from, out)
     }
 
     /// The 2-bit codes (0 `A`, 1 `C`, 2 `G`, 3 `T`; an ambiguous base as resolved) of the bases
@@ -482,29 +413,11 @@ impl PackedNucleotide {
         }
     }
 
-    // No NCBI counterpart: LOSAT's speed (one table read per packed byte); the letters are those of
-    // `codes_into`'s codes.
     /// The bases `[from, from + out.len())` as packed, one `A`, `C`, `G` or `T` each (an ambiguous
     /// base as resolved): the letters of `codes_into`'s codes.
+    #[inline]
     pub fn bases_into(&self, from: usize, out: &mut [u8]) {
-        assert!(from + out.len() <= self.length, "bases out of the subject");
-        // the bases before the first whole byte, the whole bytes, the bases after them
-        let to = from + out.len();
-        let head = ((4 - from % 4) % 4).min(out.len());
-        let (head_out, rest) = out.split_at_mut(head);
-        for (slot, base) in head_out.iter_mut().enumerate() {
-            *base = b"ACGT"[usize::from(self.code(from + slot))];
-        }
-        let whole = from + head;
-        let mut bytes = rest.chunks_exact_mut(4);
-        for (four, &byte) in (&mut bytes).zip(&self.packed[whole / 4..]) {
-            four.copy_from_slice(&BASES_OF_BYTE[usize::from(byte)]);
-        }
-        let tail = bytes.into_remainder();
-        let tail_from = to - tail.len();
-        for (slot, base) in tail.iter_mut().enumerate() {
-            *base = b"ACGT"[usize::from(self.code(tail_from + slot))];
-        }
+        self.view().bases_into(from, out)
     }
 
     /// The ncbi4na code of every base (`iupacna_to_ncbi4na` of each letter).
@@ -568,6 +481,185 @@ impl PackedNucleotide {
     /// for a record's letters, `x_subject_ncbi2na`).
     pub fn resolved_letters_into(&self, out: &mut Vec<u8>) {
         self.unpack_into(out, *b"ACGT");
+    }
+}
+
+/// A packed nucleotide sequence borrowed where it is held: a store's bytes and runs
+/// (`PackedNucleotide::view`), or a sequence of a database block, read in place
+/// (`PackedRef::x_stored`). It gives the letters and bases that the store gives.
+#[derive(Debug, Clone, Copy)]
+pub struct PackedRef<'a> {
+    packed: &'a [u8],
+    length: usize,
+    ambiguity: &'a [AmbiguityRun],
+}
+
+impl<'a> PackedRef<'a> {
+    /// A sequence of a BLAST database as `PackedNucleotide::from_stored` keeps it, without the
+    /// store: `packed` its 2-bit data, `length` its number of bases and `ambiguity` the runs of
+    /// `x_stored_runs`. No NCBI counterpart: only where the bytes are held.
+    pub fn x_stored(packed: &'a [u8], length: usize, ambiguity: &'a [AmbiguityRun]) -> Self {
+        Self {
+            packed,
+            length,
+            ambiguity,
+        }
+    }
+
+    /// The number of bases.
+    pub fn len(&self) -> usize {
+        self.length
+    }
+
+    /// True for a sequence without bases.
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
+    }
+
+    /// The runs of letters other than `A`, `C`, `G`, `T`, in order, each of one ncbi4na code.
+    pub fn ambiguity_runs(&self) -> &'a [AmbiguityRun] {
+        self.ambiguity
+    }
+
+    /// The 2-bit code (0-3) of base `index` as packed (an ambiguous base as resolved).
+    #[inline]
+    fn code(&self, index: usize) -> u8 {
+        (self.packed[index >> 2] >> (6 - 2 * (index & 3))) & 3
+    }
+
+    /// Clears `out` and writes one byte per base from the packed codes through `map`.
+    fn unpack_into(&self, out: &mut Vec<u8>, map: [u8; 4]) {
+        out.clear();
+        out.reserve(self.length);
+        let whole = self.length / 4;
+        for &byte in &self.packed[..whole] {
+            out.extend_from_slice(&[
+                map[usize::from(byte >> 6)],
+                map[usize::from((byte >> 4) & 3)],
+                map[usize::from((byte >> 2) & 3)],
+                map[usize::from(byte & 3)],
+            ]);
+        }
+        for index in whole * 4..self.length {
+            out.push(map[usize::from(self.code(index))]);
+        }
+    }
+
+    /// The letters `[from, to)` in upper case (the letters a report row shows).
+    pub fn letters_into(&self, from: usize, to: usize, out: &mut Vec<u8>) {
+        assert!(
+            from <= to && to <= self.length,
+            "letters out of the subject"
+        );
+        out.clear();
+        out.resize(to - from, 0);
+        self.letters_to(from, out);
+    }
+
+    // No NCBI counterpart: LOSAT's speed (no buffer of its own); the letters of `letters_into`.
+    /// `letters_into` of the letters `[from, from + out.len())`, into `out`.
+    pub fn letters_to(&self, from: usize, out: &mut [u8]) {
+        let to = from + out.len();
+        self.bases_into(from, out);
+        // the runs are in order and do not overlap: the first that ends after `from` on
+        let first = self
+            .ambiguity
+            .partition_point(|run| (run.offset + run.length) as usize <= from);
+        for run in self.ambiguity[first..].iter() {
+            let start = (run.offset as usize).max(from);
+            if start >= to {
+                break;
+            }
+            let end = (run.offset as usize + run.length as usize).min(to);
+            out[start - from..end - from].fill(NCBI4NA_TO_IUPACNA[usize::from(run.ncbi4na)]);
+        }
+    }
+
+    // No NCBI counterpart: LOSAT's speed (one table read per packed byte); the letters are those of
+    // `codes_into`'s codes.
+    /// The bases `[from, from + out.len())` as packed, one `A`, `C`, `G` or `T` each (an ambiguous
+    /// base as resolved): the letters of `codes_into`'s codes.
+    #[inline]
+    pub fn bases_into(&self, from: usize, out: &mut [u8]) {
+        assert!(from + out.len() <= self.length, "bases out of the subject");
+        // the bases before the first whole byte, the whole bytes, the bases after them
+        let to = from + out.len();
+        let head = ((4 - from % 4) % 4).min(out.len());
+        let (head_out, rest) = out.split_at_mut(head);
+        for (slot, base) in head_out.iter_mut().enumerate() {
+            *base = b"ACGT"[usize::from(self.code(from + slot))];
+        }
+        let whole = from + head;
+        let mut bytes = rest.chunks_exact_mut(4);
+        for (four, &byte) in (&mut bytes).zip(&self.packed[whole / 4..]) {
+            four.copy_from_slice(&BASES_OF_BYTE[usize::from(byte)]);
+        }
+        let tail = bytes.into_remainder();
+        let tail_from = to - tail.len();
+        for (slot, base) in tail.iter_mut().enumerate() {
+            *base = b"ACGT"[usize::from(self.code(tail_from + slot))];
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:834-842 (as
+// `PackedNucleotide::from_stored`): NCBI applies the runs to the whole sequence it reads.
+/// The ambiguity runs of a stored sequence as `PackedNucleotide::from_stored` keeps them, made
+/// in place from `runs` (its runs in stored order; `packed` its 2-bit data): clipped to the
+/// `length` bases with their codes cut to 4 bits, and made again from the letters when they are
+/// not in order and apart. A store and a view of a block (`PackedRef::x_stored`) read the same
+/// runs.
+pub fn x_stored_runs(packed: &[u8], length: usize, runs: &mut Vec<AmbiguityRun>) {
+    let mut kept = 0;
+    let mut in_order = true;
+    let mut previous_end = 0usize;
+    for index in 0..runs.len() {
+        let run = runs[index];
+        let position = i64::from(run.offset as i32);
+        let row_end = position + i64::from(run.length);
+        if row_end <= 0 {
+            continue;
+        }
+        if position >= length as i64 {
+            break;
+        }
+        let start = position.max(0) as usize;
+        let end = row_end.min(length as i64) as usize;
+        in_order &= start >= previous_end;
+        previous_end = previous_end.max(end);
+        runs[kept] = AmbiguityRun {
+            offset: start as u32,
+            length: (end - start) as u32,
+            ncbi4na: run.ncbi4na & 0x0F,
+        };
+        kept += 1;
+    }
+    runs.truncate(kept);
+    if in_order {
+        return;
+    }
+    let mut codes = Vec::new();
+    PackedRef::x_stored(packed, length, &[]).unpack_into(&mut codes, [1, 2, 4, 8]);
+    let stored = codes.clone();
+    for run in runs.iter() {
+        let start = run.offset as usize;
+        codes[start..start + run.length as usize].fill(run.ncbi4na);
+    }
+    runs.clear();
+    for (index, (&code, &base)) in codes.iter().zip(&stored).enumerate() {
+        if code == base {
+            continue;
+        }
+        match runs.last_mut() {
+            Some(run) if run.ncbi4na == code && (run.offset + run.length) as usize == index => {
+                run.length += 1
+            }
+            _ => runs.push(AmbiguityRun {
+                offset: index as u32,
+                length: 1,
+                ncbi4na: code,
+            }),
+        }
     }
 }
 

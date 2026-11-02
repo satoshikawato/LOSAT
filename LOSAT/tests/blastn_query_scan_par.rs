@@ -3,10 +3,9 @@
 //! searches.
 //!
 //! The parts have no switch of their own: wherever LOSAT_X_QSTREAM acts, at two threads or more on
-//! unix with the `parallel` feature and on a file of `LOSAT_X_QSCANPARMIN` bytes or more (4 MiB;
-//! 0 here, so that a small file is cut), the first reading is in parts, and it falls back to one
+//! unix with the `parallel` feature, the first reading is in parts, and it falls back to one
 //! thread on a `\r`, a gap line (`>?`), a reader error and the like. (`LOSAT_X_QSCANPAR` was folded
-//! into LOSAT_X_QSTREAM on 2026-11-01.) It changes who
+//! into LOSAT_X_QSTREAM on 2026-11-01, its minimum of 4 MiB removed on 2026-11-02.) It changes who
 //! reads the lengths, not the lengths, so the property under test is that nothing a run writes
 //! depends on the thread count (exit status, report and standard error), and that the parts were
 //! taken where the rule says so: `scan_par=1` in the `[X_STATS] QSTREAM` line (printed with
@@ -22,9 +21,6 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-/// Every file is cut, whatever its size (tuning).
-const ANY_SIZE: (&str, &str) = ("LOSAT_X_QSCANPARMIN", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -103,7 +99,7 @@ fn query_text(tail: &[u8]) -> Vec<u8> {
 }
 
 /// One search of `query` with `target` (`-subject FILE` or `-db NAME`) and `task`, `-outfmt 6`,
-/// `BATCH_SIZE` 20,000, `ANY_SIZE` and the given variables as its only `LOSAT_*` variables.
+/// `BATCH_SIZE` 20,000 and the given variables as its only `LOSAT_*` variables.
 /// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature (`cargo
 /// test --all-features`, as in CI) needs that file name as soon as a search has more than one
 /// thread, and it selects nothing (it is set to a file of this test when the environment has none).
@@ -139,7 +135,6 @@ fn search(
         .args(["-outfmt", "6"])
         .args(["-num_threads", &threads.to_string()])
         .env("BATCH_SIZE", "20000")
-        .env(ANY_SIZE.0, ANY_SIZE.1)
         .envs(vars.iter().copied())
         .output()
         .expect("run LOSAT");

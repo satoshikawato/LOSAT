@@ -177,6 +177,9 @@ pub(super) struct Opening {
     on: bool,
     off: Option<Off>,
     again: Option<(File, u64)>,
+    /// Where the switch does not act on a regular file: a second handle on it and the position its
+    /// reading starts at, for LOSAT_X_BNQPARTS's reading in parts (`store_parts`).
+    before: Option<(File, u64)>,
 }
 
 impl Opening {
@@ -210,7 +213,7 @@ impl Opening {
         reports_streamed: bool,
         rule: Rule,
     ) -> Opening {
-        let off = |off| {
+        let off_with = |off, before| {
             if on {
                 crate::utils::xreach::x_reach!("LOSAT_X_QSTREAM", false);
             }
@@ -218,45 +221,71 @@ impl Opening {
                 on,
                 off: Some(off),
                 again: None,
+                before,
             }
         };
-        if !on {
-            return off(Off::NotSet);
-        }
-        if !reports_streamed {
-            return off(Off::Reports);
-        }
-        if path.as_os_str() == "-" || shared_standard_input {
-            return off(Off::StandardInput);
-        }
-        let bytes = match file.metadata() {
+        let off = |off| off_with(off, None);
+        let standard_input = path.as_os_str() == "-" || shared_standard_input;
+        let regular = || match file.metadata() {
             Ok(metadata)
                 if metadata.is_file()
                     && crate::blastinput::input_files::has_stream_position(file) =>
             {
-                metadata.len()
+                Ok(metadata.len())
             }
-            Ok(_) => return off(Off::NotAFile),
-            Err(_) => return off(Off::Io),
+            Ok(_) => Err(Off::NotAFile),
+            Err(_) => Err(Off::Io),
+        };
+        // A second handle on the file and the position its reading starts at.
+        let again = || {
+            let mut handle = file;
+            let start = handle.stream_position().ok()?;
+            Some((file.try_clone().ok()?, start))
+        };
+        if !on || !reports_streamed {
+            let before = (!standard_input && regular().is_ok()).then(again).flatten();
+            return off_with(if on { Off::Reports } else { Off::NotSet }, before);
+        }
+        if standard_input {
+            return off(Off::StandardInput);
+        }
+        let bytes = match regular() {
+            Ok(bytes) => bytes,
+            Err(why) => return off(why),
         };
         if let Some(why) = rule.off(bytes) {
-            return off(why);
+            return off_with(why, again());
         }
-        let mut handle = file;
-        let Ok(start) = handle.stream_position() else {
-            return off(Off::Io);
-        };
-        match file.try_clone() {
-            Ok(again) => {
+        match again() {
+            Some(again) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_QSTREAM", true);
                 Opening {
                     on,
                     off: None,
-                    again: Some((again, start)),
+                    again: Some(again),
+                    before: None,
                 }
             }
-            Err(_) => off(Off::Io),
+            None => off(Off::Io),
         }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNQPARTS): the parts of the store of a search whose records are read
+    /// before it (the switch does not act on its regular file), read on the search's `threads`
+    /// threads (`x_query_scan_par::store_parts`), or `None` where the search's reader reads them
+    /// (one thread, standard input or a file that is not regular, the BLAST archive,
+    /// `-parse_deflines`, whose reader refuses a Seq-id read twice across the file, and the cases
+    /// of that module).
+    pub(super) fn store_parts(
+        &mut self,
+        config: ReaderConfig,
+        threads: usize,
+    ) -> Option<Vec<super::x_query_drop::Part>> {
+        if config.keep_defline || config.parse_deflines {
+            return None;
+        }
+        let (file, start) = self.before.take()?;
+        super::x_query_scan_par::store_parts(&file, start, config, threads)
     }
 
     /// Whether the records are read batch by batch (`Store::read`).

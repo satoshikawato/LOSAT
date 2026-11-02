@@ -68,6 +68,9 @@ async function runMode(
     const firstHighPointer = initialBytes > TWO_GIB ? fillLow(exports) : 0;
     const outputs: HighMemoryCase[] = [];
     for (const search of request.cases) {
+      // As runtime.run: every thread worker ready before a run, also those whose thread of the
+      // previous run is still returning (the ThreadHost has one set; a spawn does not wait for those).
+      await host.prepare(request.threads - 1);
       const query = abi.register(search.program, ROLE_QUERY, search.query);
       const subject = abi.register(search.program, ROLE_SUBJECT, search.subject);
       const streams = new Map<number, Uint8Array[]>();

@@ -217,47 +217,22 @@ def quick() -> list[dict]:
     searches.append({"program": "blastp", "argv": ["blastp", "-task", "blastp-fast",
                      "-query", "LOSAT/tests/fasta/NZ_CP006932.faa", "-subject", "LOSAT/tests/fasta/SicyWSV.faa"],
                      "cwd": str(REPO), "cases": ["blastp_fast_query_blocks"], "frozen": {}})
-    # BLASTN dc-megablast and blastn-short (Session SD): their default fixtures, with the
-    # NCBI-frozen hashes of outfmt 0 and 7.
-    searches += [search for search in outfmt0_fixtures()
-                 if set(search["cases"]) & {"dc.default", "short.default"}]
-    # -num_descriptions / -num_alignments (O-webopt): the hit list of format 0 is 4 and the tabular
-    # formats' 2 (two searches) in each program, and the one input where format 0 and the tabular
-    # formats keep other subjects (-num_alignments 3 on a split subject); NCBI-frozen hashes.
-    searches += [search for search in outfmt0_fixtures()
-                 if set(search["cases"]) & {f"numdesc.{program}.nd4_na2" for program in FORMATS}
-                 | {"numdesc.blastn.split_na3"}]
-    # BLASTN -ungapped (O4a-1; abi_v2.md does not list it: the adapter passes the argv to the CLI's parser): the
-    # four tasks on the t2 pair and on the ambrun pair (a subject with a run of N and an R, which the ungapped
-    # re-evaluation splits), the NCBI-frozen hashes of outfmt 0, 7 (the rows of the outfmt 0 manifest) and, for t2, 6 (the regression
-    # manifest); every search is also compared with the native CLI.
-    ungapped = {f"ungapped.{task}.{pair}.{fmt}" for task in ("mb", "bn", "dc", "short") for pair in ("t2", "amb")
-                for fmt in ("0", "5", "7", "15", "16")}
-    chosen = [search for search in outfmt0_fixtures() if set(search["cases"]) & ungapped]
-    # The frozen outfmt 6 of the t2 pair (LOSAT/tests/fixtures/blastn_regression/manifest.tsv; no stderr).
+    # Every NCBI-frozen fixture of the outfmt 0 manifest (outfmt0_fixtures), each also compared with the
+    # native CLI: among them BLASTN dc-megablast and blastn-short (Session SD), -num_descriptions /
+    # -num_alignments (O-webopt), BLASTN -ungapped (O4a-1) and the X-drop and window options (DI-6). From
+    # 2026-10-25 an operator precedence in the selection of the -num_descriptions fixtures took them all
+    # by accident (`set & {...} | {...}`); the suite keeps them on purpose (line SX, DECISIONS 7).
+    searches += outfmt0_fixtures()
+    # The frozen outfmt 6 of BLASTN -ungapped on the t2 pair (O4a-1; the four tasks, of the
+    # LOSAT/tests/fixtures/blastn_regression/manifest.tsv rows without stderr).
+    ungapped = {f"ungapped.{task}.t2.0" for task in ("mb", "bn", "dc", "short")}
     sys.path.insert(0, str(REPO / "LOSAT/tests"))
     import blastn_regression_fixtures as regression  # noqa: E402  (the manifest reader)
     rows = {row["case_id"]: row for row in regression.read_manifest()}
-    present = {(search["program"], tuple(search["argv"])): search for search in searches}
-    for search in chosen:
-        row = next((rows[case.removesuffix(".0")] for case in search["cases"] if case.endswith(".t2.0")), None)
+    for search in searches:
+        row = next((rows[case.removesuffix(".0")] for case in search["cases"] if case in ungapped), None)
         if row and row["exit"] == "0" and not row["stderr_sha256"]:
             search["frozen"]["6"] = row["stdout_sha256"]
-        # A search the lines above already hold gains the frozen outfmt 6; it is not run twice.
-        held = present.get((search["program"], tuple(search["argv"])))
-        if held is None:
-            searches.append(search)
-        else:
-            held["frozen"].update(search["frozen"])
-    # BLASTN -xdrop_ungap, -xdrop_gap, -xdrop_gap_final, -window_size, -off_diagonal_range and -no_greedy (DI-6;
-    # the adapter passes the argv to the CLI's parser): the NCBI-frozen outfmt 0 rows of the outfmt 0 manifest
-    # (pyani ANIb's options, the greedy X-drop and -no_greedy of megablast), each also compared with the native CLI.
-    present = {(search["program"], tuple(search["argv"])): search for search in searches}
-    for search in outfmt0_fixtures():
-        if not set(search["cases"]) & {"xdrop.anib.bn.0", "xdrop.mb.gap5.0", "xdrop.mb.nogreedy.0"}:
-            continue
-        if present.get((search["program"], tuple(search["argv"]))) is None:
-            searches.append(search)
     return searches
 
 

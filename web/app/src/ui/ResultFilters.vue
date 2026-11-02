@@ -89,7 +89,6 @@ function clear(): void {
       <button type="submit" class="filter-submit" data-testid="filter-apply">Filter</button>
       <button type="button" data-testid="filter-clear" @click="clear">Reset</button>
     </div>
-    <p class="muted small">Filters change the view only. Exports of outfmt 0, 6 and 7 always hold the whole result.</p>
     <p v-if="problem" class="error" role="alert" data-testid="filter-problem">{{ problem }}</p>
   </form>
 </template>

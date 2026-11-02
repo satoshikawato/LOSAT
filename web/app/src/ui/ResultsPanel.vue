@@ -31,6 +31,8 @@ import VerificationBadge from './VerificationBadge.vue';
 export type ResultsView = 'hits' | 'dotplot' | 'details' | 'outputs';
 
 const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly RunView[] }>();
+/** "Run a search" of the empty results page: the Search tab. */
+const emit = defineEmits<{ search: [] }>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
 const view = defineModel<ResultsView>('view', { default: 'hits' });
 const state = useStore(props.results.state);
@@ -113,7 +115,9 @@ async function toAlignments(id: HspId): Promise<void> {
 <template>
   <section class="results" data-testid="results-panel">
     <h2 ref="heading" tabindex="-1" data-testid="results-heading">Results</h2>
-    <p v-if="runs.length === 0" class="muted" data-testid="results-empty">No runs yet. Searches appear here when they complete.</p>
+    <p v-if="runs.length === 0" data-testid="results-empty">
+      <button type="button" class="primary-action" data-testid="results-run-a-search" @click="emit('search')">Run a search</button>
+    </p>
     <template v-else>
       <div class="results-top">
         <dl class="results-summary" data-testid="results-summary">

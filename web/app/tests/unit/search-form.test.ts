@@ -328,25 +328,25 @@ describe('fieldRows', () => {
 });
 
 describe('searchSummary', () => {
-  it('says what is searched, with which program and task, and where', () => {
+  it('says what is searched, with which program and task', () => {
     expect(searchSummary(programById('blastn'), 'megablast')).toBe(
-      'Search nucleotide subjects with BLASTN, task megablast (optimized for highly similar sequences). Runs in this browser.',
+      'Search nucleotide subjects with BLASTN, task megablast (optimized for highly similar sequences).',
     );
     expect(searchSummary(programById('blastn'), 'dc-megablast')).toContain('task dc-megablast (optimized for more dissimilar sequences)');
     expect(searchSummary(programById('blastp'), 'blastp')).toBe(
-      'Search protein subjects with BLASTP, task blastp (protein-protein BLAST). Runs in this browser.',
+      'Search protein subjects with BLASTP, task blastp (protein-protein BLAST).',
     );
     expect(searchSummary(programById('tblastn'), 'tblastn')).toBe(
-      'Search translated nucleotide subjects with TBLASTN (protein query), task tblastn. Runs in this browser.',
+      'Search translated nucleotide subjects with TBLASTN (protein query), task tblastn.',
     );
     expect(searchSummary(programById('tblastx'), undefined)).toBe(
-      'Search translated nucleotide subjects with TBLASTX (translated nucleotide query). Runs in this browser.',
+      'Search translated nucleotide subjects with TBLASTX (translated nucleotide query).',
     );
   });
 
   it('names a task without a note, and leaves the task out while it is unknown', () => {
-    expect(searchSummary(programById('blastp'), 'other')).toBe('Search protein subjects with BLASTP, task other. Runs in this browser.');
-    expect(searchSummary(programById('blastn'), undefined)).toBe('Search nucleotide subjects with BLASTN. Runs in this browser.');
+    expect(searchSummary(programById('blastp'), 'other')).toBe('Search protein subjects with BLASTP, task other.');
+    expect(searchSummary(programById('blastn'), undefined)).toBe('Search nucleotide subjects with BLASTN.');
   });
 });
 

@@ -45,12 +45,6 @@ const ahead = computed(() => {
   if (props.run.status !== 'queued') return undefined;
   return props.runs.find((other) => !isTerminal(other.status) && other.status !== 'queued');
 });
-/** Runs that wait before this one. */
-const waitingAhead = computed(() => {
-  if (props.run.status !== 'queued') return 0;
-  return props.runs.filter((other) => other.status === 'queued' && other.snapshot.number < props.run.snapshot.number).length;
-});
-
 /** A run of a group shows the group's cancel while another of its runs can still be cancelled. */
 const groupCancellable = computed(() => {
   const group = props.run.snapshot.group;
@@ -72,7 +66,7 @@ const phaseTimes = computed(() => {
   <div class="run-status" :data-status="run.status" data-testid="run-status" :data-run="run.snapshot.number">
     <p class="run-status-line">
       <span class="muted">Status:</span>
-      <span class="phase" data-testid="run-status-phase">{{ PHASE_LABELS[run.status] }}</span>
+      <span class="phase" data-testid="run-status-phase">{{ ahead ? `Waiting for run ${ahead.snapshot.number}` : PHASE_LABELS[run.status] }}</span>
       <span v-if="elapsed" class="elapsed muted" data-testid="run-status-elapsed">{{ elapsed }}</span>
       <span class="run-status-actions">
         <button v-if="groupCancellable" type="button" class="link" data-testid="run-status-cancel-group" @click="coordinator.cancelGroup(run.snapshot.group!.groupId)">
@@ -81,13 +75,11 @@ const phaseTimes = computed(() => {
         <button v-if="cancellable(run)" type="button" data-testid="run-status-cancel" @click="coordinator.cancel(run.snapshot.runId)">Cancel</button>
       </span>
     </p>
-    <p v-if="ahead" class="muted small" data-testid="run-status-ahead">
-      Run {{ ahead.snapshot.number }} is searching<template v-if="waitingAhead > 0">
-        and {{ waitingAhead }} {{ waitingAhead === 1 ? 'run waits' : 'runs wait' }} before this one</template
-      >; searches run one at a time in this tab. This run starts when they end.
-    </p>
-    <p v-else-if="run.status === 'queued'" class="muted small" data-testid="run-status-ahead">This run starts when the search before it ends.</p>
     <p v-if="phaseTimes" class="muted small" data-testid="run-status-phases">{{ phaseTimes }}</p>
-    <p class="muted small">The results appear here when the search completes.</p>
+    <!-- The one consequence that matters while a search runs (stop-describing-ui rule 3). -->
+    <p class="muted small run-status-warning" data-testid="run-status-tab-warning">
+      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
+      Closing or reloading this tab ends the search
+    </p>
   </div>
 </template>

@@ -699,13 +699,9 @@ const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, vi
       <span class="plot-title" data-testid="dotplot-title">Plot of {{ queryId }} vs {{ subjectId }}</span>
       <span class="muted small"
         >Query {{ queryId }} ({{ formatCount(queryLength) }} {{ units.query }}) against subject {{ subjectId }} ({{ formatCount(subjectLength) }}
-        {{ units.subject }}). Each line is an HSP from its start to its end.</span
+        {{ units.subject }}).</span
       >
     </figcaption>
-    <div class="plot-help muted small" data-testid="dotplot-help">
-      <p>Mouse: hold Ctrl (⌘ on a Mac) and turn the wheel to zoom; drag to move; click a line to show its HSP.</p>
-      <p>Touch: use the Zoom buttons; slide a finger sideways to move (up and down scrolls the page); tap a line to show its HSP.</p>
-    </div>
     <div ref="stage" class="plot-stage">
       <!-- As tall as the canvas, and the popup when it is under the plot. -->
       <div class="plot-layers" :style="{ width: `${canvasWidth}px` }">

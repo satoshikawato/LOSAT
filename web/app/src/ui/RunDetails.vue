@@ -87,7 +87,6 @@ const inputs = computed(() => [
     </div>
 
     <h3>Command line</h3>
-    <p class="muted small">The LOSAT command that writes each output from the same inputs.</p>
     <ul class="commands">
       <li v-for="format in loaded.description.formats" :key="format">
         outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :text="toShellCommand(snapshot.argv, format)" /></code>

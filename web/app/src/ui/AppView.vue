@@ -5,7 +5,6 @@ import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
 import type { ResultsBrowser } from '../application/results';
 import { useStore } from './useStore';
-import AttentionPanel from './AttentionPanel.vue';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
@@ -55,7 +54,10 @@ onUnmounted(() => {
 <template>
   <header class="app-header">
     <h1>LOSAT Web</h1>
-    <span class="local-note">Local processing: your sequences stay in this browser.</span>
+    <span class="local-note">
+      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+      Nothing leaves this browser
+    </span>
   </header>
   <p v-if="usesFakeEngine" class="banner" data-testid="fake-engine-banner">
     Development build: a fake engine is in use. Outputs are not search results.
@@ -68,7 +70,7 @@ onUnmounted(() => {
   <main class="layout">
     <section class="primary">
       <!-- The search form stays mounted, so the next search keeps its edits while results are viewed. -->
-      <SearchPanel v-show="tab === 'search'" :draft="draft" @submitted="openResults" />
+      <SearchPanel v-show="tab === 'search'" :draft="draft" :attention="attention" :attention-state="attentionState" @submitted="openResults" />
       <ResultsPanel
         v-if="tab === 'results'"
         ref="resultsPanel"
@@ -76,11 +78,11 @@ onUnmounted(() => {
         :coordinator="coordinator"
         :results="results"
         :runs="state.runs"
+        @search="tab = 'search'"
       />
     </section>
-    <!-- LOSAT's notes under the page: leaving the tab, and the temporary storage (design §3.4). -->
+    <!-- Under the page: the storage's warnings, when there are any (design §3.4). -->
     <aside class="notes">
-      <AttentionPanel :attention="attention" :state="attentionState" />
       <StorageStatus :storage="state.storage" />
     </aside>
   </main>

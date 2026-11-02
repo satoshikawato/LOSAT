@@ -4,7 +4,7 @@
 // several (`inline`, such as "Match" in "Match/Mismatch Scores"). A field whose value is
 // written to the argv differs from the engine's default, and is marked as NCBI marks it
 // (yellow and "♦"), with words for screen readers. An empty field is the engine's default.
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { DraftState, SearchDraft } from '../application/draft';
 import { geneticCodeLabel } from '../domain/genetic-codes';
 import { effectiveValue, fieldChoices, writtenValue } from '../domain/parameters';
@@ -24,6 +24,8 @@ const choices = computed(() => (props.field.kind === 'boolean' ? ['true', 'false
 const checked = computed(() => effectiveValue(props.field.flag, values.value, options.value));
 
 const choiceLabel = (choice: string) => props.field.choiceLabels?.[choice] ?? choice;
+/** The engine's help, opened with the "?" button (stop-describing-ui: the control shows, the help waits). */
+const showHelp = ref(false);
 
 /** The first paragraph of the engine's help, without the references to NCBI's sources. */
 const help = computed(() => {
@@ -90,7 +92,7 @@ function set(next: string | boolean): void {
           autocomplete="off"
           spellcheck="false"
           :value="text"
-          :placeholder="option?.defaultValue === undefined ? 'default' : `default: ${option.defaultValue}`"
+          :placeholder="option?.defaultValue ?? ''"
           :list="field.suggestions ? `${id}-list` : undefined"
           :data-testid="id"
           @input="set(($event.target as HTMLInputElement).value)"
@@ -117,7 +119,19 @@ function set(next: string | boolean): void {
           <option v-for="choice in choices" :key="choice" :value="choice">{{ choiceLabel(choice) }}</option>
         </select>
       </span>
-      <p v-if="help" class="help">{{ help }}</p>
+      <button
+        v-if="help"
+        type="button"
+        class="help-toggle"
+        :aria-expanded="showHelp"
+        :aria-controls="`${id}-help`"
+        :aria-label="`About ${field.flag}`"
+        :data-testid="`${id}-help-toggle`"
+        @click="showHelp = !showHelp"
+      >
+        ?
+      </button>
+      <p v-if="help && showHelp" :id="`${id}-help`" class="help" :data-testid="`${id}-help`">{{ help }}</p>
     </div>
   </div>
 </template>

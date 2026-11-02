@@ -250,7 +250,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     query: 'nucleotide',
     subject: 'protein',
     fastaParser: 1,
-    unavailable: 'BLASTX joins LOSAT Web after its certification. Until then, use BLASTX of the LOSAT command line.',
+    unavailable: 'Not in LOSAT Web yet: use BLASTX of the LOSAT command line.',
     sections: [],
   },
   {
@@ -338,5 +338,5 @@ export function searchSummary(program: ProgramDescriptor, task: string | undefin
   const query = program.queryNote === undefined ? '' : ` (${program.queryNote})`;
   const note = task === undefined ? undefined : program.taskNotes?.[task];
   const taskText = task === undefined ? '' : `, task ${task}${note === undefined ? '' : ` (${note})`}`;
-  return `Search ${program.searches} with ${program.label}${query}${taskText}. Runs in this browser.`;
+  return `Search ${program.searches} with ${program.label}${query}${taskText}.`;
 }

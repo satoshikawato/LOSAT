@@ -14,8 +14,8 @@ export const fasta = (path: string): Buffer => readFileSync(join(REPOSITORY, 'LO
 /**
  * Waits until the engine's describe of the chosen program has come (or failed). It comes after
  * the page opens (the Data worker starts its session and loads the serial reactor first: up to
- * a second in Firefox) or the program changes, and its help and task move every control below
- * "Program Selection" down. A click on such a control while it moves is lost: Firefox and
+ * a second in Firefox) or the mode changes, and its help and task move every control below
+ * "Task Selection" down. A click on such a control while it moves is lost: Firefox and
  * WebKit press and release some 20-300 ms apart, Playwright checks the target at the press
  * only, and the release lands on the panel (WF1, losat-baselines/web-flaky-20261016).
  */
@@ -57,7 +57,7 @@ export async function openFiles(
   for (let i = 0; i < files.length; i++) await settled(page, role, before + i);
 }
 
-/** Opens the record list of a source (it starts open for a few records). */
+/** Opens the record list of a source (it starts closed). */
 export async function showRecords(page: Page, role: Role, index = 0): Promise<void> {
   await page
     .getByTestId(`${role}-source-${index}`)
@@ -78,7 +78,7 @@ export async function openParameters(page: Page): Promise<void> {
   await expect(page.getByTestId('parameter-form')).toBeVisible();
 }
 
-/** Chooses a task in "Program Selection" (W4b: radio buttons). */
+/** Chooses a task in "Task Selection" (W4b: radio buttons). */
 export async function task(page: Page, value: string): Promise<void> {
   await page.getByTestId(`param-task-${value}`).check();
 }
@@ -107,9 +107,11 @@ export async function waitStatus(
 /** Selects run `run` in the results page's run picker (the page may show no results for it). */
 export async function pickRun(page: Page, run: number): Promise<void> {
   await page.getByTestId('tab-results').click();
-  const select = page.getByTestId('results-run');
-  const label = await select.locator('option', { hasText: new RegExp(`^Run ${run} · `) }).textContent();
-  await select.selectOption({ label: label!.trim() });
+  // By the option's value (the run's ID), not its label: the label ends in " (running)" until the
+  // run ends, so a label read just before then matched no option, and "several runs" timed out
+  // (CI of #731 and #732; found by the SX line).
+  const value = await page.getByTestId(`run-${run}-option`).getAttribute('value');
+  await page.getByTestId('results-run').selectOption(value!);
 }
 
 /** The text the results page gives for run `run` when it has no results (a failed or cancelled run). */

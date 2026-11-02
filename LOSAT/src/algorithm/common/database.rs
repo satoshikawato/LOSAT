@@ -291,11 +291,12 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
 /// The checks of `read_nucleotide_stores` without the copy (TBLASTN's `-db` search, which reads
 /// its subjects where it searches them, `x_read_nucleotide_store`). The
 /// database is read in the same blocks, and every sequence's length and ambiguity runs are read
-/// with the same errors in the same order; only the lengths are kept, by ordinal id. The search
+/// with the same errors in the same order; only the lengths are kept, by ordinal id (a length
+/// that does not fit a signed 32-bit integer is an error of the read). The search
 /// fails the query batch that the copy would fail, with the same text. A block of one sequence (one longer than
 /// a block, or the last of its volume) is checked without its 2-bit data
 /// (`SeqDb::x_nucleotide_check`): a human chromosome is not read here only to be dropped.
-pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<usize>> {
+pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<u32>> {
     let mut lengths = Vec::with_capacity(db.num_seqs() as usize);
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, STORE_BLOCK_BYTES) {
@@ -313,7 +314,7 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
                     program,
                 )
             })?;
-            lengths.push(length);
+            lengths.push(length as u32);
             next_ordinal = range.end_ordinal();
             continue;
         }
@@ -322,7 +323,7 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
             let (length, _) = stored_parts(&block, i, range.first_ordinal + i as u32, program)?;
-            lengths.push(length);
+            lengths.push(length as u32);
         }
         next_ordinal = range.end_ordinal();
     }
@@ -2455,6 +2456,59 @@ mod taxdb_prepass_tests {
                 (Err(error), Some(text)) => assert!(error.contains(text), "{name}: {error}"),
                 (got, _) => panic!("{name}: {got:?}"),
             }
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    #[test]
+    fn a_stored_ordinal_id_of_another_number_is_not_fetched() {
+        // tests/db_search/ids/make_ids.py (line DBID N2a): sequences whose only Seq-id is
+        // `gnl|BL_ORD_ID|n`. With n the sequence's number in its volume it reads as a sequence
+        // without parsed Seq-ids (in `pord_vx`, sequence 6 is the second of `pord_x`); another n is
+        // a parsed Seq-id, n plus the first ordinal id of the volume, by which NCBI's formatters
+        // find no sequence or another one.
+        let cwd = empty_cwd("stored_ordinal_id");
+        // `Ok(true)`: read as a sequence without parsed Seq-ids; `Ok(false)`: a parsed subject
+        // that the reports fetch; `Err(id)`: refused, with its Seq-align id.
+        for (name, ordinal, want) in [
+            ("ids/pord_v5", 0, Ok(false)),
+            ("ids/pord_v5", 2, Ok(true)),
+            ("ids/pord_v5", 3, Err("gnl|BL_ORD_ID|6")),
+            ("ids/pord_v5", 4, Err("gnl|BL_ORD_ID|1")),
+            ("ids/pord_v4", 2, Ok(true)),
+            ("ids/pord_v4", 3, Err("gnl|BL_ORD_ID|6")),
+            ("ids/pord_vx", 3, Err("gnl|BL_ORD_ID|6")),
+            ("ids/pord_vx", 5, Ok(false)),
+            ("ids/pord_vx", 6, Ok(true)),
+            ("ids/pord_vx", 7, Err("gnl|BL_ORD_ID|12")),
+        ] {
+            let db = db_search(name, None, &cwd);
+            let headers = HeaderReader::new(&db);
+            match (read_header(&headers, ordinal, 0, "BLASTP").unwrap(), want) {
+                (ReportedHeader::Stored(_), Ok(true)) => {}
+                (ReportedHeader::Parsed(subject), Ok(false)) => {
+                    assert!(subject.fetched().is_ok(), "{name} {ordinal}")
+                }
+                (ReportedHeader::Parsed(subject), Err(id)) => {
+                    let error = subject.fetched().unwrap_err();
+                    assert!(
+                        error.contains(&format!("the Seq-align id {id},")),
+                        "{name} {ordinal}: {error}"
+                    );
+                }
+                (got, want) => panic!("{name} {ordinal}: {got:?}, want {want:?}"),
+            }
+        }
+        // The first sequence of `nord_v5` holds `gnl|BL_ORD_ID|3`: the database has parsed Seq-ids.
+        let search = SearchPath::new(&cwd, None, None).unwrap();
+        for name in ["nord_v5", "nord_v4"] {
+            let path = root().join("db_search/ids").join(name);
+            let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+            assert!(db.has_parsed_seqids().unwrap(), "{name}");
+            assert!(matches!(
+                db.read_header(1).unwrap(),
+                crate::seqdb::SequenceHeader::Ordinal(_)
+            ));
         }
         std::fs::remove_dir_all(&cwd).unwrap();
     }

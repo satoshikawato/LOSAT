@@ -54,8 +54,14 @@ fn store() -> &'static Mutex<Store> {
 /// ```c++
 ///         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
 /// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:50,106
+/// ```c++
+///     const bool kQueryIsProtein = false;
+/// ...
+///     m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
+/// ```
 /// BLASTN and TBLASTX read nucleotides in both roles, BLASTP proteins in both, TBLASTN a
-/// protein query and nucleotide subjects.
+/// protein query and nucleotide subjects, BLASTX a nucleotide query and protein subjects.
 fn reader_of(program: Program, role: u32) -> (&'static str, bool) {
     match (program, role) {
         (Program::Blastn, _) => ("BLASTN", false),
@@ -63,6 +69,8 @@ fn reader_of(program: Program, role: u32) -> (&'static str, bool) {
         (Program::Tblastn, ROLE_SUBJECT) => ("TBLASTN", false),
         (Program::Tblastn, _) => ("TBLASTN", true),
         (Program::Blastp, _) => ("BLASTP", true),
+        (Program::Blastx, ROLE_SUBJECT) => ("BLASTX", true),
+        (Program::Blastx, _) => ("BLASTX", false),
     }
 }
 
@@ -322,6 +330,15 @@ mod tests {
         assert_eq!(
             records("blastp", ROLE_QUERY, b"ACGT\n>x\nAC\n"),
             r#""records":[{"index":0,"id":"","length":4},{"index":1,"id":"x","length":2}]}"#
+        );
+        // BLASTX reads a nucleotide query (X is not a nucleotide letter) and protein subjects.
+        assert_eq!(
+            records("blastx", ROLE_QUERY, b">q\nACXGU\n"),
+            r#""records":[{"index":0,"id":"q","length":4}]}"#
+        );
+        assert_eq!(
+            records("blastx", ROLE_SUBJECT, b">s\nACXGU\n"),
+            r#""records":[{"index":0,"id":"s","length":5}]}"#
         );
         assert_eq!(
             records("tblastn", ROLE_SUBJECT, b"\n>\xff\xfe a\nACGT\n"),

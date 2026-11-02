@@ -62,6 +62,10 @@ them). `pdup_a.*` and `pdup_b.*` (version 5) from `pdup.faa`, the same record `g
 same; `pdup_c.*` from `pdup_c.faa`, the record with another title, read with `pdup_a` through `pdup_ac.pal`.
 `nfound_v5.*` and `nfound_v4.*` from `nfound.fna`: the sequence of `njoined_a.fna` as `gb|AF000050.1|`, then a
 copy with three substitutions as `gb|AF000050|`.
+
+Sequences whose only Seq-id is `gnl|BL_ORD_ID|n` (line DBID N2a; the FASTA comes from `make_ord_fasta.py`):
+`pord_v5.*` and `pord_v4.*` from `pord.faa`, `pord_x.*` (version 5) from `pord_x.faa`, read after `pord_v5` through
+the alias `pord_vx.pal` (which lists `pord_x` first: NCBI orders the volumes of an alias by their base names), and `nord_v5.*` and `nord_v4.*` from `nord.fna`.
 """
 import argparse
 import subprocess
@@ -144,6 +148,20 @@ def main() -> int:
             [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", "prot", "-parse_seqids",
              "-blastdb_version", "5", "-title", name, "-out", str(args.out / name)],
             check=True, stdout=subprocess.DEVNULL)
+    for name, dbtype, extension in (("pord", "prot", "faa"), ("nord", "nucl", "fna")):
+        for version in (5, 4):
+            subprocess.run(
+                [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.{extension}"),
+                 "-dbtype", dbtype, "-parse_seqids", "-blastdb_version", str(version),
+                 "-title", f"{name}_v{version} (parsed Seq-ids)", "-out", str(args.out / f"{name}_v{version}")],
+                check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(
+        [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / "pord_x.faa"), "-dbtype", "prot", "-parse_seqids",
+         "-blastdb_version", "5", "-title", "pord_x", "-out", str(args.out / "pord_x")],
+        check=True, stdout=subprocess.DEVNULL)
+    (args.out / "pord_vx.pal").write_text(
+        "#\n# Alias file of line DBID, N2a\n#\nTITLE pord_vx (two databases, parsed Seq-ids)\n"
+        "DBLIST pord_x pord_v5\n")
     for alias, second in (("pdup_ab", "pdup_b"), ("pdup_ac", "pdup_c")):
         (args.out / f"{alias}.pal").write_text(
             f"#\n# Alias file of line DBID, N1\n#\nTITLE {alias} (two databases, parsed Seq-ids)\n"

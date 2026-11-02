@@ -1,5 +1,6 @@
-/* The look of gbdraw's Web GUI (Owner, 2026-11-02): Inter, a slate page with white cards, blue
-   accent, rounded controls. The tokens are gbdraw's (--ui-* in gbdraw/web/index.html). */
+/* The look of gbdraw's Web GUI (Owner, 2026-11-02): Inter, white cards, rounded controls. The
+   colours are look B of the redesign (DW-33): a dark blue header, grey-blue tabs on an accent rule,
+   white groups on a grey-blue page, with Okabe–Ito's accent and status colours. */
 @font-face {
   font-family: 'Inter';
   src: url('/fonts/inter/inter-latin-400-normal.woff2') format('woff2');
@@ -73,20 +74,32 @@
 }
 
 :root {
-  /* Three layers, as NCBI's page (line WR, 2026-11-02): a tinted ground (--page), groups in a
-     lighter tint with a visible edge (--group, --border-strong), and white controls, tables and
-     outputs (--bg). Bands inside a group (toolbars, table heads) are --band. */
-  --page: #d6e3f1;
-  --group: #eef1f4;
-  --band: #e2e7ec;
+  /* Look B of the redesign (Owner, 2026-11-02, DW-33): a grey-blue ground (--page), white groups
+     with a visible edge (--group, --border-strong), white controls, tables and outputs (--bg).
+     Bands inside a group (toolbars, table heads) are --band. Text that can be used is at least
+     4.5:1 on all of them, --muted too; only the unavailable tab is paler. */
+  --page: #e9eef3;
+  --group: #ffffff;
+  --band: #f1f4f7;
   --bg: #ffffff;
-  --fg: #1e293b;
-  --fg-2: #334155;
-  --muted: #64748b;
-  --border: #dbe6ec;
-  --border-strong: #c3d4dd;
+  --fg: #0b1a2a;
+  --fg-2: #1c2b3a;
+  --muted: #46576a;
+  --border: #d3dbe4;
+  --border-strong: #a9b8c7;
   /* The edge of a text box or a select in the search form, dark enough to find the controls. */
-  --control-line: #8b9bab;
+  --control-line: #7b8a9a;
+  /* The dark header band, the tabs (grey-blue, the selected one filled with the accent) and the
+     group names' tabs. */
+  --header: #0b3a5e;
+  --header-fg: #ffffff;
+  --header-muted: #d4e6f4;
+  --tab: #d6dfe8;
+  --tab-hover: #e6edf4;
+  --tab-fg: #14263a;
+  --tab-off: #e6ebf0;
+  --tab-off-fg: #7d8896;
+  --legend: #e3eaf1;
   --panel: #f3f8fa;
   /* The accent and the status colours are Okabe–Ito's colour-universal palette (Owner,
      2026-11-02, 案 4): blue, bluish green, vermillion and yellow, told apart in every common
@@ -244,8 +257,7 @@ input[type='radio'] {
   gap: 4px 14px;
   margin: 0 -16px 12px;
   padding: 10px 16px;
-  background: var(--group);
-  border-bottom: 1px solid var(--border-strong);
+  background: var(--header);
 }
 
 .app-header h1 {
@@ -253,6 +265,7 @@ input[type='radio'] {
   font-size: 1.5em;
   font-weight: 700;
   letter-spacing: -0.01em;
+  color: var(--header-fg);
 }
 
 .local-note,
@@ -260,6 +273,10 @@ input[type='radio'] {
 .muted,
 .hint {
   color: var(--muted);
+}
+
+.app-header .local-note {
+  color: var(--header-muted);
 }
 
 .hint,
@@ -303,7 +320,7 @@ input[type='radio'] {
   margin: 8px 0;
   padding: 4px;
   border-radius: var(--radius-sm);
-  background: #eaf2f5;
+  background: var(--tab);
 }
 
 .tabs button {
@@ -311,21 +328,22 @@ input[type='radio'] {
   border-radius: 6px;
   background: transparent;
   box-shadow: none;
-  color: var(--muted);
+  color: var(--tab-fg);
   font-weight: 600;
   padding: 6px 14px;
 }
 
 .tabs button:hover:not(:disabled) {
-  background: transparent;
-  color: var(--fg-2);
+  background: var(--tab-hover);
+  color: var(--tab-fg);
 }
 
-.tabs button[aria-pressed='true'] {
-  border-color: var(--border);
-  color: var(--accent);
-  background: var(--bg);
-  box-shadow: var(--shadow);
+.tabs button[aria-pressed='true'],
+.tabs button[aria-pressed='true']:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: #fff;
+  background: var(--accent);
+  box-shadow: none;
 }
 
 /* One column, as NCBI's pages: the search form or the results take the width, and LOSAT's
@@ -351,25 +369,32 @@ input[type='radio'] {
 
 /* Search screen */
 
+/* The mode tabs as NCBI's older tab row (look B, DW-33): grey-blue tabs with dark text on an
+   accent rule, the selected one filled with the accent; the unavailable one paler. */
 .program-tabs {
-  display: inline-flex;
+  display: flex;
   flex-wrap: wrap;
-  gap: 2px;
+  gap: 4px;
   border: none;
-  padding: 4px;
-  margin: 8px 0 4px;
-  border-radius: var(--radius-sm);
-  background: #eaf2f5;
+  border-bottom: 3px solid var(--accent);
+  padding: 0;
+  margin: 12px 0 8px;
 }
 
 .program-tab {
   position: relative;
-  padding: 6px 14px;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  padding: 9px 22px 8px;
+  border: 1px solid var(--border-strong);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
   cursor: pointer;
   font-weight: 600;
-  color: var(--muted);
+  color: var(--tab-fg);
+  background: var(--tab);
+}
+
+.program-tab:hover {
+  background: var(--tab-hover);
 }
 
 .program-tab input {
@@ -380,22 +405,17 @@ input[type='radio'] {
   cursor: pointer;
 }
 
-.program-tab.selected {
-  border-color: var(--border);
-  color: var(--accent);
-  background: var(--bg);
-  box-shadow: var(--shadow);
+.program-tab.selected,
+.program-tab.unavailable.selected {
+  border-color: var(--accent);
+  color: #fff;
+  background: var(--accent);
 }
 
 .program-tab.unavailable {
-  color: #94a3b8;
+  color: var(--tab-off-fg);
+  background: var(--tab-off);
   font-weight: 500;
-}
-
-.program-tab.unavailable.selected {
-  color: var(--accent);
-  background: var(--bg);
-  border-color: var(--border);
 }
 
 .program-tab:focus-within {
@@ -408,16 +428,16 @@ input[type='radio'] {
   font-size: 14px;
 }
 
-/* W4b search: the program's sentence under the tabs, as NCBI's, in the panel's type. */
+/* W4b search: the mode's sentence under the tabs, as NCBI's, in the panel's type. */
 .program-summary {
   margin: 4px 0 8px;
-  color: var(--muted);
+  color: var(--fg-2);
   font-size: 0.92em;
 }
 
-/* NCBI's blocks ("Enter Query Sequence", "Program Selection", the groups of "Algorithm
-   parameters", the sections of the results): a group in the lighter tint with a visible edge,
-   whose name is a tab on its top edge in the accent (line WR, 2026-11-02). */
+/* NCBI's blocks ("Enter Query Sequence", "Task Selection", the groups of "Algorithm
+   parameters", the sections of the results): a white group with a visible edge, whose name is a
+   grey-blue tab on its top edge in dark text (look B, DW-33). */
 .search-block {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -433,8 +453,8 @@ input[type='radio'] {
   padding: 1px 10px;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
-  background: var(--group);
-  color: var(--accent);
+  background: var(--legend);
+  color: var(--fg);
   font-size: 1.1em;
   font-weight: 700;
 }
@@ -1903,10 +1923,19 @@ pre.range-text {
     width: 100%;
   }
 
+  /* The five mode tabs share one row (look B: a wrapped tab hung under the accent rule). */
+  .program-tabs {
+    flex-wrap: nowrap;
+    gap: 2px;
+  }
+
   .program-tab {
-    flex: 1 1 auto;
+    flex: 1 1 0;
+    min-width: 0;
     text-align: center;
-    padding: 10px 8px;
+    padding: 10px 2px 9px;
+    border-radius: 6px 6px 0 0;
+    font-size: 0.9em;
   }
 
   /* Larger targets for touch. */

@@ -178,6 +178,16 @@ pub fn run_formats(
     observe: bool,
     search: impl FnOnce(&mut ReportOutputs<'_>) -> anyhow::Result<()>,
 ) -> Run {
+    run_formats_with(formats, observe, observe, search)
+}
+
+/// `run_formats`, with the observer (`observe`) and the hit records (`hits`) requested apart.
+pub fn run_formats_with(
+    formats: &[&str],
+    observe: bool,
+    hits: bool,
+    search: impl FnOnce(&mut ReportOutputs<'_>) -> anyhow::Result<()>,
+) -> Run {
     let mut sinks: Vec<CountingSink> = formats
         .iter()
         .map(|_| CountingSink {
@@ -208,7 +218,7 @@ pub fn run_formats(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
-            hits: observe.then_some(&mut on_hits as _),
+            hits: hits.then_some(&mut on_hits as _),
             observer: if observe { Some(&mut observer) } else { None },
         };
         search(&mut outputs).expect("run_local");

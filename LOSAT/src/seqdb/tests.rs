@@ -955,9 +955,9 @@ fn the_taxid_of_a_definition_line_is_read_apart() {
         tagged.push((taxid, record));
     }
     for (taxid, record) in &tagged {
-        assert_eq!(decode_defline_taxids(record, path).unwrap(), [*taxid]);
+        assert_eq!(decode_defline_taxids(record, path, 5).unwrap(), [*taxid]);
         // the title and ordinal id are read the same, and the default decode leaves the taxid 0
-        let deflines = decode_defline_set(record, path).unwrap();
+        let deflines = decode_defline_set(record, path, 5).unwrap();
         assert_eq!(deflines[0].title, b"t1 title");
         assert_eq!(deflines[0].volume_ordinal, 5);
         assert_eq!(deflines[0].taxid, 0);
@@ -969,13 +969,13 @@ fn the_taxid_of_a_definition_line_is_read_apart() {
         .position(|window| window == [0xa2, 0x80, 0x02, 0x01, 0x00])
         .unwrap();
     record.drain(at..at + 7);
-    assert_eq!(decode_defline_taxids(&record, path).unwrap(), [0]);
+    assert_eq!(decode_defline_taxids(&record, path, 5).unwrap(), [0]);
 }
 
 #[test]
 fn header_records_are_decoded() {
     let path = Path::new("test.phr");
-    let decode = |record: &[u8]| decode_defline_set(record, path);
+    let decode = |record: &[u8]| decode_defline_set(record, path, 0);
 
     // The first record of the fixture, byte for byte.
     let fixture = std::fs::read(fixture_dir().join("db/prot_v4.phr")).unwrap();
@@ -994,7 +994,8 @@ fn header_records_are_decoded() {
         (vec![0x7f, 0xff, 0xff, 0xff], i32::MAX as u32),
     ] {
         let title = vec![b't'; 300];
-        let deflines = decode(&defline_record(&title, &bl_ord_id(&integer))).unwrap();
+        let record = defline_record(&title, &bl_ord_id(&integer));
+        let deflines = decode_defline_set(&record, path, value).unwrap();
         assert_eq!(deflines[0].volume_ordinal, value);
         assert_eq!(deflines[0].title, title);
     }
@@ -1025,6 +1026,28 @@ fn header_records_are_decoded() {
     assert!(matches!(
         decode(&defline_record(b"title", &two)),
         Err(SeqDbError::Unsupported { .. })
+    ));
+    // The id of another number than the sequence's in the volume: a FASTA id that makeblastdb
+    // -parse_seqids stored as written, unsupported (a parsed Seq-id) whatever the other number.
+    for (stored, oid) in [(5u8, 3u32), (3, 5), (0, 1), (1, 0)] {
+        let record = defline_record(b"title", &bl_ord_id(&[stored]));
+        assert!(decode_defline_set(&record, path, u32::from(stored)).is_ok());
+        let error = decode_defline_set(&record, path, oid).unwrap_err();
+        assert!(error.is_parsed_seqids(), "{stored} at {oid}: {error}");
+        assert!(decode_defline_taxids(&record, path, oid)
+            .unwrap_err()
+            .is_parsed_seqids());
+    }
+    // A damaged record with such an id is a parsed one here; its error comes from the decoder of
+    // every Seq-id (`decode_full`), when a report reads it, as for any other parsed Seq-id.
+    let mut trailing = defline_record(b"title", &bl_ord_id(&[5]));
+    trailing.push(0);
+    assert!(decode_defline_set(&trailing, path, 0)
+        .unwrap_err()
+        .is_parsed_seqids());
+    assert!(matches!(
+        decode_defline_set(&trailing, path, 5),
+        Err(SeqDbError::Format { .. })
     ));
     // A negative ordinal id, a cut record, bytes after the record.
     assert!(matches!(
@@ -1447,7 +1470,7 @@ fn x_check_range_gives_the_errors_of_read_range() {
 #[test]
 fn header_members_lengths_and_bytes() {
     let path = Path::new("test.phr");
-    let decode = |record: &[u8]| decode_defline_set(record, path);
+    let decode = |record: &[u8]| decode_defline_set(record, path, 0);
 
     // Definite lengths throughout, and no title (it is optional).
     let seqid = [
@@ -1456,7 +1479,7 @@ fn header_members_lengths_and_bytes() {
     ];
     let mut record = vec![0x30, 0x20, 0x30, 0x1e, 0xa1, 0x1c, 0x30, 0x1a];
     record.extend_from_slice(&seqid);
-    let deflines = decode(&record).unwrap();
+    let deflines = decode_defline_set(&record, path, 65_537).unwrap();
     assert_eq!(deflines.len(), 1);
     assert!(deflines[0].title.is_empty());
     assert_eq!(deflines[0].volume_ordinal, 65_537);
@@ -1472,7 +1495,7 @@ fn header_members_lengths_and_bytes() {
         members.extend_from_slice(&[0, 0, 0, 0]);
     }
     members.extend_from_slice(&[0, 0, 0, 0]);
-    let deflines = decode(&members).unwrap();
+    let deflines = decode_defline_set(&members, path, 3).unwrap();
     assert_eq!(deflines[0].title, b"t");
     assert_eq!(deflines[0].volume_ordinal, 3);
 

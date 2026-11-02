@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn options_the_adapter_owns_or_refuses_are_not_described() {
-        for program in ["blastp", "tblastn", "blastn", "tblastx"] {
+        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             let described = describe(program).unwrap();
             for flag in ADAPTER_OWNED {
                 assert!(

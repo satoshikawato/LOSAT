@@ -3,7 +3,7 @@
 //! reported by the command line's loop (`native::run_query_batches`).
 
 use super::{
-    args::{BlastxArgs, SemanticOptionsError},
+    args::{BlastxArgs, ResolvedOptions, SemanticOptionsError},
     input::FastaRecord,
     native::{
         engine, input_error, options_error, output_error, report_error, run_query_batches,
@@ -54,48 +54,8 @@ pub fn run_local(
     subject_records: &[fasta_reader::FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The host has no database files; LOSAT Web searches the records it gives.
-    if args.db.is_some() {
-        bail!("-db (a database search) is not supported by LOSAT Web yet");
-    }
-    // NCBI parses -outfmt before its option handlers read the subjects (`native::run_inner`).
-    let mut choices = Vec::with_capacity(outputs.formats.len());
-    for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
-        app::report_format(&choice, Program::Blastx, None)?;
-        // No NCBI counterpart: the formats of LOSAT Web (`docs/web/abi_v2.md`).
-        if !matches!(choice.number, 0 | 6 | 7) {
-            bail!(
-                "output format {} is not supported by LOSAT Web's BLASTX",
-                choice.number
-            );
-        }
-        if choice.custom() {
-            bail!(
-                "a custom output format specification (fields or a delimiter) is not supported by LOSAT Web's BLASTX"
-            );
-        }
-        choices.push(choice);
-    }
-    ensure!(!choices.is_empty(), "no output format was requested");
-    // The records keep no ids read from their deflines (the host registers them before it knows
-    // the options).
-    if args.parse_deflines {
-        bail!("-parse_deflines is not supported by LOSAT Web yet");
-    }
-    // The options of each format: LOSAT's refusals now, NCBI's errors of the options after the
-    // subjects are read (`native::run_inner`).
-    let mut resolutions = Vec::with_capacity(choices.len());
-    for choice in &choices {
-        let resolution = args.resolve_with_format(choice);
-        if resolution
-            .as_ref()
-            .is_err_and(|e| e.downcast_ref::<SemanticOptionsError>().is_none())
-        {
-            return resolution.map(|_| ());
-        }
-        resolutions.push(resolution);
-    }
+    let requested: Vec<&str> = outputs.formats.iter().map(|format| format.outfmt).collect();
+    let (choices, resolutions) = read_options(&args, &requested)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     let Some(subject_path) = args.subject.as_deref() else {
         return Err(app::missing_subject_error());
@@ -124,24 +84,7 @@ pub fn run_local(
     if subjects.is_empty() {
         return Err(engine("Empty CBlastQueryVector"));
     }
-    for choice in &choices {
-        app::formatting_handler_check(choice, Program::Blastx)?;
-    }
-    // The warnings of the hit list size and of an ignored -num_descriptions, those of the first
-    // format; formats that need different hit lists are refused (`run_report_counts`).
-    let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
-    let (_, warnings) = crate::blastinput::report_counts::run_report_counts(
-        "blastx",
-        &outfmts,
-        args.max_target_seqs.map(|n| n as usize),
-        args.num_descriptions,
-        args.num_alignments,
-    )?;
-    diagnostics.write_all(&warnings)?;
-    let resolved = resolutions
-        .into_iter()
-        .map(|resolution| resolution.map_err(options_error))
-        .collect::<Result<Vec<_>>>()?;
+    let resolved = check_resolutions(&args, &choices, resolutions, &mut **diagnostics)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:213-217
     // ```c++
     //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
@@ -222,7 +165,7 @@ pub fn run_local(
             engine(error)
         }
     };
-    let made_hits = hits_sink.is_some() || outfmts.contains(&0);
+    let made_hits = hits_sink.is_some() || choices.iter().any(|choice| choice.number == 0);
     let mut run_hits = Vec::new();
     let mut first_hsp = 0;
     let mut render = |diagnostics: &mut dyn Write,
@@ -318,6 +261,96 @@ pub fn run_local(
         sink(std::sync::Arc::new(run_hits));
     }
     Ok(())
+}
+
+/// The checks of the options alone, without the records (the `validate` of web ABI v2), for the
+/// output formats `outfmts` of one `run_local` call: `run_local`'s refusals and LOSAT's, the
+/// thread count, then NCBI's errors of the options, with the messages of a run. A run reports
+/// NCBI's errors after the subjects are read, so for an argv and records that both fail the run
+/// reports the records' error.
+pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
+    let (choices, resolutions) = read_options(args, outfmts)?;
+    crate::utils::threading::validate_threads(args.num_threads as usize)?;
+    check_resolutions(args, &choices, resolutions, &mut io::sink()).map(|_| ())
+}
+
+/// The output formats `outfmts` as `run_local` reads them and the options of each, before the
+/// records are read: LOSAT Web's refusals and LOSAT's fail here; NCBI's errors of the options
+/// (`SemanticOptionsError`) stay in the resolutions, which the command line reports after the
+/// subjects are read (`native::run_inner`).
+fn read_options(
+    args: &BlastxArgs,
+    outfmts: &[&str],
+) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
+    // The host has no database files; LOSAT Web searches the records it gives.
+    if args.db.is_some() {
+        bail!("-db (a database search) is not supported by LOSAT Web yet");
+    }
+    // NCBI parses -outfmt before its option handlers read the subjects (`native::run_inner`).
+    let mut choices = Vec::with_capacity(outfmts.len());
+    for outfmt in outfmts {
+        let choice = app::parse_formatting_string(outfmt)?;
+        app::report_format(&choice, Program::Blastx, None)?;
+        // No NCBI counterpart: the formats of LOSAT Web (`docs/web/abi_v2.md`).
+        if !matches!(choice.number, 0 | 6 | 7) {
+            bail!(
+                "output format {} is not supported by LOSAT Web's BLASTX",
+                choice.number
+            );
+        }
+        if choice.custom() {
+            bail!(
+                "a custom output format specification (fields or a delimiter) is not supported by LOSAT Web's BLASTX"
+            );
+        }
+        choices.push(choice);
+    }
+    ensure!(!choices.is_empty(), "no output format was requested");
+    // The records keep no ids read from their deflines (the host registers them before it knows
+    // the options).
+    if args.parse_deflines {
+        bail!("-parse_deflines is not supported by LOSAT Web yet");
+    }
+    // The options of each format: LOSAT's refusals now, NCBI's errors of the options after the
+    // subjects are read (`native::run_inner`).
+    let mut resolutions = Vec::with_capacity(choices.len());
+    for choice in &choices {
+        match args.resolve_with_format(choice) {
+            Err(error) if error.downcast_ref::<SemanticOptionsError>().is_none() => {
+                return Err(error)
+            }
+            resolution => resolutions.push(resolution),
+        }
+    }
+    Ok((choices, resolutions))
+}
+
+/// The checks of the options that the command line makes after the subjects are read, in its
+/// order: the formatting handler's, the hit list size (its warnings and those of an ignored
+/// -num_descriptions, the first format's, to `diagnostics`; formats that need different hit lists
+/// are refused, `run_report_counts`), then NCBI's errors of each format's options.
+fn check_resolutions(
+    args: &BlastxArgs,
+    choices: &[app::FormatChoice],
+    resolutions: Vec<Result<ResolvedOptions>>,
+    diagnostics: &mut dyn Write,
+) -> Result<Vec<ResolvedOptions>> {
+    for choice in choices {
+        app::formatting_handler_check(choice, Program::Blastx)?;
+    }
+    let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
+    let (_, warnings) = crate::blastinput::report_counts::run_report_counts(
+        "blastx",
+        &outfmts,
+        args.max_target_seqs.map(|n| n as usize),
+        args.num_descriptions,
+        args.num_alignments,
+    )?;
+    diagnostics.write_all(&warnings)?;
+    resolutions
+        .into_iter()
+        .map(|resolution| resolution.map_err(options_error))
+        .collect()
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1082-1090

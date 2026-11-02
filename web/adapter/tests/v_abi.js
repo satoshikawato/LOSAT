@@ -31,8 +31,8 @@ const ROOT = path.resolve(__dirname, "../../..");
 const { createThreadHost } = require(path.join(ROOT, "LOSAT/tests/wasi_thread_host"));
 const { unsignedWasiImports } = require(path.join(ROOT, "LOSAT/tests/wasi_artifact"));
 
-const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7] };
-const WITH_HITS = new Set(["blastp", "tblastn", "blastn", "tblastx"]);
+const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7], blastx: [0, 6, 7] };
+const WITH_HITS = new Set(["blastp", "tblastn", "blastn", "tblastx", "blastx"]);
 
 function sha256(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
@@ -228,13 +228,13 @@ function checkSurface(reactor, native) {
     assert.ok(!flags.includes("-outfmt") && !flags.includes("-out") && !flags.includes("-num_threads"), `${program}: adapter-owned options`);
     assert.ok(flags.includes("-num_descriptions") && flags.includes("-num_alignments"), `${program}: hit list options`);
     if (program === "tblastn") assert.ok(description.subject_gencodes.includes(32), "tblastn: genetic code 32");
+    if (program === "blastx") assert.ok(description.query_gencodes.includes(11) && !("subject_gencodes" in description), "blastx: the query's genetic codes");
     if (program === "blastn") {
       assert.ok(flags.includes("-template_type") && flags.includes("-template_length"), "blastn: dc-megablast templates");
       const task = description.parameters.find((parameter) => parameter.flag === "-task");
       assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short"), "blastn: tasks in -task's help");
     }
   }
-  assert.equal(reactor.call("losat_web2_describe", "blastx").status, -1, "blastx joins in SX");
   // validate: accepted argv, and CLI errors with the CLI's words.
   assert.equal(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s"].join("\0")).status, 0);
   for (const argv of [["blastp", "-query", "q", "-subject", "s", "-evalue", "abc"],
@@ -243,7 +243,8 @@ function checkSurface(reactor, native) {
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding"],
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding",
                        "-template_length", "17"],
-                      ["blastn", "-query", "q", "-subject", "s", "-task", "rmblastn"]]) {
+                      ["blastn", "-query", "q", "-subject", "s", "-task", "rmblastn"],
+                      ["blastx", "-query", "q", "-subject", "s", "-query_loc", "1-9"]]) {
     const validated = reactor.call("losat_web2_validate", argv.join("\0"));
     assert.equal(validated.status, -1, argv.join(" "));
     const cli = require("node:child_process").spawnSync(native, argv);

@@ -719,3 +719,37 @@ fn refusals_come_before_any_output() {
         assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());
     }
 }
+
+/// `check_options` (LOSAT Web's `validate`) fails where a run of the same formats fails before it
+/// searches, with the run's error: LOSAT Web's refusals, LOSAT's BLASTX limits, formats that need
+/// different hit lists, and NCBI's errors of the options, among them the hit list size of each
+/// format (`-num_alignments 0` empties the tabular formats' list only).
+#[test]
+fn check_options_fails_as_a_run_does() {
+    let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
+    let queries = queries(&Inputs::path(&inputs.query)).unwrap();
+    let subjects = subjects(&Inputs::path(&inputs.subject)).unwrap();
+    let mut failed = 0;
+    for (formats, extra) in [
+        (&FORMATS[..], &[][..]),
+        (&["5"][..], &[][..]),
+        (&["6 qseqid sseqid"][..], &[][..]),
+        (&["6"][..], &["-parse_deflines"][..]),
+        (&FORMATS[..], &["-matrix", "PAM30"][..]),
+        (&FORMATS[..], &["-evalue", "0"][..]),
+        (&FORMATS[..], &["-ungapped"][..]),
+        (&["6", "7"][..], &["-num_alignments", "0"][..]),
+        (&["0"][..], &["-num_alignments", "0"][..]),
+        (&["0", "6"][..], &["-num_alignments", "3"][..]),
+    ] {
+        let args = blastx_args(&inputs.query, &inputs.subject, extra);
+        let checked = LOSAT::algorithm::blastx::check_options(&args, formats)
+            .map_err(|error| format!("{error:#}"));
+        let (result, _, _) = try_run(&inputs, &queries, &subjects, formats, extra);
+        let run = result.map_err(|error| format!("{error:#}"));
+        assert_eq!(checked, run, "{formats:?} {extra:?}");
+        failed += usize::from(run.is_err());
+    }
+    // Every case but the two searches fails.
+    assert_eq!(failed, 8);
+}

@@ -39,7 +39,8 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "docs/evidence/losat_web_e1a"))
 import capture_outputs as capture  # noqa: E402  (the verified case builders)
 
-FORMATS = {"blastp": ["0", "6", "7"], "tblastn": ["0", "6", "7"], "blastn": ["0", "6", "7"], "tblastx": ["0", "6", "7"]}
+FORMATS = {"blastp": ["0", "6", "7"], "tblastn": ["0", "6", "7"], "blastn": ["0", "6", "7"], "tblastx": ["0", "6", "7"],
+           "blastx": ["0", "6", "7"]}
 ADAPTER_OWNED = {"-outfmt", "-out", "-num_threads"}
 
 
@@ -85,8 +86,6 @@ def outfmt0_fixtures() -> list[dict]:
     import run_oracle  # noqa: E402  (the manifest reader and the oracle's arguments)
     searches: dict[tuple, dict] = {}
     for row in run_oracle.read_manifest()[2]:
-        # BLASTX (best_hsp.blastx and the outfmt 8/12 rows of the manifest) is not a program of ABI v2:
-        # it joins LOSAT Web ABI v2 in SX (`losat_web2_describe("blastx")` fails).
         if row["program"] not in FORMATS:
             continue
         # The rows of outfmt 13 and 14 (the `files` column: side files and a master file next to
@@ -194,6 +193,8 @@ def quick() -> list[dict]:
     for case in tblastx[1:2]:
         _, losat = capture.audit_tblastx_v010.build_commands(case, Path("unused"), Path("losat"), Path("unused"), Path("{OUT}"))
         cases.append(capture.Case("tblastx", case.case_id, capture.strip_binary(losat), REPO))
+    # BLASTX (session SX): the smaller pair of capture_outputs.py's BLASTX_CASES.
+    cases += [case for case in capture.blastx_cases() if case.case_id.startswith("small_vs_paja.")]
     prefix = "/mnt/c/Users/genom/GitHub/LOSAT/"
     with open(REPO / "docs/evidence/tlosan_stage_g/matrix_162.jsonl") as handle:
         for line in handle:

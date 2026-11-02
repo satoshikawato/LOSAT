@@ -1,0 +1,548 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q"
+                  }
+                }
+              },
+              title "q"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 783,
+              seq-data ncbi2na 'F54F7D51453D514F7DF54F7D514514514514F5453D514F
+54514F5453DF5E9CD34D35B427145F6741E34514D7854057907856DE9DB17DF5E9DB7903716D40
+27E9E24D9EDE6DA28A28E79B68E6D5005144C05140135135140144C05134D34D35208208208208
+208208208208208208208208208208208208208208208208145149E75275149D4527514F7DF7DF
+7DF7DF7DF7DF7DF7DF7DF7DF7DF7DF7DF7DF7DF6D6F9B79E6D6EDE5BE79E796DBB79E6DE6DB5BE
+79B6D6EDB79E796F96F941040E39038E40'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s"
+                }
+              }
+            },
+            title "s"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 261,
+            seq-data ncbieaa "FPFFPPPFPPFFFPFFPPPPPPPPFPPFPPFPPPFPPFFLAIIIIRQA
+TTFAQLITTILTQTLQLTRLARTFFLARLQIYRPKAWLSIAVCVGGGGCCVGCVPKPPHKPPKHPHPPKPHKPHHHHH
+PEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEPPPAAPAPPAPPAPPFFFFFFFFFFFFFFFFFFFFFF
+FFFFFFFFFVRCVCCVRVCRCCCCRRVCCVCVVRCCVVRVVCCCRCRCQQQMMQMMQ"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 55696
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 37,
+                  to 37,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame plus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 37,
+                  to 37,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame minus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 320,
+                  to 328,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame plus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 320,
+                  to 328,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame minus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 416,
+                  to 417,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame plus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 416,
+                  to 417,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame minus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 708,
+                  to 716,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame plus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 708,
+                  to 716,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame minus1
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 89
+          },
+          {
+            id str "blast_score",
+            value int 89
+          },
+          {
+            id str "e_value",
+            value real { 398034843517506, 10, -22 }
+          },
+          {
+            id str "bit_score",
+            value real { 388909945366884, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 57
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 57
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 223390804597701, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 117,
+                to 287,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 39,
+                to 95,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 42
+          },
+          {
+            id str "blast_score",
+            value int 42
+          },
+          {
+            id str "e_value",
+            value real { 288161940807572, 10, -16 }
+          },
+          {
+            id str "bit_score",
+            value real { 207866144685728, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 9
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 9
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 394827586206897, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 756,
+                to 782,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 252,
+                to 260,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 114,
+              id local str "Query_1"
+            },
+            {
+              from 141,
+              to 219,
+              id local str "Query_1"
+            },
+            {
+              from 306,
+              to 375,
+              id local str "Query_1"
+            },
+            {
+              from 378,
+              to 753,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 133,
+              id local str "Query_1"
+            },
+            {
+              from 139,
+              to 196,
+              id local str "Query_1"
+            },
+            {
+              from 256,
+              to 304,
+              id local str "Query_1"
+            },
+            {
+              from 307,
+              to 376,
+              id local str "Query_1"
+            },
+            {
+              from 379,
+              to 754,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 116,
+              id local str "Query_1"
+            },
+            {
+              from 263,
+              to 761,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 261,
+              to 755,
+              id local str "Query_1"
+            },
+            {
+              from 144,
+              to 221,
+              id local str "Query_1"
+            },
+            {
+              from 3,
+              to 116,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 641,
+              to 754,
+              id local str "Query_1"
+            },
+            {
+              from 377,
+              to 637,
+              id local str "Query_1"
+            },
+            {
+              from 308,
+              to 364,
+              id local str "Query_1"
+            },
+            {
+              from 269,
+              to 304,
+              id local str "Query_1"
+            },
+            {
+              from 188,
+              to 241,
+              id local str "Query_1"
+            },
+            {
+              from 5,
+              to 115,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 265,
+              to 744,
+              id local str "Query_1"
+            },
+            {
+              from 4,
+              to 117,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus3
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 55696",
+      "Effective search space used: 55696",
+      "Length adjustment: 25"
+    }
+  }
+}

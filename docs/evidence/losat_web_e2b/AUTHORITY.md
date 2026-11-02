@@ -49,7 +49,7 @@ The order of NCBI's checks and errors, as LOSAT's `run` follows it: options (`-o
 | The HSP list sorted by score after the first `BLAST_LinkHsps`, before the re-evaluation | `src/algo/blast/core/link_hsps.c:1802-1803` | `Blast_HSPListSortByScore(hsp_list);` | `run_impl.rs` (after the preliminary linking) |
 | Linking groups: query and strand (six contexts per query) | `src/algo/blast/core/blast_query_info.c:76-77` | `retval->last_context = retval->num_queries * kNumContexts - 1;` | `sum_stats_linking/linking.rs` (`translated_context_group`) |
 | Sum statistics of large gaps, in NCBI's order of evaluation | `src/algo/blast/core/blast_stat.c:4560-4561` | `xsum -= num*log(lcl_subject_length*lcl_query_length)` | `stats/sum_statistics.rs` (`ncbi_large_gap_sum_e`) |
-| SEG keeps only the head of the left recursion's segments | `src/algo/blast/core/blast_seg.c:2096-2100` | `leftsegs->next = *segs;` | `utils/seg.rs` (`seg_seq`; BLASTX keeps the former behavior until SX) |
+| SEG keeps only the head of the left recursion's segments | `src/algo/blast/core/blast_seg.c:2096-2100` | `leftsegs->next = *segs;` | `utils/seg.rs` (`seg_seq`; BLASTX kept the former behavior until 2026-11-02, `feature/np-sm-bxseg`) |
 | SEG masks back to nucleotides | `src/algo/blast/core/blast_filter.c:892,925-931` | `Int2 BlastMaskLocProteinToDNA(BlastMaskLoc* mask_loc,`; `to = dna_length - CODON_LENGTH*seq_range->left + frame;` | `algorithm/tblastx/report.rs:283` (`query_dna_masks`, with `blastx::query_setup`) |
 
 Sum statistics give every HSP of a chain the chain's count (`hsp_link.num` of the head); NCBI prints it as `Expect(n)` above 1 and in the description table's `N` column (the first HSP of the subject in Seq-align order).

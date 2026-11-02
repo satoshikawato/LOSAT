@@ -597,9 +597,6 @@ pub struct SegMasker {
     maxtrim: usize,
     downset: usize,
     upset: usize,
-    /// Whether a recursion on the left part of a trimmed segment keeps only the head of
-    /// its result, as NCBI's `s_SegSeq` does (true, the default; see `mask_sequence`).
-    ncbi_left_segments: bool,
     /// LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): whether the fast path takes a segment's trim from the
     /// thread's memo (`x_seg_trim_memo.rs`); set by the maskers that repeat segments.
     x_trim_memo: bool,
@@ -624,17 +621,8 @@ impl SegMasker {
             maxtrim: params.maxtrim,
             downset,
             upset,
-            ncbi_left_segments: true,
             x_trim_memo: false,
         }
-    }
-
-    /// The masker that keeps every segment of the left recursion (LOSAT's SEG before S08).
-    /// BLASTX keeps it until it is integrated (plan DW-10, SX); every other program uses
-    /// NCBI's behavior.
-    pub fn keeping_all_left_segments(mut self) -> Self {
-        self.ncbi_left_segments = false;
-        self
     }
 
     /// LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the masker that takes the trim of a segment it (or
@@ -667,7 +655,6 @@ impl SegMasker {
             maxtrim: params.maxtrim,
             downset,
             upset,
-            ncbi_left_segments: true,
             x_trim_memo: false,
         }
     }
@@ -942,19 +929,10 @@ impl SegMasker {
                                 // one segment only its head (the one found last) is kept; the
                                 // others are dropped (and leaked). This deterministic result
                                 // is reproduced.
-                                if masker.ncbi_left_segments {
-                                    let mut left_segs: Vec<(usize, usize)> = Vec::new();
-                                    seg_seq(
-                                        masker,
-                                        &seq[lend..=rend],
-                                        offset + lend,
-                                        &mut left_segs,
-                                    );
-                                    if let Some(&head) = left_segs.first() {
-                                        segs.insert(0, head);
-                                    }
-                                } else {
-                                    seg_seq(masker, &seq[lend..=rend], offset + lend, segs);
+                                let mut left_segs: Vec<(usize, usize)> = Vec::new();
+                                seg_seq(masker, &seq[lend..=rend], offset + lend, &mut left_segs);
+                                if let Some(&head) = left_segs.first() {
+                                    segs.insert(0, head);
                                 }
                             }
                         }
@@ -1637,20 +1615,16 @@ impl SegMasker {
                         if lend < leftend {
                             let rend = leftend - 1;
                             if rend < seq.len() && lend <= rend {
-                                if masker.ncbi_left_segments {
-                                    let mut left_segs: Vec<(usize, usize)> = Vec::new();
-                                    seg_seq(
-                                        masker,
-                                        index,
-                                        &seq[lend..=rend],
-                                        offset + lend,
-                                        &mut left_segs,
-                                    );
-                                    if let Some(&head) = left_segs.first() {
-                                        segs.insert(0, head);
-                                    }
-                                } else {
-                                    seg_seq(masker, index, &seq[lend..=rend], offset + lend, segs);
+                                let mut left_segs: Vec<(usize, usize)> = Vec::new();
+                                seg_seq(
+                                    masker,
+                                    index,
+                                    &seq[lend..=rend],
+                                    offset + lend,
+                                    &mut left_segs,
+                                );
+                                if let Some(&head) = left_segs.first() {
+                                    segs.insert(0, head);
                                 }
                             }
                         }
@@ -1781,11 +1755,7 @@ mod tests {
                 3 => SegParams::with_all(15, 2.6, 2.9, 15, 100),
                 _ => SegParams::with_all(8, 1.5, 1.9, 1, 10),
             };
-            let masker = if case % 7 == 3 {
-                SegMasker::with_params(&params).keeping_all_left_segments()
-            } else {
-                SegMasker::with_params(&params)
-            };
+            let masker = SegMasker::with_params(&params);
             assert!(masker.x_fast_applies());
             let len = 1 + (next() % if case % 11 == 0 { 3000 } else { 400 }) as usize;
             let mut seq = Vec::with_capacity(len);

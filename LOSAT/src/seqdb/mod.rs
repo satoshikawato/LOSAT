@@ -1340,7 +1340,8 @@ impl SeqDb {
     /// EXPERIMENT (LOSAT_X_BNDBSMALL): the blocks that `next_block` gives from `first_ordinal`
     /// on, one after the other, up to `max` of them. The sequence offsets of a volume are read
     /// `X_LIST_ENTRIES` at a time (64 KiB) and kept for the next blocks, where `next_block` reads
-    /// two entries and 1,024 more for each block: listing the 81,218 blocks of 256 KiB of
+    /// two entries and 1,024 more from the file for each block (`LOSAT_X_DBIDXREAD`; with the
+    /// arrays held, both cut in memory): listing the 81,218 blocks of 256 KiB of
     /// ref_prok_rep_genomes took 183 ms, on one thread while the others waited, at every query
     /// batch (`v4-D12/STATE.md`, s30). The blocks are those of `next_block` (the same ends,
     /// `Volume::x_listed_block_end`, and the same cut at excluded OIDs).

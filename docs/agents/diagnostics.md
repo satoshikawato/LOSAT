@@ -1315,6 +1315,42 @@ Rebuilding less:
   (dc-megablast at 16 threads: user 31.9 -> 18.6 s, system 8.71 -> 0.37 s), and the median max RSS falls in every cell (139-143
   -> 119-122 MiB and 147-151 -> 117-121 MiB for megablast at 16 threads), below NCBI's except for the Sakai query at
   16 threads: 197-203 MiB with the switch and 200-203 MiB without it, against NCBI's 194 MiB.
+- `LOSAT_X_BNDBSMALL=1` (BLASTN, every task, memory; in the strict set from the pull request that added it
+  (perf/bn-db-small-blocks, v4-D12 s29-s30, evidence at the end of this entry): on unless it is `0`; acts for `-db` at
+  more than one thread) the largest block of `LOSAT_X_BNDBCUT`'s cut is 256 KiB of the sequence file
+  (`X_BNDBSMALL_BLOCK_BYTES` in `blastn/blast_engine/x_db_cut.rs`) instead of 1 MiB (`BLOCK_BYTES`), and the blocks are
+  listed in runs of the index (below). When a search starts, each thread holds the block it reads and the results of the
+  blocks that wait for the owner, before the owner has handed any over, and that memory stays on the thread's arena.
+  Where most sequences hit most queries it is large: 1,000 amplicons against SILVA at 16 threads gave about 1 MiB of
+  preliminary HSPs per 1 MiB block, two or three blocks of them per thread, plus the 1 MiB read buffers, 5.9 MiB per
+  thread in all (heaptrack raw records read by arena, `v4-D12/STATE.md` s29). `LOSAT_X_BNDBWIDE`'s window keeps its bytes
+  (16 MiB of the sequence file per thread, `x_wide_blocks_per_thread` in `x_db_stream.rs`): 16 blocks of 128 KiB per thread
+  took x1.16 on core_nt. The list: `stream_blocks` lists a segment's blocks on one thread while the others wait, at every
+  query batch, and `next_block` reads two index entries and 1,024 more for each block; 81,218 blocks of 256 KiB of
+  ref_prok_rep_genomes took 183 ms per batch against 59 ms for its 26,469 blocks of 1 MiB, and that made a first form
+  without the new list x1.003-1.011 slower there. `SeqDb::x_next_blocks` reads a volume's sequence offsets 16 Ki entries at a time and keeps them
+  for the next blocks (`Volume::x_listed_block_end`): 5-7 ms per batch (probe exp/d12s30-wait). The cut, the window and
+  the list decide only which thread searches which sequences when, so reports are unchanged for the reasons given under
+  `LOSAT_X_BNDBSTREAM`, and the listed blocks are `next_block`'s (seqdb tests against `next_block` and `block_end` on
+  every fixture volume, multi-volume and taxid-restricted databases, runs of 1 entry to the whole volume;
+  `LOSAT/tests/blastn_db_stream.rs` `reports_with_small_blocks_are_the_reports_with_large_ones`). One thread keeps blocks
+  of 1 MiB and `next_block`.
+  Evidence 2026-11-02 (v4-D12 s30, workstation node 1, membind 1, head ca9cfbec on dev f62da7f6b; arms dev, default and
+  `=0`, rotated, 8 rounds unless stated, peak VmHWM and anonymous memory from 2 ms samples with the wall time of the same
+  runs; every report identical across arms, and to NCBI 2.17.0's where it ran): 1,000 amplicons against SILVA 144 SSURef
+  NR99 with QIIME 2 classify-consensus-blast's options at 16 threads, max RSS 41.4 [40.4-41.7] MiB against dev's 101.9
+  [99.4-104.4] (`=0` 100.8; 58.2-63.0 MiB lower in 8 of 8), peak anonymous memory 33.3 against 93.6 (NCBI 20.9, its max
+  RSS 546.3 with the database's pages), wall x0.9717 (8 of 8 below 1); 100 amplicons at 8 and 4 threads 27.6 and 21.0
+  against 59.1 and 36.8 MiB (8 of 8 lower), wall x0.9891 and x1.0014 (`=0` x0.9971 and x1.0027); 10^6 reads with
+  megablast at 16 threads 571.8 against 601.5 MiB (8 of 8), wall x0.9655; 100 16S queries against 28,036 16S rRNA genes
+  at 16 threads, whose cut of 161 KiB keeps dev's blocks, megablast, dc-megablast and blastn wall x1.0018, x1.0052 and
+  x0.9984 (`=0` x1.0060, x1.0027 and x0.9971), max RSS within 1 MiB; `draft200` with
+  BlobToolKit's megablast options against ref_prok_rep_genomes at 32 / 16 / 8 threads wall x0.9922 / x0.9938 / x0.9960
+  of dev (8 of 8 below 1; `=0` x1.0032 / x1.0003 / x1.0003) with max RSS unchanged within the rounds' spread, and against
+  its first volume at 2 threads x0.9996 (`=0` x1.0009); `draft200` against core_nt at 16 threads (4 rounds) wall
+  x0.9918 (`=0` x0.9979), system time 95.5 -> 88.0 s, max RSS unchanged within the rounds' spread (both the default and
+  `=0` 16-18 MiB below dev at the median); one thread (node 0, `perf stat`, 8 rounds)
+  instructions x1.00000-1.00002 of dev and the same peak anonymous memory.
 - `LOSAT_X_BNDBSTREAM=1` (BLASTN, every task, memory; in the strict set from the pull request that added it
   (perf/bn-db-stream, evidence at the end of this entry): on unless it is `0`;
   acts only where a `-db` search runs its preliminary stage on the pool: more than one thread) the parallel preliminary

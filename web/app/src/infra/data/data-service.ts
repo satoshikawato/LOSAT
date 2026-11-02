@@ -369,14 +369,17 @@ function blockPath(token: string, stream: OutputStream): string {
   return `${runPrefix(token)}/${BLOCK_NAMES[stream]}`;
 }
 
-/** Rejects a record table whose offsets do not describe ordered records inside the source. */
+/**
+ * Rejects a record table whose offsets do not describe ordered records inside the source.
+ * Only a first record without a defline starts its sequence at its header offset (both 0).
+ */
 function checkRecordTable(records: readonly IndexedRecord[], size: number): void {
   let previousEnd = 0;
   records.forEach((record, i) => {
     const ordered =
       record.index === i &&
       previousEnd <= record.header_offset &&
-      record.header_offset < record.sequence_offset &&
+      (record.header_offset < record.sequence_offset || (i === 0 && record.header_offset === 0 && record.sequence_offset === 0)) &&
       record.sequence_offset <= record.end_offset &&
       record.end_offset <= size;
     if (!ordered) throw new Error(`the index scan returned an invalid record table (record ${i + 1})`);

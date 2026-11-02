@@ -2,8 +2,11 @@
 // revisions of it that say which records a run uses. The record fields are those of the
 // ABI v2 *scan* response (docs/web/abi_v2.md §9), so no mapping layer is needed.
 
-/** The FASTA reader whose rules the index scan follows (ABI v2 `scan_begin`, plan TD-8). */
-export type FastaParserKind = 0 | 1;
+/**
+ * The FASTA reader whose rules the index scan follows (ABI v2 `scan_begin`, plan TD-8): NCBI
+ * BLAST+'s reader with the nucleotide flags (1) or the protein flags (2).
+ */
+export type FastaParserKind = 1 | 2;
 
 /** How to find the byte offset of residue `i` of a record (ABI v2 §9 `line_layout`). */
 export type LineLayout =
@@ -13,17 +16,18 @@ export type LineLayout =
 /** One record of the index scan. Offsets are byte offsets in the source and stay below 2^53. */
 export interface IndexedRecord {
   readonly index: number;
+  /** The title up to its first space; empty for a record without a title. */
   readonly id: string;
-  /** Offset of the `>` of the header line. */
+  /** Offset of the defline's `>`; 0 for a first record without a defline. */
   readonly header_offset: number;
-  /** Offset of the first byte after the header line. */
+  /** Offset of the first byte after the defline; 0 for a first record without a defline. */
   readonly sequence_offset: number;
-  /** Offset of the next header line, or the end of the input. */
+  /** Offset of the next defline, or the end of the input. */
   readonly end_offset: number;
-  /** Sequence length in bytes, as the parser reports it. */
+  /** The number of residues that the reader stores. */
   readonly length: number;
   readonly line_layout: LineLayout;
-  /** Count of each byte value of the sequence: 0x21-0x7E as the character, others as "0xNN". */
+  /** Count of each stored residue, upper case (kind 1: `U` as `T`): `A`-`Z` and `*`. */
   readonly residue_counts: Readonly<Record<string, number>>;
 }
 
@@ -54,6 +58,14 @@ export interface RecordKey {
 export function includedRecords(revision: DatasetRevision): readonly DatasetRecord[] {
   const excluded = new Set(revision.excluded);
   return revision.records.filter((record) => !excluded.has(record.index));
+}
+
+/**
+ * The name of a run input's record in the results: its ID, or for a record without a title the
+ * name of NCBI's tabular outputs, `Query_N` or `Subject_N` (N its number in the run input).
+ */
+export function recordName(id: string, role: 'query' | 'subject', index: number): string {
+  return id !== '' ? id : `${role === 'query' ? 'Query' : 'Subject'}_${index + 1}`;
 }
 
 export function recordKey(record: RecordKey): RecordKey {

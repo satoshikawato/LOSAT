@@ -29,7 +29,7 @@ const otherKind = computed(
 const otherKindName = computed(() => (kind.value === 'nucleotide' ? 'protein' : 'nucleotide'));
 const programLabel = computed(() => programById(props.state.program).label);
 const title = computed(() => (props.source.origin === 'paste' ? `Pasted sequences (${props.source.name})` : props.source.name));
-/** A pasted text without a defline: the index scan's error for text before the first '>'. */
+/** A pasted text that does not start with a defline and cannot be read (such as a first line that NCBI would fetch as a Seq-id). */
 const needsDefline = computed(() => {
   const text = props.state[props.role].paste.trimStart();
   return props.source.origin === 'paste' && props.source.status === 'failed' && text !== '' && !text.startsWith('>');

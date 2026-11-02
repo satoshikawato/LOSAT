@@ -10,7 +10,7 @@
 import { buildArgv, PASTED_NAMES } from '../domain/argv';
 import type { FastaParserKind } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
-import { programById, type ProgramId } from '../domain/programs';
+import { fastaParser, programById, type ProgramId } from '../domain/programs';
 import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
@@ -129,8 +129,8 @@ export class Coordinator {
       let query: InputSnapshot;
       let subject: InputSnapshot;
       try {
-        query = await this.snapshotInput('Query', request.query, queryName, program.fastaParser);
-        subject = await this.snapshotInput('Subject', request.subject, subjectName, program.fastaParser);
+        query = await this.snapshotInput('Query', request.query, queryName, fastaParser(program, 'query'));
+        subject = await this.snapshotInput('Subject', request.subject, subjectName, fastaParser(program, 'subject'));
       } catch (error) {
         return { ok: false, message: errorMessage(error) };
       }

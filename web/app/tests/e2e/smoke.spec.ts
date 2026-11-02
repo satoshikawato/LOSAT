@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
-import { openSearch, paste, program } from './support/search';
+import { chooseRun, openSearch, paste, program, waitStatus } from './support/search';
 
 test('the page is cross-origin isolated, so the threaded engine can use shared memory', async ({ page }) => {
   await page.goto('/');
@@ -41,19 +41,21 @@ test(`paste, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' : 'the 
   expect(file.suggestedFilename()).toBe('losat-run1-tblastx.outfmt0.txt');
 });
 
-test('a BLASTN query of white space only is refused with the index scan error, before it is started', async ({ page }) => {
-  // The adapter's register reads such a file as no records and the CLI then warns
-  // "Query is Empty!", but the index scan (bio's reader) refuses it; the application follows
-  // the scan and does not rebuild BLASTN's rules (S09, docs/evidence/losat_web_w1/README.md).
+test('a BLASTN query of white space only has no record, and its run ends as the CLI\'s does', async ({ page }) => {
+  // The index scan reads with the program's reader (NCBI's, DW-38), which reads no record from
+  // it; the CLI then warns "Query is Empty!". (Before, bio's reader refused it before the run.)
   await openSearch(page);
   await program(page, 'blastn');
   await paste(page, 'query', ' \n');
   await paste(page, 'subject', '>s1\nACGTACGTACGT\n');
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('0 records');
   await page.getByTestId('run-losat').click();
-  await expect(page.getByTestId('search-message')).toHaveText('Query (pasted): Expected > at record start.');
-  await expect(page.getByTestId('query-source-0-error')).toHaveText('This input cannot be read: Expected > at record start.');
-  await expect(page.getByTestId('run-1-option')).toHaveCount(0);
-  await expect(page.getByTestId('tab-search')).toHaveAttribute('aria-pressed', 'true');
+  await waitStatus(page, 1, 'completed');
+  if (BUILD_HAS_ENGINE) {
+    await chooseRun(page, 1);
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-diagnostics')).toContainText('Query is Empty!');
+  }
 });
 
 test('the empty Results tab offers "Run a search", which opens the Search tab', async ({ page }) => {

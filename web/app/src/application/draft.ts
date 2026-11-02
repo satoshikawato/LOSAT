@@ -13,9 +13,9 @@
 // `register`), shown with its message. Several sources of a role are one combined search
 // input, or separate searches (one run per source, started as a group).
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES } from '../domain/argv';
-import { includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
+import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
 import { formParameters, setField, type FieldValue, type FormValues } from '../domain/parameters';
-import { PROGRAMS, programById, type InputRole, type ProgramId } from '../domain/programs';
+import { fastaParser, PROGRAMS, programById, type InputRole, type ProgramId } from '../domain/programs';
 import { REGION_FLAG, regionProblem, regionValue, type RegionText } from '../domain/region';
 import type { DataGateway } from '../ports/data';
 import type { EngineGateway, ProgramDescription } from '../ports/engine';
@@ -43,6 +43,8 @@ export interface DraftSource {
   /** The File of the source (pasted text is a File too); a source is indexed again from it. */
   readonly file: File;
   readonly status: 'indexing' | 'ready' | 'failed';
+  /** The FASTA reader kind of the index (running, failed or its record table), the program's for the role (TD-8). */
+  readonly parser: FastaParserKind;
   /** Why the source could not be indexed (the index scan's error). */
   readonly error?: string;
   /** The record table: the revision of the data layer that includes every record. */
@@ -163,10 +165,11 @@ export class SearchDraft {
     this.set({ program, description, descriptionError: undefined, message: undefined });
     this.loadDescription(program);
     for (const role of ROLES) {
+      const parser = fastaParser(next, role);
       for (const source of this.role(role).sources) {
-        if (source.base !== undefined && source.base.parser !== next.fastaParser) {
-          // A program with another FASTA reader needs another record table (plan TD-8).
-          this.reindex(role, source.key);
+        if (source.parser !== parser) {
+          // A program that reads the role with another FASTA reader kind needs another record table (plan TD-8).
+          this.reindex(role, source.key, parser);
         } else {
           this.scheduleCheck(role, source.key, 0);
         }
@@ -225,6 +228,7 @@ export class SearchDraft {
       size: file.size,
       file,
       status: 'indexing',
+      parser: this.parserOf(role),
       excluded: [],
     };
     // A newer text supersedes an index of the older one that is still running.
@@ -236,7 +240,8 @@ export class SearchDraft {
         ? draft.sources.map((s) => (s.key === PASTE_KEY ? source : s))
         : [source, ...draft.sources],
     }));
-    this.debounce(`paste:${role}`, () => this.track(this.index(role, PASTE_KEY, file)));
+    // The program may change before the pause ends (setProgram then sets the source's kind).
+    this.debounce(`paste:${role}`, () => this.track(this.index(role, PASTE_KEY, file, this.parserOf(role))));
     this.scheduleValidation();
   }
 
@@ -252,14 +257,15 @@ export class SearchDraft {
   addFiles(role: InputRole, files: readonly File[]): void {
     for (const file of files) {
       const key = `file-${this.nextKey++}`;
+      const parser = this.parserOf(role);
       this.updateRole(role, (draft) => ({
         ...draft,
         sources: [
           ...draft.sources,
-          { key, origin: 'file', name: file.name, size: file.size, file, status: 'indexing', excluded: [] },
+          { key, origin: 'file', name: file.name, size: file.size, file, status: 'indexing', parser, excluded: [] },
         ],
       }));
-      this.track(this.index(role, key, file));
+      this.track(this.index(role, key, file, parser));
     }
     this.set({ message: undefined });
     this.scheduleValidation();
@@ -476,6 +482,18 @@ export class SearchDraft {
       const message = `Every ${title} record is excluded.`;
       return { message, short: message };
     }
+    if (draft.mode === 'combined') {
+      // The sources follow one another in one input, where a sequence without a defline
+      // would join the record before it (NCBI's reader): only the first can start so.
+      const late = draft.sources
+        .filter((source) => includedOf(source).length > 0)
+        .slice(1)
+        .find((source) => includedOf(source)[0]!.sequence_offset === 0);
+      if (late !== undefined) {
+        const message = `${label} (${describeSource(late)}) starts with a sequence without a defline (">"), which cannot follow another input.`;
+        return { message, short: message };
+      }
+    }
     for (const source of draft.sources) {
       const where = `${label} (${describeSource(source)})`;
       const check = source.check;
@@ -541,24 +559,30 @@ export class SearchDraft {
     );
   }
 
-  private reindex(role: InputRole, key: string): void {
-    const source = this.role(role).sources.find((s) => s.key === key);
-    if (source === undefined) return;
-    this.updateSource(role, key, (s) => {
-      const next: DraftSource = { ...s, status: 'indexing', excluded: [] };
-      delete (next as { base?: unknown }).base;
-      delete (next as { check?: unknown }).check;
-      return next;
-    });
-    this.track(this.index(role, key, source.file));
+  private parserOf(role: InputRole): FastaParserKind {
+    return fastaParser(programById(this.state.get().program), role);
   }
 
-  private async index(role: InputRole, key: string, file: File): Promise<void> {
+  private reindex(role: InputRole, key: string, parser: FastaParserKind): void {
+    const source = this.role(role).sources.find((s) => s.key === key);
+    if (source === undefined) return;
+    // A pending index of the pasted text would read it again after this one (and drop the exclusions made since).
+    if (key === PASTE_KEY) this.cancelTask(`paste:${role}`);
+    this.updateSource(role, key, (s) => {
+      const next: DraftSource = { ...s, status: 'indexing', parser, excluded: [] };
+      delete (next as { base?: unknown }).base;
+      delete (next as { check?: unknown }).check;
+      delete (next as { error?: unknown }).error;
+      return next;
+    });
+    this.track(this.index(role, key, source.file, parser));
+  }
+
+  private async index(role: InputRole, key: string, file: File, parser: FastaParserKind): Promise<void> {
     const task = `${role}:${key}`;
     const generation = this.nextGeneration(task);
     const current = () => this.generations.get(task) === generation;
     const started = this.deps.now();
-    const parser = programById(this.state.get().program).fastaParser;
     try {
       const ref = await this.deps.data.addSource(file);
       const head = await this.deps.data.previewSource(ref.sourceId, HEAD_BYTES).then(headText, () => undefined);

@@ -273,7 +273,7 @@ pub enum Lookup {
     Standard(BlastAaLookupTable, x_seed_scan::XKeptPresence),
     // EXPERIMENT (LOSAT_X_BPCLUT): the compressed table as the reference builds it or flat
     // (`x_clut_direct.rs`), one variant so that the standard table's loops keep their match.
-    Compressed(XCompressedLookup),
+    Compressed(XCompressedLookup<u16>),
 }
 
 // No NCBI counterpart: buffer reuse only (the pooled build, tblastx/lookup/x_lut_direct.rs): a
@@ -298,7 +298,7 @@ impl Drop for Lookup {
 // drop keeps its code.
 #[cold]
 #[inline(never)]
-fn x_give_back_compressed(table: &mut XCompressedLookup) {
+fn x_give_back_compressed(table: &mut XCompressedLookup<u16>) {
     if let XCompressedLookup::Flat(flat) = table {
         if x_bx_clut_pool() && !std::thread::panicking() {
             x_give_back_flat(flat);
@@ -340,7 +340,7 @@ fn x_compressed_lookup(query: &[u8], segments: &[(i32, i32)], threshold: f64) ->
 /// No NCBI counterpart: the word length of either form of the compressed table. Not inlined, so
 /// that the standard table's loops keep their code.
 #[inline(never)]
-pub(super) fn x_compressed_word_length(table: &XCompressedLookup) -> i32 {
+pub(super) fn x_compressed_word_length(table: &XCompressedLookup<u16>) -> i32 {
     match table {
         XCompressedLookup::Reference(table) => table.word_length,
         XCompressedLookup::Flat(table) => table.word_length,
@@ -351,7 +351,7 @@ pub(super) fn x_compressed_word_length(table: &XCompressedLookup) -> i32 {
 /// pairs and `s_range`. Not inlined, so that the standard table's loops keep their code.
 #[inline(never)]
 pub(super) fn x_compressed_scan(
-    table: &XCompressedLookup,
+    table: &XCompressedLookup<u16>,
     subject: &[u8],
     seq_ranges: &[(i32, i32)],
     offset_pairs: &mut [OffsetPair],

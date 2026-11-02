@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The sections under "Algorithm parameters" (plan §5.3; NCBI's General Parameters, Scoring
-// Parameters, Filters and Masking, Discontiguous Word Options, and LOSAT's Other Parameters):
+// Parameters, Filters and Masking, Discontiguous Word Options, and LOSAT's Other Parameters),
+// whose rows share one label column, as on NCBI's form:
 // the sections and labels of the program's descriptor, with the engine's defaults, choices
 // and help (`describe`). The task and the genetic codes are shown elsewhere (SearchPanel,
 // InputPanel).
@@ -11,6 +12,7 @@ import { programById } from '../domain/programs';
 import ParameterField from './ParameterField.vue';
 
 const props = defineProps<{ draft: SearchDraft; state: DraftState }>();
+const sectionId = (title: string) => `parameters-${title.toLowerCase().replace(/[^a-z]+/g, '-')}`;
 const sections = computed(() => {
   const options = props.state.description?.parameters;
   const values = props.state.values[props.state.program];
@@ -23,8 +25,16 @@ const sections = computed(() => {
 <template>
   <div class="parameter-form" data-testid="parameter-form">
     <p v-if="state.descriptionError" class="error">The engine's options could not be read: {{ state.descriptionError }}</p>
-    <fieldset v-for="section in sections" :key="section.title" class="search-block parameter-section">
-      <legend>{{ section.title }}</legend>
+    <!-- A group, not a fieldset: its rows share the form's label column (CSS subgrid), which
+         Chromium does not give a fieldset. -->
+    <div
+      v-for="section in sections"
+      :key="section.title"
+      class="search-block parameter-section"
+      role="group"
+      :aria-labelledby="sectionId(section.title)"
+    >
+      <div :id="sectionId(section.title)" class="section-legend">{{ section.title }}</div>
       <template v-for="row in fieldRows(section.fields)" :key="row.fields[0]!.flag">
         <ParameterField v-if="row.row === undefined" :draft="draft" :state="state" :field="row.fields[0]!" />
         <div v-else class="param-row param-row-group">
@@ -34,6 +44,6 @@ const sections = computed(() => {
           </div>
         </div>
       </template>
-    </fieldset>
+    </div>
   </div>
 </template>

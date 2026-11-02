@@ -1128,7 +1128,6 @@ fn x_try_build_flat_parallel_with(
         compressed_alphabet_size: header.alphabet as i32,
         reciprocal_alphabet_size: header.reciprocal_alphabet_size,
         longest_chain,
-        used_cells: nonempty_count,
         pv,
         pv_array_bts: pv_array_bts as i32,
         scaled_compress_table_u8: build_scaled_compress_table_u8(&header.scaled_compress_table),

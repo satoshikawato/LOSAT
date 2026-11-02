@@ -1725,11 +1725,11 @@ fn x_bx_buckets_on(
         bucket_starts[b + 1] += bucket_starts[b];
     }
     let mut hits = x_sized_on(kept.hits, total, pooled);
-    let mut lows: Vec<u16> = if pooled {
-        Vec::with_capacity(x_mapped_low_entries())
+    let mut lows: Vec<u16> = Vec::with_capacity(if pooled {
+        x_mapped_low_entries().max(total)
     } else {
-        Vec::with_capacity(total)
-    };
+        total
+    });
     {
         let mut cursors = bucket_starts[..buckets].to_vec();
         let out = hits.as_mut_ptr();
@@ -1742,7 +1742,7 @@ fn x_bx_buckets_on(
                 // SAFETY: the offsets' appends are `targets` in order, and bucket b's cursor starts
                 // at `bucket_starts[b]` and moves on once per append to the bucket, which the
                 // histogram counted, so it stays below `bucket_starts[b + 1] <= total`, the length
-                // of `hits` and below the capacity of `lows`.
+                // of `hits` and at most the capacity of `lows`.
                 unsafe {
                     out.add(*cursor as usize)
                         .write(u16::from_offset(query_offset as u32));

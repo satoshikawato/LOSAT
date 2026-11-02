@@ -1,0 +1,78 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: plook_vz (two databases, parsed Seq-ids)
+           17 sequences; 3,740 total letters
+
+
+
+Query= plook_zq1 query of record 1
+
+Length=220
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+own number in the second database                                     461     9e-172
+
+
+>own number in the second database
+ FFF00028.1 second definition line
+Length=220
+
+ Score = 461 bits (1187),  Expect = 9e-172, Method: Compositional matrix adjust.
+ Identities = 220/220 (100%), Positives = 220/220 (100%), Gaps = 0/220 (0%)
+
+Query  1    MRGPVVLLILHCHYMWWRGEMLQQRVNFDTPWPVVCNKSAAKCHYDGCVPCFPVWFHENH  60
+            MRGPVVLLILHCHYMWWRGEMLQQRVNFDTPWPVVCNKSAAKCHYDGCVPCFPVWFHENH
+Sbjct  1    MRGPVVLLILHCHYMWWRGEMLQQRVNFDTPWPVVCNKSAAKCHYDGCVPCFPVWFHENH  60
+
+Query  61   QWCDHDYLDTSFQHMNIDTFDAIESPKKHEHWFAPYRWEFPYHRMWGCRFRMSEEGDFCT  120
+            QWCDHDYLDTSFQHMNIDTFDAIESPKKHEHWFAPYRWEFPYHRMWGCRFRMSEEGDFCT
+Sbjct  61   QWCDHDYLDTSFQHMNIDTFDAIESPKKHEHWFAPYRWEFPYHRMWGCRFRMSEEGDFCT  120
+
+Query  121  TWAIPWTSYEWLQEEIQKNHCIKFPIIMEISCMWNEKTGGCVPQYCTPSRSNRSHWIEFI  180
+            TWAIPWTSYEWLQEEIQKNHCIKFPIIMEISCMWNEKTGGCVPQYCTPSRSNRSHWIEFI
+Sbjct  121  TWAIPWTSYEWLQEEIQKNHCIKFPIIMEISCMWNEKTGGCVPQYCTPSRSNRSHWIEFI  180
+
+Query  181  NMMEKHWHGPLGAFCKMSVACIPWSPIQDMRGTGLRGQCP  220
+            NMMEKHWHGPLGAFCKMSVACIPWSPIQDMRGTGLRGQCP
+Sbjct  181  NMMEKHWHGPLGAFCKMSVACIPWSPIQDMRGTGLRGQCP  220
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.140    0.546    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 544697
+
+
+  Database: plook_vz (two databases, parsed Seq-ids)
+    Posted date:  Nov 2, 2026  10:50 PM
+  Number of letters in database: 3,740
+  Number of sequences in database:  17
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

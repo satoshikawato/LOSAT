@@ -677,7 +677,7 @@ fn reported_header(
     let db = headers.db;
     match header {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
-            crate::report::db_subject::ParsedSubject::new(set, db.is_version5())
+            crate::report::db_subject::ParsedSubject::new(set)
                 .map_err(|reason| parsed_refusal(ordinal, &reason, program))
                 .and_then(|subject| {
                     refuse_id_of_a_query(db, &subject, ordinal, program)?;
@@ -2415,7 +2415,7 @@ mod taxdb_prepass_tests {
         (0..db.num_seqs())
             .map(|ordinal| {
                 let set = db.defline_set(ordinal).unwrap();
-                crate::report::db_subject::ParsedSubject::new(set, db.is_version5()).unwrap()
+                crate::report::db_subject::ParsedSubject::new(set).unwrap()
             })
             .collect()
     }
@@ -2455,6 +2455,52 @@ mod taxdb_prepass_tests {
                 (Ok(()), None) => {}
                 (Err(error), Some(text)) => assert!(error.contains(text), "{name}: {error}"),
                 (got, _) => panic!("{name}: {got:?}"),
+            }
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    #[test]
+    fn a_seq_align_id_of_any_kind_is_left_to_the_lookup() {
+        // tests/db_search/ids/make_look_fasta.py (line DBID N2b): `None`, NCBI's formatters find the
+        // sequence itself; else the text of the refusal.
+        let cwd = empty_cwd("any_kind");
+        let other = |n: u32| format!("lookup gives database sequence {n} first");
+        let none = "formatters do not find the sequence".to_string();
+        for (name, ordinal, want) in [
+            ("ids/plook_v5", 1, None),
+            ("ids/plook_v5", 2, None),
+            ("ids/plook_v5", 3, None),
+            ("ids/plook_v5", 4, Some(none.clone())),
+            ("ids/plook_v5", 5, None),
+            ("ids/plook_v5", 6, Some(other(5))),
+            ("ids/plook_v5", 8, Some(other(7))),
+            ("ids/plook_v5", 9, None),
+            ("ids/plook_v5", 10, None),
+            ("ids/plook_v5", 11, Some(other(4))),
+            ("ids/plook_v5", 12, Some(none.clone())),
+            ("ids/plook_v5", 13, None),
+            ("ids/plook_v4", 1, Some(none.clone())),
+            ("ids/plook_v4", 2, Some(none.clone())),
+            ("ids/plook_v4", 3, None),
+            ("ids/plook_v4", 5, Some(other(6))),
+            ("ids/plook_v4", 9, None),
+            ("ids/plook_vz", 16, None),
+        ] {
+            let db = db_search(name, None, &cwd);
+            let headers = HeaderReader::new(&db);
+            let ReportedHeader::Parsed(subject) =
+                read_header(&headers, ordinal, 0, "BLASTP").unwrap()
+            else {
+                panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
+            };
+            assert!(!subject.unfetchable(), "{name} {ordinal}");
+            match (subject.fetched(), want) {
+                (Ok(()), None) => {}
+                (Err(error), Some(text)) => {
+                    assert!(error.contains(&text), "{name} {ordinal}: {error}")
+                }
+                (got, _) => panic!("{name} {ordinal}: {got:?}"),
             }
         }
         std::fs::remove_dir_all(&cwd).unwrap();

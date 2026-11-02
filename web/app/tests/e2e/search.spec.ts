@@ -327,7 +327,7 @@ test("the options form: the engine's defaults are not written; tasks, templates 
   // BLASTN: Discontiguous Word Options appear for discontiguous megablast, Template length
   // first; they stay while they hold a value; choosing the blastn task empties and hides them.
   await program(page, 'blastn');
-  const legends = page.getByTestId('parameter-form').locator('legend');
+  const legends = page.getByTestId('parameter-form').locator('.section-legend');
   const sections = ['General Parameters', 'Scoring Parameters', 'Filters and Masking', 'Other Parameters'];
   const withTemplates = [...sections.slice(0, 3), 'Discontiguous Word Options', 'Other Parameters'];
   await expect(legends).toHaveText(sections);
@@ -349,11 +349,12 @@ test("the options form: the engine's defaults are not written; tasks, templates 
   await expect(page.getByTestId('param-template_length')).toHaveValue('');
   if (BUILD_HAS_ENGINE) {
     await task(page, 'blastn');
-    await page.getByTestId('param-word_size').fill('3');
+    await page.getByTestId('param-word_size').selectOption('other');
+    await page.getByTestId('param-word_size-other').fill('3');
     await expect(page.getByTestId('argv-validation')).toContainText(
       "error: invalid value '3' for '-word_size <WORD_SIZE>': expected an integer >= 4",
     );
-    await page.getByTestId('param-word_size').fill('');
+    await page.getByTestId('param-word_size-other').fill('');
     // Templates with the megablast task (the default, not written): the section stays, and the engine refuses them.
     await task(page, 'dc-megablast');
     await page.getByTestId('param-template_type').selectOption('coding');
@@ -388,7 +389,7 @@ test("the engine's refusals of option values are shown as the engine writes them
   await expect(page.getByTestId('argv-validation')).toHaveText(
     "-comp_based_stats 1 is not supported by LOSAT's BLASTP",
   );
-  await page.getByTestId('param-comp_based_stats').selectOption('');
+  await page.getByTestId('param-comp_based_stats').selectOption('2');
   await page.getByTestId('param-evalue').fill('0');
   await expect(page.getByTestId('argv-validation')).toContainText('BLAST query/options error:');
 });
@@ -565,6 +566,15 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   ]) {
     await expect(form.locator('.param-label', { hasText: label }).first()).toBeVisible();
   }
+  // Each control shows the value that the search uses (discontiguous megablast's here), as NCBI's
+  // form shows its values; NCBI's lists are selects, and NCBI's sentence is beside its control.
+  await expect(page.getByTestId('param-word_size')).toHaveValue('11');
+  await expect(page.getByTestId('param-word_size').locator('option')).toHaveText(['11', '12', 'Other']);
+  await expect(page.getByTestId('param-reward')).toHaveValue('2');
+  await expect(page.getByTestId('param-soft_masking')).toBeChecked();
+  await expect(page.getByTestId('param-max_target_seqs')).toHaveValue('500');
+  await expect(page.getByTestId('param-max_target_seqs-field')).toContainText('Select the maximum number of aligned sequences to display');
+  await expect(line.locator('strong')).toHaveText(['nucleotide subjects', 'BLASTN, task dc-megablast (optimized for more dissimilar sequences)']);
   await expect(page.getByTestId('param-reward')).toHaveAccessibleName('Match -reward');
   await expect(page.getByTestId('param-gapopen')).toHaveAccessibleName('Existence -gapopen');
 
@@ -578,9 +588,11 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
     'Quick BLASTP (blastp-fast)',
   );
   await expect(line).toHaveText('Search protein subjects with BLASTP, task blastp (protein-protein BLAST).');
-  await expect(form.locator('legend')).toHaveText(['General Parameters', 'Scoring Parameters', 'Filters and Masking', 'Other Parameters']);
+  await expect(form.locator('.section-legend')).toHaveText(['General Parameters', 'Scoring Parameters', 'Filters and Masking', 'Other Parameters']);
+  // The select shows the engine's default as its value, as NCBI's does.
   const cbs = page.getByTestId('param-comp_based_stats');
-  await expect(cbs.locator('option').first()).toHaveText('Default (2: Conditional compositional score matrix adjustment)');
+  await expect(cbs).toHaveValue('2');
+  await expect(cbs.locator('option[value="2"]')).toHaveText('2: Conditional compositional score matrix adjustment');
   await expect(cbs.locator('option[value="0"]')).toHaveText('0: No adjustment');
   await expect(cbs.locator('option[value="3"]')).toHaveText('3: Universal compositional score matrix adjustment');
   await expect(page.getByTestId('param-seg-field')).toContainText('Low complexity regions filter (SEG)');
@@ -615,15 +627,17 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   await expect(page.getByTestId('param-reward-field')).toHaveClass(/\bchanged\b/);
   await expect(page.getByTestId('param-penalty-field')).not.toHaveClass(/\bchanged\b/);
   await expect(toggle).toContainText('(2 changed)');
-  // The task is chosen in Program Selection: it is not counted.
+  // The task is chosen in Program Selection: it is not counted. Match 2 is the blastn task's
+  // default: it is neither counted nor written any more.
   await task(page, 'blastn');
-  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(2 changed)');
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
+  await expect(page.getByTestId('param-reward-field')).not.toHaveClass(/\bchanged\b/);
 
   await page.getByTestId('job-title').fill('  Globin check  ');
   await paste(page, 'query', '>q\nACGTACGTACGTAAACCCGGGTTT\n');
   await paste(page, 'subject', '>s\nACGTACGTACGTAAACCCGGGTTTACGT\n');
   await submit(page);
-  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -evalue 1e-3 -reward 2');
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -evalue 1e-3');
   await expect(page.getByTestId('results-job-title')).toHaveText('Globin check');
   await waitStatus(page, 1, 'completed');
   await backToSearch(page);
@@ -631,7 +645,7 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   // Closed, the bar keeps the count; a program with changed values opens it when it is chosen.
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(toggle).toContainText('(2 changed)');
+  await expect(toggle).toContainText('(1 changed)');
   await program(page, 'blastp');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveCount(0);
@@ -640,8 +654,9 @@ test('Algorithm parameters: closed at start, the changed values marked and count
 
   // "Restore default search parameters" clears the Algorithm parameters, not the task.
   await page.getByTestId('restore-defaults').click();
-  await expect(page.getByTestId('param-evalue')).toHaveValue('');
-  await expect(page.getByTestId('param-reward')).toHaveValue('');
+  // The controls show the blastn task's defaults again.
+  await expect(page.getByTestId('param-evalue')).toHaveValue('10');
+  await expect(page.getByTestId('param-reward')).toHaveValue('2');
   await expect(evalue).not.toHaveClass(/\bchanged\b/);
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveCount(0);
   await expect(page.getByTestId('param-task-blastn')).toBeChecked();
@@ -657,6 +672,40 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   await expect(page.getByTestId('search-message')).toHaveCount(0);
   await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
   await waitStatus(page, 2, 'completed');
+});
+
+test("Algorithm parameters show the task's values; NCBI's lists with Other; a default chosen is not written, a given hit list size is", async ({
+  page,
+}) => {
+  await program(page, 'blastn');
+  await openParameters(page);
+  const words = page.getByTestId('param-word_size');
+  const wordsField = page.getByTestId('param-word_size-field');
+  await expect(words).toHaveValue('28');
+  await task(page, 'blastn');
+  await expect(words).toHaveValue('11');
+  await words.selectOption('15');
+  await expect(wordsField).toHaveClass(/\bchanged\b/);
+  await words.selectOption('11');
+  await expect(wordsField).not.toHaveClass(/\bchanged\b/);
+  await words.selectOption('other');
+  await page.getByTestId('param-word_size-other').fill('9');
+  await expect(wordsField).toHaveClass(/\bchanged\b/);
+  await expect(words).toHaveValue('other');
+  // A true/false option with a default is a checkbox in NCBI's "Mask" row.
+  const mask = page.getByTestId('param-soft_masking');
+  await expect(mask).toBeChecked();
+  await mask.uncheck();
+  await expect(page.getByTestId('param-soft_masking-field')).toHaveClass(/\bchanged\b/);
+  // Max target sequences shows its default only while the other hit list options are not set
+  // (BLAST+ tells them given from not given).
+  await page.getByTestId('param-num_alignments').fill('3');
+  await expect(page.getByTestId('param-max_target_seqs')).toHaveValue('');
+  await paste(page, 'query', '>q\nACGTACGTACGTAAACCCGGGTTT\n');
+  await paste(page, 'subject', '>s\nACGTACGTACGTAAACCCGGGTTTACGT\n');
+  await submit(page);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -word_size 9 -soft_masking false -num_alignments 3');
+  await waitStatus(page, 1, 'completed');
 });
 
 test('narrow screens put the inputs one under the other, without horizontal scrolling', async ({ page }) => {

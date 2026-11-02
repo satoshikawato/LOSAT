@@ -61,7 +61,6 @@ watch(
 
 <template>
   <div class="outputs-view" data-testid="results-outputs">
-    <p class="muted">The outputs as the engine wrote them. The view filters do not change them.</p>
     <nav class="tabs" aria-label="Output format">
       <button
         v-for="f in OUTPUT_FORMATS"

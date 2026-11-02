@@ -1,21 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { StorageInfo } from '../ports/data';
-import { formatBytes } from './format';
 
 const props = defineProps<{ storage: StorageInfo | undefined }>();
 
-const usage = computed(() => {
-  const storage = props.storage;
-  if (storage === undefined) return '';
-  const place = storage.backend === 'opfs' ? 'Browser storage (OPFS)' : 'Memory';
-  const site =
-    storage.estimate === undefined
-      ? ''
-      : `; this site uses about ${formatBytes(storage.estimate.usage)} of ` +
-        `${formatBytes(storage.estimate.quota)} (browser estimate)`;
-  return `${place}: ${formatBytes(storage.sessionBytes)} used by this tab${site}.`;
-});
 const removed = computed(() =>
   props.storage?.cleanup.state === 'done' ? props.storage.cleanup.removedSessions : undefined,
 );
@@ -30,17 +18,12 @@ const removed = computed(() =>
     :data-cleanup="storage.cleanup.state"
     :data-removed-sessions="removed"
   >
-    <h2>Temporary storage</h2>
-    <p data-testid="storage-usage">{{ usage }}</p>
+    <!-- Nothing in the normal case (stop-describing-ui rule 4): the warnings only. -->
     <p v-if="storage.fallbackReason" class="warning" data-testid="storage-memory-note">
-      Results are kept in memory only and are lost when this tab is closed or reloaded. The browser's private storage
-      (OPFS) cannot be used: {{ storage.fallbackReason }}.
+      Results are kept in memory only and are lost when this tab is closed or reloaded ({{ storage.fallbackReason }}).
     </p>
     <p v-if="storage.cleanup.state === 'unavailable'" class="note">
-      Temporary data left by closed tabs is not removed automatically: {{ storage.cleanup.reason }}.
-    </p>
-    <p v-else-if="removed" class="note">
-      Removed the temporary data left by {{ removed }} closed {{ removed === 1 ? 'tab' : 'tabs' }}.
+      Temporary data of closed tabs is not removed: {{ storage.cleanup.reason }}.
     </p>
   </section>
 </template>

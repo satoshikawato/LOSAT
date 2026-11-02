@@ -291,7 +291,6 @@ async function expectTableFits(page: Page, table: 'subject-table' | 'hsp-table')
   const scroll = page.getByTestId(table).locator('.table-scroll');
   const [scrollWidth, clientWidth] = await scroll.evaluate((element) => [element.scrollWidth, element.clientWidth]);
   expect(scrollWidth, `${table} scrolls sideways`).toBeLessThanOrEqual(clientWidth);
-  await expect(page.getByTestId(`${table}-scroll-hint`)).toHaveCount(0);
   const report = await scroll.evaluate((element) => {
     const cells = [...element.querySelectorAll<HTMLElement>('.table-row [data-field]')];
     const untitled = cells
@@ -791,7 +790,7 @@ for (const c of PROGRAM_CASES) {
       const [, path, threads] = /^\s*(serial|threaded), (\d+) threads?\s*$/.exec(await text(page.getByTestId('run-record').locator('[data-detail="path"]')))!;
       const level = tableLevel(c.id, argv, path!, Number(threads));
       await expect(badge).toHaveAttribute('data-level', level);
-      await expect(badge).toHaveText(level === 'certified' ? 'Certified profile' : 'Engine-supported, outside certified profile');
+      await expect(badge).toHaveText(level === 'certified' ? 'Certified profile' : 'Outside certified profile');
       test.info().annotations.push({ type: 'verification', description: `${c.id} ${argv.slice(5).join(' ') || 'defaults'}, ${path} ${threads}: ${level}` });
     }
     await expect(page.getByTestId('verification-details')).toHaveAttribute('data-level', (await badge.getAttribute('data-level'))!);
@@ -1580,7 +1579,6 @@ test('narrow screens: the results are no wider than the screen; "Run LOSAT" open
   await clickKeepsScroll('hsp-table', hspRows(page).nth(Math.min(1, (await hspRows(page).count()) - 1)));
   for (const table of ['subject-table', 'hsp-table']) {
     await show(page, 'hits');
-    await expect(page.getByTestId(`${table}-scroll-hint`)).toBeVisible();
     // Each value is under its header.
     const offsets = await page
       .getByTestId(table)

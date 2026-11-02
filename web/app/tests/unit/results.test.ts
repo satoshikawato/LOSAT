@@ -309,7 +309,7 @@ describe('verificationBadge', () => {
     expect(reasons({ argv: ['blastn', '-evalue', '2'] }).details.join(' ')).toMatch(/were not compared with NCBI BLAST\+ 2\.17\.0/);
     expect(reasons({ threads: 3 }).details.join(' ')).toMatch(/used 3 threads; the browser runtime was checked with 1, 2 and 4 threads/);
     expect(reasons({ program: 'tblastx', argv: ['tblastx'] }).details.join(' ')).toMatch(/browser runtime of tblastx was not checked/);
-    expect(reasons({ threads: 3 }).label).toBe('Engine-supported, outside certified profile');
+    expect(reasons({ threads: 3 }).label).toBe('Outside certified profile');
     expect(reasons({ runtimePath: 'fake' }).level).toBe('development');
   });
 

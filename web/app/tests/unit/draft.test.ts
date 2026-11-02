@@ -166,7 +166,7 @@ describe('SearchDraft submit', () => {
     draft.setProgram('blastx');
     const result = await draft.submit();
     expect(result.ok).toBe(false);
-    expect(!result.ok && result.message).toMatch(/^BLASTX joins LOSAT Web after its certification/);
+    expect(!result.ok && result.message).toMatch(/^Not in LOSAT Web yet: use BLASTX of the LOSAT command line/);
   });
 
   it('queues one combined search of all files, named as plan §5.3 says', async () => {
@@ -183,7 +183,7 @@ describe('SearchDraft submit', () => {
       name: 'combined_subject.fa',
       revisionIds: [sourceOf(draft, 'subject', 0).base!.revisionId, sourceOf(draft, 'subject', 1).base!.revisionId],
     });
-    expect(draft.state.get().message).toEqual({ kind: 'info', text: 'Search started.' });
+    expect(draft.state.get().message).toBeUndefined();
   });
 
   it('queues separate searches as every query input against every subject input', async () => {
@@ -198,7 +198,7 @@ describe('SearchDraft submit', () => {
     await draft.submit();
     const names = requests[0]!.map((r) => `${datasetOf(r, 'query').name}|${datasetOf(r, 'subject').name}`);
     expect(names).toEqual(['q1.fa|s1.fa', 'q1.fa|s2.fa', 'q1.fa|s3.fa', 'q2.fa|s1.fa', 'q2.fa|s2.fa', 'q2.fa|s3.fa']);
-    expect(draft.state.get().message).toEqual({ kind: 'info', text: 'Started 6 runs as a group; they search one at a time.' });
+    expect(draft.state.get().message).toBeUndefined();
   });
 
   it('uses the same revision for the same selection, so that a kept subject is the same input (R1)', async () => {

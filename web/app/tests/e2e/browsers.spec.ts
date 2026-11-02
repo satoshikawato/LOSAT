@@ -61,7 +61,11 @@ test('the application keeps results in OPFS, or in memory with the reason shown'
   const status = page.getByTestId('storage-status');
   const backend = await status.getAttribute('data-backend');
   expect(['opfs', 'memory']).toContain(backend);
-  if (backend === 'memory') await expect(status).toContainText("The browser's private storage (OPFS) cannot be used: ");
+  if (backend === 'memory') {
+    await expect(status.getByTestId('storage-memory-note')).toContainText(
+      'Results are kept in memory only and are lost when this tab is closed or reloaded (',
+    );
+  }
   const text = await status.innerText();
   if (EVIDENCE !== undefined) writeFileSync(join(EVIDENCE, `storage-${browserName}.json`), `${JSON.stringify({ backend, text }, null, 2)}\n`);
 });

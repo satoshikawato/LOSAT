@@ -650,7 +650,7 @@ mod tests {
                     bases.map(|bases| generate_frames(bases, table)),
                 )
             });
-            let (frames, of_letters, _) = subjects.x_preliminary_frames(oid, table).unwrap();
+            let (frames, of_letters, kept) = subjects.x_preliminary_frames(oid, table).unwrap();
             assert_eq!(of_letters, preliminary.is_none(), "oid {oid}");
             assert_same(
                 &frames,
@@ -658,7 +658,7 @@ mod tests {
                 "preliminary",
             );
             assert_same(
-                &subjects.x_letter_frames(oid, table, None).unwrap(),
+                &subjects.x_letter_frames(oid, table, kept).unwrap(),
                 &letters,
                 "letters",
             );
@@ -815,6 +815,70 @@ mod tests {
         }
         assert!(PackedNucleotide::from_subject_letters(b"ACGU").is_none());
         assert!(PackedNucleotide::from_subject_letters(b"ACGu").is_none());
+    }
+
+    /// A `-db` stream gives the frames of the copy of the database
+    /// (`common::database::read_nucleotide_stores`) for every fixture database of nucleotides
+    /// (ambiguity runs, stored bases flipped under them, several volumes, parsed ids), in blocks
+    /// of several sequences and alone, with genetic codes 1, 2, 4 and 11; the letters' frames
+    /// come from the kept block and from a read of the sequence alike.
+    #[test]
+    fn streamed_sequences_give_the_frames_of_the_copy() {
+        use crate::algorithm::common::x_db_stream::XDbStream;
+        use crate::seqdb::{SeqDb, SeqType};
+        let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+        let mut names: Vec<String> = ["seqdb/db/nucl_v4", "seqdb/db/nucl_v5", "seqdb/db/nucl_mv"]
+            .map(String::from)
+            .to_vec();
+        for entry in std::fs::read_dir(tests.join("db_search")).unwrap() {
+            let name = entry.unwrap().file_name().into_string().unwrap();
+            if let Some(stem) = name.strip_suffix(".nsq") {
+                names.push(format!("db_search/{stem}"));
+            }
+        }
+        let mut ambiguous = 0;
+        for name in &names {
+            let path = tests.join(name);
+            let db = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+            let copy =
+                crate::algorithm::common::database::read_nucleotide_stores(&db, "TBLASTX").unwrap();
+            ambiguous += copy
+                .iter()
+                .filter(|store| !store.ambiguity_runs().is_empty())
+                .count();
+            for max_bytes in [0, 64, u64::MAX] {
+                let stream = XDbStream::new(&db, 1, "TBLASTX")
+                    .unwrap()
+                    .x_regrid(max_bytes);
+                let (streamed, stored) = (Subjects::Stream(&stream), Subjects::Stored(&copy));
+                assert_eq!(streamed.count(), stored.count(), "{name}");
+                assert_eq!(streamed.longest_and_total(), stored.longest_and_total());
+                for id in [1, 2, 4, 11] {
+                    let table = GeneticCode::from_id(id);
+                    check(streamed, &table);
+                    for oid in 0..copy.len() {
+                        let (frames, of_letters, kept) =
+                            streamed.x_preliminary_frames(oid, &table).unwrap();
+                        let (want, want_of_letters, _) =
+                            stored.x_preliminary_frames(oid, &table).unwrap();
+                        assert_eq!(of_letters, want_of_letters, "{name} {oid}");
+                        assert_same(&frames, &want, "preliminary");
+                        let want = stored.x_letter_frames(oid, &table, None).unwrap();
+                        assert_same(
+                            &streamed.x_letter_frames(oid, &table, None).unwrap(),
+                            &want,
+                            "letters read again",
+                        );
+                        assert_same(
+                            &streamed.x_letter_frames(oid, &table, kept).unwrap(),
+                            &want,
+                            "letters of the kept block",
+                        );
+                    }
+                }
+            }
+        }
+        assert!(ambiguous > 0, "a fixture with ambiguity runs");
     }
 
     #[test]

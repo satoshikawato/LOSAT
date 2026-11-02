@@ -291,6 +291,14 @@ impl<'a> XDbStream<'a> {
         made
     }
 
+    /// The stream with the blocks of `max_bytes` (`x_block_grid`), for the tests of a program:
+    /// the fixtures are smaller than a block of the search.
+    #[cfg(test)]
+    pub(crate) fn x_regrid(mut self, max_bytes: u64) -> Self {
+        self.grid = x_block_grid(self.db, max_bytes);
+        self
+    }
+
     /// The block of the sequences `first..end` of the grid (`XReadError` if it cannot be read).
     fn read_grid_block(&self, first: u32, end: u32) -> Result<SequenceBlock> {
         #[cfg(test)]

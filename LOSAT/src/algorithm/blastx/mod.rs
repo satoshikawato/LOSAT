@@ -478,6 +478,9 @@ mod tabular;
 //         formatter.PrintEpilog(opt);
 // ```
 pub mod native;
+// LOSAT Web's entry (web ABI v2): one search, every requested output format.
+mod local;
+pub use local::run_local;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
 // ```c++

@@ -27,3 +27,5 @@ mod blastx_subject_flow;
 mod blastx_ungap_sent;
 #[path = "../blastx_unit_cap.rs"]
 mod blastx_unit_cap;
+#[path = "../run_local_blastx.rs"]
+mod run_local_blastx;

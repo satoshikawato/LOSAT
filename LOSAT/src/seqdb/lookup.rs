@@ -670,6 +670,14 @@ impl SeqidLookup<'_> {
     //         oid = oids[0];
     //     }
     // ```
+    /// `CSeqDB::SeqidToOid`: the OID that NCBI's lookup of the Seq-id `seqid` gives first, the
+    /// one whose Bioseq NCBI's BLAST database data loader serves for it
+    /// (`CBlastDbDataLoader::x_GetOid`; the search's own database, so its list's OIDs only).
+    /// `None`: not found (`seqid_to_oids`).
+    pub fn seqid_to_oid(&self, seqid: &ParsedSeqId) -> Result<Option<u32>, SeqDbError> {
+        Ok(self.seqid_to_oids(seqid, false)?.first().copied())
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1381-1459
     // ```c++
     // void CSeqDBImpl::SeqidToOids(const CSeq_id & seqid_in,
@@ -721,15 +729,14 @@ impl SeqidLookup<'_> {
     //            	}
     //        	}
     // ```
-    /// `CSeqDB::SeqidToOid`: the OID that NCBI's lookup of the Seq-id `seqid` gives first, the
-    /// one whose Bioseq NCBI's BLAST database data loader serves for it
-    /// (`CBlastDbDataLoader::x_GetOid`; the search's own database, so its list's OIDs only).
+    /// `CSeqDBImpl::SeqidToOids`: the OIDs that NCBI's lookup of the Seq-id `seqid` gives, in its
+    /// order, the search's list's OIDs only; every one with `multi`, else the first.
     /// Version 5 looks a text id up by its key in every LMDB file (the files in order, in a file
-    /// LMDB's order of the duplicates), version 4 and the GIs and PIGs in the ISAMs of the
-    /// volumes in order, and `gnl|BL_ORD_ID|n` is `n` from the start of each volume in turn.
-    /// `None`: not found, also where NCBI's lookup throws on a number that does not fit 32 bits.
-    /// An error of a file is NCBI's exception of the lookup.
-    pub fn seqid_to_oid(&self, seqid: &ParsedSeqId) -> Result<Option<u32>, SeqDbError> {
+    /// LMDB's order of the duplicates; every OID, as NCBI's), version 4 and the GIs and PIGs in the
+    /// ISAMs of the volumes in order, and `gnl|BL_ORD_ID|n` is `n` from the start of each volume
+    /// in turn. Empty: not found, also where NCBI's lookup throws on a number that does not fit 32
+    /// bits. An error of a file is NCBI's exception of the lookup.
+    pub fn seqid_to_oids(&self, seqid: &ParsedSeqId, multi: bool) -> Result<Vec<u32>, SeqDbError> {
         let db = self.volumes.db;
         let bl_ord_id = matches!(seqid, ParsedSeqId::General(tag) if tag.db == b"BL_ORD_ID");
         if db.is_version5() && !bl_ord_id && is_string_id(seqid) {
@@ -742,21 +749,27 @@ impl SeqidLookup<'_> {
             let mut oids = Vec::new();
             for (entry, env) in &self.envs {
                 let found = entry.oids_in(env, &key)?;
-                oids.extend(found.into_iter().filter_map(|oid| entry.database_oid(oid)));
+                oids.extend(
+                    found
+                        .into_iter()
+                        .filter_map(|oid| entry.database_oid(oid))
+                        .filter(|&oid| self.volumes.visible(oid)),
+                );
             }
-            return Ok(oids.into_iter().find(|&oid| self.volumes.visible(oid)));
+            return Ok(oids);
         }
         let simplified =
             seqdb_simplify_seqid(seqid).map_err(|error| SeqDbError::NotFound(error.to_string()))?;
         let mut fasta = Vec::new();
         label::fasta(seqid, &mut fasta);
+        let mut oids = Vec::new();
         for at in 0..db.volumes.len() {
             let vol_oids = self
                 .volumes
                 .volume_string_to_oids(at, &fasta, &simplified)?;
             let ident = simplified.num_id;
             if !(ident == -1 || ident >> 32 == 0) {
-                return Ok(None);
+                return Ok(Vec::new());
             }
             let vol_start = i64::from(db.volume_starts[at]);
             for oid in vol_oids {
@@ -764,10 +777,13 @@ impl SeqidLookup<'_> {
                     .ok()
                     .filter(|&oid| self.volumes.visible(oid))
                 {
-                    return Ok(Some(oid));
+                    oids.push(oid);
+                    if !multi {
+                        return Ok(oids);
+                    }
                 }
             }
         }
-        Ok(None)
+        Ok(oids)
     }
 }

@@ -22,8 +22,7 @@ NC_/NP_/WP_ accessions without titles, `lcl|Subject_` ids beside other ids). Tax
 Outputs: `prot_v4.*` (version 4, every record) and `prot_v5.*` (version 5, without the GI-only
 record `gi|1414`, after which NCBI 2.17.0's makeblastdb aborts writing the LMDB file, and without
 `lcl|123`, left out while LOSAT refused every local integer id of version 5; NCBI's formatters
-find it by its LMDB key unless an earlier sequence holds the key, as `bbs|123` of `variants.fa`
-does: line DBID N2b).
+find it by its LMDB key unless an earlier sequence holds the key, line DBID N2b).
 
 `refuse_v5.*` (version 5): the records of `refuse.faa` with the taxids of `taxmap_refuse.txt`, each
 the subject of its own query `refuse_<case>.faa` (its sequence; `refuse_nf.fna` a back-translation):
@@ -70,7 +69,10 @@ the alias `pord_vx.pal` (which lists `pord_x` first: NCBI orders the volumes of 
 
 Seq-align ids that NCBI's formatters look up like any other (line DBID N2b; the FASTA comes from `make_look_fasta.py`):
 `plook_v5.*` and `plook_v4.*` from `plook.faa`, `plook_z.*` (version 5) from `plook_z.faa`, read after `plook_v5`
-through the alias `plook_vz.pal`, and `nlook_v5.*` and `nlook_v4.*` from `nlook.fna`.
+through the alias `plook_vz.pal`, and `nlook_v5.*` and `nlook_v4.*` from `nlook.fna`. A Seq-align id that another
+sequence also holds (the same FASTA script): `pshare_v5.*` and `pshare_v4.*` from `pshare.faa`, `pshare_a.*` and
+`pshare_b.*` (version 5) from `pshare_a.faa` and `pshare_b.faa`, read through the alias `pshare_ab.pal`, and
+`nshare_v5.*` from `nshare.fna`.
 """
 import argparse
 import subprocess
@@ -175,6 +177,22 @@ def main() -> int:
         [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / "plook_z.faa"), "-dbtype", "prot", "-parse_seqids",
          "-blastdb_version", "5", "-title", "plook_z", "-out", str(args.out / "plook_z")],
         check=True, stdout=subprocess.DEVNULL)
+    for name, fasta, dbtype, versions in (("pshare", "pshare.faa", "prot", (5, 4)),
+                                          ("nshare", "nshare.fna", "nucl", (5,))):
+        for version in versions:
+            subprocess.run(
+                [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", dbtype, "-parse_seqids",
+                 "-blastdb_version", str(version), "-title", f"{name}_v{version} (parsed Seq-ids)",
+                 "-out", str(args.out / f"{name}_v{version}")],
+                check=True, stdout=subprocess.DEVNULL)
+    for name in ("pshare_a", "pshare_b"):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.faa"), "-dbtype", "prot", "-parse_seqids",
+             "-blastdb_version", "5", "-title", name, "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+    (args.out / "pshare_ab.pal").write_text(
+        "#\n# Alias file of line DBID, N2b\n#\nTITLE pshare_ab (two databases, parsed Seq-ids)\n"
+        "DBLIST pshare_a pshare_b\n")
     (args.out / "plook_vz.pal").write_text(
         "#\n# Alias file of line DBID, N2b\n#\nTITLE plook_vz (two databases, parsed Seq-ids)\n"
         "DBLIST plook_v5 plook_z\n")

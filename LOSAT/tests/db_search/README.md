@@ -435,6 +435,12 @@ the alias `ids/plook_vz.pal` (its second sequence holds `gnl|BL_ORD_ID|1`, its o
 `ids/nlook_v5` and `ids/nlook_v4` from `ids/nlook.fna` (queries `ids/nlook_q<k>.fna` and `.faa`, `ids/nlook_qall.fna`
 and `ids/nlook_qfound.fna` for the report streams). Version 5 finds `bbs|`, `nat|` and `lcl|<integer>` by their LMDB
 keys unless an earlier sequence holds the key; version 4 finds neither `bbs|` nor `nat|`; no version finds `gnl|PIG|`.
+A Seq-align id that another sequence also holds (review 1 of N2b): `ids/pshare_v5` and `ids/pshare_v4` from
+`ids/pshare.faa` (`lcl|555`, then `gb|FFF00030.1|` with `lcl|555` in a second definition line and nearly the same
+letters, so that the query `ids/pshare_q1.faa` hits both and NCBI's scope shows the second for the first; a
+`gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag, query `ids/pshare_q2.faa`), `ids/pshare_a` and
+`ids/pshare_b` (`bbs|123` in each) through the alias `ids/pshare_ab.pal` (query `ids/pshare_b_q0.faa`), and
+`ids/nshare_v5` from `ids/nshare.fna` (query `ids/nshare_q1.fna`).
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 

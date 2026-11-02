@@ -562,7 +562,9 @@ program writes, the same bytes at every `-num_threads` (P1, P1.1), apart from wh
   as NCBI's formatters look it up (`CSeqDB::SeqidToOid`: the LMDB keys of version 5, the ISAM files
   of version 4, under the search's id or taxonomy list), whatever its kind: version 5 finds `bbs|`,
   `nat|` and `lcl|<integer>` by their keys, and `gnl|BL_ORD_ID|n` of the sequence's own number in
-  its volume is found also beside another id.
+  its volume is found also beside another id. NCBI's scope first looks among the sequences of the
+  batch it has already read, so another reported sequence that holds the id can be shown in its
+  place (refused below).
 - Approved difference: a `gb`, `emb` or `dbj` id prints the stored type
   ([`PD-LOSAT-NCBI-DEFECTS`](PD-LOSAT-NCBI-DEFECTS.md), version 1.10).
 
@@ -572,9 +574,10 @@ a result that LOSAT does not reproduce.
 
 | Rejected, for a reported sequence | Formats | NCBI BLAST+ 2.17.0 | Rule |
 | --- | --- | --- | --- |
-| A Seq-align id that the lookup does not find: `gnl|PIG|` (makeblastdb fills the PIG files from no FASTA id), in version 4 `bbs|` and `nat|` (makeblastdb writes no ISAM key for them), `gnl|BL_ORD_ID|n` where n plus the first ordinal id of each volume is no sequence (makeblastdb stores such an id only when the FASTA names it), any id of a version 4 database without ISAM files; and a local id that alone decides the definition line (`lcl|777` before `gi|777`), which the lookup finds but the formatters do not | 0, 5, 6, 7, 10, 13 to 17, 20 | The default tabular fields and any list with `sacc`, `saccver` or a field that reads the letters stop (exit 255). Other lists exit 0: `sseqid` writes `Unknown`, `sallseqid` the stored id. Outfmt 0 and 5 write `Unknown`, 13 to 16 and SAM the id | 2, 3 |
+| A Seq-align id that the lookup does not find: `gnl|PIG|` (makeblastdb fills the PIG files from no FASTA id), in version 4 `bbs|` and `nat|` (makeblastdb writes no ISAM key for them), `gnl|BL_ORD_ID|n` where n plus the first ordinal id of each volume is no sequence (makeblastdb stores such an id only when the FASTA names it), any other id of a version 4 database without ISAM files; and a local id that alone decides the definition line (`lcl|777` before `gi|777`), which the lookup finds but the formatters do not | 0, 5, 6, 7, 10, 13 to 17, 20 | The default tabular fields and any list with `sacc`, `saccver` or a field that reads the letters stop (exit 255). Other lists exit 0: `sseqid` writes `Unknown`, `sallseqid` the stored id. Outfmt 0 and 5 write `Unknown`, 13 to 16 and SAM the id | 2, 3 |
 | A Seq-align id that the lookup finds first on another sequence, for example `gb|X|` after `gb|X.1|`, `emb|X.1|` after `gb|X.1|`, `gb|X|` after `emb|X.1|`, `lcl|X` after `gb|X.1|`, in version 5 `lcl|300` after `bbs|300` and `bbs|301` after `lcl|301` (one LMDB key), `gnl|BL_ORD_ID|n` where n plus the first ordinal id of a volume is another sequence. The lookup does not refuse the same record in two volumes or in two databases of an alias | 0, 5, 6, 7, 10, 13 to 17, 20 | Writes the other sequence's names, in every program but BLASTN also its identities, where one of its ids equals the Seq-align id (`gb|X.1|` for `gb|X|`, a `gnl|BL_ORD_ID|n` that is its own number); otherwise as in the row above | 2, 3 |
-| A Seq-align id whose lookup fails (an LMDB file without the accession table) | 0, 5, 6, 7, 10, 13 to 17, 20 | Stops (exit 2) | 3 |
+| A Seq-align id that another sequence also holds, where the lookup finds the sequence itself first: `lcl|555` and `gb|X.1|` with `lcl|555` in a second definition line, `bbs|123` in two databases of an alias. Not the same record in two volumes or databases | 0, 5, 6, 7, 10, 13 to 17, 20 | Where both are reported (also for different queries), writes for both the names of the one it read first, in every program but BLASTN also its identities | 2 |
+| A Seq-align id whose lookup fails (an LMDB file without the accession table; `gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) | 0, 5, 6, 7, 10, 13 to 17, 20 | Stops (exit 2; for the text tag "Error pre-fetching sequence data", exit 255) | 3 |
 | Following hits of a query whose Seq-align ids `Match`: `pdb|1ABC|` and `pdb|1ABC|AA`, `gb|X|` and `gb|X.1|`, one accession and version under `gb`, `emb` or `dbj`, two copies of one record | 0, 5, 13 to 16 | Shows them as one hit | 2 |
 | In `psiblast`, such hits among the first `-max_target_seqs` + 1 of a longer list | every format | `PruneSeqalign` counts them as one subject and keeps one more | 2 |
 | A Seq-align id that is the id of a query read with `-parse_deflines` | every format | Shows the query's title and letters for it | 2 |
@@ -600,6 +603,8 @@ Known differences that remain:
   - A sole `gnl|BL_ORD_ID|n` of another number whose n names a sequence with the same definition
     lines and letters, which NCBI shows as the subject itself: that sequence is read without parsed
     Seq-ids, so the lookup does not take it for the same record.
+  - A Seq-align id that another sequence also holds is refused also where NCBI writes the subject's
+    own report: where that sequence is not reported, or is read after the subject.
   - A tabular field list without the fields on which NCBI stops (`6 qseqid evalue`, `6 sseqid`,
     `6 sallseqid`), where NCBI exits 0.
   - A title ending in `]` without `taxdb.bti` on the search path, where NCBI keeps the title.

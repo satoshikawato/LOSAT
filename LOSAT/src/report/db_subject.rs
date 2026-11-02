@@ -96,6 +96,10 @@ pub enum FoundInstead {
     /// Another sequence of the database first, by ordinal id: NCBI's formatters show it where
     /// its ids compare equal to the Seq-align id, else no sequence.
     Sequence(u32),
+    /// The sequence itself first, and later another sequence of the database, by ordinal id, that
+    /// holds an id NCBI's scope takes for the Seq-align id: where both are reported, NCBI's
+    /// formatters show for both the one they read first.
+    AlsoHeld(u32),
     /// No sequence.
     Nothing,
     /// The lookup fails on a file of the database or on the id, with this message: NCBI's
@@ -119,18 +123,22 @@ pub struct HitDescription {
 }
 
 impl ParsedSubject {
-    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:406-415
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:390-395
     // ```c++
     //     int oid = -1;
-    //     ...
-    //     if (m_BlastDb->SeqidToOid(*seq_id, oid)) {
+    //
+    //     if (! m_BlastDb->SeqidToOid(*seqid, oid)) {
+    //         _TRACE("FAILED to find '" << seqid->AsFastaString() << "'");
+    //         return -1;
+    //     }
     // ```
-    // NCBI's formatters find the subject's sequence again from its Seq-align id, by the lookup
-    // that `found_instead` ports, whatever kind of id it is: in version 5 `bbs|123`, `nat|X.1|`
-    // and `lcl|777` by their LMDB keys, in version 4 the ISAM files that makeblastdb writes for
-    // neither `bbs|` nor `nat|`, a `gnl|PIG|` id in the PIG files that it fills from no FASTA id,
-    // and a `gnl|BL_ORD_ID|n` as n from the start of each volume, so as its own sequence where n
-    // is its own number in its volume, also beside another id (probe of line DBID N2b,
+    // NCBI's formatters find the subject's sequence again from its Seq-align id, by the lookup that
+    // `found_instead` ports, whatever kind of id it is: in version 5 `bbs|123`, `nat|X.1|` and
+    // `lcl|777` by their LMDB keys, in version 4 the ISAM files that makeblastdb writes for neither
+    // `bbs|` nor `nat|`, a `gnl|PIG|` id in the PIG files that it fills from no FASTA id, and a
+    // `gnl|BL_ORD_ID|n` as the stored n plus the first ordinal id of its volume
+    // (`SeqDb::defline_set`), looked up from the start of each volume, so as its own sequence where
+    // the stored n is its own number in its volume, also beside another id (probe of line DBID N2b,
     // `blastdb-ids-20261021/R/unfetch/p1`: 317 cases of NCBI 2.17.0, databases of NCBI's and
     // LOSAT's makeblastdb). The lookup does not decide one case: where the definition line of the
     // Bioseq is found by the content of a local id alone (`lcl|777` before the definition line of
@@ -382,6 +390,10 @@ impl ParsedSubject {
             (false, None) => Ok(()),
             (false, Some(FoundInstead::Sequence(ordinal))) => Err(format!(
                 "has the Seq-align id {}, by which NCBI BLAST+'s lookup gives database sequence {ordinal} first (NCBI BLAST+ 2.17.0 writes that sequence's names and letters, or stops)",
+                id()
+            )),
+            (false, Some(FoundInstead::AlsoHeld(ordinal))) => Err(format!(
+                "has the Seq-align id {}, which database sequence {ordinal} also holds (where both are reported, NCBI BLAST+ 2.17.0 writes for both the names and letters of the one it reads first)",
                 id()
             )),
             (false, Some(FoundInstead::Failed(message))) => Err(format!(
@@ -1437,7 +1449,7 @@ mod tests {
     #[test]
     fn the_kind_of_a_seq_align_id_refuses_nothing_before_its_lookup() {
         // NCBI's lookup decides whether its formatters find these (`found_instead`; probe of line
-        // DBID N2b): found by their LMDB keys in version 5, not found by the ISAM and PIG files.
+        // DBID N2b), not the kind of id.
         for id in [
             ParsedSeqId::Local(ObjectId::Id(123)),
             ParsedSeqId::Gibbsq(123),

@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "pshare_v4",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "pshare_v4 (parsed Seq-ids)",
+  "number-of-letters": 880,
+  "number-of-sequences": 4,
+  "last-updated": "2026-11-02T23:24:00",
+  "number-of-volumes": 1,
+  "bytes-total": 1684,
+  "bytes-to-cache": 1005,
+  "files": [
+    "pshare_v4.phr",
+    "pshare_v4.pin",
+    "pshare_v4.pog",
+    "pshare_v4.psd",
+    "pshare_v4.psi",
+    "pshare_v4.psq"
+  ]
+}

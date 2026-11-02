@@ -22,6 +22,15 @@ volume) with `gb|FFF00028.1|` in a second definition line. `nlook.fna`: 0 `gb|AF
 definition line; `nlook_qall.fna` holds the queries of records 1, 0 and 5 in this order (a report stream would
 write the first two before it reaches record 5), `nlook_qfound.fna` those of records 1, 2, 3 and 6.
 
+A Seq-align id that another sequence also holds, which NCBI's scope shows for it where both are reported (review 1
+of N2b): `pshare.faa` (versions 5 and 4) 0 `lcl|555`, 1 `gb|FFF00030.1|` with `lcl|555` in a second definition line
+(record 0's sequence with every tenth letter replaced, so that its query `pshare_q1.faa` hits both), 2
+`gnl|BL_ORD_ID|0` (which makeblastdb stores with a text tag, so NCBI's lookup throws) with `gb|FFF00031.1|` in a
+second definition line, 3 `gb|FFF00032.1|`; `pshare_a.faa` `bbs|123` and `pshare_b.faa` `gb|FFF00033.1|` with
+`bbs|123` in a second definition line (makeblastdb refuses the two in one database), read through the alias
+`pshare_ab.pal` (query `pshare_b_q0.faa`); `nshare.fna` the back-translations of `pshare.faa` 0 and 1 (query
+`nshare_q1.fna`).
+
 usage: make_look_fasta.py [--out LOSAT/tests/db_search/ids]
 """
 import argparse
@@ -56,6 +65,11 @@ NLOOK = ["gb|AF000070.1| control with an accession",
          "bbs|300 gibbsq id before lcl|300",
          "lcl|300 local integer id after bbs|300",
          "gnl|BL_ORD_ID|6 ordinal id of its own number\x01gb|AF000071.1| second definition line"]
+
+PSHARE = ["lcl|555 local integer id",
+          "gb|FFF00030.1| accession\x01lcl|555 the same local id in a second definition line",
+          "gnl|BL_ORD_ID|0 ordinal id stored with a text tag\x01gb|FFF00031.1| second definition line",
+          "gb|FFF00032.1| control with an accession"]
 
 
 def wrap(seq: str) -> str:
@@ -94,6 +108,21 @@ def main() -> int:
     (out / "nlook.fna").write_text("".join(records))
     (out / "nlook_qall.fna").write_text("".join(queries[k] for k in (1, 0, 5)))
     (out / "nlook_qfound.fna").write_text("".join(queries[k] for k in (1, 2, 3, 6)))
+    first = protein()
+    near = "".join(rng.choice(AA.replace(a, "")) if i % 10 == 9 else a for i, a in enumerate(first))
+    seqs = [first, near, protein(), protein()]
+    (out / "pshare.faa").write_text("".join(f">{t}\n{wrap(q)}" for t, q in zip(PSHARE, seqs)))
+    (out / "pshare_q1.faa").write_text(f">pshareq1 query of record 1\n{wrap(near)}")
+    (out / "pshare_q2.faa").write_text(f">pshareq2 query of record 2\n{wrap(seqs[2])}")
+    (out / "nshare.fna").write_text("".join(
+        f">{t}\n{wrap(''.join(CODON[a] for a in q))}" for t, q in zip(PSHARE[:2], seqs[:2])))
+    (out / "nshare_q1.fna").write_text(f">nshareq1 query of record 1\n{wrap(''.join(CODON[a] for a in near))}")
+    first = protein()
+    near = "".join(rng.choice(AA.replace(a, "")) if i % 10 == 9 else a for i, a in enumerate(first))
+    (out / "pshare_a.faa").write_text(f">bbs|123 gibbsq id\n{wrap(first)}")
+    (out / "pshare_b.faa").write_text(
+        f">gb|FFF00033.1| accession\x01bbs|123 the same gibbsq id in a second definition line\n{wrap(near)}")
+    (out / "pshare_b_q0.faa").write_text(f">pshare_bq0 query of record 0\n{wrap(near)}")
     return 0
 
 

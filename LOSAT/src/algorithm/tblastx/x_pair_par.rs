@@ -328,11 +328,8 @@ fn x_groups_wanted(
     if !few_groups() {
         return X_MAX_GROUPS;
     }
-    let (longest, total) = subjects
-        .lengths()
-        .fold((0u128, 0u128), |(longest, total), length| {
-            (longest.max(length as u128), total + length as u128)
-        });
+    let (longest, total) = subjects.longest_and_total();
+    let (longest, total) = (longest as u128, u128::from(total));
     let shares = usize::try_from(total / longest.max(1))
         .unwrap_or(usize::MAX)
         .max(1);
@@ -993,12 +990,8 @@ fn x_guard_lengths(
     subjects: crate::algorithm::tblastx::subjects::Subjects<'_>,
 ) -> (usize, usize) {
     let max_context_len = contexts.iter().map(|c| c.aa_len).max().unwrap_or(0);
-    let longest_subject_chunk = subjects
-        .lengths()
-        .map(|length| length / 3)
-        .max()
-        .unwrap_or(0)
-        .min(tblastx_max_dbseq_len_for_run());
+    let longest_subject_chunk =
+        (subjects.longest_and_total().0 / 3).min(tblastx_max_dbseq_len_for_run());
     (max_context_len, longest_subject_chunk)
 }
 
@@ -1033,12 +1026,8 @@ fn units_gain(g: &XGates<'_>) -> bool {
         crate::utils::xreach::x_reach!("LOSAT_X_TBXFEWGROUPS", true);
         return true;
     }
-    let (longest, total) = g
-        .subjects
-        .lengths()
-        .fold((0u128, 0u128), |(longest, total), length| {
-            (longest.max(length as u128), total + length as u128)
-        });
+    let (longest, total) = g.subjects.longest_and_total();
+    let (longest, total) = (longest as u128, u128::from(total));
     2 * longest * g.threads as u128 > 3 * total
 }
 
@@ -1109,12 +1098,10 @@ fn early_chunk_switches(
         && !use_serial_scan_chunks
         && (std::env::var_os("LOSAT_TBLASTX_PARALLEL_CHUNKS").is_some()
             || (cfg!(all(target_arch = "wasm32", feature = "wasm-threads"))
-                && subjects.lengths().any(|length| {
-                    tblastx_estimated_subject_chunk_work_items(
-                        length,
-                        tblastx_max_dbseq_len_for_run(),
-                    ) > 1
-                })));
+                && tblastx_estimated_subject_chunk_work_items(
+                    subjects.longest_and_total().0,
+                    tblastx_max_dbseq_len_for_run(),
+                ) > 1));
     use_serial_scan_chunks || use_parallel_chunks
 }
 

@@ -3,11 +3,16 @@
 
 #[cfg(test)]
 use std::cell::Cell;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
+use anyhow::Result;
+
+use crate::algorithm::common::x_db_stream::{XDbStream, XSequence};
 use crate::algorithm::tblastx::translation::{x_generate_frames_in_windows, QueryFrame};
 use crate::blastinput::fasta_reader::FastaRecord;
-use crate::sequence::packed_subject::PackedNucleotide;
+use crate::seqdb::SequenceBlock;
+use crate::sequence::packed_subject::{PackedNucleotide, PackedRef};
 use crate::utils::genetic_code::GeneticCode;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1403-1405
@@ -33,9 +38,13 @@ use crate::utils::genetic_code::GeneticCode;
 pub(crate) enum Subjects<'a> {
     /// The records of `-subject` (after `-subject_loc`).
     Fasta(&'a [FastaRecord]),
-    /// The sequences of a `-db` database, read whole, or (LOSAT_X_TBXSTORE) the records of
-    /// `-subject` (after `-subject_loc`), packed as read.
+    /// (LOSAT_X_TBXSTORE) The records of `-subject` (after `-subject_loc`), packed as read.
     Stored(&'a [PackedNucleotide]),
+    /// The sequences of a `-db` database, read where they are searched (`XDbStream`): a short
+    /// sequence's frames are made from the bytes of its block, a long one (a block of its own) is
+    /// read alone and shared, and the stores are those of a copy of the database
+    /// (`common::database::read_nucleotide_stores`), so every frame is the same.
+    Stream(&'a XDbStream<'a>),
     /// A `-db` database whose sequences could not be read: no subject is searched, and the
     /// first batch with a valid context raises the read error (`SubjectsUnreadable`).
     Unreadable,
@@ -47,6 +56,7 @@ impl<'a> Subjects<'a> {
         match self {
             Self::Fasta(records) => records.len(),
             Self::Stored(stores) => stores.len(),
+            Self::Stream(stream) => stream.count(),
             Self::Unreadable => 0,
         }
     }
@@ -56,13 +66,21 @@ impl<'a> Subjects<'a> {
         match self {
             Self::Fasta(records) => records[oid].seq().len(),
             Self::Stored(stores) => stores[oid].len(),
+            Self::Stream(stream) => stream.length(oid),
             Self::Unreadable => 0,
         }
     }
 
-    /// The numbers of bases of the subjects, in OID order.
-    pub(crate) fn lengths(&self) -> impl Iterator<Item = usize> + '_ {
-        (0..self.count()).map(|oid| self.length(oid))
+    /// The number of bases of the longest subject and of all the subjects (a stream holds them
+    /// from its check).
+    pub(crate) fn longest_and_total(&self) -> (usize, u64) {
+        match self {
+            Self::Stream(stream) => stream.longest_and_total(),
+            _ => (0..self.count()).fold((0, 0), |(longest, total), oid| {
+                let length = self.length(oid);
+                (longest.max(length), total + length as u64)
+            }),
+        }
     }
 
     /// The reference of the unit tests: `f` of the letters of subject `oid` and, when it has
@@ -101,6 +119,10 @@ impl<'a> Subjects<'a> {
                     },
                 )
             }
+            Self::Stream(stream) => {
+                let store = stream.read(oid).unwrap();
+                Subjects::Stored(std::slice::from_ref(&store)).with_search_bases(0, f)
+            }
             Self::Unreadable => unreachable!("an unreadable database has no subject to search"),
         }
     }
@@ -119,13 +141,15 @@ impl<'a> Subjects<'a> {
     // window by window in letter order from one `CRandom` seeded with the record's length, which
     // draws what `preliminary_subject_bases` draws; a stored sequence gives the bases of its
     // 2-bit codes (`bases_into`).
-    /// The frames the preliminary stage of subject `oid` translates, and whether they are the
-    /// frames of its letters as well (true when it has no ambiguous base).
+    /// The frames the preliminary stage of subject `oid` translates, whether they are the frames
+    /// of its letters as well (true when it has no ambiguous base), and what the search keeps for
+    /// the frames of its letters (`x_letter_frames`). A read of a `-db` stream that fails is an
+    /// `XReadError`.
     pub(crate) fn x_preliminary_frames(
         &self,
         oid: usize,
         table: &GeneticCode,
-    ) -> (Vec<QueryFrame>, bool) {
+    ) -> Result<(Vec<QueryFrame>, bool, XKept)> {
         match self {
             Self::Fasta(records) => {
                 let letters = records[oid].seq();
@@ -141,9 +165,13 @@ impl<'a> Subjects<'a> {
                         &mut |from, out| out.copy_from_slice(&letters[from..from + out.len()]),
                         table,
                     );
-                    return (frames, true);
+                    return Ok((frames, true, None));
                 }
-                (x_resolved_record_frames(letters, table, by_table), false)
+                Ok((
+                    x_resolved_record_frames(letters, table, by_table),
+                    false,
+                    None,
+                ))
             }
             Self::Stored(stores) => {
                 let store = &stores[oid];
@@ -152,8 +180,26 @@ impl<'a> Subjects<'a> {
                     &mut |from, out| store.bases_into(from, out),
                     table,
                 );
-                (frames, store.ambiguity_runs().is_empty())
+                Ok((frames, store.ambiguity_runs().is_empty(), None))
             }
+            // A short sequence keeps its block until its letters' frames are made, when it has
+            // ambiguous bases (a nested subject on this thread may take another block); a long one
+            // is read again then, instead of being held through the search.
+            Self::Stream(stream) => stream.with_block(oid, |sequence| {
+                let block = match &sequence {
+                    XSequence::Block { block, i, .. } => Some((Arc::clone(block), *i)),
+                    XSequence::Store(_) => None,
+                };
+                let (frames, of_letters) = sequence.with_view(|view| {
+                    let frames = x_generate_frames_in_windows(
+                        view.len(),
+                        &mut |from, out| view.bases_into(from, out),
+                        table,
+                    );
+                    (frames, view.ambiguity_runs().is_empty())
+                });
+                Ok((frames, of_letters, block.filter(|_| !of_letters)))
+            }),
             Self::Unreadable => unreachable!("an unreadable database has no subject to search"),
         }
     }
@@ -167,9 +213,22 @@ impl<'a> Subjects<'a> {
     // The frames of the letters `with_search_bases` gives (`s_frames`), made in windows: a
     // record's letters, or a stored sequence's letters of its codes (`letters_to`, the
     // upper-case letters of `ascii_into`; the translation reads both cases alike).
-    /// The frames of the letters of subject `oid` (the ungapped re-evaluation's).
-    pub(crate) fn x_letter_frames(&self, oid: usize, table: &GeneticCode) -> Vec<QueryFrame> {
-        match self {
+    /// The frames of the letters of subject `oid` (the ungapped re-evaluation's); `kept` is what
+    /// `x_preliminary_frames` kept of it. A read of a `-db` stream that fails is an `XReadError`.
+    pub(crate) fn x_letter_frames(
+        &self,
+        oid: usize,
+        table: &GeneticCode,
+        kept: XKept,
+    ) -> Result<Vec<QueryFrame>> {
+        let of_view = |view: PackedRef<'_>| {
+            x_generate_frames_in_windows(
+                view.len(),
+                &mut |from, out| view.letters_to(from, out),
+                table,
+            )
+        };
+        Ok(match self {
             Self::Fasta(records) => {
                 let letters = records[oid].seq();
                 x_generate_frames_in_windows(
@@ -178,16 +237,66 @@ impl<'a> Subjects<'a> {
                     table,
                 )
             }
-            Self::Stored(stores) => {
-                let store = &stores[oid];
-                x_generate_frames_in_windows(
-                    store.len(),
-                    &mut |from, out| store.letters_to(from, out),
-                    table,
-                )
-            }
+            Self::Stored(stores) => of_view(stores[oid].view()),
+            Self::Stream(stream) => match kept {
+                Some((block, i)) => {
+                    let (length, runs) = stream.parts_in(&block, i, oid)?;
+                    XSequence::Block {
+                        block: &block,
+                        i,
+                        length,
+                        runs,
+                    }
+                    .with_view(of_view)
+                }
+                None => of_view(stream.read_shared(oid)?.view()),
+            },
             Self::Unreadable => unreachable!("an unreadable database has no subject to search"),
+        })
+    }
+}
+
+/// What the search of a `-db` subject keeps from its preliminary frames to the frames of its
+/// letters (`Subjects::x_letter_frames`): the block that holds a short sequence with ambiguous
+/// bases, and its place in the block. `None` for every other subject.
+pub(crate) type XKept = Option<(Arc<SequenceBlock>, usize)>;
+
+/// The read of a `-db` stream that failed in the search of one query batch, with the smallest
+/// ordinal id (`Subjects::Stream`). The subjects after it are not searched (`skips`); those before
+/// it are, so the error kept does not depend on the threads or their order. Each query batch
+/// has its own: a batch that the pipe runs early does not stop the batch before it.
+pub(crate) struct XReadFailure {
+    /// The ordinal id of the failed read kept, or `usize::MAX`.
+    first: AtomicUsize,
+    failed: Mutex<Option<(usize, anyhow::Error)>>,
+}
+
+impl XReadFailure {
+    pub(crate) fn new() -> Self {
+        Self {
+            first: AtomicUsize::new(usize::MAX),
+            failed: Mutex::new(None),
         }
+    }
+
+    /// Whether subject `oid` comes after a read that failed.
+    pub(crate) fn skips(&self, oid: usize) -> bool {
+        oid > self.first.load(Ordering::Relaxed)
+    }
+
+    /// The read of subject `oid` failed with `error`.
+    pub(crate) fn fail(&self, oid: usize, error: anyhow::Error) {
+        let mut failed = self.failed.lock().unwrap_or_else(|e| e.into_inner());
+        if failed.as_ref().is_none_or(|(first, _)| oid < *first) {
+            *failed = Some((oid, error));
+            self.first.fetch_min(oid, Ordering::Relaxed);
+        }
+    }
+
+    /// The error of the failed read kept, if any, taken.
+    pub(crate) fn take(&self) -> Option<anyhow::Error> {
+        let mut failed = self.failed.lock().unwrap_or_else(|e| e.into_inner());
+        failed.take().map(|(_, error)| error)
     }
 }
 
@@ -541,14 +650,18 @@ mod tests {
                     bases.map(|bases| generate_frames(bases, table)),
                 )
             });
-            let (frames, of_letters) = subjects.x_preliminary_frames(oid, table);
+            let (frames, of_letters, kept) = subjects.x_preliminary_frames(oid, table).unwrap();
             assert_eq!(of_letters, preliminary.is_none(), "oid {oid}");
             assert_same(
                 &frames,
                 preliminary.as_deref().unwrap_or(&letters),
                 "preliminary",
             );
-            assert_same(&subjects.x_letter_frames(oid, table), &letters, "letters");
+            assert_same(
+                &subjects.x_letter_frames(oid, table, kept).unwrap(),
+                &letters,
+                "letters",
+            );
         }
     }
 
@@ -689,19 +802,148 @@ mod tests {
             for oid in 0..records.len() {
                 let what = format!("record {oid} code {id}");
                 assert_eq!(stored.length(oid), fasta.length(oid), "{what}");
-                let (frames, of_letters) = fasta.x_preliminary_frames(oid, &table);
-                let (got, got_of_letters) = stored.x_preliminary_frames(oid, &table);
+                let (frames, of_letters, _) = fasta.x_preliminary_frames(oid, &table).unwrap();
+                let (got, got_of_letters, _) = stored.x_preliminary_frames(oid, &table).unwrap();
                 assert_eq!(got_of_letters, of_letters, "{what}");
                 assert_same(&got, &frames, &what);
                 assert_same(
-                    &stored.x_letter_frames(oid, &table),
-                    &fasta.x_letter_frames(oid, &table),
+                    &stored.x_letter_frames(oid, &table, None).unwrap(),
+                    &fasta.x_letter_frames(oid, &table, None).unwrap(),
                     &what,
                 );
             }
         }
         assert!(PackedNucleotide::from_subject_letters(b"ACGU").is_none());
         assert!(PackedNucleotide::from_subject_letters(b"ACGu").is_none());
+    }
+
+    /// A `-db` stream gives the frames of the copy of the database
+    /// (`common::database::read_nucleotide_stores`) for every fixture database of nucleotides
+    /// (ambiguity runs, stored bases flipped under them, several volumes, parsed ids), in blocks
+    /// of several sequences and alone, with genetic codes 1, 2, 4 and 11; the letters' frames
+    /// come from the kept block and from a read of the sequence alike.
+    #[test]
+    fn streamed_sequences_give_the_frames_of_the_copy() {
+        use crate::algorithm::common::x_db_stream::XDbStream;
+        use crate::seqdb::{SeqDb, SeqType};
+        let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+        let mut names: Vec<String> = ["seqdb/db/nucl_v4", "seqdb/db/nucl_v5", "seqdb/db/nucl_mv"]
+            .map(String::from)
+            .to_vec();
+        for entry in std::fs::read_dir(tests.join("db_search")).unwrap() {
+            let name = entry.unwrap().file_name().into_string().unwrap();
+            if let Some(stem) = name.strip_suffix(".nsq") {
+                names.push(format!("db_search/{stem}"));
+            }
+        }
+        let mut ambiguous = 0;
+        for name in &names {
+            let path = tests.join(name);
+            let db = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+            let copy =
+                crate::algorithm::common::database::read_nucleotide_stores(&db, "TBLASTX").unwrap();
+            ambiguous += copy
+                .iter()
+                .filter(|store| !store.ambiguity_runs().is_empty())
+                .count();
+            for max_bytes in [0, 64, u64::MAX] {
+                let stream = XDbStream::new(&db, 1, "TBLASTX")
+                    .unwrap()
+                    .x_regrid(max_bytes);
+                let (streamed, stored) = (Subjects::Stream(&stream), Subjects::Stored(&copy));
+                assert_eq!(streamed.count(), stored.count(), "{name}");
+                assert_eq!(streamed.longest_and_total(), stored.longest_and_total());
+                for id in [1, 2, 4, 11] {
+                    let table = GeneticCode::from_id(id);
+                    check(streamed, &table);
+                    for oid in 0..copy.len() {
+                        let (frames, of_letters, kept) =
+                            streamed.x_preliminary_frames(oid, &table).unwrap();
+                        let (want, want_of_letters, _) =
+                            stored.x_preliminary_frames(oid, &table).unwrap();
+                        assert_eq!(of_letters, want_of_letters, "{name} {oid}");
+                        assert_same(&frames, &want, "preliminary");
+                        let want = stored.x_letter_frames(oid, &table, None).unwrap();
+                        assert_same(
+                            &streamed.x_letter_frames(oid, &table, None).unwrap(),
+                            &want,
+                            "letters read again",
+                        );
+                        assert_same(
+                            &streamed.x_letter_frames(oid, &table, kept).unwrap(),
+                            &want,
+                            "letters of the kept block",
+                        );
+                    }
+                }
+            }
+        }
+        assert!(ambiguous > 0, "a fixture with ambiguity runs");
+    }
+
+    /// A read of a `-db` stream that fails during the search (`XDbStream::x_failing`) is the
+    /// `XReadError` of its subject's frames, preliminary and of the letters read again. A query
+    /// batch's failure (`XReadFailure`) keeps the error of the smallest ordinal id whose read
+    /// fails, whichever fails first, and skips the subjects after it only, so every subject
+    /// before it is searched at any number of threads.
+    #[test]
+    fn a_failed_read_of_the_stream_fails_the_batch_at_its_smallest_subject() {
+        use crate::algorithm::common::x_db_stream::{XDbStream, XReadError};
+        use crate::seqdb::{SeqDb, SeqType};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db/nucl_v4");
+        let db = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+        let table = GeneticCode::from_id(1);
+        let count = db.num_seqs() as usize;
+        let (smallest, last) = (count / 2, count - 1);
+        let stream = XDbStream::new(&db, 4, "TBLASTX")
+            .unwrap()
+            .x_regrid(0)
+            .x_failing(&[last, smallest], true);
+        let subjects = Subjects::Stream(&stream);
+        for oid in 0..count {
+            let failing = oid == smallest || oid == last;
+            let preliminary = subjects.x_preliminary_frames(oid, &table);
+            let letters = subjects.x_letter_frames(oid, &table, None);
+            for error in [preliminary.err(), letters.err()] {
+                assert_eq!(error.is_some(), failing, "{oid}");
+                assert!(error.is_none_or(|error| error.is::<XReadError>()), "{oid}");
+            }
+        }
+        let failure = XReadFailure::new();
+        failure.fail(last, anyhow::anyhow!("last"));
+        assert!(failure.skips(last + 1) && !failure.skips(last) && !failure.skips(smallest + 1));
+        failure.fail(smallest, anyhow::anyhow!("smallest"));
+        failure.fail(last, anyhow::anyhow!("last again"));
+        assert!(failure.skips(smallest + 1) && !failure.skips(smallest));
+        assert_eq!(failure.take().unwrap().to_string(), "smallest");
+        assert!(failure.take().is_none());
+        let message = format!("the read of database sequence {smallest} failed");
+        for _ in 0..20 {
+            let failure = XReadFailure::new();
+            let next = AtomicUsize::new(0);
+            let searched = Mutex::new(Vec::new());
+            std::thread::scope(|scope| {
+                for _ in 0..4 {
+                    scope.spawn(|| loop {
+                        let oid = next.fetch_add(1, Ordering::Relaxed);
+                        if oid >= count {
+                            break;
+                        }
+                        if failure.skips(oid) {
+                            continue;
+                        }
+                        match subjects.x_preliminary_frames(oid, &table) {
+                            Ok(_) => searched.lock().unwrap().push(oid),
+                            Err(error) => failure.fail(oid, error),
+                        }
+                    });
+                }
+            });
+            let error = failure.take().expect("a read failed");
+            assert!(error.to_string().contains(&message), "{error}");
+            let searched = searched.into_inner().unwrap();
+            assert!((0..smallest).all(|oid| searched.contains(&oid)));
+        }
     }
 
     #[test]

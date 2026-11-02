@@ -394,7 +394,7 @@ test("the engine's refusals of option values are shown as the engine writes them
   await expect(page.getByTestId('argv-validation')).toContainText('BLAST query/options error:');
 });
 
-test('empty inputs, every record excluded, a sequence without a defline, and BLASTX', async ({ page }) => {
+test('empty inputs, every record excluded, a sequence without a defline, and BLASTX without a subrange', async ({ page }) => {
   await program(page, 'blastn');
   await submit(page);
   await expect(page.getByTestId('search-message')).toHaveText('Add the query sequences: paste them or open FASTA files.');
@@ -413,9 +413,12 @@ test('empty inputs, every record excluded, a sequence without a defline, and BLA
   await expect(page.getByTestId('search-message')).toHaveText('Every subject record is excluded.');
   await expect(page.getByTestId('run-1-option')).toHaveCount(0);
 
+  // BLASTX takes no -query_loc (DW-11): the query's only record shows no subrange.
+  await expect(page.getByTestId('query-region')).toBeVisible();
   await program(page, 'blastx');
-  await expect(page.getByTestId('program-unavailable')).toContainText('Not in LOSAT Web yet: use BLASTX of the LOSAT command line.');
-  await expect(page.getByTestId('run-losat')).toBeDisabled();
+  await expect(page.getByTestId('param-query_gencode')).toBeVisible();
+  await expect(page.getByTestId('query-region')).toHaveCount(0);
+  await expect(page.getByTestId('run-losat')).toBeEnabled();
 });
 
 test('the sequence kind warning is an estimate and does not change the program', async ({ page }) => {

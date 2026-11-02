@@ -13,18 +13,20 @@ import { inspectReactor } from '../../src/infra/reactor/artifact';
 import { buildHarness, type HarnessFiles } from './support/browser';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
 import { openHarness, startHarnessServer, type HarnessServer } from './support/harness-server';
-import { manifestCase, NATIVE, nativeExpectation, NO_NATIVE_REASON, searchOf, type VbrCase } from './support/native';
+import { manifestCase, NATIVE, nativeExpectation, NO_NATIVE_REASON, searchOf, vbrCases, type VbrCase } from './support/native';
 
 const TWO_GIB = 2 ** 31;
 const DECLARED = ENGINE === undefined ? undefined : inspectReactor(ENGINE.threads.bytes).memory.maximum;
 const EVIDENCE = process.env['LOSAT_WEB_EVIDENCE'] || undefined;
 
-/** One search per program of LOSAT Web: V-BR cells of LOSAT/tests/outfmt0_manifest.tsv. */
+/** One search per program of LOSAT Web: V-BR cells (of LOSAT/tests/outfmt0_manifest.tsv but BLASTX's). */
 const CASES: readonly VbrCase[] = [
   manifestCase('compact.blastn', ['compact.blastn']),
   manifestCase('width.blastp', ['width.blastp']),
   manifestCase('width.tblastn', ['width.tblastn']),
   manifestCase('tblastx.multi', ['tblastx.multi.0', 'tblastx.multi.7']),
+  // BLASTX's query batches, searched as a flow at 4 threads.
+  vbrCases().find((c) => c.id === 'blastx.batches')!,
 ];
 const argvOf = (c: VbrCase) => [c.program, '-query', c.query, '-subject', c.subject, ...c.options];
 

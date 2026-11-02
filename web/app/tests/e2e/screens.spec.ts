@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { chooseRun, fasta, openFiles, openParameters, pickRun, program, submit, task, waitStatus } from './support/search';
+import { chooseRun, fasta, openFiles, openParameters, pickRun, program, showRecords, submit, task, waitStatus } from './support/search';
 
 const SCREENS = process.env['LOSAT_WEB_SCREENS'] || undefined;
 test.skip(SCREENS === undefined, 'screen records are taken only with LOSAT_WEB_SCREENS');
@@ -46,16 +46,19 @@ for (const size of SIZES) {
   test(`search screen at the ${size.name} size`, async ({ page, browserName }) => {
     await page.setViewportSize({ width: size.width, height: size.height });
     await page.goto('/');
-    await expect(page.getByTestId('storage-status')).toBeVisible();
+    // The storage is open (its section shows nothing in the normal case, stop-describing-ui rule 4).
+    await expect(page.getByTestId('storage-status')).toBeAttached();
     // After the engine has checked the default options (S13 screen review L6).
     await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', /^(ok|invalid)$/, { timeout: 60_000 });
     await shoot(page, browserName, size.name, '01-empty');
 
-    // Inputs: a query with a duplicate ID, a refused record and a protein-like record; one subject record with a region.
+    // Inputs: a query with a duplicate ID, a protein-like record and a record that the engine refuses
+    // (a gap line, which LOSAT Web does not support); one subject record with a region.
     await page.getByTestId('query-input').fill(
       '>contig_1 assembled contig\nACGTACGTTTGACCATGGCATGCATGCATTTAGGCCAAGTACGATCGATCG\n' +
         '>contig_1 second copy\nACGTTGCAACGTTGCAACGTTGCAAGGT\n' +
-        '>gene_x\nMKLVVLAAGGHHKLMKLVVLAAGG\n',
+        '>gene_x\nMKLVVLAAGGHHKLMKLVVLAAGG\n' +
+        '>?10\nACGT\n',
     );
     await page.getByTestId('subject-files').setInputFiles({
       name: 'LC738884.fasta',
@@ -74,8 +77,14 @@ for (const size of SIZES) {
     await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
     await shoot(page, browserName, size.name, '02-inputs-refused-region');
 
-    // Exclude the refused record and start a group of separate searches behind a running one.
-    await page.getByTestId('query-source-0-exclude-refused').click();
+    // Exclude the refused record (the engine's message names no record: from the record list) and
+    // start a group of separate searches behind a running one.
+    await showRecords(page, 'query');
+    await page.getByTestId('query-source-0-record-3').uncheck();
+    // The protein-like record too: the record table (the scan's reader) counts its 24 letters, the
+    // engine's NCBI reader keeps 19, and the run fails on the difference (line SX STATE 2026-11-03,
+    // reported to the maintainer and line WR).
+    await page.getByTestId('query-source-0-record-2').uncheck();
     await ready(page, 'query');
     await page.getByTestId('run-losat').click();
     await expect(page.getByTestId('run-1-option')).toHaveCount(1);
@@ -98,15 +107,13 @@ for (const size of SIZES) {
     await page.getByTestId('tab-search').click();
 
     // Parameters of the other programs.
-    for (const program of ['blastp', 'tblastn', 'tblastx'] as const) {
+    for (const program of ['blastp', 'blastx', 'tblastn', 'tblastx'] as const) {
       await page.getByTestId(`program-${program}`).check();
       await expect(page.getByTestId('parameter-form')).toBeVisible();
       if (program === 'tblastx') await page.getByTestId('param-db_gencode').selectOption('11');
       await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
       await shoot(page, browserName, size.name, `04-${program}`);
     }
-    await page.getByTestId('program-blastx').check();
-    await shoot(page, browserName, size.name, '05-blastx-unavailable');
 
     // A run that fails: a TBLASTX subject record without residues. `register` and `validate`
     // accept it, and the run ends with NCBI's `BLAST engine error: The average subject length
@@ -219,7 +226,8 @@ for (const size of SIZES) {
   test(`results screen at the ${size.name} size`, async ({ page, browserName }) => {
     await page.setViewportSize({ width: size.width, height: size.height });
     await page.goto('/');
-    await expect(page.getByTestId('storage-status')).toBeVisible();
+    // The storage is open (its section shows nothing in the normal case, stop-describing-ui rule 4).
+    await expect(page.getByTestId('storage-status')).toBeAttached();
     // The Hits view stays mounted (hidden) beside the dot plot: each has its own HSP table.
     const hspRows = page.getByTestId('results-hits').getByTestId('hsp-list').locator('[data-testid^="hsp-row-"]');
     const dotRows = page.getByTestId('results-dotplot').getByTestId('hsp-list').locator('[data-testid^="hsp-row-"]');

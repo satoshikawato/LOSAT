@@ -51,8 +51,6 @@ export class FakeEngine implements EngineGateway {
   async validate(argv: readonly string[]): Promise<ValidationResult> {
     const program = argv[0];
     if (!PROGRAMS.some((p) => p.id === program)) return { ok: false, message: `unknown program: ${program}` };
-    // As ABI v2 does until session SX (web/adapter/src/run.rs `Program::parse`).
-    if (program === 'blastx') return { ok: false, message: 'blastx is not available in LOSAT Web ABI v2 yet' };
     return { ok: true };
   }
 
@@ -90,7 +88,7 @@ export class FakeEngine implements EngineGateway {
    * Writes outputs with the structure of a search, so that the results screen can be built
    * and tested without the engine: up to 200 queries, each but every fourth with HSPs on
    * up to three subjects (the third subject is left out of outfmt 0, as subjects past
-   * -num_alignments are), a reverse HSP and, for BLASTN, a one-letter HSP. Every text
+   * -num_alignments are), a reverse HSP on a nucleotide subject and, for BLASTN, a one-letter HSP. Every text
    * says that it is not a search result, and the values are marked FAKE.
    */
   private writeOutputs(request: EngineRunRequest, writer: RunOutputWriter): void {
@@ -98,8 +96,8 @@ export class FakeEngine implements EngineGateway {
     const program = request.argv[0] ?? '';
     const queries = fakeRecordKeys(request.query.bytes).slice(0, 200);
     const subjects = fakeRecordKeys(request.subject.bytes).slice(0, 3);
-    const nucleotide = { query: program === 'blastn' || program === 'tblastx', subject: program !== 'blastp' };
-    const translated = { query: program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
+    const nucleotide = { query: ['blastn', 'blastx', 'tblastx'].includes(program), subject: ['blastn', 'tblastn', 'tblastx'].includes(program) };
+    const translated = { query: program === 'blastx' || program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
     let out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;
     // outfmt 6 has no comment lines; this first line is what makes an exported fake outfmt 6
     // say that it is not a search result. The rows are read by their `out6` ranges.

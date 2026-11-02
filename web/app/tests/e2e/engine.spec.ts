@@ -230,6 +230,7 @@ test('a run of several searches or query batches runs threaded from a new runtim
   const twoSearches: VbrCase = { ...batches, id: 'tblastn.query_batches.num_alignments', options: ['-num_alignments', '3'] };
   const file = (name: string) => ({ url: `/__extra/${name}`, name });
   for (const vbr of [batches, twoSearches]) {
+    const outputs: string[] = [];
     for (const threads of [2, 4]) {
       const search: SearchCase = { ...searchOf(vbr, threads), query: file(vbr.query), subject: file(vbr.subject) };
       // A new application (a session with its own options), so that this is the first search of its runtime.
@@ -237,8 +238,12 @@ test('a run of several searches or query batches runs threaded from a new runtim
       expect(result!.status, result!.record.error).toBe('completed');
       expect(result!.record.runtimePath).toBe('threaded');
       expect(result!.record.threads).toBe(threads);
-      if (NATIVE !== undefined) expectOutputs(vbr, result!);
+      outputs.push(JSON.stringify(result!.sha256));
+      // The two searches' CLI warnings differ by format (abi_v2.md §8), which nativeExpectation
+      // does not take; V-ABI (web/adapter/tests/v_abi.js) compares such runs with the native CLI.
+      if (NATIVE !== undefined && vbr === batches) expectOutputs(vbr, result!);
     }
+    expect(outputs[1], `${vbr.id}: the same bytes at 2 and 4 threads`).toBe(outputs[0]);
   }
 });
 

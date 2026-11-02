@@ -20,6 +20,13 @@
 //! branch-free list, a sparser one keeps the branch, and `LOSAT_X_BPCLUTSCANBFMIN=0` takes the list
 //! on every table. Exact blastp builds no compressed table and records no side.
 //!
+//! The dense tables' loops after the list (blastp-fast's fused loop with the branch-free two-hit
+//! test and the staged copy, `src/algorithm/blastp/x_seed_fused_clut.rs`; always taken, natively,
+//! on a table with the branch-free list) are part of the default run here: `LOSAT_X_BPCLUTSCANBF=0`
+//! and the reference compressed table (`LOSAT_X_BPCLUT=0`) keep the loop with the branch, and the
+//! report must not change. The subjects include records shorter than a word, which take the
+//! branch-free test's loop without the staged copy.
+//!
 //! The dense query is the first 30 proteins of AP027131 (9,948 residues; its table uses 30.9 % of
 //! the cells), the sparse one its first protein (455 residues; 1.66 %, a third of the built-in
 //! threshold); the subjects are the first 150 proteins of the related AP027133.
@@ -31,6 +38,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const SWITCH: &str = "LOSAT_X_BPCLUTSCANBF";
 const OFF: (&str, &str) = ("LOSAT_X_BPCLUTSCANBF", "0");
 const EVERY_TABLE: (&str, &str) = ("LOSAT_X_BPCLUTSCANBFMIN", "0");
+const REFERENCE_TABLE: (&str, &str) = ("LOSAT_X_BPCLUT", "0");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -84,7 +92,10 @@ impl Inputs {
         let subject = dir.join("subject.faa");
         std::fs::write(&dense, records("AP027131.faa", 0, 30)).unwrap();
         std::fs::write(&sparse, records("AP027131.faa", 0, 1)).unwrap();
-        std::fs::write(&subject, records("AP027133.faa", 0, 150)).unwrap();
+        // Records of 1, 3 and 4 residues (shorter than a word of 5) follow the proteins.
+        let mut subjects = records("AP027133.faa", 0, 150);
+        subjects.push_str(">short1\nM\n>short3\nMKV\n>short4\nMKVL\n");
+        std::fs::write(&subject, subjects).unwrap();
         let db = dir.join("db");
         let made = losat(&[], &dir.join("worker.log"))
             .arg("makeblastdb")
@@ -211,10 +222,16 @@ fn blastp_fast_reports_do_not_depend_on_the_branch_free_list() {
                 assert_eq!(on.code, Some(0), "{case}: {}", on.stderr);
                 assert!(!on.stdout.is_empty(), "{case}: no hits");
                 assert_eq!(on.reached, (dense, !dense), "{case}: default's side");
-                for (label, env, reached) in [
+                let mut arms = vec![
                     ("off", OFF, (false, false)),
                     ("every table", EVERY_TABLE, (true, false)),
-                ] {
+                ];
+                // The reference compressed table, on one case: it builds no flat table and keeps
+                // its loop.
+                if dense && source == "-subject" && threads == "1" {
+                    arms.push(("reference table", REFERENCE_TABLE, (false, true)));
+                }
+                for (label, env, reached) in arms {
                     let run = blastp(&args, &[env]);
                     assert_eq!(run.code, Some(0), "{case} {label}: {}", run.stderr);
                     assert!(run.stdout == on.stdout, "{case} {label}: report differs");

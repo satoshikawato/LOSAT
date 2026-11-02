@@ -332,9 +332,6 @@ export LOSAT_X_BPDBWIDE=1
 export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
 export LOSAT_X_BPFFILL=1
-export LOSAT_X_BPFLEAN=1
-export LOSAT_X_BPFSEED=1
-export LOSAT_X_BPFSTAGE=1
 export LOSAT_X_BPGAP=1
 export LOSAT_X_BPGAP16=1
 export LOSAT_X_BPGAPBAND=1
@@ -2178,139 +2175,29 @@ Rebuilding less:
   x1.0000; `=0` runs dev's instructions (x1.0000, cycles x0.992-1.031 of dev's in the same rounds). With two or
   more threads the pool builds the table and the switch does not act. In the strict set from its first pull
   request (no measured case slower; AGENTS.md "Speed-up switches").
-- `LOSAT_X_BPFSEED=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
-  2026-10-24, line v4-BPF K2-1; `=0` turns it off; acts in the fused loop on the flat compressed
-  table of `LOSAT_X_BPCLUT` where the scan lists the cells without a branch, `LOSAT_X_BPCLUTSCANBF`, natively; a
-  sparser table, the reference compressed table and wasm32 keep their loops) the loop on such a table
-  (`blastp/x_seed_fused_clut.rs` `x_scan_flat_fseed`) takes two changes: each hit goes first through blastp's
-  branch-free two-hit test (`XHitBf::test`, the test of `LOSAT_X_BPHITBF`, which does not act here: too far and
-  overlap without a branch, a flag-1 entry or a candidate on to `x_test_hit`; exact where `XHitBf::fits` holds for
-  the subject, which is decided and recorded per subject, `LOSAT_X_REACH`), and no hit reads ahead a later hit's diagonal entry (with about 3.5 hits
-  per cell the read-ahead rarely found one, and its bound test stayed). The cells, their order and the hits are
-  `for_each_cell::<true, _>`'s, the diagonal table holds after each hit what `x_test_hit` leaves there, and the
-  extension is called for the same hits with the same values, so the report is the same (the lib test
-  `the_flat_loop_is_the_fused_loop_on_the_reference_table` compares the loop with the reference table's loop, and
-  `tests/blastp_fast_seed_bf.rs` the reports with `=0`'s, with both lists and with the reference table). The loop
-  is out of line, so the loops without it keep their code; only the choice in `x_scan_two_hit_compressed_flat`
-  is new (`=0` runs the instructions of the binary before the switch on the dense tables, x1.0000, and `=0` and
-  the default x0.9998 of them on a sparse one). Not taken (line v4-BPF K2 probes, one
-  core on the workstation): the scan reading each listed cell's slice bounds (a list of (offset, start, end)) took
-  x1.50 the cycles of 3 proteins x UniRef50 volume 00, as the branch-free list then loads the bounds at every
-  offset; on the tables with the branch the loop gained nothing (x0.98-1.01 on a 42-residue protein x UniRef50);
-  AVX2 batches of the cells of eight or more hits (`LOSAT_X_BPDIAG` with `LOSAT_X_BPDEFER`) x1.06 the cycles of
-  the loop without them; reading the hits 4 or 16 cells ahead instead of 8, the slice bounds 8 or 32 ahead instead
-  of 16, and slices without bound tests changed nothing measurable. In WebAssembly (the serial WASI command in
-  Node 26, one process, 3 rounds) the loop took x1.055-1.086 the time of 3 proteins x UniRef50 (x0.945-0.979 for 10
-  proteins, x0.99 for 42 residues), so wasm32 keeps `x_scan_flat_bf`. Timed 2026-10-24 on the workstation (node 0, one physical core, its
-  HT sibling idle, warmed 3 s before every run, 8 rounds of the pairs in alternating order; other lines' gates ran on
-  node 0, load 22-88, so the cycle and instruction counts are the firmer measure; dev a806eaa5; every report
-  identical between the arms; medians, `cycles:u`): OrthoFinder's 1/10 of the Arabidopsis proteins x the zebrafish
-  proteome (`-db`, `-evalue 0.001`) x0.901 (instructions x0.989, mispredicted branches x0.701), the 1/10 of the human
-  proteins x the yeast proteome x0.939, the 1/10 of the yeast proteins x the yeast proteome x0.935; UniRef50 volume 00
-  (`-db`, `-evalue 1e-5`) 3 proteins x0.957, 10 proteins x0.912; once each, the whole human proteome x the yeast
-  proteome 74.16 -> 69.63 s (cycles x0.937) and the whole Arabidopsis proteome x the zebrafish proteome 256.49 ->
-  235.51 s (x0.915), max RSS 93.1 -> 94.9 MiB and 75.6 -> 75.7 MiB (one run each). Where the switch does not act the
-  instructions are those of dev: proteins of 42 and 357 residues x UniRef50 (the list with the branch) x0.9998 with
-  cycles x1.003 (the `=0` arm read x1.009 in a probe round: code layout), exact blastp (1/10 of the Arabidopsis
-  proteins x the yeast proteome) x1.0000. In the strict set from its first pull request (no measured case slower
-  natively; AGENTS.md "Speed-up switches").
-- `LOSAT_X_BPFSTAGE=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
-  2026-10-26, line v4-BPF s4; `=0` turns it off; acts where `LOSAT_X_BPFSEED`'s loop runs, natively, on the subjects
-  that fit its scan: compressed alphabet of 15 letters, word length 2 to 6, one presence bit per cell, as on every
-  table dense enough for the branch-free list, and a byte past the last word, which a search's subjects of a word or
-  more keep, `LOSAT_X_REACH`; wasm32, where `LOSAT_X_BPFSEED`'s loop does not run,
-  keeps its loops) changes that loop (`blastp/x_seed_fused_clut.rs` `x_scan_flat_stage`,
-  exactness argument in that file's header) in three ways. The scan is out of line and takes two offsets per step
-  (`tblastx/lookup/x_clut_direct.rs` `x_list_pairs`): with both new letters in the alphabet the index of `s + 1` is
-  NCBI's step from the index of `s`, and the preshift after `s + 1` is the index of `s` over 225 plus the second
-  letter's scaled value over 15, so the dependency chain from preshift to preshift, which set the scan's time (about
-  7 cycles per offset at 26-36 instructions, inlined in the larger loop with its state on the stack), takes one
-  multiply per two offsets; the divisions are exact below 15^6 (lib test), the letter's over 15 is a multiply by the
-  inverse of 15 modulo 2^32, and the presence bits' shift is the constant one. Each cell's hits are staged, in scan
-  order, in runs of 8 copied whole as `q - s` and `s + diagonal offset`, so that no loop ends at a cell's last hit
-  (about one mispredicted branch per cell, half of the search's mispredicts on a dense table); when fewer than 8 of
-  the 1,024 places are left, and at the end, one loop, out of line, gives the staged hits in order to the loop's
-  test: the diagonal is `(q - s) & mask` and the query offset `(q - s) + s`. The read-ahead of the slice bounds and of the hits is that of `for_each_cell`, without its
-  bound tests (the list holds 16 entries of cell 0 past its end). The hits, their order, the tests, the entries and
-  the calls are those of the loop without the switch, so the report is the same (the lib test
-  `the_flat_loop_is_the_fused_loop_on_the_reference_table` compares the loop with the reference table's loop,
-  `the_fused_loop_takes_either_loop_with_the_same_outcomes` the choice with `x_scan_flat_bf` on subjects of up to
-  3,000 letters, several flushes, and `the_staged_loop_copies_the_last_cell_of_the_hits` the copy at the end of the
-  hits array with the loop without the switch; `flat_scans_give_the_reference_scans_hits` and
-  `the_pairs_scan_lists_word_length_six_and_declines_outside_its_range` the list with `for_each_cell`'s, and
-  `the_pairs_scan_divisions_are_exact_below_fifteen_to_the_sixth` the divisions; `tests/blastp_fast_stage.rs` the
-  reports with `=0`'s). The loops are out of line,
-  so the loops without the switch keep their code. Not taken (line v4-BPF s4 probes, one core on the workstation):
-  the staged loop inlined with the scan (its copies were not vectorized and its state went to the stack: +18
-  instructions per hit, no gain although the mispredicts halved), runs of 16 hits, the test per 256 staged hits, no
-  read-ahead of the hits, and the reviewed first form of this pull request, with the letter over 15 by NCBI's
-  reciprocal multiply and the presence bits' shift read from the table (x1.014 the cycles of this form on the 1/10
-  of the Arabidopsis proteins x the zebrafish proteome, x1.12 on 3 proteins x UniRef50: the scan's state went to the
-  stack). In WebAssembly (probe, the serial WASI command in Node 26, one process, 3 rounds, in place
-  of `x_scan_flat_bf`, which every wasm32 table takes) the loop took x0.867 and x0.892 the CPU time of the 1/10 of
-  the Arabidopsis and human proteins x the zebrafish and yeast proteomes, but x1.131 of 3 proteins and x1.182 of 42
-  residues x UniRef50 volume 00 (x0.982 for 10 proteins), so wasm32 keeps its loops. Timed 2026-10-26 on the
-  workstation (node 0, one physical core, its HT sibling idle, warmed 3 s before every run, 8 rounds of the pairs in
-  alternating order; load 0.4-17; dev 70d75af5; every report identical between the arms; medians, `cycles:u`):
-  OrthoFinder's 1/10 of the Arabidopsis proteins x the zebrafish proteome (`-db`, `-evalue 0.001`) x0.923
-  (instructions x0.992, mispredicted branches x0.519), of the human proteins x the yeast proteome x0.943, of the
-  yeast proteins x the yeast proteome x0.946; UniRef50 volume 00 (`-db`, `-evalue 1e-5`) 3 proteins x0.795
-  (instructions x0.740: the scan is most of that search), 10 proteins x0.895; once each, the whole human proteome x
-  the yeast proteome 62.07 -> 58.80 s (cycles x0.946) and the whole Arabidopsis proteome x the zebrafish proteome
-  222.57 -> 204.97 s (x0.920), max RSS 82.7 -> 83.9 MiB and 75.2 -> 75.7 MiB (NCBI's 95 and 115 MiB). Where the
-  switch does not act the instructions are dev's: a 42-residue protein x UniRef50 (a sparse table, the list with the
-  branch) x1.0000 (cycles x0.999), exact blastp (1/10 of the Arabidopsis proteins x the yeast proteome) x1.0000;
-  `=0` runs dev's instructions (x1.0001-1.0006, cycles x0.993-1.001 in the same rounds). With 16 threads
-  (node 1, CPUs 32-47, once, 3 rounds) the whole human proteome x the yeast proteome took 5.47 -> 5.23 s (cycles
-  x0.951) and the whole Arabidopsis proteome x the zebrafish proteome 18.19 -> 16.98 s (x0.921). In the strict set
-  from its first pull request (no measured case slower natively; AGENTS.md "Speed-up switches").
-- `LOSAT_X_BPFLEAN=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
-  2026-10-26, line v4-BPF s6; `=0` turns it off; acts where `LOSAT_X_BPFSTAGE`'s loop runs, on the same subjects,
-  and records its sides where that switch does, `LOSAT_X_REACH`; with `LOSAT_X_BPFSTAGE=0` it does not act) runs
-  that loop as `x_scan_flat_lean` (`blastp/x_seed_fused_clut.rs`, exactness argument in that file's header), which
-  reads differently but stages and tests the same. The scan's two-offset steps are a loop of their own, out of line
-  (`tblastx/lookup/x_clut_direct.rs` `x_list_pairs_lean`, `x_pairs_loop`), so that the offset, the list's length,
-  the preshift and the next letter stay in registers (in one loop with the other steps the list's length was kept on
-  the stack, loaded and stored at every pair), with NCBI's reciprocal for 15 as the constant `x_pairs_fit` asks for,
-  `u32` arithmetic and the subject read through a pointer a word length in; the first word, a letter outside the
-  alphabet and the last offset take `x_list_pairs`'s steps, so the list is the same. The copy is out of line and
-  makes no call (`x_lean_copy`): it stages runs until fewer than 8 of the 1,024 places are left or the list ends and
-  returns where it stopped (within a cell too); the caller gives the staged hits to the same test loop
-  (`x_stage_test`) and calls it again. A run's second half of 4 hits is read from `k + 4` only where the cell has
-  more than 4 hits left, else from `k` again (places past the run's length, left unread as before): in the probe
-  72 % of the copy's L2 misses were that half's line, unused by cells of 3.5 hits on average. The read-ahead also
-  takes the slice bound after the one it reads ahead (a line crossed 1 time in 16). The runs, their places, the
-  flushes, and so the hits, their order, the tests, the entries and the calls are those of `x_scan_flat_stage` (the
-  lib tests `the_lean_loop_is_the_staged_loop`, which replays the staging to show a flush within a cell and runs on
-  either side of the 4-hit rule, `the_flat_loop_is_the_fused_loop_on_the_reference_table` and
-  `the_staged_loop_copies_the_last_cell_of_the_hits` compare the loop with the staged loop, the reference table's loop
-  and the loop without `LOSAT_X_BPFSTAGE`; `flat_scans_give_the_reference_scans_hits` and
-  `the_pairs_scan_lists_word_length_six_and_declines_outside_its_range` the list with `for_each_cell`'s;
-  `tests/blastp_fast_stage.rs` the reports with `=0`'s). The new loops are out of line and the lean loop makes its
-  stage itself, so the loops without the switch keep their machine code: `x_scan_flat_stage`, `x_stage_test`,
-  `x_list_pairs`, `x_scan_flat_fseed_loop` and `x_scan_flat_bf` have dev's instructions (objdump of both release
-  builds; a first form that also made its stage with `XStage::new` left that function out of line in
-  `x_scan_flat_stage`, 29 instructions fewer there). Not taken (line v4-BPF s5 probes, one core on the workstation):
-  the steps' loop inlined in the scan (the list's length on the stack: x0.93 of the cycles on 3 proteins x UniRef50,
-  against x0.82 out of line, and within 2 % on the OrthoFinder tables), a read-ahead of the line of a later cell's last hit (x1.04 on 3 proteins x UniRef50), and
-  read-ahead distances of 16 and 32 cells (no difference). Timed 2026-10-26 on the workstation (node 0, one physical
-  core, its HT sibling idle, warmed 3 s before every run, 8 rounds of the pairs in alternating order; load 15-69, other
-  lines' builds and gates on node 0; dev d40021ba; every report identical between the arms; medians, `cycles:u`):
-  OrthoFinder's 1/10 of the Arabidopsis proteins x the zebrafish proteome (`-db`, `-evalue 0.001`) x0.981
-  (instructions x0.993), of the human proteins x the yeast proteome x0.988, of the yeast proteins x the yeast proteome
-  x0.992; UniRef50 volume 00 (`-db`, `-evalue 1e-5`) 3 proteins x0.817 (instructions x0.807), 10 proteins x0.927;
-  once each, the whole human proteome x the yeast proteome 62.18 -> 62.09 s (cycles x0.984) and the whole Arabidopsis
-  proteome x the zebrafish proteome 218.30 -> 215.26 s (x0.986), max RSS 83.9 -> 84.0 MiB and 75.4 -> 77.5 MiB
-  (NCBI's 95 and 115 MiB). On the 1/10 of the Arabidopsis proteins (perf record, the same core) the copy took
-  8.62 -> 7.20 G cycles with 97.7 -> 53.9 M L2 misses, the scan 2.03 -> 1.46 G. Where the switch does not act the
-  instructions are dev's: a 42-residue protein x UniRef50 (a sparse table) x1.0000 (cycles x1.000), exact blastp
-  (1/10 of the Arabidopsis proteins x the yeast proteome) x1.0000; `=0` runs dev's instructions (x1.0000-1.0004, cycles x0.994-0.999 in a confirming run of 4 rounds of the final
-  form, load 31-37, where the switch took x0.987, x0.992 and x0.815 on the first three cases above). With 16
-  threads (node 1, CPUs 32-47, once, 3 rounds) the whole human proteome x the yeast proteome took 5.25 -> 5.19 s
-  (cycles x0.991) and the whole Arabidopsis proteome x the zebrafish proteome 17.01 -> 16.75 s (x0.989), max RSS
-  123.5 -> 124.2 MiB and 106.0 -> 108.2 MiB (medians; per run 122.8-125.5 and 104.1-108.8 MiB, dev's 122.7-123.7
-  and 105.0-106.9). In the strict set from its first pull request (no measured case slower natively; AGENTS.md
-  "Speed-up switches").
+  The dense tables' loop after the list. Until 2026-11-02 three more strict-set switches, `LOSAT_X_BPFSEED`,
+  `LOSAT_X_BPFSTAGE` and `LOSAT_X_BPFLEAN`, chose its form; they were folded into it (line SF S3, family
+  bpf-seed-loop) and select nothing now: no variable is read, so `=0` and `=1` give the same run. What runs, in
+  `blastp/x_seed_fused_clut.rs`: on a table that takes the branch-free list (the rule above), natively, a subject
+  where `XHitBf::fits` holds (`1 <= wordsize < window`, `0 <= diag_offset` and `diag_offset + length + 2 window <
+  2^30`) runs `x_scan_flat_lean` if `XFlatCompressedLookup::x_pairs_fit` holds (a subject of a word or more, which
+  keeps its sentinel, with the 15-letter alphabet and words of 2 to 6 letters), else `x_scan_flat_fseed_loop`; a
+  subject where `XHitBf::fits` fails runs `x_scan_flat_bf`, and wasm32 always runs `x_scan_flat_bf`. Sparse tables
+  and `LOSAT_X_BPCLUTSCANBF=0` keep the loop with the branch (`x_scan_flat_in::<false, _>`). `x_scan_flat_fseed_loop`
+  gives each hit to blastp's branch-free two-hit test (`XHitBf::test`) first, a flag-1 entry or a candidate on to
+  `x_test_hit`, and reads no diagonal entry ahead; `x_scan_flat_lean` makes the list two offsets per step in a loop
+  of its own (`x_list_pairs_lean`, `x_pairs_loop`), stages each cell's hits in runs of 8 (`x_lean_copy`, 1,024
+  places) and tests them in order in an out-of-line loop (`x_stage_test`), with the hits, their order, the tests,
+  the entries and the calls of `x_scan_flat_fseed_loop`, so the report is the same as with the loop with the branch
+  (lib tests `the_flat_loop_is_the_fused_loop_on_the_reference_table`, `the_lean_loop_is_the_branch_free_test_loop`,
+  `the_lean_loop_copies_the_last_cell_of_the_hits`, `the_fused_loop_takes_either_loop_with_the_same_outcomes`;
+  `tests/blastp_fast_scan_bf.rs` the reports). Why they were folded: each `=0` was slower on every input measured
+  (workstation, node 0, `cycles:u`): the branch-free test x0.90-0.96 on dense tables (#472: OrthoFinder's 1/10 of the
+  Arabidopsis proteins x the zebrafish proteome x0.901, UniRef50 volume 00 `-db` 3 proteins x0.957, 10 proteins
+  x0.912), the staged loop with the list two offsets per step x0.80-0.95 (#543: 3 proteins x0.795, 10 proteins x0.895),
+  and the out-of-line steps and copy x0.98-0.99 and x0.82 on 3 proteins x UniRef50 (#551). WebAssembly keeps
+  `x_scan_flat_bf` because there both were slower (Node 26, serial WASI command, 3 rounds, 3 proteins x UniRef50: the
+  branch-free test x1.06-1.09, the staged loop x1.13-1.18).
 - `LOSAT_X_BPLKPFLAT=1` (BLASTP `-task blastp-fast`, speed; in the strict set since 2026-10-17, on by default
   together with `LOSAT_X_BPCLUT`; acts only where the search's pool builds the flat table of
   `LOSAT_X_BPCLUT`, with more than one thread) changes how that build is scheduled
@@ -2529,8 +2416,8 @@ Rebuilding less:
   `0 <= diag_offset` and `diag_offset + length + 2 window < 2^30` (otherwise the loop without the test runs: a
   window equal to the word size, or a subject of about 2^29 letters or a `-window_size` near 2^29). The
   AVX2 batches of `LOSAT_X_BPDIAG` (the x86-64 default) and blastp-fast's loop on the reference compressed
-  table keep their own tests; blastp-fast's loop on the flat table takes the test under `LOSAT_X_BPFSEED`
-  (`LOSAT_X_BPHITBF=0` does not turn it off there). With `LOSAT_X_BPDIAG=0` 72-74 % of the hits of WSSV x
+  table keep their own tests; blastp-fast's loop on the flat table with the branch-free list takes the test always, natively
+  (`x_scan_flat_fseed_loop`; `LOSAT_X_BPHITBF=0` does not turn it off there). With `LOSAT_X_BPDIAG=0` 72-74 % of the hits of WSSV x
   PajaWSV and of 300 yeast
   proteins x the fly proteome are too far, 18.6-18.8 % overlap, 2.5-3.7 % meet a flag-1 entry and 4.7-5.3 %
   are candidates (v4-A10 probe bp1). With `LOSAT_X_STATS` (and the `xstats` feature) `main` prints

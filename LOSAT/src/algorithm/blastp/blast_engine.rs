@@ -7779,60 +7779,6 @@ fn run_resolved_in_pool(
             ),
         }
     }
-    // EXPERIMENT (LOSAT_X_BPFSEED): the reference compressed table, a flat table without the
-    // branch-free list and every table on wasm32 keep their loops; on a flat table with the list
-    // the loop records its side per subject (`x_seed_fused_clut.rs`).
-    if args.window_size != 0 && super::x_seed_fused_clut::x_bp_fseed() {
-        match &lookup {
-            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
-            BlastpRuntimeLookup::Compressed(_) => {
-                crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
-            }
-            BlastpRuntimeLookup::CompressedFlat(table) => {
-                if !super::x_seed_fused_clut::x_fseed_table(table) {
-                    crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
-                }
-            }
-        }
-    }
-    // EXPERIMENT (LOSAT_X_BPFSTAGE): it acts only where LOSAT_X_BPFSEED's loop runs; the tables
-    // without that loop keep theirs, and a subject with it records its side
-    // (`x_seed_fused_clut.rs`).
-    if args.window_size != 0
-        && super::x_seed_fused_clut::x_bp_fseed()
-        && super::x_seed_fused_clut::x_bp_fstage()
-    {
-        match &lookup {
-            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
-            BlastpRuntimeLookup::Compressed(_) => {
-                crate::utils::xreach::x_reach!("LOSAT_X_BPFSTAGE", false)
-            }
-            BlastpRuntimeLookup::CompressedFlat(table) => {
-                if !super::x_seed_fused_clut::x_fseed_table(table) {
-                    crate::utils::xreach::x_reach!("LOSAT_X_BPFSTAGE", false)
-                }
-            }
-        }
-    }
-    // EXPERIMENT (LOSAT_X_BPFLEAN): it acts only where LOSAT_X_BPFSTAGE's loop runs, and records
-    // its sides where that switch records its own.
-    if args.window_size != 0
-        && super::x_seed_fused_clut::x_bp_fseed()
-        && super::x_seed_fused_clut::x_bp_fstage()
-        && super::x_seed_fused_clut::x_bp_flean()
-    {
-        match &lookup {
-            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
-            BlastpRuntimeLookup::Compressed(_) => {
-                crate::utils::xreach::x_reach!("LOSAT_X_BPFLEAN", false)
-            }
-            BlastpRuntimeLookup::CompressedFlat(table) => {
-                if !super::x_seed_fused_clut::x_fseed_table(table) {
-                    crate::utils::xreach::x_reach!("LOSAT_X_BPFLEAN", false)
-                }
-            }
-        }
-    }
     let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);
     let concatenated_query = build_blastp_concatenated_query(&contexts);
     // The context of every query offset, for the candidates of the fused seed loop (the binary

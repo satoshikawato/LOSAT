@@ -1960,14 +1960,14 @@ impl XFlatCompressedLookup {
 
     // No NCBI counterpart: the range of LOSAT's two-offsets-per-step scan; it does not change any
     // value NCBI computes.
-    /// EXPERIMENT (LOSAT_X_BPFSTAGE): whether [`Self::x_list_pairs`] lists the offsets of `subject`
-    /// (`subject_length` residues): the compressed alphabet has 15 letters (NCBI's reciprocal for
-    /// 15), the word length is 2 to 6 (the indices stay below 15^6, where the divisions by 15 and
-    /// by 225 are exact), the presence bits are one per cell (shift `PV_ARRAY_BTS`, as on every
-    /// table with 1 % of its cells used or more, which the branch-free list needs) and they and the
-    /// slice bounds cover every index, and the subject keeps a byte past its last word (the
-    /// sentinel, which a search's subjects of a word or more keep), so that the scan reads no letter
-    /// out of bounds.
+    /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): whether [`Self::x_list_pairs_lean`] lists the offsets of
+    /// `subject` (`subject_length` residues): the compressed alphabet has 15 letters (NCBI's
+    /// reciprocal for 15), the word length is 2 to 6 (the indices stay below 15^6, where the
+    /// divisions by 15 and by 225 are exact), the presence bits are one per cell (shift
+    /// `PV_ARRAY_BTS`, as on every table with 1 % of its cells used or more, which the branch-free
+    /// list needs) and they and the slice bounds cover every index, and the subject keeps a byte
+    /// past its last word (the sentinel, which a search's subjects of a word or more keep), so that
+    /// the scan reads no letter out of bounds.
     pub(crate) fn x_pairs_fit(&self, subject: &[u8], subject_length: usize) -> bool {
         let Ok(word_length) = usize::try_from(self.word_length) else {
             return false;
@@ -1989,149 +1989,29 @@ impl XFlatCompressedLookup {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341 (quoted at
     // `for_each_cell`)
-    /// EXPERIMENT (LOSAT_X_BPFSTAGE): the list of `for_each_cell::<true, _>` (each offset whose
+    /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): the list of `for_each_cell::<true, _>` (each offset whose
     /// index has its presence bit, with the index, in order) for a subject where
-    /// [`Self::x_pairs_fit`] holds, made two offsets per step and out of line (the scan inlined in
-    /// a larger loop kept its state on the stack). With both new letters `c0` and `c1` in the
-    /// alphabet (scaled values `C0`, `C1`, multiples of 15^(word length - 1)) and `p` the preshift
-    /// before offset `s`, the index of `s` is `i0 = p + C0`, the index of `s + 1` is `i0 / 15 + C1`
-    /// (NCBI's step), and the preshift after `s + 1` is `(i0 / 15 + C1) / 15 = i0 / 225 + C1 / 15`
-    /// (as `C1` is a multiple of 15), so the chain from preshift to preshift takes one multiply per
-    /// two offsets; `C1 / 15` is off the chain. The divisions are NCBI's reciprocal multiply and,
-    /// for 225, `x * 19,088,744 >> 32`, exact below 15^6 (lib test); `C1 / 15`, an exact division,
-    /// is `C1` times the inverse of 15 modulo 2^32. A letter outside the alphabet
-    /// takes NCBI's step and its skip, as `for_each_cell` does. `cells` reserves
+    /// [`Self::x_pairs_fit`] holds, made two offsets per step. With both new letters `c0` and `c1`
+    /// in the alphabet (scaled values `C0`, `C1`, multiples of 15^(word length - 1)) and `p` the
+    /// preshift before offset `s`, the index of `s` is `i0 = p + C0`, the index of `s + 1` is
+    /// `i0 / 15 + C1` (NCBI's step), and the preshift after `s + 1` is
+    /// `(i0 / 15 + C1) / 15 = i0 / 225 + C1 / 15` (as `C1` is a multiple of 15), so the chain from
+    /// preshift to preshift takes one multiply per two offsets; `C1 / 15` is off the chain. The
+    /// divisions are NCBI's reciprocal multiply and, for 225, `x * 19,088,744 >> 32`, exact below
+    /// 15^6 (lib test); `C1 / 15`, an exact division, is `C1` times the inverse of 15 modulo 2^32.
+    /// The two-offset steps are a loop of their own, out of line ([`x_pairs_loop`]), so that their
+    /// state (the offset, the list's length, the preshift and the next letter) stays in registers:
+    /// in one loop with the other steps, the list's length was kept on the stack, loaded and stored
+    /// at every pair. That loop takes NCBI's reciprocal for 15 as the constant `x_pairs_fit` asks
+    /// for, computes in `u32` (every index is below 15^6) and reads the subject through a pointer a
+    /// word length in. The first word, a letter outside the alphabet (NCBI's step and its skip, as
+    /// in `for_each_cell`) and the last offset take one offset per step. `cells` reserves
     /// [`X_STARTS_AHEAD`] places past the list.
     ///
     /// # Safety
     ///
     /// [`Self::x_pairs_fit`]`(subject, subject_length)` holds: the scan reads the subject's bytes
     /// and the presence bits without bounds checks.
-    #[inline(never)]
-    pub(crate) unsafe fn x_list_pairs(
-        &self,
-        subject: &[u8],
-        subject_length: usize,
-        cells: &mut Vec<(i32, u32)>,
-    ) {
-        debug_assert!(self.x_pairs_fit(subject, subject_length));
-        // The scaled letters are at most 14 * 15^(word length - 1), so every index and preshift
-        // below stays under 15^word length.
-        let word_length = self.word_length as usize;
-        let recip = i64::from(self.reciprocal_alphabet_size);
-        let table = &self.scaled_compress_table_u8;
-        let pv = &self.pv;
-        cells.clear();
-        let s_last = subject_length.saturating_sub(word_length);
-        // SAFETY: the loops read up to s_last + word length, below subject.len() (x_pairs_fit, the
-        // caller's contract).
-        let byte_at = |i: usize| unsafe { *subject.get_unchecked(i) };
-        let bit_of = |index: i32| {
-            let ix = index as usize;
-            // SAFETY: an index is below 15^word length (the scaled letters, above), which the bits
-            // cover (x_pairs_fit, the caller's contract).
-            let word = unsafe { *pv.get_unchecked(ix >> PV_ARRAY_BTS) };
-            (word >> (ix & PV_ARRAY_MASK)) & 1
-        };
-        let div225 = |x: i32| ((i64::from(x) * 19_088_744) >> 32) as i32;
-        // 15 * 0xEEEE_EEEF = 1 modulo 2^32.
-        let div15_exact = |x: i32| (x as u32).wrapping_mul(0xEEEE_EEEF) as i32;
-
-        let mut s = 0usize;
-        let mut index = 0i32;
-        while s <= s_last {
-            let (computed, skip) = compute_compressed_index_u8(
-                word_length - 1,
-                &subject[s..s + word_length - 1],
-                15,
-                table,
-            );
-            index = computed;
-            if skip == 0 {
-                break;
-            }
-            s += 1;
-        }
-        let mut next_char = if s <= s_last {
-            byte_at(s + word_length - 1)
-        } else {
-            0
-        };
-        let mut preshift = compressed_reciprocal_divide(index, recip);
-        cells.reserve(s_last + 1 - s + X_STARTS_AHEAD);
-        let list = cells.as_mut_ptr();
-        let mut listed = 0usize;
-        while s <= s_last {
-            if s < s_last {
-                let c1 = byte_at(s + word_length);
-                let scaled0 = table[usize::from(next_char)];
-                let scaled1 = table[usize::from(c1)];
-                if (scaled0 | scaled1) >= 0 {
-                    let i0 = preshift + scaled0;
-                    let i1 = compressed_reciprocal_divide(i0, recip) + scaled1;
-                    preshift = div225(i0) + div15_exact(scaled1);
-                    next_char = byte_at(s + word_length + 1);
-                    let bit0 = bit_of(i0);
-                    // SAFETY: each offset adds at most one to `listed`, so `listed` stays below
-                    // the reserve (as in `for_each_cell`).
-                    unsafe { list.add(listed).write((s as i32, i0 as u32)) };
-                    listed += bit0 as usize;
-                    let bit1 = bit_of(i1);
-                    // SAFETY: as above.
-                    unsafe { list.add(listed).write((s as i32 + 1, i1 as u32)) };
-                    listed += bit1 as usize;
-                    s += 2;
-                    continue;
-                }
-            }
-            let mut compressed_char = table[usize::from(next_char)];
-            next_char = byte_at(s + word_length);
-            if compressed_char < 0 {
-                preshift = 0;
-                s += 1;
-                let mut skip = self.word_length - 1;
-                while skip != 0 && s <= s_last {
-                    compressed_char = table[usize::from(next_char)];
-                    next_char = byte_at(s + word_length);
-                    if compressed_char < 0 {
-                        skip = self.word_length - 1;
-                        preshift = 0;
-                        s += 1;
-                        continue;
-                    }
-                    index = preshift + compressed_char;
-                    preshift = compressed_reciprocal_divide(index, recip);
-                    skip -= 1;
-                    s += 1;
-                }
-                continue;
-            }
-            index = preshift + compressed_char;
-            preshift = compressed_reciprocal_divide(index, recip);
-            let bit = bit_of(index);
-            // SAFETY: as above.
-            unsafe { list.add(listed).write((s as i32, index as u32)) };
-            listed += bit as usize;
-            s += 1;
-        }
-        // SAFETY: the first `listed` places were written above, within the reserve.
-        unsafe { cells.set_len(listed) };
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341 (quoted at
-    // `for_each_cell`)
-    /// EXPERIMENT (LOSAT_X_BPFLEAN): [`Self::x_list_pairs`] with its two-offset steps in a loop of
-    /// their own, out of line ([`x_pairs_loop`]), so that their state (the offset, the list's
-    /// length, the preshift and the next letter) stays in registers: in one loop with the other
-    /// steps, the list's length was kept on the stack, loaded and stored at every pair. That loop
-    /// takes NCBI's reciprocal for 15 as the constant `x_pairs_fit` asks for, computes in `u32`
-    /// (every index is below 15^6) and reads the subject through a pointer a word length in. The
-    /// first word, a letter outside the alphabet and the last offset take the steps of
-    /// `x_list_pairs`, so the list, and the reserve past it, are the same.
-    ///
-    /// # Safety
-    ///
-    /// As [`Self::x_list_pairs`]: [`Self::x_pairs_fit`]`(subject, subject_length)` holds.
     #[inline(never)]
     pub(crate) unsafe fn x_list_pairs_lean(
         &self,
@@ -2204,7 +2084,7 @@ impl XFlatCompressedLookup {
             if s > s_last {
                 break;
             }
-            // Offset s_last, or a pair with a letter outside the alphabet: x_list_pairs's step.
+            // Offset s_last, or a pair with a letter outside the alphabet: one offset's step.
             let mut compressed_char = table[usize::from(next_char)];
             next_char = byte_at(s + word_length);
             if compressed_char < 0 {
@@ -2251,7 +2131,7 @@ impl XFlatCompressedLookup {
 }
 
 // No NCBI counterpart: the state of LOSAT's list around its two-offset steps.
-/// EXPERIMENT (LOSAT_X_BPFLEAN): where [`x_pairs_loop`] starts and stops: the next offset `s`,
+/// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): where [`x_pairs_loop`] starts and stops: the next offset `s`,
 /// the list's length `listed`, the preshift before `s` and the letter at `s + word length - 1`.
 struct XPairsAt {
     s: usize,
@@ -2262,11 +2142,12 @@ struct XPairsAt {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341 (quoted at
 // `XFlatCompressedLookup::for_each_cell`)
-/// EXPERIMENT (LOSAT_X_BPFLEAN): the two-offset steps of [`XFlatCompressedLookup::x_list_pairs`]
-/// from `at`, until fewer than two offsets up to `s_last` are left or a pair has a letter outside
-/// the alphabet; `at` then holds that pair's first offset, for the caller's step. `sub_w` points a
-/// word length into the subject, `table` holds the scaled letters and `pv` the presence bits. The
-/// divisions are those of `x_list_pairs` with NCBI's reciprocal for 15, 286,331,154, as a constant.
+/// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): the two-offset steps of
+/// [`XFlatCompressedLookup::x_list_pairs_lean`] from `at`, until fewer than two offsets up to
+/// `s_last` are left or a pair has a letter outside the alphabet; `at` then holds that pair's first
+/// offset, for the caller's step. `sub_w` points a word length into the subject, `table` holds the
+/// scaled letters and `pv` the presence bits. The divisions are those of `x_list_pairs_lean`'s
+/// header with NCBI's reciprocal for 15, 286,331,154, as a constant.
 ///
 /// # Safety
 ///
@@ -2302,7 +2183,7 @@ unsafe fn x_pairs_loop(
         }
         let i0 = (preshift + scaled0) as u32;
         let i1 = ((u64::from(i0) * 286_331_154) >> 32) as u32 + scaled1 as u32;
-        // i0 / 225 + C1 / 15, as in x_list_pairs.
+        // i0 / 225 + C1 / 15, as in x_list_pairs_lean's header.
         preshift = (((u64::from(i0) * 19_088_744) >> 32) as u32)
             .wrapping_add((scaled1 as u32).wrapping_mul(0xEEEE_EEEF)) as i32;
         // SAFETY: s + 1 + word length <= s_last + word length < subject.len() (x_pairs_fit).
@@ -2357,10 +2238,10 @@ fn x_scan_bf_min() -> u64 {
     })
 }
 
-// No NCBI counterpart: how many cells ahead `for_each_cell` reads the slice bounds and the hits. Tuning
-// only. LOSAT_X_BPFSTAGE's and LOSAT_X_BPFLEAN's loops (`blastp/x_seed_fused_clut.rs`) read ahead as
-// far, over X_STARTS_AHEAD entries past their list, so the hits must not be read further ahead than the
-// bounds.
+// No NCBI counterpart: how many cells ahead `for_each_cell` reads the slice bounds and the hits.
+// Tuning only. blastp-fast's loop on the dense tables (`x_scan_flat_lean` in
+// `blastp/x_seed_fused_clut.rs`) reads ahead as far, over X_STARTS_AHEAD entries past its list, so
+// the hits must not be read further ahead than the bounds.
 pub(crate) const X_STARTS_AHEAD: usize = 16;
 pub(crate) const X_HITS_AHEAD: usize = 8;
 const _: () = assert!(X_HITS_AHEAD <= X_STARTS_AHEAD);
@@ -3241,8 +3122,9 @@ mod tests {
                     );
                     cells = scratch;
                 }
-                // LOSAT_X_BPFSTAGE: the list two offsets per step, on a subject of a word or more
-                // with its sentinel; a shorter one, or one without the sentinel, is declined.
+                // The dense loop's list (`x_list_pairs_lean`, two offsets per step) on a subject of
+                // a word or more with its sentinel; a shorter one, or one without the sentinel, is
+                // declined.
                 assert_eq!(
                     flat.x_pairs_fit(subject, length),
                     length >= 5,
@@ -3256,14 +3138,6 @@ mod tests {
                     continue;
                 }
                 let want_list = cells.clone();
-                // SAFETY: x_pairs_fit holds (asserted above).
-                unsafe { flat.x_list_pairs(subject, length, &mut cells) };
-                assert_eq!(cells, want_list, "subject {n}: x_list_pairs's list");
-                assert!(
-                    cells.capacity() >= cells.len() + X_STARTS_AHEAD,
-                    "subject {n}: reserve"
-                );
-                // LOSAT_X_BPFLEAN: the list with the two-offset steps out of line.
                 let mut lean = Vec::new();
                 // SAFETY: x_pairs_fit holds (asserted above).
                 unsafe { flat.x_list_pairs_lean(subject, length, &mut lean) };
@@ -3272,7 +3146,7 @@ mod tests {
                     lean.capacity() >= lean.len() + X_STARTS_AHEAD,
                     "subject {n}: lean reserve"
                 );
-                let listed: Vec<(u32, u32)> = cells
+                let listed: Vec<(u32, u32)> = lean
                     .iter()
                     .flat_map(|&(s, index)| {
                         flat.cell(index as usize)
@@ -3280,14 +3154,14 @@ mod tests {
                             .map(move |&q| (s as u32, q as u32))
                     })
                     .collect();
-                assert_eq!(Some(listed), expected, "subject {n}: x_list_pairs");
+                assert_eq!(Some(listed), expected, "subject {n}: x_list_pairs_lean");
             }
         }
     }
 
-    // LOSAT_X_BPFSTAGE: `x * 19,088,744 >> 32` is `x / 225` below 15^6, NCBI's reciprocal
-    // multiply is `x / 15` there (the indices of word lengths up to 6), and the multiply by the
-    // inverse of 15 is `x / 15` on its multiples.
+    // LOSAT_X_BPCLUTSCANBF's dense loop: `x * 19,088,744 >> 32` is `x / 225` below 15^6, NCBI's
+    // reciprocal multiply is `x / 15` there (the indices of word lengths up to 6), and the multiply
+    // by the inverse of 15 is `x / 15` on its multiples.
     #[test]
     fn the_pairs_scan_divisions_are_exact_below_fifteen_to_the_sixth() {
         for x in 0..15i64.pow(6) {
@@ -3307,8 +3181,8 @@ mod tests {
         }
     }
 
-    // LOSAT_X_BPFSTAGE: the list two offsets per step on word length 6 too (and LOSAT_X_BPFLEAN's),
-    // and the tables and subjects it declines.
+    // LOSAT_X_BPCLUTSCANBF's dense loop: the list two offsets per step on word length 6 too, and
+    // the tables and subjects it declines.
     #[test]
     fn the_pairs_scan_lists_word_length_six_and_declines_outside_its_range() {
         let mut rng = XorShift(0x6a09_e667_f3bc_c909);
@@ -3342,15 +3216,12 @@ mod tests {
                     want.extend(hits.iter().map(|&q| (s, q)));
                 });
                 let want_list = cells.clone();
-                // SAFETY: x_pairs_fit holds (asserted above).
-                unsafe { flat6.x_list_pairs(&subject, length, &mut cells) };
-                assert_eq!(cells, want_list, "length {length}: list");
                 let mut lean = Vec::new();
                 // SAFETY: x_pairs_fit holds (asserted above).
                 unsafe { flat6.x_list_pairs_lean(&subject, length, &mut lean) };
-                assert_eq!(lean, want_list, "length {length}: lean list");
+                assert_eq!(lean, want_list, "length {length}: list");
                 found += want.len();
-                let got: Vec<(i32, i32)> = cells
+                let got: Vec<(i32, i32)> = lean
                     .iter()
                     .flat_map(|&(s, index)| flat6.cell(index as usize).iter().map(move |&q| (s, q)))
                     .collect();

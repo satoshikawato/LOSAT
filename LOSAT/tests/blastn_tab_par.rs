@@ -1,5 +1,7 @@
-//! BLASTN's outfmt 6 / 7 rows formatted on the search pool (`LOSAT_X_BNTABPAR`,
-//! `src/algorithm/blastn/x_tab_par.rs`) on whole searches.
+//! BLASTN's outfmt 6 / 7 rows formatted on the search pool (`LOSAT_X_PAIRWISEPAR`,
+//! `src/algorithm/blastn/x_tab_par.rs`) on whole searches. The rows were under a switch of their
+//! own, `LOSAT_X_BNTABPAR`, until 2026-11-02 (structural line S3), when it was folded into
+//! `LOSAT_X_PAIRWISEPAR`, which keeps the whole report stage serial at `0`.
 //!
 //! The switch is in the strict set: on unless it is `0`. It chooses between two LOSAT code paths
 //! with the same result: the rows of a report written query after query on the thread of the
@@ -7,7 +9,7 @@
 //! on the pool, and the buffers written in order. So the property under test is that the report
 //! does not depend on it: for megablast and blastn with 60 queries (pieces of LC738874) against
 //! LC738874, with outfmt 6 and 7 (whose header lines and last line come from the same writer) at
-//! 1 and 4 threads, the default and `LOSAT_X_BNTABPAR=0` give the same bytes. `LOSAT_X_REACH`
+//! 1 and 4 threads, the default and `LOSAT_X_PAIRWISEPAR=0` give the same bytes. `LOSAT_X_REACH`
 //! shows that the default took the pool's path at 4 threads and the serial one at 1 thread (no
 //! pool). That the rows equal NCBI's is the business of the blastn fixtures; the unit tests in
 //! `x_tab_par.rs` compare the two writers on random hit lists, with warnings and windows of every
@@ -19,7 +21,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod reach_support;
 
-const OFF: (&str, &str) = ("LOSAT_X_BNTABPAR", "0");
+const OFF: (&str, &str) = ("LOSAT_X_PAIRWISEPAR", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -124,8 +126,7 @@ fn tabular_rows_do_not_depend_on_the_switch() {
     for task in ["megablast", "blastn"] {
         for outfmt in ["6", "7"] {
             for threads in [1u32, 4] {
-                let reach =
-                    reach_support::Reach::new(&format!("bntabpar-{task}-{outfmt}-{threads}"));
+                let reach = reach_support::Reach::new(&format!("pwpar-{task}-{outfmt}-{threads}"));
                 let default = blastn(&queries, task, outfmt, threads, &[reach.var()]);
                 let off = blastn(&queries, task, outfmt, threads, &[OFF]);
                 let rows = default
@@ -138,13 +139,13 @@ fn tabular_rows_do_not_depend_on_the_switch() {
                 );
                 assert!(
                     default == off,
-                    "{task} outfmt {outfmt} threads {threads}: the default's report differs from LOSAT_X_BNTABPAR=0's"
+                    "{task} outfmt {outfmt} threads {threads}: the default's report differs from LOSAT_X_PAIRWISEPAR=0's"
                 );
-                let (new, reference) = reach.sides("LOSAT_X_BNTABPAR");
+                let (new, reference) = reach.sides("LOSAT_X_PAIRWISEPAR");
                 assert_eq!(
                     (new, reference),
                     (threads > 1, threads == 1),
-                    "{task} outfmt {outfmt} threads {threads}: sides of LOSAT_X_BNTABPAR"
+                    "{task} outfmt {outfmt} threads {threads}: sides of LOSAT_X_PAIRWISEPAR"
                 );
             }
         }

@@ -6,7 +6,9 @@
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_PAIRWISEPAR`
 //! is `0`. With it on and two or more threads, each
 //! query's head, runs of its subjects' alignments and its footer are formatted into buffers by the
-//! pool's threads and written in order.
+//! pool's threads and written in order. The switch also holds BLASTN's and TBLASTX's outfmt 6 / 7
+//! rows and TBLASTX's report values (since 2026-11-02; `blastn_tab_par.rs` and
+//! `tblastx_report_par.rs` test those).
 //!
 //! The property under test is that the reports, the messages and the exit status do not depend on
 //! the switch or on the thread count: each search is compared with the same LOSAT search with the

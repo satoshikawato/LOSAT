@@ -380,9 +380,10 @@ fn cases() -> Vec<Case> {
 /// so a pair is listed only when the default run takes the new side (4 threads, `LOSAT_X_REACH`
 /// on `batches_sub`) or the switch acts on every run (class `always`); the `=0` run then takes a
 /// path other than the default one. The seed stage's switches (`PAIRPARGATE`, `SEEDCOMPACT`,
-/// `TBXHITBF`, `TBXKMERGE`, `TBXSCANBF`), the pool's (`TBXNEXT`, `TBXQFRAMES`, `TBXRPTPAR`,
-/// `TBXPIPE`: the next batch starts while the batch before links) change what the search does,
-/// not what the archive reads: the first query's block, search space and masks and the final hits.
+/// `TBXHITBF`, `TBXKMERGE`, `TBXSCANBF`), the pool's (`TBXNEXT`, `TBXQFRAMES`, `TBXPIPE`: the
+/// next batch starts while the batch before links) and the report stage's (`PAIRWISEPAR`, which
+/// since 2026-11-02 also holds the TBLASTX report values that `TBXRPTPAR` held) change what the
+/// search does, not what the archive reads: the first query's block, search space and masks and the final hits.
 /// `DISPTABLE` (graduated 2026-10-27) was not here: it acted only where a format reads displayed
 /// counts, which outfmt 11 never builds, so its `=0` run was the default run. `lenbatch_sub` x
 /// `TBXPIPE` is not here for the same reason (4 threads take the reference side on that case).
@@ -394,13 +395,13 @@ fn cases() -> Vec<Case> {
 /// cases, `S/of8/logs/RESULTS_impl_b3.md`) covers every switch.
 const STRICT_SET_RUNS: &[(&str, &str)] = &[
     ("batches_sub", "LOSAT_X_PAIRPARGATE"),
+    ("batches_sub", "LOSAT_X_PAIRWISEPAR"),
     ("batches_sub", "LOSAT_X_SEEDCOMPACT"),
     ("batches_sub", "LOSAT_X_TBXHITBF"),
     ("batches_sub", "LOSAT_X_TBXKMERGE"),
     ("batches_sub", "LOSAT_X_TBXNEXT"),
     ("batches_sub", "LOSAT_X_TBXPIPE"),
     ("batches_sub", "LOSAT_X_TBXQFRAMES"),
-    ("batches_sub", "LOSAT_X_TBXRPTPAR"),
     ("batches_sub", "LOSAT_X_TBXSCANBF"),
     ("segbatch_sub", "LOSAT_X_TBXQFRAMES"),
     ("stop1batch_sub", "LOSAT_X_TBXPIPE"),

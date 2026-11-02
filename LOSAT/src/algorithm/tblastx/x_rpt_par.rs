@@ -280,3 +280,263 @@ pub(crate) fn pairwise_hits(
     let mut window = Vec::new();
     hits.iter().map(|hsp| rows.hit(hsp, &mut window)).collect()
 }
+
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+mod tests {
+    use super::*;
+    use crate::common::Hit;
+    use crate::report::query_warnings::QueryWarnings;
+    use crate::report::x_pairwise_par::ROWS_PER_THREAD;
+
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n.max(1)
+        }
+    }
+
+    fn hsp(rng: &mut Rng, q_idx: u32) -> TblastxHsp {
+        let length = 1 + rng.below(900) as usize;
+        let num_ident = rng.below(length as u64 + 1) as usize;
+        let q_start = 1 + rng.below(5000) as usize;
+        let s_start = 1 + rng.below(3_000_000) as usize;
+        TblastxHsp {
+            hit: Hit {
+                identity: 100.0 * num_ident as f64 / length as f64,
+                length,
+                mismatch: (length - num_ident) as i64,
+                gapopen: 0,
+                q_start,
+                q_end: q_start + 3 * length - 1,
+                s_start,
+                s_end: s_start + 3 * length - 1,
+                e_value: 10f64.powi(-(rng.below(200) as i32)),
+                bit_score: rng.below(6000) as f64 / 3.0 + 0.5,
+                num_ident,
+                query_frame: 1 + rng.below(3) as i32,
+                query_length: 0,
+                q_idx,
+                s_idx: rng.below(3) as u32,
+                raw_score: rng.below(3000) as i32,
+                sort_query_offset: q_start,
+                sort_query_end: q_start + length,
+                sort_subject_offset: s_start,
+                sort_subject_end: s_start + length,
+                has_sort_offsets: true,
+                gap_info: None,
+                num_positives: num_ident,
+            },
+            subject_frame: 1,
+            num: 1,
+        }
+    }
+
+    struct Case {
+        hits: Vec<TblastxHsp>,
+        query_ids: Vec<Arc<[u8]>>,
+        subject_ids: Vec<Arc<[u8]>>,
+        titles: Vec<Vec<u8>>,
+        unsearched: Vec<bool>,
+        warnings: Vec<Vec<u8>>,
+    }
+
+    fn ids(prefix: &str, n: usize) -> Vec<Arc<[u8]>> {
+        (0..n)
+            .map(|i| Arc::<[u8]>::from(format!("{prefix}{i}").into_bytes()))
+            .collect()
+    }
+
+    /// `queries` queries with `rows(query)` rows each (the hits grouped by query, as the final
+    /// list is).
+    fn case(rng: &mut Rng, queries: usize, rows: impl Fn(&mut Rng, usize) -> usize) -> Case {
+        let mut hits = Vec::new();
+        for q_idx in 0..queries {
+            let n = rows(rng, q_idx);
+            hits.extend((0..n).map(|_| hsp(rng, q_idx as u32)));
+        }
+        Case {
+            hits,
+            query_ids: ids("query_", queries),
+            subject_ids: ids("lcl|subject_", 3),
+            titles: (0..queries)
+                .map(|q| format!("query title {q}").into_bytes())
+                .collect(),
+            unsearched: (0..queries).map(|_| rng.below(9) == 0).collect(),
+            warnings: (0..queries)
+                .map(|q| {
+                    if rng.below(5) == 0 {
+                        format!("Warning: [tblastx] Query_{q} warning\n").into_bytes()
+                    } else {
+                        Vec::new()
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    /// What the report's writer and the warnings' sink saw, in order: the report's bytes (writes
+    /// one after another joined) and the sink's bytes.
+    #[derive(Debug, PartialEq)]
+    enum Event {
+        Report(Vec<u8>),
+        Sink(Vec<u8>),
+    }
+
+    /// The report's writer (`sink` false) or the warnings' sink, both adding to one log.
+    struct Side {
+        log: Arc<std::sync::Mutex<Vec<Event>>>,
+        sink: bool,
+    }
+
+    impl Write for Side {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            if buf.is_empty() {
+                return Ok(0);
+            }
+            let mut events = self.log.lock().unwrap();
+            match (self.sink, events.last_mut()) {
+                (false, Some(Event::Report(bytes))) | (true, Some(Event::Sink(bytes))) => {
+                    bytes.extend_from_slice(buf)
+                }
+                (false, _) => events.push(Event::Report(buf.to_vec())),
+                (true, _) => events.push(Event::Sink(buf.to_vec())),
+            }
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// The log of `report::write_tabular` (`pool` `None`, no format observer) or of the pool's
+    /// form.
+    fn run(
+        case: &Case,
+        comments: bool,
+        epilog: Option<usize>,
+        pool: Option<&SearchPool<'_>>,
+    ) -> Vec<Event> {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut report = Side {
+            log: log.clone(),
+            sink: false,
+        };
+        let mut sink = Side {
+            log: log.clone(),
+            sink: true,
+        };
+        let mut warnings = QueryWarnings {
+            before: &case.warnings,
+            sink: &mut sink,
+        };
+        let titles: Vec<&[u8]> = case.titles.iter().map(|title| &title[..]).collect();
+        let database = "User specified sequence set (Input: subject.fa)";
+        match pool {
+            Some(pool) => write_tabular(
+                pool,
+                &case.hits,
+                &mut report,
+                comments,
+                &titles,
+                database,
+                &case.query_ids,
+                &case.subject_ids,
+                &case.unsearched,
+                epilog,
+                Some(&mut warnings),
+            ),
+            None => report::write_tabular(
+                &case.hits,
+                &mut report,
+                comments,
+                &titles,
+                database,
+                &case.query_ids,
+                &case.subject_ids,
+                &case.unsearched,
+                epilog,
+                None,
+                Some(&mut warnings),
+            ),
+        }
+        .unwrap();
+        drop(warnings);
+        drop((report, sink));
+        Arc::try_unwrap(log).unwrap().into_inner().unwrap()
+    }
+
+    fn report_len(events: &[Event]) -> usize {
+        events
+            .iter()
+            .map(|event| match event {
+                Event::Report(bytes) => bytes.len(),
+                Event::Sink(_) => 0,
+            })
+            .sum()
+    }
+
+    #[test]
+    fn rows_on_the_pool_are_the_serial_writers_bytes() {
+        let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+        // Many queries with 0 to 600 rows (some of them in one piece, some in two), none, one and
+        // a few queries, and one query of more than two windows of two threads.
+        let cases: Vec<Case> = vec![
+            case(&mut rng, 0, |_, _| 0),
+            case(&mut rng, 1, |_, _| 0),
+            case(&mut rng, 1, |_, _| 5),
+            case(&mut rng, 7, |rng, _| rng.below(4) as usize),
+            case(&mut rng, 60, |rng, _| rng.below(601) as usize),
+            case(&mut rng, 400, |rng, _| rng.below(10) as usize),
+            case(&mut rng, 30, |rng, q| {
+                if q == 3 {
+                    ROWS_PER_THREAD * 5 + 17
+                } else {
+                    rng.below(5) as usize
+                }
+            }),
+        ];
+        let mut sinks = 0;
+        for threads in [2usize, 3, 8] {
+            crate::utils::threading::with_search_pool(threads, "tblastx", |pool| {
+                for case in &cases {
+                    let queries = case.titles.len();
+                    for comments in [false, true] {
+                        for epilog in [None, Some(queries + 3)] {
+                            let serial = run(case, comments, epilog, None);
+                            let pooled = run(case, comments, epilog, Some(pool));
+                            assert_eq!(
+                                serial, pooled,
+                                "threads {threads} queries {queries} comments {comments} \
+                                 {epilog:?}"
+                            );
+                            sinks += serial
+                                .iter()
+                                .filter(|event| matches!(event, Event::Sink(_)))
+                                .count();
+                        }
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+        }
+        assert!(sinks > 100, "{sinks} warnings");
+        // The last case has a query of more than two windows of rows (it was written by the pool
+        // in several windows at 2 threads).
+        let big = &cases[6];
+        assert!(big.hits.len() > 4 * ROWS_PER_THREAD);
+        assert!(report_len(&run(big, true, None, None)) > 4 * ROWS_PER_THREAD * 40);
+    }
+}

@@ -2744,7 +2744,12 @@ Rebuilding less:
   16; the 18,838 pieces 136 / 133 at 16 and 117 / 116 at 8; MelaMJNV x 9 genomes 128 / 132 and 98 / 105 at 8
   and 4; AP027131 x AP027133 124 / 124 at 16; Autographivirales 50 / 57 at 8; Begomovirus 27 / 26 at 8.
 - `LOSAT_X_TBXRPTPAR=1` (TBLASTX, speed; in the strict set from the pull request that added it,
-  2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads))
+  2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads);
+  folded into `LOSAT_X_PAIRWISEPAR` on 2026-11-02, structural line S3: the variable is gone, a run ignores
+  it, and `LOSAT_X_PAIRWISEPAR=0` keeps this whole stage serial; the numbers below were measured with the
+  old switch, `=0` of which is now `LOSAT_X_PAIRWISEPAR=0`; the outfmt 6 / 7 rows now take BLASTN's pieces and
+  windows (see `LOSAT_X_BNTABPAR` below) for a query of any number of rows, where until 2026-11-02 only a
+  query of more than 1,024 rows was formatted on the pool, in the windows described here)
   the report stage after the last query batch (`write_tblastx_outputs`) runs its per-HSP work on the
   search's pool (`tblastx/x_rpt_par.rs`, exactness argument in its header): the displayed identities
   (each HSP's codons translated again), the outfmt 0 rows (translated again, masks lowercased; also the
@@ -2759,7 +2764,7 @@ Rebuilding less:
   rows 0.17 s, final order 0.15 s) and 3.37 s of 10.6 s with outfmt 0 (outfmt 0 rows 1.80 s, formatting
   0.41 s), the same at 8 threads. The final order, the outfmt 0 text and the writes stay on the loop's
   thread. On the workstation (16 CPUs of one socket, 3 s warm-up per run, medians of alternating runs,
-  every report identical; off = `LOSAT_X_TBXRPTPAR=0`), the three genomes above took 7.38 s with it and
+  every report identical; off = `LOSAT_X_TBXRPTPAR=0`, now `LOSAT_X_PAIRWISEPAR=0`), the three genomes above took 7.38 s with it and
   8.39 s without at 16 threads with outfmt 6 (stage 0.25 / 1.31 s), 7.88 / 10.48 s with outfmt 0 (stage
   0.78 / 3.39 s), 12.59 / 13.65 s at 8 threads and 23.42 / 24.05 s at 4; MelaMJNV x 9 MJNV genomes at 16
   threads 1.16 / 1.44 s (outfmt 6) and 1.29 / 1.84 s (outfmt 0); AP027131 x AP027133 at 8 threads 1.96 /
@@ -2896,7 +2901,12 @@ Rebuilding less:
   (x0.993 on Species0 x Species3), instructions x0.989-0.991; the median of the per-round max RSS differences
   -5.2 to +1.5 MiB (no rise); one-thread instructions the same (the serial builder).
 - `LOSAT_X_BNTABPAR=1` (BLASTN, all tasks, outfmt 6 / 7, two or more threads, speed; in the strict set since
-  2026-10-24 (perf/bn-tab-par, evidence at the end of this entry): on unless it is `0`) the rows of a report are
+  2026-10-24 (perf/bn-tab-par, evidence at the end of this entry): on unless it is `0`; folded into
+  `LOSAT_X_PAIRWISEPAR` on 2026-11-02, structural line S3: the variable is gone, a run ignores it, and
+  `LOSAT_X_PAIRWISEPAR=0` keeps these rows serial, as it keeps TBLASTX's tabular rows and report values
+  (`LOSAT_X_TBXRPTPAR`, folded the same day) and the outfmt 0 text serial; TBLASTX's outfmt 6 / 7 rows now
+  take these pieces and windows for every query, one writer loop, `x_pairwise_par::write_in_order`, serves all
+  three; the description and numbers below are those of the switch as it was added) the rows of a report are
   formatted on the search's pool: they are cut into pieces of at most 512 rows of one query (the first piece of a
   query with its outfmt 7 header; a query without rows is one piece), the pieces are taken in windows of at least
   2,048 rows per thread (a piece without rows counts as one), each piece of a window is formatted into a buffer of
@@ -2927,7 +2937,13 @@ Rebuilding less:
   M1 / D1 by default 0.96-1.01, `-db` loop n16 x0.904, and the defaults with slots (G2, MB, C5, AD, AB at 8 / 16 /
   32 threads) 0.96-1.01.
 - `LOSAT_X_PAIRWISEPAR=1` (BLASTN, TBLASTX, BLASTP, speed; in the strict set from the pull request that added it,
-  2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads)) the pairwise
+  2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads); since
+  2026-11-02 (structural line S3) it is the switch of the whole report stage on the pool: `LOSAT_X_BNTABPAR`
+  (BLASTN's outfmt 6 / 7 rows) and `LOSAT_X_TBXRPTPAR` (TBLASTX's displayed identities, engine counts, outfmt 0
+  rows and outfmt 6 / 7 rows) were folded into it, their variables are gone, and `LOSAT_X_PAIRWISEPAR=0` keeps
+  all of it serial, the outfmt 0 text of the three programs included; the serial forms remain for the Web format
+  observer (text and tabular rows) and the BLASTN trace (tabular rows); `LOSAT_X_REACH` records the decision of
+  the three sites under this name, TBLASTX's once per report stage) the pairwise
   report (outfmt 0) of BLASTN (every task, `-subject` and `-db`), TBLASTX and BLASTP is formatted on the search's pool
   (`report/x_pairwise_par.rs`, exactness argument in its header). The three writers of `report/pairwise.rs` have one
   shape: after the prolog, per query its warnings, its head (header, then "No hits found" and the footer, or the

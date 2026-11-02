@@ -851,15 +851,39 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
-.attention,
 .storage {
-  margin-top: 12px;
   font-size: 0.9em;
 }
 
-.attention h2,
-.storage h2 {
-  font-size: 1em;
+/* The engine's help of an option waits behind "?" (stop-describing-ui). */
+.help-toggle {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin-left: 8px;
+  border-radius: 50%;
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.help-toggle[aria-expanded='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.local-note svg {
+  vertical-align: -2px;
+  margin-right: 4px;
+}
+
+.run-status-warning svg {
+  vertical-align: -2px;
+  margin-right: 4px;
+}
+
+.ok svg {
+  vertical-align: -3px;
 }
 
 .storage {

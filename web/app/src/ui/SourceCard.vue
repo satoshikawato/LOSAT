@@ -58,7 +58,6 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
     <template v-else-if="source.status === 'failed'">
       <p class="error" :data-testid="`${testid}-error`">This input cannot be read: {{ source.error }}</p>
       <p v-if="needsDefline" class="hint">
-        FASTA starts each record with a line that begins with "&gt;".
         <button type="button" class="link" :data-testid="`${testid}-add-defline`" @click="draft.addDefline(role)">
           Add the line "&gt;pasted_{{ role }}" before the sequence
         </button>
@@ -77,11 +76,11 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
         :data-testid="`${testid}-check`"
         data-check="pending"
       >
-        Checking with the {{ programLabel }} engine…
+        Checking…
       </p>
       <p v-else-if="source.check?.state === 'ok'" class="ok" :data-testid="`${testid}-check`" data-check="ok">
-        The {{ programLabel }} engine reads {{ formatCount(source.check.records) }}
-        {{ source.check.records === 1 ? 'record' : 'records' }}.
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7" /></svg>
+        <span class="visually-hidden">Accepted by the {{ programLabel }} engine: {{ formatCount(source.check.records) }} {{ source.check.records === 1 ? 'record' : 'records' }}</span>
       </p>
       <div v-else-if="source.check?.state === 'refused'" class="refused" :data-testid="`${testid}-check`" data-check="refused">
         <p class="error">The {{ programLabel }} engine refuses this input: {{ source.check.message }}</p>
@@ -95,17 +94,15 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
         </button>
       </div>
       <p v-else-if="source.check?.state === 'error'" class="error" :data-testid="`${testid}-check`" data-check="error">
-        The input could not be checked here ({{ source.check.message }}). The search reads it with the engine again.
+        The input could not be checked here ({{ source.check.message }}).
       </p>
 
       <p v-if="otherKind > 0" class="warning" :data-testid="`${testid}-kind-warning`">
         {{ formatCount(otherKind) }} {{ otherKind === 1 ? 'record looks' : 'records look' }} like {{ otherKindName }}
-        sequences, but {{ programLabel }} reads the {{ role }} as {{ kind }}. This is an estimate of LOSAT Web; the
-        program is not changed.
+        sequences, but {{ programLabel }} reads the {{ role }} as {{ kind }}.
       </p>
       <p v-if="duplicateCount > 0" class="warning" :data-testid="`${testid}-duplicates`">
-        {{ formatCount(duplicateCount) }} records share an ID with another record. They are told apart by their number
-        (#).
+        {{ formatCount(duplicateCount) }} records share an ID with another record.
       </p>
 
       <details v-if="source.head" class="head">

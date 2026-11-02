@@ -3,10 +3,12 @@
 // §1): the program tabs and sentence, "Enter Query Sequence", "Enter Subject Sequence",
 // "Program Selection", the "Run LOSAT" button (NCBI's BLAST button) with the line that says
 // what it searches, and "Algorithm parameters", which opens and closes, with a second button
-// below it. LOSAT's own lines (threads, readiness, the engine's check of the options) are
-// under the first button. "Run LOSAT" starts the search and the page goes to its results
-// (`submitted`), as NCBI's BLAST button does.
+// below it. LOSAT's own controls (threads, keep the screen on) are under the first button, with
+// the engine's refusal of the options when there is one. "Run LOSAT" starts the search and the
+// page goes to its results (`submitted`), as NCBI's BLAST button does. Explanatory copy follows
+// stop-describing-ui (Owner, 2026-11-02): NCBI's sentences stay, LOSAT's explanations go.
 import { computed, ref, watch } from 'vue';
+import type { Attention, AttentionState } from '../application/attention';
 import type { SearchDraft } from '../application/draft';
 import { effectiveValue, formParameters, placementFlags, sectionsAt } from '../domain/parameters';
 import { PROGRAMS, programById, searchSummary, type InputRole } from '../domain/programs';
@@ -15,7 +17,7 @@ import InputPanel from './InputPanel.vue';
 import ParameterField from './ParameterField.vue';
 import ParameterForm from './ParameterForm.vue';
 
-const props = defineProps<{ draft: SearchDraft }>();
+const props = defineProps<{ draft: SearchDraft; attention: Attention; attentionState: AttentionState }>();
 /** A search was started: the ID of its first run (a group of separate searches starts several). */
 const emit = defineEmits<{ submitted: [runId: string] }>();
 const state = useStore(props.draft.state);
@@ -34,17 +36,14 @@ const runCount = computed(() => {
   void state.value; // recompute with the draft
   return props.draft.runCount();
 });
-const readiness = computed(() => {
-  void state.value;
-  return props.draft.readiness();
-});
 /**
  * The button runs LOSAT (the Owner's words, 2026-10-10: not "BLAST", which names NCBI's
  * service), and says how many runs separate searches make.
  */
-const buttonLabel = computed(() =>
-  runCount.value > 1 && program.value.unavailable === undefined ? `Run LOSAT (${runCount.value} runs)` : 'Run LOSAT',
-);
+const buttonLabel = computed(() => {
+  if (state.value.submitting) return 'Starting…';
+  return runCount.value > 1 && program.value.unavailable === undefined ? `Run LOSAT (${runCount.value} runs)` : 'Run LOSAT';
+});
 /**
  * Whether the engine's describe of the program has come. It comes after the page or the
  * program changes, and adds the task's help and the task to the line next to the button,
@@ -132,8 +131,7 @@ function onThreads(event: Event): void {
       >
         {{ buttonLabel }}
       </button>
-      <p v-if="program.unavailable" class="hint">{{ program.label }} is not available yet.</p>
-      <p v-else class="search-summary-line" data-testid="search-summary-line">{{ summaryLine }}</p>
+      <p v-if="!program.unavailable" class="search-summary-line" data-testid="search-summary-line">{{ summaryLine }}</p>
     </div>
 
     <div class="blast-notes">
@@ -145,25 +143,24 @@ function onThreads(event: Event): void {
             <option v-for="n in threadChoices" :key="n" :value="String(n)">{{ n }}</option>
           </select>
         </label>
-        <span class="hint">
-          Auto runs small searches on one thread and larger ones on up to half the logical processors (at most 8
-          below 1 MB of input, at most 32 above).
+        <label v-if="attentionState.wakeLock !== 'unsupported'" class="flag-label" :data-wake-lock="attentionState.wakeLock">
+          <input
+            type="checkbox"
+            :checked="attentionState.keepAwake"
+            data-testid="keep-awake"
+            @change="attention.setKeepAwake(($event.target as HTMLInputElement).checked)"
+          />
+          Keep screen on while searching
+        </label>
+        <span v-if="attentionState.wakeLock === 'failed'" class="warning" data-testid="wake-lock-failed">
+          The browser did not keep the screen on: {{ attentionState.wakeLockError }}
         </span>
       </div>
-      <p v-if="readiness" class="notice" data-testid="draft-readiness">{{ readiness }}</p>
+      <!-- The engine's verdict on the options: only a refusal is shown (stop-describing-ui rule 7). -->
       <p class="validation" :data-state="state.validation.state" data-testid="argv-validation" aria-live="polite">
-        <template v-if="state.validation.state === 'invalid'">
-          <span class="error">The engine refuses these options: {{ state.validation.message }}</span>
-        </template>
-        <template v-else-if="state.validation.state === 'checking'">Checking the options with the engine…</template>
-        <template v-else-if="state.validation.state === 'ok'">The engine accepts these options.</template>
+        <span v-if="state.validation.state === 'invalid'" class="error">{{ state.validation.message }}</span>
       </p>
-      <p
-        v-if="state.message && !messageBelow"
-        role="status"
-        :class="state.message.kind === 'error' ? 'error' : 'note'"
-        data-testid="search-message"
-      >
+      <p v-if="state.message && !messageBelow" role="status" class="error" data-testid="search-message">
         {{ state.message.text }}
       </p>
     </div>
@@ -203,12 +200,7 @@ function onThreads(event: Event): void {
           </button>
           <p class="search-summary-line">{{ summaryLine }}</p>
         </div>
-        <p
-          v-if="state.message && messageBelow"
-          role="status"
-          :class="state.message.kind === 'error' ? 'error' : 'note'"
-          data-testid="search-message"
-        >
+        <p v-if="state.message && messageBelow" role="status" class="error" data-testid="search-message">
           {{ state.message.text }}
         </p>
       </div>

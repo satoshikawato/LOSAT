@@ -11,7 +11,7 @@ import { headingTitle } from '../domain/outfmt0';
 import type { SubjectSortKey } from '../domain/result-index';
 import { formatCount } from './format';
 import SortButton from './SortButton.vue';
-import { focusPressed, useSideScroll } from './useSideScroll';
+import { focusPressed } from './useSideScroll';
 import VirtualRows from './VirtualRows.vue';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
@@ -20,7 +20,6 @@ const MAX_ROWS = 10;
 const selectedPosition = computed(() => props.state.subjects.findIndex((subject) => subject.sIdx === props.state.sIdx));
 const unit = computed(() => props.state.loaded?.units.subject ?? '');
 const scroller = ref<HTMLElement>();
-const sideScroll = useSideScroll(scroller);
 const gutter = ref(0);
 
 function sortBy(key: SubjectSortKey, descending: boolean): void {
@@ -88,7 +87,6 @@ function description(sIdx: number, inOutfmt0: boolean): string {
         <span class="muted small" data-testid="subject-count">{{ formatCount(state.subjects.length) }} shown</span>
       </h3>
     </div>
-    <p v-if="sideScroll" class="table-hint muted small" data-testid="subject-table-scroll-hint">Scroll the table sideways for more columns →</p>
     <div ref="scroller" class="table-scroll" :style="{ '--row-gutter': `${gutter}px`, '--id-width': idWidth }">
       <div class="table-head subject-grid" role="row">
         <SortButton class="num-head" data-col="order" label="#" sort-key="order" :sort="state.subjectSort" scope="subject" @sort="sortBy" />

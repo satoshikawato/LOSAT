@@ -369,7 +369,7 @@ export class SearchDraft {
   /** Freezes the draft into runs (one, or a group of separate searches) and starts them. */
   async submit(): Promise<EnqueueAllResult> {
     if (this.state.get().submitting) return { ok: false, message: 'The search is being started already.' };
-    this.set({ submitting: true, message: { kind: 'info', text: 'Preparing the inputs…' } });
+    this.set({ submitting: true, message: undefined });
     try {
       let result: EnqueueAllResult;
       try {
@@ -377,12 +377,8 @@ export class SearchDraft {
       } catch (error) {
         result = { ok: false, message: `The search could not be started: ${messageOf(error)}` };
       }
-      if (result.ok) {
-        const count = result.runIds?.length ?? 0;
-        this.set({ message: { kind: 'info', text: count > 1 ? `Started ${count} runs as a group; they search one at a time.` : 'Search started.' } });
-      } else {
-        this.set({ message: { kind: 'error', text: result.message } });
-      }
+      // A started search shows itself: the page moves to the run (stop-describing-ui rule 6).
+      if (!result.ok) this.set({ message: { kind: 'error', text: result.message } });
       return result;
     } finally {
       this.set({ submitting: false });

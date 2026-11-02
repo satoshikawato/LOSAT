@@ -240,7 +240,7 @@
 //! entries, and the initial HSPs are the same, in the same order. blastx's direct loop takes the same
 //! test (`XHitBf` is shared; LOSAT_X_BXHITBF, `blastx/x_seed_scan.rs`, whose header shows that its
 //! table holds the same range of flag-0 values), and so does blastp-fast's loop on the flat
-//! compressed table (LOSAT_X_BPFSEED, `x_seed_fused_clut.rs`: the same diagonal table and
+//! compressed table (`x_seed_fused_clut.rs`, `x_scan_flat_fseed_loop`: the same diagonal table and
 //! extension as blastp's loop).
 //!
 //! The switch is read once; it is in the strict set (`utils/xswitch.rs`): on unless
@@ -248,11 +248,11 @@
 //! closure of its own type (`x_scan_two_hit_hitbf`), so the loops without it keep their code; the
 //! AVX2 and scalar batches keep their own tests, and so does blastp-fast's loop on the reference
 //! compressed table (`x_seed_fused_compressed.rs`). blastp-fast's loop on the flat compressed table
-//! takes the test, without the read-ahead, under its own switch (LOSAT_X_BPFSEED; LOSAT_X_BPHITBF
-//! does not act there). `x_scan_two_hit_hitbf` also reads ahead without a bound check per hit
-//! (`x_cell_per_hit_bf`). With `LOSAT_X_STATS` (and the `xstats` feature) `main` prints
-//! `[X_STATS] BPHITBF subjects=N` at exit when N is not zero, N the subjects the loop with the
-//! test scanned.
+//! takes the test, without the read-ahead, wherever the target is not wasm32 and the table takes
+//! the branch-free list (LOSAT_X_BPCLUTSCANBF; LOSAT_X_BPHITBF does not act there).
+//! `x_scan_two_hit_hitbf` also reads ahead without a bound check per hit (`x_cell_per_hit_bf`).
+//! With `LOSAT_X_STATS` (and the `xstats` feature) `main` prints `[X_STATS] BPHITBF subjects=N` at
+//! exit when N is not zero, N the subjects the loop with the test scanned.
 
 use crate::algorithm::tblastn::x_scan_bf::{x_block_candidates, X_BLOCK};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
@@ -427,7 +427,7 @@ pub(crate) fn x_bp_hit_bf() -> bool {
 /// EXPERIMENT (LOSAT_X_BPHITBF, LOSAT_X_BXHITBF): the constants of the branch-free two-hit test
 /// ([`XHitBf::test`]) for one subject: the diagonal offset, `2 wordsize`, `2 (window - wordsize)`
 /// and `2 window`. blastp's per-hit loop, blastx's direct loop (`blastx/x_seed_scan.rs`) and
-/// blastp-fast's loop on the flat compressed table (LOSAT_X_BPFSEED, `x_seed_fused_clut.rs`) use it.
+/// blastp-fast's loop on the flat compressed table (`x_seed_fused_clut.rs`) use it.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct XHitBf {
     diag_offset: i32,

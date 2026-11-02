@@ -291,7 +291,6 @@ async function expectTableFits(page: Page, table: 'subject-table' | 'hsp-table')
   const scroll = page.getByTestId(table).locator('.table-scroll');
   const [scrollWidth, clientWidth] = await scroll.evaluate((element) => [element.scrollWidth, element.clientWidth]);
   expect(scrollWidth, `${table} scrolls sideways`).toBeLessThanOrEqual(clientWidth);
-  await expect(page.getByTestId(`${table}-scroll-hint`)).toHaveCount(0);
   const report = await scroll.evaluate((element) => {
     const cells = [...element.querySelectorAll<HTMLElement>('.table-row [data-field]')];
     const untitled = cells
@@ -791,7 +790,7 @@ for (const c of PROGRAM_CASES) {
       const [, path, threads] = /^\s*(serial|threaded), (\d+) threads?\s*$/.exec(await text(page.getByTestId('run-record').locator('[data-detail="path"]')))!;
       const level = tableLevel(c.id, argv, path!, Number(threads));
       await expect(badge).toHaveAttribute('data-level', level);
-      await expect(badge).toHaveText(level === 'certified' ? 'Certified profile' : 'Engine-supported, outside certified profile');
+      await expect(badge).toHaveText(level === 'certified' ? 'Certified profile' : 'Outside certified profile');
       test.info().annotations.push({ type: 'verification', description: `${c.id} ${argv.slice(5).join(' ') || 'defaults'}, ${path} ${threads}: ${level}` });
     }
     await expect(page.getByTestId('verification-details')).toHaveAttribute('data-level', (await badge.getAttribute('data-level'))!);
@@ -866,7 +865,9 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   const limit = BUILD_HAS_ENGINE ? 255 : 3;
   await page.getByTestId('tab-search').click();
   await openParameters(page);
-  await page.getByTestId('param-max_target_seqs').fill(String(limit));
+  // 3 and 255 are not in NCBI's list: "Other" takes them.
+  await page.getByTestId('param-max_target_seqs').selectOption('other');
+  await page.getByTestId('param-max_target_seqs-other').fill(String(limit));
   await run(page, 2);
   await openRun(page, 2);
   await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
@@ -950,7 +951,8 @@ test("BLASTN: an HSP of one letter has no orientation in its record; the note po
   await program(page, 'blastn');
   await task(page, 'blastn');
   await openParameters(page);
-  await page.getByTestId('param-word_size').fill('4');
+  await page.getByTestId('param-word_size').selectOption('other');
+  await page.getByTestId('param-word_size-other').fill('4');
   await paste(page, 'query', BUILD_HAS_ENGINE ? '>q\nTAGGACGG\n' : '>q1\nACGTACGTACGT\n>q2\nACGTACGTACGT\n>q\nTAGGACGG\n');
   await paste(page, 'subject', '>s\nYCAYAANTNCRGYACT\n');
   await run(page, 1);
@@ -1580,7 +1582,6 @@ test('narrow screens: the results are no wider than the screen; "Run LOSAT" open
   await clickKeepsScroll('hsp-table', hspRows(page).nth(Math.min(1, (await hspRows(page).count()) - 1)));
   for (const table of ['subject-table', 'hsp-table']) {
     await show(page, 'hits');
-    await expect(page.getByTestId(`${table}-scroll-hint`)).toBeVisible();
     // Each value is under its header.
     const offsets = await page
       .getByTestId(table)

@@ -61,7 +61,6 @@ const loaded = computed(() => props.state.loaded);
 const subjects = computed(() => props.state.subjects);
 const record = computed(() => loaded.value?.run.snapshot.query.records[props.state.qIdx ?? -1]);
 const queryLength = computed(() => Math.max(1, record.value?.length ?? 1));
-const unit = computed(() => loaded.value?.units.query ?? '');
 const drawnSubjects = computed(() => (showAll.value ? subjects.value : subjects.value.slice(0, FIRST_SUBJECTS)));
 
 /**
@@ -528,10 +527,6 @@ const selectedText = computed(() => (selectedIndex.value < 0 ? '' : `${props.sta
     <figcaption class="plot-caption">
       <span class="plot-title" data-testid="graphic-title"
         >Distribution of {{ formatCount(layout.count) }} HSPs on {{ formatCount(layout.rows.length) }} subject sequences</span
-      >
-      <span class="muted small"
-        >Query {{ record?.id }} ({{ formatCount(queryLength) }} {{ unit }}). One row per subject, in the order of the Descriptions; each bar is an HSP
-        at its query coordinates.</span
       >
     </figcaption>
     <div class="graphic-frame">

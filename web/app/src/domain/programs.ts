@@ -38,6 +38,13 @@ export interface ParameterField {
   /** Suggestions offered with a `text` field (they do not limit what can be typed). */
   readonly suggestions?: readonly string[];
   /**
+   * For `text` fields: the values of NCBI's select, offered in a select (one list, or a list per
+   * task); its "Other" takes any other value in a text box, which the engine's parser reads.
+   */
+  readonly list?: readonly string[] | Readonly<Record<string, readonly string[]>>;
+  /** NCBI's sentence beside the control ("Select the maximum number of aligned sequences to display"). */
+  readonly hint?: string;
+  /**
    * The name of a row that shows this field with its neighbours of the same row (NCBI's
    * "Match/Mismatch Scores" and "Gap Costs", which are one select on NCBI's page).
    */
@@ -60,6 +67,28 @@ export interface ParameterSection {
    * is never written to the argv from a hidden field (NCBI's "Discontiguous Word Options").
    */
   readonly shownFor?: { readonly flag: string; readonly values: readonly string[] };
+}
+
+/**
+ * A default that the engine resolves itself and `describe` does not report (the option has no
+ * clap default): by task, or from other options. The values are those of the CLI's help
+ * (`losat <program> -help`; describe.json carries the same text, and a unit test checks each
+ * value against it). This table is a temporary source (line WR, 2026-11-02): the engine's route
+ * is `describe` reporting the defaults it resolves (docs/web/ncbi_ui_mapping.md §2).
+ */
+export interface ResolvedDefault {
+  /** The value, or the value of each task. */
+  readonly value: string | Readonly<Record<string, string>>;
+  /**
+   * Options whose value decides this one ("11, or the matrix's best value"): the value holds
+   * while each of them keeps its own default.
+   */
+  readonly unless?: readonly string[];
+  /**
+   * BLAST+ tells the option given from not given (the hit list options, abi_v2.md §7): a value
+   * set is written even when it equals the default.
+   */
+  readonly given?: true;
 }
 
 export interface ProgramDescriptor {
@@ -86,19 +115,29 @@ export interface ProgramDescriptor {
    * in the order of the page.
    */
   readonly sections: readonly ParameterSection[];
+  /** The defaults that the engine resolves and `describe` does not report, by flag. */
+  readonly defaults?: Readonly<Record<string, ResolvedDefault>>;
 }
 
 const integer = { kind: 'text', inputMode: 'numeric' } as const;
 const decimal = { kind: 'text', inputMode: 'decimal' } as const;
-/** Matrix names of NCBI BLAST+; the engine says which ones it searches with. */
-const MATRICES = ['BLOSUM45', 'BLOSUM50', 'BLOSUM62', 'BLOSUM80', 'BLOSUM90', 'PAM30', 'PAM70', 'PAM250', 'IDENTITY'];
+/** NCBI's matrix select, in its order; "Other" takes the other names that the engine reads. */
+const MATRICES = ['PAM30', 'PAM70', 'BLOSUM90', 'BLOSUM80', 'BLOSUM62', 'BLOSUM50', 'BLOSUM45', 'PAM250'];
+/** NCBI's word size selects of the protein programs. */
+const PROTEIN_WORD_SIZES = ['2', '3', '5', '6'];
 
 // General Parameters.
-const maxTargetSeqs: ParameterField = { flag: '-max_target_seqs', label: 'Max target sequences', ...integer };
+const maxTargetSeqs: ParameterField = {
+  flag: '-max_target_seqs',
+  label: 'Max target sequences',
+  ...integer,
+  list: ['10', '50', '100', '250', '500', '1000', '5000'],
+  hint: 'Select the maximum number of aligned sequences to display',
+};
 const evalue: ParameterField = { flag: '-evalue', label: 'Expect threshold', ...decimal };
-const wordSize: ParameterField = { flag: '-word_size', label: 'Word size', ...integer };
+const wordSize: ParameterField = { flag: '-word_size', label: 'Word size', ...integer, list: PROTEIN_WORD_SIZES };
 // Scoring Parameters: NCBI's "Gap Costs" select is one row of the two costs here.
-const matrix: ParameterField = { flag: '-matrix', label: 'Matrix', kind: 'text', suggestions: MATRICES };
+const matrix: ParameterField = { flag: '-matrix', label: 'Matrix', kind: 'text', list: MATRICES };
 const gapOpen: ParameterField = { flag: '-gapopen', label: 'Existence', row: 'Gap Costs', ...integer };
 const gapExtend: ParameterField = { flag: '-gapextend', label: 'Extension', row: 'Gap Costs', ...integer };
 // `describe` explains the values of -comp_based_stats only in its help text; the names are NCBI's.
@@ -116,8 +155,9 @@ const compBasedStats: ParameterField = {
 };
 // Filters and Masking.
 const seg: ParameterField = { flag: '-seg', label: 'Low complexity regions filter (SEG)', kind: 'text', suggestions: ['no', 'yes'] };
-const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag' };
-const softMasking: ParameterField = { flag: '-soft_masking', label: 'Mask for lookup table only', kind: 'boolean' };
+// NCBI's "Mask" row: two checkboxes.
+const softMasking: ParameterField = { flag: '-soft_masking', label: 'Mask for lookup table only', kind: 'boolean', row: 'Mask' };
+const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag', row: 'Mask' };
 // Other Parameters: LOSAT's options that NCBI's page does not show.
 const maxHsps: ParameterField = { flag: '-max_hsps', label: 'Max HSPs per subject', ...integer };
 const threshold: ParameterField = { flag: '-threshold', label: 'Neighboring words threshold', ...decimal };
@@ -129,6 +169,22 @@ const numDescriptions: ParameterField = { flag: '-num_descriptions', label: 'Num
 const numAlignments: ParameterField = { flag: '-num_alignments', label: 'Number of alignments', ...integer };
 
 const OTHER = 'Other Parameters';
+
+/**
+ * The hit list options: BLAST+ tells each given from not given, and -max_target_seqs excludes
+ * the other two (abi_v2.md §7), so a default is shown only while the others are not set.
+ */
+const HIT_LIST_DEFAULTS: Readonly<Record<string, ResolvedDefault>> = {
+  '-max_target_seqs': { value: '500', given: true, unless: ['-num_descriptions', '-num_alignments'] },
+  '-num_descriptions': { value: '500', given: true, unless: ['-max_target_seqs'] },
+  '-num_alignments': { value: '250', given: true, unless: ['-max_target_seqs'] },
+};
+/** The values of BLASTP and TBLASTN that the matrix decides ("or the matrix's best value"). */
+const GAP_COST_DEFAULTS: Readonly<Record<string, ResolvedDefault>> = {
+  '-gapopen': { value: '11', unless: ['-matrix'] },
+  '-gapextend': { value: '1', unless: ['-matrix'] },
+  '-window_size': { value: '40', unless: ['-matrix'] },
+};
 
 export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
   {
@@ -167,7 +223,23 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           },
         ],
       },
-      { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize] },
+      {
+        title: 'General Parameters',
+        placement: 'algorithm',
+        fields: [
+          maxTargetSeqs,
+          evalue,
+          {
+            ...wordSize,
+            list: {
+              megablast: ['16', '20', '24', '28', '32', '48', '64'],
+              'dc-megablast': ['11', '12'],
+              blastn: ['7', '11', '15'],
+              'blastn-short': ['7', '11', '15'],
+            },
+          },
+        ],
+      },
       {
         title: 'Scoring Parameters',
         placement: 'algorithm',
@@ -209,6 +281,17 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         ],
       },
     ],
+    defaults: {
+      ...HIT_LIST_DEFAULTS,
+      '-evalue': { value: { megablast: '10', 'dc-megablast': '10', blastn: '10', 'blastn-short': '1000' } },
+      '-word_size': { value: { megablast: '28', 'dc-megablast': '11', blastn: '11', 'blastn-short': '7' } },
+      '-reward': { value: { megablast: '1', 'dc-megablast': '2', blastn: '2', 'blastn-short': '1' } },
+      '-penalty': { value: { megablast: '-2', 'dc-megablast': '-3', blastn: '-3', 'blastn-short': '-3' } },
+      '-gapopen': { value: { megablast: '0', 'dc-megablast': '5', blastn: '5', 'blastn-short': '5' } },
+      '-gapextend': { value: { megablast: '0', 'dc-megablast': '2', blastn: '2', 'blastn-short': '2' } },
+      '-dust': { value: { megablast: '20 64 1', 'dc-megablast': '20 64 1', blastn: '20 64 1', 'blastn-short': 'no' } },
+      '-soft_masking': { value: 'true' },
+    },
   },
   {
     id: 'blastp',
@@ -240,6 +323,16 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
       { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize, maxHsps] },
     ],
+    defaults: {
+      ...HIT_LIST_DEFAULTS,
+      ...GAP_COST_DEFAULTS,
+      '-evalue': { value: '10' },
+      '-word_size': { value: { blastp: '3', 'blastp-fast': '5' } },
+      '-matrix': { value: 'BLOSUM62' },
+      '-seg': { value: 'no' },
+      '-soft_masking': { value: 'false' },
+      '-threshold': { value: { blastp: '11', 'blastp-fast': '20' }, unless: ['-matrix', '-word_size'] },
+    },
   },
   {
     id: 'blastx',
@@ -250,7 +343,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     query: 'nucleotide',
     subject: 'protein',
     fastaParser: 1,
-    unavailable: 'BLASTX joins LOSAT Web after its certification. Until then, use BLASTX of the LOSAT command line.',
+    unavailable: 'Not in LOSAT Web yet: use BLASTX of the LOSAT command line.',
     sections: [],
   },
   {
@@ -286,6 +379,19 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         ],
       },
     ],
+    defaults: {
+      ...HIT_LIST_DEFAULTS,
+      ...GAP_COST_DEFAULTS,
+      '-evalue': { value: '10' },
+      '-word_size': { value: { tblastn: '3', 'tblastn-fast': '5' } },
+      '-matrix': { value: 'BLOSUM62' },
+      '-seg': { value: '12 2.2 2.5' },
+      '-soft_masking': { value: 'false' },
+      '-threshold': { value: { tblastn: '13', 'tblastn-fast': '20' }, unless: ['-matrix', '-word_size'] },
+      '-xdrop_gap': { value: '15' },
+      '-xdrop_gap_final': { value: '25' },
+      '-sum_stats': { value: 'true' },
+    },
   },
   {
     id: 'tblastx',
@@ -303,13 +409,27 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         title: 'General Parameters',
         placement: 'algorithm',
         // NCBI's "Max matches in a query range" (HSP_RANGE_MAX) is BLAST+'s -culling_limit.
-        fields: [maxTargetSeqs, evalue, wordSize, { flag: '-culling_limit', label: 'Max matches in a query range', ...integer }],
+        fields: [
+          maxTargetSeqs,
+          evalue,
+          { ...wordSize, list: ['2', '3'] },
+          { flag: '-culling_limit', label: 'Max matches in a query range', ...integer },
+        ],
       },
       // TBLASTX is ungapped: NCBI's page has the matrix and no gap costs.
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix] },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
       { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize] },
     ],
+    defaults: {
+      ...HIT_LIST_DEFAULTS,
+      '-word_size': { value: '3' },
+      '-culling_limit': { value: '0' },
+      '-matrix': { value: 'BLOSUM62' },
+      '-soft_masking': { value: 'false' },
+      '-threshold': { value: '13', unless: ['-matrix'] },
+      '-window_size': { value: '40', unless: ['-matrix'] },
+    },
   },
 ] satisfies ProgramDescriptor[]);
 
@@ -335,8 +455,28 @@ export function residueUnit(kind: SequenceKind): string {
  * and where. `task` is the task the search uses (set, or the engine's default), if known.
  */
 export function searchSummary(program: ProgramDescriptor, task: string | undefined): string {
+  return searchSummaryParts(program, task)
+    .map((part) => part.text)
+    .join('');
+}
+
+/**
+ * The line beside the "Run LOSAT" button in parts: what is searched and the program with its
+ * task are set off (`strong`), as NCBI sets off "database core_nt" and "Megablast (Optimize for
+ * highly similar sequences)".
+ */
+export function searchSummaryParts(
+  program: ProgramDescriptor,
+  task: string | undefined,
+): ReadonlyArray<{ readonly text: string; readonly strong?: true }> {
   const query = program.queryNote === undefined ? '' : ` (${program.queryNote})`;
   const note = task === undefined ? undefined : program.taskNotes?.[task];
   const taskText = task === undefined ? '' : `, task ${task}${note === undefined ? '' : ` (${note})`}`;
-  return `Search ${program.searches} with ${program.label}${query}${taskText}. Runs in this browser.`;
+  return [
+    { text: 'Search ' },
+    { text: program.searches, strong: true },
+    { text: ' with ' },
+    { text: `${program.label}${query}${taskText}`, strong: true },
+    { text: '.' },
+  ];
 }

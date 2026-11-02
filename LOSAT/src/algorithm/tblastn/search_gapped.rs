@@ -551,6 +551,14 @@ thread_local! {
     static X_UNIT_STATE: std::cell::Cell<Option<XUnitBuffers>> = const { std::cell::Cell::new(None) };
 }
 
+/// Frees this thread's `XUnitBuffers` at the end of its loop over the chunks of the subject flow
+/// (`x_oid_flow::x_loop_free`, LOSAT_X_TBNLOOPFREE). A thread that searches a subject after it
+/// makes new buffers, as for its first subject.
+#[cfg(feature = "parallel")]
+pub(super) fn x_free_unit_buffers() {
+    let _ = X_UNIT_STATE.try_with(|state| drop(state.take()));
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812
 // ```c
 //             subject->sequence = translation_buffer + frame_offsets[context] + 1;

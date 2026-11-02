@@ -20,8 +20,8 @@ export const AUTO_SERIAL_BELOW_BYTES = 20_000;
  * PLAN v4 §8 (4)). In W3 (headed Chromium on a 32-processor i9, TBLASTX d04, two genomes of
  * 1.3 MB) 16 threads took 2.2-2.4 s from the second search on against 4.6-10.6 s at 4 and
  * 2.5-3.0 s at 8, and the first search was no slower than at 4. 64 threads were not faster
- * on that machine and need 2 x 63 thread workers: the browser held 1,210 MiB after three d04
- * searches against 967 MiB at 32 and 801 MiB at 4 (v4-W/DESIGN_W3.md).
+ * on that machine and need 63 thread workers (2 x 63 when this was measured): the browser held
+ * 1,210 MiB after three d04 searches against 967 MiB at 32 and 801 MiB at 4 (v4-W/DESIGN_W3.md).
  */
 export const AUTO_MAX_THREADS = 32;
 

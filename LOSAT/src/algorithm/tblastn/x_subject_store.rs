@@ -180,6 +180,13 @@ thread_local! {
     static X_LETTERS: Cell<Vec<u8>> = const { Cell::new(Vec::new()) };
 }
 
+/// Frees this thread's letter buffer at the end of its loop over the chunks of the subject flow
+/// (`x_oid_flow::x_loop_free`, LOSAT_X_TBNLOOPFREE).
+#[cfg(feature = "parallel")]
+pub(super) fn x_free_letters() {
+    let _ = X_LETTERS.try_with(|buffer| drop(buffer.take()));
+}
+
 /// EXPERIMENT (LOSAT_X_TBNSTORE): the subject records, each one's letters packed as soon as it has
 /// been read (`blastinput::x_packed_subjects::x_read_packed_subjects`: cut to `-subject_loc` first,
 /// packed on a second thread at two or more threads natively, on the reader in WebAssembly). The

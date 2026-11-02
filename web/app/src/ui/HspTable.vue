@@ -7,7 +7,7 @@ import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../applicati
 import type { HspSortKey } from '../domain/result-index';
 import { framesLabel, framesText } from './format';
 import SortButton from './SortButton.vue';
-import { focusPressed, useSideScroll } from './useSideScroll';
+import { focusPressed } from './useSideScroll';
 import VirtualRows from './VirtualRows.vue';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
@@ -23,7 +23,6 @@ const framed = computed(() => props.state.hsps.some((hsp) => hsp.queryFrame !== 
 const framesHead = computed(() => (props.state.hsps[0] === undefined ? '' : (framesLabel(props.state.hsps[0]) ?? '')));
 const subject = computed(() => props.state.subjects.find((s) => s.sIdx === props.state.sIdx));
 const scroller = ref<HTMLElement>();
-const sideScroll = useSideScroll(scroller);
 const gutter = ref(0);
 
 function sortBy(key: HspSortKey, descending: boolean): void {
@@ -50,7 +49,6 @@ const ORIENTATION: Readonly<Record<HspEntry['orientation'], string>> = {
       HSPs of {{ subject?.first.sseqid }}
       <span class="muted small">{{ state.hsps.length }} shown</span>
     </h3>
-    <p v-if="sideScroll" class="table-hint muted small" data-testid="hsp-table-scroll-hint">Scroll the table sideways for more columns →</p>
     <div ref="scroller" class="table-scroll" :style="{ '--row-gutter': `${gutter}px` }">
       <div class="table-head hsp-grid" :class="{ framed }" role="row">
         <SortButton class="num-head" data-col="rank" label="#" sort-key="rank" :sort="state.hspSort" scope="hsp" @sort="sortBy" />

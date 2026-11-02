@@ -1,25 +1,132 @@
+/* The look of gbdraw's Web GUI (Owner, 2026-11-02): Inter, a slate page with white cards, blue
+   accent, rounded controls. The tokens are gbdraw's (--ui-* in gbdraw/web/index.html). */
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter/inter-latin-400-normal.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter/inter-latin-500-normal.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter/inter-latin-600-normal.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter/inter-latin-700-normal.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter/inter-latin-ext-400-normal.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter/inter-latin-ext-500-normal.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter/inter-latin-ext-600-normal.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter/inter-latin-ext-700-normal.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 :root {
+  /* Three layers, as NCBI's page (line WR, 2026-11-02): a tinted ground (--page), groups in a
+     lighter tint with a visible edge (--group, --border-strong), and white controls, tables and
+     outputs (--bg). Bands inside a group (toolbars, table heads) are --band. */
+  --page: #d6e3f1;
+  --group: #eef1f4;
+  --band: #e2e7ec;
   --bg: #ffffff;
-  --fg: #1d2330;
-  --muted: #5b6475;
-  --border: #d5dae3;
-  --panel: #f6f8fb;
-  --accent: #1f5fbf;
-  --accent-bg: #e8f0fc;
-  --ok: #1d6b3a;
-  --error: #a3161a;
-  --warn-bg: #fff4d6;
-  --warn-fg: #6b4a00;
-  font-family: system-ui, sans-serif;
-  color: var(--fg);
-  background: var(--bg);
-  line-height: 1.4;
+  --fg: #1e293b;
+  --fg-2: #334155;
+  --muted: #64748b;
+  --border: #dbe6ec;
+  --border-strong: #c3d4dd;
+  /* The edge of a text box or a select in the search form, dark enough to find the controls. */
+  --control-line: #8b9bab;
+  --panel: #f3f8fa;
+  /* The accent and the status colours are Okabe–Ito's colour-universal palette (Owner,
+     2026-11-02, 案 4): blue, bluish green, vermillion and yellow, told apart in every common
+     colour vision; the Graphic Summary's score bins (plot-scale.ts) use the same palette. */
+  --accent: #0072b2;
+  --accent-hover: #005b8e;
+  --accent-bg: #e6f1f9;
+  --accent-line: #9ccbe6;
+  --ok: #007a5a;
+  --ok-bg: #e3f4ee;
+  --error: #b84f00;
+  --error-bg: #fdeee3;
+  --error-line: #f2b58b;
+  --warn-bg: #faf6d2;
+  --warn-fg: #5b4b00;
+  --warn-line: #e2d24b;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --radius: 12px;
+  --radius-sm: 8px;
+  font-family: 'Inter', 'Noto Sans JP', system-ui, sans-serif;
+  font-size: 15px;
+  color: var(--fg-2);
+  /* A neutral light grey page behind the white cards, so that the status colours read against it. */
+  background: var(--page);
+  line-height: 1.45;
 }
 
 body {
   margin: 0;
   padding: 0 16px 32px;
-  background: var(--bg);
+  background: transparent;
+}
+
+h1,
+h2,
+h3,
+h4,
+strong,
+legend {
+  color: var(--fg);
 }
 
 h2 {
@@ -34,25 +141,60 @@ h3 {
 
 button {
   font: inherit;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   background: var(--bg);
-  color: var(--fg);
+  color: var(--fg-2);
+  box-shadow: var(--shadow);
   cursor: pointer;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    transform 0.1s;
+}
+
+button:hover:not(:disabled) {
+  background: var(--panel);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.5;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 button.link {
   border: none;
   background: none;
+  box-shadow: none;
   color: var(--accent);
+  font-weight: 600;
   padding: 0;
   text-decoration: underline;
+}
+
+button.link:hover:not(:disabled) {
+  background: none;
+  color: var(--accent-hover);
+}
+
+a {
+  color: var(--accent);
 }
 
 input[type='text'],
@@ -60,12 +202,30 @@ input[type='search'],
 select,
 textarea {
   font: inherit;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 4px 6px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
   background: var(--bg);
-  color: var(--fg);
+  color: var(--fg-2);
   min-width: 0;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+input[type='text']:focus,
+input[type='search']:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(0, 114, 178, 0.25);
+  background: var(--bg);
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent);
 }
 
 .visually-hidden {
@@ -81,7 +241,18 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 12px;
+  gap: 4px 14px;
+  margin: 0 -16px 12px;
+  padding: 10px 16px;
+  background: var(--group);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.5em;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .local-note,
@@ -96,13 +267,21 @@ textarea {
   font-size: 0.88em;
 }
 
+/* gbdraw's notices: an info card in blue, a warning in amber. */
 .banner,
 .notice,
 .warning {
   background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
   color: var(--warn-fg);
   padding: 6px 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
+}
+
+.notice {
+  background: var(--accent-bg);
+  border-color: var(--accent-line);
+  color: #004a73;
 }
 
 .error {
@@ -118,16 +297,35 @@ textarea {
 }
 
 .tabs {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 2px;
   margin: 8px 0;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  background: #eaf2f5;
+}
+
+.tabs button {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 6px 14px;
+}
+
+.tabs button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--fg-2);
 }
 
 .tabs button[aria-pressed='true'] {
-  border-color: var(--accent);
+  border-color: var(--border);
   color: var(--accent);
-  background: var(--accent-bg);
+  background: var(--bg);
+  box-shadow: var(--shadow);
 }
 
 /* One column, as NCBI's pages: the search form or the results take the width, and LOSAT's
@@ -144,7 +342,6 @@ textarea {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 24px;
-  border-top: 1px solid var(--border);
 }
 
 /* An option name is not broken after its leading hyphen (S13 screen review L2). */
@@ -155,21 +352,24 @@ textarea {
 /* Search screen */
 
 .program-tabs {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 2px;
   border: none;
-  padding: 0;
+  padding: 4px;
   margin: 8px 0 4px;
+  border-radius: var(--radius-sm);
+  background: #eaf2f5;
 }
 
 .program-tab {
   position: relative;
   padding: 6px 14px;
-  border: 1px solid var(--border);
-  border-radius: 4px 4px 0 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 600;
+  color: var(--muted);
 }
 
 .program-tab input {
@@ -181,26 +381,31 @@ textarea {
 }
 
 .program-tab.selected {
-  border-color: var(--accent);
+  border-color: var(--border);
   color: var(--accent);
-  background: var(--accent-bg);
+  background: var(--bg);
+  box-shadow: var(--shadow);
 }
 
 .program-tab.unavailable {
-  color: var(--muted);
-  font-weight: 400;
-  border-style: dashed;
+  color: #94a3b8;
+  font-weight: 500;
 }
 
 .program-tab.unavailable.selected {
   color: var(--accent);
-  background: var(--accent-bg);
-  border-color: var(--accent);
+  background: var(--bg);
+  border-color: var(--border);
 }
 
 .program-tab:focus-within {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* The search page in 14 px, as the Algorithm parameters (line WR, 2026-11-02). */
+.search-panel {
+  font-size: 14px;
 }
 
 /* W4b search: the program's sentence under the tabs, as NCBI's, in the panel's type. */
@@ -210,26 +415,32 @@ textarea {
   font-size: 0.92em;
 }
 
-/* W4b search: NCBI's blocks ("Enter Query Sequence", "Program Selection", the sections of
-   "Algorithm parameters"): a light grey panel whose legend is a tab on its top edge, in
-   LOSAT's accent. */
+/* NCBI's blocks ("Enter Query Sequence", "Program Selection", the groups of "Algorithm
+   parameters", the sections of the results): a group in the lighter tint with a visible edge,
+   whose name is a tab on its top edge in the accent (line WR, 2026-11-02). */
 .search-block {
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--panel);
-  margin: 14px 0 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--group);
+  margin: 18px 0 0;
   padding: 4px 12px 10px;
   min-width: 0;
 }
 
-.search-block > legend {
+.search-block > legend,
+.section-legend,
+.hits-section > .section-heading {
   padding: 1px 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px 4px 0 0;
-  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--group);
   color: var(--accent);
+  font-size: 1.1em;
   font-weight: 700;
-  font-size: 1.05em;
+}
+
+.search-block > legend {
+  margin-left: -4px;
 }
 
 /* W4b search: a file dragged over a block. */
@@ -305,11 +516,13 @@ textarea {
 
 .param-label {
   font-weight: 600;
+  color: var(--fg);
   overflow-wrap: anywhere;
 }
 
-.param-label code.flag {
-  font-size: 0.8em;
+/* The option's flag after NCBI's name (W4b: NCBI's words with LOSAT's flags), small and muted. */
+.param-label .flag {
+  font-size: 0.82em;
   font-weight: 400;
   color: var(--muted);
   white-space: nowrap;
@@ -317,11 +530,27 @@ textarea {
 
 .param-control {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, max-content) max-content;
   align-content: start;
+  align-items: center;
   justify-items: start;
-  gap: 2px;
+  gap: 2px 8px;
   min-width: 0;
+}
+
+/* The "?" sits beside the control; the help it opens takes the row under both. */
+.param-control > .help,
+.param-control > datalist {
+  grid-column: 1 / -1;
+}
+
+.param-row[data-kind='radio'] .param-control {
+  align-items: start;
+}
+
+/* The Job Title fills its row, like the paste box and the drop zone above it (W4b L13). */
+.param-control.fill {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .param-control > input[type='text'] {
@@ -350,11 +579,38 @@ textarea {
   color: var(--muted);
 }
 
-/* W4b search: a row of several fields (Match/Mismatch Scores, Gap Costs). */
+/* W4b search: a row of several fields (Match/Mismatch Scores, Gap Costs, NCBI's "Mask"). */
 .param-group {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
+}
+
+/* In Algorithm parameters each field of a row is its name and its control on one line. */
+.parameter-form .param-group {
+  gap: 2px 12px;
+}
+
+.parameter-form .param-inline {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+}
+
+.parameter-form .param-inline .param-control > input[type='text'] {
+  width: 5em;
+}
+
+/* A checkbox of a row keeps its name beside it; the name wraps. */
+.parameter-form .param-check .param-control {
+  flex-wrap: nowrap;
+  gap: 4px 6px;
+}
+
+.parameter-form .param-check .param-label {
+  min-width: 0;
 }
 
 .param-inline {
@@ -380,6 +636,7 @@ textarea {
 .param-row.changed,
 .param-inline.changed {
   background: var(--warn-bg);
+  border-radius: var(--radius-sm);
 }
 
 .changed-mark {
@@ -409,10 +666,18 @@ textarea {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 10px;
-  border: 1px dashed var(--border);
-  border-radius: 4px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
   padding: 6px;
   background: var(--bg);
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
+}
+
+.dropzone:hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
 }
 
 .input-panel.dragging .dropzone {
@@ -448,8 +713,8 @@ textarea {
 
 .source {
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 8px;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
   background: var(--bg);
   min-width: 0;
 }
@@ -504,7 +769,8 @@ textarea {
   position: relative;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
 }
 
 .record-spacer {
@@ -532,7 +798,7 @@ textarea {
 }
 
 .record-row.refused {
-  background: #fdecec;
+  background: var(--error-bg);
 }
 
 .record-number {
@@ -580,10 +846,12 @@ textarea {
 
 .badge {
   font-size: 0.8em;
-  padding: 0 6px;
-  border-radius: 8px;
+  font-weight: 500;
+  padding: 0 7px;
+  border-radius: 999px;
   background: var(--panel);
   border: 1px solid var(--border);
+  color: var(--muted);
 }
 
 .badge.warn {
@@ -598,14 +866,14 @@ textarea {
 .mode,
 .region {
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   margin: 8px 0 0;
   padding: 6px 10px 8px;
   min-width: 0;
 }
 
 .mode {
-  background: var(--bg);
+  background: var(--panel);
 }
 
 .mode label {
@@ -626,7 +894,7 @@ textarea {
   position: absolute;
   top: 0;
   bottom: 0;
-  background: rgba(31, 95, 191, 0.45);
+  background: rgba(37, 99, 235, 0.4);
   border: 1px solid var(--accent);
   box-sizing: border-box;
 }
@@ -662,10 +930,10 @@ textarea {
   align-items: center;
   gap: 8px 16px;
   margin: 14px 0 0;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--group);
 }
 
 .blast-row p {
@@ -700,24 +968,122 @@ textarea {
   font-size: 1em;
 }
 
-/* A block of inline words, so that the name and the count wrap as text on a phone. */
+/* The bar is a group of its own (a block of inline words, so that the name and the count wrap
+   as text on a phone); open, its groups follow on the ground as the blocks above do. */
 .parameters-bar {
   display: block;
   width: 100%;
-  min-height: 32px;
-  padding: 4px 12px;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  background: var(--accent);
-  color: #fff;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--group);
+  box-shadow: none;
+  color: var(--accent);
   font-weight: 700;
-  font-size: 1.05em;
+  font-size: 1.1em;
   text-align: left;
+}
+
+.parameters-bar:hover:not(:disabled) {
+  background: var(--group);
+  color: var(--accent-hover);
+}
+
+.parameters-bar:active:not(:disabled) {
+  transform: none;
 }
 
 .parameters-bar:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.parameters-body {
+  padding-bottom: 8px;
+}
+
+/* Algorithm parameters as NCBI's form (line WR, 2026-11-02): the groups on the ground, each
+   group's name a tab in the accent; rows of at most 40 px. */
+.parameters-body .search-block {
+  margin-top: 24px;
+}
+
+/* A group's name (a div, not a legend: ParameterForm.vue) as a tab on its top edge. */
+.parameters-body .section-legend {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin: -17px 0 2px -4px;
+}
+
+/* The sections share one label column, as wide as the longest name (wrapped at 22 em), and the
+   controls start next to it; one column below 801 px (W4b). */
+.parameter-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.parameter-form > * {
+  grid-column: 1 / -1;
+}
+
+.parameter-form .param-row {
+  align-items: center;
+  gap: 2px 14px;
+  padding: 3px 6px;
+}
+
+.parameter-form .param-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.parameter-form .param-control > .help {
+  flex-basis: 100%;
+}
+
+.parameter-form input[type='text'],
+.parameter-form select {
+  padding: 3px 6px;
+  border-color: var(--control-line);
+  background: var(--bg);
+}
+
+.parameter-form .param-control > input[type='text'] {
+  width: 8em;
+}
+
+.parameter-form .param-control > input[inputmode='text'] {
+  width: 12em;
+}
+
+.parameter-form .select-clip select {
+  min-width: 0;
+}
+
+/* NCBI's sentence beside a control. */
+.param-hint {
+  color: var(--muted);
+}
+
+@media (min-width: 801px) {
+  .parameter-form {
+    grid-template-columns: minmax(10em, max-content) minmax(0, 1fr);
+  }
+
+  .parameter-form .parameter-section,
+  .parameter-form .parameter-section > .param-row {
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
+  }
+
+  .parameter-form .param-row > .param-label {
+    max-width: 22em;
+  }
 }
 
 .bar-mark {
@@ -725,8 +1091,9 @@ textarea {
   width: 1em;
   margin-right: 6px;
   text-align: center;
-  font-size: 1.2em;
+  font-size: 1.1em;
   line-height: 1;
+  color: var(--muted);
 }
 
 .bar-count {
@@ -745,11 +1112,12 @@ textarea {
 
 .parameters-note {
   margin: 0;
-  padding: 2px 8px;
-  border-radius: 3px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--warn-line);
   background: var(--warn-bg);
   color: var(--warn-fg);
-  font-size: 0.9em;
+  font-size: 0.88em;
 }
 
 .run-options label {
@@ -768,12 +1136,25 @@ textarea {
   color: var(--ok);
 }
 
-.primary-action {
+.primary-action,
+.filter-submit {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
-  font-weight: 600;
+  font-weight: 700;
   padding: 8px 18px;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.3);
+}
+
+.primary-action:hover:not(:disabled),
+.filter-submit:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.blast-row .primary-action {
+  padding: 10px 22px;
+  font-size: 1.05em;
 }
 
 /* W4b search: the Job Title on a run's card. */
@@ -789,6 +1170,12 @@ textarea {
     grid-template-columns: 14em minmax(0, 1fr);
   }
 
+  /* "Or, upload file": the button and its words; the whole block takes a dropped file. */
+  .param-control.dropzone {
+    justify-self: start;
+    padding-right: 14px;
+  }
+
   .entry {
     grid-template-columns: minmax(0, 3fr) minmax(15em, 2fr);
   }
@@ -798,14 +1185,14 @@ textarea {
 
 .run-status {
   margin: 12px 0;
-  padding: 8px 12px;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
   background: var(--accent-bg);
 }
 
 .run-status[data-status='queued'] {
-  border-color: var(--warn-fg);
+  border-color: var(--warn-line);
   background: var(--warn-bg);
 }
 
@@ -830,7 +1217,7 @@ textarea {
 
 .run-status-actions > button:not(.link) {
   font-size: 0.88em;
-  padding: 2px 10px;
+  padding: 3px 10px;
 }
 
 .run-inputs {
@@ -851,15 +1238,49 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
-.attention,
 .storage {
-  margin-top: 12px;
   font-size: 0.9em;
 }
 
-.attention h2,
-.storage h2 {
-  font-size: 1em;
+/* The engine's help of an option waits behind "?" (stop-describing-ui), a filled circle in the
+   accent as NCBI's. */
+.help-toggle {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: none;
+  color: #fff;
+  font-size: 0.8em;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.help-toggle:hover:not(:disabled),
+.help-toggle[aria-expanded='true'] {
+  background: var(--accent-hover);
+}
+
+.search-summary-line strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.local-note svg {
+  vertical-align: -2px;
+  margin-right: 4px;
+}
+
+.run-status-warning svg {
+  vertical-align: -2px;
+  margin-right: 4px;
+}
+
+.ok svg {
+  vertical-align: -3px;
 }
 
 .storage {
@@ -867,10 +1288,10 @@ textarea {
 }
 
 .resume-notice {
-  border: 1px solid var(--accent);
+  border: 1px solid var(--accent-line);
   background: var(--accent-bg);
-  border-radius: 4px;
-  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
   margin: 8px 0;
 }
 
@@ -883,9 +1304,30 @@ textarea {
 
 pre.output {
   border: 1px solid var(--border);
-  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 8px 10px;
   overflow: auto;
   max-height: 60vh;
+}
+
+.results {
+  padding: 0 0 16px;
+}
+
+/* The results' groups: the header block, Filter Results, the sections of Hits and the other views. */
+.results-summary,
+.result-filters,
+.hits-section,
+.results-group {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--group);
+}
+
+.results-group {
+  margin: 8px 0 0;
+  padding: 6px 12px 12px;
 }
 
 /* The Outputs view lays out a block of lines only near the view (src/domain/output-chunks.ts). A
@@ -931,6 +1373,7 @@ label.inline {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   margin: 0;
+  padding: 2px 14px;
 }
 
 .results-summary dt,
@@ -941,7 +1384,7 @@ label.inline {
 
 .results-summary dt {
   padding-right: 16px;
-  color: var(--muted);
+  color: var(--fg-2);
   font-weight: 600;
 }
 
@@ -987,29 +1430,32 @@ label.inline {
 }
 
 .results-message {
-  padding: 6px 10px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--panel);
 }
 
 .verification-badge {
-  font-size: 0.85em;
+  font-size: 0.82em;
+  font-weight: 500;
   padding: 2px 10px;
-  border-radius: 12px;
-  border: 1px solid currentColor;
+  border-radius: 999px;
+  border: 1px solid var(--border);
   background: var(--panel);
   color: var(--muted);
 }
 
 .verification-badge[data-level='certified'] {
   color: var(--ok);
-  background: #e7f5ec;
+  background: var(--ok-bg);
+  border-color: #8fd6bf;
 }
 
 .verification-badge[data-level='outside'] {
   color: var(--warn-fg);
   background: var(--warn-bg);
+  border-color: var(--warn-line);
 }
 
 .verification ul {
@@ -1024,14 +1470,14 @@ label.inline {
 /* NCBI's classic page: Graphic Summary, Descriptions and Alignments one under the other, each
    under its own heading. */
 .hits-section {
-  margin: 0 0 16px;
+  margin: 26px 0 0;
+  padding: 0 12px 12px;
 }
 
-.hits-section .section-heading {
-  margin: 16px 0 6px;
-  padding-bottom: 2px;
-  border-bottom: 1px solid var(--border);
-  font-size: 1.1em;
+.hits-section > .section-heading {
+  width: max-content;
+  margin: -14px 0 8px -4px;
+  line-height: 1.45;
 }
 
 .hits-view h4,
@@ -1043,10 +1489,11 @@ label.inline {
 .result-filters {
   flex: 1 1 18em;
   max-width: 28em;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--panel);
+  padding: 10px 14px;
+}
+
+.result-filters > h3 {
+  color: var(--accent);
 }
 
 .result-filters .filter-fields {
@@ -1078,12 +1525,6 @@ label.inline {
   margin-top: 8px;
 }
 
-.filter-submit {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  font-weight: 600;
-}
 
 /* "Results for": the query list of a run of several queries. */
 .query-picker {
@@ -1093,30 +1534,14 @@ label.inline {
 /* W4b: NCBI's tab strip, in LOSAT's colours: the selected tab filled with the accent and white
    text, the others grey, over a line of the accent; under it, each tab's light tool band. */
 .results-tabs {
-  gap: 4px;
-  margin: 12px 0 0;
-  border-bottom: 3px solid var(--accent);
-}
-
-.results-tabs button {
-  border-color: var(--border);
-  border-bottom: none;
-  border-radius: 4px 4px 0 0;
-  background: var(--panel);
-  padding: 6px 14px;
-}
-
-.results-tabs button[aria-pressed='true'] {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
+  margin: 14px 0 4px;
 }
 
 .tool-band {
   margin: 0 0 8px;
   padding: 6px 10px;
-  background: var(--accent-bg);
+  border-radius: var(--radius-sm);
+  background: var(--band);
 }
 
 .hits-view .tool-band h3 {
@@ -1131,7 +1556,7 @@ label.inline {
   position: relative;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
   background: var(--bg);
 }
 
@@ -1145,6 +1570,8 @@ label.inline {
   right: 0;
 }
 
+/* Rows are buttons: none of the button look, and the tables' weight, so that the rows' ch are
+   the header's ch (the columns are sized in ch). */
 .pick-row,
 .table-row {
   width: 100%;
@@ -1153,9 +1580,18 @@ label.inline {
   border-bottom: 1px solid var(--panel);
   border-radius: 0;
   background: transparent;
+  box-shadow: none;
   text-align: left;
   padding: 0 8px;
   color: var(--fg);
+  font-weight: 400;
+  transition: background-color 0.15s;
+}
+
+.pick-row:active:not(:disabled),
+.table-row:active:not(:disabled),
+.sort-button:active:not(:disabled) {
+  transform: none;
 }
 
 .pick-row {
@@ -1180,6 +1616,11 @@ label.inline {
 
 .pick-row.empty .record-id {
   color: var(--muted);
+}
+
+.pick-row:hover,
+.table-row:hover {
+  background: var(--panel);
 }
 
 .pick-row.selected,
@@ -1209,6 +1650,7 @@ label.inline {
   width: 100%;
   border: none;
   background: none;
+  box-shadow: none;
   padding: 0;
   font: inherit;
   color: inherit;
@@ -1223,12 +1665,15 @@ label.inline {
   align-items: center;
 }
 
+/* The E value columns are 9.5ch: in Inter an E value of 9 characters ("1.21e-102") is 9.4ch
+   wide, wider than the 8.25ch that fitted the system font, and it ran past its header. */
+
 /* NCBI's order (W4b): #, Description, Score (bits), E value, HSPs, Length, Subject ID. The Subject
    ID column is as wide as its longest value (--id-width, measured by SubjectTable), within 10ch
    and 24ch, and starts 12 px further from the right-aligned lengths; the Description has the rest
    (W4b screen review L8). */
 .subject-grid {
-  grid-template-columns: 4ch minmax(12ch, 1fr) 9ch 8.25ch 7ch 8.25ch calc(clamp(10ch, var(--id-width, 24ch), 24ch) + 12px);
+  grid-template-columns: 4ch minmax(12ch, 1fr) 9ch 9.5ch 7ch 8.25ch calc(clamp(10ch, var(--id-width, 24ch), 24ch) + 12px);
 }
 
 .subject-grid > [data-col='sseqid'],
@@ -1241,11 +1686,11 @@ label.inline {
    column at 1280 px beside the queue's column of the same width (W4b). */
 .hsp-grid {
   column-gap: 5px;
-  grid-template-columns: 3.5ch 9ch 8.25ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 9.5ch 8.25ch;
+  grid-template-columns: 3.5ch 9ch 9.5ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 9.5ch 8.25ch;
 }
 
 .hsp-grid.framed {
-  grid-template-columns: 3.5ch 9ch 8.25ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 6ch 9.5ch 8.25ch;
+  grid-template-columns: 3.5ch 9ch 9.5ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 6ch 9.5ch 8.25ch;
 }
 
 /* The header's columns are the rows' columns: the same borders, and room for the rows'
@@ -1254,16 +1699,16 @@ label.inline {
 .table-head {
   border: 1px solid var(--border);
   border-bottom: none;
-  border-radius: 4px 4px 0 0;
-  padding: 4px calc(8px + var(--row-gutter, 0px)) 4px 8px;
-  background: var(--accent-bg);
-  color: var(--fg);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  padding: 5px calc(8px + var(--row-gutter, 0px)) 5px 8px;
+  background: var(--band);
+  color: var(--muted);
   align-items: end;
 }
 
 .table-head > * {
   min-width: 0;
-  font-size: 0.9em;
+  font-size: 0.86em;
   font-weight: 600;
 }
 
@@ -1285,7 +1730,7 @@ label.inline {
 }
 
 .orientation[data-orientation='reverse'] {
-  color: #c2410c;
+  color: #b84f00;
 }
 
 .orientation[data-orientation='unknown'] {
@@ -1482,6 +1927,13 @@ pre.range-text {
     min-height: 0;
   }
 
+  /* The "?" stays a circle, at the 24 px of WCAG 2.5.8. */
+  .help-toggle {
+    width: 24px;
+    height: 24px;
+    min-height: 0;
+  }
+
   .region-bar {
     height: 36px;
   }
@@ -1493,7 +1945,12 @@ pre.range-text {
   }
 
   /* The results' tabs share their rows. */
-  .results-tabs button {
+  .tabs,
+  .program-tabs {
+    display: flex;
+  }
+
+  .tabs button {
     flex: 1 1 auto;
     padding: 6px 10px;
   }
@@ -1507,7 +1964,7 @@ pre.range-text {
      the same order. Subjects: #, Subject, Score (bits), E value, HSPs, Length, Description. The
      Subject column keeps 12ch, so that IDs with a common prefix stay apart (second screen review). */
   .subject-grid {
-    grid-template-columns: 4ch minmax(12ch, 1fr) 9ch 8.25ch 6ch 8.25ch minmax(16ch, 2fr);
+    grid-template-columns: 4ch minmax(12ch, 1fr) 9ch 9.5ch 6ch 8.25ch minmax(16ch, 2fr);
   }
 
   .subject-grid > [data-col='sseqid'],
@@ -1549,11 +2006,11 @@ pre.range-text {
      Mismatches, Gap opens, outfmt 0. The frames come before the ranges, so that a phone shows
      them (W4 screen review middle 2: the screen ended inside the subject range). */
   .hsp-grid {
-    grid-template-columns: 3.5ch 9ch 8.25ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
+    grid-template-columns: 3.5ch 9ch 9.5ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
   }
 
   .hsp-grid.framed {
-    grid-template-columns: 3.5ch 9ch 8.25ch 6ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
+    grid-template-columns: 3.5ch 9ch 9.5ch 6ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
   }
 
   .hsp-grid > [data-col='frames'],

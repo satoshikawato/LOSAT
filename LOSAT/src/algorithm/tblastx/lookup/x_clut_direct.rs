@@ -1340,7 +1340,7 @@ fn x_zeroed_on<T: Copy + Default>(mut vector: Vec<T>, n: usize) -> Vec<T> {
 }
 
 // No NCBI counterpart: `vector` with `n` entries for a fill that writes every entry before any is
-// read (the bucket fill's starts): the values the table before left are not cleared, only entries
+// read (the bucket fill's starts, and BLASTX's hits): the values the table before left are not cleared, only entries
 // added past them are zeroed. One short of room is replaced by a zeroed one (calloc'd, so that a
 // large one is mapped and its pages are touched only when the fill writes them) of `n` entries.
 // Zero-filling them again cost the small searches 1-5 % of their user cycles.
@@ -1600,29 +1600,12 @@ fn x_buckets_on(
     })))
 }
 
-// No NCBI counterpart: the bucket fill's appends are sorted by bucket in place.
-/// Whether `locations` are in query order and apart, so that the query offsets of a cell's appends
-/// are in the order they were appended (`x_bx_buckets_on`).
-fn x_locations_ascend(locations: &[(i32, i32)]) -> bool {
-    locations.windows(2).all(|pair| pair[0].1 < pair[1].0)
-}
-
-// No NCBI counterpart: a cell's offsets put back in query order (`x_bx_buckets_on`); most cells
-// hold few.
-fn x_sort_cell(cell: &mut [u16]) {
-    if cell.len() > 32 {
-        cell.sort_unstable();
-        return;
-    }
-    for i in 1..cell.len() {
-        let value = cell[i];
-        let mut j = i;
-        while j > 0 && cell[j - 1] > value {
-            cell[j] = cell[j - 1];
-            j -= 1;
-        }
-        cell[j] = value;
-    }
+// No NCBI counterpart: the size, as `x_mapped_record_entries`: the cells' indices in their buckets
+// (`x_bx_buckets_on`) are needed only during the build.
+/// EXPERIMENT (LOSAT_X_BXCLUTPOOL): the capacity, in entries, of a pooled bucket fill's `u16`
+/// indices of the cells in their buckets.
+const fn x_mapped_low_entries() -> usize {
+    x_mapped_record_entries() * 2
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (see
@@ -1633,12 +1616,10 @@ fn x_sort_cell(cell: &mut [u16]) {
 //         }
 // ```
 /// BLASTX's bucket fill: `x_buckets_on`'s table with `u16` offsets, with `pooled` on vectors kept
-/// between builds (`LOSAT_X_BXCLUTPOOL`). The record holds each append's cell and `hits` its query
-/// offset beside it; both are sorted by bucket in place (an offset above a cell's index in its
-/// bucket no longer fits the offsets' 16 bits, so there is no packed copy of the appends), and the
-/// offsets of each cell are then put back in query order, the order they were appended in. Declined
-/// as `x_buckets_on`, and where the query has more than `X_U16_LETTERS` letters or its locations are
-/// not in query order.
+/// between builds (`LOSAT_X_BXCLUTPOOL`). An offset above a cell's index in its bucket no longer
+/// fits 32 bits of `hits`, so the partition puts the offsets in `hits` and the indices beside them
+/// in a vector of their own, and drops the record of the appends before the cells are filled.
+/// Declined as `x_buckets_on`, and where the query has more than `X_U16_LETTERS` letters.
 #[allow(clippy::too_many_arguments)]
 fn x_bx_buckets_on(
     word_size: usize,
@@ -1649,7 +1630,7 @@ fn x_bx_buckets_on(
     overflow_cell_capacity: usize,
     pooled: bool,
 ) -> XBucketBuild<u16> {
-    if query.len() > X_U16_LETTERS || !x_locations_ascend(locations) {
+    if query.len() > X_U16_LETTERS {
         return XBucketBuild::Declined;
     }
     let Some(header) = XHeader::new(word_size) else {
@@ -1676,22 +1657,25 @@ fn x_bx_buckets_on(
     let mut starts = x_sized_on(kept.starts, backbone_size + 1);
 
     // Appends, over the segments before, inside and between NCBI's tables, recorded as the
-    // count-and-fill builder records them, each append's offset beside its cell; not counted.
+    // count-and-fill builder records them; not counted.
     let ranges = x_count_ranges(tables, locations.len());
     let mut targets: Vec<u32> = if pooled {
         Vec::with_capacity(x_mapped_record_entries())
     } else {
         Vec::new()
     };
-    let mut hits = kept.hits;
-    hits.clear();
+    let mut per_offset: Vec<(i32, u32)> = Vec::new();
     for (range, is_table) in ranges {
         let range_start = targets.len();
         let mut too_large = false;
         let mut declined = false;
         x_for_each_offset(word_size, query, &locations[range], |offset, word| {
+            let before = targets.len();
             words.for_each_word(word, &mut targets);
-            hits.resize(targets.len(), offset as u16);
+            let appends = targets.len() - before;
+            if appends != 0 {
+                per_offset.push((offset, appends as u32));
+            }
             if targets.len() > max_appends {
                 too_large = true;
                 return false;
@@ -1710,7 +1694,7 @@ fn x_bx_buckets_on(
                 let refused = x_flat_pool()
                     .take_back(XFlatTableVectors {
                         starts,
-                        hits,
+                        hits: kept.hits,
                         pv: kept.pv,
                     })
                     .err();
@@ -1725,9 +1709,9 @@ fn x_bx_buckets_on(
     }
     let total = targets.len();
 
-    // Partition in place (American flag sort): bucket b's appends at `bucket_starts[b]..bucket_starts[b
-    // + 1]` of the record and of `hits`. An append is swapped into the next free slot of its bucket
-    // until the slot being filled gets one of its own bucket's.
+    // Partition: the buckets' appends in order (a counting sort, stable), bucket b's offsets at
+    // `bucket_starts[b]..bucket_starts[b + 1]` of `hits`, the slots its cells' hits take, and the
+    // cells' indices in the bucket at the same places of `lows`.
     let buckets = backbone_size.div_ceil(1 << X_BUCKET_SHIFT);
     let mask = (1u32 << X_BUCKET_SHIFT) - 1;
     let mut bucket_starts = vec![0u32; buckets + 1];
@@ -1737,36 +1721,44 @@ fn x_bx_buckets_on(
     for b in 0..buckets {
         bucket_starts[b + 1] += bucket_starts[b];
     }
+    let mut hits = x_sized_on(kept.hits, total);
+    let mut lows: Vec<u16> = if pooled {
+        Vec::with_capacity(x_mapped_low_entries())
+    } else {
+        Vec::with_capacity(total)
+    };
     {
         let mut cursors = bucket_starts[..buckets].to_vec();
-        for b in 0..buckets {
-            let end = bucket_starts[b + 1];
-            while cursors[b] < end {
-                let at = cursors[b] as usize;
-                let mut index = targets[at];
-                let mut query_offset = hits[at];
-                loop {
-                    let to = (index >> X_BUCKET_SHIFT) as usize;
-                    if to == b {
-                        break;
-                    }
-                    // Bucket `to`'s cursor moves on once per append to it, which the histogram
-                    // counted, so it stays below `bucket_starts[to + 1]`.
-                    let slot = cursors[to] as usize;
-                    cursors[to] += 1;
-                    std::mem::swap(&mut index, &mut targets[slot]);
-                    std::mem::swap(&mut query_offset, &mut hits[slot]);
+        let out = hits.as_mut_ptr();
+        let out_lows = lows.as_mut_ptr();
+        let mut at = 0usize;
+        for &(query_offset, appends) in &per_offset {
+            let end = at + appends as usize;
+            for &index in &targets[at..end] {
+                let cursor = &mut cursors[(index >> X_BUCKET_SHIFT) as usize];
+                // SAFETY: the offsets' appends are `targets` in order, and bucket b's cursor starts
+                // at `bucket_starts[b]` and moves on once per append to the bucket, which the
+                // histogram counted, so it stays below `bucket_starts[b + 1] <= total`, the length
+                // of `hits` and below the capacity of `lows`.
+                unsafe {
+                    out.add(*cursor as usize)
+                        .write(u16::from_offset(query_offset as u32));
+                    out_lows.add(*cursor as usize).write((index & mask) as u16);
                 }
-                targets[at] = index;
-                hits[at] = query_offset;
-                cursors[b] += 1;
+                *cursor += 1;
             }
+            at = end;
         }
+        // SAFETY: every slot below `total` was written above (the cursors end at the buckets'
+        // ends, `bucket_starts[buckets] == total`).
+        unsafe { lows.set_len(total) };
     }
+    drop(per_offset);
+    drop(targets);
 
     // Per bucket, as `x_buckets_on`: the counts of its cells, their starts, the PV bits and
-    // `finalize`'s statistics, the fill (from a copy of the bucket's offsets), each cell's offsets in
-    // query order, then the scan order of the cells of more than 5 offsets.
+    // `finalize`'s statistics, the fill (from a copy of the bucket's offsets), then the scan order
+    // of the cells of more than 5 offsets.
     let mut pv = x_zeroed_on(kept.pv, (backbone_size >> PV_ARRAY_BTS) + 1);
     let mut cell_slots = vec![0u32; 1 << X_BUCKET_SHIFT];
     let mut overflowed: Vec<u32> = Vec::new();
@@ -1779,11 +1771,12 @@ fn x_bx_buckets_on(
         let cells = (backbone_size - first).min(1 << X_BUCKET_SHIFT);
         let lo = bucket_starts[b] as usize;
         let hi = bucket_starts[b + 1] as usize;
+        let bucket_lows = &lows[lo..hi];
         // Each cell's count, then its cursor.
         let slots = &mut cell_slots[..cells];
         slots.fill(0);
-        for &index in &targets[lo..hi] {
-            slots[(index & mask) as usize] += 1;
+        for &low in bucket_lows {
+            slots[usize::from(low)] += 1;
         }
         overflowed.clear();
         let mut slot = lo as u32;
@@ -1807,19 +1800,15 @@ fn x_bx_buckets_on(
         }
         part.clear();
         part.extend_from_slice(&hits[lo..hi]);
-        for (&index, &query_offset) in targets[lo..hi].iter().zip(&part) {
-            let at = &mut slots[(index & mask) as usize];
-            hits[*at as usize] = query_offset;
+        let out = hits.as_mut_ptr();
+        for (&low, &query_offset) in bucket_lows.iter().zip(&part) {
+            let at = &mut slots[usize::from(low)];
+            // SAFETY: a cell's cursor starts at its start and moves on once per append to the
+            // cell, which the counts counted, so it stays within the bucket's slots `lo..hi`.
+            unsafe { out.add(*at as usize).write(query_offset) };
             *at += 1;
         }
-        // A cursor ends at the cell's end. Equal offsets of a cell are the same value, so query
-        // order is the order of the appends.
-        for (cell, &end) in slots.iter().enumerate() {
-            let begin = starts[first + cell] as usize;
-            if end as usize - begin > 1 {
-                x_sort_cell(&mut hits[begin..end as usize]);
-            }
-        }
+        // A cursor ends at the cell's end.
         for &cell in &overflowed {
             let cell = cell as usize;
             let begin = starts[first + cell] as usize;
@@ -1834,7 +1823,7 @@ fn x_bx_buckets_on(
         }
     }
     starts[backbone_size] = total as u32;
-    drop(targets);
+    drop(lows);
     let mut pv_array_bts = PV_ARRAY_BTS;
     if (nonempty_count as f64) <= 0.01 * (backbone_size as f64) {
         pv_array_bts += ilog2(backbone_size / (8 * X_TARGET_PV_BYTES));
@@ -3706,8 +3695,8 @@ mod tests {
 
     // BLASTX's bucket fill (`u16` offsets, LOSAT_X_BXCLUTPOOL on kept vectors or not) makes
     // `x_buckets_on`'s table with its offsets narrowed: queries of one segment and of several in
-    // NCBI's tables, low-complexity ones whose cells pass 32 offsets, and one of `X_U16_LETTERS`
-    // letters.
+    // NCBI's tables, low-complexity ones whose cells pass 32 offsets (the scan order), and one of
+    // `X_U16_LETTERS` letters.
     #[test]
     fn pooled_flat_tables_equal_the_unpooled_ones_on_kept_vectors() {
         let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
@@ -3809,7 +3798,8 @@ mod tests {
     }
 
     // BLASTX's table: `u16` offsets up to `X_U16_LETTERS` letters, the reference table past them;
-    // locations out of query order go to the count-and-fill builder, narrowed.
+    // the count-and-fill builder's table (where the bucket fill declines) narrowed is the bucket
+    // fill's, here on locations out of query order in two tables.
     #[test]
     fn blastx_tables_take_u16_offsets_up_to_their_letters() {
         let mut rng = XorShift(0x2545_F491_4F6C_DD1D);
@@ -3825,33 +3815,28 @@ mod tests {
             Some(Ok(XCompressedLookup::Flat(_)))
         ));
         let swapped = [(5_000, 9_999), (0, 4_999)];
-        assert!(matches!(
-            x_bx_buckets_on(5, 1100, query, &swapped, &[0..2], usize::MAX >> 8, false),
-            XBucketBuild::Declined
-        ));
-        let Some(Ok(XCompressedLookup::Flat(got))) =
-            x_bx_build_compressed_lookup(5, 1100, query, &swapped, &[0..2])
+        let tables = [0..1, 1..2];
+        let XBucketBuild::Built(Some(XFlatBuild::Table(got))) =
+            x_bx_buckets_on(5, 1100, query, &swapped, &tables, usize::MAX >> 8, false)
         else {
-            panic!("the count-and-fill builder's table");
+            panic!("BLASTX's bucket fill builds this table");
         };
         let Some(XFlatBuild::Table(want)) = x_try_build_flat_with_capacity(
             5,
             1100,
             query,
             &swapped,
-            &[0..2],
+            &tables,
             NCBI_OVERFLOW_CELL_CAPACITY,
             X_COUNT_CHUNK,
         ) else {
             panic!("the count-and-fill builder builds this table");
         };
+        let want = x_narrow_flat(want);
         assert_eq!(got.starts, want.starts);
-        assert!(got
-            .hits
-            .iter()
-            .zip(&want.hits)
-            .all(|(&g, &w)| i32::from(g) == w));
-        assert_eq!(got.hits.len(), want.hits.len());
+        assert_eq!(got.hits, want.hits);
+        assert_eq!(got.pv, want.pv);
+        assert_eq!(got.longest_chain, want.longest_chain);
     }
 
     // LOSAT_X_BXCLUTPOOL: a set comes back only against one lent, so tables built without the pool

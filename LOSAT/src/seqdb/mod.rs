@@ -75,6 +75,9 @@ pub use volume::{
     FENCE_SENTRY,
 };
 
+/// EXPERIMENT (LOSAT_X_BNDBSMALL): offsets per read of `SeqDb::x_next_blocks` (64 KiB).
+const X_LIST_ENTRIES: usize = 1 << 14;
+
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): how the volumes read their index files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum XDbIdxRead {
@@ -1332,6 +1335,53 @@ impl SeqDb {
             end,
             first_ordinal,
         })
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNDBSMALL): the blocks that `next_block` gives from `first_ordinal`
+    /// on, one after the other, up to `max` of them. The sequence offsets of a volume are read
+    /// `X_LIST_ENTRIES` at a time (64 KiB) and kept for the next blocks, where `next_block` reads
+    /// two entries and 1,024 more for each block: listing the 81,218 blocks of 256 KiB of
+    /// ref_prok_rep_genomes took 183 ms, on one thread while the others waited, at every query
+    /// batch (`v4-D12/STATE.md`, s30). The blocks are those of `next_block` (the same ends,
+    /// `Volume::x_listed_block_end`, and the same cut at excluded OIDs).
+    pub fn x_next_blocks(&self, first_ordinal: u32, max_bytes: u64, max: usize) -> Vec<BlockRange> {
+        self.x_next_blocks_in(first_ordinal, max_bytes, max, X_LIST_ENTRIES)
+    }
+
+    /// `x_next_blocks` with windows of `entries` offsets.
+    fn x_next_blocks_in(
+        &self,
+        first_ordinal: u32,
+        max_bytes: u64,
+        max: usize,
+        entries: usize,
+    ) -> Vec<BlockRange> {
+        let mut blocks = Vec::new();
+        let mut window = volume::XOffsetWindow::default();
+        let mut window_volume = usize::MAX;
+        let mut next_ordinal = first_ordinal;
+        while blocks.len() < max {
+            let Ok((volume, first)) = self.find_volume(next_ordinal) else {
+                break;
+            };
+            if volume != window_volume {
+                window = volume::XOffsetWindow::default();
+                window_volume = volume;
+            }
+            let end = self.volumes[volume]
+                .x_listed_block_end(first, max_bytes, &mut window, entries)
+                .unwrap_or(first + 1);
+            let end = self.included_end(volume, first, end);
+            let range = BlockRange {
+                volume,
+                first,
+                end,
+                first_ordinal: next_ordinal,
+            };
+            blocks.push(range);
+            next_ordinal = range.end_ordinal();
+        }
+        blocks
     }
 
     /// The block of the sequences `first_ordinal..end_ordinal`

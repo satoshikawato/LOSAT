@@ -233,6 +233,37 @@ fn blocks_end_where_the_held_arrays_end_them() {
     }
 }
 
+// LOSAT_X_BNDBSMALL: the ends that a list of blocks gets with one window of offsets kept from
+// block to block are those of `block_end`, from every first sequence on and in runs of any length.
+#[test]
+fn listed_blocks_end_where_block_end_ends_them() {
+    use super::volume::XOffsetWindow;
+    for (name, held, read) in volume_pairs() {
+        let n = held.num_oids();
+        for max_bytes in [0u64, 1, 2, 5, 64, 100, 400, 1 << 20, u64::MAX] {
+            for entries in [1, 2, 3, 5, 1024] {
+                for start in 0..n {
+                    for volume in [&held, &read] {
+                        let mut window = XOffsetWindow::default();
+                        let mut first = start;
+                        while first < n {
+                            let want = volume.block_end(first, max_bytes).unwrap();
+                            let got = volume
+                                .x_listed_block_end(first, max_bytes, &mut window, entries)
+                                .unwrap();
+                            assert_eq!(
+                                got, want,
+                                "{name} from {first} within {max_bytes}, runs of {entries}"
+                            );
+                            first = got;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn blocks_read_alike() {
     for (name, held, read) in volume_pairs() {

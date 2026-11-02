@@ -1,9 +1,30 @@
 // The search form's values and the argv parameters they make (plan §5.3). The form keeps
-// only what the user set; a value equal to the default (the engine's, or the program's
-// resolved default, `knownDefault`) is not written, so the argv and the CLI command stay
-// minimal (DW-4). Nothing here checks BLAST's rules: the engine's `validate` reads the argv
-// as the command line does.
+// only what the user set; a value equal to the default (the one that the engine resolves,
+// `knownDefault`) is not written, so the argv and the CLI command stay minimal (DW-4).
+// Nothing here checks BLAST's rules: the engine's `validate` reads the argv as the command
+// line does, and the engine's `describe` gives the defaults it resolves.
 import type { ParameterField, ParameterSection, ProgramDescriptor, SectionPlacement } from './programs';
+
+/**
+ * The default that the engine resolves for an option that a search leaves out (`describe`'s
+ * `defaults`, docs/web/abi_v2.md §9), by task and from other options.
+ */
+export interface ResolvedDefault {
+  /** The value of each task with no other option given (the key '' for a program without -task). */
+  readonly byTask: Readonly<Record<string, string>>;
+  /**
+   * For each option that changes this one (-matrix, -word_size): the value by task for each
+   * value of that option that the engine accepts.
+   */
+  readonly by?: Readonly<Record<string, Readonly<Record<string, Readonly<Record<string, string>>>>>>;
+  /** The value holds only while none of these options is given (the hit list options). */
+  readonly unless?: readonly string[];
+  /**
+   * The tasks where BLAST+ tells the option given from not given: a value set is written even
+   * when it equals the default.
+   */
+  readonly given?: readonly string[];
+}
 
 /** What `describe` says about one option (the fields of ports/engine ParameterDescription). */
 export interface EngineOption {
@@ -11,6 +32,7 @@ export interface EngineOption {
   readonly takesValue: boolean;
   readonly defaultValue?: string;
   readonly choices?: readonly string[];
+  readonly resolvedDefault?: ResolvedDefault;
 }
 
 /** A field's value: the text of a value option ('' when not set), or whether a flag is set. */
@@ -71,9 +93,10 @@ export interface KnownDefault {
 }
 
 /**
- * The default of a field: the program's resolved default (`ProgramDescriptor.defaults`, by
- * task, while the options it depends on keep their defaults), or else the engine's
- * (`describe`); undefined when neither is known.
+ * The default of a field: the value that the engine resolves for the task (`describe`), the
+ * value that a set -matrix or -word_size gives it, or else the clap default; undefined when
+ * unknown (two of the options that change it are set, one of them at a value that the
+ * engine's table does not hold, or an option that excludes it is set).
  */
 export function knownDefault(
   program: ProgramDescriptor,
@@ -81,27 +104,44 @@ export function knownDefault(
   values: FormValues,
   options: readonly EngineOption[] | undefined,
 ): KnownDefault | undefined {
-  const resolved = program.defaults?.[flag];
-  if (resolved === undefined) {
-    const described = options?.find((option) => option.flag === flag)?.defaultValue;
+  const option = options?.find((o) => o.flag === flag);
+  const resolved = option?.resolvedDefault;
+  if (option === undefined || resolved === undefined) {
+    const described = option?.defaultValue;
     return described === undefined ? undefined : { defaultValue: described };
   }
-  const task = effectiveValue('-task', values, options);
-  const value = typeof resolved.value === 'string' ? resolved.value : task === undefined ? undefined : resolved.value[task];
-  const holds = (resolved.unless ?? []).every((other) => !isSet(program, other, values, options));
-  const held = holds ? value : undefined;
-  if (resolved.given === true) return held === undefined ? { given: true } : { defaultValue: held, given: true };
-  return held === undefined ? undefined : { defaultValue: held };
+  const task = effectiveValue('-task', values, options) ?? '';
+  let value = taskDefault(option, task);
+  const deciders = Object.entries(resolved.by ?? {})
+    .map(([other, table]) => [setValue(program, other, values, options), table] as const)
+    .filter(([set]) => set !== undefined);
+  if (deciders.length === 1) {
+    const [set, table] = deciders[0]!;
+    value = typeof set === 'string' ? table[set]?.[task] : undefined;
+  } else if (deciders.length > 1) value = undefined;
+  if ((resolved.unless ?? []).some((other) => setValue(program, other, values, options) !== undefined)) value = undefined;
+  if (resolved.given?.includes(task) === true) return value === undefined ? { given: true } : { defaultValue: value, given: true };
+  return value === undefined ? undefined : { defaultValue: value };
 }
 
-/** Whether a field's value is written to the argv (`writtenValue`), found by its flag. */
-function isSet(program: ProgramDescriptor, flag: string, values: FormValues, options: readonly EngineOption[] | undefined): boolean {
+/** An option's default for a task alone: the engine's resolved value, or else the clap default. */
+function taskDefault(option: EngineOption, task: string): string | undefined {
+  return option.resolvedDefault?.byTask[task] ?? option.defaultValue;
+}
+
+/**
+ * The value written to the argv for a field found by its flag (`writtenValue`), against its
+ * task's default: a given option is set by any value, so that the options that depend on each
+ * other (the hit list options, the word size and the threshold) do not ask each other.
+ */
+function setValue(program: ProgramDescriptor, flag: string, values: FormValues, options: readonly EngineOption[] | undefined): string | true | undefined {
   const field = program.sections.flatMap((section) => section.fields).find((f) => f.flag === flag);
-  if (field === undefined) return false;
-  // A given option is set by any value: its default is not read, so that the hit list options,
-  // which depend on each other, do not ask each other.
-  const known = program.defaults?.[flag]?.given === true ? { given: true } : knownDefault(program, flag, values, options);
-  return writtenValue(field, values[flag], known) !== undefined;
+  if (field === undefined) return undefined;
+  const option = options?.find((o) => o.flag === flag);
+  const task = effectiveValue('-task', values, options) ?? '';
+  if (option?.resolvedDefault?.given?.includes(task) === true) return writtenValue(field, values[flag], { given: true });
+  const known = option === undefined ? undefined : taskDefault(option, task);
+  return writtenValue(field, values[flag], known === undefined ? undefined : { defaultValue: known });
 }
 
 /**

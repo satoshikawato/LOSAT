@@ -268,8 +268,9 @@ const X_TREE_CELLS_PER_HSP: usize = 64;
 /// No NCBI counterpart: the grid limit (`reset_with_bounds_cells`) of the tree NCBI makes for each
 /// subject. The tree holds at most one HSP per initial HSP, so its grid index gets
 /// `X_TREE_CELLS_PER_HSP` cells per initial HSP, at most the grid's own limit (`X_MAX_CELLS`, four
-/// bytes per cell, zeroed when made): a subject with a few initial HSPs no longer takes a grid of
-/// up to 256 KiB for them. A smaller grid lists more leaves per cell and answers the same.
+/// bytes per cell, zeroed on the first HSP): a subject with a few initial HSPs no longer takes a
+/// grid of up to 256 KiB for them. The count only sizes the grid: a smaller grid lists more leaves
+/// per cell and answers the same, whatever the tree holds.
 fn x_tree_cells(initial: usize) -> usize {
     initial
         .saturating_mul(X_TREE_CELLS_PER_HSP)

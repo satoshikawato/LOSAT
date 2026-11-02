@@ -881,6 +881,71 @@ mod tests {
         assert!(ambiguous > 0, "a fixture with ambiguity runs");
     }
 
+    /// A read of a `-db` stream that fails during the search (`XDbStream::x_failing`) is the
+    /// `XReadError` of its subject's frames, preliminary and of the letters read again. A query
+    /// batch's failure (`XReadFailure`) keeps the error of the smallest ordinal id whose read
+    /// fails, whichever fails first, and skips the subjects after it only, so every subject
+    /// before it is searched at any number of threads.
+    #[test]
+    fn a_failed_read_of_the_stream_fails_the_batch_at_its_smallest_subject() {
+        use crate::algorithm::common::x_db_stream::{XDbStream, XReadError};
+        use crate::seqdb::{SeqDb, SeqType};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db/nucl_v4");
+        let db = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+        let table = GeneticCode::from_id(1);
+        let count = db.num_seqs() as usize;
+        let (smallest, last) = (count / 2, count - 1);
+        let stream = XDbStream::new(&db, 4, "TBLASTX")
+            .unwrap()
+            .x_regrid(0)
+            .x_failing(&[last, smallest], true);
+        let subjects = Subjects::Stream(&stream);
+        for oid in 0..count {
+            let failing = oid == smallest || oid == last;
+            let preliminary = subjects.x_preliminary_frames(oid, &table);
+            let letters = subjects.x_letter_frames(oid, &table, None);
+            for error in [preliminary.err(), letters.err()] {
+                assert_eq!(error.is_some(), failing, "{oid}");
+                assert!(error.is_none_or(|error| error.is::<XReadError>()), "{oid}");
+            }
+        }
+        let failure = XReadFailure::new();
+        failure.fail(last, anyhow::anyhow!("last"));
+        assert!(failure.skips(last + 1) && !failure.skips(last) && !failure.skips(smallest + 1));
+        failure.fail(smallest, anyhow::anyhow!("smallest"));
+        failure.fail(last, anyhow::anyhow!("last again"));
+        assert!(failure.skips(smallest + 1) && !failure.skips(smallest));
+        assert_eq!(failure.take().unwrap().to_string(), "smallest");
+        assert!(failure.take().is_none());
+        let message = format!("the read of database sequence {smallest} failed");
+        for _ in 0..20 {
+            let failure = XReadFailure::new();
+            let next = AtomicUsize::new(0);
+            let searched = Mutex::new(Vec::new());
+            std::thread::scope(|scope| {
+                for _ in 0..4 {
+                    scope.spawn(|| loop {
+                        let oid = next.fetch_add(1, Ordering::Relaxed);
+                        if oid >= count {
+                            break;
+                        }
+                        if failure.skips(oid) {
+                            continue;
+                        }
+                        match subjects.x_preliminary_frames(oid, &table) {
+                            Ok(_) => searched.lock().unwrap().push(oid),
+                            Err(error) => failure.fail(oid, error),
+                        }
+                    });
+                }
+            });
+            let error = failure.take().expect("a read failed");
+            assert!(error.to_string().contains(&message), "{error}");
+            let searched = searched.into_inner().unwrap();
+            assert!((0..smallest).all(|oid| searched.contains(&oid)));
+        }
+    }
+
     #[test]
     fn frames_of_stored_sequences_are_those_of_their_codes_and_stored_bases() {
         let mut stores = Vec::new();

@@ -11,6 +11,8 @@ mod tblastx_band;
 mod tblastx_batch_pipe;
 #[path = "../tblastx_db_search.rs"]
 mod tblastx_db_search;
+#[path = "../tblastx_db_stream.rs"]
+mod tblastx_db_stream;
 #[path = "../tblastx_extbatch.rs"]
 mod tblastx_extbatch;
 #[path = "../tblastx_few_groups.rs"]

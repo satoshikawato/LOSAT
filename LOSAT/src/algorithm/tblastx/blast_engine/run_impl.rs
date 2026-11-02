@@ -3364,25 +3364,19 @@ fn run_batch_loop(
                 }
                 batch
             }
-            Err(error) if error.is::<SubjectsUnreadable>() => {
+            Err(error) if error.is::<SubjectsUnreadable>() || error.is::<XReadError>() => {
                 // The first batch with a valid context of a `-db` search whose sequences could
-                // not be read (`search`): NCBI's read error is an engine error after the
-                // reports of the batches before; LOSAT's refusal (a truncated sequence file,
-                // unreadable ambiguity data) stops the run, as any other refusal does.
-                let error = stores_error
-                    .take()
-                    .expect("unreadable subjects keep their read error");
-                let read_error =
-                    error.downcast::<crate::algorithm::common::database::PreliminaryReadError>()?;
-                reports.write_before_failed_batch(outputs, done, &warnings)?;
-                outputs.diagnostics.write_all(&batch_warnings)?;
-                return Err(crate::blastinput::app::engine_error(read_error.0));
-            }
-            Err(error) if error.is::<XReadError>() => {
-                // A read of the database that failed during the batch's search (`XReadFailure`):
-                // as the database that could not be read above, with the error that the check
-                // gives for the same read.
-                let XReadError(error) = error.downcast::<XReadError>()?;
+                // not be read (`search`), or a read of the database that failed during the
+                // batch's search (`XReadFailure`, with the error that the check gives for the same
+                // read): NCBI's read error is an engine error after the reports of the batches
+                // before; LOSAT's refusal (a truncated sequence file, unreadable ambiguity data)
+                // stops the run, as any other refusal does.
+                let error = match error.downcast::<XReadError>() {
+                    Ok(XReadError(error)) => error,
+                    Err(_) => stores_error
+                        .take()
+                        .expect("unreadable subjects keep their read error"),
+                };
                 let read_error =
                     error.downcast::<crate::algorithm::common::database::PreliminaryReadError>()?;
                 reports.write_before_failed_batch(outputs, done, &warnings)?;

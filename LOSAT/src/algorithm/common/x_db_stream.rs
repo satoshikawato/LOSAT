@@ -1,6 +1,7 @@
 //! The database of a `-db` search, read where it is searched, instead of a copy of the whole
 //! database made before the first query batch: the core of TBLASTN's stream
-//! (`tblastn/x_db_stream.rs` holds what only TBLASTN's stages do with it).
+//! (`tblastn/x_db_stream.rs` holds what only TBLASTN's stages do with it) and TBLASTX's
+//! (`tblastx::subjects::Subjects::Stream`).
 //!
 //! A copy packs every sequence of the database into anonymous memory before the first query
 //! batch, and it stays until the reports, where NCBI maps the sequence file.
@@ -33,12 +34,22 @@
 //!   thread it is read into the heap, where a dropped store's pages serve the next read.
 //! - While a stream is open (`x_frames_pooled`), a search may give its idle large buffers to
 //!   `X_BYTES`. When the last stream of the process closes, the idle buffers are freed.
+//! - TBLASTX makes the frames of a short subject from the bytes of its block, with the ambiguity
+//!   runs that its store would keep (`XSequence::with_view`), and keeps the block for the frames
+//!   of its letters when it has ambiguous bases; a long one is read alone (`read_shared`) for its
+//!   frames and again for its letters' frames. Each query batch reads the sequences it reports
+//!   once each (`tblastx::database::read_reported`), when a report reads their letters.
 //!
 //! Every read packs the stored bytes as the copy did (`common::database::x_read_nucleotide_store`:
 //! the packing of `PackedNucleotide::from_stored`), so every stage computes the same values on the
 //! same subjects in the same order. A read that fails during the search (a database changed or
 //! damaged after the check, an error of the file system) is an `XReadError` holding the error that
 //! the check gives for the same read; the program decides how the batch that read it fails.
+//! The check does not read the 2-bit data of a block of one sequence but its last byte, so an
+//! error of the disk in the rest comes in the search's read of the sequence and not in the check:
+//! TBLASTX fails the batch that reads it, as the copy failed the first batch with a valid
+//! context, except that a batch without one that comes first and is reported with the batch
+//! (`tblastx::report_stream`) is reported before LOSAT's refusal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:374-376 (the sequence of
 //! the search is the mapped volume's bytes, not a copy)
@@ -175,6 +186,9 @@ pub(crate) struct XDbStream<'a> {
     /// The blocks read (`with_block`).
     #[cfg(test)]
     block_reads: AtomicUsize,
+    /// The sequences whose reads fail, and whether with LOSAT's refusal (`x_failing`).
+    #[cfg(test)]
+    x_failing: (Vec<usize>, bool),
 }
 
 impl<'a> XDbStream<'a> {
@@ -201,6 +215,8 @@ impl<'a> XDbStream<'a> {
             blocks: XSharedReads::new(),
             #[cfg(test)]
             block_reads: AtomicUsize::new(0),
+            #[cfg(test)]
+            x_failing: (Vec::new(), false),
         })
     }
 
@@ -222,6 +238,8 @@ impl<'a> XDbStream<'a> {
     /// Sequence `oid`, packed as the copy of the database packed it, with one read (`XReadError` if it fails).
     pub(crate) fn read(&self, oid: usize) -> Result<PackedNucleotide> {
         let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
+        #[cfg(test)]
+        self.x_failed(oid..oid + 1)?;
         shared::x_read_nucleotide_store(self.db, ordinal, self.program, self.mapped)
             .map_err(|error| XReadError(error).into())
     }
@@ -299,10 +317,36 @@ impl<'a> XDbStream<'a> {
         self
     }
 
+    /// The stream whose reads of the sequences `oids` fail (a block's read when it holds one of
+    /// them) with NCBI's read error, or with LOSAT's refusal: a read that fails after the check,
+    /// which the files of a test cannot give (the check keeps their handles and lengths).
+    #[cfg(test)]
+    pub(crate) fn x_failing(mut self, oids: &[usize], refusal: bool) -> Self {
+        self.x_failing = (oids.to_vec(), refusal);
+        self
+    }
+
+    /// The error of a read of the sequences `oids` that `x_failing` names one of.
+    #[cfg(test)]
+    fn x_failed(&self, oids: std::ops::Range<usize>) -> Result<()> {
+        let (failing, refusal) = &self.x_failing;
+        let error = match failing.iter().find(|oid| oids.contains(oid)) {
+            None => return Ok(()),
+            Some(oid) if *refusal => shared::refusal(
+                &format!("the read of database sequence {oid} failed"),
+                self.program,
+            ),
+            Some(_) => shared::PreliminaryReadError("Database memory map file error").into(),
+        };
+        Err(XReadError(error).into())
+    }
+
     /// The block of the sequences `first..end` of the grid (`XReadError` if it cannot be read).
     fn read_grid_block(&self, first: u32, end: u32) -> Result<SequenceBlock> {
         #[cfg(test)]
         self.block_reads.fetch_add(1, Ordering::Relaxed);
+        #[cfg(test)]
+        self.x_failed(first as usize..end as usize)?;
         let range = self
             .db
             .x_block_range(first, end)
@@ -897,5 +941,122 @@ mod tests {
             reads.read_once(key, || Ok(0)).unwrap();
         }
         assert!(reads.table.lock().unwrap().held.len() <= 64);
+    }
+
+    /// The files of the fixture `seqdb/db/{name}` copied into a directory of their own (`tag`), for
+    /// a test that damages them.
+    fn copied(name: &str, tag: &str) -> std::path::PathBuf {
+        let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db");
+        let dir =
+            std::env::temp_dir().join(format!("losat-x-db-stream-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for entry in std::fs::read_dir(&from).unwrap() {
+            let path = entry.unwrap().path();
+            let file = path.file_name().unwrap().to_str().unwrap();
+            if file.starts_with(&format!("{name}.")) {
+                std::fs::copy(&path, dir.join(file)).unwrap();
+            }
+        }
+        dir
+    }
+
+    /// The check of a stream fails where the copy of the database
+    /// (`common::database::read_nucleotide_stores`) fails, with its error: a sequence file
+    /// missing, cut at every length or with any byte changed, and an index with any byte changed,
+    /// in one volume and in several.
+    #[test]
+    fn the_check_fails_where_the_copy_fails_with_its_error() {
+        let mut failed = 0;
+        for (name, files) in [
+            ("nucl_v4", &["nucl_v4.nsq", "nucl_v4.nin"][..]),
+            ("nucl_mv", &["nucl_mv.01.nsq", "nucl_mv.05.nsq"][..]),
+        ] {
+            let dir = copied(name, &format!("check-{name}"));
+            let path = dir.join(name);
+            for file in files {
+                let file = dir.join(file);
+                let original = std::fs::read(&file).unwrap();
+                let mut damaged = vec![None];
+                damaged.extend((0..original.len()).map(|cut| Some(original[..cut].to_vec())));
+                damaged.extend((0..original.len()).map(|at| {
+                    let mut bytes = original.clone();
+                    bytes[at] ^= 0xFF;
+                    Some(bytes)
+                }));
+                for (number, bytes) in damaged.iter().enumerate() {
+                    match bytes {
+                        None => std::fs::remove_file(&file).unwrap(),
+                        Some(bytes) => std::fs::write(&file, bytes).unwrap(),
+                    }
+                    let Ok(db) = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide) else {
+                        continue;
+                    };
+                    let what = format!("{} damage {number}", file.display());
+                    let check = XDbStream::new(&db, 1, "TBLASTX").map(|_| ());
+                    let copy = shared::read_nucleotide_stores(&db, "TBLASTX").map(|_| ());
+                    match (check, copy) {
+                        (Ok(()), Ok(())) => {}
+                        (Err(check), Err(copy)) => {
+                            assert_eq!(format!("{check:#}"), format!("{copy:#}"), "{what}");
+                            assert_eq!(
+                                check.is::<shared::PreliminaryReadError>(),
+                                copy.is::<shared::PreliminaryReadError>(),
+                                "{what}"
+                            );
+                            failed += 1;
+                        }
+                        (check, copy) => panic!("{what}: check {check:?}, copy {copy:?}"),
+                    }
+                }
+                std::fs::write(&file, &original).unwrap();
+            }
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+        assert!(failed > 100, "{failed} damaged databases fail");
+    }
+
+    /// A read that fails after the check (`x_failing`) is the error of every thread that asks for
+    /// it, the one that reads and those that wait for its read, for a block of several sequences
+    /// and for a sequence alone, with NCBI's read error and with LOSAT's refusal; the other blocks
+    /// are read.
+    #[test]
+    fn a_read_that_fails_fails_the_reader_and_the_threads_that_wait() {
+        let db = nucleotides("nucl_v4");
+        for max_bytes in [0, 64] {
+            let grid = x_block_grid(&db, max_bytes);
+            let block = grid
+                .windows(2)
+                .find(|block| block[1] - block[0] > 1 || max_bytes == 0)
+                .expect("a block of several sequences");
+            let (first, failing) = (block[0] as usize, block[1] as usize - 1);
+            for refusal in [false, true] {
+                let what = format!("blocks of {max_bytes} refusal {refusal}");
+                let stream = stream_of(&db, 4, max_bytes).x_failing(&[failing], refusal);
+                let together = Barrier::new(4);
+                let errors: Vec<String> = std::thread::scope(|scope| {
+                    let threads: Vec<_> = (0..4)
+                        .map(|_| {
+                            scope.spawn(|| {
+                                together.wait();
+                                let error = stream.with_block(first, |_| Ok(())).unwrap_err();
+                                let XReadError(error) = error.downcast::<XReadError>().unwrap();
+                                assert_eq!(
+                                    error.is::<shared::PreliminaryReadError>(),
+                                    !refusal,
+                                    "{what}"
+                                );
+                                error.to_string()
+                            })
+                        })
+                        .collect();
+                    threads.into_iter().map(|t| t.join().unwrap()).collect()
+                });
+                assert!(errors.iter().all(|error| *error == errors[0]), "{what}");
+                assert!(stream.read_shared(failing).is_err(), "{what}");
+                for oid in block[1] as usize..stream.count() {
+                    stream.with_block(oid, |_| Ok(())).unwrap();
+                }
+            }
+        }
     }
 }

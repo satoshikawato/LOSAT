@@ -1097,4 +1097,105 @@ mod tests {
             assert_stored_forms(&store, &packed, &codes, &format!("case {number}"));
         }
     }
+
+    /// A view of stored bytes with the runs of `x_stored_runs` (a sequence of a database block,
+    /// read in place) reads the letters and bases of the store of the same bytes and runs, which
+    /// are NCBI's (`ncbi_letters`): random bytes, with random runs in order and apart (some of the
+    /// codes of A, C, G and T), across either end and at negative offsets, with bits above the four
+    /// of a code, out of order and overlapping, and out of order with the stored bases' codes only
+    /// (no run is left).
+    #[test]
+    fn a_view_of_stored_bytes_reads_as_their_store() {
+        let mut state = 5u64;
+        let mut next = |below: u64| {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) % below
+        };
+        let mut left_none = 0;
+        for case in 0..600 {
+            let length = 1 + next(300) as usize;
+            let packed: Vec<u8> = (0..length.div_ceil(4)).map(|_| next(256) as u8).collect();
+            let base = |index: usize| (packed[index >> 2] >> (6 - 2 * (index & 3))) & 3;
+            let mut runs = Vec::new();
+            let mut offset = next(8) as i64 - 4;
+            while offset < length as i64 + 4 {
+                let run_length = 1 + next(6) as u32;
+                let ncbi4na = match case % 3 {
+                    0 => 1 << next(4),
+                    1 => next(16) as u8,
+                    _ => next(256) as u8,
+                };
+                runs.push(AmbiguityRun {
+                    offset: offset as i32 as u32,
+                    length: run_length,
+                    ncbi4na,
+                });
+                offset += i64::from(run_length) + next(12) as i64;
+            }
+            match case % 4 {
+                0 => {}
+                1 => runs.reverse(),
+                2 => {
+                    for index in (1..runs.len()).rev() {
+                        runs.swap(index, next(index as u64 + 1) as usize);
+                    }
+                }
+                _ => {
+                    // out of order, each run a stored base's own code
+                    runs = (0..length)
+                        .rev()
+                        .step_by(3)
+                        .map(|index| AmbiguityRun {
+                            offset: index as u32,
+                            length: 1,
+                            ncbi4na: 1 << base(index),
+                        })
+                        .collect();
+                }
+            }
+            let what = format!("case {case}");
+            let store = PackedNucleotide::from_stored(&packed, length, &runs);
+            let mut kept = runs.clone();
+            x_stored_runs(&packed, length, &mut kept);
+            let view = PackedRef::x_stored(&packed, length, &kept);
+            assert_eq!(view.len(), length, "{what}");
+            assert_eq!(view.ambiguity_runs(), store.ambiguity_runs(), "{what}");
+            if case % 4 == 3 && length > 3 {
+                assert!(kept.is_empty(), "{what}");
+                left_none += 1;
+            }
+            let masked: Vec<AmbiguityRun> = runs
+                .iter()
+                .map(|run| AmbiguityRun {
+                    ncbi4na: run.ncbi4na & 0x0F,
+                    ..*run
+                })
+                .collect();
+            let letters: Vec<u8> = ncbi_letters(&packed, length, &masked)
+                .iter()
+                .map(|&code| NCBI4NA_TO_IUPACNA[usize::from(code)])
+                .collect();
+            let bases: Vec<u8> = (0..length)
+                .map(|index| b"ACGT"[usize::from(base(index))])
+                .collect();
+            for _ in 0..8 {
+                let from = next(length as u64 + 1) as usize;
+                let to = from + next((length - from) as u64 + 1) as usize;
+                let mut out = Vec::new();
+                for reader in [view, store.view()] {
+                    reader.letters_into(from, to, &mut out);
+                    assert_eq!(out, &letters[from..to], "{what} letters {from}..{to}");
+                    reader.letters_to(from, &mut out);
+                    assert_eq!(out, &letters[from..to], "{what} letters_to {from}..{to}");
+                    reader.bases_into(from, &mut out);
+                    assert_eq!(out, &bases[from..to], "{what} bases {from}..{to}");
+                }
+                store.letters_into(from, to, &mut out);
+                assert_eq!(out, &letters[from..to], "{what} the store's letters");
+            }
+        }
+        assert!(left_none > 100, "{left_none}");
+    }
 }

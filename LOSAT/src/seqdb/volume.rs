@@ -324,6 +324,52 @@ impl Volume {
         }
     }
 
+    /// EXPERIMENT (LOSAT_X_BNDBSMALL): `block_end` for a list of consecutive blocks
+    /// (`SeqDb::x_next_blocks`): the sequence offsets from `first` on are read `entries` at a time
+    /// into `window` and kept for the blocks after it, where `x_read_block_end` reads two entries
+    /// and a window of its own for every block. A block that passes the end of a window that
+    /// starts at `first` is cut by `x_read_block_end`. The end is the one `block_end` gives
+    /// (the same comparisons on the same entries); a read error leaves `window` empty.
+    pub(super) fn x_listed_block_end(
+        &self,
+        first: u32,
+        max_bytes: u64,
+        window: &mut XOffsetWindow,
+        entries: usize,
+    ) -> Result<u32, SeqDbError> {
+        if self.index.held_sequence_offsets().is_some() {
+            return self.block_end(first, max_bytes);
+        }
+        let n = self.num_oids();
+        let lead = self.lead();
+        if max_bytes < lead {
+            return Ok(first + 1);
+        }
+        loop {
+            if !window.holds(first) {
+                window.offsets.clear();
+                let count = entries.max(1).min((n + 1 - first) as usize);
+                window.offsets = self
+                    .index
+                    .sequence_offsets(first, first + count as u32 - 1)?;
+                window.first = first;
+            }
+            let base = (first - window.first) as usize;
+            let limit = u64::from(window.offsets[base]).saturating_add(max_bytes - lead);
+            let after = &window.offsets[base + 1..];
+            if let Some(at) = after.iter().position(|&offset| u64::from(offset) > limit) {
+                return Ok((first + at as u32).max(first + 1));
+            }
+            if window.first as usize + window.offsets.len() == n as usize + 1 {
+                return Ok(n);
+            }
+            if base == 0 {
+                return self.x_read_block_end(first, max_bytes, entries);
+            }
+            window.offsets.clear();
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1838
     // ```c++
     //     if ('p' == seqtype) {
@@ -1060,6 +1106,21 @@ impl Volume {
                 self.check_ambiguity_data(amb[i], seq[i + 1], first_ordinal + i as u32),
             )
         })
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BNDBSMALL): sequence offsets of one volume from `first` on, kept by
+/// `SeqDb::x_next_blocks` for `Volume::x_listed_block_end`.
+#[derive(Debug, Default)]
+pub(super) struct XOffsetWindow {
+    first: u32,
+    offsets: Vec<u32>,
+}
+
+impl XOffsetWindow {
+    /// Whether the window holds the offset of `oid`.
+    fn holds(&self, oid: u32) -> bool {
+        oid >= self.first && ((oid - self.first) as usize) < self.offsets.len()
     }
 }
 

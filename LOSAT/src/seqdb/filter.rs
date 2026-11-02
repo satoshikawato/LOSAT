@@ -2673,13 +2673,32 @@ mod tests {
             assert_eq!(db.total_length(), lengths, "{line}");
             let mut first = 0;
             let mut seen = Vec::new();
+            let mut listed = Vec::new();
             while let Some(range) = db.next_block(first, 1 << 20) {
+                listed.push(range);
                 for at in range.first..range.end {
                     seen.push(db.volume_starts[range.volume] + at);
                 }
                 first = range.end_ordinal();
             }
             assert_eq!(seen, want, "{line}: blocks");
+            // LOSAT_X_BNDBSMALL: listed in runs, the blocks are the same (cut at excluded OIDs).
+            assert_eq!(db.x_next_blocks(0, 1 << 20, usize::MAX), listed, "{line}");
+            for max_bytes in [0, 1, 100] {
+                let mut first = 0;
+                let mut listed = Vec::new();
+                while let Some(range) = db.next_block(first, max_bytes) {
+                    listed.push(range);
+                    first = range.end_ordinal();
+                }
+                for entries in [1, 2, 1 << 14] {
+                    assert_eq!(
+                        db.x_next_blocks_in(0, max_bytes, usize::MAX, entries),
+                        listed,
+                        "{line} within {max_bytes}, runs of {entries}"
+                    );
+                }
+            }
             checked += 1;
         }
         assert!(checked >= 30, "{checked}");

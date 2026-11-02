@@ -103,7 +103,7 @@ pub(super) const X_MIN_BLOCK_BYTES: u64 = 4 << 10;
 // No NCBI counterpart: reads the LOSAT_X_BNDBSMALL switch once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BNDBSMALL): a strict-set switch, on unless it is `0`.
-fn x_bn_db_small() -> bool {
+pub(super) fn x_bn_db_small() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNDBSMALL"))
 }

@@ -143,8 +143,13 @@ const X_SEGMENT_BLOCKS: usize = 1 << 16;
 // No NCBI counterpart (scheduling only): `SeqDb::next_block`'s blocks, which follow each other in
 // ordinal order (the rounds list them alike).
 /// Up to `max` blocks of at most `block_bytes` of `db` from ordinal id `first_ordinal` on, in
-/// ordinal order.
+/// ordinal order. With LOSAT_X_BNDBSMALL they are listed by `SeqDb::x_next_blocks` (the same
+/// blocks), which reads the index in runs: the list is made on one thread while the others wait,
+/// and smaller blocks make it longer.
 fn blocks_of(db: &SeqDb, first_ordinal: u32, block_bytes: u64, max: usize) -> Vec<BlockRange> {
+    if super::x_db_cut::x_bn_db_small() {
+        return db.x_next_blocks(first_ordinal, block_bytes, max);
+    }
     let mut blocks = Vec::new();
     let mut next_ordinal = first_ordinal;
     while blocks.len() < max {
@@ -391,7 +396,6 @@ mod tests {
 
     // Uneven work per sequence, so that the blocks end out of order.
     // The bytes that wait are the results' lists and the list of the block's kept results.
-
     #[test]
     fn the_kept_bytes_are_the_capacities_of_the_lists() {
         let mut kept: Vec<(u32, Vec<u64>)> = Vec::with_capacity(3);

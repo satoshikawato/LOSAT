@@ -7630,7 +7630,7 @@ fn search_cli(
     // EXPERIMENT (LOSAT_X_QSTREAM): whether the query file is read a second time, batch by batch
     // (a second handle on it, at the position its reader starts from), where the reports may be
     // written batch by batch (LOSAT_X_RPTSTREAM).
-    let x_opening = x_query_stream::Opening::new(
+    let mut x_opening = x_query_stream::Opening::new(
         &args.query,
         &query_file,
         shared_standard_input,
@@ -7689,6 +7689,17 @@ fn search_cli(
             args.num_threads,
         )?;
         (Vec::new(), end, store)
+    } else if let Some((records, packed)) =
+        x_opening.records_before(query_config, args.num_threads, x_store_acts)
+    {
+        // EXPERIMENT (LOSAT_X_QSTREAM): the records read in parts on the search's threads
+        // (`x_query_scan_par::records`), each part to its end: the reading ended at the end.
+        x_packed = packed;
+        (
+            records,
+            QueryEnd::Input,
+            x_query_stream::Store::off(x_opening),
+        )
     } else if x_store_acts {
         let (QueryRecords { records, end }, packed) =
             crate::blastinput::fasta_reader::x_read_queries_packed(&mut query_source);

@@ -177,6 +177,11 @@ pub(super) struct Opening {
     on: bool,
     off: Option<Off>,
     again: Option<(File, u64)>,
+    /// Where the switch does not act on a regular file: a second handle on it and the position its
+    /// reading starts at, for the records read before the search in parts (`records_before`).
+    before: Option<(File, u64)>,
+    /// The records read before the search were read in parts (`records_before`).
+    before_par: bool,
 }
 
 impl Opening {
@@ -210,7 +215,7 @@ impl Opening {
         reports_streamed: bool,
         rule: Rule,
     ) -> Opening {
-        let off = |off| {
+        let off_with = |off, before| {
             if on {
                 crate::utils::xreach::x_reach!("LOSAT_X_QSTREAM", false);
             }
@@ -218,45 +223,78 @@ impl Opening {
                 on,
                 off: Some(off),
                 again: None,
+                before,
+                before_par: false,
             }
         };
+        let off = |off| off_with(off, None);
         if !on {
             return off(Off::NotSet);
         }
-        if !reports_streamed {
-            return off(Off::Reports);
-        }
-        if path.as_os_str() == "-" || shared_standard_input {
-            return off(Off::StandardInput);
-        }
-        let bytes = match file.metadata() {
+        let standard_input = path.as_os_str() == "-" || shared_standard_input;
+        let regular = || match file.metadata() {
             Ok(metadata)
                 if metadata.is_file()
                     && crate::blastinput::input_files::has_stream_position(file) =>
             {
-                metadata.len()
+                Ok(metadata.len())
             }
-            Ok(_) => return off(Off::NotAFile),
-            Err(_) => return off(Off::Io),
+            Ok(_) => Err(Off::NotAFile),
+            Err(_) => Err(Off::Io),
+        };
+        // A second handle on the file and the position its reading starts at.
+        let again = || {
+            let mut handle = file;
+            let start = handle.stream_position().ok()?;
+            Some((file.try_clone().ok()?, start))
+        };
+        if !reports_streamed {
+            let before = (!standard_input && regular().is_ok()).then(again).flatten();
+            return off_with(Off::Reports, before);
+        }
+        if standard_input {
+            return off(Off::StandardInput);
+        }
+        let bytes = match regular() {
+            Ok(bytes) => bytes,
+            Err(why) => return off(why),
         };
         if let Some(why) = rule.off(bytes) {
-            return off(why);
+            return off_with(why, again());
         }
-        let mut handle = file;
-        let Ok(start) = handle.stream_position() else {
-            return off(Off::Io);
-        };
-        match file.try_clone() {
-            Ok(again) => {
+        match again() {
+            Some(again) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_QSTREAM", true);
                 Opening {
                     on,
                     off: None,
-                    again: Some((again, start)),
+                    again: Some(again),
+                    before: None,
+                    before_par: false,
                 }
             }
-            Err(_) => off(Off::Io),
+            None => off(Off::Io),
         }
+    }
+
+    /// The records of a search whose records are read before it (the switch does not act on its
+    /// regular file), read in parts on the search's `threads` threads (`x_query_scan_par::records`;
+    /// their letters packed where `pack`), or `None` where `source` reads them as before: one thread,
+    /// standard input or a file that is not regular, the BLAST archive, `-parse_deflines` (its
+    /// reader refuses a Seq-id read twice across the file), and the cases of the module.
+    pub(super) fn records_before(
+        &mut self,
+        config: ReaderConfig,
+        threads: usize,
+        pack: bool,
+    ) -> Option<super::x_query_scan_par::Records> {
+        if config.keep_defline || config.parse_deflines {
+            return None;
+        }
+        let (file, start) = self.before.take()?;
+        let records = super::x_query_scan_par::records(&file, start, config, threads, pack);
+        self.before_par = records.is_some();
+        records
     }
 
     /// Whether the records are read batch by batch (`Store::read`).
@@ -352,6 +390,8 @@ pub(super) struct Store {
     on: bool,
     off: Option<Off>,
     acting: Option<Acting>,
+    /// The records read before the search were read in parts (`Opening::records_before`).
+    before_par: bool,
 }
 
 struct Acting {
@@ -399,6 +439,7 @@ impl Store {
             on: opening.on,
             off: opening.off,
             acting: None,
+            before_par: opening.before_par,
         }
     }
 
@@ -449,6 +490,7 @@ impl Store {
         let store = Store {
             on: opening.on,
             off: None,
+            before_par: false,
             acting: Some(Acting {
                 ranged: range.is_some(),
                 query_input,
@@ -510,13 +552,14 @@ impl Drop for Store {
         let (read, stats) = stats;
         if std::env::var_os("LOSAT_X_STATS").is_some() {
             eprintln!(
-                "[X_STATS] QSTREAM records={records} read={read} batches={} kept={} scan_s={:.4} scan_par={} read_s={:.4} peak_window={} off={off}",
+                "[X_STATS] QSTREAM records={records} read={read} batches={} kept={} scan_s={:.4} scan_par={} read_s={:.4} peak_window={} before_par={} off={off}",
                 stats.batches,
                 stats.kept,
                 scan.as_secs_f64(),
                 u8::from(scan_par),
                 stats.read.as_secs_f64(),
                 stats.peak_window,
+                u8::from(self.before_par),
             );
         }
     }

@@ -209,13 +209,15 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 | アクセント | 青 `#2563eb`、hover `#1d4ed8`、薄い青 `#eff6ff` | 同じ（`--accent` `--accent-hover` `--accent-bg`） |
 | カード | 角 12 px、1 px の線、薄い影 | NCBI の各ブロック（Enter Query Sequence …）、Run LOSAT の行、Algorithm parameters、Results がカード。Algorithm parameters の中は下の「Algorithm parameters の形」 |
 | ボタン | `.btn-secondary`：白、線、角 8 px、太字、影。`.btn-primary`：青地に白 | 既定のボタンが secondary、`Run LOSAT` と `Filter` が primary |
-| 切り替え | mode switch：灰色の丸い枠の中で、選んだものが白くなり青い字 | Search / Results、program のタブ、結果の Hits / Dot Plot / Run details / Outputs |
+| 切り替え | mode switch：灰色の丸い枠の中で、選んだものが白くなり青い字 | Search / Results と結果の Hits / Dot Plot / Run details / Outputs は灰青の枠の中で、選んだものをアクセントで塗り白い字（案 B、DW-33）。mode のタブは下の「案 B」 |
 | 入力欄 | `.form-input`：角 8 px、薄い灰色の地、focus で青い枠 | 同じ |
 | 通知 | info は青、warning は琥珀 | `.notice` が青、`.warning` `.banner` と ♦ の注が琥珀 |
 
 アイコンは gbdraw の Phosphor を取り込まず、LOSAT の少数のインラインの SVG のまま。
 
 **画面全体の層**（line WR、2026-11-02。保守者「Enter Query Sequence とか General Parameters とかの階層の box、背景白いとちょっと明るすぎる」「背景とかも含めてデザインしなおそう」）：NCBI の画面の 3 層（青みの地、灰色の組、白い入力）に揃える。地 `--page` `#d6e3f1`、組 `--group` `#eef1f4`（Enter Query Sequence・Enter Subject Sequence・Program Selection・Run LOSAT の行・Algorithm parameters の帯とその組・結果の見出しの塊・Filter Results・Graphic Summary・Descriptions・Alignments・Dot Plot・Run details・Outputs）、組の線 `--border-strong`、組の中の帯（表の見出し、道具の行）`--band` `#e2e7ec`、入力・表・出力・レコードの一覧は白。組の名前は全部アクセントの太字のつまみ（`legend`、`.section-legend`、`.section-heading`）。カードの影はやめる。検索のページは 14 px、「Or, upload file」の点線の枠は 801 px 以上で中身の幅（落とす先はブロック全体）。地と組の色は 4 案（`web-refresh-20261102/screens/tones/`：t1 明るい、t2 濃い、t3 NCBI の青、t4 無彩色）を実画面で比べ、t3 を既定にした（Owner-delegated、3 つの token で替えられる）。
+
+**案 B**（line WR、2026-11-02、DW-33。保守者「灰色で見ずらい。ていうか全体的に見ずらい」→ 7 案のキャンバス https://claude.ai/artifact/3mMN84B4YYgL1NG66Pmr4t から「Bにします」）：上の「画面全体の層」の色を替える。見出しの帯は紺 `--header` `#0b3a5e` に白い字（鍵と「Nothing leaves this browser」は `--header-muted` `#d4e6f4`）。地 `--page` `#e9eef3`、組 `--group` は白、組の中の帯 `--band` `#f1f4f7`、線 `--border` `#d3dbe4` / `--border-strong` `#a9b8c7`、入力欄の線 `--control-line` `#7b8a9a`。文字は `--fg` `#0b1a2a`、`--fg-2` `#1c2b3a`、薄い文字 `--muted` `#46576a`（白の上で約 7:1。使える文字はどれも 4.5:1 以上、薄いのは使えない BLASTX のタブだけ）。mode のタブは NCBI の以前のタブの列の形：灰青のつまみ（`--tab` `#d6dfe8`、字 `--tab-fg` `#14263a`）がアクセントの 3 px の線に載り、選んだタブはアクセントで塗り白い字、使えないタブは `--tab-off` `#e6ebf0` に `--tab-off-fg` `#7d8896`。800 px 以下では 5 つのタブが 1 行を等分する（折り返すとつまみが線の下に垂れる）。組の名前のつまみは灰青 `--legend` `#e3eaf1` に濃い字。タブの下の一文は `--fg-2`。
 
 **Algorithm parameters の形**（line WR、2026-11-02。保守者「NCBI と比べるとやっぱ見づらい」）：NCBI の画面の読み方（太い名前、節の名前のつまみ、名前のすぐ横の内容の幅の欄、残りの幅に一文）を gbdraw の見た目の中で取る。開いた中身は地の上に組として並び（上の「画面全体の層」）、節の名前はつまみ（NCBI の legend の位置）にアクセントの色・太字・1.1 em（文字は NCBI のまま「General Parameters」、大文字にしない）。字は 14 px、行は 40 px 以下（1 行の名前で 33〜38 px）。名前は太字（600、`--fg`）、flag はその後ろに小さい薄い字（等幅の 2 行目にしない。W4b：NCBI の名前と LOSAT の flag）。全部の節が 1 つの名前の列（最も長い名前の幅、10〜22 em、CSS subgrid。fieldset には subgrid が効かないので節は `role="group"` の div）を共有し、欄はその横から内容の幅（数は 8 em、文字の値は 12 em、select は選択肢の幅）。欄の線は `--control-line` `#8b9bab`、地は白。「?」は NCBI と同じくアクセントで塗った円に白い「?」（20 px、800 px 以下は 24 px）。Run LOSAT の横の一文は、何を検索するかと program・task を NCBI と同じく色付きの太字にする。800 px 以下は W4b のまま 1 列（名前の下に欄）。1920 px と 1280 px の検査は `web-refresh-20261102/screens/params-*.png`。
 

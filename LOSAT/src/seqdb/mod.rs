@@ -199,7 +199,8 @@ impl std::fmt::Display for SeqDbError {
 
 impl SeqDbError {
     /// Whether this is the error of the ordinal-id decoders for a record with a Seq-id other
-    /// than `gnl|BL_ORD_ID|n` (a database built with `-parse_seqids`; `SeqDb::read_header`).
+    /// than the `gnl|BL_ORD_ID|n` of the sequence's own number in its volume (a database built
+    /// with `-parse_seqids`; `SeqDb::read_header`).
     pub fn is_parsed_seqids(&self) -> bool {
         matches!(self, SeqDbError::Unsupported { message, .. } if message == header::PARSED_SEQIDS)
     }
@@ -1950,7 +1951,8 @@ fn partition_point_u32(range: std::ops::Range<u32>, fits: impl Fn(u32) -> bool) 
 /// The header of one sequence (`SeqDb::read_header`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SequenceHeader {
-    /// A record whose only Seq-ids are `gnl|BL_ORD_ID|n` (`SeqDb::deflines`).
+    /// A record whose only Seq-ids are `gnl|BL_ORD_ID|n` of the sequence's number n in its volume
+    /// (`SeqDb::deflines`).
     Ordinal(Vec<OrdinalDefline>),
     /// A record with parsed Seq-ids (`SeqDb::defline_set`).
     Parsed(DeflineSet),

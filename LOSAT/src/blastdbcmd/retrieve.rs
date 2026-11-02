@@ -937,16 +937,25 @@ fn accession_to_oids_v4(lookup: &IdLookup, id: &str) -> Result<Vec<u32>, Stop> {
         .ok_or_else(|| Stop::Ncbi(ID_OVERFLOWS.to_string()))
 }
 
-/// The lines of an `-entry_batch` (`-ipg_batch`) file: the id and the rest of the line
-/// (`NStr::SplitInTwo(line, " \t", id, format, fSplit_MergeDelimiters | fSplit_Truncate)`),
-/// empty lines and lines without an id left out. The line's `\r` stays, as in NCBI's reading.
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:382-386
+// ```c++
+//     while (input) {
+//         string line;
+//         NcbiGetlineEOL(input, line);
+//         if ( !line.empty() ) {
+//         	string id, format;
+// ```
+/// The lines of an `-entry_batch` (`-ipg_batch`) file (`args::input_lines`): the id and the
+/// rest of the line (`NStr::SplitInTwo(line, " \t", id, format, fSplit_MergeDelimiters |
+/// fSplit_Truncate)`), lines without an id left out. A `\r` that the platform's reading leaves
+/// in a line stays (Linux: every `\r`), as in NCBI's reading.
 fn read_batch(argument: &str, file: &str) -> Result<Vec<(String, String)>, Stop> {
     let bytes = args::read_input_file(argument, file).map_err(Stop::Ncbi)?;
-    let text = String::from_utf8(bytes)
-        .map_err(|_| Stop::refused(format!("{file}: a batch file that is not UTF-8 text")))?;
+    let not_text = || Stop::refused(format!("{file}: a batch file that is not UTF-8 text"));
     let delimiter = |c: char| c == ' ' || c == '\t';
     let mut lines = Vec::new();
-    for line in text.split('\n') {
+    for line in args::input_lines(&bytes, args::LineEnds::HOST) {
+        let line = std::str::from_utf8(line).map_err(|_| not_text())?;
         let trimmed = line.trim_matches(delimiter);
         if trimmed.is_empty() {
             continue;
@@ -1344,8 +1353,8 @@ impl Run<'_, '_> {
     //     }
     //     return (err_found) ? 1 : 0;
     // ```
-    // An id that is not an `int` is the PIG 0 (`fConvErr_NoThrow`; a `\r` of a CRLF line
-    // stays on the id: J207).
+    // An id that is not an `int` is the PIG 0 (`fConvErr_NoThrow`; on Linux a `\r` of a CRLF
+    // line stays on the id: J207, O42).
     /// `-ipg_batch`: the sequence of the PIG of each line of `file`, with the line's range,
     /// strand and mask algorithm.
     fn batch_pig(&mut self, file: &str, config: &mut Config) -> Result<bool, Stop> {
@@ -1570,12 +1579,17 @@ mod tests {
         )
         .unwrap();
         let lines = read_batch("entry_batch", file.to_str().unwrap()).unwrap();
+        // The `\r` of `\r\n` stays on Linux and goes on Windows and macOS (`NcbiGetlineEOL`).
+        let crlf_rest = match args::LineEnds::HOST {
+            args::LineEnds::Unix => "1-5 21\r",
+            args::LineEnds::Windows | args::LineEnds::Darwin => "1-5 21",
+        };
         assert_eq!(
             lines,
             [
                 ("gnl|BL_ORD_ID|3".to_string(), String::new()),
                 ("gnl|BL_ORD_ID|4".to_string(), "3-".to_string()),
-                ("x".to_string(), "1-5 21\r".to_string()),
+                ("x".to_string(), crlf_rest.to_string()),
             ]
         );
         std::fs::remove_dir_all(&dir).unwrap();

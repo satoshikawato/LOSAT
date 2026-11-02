@@ -5,8 +5,9 @@
 - Date: 2026-11-02 (version 1.0: 2026-10-12; 1.1: 2026-10-13; 1.2: 2026-11-01, several databases
   in one `-db`, P4, line DI-8f, decided under the maintainer's standing delegation; its PR asks
   the maintainer to accept it; 1.3: databases with parsed Seq-ids, line DBID, on the
-  maintainer's request of 2026-10-21, with the refusals under the same delegation, which its PR
-  asks the maintainer to accept)
+  maintainer's request of 2026-10-21, with the refusals under the same delegation, which the
+  maintainer accepted on 2026-11-02; the same day line DBID N2a refused a stored
+  `gnl|BL_ORD_ID|n` of another number, which version 1.3 listed as a known difference)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -134,7 +135,7 @@ is an explicit error of `LOSAT/src/seqdb`:
 
 | Rejected | Why |
 | --- | --- |
-| A header with a Seq-id other than `gnl|BL_ORD_ID|n` | parsed Seq-ids (P4); searched since version 1.3, section "Databases with parsed Seq-ids" |
+| A header with a Seq-id other than `gnl|BL_ORD_ID|n` of the sequence's number n in its volume | parsed Seq-ids (P4); searched since version 1.3, section "Databases with parsed Seq-ids" |
 | Alias keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `OID_MASK_TYPE`, `FIRST_OID`, `LAST_OID`, `MEMB_BIT`, `MASKLIST`, `VDBLIST` | filters (P4) |
 | Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | they replace the values behind the statistics (second step). `NSEQ` and `LENGTH` equal to those sums, as `blastdb_aliastool -dblist` writes them, change nothing in NCBI and are read (since stage DB-3) |
 | A name that lists several databases | one database per search (P4); searched since version 1.2 |
@@ -567,7 +568,7 @@ a result that LOSAT does not reproduce.
 
 | Rejected, for a reported sequence | Formats | NCBI BLAST+ 2.17.0 | Rule |
 | --- | --- | --- | --- |
-| A Seq-align id the formatters do not find: `gnl|PIG|`, in version 4 `bbs|` and `nat|`, `gnl|BL_ORD_ID|n` in a sequence that also has another id, a local id that alone decides the definition line (`lcl|777` before `gi|777`), any id of a version 4 database without ISAM files. In version 5 also every `bbs|`, `nat|` and `lcl|<integer>` (see the known differences) | 0, 5, 6, 7, 10, 13 to 17, 20 | The default tabular fields and any list with `sacc`, `saccver` or a field that reads the letters stop (exit 255). Other lists exit 0: `sseqid` writes `Unknown`, `sallseqid` the stored id. Outfmt 0 and 5 write `Unknown`, 13 to 16 and SAM the id | 2, 3 |
+| A Seq-align id the formatters do not find: `gnl|PIG|`, in version 4 `bbs|` and `nat|`, `gnl|BL_ORD_ID|n` with n other than the sequence's number in its volume, alone or beside another id (makeblastdb stores such an id only when the FASTA names it), a local id that alone decides the definition line (`lcl|777` before `gi|777`), any id of a version 4 database without ISAM files. In version 5 also every `bbs|`, `nat|` and `lcl|<integer>`, and in both versions every `gnl|BL_ORD_ID|n` beside another id (see the known differences) | 0, 5, 6, 7, 10, 13 to 17, 20 | The default tabular fields and any list with `sacc`, `saccver` or a field that reads the letters stop (exit 255). Other lists exit 0: `sseqid` writes `Unknown`, `sallseqid` the stored id. Outfmt 0 and 5 write `Unknown`, 13 to 16 and SAM the id. Where n plus the first ordinal id of the volume is the number of another sequence whose id is its own number (another database of an alias), NCBI writes that sequence's names and, in every program but BLASTN, its identities | 2, 3 |
 | A Seq-align id that the lookup finds first on another sequence, for example `gb|X|` after `gb|X.1|`, `emb|X.1|` after `gb|X.1|`, `gb|X|` after `emb|X.1|`, `lcl|X` after `gb|X.1|`. The lookup does not refuse the same record in two volumes or in two databases of an alias | 0, 5, 6, 7, 10, 13 to 17, 20 | Writes the other sequence's names, in every program but BLASTN also its identities; for `lcl|X` as in the row above | 2, 3 |
 | A Seq-align id whose lookup fails (an LMDB file without the accession table) | 0, 5, 6, 7, 10, 13 to 17, 20 | Stops (exit 2) | 3 |
 | Following hits of a query whose Seq-align ids `Match`: `pdb|1ABC|` and `pdb|1ABC|AA`, `gb|X|` and `gb|X.1|`, one accession and version under `gb`, `emb` or `dbj`, two copies of one record | 0, 5, 13 to 16 | Shows them as one hit | 2 |
@@ -591,15 +592,15 @@ refused in every search.
 
 Known differences that remain:
 
-- A sequence whose only id is `gnl|BL_ORD_ID|n`, with n other than its ordinal id, is read as a
-  sequence without parsed Seq-ids. LOSAT writes its own ordinal and title in every format
-  (outfmt 8: `tag id 3`), where NCBI writes n (`tag id 5`) and `Unknown`, or stops (outfmt 6, exit
-  255). makeblastdb writes such a record only when the FASTA names this id. This is a defect of
-  the reader, not a decision; a later change refuses it.
 - Refusals wider than NCBI's failure, which rule 4 of `PD-LOSAT-NCBI-DEFECTS` would port:
   - In version 5, `bbs|`, `nat|` and `lcl|<integer>`: NCBI finds them by their LMDB key and writes
     its normal report, unless an earlier sequence holds the same key. The refusal's text says that
     the formatters do not find the sequence.
+  - `gnl|BL_ORD_ID|n` beside another id, with n the sequence's own number in its volume: NCBI finds
+    the sequence by n and writes its normal report (version 4 and 5). The refusal's text says that
+    the formatters do not find the sequence. So does a sole `gnl|BL_ORD_ID|n` of another number whose
+    n names a sequence with the same definition lines and letters, which NCBI shows as the subject
+    itself.
   - A tabular field list without the fields on which NCBI stops (`6 qseqid evalue`, `6 sseqid`,
     `6 sallseqid`), where NCBI exits 0.
   - A title ending in `]` without `taxdb.bti` on the search path, where NCBI keeps the title.

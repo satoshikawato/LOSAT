@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The search screen in the order of NCBI BLAST's two-sequence page (docs/web/ncbi_ui_mapping.md
-// §1): the program tabs and sentence, "Enter Query Sequence", "Enter Subject Sequence",
-// "Program Selection", the "Run LOSAT" button (NCBI's BLAST button) with the line that says
+// §1): the mode tabs and sentence, "Enter Query Sequence", "Enter Subject Sequence",
+// "Task Selection" (NCBI's "Program Selection"), the "Run LOSAT" button (NCBI's BLAST button) with the line that says
 // what it searches, and "Algorithm parameters", which opens and closes, with a second button
 // below it. LOSAT's own controls (threads, keep the screen on) are under the first button, with
 // the engine's refusal of the options when there is one. "Run LOSAT" starts the search and the
@@ -94,7 +94,7 @@ function onThreads(event: Event): void {
   <div class="search-panel" data-testid="search-panel" :data-describe="describeState">
     <h2 class="visually-hidden">Search</h2>
     <fieldset class="program-tabs" data-testid="program-tabs">
-      <legend class="visually-hidden">Program</legend>
+      <legend class="visually-hidden">Mode</legend>
       <label
         v-for="p in PROGRAMS"
         :key="p.id"
@@ -118,7 +118,7 @@ function onThreads(event: Event): void {
     <InputPanel v-for="role in roles" :key="role" :draft="draft" :state="state" :role="role" />
 
     <fieldset v-if="taskFields.length > 0" class="search-block" data-testid="program-selection">
-      <legend>Program Selection</legend>
+      <legend>Task Selection</legend>
       <ParameterField v-for="field in taskFields" :key="field.flag" :draft="draft" :state="state" :field="field" />
     </fieldset>
 

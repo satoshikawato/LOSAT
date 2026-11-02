@@ -308,6 +308,18 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
     }
 }
 
+/// `-num_threads` of the program's arguments.
+fn num_threads(command: &Commands) -> usize {
+    match command {
+        Commands::Blastp(a) => a.num_threads,
+        Commands::Tblastn(a) => a.num_threads,
+        Commands::Blastn(a) => a.num_threads,
+        Commands::Tblastx(a) => a.num_threads,
+        // Rejected by `Program::parse`.
+        Commands::Blastx(_) | Commands::Psiblast(_) | Commands::Makedb(_) => 1,
+    }
+}
+
 /// The hit list size that the CLI derives for the output format `format` from the options
 /// of `command` (`report_counts`, NCBI `blast_args.cpp:2894-2973`).
 pub fn hit_list_size(command: &Commands, format: u32) -> usize {
@@ -603,32 +615,39 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
     let (program, command) = parse(words)?;
     let groups = search_groups(program.formats(), &command);
     let mut diagnostics = StreamWriter::new(STREAM_DIAGNOSTICS);
+    let threads = num_threads(&command);
     let mut command = Some(command);
     // Each search: what it wrote or why it failed, and (after the first) its diagnostics.
     let mut outcomes: Vec<(Result<Searched, Failed>, Vec<u8>)> = Vec::new();
-    for group in &groups {
-        let command = match command.take() {
-            Some(command) => command,
-            None => parse(words)?.1,
-        };
-        let mut scratch = Vec::new();
-        // Whether the options' checks reject this search, found before `search` takes the
-        // command.
-        let rejected = group_rejected(&command, group);
-        // The warnings of the first search include the reader's and the queries' warnings
-        // that the next searches repeat; the CLI writes them once.
-        let result = if outcomes.is_empty() {
-            search(command, group, query, subject, &mut diagnostics)
-        } else {
-            search(command, group, query, subject, &mut scratch)
-        };
-        if let Err(failed) = &result {
-            if fails_run(failed, rejected) {
-                return Err(failed.message.clone());
+    // The searches of the run share one thread pool (`with_run_pool`): a browser holds a thread
+    // worker for every thread that may start, and the threads of a pool may not have returned when
+    // the next pool starts, so each pool of its own needed thread workers of its own.
+    LOSAT::api::local_blast::with_run_pool(threads, program.name(), || -> Result<(), String> {
+        for group in &groups {
+            let command = match command.take() {
+                Some(command) => command,
+                None => parse(words)?.1,
+            };
+            let mut scratch = Vec::new();
+            // Whether the options' checks reject this search, found before `search` takes the
+            // command.
+            let rejected = group_rejected(&command, group);
+            // The warnings of the first search include the reader's and the queries' warnings
+            // that the next searches repeat; the CLI writes them once.
+            let result = if outcomes.is_empty() {
+                search(command, group, query, subject, &mut diagnostics)
+            } else {
+                search(command, group, query, subject, &mut scratch)
+            };
+            if let Err(failed) = &result {
+                if fails_run(failed, rejected) {
+                    return Err(failed.message.clone());
+                }
             }
+            outcomes.push((result, scratch));
         }
-        outcomes.push((result, scratch));
-    }
+        Ok(())
+    })?;
     if outcomes.iter().all(|(result, _)| result.is_err()) {
         // The CLI fails every format; the error is that of the tabular formats.
         return Err(match outcomes.remove(0).0 {

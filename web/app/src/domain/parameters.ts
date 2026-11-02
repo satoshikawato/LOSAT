@@ -1,7 +1,8 @@
 // The search form's values and the argv parameters they make (plan §5.3). The form keeps
-// only what the user set; a value equal to the engine's default is not written, so the
-// argv and the CLI command stay minimal (DW-4). Nothing here checks BLAST's rules: the
-// engine's `validate` reads the argv as the command line does.
+// only what the user set; a value equal to the default (the engine's, or the program's
+// resolved default, `knownDefault`) is not written, so the argv and the CLI command stay
+// minimal (DW-4). Nothing here checks BLAST's rules: the engine's `validate` reads the argv
+// as the command line does.
 import type { ParameterField, ParameterSection, ProgramDescriptor, SectionPlacement } from './programs';
 
 /** What `describe` says about one option (the fields of ports/engine ParameterDescription). */
@@ -61,6 +62,48 @@ export function effectiveValue(flag: string, values: FormValues, options: readon
   return options?.find((option) => option.flag === flag)?.defaultValue;
 }
 
+/** What the form knows of an option's default (`knownDefault`). */
+export interface KnownDefault {
+  /** The value that the search uses while the field is empty; undefined when unknown. */
+  readonly defaultValue?: string;
+  /** BLAST+ tells the option given from not given: a value set is written even when it equals the default. */
+  readonly given?: boolean;
+}
+
+/**
+ * The default of a field: the program's resolved default (`ProgramDescriptor.defaults`, by
+ * task, while the options it depends on keep their defaults), or else the engine's
+ * (`describe`); undefined when neither is known.
+ */
+export function knownDefault(
+  program: ProgramDescriptor,
+  flag: string,
+  values: FormValues,
+  options: readonly EngineOption[] | undefined,
+): KnownDefault | undefined {
+  const resolved = program.defaults?.[flag];
+  if (resolved === undefined) {
+    const described = options?.find((option) => option.flag === flag)?.defaultValue;
+    return described === undefined ? undefined : { defaultValue: described };
+  }
+  const task = effectiveValue('-task', values, options);
+  const value = typeof resolved.value === 'string' ? resolved.value : task === undefined ? undefined : resolved.value[task];
+  const holds = (resolved.unless ?? []).every((other) => !isSet(program, other, values, options));
+  const held = holds ? value : undefined;
+  if (resolved.given === true) return held === undefined ? { given: true } : { defaultValue: held, given: true };
+  return held === undefined ? undefined : { defaultValue: held };
+}
+
+/** Whether a field's value is written to the argv (`writtenValue`), found by its flag. */
+function isSet(program: ProgramDescriptor, flag: string, values: FormValues, options: readonly EngineOption[] | undefined): boolean {
+  const field = program.sections.flatMap((section) => section.fields).find((f) => f.flag === flag);
+  if (field === undefined) return false;
+  // A given option is set by any value: its default is not read, so that the hit list options,
+  // which depend on each other, do not ask each other.
+  const known = program.defaults?.[flag]?.given === true ? { given: true } : knownDefault(program, flag, values, options);
+  return writtenValue(field, values[flag], known) !== undefined;
+}
+
 /**
  * Whether a section is shown (`shownFor`): always, unless it is shown only for some values of
  * an option, and the option has another value and none of the section's fields has a value.
@@ -94,15 +137,24 @@ export function fieldRows(
 
 /**
  * What the form writes to the argv for a field: `true` for a set flag, or a value other than
- * '' and the engine's default (white space around it dropped); undefined when it writes
- * nothing. A written value is a value that differs from the default ("♦"), since a value
- * equal to the default is not written.
+ * '' and the default (white space around it dropped; a `given` option's value even when it
+ * equals the default); undefined when it writes nothing. A written value is a value that
+ * differs from the default ("♦"), since a value equal to the default is not written.
  */
-export function writtenValue(field: ParameterField, value: FieldValue | undefined, option: EngineOption | undefined): string | true | undefined {
+export function writtenValue(field: ParameterField, value: FieldValue | undefined, known: KnownDefault | undefined): string | true | undefined {
   if (field.kind === 'flag') return value === true ? true : undefined;
   if (typeof value !== 'string') return undefined;
   const text = value.trim();
-  return text === '' || text === option?.defaultValue ? undefined : text;
+  return text === '' || (known?.given !== true && text === known?.defaultValue) ? undefined : text;
+}
+
+/** The values of a field's select (`list`), for the task the search uses; empty without one. */
+export function fieldList(field: ParameterField, values: FormValues, options: readonly EngineOption[] | undefined): readonly string[] {
+  const list = field.list;
+  if (list === undefined) return [];
+  if (Array.isArray(list)) return list as readonly string[];
+  const task = effectiveValue('-task', values, options);
+  return (task === undefined ? undefined : (list as Readonly<Record<string, readonly string[]>>)[task]) ?? [];
 }
 
 /** The choices of a `choice` field: the engine's, or the field's own where the engine lists none. */
@@ -131,12 +183,11 @@ export function formParameters(
   options: readonly EngineOption[] | undefined,
   placement?: SectionPlacement,
 ): Array<readonly [string, string | true]> {
-  const byFlag = new Map((options ?? []).map((option) => [option.flag, option]));
   const parameters: Array<readonly [string, string | true]> = [];
   for (const section of describedSections(program, options)) {
     if (placement !== undefined && section.placement !== placement) continue;
     for (const field of section.fields) {
-      const written = writtenValue(field, values[field.flag], byFlag.get(field.flag));
+      const written = writtenValue(field, values[field.flag], knownDefault(program, field.flag, values, options));
       if (written !== undefined) parameters.push([field.flag, written]);
     }
   }

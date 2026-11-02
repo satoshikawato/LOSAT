@@ -865,7 +865,9 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   const limit = BUILD_HAS_ENGINE ? 255 : 3;
   await page.getByTestId('tab-search').click();
   await openParameters(page);
-  await page.getByTestId('param-max_target_seqs').fill(String(limit));
+  // 3 and 255 are not in NCBI's list: "Other" takes them.
+  await page.getByTestId('param-max_target_seqs').selectOption('other');
+  await page.getByTestId('param-max_target_seqs-other').fill(String(limit));
   await run(page, 2);
   await openRun(page, 2);
   await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
@@ -949,7 +951,8 @@ test("BLASTN: an HSP of one letter has no orientation in its record; the note po
   await program(page, 'blastn');
   await task(page, 'blastn');
   await openParameters(page);
-  await page.getByTestId('param-word_size').fill('4');
+  await page.getByTestId('param-word_size').selectOption('other');
+  await page.getByTestId('param-word_size-other').fill('4');
   await paste(page, 'query', BUILD_HAS_ENGINE ? '>q\nTAGGACGG\n' : '>q1\nACGTACGTACGT\n>q2\nACGTACGTACGT\n>q\nTAGGACGG\n');
   await paste(page, 'subject', '>s\nYCAYAANTNCRGYACT\n');
   await run(page, 1);

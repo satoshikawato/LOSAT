@@ -39,6 +39,10 @@ pub use crate::algorithm::blastn::blast_engine::run as run_blastn;
 // ```
 pub use crate::algorithm::blastn::blast_engine::run_local as run_local_blastn;
 
+// Re-export the pool of a run of several searches (`run_local` calls of one argv), which they
+// share instead of building one each (no NCBI counterpart: NCBI's CLI searches once per run).
+pub use crate::utils::threading::with_run_pool;
+
 // Re-export BLASTP run function
 // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:1196-1218
 // ```c

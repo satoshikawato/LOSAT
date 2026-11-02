@@ -125,7 +125,7 @@ function onDrop(event: DragEvent): void {
 
     <div v-if="role === 'query'" class="param-row">
       <label class="param-label" for="job-title">Job Title</label>
-      <div class="param-control">
+      <div class="param-control fill">
         <input
           id="job-title"
           type="text"

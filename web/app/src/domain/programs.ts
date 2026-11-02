@@ -85,8 +85,8 @@ export interface ResolvedDefault {
    */
   readonly unless?: readonly string[];
   /**
-   * BLAST+ tells the option given from not given (the hit list options, abi_v2.md §7): a value
-   * set is written even when it equals the default.
+   * BLAST+ tells the option given from not given (the hit list options, abi_v2.md §7; BLASTX's
+   * word size): a value set is written even when it equals the default.
    */
   readonly given?: true;
 }
@@ -203,7 +203,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     },
     query: 'nucleotide',
     subject: 'nucleotide',
-    // Kind 0 is the `bio::io::fasta` reader; kind 1 is BLASTX's NCBI-style reader (ABI v2 §4).
+    // Kind 0 is the `bio::io::fasta` reader (ABI v2 §4), which every program indexes with.
     fastaParser: 0,
     sections: [
       {
@@ -362,8 +362,12 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           { flag: '-culling_limit', label: 'Max matches in a query range', ...integer },
         ],
       },
-      // LOSAT's BLASTX scores with BLOSUM62 and gap costs 11/1 only.
-      { title: 'Scoring Parameters', placement: 'algorithm', fields: [{ ...matrix, list: ['BLOSUM62'] }, gapOpen, gapExtend, compBasedStats] },
+      // LOSAT's BLASTX scores with BLOSUM62 and gap costs 11/1 only, and adjusts with modes 0 and 2.
+      {
+        title: 'Scoring Parameters',
+        placement: 'algorithm',
+        fields: [{ ...matrix, list: ['BLOSUM62'] }, gapOpen, gapExtend, { ...compBasedStats, choices: ['0', '2'] }],
+      },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
       {
         title: OTHER,
@@ -381,7 +385,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     ],
     defaults: {
       ...HIT_LIST_DEFAULTS,
-      '-word_size': { value: { blastx: '3', 'blastx-fast': '5' } },
+      // A word size given sets its own threshold (19.3 for 5, also with blastx-fast's 5).
+      '-word_size': { value: { blastx: '3', 'blastx-fast': '5' }, given: true },
       '-culling_limit': { value: '0' },
       '-matrix': { value: 'BLOSUM62' },
       '-gapopen': { value: '11' },

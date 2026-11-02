@@ -303,6 +303,18 @@ describe('knownDefault: the defaults that the engine resolves by task and from o
     expect(knownDefault(tblastx, '-num_descriptions', {}, undefined)).toEqual({ defaultValue: '500', given: true });
   });
 
+  it("writes BLASTX's word size even at the task's default: a word size given sets its own threshold", () => {
+    const blastx = programById('blastx');
+    const described = [valueOption('-task', 'blastx'), valueOption('-word_size'), valueOption('-threshold')];
+    expect(knownDefault(blastx, '-word_size', { '-task': 'blastx-fast' }, described)).toEqual({ defaultValue: '5', given: true });
+    expect(formParameters(blastx, { '-task': 'blastx-fast', '-word_size': '5' }, described)).toEqual([
+      ['-task', 'blastx-fast'],
+      ['-word_size', '5'],
+    ]);
+    expect(knownDefault(blastx, '-threshold', { '-task': 'blastx-fast' }, described)).toEqual({ defaultValue: '20' });
+    expect(knownDefault(blastx, '-threshold', { '-task': 'blastx-fast', '-word_size': '5' }, described)).toBeUndefined();
+  });
+
   it("is the engine's default where the program resolves none", () => {
     expect(knownDefault(tblastx, '-evalue', {}, [valueOption('-evalue', '10')])).toEqual({ defaultValue: '10' });
     expect(knownDefault(tblastx, '-evalue', {}, undefined)).toBeUndefined();

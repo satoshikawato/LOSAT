@@ -88,7 +88,7 @@ export class FakeEngine implements EngineGateway {
    * Writes outputs with the structure of a search, so that the results screen can be built
    * and tested without the engine: up to 200 queries, each but every fourth with HSPs on
    * up to three subjects (the third subject is left out of outfmt 0, as subjects past
-   * -num_alignments are), a reverse HSP and, for BLASTN, a one-letter HSP. Every text
+   * -num_alignments are), a reverse HSP on a nucleotide subject and, for BLASTN, a one-letter HSP. Every text
    * says that it is not a search result, and the values are marked FAKE.
    */
   private writeOutputs(request: EngineRunRequest, writer: RunOutputWriter): void {

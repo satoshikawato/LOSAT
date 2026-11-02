@@ -165,7 +165,7 @@ export class SearchDraft {
     for (const role of ROLES) {
       for (const source of this.role(role).sources) {
         if (source.base !== undefined && source.base.parser !== next.fastaParser) {
-          // A program with another FASTA reader needs another record table (BLASTX, plan TD-8).
+          // A program with another FASTA reader needs another record table (plan TD-8).
           this.reindex(role, source.key);
         } else {
           this.scheduleCheck(role, source.key, 0);
@@ -320,7 +320,10 @@ export class SearchDraft {
     return this.onlyRecord(role)?.record;
   }
 
-  /** The region of the role, if it was chosen on the record that `regionRecord` gives now. */
+  /**
+   * The region of the role, if it was chosen on the role's only record as it is now. A program
+   * without a subrange keeps it unused (`regionRecord` gives no record).
+   */
   region(role: InputRole): RegionText | undefined {
     const region = this.role(role).region;
     return region !== undefined && region.record === this.regionIdentity(role) ? region.text : undefined;

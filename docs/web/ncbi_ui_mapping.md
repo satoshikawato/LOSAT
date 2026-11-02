@@ -65,7 +65,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 |---|---|
 | Max target sequences | 10、50、100、250、500、1000、5000（NCBI の既定は 100、LOSAT は CLI の 500） |
 | Word size | megablast 16、20、24、28、32、48、64／dc-megablast 11、12／blastn と blastn-short 7、11、15／BLASTP・TBLASTN 2、3、5、6／TBLASTX 2、3／BLASTX 3、5（LOSAT の BLASTX が読む値だけ、DW-36） |
-| Matrix | PAM30、PAM70、BLOSUM90、BLOSUM80、BLOSUM62、BLOSUM50、BLOSUM45、PAM250（NCBI の順）／BLASTX は BLOSUM62 だけ（LOSAT の BLASTX が読む行列。Gap Costs も 11 / 1 だけ、DW-36） |
+| Matrix | PAM30、PAM70、BLOSUM90、BLOSUM80、BLOSUM62、BLOSUM50、BLOSUM45、PAM250（NCBI の順）／BLASTX は BLOSUM62 だけ（LOSAT の BLASTX が読む行列。Gap Costs も 11 / 1 だけ、Compositional adjustments は 0 と 2 だけ、DW-36） |
 
 Match/Mismatch と Gap Costs は 2 つの欄のまま（NCBI は「1,-2」「Existence: 5 Extension: 2」の組の select）。
 
@@ -79,7 +79,7 @@ Match/Mismatch と Gap Costs は 2 つの欄のまま（NCBI は「1,-2」「Exi
 | BLASTP | `-word_size` 3（blastp-fast 5）、`-evalue` 10、`-matrix` BLOSUM62、`-seg` no、`-soft_masking` false | `-gapopen` 11・`-gapextend` 1・`-window_size` 40（`-matrix`）、`-threshold` 11（blastp-fast 20。`-matrix`・`-word_size`） |
 | TBLASTN | `-word_size` 3（tblastn-fast 5）、`-evalue` 10、`-matrix` BLOSUM62、`-seg` 12 2.2 2.5、`-soft_masking` false、`-xdrop_gap` 15、`-xdrop_gap_final` 25、`-sum_stats` true | BLASTP と同じ（`-threshold` 13、tblastn-fast 20） |
 | TBLASTX | `-word_size` 3、`-matrix` BLOSUM62、`-soft_masking` false、`-culling_limit` 0 | `-threshold` 13・`-window_size` 40（`-matrix`） |
-| BLASTX | `-word_size` 3（blastx-fast 5）、`-matrix` BLOSUM62、`-gapopen` 11、`-gapextend` 1、`-window_size` 40、`-culling_limit` 0、`-sum_stats` true（`-evalue` 10、`-seg` 12 2.2 2.5、`-soft_masking` false、`-comp_based_stats` 2、`-strand` both は clap の既定。help の文は線 SX が CLI に足した、DW-36） | `-threshold` 12（blastx-fast 20。`-word_size`：blastx で 5 を与えると 19.3） |
+| BLASTX | `-word_size` 3（blastx-fast 5）、`-matrix` BLOSUM62、`-gapopen` 11、`-gapextend` 1、`-window_size` 40、`-culling_limit` 0、`-sum_stats` true（`-evalue` 10、`-seg` 12 2.2 2.5、`-soft_masking` false、`-comp_based_stats` 2、`-strand` both は clap の既定。help の文は線 SX が CLI に足した、DW-36） | `-threshold` 12（blastx-fast 20。`-word_size`：与えた word size が threshold を決める、5 なら 19.3。BLASTX の `-word_size` は hit list の 3 つと同じく打てば既定と同じ値でも書く） |
 | 5 つとも | `-max_target_seqs` 500、`-num_descriptions` 500、`-num_alignments` 250 | `-max_target_seqs` は他の 2 つが、他の 2 つは `-max_target_seqs` が空の間だけ（BLAST+ は与えたかを区別し、互いに除く） |
 
 Template length・Template type は既定を示さない（2 つを共に与える option で、片方だけ書くと CLI が拒む）。Max HSPs・Percent identity は既定が無い（空 = 制限なし）。この表は仮の出どころ（Owner-delegated 2026-11-02）。本来の経路は `describe` がエンジンの解決した既定（BLASTP・TBLASTN の `resolve()`、TBLASTX の `word_threshold()`・`window()`、`stats::protein_options::suggested_threshold` など）を program・task ごとに返すこと（`web-refresh-20261102/SURVEY.md`）。

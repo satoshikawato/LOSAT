@@ -165,14 +165,20 @@ describe('SearchDraft submit', () => {
     draft.setPaste('query', '>q\nACGTACGTAC\n');
     draft.setPaste('subject', '>s\nMKLVMKLV\n');
     await draft.idle();
-    // A region that BLASTN refuses (the stop is past the record) does not stop BLASTX.
-    draft.setRegion('query', { start: '2', stop: '50' });
+    draft.setRegion('query', { start: '2', stop: '8' });
+    expect(draft.parameters()).toEqual([['-query_loc', '2-8']]);
     draft.setProgram('blastx');
     await draft.idle();
     expect(draft.regionRecord('query')).toBeUndefined();
     expect(draft.parameters()).toEqual([]);
+    // Nor does a region that BLASTN refuses (the stop is past the record) stop BLASTX.
+    draft.setProgram('blastn');
+    draft.setRegion('query', { start: '2', stop: '50' });
+    expect(await draft.submit()).toMatchObject({ ok: false, message: expect.stringMatching(/^Query region: /) });
+    draft.setProgram('blastx');
+    await draft.idle();
     expect(await draft.submit()).toMatchObject({ ok: true });
-    expect(requests[0]![0]!).toMatchObject({ program: 'blastx', parameters: [] });
+    expect(requests.at(-1)![0]!).toMatchObject({ program: 'blastx', parameters: [] });
     draft.setProgram('blastn');
     await draft.idle();
     expect(draft.region('query')).toEqual({ start: '2', stop: '50' });

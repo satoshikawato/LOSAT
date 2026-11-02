@@ -117,7 +117,8 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
   const outside: string[] = [];
   const missing = input.formats.filter((format) => !(compared ?? []).includes(format));
   if (compared === undefined) {
-    outside.push(`These options of ${input.program} were not compared with NCBI BLAST+ ${table.ncbi} in the certification records.`);
+    const records = MANIFEST_ROWS_ONLY.has(input.program) ? 'the frozen rows of the outfmt 0 manifest' : 'the certification records';
+    outside.push(`These options of ${input.program} were not compared with NCBI BLAST+ ${table.ncbi} in ${records}.`);
   } else if (missing.length > 0) {
     outside.push(`These options were compared with NCBI BLAST+ ${table.ncbi} for outfmt ${list(compared)}, not for outfmt ${list(missing)}.`);
   }

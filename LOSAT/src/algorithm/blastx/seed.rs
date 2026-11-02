@@ -7,7 +7,8 @@ use crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject_one_range;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_bx_build_compressed_lookup, x_bx_clut_pool, x_give_back_flat, XCompressedLookup, X_BLASTX,
+    x_bx_build_compressed_lookup, x_bx_clut_pool, x_give_back_flat, x_give_back_wide_flat,
+    XBxCompressedLookup, X_BLASTX,
 };
 use crate::algorithm::tblastx::lookup::compressed::{
     x_compressed_scaled_threshold, BlastCompressedAaLookupTable,
@@ -273,7 +274,7 @@ pub enum Lookup {
     Standard(BlastAaLookupTable, x_seed_scan::XKeptPresence),
     // EXPERIMENT (LOSAT_X_BPCLUT): the compressed table as the reference builds it or flat
     // (`x_clut_direct.rs`), one variant so that the standard table's loops keep their match.
-    Compressed(XCompressedLookup<u16>),
+    Compressed(XBxCompressedLookup),
 }
 
 // No NCBI counterpart: buffer reuse only (the pooled build, tblastx/lookup/x_lut_direct.rs): a
@@ -298,11 +299,14 @@ impl Drop for Lookup {
 // drop keeps its code.
 #[cold]
 #[inline(never)]
-fn x_give_back_compressed(table: &mut XCompressedLookup<u16>) {
-    if let XCompressedLookup::Flat(flat) = table {
-        if x_bx_clut_pool() && !std::thread::panicking() {
-            x_give_back_flat(flat);
-        }
+fn x_give_back_compressed(table: &mut XBxCompressedLookup) {
+    if !x_bx_clut_pool() || std::thread::panicking() {
+        return;
+    }
+    match table {
+        XBxCompressedLookup::Reference(_) => {}
+        XBxCompressedLookup::Flat(flat) => x_give_back_flat(flat),
+        XBxCompressedLookup::Wide(flat) => x_give_back_wide_flat(flat),
     }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
@@ -312,8 +316,9 @@ fn x_give_back_compressed(table: &mut XCompressedLookup<u16>) {
 //     s_CompressedLookupFinalize(lookup);
 // ```
 /// EXPERIMENT (LOSAT_X_BPCLUT): the compressed table of a query batch (`-word_size 5`), flat as
-/// TBLASTN's (`x_bx_build_compressed_lookup`, on vectors kept between builds with
-/// `LOSAT_X_BXCLUTPOOL`), on one thread. One table for the batch, so its one
+/// TBLASTN's with `u16` query offsets (`i32` past `X_U16_LETTERS` letters;
+/// `x_bx_build_compressed_lookup`, on vectors kept between builds with `LOSAT_X_BXCLUTPOOL`), on one
+/// thread. One table for the batch, so its one
 /// range is all the segments. Words that fill NCBI's overflow banks are refused, as BLASTP's
 /// (NCBI writes past its banks). Cold and not inlined, so that the standard table's build keeps
 /// its code.
@@ -340,10 +345,11 @@ fn x_compressed_lookup(query: &[u8], segments: &[(i32, i32)], threshold: f64) ->
 /// No NCBI counterpart: the word length of either form of the compressed table. Not inlined, so
 /// that the standard table's loops keep their code.
 #[inline(never)]
-pub(super) fn x_compressed_word_length(table: &XCompressedLookup<u16>) -> i32 {
+pub(super) fn x_compressed_word_length(table: &XBxCompressedLookup) -> i32 {
     match table {
-        XCompressedLookup::Reference(table) => table.word_length,
-        XCompressedLookup::Flat(table) => table.word_length,
+        XBxCompressedLookup::Reference(table) => table.word_length,
+        XBxCompressedLookup::Flat(table) => table.word_length,
+        XBxCompressedLookup::Wide(table) => table.word_length,
     }
 }
 
@@ -351,7 +357,7 @@ pub(super) fn x_compressed_word_length(table: &XCompressedLookup<u16>) -> i32 {
 /// pairs and `s_range`. Not inlined, so that the standard table's loops keep their code.
 #[inline(never)]
 pub(super) fn x_compressed_scan(
-    table: &XCompressedLookup<u16>,
+    table: &XBxCompressedLookup,
     subject: &[u8],
     seq_ranges: &[(i32, i32)],
     offset_pairs: &mut [OffsetPair],
@@ -359,10 +365,13 @@ pub(super) fn x_compressed_scan(
     s_range: &mut [i32; 3],
 ) -> i32 {
     match table {
-        XCompressedLookup::Reference(table) => {
+        XBxCompressedLookup::Reference(table) => {
             table.scan_subject(subject, seq_ranges, offset_pairs, array_size, s_range)
         }
-        XCompressedLookup::Flat(table) => {
+        XBxCompressedLookup::Flat(table) => {
+            table.scan_subject::<X_BLASTX>(subject, seq_ranges, offset_pairs, array_size, s_range)
+        }
+        XBxCompressedLookup::Wide(table) => {
             table.scan_subject::<X_BLASTX>(subject, seq_ranges, offset_pairs, array_size, s_range)
         }
     }
@@ -509,8 +518,9 @@ impl Lookup {
     pub fn capacity(&self) -> usize {
         4096 + match self {
             Self::Standard(l, _) => l.longest_chain as usize,
-            Self::Compressed(XCompressedLookup::Reference(l)) => l.longest_chain as usize,
-            Self::Compressed(XCompressedLookup::Flat(l)) => l.longest_chain as usize,
+            Self::Compressed(XBxCompressedLookup::Reference(l)) => l.longest_chain as usize,
+            Self::Compressed(XBxCompressedLookup::Flat(l)) => l.longest_chain as usize,
+            Self::Compressed(XBxCompressedLookup::Wide(l)) => l.longest_chain as usize,
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-505

@@ -177,9 +177,22 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 
 ## 5. 見た目
 
-- 節：検索画面の枠は NCBI と同じく、薄い灰色の面に見出しのつまみ（legend）を載せる。見出しは LOSAT の青（`--accent`）の太字。
-- 「Algorithm parameters」は幅いっぱいの帯のボタン（`+` / `−` の印、`aria-expanded`）。
-- 結果のタブは帯のボタンで、選んだタブを LOSAT の青で塗り白の字。タブの下に薄い色の道具の行。
-- 表：0.875em、見出しは薄い青の面に太字（2 行まで折り返し、数の見出しは右寄せ）、行の境に細い線。リンクは青の下線。
-- 色は LOSAT の配色のまま（ブランドを写さない）。Graphic Summary の凡例とドットプロットの線の色だけは上の約束。
-- S13 の基準を保つ：1280 px で表が切れない、390 px で横に流れない、触れる対象は 24 px 以上、コントラスト、キーボード操作（W4 の判断 16〜23）。
+保守者の指示（2026-11-02）「色とかボタンを gbdraw の GUI っぽく」「フォントも Inter で」。配置・節の順・言葉は NCBI のまま（§1〜§4）、色・字・部品の形は gbdraw の Web GUI（`gbdraw/web/index.html` の `--ui-*` と `css/tailwind.input.css` の `.btn` `.card` `.form-input`）に合わせる（`web/app/src/ui/styles.css` の `:root`）。
+
+| 要素 | gbdraw | LOSAT Web |
+|---|---|---|
+| 字 | Inter（同梱の woff2、Noto Sans JP が後ろ） | 同じ。`web/app/public/fonts/inter/`（latin・latin-ext の 400〜700、SIL OFL 1.1、`LICENSE.txt`）。CSP は `self` だけなので外部の font は読まない |
+| 地と文字 | ページ `#eef2f6`、カード `#fff`、文字 `#1e293b` / `#334155`、薄い文字 `#64748b`、線 `#e2e8f0` / `#cbd5e1` | 同じ値（`--page` `--bg` `--fg` `--fg-2` `--muted` `--border` `--border-strong`） |
+| アクセント | 青 `#2563eb`、hover `#1d4ed8`、薄い青 `#eff6ff` | 同じ（`--accent` `--accent-hover` `--accent-bg`） |
+| カード | 角 12 px、1 px の線、薄い影 | NCBI の各ブロック（Enter Query Sequence …）、Run LOSAT の行、Algorithm parameters、Results がカード。Algorithm parameters の中の節は薄い灰色の平らな組で、見出しは gbdraw の group heading（小さい大文字） |
+| ボタン | `.btn-secondary`：白、線、角 8 px、太字、影。`.btn-primary`：青地に白 | 既定のボタンが secondary、`Run LOSAT` と `Filter` が primary |
+| 切り替え | mode switch：灰色の丸い枠の中で、選んだものが白くなり青い字 | Search / Results、program のタブ、結果の Hits / Dot Plot / Run details / Outputs |
+| 入力欄 | `.form-input`：角 8 px、薄い灰色の地、focus で青い枠 | 同じ |
+| 通知 | info は青、warning は琥珀 | `.notice` が青、`.warning` `.banner` と ♦ の注が琥珀 |
+
+アイコンは gbdraw の Phosphor を取り込まず、LOSAT の少数のインラインの SVG のまま。
+
+2026-11-02 までの見た目（W4b）：薄い灰色の面に青い見出しのつまみ、幅いっぱいの青い帯の「Algorithm parameters」、青く塗った結果のタブ、薄い青の表の見出し。gbdraw の見た目に置き換えた。
+
+変わらない基準（S13、W4 の判断 16〜23）：1280 px で表が切れない、390 px で横に流れない、触れる対象は 24 px 以上、コントラスト、キーボード操作。Graphic Summary の凡例とドットプロットの線の色は §2 の約束のまま。
+

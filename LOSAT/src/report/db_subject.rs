@@ -127,7 +127,9 @@ impl ParsedSubject {
     // NCBI's formatters find the subject's sequence again from its Seq-align id. For a gibbsq
     // id, a `general` id of the database `PIG`, a named-annotation-track id and a `general`
     // id `BL_ORD_ID` that makeblastdb stored as written, the lookup finds no sequence or
-    // another one: NCBI 2.17.0 stops with a CCoreException in outfmt 6 (exit status 255) and
+    // another one (a `BL_ORD_ID` of the sequence's own number in its volume beside another id
+    // is found, so its refusal is wider than NCBI's failure; probe of line DBID N2a,
+    // `blastdb-ids-20261021/R/ordid/p1/both.*`): NCBI 2.17.0 stops with a CCoreException in outfmt 6 (exit status 255) and
     // writes the title `Unknown`, or another sequence's, in outfmt 0 and 5 (probe of line
     // DBID, DECISIONS 8 (3); `LOSAT/tests/seqid/fasta/variants.fa`). In a version 5 database
     // (LMDB) a local integer id (`lcl|123`) is not found either (the same failures; probe of

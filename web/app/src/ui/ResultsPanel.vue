@@ -151,7 +151,7 @@ async function toAlignments(id: HspId): Promise<void> {
             </button>
           </dd>
           <template v-if="selected">
-            <dt>Program</dt>
+            <dt>Mode</dt>
             <dd class="results-program">
               <span data-testid="results-program">{{ programText }}</span>
               <VerificationBadge v-if="loaded" :badge="loaded.badge" compact @details="view = 'details'" />
@@ -234,12 +234,16 @@ async function toAlignments(id: HspId): Promise<void> {
             </section>
           </template>
         </div>
-        <div v-if="view === 'dotplot' && state.hsps.length > 0" class="hits-view" data-testid="results-dotplot">
+        <div v-if="view === 'dotplot' && state.hsps.length > 0" class="hits-view results-group" data-testid="results-dotplot">
           <DotPlot :results="results" :state="state" @show-alignment="toAlignments" />
           <HspTable :results="results" :state="state" />
         </div>
-        <RunDetails v-if="view === 'details'" :run="loaded.run" :loaded="loaded" />
-        <OutputsView v-if="view === 'outputs'" :coordinator="coordinator" :run="loaded.run" />
+        <div v-if="view === 'details'" class="results-group">
+          <RunDetails :run="loaded.run" :loaded="loaded" />
+        </div>
+        <div v-if="view === 'outputs'" class="results-group">
+          <OutputsView :coordinator="coordinator" :run="loaded.run" />
+        </div>
       </template>
     </template>
   </section>

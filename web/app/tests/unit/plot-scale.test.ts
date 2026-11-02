@@ -143,7 +143,7 @@ describe('identityClass', () => {
 describe('scoreBin', () => {
   it('uses NCBI\'s half-open bins and colours', () => {
     expect([0, 39.99, 40, 49.9, 50, 79.9, 80, 199.9, 200, 1e6].map(scoreBin)).toEqual([0, 0, 1, 1, 2, 2, 3, 3, 4, 4]);
-    expect(SCORE_BINS.map((bin) => bin.color)).toEqual(['#000000', '#0020e9', '#75ea4c', '#db3de9', '#db3324']);
+    expect(SCORE_BINS.map((bin) => bin.color)).toEqual(['#000000', '#0072b2', '#009e73', '#cc79a7', '#d55e00']);
     expect(SCORE_BINS.map((bin) => bin.label)).toEqual(['< 40', '40 - 50', '50 - 80', '80 - 200', '>= 200']);
     expect(scoreBin(Number.NaN)).toBe(0);
   });

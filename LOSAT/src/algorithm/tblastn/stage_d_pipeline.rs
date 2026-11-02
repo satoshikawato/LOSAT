@@ -335,7 +335,8 @@ pub(super) fn run_local_for_report(
 // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //        != BLAST_SEQSRC_EOF) {
 //    Int4 stat_length;
-// The pool owns one search; ordered subject results enter the same Stage D stream.
+// The pool owns one search (or is the run's, `with_run_pool`); ordered subject results enter
+// the same Stage D stream.
 pub(super) fn run_local_for_report_threads(
     queries: &[Vec<u8>],
     subjects: SubjectLetters<'_>,
@@ -832,10 +833,11 @@ pub(super) fn x_search_batches<'p>(
         return Ok(None);
     };
     // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): each of the last batches on a pool of its own with its
-    // share of the threads, all at the same time, once the shared pool has ended (a pool cannot
-    // be started from a worker of another, `with_search_pool`). Each batch is the same search
-    // as on the shared pool, whose report does not depend on the number of threads; the reports
-    // are taken in batch order, and the first failing batch in that order gives the error.
+    // share of the threads, all at the same time, once the search on the shared pool has ended
+    // (a pool cannot be started from a worker of another, `with_search_pool`). Each batch is the
+    // same search as on the shared pool, whose report does not depend on the number of threads;
+    // the reports are taken in batch order, and the first failing batch in that order gives the
+    // error.
     #[cfg(feature = "parallel")]
     if !x_own_pools.is_empty() {
         let side = x_subject_side.as_ref();
@@ -2899,6 +2901,12 @@ fn run_preliminary_subjects_into(
     if super::x_oid_flow::x_flow_help().is_some() {
         crate::utils::xreach::x_reach!("LOSAT_X_TBNFLOWHELP", x_chunk_bases.is_some());
     }
+    // LOSAT_X_TBNLOOPFREE: the threads of the flow free the buffers they kept between subjects when
+    // their loops end; no flow, nothing freed here.
+    #[cfg(feature = "parallel")]
+    if super::x_oid_flow::x_loop_free_on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBNLOOPFREE", x_chunk_bases.is_some());
+    }
     #[cfg(feature = "parallel")]
     let x_flow = x_chunk_bases.map(|bases| {
         super::x_oid_flow::XOidFlow::new(
@@ -2983,13 +2991,16 @@ fn run_preliminary_subjects_into(
     #[cfg(feature = "parallel")]
     match (x_flow.as_ref(), pool) {
         (Some(flow), Some(pool)) => pool.install(|| {
-            rayon::scope(|scope| {
+            let reduced = rayon::scope(|scope| {
                 for _ in 1..pool.threads() {
                     scope.spawn(|_| flow.work(&x_flow_search));
                 }
                 let _close = super::x_oid_flow::XCloseOnDrop(flow);
                 reduce_subjects()
-            })
+            });
+            // LOSAT_X_TBNLOOPFREE: the owner's loop has ended too.
+            super::x_oid_flow::x_loop_free();
+            reduced
         })?,
         _ => reduce_subjects()?,
     }

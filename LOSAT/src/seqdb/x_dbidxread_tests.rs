@@ -375,6 +375,9 @@ fn a_header_is_read_alike_alone_and_in_a_range() {
         (ids.join("njoined"), SeqType::Nucleotide),
         (ids.join("prot_v4"), SeqType::Protein),
         (ids.join("refuse_v5"), SeqType::Protein),
+        // Line DBID N2a: a stored `gnl|BL_ORD_ID|n` of another number, in a second volume too.
+        (ids.join("pord_vx"), SeqType::Protein),
+        (ids.join("nord_v5"), SeqType::Nucleotide),
     ] {
         let db = SeqDb::open(path.to_str().unwrap(), seqtype).unwrap();
         let parsed = check_headers(&db, &path);

@@ -55,6 +55,8 @@ mod blastn_qgroup_par;
 mod blastn_query_drop;
 #[path = "../blastn_query_dust_par.rs"]
 mod blastn_query_dust_par;
+#[path = "../blastn_query_parts.rs"]
+mod blastn_query_parts;
 #[path = "../blastn_query_prep_par.rs"]
 mod blastn_query_prep_par;
 #[path = "../blastn_query_scan_par.rs"]

@@ -109,7 +109,8 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
         <summary>First lines</summary>
         <pre :data-testid="`${testid}-head`">{{ source.head }}</pre>
       </details>
-      <details class="records" :open="records.length > 1 && records.length <= 20">
+      <!-- Closed, as NCBI shows only the file (Owner, 2026-11-02): opened to leave records out. -->
+      <details class="records">
         <summary>Records</summary>
         <RecordList
           :draft="draft"

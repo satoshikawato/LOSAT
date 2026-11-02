@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { duplicateIds } from '../../src/domain/dataset';
 import { geneticCodeLabel } from '../../src/domain/genetic-codes';
@@ -5,8 +7,10 @@ import {
   describedSections,
   effectiveValue,
   fieldChoices,
+  fieldList,
   fieldRows,
   formParameters,
+  knownDefault,
   placementFlags,
   sectionShown,
   sectionsAt,
@@ -15,7 +19,15 @@ import {
   type EngineOption,
   type FormValues,
 } from '../../src/domain/parameters';
-import { PROGRAMS, programById, residueUnit, searchSummary, sequenceKind, type ParameterField } from '../../src/domain/programs';
+import {
+  PROGRAMS,
+  programById,
+  residueUnit,
+  searchSummary,
+  searchSummaryParts,
+  sequenceKind,
+  type ParameterField,
+} from '../../src/domain/programs';
 import {
   REGION_FLAG,
   regionFromPositions,
@@ -82,11 +94,11 @@ describe('formParameters', () => {
   });
 
   it('follows the order of the descriptor, not of the values or the options', () => {
-    const values: FormValues = { '-lcase_masking': true, '-word_size': '11', '-evalue': '1', '-task': 'blastn' };
+    const values: FormValues = { '-lcase_masking': true, '-word_size': '15', '-evalue': '1', '-task': 'blastn' };
     expect(formParameters(blastn, values, options)).toEqual([
       ['-task', 'blastn'],
       ['-evalue', '1'],
-      ['-word_size', '11'],
+      ['-word_size', '15'],
       ['-lcase_masking', true],
     ]);
   });
@@ -260,6 +272,93 @@ describe('writtenValue', () => {
   });
 });
 
+describe('knownDefault: the defaults that the engine resolves by task and from other options', () => {
+  const blastn = programById('blastn');
+  const blastp = programById('blastp');
+  const tblastx = programById('tblastx');
+  const task = [valueOption('-task', 'megablast')];
+
+  it('follows the task the search uses, set or the engine default', () => {
+    expect(knownDefault(blastn, '-word_size', {}, task)).toEqual({ defaultValue: '28' });
+    expect(knownDefault(blastn, '-word_size', { '-task': 'blastn' }, task)).toEqual({ defaultValue: '11' });
+    expect(knownDefault(blastn, '-evalue', { '-task': 'blastn-short' }, task)).toEqual({ defaultValue: '1000' });
+    expect(knownDefault(blastn, '-dust', { '-task': 'blastn-short' }, task)).toEqual({ defaultValue: 'no' });
+    // The task is unknown before `describe` comes: so is a default by task.
+    expect(knownDefault(blastn, '-word_size', {}, undefined)).toBeUndefined();
+  });
+
+  it("holds a matrix's value only while the matrix is the default", () => {
+    expect(knownDefault(blastp, '-gapopen', {}, undefined)).toEqual({ defaultValue: '11' });
+    expect(knownDefault(blastp, '-gapopen', { '-matrix': 'BLOSUM62' }, undefined)).toEqual({ defaultValue: '11' });
+    expect(knownDefault(blastp, '-gapopen', { '-matrix': 'PAM30' }, undefined)).toBeUndefined();
+    expect(knownDefault(blastp, '-threshold', { '-task': 'blastp-fast' }, undefined)).toEqual({ defaultValue: '20' });
+    expect(knownDefault(blastp, '-threshold', { '-word_size': '6' }, [valueOption('-task', 'blastp')])).toBeUndefined();
+    expect(knownDefault(tblastx, '-window_size', { '-matrix': 'PAM70' }, undefined)).toBeUndefined();
+  });
+
+  it('marks the hit list options given, and shows no default for one while another is set', () => {
+    expect(knownDefault(tblastx, '-max_target_seqs', {}, undefined)).toEqual({ defaultValue: '500', given: true });
+    expect(knownDefault(tblastx, '-max_target_seqs', { '-num_alignments': '3' }, undefined)).toEqual({ given: true });
+    expect(knownDefault(tblastx, '-num_alignments', { '-max_target_seqs': '500' }, undefined)).toEqual({ given: true });
+    expect(knownDefault(tblastx, '-num_descriptions', {}, undefined)).toEqual({ defaultValue: '500', given: true });
+  });
+
+  it("is the engine's default where the program resolves none", () => {
+    expect(knownDefault(tblastx, '-evalue', {}, [valueOption('-evalue', '10')])).toEqual({ defaultValue: '10' });
+    expect(knownDefault(tblastx, '-evalue', {}, undefined)).toBeUndefined();
+  });
+
+  it('omits a value equal to a resolved default from the argv, and writes a given option at its default', () => {
+    const described = [...task, ...['-word_size', '-reward', '-gapopen'].map((flag) => valueOption(flag))];
+    expect(formParameters(blastn, { '-task': 'blastn', '-word_size': '11', '-reward': '2', '-gapopen': '5' }, described)).toEqual([
+      ['-task', 'blastn'],
+    ]);
+    expect(formParameters(blastn, { '-word_size': '11' }, described)).toEqual([['-word_size', '11']]);
+    expect(formParameters(blastp, { '-matrix': 'PAM30', '-gapopen': '11', '-gapextend': '1' }, undefined)).toEqual([
+      ['-matrix', 'PAM30'],
+      ['-gapopen', '11'],
+      ['-gapextend', '1'],
+    ]);
+    expect(formParameters(tblastx, { '-max_target_seqs': '500', '-soft_masking': 'false' }, undefined)).toEqual([['-max_target_seqs', '500']]);
+  });
+
+  // The table is a copy of the CLI's help (programs.ts `ResolvedDefault`): each value must be one
+  // that the help of the option names, in describe.json, the reactor's describe.
+  const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<
+    string,
+    { parameters: { flag: string; help: string; default?: string }[] }
+  >;
+  it.each(PROGRAMS.filter((p) => p.defaults !== undefined).map((p) => [p.id, p] as const))(
+    "%s: every resolved default is a value that the engine's help of the option names",
+    (id, program) => {
+      for (const [flag, resolved] of Object.entries(program.defaults!)) {
+        const option = described[id]!.parameters.find((p) => p.flag === flag);
+        expect(option, `${id} ${flag}`).toBeDefined();
+        const text = `${option!.help} ${option!.default ?? ''}`;
+        expect(text, `${id} ${flag}`).toMatch(/default/i);
+        const values = typeof resolved.value === 'string' ? [resolved.value] : Object.values(resolved.value);
+        for (const value of values) {
+          const word = new RegExp(`(^|[^\\w.-])${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\w.])`);
+          expect(text, `${id} ${flag} ${value}`).toMatch(word);
+        }
+      }
+    },
+  );
+});
+
+describe('fieldList', () => {
+  const blastn = programById('blastn');
+  const wordSize = blastn.sections.flatMap((section) => section.fields).find((field) => field.flag === '-word_size')!;
+  const task = [valueOption('-task', 'megablast')];
+
+  it("gives NCBI's list of the task the search uses", () => {
+    expect(fieldList(wordSize, {}, task)).toEqual(['16', '20', '24', '28', '32', '48', '64']);
+    expect(fieldList(wordSize, { '-task': 'blastn' }, task)).toEqual(['7', '11', '15']);
+    expect(fieldList(wordSize, {}, undefined)).toEqual([]);
+    expect(fieldList({ flag: '-x', label: 'X', kind: 'text' }, {}, task)).toEqual([]);
+  });
+});
+
 describe('effectiveValue', () => {
   const options = [valueOption('-task', 'megablast')];
 
@@ -342,6 +441,13 @@ describe('searchSummary', () => {
     expect(searchSummary(programById('tblastx'), undefined)).toBe(
       'Search translated nucleotide subjects with TBLASTX (translated nucleotide query).',
     );
+  });
+
+  it('sets off what is searched and the program with its task', () => {
+    expect(searchSummaryParts(programById('blastn'), 'megablast').filter((part) => part.strong).map((part) => part.text)).toEqual([
+      'nucleotide subjects',
+      'BLASTN, task megablast (optimized for highly similar sequences)',
+    ]);
   });
 
   it('names a task without a note, and leaves the task out while it is unknown', () => {
@@ -518,7 +624,7 @@ describe('program descriptors', () => {
     const titles = program.sections.filter((s) => s.placement === 'algorithm').map((s) => s.title);
     expect(titles.map((title) => order.indexOf(title))).toEqual([...titles.map((title) => order.indexOf(title))].sort((a, b) => a - b));
     expect(titles.every((title) => order.includes(title))).toBe(true);
-    // The task is chosen with radio buttons in Program Selection, before every other option.
+    // The task is chosen with radio buttons in Task Selection, before every other option.
     const task = program.sections.flatMap((s) => s.fields).find((f) => f.flag === '-task');
     if (task !== undefined) {
       expect(task.kind).toBe('radio');

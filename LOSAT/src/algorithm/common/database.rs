@@ -2465,6 +2465,59 @@ mod taxdb_prepass_tests {
     }
 
     #[test]
+    fn a_stored_ordinal_id_of_another_number_is_not_fetched() {
+        // tests/db_search/ids/make_ids.py (line DBID N2a): sequences whose only Seq-id is
+        // `gnl|BL_ORD_ID|n`. With n the sequence's number in its volume it reads as a sequence
+        // without parsed Seq-ids (in `pord_vx`, sequence 6 is the second of `pord_x`); another n is
+        // a parsed Seq-id, n plus the first ordinal id of the volume, by which NCBI's formatters
+        // find no sequence or another one.
+        let cwd = empty_cwd("stored_ordinal_id");
+        // `Ok(true)`: read as a sequence without parsed Seq-ids; `Ok(false)`: a parsed subject
+        // that the reports fetch; `Err(id)`: refused, with its Seq-align id.
+        for (name, ordinal, want) in [
+            ("ids/pord_v5", 0, Ok(false)),
+            ("ids/pord_v5", 2, Ok(true)),
+            ("ids/pord_v5", 3, Err("gnl|BL_ORD_ID|6")),
+            ("ids/pord_v5", 4, Err("gnl|BL_ORD_ID|1")),
+            ("ids/pord_v4", 2, Ok(true)),
+            ("ids/pord_v4", 3, Err("gnl|BL_ORD_ID|6")),
+            ("ids/pord_vx", 3, Err("gnl|BL_ORD_ID|6")),
+            ("ids/pord_vx", 5, Ok(false)),
+            ("ids/pord_vx", 6, Ok(true)),
+            ("ids/pord_vx", 7, Err("gnl|BL_ORD_ID|12")),
+        ] {
+            let db = db_search(name, None, &cwd);
+            let headers = HeaderReader::new(&db);
+            match (read_header(&headers, ordinal, 0, "BLASTP").unwrap(), want) {
+                (ReportedHeader::Stored(_), Ok(true)) => {}
+                (ReportedHeader::Parsed(subject), Ok(false)) => {
+                    assert!(subject.fetched().is_ok(), "{name} {ordinal}")
+                }
+                (ReportedHeader::Parsed(subject), Err(id)) => {
+                    let error = subject.fetched().unwrap_err();
+                    assert!(
+                        error.contains(&format!("the Seq-align id {id},")),
+                        "{name} {ordinal}: {error}"
+                    );
+                }
+                (got, want) => panic!("{name} {ordinal}: {got:?}, want {want:?}"),
+            }
+        }
+        // The first sequence of `nord_v5` holds `gnl|BL_ORD_ID|3`: the database has parsed Seq-ids.
+        let search = SearchPath::new(&cwd, None, None).unwrap();
+        for name in ["nord_v5", "nord_v4"] {
+            let path = root().join("db_search/ids").join(name);
+            let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+            assert!(db.has_parsed_seqids().unwrap(), "{name}");
+            assert!(matches!(
+                db.read_header(1).unwrap(),
+                crate::seqdb::SequenceHeader::Ordinal(_)
+            ));
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    #[test]
     fn names_that_can_be_written_do_not_hold() {
         for name in ["sprot_tax", "sprot_mixtax"] {
             let db = database(name, Some(&variant("good")));

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The search screen in the order of NCBI BLAST's two-sequence page (docs/web/ncbi_ui_mapping.md
-// §1): the program tabs and sentence, "Enter Query Sequence", "Enter Subject Sequence",
-// "Program Selection", the "Run LOSAT" button (NCBI's BLAST button) with the line that says
+// §1): the mode tabs and sentence, "Enter Query Sequence", "Enter Subject Sequence",
+// "Task Selection" (NCBI's "Program Selection"), the "Run LOSAT" button (NCBI's BLAST button) with the line that says
 // what it searches, and "Algorithm parameters", which opens and closes, with a second button
 // below it. LOSAT's own controls (threads, keep the screen on) are under the first button, with
 // the engine's refusal of the options when there is one. "Run LOSAT" starts the search and the
@@ -11,7 +11,7 @@ import { computed, ref, watch } from 'vue';
 import type { Attention, AttentionState } from '../application/attention';
 import type { SearchDraft } from '../application/draft';
 import { effectiveValue, formParameters, placementFlags, sectionsAt } from '../domain/parameters';
-import { PROGRAMS, programById, searchSummary, type InputRole } from '../domain/programs';
+import { PROGRAMS, programById, searchSummaryParts, type InputRole } from '../domain/programs';
 import { useStore } from './useStore';
 import InputPanel from './InputPanel.vue';
 import ParameterField from './ParameterField.vue';
@@ -54,7 +54,7 @@ const describeState = computed(() => {
   return state.value.descriptionError === undefined ? 'loading' : 'failed';
 });
 const taskFields = computed(() => sectionsAt(program.value, options.value, 'program').flatMap((section) => section.fields));
-const summaryLine = computed(() => searchSummary(program.value, effectiveValue('-task', values.value, options.value)));
+const summaryParts = computed(() => searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value)));
 /** The Algorithm parameters that the argv writes: each differs from the engine's default. */
 const changed = computed(() => formParameters(program.value, values.value, options.value, 'algorithm').length);
 /**
@@ -94,7 +94,7 @@ function onThreads(event: Event): void {
   <div class="search-panel" data-testid="search-panel" :data-describe="describeState">
     <h2 class="visually-hidden">Search</h2>
     <fieldset class="program-tabs" data-testid="program-tabs">
-      <legend class="visually-hidden">Program</legend>
+      <legend class="visually-hidden">Mode</legend>
       <label
         v-for="p in PROGRAMS"
         :key="p.id"
@@ -118,7 +118,7 @@ function onThreads(event: Event): void {
     <InputPanel v-for="role in roles" :key="role" :draft="draft" :state="state" :role="role" />
 
     <fieldset v-if="taskFields.length > 0" class="search-block" data-testid="program-selection">
-      <legend>Program Selection</legend>
+      <legend>Task Selection</legend>
       <ParameterField v-for="field in taskFields" :key="field.flag" :draft="draft" :state="state" :field="field" />
     </fieldset>
 
@@ -131,7 +131,9 @@ function onThreads(event: Event): void {
       >
         {{ buttonLabel }}
       </button>
-      <p v-if="!program.unavailable" class="search-summary-line" data-testid="search-summary-line">{{ summaryLine }}</p>
+      <p v-if="!program.unavailable" class="search-summary-line" data-testid="search-summary-line">
+        <template v-for="(part, index) in summaryParts" :key="index"><strong v-if="part.strong">{{ part.text }}</strong><template v-else>{{ part.text }}</template></template>
+      </p>
     </div>
 
     <div class="blast-notes">
@@ -198,7 +200,9 @@ function onThreads(event: Event): void {
           >
             {{ buttonLabel }}
           </button>
-          <p class="search-summary-line">{{ summaryLine }}</p>
+          <p class="search-summary-line">
+            <template v-for="(part, index) in summaryParts" :key="index"><strong v-if="part.strong">{{ part.text }}</strong><template v-else>{{ part.text }}</template></template>
+          </p>
         </div>
         <p v-if="state.message && messageBelow" role="status" class="error" data-testid="search-message">
           {{ state.message.text }}

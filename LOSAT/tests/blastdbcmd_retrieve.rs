@@ -406,6 +406,12 @@ const MATCHES: &[(&str, &[&str], i32)] = &[
 fn retrieval_is_ncbi_s_bytes() {
     let dir = TestDir::new("retrieve");
     for &(id, words, status) in MATCHES {
+        // D65's batch file ends its lines with `\r\n`, which NCBI reads apart on Linux alone
+        // (`NcbiGetlineEOL`; the bytes of Windows and macOS: probe O27,
+        // `blastdbcmd_batch_line_ends.rs`).
+        if id == "D65" && (cfg!(windows) || cfg!(target_os = "macos")) {
+            continue;
+        }
         check(id, words, status, &dir.0);
     }
 }

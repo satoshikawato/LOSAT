@@ -345,10 +345,7 @@ fn get_range<'a>(
         // The intervals come from a per-thread memo of the last subject's SEG (byte-equal input,
         // the same masker call on a miss; x_seg_memo.rs).
         let intervals = super::x_seg_memo::x_subject_seg(subject.data(), |data| {
-            // BLASTX keeps LOSAT's former SEG until SX (plan DW-10).
-            SegMasker::with_params(&SegParams::new(10, 1.8, 2.1))
-                .keeping_all_left_segments()
-                .mask_sequence(data)
+            SegMasker::with_params(&SegParams::new(10, 1.8, 2.1)).mask_sequence(data)
         });
         biased = !intervals.is_empty();
         for interval in intervals {

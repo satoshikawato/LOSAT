@@ -31,7 +31,7 @@ const inputs = computed(() => [
     <VerificationBadge :badge="loaded.badge" />
 
     <div class="details-grid">
-      <h3>Search (fixed when the run was queued)</h3>
+      <h3>Search (fixed when the run was submitted)</h3>
       <dl class="details-list" data-testid="run-snapshot">
         <dt>Run</dt>
         <dd>
@@ -51,7 +51,7 @@ const inputs = computed(() => [
         </template>
         <dt>Threads requested</dt>
         <dd>{{ snapshot.requestedThreads === 'auto' ? 'Auto' : snapshot.requestedThreads }}</dd>
-        <dt>Queued</dt>
+        <dt>Submitted</dt>
         <dd data-detail="queued">{{ time(snapshot.queuedAt) }}</dd>
       </dl>
 

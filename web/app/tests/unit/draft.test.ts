@@ -183,7 +183,7 @@ describe('SearchDraft submit', () => {
       name: 'combined_subject.fa',
       revisionIds: [sourceOf(draft, 'subject', 0).base!.revisionId, sourceOf(draft, 'subject', 1).base!.revisionId],
     });
-    expect(draft.state.get().message).toEqual({ kind: 'info', text: 'Added to the queue.' });
+    expect(draft.state.get().message).toEqual({ kind: 'info', text: 'Search started.' });
   });
 
   it('queues separate searches as every query input against every subject input', async () => {
@@ -198,7 +198,7 @@ describe('SearchDraft submit', () => {
     await draft.submit();
     const names = requests[0]!.map((r) => `${datasetOf(r, 'query').name}|${datasetOf(r, 'subject').name}`);
     expect(names).toEqual(['q1.fa|s1.fa', 'q1.fa|s2.fa', 'q1.fa|s3.fa', 'q2.fa|s1.fa', 'q2.fa|s2.fa', 'q2.fa|s3.fa']);
-    expect(draft.state.get().message).toEqual({ kind: 'info', text: 'Added 6 runs to the queue as a group.' });
+    expect(draft.state.get().message).toEqual({ kind: 'info', text: 'Started 6 runs as a group; they search one at a time.' });
   });
 
   it('uses the same revision for the same selection, so that a kept subject is the same input (R1)', async () => {

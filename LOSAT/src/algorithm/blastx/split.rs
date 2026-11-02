@@ -424,31 +424,11 @@ pub fn split_queries(
         } else {
             (start + size).min(length)
         };
-        let mut record = records[0].clone();
-        record.sequence = record.sequence[start..end].to_vec();
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:278-281
-        // ```c++
-        //             CRef<CSeq_loc> mask_query_loc(new CSeq_loc);
-        //             s_SetSplitQuerySeqInterval(chunk, query_range, 0, mask_query_loc);
-        //             TMaskedQueryRegions split_mask =
-        //                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
-        // ```
-        // Each run is one letter longer inside a chunk, and a run that starts on the chunk's last
-        // letter is dropped (`restrict_masks`).
-        let runs: Vec<MaskedInterval> = record
-            .lowercase_masks
-            .iter()
-            .map(|&(a, b)| MaskedInterval::new(a as usize, b as usize + 1))
-            .collect();
-        let part = ChunkQuery {
-            query: 0,
-            from: start,
-            to: end,
+        let record = if x_chunk_slice() {
+            x_chunk_record(&records[0], start, end)
+        } else {
+            x_chunk_record_from_copy(&records[0], start, end)
         };
-        record.lowercase_masks = restrict_masks(&runs, &part, 0)
-            .into_iter()
-            .map(|mask| (mask.start as i32, mask.end as i32 - 1))
-            .collect();
         let prepared = prepare_queries(&[record], options)?;
         let shift = match length % 3 {
             1 => -1,
@@ -553,6 +533,65 @@ pub fn split_queries(
         }
     }
     Ok(chunks)
+}
+
+/// EXPERIMENT (LOSAT_X_BXCHUNKSLICE): whether a chunk's record is made without a copy of the whole
+/// query. A copy for each chunk (569 of 5.3 MiB for a 5.5 Mb query, 3 GiB in all) was the largest
+/// block each thread that prepared chunks ever held in its glibc arena, which kept that much
+/// resident through the search after the block was freed.
+fn x_chunk_slice() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCHUNKSLICE"))
+}
+
+/// The lowercase masks of `whole` inside `start..end`, moved to the chunk's coordinates.
+fn x_chunk_masks(whole: &FastaRecord, start: usize, end: usize) -> Vec<(i32, i32)> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:278-281
+    // ```c++
+    //             CRef<CSeq_loc> mask_query_loc(new CSeq_loc);
+    //             s_SetSplitQuerySeqInterval(chunk, query_range, 0, mask_query_loc);
+    //             TMaskedQueryRegions split_mask =
+    //                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
+    // ```
+    // Each run is one letter longer inside a chunk, and a run that starts on the chunk's last
+    // letter is dropped (`restrict_masks`).
+    let runs: Vec<MaskedInterval> = whole
+        .lowercase_masks
+        .iter()
+        .map(|&(a, b)| MaskedInterval::new(a as usize, b as usize + 1))
+        .collect();
+    let part = ChunkQuery {
+        query: 0,
+        from: start,
+        to: end,
+    };
+    restrict_masks(&runs, &part, 0)
+        .into_iter()
+        .map(|mask| (mask.start as i32, mask.end as i32 - 1))
+        .collect()
+}
+
+// No NCBI counterpart: NCBI's chunk factory reads the chunk's range of the query it holds; here the
+// record is what `prepare_queries` takes.
+/// EXPERIMENT (LOSAT_X_BXCHUNKSLICE): the record of the chunk `start..end` of `whole`, with the
+/// chunk's letters and masks and without a copy of the others.
+fn x_chunk_record(whole: &FastaRecord, start: usize, end: usize) -> FastaRecord {
+    FastaRecord {
+        internal_id: whole.internal_id.clone(),
+        title: whole.title.clone(),
+        sequence: whole.sequence[start..end].to_vec(),
+        lowercase_masks: x_chunk_masks(whole, start, end),
+        warnings: whole.warnings.clone(),
+        source: whole.source.clone(),
+    }
+}
+
+/// `x_chunk_record` as `LOSAT_X_BXCHUNKSLICE=0` makes it: from a copy of the whole record.
+fn x_chunk_record_from_copy(whole: &FastaRecord, start: usize, end: usize) -> FastaRecord {
+    let mut record = whole.clone();
+    record.sequence = record.sequence[start..end].to_vec();
+    record.lowercase_masks = x_chunk_masks(whole, start, end);
+    record
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:477-510
@@ -915,4 +954,80 @@ pub fn merge_chunk_hsps(
     );
     sort_by_score(combined);
     combined.truncate(max_hsps);
+}
+
+#[cfg(test)]
+mod x_chunk_record_tests {
+    use super::{
+        prepare_queries, split_queries, x_chunk_record, x_chunk_record_from_copy, FastaRecord,
+    };
+    use crate::algorithm::blastx::input::InputWarning;
+    use crate::blastinput::fasta_reader::RecordSource;
+
+    /// A query of 30,000 letters of no repeat in its frames, with masks at the chunks' borders.
+    fn whole() -> FastaRecord {
+        FastaRecord {
+            internal_id: "Query_1".to_string(),
+            title: "long query".to_string(),
+            sequence: (0..30_000u32)
+                .map(|k| b"ACGT"[(k.wrapping_mul(2_654_435_761) >> 30) as usize])
+                .collect(),
+            lowercase_masks: vec![(0, 9), (100, 299), (9_990, 10_010), (29_990, 29_999)],
+            warnings: vec![InputWarning {
+                line: 3,
+                kind: "defline_id",
+                positions: vec![7],
+                text: b"a warning".to_vec(),
+            }],
+            source: Some(Box::new(RecordSource {
+                defline: b">long query".to_vec(),
+                ..RecordSource::default()
+            })),
+        }
+    }
+
+    // LOSAT_X_BXCHUNKSLICE: the record without the copy equals the one from the copy in every
+    // field, at ranges that hold, cross and miss the masks.
+    #[test]
+    fn a_chunks_record_equals_the_one_cut_from_a_copy() {
+        let whole = whole();
+        for (start, end) in [
+            (0, 10_002),
+            (9_705, 19_707),
+            (10, 100),
+            (299, 300),
+            (300, 9_000),
+            (29_000, 30_000),
+        ] {
+            let new = x_chunk_record(&whole, start, end);
+            let old = x_chunk_record_from_copy(&whole, start, end);
+            assert_eq!(format!("{new:?}"), format!("{old:?}"), "{start}..{end}");
+            assert_eq!(new.sequence.len(), end - start);
+        }
+    }
+
+    // LOSAT_X_BXCHUNKSLICE: `split_queries` does split this query, and each chunk holds what a
+    // record cut from a copy prepares, masks included.
+    #[test]
+    fn a_split_querys_chunks_are_prepared_as_from_a_copy() {
+        let whole = whole();
+        let options = super::super::stage_c_tests::options();
+        let records = std::slice::from_ref(&whole);
+        let full = prepare_queries(records, &options).unwrap();
+        let chunks = split_queries(records, &full, &options).unwrap();
+        assert!(chunks.len() > 1, "{} chunks", chunks.len());
+        for chunk in &chunks {
+            let (start, end) = (chunk.range.start, chunk.range.end);
+            let old = x_chunk_record_from_copy(&whole, start, end);
+            let old = prepare_queries(&[old], &options).unwrap();
+            let new = &chunk.prepared;
+            assert_eq!(new.original_lengths, old.original_lengths, "{start}..{end}");
+            assert_eq!(new.sequence_start, old.sequence_start, "{start}..{end}");
+            assert_eq!(
+                new.sequence_start_nomask, old.sequence_start_nomask,
+                "{start}..{end}"
+            );
+            assert_eq!(new.lookup_segments, old.lookup_segments, "{start}..{end}");
+        }
+    }
 }

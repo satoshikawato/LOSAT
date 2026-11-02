@@ -5,11 +5,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import {
+  chooseRun,
   fasta,
   openFiles,
   openParameters,
   openSearch,
   paste,
+  pickRun,
   program,
   result,
   settled,
@@ -25,19 +27,17 @@ import {
  */
 const SLOW = { program: 'blastp', query: 'NZ_CP006932.faa', subject: 'NZ_CP006932.faa' } as const;
 
-/** Where a part of a run's card is: its top below the card's top, and its right edge from the card's right edge. */
-async function placeInCard(page: Page, number: number, part: string): Promise<{ top: number; right: number }> {
-  const card = (await page.getByTestId(`run-${number}`).boundingBox())!;
-  const box = (await page.getByTestId(`run-${number}-${part}`).boundingBox())!;
-  return { top: Math.round(box.y - card.y), right: Math.round(card.x + card.width - box.x - box.width) };
-}
-
 async function startSlowSearch(page: Page): Promise<void> {
   await program(page, SLOW.program);
   await openFiles(page, 'query', [{ name: SLOW.query, text: fasta(SLOW.query) }]);
   await openFiles(page, 'subject', [{ name: SLOW.subject, text: fasta(SLOW.subject) }]);
   await submit(page);
-  await expect(page.getByTestId('run-1-status')).toHaveText('running', { timeout: 60_000 });
+  await expect(page.getByTestId('run-1-option')).toHaveAttribute('data-status', 'running', { timeout: 60_000 });
+}
+
+/** Back to the search form (it stays mounted with its edits) after "Run LOSAT" went to the results. */
+async function backToSearch(page: Page): Promise<void> {
+  await page.getByTestId('tab-search').click();
 }
 
 // Engine searches are slower in Firefox and WebKit than in Chromium (W1 README).
@@ -90,12 +90,12 @@ test('records: duplicate IDs by number, the engine refuses a record, exclusion, 
   await expect(check).toHaveAttribute('data-check', 'refused');
   await expect(check).toContainText(BUILD_HAS_ENGINE ? 'not supported by LOSAT Web' : 'query record 3 (bad)');
   if (!BUILD_HAS_ENGINE) await expect(check).toContainText('FAKE ENGINE check');
-  // The refused input cannot be queued.
+  // The refused input cannot be started.
   await submit(page);
   await expect(page.getByTestId('search-message')).toContainText(
     BUILD_HAS_ENGINE ? 'Query (pasted): ' : 'Query (pasted): query record 3 (bad)',
   );
-  await expect(page.getByTestId('run-1')).toHaveCount(0);
+  await expect(page.getByTestId('run-1-option')).toHaveCount(0);
 
   if (BUILD_HAS_ENGINE) {
     await expect(page.getByTestId('query-source-0-exclude-refused')).toHaveCount(0);
@@ -110,6 +110,7 @@ test('records: duplicate IDs by number, the engine refuses a record, exclusion, 
   await waitStatus(page, 1, 'completed');
 
   // Leave out the first "dup" (by its number) and search again.
+  await backToSearch(page);
   await showRecords(page, 'query');
   await page.getByTestId('query-source-0-record-0').uncheck();
   await expect(check).toHaveAttribute('data-check', 'ok');
@@ -131,19 +132,19 @@ test('the same subject, another query: the engine keeps the subject (R1)', async
   await paste(page, 'query', '>qa\nACGTACGTACGTAAACCCGGGTTT\n');
   await submit(page);
   await waitStatus(page, 1, 'completed');
+  await backToSearch(page);
   await paste(page, 'query', '>qb\nACGTACGTACGTAAACCCGGGTTA\n');
   await submit(page);
   await waitStatus(page, 2, 'completed');
   if (BUILD_HAS_ENGINE) {
-    await page.getByTestId('run-2').locator('summary', { hasText: 'Details' }).click();
-    await expect(page.getByTestId('run-2-details').locator('[data-detail="subject-retained"]')).toHaveText(
-      'kept from the previous search',
-    );
+    await chooseRun(page, 2);
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-record')).toContainText('kept from the previous search');
     expect((await result(page, 2, 7)).output).toContain('# Query: qb');
   }
 });
 
-test('several runs in the queue; the next job is edited while one runs; separate searches as a group', async ({ page }) => {
+test('several runs; the next search is edited while one runs; separate searches as a group', async ({ page }) => {
   if (BUILD_HAS_ENGINE) {
     await startSlowSearch(page);
   } else {
@@ -151,10 +152,11 @@ test('several runs in the queue; the next job is edited while one runs; separate
     await openFiles(page, 'query', [{ name: 'q1.fa', text: '>q1\nMKLVVLAAGGHHKL\n' }]);
     await openFiles(page, 'subject', [{ name: 's1.fa', text: '>s1\nMKLVVLAAGGHHKL\n' }]);
     await submit(page);
-    await expect(page.getByTestId('run-1')).toBeVisible();
+    await expect(page.getByTestId('run-1-option')).toHaveCount(1);
   }
 
-  // Edit the next job while run 1 runs: another program, query and option, two subjects searched separately.
+  // Edit the next search while run 1 runs: another program, query and option, two subjects searched separately.
+  await backToSearch(page);
   await program(page, 'tblastx');
   await page.getByTestId('query-source-0-remove').click();
   await paste(page, 'query', '>next\nACGTACGTACGTACGTAC\n');
@@ -166,74 +168,71 @@ test('several runs in the queue; the next job is edited while one runs; separate
     { name: 'b.fa', text: '>b\nTTTACGTACGTACGTACGTACGT\n' },
   ]);
   await page.getByTestId('subject-mode-separate').check();
-  await expect(page.getByTestId('add-to-queue')).toHaveText(/^Run LOSAT \(2 runs(, add to queue)?\)$/);
-  // While run 1 runs, the button says that the next runs wait in the queue.
-  if (BUILD_HAS_ENGINE) await expect(page.getByTestId('add-to-queue')).toHaveText('Run LOSAT (2 runs, add to queue)');
-  await expect(page.getByTestId('add-to-queue-bottom')).toHaveText(/^Run LOSAT \(2 runs(, add to queue)?\)$/);
+  await expect(page.getByTestId('run-losat')).toHaveText('Run LOSAT (2 runs)');
+  await expect(page.getByTestId('run-losat-bottom')).toHaveText('Run LOSAT (2 runs)');
   await submit(page);
-  await expect(page.getByTestId('run-3')).toBeVisible();
-  await expect(page.getByTestId('run-2')).toContainText('query.fa vs a.fa · group run 1 of 2');
-  await expect(page.getByTestId('run-3')).toContainText('query.fa vs b.fa · group run 2 of 2');
-  await expect(page.getByTestId('run-3-options')).toHaveText('Options: -evalue 1e-3');
+  // The page goes to the results of the first run of the group.
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('run-3-option')).toHaveCount(1);
+  await expect(page.getByTestId('run-2-option')).toContainText('query.fa vs a.fa');
+  await expect(page.getByTestId('run-3-option')).toContainText('query.fa vs b.fa');
+  await expect(page.getByTestId('results-run-options')).toContainText('group run 1 of 2');
+  await pickRun(page, 3);
+  await expect(page.getByTestId('results-run-options')).toContainText('-evalue 1e-3');
+  await expect(page.getByTestId('results-run-options')).toContainText('group run 2 of 2');
   // Run 1 kept its own program, inputs and options.
-  await expect(page.getByTestId('run-1')).toContainText('BLASTP');
-  await expect(page.getByTestId('run-1-options')).toHaveText('Options: defaults');
+  await expect(page.getByTestId('run-1-option')).toContainText('BLASTP');
+  await pickRun(page, 1);
+  await expect(page.getByTestId('results-run-options')).toHaveText('defaults');
 
   if (BUILD_HAS_ENGINE) {
-    await expect(page.getByTestId('run-1')).toContainText(`${SLOW.query} vs ${SLOW.subject}`);
+    await expect(page.getByTestId('run-1-option')).toContainText(`${SLOW.query} vs ${SLOW.subject}`);
     // The group waits behind run 1; cancelling the group leaves run 1 running.
-    await expect(page.getByTestId('run-2-status')).toHaveText('queued');
-    // One card layout (W4b screen review L7): the phase line and Cancel are at the same place in
-    // the running card and in the waiting one.
-    await expect(page.getByTestId('run-2-phase')).toHaveText('Waiting');
-    expect(await placeInCard(page, 2, 'progress')).toEqual(await placeInCard(page, 1, 'progress'));
-    expect(await placeInCard(page, 2, 'cancel')).toEqual(await placeInCard(page, 1, 'cancel'));
-    await page.getByTestId('run-2-cancel-group').click();
-    await expect(page.getByTestId('run-2-status')).toHaveText('cancelled');
-    await expect(page.getByTestId('run-3-status')).toHaveText('cancelled');
-    await expect(page.getByTestId('run-1-status')).toHaveText('running');
-    await expect(page.getByTestId('run-1-phase')).toHaveText('Searching');
-    await expect(page.getByTestId('run-1-elapsed')).toHaveText(/^\d+:\d\d$/);
+    await pickRun(page, 2);
+    await expect(page.getByTestId('run-2-option')).toHaveAttribute('data-status', 'queued');
+    await expect(page.getByTestId('run-status')).toHaveAttribute('data-status', 'queued');
+    await expect(page.getByTestId('run-status')).toHaveAttribute('data-run', '2');
+    await expect(page.getByTestId('run-status-phase')).toHaveText('Waiting');
+    await expect(page.getByTestId('run-status-ahead')).toContainText('Run 1 is searching');
+    await page.getByTestId('run-status-cancel-group').click();
+    await expect(page.getByTestId('run-2-option')).toHaveAttribute('data-status', 'cancelled');
+    await expect(page.getByTestId('run-3-option')).toHaveAttribute('data-status', 'cancelled');
+    await expect(page.getByTestId('run-1-option')).toHaveAttribute('data-status', 'running');
+    await pickRun(page, 1);
+    await expect(page.getByTestId('run-status-phase')).toHaveText('Searching');
+    await expect(page.getByTestId('run-status-elapsed')).toHaveText(/^\d+:\d\d$/);
+    await backToSearch(page);
     await submit(page); // the same group again, behind run 1
-    await expect(page.getByTestId('run-5-status')).toHaveText('queued');
-    await page.getByTestId('run-1-cancel').click();
+    await expect(page.getByTestId('run-5-option')).toHaveAttribute('data-status', 'queued');
+    await pickRun(page, 1);
+    await page.getByTestId('run-status-cancel').click();
     await waitStatus(page, 1, 'cancelled');
     await waitStatus(page, 4, 'completed');
     await waitStatus(page, 5, 'completed');
   } else {
-    await expect(page.getByTestId('run-1')).toContainText('q1.fa vs s1.fa');
+    await expect(page.getByTestId('run-1-option')).toContainText('q1.fa vs s1.fa');
     await waitStatus(page, 1, 'completed');
     await waitStatus(page, 2, 'completed');
     await waitStatus(page, 3, 'completed');
   }
   const last = await result(page, BUILD_HAS_ENGINE ? 5 : 3, 6);
   expect(last.command).toBe('losat tblastx -query query.fa -subject b.fa -evalue 1e-3 -outfmt 6');
-  // A finished card has the same lines: the run and its status, the time it took, "Open results"
-  // at the right, then what it searched.
-  const number = BUILD_HAS_ENGINE ? 5 : 3;
-  await expect(page.getByTestId(`run-${number}-phase`)).toHaveText('Took');
-  const box = async (part: string) => (await page.getByTestId(`run-${number}-${part}`).boundingBox())!;
-  const [head, progress, open, options] = [await box('status'), await box('progress'), await box('open'), await box('options')];
-  expect(progress.y).toBeGreaterThanOrEqual(head.y + head.height - 1);
-  expect(open.y).toBeGreaterThanOrEqual(progress.y + progress.height - 1);
-  expect(options.y).toBeGreaterThanOrEqual(open.y + open.height - 1);
-  expect((await placeInCard(page, number, 'open')).right).toBeLessThanOrEqual(12);
 });
 
 test('cancel a running search; the next one runs', async ({ page }) => {
   test.skip(!BUILD_HAS_ENGINE, 'needs a search that runs long enough to cancel (engine build)');
   await startSlowSearch(page);
-  await page.getByTestId('run-1-cancel').click();
+  await page.getByTestId('run-status-cancel').click();
   await waitStatus(page, 1, 'cancelled');
   // The same subject, another query: the new runtime registers the subject again.
+  await backToSearch(page);
   await page.getByTestId('query-source-0-remove').click();
   await paste(page, 'query', '>small\nMKLVVLAAGGHHKLMKLVVLAAGGHHKL\n');
   await submit(page);
   await waitStatus(page, 2, 'completed');
-  await page.getByTestId('run-2').locator('summary', { hasText: 'Details' }).click();
-  await expect(page.getByTestId('run-2-details').locator('[data-detail="subject-retained"]')).toHaveText(
-    'read for this search',
-  );
+  await chooseRun(page, 2);
+  await page.getByTestId('results-view-details').click();
+  await expect(page.getByTestId('run-record')).toContainText('read for this search');
 });
 
 test('the region of a role with one record: the drag, the fields, the limits and the argv', async ({ page }) => {
@@ -364,7 +363,7 @@ test("the options form: the engine's defaults are not written; tasks, templates 
   }
 });
 
-test("the engine's refusals of option values are shown as the engine writes them, and nothing is queued", async ({ page }) => {
+test("the engine's refusals of option values are shown as the engine writes them, and nothing is started", async ({ page }) => {
   test.skip(!BUILD_HAS_ENGINE, "the engine's messages need the engine build");
   await program(page, 'tblastx');
   await openParameters(page);
@@ -379,7 +378,7 @@ test("the engine's refusals of option values are shown as the engine writes them
   await expect(page.getByTestId('search-message')).toHaveText(
     "error: the NCBI BLAST+ option -version is not supported by LOSAT's TBLASTX",
   );
-  await expect(page.getByTestId('run-1')).toHaveCount(0);
+  await expect(page.getByTestId('run-1-option')).toHaveCount(0);
   // A value that LOSAT does not support, and one that NCBI refuses.
   await program(page, 'blastp');
   await page.getByTestId('param-comp_based_stats').selectOption('1');
@@ -408,11 +407,11 @@ test('empty inputs, every record excluded, a sequence without a defline, and BLA
   await page.getByTestId('subject-source-0-exclude-shown').click();
   await submit(page);
   await expect(page.getByTestId('search-message')).toHaveText('Every subject record is excluded.');
-  await expect(page.getByTestId('run-1')).toHaveCount(0);
+  await expect(page.getByTestId('run-1-option')).toHaveCount(0);
 
   await program(page, 'blastx');
   await expect(page.getByTestId('program-unavailable')).toContainText('BLASTX joins LOSAT Web after its certification');
-  await expect(page.getByTestId('add-to-queue')).toBeDisabled();
+  await expect(page.getByTestId('run-losat')).toBeDisabled();
 });
 
 test('the sequence kind warning is an estimate and does not change the program', async ({ page }) => {
@@ -474,7 +473,7 @@ test.describe('leaving and returning', () => {
       expect(shown.type()).toBe('beforeunload');
       await shown.dismiss();
     }
-    await page.getByTestId('run-1-cancel').click();
+    await page.getByTestId('run-status-cancel').click();
     await waitStatus(page, 1, 'cancelled');
     await expect(page.getByTestId('wake-lock-held')).toHaveCount(0);
     await page.getByTestId('resume-dismiss').click();
@@ -491,7 +490,7 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   await expect(page.getByTestId('subject-panel').locator('legend').first()).toHaveText('Enter Subject Sequence');
   await expect(page.getByTestId('program-selection').locator('legend')).toHaveText('Program Selection');
   // The blocks one under the other, in NCBI's order.
-  const order = ['program-tabs', 'program-summary', 'query-panel', 'subject-panel', 'program-selection', 'add-to-queue', 'algorithm-parameters'];
+  const order = ['program-tabs', 'program-summary', 'query-panel', 'subject-panel', 'program-selection', 'run-losat', 'algorithm-parameters'];
   const tops = [];
   for (const id of order) tops.push((await page.getByTestId(id).boundingBox())!.y);
   expect(tops).toEqual([...tops].sort((a, b) => a - b));
@@ -532,7 +531,7 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   }
   await expect(page.getByTestId('param-task-megablast')).toBeChecked();
   // The search button (NCBI's BLAST button) and the line that says what it searches.
-  await expect(page.getByTestId('add-to-queue')).toHaveText('Run LOSAT');
+  await expect(page.getByTestId('run-losat')).toHaveText('Run LOSAT');
   const line = page.getByTestId('search-summary-line');
   await expect(line).toHaveText(
     'Search nucleotide subjects with BLASTN, task megablast (optimized for highly similar sequences). Runs in this browser.',
@@ -593,7 +592,7 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(toggle).toHaveText(/^\+\s*Algorithm parameters\s*$/);
   await expect(page.getByTestId('param-evalue')).toHaveCount(0);
-  await expect(page.getByTestId('add-to-queue-bottom')).toHaveCount(0);
+  await expect(page.getByTestId('run-losat-bottom')).toHaveCount(0);
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(toggle).toHaveText(/^−\s*Algorithm parameters\s*$/);
@@ -618,13 +617,10 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   await paste(page, 'query', '>q\nACGTACGTACGTAAACCCGGGTTT\n');
   await paste(page, 'subject', '>s\nACGTACGTACGTAAACCCGGGTTTACGT\n');
   await submit(page);
-  await expect(page.getByTestId('run-1-options')).toHaveText('Options: -task blastn -evalue 1e-3 -reward 2');
-  await expect(page.getByTestId('run-1-title')).toHaveText('Globin check');
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -evalue 1e-3 -reward 2');
+  await expect(page.getByTestId('results-job-title')).toHaveText('Globin check');
   await waitStatus(page, 1, 'completed');
-  // The title comes before the input names on the card (in one reading: the card changes as the run ends).
-  const parts = await page.getByTestId('run-1').evaluate((card) => [...card.children].map((child) => child.className));
-  expect(parts.indexOf('run-title')).toBeGreaterThan(-1);
-  expect(parts.indexOf('run-title')).toBeLessThan(parts.findIndex((name) => name.startsWith('run-inputs')));
+  await backToSearch(page);
 
   // Closed, the bar keeps the count; a program with changed values opens it when it is chosen.
   await toggle.click();
@@ -644,18 +640,18 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveCount(0);
   await expect(page.getByTestId('param-task-blastn')).toBeChecked();
   await page.getByTestId('job-title').fill('');
-  // The second button, below the parameters, queues the same search.
-  const bottom = page.getByTestId('add-to-queue-bottom');
+  // The second button, below the parameters, starts the same search.
+  const bottom = page.getByTestId('run-losat-bottom');
   await expect(bottom).toHaveText('Run LOSAT');
   await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
   await bottom.click();
-  await expect(page.getByTestId('run-2-options')).toHaveText('Options: -task blastn');
-  await expect(page.getByTestId('run-2-title')).toHaveCount(0);
-  await expect(page.getByTestId('algorithm-parameters').getByTestId('search-message')).toHaveText('Added to the queue.');
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn');
+  await expect(page.getByTestId('results-job-title')).toHaveCount(0);
+  await expect(page.getByTestId('algorithm-parameters').getByTestId('search-message')).toHaveText('Search started.');
   await waitStatus(page, 2, 'completed');
 });
 
-test('narrow screens put the inputs and the queue one under the other, without horizontal scrolling', async ({ page }) => {
+test('narrow screens put the inputs one under the other, without horizontal scrolling', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await paste(page, 'query', `>NZ_CP006932.1 first\nACGTACGTACGTACGTAC\n>NZ_CP006932.1 second\n${BUILD_HAS_ENGINE ? 'ACGT\n>?10\nACGT' : 'ACGT!ACGT'}\n`);
   // A record row puts its tags on a second line: the ID and the "refused" tag stay in the list.
@@ -672,9 +668,7 @@ test('narrow screens put the inputs and the queue one under the other, without h
   }
   const query = (await page.getByTestId('query-panel').boundingBox())!;
   const subject = (await page.getByTestId('subject-panel').boundingBox())!;
-  const queue = (await page.getByTestId('queue').boundingBox())!;
   expect(subject.y).toBeGreaterThan(query.y + query.height - 1);
-  expect(queue.y).toBeGreaterThan(subject.y);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   // The query block's paste box, drop zone and Job Title start and end at the same x (W4b screen review L13).
   const edges = await Promise.all(

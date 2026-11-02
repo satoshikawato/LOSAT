@@ -1,8 +1,8 @@
 // The search draft (design §3.1, §3.2; plan §5.2-§5.4): the job being edited on the search
-// screen. It is independent of the queue, so the next job can be edited while a search
-// runs, and "Add to queue" freezes the draft's inputs and conditions into run snapshots
-// (Coordinator.enqueueAll); the draft itself stays, so a subject can be kept while the
-// query changes.
+// screen. It is independent of the runs, so the next job can be edited while a search
+// runs, and "Run LOSAT" freezes the draft's inputs and conditions into run snapshots
+// (Coordinator.enqueueAll; runs search one at a time); the draft itself stays, so a subject
+// can be kept while the query changes.
 //
 // Inputs: every pasted text and every file becomes a source of the data layer and is
 // indexed when it is added (DatasetStore). The record table of a source is its
@@ -11,7 +11,7 @@
 // change is the same revision from search to search (the engine then keeps it, R1).
 // Whether the engine reads a source is the engine's verdict (`checkInput`, the program's
 // `register`), shown with its message. Several sources of a role are one combined search
-// input, or separate searches (one run per source, queued as a group).
+// input, or separate searches (one run per source, started as a group).
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
 import { formParameters, setField, type FieldValue, type FormValues } from '../domain/parameters';
@@ -197,7 +197,7 @@ export class SearchDraft {
     this.scheduleValidation();
   }
 
-  /** The Job Title of the runs that "Add to queue" makes next. */
+  /** The Job Title of the runs that "Run LOSAT" makes next. */
   setTitle(title: string): void {
     this.set({ title, message: undefined });
   }
@@ -359,27 +359,27 @@ export class SearchDraft {
     return sources.length === 0 ? PASTED_NAMES[role] : COMBINED_NAMES[role];
   }
 
-  /** The runs that "Add to queue" would make now. */
+  /** The runs that "Run LOSAT" would make now. */
   runCount(): number {
     return ROLES.map((role) => this.inputGroups(role).length).reduce((a, b) => a * Math.max(1, b), 1);
   }
 
   // --- submit -----------------------------------------------------------------------------
 
-  /** Freezes the draft into queued runs (one, or a group of separate searches). */
+  /** Freezes the draft into runs (one, or a group of separate searches) and starts them. */
   async submit(): Promise<EnqueueAllResult> {
-    if (this.state.get().submitting) return { ok: false, message: 'The draft is being added already.' };
+    if (this.state.get().submitting) return { ok: false, message: 'The search is being started already.' };
     this.set({ submitting: true, message: { kind: 'info', text: 'Preparing the inputs…' } });
     try {
       let result: EnqueueAllResult;
       try {
         result = await this.prepareAndEnqueue();
       } catch (error) {
-        result = { ok: false, message: `The search could not be queued: ${messageOf(error)}` };
+        result = { ok: false, message: `The search could not be started: ${messageOf(error)}` };
       }
       if (result.ok) {
         const count = result.runIds?.length ?? 0;
-        this.set({ message: { kind: 'info', text: count > 1 ? `Added ${count} runs to the queue as a group.` : 'Added to the queue.' } });
+        this.set({ message: { kind: 'info', text: count > 1 ? `Started ${count} runs as a group; they search one at a time.` : 'Search started.' } });
       } else {
         this.set({ message: { kind: 'error', text: result.message } });
       }
@@ -446,8 +446,8 @@ export class SearchDraft {
   }
 
   /**
-   * What keeps the draft from being queued now, in short, for the line above the button;
-   * undefined when nothing does. "Add to queue" reports the full message.
+   * What keeps the draft from being searched now, in short, for the line above the button;
+   * undefined when nothing does. "Run LOSAT" reports the full message.
    */
   readiness(): string | undefined {
     if (programById(this.state.get().program).unavailable !== undefined) return undefined;
@@ -691,7 +691,7 @@ export class SearchDraft {
   /**
    * Tells the engine that a search like the draft's may come (EngineGateway.prepare), once
    * its conditions are valid and both roles have indexed inputs, so that the engine can
-   * start its runtime and compile the code of the search before "Add to queue". The size is
+   * start its runtime and compile the code of the search before "Run LOSAT". The size is
    * that of the largest run.
    */
   private prepareEngine(): void {

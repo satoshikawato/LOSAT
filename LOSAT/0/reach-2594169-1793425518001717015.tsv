@@ -1,5 +1,0 @@
-switch	new	ref	program
-LOSAT_X_DBIDXREAD	1	0	tblastn
-LOSAT_X_TBNOWNPOOLS	0	1	tblastn
-LOSAT_X_TBNBATCH	0	1	tblastn
-LOSAT_X_TBNSSIDE	0	1	tblastn

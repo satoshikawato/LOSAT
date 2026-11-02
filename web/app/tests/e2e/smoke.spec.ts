@@ -8,7 +8,7 @@ test('the page is cross-origin isolated, so the threaded engine can use shared m
   expect(await page.evaluate(() => typeof SharedArrayBuffer)).toBe('function');
 });
 
-test(`paste, queue, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' : 'the fake engine'}`, async ({ page }) => {
+test(`paste, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' : 'the fake engine'}`, async ({ page }) => {
   await openSearch(page);
   // The banner shows exactly when the build has no engine (web/AGENTS.md rule 7).
   await expect(page.getByTestId('fake-engine-banner')).toHaveCount(BUILD_HAS_ENGINE ? 0 : 1);
@@ -17,11 +17,11 @@ test(`paste, queue, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' 
   await program(page, 'tblastx');
   await paste(page, 'query', '>q1\nACGTACGTACGT\n');
   await paste(page, 'subject', '>s1\nACGTACGTACGT\n');
-  await page.getByTestId('add-to-queue').click();
+  await page.getByTestId('run-losat').click();
 
-  await expect(page.getByTestId('run-1-status')).toHaveText('completed');
-  // The results tab shows the newest completed run; the outputs as written are in its Outputs view.
-  await page.getByTestId('tab-results').click();
+  // "Run LOSAT" opens the results page of the run: its status, then its results and, in the
+  // Outputs view, the outputs as written.
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
   await page.getByTestId('results-view-outputs').click();
   await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:6');
@@ -41,7 +41,7 @@ test(`paste, queue, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' 
   expect(file.suggestedFilename()).toBe('losat-run1-tblastx.outfmt0.txt');
 });
 
-test('a BLASTN query of white space only is refused with the index scan error, before it is queued', async ({ page }) => {
+test('a BLASTN query of white space only is refused with the index scan error, before it is started', async ({ page }) => {
   // The adapter's register reads such a file as no records and the CLI then warns
   // "Query is Empty!", but the index scan (bio's reader) refuses it; the application follows
   // the scan and does not rebuild BLASTN's rules (S09, docs/evidence/losat_web_w1/README.md).
@@ -49,8 +49,9 @@ test('a BLASTN query of white space only is refused with the index scan error, b
   await program(page, 'blastn');
   await paste(page, 'query', ' \n');
   await paste(page, 'subject', '>s1\nACGTACGTACGT\n');
-  await page.getByTestId('add-to-queue').click();
+  await page.getByTestId('run-losat').click();
   await expect(page.getByTestId('search-message')).toHaveText('Query (pasted): Expected > at record start.');
   await expect(page.getByTestId('query-source-0-error')).toHaveText('This input cannot be read: Expected > at record start.');
-  await expect(page.getByTestId('run-1')).toHaveCount(0);
+  await expect(page.getByTestId('run-1-option')).toHaveCount(0);
+  await expect(page.getByTestId('tab-search')).toHaveAttribute('aria-pressed', 'true');
 });

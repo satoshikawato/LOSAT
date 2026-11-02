@@ -15,18 +15,18 @@
 // 1. `queries`: for each count N, a BLASTN search of N queries of 100 letters (most with hits:
 //    70% one subject, 20% three, every 1000th "wide" query with 200 subjects, 10% random without
 //    hits; tests/e2e/support/synthetic.ts) against 203 subject records. It records the input
-//    (indexing and checking the query file, after the subject's), the search (from "Add to queue"
-//    until it completes; the run's elapsed time as the queue shows it, and the runtime path), the
+//    (indexing and checking the query file, after the subject's), the search (from "Run LOSAT"
+//    until it completes; the run's time as its Run details show it, and the runtime path), the
 //    number of HSPs (the lines of the run's outfmt 6 in the Outputs view, once), and, in one
-//    warm-up and three measured repetitions, in the same page: opening the run from the queue
+//    warm-up and three measured repetitions, in the same page: choosing the run in the run picker
 //    until the hits view is ready (the HSP records read and transferred, the index built), and
 //    again until the first query's first HSP is read as well, the rows the query picker draws,
 //    scrolling it to its end, finding the last query but one with `query-filter` (which selects
 //    it), clearing the filter, selecting the query before it by a click, "With hits only",
-//    selecting the second query with 200 subjects by a click, showing its Graphic Summary (W4b)
-//    and sorting its subject list (the Descriptions) by each column. Since W4b the results screen
-//    has tabs: the selection and the HSP's detail are timed in the Alignments tab (the detail is
-//    there), the subject list in the Descriptions. In Chromium also the JS heap (after a garbage
+//    selecting the second query with 200 subjects by a click (until its Graphic Summary is drawn
+//    and the Alignments show the HSP's detail: the Hits view is one page of Graphic Summary,
+//    Descriptions and Alignments), and sorting its subject list (the Descriptions) by each
+//    column. In Chromium also the JS heap (after a garbage
 //    collection) before opening, after the first opening and after the repetitions, and the
 //    memory of the page and its workers where the browser exposes it.
 // 2. `pair`: a query that repeats a unit of 20 letters (with 1% differences between the copies)
@@ -51,7 +51,7 @@ import { join } from 'node:path';
 import { expect, test, type CDPSession, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NO_ENGINE_REASON } from './support/engine';
-import { program, settled, submit } from './support/search';
+import { program, runMessage, settled, submit } from './support/search';
 import { manyQueries, queryId, repeats } from './support/synthetic';
 
 const MEASURE = new Set((process.env['LOSAT_WEB_MEASURE'] ?? '').split(',').filter((name) => name !== ''));
@@ -76,6 +76,8 @@ test.use({ actionTimeout: 120_000 });
 type Act =
   | { readonly kind: 'click'; readonly testid: string }
   | { readonly kind: 'fill'; readonly testid: string; readonly value: string }
+  /** Chooses the option (by its test ID) of the select (by its test ID): a run in the results page's run picker. */
+  | { readonly kind: 'select'; readonly testid: string; readonly option: string }
   | {
       readonly kind: 'scroll';
       readonly testid: string;
@@ -145,6 +147,11 @@ async function step(page: Page, act: Act, until: readonly Cond[], timeoutMs = 60
       let t0 = performance.now();
       if (action.kind === 'armed') t0 = (window as unknown as { __t0: number }).__t0;
       else if (action.kind === 'click') find(action.testid)!.click();
+      else if (action.kind === 'select') {
+        const select = find(action.testid) as HTMLSelectElement;
+        select.value = (find(action.option) as HTMLOptionElement).value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
       else if (action.kind === 'scroll') {
         const element = find(action.testid)!;
         element.scrollTop = action.to === 'end' ? element.scrollHeight : 0;
@@ -301,16 +308,16 @@ interface Search {
   /** Choosing the query file until its record table is shown, and until the engine's check answers. */
   readonly indexMs: number;
   readonly checkMs: number;
-  /** "Add to queue" until the run is in the queue (the run input, its SHA-256, the engine's validation). */
+  /** "Run LOSAT" until the run is in the run picker (the run input, its SHA-256, the engine's validation). */
   readonly enqueueMs: number;
-  /** The run in the queue until it completes, seen from the page. */
+  /** The run in the picker until it completes, seen from the page. */
   readonly searchMs: number;
-  /** What the queue shows for the run. */
+  /** What the run's Run details show as the time it took. */
   readonly elapsed: string;
   readonly path: string;
 }
 
-/** Queues a search of the files with the form's defaults and waits until run `number` completes. */
+/** Starts a search of the files with the form's defaults and waits until run `number` completes. */
 async function search(
   page: Page,
   number: number,
@@ -345,55 +352,49 @@ async function search(
   await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
   const tSubmit = Date.now();
   await submit(page);
-  await expect(page.getByTestId(`run-${number}`)).toBeVisible({
-    timeout: 600_000,
-  });
+  const option = page.getByTestId(`run-${number}-option`);
+  await expect(option).toHaveCount(1, { timeout: 600_000 });
   const t3 = Date.now();
-  note(`run ${number}: in the queue`);
-  const status = page.getByTestId(`run-${number}-status`);
-  // A long search is reported once a minute, with the phase the queue shows.
+  note(`run ${number}: started`);
+  // A long search is reported once a minute, with the phase the run's results page shows.
   for (let minutes = 1; ; minutes++) {
     try {
-      await expect(status).toHaveText(/^(completed|cancelled|failed)$/, { timeout: 60_000 });
+      await expect(option).toHaveAttribute('data-status', /^(completed|cancelled|failed)$/, { timeout: 60_000 });
       break;
     } catch (error) {
       if (minutes >= SEARCH_MINUTES) throw error;
       const phase =
         (await page
-          .getByTestId(`run-${number}-phase`)
+          .getByTestId('run-status-phase')
           .textContent()
           .catch(() => null)) ?? '?';
       const elapsed =
         (await page
-          .getByTestId(`run-${number}-elapsed`)
+          .getByTestId('run-status-elapsed')
           .textContent()
           .catch(() => null)) ?? '';
       console.log(`run ${number}: ${minutes} min, ${phase.trim()}, ${elapsed.trim()}`);
     }
   }
   const t4 = Date.now();
-  if ((await status.textContent()) !== 'completed') {
-    throw new Error(
-      `run ${number} ended ${await status.textContent()}: ${
-        (await page
-          .getByTestId(`run-${number}-error`)
-          .textContent()
-          .catch(() => '')) ?? ''
-      }`,
-    );
-  }
+  const ended = await option.getAttribute('data-status');
+  if (ended !== 'completed') throw new Error(`run ${number} ended ${ended}: ${await runMessage(page, number)}`);
+  // The results of the run load by themselves; its Run details have the time it took and the runtime path.
+  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(number), { timeout: 900_000 });
+  await page.getByTestId('results-view-details').click();
+  const record = page.getByTestId('run-record');
   const elapsed =
-    (await page
-      .getByTestId(`run-${number}-elapsed`)
+    (await record
+      .locator('dt', { hasText: 'Took' })
+      .locator('+ dd')
       .textContent()
       .catch(() => '')) ?? '';
-  await page.getByTestId(`run-${number}`).locator('summary', { hasText: 'Details' }).click();
-  const details = page.getByTestId(`run-${number}-details`);
   const path =
-    (await details
+    (await record
       .locator('[data-detail="path"]')
       .textContent()
       .catch(() => '')) ?? '';
+  await page.getByTestId('results-view-hits').click();
   return {
     indexMs: t1 - t0,
     checkMs: t2 - t1,
@@ -423,26 +424,35 @@ interface Repetition {
   hitsOnlyQueries: number;
   hitsOnlyOff: Timing;
   selectWide: Timing;
-  showGraphic: Timing;
   graphicRows: number;
   wideSubjects: number;
   subjectRowsDrawn: number;
   sortSubjects: Record<string, Timing>;
 }
 
+/** The act of choosing run `number` in the results page's run picker. */
+const choose = (number: number): Act => ({ kind: 'select', testid: 'results-run', option: `run-${number}-option` });
+
+/** Shows run `number` in the results page (the results tab, the run picker) and waits until it is read. */
+async function showRun(page: Page, number: number): Promise<void> {
+  await page.getByTestId('tab-results').click();
+  const select = page.getByTestId('results-run');
+  await select.selectOption(await page.getByTestId(`run-${number}-option`).getAttribute('value'));
+  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(number), { timeout: 120_000 });
+}
+
 /**
- * Opens run `number` from the queue while run `other` is shown, twice: `open` until its hits view
- * is ready, and `firstHsp` until the first HSP of its first query with hits (selected when the run
- * opens) is also read from outfmt 0.
+ * Opens run `number` in the run picker while run `other` is shown, twice: `open` until its hits
+ * view is ready, and `firstHsp` until the first HSP of its first query with hits (selected when
+ * the run opens) is also read from outfmt 0.
  */
 async function openRun(page: Page, number: number, other: number): Promise<{ open: Timing; firstHsp: Timing }> {
-  const open = await step(page, { kind: 'click', testid: `run-${number}-open` }, [
+  const open = await step(page, choose(number), [
     { testid: 'results-hits', attr: 'data-run', equals: String(number) },
     { testid: 'query-list' },
   ]);
-  await page.getByTestId(`run-${other}-open`).click();
-  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(other), { timeout: 120_000 });
-  const firstHsp = await step(page, { kind: 'click', testid: `run-${number}-open` }, [
+  await showRun(page, other);
+  const firstHsp = await step(page, choose(number), [
     { testid: 'results-hits', attr: 'data-run', equals: String(number) },
     { testid: 'hsp-detail', attr: 'data-state', equals: 'ready' },
   ]);
@@ -452,11 +462,10 @@ async function openRun(page: Page, number: number, other: number): Promise<{ ope
 async function repetition(page: Page, count: number): Promise<Repetition> {
   const far = count - 2;
   const total = countText(count);
-  // The small run (run 2) first, so that opening run 1 is a change of run. The Alignments tab,
-  // which the next run opens on, shows the selected HSP's detail.
-  await page.getByTestId('run-2-open').click();
-  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '2', { timeout: 120_000 });
-  await page.getByTestId('pane-alignment').click();
+  // The small run (run 2) first, so that opening run 1 is a change of run. The Hits view, which
+  // the next run opens on, shows the selected HSP's detail in its Alignments.
+  await showRun(page, 2);
+  await page.getByTestId('results-view-hits').click();
   const { open, firstHsp } = await openRun(page, 1, 2);
   await expect(page.getByTestId('query-count')).toHaveText(`${total} of ${total} queries`);
   const queryRowsDrawn = await rowsDrawn(page, 'query-row-');
@@ -500,18 +509,17 @@ async function repetition(page: Page, count: number): Promise<Repetition> {
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', new RegExp(`^${await rowIndex(0)}:`));
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
   const wideIdx = await rowIndex(1);
+  // The hits page of the query: its Graphic Summary is drawn (the first 100 of its subjects), and
+  // the Alignments show its selected HSP (the detail is there).
   const selectWide = await step(page, { kind: 'click', testid: `query-row-${wideIdx}` }, [
     { testid: 'hsp-detail', attr: 'data-hsp', matches: `^${wideIdx}:` },
     { testid: 'hsp-detail', attr: 'data-state', equals: 'ready' },
     { testid: 'alignments-subject' },
-  ]);
-  // Its Graphic Summary: the first 100 of its subjects drawn on the canvas.
-  const showGraphic = await step(page, { kind: 'click', testid: 'results-view-graphic' }, [
     { testid: 'graphic-canvas', attr: 'data-rows', matches: '^[1-9]\\d{2,}$' },
-    { testid: 'graphic-canvas', attr: 'data-drawn' },
+    { testid: 'graphic-canvas', attr: 'data-drawn', changed: true },
   ]);
+  // Its Graphic Summary (the first 100 of its subjects drawn on the canvas) is on the same page.
   const graphicRows = Number(await page.getByTestId('graphic-canvas').getAttribute('data-rows'));
-  await page.getByTestId('results-view-hits').click();
   await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', /^[1-9]\d{2,}$/);
   const wideSubjects = Number(await page.getByTestId('subject-list').getAttribute('data-count'));
   const subjectRowsDrawn = await rowsDrawn(page, 'subject-row-');
@@ -547,7 +555,6 @@ async function repetition(page: Page, count: number): Promise<Repetition> {
     hitsOnlyQueries: Number(withHits!.replace(/,/g, '')),
     hitsOnlyOff: rounded(hitsOnlyOff),
     selectWide: rounded(selectWide),
-    showGraphic: rounded(showGraphic),
     graphicRows,
     wideSubjects,
     subjectRowsDrawn,
@@ -606,8 +613,7 @@ for (const count of COUNTS) {
       save();
 
       // The number of HSPs: the lines of outfmt 6 as the Outputs view shows them (once, after the repetitions).
-      await page.getByTestId('run-1-open').click();
-      await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1', { timeout: 120_000 });
+      await showRun(page, 1);
       await page.getByTestId('results-view-outputs').click();
       const outputs = await step(
         page,
@@ -666,15 +672,14 @@ interface PairRepetition {
 }
 
 async function pairRepetition(page: Page, number: number, other: number): Promise<PairRepetition> {
-  await page.getByTestId(`run-${other}-open`).click();
-  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(other), { timeout: 120_000 });
-  // The run opens on the Alignments tab, which shows the selected HSP's detail (W4b).
-  await page.getByTestId('pane-alignment').click();
-  const open = await step(page, { kind: 'click', testid: `run-${number}-open` }, [
+  await showRun(page, other);
+  // The run opens on the Hits view, whose Alignments show the selected HSP's detail.
+  await page.getByTestId('results-view-hits').click();
+  const open = await step(page, choose(number), [
     { testid: 'results-hits', attr: 'data-run', equals: String(number) },
     { testid: 'hsp-detail', attr: 'data-state', equals: 'ready' },
   ]);
-  await page.getByTestId('pane-alignment').click();
+  await page.getByTestId('results-view-hits').click();
   const hsps = Number(await page.getByTestId('hsp-list').getAttribute('data-count'));
   const hspRowsDrawn = await rowsDrawn(page, 'hsp-row-');
 
@@ -777,7 +782,7 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
     drew,
   ]);
 
-  await page.getByTestId('pane-alignment').click();
+  await page.getByTestId('results-view-hits').click();
   const row = page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"][aria-pressed="false"]').nth(2);
   await quiet(page);
   const rowId = (await row.getAttribute('data-testid'))!.replace('hsp-row-', '').replace('-', ':');

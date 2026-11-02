@@ -3,12 +3,11 @@
 // §1): the program tabs and sentence, "Enter Query Sequence", "Enter Subject Sequence",
 // "Program Selection", the "Run LOSAT" button (NCBI's BLAST button) with the line that says
 // what it searches, and "Algorithm parameters", which opens and closes, with a second button
-// below it. LOSAT's own lines (threads, readiness, the engine's check of the options, the
-// queue) are under the first button.
+// below it. LOSAT's own lines (threads, readiness, the engine's check of the options) are
+// under the first button. "Run LOSAT" starts the search and the page goes to its results
+// (`submitted`), as NCBI's BLAST button does.
 import { computed, ref, watch } from 'vue';
-import type { RunView } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
-import { isTerminal } from '../domain/run';
 import { effectiveValue, formParameters, placementFlags, sectionsAt } from '../domain/parameters';
 import { PROGRAMS, programById, searchSummary, type InputRole } from '../domain/programs';
 import { useStore } from './useStore';
@@ -16,7 +15,9 @@ import InputPanel from './InputPanel.vue';
 import ParameterField from './ParameterField.vue';
 import ParameterForm from './ParameterForm.vue';
 
-const props = defineProps<{ draft: SearchDraft; runs: readonly RunView[] }>();
+const props = defineProps<{ draft: SearchDraft }>();
+/** A search was started: the ID of its first run (a group of separate searches starts several). */
+const emit = defineEmits<{ submitted: [runId: string] }>();
 const state = useStore(props.draft.state);
 const program = computed(() => programById(state.value.program));
 const options = computed(() => state.value.description?.parameters);
@@ -29,8 +30,6 @@ const threadChoices = computed(() => {
   return Array.from({ length: Math.max(1, Math.min(32, hardware)) }, (_, i) => i + 1);
 });
 
-const waiting = computed(() => props.runs.filter((run) => !isTerminal(run.status)).length);
-const active = computed(() => props.runs.find((run) => !isTerminal(run.status) && run.status !== 'queued'));
 const runCount = computed(() => {
   void state.value; // recompute with the draft
   return props.draft.runCount();
@@ -41,14 +40,11 @@ const readiness = computed(() => {
 });
 /**
  * The button runs LOSAT (the Owner's words, 2026-10-10: not "BLAST", which names NCBI's
- * service), and says when the search waits in the queue and how many runs it makes.
+ * service), and says how many runs separate searches make.
  */
-const buttonLabel = computed(() => {
-  const notes = [];
-  if (runCount.value > 1 && program.value.unavailable === undefined) notes.push(`${runCount.value} runs`);
-  if (waiting.value > 0) notes.push('add to queue');
-  return notes.length === 0 ? 'Run LOSAT' : `Run LOSAT (${notes.join(', ')})`;
-});
+const buttonLabel = computed(() =>
+  runCount.value > 1 && program.value.unavailable === undefined ? `Run LOSAT (${runCount.value} runs)` : 'Run LOSAT',
+);
 /**
  * Whether the engine's describe of the program has come. It comes after the page or the
  * program changes, and adds the task's help and the task to the line next to the button,
@@ -60,16 +56,6 @@ const describeState = computed(() => {
 });
 const taskFields = computed(() => sectionsAt(program.value, options.value, 'program').flatMap((section) => section.fields));
 const summaryLine = computed(() => searchSummary(program.value, effectiveValue('-task', values.value, options.value)));
-/** One line about the queue next to the button; on narrow screens the queue is far below. */
-const queueSummary = computed(() => {
-  if (waiting.value === 0) return undefined;
-  const queued = waiting.value - (active.value === undefined ? 0 : 1);
-  const parts = [];
-  if (active.value !== undefined) parts.push(`Run ${active.value.snapshot.number} is running`);
-  if (queued > 0) parts.push(`${queued} waiting`);
-  return parts.join(', ');
-});
-
 /** The Algorithm parameters that the argv writes: each differs from the engine's default. */
 const changed = computed(() => formParameters(program.value, values.value, options.value, 'algorithm').length);
 /**
@@ -88,17 +74,15 @@ watch(
 const submittedFrom = ref<'top' | 'bottom'>('top');
 const messageBelow = computed(() => submittedFrom.value === 'bottom' && open.value);
 
-function submit(from: 'top' | 'bottom'): void {
+async function submit(from: 'top' | 'bottom'): Promise<void> {
   submittedFrom.value = from;
-  void props.draft.submit();
+  const result = await props.draft.submit();
+  const first = result.ok ? result.runIds?.[0] : undefined;
+  if (first !== undefined) emit('submitted', first);
 }
 
 function restoreDefaults(): void {
   props.draft.resetFields(placementFlags(program.value, 'algorithm'));
-}
-
-function showQueue(): void {
-  document.getElementById('queue')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function onThreads(event: Event): void {
@@ -142,7 +126,7 @@ function onThreads(event: Event): void {
     <div class="blast-row">
       <button
         class="primary-action"
-        data-testid="add-to-queue"
+        data-testid="run-losat"
         :disabled="state.submitting || program.unavailable !== undefined"
         @click="submit('top')"
       >
@@ -173,10 +157,6 @@ function onThreads(event: Event): void {
         </template>
         <template v-else-if="state.validation.state === 'checking'">Checking the options with the engine…</template>
         <template v-else-if="state.validation.state === 'ok'">The engine accepts these options.</template>
-      </p>
-      <p v-if="queueSummary" class="hint" data-testid="queue-summary">
-        {{ queueSummary }}.
-        <button type="button" class="link" @click="showQueue">Show the queue</button>
       </p>
       <p
         v-if="state.message && !messageBelow"
@@ -215,7 +195,7 @@ function onThreads(event: Event): void {
         <div class="blast-row">
           <button
             class="primary-action"
-            data-testid="add-to-queue-bottom"
+            data-testid="run-losat-bottom"
             :disabled="state.submitting || program.unavailable !== undefined"
             @click="submit('bottom')"
           >

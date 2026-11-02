@@ -6,7 +6,6 @@ import type { SearchDraft } from '../application/draft';
 import type { ResultsBrowser } from '../application/results';
 import { useStore } from './useStore';
 import AttentionPanel from './AttentionPanel.vue';
-import QueuePanel from './QueuePanel.vue';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
@@ -27,9 +26,9 @@ const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
 const resultsView = ref<ResultsView>('hits');
 
 /**
- * Opens a run's results from the queue (S12's screen review L7), and brings the results
- * panel into view with the focus on its heading: on a narrow screen the queue is below the
- * results (S13 screen review M3).
+ * Opens a run's results: "Run LOSAT" goes straight to the results page of the run it started, as
+ * NCBI BLAST's "BLAST" button does (Owner, 2026-11-02); the page shows the run's status until it
+ * completes, then its results. The results panel comes into view with the focus on its heading.
  */
 async function openResults(runId: string): Promise<void> {
   tab.value = 'results';
@@ -68,8 +67,8 @@ onUnmounted(() => {
   </nav>
   <main class="layout">
     <section class="primary">
-      <!-- The search form stays mounted, so the next job keeps its edits while results are viewed. -->
-      <SearchPanel v-show="tab === 'search'" :draft="draft" :runs="state.runs" />
+      <!-- The search form stays mounted, so the next search keeps its edits while results are viewed. -->
+      <SearchPanel v-show="tab === 'search'" :draft="draft" @submitted="openResults" />
       <ResultsPanel
         v-if="tab === 'results'"
         ref="resultsPanel"
@@ -79,8 +78,8 @@ onUnmounted(() => {
         :runs="state.runs"
       />
     </section>
-    <aside class="secondary">
-      <QueuePanel :coordinator="coordinator" :runs="state.runs" @open-results="openResults" />
+    <!-- LOSAT's notes under the page: leaving the tab, and the temporary storage (design §3.4). -->
+    <aside class="notes">
       <AttentionPanel :attention="attention" :state="attentionState" />
       <StorageStatus :storage="state.storage" />
     </aside>

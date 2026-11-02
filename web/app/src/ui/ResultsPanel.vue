@@ -1,13 +1,17 @@
 <script setup lang="ts">
 // The results screen (plan §5.7, design §3.4), in the order and words of NCBI BLAST's results
 // page (S13b, docs/web/ncbi_ui_mapping.md §2): the run's header block with "Filter Results"
-// beside it, "Results for" (the query) and the notices, then the tabs Descriptions, Graphic
-// Summary, Alignments and Dot Plot, and LOSAT's Run details and Outputs. Every tab follows one
+// beside it, "Results for" (the query) and the notices, then the hits as NCBI's classic page
+// shows them, on one page from top to bottom: the Graphic Summary, the Descriptions and the
+// Alignments of the selected subject (Owner, 2026-10-10 and 2026-11-02: not behind tabs). The
+// Dot Plot and LOSAT's Run details and Outputs are tabs beside the hits. A run that has not
+// finished shows its status here (RunStatus) until it completes. Every view follows one
 // selection, held by the HSP's identity (application/results.ts).
 import { computed, nextTick, ref, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import type { HspId, ResultsBrowser } from '../application/results';
 import { programById, residueUnit } from '../domain/programs';
+import { isTerminal } from '../domain/run';
 import { useStore } from './useStore';
 import AlignmentsView from './AlignmentsView.vue';
 import CommandText from './CommandText.vue';
@@ -20,10 +24,11 @@ import QueryPicker from './QueryPicker.vue';
 import ResultFilters from './ResultFilters.vue';
 import ResultNotices from './ResultNotices.vue';
 import RunDetails from './RunDetails.vue';
+import RunStatus from './RunStatus.vue';
 import SubjectTable from './SubjectTable.vue';
 import VerificationBadge from './VerificationBadge.vue';
 
-export type ResultsView = 'hits' | 'graphic' | 'alignment' | 'dotplot' | 'details' | 'outputs';
+export type ResultsView = 'hits' | 'dotplot' | 'details' | 'outputs';
 
 const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly RunView[] }>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
@@ -32,20 +37,20 @@ const state = useStore(props.results.state);
 const heading = ref<HTMLElement>();
 const alignments = ref<InstanceType<typeof AlignmentsView>>();
 
-/** NCBI's tabs, then LOSAT's. The test IDs are W4's (the hits view, the HSP's panes, the run's views). */
+/**
+ * The hits (Graphic Summary, Descriptions and Alignments on one page), NCBI's Dot Plot, then
+ * LOSAT's views. The test IDs are W4's (the hits view, the dot plot's pane, the run's views).
+ */
 const TABS: readonly { readonly view: ResultsView; readonly label: string; readonly testid: string }[] = [
-  { view: 'hits', label: 'Descriptions', testid: 'results-view-hits' },
-  { view: 'graphic', label: 'Graphic Summary', testid: 'results-view-graphic' },
-  { view: 'alignment', label: 'Alignments', testid: 'pane-alignment' },
+  { view: 'hits', label: 'Hits', testid: 'results-view-hits' },
   { view: 'dotplot', label: 'Dot Plot', testid: 'pane-dotplot' },
   { view: 'details', label: 'Run details', testid: 'results-view-details' },
   { view: 'outputs', label: 'Outputs', testid: 'results-view-outputs' },
 ];
-const HITS_VIEWS: readonly ResultsView[] = ['hits', 'graphic', 'alignment', 'dotplot'];
 
 /**
- * Brings the panel's heading into view and moves the focus to it (a run opened from the
- * queue). The scroll is instant: Firefox ended a smooth one early while the run was read.
+ * Brings the panel's heading into view and moves the focus to it (a search just started).
+ * The scroll is instant: Firefox ended a smooth one early while the run was read.
  */
 function showHeading(): void {
   heading.value?.scrollIntoView({ block: 'start' });
@@ -57,6 +62,8 @@ defineExpose({ showHeading });
 const choices = computed(() => [...props.runs].reverse());
 const selected = computed(() => props.runs.find((run) => run.snapshot.runId === state.value.runId));
 const loaded = computed(() => state.value.loaded);
+/** The selected run waits or searches: its status is shown in place of its results. */
+const active = computed(() => selected.value !== undefined && !isTerminal(selected.value.status));
 
 // With no run chosen, show the newest completed one.
 watch(
@@ -69,7 +76,7 @@ watch(
 
 function runLabel(run: RunView): string {
   const { number, program, query, subject } = run.snapshot;
-  const status = run.status === 'completed' ? '' : ` (${run.status})`;
+  const status = run.status === 'completed' ? '' : ` (${run.status === 'queued' ? 'waiting' : run.status})`;
   return `Run ${number} · ${programById(program).label} · ${query.name} vs ${subject.name}${status}`;
 }
 
@@ -95,9 +102,9 @@ const plural = (count: number, one: string) => `${formatCount(count)} ${count ==
 /** "Results for" (the query list) is for runs of more than one query, as NCBI's. */
 const multiQuery = computed(() => (loaded.value?.run.snapshot.query.records.length ?? 0) > 1);
 
-/** "Show alignment" of the Graphic Summary and the Dot Plot: the Alignments tab, with the HSP's Range in view. */
+/** "Show alignment" of the Graphic Summary and the Dot Plot: the Alignments, with the HSP's Range in view. */
 async function toAlignments(id: HspId): Promise<void> {
-  view.value = 'alignment';
+  view.value = 'hits';
   await nextTick();
   alignments.value?.reveal(id, true);
 }
@@ -124,7 +131,15 @@ async function toAlignments(id: HspId): Promise<void> {
                 @change="results.open(($event.target as HTMLSelectElement).value)"
               >
                 <option value="" disabled>Choose a run</option>
-                <option v-for="run in choices" :key="run.snapshot.runId" :value="run.snapshot.runId">{{ runLabel(run) }}</option>
+                <option
+                  v-for="run in choices"
+                  :key="run.snapshot.runId"
+                  :value="run.snapshot.runId"
+                  :data-testid="`run-${run.snapshot.number}-option`"
+                  :data-status="run.status"
+                >
+                  {{ runLabel(run) }}
+                </option>
               </select>
             </label>
             <button v-if="state.phase === 'ready'" type="button" class="link" data-testid="results-download-all" @click="view = 'outputs'">
@@ -168,6 +183,7 @@ async function toAlignments(id: HspId): Promise<void> {
       </div>
 
       <p v-if="state.phase === 'loading'" class="muted" data-testid="results-status" data-phase="loading">Reading the results…</p>
+      <RunStatus v-else-if="state.phase === 'unavailable' && active && selected" :coordinator="coordinator" :run="selected" :runs="runs" />
       <p
         v-else-if="state.phase === 'unavailable' || state.phase === 'failed'"
         class="results-message"
@@ -196,25 +212,27 @@ async function toAlignments(id: HspId): Promise<void> {
           </button>
         </nav>
 
-        <div v-show="HITS_VIEWS.includes(view)" class="hits-view" data-testid="results-hits" :data-run="loaded.run.snapshot.number">
-          <SubjectTable v-if="view === 'hits' && state.subjects.length > 0" :results="results" :state="state" />
-          <GraphicSummary
-            v-else-if="view === 'graphic' && state.subjects.length > 0"
-            :results="results"
-            :state="state"
-            @show-alignment="toAlignments"
-          />
-          <AlignmentsView
-            v-else-if="view === 'alignment' && state.hsps.length > 0"
-            ref="alignments"
-            :results="results"
-            :state="state"
-            @descriptions="view = 'hits'"
-          />
-          <template v-else-if="view === 'dotplot' && state.hsps.length > 0">
-            <DotPlot :results="results" :state="state" @show-alignment="toAlignments" />
-            <HspTable :results="results" :state="state" />
+        <!-- NCBI's classic results page: the three sections on one page, in its order. The Alignments
+             show the selected subject; a row of the Descriptions or a bar of the Graphic Summary selects it. -->
+        <div v-show="view === 'hits'" class="hits-view" data-testid="results-hits" :data-run="loaded.run.snapshot.number">
+          <template v-if="state.subjects.length > 0">
+            <section class="hits-section" data-testid="section-graphic">
+              <h3 class="section-heading">Graphic Summary</h3>
+              <GraphicSummary :results="results" :state="state" @show-alignment="toAlignments" />
+            </section>
+            <section class="hits-section" data-testid="section-descriptions">
+              <h3 class="section-heading">Descriptions</h3>
+              <SubjectTable :results="results" :state="state" />
+            </section>
+            <section v-if="state.hsps.length > 0" class="hits-section" data-testid="section-alignments">
+              <h3 class="section-heading">Alignments</h3>
+              <AlignmentsView ref="alignments" :results="results" :state="state" />
+            </section>
           </template>
+        </div>
+        <div v-if="view === 'dotplot' && state.hsps.length > 0" class="hits-view" data-testid="results-dotplot">
+          <DotPlot :results="results" :state="state" @show-alignment="toAlignments" />
+          <HspTable :results="results" :state="state" />
         </div>
         <RunDetails v-if="view === 'details'" :run="loaded.run" :loaded="loaded" />
         <OutputsView v-if="view === 'outputs'" :coordinator="coordinator" :run="loaded.run" />

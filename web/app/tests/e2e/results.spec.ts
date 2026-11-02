@@ -764,11 +764,15 @@ for (const c of PROGRAM_CASES) {
     // an animation frame, after the attributes above are rendered, so the titles are waited for.
     const titles = async () => JSON.parse((await canvas.getAttribute('data-titles'))!) as [string, string];
     await expect(canvas).toHaveAttribute('data-titles', /^\[/);
-    // A protein axis against a nucleotide one says, while to scale, that it is drawn at 3 nt per aa.
-    const drawnAt = (unit: Unit, other: Unit) => (codon(unit, other) === 3 && toScale ? '; drawn at 3 nt per aa' : '');
-    expect((await titles())[1]).toMatch(
-      new RegExp(`^Subject ${literal(fields[1]!)} \\((${c.units.subject === 'aa' ? 'aa|kaa' : 'bp|kbp'})${drawnAt(c.units.subject, c.units.query)}\\)$`),
-    );
+    // A protein axis against a nucleotide one says, while to scale, that it is drawn at 3 nt per aa,
+    // where its room holds the note with the unit (BLASTX's short subject axis may not).
+    const drawnAt = (unit: Unit, other: Unit) => (codon(unit, other) === 3 && toScale ? '(?:; drawn at 3 nt per aa)?' : '');
+    // Where the room is short, the ID is cut with an ellipsis and the unit kept.
+    const subjectTitle = (await titles())[1];
+    const shown = new RegExp(`^Subject (.+) \\((${c.units.subject === 'aa' ? 'aa|kaa' : 'bp|kbp'})${drawnAt(c.units.subject, c.units.query)}\\)$`).exec(subjectTitle);
+    expect(shown, subjectTitle).not.toBeNull();
+    const shownId = shown![1]!;
+    expect(shownId === fields[1] || (shownId.endsWith('…') && fields[1]!.startsWith(shownId.slice(0, -1))), subjectTitle).toBe(true);
     if (c.id === 'tblastn') {
       // TBLASTN's pair is to scale at 1280 px, its protein axis drawn at 3 nt per aa, which its title
       // says; on a phone the 120 px minimum changes the scale, and the note says so instead (W4b

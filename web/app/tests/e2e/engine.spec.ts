@@ -30,7 +30,7 @@ let notIsolated: HarnessServer;
 /**
  * A TBLASTN search of several query batches (62,500 residues of NZ_CP006932's proteins
  * against 437,500 nt of its genome), as files in a directory of their own: the query is
- * searched in batches of 20,000 residues, each with its own thread pool. The directory is
+ * searched in batches of 20,000 residues, all on the run's thread pool. The directory is
  * made by the worker that runs these tests and removed after them.
  */
 let batchesDir: string | undefined;
@@ -213,9 +213,10 @@ test('R1: searches of one subject with other queries and options reuse it and gi
   record('r1', browserName, rows);
 });
 
-test('a search that builds one thread pool after another runs threaded from a new runtime', async ({ context }) => {
-  // The first threaded search of a runtime: each query batch starts its pool while the
-  // threads of the previous pool are still returning (the ThreadHost's spare thread workers).
+test('a run of several searches or query batches runs threaded from a new runtime', async ({ context }) => {
+  // The first threaded search of a runtime, whose thread workers are one set: the query
+  // batches, and the two searches of -num_alignments (outfmt 0 has another hit list size than
+  // 6 and 7), all run on the run's one thread pool (with_run_pool).
   const page = await openHarness(context, isolated);
   const batches: VbrCase = {
     id: 'tblastn.query_batches',
@@ -226,15 +227,18 @@ test('a search that builds one thread pool after another runs threaded from a ne
     subject: 'batches_subject.fasta',
     frozen: {},
   };
+  const twoSearches: VbrCase = { ...batches, id: 'tblastn.query_batches.num_alignments', options: ['-num_alignments', '3'] };
   const file = (name: string) => ({ url: `/__extra/${name}`, name });
-  for (const threads of [2, 4]) {
-    const search: SearchCase = { ...searchOf(batches, threads), query: file(batches.query), subject: file(batches.subject) };
-    // A new application (a session with its own options), so that this is the first search of its runtime.
-    const [result] = await page.evaluate((s) => window.losatHarness!.engine.searches([s], { renewal: {} }), search);
-    expect(result!.status, result!.record.error).toBe('completed');
-    expect(result!.record.runtimePath).toBe('threaded');
-    expect(result!.record.threads).toBe(threads);
-    if (NATIVE !== undefined) expectOutputs(batches, result!);
+  for (const vbr of [batches, twoSearches]) {
+    for (const threads of [2, 4]) {
+      const search: SearchCase = { ...searchOf(vbr, threads), query: file(vbr.query), subject: file(vbr.subject) };
+      // A new application (a session with its own options), so that this is the first search of its runtime.
+      const [result] = await page.evaluate((s) => window.losatHarness!.engine.searches([s], { renewal: {} }), search);
+      expect(result!.status, result!.record.error).toBe('completed');
+      expect(result!.record.runtimePath).toBe('threaded');
+      expect(result!.record.threads).toBe(threads);
+      if (NATIVE !== undefined) expectOutputs(vbr, result!);
+    }
   }
 });
 

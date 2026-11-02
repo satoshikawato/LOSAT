@@ -10,11 +10,13 @@
 // (LOSAT_WASI_PRESPAWN=0), though by default it prepares standby workers too; a browser
 // cannot be relied on to start a worker then.
 //
-// A search can build one thread pool after another (TBLASTN builds one for each batch of
-// queries). The threads of a pool return only after the spawns of the next pool have
-// returned: the engine's thread library holds a lock across `thread-spawn` that an ending
-// thread needs (S09). So a search of N threads has two sets of N-1 thread workers: the next
-// pool starts in the set that the previous pool did not use.
+// A run of the engine builds one thread pool for all of its searches (`with_run_pool`,
+// LOSAT/src/utils/threading.rs: a run searches once per hit list size of its formats, and
+// BLASTP's block search can search again), so its N-1 threads start once. A pool after another
+// would need thread workers of its own: the threads of a pool may not have returned when the next
+// pool spawns, and they cannot return while it waits, because the engine's thread library holds a
+// lock across `thread-spawn` that an ending thread needs (S09). A search of N threads therefore
+// has one set of N-1 thread workers, all ready before the search starts (`prepare`).
 import {
   SLOT_FAILED,
   SLOT_PREPARING,
@@ -62,11 +64,11 @@ export class ThreadHost {
   constructor(private readonly options: ThreadHostOptions) {}
 
   /**
-   * Makes two sets of `count` thread workers (the threads of a search of `count` + 1
-   * threads, and a spare set for its next pool) and waits until all of them are ready.
+   * Makes `count` thread workers (the threads of a search of `count` + 1 threads) and waits
+   * until all of them are ready: also those whose thread of the previous search is returning.
    */
   async prepare(count: number): Promise<void> {
-    const total = 2 * count;
+    const total = count;
     while (this.slots.length < total) this.slots.push(this.createSlot());
     const deadline = performance.now() + (this.options.readyTimeoutMs ?? DEFAULT_TIMEOUT_MS);
     for (;;) {

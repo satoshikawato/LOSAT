@@ -421,6 +421,7 @@ export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNKEEPFEW=1
 export LOSAT_X_TBNLINKCTX=1
 export LOSAT_X_TBNLINKSETS=1
+export LOSAT_X_TBNLOOPFREE=1
 export LOSAT_X_TBNLUTLEAN=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNPAIRCAP=1
@@ -5264,6 +5265,41 @@ Scheduling (each value computed by one thread with the original function; order 
   (5 of 8, 10, 8, 9 faster); the 2 MB cut at 8 / 16 / 32 x0.9913 / x0.9955 / x0.9754; `abr_genes` at 8 / 32 x0.9999 /
   x0.9941; AP027131 `-subject`, which does not run this code, at 1 / 16 / 32 x0.9994 / x1.0007 / x1.0072 (`=0` x0.9983 /
   x0.9979 / x1.0115; cycles x0.9986 / x0.9983 / x1.0004).
+- `LOSAT_X_TBNLOOPFREE=1` tblastn (memory; in the strict set from the pull request that added it, 2026-11-02; `=0`
+  turns it off; `tblastn/x_oid_flow.rs` `x_loop_free`, called where `XOidFlow::work` returns and after the owner's
+  reduction in `stage_d_pipeline.rs`): where the subject flow runs (2+ threads and several subjects: `-db`, or
+  `-subject` with several subjects), a thread whose loop over the chunks of subjects ends frees the buffers it kept from
+  one subject to the next: the unit path's diagonal table, offset pairs, initial hits and gapped alignment scratch
+  (`search_gapped.rs` `XUnitBuffers`), the frames kept for the next plan (`x_subject_translate.rs`) and the letter
+  buffer (`x_subject_store.rs`). Kept, they stayed in the thread's heap through the
+  query batch's redo (or traceback), under its blocks, until the next batch's loop made use of them again (48 threads
+  on `dmel_b4.faa` x zebrafish cDNAs: 17 MiB live at the redo's peak). NCBI's search thread frees its word-finder state
+  when its loop over the subjects ends and its caller the gapped alignment memory (`blast_engine.c`
+  `s_BlastCoreAuxStructFree`, `BLAST_GapAlignStructFree`). A thread that searches a subject afterwards makes new ones,
+  as for its first subject and as every unit on the pool does: a new diagonal table's entries all lie beyond the
+  two-hit window, as a kept table's do after NCBI's offset step, so no reported value changes. The presence bytes
+  (`x_scan_byte.rs`, 32 KiB a thread) stay: the chunks of a split query batch are searched in flows of their own with
+  the same table, and building them again in each flow cost more than they hold (`dmel_b4.faa` x 81 KB at 32 threads:
+  instructions x1.012 and 1,600 more voluntary context switches, wall about 10 ms of 90). One flow runs per query batch searched on a pool (per query chunk of a split batch), so a thread frees
+  and makes its buffers once per batch. Unit test `a_thread_frees_its_kept_frames_when_its_loop_ends`;
+  `tests/tblastn_db_stream.rs` `buffers_freed_at_the_end_of_a_threads_loop_give_the_same_reports` (query batches
+  searched one after another on one pool, side by side, and on their own pools).
+  Reach: where the subject flow runs (new) or not (ref), recorded where the flow is chosen.
+  Measured 2026-11-02 on the workstation (2x Xeon Gold 6338; base dev d955d8df; every output of a case the same bytes
+  in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16 CPUs for
+  every run, medians of the pairs in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): `dmel_b4.faa` x zebrafish
+  cDNAs (30 MB sequence file, `-db`, `-evalue 1e-5 -max_target_seqs 5`) at 2 / 4 / 8 / 16 / 32 / 40 / 48 threads
+  26.2 / 30.1 / 37.5 / 50.4 / 74.2 / 82.3 / 95.5 -> 25.0 / 27.6 / 34.5 / 46.4 / 66.0 / 71.8 / 83.7 MiB (x0.974 / x0.925 /
+  x0.907 / x0.919 / x0.880 / x0.871 / x0.874, 16 rounds, lower in 12 and then 16 of 16; NCBI 126 to 162); a 2 MB cut of
+  those cDNAs at 16 / 48 x0.923 / x0.953 (8 rounds), 81 KB of `abr_genes` at 16 x0.988; no flow or no peak in the redo:
+  AP027131 x AP027133 `-db` at 48 x0.998, `-subject` at 16 / 48 x1.002 / x0.996 (16 rounds), 30 C. elegans proteins x
+  the C. elegans genome `-db` at 16 x1.004 (16 rounds; `=0` in the same binary x1.005, so the two binaries differ, not
+  the switch: x0.999 against `=0`, and x0.998 with `MALLOC_MMAP_THRESHOLD_=131072`, which reads the live data). At one
+  thread x0.99998 of the instructions (`dmel_b4.faa`) and x1.00000 (AP027131); BLASTP x0.99998, BLASTX and TBLASTX
+  x1.00000. Time (node 1, cores warmed 3 s before each run, arms alternating in order; the PR's binary against the
+  base, 12 rounds; one thread on one idle core of node 0): `dmel_b4.faa` at 1 / 8 / 16 / 32 x1.0002 / x0.9987 / x0.9966 /
+  x1.0002 (cycles x0.9992 / x0.9991 / x0.9980 / x0.9991); the 2 MB cut at 8 / 16 / 32 x0.9968 / x1.0013 / x0.9897;
+  `abr_genes` at 8 / 32 x0.9811 / x0.9722 (instructions x1.00001 / x1.00042).
 - `LOSAT_X_TBNPAIRCAP=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-26;
   `=0` turns it off; `tblastn/search_seed.rs` `x_scan_plan`, `X_PAIR_ROOM`): the offset-pair array that a unit's scan
   calls fill (one per running unit; the units a thread runs one after another share theirs, `XUnitBuffers`) holds

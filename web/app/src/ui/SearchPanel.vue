@@ -42,7 +42,7 @@ const runCount = computed(() => {
  */
 const buttonLabel = computed(() => {
   if (state.value.submitting) return 'Starting…';
-  return runCount.value > 1 && program.value.unavailable === undefined ? `Run LOSAT (${runCount.value} runs)` : 'Run LOSAT';
+  return runCount.value > 1 ? `Run LOSAT (${runCount.value} runs)` : 'Run LOSAT';
 });
 /**
  * Whether the engine's describe of the program has come. It comes after the page or the
@@ -99,7 +99,7 @@ function onThreads(event: Event): void {
         v-for="p in PROGRAMS"
         :key="p.id"
         class="program-tab"
-        :class="{ selected: state.program === p.id, unavailable: p.unavailable !== undefined }"
+        :class="{ selected: state.program === p.id }"
       >
         <input
           type="radio"
@@ -113,7 +113,6 @@ function onThreads(event: Event): void {
       </label>
     </fieldset>
     <p class="program-summary" data-testid="program-summary">{{ program.summary }}</p>
-    <p v-if="program.unavailable" class="notice" data-testid="program-unavailable">{{ program.unavailable }}</p>
 
     <InputPanel v-for="role in roles" :key="role" :draft="draft" :state="state" :role="role" />
 
@@ -126,12 +125,12 @@ function onThreads(event: Event): void {
       <button
         class="primary-action"
         data-testid="run-losat"
-        :disabled="state.submitting || program.unavailable !== undefined"
+        :disabled="state.submitting"
         @click="submit('top')"
       >
         {{ buttonLabel }}
       </button>
-      <p v-if="!program.unavailable" class="search-summary-line" data-testid="search-summary-line">
+      <p class="search-summary-line" data-testid="search-summary-line">
         <template v-for="(part, index) in summaryParts" :key="index"><strong v-if="part.strong">{{ part.text }}</strong><template v-else>{{ part.text }}</template></template>
       </p>
     </div>
@@ -167,7 +166,7 @@ function onThreads(event: Event): void {
       </p>
     </div>
 
-    <section v-if="!program.unavailable" class="algorithm-parameters" data-testid="algorithm-parameters">
+    <section class="algorithm-parameters" data-testid="algorithm-parameters">
       <h3 class="parameters-heading">
         <button
           type="button"
@@ -195,7 +194,7 @@ function onThreads(event: Event): void {
           <button
             class="primary-action"
             data-testid="run-losat-bottom"
-            :disabled="state.submitting || program.unavailable !== undefined"
+            :disabled="state.submitting"
             @click="submit('bottom')"
           >
             {{ buttonLabel }}

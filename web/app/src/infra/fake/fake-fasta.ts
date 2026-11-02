@@ -143,7 +143,6 @@ function isAsciiWhitespace(byte: number): boolean {
  */
 export class FakeInputChecker implements InputChecker {
   async check(program: ProgramId, role: InputRole, bytes: Uint8Array): Promise<InputCheck> {
-    if (program === 'blastx') return { ok: false, message: 'blastx is not available in LOSAT Web ABI v2 yet' };
     let records: IndexedRecord[];
     try {
       records = fakeScan(bytes);

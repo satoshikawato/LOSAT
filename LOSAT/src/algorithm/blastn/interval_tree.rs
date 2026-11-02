@@ -237,7 +237,7 @@ struct XCellEntry {
 // they do not change any value NCBI computes. Past a limit the index is dropped and the
 // tree walk answers.
 /// Grid cells at most (the per-cell heads take four bytes each).
-const X_MAX_CELLS: usize = 1 << 16;
+pub(crate) const X_MAX_CELLS: usize = 1 << 16;
 /// An HSP whose box overlaps more cells than this is kept in `overflow`.
 const X_MAX_CELLS_PER_HSP: usize = 1024;
 /// With more HSPs than this in `overflow` the index is abandoned.

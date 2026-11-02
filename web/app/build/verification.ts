@@ -16,7 +16,7 @@ import type { ProgramId } from '../src/domain/programs.ts';
 const VIRTUAL_ID = 'virtual:losat-verification';
 const RESOLVED_ID = `\0${VIRTUAL_ID}`;
 const NCBI_VERSION = '2.17.0';
-const PROGRAMS = ['blastn', 'blastp', 'tblastn', 'tblastx'] as const satisfies readonly ProgramId[];
+const PROGRAMS = ['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx'] as const satisfies readonly ProgramId[];
 const DESCRIBE = fileURLToPath(new URL('../src/infra/fake/describe.json', import.meta.url));
 
 type Program = (typeof PROGRAMS)[number];

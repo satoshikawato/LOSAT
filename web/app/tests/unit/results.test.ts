@@ -296,20 +296,23 @@ describe('verificationBadge', () => {
     grammar,
   };
 
-  it('certifies a run inside a profile, and says what that means', () => {
+  it('supports a run inside a profile, and says what that means', () => {
     const badge = verificationBadge(input, table);
     expect(badge.level).toBe('certified');
-    expect(badge.label).toBe('Certified profile');
+    expect(badge.label).toBe('Supported');
     expect(badge.details.join(' ')).toMatch(/not a comparison of your inputs with NCBI/);
+    // No word of a certification (DW-36): the badge says that the run is supported.
+    expect(`${badge.label} ${badge.details.join(' ')}`).not.toMatch(/certif/i);
   });
 
-  it('says why a run is outside the certified profiles', () => {
+  it('says why a run is not supported', () => {
     const reasons = (change: Partial<BadgeInput>) => verificationBadge({ ...input, ...change }, table);
     expect(reasons({ argv: ['blastn', '-evalue', '1'] }).details.join(' ')).toMatch(/for outfmt 0 and 6, not for outfmt 7/);
     expect(reasons({ argv: ['blastn', '-evalue', '2'] }).details.join(' ')).toMatch(/were not compared with NCBI BLAST\+ 2\.17\.0/);
     expect(reasons({ threads: 3 }).details.join(' ')).toMatch(/used 3 threads; the browser runtime was checked with 1, 2 and 4 threads/);
     expect(reasons({ program: 'tblastx', argv: ['tblastx'] }).details.join(' ')).toMatch(/browser runtime of tblastx was not checked/);
-    expect(reasons({ threads: 3 }).label).toBe('Outside certified profile');
+    expect(reasons({ threads: 3 }).label).toBe('Not supported');
+    expect(reasons({ argv: ['blastn', '-evalue', '2'] }).details.join(' ')).not.toMatch(/certif/i);
     expect(reasons({ runtimePath: 'fake' }).level).toBe('development');
   });
 

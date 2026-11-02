@@ -13,7 +13,7 @@
 // `register`), shown with its message. Several sources of a role are one combined search
 // input, or separate searches (one run per source, started as a group).
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES } from '../domain/argv';
-import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
+import { includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
 import { formParameters, setField, type FieldValue, type FormValues } from '../domain/parameters';
 import { PROGRAMS, programById, type InputRole, type ProgramId } from '../domain/programs';
 import { REGION_FLAG, regionProblem, regionValue, type RegionText } from '../domain/region';
@@ -164,12 +164,8 @@ export class SearchDraft {
     this.loadDescription(program);
     for (const role of ROLES) {
       for (const source of this.role(role).sources) {
-        if (next.unavailable !== undefined) {
-          this.scheduleCheck(role, source.key);
-          continue;
-        }
-        if (source.base !== undefined && source.base.parser !== indexParser(program)) {
-          // A program with another FASTA reader needs another record table (BLASTX, plan TD-8).
+        if (source.base !== undefined && source.base.parser !== next.fastaParser) {
+          // A program with another FASTA reader needs another record table (plan TD-8).
           this.reindex(role, source.key);
         } else {
           this.scheduleCheck(role, source.key, 0);
@@ -315,12 +311,19 @@ export class SearchDraft {
 
   // --- derived views ----------------------------------------------------------------------
 
-  /** The record that the role's region applies to: the role's only included record. */
+  /**
+   * The record that the role's region applies to: the role's only included record, for a
+   * program that takes a subrange (a region chosen for another program is kept, unused).
+   */
   regionRecord(role: InputRole): DatasetRecord | undefined {
+    if (programById(this.state.get().program).subrange === false) return undefined;
     return this.onlyRecord(role)?.record;
   }
 
-  /** The region of the role, if it was chosen on the record that `regionRecord` gives now. */
+  /**
+   * The region of the role, if it was chosen on the role's only record as it is now. A program
+   * without a subrange keeps it unused (`regionRecord` gives no record).
+   */
   region(role: InputRole): RegionText | undefined {
     const region = this.role(role).region;
     return region !== undefined && region.record === this.regionIdentity(role) ? region.text : undefined;
@@ -407,8 +410,6 @@ export class SearchDraft {
   private async prepareAndEnqueue(): Promise<EnqueueAllResult> {
     await this.idle();
     const { program, threads, title } = this.state.get();
-    const descriptor = programById(program);
-    if (descriptor.unavailable !== undefined) return { ok: false, message: descriptor.unavailable };
     for (const role of ROLES) {
       const problem = this.inputProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
@@ -446,7 +447,6 @@ export class SearchDraft {
    * undefined when nothing does. "Run LOSAT" reports the full message.
    */
   readiness(): string | undefined {
-    if (programById(this.state.get().program).unavailable !== undefined) return undefined;
     for (const role of ROLES) {
       const problem = this.problemOf(role);
       if (problem !== undefined) return problem.short;
@@ -558,7 +558,7 @@ export class SearchDraft {
     const generation = this.nextGeneration(task);
     const current = () => this.generations.get(task) === generation;
     const started = this.deps.now();
-    const parser = indexParser(this.state.get().program);
+    const parser = programById(this.state.get().program).fastaParser;
     try {
       const ref = await this.deps.data.addSource(file);
       const head = await this.deps.data.previewSource(ref.sourceId, HEAD_BYTES).then(headText, () => undefined);
@@ -583,16 +583,6 @@ export class SearchDraft {
   }
 
   private scheduleCheck(role: InputRole, key: string, delay?: number): void {
-    if (programById(this.state.get().program).unavailable !== undefined) {
-      // Nothing is checked for a program that cannot be searched yet.
-      this.cancelTask(`check:${role}:${key}`);
-      this.updateSource(role, key, (source) => {
-        const rest = { ...source };
-        delete (rest as { check?: unknown }).check;
-        return rest;
-      });
-      return;
-    }
     this.updateSource(role, key, (source) => (source.status === 'ready' ? { ...source, check: { state: 'pending' } } : source));
     this.debounce(`check:${role}:${key}`, () => this.track(this.check(role, key)), delay);
   }
@@ -654,10 +644,6 @@ export class SearchDraft {
   private async validate(): Promise<void> {
     const generation = this.generations.get('validate');
     const { program } = this.state.get();
-    if (programById(program).unavailable !== undefined) {
-      this.set({ validation: { state: 'idle' } });
-      return;
-    }
     let argv: readonly string[];
     try {
       argv = buildArgv({
@@ -765,16 +751,6 @@ export class SearchDraft {
     }
     this.state.set(next as DraftState);
   }
-}
-
-/**
- * The FASTA reader that indexes the sources of a program: its own, or for a program that
- * cannot be searched yet, that of BLASTN (the sources are indexed again when another
- * reader is needed).
- */
-function indexParser(program: ProgramId): FastaParserKind {
-  const descriptor = programById(program);
-  return descriptor.unavailable === undefined ? descriptor.fastaParser : programById('blastn').fastaParser;
 }
 
 /** The included records of a ready source. */

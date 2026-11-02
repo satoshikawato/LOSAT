@@ -120,8 +120,8 @@ export function vbrCases(): VbrCase[] {
     // BLASTX's frozen NCBI rows of the three formats are those of blastx-fast (-subject, DW-36).
     manifestCase('bxfast.def', ['bxfast.def.0', 'bxfast.def.6', 'bxfast.def.7']),
     {
-      // A genome of 310,474 nt against its 111 proteins: BLASTX reads the query in batches
-      // of 10,002 letters and, at 2 threads or more, searches the batches with the flow of
+      // A genome of 306,008 nt against its 111 proteins: BLASTX reads the query in 31 batches
+      // of up to 10,002 letters and, at 2 threads or more, searches the batches with the flow of
       // LOSAT_X_BXFLOW (its workers wait with `recv_timeout` and `rayon::yield_now`, which
       // must work in a browser's Worker; DECISIONS of line SX 5 (f)).
       id: 'blastx.batches',

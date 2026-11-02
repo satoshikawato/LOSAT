@@ -107,8 +107,8 @@ fn holds_root(text: &[u8]) -> bool {
 /// has not; `mask_nucl_ids` and `mask_nucl_y` give one algorithm the ids 101 and 100. Approved differences (expected bytes from NCBI's own neighbouring
 /// run, line BDC's `probe/make_expected.py`): 2, `gnl|BL_ORD_ID|n` (`N846`); 3, a mask and
 /// `-strand minus` in FASTA (`N1214`); 5, a mask on a protein in FASTA (`N1359`); 6, the mask of
-/// the record before, on one accession of two sequences (`N1742`; this widening of item 6 is
-/// proposed in version 1.4 of the record).
+/// the record before, on one accession of two sequences (`N1742`; this widening of item 6 was
+/// approved with version 1.4 of the record).
 #[rustfmt::skip]
 const CASES: &[(&str, &[&str], i32)] = &[
     ("I37", &["-db", "db/p5 db/n5", "-info"], 2),

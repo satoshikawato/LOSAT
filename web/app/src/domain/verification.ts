@@ -93,9 +93,9 @@ export interface Badge {
 }
 
 // The words of the badge (the maintainer, 2026-11-02: no "certified", which reads as an official
-// certification; the badge says that the run is supported, DW-36). The levels keep their names.
+// certification; the badge says whether the run is supported, DW-36). The levels keep their names.
 export const SUPPORTED_LABEL = 'Supported';
-export const NOT_CHECKED_LABEL = 'Not checked';
+export const NOT_SUPPORTED_LABEL = 'Not supported';
 
 export function verificationBadge(input: BadgeInput, table: VerificationTable): Badge {
   const exceptions = approvedExceptions(input.program, input.argv);
@@ -133,7 +133,7 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
       );
     }
   }
-  if (outside.length > 0) return { level: 'outside', label: NOT_CHECKED_LABEL, details: outside, exceptions };
+  if (outside.length > 0) return { level: 'outside', label: NOT_SUPPORTED_LABEL, details: outside, exceptions };
   return {
     level: 'certified',
     label: SUPPORTED_LABEL,

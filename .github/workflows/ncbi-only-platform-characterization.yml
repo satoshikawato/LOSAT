@@ -9,7 +9,8 @@ run-name: blastdbcmd batch line ends ${{ inputs.candidate_sha }}
 # Ctrl-Z, from a file and from the standard input) on Windows x64, macOS arm64 and macOS x64.
 # NcbiGetlineEOL (corelib/ncbistre.cpp:196-208) reads lines differently on each, and
 # CArg_InputFile (corelib/ncbiargs.cpp:695-737) opens the file in text mode on Windows.
-# Then `cargo test --test common blastdbcmd`. The outputs are uploaded; nothing is compared
+# Then the comparison (bdc5_compare_o.py) and `cargo test --test common blastdbcmd` with this run's NCBI
+# bytes as the expected ones (bdc5_freeze_o.py). The outputs are uploaded; nothing is compared
 # here (the record is frozen by line BDC).
 
 on:
@@ -35,14 +36,17 @@ jobs:
       matrix:
         include:
           - platform_id: windows-x64
+            eol_dir: windows
             runner: windows-2025
             oracle_archive: ncbi-blast-2.17.0+-x64-win64.tar.gz
             exe: .exe
           - platform_id: macos-arm64
+            eol_dir: macos
             runner: macos-15
             oracle_archive: ncbi-blast-2.17.0+-aarch64-macosx.tar.gz
             exe: ""
           - platform_id: macos-x64
+            eol_dir: macos
             runner: macos-15-intel
             oracle_archive: ncbi-blast-2.17.0+-x64-macosx.tar.gz
             exe: ""
@@ -93,6 +97,10 @@ jobs:
           python LOSAT/tests/bdc5_eol_probe.py --run-dir LOSAT/tests/blastdbcmd --out "$OUT/ncbi" \
             -- "$ORACLE/ncbi-blast-2.17.0+/bin/blastdbcmd${{ matrix.exe }}"
           cat "$OUT/ncbi/manifest.tsv"
+      # The test of the candidate (blastdbcmd_batch_line_ends.rs) reads NCBI's bytes of its platform from
+      # LOSAT/tests/blastdbcmd/eol/<dir>; this run's own outputs are put there (line BDC freezes the same bytes).
+      - name: Stage this run's NCBI outputs as the test's expected bytes
+        run: python LOSAT/tests/bdc5_freeze_o.py "$OUT/ncbi" "LOSAT/tests/blastdbcmd/eol/${{ matrix.eol_dir }}"
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.92.0
@@ -103,6 +111,12 @@ jobs:
           python LOSAT/tests/bdc5_eol_probe.py --run-dir LOSAT/tests/blastdbcmd --out "$OUT/losat" \
             -- "$GITHUB_WORKSPACE/LOSAT/target/release/losat${{ matrix.exe }}" blastdbcmd
           cat "$OUT/losat/manifest.tsv"
+      - name: Compare LOSAT with NCBI, probe O
+        continue-on-error: true
+        run: |
+          crlf=""
+          if [[ "$RUNNER_OS" == Windows ]]; then crlf=--crlf; fi
+          python LOSAT/tests/bdc5_compare_o.py --ncbi "$OUT/ncbi" --losat "$OUT/losat" $crlf | tee "$OUT/compare.tsv"
       - name: cargo test --test common blastdbcmd
         run: |
           set -o pipefail

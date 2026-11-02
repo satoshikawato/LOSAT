@@ -48,6 +48,7 @@ INPUTS = {
     "e_cr2": f"{E1}\r\r{E2}\r\n",
     "e_crlfcr": f"{E1}\r\n\r{E2}\r\n",
     "e_us": "XP_000001.1\r\nXP_000020.1\r\n",
+    "e_ord": "gnl|BL_ORD_ID|3\r\ngnl|BL_ORD_ID|1 2-10\r\n",
     "t_lf": "9606\n562\n",
     "t_crlf": "9606\r\n562\r\n",
     "t_cr": "9606\r562\r",
@@ -64,7 +65,9 @@ INPUTS = {
 
 ENTRY = ["-db", "db/p5", "-entry_batch"]
 TAX = ["-db", "j/lst/p5", "-no_taxid_expansion", "-outfmt", "%a %T", "-taxidlist"]
-PIG = ["-db", "db/m/pmg", "-ipg_batch"]
+# %s, not the FASTA: without a range NCBI's FASTA masks only the first third of a protein (approved
+# difference 5 of PD-LOSAT-BLASTDBCMD-DEVIATIONS); %s applies the whole mask.
+PIG = ["-db", "db/m/pmg", "-outfmt", "%o %s", "-ipg_batch"]
 
 # (id, argv before the file, input, the file on the standard input instead, argv after)
 CASES = [
@@ -94,6 +97,7 @@ CASES = [
     ("O24", ENTRY, "e_crcrlf", True, ["-outfmt", "%a"]),
     ("O25", ENTRY, "e_crlf", False, ["-outfmt", "%a", "-target_only"]),
     ("O26", ENTRY, "e_us", False, ["-outfmt", "%a"]),
+    ("O27", ["-db", "db/p4n", "-entry_batch"], "e_ord", False, []),
     ("O31", TAX, "t_lf", False, []),
     ("O32", TAX, "t_crlf", False, []),
     ("O33", TAX, "t_cr", False, []),
@@ -109,7 +113,7 @@ CASES = [
     ("O44", PIG, "p_crcrlf", False, []),
     ("O45", PIG, "p_sub", False, []),
     ("O46", PIG, "p_crlf", True, []),
-    ("O47", PIG, "p_cr", True, ["-outfmt", "%o %a"]),
+    ("O47", ["-db", "db/m/pmg", "-ipg_batch"], "p_cr", True, ["-outfmt", "%o %a"]),
 ]
 
 

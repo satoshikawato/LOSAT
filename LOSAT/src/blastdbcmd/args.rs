@@ -495,8 +495,10 @@ impl LineEnds {
 }
 
 /// The bytes of a file that a stream opened in text mode reads on `platform`: on Windows
-/// (the C runtime's text mode, under NCBI's `CNcbiIfstream` and the `cin` of `O_TEXT`) those
-/// before the first Ctrl-Z, with each `\r\n` read as `\n`; elsewhere the bytes of the file.
+/// (the C runtime's text mode, under NCBI's `CNcbiIfstream` and the `cin` that
+/// `NcbiSys_setmode` sets to `O_TEXT`, ncbiargs.cpp:717-720) those before the first Ctrl-Z,
+/// with each `\r\n` read as `\n` (probe O of line BDC: O04, O09-O12); elsewhere the bytes of
+/// the file.
 fn text_mode(mut bytes: Vec<u8>, platform: LineEnds) -> Vec<u8> {
     if platform != LineEnds::Windows {
         return bytes;

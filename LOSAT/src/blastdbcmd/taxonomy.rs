@@ -67,12 +67,11 @@ pub(super) struct Ended(pub i32);
 // ends at `\n` alone, and a `\r` stays and reads as white space around the number (J109).
 // Unlike a search program's list (`db_filter`), the id is kept without the taxonomy file
 // (T02), and a line of blanks is read as a number. An id that is not a number escapes
-// NCBI's `Run` as a
-// `CStringException` with the path of NCBI's build in its text (exit status 255: J101,
-// J102, J107, J108, J131, S35), which LOSAT refuses (line BDC DECISIONS 8). `-taxids 1`
-// never ends in NCBI (the parent of taxid 1 is 1, probe J120); LOSAT's walk visits each
-// taxid once and ends with every taxid below it (`TaxonomySqlite::descendants`, DI-8
-// DECISIONS 10).
+// NCBI's `Run` as a `CStringException` with the path of NCBI's build in its text (exit
+// status 255: J101, J102, J107, J108, J131, S35), which LOSAT refuses (line BDC DECISIONS
+// 8). `-taxids 1` never ends in NCBI (the parent of taxid 1 is 1, probe J120); LOSAT's walk
+// visits each taxid once and ends with every taxid below it (`TaxonomySqlite::descendants`,
+// DI-8 DECISIONS 10).
 /// The taxids of `-taxids` / `-taxidlist`, with their descendants in the taxonomy file of
 /// the search path unless `-no_taxid_expansion`; NCBI's warning when that file is missing
 /// or not one NCBI reads goes to `diag`.

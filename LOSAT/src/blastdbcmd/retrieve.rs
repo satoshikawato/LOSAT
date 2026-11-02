@@ -1353,8 +1353,8 @@ impl Run<'_, '_> {
     //     }
     //     return (err_found) ? 1 : 0;
     // ```
-    // An id that is not an `int` is the PIG 0 (`fConvErr_NoThrow`; a `\r` of a CRLF line
-    // stays on the id: J207).
+    // An id that is not an `int` is the PIG 0 (`fConvErr_NoThrow`; on Linux a `\r` of a CRLF
+    // line stays on the id: J207, O42).
     /// `-ipg_batch`: the sequence of the PIG of each line of `file`, with the line's range,
     /// strand and mask algorithm.
     fn batch_pig(&mut self, file: &str, config: &mut Config) -> Result<bool, Stop> {

@@ -8,11 +8,12 @@ the taxonomy, the metadata, the lists of databases and the search path (`-taxids
 `-taxidlist`, `-tax_info`, `-metadata`, `-list`, `-show_blastdb_search_path`, `-ipg`:
 `LOSAT/tests/blastdbcmd_discovery.rs`), on databases with masks (`-info`,
 `-mask_sequence_with`, `%m`: `LOSAT/tests/blastdbcmd_masks.rs`), and on several names in `-db`
-(`LOSAT/tests/blastdbcmd_several_names.rs`). Frozen on
+(`LOSAT/tests/blastdbcmd_several_names.rs`), and for the line ends of the batch files on each
+platform (`LOSAT/tests/blastdbcmd_batch_line_ends.rs`). Frozen on
 2026-10-29 and 2026-10-30 by line BDC's probe on the workstation (cases `I01`-`I38`,
 `B01`-`B61`, `C01`-`C20`, `F01`-`F34`, `S01`-`S46`, `D01`-`D112`, on 2026-10-31 `H01`-`H119`,
 `M01`-`M07` on 2026-10-29, on 2026-11-01 `I101`-`I1195`, `J101`-`J222`, `K01`-`K39` and
-`M101`-`M1003`, on 2026-11-02 `N101`-`N2042`; NCBI was not run on this tree).
+`M101`-`M1003`, on 2026-11-02 `N101`-`N2042` and `O01`-`O47`; NCBI was not run on this tree).
 
 - `db/`: databases of that probe. `p5` (version 5, `-parse_seqids`) and `p4` (version 4)
   are proteins with every Seq-id type, `n5` / `n4` the nucleotides, `p5n` / `p4n` / `n5n` /
@@ -54,6 +55,16 @@ the taxonomy, the metadata, the lists of databases and the search path (`-taxids
   differences 3 to 6 in the table of `blastdbcmd_masks.rs` is not NCBI's either: NCBI's
   headers with the letters of NCBI's `-outfmt %s` run of the same words, or, for two `%m`, the
   runs with one `%m` each (`make_expected.py`, `PD-LOSAT-BLASTDBCMD-DEVIATIONS`).
+- `eol/linux`, `eol/windows`, `eol/macos`: probe O, NCBI's bytes of the batch-file cases of
+  `blastdbcmd_batch_line_ends.rs` on each platform (`manifest.tsv`: the exit status and the
+  hashes of every case; no files for exit status 255, NCBI's exception with its build path,
+  which LOSAT refuses). Linux ran on the workstation; Windows x64 (`windows-2025`), macOS arm64
+  (`macos-15`) and macOS x64 (`macos-15-intel`) ran on GitHub Actions (run 41430195529 of the
+  branch `characterize/blastdbcmd-batch-eol`, NCBI's archives checked against their md5), the two
+  macOS outputs byte-identical but for the build path in the exception of exit status 255
+  (`eol/macos` is the arm64 copy). The Windows bytes are NCBI's text-mode output (`\r\n`) and
+  keep it (`eol/.gitattributes`); the test takes the `\r` before each `\n` away. The inputs
+  are written by the test.
 - `j/`: whole copies (every file but the build logs; no line-end conversion, `j/.gitattributes`:
   the sizes are in `-list %U` and `-metadata`) of probe J's databases: `j/lst` holds `n4`,
   `n5`, `p4`, `p5`, `p5n`, `dv4` (three volumes and their alias file) and `pal`

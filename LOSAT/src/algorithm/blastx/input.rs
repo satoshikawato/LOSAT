@@ -95,11 +95,11 @@ impl FastaRecord {
         match self.source.as_deref() {
             Some(RecordSource {
                 cut_from,
-                uncut_length: Some(length),
+                uncut_length,
                 ..
-            }) => RecordPlacement {
+            }) if *uncut_length > 0 => RecordPlacement {
                 offset: *cut_from,
-                length: *length,
+                length: *uncut_length,
             },
             _ => RecordPlacement {
                 offset: 0,
@@ -124,7 +124,7 @@ impl FastaRecord {
     pub fn cut_in_place(&mut self, from: usize, to_exclusive: usize) {
         let length = self.sequence.len();
         let source = self.source.get_or_insert_with(Default::default);
-        source.uncut_length = Some(length);
+        source.uncut_length = length;
         source.cut_from = from;
         self.sequence.truncate(to_exclusive);
         self.sequence.drain(..from);
@@ -816,7 +816,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                     uncut: None,
                     believed: believed.as_ref().map(|defline| defline.ids.clone()),
                     cut_from: 0,
-                    uncut_length: None,
+                    uncut_length: 0,
                 }));
             }
             if let Some(defline) = believed {

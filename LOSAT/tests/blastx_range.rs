@@ -196,14 +196,16 @@ fn ranged_runs_do_not_depend_on_the_threads_or_the_batch_flow() {
     }
 }
 
-/// No NCBI counterpart: until session SXd2 a range goes with outfmt 0, 6, 7 and 10 only; the
-/// other formats are refused before anything is read or written (no `-out` file either). SAM
-/// stops with NCBI's error of BLASTX's formatting handler.
+/// No NCBI counterpart: until session SXd2 a range goes with outfmt 0, 6, 7, 10 and 20 only; the
+/// other formats are refused before anything is read or written (no `-out` file either). SAM,
+/// AIRR and FASTA stop with NCBI's errors of BLASTX's formatting handler.
 #[test]
 fn a_range_with_another_format_is_refused_before_any_output() {
     let query = fixture("tests/db_search/bslice_q.fna");
     let subject = fixture("tests/db_search/bslice.faa");
-    for format in ["5", "8", "9", "11", "12", "13", "14", "15", "16", "17"] {
+    for format in [
+        "5", "8", "9", "11", "12", "13", "14", "15", "16", "17", "19", "21",
+    ] {
         for range in ["-query_loc", "-subject_loc"] {
             let out = temp_path("out");
             let out_text = out.to_string_lossy().into_owned();
@@ -215,13 +217,16 @@ fn a_range_with_another_format_is_refused_before_any_output() {
                 &[],
             );
             let stderr = String::from_utf8_lossy(&run.stderr);
-            if format == "17" {
-                // SAM is NCBI's error of BLASTX's formatting handler, which comes after the ranges.
+            let ncbi_error = match format {
+                "17" => Some("SAM format is only applicable to blastn"),
+                "19" => Some("AIRR rearrangement format is only applicable to igblastn"),
+                "21" => Some("FASTA output format is only applicable to magicblast"),
+                _ => None,
+            };
+            if let Some(ncbi_error) = ncbi_error {
+                // NCBI's errors of BLASTX's formatting handler, which comes after the ranges.
                 assert_eq!(run.code, Some(1), "{format} {range}: {stderr}");
-                assert!(
-                    stderr.contains("SAM format is only applicable to blastn"),
-                    "{stderr}"
-                );
+                assert!(stderr.contains(ncbi_error), "{format} {range}: {stderr}");
             } else {
                 assert_eq!(run.code, Some(1), "{format} {range}: {stderr}");
                 assert!(
@@ -232,7 +237,7 @@ fn a_range_with_another_format_is_refused_before_any_output() {
                 );
             }
             assert!(run.stdout.is_empty(), "{format} {range}");
-            if format == "17" {
+            if ncbi_error.is_some() {
                 // The handler of `-query` and `-out` comes before the formatting handler: an empty
                 // `-out` file, as NCBI's.
                 assert_eq!(std::fs::read(&out).ok(), Some(Vec::new()), "{range}");

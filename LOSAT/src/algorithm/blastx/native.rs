@@ -292,12 +292,13 @@ fn run_inner(
     let format = app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
     // No NCBI counterpart: the reports of `-query_loc` and `-subject_loc` are those of the
     // pairwise and tabular formats for now (line SX, session SXd1); the other formats come with
-    // SXd2. SAM (17) is NCBI's error of BLASTX's formatting handler, after the ranges.
+    // SXd2. SAM (17), AIRR (19) and FASTA (21) are NCBI's errors of BLASTX's formatting handler,
+    // after the ranges.
     if (args.query_loc.is_some() || args.subject_loc.is_some())
-        && !matches!(choice.number, 0 | 6 | 7 | 10 | 17)
+        && !matches!(choice.number, 0 | 6 | 7 | 10 | 17 | 19 | 20 | 21)
     {
         bail!(
-            "-query_loc and -subject_loc with -outfmt {} are not supported by LOSAT's BLASTX yet (outfmt 0, 6, 7 and 10 are)",
+            "-query_loc and -subject_loc with -outfmt {} are not supported by LOSAT's BLASTX yet (outfmt 0, 6, 7, 10 and 20 are)",
             choice.number
         );
     }

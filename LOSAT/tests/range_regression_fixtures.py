@@ -109,6 +109,8 @@ _CASES = [
     ("blastx.parse_subject_before_validate", f"blastx {BX} -subject_loc 2-1 -threshold 0 -outfmt 6", ""),
     ("blastx.parse_query_before_sam", f"blastx {BX} -query_loc 2-1 -outfmt 17", ""),
     ("blastx.sam_after_ranges", f"blastx {BX} -query_loc 1-100 -outfmt 17", ""),
+    ("blastx.parse_query_before_airr", f"blastx {BX} -query_loc 2-1 -outfmt 19", ""),
+    ("blastx.fasta_after_ranges", f"blastx {BX} -subject_loc 1-50 -outfmt 21", ""),
     ("blastx.subject_past_end", f"blastx {BX} -subject_loc 100-300 -outfmt 0", ""),
     ("blastx.subject_past_end_warnings", f"blastx -query tests/db_search/bslice_q.fna -subject {O}/sxd_bx_sloc_warn.faa -subject_loc 100-300 -outfmt 6", ""),
     ("blastx.query_without_letters", f"blastx -query {O}/bx_best_hsp_query.fna -subject {O}/bx_best_hsp_subject.faa -query_loc 2506-3000 -outfmt 0", ""),

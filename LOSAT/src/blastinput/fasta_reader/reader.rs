@@ -2068,7 +2068,7 @@ impl<R: Read> FastaReader<R> {
                     uncut: None,
                     believed: self.believed.take(),
                     cut_from: 0,
-                    uncut_length: None,
+                    uncut_length: 0,
                 })
             }),
         })

@@ -808,7 +808,7 @@ for (const c of PROGRAM_CASES) {
       const [, path, threads] = /^\s*(serial|threaded), (\d+) threads?\s*$/.exec(await text(page.getByTestId('run-record').locator('[data-detail="path"]')))!;
       const level = tableLevel(c.id, argv, path!, Number(threads));
       await expect(badge).toHaveAttribute('data-level', level);
-      await expect(badge).toHaveText(level === 'certified' ? 'Certified profile' : 'Outside certified profile');
+      await expect(badge).toHaveText(level === 'certified' ? 'Supported' : 'Not checked');
       test.info().annotations.push({ type: 'verification', description: `${c.id} ${argv.slice(5).join(' ') || 'defaults'}, ${path} ${threads}: ${level}` });
     }
     await expect(page.getByTestId('verification-details')).toHaveAttribute('data-level', (await badge.getAttribute('data-level'))!);

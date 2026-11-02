@@ -92,14 +92,10 @@ export interface Badge {
   readonly exceptions: readonly string[];
 }
 
-export const CERTIFIED_LABEL = 'Certified profile';
-export const OUTSIDE_LABEL = 'Outside certified profile';
-
-/**
- * Programs compared with NCBI on the frozen rows of LOSAT/tests/outfmt0_manifest.tsv only, without
- * the certification of a LOSAT release (BLASTX, DW-36): the badge says so.
- */
-const MANIFEST_ROWS_ONLY: ReadonlySet<ProgramId> = new Set(['blastx']);
+// The words of the badge (the maintainer, 2026-11-02: no "certified", which reads as an official
+// certification; the badge says that the run is supported, DW-36). The levels keep their names.
+export const SUPPORTED_LABEL = 'Supported';
+export const NOT_CHECKED_LABEL = 'Not checked';
 
 export function verificationBadge(input: BadgeInput, table: VerificationTable): Badge {
   const exceptions = approvedExceptions(input.program, input.argv);
@@ -117,8 +113,7 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
   const outside: string[] = [];
   const missing = input.formats.filter((format) => !(compared ?? []).includes(format));
   if (compared === undefined) {
-    const records = MANIFEST_ROWS_ONLY.has(input.program) ? 'the frozen rows of the outfmt 0 manifest' : 'the certification records';
-    outside.push(`These options of ${input.program} were not compared with NCBI BLAST+ ${table.ncbi} in ${records}.`);
+    outside.push(`These options of ${input.program} were not compared with NCBI BLAST+ ${table.ncbi} on LOSAT's test fixtures.`);
   } else if (missing.length > 0) {
     outside.push(`These options were compared with NCBI BLAST+ ${table.ncbi} for outfmt ${list(compared)}, not for outfmt ${list(missing)}.`);
   }
@@ -138,14 +133,12 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
       );
     }
   }
-  if (outside.length > 0) return { level: 'outside', label: OUTSIDE_LABEL, details: outside, exceptions };
+  if (outside.length > 0) return { level: 'outside', label: NOT_CHECKED_LABEL, details: outside, exceptions };
   return {
     level: 'certified',
-    label: CERTIFIED_LABEL,
+    label: SUPPORTED_LABEL,
     details: [
-      MANIFEST_ROWS_ONLY.has(input.program)
-        ? `The program and these options were compared byte for byte with NCBI BLAST+ ${table.ncbi} for outfmt ${list(input.formats)} on the frozen rows of the outfmt 0 manifest (searches of -subject); this is not the certification of a LOSAT release.`
-        : `The program and these options were compared byte for byte with NCBI BLAST+ ${table.ncbi} for outfmt ${list(input.formats)} on the certification fixtures.`,
+      `The program and these options were compared byte for byte with NCBI BLAST+ ${table.ncbi} for outfmt ${list(input.formats)} on LOSAT's test fixtures.`,
       `The ${input.runtimePath} runtime in the browser was checked against the native engine with ${list(browser!.threads)} threads in ${list(browser!.browsers)}.`,
       'This is a statement about the engine build and the options, not a comparison of your inputs with NCBI.',
     ],

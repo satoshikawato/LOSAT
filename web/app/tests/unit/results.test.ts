@@ -296,28 +296,23 @@ describe('verificationBadge', () => {
     grammar,
   };
 
-  it('certifies a run inside a profile, and says what that means', () => {
+  it('supports a run inside a profile, and says what that means', () => {
     const badge = verificationBadge(input, table);
     expect(badge.level).toBe('certified');
-    expect(badge.label).toBe('Certified profile');
+    expect(badge.label).toBe('Supported');
     expect(badge.details.join(' ')).toMatch(/not a comparison of your inputs with NCBI/);
-    expect(badge.details.join(' ')).toMatch(/on the certification fixtures/);
+    // No word of a certification (DW-36): the badge says that the run is supported.
+    expect(`${badge.label} ${badge.details.join(' ')}`).not.toMatch(/certif/i);
   });
 
-  it("says that BLASTX's comparisons are the manifest's frozen rows, not a release certification (DW-36)", () => {
-    const blastx = { ...input, program: 'blastx', argv: ['blastx'] } as const;
-    const badge = verificationBadge(blastx, { ...table, programs: { blastx: table.programs.blastn! } });
-    expect(badge.level).toBe('certified');
-    expect(badge.details[0]).toMatch(/on the frozen rows of the outfmt 0 manifest \(searches of -subject\); this is not the certification of a LOSAT release\.$/);
-  });
-
-  it('says why a run is outside the certified profiles', () => {
+  it('says why a run is not checked', () => {
     const reasons = (change: Partial<BadgeInput>) => verificationBadge({ ...input, ...change }, table);
     expect(reasons({ argv: ['blastn', '-evalue', '1'] }).details.join(' ')).toMatch(/for outfmt 0 and 6, not for outfmt 7/);
     expect(reasons({ argv: ['blastn', '-evalue', '2'] }).details.join(' ')).toMatch(/were not compared with NCBI BLAST\+ 2\.17\.0/);
     expect(reasons({ threads: 3 }).details.join(' ')).toMatch(/used 3 threads; the browser runtime was checked with 1, 2 and 4 threads/);
     expect(reasons({ program: 'tblastx', argv: ['tblastx'] }).details.join(' ')).toMatch(/browser runtime of tblastx was not checked/);
-    expect(reasons({ threads: 3 }).label).toBe('Outside certified profile');
+    expect(reasons({ threads: 3 }).label).toBe('Not checked');
+    expect(reasons({ argv: ['blastn', '-evalue', '2'] }).details.join(' ')).not.toMatch(/certif/i);
     expect(reasons({ runtimePath: 'fake' }).level).toBe('development');
   });
 

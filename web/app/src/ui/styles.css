@@ -144,7 +144,6 @@ textarea {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 24px;
-  border-top: 1px solid var(--border);
 }
 
 /* An option name is not broken after its leading hyphen (S13 screen review L2). */

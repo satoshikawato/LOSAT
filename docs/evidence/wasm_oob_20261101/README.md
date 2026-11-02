@@ -112,7 +112,7 @@ address in grown memory after an atomic read of another address, 2 jobs x 20 rou
 | stack checks off | trap 40/40 | trap 0/40 |
 | default | trap 36/40 | trap 0/40 |
 
-Not run: a real search in a browser on ARM64, and any Android device.
+A real search in Chromium on ARM64 is under "After merge". No Android device has been run.
 
 ## The fix
 
@@ -236,16 +236,54 @@ One-sided Fisher p = 8e-5. Every run that finished wrote one output per mode. Th
 function, on the path that the first trap took; a mode at 0 does not show that mode is free of
 the race without it, since dc-megablast trapped 7/40 in an earlier run on other CPUs.
 
+## After merge
+
+The clearing runs of the release's GO item (release DECISIONS 54, line DECISIONS 15). dev
+f62da7f6b, with #703; "before" is dev just before #703 (7aa5329e7), so its guard covers `memory.fill`
+and `memory.copy` only. Arms in turn, in one run.
+
+| Case | Before | After | P(0/N at the rate before) |
+|---|---:|---:|---:|
+| ubuntu-24.04-arm, Node 24.21.0, real blastp, 16 threads, N=100 | 100/100 | **0/100** | 0 |
+| ubuntu-24.04-arm, Node 26.8.2, real blastp, 16 threads, N=100 | 76/100 | **0/100** | 1e-62 |
+| ubuntu-24.04-arm, both Nodes, real blastn, 16 threads, N=100 | 0/100, 0/100 | 0/100, 0/100 | no information |
+| x64, Node 26.8.2, widened module, blastp, 16 threads, N=40 | 34/40 | **0/40** | 1e-33 |
+| x64, Node 26.8.2, widened module, dc-megablast, 16 threads, N=40 | 1/40 | 0/40 | 0.36 (at the earlier 7/40: 5e-4) |
+
+(`results/clear_arm/`, run 41358045153; `results/clear_x64_runs.tsv`, `scripts/wo_clear.sh`, 8 cores of
+node 0.) The widened module is 74bbd3c7e's with merged dev's host, since the guard is what changes.
+The widened dc-megablast rate depends on the CPUs: 7/40 and 0/10 earlier, 1/40 here, so that row
+says little alone; blastp is the row that separates the arms on x64.
+
+The artifacts of dev f62da7f6b (wasm-threading run 41358038188; the reverse build gives the same
+bytes): `losat-threaded-command.wasm` sha256 2f4cab62...304263, `losat-threaded-reactor.wasm`
+a8b77914...630a2d, record version 3.
+
+**Real searches in Chromium on ARM64**, run by gbdraw (gbdraw Actions 41348561507, its host, GitHub
+`ubuntu-24.04-arm`, 4 vCPUs, Chromium 156.0.8078.4, blastp AP027131 x AP027132 CDS translations,
+5 searches per pass, 56 passes per cell, arms in turn; 16 threads means `hardwareConcurrency` spoofed
+on the 4 vCPUs). Control: LOSAT dde737f18 with gbdraw's own guard. Trial: this branch at 7b4fe6132,
+which has the same guard code as dev f62da7f6b but older Rust.
+
+| Threads | Arm | Passes with a trap | Failed passes | Searches completed |
+|---:|---|---:|---:|---:|
+| 4 | control | 11/56 | 3 | 265/280 |
+| 4 | trial | **0/56** | 0 | 280/280 |
+| 16 | control | 56/56 | 56 | 0/280 |
+| 16 | trial | **0/56** | 0 | 280/280 |
+
+Every completed search in both arms gave the same 7,532 rows. One pair and one program, on few CPUs.
+
 ## What users see
 
 - **Command on Node:** `RuntimeError: memory access out of bounds` with a Wasm stack on stderr, exit
   143, no output. On dev: on ARM64 Linux, most blastp runs at 16 threads; on x64, rarely (above).
-- **Chromium:** the same trap. In gbdraw's host the widened real module printed "running the pair
-  again" 30 times in 48 jobs, and 2 of 6 passes failed. On ARM64 the V8-level page trapped 76/80.
+- **Chromium:** the same trap. In gbdraw's host on x64 the widened real module printed "running the
+  pair again" 30 times in 48 jobs, and 2 of 6 passes failed. On ARM64 the real search at 16 threads never
+  completed, and at 4 threads 3 of 56 passes failed ("After merge").
 - **LOSAT Web:** read from the code, not run on a trap: a trap in a thread ends the engine and the
   search fails with "The engine stopped: memory access out of bounds"
   (`web/app/src/infra/engine-worker/`, `reactor/abi.ts`).
 - **Firefox 151:** no trap on the V8-level page. **WebKit:** did not start here, so unknown.
-- **With this branch:** none of these in the runs above. A real search in a browser on ARM64
-  and any Android device have not been run.
+- **With this fix:** none of these in the runs above. No Android device has been run.
 

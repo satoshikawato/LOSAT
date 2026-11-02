@@ -107,9 +107,11 @@ export async function waitStatus(
 /** Selects run `run` in the results page's run picker (the page may show no results for it). */
 export async function pickRun(page: Page, run: number): Promise<void> {
   await page.getByTestId('tab-results').click();
-  const select = page.getByTestId('results-run');
-  const label = await select.locator('option', { hasText: new RegExp(`^Run ${run} · `) }).textContent();
-  await select.selectOption({ label: label!.trim() });
+  // By the option's value (the run's ID), not its label: the label ends in " (running)" until the
+  // run ends, so a label read just before then matched no option, and "several runs" timed out
+  // (CI of #731 and #732; found by the SX line).
+  const value = await page.getByTestId(`run-${run}-option`).getAttribute('value');
+  await page.getByTestId('results-run').selectOption(value!);
 }
 
 /** The text the results page gives for run `run` when it has no results (a failed or cancelled run). */

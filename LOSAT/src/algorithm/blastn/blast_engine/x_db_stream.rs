@@ -213,7 +213,11 @@ where
         db,
         pool,
         block_bytes,
-        X_SEGMENT_BLOCKS,
+        // PROBE (v4-D12 s29, not for merge): another segment.
+        std::env::var("LOSAT_PROBE_S29SEG")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(X_SEGMENT_BLOCKS),
         new_scratch,
         search,
         merge,
@@ -259,7 +263,13 @@ where
         Ok(kept)
     };
     let threads = pool.threads().max(1);
-    let floor = threads.saturating_mul(X_BNDBSTREAM_BLOCKS_PER_THREAD);
+    // PROBE (v4-D12 s29, not for merge): another floor.
+    let floor = threads.saturating_mul(
+        std::env::var("LOSAT_PROBE_S29FLOOR")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(X_BNDBSTREAM_BLOCKS_PER_THREAD),
+    );
     let wide = x_bn_db_wide();
     let window = if wide {
         threads.saturating_mul(x_wide_blocks_per_thread(block_bytes))

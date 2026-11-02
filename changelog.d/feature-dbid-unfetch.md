@@ -7,7 +7,7 @@
   LOSAT refuses as before; the refusal of a `gnl|BL_ORD_ID|n` that names another sequence now says that the
   lookup gives that sequence first.
 - `-db` with a database built with `-parse_seqids`: LOSAT now refuses a reported sequence whose Seq-align id
-  another sequence of the database also holds (`lcl|555`, and `gb|X.1|` with `lcl|555` in its second definition
-  line; one id in two databases of an alias), unless the two are the same record. Where both are reported, NCBI
-  BLAST+'s scope writes for both the names and identities of the one it reads first; LOSAT wrote each its own,
-  with exit status 0.
+  another sequence of the database also holds, in any letter case (`lcl|555`, and `gb|X.1|` with `lcl|555` in its
+  second definition line; `lcl|abc` and `lcl|ABC`; one id in two databases of an alias), unless the two are the
+  same record. Where both are reported, NCBI BLAST+'s scope can write the other sequence's names and identities
+  for it; LOSAT wrote its own, with exit status 0.

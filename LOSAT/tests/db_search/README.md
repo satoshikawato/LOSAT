@@ -440,7 +440,11 @@ A Seq-align id that another sequence also holds (review 1 of N2b): `ids/pshare_v
 letters, so that the query `ids/pshare_q1.faa` hits both and NCBI's scope shows the second for the first; a
 `gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag, query `ids/pshare_q2.faa`), `ids/pshare_a` and
 `ids/pshare_b` (`bbs|123` in each) through the alias `ids/pshare_ab.pal` (query `ids/pshare_b_q0.faa`), and
-`ids/nshare_v5` from `ids/nshare.fna` (query `ids/nshare_q1.fna`).
+`ids/nshare_v5` from `ids/nshare.fna` (query `ids/nshare_q1.fna`). Ids that differ in case alone (review 2 of N2b):
+`ids/pshare.faa` 4 `lcl|abc` and 5 with `lcl|ABC` (query `ids/pshare_q5.faa`), and `ids/pshare_c` (`pdb|1ABC|A`,
+`gnl|db|abc`) and `ids/pshare_d` (`pdb|1abc|A`, `gnl|DB|ABC`) through the alias `ids/pshare_cd.pal` (queries
+`ids/pshare_d_q<k>.faa`); `ids/pdup_abc.pal` reads the copies `pdup_a` and `pdup_b` and the record of another title
+`pdup_c`.
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 

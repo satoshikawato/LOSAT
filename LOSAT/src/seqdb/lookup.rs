@@ -678,6 +678,60 @@ impl SeqidLookup<'_> {
         Ok(self.seqid_to_oids(seqid, false)?.first().copied())
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:178-190
+    // ```c++
+    //     	SKeyValuePair kv;
+    //     	kv.id = seqid->GetSeqIdString(true);
+    //     	kv.oid = oid;
+    //     	kv.saveToOidList = true;
+    //     	m_list.push_back(kv);
+    //     	string id_upper = kv.id;
+    //     	NStr::ToUpper(id_upper);
+    //     	if(kv.id != id_upper) {
+    //     		SKeyValuePair kv_u;
+    //     		kv_u.id = id_upper;
+    // ```
+    // makeblastdb writes the key of a Seq-id other than a text, `pdb`, `pir` or `prf` id also in
+    // upper case, and for a `pdb` id its molecule and the molecule in upper case
+    // (writedb_lmdb.cpp:136-150), where NCBI's lookup reads the key as given: `lcl|abc` does not
+    // find `lcl|ABC`, which NCBI's scope takes for the same id (review 2 of line DBID N2b).
+    /// The OIDs of a version 5 database under the upper-case key of `seqid` (for a `pdb` id its
+    /// molecule in upper case), the search's list's OIDs only: every sequence that holds an id
+    /// that differs from `seqid` in case alone. Empty for version 4, whose string ISAM keys are in
+    /// lower case, and for the other ids.
+    pub fn case_folded_oids(&self, seqid: &ParsedSeqId) -> Result<Vec<u32>, SeqDbError> {
+        let db = self.volumes.db;
+        let bl_ord_id = matches!(seqid, ParsedSeqId::General(tag) if tag.db == b"BL_ORD_ID");
+        if !db.is_version5()
+            || bl_ord_id
+            || !is_string_id(seqid)
+            || seqid.textseq().is_some()
+            || matches!(seqid, ParsedSeqId::Pir(_) | ParsedSeqId::Prf(_))
+        {
+            return Ok(Vec::new());
+        }
+        let key = match seqid {
+            ParsedSeqId::Pdb(pdb) => pdb.mol.to_ascii_uppercase(),
+            _ => {
+                let mut key = Vec::new();
+                label::content(seqid, true, &mut key);
+                key.make_ascii_uppercase();
+                key
+            }
+        };
+        let mut oids = Vec::new();
+        for (entry, env) in &self.envs {
+            let found = entry.oids_in(env, &key)?;
+            oids.extend(
+                found
+                    .into_iter()
+                    .filter_map(|oid| entry.database_oid(oid))
+                    .filter(|&oid| self.volumes.visible(oid)),
+            );
+        }
+        Ok(oids)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1381-1459
     // ```c++
     // void CSeqDBImpl::SeqidToOids(const CSeq_id & seqid_in,

@@ -96,9 +96,9 @@ pub enum FoundInstead {
     /// Another sequence of the database first, by ordinal id: NCBI's formatters show it where
     /// its ids compare equal to the Seq-align id, else no sequence.
     Sequence(u32),
-    /// The sequence itself first, and later another sequence of the database, by ordinal id, that
-    /// holds an id NCBI's scope takes for the Seq-align id: where both are reported, NCBI's
-    /// formatters show for both the one they read first.
+    /// The sequence itself first (or the same record), and later another sequence of the
+    /// database, by ordinal id, that holds an id NCBI's scope takes for the Seq-align id: where
+    /// both are reported, NCBI's formatters can show that one for it.
     AlsoHeld(u32),
     /// No sequence.
     Nothing,
@@ -393,7 +393,7 @@ impl ParsedSubject {
                 id()
             )),
             (false, Some(FoundInstead::AlsoHeld(ordinal))) => Err(format!(
-                "has the Seq-align id {}, which database sequence {ordinal} also holds (where both are reported, NCBI BLAST+ 2.17.0 writes for both the names and letters of the one it reads first)",
+                "has the Seq-align id {}, which database sequence {ordinal} also holds (where both are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)",
                 id()
             )),
             (false, Some(FoundInstead::Failed(message))) => Err(format!(

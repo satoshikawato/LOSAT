@@ -71,8 +71,9 @@ Seq-align ids that NCBI's formatters look up like any other (line DBID N2b; the 
 `plook_v5.*` and `plook_v4.*` from `plook.faa`, `plook_z.*` (version 5) from `plook_z.faa`, read after `plook_v5`
 through the alias `plook_vz.pal`, and `nlook_v5.*` and `nlook_v4.*` from `nlook.fna`. A Seq-align id that another
 sequence also holds (the same FASTA script): `pshare_v5.*` and `pshare_v4.*` from `pshare.faa`, `pshare_a.*` and
-`pshare_b.*` (version 5) from `pshare_a.faa` and `pshare_b.faa`, read through the alias `pshare_ab.pal`, and
-`nshare_v5.*` from `nshare.fna`.
+`pshare_b.*` (version 5) from `pshare_a.faa` and `pshare_b.faa`, read through the alias `pshare_ab.pal`, `pshare_c.*`
+and `pshare_d.*` (version 5) through `pshare_cd.pal`, and `nshare_v5.*` from `nshare.fna`; the alias `pdup_abc.pal` reads
+`pdup_a`, `pdup_b` and `pdup_c`.
 """
 import argparse
 import subprocess
@@ -185,14 +186,17 @@ def main() -> int:
                  "-blastdb_version", str(version), "-title", f"{name}_v{version} (parsed Seq-ids)",
                  "-out", str(args.out / f"{name}_v{version}")],
                 check=True, stdout=subprocess.DEVNULL)
-    for name in ("pshare_a", "pshare_b"):
+    for name in ("pshare_a", "pshare_b", "pshare_c", "pshare_d"):
         subprocess.run(
             [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.faa"), "-dbtype", "prot", "-parse_seqids",
              "-blastdb_version", "5", "-title", name, "-out", str(args.out / name)],
             check=True, stdout=subprocess.DEVNULL)
-    (args.out / "pshare_ab.pal").write_text(
-        "#\n# Alias file of line DBID, N2b\n#\nTITLE pshare_ab (two databases, parsed Seq-ids)\n"
-        "DBLIST pshare_a pshare_b\n")
+    for alias, names in (("pshare_ab", "pshare_a pshare_b"), ("pshare_cd", "pshare_c pshare_d"),
+                         ("pdup_abc", "pdup_a pdup_b pdup_c")):
+        count = "three" if alias == "pdup_abc" else "two"
+        (args.out / f"{alias}.pal").write_text(
+            f"#\n# Alias file of line DBID, N2b\n#\nTITLE {alias} ({count} databases, parsed Seq-ids)\n"
+            f"DBLIST {names}\n")
     (args.out / "plook_vz.pal").write_text(
         "#\n# Alias file of line DBID, N2b\n#\nTITLE plook_vz (two databases, parsed Seq-ids)\n"
         "DBLIST plook_v5 plook_z\n")

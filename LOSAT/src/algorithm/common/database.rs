@@ -589,14 +589,17 @@ impl<'a> HeaderReader<'a> {
     //     }
     // ```
     // NCBI's scope finds the Seq-align id first among the Bioseqs it already holds, the reported
-    // sequences of the batch (`CDataSource_ScopeInfo::BestResolve`, scope_info.cpp:830-840), the
-    // first one read where several hold it (`x_IsBetter`), and asks the data loader only where
-    // none holds it. So where another reported sequence also holds the Seq-align id, NCBI 2.17.0
-    // writes for both the names and identities of the one it read first, in the order of its
-    // prefetch: `gb|X.1|` with `lcl|555` in its second definition line for `lcl|555`, also for
-    // the hit of another query (review 1 of line DBID N2b,
-    // `blastdb-ids-20261021/R/unfetch_review1`), and `gb|X.1|` for a later `emb|X.1|` (line DBID
-    // N1).
+    // sequences of the batch (`CDataSource_ScopeInfo::BestResolve` and `x_GetSeqMatch`,
+    // scope_info.cpp:832-850), the first one read where several hold it (`x_IsBetter`), without
+    // case, and asks the data loader only where none holds it. So where another reported
+    // sequence also holds the Seq-align id, NCBI 2.17.0 can write for the subject the names and
+    // identities of that sequence, as its prefetch reads them: `gb|X.1|` with `lcl|555` in its
+    // second definition line for `lcl|555`, also for the hit of another query, and with `lcl|ABC`
+    // for `lcl|abc` (reviews 1 and 2 of line DBID N2b, `blastdb-ids-20261021/R/unfetch_review1`,
+    // `unfetch_review2`), and `gb|X.1|` for a later `emb|X.1|` (line DBID N1). Without its
+    // prefetch (`PRE_FETCH_SEQS_LIMIT`) it also matches ids weakly (`GetMatchingHandles`, an
+    // unversioned accession to its versions), which LOSAT does not model (a known difference of
+    // PD-LOSAT-DATABASE-SEARCH).
     /// What NCBI's lookup of the Seq-align id of the sequence `ordinal`, `subject`, finds in the
     /// database where that is not the sequence (`ParsedSubject::found_instead`): NCBI's
     /// formatters look it up in the search's own database, list included
@@ -631,30 +634,33 @@ impl<'a> HeaderReader<'a> {
                 Err(error) => return failed(error),
             },
         };
-        let oids = match lookup.seqid_to_oids(subject.alignment_id(), true) {
+        let id = subject.alignment_id();
+        let oids = match lookup.seqid_to_oids(id, true) {
             Ok(oids) => oids,
             Err(error) => return failed(error),
         };
         let own = self.db.oid(ordinal);
-        match oids.first() {
-            None => Some(FoundInstead::Nothing),
-            Some(&oid) if oid != own => {
-                let other = self.db.ordinal_of(oid);
-                (!self.same_record(ordinal, other)).then_some(FoundInstead::Sequence(other))
-            }
-            Some(_) => {
-                let mut keys = Vec::new();
-                crate::report::db_subject::scope_keys(subject, &mut keys);
-                oids[1..]
-                    .iter()
-                    .filter(|&&oid| oid != own)
-                    .map(|&oid| self.db.ordinal_of(oid))
-                    .find(|&other| {
-                        self.holds_scope_key(other, &keys) && !self.same_record(ordinal, other)
-                    })
-                    .map(FoundInstead::AlsoHeld)
+        let Some(&first) = oids.first() else {
+            return Some(FoundInstead::Nothing);
+        };
+        if first != own {
+            let other = self.db.ordinal_of(first);
+            if !self.same_record(ordinal, other) {
+                return Some(FoundInstead::Sequence(other));
             }
         }
+        let folded = match lookup.case_folded_oids(id) {
+            Ok(oids) => oids,
+            Err(error) => return failed(error),
+        };
+        let mut keys = Vec::new();
+        crate::report::db_subject::scope_keys(subject, &mut keys);
+        oids.iter()
+            .chain(&folded)
+            .filter(|&&oid| oid != own)
+            .map(|&oid| self.db.ordinal_of(oid))
+            .find(|&other| self.holds_scope_key(other, &keys) && !self.same_record(ordinal, other))
+            .map(FoundInstead::AlsoHeld)
     }
 
     /// Whether a Seq-id of the sequence `ordinal` has one of the scope keys `keys`
@@ -2548,6 +2554,14 @@ mod taxdb_prepass_tests {
             ("ids/pshare_v5", 1, None),
             ("ids/pshare_v4", 0, Some(held(1))),
             ("ids/pshare_ab", 0, Some(held(1))),
+            // Ids that differ in case alone (review 2 of N2b), and a later copy of a record whose
+            // id a third sequence also holds.
+            ("ids/pshare_v5", 4, Some(held(5))),
+            ("ids/pshare_v4", 4, Some(held(5))),
+            ("ids/pshare_cd", 0, Some(held(2))),
+            ("ids/pshare_cd", 1, Some(held(3))),
+            ("ids/pdup_abc", 0, Some(held(2))),
+            ("ids/pdup_abc", 1, Some(held(2))),
             (
                 "ids/pshare_v5",
                 2,

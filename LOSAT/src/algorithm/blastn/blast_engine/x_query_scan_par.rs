@@ -76,8 +76,8 @@
 use std::fs::File;
 use std::sync::OnceLock;
 
-use crate::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
-use crate::sequence::packed_letters::PackedLetters;
+use super::x_query_drop::Part;
+use crate::blastinput::fasta_reader::ReaderConfig;
 
 /// The bytes after the reader's start below which the first reading stays on one thread: about
 /// 4 ms of it on the workstation.
@@ -259,160 +259,73 @@ fn on_helpers(helpers: usize, failed: &std::sync::atomic::AtomicBool, work: impl
     });
 }
 
-/// EXPERIMENT (LOSAT_X_QSTREAM): the records of a query file read before the search, and the packed
-/// letters of those packed (`x_read_queries_packed`: their positions among the records, in order).
-pub(super) type Records = (Vec<FastaRecord>, Vec<(usize, PackedLetters)>);
-
-/// EXPERIMENT (LOSAT_X_QSTREAM): the query records from byte `start` of `file` to its end, read in
-/// parts by `threads` threads and kept, their letters packed as `x_read_queries_packed` packs them
-/// where `pack` (the store of LOSAT_X_BNQPACK acts), or `None` where the search's reader reads them
-/// as before (the module's header, "The records read before the search"). `config` is the reader's
-/// configuration, without the BLAST archive or `-parse_deflines`.
-pub(super) fn records(
+/// EXPERIMENT (LOSAT_X_BNQPARTS): the query records from byte `start` of `file` to its end, read in
+/// parts by `threads` threads into the parts of the store (`x_query_drop::Part`, their letters
+/// packed as the reader packs them), or `None` where the search's reader reads them into one part
+/// (the module's header, "The records of the store"). `config` is the reader's configuration,
+/// without the BLAST archive or `-parse_deflines`.
+pub(super) fn store_parts(
     file: &File,
     start: u64,
     config: ReaderConfig,
     threads: usize,
-    pack: bool,
-) -> Option<Records> {
+) -> Option<Vec<Part>> {
     debug_assert!(!config.keep_defline && !config.parse_deflines);
-    records_with(
-        file,
-        start,
-        config,
-        threads,
-        pack,
-        min_bytes(),
-        Limits::DEFAULT,
-    )
+    store_parts_with(file, start, config, threads, min_bytes(), Limits::DEFAULT)
 }
 
 #[cfg(not(all(unix, feature = "parallel")))]
-fn records_with(
+fn store_parts_with(
     _file: &File,
     _start: u64,
     _config: ReaderConfig,
     _threads: usize,
-    _pack: bool,
     _min_bytes: u64,
     _limits: Limits,
-) -> Option<Records> {
+) -> Option<Vec<Part>> {
     None
 }
 
 #[cfg(all(unix, feature = "parallel"))]
-fn records_with(
+fn store_parts_with(
     file: &File,
     start: u64,
     config: ReaderConfig,
     threads: usize,
-    pack: bool,
     min_bytes: u64,
     limits: Limits,
-) -> Option<Records> {
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::Mutex;
-
-    let probe_t0 = std::time::Instant::now();
-    let parts = parts_with(
+) -> Option<Vec<Part>> {
+    parts_with(
         file,
         start,
         threads,
         min_bytes,
         limits,
-        |from, to, part, failed| read_part_records(file, from, to, config, part, pack, failed),
-    )?;
-    let probe_t1 = std::time::Instant::now();
-    // The local IDs of a part's records count from 1 (a new reader's counter); those of the parts
-    // after the first are counted again from the records before them, on the same threads.
-    let mut base = 0;
-    let parts: Vec<(usize, Mutex<Records>)> = parts
-        .into_iter()
-        .map(|part| {
-            let first = base;
-            base += part.0.len();
-            (first, Mutex::new(part))
-        })
-        .collect();
-    let next = AtomicUsize::new(1);
-    let failed = AtomicBool::new(false);
-    on_helpers(threads.min(parts.len()) - 1, &failed, || loop {
-        let part = next.fetch_add(1, Ordering::Relaxed);
-        let Some((first, records)) = parts.get(part) else {
-            return;
-        };
-        let mut records = records
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for (index, record) in records.0.iter_mut().enumerate() {
-            record.local_id = generated_id(config, first + index + 1);
-        }
-    });
-    if failed.load(Ordering::Relaxed) {
-        return None;
-    }
-    let probe_t2 = std::time::Instant::now();
-    let nparts = parts.len();
-    let mut records = Vec::with_capacity(base);
-    let mut packed = Vec::with_capacity(
-        parts
-            .iter()
-            .map(|(_, part)| {
-                part.lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .1
-                    .len()
-            })
-            .sum(),
-    );
-    for (first, part) in parts {
-        let (part_records, part_packed) = part
-            .into_inner()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        packed.extend(
-            part_packed
-                .into_iter()
-                .map(|(index, letters)| (first + index, letters)),
-        );
-        records.extend(part_records);
-    }
-    if std::env::var_os("SF1_PROBE").is_some() {
-        eprintln!(
-            "[SF1_PROBE] parts={nparts} read={:.4} renumber={:.4} concat={:.4}",
-            (probe_t1 - probe_t0).as_secs_f64(),
-            (probe_t2 - probe_t1).as_secs_f64(),
-            probe_t2.elapsed().as_secs_f64()
-        );
-    }
-    Some((records, packed))
-}
-
-/// The local ID that a new reader of `config` gives its `n`th record (`generate_id`).
-fn generated_id(config: ReaderConfig, n: usize) -> String {
-    format!("{}{n}", config.id_prefix)
+        |from, to, part, failed| read_part_store(file, from, to, config, part, failed),
+    )
 }
 
 /// The records of bytes `from..to` of `file` (part `part`), read by a new reader as
-/// `read_queries` reads them (their letters packed where `pack`), or `None` where `read_part`
-/// gives `None`, or a record of a part after the first has a reader message (its text may name a
-/// line, counted from the part's start) or a local ID other than the counter's.
+/// `x_read_queries_packed` reads them into a part of the store, or `None` where `read_part` gives
+/// `None`, or a record of a part after the first has a reader message (its text may name a line,
+/// counted from the part's start), or a record's local ID is not the reader's counter's.
 #[cfg(all(unix, feature = "parallel"))]
-fn read_part_records(
+fn read_part_store(
     file: &File,
     from: u64,
     to: u64,
     config: ReaderConfig,
     part: usize,
-    pack: bool,
     failed: &std::sync::atomic::AtomicBool,
-) -> Option<Records> {
+) -> Option<Part> {
     use crate::blastinput::fasta_reader::FastaInputSource;
     use std::sync::atomic::Ordering;
 
-    let mut records = Vec::new();
-    let mut packed = Vec::new();
+    // The store of a part takes about a third of its bytes (titles, and a quarter of a byte per
+    // letter).
+    let mut store = Part::with_capacity(usize::try_from((to - from) / 3).ok()?);
     if from >= to {
-        return Some((records, packed));
+        return Some(store);
     }
     let mut refused = false;
     let mut source = FastaInputSource::x_from_reader(
@@ -425,9 +338,7 @@ fn read_part_records(
         },
         config,
     );
-    if pack {
-        source.x_pack_letters();
-    }
+    source.x_pack_letters();
     loop {
         if source.end() {
             break;
@@ -437,25 +348,20 @@ fn read_part_records(
         }
         match source.next_sequence(&mut |_| Ok(())) {
             Ok(record) => {
-                if (part > 0 && !record.warnings.is_empty())
-                    || record
-                        .local_id
-                        .strip_prefix(config.id_prefix)
-                        .and_then(|n| n.parse::<usize>().ok())
-                        != Some(records.len() + 1)
-                {
+                if part > 0 && !record.warnings.is_empty() {
                     return None;
                 }
-                records.push(record);
-                if let Some(letters) = source.x_take_packed() {
-                    packed.push((records.len() - 1, letters));
+                let packed = source.x_take_packed();
+                let n = store.len() + 1;
+                if !store.push(record, packed, config.id_prefix, n) {
+                    return None;
                 }
             }
             Err(_) => return None,
         }
     }
     drop(source);
-    (!refused).then_some((records, packed))
+    (!refused).then_some(store)
 }
 
 /// The first record start at or after `target` (a `>` that begins a line after `start` and is not
@@ -587,8 +493,12 @@ impl std::io::Read for PartReader<'_> {
 
 #[cfg(all(test, unix, feature = "parallel"))]
 mod tests {
+    use super::super::x_query_drop::Store;
     use super::*;
-    use crate::blastinput::fasta_reader::{FastaInputSource, ParseErrorCode, ReadError};
+    use crate::blastinput::fasta_reader::{
+        FastaInputSource, FastaRecord, ParseErrorCode, ReadError,
+    };
+    use crate::utils::threading::SearchPool;
     use std::io::Write;
 
     /// The first reading as `x_query_stream::scan` makes it (without the archive): the lengths,
@@ -745,87 +655,78 @@ mod tests {
         );
     }
 
-    /// The records of `bytes` as `read_queries` reads them (with `x_read_queries_packed`'s packing
-    /// where `pack`), and whether the reading ended at the end of the input.
-    fn serial_records(bytes: &[u8], config: ReaderConfig, pack: bool) -> (Records, bool) {
-        use crate::blastinput::fasta_reader::{read_queries, x_read_queries_packed, QueryEnd};
-        let mut source = FastaInputSource::from_bytes(bytes, config);
-        let (records, packed) = if pack {
-            x_read_queries_packed(&mut source)
-        } else {
-            (read_queries(&mut source), Vec::new())
-        };
-        let clean = matches!(records.end, QueryEnd::Input);
-        ((records.records, packed), clean)
+    /// The records of `bytes` as `read_queries` reads them, and whether the reading ended at the
+    /// end of the input.
+    fn serial_records(bytes: &[u8], config: ReaderConfig) -> (Vec<FastaRecord>, bool) {
+        use crate::blastinput::fasta_reader::{read_queries, QueryEnd};
+        let records = read_queries(&mut FastaInputSource::from_bytes(bytes, config));
+        (records.records, matches!(records.end, QueryEnd::Input))
     }
 
-    /// The records of `bytes` read in parts from byte `start`, without a minimum size.
+    /// The records of `bytes` read in parts from byte 0 into a store (without a minimum size), as
+    /// the loop takes them (in `batches` batches, by a pool of `threads` threads).
     fn parallel_records(
         bytes: &[u8],
         config: ReaderConfig,
         threads: usize,
-        pack: bool,
         limits: Limits,
-    ) -> Option<Records> {
+        batches: usize,
+    ) -> Option<Vec<FastaRecord>> {
         let (path, file) = file_of(bytes, "r");
-        let records = records_with(&file, 0, config, threads, pack, 0, limits);
+        let parts = store_parts_with(&file, 0, config, threads, 0, limits);
         let _ = std::fs::remove_file(path);
-        records
+        let store = Store::from_parts(parts?, config.id_prefix, true);
+        let count = store.lengths().len();
+        let step = count.div_ceil(batches.max(1)).max(1);
+        let take = |pool: &SearchPool<'_>| {
+            let mut records = Vec::new();
+            for from in (0..count).step_by(step) {
+                records.extend(store.take(from..(from + step).min(count), pool)?);
+            }
+            Ok(records)
+        };
+        Some(if threads > 1 {
+            crate::utils::threading::with_search_pool(threads, "blastn", take).expect("take")
+        } else {
+            take(&SearchPool::x_serial()).expect("take")
+        })
     }
 
     #[test]
-    fn the_parts_give_the_readings_records() {
+    fn the_parts_of_the_store_give_the_readings_records() {
         let mut rng = Rng(0x6a09_e667_f3bc_c908);
         let (mut taken, mut refused) = (0, 0);
         for round in 0..300 {
             let config = ReaderConfig::query("BLASTN", false, round % 2 == 0);
             let text = random_fasta(&mut rng, 1 + round % 40);
-            for pack in [false, true] {
-                let (expected, clean) = serial_records(&text, config, pack);
-                for threads in [2, 3, 8] {
-                    for limits in [
-                        SMALL,
-                        Limits {
-                            max_span: 7,
-                            max_reach: 2000,
-                            parts_per_thread: 1,
-                        },
-                        Limits::DEFAULT,
-                    ] {
-                        match parallel_records(&text, config, threads, pack, limits) {
-                            Some(records) => {
-                                assert!(
-                                    clean,
-                                    "round {round}: parts taken where the reading fails"
-                                );
-                                assert!(
-                                    !has_gap_mark(&text),
-                                    "round {round}: parts taken with `>?`"
-                                );
-                                assert_eq!(
-                                    records.0, expected.0,
-                                    "round {round} threads {threads}"
-                                );
-                                assert_eq!(
-                                    records.1, expected.1,
-                                    "round {round} threads {threads}"
-                                );
-                                if pack {
-                                    assert!(records
-                                        .0
-                                        .iter()
-                                        .all(|record| { record.local_id.starts_with("Query_") }));
-                                }
-                                taken += 1;
-                            }
-                            None => refused += 1,
+            let (expected, clean) = serial_records(&text, config);
+            for threads in [2, 3, 8] {
+                for limits in [
+                    SMALL,
+                    Limits {
+                        max_span: 7,
+                        max_reach: 2000,
+                        parts_per_thread: 1,
+                    },
+                    Limits::DEFAULT,
+                ] {
+                    let batches = 1 + round % 4;
+                    match parallel_records(&text, config, threads, limits, batches) {
+                        Some(records) => {
+                            assert!(clean, "round {round}: parts taken where the reading fails");
+                            assert!(!has_gap_mark(&text), "round {round}: parts taken with `>?`");
+                            assert_eq!(records, expected, "round {round} threads {threads}");
+                            taken += 1;
                         }
+                        None => refused += 1,
                     }
                 }
             }
         }
-        assert!(taken > 1000, "the parts were taken {taken} times");
-        assert!(refused > 300, "refused {refused}");
+        // Most texts have a record with a reader message after the first part, a `>?` or a reader
+        // error: the search's reader then reads them.
+        assert!(taken > 150, "the parts were taken {taken} times");
+        assert!(refused > 150, "refused {refused}");
     }
 
     #[test]
@@ -833,35 +734,32 @@ mod tests {
         let config = ReaderConfig::query("BLASTN", false, true);
         let mut good = Vec::new();
         for index in 0..40 {
-            good.extend_from_slice(format!(">q{index} t\nACGTACGTAC\nACGT\n").as_bytes());
+            good.extend_from_slice(format!(">q{index} t\nACGTACGTAC\nACgtNNNNNNACGT\n").as_bytes());
         }
-        let (expected, clean) = serial_records(&good, config, true);
-        assert!(clean && expected.0.iter().all(|record| record.warnings.is_empty()));
-        let got = parallel_records(&good, config, 4, true, SMALL).expect("the parts are taken");
+        let (expected, clean) = serial_records(&good, config);
+        assert!(clean && expected.iter().all(|record| record.warnings.is_empty()));
+        let got = parallel_records(&good, config, 4, SMALL, 3).expect("the parts are taken");
         assert_eq!(got, expected);
-        assert_eq!(got.0[39].local_id, "Query_40");
+        assert_eq!(got[39].local_id, "Query_40");
         // A data line with a hyphen is read with a message that names its line: in the first part
         // the records are kept, after it the reader reads them.
         let mut late = good.clone();
         late.extend_from_slice(b">z\nACGT-ACGT\n");
-        let (expected, clean) = serial_records(&late, config, false);
-        assert!(clean && !expected.0.last().expect("a record").warnings.is_empty());
-        assert_eq!(parallel_records(&late, config, 4, false, SMALL), None);
+        let (expected, clean) = serial_records(&late, config);
+        assert!(clean && !expected.last().expect("a record").warnings.is_empty());
+        assert_eq!(parallel_records(&late, config, 4, SMALL, 2), None);
         let mut early = b">z\nACGT-ACGT\n".to_vec();
         early.extend_from_slice(&good);
-        let (expected, _) = serial_records(&early, config, false);
-        assert!(!expected.0[0].warnings.is_empty());
+        let (expected, _) = serial_records(&early, config);
+        assert!(!expected[0].warnings.is_empty());
         assert_eq!(
-            parallel_records(&early, config, 4, false, SMALL),
+            parallel_records(&early, config, 4, SMALL, 5),
             Some(expected)
         );
-        // One thread, or the minimum: the reader reads them.
+        // One thread, or the minimum: the search's reader reads them.
         let (path, file) = file_of(&good, "rmin");
-        assert_eq!(records_with(&file, 0, config, 1, true, 0, SMALL), None);
-        assert_eq!(
-            records_with(&file, 0, config, 4, true, 1 << 20, SMALL),
-            None
-        );
+        assert!(store_parts_with(&file, 0, config, 1, 0, SMALL).is_none());
+        assert!(store_parts_with(&file, 0, config, 4, 1 << 20, SMALL).is_none());
         let _ = std::fs::remove_file(path);
     }
 

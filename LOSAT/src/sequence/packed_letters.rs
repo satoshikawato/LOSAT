@@ -235,6 +235,87 @@ impl PackedLetters {
             out[start as usize..end as usize].make_ascii_lowercase();
         }
     }
+
+    /// EXPERIMENT (LOSAT_X_BNQPARTS): appends the store to `out` (the packed bases, then the other
+    /// runs and the lower-case intervals), for `unpack_from`.
+    pub fn append_to(&self, out: &mut Vec<u8>) -> PackedAt {
+        out.extend_from_slice(&self.packed);
+        let (others, lowercase) = match &self.rest {
+            Some(rest) => {
+                for run in rest.others.iter() {
+                    out.extend_from_slice(&run.offset.to_le_bytes());
+                    out.extend_from_slice(&run.length.to_le_bytes());
+                    out.push(run.byte);
+                }
+                for &(from, to) in rest.lowercase.iter() {
+                    out.extend_from_slice(&from.to_le_bytes());
+                    out.extend_from_slice(&to.to_le_bytes());
+                }
+                (rest.others.len(), rest.lowercase.len())
+            }
+            None => (0, 0),
+        };
+        PackedAt {
+            length: self.length,
+            // A store's runs and intervals are fewer than its letters (`u32`).
+            others: others as u32,
+            lowercase: lowercase as u32,
+        }
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BNQPARTS): where a record's store was written into a caller's buffer
+/// (`PackedLetters::append_to`): the letters' count and those of the other runs and lower-case intervals written
+/// after the packed bases (9 and 8 bytes each, little-endian `u32`s and the run's byte).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PackedAt {
+    length: u32,
+    others: u32,
+    lowercase: u32,
+}
+
+impl PackedAt {
+    /// The number of letters.
+    pub fn len(&self) -> usize {
+        self.length as usize
+    }
+
+    /// True for a record without letters.
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
+    }
+
+    /// The bytes the store takes in its buffer.
+    pub fn bytes(&self) -> usize {
+        self.len().div_ceil(4) + 9 * self.others as usize + 8 * self.lowercase as usize
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BNQPARTS): clears `out` and writes the letters of `store`, the bytes that
+/// `PackedLetters::append_to` appended for `at`.
+pub fn unpack_from(store: &[u8], at: PackedAt, out: &mut Vec<u8>) {
+    let length = at.len();
+    let (packed, mut rest) = store.split_at(length.div_ceil(4));
+    out.clear();
+    out.reserve_exact(length);
+    let spare = &mut out.spare_capacity_mut()[..length];
+    let done = unpack_blocks(packed, spare);
+    for (index, slot) in spare.iter_mut().enumerate().skip(done) {
+        let code = (packed[index / 4] >> (6 - 2 * (index % 4))) & 3;
+        slot.write(b"ACGT"[usize::from(code)]);
+    }
+    // SAFETY: `unpack_blocks` wrote the first `done` letters and the loop the others.
+    unsafe { out.set_len(length) };
+    let word = |bytes: &[u8]| u32::from_le_bytes(bytes[..4].try_into().expect("4 bytes")) as usize;
+    for _ in 0..at.others {
+        let (start, run) = (word(rest), word(&rest[4..]));
+        out[start..start + run].fill(rest[8]);
+        rest = &rest[9..];
+    }
+    for _ in 0..at.lowercase {
+        out[word(rest)..word(&rest[4..])].make_ascii_lowercase();
+        rest = &rest[8..];
+    }
 }
 
 /// Packs the leading blocks of `letters` into `packed` (blocks that are not all `ACGT` or all
@@ -464,6 +545,41 @@ mod tests {
             }
         }
         assert!(packed_records > 400, "{packed_records} records packed");
+    }
+
+    #[test]
+    fn a_store_in_a_buffer_gives_the_letters_back() {
+        let mut buffer = b"head".to_vec();
+        let mut stored = Vec::new();
+        let mut cases = cases();
+        // Long runs of other bytes and long lower-case stretches.
+        cases.push([b"ACGT".repeat(40), vec![b'N'; 300], b"acgt".repeat(50)].concat());
+        cases.push(b"acgtnnnnACGTNNNN".repeat(30));
+        for (index, letters) in cases.iter().enumerate() {
+            let masks: &[(u32, u32)] = if index % 5 == 1 && letters.len() > 12 {
+                &[(2, 5), (9, 11)]
+            } else {
+                &[]
+            };
+            let upper = letters.to_ascii_uppercase();
+            let source = if masks.is_empty() { letters } else { &upper };
+            if let Some(store) = PackedLetters::pack_masked(source, masks) {
+                let start = buffer.len();
+                let at = store.append_to(&mut buffer);
+                assert_eq!(buffer.len() - start, at.bytes(), "case {index}");
+                assert_eq!(at.len(), store.len());
+                let mut expected = Vec::new();
+                store.unpack_into(&mut expected);
+                stored.push((start, at, expected));
+            }
+        }
+        assert!(stored.len() > 400, "{} stores", stored.len());
+        let mut out = b"old".to_vec();
+        for (start, at, expected) in &stored {
+            unpack_from(&buffer[*start..start + at.bytes()], *at, &mut out);
+            assert_eq!(&out, expected);
+        }
+        assert_eq!(&buffer[..4], b"head");
     }
 
     #[test]

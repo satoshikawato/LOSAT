@@ -83,15 +83,23 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use crate::algorithm::blastn::coordination::QueryLetters;
 use crate::algorithm::blastn::hsp::BlastnOutputFormat;
-use crate::blastinput::fasta_reader::FastaRecord;
+use crate::blastinput::fasta_reader::{
+    FastaInputSource, FastaRecord, ParseErrorCode, QueryEnd, ReadError, RecordSource,
+};
 use crate::blastinput::seq_range::QueryInput;
-use crate::sequence::packed_letters::PackedLetters;
+use crate::sequence::packed_letters::{unpack_from, PackedAt, PackedLetters};
 use crate::utils::threading::SearchPool;
 
 /// No NCBI counterpart: LOSAT_X_BNQPACK (read once).
 pub(super) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNQPACK"))
+}
+
+/// No NCBI counterpart: LOSAT_X_BNQPARTS (read once).
+pub(super) fn parts_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNQPARTS"))
 }
 
 /// No NCBI counterpart: what `search_cli` knows of a search when it decides whether the switch
@@ -122,8 +130,23 @@ pub(super) struct Store {
     /// The records the loop has not taken, the packed letters of those packed, and how many
     /// records the loop has taken.
     left: Mutex<Left>,
+    /// EXPERIMENT (LOSAT_X_BNQPARTS): the records held in parts (`Store::from_parts`; `left` is then
+    /// empty).
+    parts: Option<Mutex<PartsLeft>>,
     /// Every record searched whole (no `-query_loc`).
     query_input: QueryInput,
+}
+
+/// EXPERIMENT (LOSAT_X_BNQPARTS): the parts with records the loop has not taken, each with the
+/// position of its first record among all records, and how many records the loop has taken.
+struct PartsLeft {
+    parts: std::collections::VecDeque<(usize, Part)>,
+    taken: usize,
+    /// The prefix of the local IDs the reader's counter gives (`ReaderConfig::id_prefix`).
+    id_prefix: &'static str,
+    /// The parts and whether they were read on the search's threads, for the `[X_STATS]` line.
+    count: usize,
+    in_parts: bool,
 }
 
 struct Left {
@@ -194,6 +217,62 @@ impl Store {
                     .collect(),
                 taken: 0,
             }),
+            parts: None,
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNQPARTS): the store of the records of `parts`, in order (`in_parts`:
+    /// read on the search's threads, `x_query_scan_par::store_parts`, else by the search's reader);
+    /// `id_prefix` is the reader's (`ReaderConfig::id_prefix`).
+    pub(super) fn from_parts(parts: Vec<Part>, id_prefix: &'static str, in_parts: bool) -> Self {
+        let count = parts.iter().map(Part::len).sum();
+        let mut input_lengths = Vec::with_capacity(count);
+        let (mut packed, mut packed_letters, mut bytes) = (0, 0, 0);
+        for part in &parts {
+            for record in &part.records {
+                input_lengths.push(record.letters.len());
+                if let PartLetters::Packed(at) = record.letters {
+                    packed += 1;
+                    packed_letters += at.len() as u64;
+                }
+            }
+            bytes += part.bytes.len() as u64;
+        }
+        if packed > 0 {
+            PACKED.fetch_add(packed, Ordering::Relaxed);
+            PACKED_LETTERS.fetch_add(packed_letters, Ordering::Relaxed);
+            PACKED_BYTES.fetch_add(bytes, Ordering::Relaxed);
+        }
+        let mut first = 0;
+        let parts_count = parts.len();
+        let parts = parts
+            .into_iter()
+            .map(|part| {
+                let at = first;
+                first += part.len();
+                (at, part)
+            })
+            .collect();
+        Self {
+            query_input: QueryInput {
+                placements: Default::default(),
+                ordinals: (0..count).collect(),
+                input_lengths,
+                skipped: vec![false; count],
+                range_length: None,
+            },
+            left: Mutex::new(Left {
+                records: Vec::new().into_iter(),
+                packed: Default::default(),
+                taken: 0,
+            }),
+            parts: Some(Mutex::new(PartsLeft {
+                parts,
+                taken: 0,
+                id_prefix,
+                count: parts_count,
+                in_parts,
+            })),
         }
     }
 
@@ -214,6 +293,10 @@ impl Store {
         range: std::ops::Range<usize>,
         pool: &SearchPool<'_>,
     ) -> anyhow::Result<Vec<FastaRecord>> {
+        if let Some(parts) = &self.parts {
+            let mut parts = parts.lock().unwrap_or_else(PoisonError::into_inner);
+            return parts.take(range, self.lengths().len(), pool);
+        }
         let mut left = self.left.lock().unwrap_or_else(PoisonError::into_inner);
         let Left {
             records,
@@ -242,11 +325,285 @@ impl Store {
         &self,
         out: &mut (dyn std::io::Write + Send),
     ) -> anyhow::Result<()> {
+        if let Some(parts) = &self.parts {
+            let parts = parts.lock().unwrap_or_else(PoisonError::into_inner);
+            for (first, part) in &parts.parts {
+                for index in parts.taken.saturating_sub(*first)..part.len() {
+                    out.write_all(part.warnings(index))?;
+                }
+            }
+            return Ok(());
+        }
         let left = self.left.lock().unwrap_or_else(PoisonError::into_inner);
         for record in left.records.as_slice() {
             out.write_all(&record.warnings)?;
         }
         Ok(())
+    }
+}
+
+// No NCBI counterpart: the summary line of LOSAT_X_BNQPARTS (with LOSAT_X_STATS); it prints
+// counters and changes no value NCBI computes.
+impl Drop for Store {
+    fn drop(&mut self) {
+        let Some(parts) = &self.parts else {
+            return;
+        };
+        if std::thread::panicking() || std::env::var_os("LOSAT_X_STATS").is_none() {
+            return;
+        }
+        let parts = parts.lock().unwrap_or_else(PoisonError::into_inner);
+        eprintln!(
+            "[X_STATS] BNQPARTS records={} parts={} in_parts={}",
+            self.query_input.input_lengths.len(),
+            parts.count,
+            u8::from(parts.in_parts)
+        );
+    }
+}
+
+impl PartsLeft {
+    /// `Store::take` of the parts: the records `range` made again from their parts (by `pool`'s
+    /// threads with two or more), and the parts all of whose records are taken dropped.
+    fn take(
+        &mut self,
+        range: std::ops::Range<usize>,
+        count: usize,
+        pool: &SearchPool<'_>,
+    ) -> anyhow::Result<Vec<FastaRecord>> {
+        anyhow::ensure!(
+            range.start == self.taken && range.end <= count,
+            "LOSAT_X_BNQPARTS: the batch of the records {range:?} after those up to {}",
+            self.taken
+        );
+        let t0 = crate::utils::xtiming::clock();
+        // The runs of the batch's records in each part: (part, first record in the part, first
+        // record in the batch).
+        let mut runs = Vec::new();
+        let mut at = range.start;
+        for (index, (first, part)) in self.parts.iter().enumerate() {
+            if at >= range.end {
+                break;
+            }
+            if at < first + part.len() {
+                runs.push((index, at - first, at - range.start));
+                at = (first + part.len()).min(range.end);
+            }
+        }
+        let parts = &self.parts;
+        let id_prefix = self.id_prefix;
+        let make = |offset: usize| {
+            let run = runs[runs.partition_point(|&(_, _, from)| from <= offset) - 1];
+            let (first, part) = &parts[run.0];
+            let index = run.1 + offset - run.2;
+            part.record(index, first + index, id_prefix)
+        };
+        let batch: Vec<FastaRecord>;
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        {
+            use rayon::prelude::*;
+            batch = if pool.enabled() && pool.threads() > 1 {
+                pool.install(|| (0..range.len()).into_par_iter().map(make).collect())
+            } else {
+                (0..range.len()).map(make).collect()
+            };
+        }
+        #[cfg(not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )))]
+        {
+            let _ = pool;
+            batch = (0..range.len()).map(make).collect();
+        }
+        self.taken = range.end;
+        while self
+            .parts
+            .front()
+            .is_some_and(|(first, part)| first + part.len() <= self.taken)
+        {
+            self.parts.pop_front();
+        }
+        add_unpack_time(t0);
+        Ok(batch)
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BNQPARTS): the records of a run of consecutive records of the query file (a
+/// part of it read on a thread of its own, `x_query_scan_par::store_parts`, or the whole file read
+/// by the search's reader, `read_part`) held in one buffer: each record's title, reader messages
+/// and letters (their store where the reader packed them, `PackedLetters::append_to`, else the
+/// letters), made again when the loop takes their batch (`Part::record`).
+#[derive(Default)]
+pub(super) struct Part {
+    bytes: Vec<u8>,
+    records: Vec<PartRecord>,
+    /// The records whose local ID is not the one their reader's counter gave (`-parse_deflines`)
+    /// or that carry a source (`FastaRecord::source`): their position in the part, ID and source.
+    special: Vec<(usize, String, Option<Box<RecordSource>>)>,
+}
+
+#[derive(Clone, Copy)]
+struct PartRecord {
+    /// Where the record ends in `bytes` (it starts where the one before ends).
+    end: usize,
+    title: usize,
+    warnings: usize,
+    letters: PartLetters,
+}
+
+#[derive(Clone, Copy)]
+enum PartLetters {
+    /// The letters themselves (the reader did not pack them).
+    Letters(usize),
+    Packed(PackedAt),
+}
+
+impl PartLetters {
+    fn len(&self) -> usize {
+        match self {
+            PartLetters::Letters(length) => *length,
+            PartLetters::Packed(at) => at.len(),
+        }
+    }
+}
+
+impl Part {
+    /// An empty part with room for `bytes` bytes.
+    pub(super) fn with_capacity(bytes: usize) -> Part {
+        Part {
+            bytes: Vec::with_capacity(bytes),
+            ..Part::default()
+        }
+    }
+
+    /// The number of records.
+    pub(super) fn len(&self) -> usize {
+        self.records.len()
+    }
+
+    /// Adds `record`, the `n`th record its reader read (from 1), with the store of its letters
+    /// where the reader packed them (`packed`; its `sequence` is then empty). Returns whether its
+    /// local ID is the one the reader's counter gave (`id_prefix` and `n`) and it has no source.
+    pub(super) fn push(
+        &mut self,
+        record: FastaRecord,
+        packed: Option<PackedLetters>,
+        id_prefix: &str,
+        n: usize,
+    ) -> bool {
+        let FastaRecord {
+            local_id,
+            title,
+            sequence,
+            warnings,
+            source,
+        } = record;
+        self.bytes.extend_from_slice(&title);
+        self.bytes.extend_from_slice(&warnings);
+        let letters = match packed {
+            Some(store) => PartLetters::Packed(store.append_to(&mut self.bytes)),
+            None => {
+                self.bytes.extend_from_slice(&sequence);
+                PartLetters::Letters(sequence.len())
+            }
+        };
+        let counted = source.is_none() && counted_id(&local_id, id_prefix, n);
+        if !counted {
+            self.special.push((self.records.len(), local_id, source));
+        }
+        self.records.push(PartRecord {
+            end: self.bytes.len(),
+            title: title.len(),
+            warnings: warnings.len(),
+            letters,
+        });
+        counted
+    }
+
+    /// The bytes of record `index`: its title, messages and letters (or their store).
+    fn parts_of(&self, index: usize) -> (&[u8], &[u8], &[u8]) {
+        let start = index
+            .checked_sub(1)
+            .map_or(0, |before| self.records[before].end);
+        let record = &self.records[index];
+        let (title, rest) = self.bytes[start..record.end].split_at(record.title);
+        let (warnings, letters) = rest.split_at(record.warnings);
+        (title, warnings, letters)
+    }
+
+    /// The reader's messages of record `index`.
+    fn warnings(&self, index: usize) -> &[u8] {
+        self.parts_of(index).1
+    }
+
+    /// Record `index` made again, the input record `ordinal` (from 0) of a reader whose local IDs
+    /// start with `id_prefix`.
+    fn record(&self, index: usize, ordinal: usize, id_prefix: &str) -> FastaRecord {
+        let (title, warnings, letters) = self.parts_of(index);
+        let (local_id, source) = match self.special.binary_search_by_key(&index, |(at, _, _)| *at) {
+            Ok(found) => {
+                let (_, local_id, source) = &self.special[found];
+                (local_id.clone(), source.clone())
+            }
+            Err(_) => (format!("{id_prefix}{}", ordinal + 1), None),
+        };
+        let mut sequence = Vec::new();
+        match self.records[index].letters {
+            PartLetters::Letters(_) => sequence.extend_from_slice(letters),
+            PartLetters::Packed(at) => unpack_from(letters, at, &mut sequence),
+        }
+        FastaRecord {
+            local_id,
+            title: title.to_vec(),
+            sequence,
+            warnings: warnings.to_vec(),
+            source,
+        }
+    }
+}
+
+/// Whether `id` is the local ID that a reader's counter gives its `n`th record (`generate_id`:
+/// the prefix and `n` in decimal).
+fn counted_id(id: &str, id_prefix: &str, n: usize) -> bool {
+    id.strip_prefix(id_prefix).is_some_and(|digits| {
+        !digits.starts_with('0')
+            && digits.bytes().all(|byte| byte.is_ascii_digit())
+            && digits.parse::<usize>() == Ok(n)
+    })
+}
+
+/// EXPERIMENT (LOSAT_X_BNQPARTS): `x_read_queries_packed` into one part: the records of `source`
+/// (their letters packed as they are read) and how the reading ended, as `read_queries` reads them.
+pub(super) fn read_part<R: std::io::Read>(
+    source: &mut FastaInputSource<R>,
+    id_prefix: &str,
+) -> (Part, QueryEnd) {
+    source.x_pack_letters();
+    let mut part = Part::default();
+    loop {
+        if source.end() {
+            return (part, QueryEnd::Input);
+        }
+        let mut warnings = Vec::new();
+        match source.next_sequence(&mut |message: &[u8]| {
+            warnings.extend_from_slice(message);
+            Ok(())
+        }) {
+            Ok(record) => {
+                let packed = source.x_take_packed();
+                let n = part.len() + 1;
+                part.push(record, packed, id_prefix, n);
+            }
+            Err(ReadError::Parse {
+                code: ParseErrorCode::Eof,
+                ..
+            }) => return (part, QueryEnd::EofError),
+            Err(error) => return (part, QueryEnd::Error { error, warnings }),
+        }
     }
 }
 

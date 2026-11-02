@@ -335,7 +335,8 @@ pub(super) fn run_local_for_report(
 // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //        != BLAST_SEQSRC_EOF) {
 //    Int4 stat_length;
-// The pool owns one search; ordered subject results enter the same Stage D stream.
+// The pool owns one search (or is the run's, `with_run_pool`); ordered subject results enter
+// the same Stage D stream.
 pub(super) fn run_local_for_report_threads(
     queries: &[Vec<u8>],
     subjects: SubjectLetters<'_>,
@@ -825,10 +826,11 @@ pub(super) fn x_search_batches<'p>(
         return Ok(None);
     };
     // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): each of the last batches on a pool of its own with its
-    // share of the threads, all at the same time, once the shared pool has ended (a pool cannot
-    // be started from a worker of another, `with_search_pool`). Each batch is the same search
-    // as on the shared pool, whose report does not depend on the number of threads; the reports
-    // are taken in batch order, and the first failing batch in that order gives the error.
+    // share of the threads, all at the same time, once the search on the shared pool has ended
+    // (a pool cannot be started from a worker of another, `with_search_pool`). Each batch is the
+    // same search as on the shared pool, whose report does not depend on the number of threads;
+    // the reports are taken in batch order, and the first failing batch in that order gives the
+    // error.
     #[cfg(feature = "parallel")]
     if !x_own_pools.is_empty() {
         let side = x_subject_side.as_ref();

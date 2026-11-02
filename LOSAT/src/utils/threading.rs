@@ -4,7 +4,7 @@ use anyhow::{ensure, Context, Result};
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // TBlastThreads the_threads(GetNumberOfThreads());
 // (*thread)->Run(); (*thread)->Join(&result);
-// This borrow cannot outlive the one search that owns the pool.
+// This borrow cannot outlive the one search, or the run (`with_run_pool`), that owns the pool.
 pub struct SearchPool<'a> {
     requested: &'a usize,
     #[cfg(feature = "parallel")]
@@ -152,8 +152,8 @@ where
     validate_threads(requested)?;
     #[cfg(feature = "parallel")]
     if requested > 1 {
+        // The run's pool was reported once, when the run built it.
         if let Some(pool) = run_pool(requested) {
-            report_pool(program, requested, pool.current_num_threads());
             return work(&SearchPool {
                 requested: &requested,
                 pool: Some(pool),
@@ -276,7 +276,8 @@ where
     // the thread that called it: without a pool directly, with a pool as slot
     // zero, which is the caller's own thread running the Rayon worker loop
     // (`caller.run()` above), from where `ThreadPool::install` runs its
-    // closure in place. The result is written to and read from a slot on that
+    // closure in place, or inside a run (`with_run_pool`) on the run's pool
+    // from this same thread. The result is written to and read from a slot on that
     // same thread's stack. Neither value is ever touched by another thread.
     unsafe impl<T> Send for Local<T> {}
     let work = Local(work);

@@ -64,8 +64,9 @@ export class ThreadHost {
   constructor(private readonly options: ThreadHostOptions) {}
 
   /**
-   * Makes `count` thread workers (the threads of a search of `count` + 1 threads) and waits
-   * until all of them are ready: also those whose thread of the previous search is returning.
+   * Makes `count` thread workers (the threads of a search of `count` + 1 threads), if there
+   * are fewer, and waits until `count` of them are ready: also those whose thread of the
+   * previous search is still returning.
    */
   async prepare(count: number): Promise<void> {
     const total = count;

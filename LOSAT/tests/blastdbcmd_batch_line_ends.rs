@@ -123,10 +123,18 @@ const TAX: &[&str] = &[
 const PIG: &[&str] = &["-db", "db/m/pmg", "-outfmt", "%o %s", "-ipg_batch"];
 const PIG_FASTA: &[&str] = &["-db", "db/m/pmg", "-ipg_batch"];
 
-/// The cases of probe O: id, the words before the file, the input, whether it is read from the
+/// A case of probe O: id, the words before the file, the input, whether it is read from the
 /// standard input (`-`), the words after the file.
+type Case = (
+    &'static str,
+    &'static [&'static str],
+    &'static str,
+    bool,
+    &'static [&'static str],
+);
+
 #[rustfmt::skip]
-const CASES: &[(&str, &[&str], &str, bool, &[&str])] = &[
+const CASES: &[Case] = &[
     ("O01", ENTRY, "e_lf", false, &["-outfmt", "%a"]),
     ("O02", ENTRY, "e_crlf", false, &["-outfmt", "%a"]),
     ("O03", ENTRY, "e_cr", false, &["-outfmt", "%a"]),

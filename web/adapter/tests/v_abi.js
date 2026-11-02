@@ -243,13 +243,15 @@ function checkSurface(reactor, native) {
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding"],
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding",
                        "-template_length", "17"],
-                      ["blastn", "-query", "q", "-subject", "s", "-task", "rmblastn"],
-                      ["blastx", "-query", "q", "-subject", "s", "-query_loc", "1-9"]]) {
+                      ["blastn", "-query", "q", "-subject", "s", "-task", "rmblastn"]]) {
     const validated = reactor.call("losat_web2_validate", argv.join("\0"));
     assert.equal(validated.status, -1, argv.join(" "));
     const cli = require("node:child_process").spawnSync(native, argv);
     assert.equal(validated.error, cli.stderr.toString(), `${argv.join(" ")}: the CLI's message`);
   }
+  // BLASTX's ranges: the CLI reads them (line SX, SXd1), LOSAT Web refuses them until SXd3.
+  assert.match(reactor.call("losat_web2_validate", ["blastx", "-query", "q", "-subject", "s", "-query_loc", "1-9"].join("\0")).error,
+               /^-query_loc and -subject_loc are not supported by LOSAT Web's BLASTX yet$/);
   // The host validates the argv that it runs, with its -num_threads, so a -num_threads in
   // the user's words is a repeated option (abi_v2.md §7). The adapter parses the argv as the
   // CLI does, so the whole message (its usage line too) and an unknown program's are the CLI's.

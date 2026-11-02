@@ -380,6 +380,8 @@ fn manifest_rows() -> Vec<(String, String, String, Vec<String>, String)> {
         .map(|line| line.split('\t').collect::<Vec<_>>())
         .filter(|row| row[program] == "blastx" && matches!(row[outfmt], "0" | "6" | "7"))
         .filter(|row| !row[extra].contains("-parse_deflines"))
+        // LOSAT Web's BLASTX refuses the command line's ranges until line SX's session SXd3.
+        .filter(|row| !row[extra].contains("-query_loc") && !row[extra].contains("-subject_loc"))
         .map(|row| {
             (
                 row[id].to_string(),

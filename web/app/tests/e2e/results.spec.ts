@@ -1641,3 +1641,94 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   await expect(page.getByTestId('results-outputs')).toBeVisible();
   await expect(heading).toBeInViewport({ ratio: 1 });
 });
+
+test('the Outputs view lays out blocks of lines near the view, and shows, finds and selects every line', async ({ page, browserName }) => {
+  test.skip(!BUILD_HAS_ENGINE, 'an output of many lines');
+  await openSearch(page);
+  await program(page, 'tblastx');
+  await openFiles(page, 'query', [{ name: 'q.fasta', text: fasta('small_test.fasta') }]);
+  await openFiles(page, 'subject', [{ name: 's.fasta', text: fasta('small_test.fasta') }]);
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await page.getByTestId('tab-results').click();
+  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
+  await page.getByTestId('results-view-outputs').click();
+  const output = page.getByTestId('result-output');
+  // A block says when the browser starts or stops skipping its contents.
+  await page.evaluate(() => {
+    const skipped = new WeakMap<EventTarget, boolean>();
+    (window as unknown as { skippedBlocks: typeof skipped }).skippedBlocks = skipped;
+    document.addEventListener(
+      'contentvisibilityautostatechange',
+      (event) => skipped.set(event.target!, (event as Event & { skipped: boolean }).skipped),
+      true,
+    );
+  });
+  // Outfmt 6 after 0: the blocks of one output do not keep the heights of the other's.
+  for (const format of [0, 6, 0] as const) {
+    await page.getByTestId(`format-${format}`).click();
+    await expect(output).toHaveAttribute('data-shown', `1:${format}`);
+    const view = await output.evaluate(async (element) => {
+      const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await frame();
+      const blocks = [...element.children];
+      const text = element.textContent ?? '';
+      const { skippedBlocks } = window as unknown as { skippedBlocks: WeakMap<EventTarget, boolean> };
+      const skipped = (block: Element) => skippedBlocks.get(block) === true;
+      const marked = () => element.querySelectorAll('.output-chunk-selected').length;
+      const style = getComputedStyle(element);
+      const lineHeight = blocks[0]!.getBoundingClientRect().height / (blocks[0]!.textContent!.split('\n').length - 1);
+      const selection = document.getSelection()!;
+      const lastLine = text.trimEnd().split('\n').at(-1)!;
+      const lastSkipped = blocks.length > 2 ? skipped(blocks.at(-1)!) : null;
+      // Two lines over the boundary of the first two blocks: those two are laid out, the last not.
+      const range = document.createRange();
+      range.setStart(blocks[0]!.firstChild!, blocks[0]!.textContent!.length - 2);
+      range.setEnd(blocks[1]!.firstChild!, 2);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      await frame();
+      const overBoundary = { marked: marked(), lastSkipped: blocks.length > 2 ? skipped(blocks.at(-1)!) : null };
+      selection.selectAllChildren(element);
+      await frame();
+      const all = { marked: marked(), chars: selection.toString().trimEnd().length };
+      selection.removeAllRanges();
+      await frame();
+      const found = (window as unknown as { find(text: string): boolean }).find(lastLine);
+      selection.removeAllRanges();
+      await frame();
+      return {
+        blocks: blocks.length,
+        lines: text.split('\n').length - 1,
+        lineHeight,
+        contentHeight: element.scrollHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+        chars: text.trimEnd().length,
+        lastSkipped,
+        overBoundary,
+        all,
+        found,
+        markedAfter: marked(),
+      };
+    });
+    expect(view.blocks).toBeGreaterThan(1);
+    if (format === 0) {
+      expect(view.lastSkipped).toBe(true);
+      expect(view.overBoundary).toEqual({ marked: 2, lastSkipped: true });
+    }
+    expect(Math.round(view.contentHeight / view.lineHeight)).toBe(view.lines);
+    expect(view.all).toEqual({ marked: view.blocks, chars: view.chars });
+    expect(view.found).toBe(true);
+    expect(view.markedAfter).toBe(0);
+  }
+  // Select all of the page, as the keyboard does, with the output's end in it (WPE WebKit binds
+  // no key to the command).
+  await output.click();
+  if (browserName === 'webkit') await page.evaluate(() => document.execCommand('selectAll'));
+  else await page.keyboard.press('ControlOrMeta+a');
+  const selected = await output.evaluate(async (element) => {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const last = (element.textContent ?? '').trimEnd().split('\n').at(-1)!;
+    return { marked: element.querySelectorAll('.output-chunk-selected').length, blocks: element.children.length, hasLast: document.getSelection()!.toString().includes(last) };
+  });
+  expect(selected).toEqual({ marked: selected.blocks, blocks: selected.blocks, hasLast: true });
+});

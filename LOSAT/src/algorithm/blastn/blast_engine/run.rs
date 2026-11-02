@@ -6368,7 +6368,7 @@ fn post_process_hits_and_write(
     let pairwise_hits = if outputs.hits.is_some()
         || (outputs.observer.is_some() && output_formats.contains(&BlastnOutputFormat::Pairwise))
     {
-        Some(rows_of(0..hit_lists.len())?)
+        Some(Arc::new(rows_of(0..hit_lists.len())?))
     } else {
         None
     };
@@ -6378,7 +6378,7 @@ fn post_process_hits_and_write(
     // ```
     // The caller receives the same final result that every formatter prints.
     if let (Some(hits_sink), Some(hits)) = (outputs.hits.as_mut(), pairwise_hits.as_ref()) {
-        hits_sink(hits);
+        hits_sink(Arc::clone(hits));
     }
     // Built before any format is written, so that a report that cannot be made fails the
     // run without output.
@@ -7086,6 +7086,7 @@ pub fn run(
     mut args: BlastnArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
+    args.id_scope = args.parse_deflines.then(Default::default);
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:128-133
     // ```c
     // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -7453,6 +7454,7 @@ fn read_cli_subjects(
             .with_defline(keep_deflines)
             .with_parse_deflines(args.parse_deflines),
     );
+    subject_source.set_id_scope(args.id_scope.clone());
     // EXPERIMENT (LOSAT_X_BNSTORE): without a subject range, each record's letters are packed as
     // soon as it has been read, and the records keep none (`x_read_subject_stores`).
     // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs); with
@@ -7539,7 +7541,8 @@ fn search_cli(
                 list.as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .in_id_scope(args.id_scope.clone());
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
@@ -7649,6 +7652,7 @@ fn search_cli(
         .with_parse_deflines(args.parse_deflines)
         .with_strand(&args.strand);
     let mut query_source = FastaInputSource::from_argument(&args.query, query_file, query_config);
+    query_source.set_id_scope(args.id_scope.clone());
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs
             .diagnostics
@@ -10080,6 +10084,19 @@ fn write_reports_untimed(
     mut written: x_rpt_stream::Written<'_>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
+    if args.parse_deflines && output_formats.contains(&BlastnOutputFormat::Pairwise) {
+        crate::blastinput::fasta_reader::believed::refuse_shared_masks(
+            query_records,
+            |query| {
+                results
+                    .query_masks
+                    .get(query)
+                    .is_some_and(|m| !m.is_empty())
+            },
+            args.lcase_masking,
+            "BLASTN",
+        )?;
+    }
     let megablast = args.task == "megablast";
     let config = configure_task(args);
     let mut hit_lists = results.hit_lists;

@@ -141,8 +141,10 @@ fn build_alignment_view_with_matrix_impl<const BLOSUM62: bool>(
 
     let mut q_index = q_offset;
     let mut s_index = s_offset;
-    let mut query_aln = String::new();
-    let mut subject_aln = String::new();
+    // The rows live in a `PairwiseHit` while the reports are written: their exact size.
+    let columns = ops.iter().map(|op| op.num() as usize).sum();
+    let mut query_aln = String::with_capacity(columns);
+    let mut subject_aln = String::with_capacity(columns);
     let mut num_ident = 0usize;
     let mut num_positives = 0usize;
     let mut gap_letters = 0usize;

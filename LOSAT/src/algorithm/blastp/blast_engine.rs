@@ -4650,6 +4650,7 @@ pub fn run(
     mut args: BlastpArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
+    args.id_scope = args.parse_deflines.then(Default::default);
     use crate::blastinput::app;
     use crate::blastinput::input_files;
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:128-133
@@ -4983,6 +4984,7 @@ fn read_cli_subjects(
             .with_defline(keep_deflines)
             .with_parse_deflines(args.parse_deflines),
     );
+    subject_source.set_id_scope(args.id_scope.clone());
     // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
     // counterpart.
     let t_read_fasta = crate::utils::xtiming::clock();
@@ -5081,7 +5083,8 @@ fn search_cli(
                 list.as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .in_id_scope(args.id_scope.clone());
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
@@ -5172,6 +5175,7 @@ fn search_cli(
             .with_defline(args.archive.is_some())
             .with_parse_deflines(args.parse_deflines),
     );
+    query_source.set_id_scope(args.id_scope.clone());
     if !shared_standard_input && query_source.stream_is_empty() {
         // psiblast_app.cpp:461-464 is the same test, with psiblast's prefix.
         writeln!(
@@ -6124,15 +6128,10 @@ fn search(
                     let records_before = x_records.as_ref().map_or(0, Vec::len);
                     let x_first_query =
                         u32::try_from(block.start).expect("a query index of the call fits q_idx");
-                    let mut x_collect = |found: &[PairwiseHit]| {
-                        if let Some(records) = x_records.as_mut() {
-                            records.extend(found.iter().map(|record| {
-                                let mut record = record.clone();
-                                record.hit.q_idx += x_first_query;
-                                record
-                            }));
-                        }
-                    };
+                    // The block's rows, shared with its reports until the block has ended.
+                    let mut x_found = Vec::new();
+                    let mut x_collect =
+                        |found: std::sync::Arc<Vec<PairwiseHit>>| x_found.push(found);
                     // EXPERIMENT (LOSAT_X_BPQBLOCK): the caller's observer with the block's HSP
                     // indices moved past the blocks before.
                     let mut x_offset = observer.as_deref_mut().map(|inner| XOffsetObserver {
@@ -6149,8 +6148,9 @@ fn search(
                             })
                             .collect(),
                         diagnostics: &mut **diagnostics,
-                        hits: x_want_records
-                            .then_some(&mut x_collect as &mut (dyn FnMut(&[PairwiseHit]) + Send)),
+                        hits: x_want_records.then_some(
+                            &mut x_collect as &mut crate::api::local_blast::HitsSink<'_>,
+                        ),
                         observer: x_offset
                             .as_mut()
                             .map(|offset| offset as &mut (dyn FormatObserver + Send)),
@@ -6186,6 +6186,17 @@ fn search(
                         )
                     })?;
                     drop(block_outputs);
+                    if let Some(records) = x_records.as_mut() {
+                        for found in x_found {
+                            // The block has ended, its reports hold no row: the rows move here.
+                            let found = std::sync::Arc::try_unwrap(found)
+                                .unwrap_or_else(|shared| shared.as_ref().clone());
+                            records.extend(found.into_iter().map(|mut record| {
+                                record.hit.q_idx += x_first_query;
+                                record
+                            }));
+                        }
+                    }
                     x_hsps_before += x_records.as_ref().map_or(0, Vec::len) - records_before;
                 }
                 for sink in &mut sinks {
@@ -6195,8 +6206,8 @@ fn search(
             })?;
         if searched_in_blocks {
             // EXPERIMENT (LOSAT_X_BPQBLOCK): the hit records of all queries, once.
-            if let (Some(sink), Some(records)) = (hits.as_mut(), x_records.as_ref()) {
-                sink(records);
+            if let (Some(sink), Some(records)) = (hits.as_mut(), x_records.take()) {
+                sink(std::sync::Arc::new(records));
             }
             return Ok(());
         }
@@ -11100,9 +11111,10 @@ fn run_resolved_in_pool(
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
     // ```
     // The caller receives the same final result that every formatter prints.
+    let pairwise_hits = pairwise_hits.map(std::sync::Arc::new);
     if let (Some(hits_sink), Some(pairwise_hits)) = (outputs.hits.as_mut(), pairwise_hits.as_ref())
     {
-        hits_sink(pairwise_hits);
+        hits_sink(std::sync::Arc::clone(pairwise_hits));
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1553-1554
@@ -11253,6 +11265,19 @@ fn run_resolved_in_pool(
                 query_warning_lines[first].splice(reader..reader, messages);
             }
         }
+    }
+    if args.parse_deflines
+        && format_plans
+            .iter()
+            .any(|outfmt| matches!(outfmt, BlastpReport::Text(OutputFormat::Pairwise)))
+    {
+        let masks = query_record_masks(&query_frames, &ranges.query_input.placements);
+        crate::blastinput::fasta_reader::believed::refuse_shared_masks(
+            query_records,
+            |query| masks.get(query).is_some_and(|m| !m.is_empty()),
+            args.lcase_masking,
+            args.app.name(),
+        )?;
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
@@ -12003,7 +12028,10 @@ fn run_resolved_in_pool(
                     subjects: tabular_subjects,
                     unsearched: &query_batch_skipped,
                     hits_found: psiblast_hits_found.as_deref(),
-                    rows: needs.rows.then_some(pairwise_hits.as_deref()).flatten(),
+                    rows: needs
+                        .rows
+                        .then_some(pairwise_hits.as_deref().map(Vec::as_slice))
+                        .flatten(),
                     prolog: reports.x_prolog,
                     epilog: reports
                         .epilog
@@ -12323,6 +12351,7 @@ mod tests {
             dbsize: None,
             show_gis: false,
             parse_deflines: false,
+            id_scope: None,
             searchsp: None,
             task: "blastp".to_string(),
             evalue: None,

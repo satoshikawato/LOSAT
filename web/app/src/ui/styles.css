@@ -964,6 +964,22 @@ pre.output {
   max-height: 60vh;
 }
 
+/* The Outputs view lays out a block of lines only near the view (src/domain/output-chunks.ts). A
+   block out of view has the height of its lines and the width of the view; a block near the view
+   has the width of its longest line (`max-content`), so the view scrolls sideways as far as the
+   lines near it reach. A browser without content-visibility lays them all out. */
+.output-chunk {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto calc(var(--output-chunk-lines) * 1lh);
+}
+
+.output-chunk-selected {
+  content-visibility: visible;
+}
+
 /* Results screen (S13) */
 
 .small {

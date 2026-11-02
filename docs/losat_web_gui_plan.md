@@ -264,7 +264,7 @@ pub trait FormatObserver {                   // 行・節の開始と終了。�
 pub struct ReportOutputs<'a> {               // すべて Send（整形はスレッドプールの中で走る）
     pub formats: Vec<FormatOutput<'a>>,                                // CLI は 1 つ
     pub diagnostics: &'a mut (dyn Write + Send),                      // CLI の stderr に当たる警告
-    pub hits: Option<&'a mut (dyn FnMut(&[PairwiseHit]) + Send)>,     // 最終の HSP 一覧
+    pub hits: Option<&'a mut HitsSink<'a>>,                           // 最終の HSP 一覧（dyn FnMut(Arc<Vec<PairwiseHit>>)、複製しない）
     pub observer: Option<&'a mut (dyn FormatObserver + Send)>,
 }
 

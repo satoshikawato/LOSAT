@@ -813,7 +813,7 @@ mod tests {
         );
         drop(outputs);
         // Hit records, an observer-like second output: two formats; a file sink.
-        let mut on_hits = |_: &[crate::report::PairwiseHit]| {};
+        let mut on_hits = |_: Arc<Vec<crate::report::PairwiseHit>>| {};
         let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors);
         outputs.hits = Some(&mut on_hits);
         assert_eq!(

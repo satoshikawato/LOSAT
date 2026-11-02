@@ -22,6 +22,13 @@ pub mod compressed;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 pub(crate) use backbone::x_prepare_blosum62_lookup_query_in_pool;
+// TBLASTN's query set setup on the batch's pool (`tblastn/stage_d_pipeline.rs`); no NCBI
+// counterpart for the re-export itself.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) use backbone::x_lookup_contexts_for_profile_in_pool;
 // EXPERIMENT (LOSAT_X_BPLKPFLAT): the lookup query with the contexts' Karlin blocks left to the
 // caller (`blastp/x_query_blocks.rs`); no NCBI counterpart for the re-export itself.
 #[cfg(all(
@@ -39,7 +46,7 @@ pub use backbone::x_tbn_lut_print_summary;
 pub(crate) use backbone::{
     build_ncbi_lookup_for_profile, ideal_karlin_params_of,
     prepare_blosum62_lookup_query_for_word_size, x_lookup_contexts_for_profile,
-    x_lookup_query_for_profile, x_lookup_table_for_profile,
+    x_lookup_query_for_profile, x_lookup_table_for_profile, x_lookup_table_for_profile_in,
 };
 
 use crate::stats::KarlinParams;

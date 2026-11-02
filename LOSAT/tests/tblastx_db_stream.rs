@@ -287,7 +287,7 @@ fn a_damaged_database_fails_the_same_batch_with_the_same_error() {
                     assert_eq!(engine, error == "Database memory map file error", "{what}");
                     let report = String::from_utf8_lossy(&one.1);
                     assert_eq!(report.contains("nn all N"), engine, "{what}: {report}");
-                    assert_eq!(report.contains("mje6k"), false, "{what}: {report}");
+                    assert!(!report.contains("mje6k"), "{what}: {report}");
                 }
                 None => {
                     assert_eq!(one.0, Some(0), "{what}: {}", one.2);

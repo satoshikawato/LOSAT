@@ -7,7 +7,7 @@
 // 60): the time from choosing the file to its record table (the Data worker's index scan
 // with the engine's serial reactor and the SHA-256 of every record), the engine's check of
 // the input (`register` on the Data worker's reactor), leaving one record out (a new
-// revision and the check again), and "Add to queue" (the run input and its SHA-256, the
+// revision and the check again), and "Run LOSAT" (the run input and its SHA-256, the
 // engine's validate). One warm-up and three measured repetitions, each in a new page.
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -78,10 +78,10 @@ async function once(page: Page, file: Buffer, count: number): Promise<Sample> {
   const t4 = Date.now();
   const recheckInApp = Number(await source.getAttribute('data-check-ms'));
 
-  await page.getByTestId('add-to-queue').click();
-  await expect(page.getByTestId('run-1')).toBeVisible({ timeout: 600_000 });
+  await page.getByTestId('run-losat').click();
+  await expect(page.getByTestId('run-1-option')).toHaveCount(1, { timeout: 600_000 });
   const t5 = Date.now();
-  await page.getByTestId('run-1-cancel').click({ timeout: 2000 }).catch(() => undefined);
+  await page.getByTestId('run-status-cancel').click({ timeout: 2000 }).catch(() => undefined);
   return { indexMs: t1 - t0, indexInApp, checkInApp, excludeMs: t4 - t3, recheckInApp, enqueueMs: t5 - t4 };
 }
 

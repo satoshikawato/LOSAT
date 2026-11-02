@@ -9,13 +9,14 @@ import {
   openApp,
   openProbe,
   OUTFMT7_MARK,
-  queueSearch,
   runSearch,
+  startSearch,
   sessionDirectories,
   sessionFiles,
   setQuota,
 } from './support/browser';
 import { expect, killRenderers, test } from './support/profile';
+import { runMessage } from './support/search';
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 
@@ -153,9 +154,9 @@ test('a run that runs out of storage fails with the reason; earlier results stay
   // usage that Chromium checks, which would leave room for the next run.
   await setQuota(page, 0);
   try {
-    await queueSearch(page);
-    await expect(page.getByTestId('run-2-status')).toHaveText('failed');
-    await expect(page.getByTestId('run-2')).toContainText('Not enough temporary storage for the results of this run');
+    await startSearch(page);
+    await expect(page.getByTestId('run-2-option')).toHaveAttribute('data-status', 'failed');
+    expect(await runMessage(page, 2)).toContain('Not enough temporary storage for the results of this run');
 
     await expectResult(page, 1);
     const download = page.waitForEvent('download');

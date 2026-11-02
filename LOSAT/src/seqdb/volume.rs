@@ -37,7 +37,8 @@ pub(super) fn with_extension(base: &Path, seqtype: SeqType, ext: &str) -> PathBu
 /// (`Volume::header`, `SeqDb::read_header`).
 #[derive(Debug)]
 pub enum VolumeHeader {
-    /// A record whose only Seq-ids are `gnl|BL_ORD_ID|n` (`Volume::deflines`).
+    /// A record whose only Seq-ids are `gnl|BL_ORD_ID|n` of the sequence's number n in its volume
+    /// (`Volume::deflines`).
     Ordinal(Vec<Defline>),
     /// A record with parsed Seq-ids (`Volume::defline_set`).
     Parsed(crate::seqid::DeflineSet),
@@ -539,7 +540,12 @@ impl Volume {
     pub fn defline_taxids(&self, oid: u32) -> Result<Vec<i32>, SeqDbError> {
         let record = self.header_bytes(oid)?;
         let path = with_extension(&self.base, self.index.seqtype, "hr");
-        self.kept_lines(oid, &record, &path, decode_defline_taxids(&record, &path))
+        self.kept_lines(
+            oid,
+            &record,
+            &path,
+            decode_defline_taxids(&record, &path, oid),
+        )
     }
 
     /// The definition lines of the sequence `oid` (volume-relative) with every member and
@@ -587,7 +593,7 @@ impl Volume {
         record: &[u8],
         path: &Path,
     ) -> Result<VolumeHeader, SeqDbError> {
-        match decode_deflines_as(record, path, false) {
+        match decode_deflines_as(record, path, oid, false) {
             Err(error) if error.is_parsed_seqids() => self
                 .decode_kept_set(oid, record, path)
                 .map(VolumeHeader::Parsed),
@@ -637,7 +643,7 @@ impl Volume {
             oid,
             &record,
             &path,
-            decode_deflines_as(&record, &path, want_taxid),
+            decode_deflines_as(&record, &path, oid, want_taxid),
         )
     }
 
@@ -884,7 +890,7 @@ impl Volume {
                     oid,
                     record,
                     path,
-                    decode_deflines_as(record, path, want_taxid),
+                    decode_deflines_as(record, path, oid, want_taxid),
                 )
             },
             visit,
@@ -907,7 +913,7 @@ impl Volume {
             piece_bytes,
             &|oid| self.defline_taxids(oid),
             &|oid, record, path| {
-                self.kept_lines(oid, record, path, decode_defline_taxids(record, path))
+                self.kept_lines(oid, record, path, decode_defline_taxids(record, path, oid))
             },
             visit,
         )

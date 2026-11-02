@@ -73,9 +73,7 @@
 }
 
 :root {
-  --page: #e6f0f3;
-  --page-top: #e2edf8;
-  --page-bottom: #e4f3ee;
+  --page: #eef1f4;
   --bg: #ffffff;
   --fg: #1e293b;
   --fg-2: #334155;
@@ -83,28 +81,29 @@
   --border: #dbe6ec;
   --border-strong: #c3d4dd;
   --panel: #f3f8fa;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-bg: #eff6ff;
-  --accent-line: #bfdbfe;
-  --ok: #15803d;
-  --ok-bg: #f0fdf4;
-  --error: #b91c1c;
-  --error-bg: #fef2f2;
-  --error-line: #fca5a5;
-  --warn-bg: #fffbeb;
-  --warn-fg: #92400e;
-  --warn-line: #fde68a;
+  /* The accent and the status colours are Okabe–Ito's colour-universal palette (Owner,
+     2026-11-02, 案 4): blue, bluish green, vermillion and yellow, told apart in every common
+     colour vision; the Graphic Summary's score bins (plot-scale.ts) use the same palette. */
+  --accent: #0072b2;
+  --accent-hover: #005b8e;
+  --accent-bg: #e6f1f9;
+  --accent-line: #9ccbe6;
+  --ok: #007a5a;
+  --ok-bg: #e3f4ee;
+  --error: #b84f00;
+  --error-bg: #fdeee3;
+  --error-line: #f2b58b;
+  --warn-bg: #faf6d2;
+  --warn-fg: #5b4b00;
+  --warn-line: #e2d24b;
   --shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
   --radius: 12px;
   --radius-sm: 8px;
   font-family: 'Inter', 'Noto Sans JP', system-ui, sans-serif;
   font-size: 15px;
   color: var(--fg-2);
-  /* A soft blue-to-green page behind the white cards (Owner, 2026-11-02): the gradient covers
-     the whole document, so a long page goes from the blue to the green. */
-  background: var(--page) linear-gradient(180deg, var(--page-top), var(--page-bottom)) no-repeat;
-  min-height: 100%;
+  /* A neutral light grey page behind the white cards, so that the status colours read against it. */
+  background: var(--page);
   line-height: 1.45;
 }
 
@@ -212,8 +211,8 @@ input[type='search']:focus,
 select:focus,
 textarea:focus {
   outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(0, 114, 178, 0.25);
   background: var(--bg);
 }
 
@@ -276,7 +275,7 @@ input[type='radio'] {
 .notice {
   background: var(--accent-bg);
   border-color: var(--accent-line);
-  color: #1e3a8a;
+  color: #004a73;
 }
 
 .error {
@@ -1319,7 +1318,7 @@ label.inline {
 .verification-badge[data-level='certified'] {
   color: var(--ok);
   background: var(--ok-bg);
-  border-color: #86efac;
+  border-color: #8fd6bf;
 }
 
 .verification-badge[data-level='outside'] {
@@ -1601,7 +1600,7 @@ label.inline {
 }
 
 .orientation[data-orientation='reverse'] {
-  color: #c2410c;
+  color: #b84f00;
 }
 
 .orientation[data-orientation='unknown'] {

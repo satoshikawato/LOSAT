@@ -113,7 +113,7 @@ NCBI の今の結果は、上から操作の行（Edit Search、Save Search、Se
 | NCBI の要素 | LOSAT Web | 採否 | 理由 |
 |---|---|---|---|
 | 道具の行「hover to see the title」「click to show alignments」 | 同じ言葉 | 採る | |
-| 「Alignment Scores」の凡例：< 40 黒、40 - 50 青、50 - 80 緑、80 - 200 マゼンタ、>= 200 赤 | 同じ階級と色（#000000、#0020e9、#75ea4c、#db3de9、#db3324） | 採る | 読み慣れた機能上の約束（ブランドではない）。HSP レコードの `bit_score`（原値）を区切るだけ |
+| 「Alignment Scores」の凡例：< 40 黒、40 - 50 青、50 - 80 緑、80 - 200 マゼンタ、>= 200 赤 | 同じ階級。色は Okabe–Ito のカラーユニバーサルデザインの 5 色（黒 #000000、青 #0072b2、青緑 #009e73、赤紫 #cc79a7、朱 #d55e00）：保守者の指示（2026-11-02）「案 4（色覚多様性対応）でいきましょう」。赤と緑の対比に頼らない | 寄せる | 読み慣れた機能上の約束（ブランドではない）。HSP レコードの `bit_score`（原値）を区切るだけ |
 | 「Show Conserved Domains」 | なし | 採らない | NCBI の CDD |
 | 「Distribution of the top N Blast Hits on M subject sequences」 | 「Distribution of N HSPs on M subject sequences」（見せている subject の数） | 寄せる | |
 | query の棒と目盛り | 同じ：棒「Query」と目盛り（1 と query の長さ、その間の切りのよい位置）、単位は query の nt / aa | 採る | 座標は Run の記録の長さ |
@@ -192,7 +192,7 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 
 アイコンは gbdraw の Phosphor を取り込まず、LOSAT の少数のインラインの SVG のまま。
 
-ページの背景だけは gbdraw の `#eef2f6` ではなく、保守者の指示（2026-11-02）「背景をもうちょっと青か緑系の色に、優しい色で殺風景じゃないかんじ」で、上が青・下が緑の淡いグラデーション（`--page-top` `#e2edf8` → `--page-bottom` `#e4f3ee`、`:root` の背景）。面（`--panel`）と線（`--border`）もそれに合わせて少し青緑に寄せた。黄・臙脂・色覚多様性対応（Okabe–Ito）・高速道路の案内標識の緑（`#007356`）の案も比べていて、保守者が選んだものに差し替える。
+色は gbdraw の青ではなく Okabe–Ito のカラーユニバーサルデザインの色：アクセント `#0072b2`（青）、OK `#007a5a`（青緑）、エラー `#b84f00`（朱）、注意 `#faf6d2` / `#5b4b00`（黄）。Graphic Summary のリボン（§3）も同じ 5 色。ページの背景は無彩色の薄い灰色 `#eef1f4`、面（`--panel`）と線（`--border`）は少し青みのある灰色。保守者の指示（2026-11-02）：青緑・黄・臙脂・案内標識の緑（`#007356`）を背景やアクセントにした案と比べて「案 4（色覚多様性対応）でいきましょう」。Dot Plot の線の青 `#1f77b4` とオレンジ `#ff7f0e`（blast2dotplot.py の色、§3）は青と橙の対比で色覚に優しいのでそのまま。
 
 2026-11-02 までの見た目（W4b）：薄い灰色の面に青い見出しのつまみ、幅いっぱいの青い帯の「Algorithm parameters」、青く塗った結果のタブ、薄い青の表の見出し。gbdraw の見た目に置き換えた。
 

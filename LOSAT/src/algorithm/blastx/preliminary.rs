@@ -3,14 +3,15 @@ use super::{
     args::ResolvedOptions, parameters::ContextParameters, query_setup::PreparedQueryBatch,
     seed::InitHsp,
 };
-use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+use crate::algorithm::blastn::interval_tree::{
+    BlastIntervalTree, IndexMethod, TreeHsp, X_MAX_CELLS,
+};
 use crate::algorithm::blastp::gapalign::{
     blastp_get_start_for_gapped_alignment, blastp_score_only_gapped_alignment_with_scratch,
     BlastpGappedAlignmentMode, GapAlignScratch,
 };
 use crate::config::ScoringMatrix;
 use anyhow::Result;
-use std::cell::RefCell;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:96-103
 // ```c++
@@ -255,61 +256,24 @@ fn save_hsp(hits: &mut Vec<PreliminaryHsp>, h: PreliminaryHsp, max: usize, heap:
     heapify(hits, 0);
 }
 
-thread_local! {
-    // No NCBI counterpart: the interval tree this thread keeps between subjects (buffer reuse).
-    static X_TREE: RefCell<Option<BlastIntervalTree>> = const { RefCell::new(None) };
-}
+// No NCBI counterpart: grid cells per HSP of a subject's tree (`x_tree_cells`); memory of the
+// grid index only.
+const X_TREE_CELLS_PER_HSP: usize = 64;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831,4107
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
 // ```c
 //       tree = Blast_IntervalTreeInit(0, query->length+1,
 //                                     0, subject->length+1);
-// ...
-//    tree = Blast_IntervalTreeFree(tree);
 // ```
-/// No NCBI counterpart (buffer reuse): NCBI makes the tree for each subject and frees it at the
-/// end; here the interval tree of a subject's gapped stage is taken from the thread that runs it
-/// and given back when dropped. A tree the thread kept from an earlier
-/// subject gets this subject's ranges with `reset_with_bounds` (the state of a new tree), so the
-/// grid index LOSAT adds to the tree (up to 256 KiB of cell heads, zeroed when made) and the node
-/// array are not made again for each (chunk, subject) pair with an initial HSP. A tree left while
-/// a panic unwinds is dropped, not kept.
-struct XTreeSlot(Option<BlastIntervalTree>);
-
-impl XTreeSlot {
-    fn take(q_min: i32, q_max: i32, s_min: i32, s_max: i32) -> Self {
-        let tree = match X_TREE.with(|kept| kept.borrow_mut().take()) {
-            Some(mut tree) => {
-                tree.reset_with_bounds(q_min, q_max, s_min, s_max);
-                tree
-            }
-            None => BlastIntervalTree::new(q_min, q_max, s_min, s_max),
-        };
-        Self(Some(tree))
-    }
-}
-
-impl std::ops::Deref for XTreeSlot {
-    type Target = BlastIntervalTree;
-    fn deref(&self) -> &BlastIntervalTree {
-        self.0.as_ref().expect("set until dropped")
-    }
-}
-
-impl std::ops::DerefMut for XTreeSlot {
-    fn deref_mut(&mut self) -> &mut BlastIntervalTree {
-        self.0.as_mut().expect("set until dropped")
-    }
-}
-
-impl Drop for XTreeSlot {
-    fn drop(&mut self) {
-        if let Some(tree) = self.0.take() {
-            if !std::thread::panicking() {
-                let _ = X_TREE.try_with(|kept| *kept.borrow_mut() = Some(tree));
-            }
-        }
-    }
+/// No NCBI counterpart: the grid limit (`reset_with_bounds_cells`) of the tree NCBI makes for each
+/// subject. The tree holds at most one HSP per initial HSP, so its grid index gets
+/// `X_TREE_CELLS_PER_HSP` cells per initial HSP, at most the grid's own limit (`X_MAX_CELLS`, four
+/// bytes per cell, zeroed when made): a subject with a few initial HSPs no longer takes a grid of
+/// up to 256 KiB for them. A smaller grid lists more leaves per cell and answers the same.
+fn x_tree_cells(initial: usize) -> usize {
+    initial
+        .saturating_mul(X_TREE_CELLS_PER_HSP)
+        .clamp(X_TREE_CELLS_PER_HSP, X_MAX_CELLS)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3860-3869
@@ -471,12 +435,9 @@ pub(crate) fn gapped_observed(
         return Ok(Vec::new());
     }
     let last = batch.contexts.last().expect("BLASTX contexts");
-    let mut tree = XTreeSlot::take(
-        0,
-        (last.offset + last.length + 1) as i32,
-        0,
-        subject.len() as i32,
-    );
+    let (q_max, s_max) = ((last.offset + last.length + 1) as i32, subject.len() as i32);
+    let mut tree = BlastIntervalTree::new(0, q_max, 0, s_max);
+    tree.reset_with_bounds_cells(0, q_max, 0, s_max, x_tree_cells(initial.len()));
     let mut scratch = GapAlignScratch::new();
     let mut hits = Vec::new();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:213-227
@@ -936,47 +897,14 @@ mod tests {
             );
         }
     }
-    // No NCBI counterpart (buffer reuse): NCBI's tree is new for each subject
-    // (blast_gapalign.c:3830-3831); the tree a thread keeps must answer as a new one.
+    // No NCBI counterpart: the grid limit of a subject's tree (`x_tree_cells`).
     #[test]
-    fn kept_tree_holds_nothing_of_the_last_subject() {
-        let (_, batch, _) = super::super::stage_c_tests::fixture("S06_seed.fna");
-        let h = PreliminaryHsp {
-            context: 0,
-            frame: 1,
-            score: 100,
-            q_start: 0,
-            q_end: 70,
-            q_gapped_start: 2,
-            s_start: 0,
-            s_end: 70,
-            s_gapped_start: 2,
-        };
-        let mut inside = h.clone();
-        inside.score = 90;
-        inside.q_start = 5;
-        inside.q_end = 60;
-        inside.s_start = 5;
-        inside.s_end = 60;
-        let (node, inner) = (tree_hsp(&h, &batch), tree_hsp(&inside, &batch));
-        std::thread::spawn(move || {
-            {
-                // A long subject first: the grid takes its largest size.
-                let mut tree = XTreeSlot::take(0, 600, 0, 40_000);
-                tree.add_hsp(
-                    node,
-                    node.query_context_offset,
-                    IndexMethod::QueryAndSubject,
-                );
-                assert!(tree.contains_hsp(&inner, inner.query_context_offset, 0));
-            }
-            assert!(X_TREE.with(|kept| kept.borrow().is_some()));
-            let tree = XTreeSlot::take(0, 600, 0, 100);
-            assert!(X_TREE.with(|kept| kept.borrow().is_none()));
-            assert!(!tree.contains_hsp(&inner, inner.query_context_offset, 0));
-        })
-        .join()
-        .unwrap();
+    fn tree_grid_follows_the_initial_hsps() {
+        assert_eq!(x_tree_cells(0), X_TREE_CELLS_PER_HSP);
+        assert_eq!(x_tree_cells(1), X_TREE_CELLS_PER_HSP);
+        assert_eq!(x_tree_cells(10), 10 * X_TREE_CELLS_PER_HSP);
+        assert_eq!(x_tree_cells(1 << 20), X_MAX_CELLS);
+        assert_eq!(x_tree_cells(usize::MAX), X_MAX_CELLS);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1358
     // ```c++

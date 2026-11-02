@@ -2103,9 +2103,11 @@ Rebuilding less:
   `BPCLUT`; four jobs run at once on four cores): human x yeast 110.9 -> 94.3 s and 103 -> 68 MB,
   Arabidopsis x zebrafish 366.9 -> 352.7 s and 96 -> 88 MB.
 - `LOSAT_X_BPCLUTSCANBF=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that
-  added it, 2026-10-23, line v4-G #11; `=0` turns it off; acts in the fused loop on the flat
+  added it, 2026-10-23, line v4-G #11; `=0` turns it off; acts in the two-hit fused loop on the flat
   compressed table of `LOSAT_X_BPCLUT`, on every table since 2026-11-02, class always: it records nothing in
-  `LOSAT_X_REACH`, its sides are `LOSAT_X_BPCLUT`'s; the reference compressed table keeps its scan) the flat table's scan (`tblastx/lookup/x_clut_direct.rs`
+  `LOSAT_X_REACH`, its sides are `LOSAT_X_BPCLUT`'s; the reference compressed table keeps its scan, and so do
+  `-window_size 0` (the one-hit `scan_subject` in `blastp/blast_engine.rs`) and a subject with lower case under
+  `-lcase_masking` (`x_soft_subject::x_scan_two_hit_ranges`), which scan the flat table with the reference scan) the flat table's scan (`tblastx/lookup/x_clut_direct.rs`
   `for_each_cell::<true, _>`) writes every subject offset that reaches `PV_TEST` at the end of its list and
   advances the list's length by the presence bit, the form of the standard table's `x_scan_cells_bf` (BPSCANBF). The
   offsets, their indices and their order are those of the loop with the branch, so the cells visited and the
@@ -2193,7 +2195,11 @@ Rebuilding less:
   2^30`) runs `x_scan_flat_lean` if `XFlatCompressedLookup::x_pairs_fit` holds (a subject of a word or more, which
   keeps its sentinel, with the 15-letter alphabet and words of 2 to 6 letters), else `x_scan_flat_fseed_loop`; a
   subject where `XHitBf::fits` fails runs `x_scan_flat_bf`, and wasm32 always runs `x_scan_flat_bf`. Only
-  `LOSAT_X_BPCLUTSCANBF=0` keeps the loop with the branch (`x_scan_flat_in::<false, _>`). `x_scan_flat_fseed_loop`
+  `LOSAT_X_BPCLUTSCANBF=0` keeps the loop with the branch (`x_scan_flat_in::<false, _>`). With `LOSAT_X_STATS` (and the `xstats` feature) `main` prints
+  `[X_STATS] BPFLAT lean=N fseed=N bf=N branch=N` at exit when one of them is not zero: the subjects that
+  `x_scan_flat_lean` (a subject of a word or more), `x_scan_flat_fseed_loop` (natively, a subject shorter than a
+  word), `x_scan_flat_bf` (past `XHitBf::fits`, and every subject on wasm32) and the loop with the branch (only
+  `=0`) scanned; `tests/blastp_fast_scan_bf.rs` reads it. `x_scan_flat_fseed_loop`
   gives each hit to blastp's branch-free two-hit test (`XHitBf::test`) first, a flag-1 entry or a candidate on to
   `x_test_hit`, and reads no diagonal entry ahead; `x_scan_flat_lean` makes the list two offsets per step in a loop
   of its own (`x_list_pairs_lean`, `x_pairs_loop`), stages each cell's hits in runs of 8 (`x_lean_copy`, 1,024

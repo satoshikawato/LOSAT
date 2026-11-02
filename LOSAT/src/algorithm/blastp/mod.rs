@@ -71,6 +71,12 @@ pub fn x_bp_hit_bf_print_summary() {
     x_seed_fused::x_bp_hit_bf_print_summary();
 }
 
+/// The `[X_STATS] BPFLAT` line at exit: the subjects each loop on the flat compressed table scanned.
+// No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_bp_flat_print_summary() {
+    x_seed_fused_clut::x_bp_flat_print_summary();
+}
+
 /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the `[X_STATS] BPLKPAHEAD` line at exit.
 // No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_bp_lkp_ahead_print_summary() {

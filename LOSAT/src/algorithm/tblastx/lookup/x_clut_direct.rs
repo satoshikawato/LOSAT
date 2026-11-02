@@ -1959,8 +1959,10 @@ impl XFlatCompressedLookup {
     /// `subject` (`subject_length` residues): the compressed alphabet has 15 letters (NCBI's
     /// reciprocal for 15), the word length is 2 to 6 (the indices stay below 15^6, where the
     /// divisions by 15 and by 225 are exact), the presence bits are one per cell (shift
-    /// `PV_ARRAY_BTS`, as on every table with 1 % of its cells used or more, which the branch-free
-    /// list needs) and they and the slice bounds cover every index, and the subject keeps a byte
+    /// `PV_ARRAY_BTS`: only this two-offset step needs one bit per cell, `for_each_cell::<true, _>`
+    /// handles any shift; blastp-fast's tables, words of 5 letters over a backbone of 15^5 cells,
+    /// below NCBI's 8 x 262,144 for a coarser shift, always have one bit per cell) and they and the
+    /// slice bounds cover every index, and the subject keeps a byte
     /// past its last word (the sentinel, which a search's subjects of a word or more keep), so that
     /// the scan reads no letter out of bounds.
     pub(crate) fn x_pairs_fit(&self, subject: &[u8], subject_length: usize) -> bool {

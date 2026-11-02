@@ -69,6 +69,28 @@ thread_local! {
     static X_STAGE: Cell<Option<Box<XStage>>> = const { Cell::new(None) };
 }
 
+// No NCBI counterpart: counters; they do not change any value NCBI computes.
+/// The subjects each loop of [`x_scan_two_hit_compressed_flat`] scanned (counted with the `xstats`
+/// feature, for the line at exit): [`x_scan_flat_lean`], [`x_scan_flat_fseed_loop`],
+/// [`x_scan_flat_bf`] and the loop with the branch.
+static X_FLAT_SUBJECTS: [std::sync::atomic::AtomicU64; 4] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 4];
+
+// No NCBI counterpart: prints counters; it does not change any value NCBI computes.
+/// With LOSAT_X_STATS, the `[X_STATS] BPFLAT lean=N fseed=N bf=N branch=N` line at exit: the
+/// subjects each loop on the flat compressed table scanned (only when one of them is not zero).
+pub(crate) fn x_bp_flat_print_summary() {
+    if std::env::var_os("LOSAT_X_STATS").is_none() {
+        return;
+    }
+    let [lean, fseed, bf, branch] = X_FLAT_SUBJECTS
+        .each_ref()
+        .map(|n| n.load(std::sync::atomic::Ordering::Relaxed));
+    if lean + fseed + bf + branch > 0 {
+        eprintln!("[X_STATS] BPFLAT lean={lean} fseed={fseed} bf={bf} branch={branch}");
+    }
+}
+
 // No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's outcomes.
 /// Whether tables with the branch-free list take [`x_scan_flat_fseed`]: every target but wasm32
 /// (module header).
@@ -134,6 +156,7 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
             );
             return;
         }
+        crate::utils::xstats::add(&X_FLAT_SUBJECTS[2], 1);
         x_scan_flat_bf(
             lookup,
             subject,
@@ -147,6 +170,7 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
         );
         return;
     }
+    crate::utils::xstats::add(&X_FLAT_SUBJECTS[3], 1);
     x_scan_flat_in::<false, F>(
         lookup,
         subject,
@@ -225,6 +249,7 @@ fn x_scan_flat_fseed<F>(
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
     if lookup.x_pairs_fit(subject, subject_length) {
+        crate::utils::xstats::add(&X_FLAT_SUBJECTS[0], 1);
         // SAFETY: x_pairs_fit holds (tested above).
         unsafe {
             x_scan_flat_lean(
@@ -242,6 +267,7 @@ fn x_scan_flat_fseed<F>(
         };
         return;
     }
+    crate::utils::xstats::add(&X_FLAT_SUBJECTS[1], 1);
     x_scan_flat_fseed_loop(
         lookup,
         subject,

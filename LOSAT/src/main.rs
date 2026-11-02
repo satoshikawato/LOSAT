@@ -337,6 +337,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastn::blast_engine::x_lut_drop_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_query_drop_print_summary();
     LOSAT::algorithm::blastp::x_bp_hit_bf_print_summary();
+    LOSAT::algorithm::blastp::x_bp_flat_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();
     LOSAT::algorithm::blastp::x_bp_lkp_ahead_print_summary();
     LOSAT::algorithm::blastp::x_restricted_gap_print_summary();

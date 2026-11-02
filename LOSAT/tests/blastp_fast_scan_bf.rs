@@ -26,6 +26,14 @@
 //! with the loop with the branch. The subjects include records shorter than a word, which take
 //! the branch-free test's loop without the staged copy.
 //!
+//! With `LOSAT_X_STATS` (and the `xstats` feature, as in `cargo test --all-features`) the
+//! `[X_STATS] BPFLAT lean= fseed= bf= branch=` line counts the subjects each loop on the flat table
+//! scanned, so the default arm is shown to run `x_scan_flat_lean` (the proteins) and
+//! `x_scan_flat_fseed_loop` (the records shorter than a word, natively), and the `=0` arm the loop with
+//! the branch alone; the reference table prints no such line; a build without the feature prints
+//! none. `LOSAT_X_STATS` changes neither the report nor the other messages. A build without the
+//! `parallel` feature runs the one-thread cases only.
+//!
 //! The dense query is the first 30 proteins of AP027131 (9,948 residues; its table uses 30.9 % of
 //! the cells), the sparse one its first protein (455 residues; 1.66 %, a table that kept the
 //! branch under the old rule); the subjects are the first 150 proteins of the related AP027133.
@@ -36,6 +44,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const OFF: (&str, &str) = ("LOSAT_X_BPCLUTSCANBF", "0");
 const REFERENCE_TABLE: (&str, &str) = ("LOSAT_X_BPCLUT", "0");
+const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -152,6 +161,38 @@ struct Run {
     code: Option<i32>,
 }
 
+impl Run {
+    /// Standard error without the `[X_STATS]` lines.
+    fn messages(&self) -> String {
+        self.stderr
+            .lines()
+            .filter(|line| !line.starts_with("[X_STATS]"))
+            .map(|line| format!("{line}\n"))
+            .collect()
+    }
+
+    /// The number after `name=` in the `[X_STATS] BPFLAT` line, or `None` without that line.
+    fn flat(&self, name: &str) -> Option<u64> {
+        let line = self
+            .stderr
+            .lines()
+            .find(|line| line.starts_with("[X_STATS] BPFLAT "))?;
+        let key = format!(" {name}=");
+        let at = line
+            .find(&key)
+            .unwrap_or_else(|| panic!("no {name} in {line}"))
+            + key.len();
+        Some(
+            line[at..]
+                .split(|c: char| !c.is_ascii_digit())
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap(),
+        )
+    }
+}
+
 /// `blastp` with `env` (the worker log is in a directory of its own, removed after the run).
 fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
     let worker_log = temp_path("worker");
@@ -177,10 +218,16 @@ fn blastp_fast_reports_do_not_depend_on_the_branch_free_list() {
     let inputs = Inputs::new();
     let subject = inputs.subject.to_str().unwrap();
     let db = inputs.db.to_str().unwrap();
+    // The `xstats` feature counts the subjects; a build without it prints no BPFLAT line.
+    let counted = cfg!(feature = "xstats");
     for (query, dense) in [(&inputs.dense, true), (&inputs.sparse, false)] {
         let query = query.to_str().unwrap();
         for (source, target) in [("-subject", subject), ("-db", db)] {
             for threads in ["1", "2"] {
+                // A build without the `parallel` feature refuses two threads.
+                if threads == "2" && !cfg!(feature = "parallel") {
+                    continue;
+                }
                 let case = format!("dense {dense} {source} n{threads}");
                 let args = [
                     "-task",
@@ -210,6 +257,72 @@ fn blastp_fast_reports_do_not_depend_on_the_branch_free_list() {
                     assert_eq!(run.code, Some(0), "{case} {label}: {}", run.stderr);
                     assert!(run.stdout == on.stdout, "{case} {label}: report differs");
                     assert_eq!(run.stderr, on.stderr, "{case} {label}: messages");
+                }
+                // The loops that ran, counted per subject. A build without the feature prints no
+                // line, with `LOSAT_X_STATS` or without.
+                let on_stats = blastp(&args, &[STATS]);
+                assert_eq!(on_stats.code, Some(0), "{case} stats: {}", on_stats.stderr);
+                assert!(on_stats.stdout == on.stdout, "{case} stats: report differs");
+                assert_eq!(on_stats.messages(), on.stderr, "{case} stats: messages");
+                let off_stats = blastp(&args, &[STATS, OFF]);
+                assert_eq!(
+                    off_stats.code,
+                    Some(0),
+                    "{case} off stats: {}",
+                    off_stats.stderr
+                );
+                assert!(
+                    off_stats.stdout == on.stdout,
+                    "{case} off stats: report differs"
+                );
+                assert_eq!(
+                    off_stats.messages(),
+                    on.stderr,
+                    "{case} off stats: messages"
+                );
+                let reference_stats = blastp(&args, &[STATS, REFERENCE_TABLE]);
+                assert_eq!(
+                    reference_stats.code,
+                    Some(0),
+                    "{case}: {}",
+                    reference_stats.stderr
+                );
+                assert!(
+                    reference_stats.stdout == on.stdout,
+                    "{case} ref stats: report differs"
+                );
+                // The reference table runs none of the flat table's loops.
+                assert_eq!(
+                    reference_stats.flat("lean"),
+                    None,
+                    "{case}: {}",
+                    reference_stats.stderr
+                );
+                if counted {
+                    let loops = ["lean", "fseed", "bf", "branch"];
+                    let on_n = loops.map(|name| on_stats.flat(name));
+                    let off_n = loops.map(|name| off_stats.flat(name));
+                    let msg = format!("{case}: {}", on_stats.stderr);
+                    // Each subject is scanned once per search (150 proteins and the three short
+                    // records). Default: the proteins take the list two offsets per step, the
+                    // records of 1, 3 and 4 residues the loop for subjects shorter than a word
+                    // (natively; wasm32 runs `bf` on every subject), none the loop with the branch.
+                    assert_eq!(on_n[0], Some(150), "{msg}");
+                    assert_eq!(on_n[1], Some(3), "{msg}");
+                    assert_eq!(on_n[2], Some(0), "{msg}");
+                    assert_eq!(on_n[3], Some(0), "{msg}");
+                    // `=0`: the loop with the branch alone, on every subject.
+                    let msg = format!("{case} off: {}", off_stats.stderr);
+                    assert_eq!(off_n[3], Some(153), "{msg}");
+                    assert_eq!(off_n[..3], [Some(0); 3], "{msg}");
+                } else {
+                    assert_eq!(on_stats.flat("lean"), None, "{case}: {}", on_stats.stderr);
+                    assert_eq!(
+                        off_stats.flat("branch"),
+                        None,
+                        "{case}: {}",
+                        off_stats.stderr
+                    );
                 }
             }
         }

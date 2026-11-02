@@ -74,6 +74,10 @@ sequence also holds (the same FASTA script): `pshare_v5.*` and `pshare_v4.*` fro
 `pshare_b.*` (version 5) from `pshare_a.faa` and `pshare_b.faa`, read through the alias `pshare_ab.pal`, `pshare_c.*`
 and `pshare_d.*` (version 5) through `pshare_cd.pal`, and `nshare_v5.*` from `nshare.fna`; the alias `pdup_abc.pal` reads
 `pdup_a`, `pdup_b` and `pdup_c`.
+
+Seq-ids that NCBI's scope matches weakly (line DBID N2c; the FASTA comes from `make_weak_fasta.py`): `pweak_v5.*` and
+`pweak_v4.*` from `pweak.faa`, `nweak_v5.*` and `nweak_v4.*` from `nweak.fna`. `--weak-only` builds only these, so
+that the other databases keep their bytes.
 """
 import argparse
 import subprocess
@@ -96,11 +100,25 @@ def records(path: Path) -> list[str]:
     return [">" + record for record in path.read_text().split(">")[1:]]
 
 
+def build_weak(args: argparse.Namespace) -> None:
+    for name, dbtype, extension in (("pweak", "prot", "faa"), ("nweak", "nucl", "fna")):
+        for version in (5, 4):
+            subprocess.run(
+                [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.{extension}"),
+                 "-dbtype", dbtype, "-parse_seqids", "-blastdb_version", str(version),
+                 "-title", f"{name}_v{version} (parsed Seq-ids)", "-out", str(args.out / f"{name}_v{version}")],
+                check=True, stdout=subprocess.DEVNULL)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--ncbi-bin", required=True, type=Path)
     ap.add_argument("--out", type=Path, default=HERE)
+    ap.add_argument("--weak-only", action="store_true", help="build only the databases of line DBID N2c")
     args = ap.parse_args()
+    if args.weak_only:
+        build_weak(args)
+        return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants
                    + records(HERE / "gen.faa"))
@@ -210,6 +228,7 @@ def main() -> int:
     (args.out / "njoined.nal").write_text(
         "#\n# Alias file of line DBID, ID2b\n#\nTITLE njoined (two volumes, parsed Seq-ids)\n"
         "DBLIST njoined_a njoined_b\n")
+    build_weak(args)
     return 0
 
 

@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pweak_v5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pweak_v5 (parsed Seq-ids)",
+  "number-of-letters": 2420,
+  "number-of-sequences": 11,
+  "last-updated": "2026-11-03T01:08:00",
+  "number-of-volumes": 1,
+  "bytes-total": 53024,
+  "bytes-to-cache": 2632,
+  "files": [
+    "pweak_v5.pdb",
+    "pweak_v5.phr",
+    "pweak_v5.pin",
+    "pweak_v5.pog",
+    "pweak_v5.pos",
+    "pweak_v5.pot",
+    "pweak_v5.psq",
+    "pweak_v5.ptf",
+    "pweak_v5.pto"
+  ]
+}

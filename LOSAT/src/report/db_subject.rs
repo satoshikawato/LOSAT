@@ -100,6 +100,14 @@ pub enum FoundInstead {
     /// database, by ordinal id, that holds an id NCBI's scope takes for the Seq-align id: where
     /// both are reported, NCBI's formatters can show that one for it.
     AlsoHeld(u32),
+    /// Where NCBI's formatters may read the reported sequences one by one
+    /// (`PRE_FETCH_SEQS_LIMIT`), another sequence of the database, by ordinal id, that holds an id
+    /// the Seq-align id matches weakly (`seqid::id_scope::weak_keys`): where that one is read
+    /// first, NCBI's scope shows it for the subject.
+    WeaklyHeld(u32),
+    /// The same for a Seq-align id of a name alone, which matches the name with any accession: a
+    /// version 5 database does not tell which sequences hold one.
+    NameAlone,
     /// No sequence.
     Nothing,
     /// The lookup fails on a file of the database or on the id, with this message: NCBI's
@@ -394,6 +402,14 @@ impl ParsedSubject {
             )),
             (false, Some(FoundInstead::AlsoHeld(ordinal))) => Err(format!(
                 "has the Seq-align id {}, which database sequence {ordinal} also holds (where both are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)",
+                id()
+            )),
+            (false, Some(FoundInstead::WeaklyHeld(ordinal))) => Err(format!(
+                "has the Seq-align id {}, which an id of database sequence {ordinal} matches weakly (an accession with a version for one without, a name with or without an accession): with PRE_FETCH_SEQS_LIMIT, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one and that sequence first, it writes that sequence's names and letters for it",
+                id()
+            )),
+            (false, Some(FoundInstead::NameAlone)) => Err(format!(
+                "has the Seq-align id {}, a name without an accession, which any id of that name matches weakly: with PRE_FETCH_SEQS_LIMIT, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one, it writes the names and letters of another sequence of that name read before",
                 id()
             )),
             (false, Some(FoundInstead::Failed(message))) => Err(format!(

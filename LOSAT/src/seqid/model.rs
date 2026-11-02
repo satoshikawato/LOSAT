@@ -310,6 +310,25 @@ impl ParsedSeqId {
         }
     }
 
+    /// `textseq`, to change.
+    pub fn textseq_mut(&mut self) -> Option<&mut TextseqId> {
+        match self {
+            ParsedSeqId::Genbank(id)
+            | ParsedSeqId::Embl(id)
+            | ParsedSeqId::Ddbj(id)
+            | ParsedSeqId::Pir(id)
+            | ParsedSeqId::Swissprot(id)
+            | ParsedSeqId::Other(id)
+            | ParsedSeqId::Prf(id)
+            | ParsedSeqId::Tpg(id)
+            | ParsedSeqId::Tpe(id)
+            | ParsedSeqId::Tpd(id)
+            | ParsedSeqId::Gpipe(id)
+            | ParsedSeqId::NamedAnnotTrack(id) => Some(id),
+            _ => None,
+        }
+    }
+
     /// The GI of a `gi` id.
     pub fn gi(&self) -> Option<i64> {
         match *self {

@@ -446,6 +446,21 @@ letters, so that the query `ids/pshare_q1.faa` hits both and NCBI's scope shows 
 `ids/pshare_d_q<k>.faa`); `ids/pdup_abc.pal` reads the copies `pdup_a` and `pdup_b` and the record of another title
 `pdup_c`.
 
+Seq-ids that NCBI's scope matches weakly (line DBID N2c; rows `db.id.*.weak.*`): `make_ids.py` (`--weak-only` builds
+just these) writes, from the FASTA of `ids/make_weak_fasta.py`, `ids/pweak_v5` and `ids/pweak_v4` from `ids/pweak.faa`
+(`sp|P00041.1|NAMEW`, `gb|FFF00040|`, `pir|PIRW1|`, `sp||NAMEX`, `gb|FFF00041.1|`, then three pairs S, T of nearly
+equal letters: `sp||NAMEY` before `sp|P00042.1|NAMEY`, `gb|FFF00043|` before `gb|FFF00043.1|`, `sp|P00044.1|NAMEZ`
+before `sp||NAMEZ`) and `ids/nweak_v5` and `ids/nweak_v4` from `ids/nweak.fna` (`gb|AF000081|` before
+`gb|AF000081.1|`, then `gb|AF000082|`). NCBI's scope finds an accession without a version by the same one with a
+version, an id of accession and name by the name-only id, a name-only id by an id of that name and an accession, and a
+pir accession-only id by the name-only id; not the other way. The queries `ids/pweak_qa<k>.faa` (`.fna` for BLASTX,
+`ids/nweak_qa2.fna`) carry such an id and are read with -parse_deflines (`qa4` the direction NCBI does not match);
+`ids/pweak_q<k>.faa`, `ids/pweak_q8.fna`, `ids/nweak_q1.fna` and `.faa` hit record k (the second of a pair also hits
+the first) and are run with `PRE_FETCH_SEQS_LIMIT=N` in `extra_args`, an environment variable of both programs (NCBI
+reads the reported sequences one by one when N is 0 or below the batch's Seq-align count and then writes the names of
+the sequence it read first). LOSAT refuses both cases and every N but 2147483647 (it does not count the Seq-aligns);
+the `ncbi` rows are the searches without the variable or at 2147483647, the sequences with no weak holder and outfmt 8.
+
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
 Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTDB=tests/seqdb/taxdb/offset_last_past_end`

@@ -406,13 +406,13 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
   // (with LOSAT_WEB_REACTORS) writes it again.
   it("FakeEngine's describe.json is the reactor's describe of every program", async () => {
     const abi = await open();
-    const described = Object.fromEntries(['blastn', 'blastp', 'tblastn', 'tblastx'].map((program) => [program, abi.describe(program)]));
+    const described = Object.fromEntries(PROGRAMS.map(({ id }) => [id, abi.describe(id)]));
     await expect(`${JSON.stringify(described, null, 1)}\n`).toMatchFileSnapshot('../../src/infra/fake/describe.json');
   });
 
   it('every field of the search form is an option that the engine describes', async () => {
     const abi = await open();
-    for (const program of PROGRAMS.filter((p) => p.unavailable === undefined)) {
+    for (const program of PROGRAMS) {
       const described = new Set(toProgramDescription(abi.describe(program.id)).parameters.map((option) => option.flag));
       for (const section of program.sections) {
         for (const field of section.fields) expect(described, `${program.id} ${field.flag}`).toContain(field.flag);
@@ -469,7 +469,7 @@ describe.skipIf(reactors === undefined)('the warm-up on the serial reactor', () 
     return out;
   };
 
-  for (const program of PROGRAMS.filter((p) => p.unavailable === undefined)) {
+  for (const program of PROGRAMS) {
     it(`${program.id}: runs on the built-in sequences, which have hits, and leaves the next search as on a new instance`, async () => {
       const argv = [program.id, '-query', 'query.fa', '-subject', 'subject.fa'];
       const inputs = warmUpInputs(program.id);

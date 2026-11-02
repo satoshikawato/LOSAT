@@ -107,8 +107,11 @@ export interface ProgramDescriptor {
   readonly subject: SequenceKind;
   /** The engine's FASTA reader for this program, which the index scan follows (plan TD-8). */
   readonly fastaParser: FastaParserKind;
-  /** Why the program cannot be searched in this release; undefined when it can. */
-  readonly unavailable?: string;
+  /**
+   * False when the engine takes no -query_loc / -subject_loc for the program: the form shows
+   * no subrange and writes none (DW-9).
+   */
+  readonly subrange?: false;
   /**
    * The search form. The order of the sections and fields is the order of the argv: the
    * task first, as on a command line, then the genetic codes and the algorithm parameters
@@ -342,9 +345,51 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     queryNote: 'translated nucleotide query',
     query: 'nucleotide',
     subject: 'protein',
-    fastaParser: 1,
-    unavailable: 'Not in LOSAT Web yet: use BLASTX of the LOSAT command line.',
-    sections: [],
+    fastaParser: 0,
+    // The engine refuses -query_loc and -subject_loc for BLASTX (line SX, DW-11).
+    subrange: false,
+    sections: [
+      { title: 'Task Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
+      { title: 'Genetic code', placement: 'query', fields: [{ flag: '-query_gencode', label: 'Genetic code', kind: 'gencode' }] },
+      {
+        title: 'General Parameters',
+        placement: 'algorithm',
+        // LOSAT's BLASTX reads word sizes 3 and 5 only.
+        fields: [
+          maxTargetSeqs,
+          evalue,
+          { ...wordSize, list: ['3', '5'] },
+          { flag: '-culling_limit', label: 'Max matches in a query range', ...integer },
+        ],
+      },
+      // LOSAT's BLASTX scores with BLOSUM62 and gap costs 11/1 only.
+      { title: 'Scoring Parameters', placement: 'algorithm', fields: [{ ...matrix, list: ['BLOSUM62'] }, gapOpen, gapExtend, compBasedStats] },
+      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
+      {
+        title: OTHER,
+        placement: 'algorithm',
+        fields: [
+          numDescriptions,
+          numAlignments,
+          threshold,
+          windowSize,
+          maxHsps,
+          { flag: '-strand', label: 'Query strand', kind: 'choice' },
+          { flag: '-sum_stats', label: 'Sum statistics', kind: 'boolean' },
+        ],
+      },
+    ],
+    defaults: {
+      ...HIT_LIST_DEFAULTS,
+      '-word_size': { value: { blastx: '3', 'blastx-fast': '5' } },
+      '-culling_limit': { value: '0' },
+      '-matrix': { value: 'BLOSUM62' },
+      '-gapopen': { value: '11' },
+      '-gapextend': { value: '1' },
+      '-threshold': { value: { blastx: '12', 'blastx-fast': '20' }, unless: ['-word_size'] },
+      '-window_size': { value: '40' },
+      '-sum_stats': { value: 'true' },
+    },
   },
   {
     id: 'tblastn',

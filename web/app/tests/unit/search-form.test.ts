@@ -406,7 +406,8 @@ describe('sections by place, and the Discontiguous Word Options', () => {
     expect(placementFlags(programById('tblastn'), 'algorithm')).not.toContain('-db_gencode');
     expect(placementFlags(programById('tblastn'), 'algorithm')).not.toContain('-task');
     expect(placementFlags(programById('tblastn'), 'algorithm')).toContain('-evalue');
-    expect(placementFlags(programById('blastx'), 'algorithm')).toEqual([]);
+    expect(sectionsAt(programById('blastx'), undefined, 'query').flatMap((s) => s.fields.map((f) => f.flag))).toEqual(['-query_gencode']);
+    expect(sectionsAt(programById('blastx'), undefined, 'subject')).toEqual([]);
   });
 });
 
@@ -594,19 +595,18 @@ describe('duplicateIds', () => {
 
 describe('program descriptors', () => {
   const RESERVED = ['-query', '-subject', '-out', '-outfmt', '-num_threads', '-query_loc', '-subject_loc'];
-  const available = PROGRAMS.filter((p) => p.unavailable === undefined);
 
   it('lists each program once', () => {
     expect(new Set(PROGRAMS.map((p) => p.id)).size).toBe(PROGRAMS.length);
     for (const program of PROGRAMS) expect(programById(program.id)).toBe(program);
   });
 
-  it('marks BLASTX as unavailable', () => {
-    expect(programById('blastx').unavailable).toBeTypeOf('string');
-    expect(available.map((p) => p.id)).not.toContain('blastx');
+  it('reads every input with the same FASTA reader, and gives BLASTX no subrange (DW-11)', () => {
+    expect(PROGRAMS.map((p) => p.fastaParser)).toEqual(PROGRAMS.map(() => 0));
+    expect(PROGRAMS.filter((p) => p.subrange === false).map((p) => p.id)).toEqual(['blastx']);
   });
 
-  it.each(available.map((p) => [p.id, p] as const))('%s has a form with unique flags', (_id, program) => {
+  it.each(PROGRAMS.map((p) => [p.id, p] as const))('%s has a form with unique flags', (_id, program) => {
     expect(program.sections.length).toBeGreaterThan(0);
     for (const section of program.sections) expect(section.fields.length).toBeGreaterThan(0);
     const flags = program.sections.flatMap((s) => s.fields.map((f) => f.flag));
@@ -619,7 +619,7 @@ describe('program descriptors', () => {
     for (const flag of flags) expect(RESERVED).not.toContain(flag);
   });
 
-  it.each(available.map((p) => [p.id, p] as const))("%s has NCBI's sections in NCBI's order under Algorithm parameters", (_id, program) => {
+  it.each(PROGRAMS.map((p) => [p.id, p] as const))("%s has NCBI's sections in NCBI's order under Algorithm parameters", (_id, program) => {
     const order = ['General Parameters', 'Scoring Parameters', 'Filters and Masking', 'Discontiguous Word Options', 'Other Parameters'];
     const titles = program.sections.filter((s) => s.placement === 'algorithm').map((s) => s.title);
     expect(titles.map((title) => order.indexOf(title))).toEqual([...titles.map((title) => order.indexOf(title))].sort((a, b) => a - b));

@@ -8,9 +8,7 @@
 // with the stored outputs as the Outputs view shows them (the outfmt 6 rows and the outfmt 0
 // text), never with values computed here.
 //
-// Every program that LOSAT Web runs is covered: BLASTN, BLASTP, TBLASTN and TBLASTX. BLASTX
-// is not in ABI v2 until session SX (docs/losat_web_gui_sessions/session_sx_blastx_integration.md;
-// the search screen refuses it, search.spec.ts), so it has no results screen to test yet.
+// Every program that LOSAT Web runs is covered: BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX.
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -22,13 +20,13 @@ import { REPOSITORY } from './support/harness-server';
 import { chooseRun, fasta, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
 import { repeats } from './support/synthetic';
 
-type ProgramId = 'blastn' | 'blastp' | 'tblastn' | 'tblastx';
+type ProgramId = 'blastn' | 'blastp' | 'blastx' | 'tblastn' | 'tblastx';
 type Unit = 'nt' | 'aa';
 type Orientation = 'forward' | 'reverse' | 'unknown';
 type Tab = 'hits' | 'dotplot' | 'details' | 'outputs';
 
 const FORMATS = [0, 6, 7] as const satisfies readonly OutputFormat[];
-const LABELS: Readonly<Record<ProgramId, string>> = { blastn: 'BLASTN', blastp: 'BLASTP', tblastn: 'TBLASTN', tblastx: 'TBLASTX' };
+const LABELS: Readonly<Record<ProgramId, string>> = { blastn: 'BLASTN', blastp: 'BLASTP', blastx: 'BLASTX', tblastn: 'TBLASTN', tblastx: 'TBLASTX' };
 /** The tabs' test IDs (the Hits view with its three sections, the dot plot, the run's views). */
 const TABS: Readonly<Record<Tab, string>> = {
   hits: 'results-view-hits',
@@ -77,8 +75,9 @@ const PANEL_QUERIES = Array.from({ length: 150 }, (_, i) => {
 /**
  * Searches of the outfmt 0 fixtures of LOSAT/tests/outfmt0_manifest.tsv with the program's
  * default options: multi.megablast (both strands, a subject with an HSP on each, a query
- * without hits), method.blastp, e2e.tblastn.amb (minus frames; inputs large enough for Auto
- * to choose the threaded runtime) and tblastx.ambig.0 (frames of opposite signs).
+ * without hits), method.blastp, the inputs of pd.blastx.0 (two queries, query frames of both
+ * signs), e2e.tblastn.amb (minus frames; inputs large enough for Auto to choose the threaded
+ * runtime) and tblastx.ambig.0 (frames of opposite signs).
  */
 const PROGRAM_CASES: readonly {
   readonly id: ProgramId;
@@ -90,6 +89,13 @@ const PROGRAM_CASES: readonly {
 }[] = [
   { id: 'blastn', query: 'outfmt0/multi_query.fasta', subject: 'outfmt0/multi_subject.fasta', units: { query: 'nt', subject: 'nt' } },
   { id: 'blastp', query: 'outfmt0/e2e_protein_query.faa', subject: 'outfmt0/e2e_protein_subject.faa', units: { query: 'aa', subject: 'aa' } },
+  {
+    id: 'blastx',
+    query: 'outfmt0/pd_sub_q.fna',
+    subject: 'outfmt0/pd_sub_p.faa',
+    units: { query: 'nt', subject: 'aa' },
+    frameLine: (query) => ` Frame = ${query}\n`,
+  },
   {
     id: 'tblastn',
     query: 'outfmt0/e2e_protein_query.faa',
@@ -633,13 +639,14 @@ for (const c of PROGRAM_CASES) {
           const orientation = orientationOf(fields, c.units, translated);
           if (orientation !== undefined) expect(await row.getAttribute('data-orientation')).toBe(orientation);
           if (translated) {
-            // TBLASTN shows the subject's frame only (W4b screen review L9), TBLASTX both.
-            expect(await field('frames')).toMatch(c.id === 'tblastn' ? /^[+-][123]$/ : /^[+-][123]\/[+-][123]$/);
+            // TBLASTN shows the subject's frame only (W4b screen review L9), BLASTX the query's, TBLASTX both.
+            const frames = await field('frames');
+            expect(frames).toMatch(c.id === 'tblastx' ? /^[+-][123]\/[+-][123]$/ : /^[+-][123]$/);
             // The frames' signs agree with the coordinates' directions.
-            const [q, s] = c.id === 'tblastn' ? [undefined, await field('frames')] : (await field('frames')).split('/');
+            const [q, s] = c.id === 'tblastn' ? [undefined, frames] : c.id === 'blastx' ? [frames, undefined] : frames.split('/');
             const sign = (frame: string | undefined) => (frame === undefined ? 1 : frame.startsWith('-') ? -1 : 1);
             expect(sign(q) === sign(s) ? 'forward' : 'reverse').toBe(await row.getAttribute('data-orientation'));
-            seen.frames.add(await field('frames'));
+            seen.frames.add(frames);
           } else {
             await expect(row.locator('[data-field="frames"]')).toHaveCount(0);
           }
@@ -678,7 +685,7 @@ for (const c of PROGRAM_CASES) {
         if (c.id === 'blastn') expect(section).toContain(` Strand=Plus/${orientation === 'reverse' ? 'Minus' : 'Plus'}\n`);
         if (translated && BUILD_HAS_ENGINE) {
           const shown = await text(first.locator('[data-field="frames"]'));
-          const [q, s] = c.id === 'tblastn' ? ['', shown] : shown.split('/');
+          const [q, s] = c.id === 'tblastn' ? ['', shown] : c.id === 'blastx' ? [shown, ''] : shown.split('/');
           expect(section).toContain(c.frameLine!(q!, s!));
         }
       }
@@ -737,24 +744,31 @@ for (const c of PROGRAM_CASES) {
     await expect(page.getByTestId('dotplot')).toContainText(new RegExp(`\\([\\d,]+ ${c.units.query}\\) against subject .* \\([\\d,]+ ${c.units.subject}\\)\\.`));
     await expect(page.getByTestId('dotplot-selected')).toContainText(
       `query ${fields[6]}–${fields[7]} ${c.units.query}, subject ${fields[8]}–${fields[9]} ${c.units.subject}` +
-        (c.id === 'tblastn' ? `, subject frame ${frames}.` : translated ? `, frames ${frames.replace('/', ' / ')}.` : '.'),
+        (c.id === 'tblastn' ? `, subject frame ${frames}.` : c.id === 'blastx' ? `, query frame ${frames}.` : translated ? `, frames ${frames.replace('/', ' / ')}.` : '.'),
     );
     // The same scale on both axes, a residue counting as 3 nt against nucleotides (S13b decision
-    // 26: TBLASTN's query), unless the shorter side was raised to 120 px (then the note says so).
+    // 26: TBLASTN's query, BLASTX's subject), unless the shorter side was raised to 120 px (then the
+    // note says so).
     const [queryLength, subjectLength] = /\(([\d,]+) \w+\) against subject .* \(([\d,]+) \w+\)\./
       .exec(await text(page.getByTestId('dotplot')))!
       .slice(1)
       .map((n) => Number(n.replace(/,/g, '')));
-    const ratio = (queryLength! * (c.units.query === 'aa' && c.units.subject === 'nt' ? 3 : 1)) / subjectLength!;
+    const codon = (unit: Unit, other: Unit) => (unit === 'aa' && other === 'nt' ? 3 : 1);
+    const ratio = (queryLength! * codon(c.units.query, c.units.subject)) / (subjectLength! * codon(c.units.subject, c.units.query));
     const [width, height] = (await canvas.getAttribute('data-plot'))!.split('x').map(Number);
-    if ((await page.getByTestId('dotplot-scale-note').count()) === 0) {
+    const toScale = (await page.getByTestId('dotplot-scale-note').count()) === 0;
+    if (toScale) {
       expect(Math.min(Math.abs(width! - height! * ratio), Math.abs(height! - width! / ratio))).toBeLessThanOrEqual(0.5);
     } else expect(Math.min(width!, height!)).toBe(120);
     // The axis titles as drawn: the IDs and the units of the visible spans. The plot is drawn on
     // an animation frame, after the attributes above are rendered, so the titles are waited for.
     const titles = async () => JSON.parse((await canvas.getAttribute('data-titles'))!) as [string, string];
     await expect(canvas).toHaveAttribute('data-titles', /^\[/);
-    expect((await titles())[1]).toMatch(new RegExp(`^Subject ${literal(fields[1]!)} \\((${c.units.subject === 'aa' ? 'aa|kaa' : 'bp|kbp'})\\)$`));
+    // A protein axis against a nucleotide one says, while to scale, that it is drawn at 3 nt per aa.
+    const drawnAt = (unit: Unit, other: Unit) => (codon(unit, other) === 3 && toScale ? '; drawn at 3 nt per aa' : '');
+    expect((await titles())[1]).toMatch(
+      new RegExp(`^Subject ${literal(fields[1]!)} \\((${c.units.subject === 'aa' ? 'aa|kaa' : 'bp|kbp'})${drawnAt(c.units.subject, c.units.query)}\\)$`),
+    );
     if (c.id === 'tblastn') {
       // TBLASTN's pair is to scale at 1280 px, its protein axis drawn at 3 nt per aa, which its title
       // says; on a phone the 120 px minimum changes the scale, and the note says so instead (W4b

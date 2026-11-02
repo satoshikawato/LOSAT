@@ -131,17 +131,16 @@ describe('SearchDraft inputs', () => {
   });
 
   it('checks the inputs again for another program', async () => {
-    const { draft } = setup();
+    const { draft, checks } = setup();
     draft.setPaste('query', '>a\nACGT\n');
     await draft.idle();
+    const revision = sourceOf(draft, 'query').base!.revisionId;
     draft.setProgram('blastx');
     await draft.idle();
-    // BLASTX cannot be searched until SX: nothing is read again or checked.
-    expect(sourceOf(draft, 'query').status).toBe('ready');
-    expect(sourceOf(draft, 'query').check).toBeUndefined();
-    draft.setProgram('tblastx');
-    await draft.idle();
+    // Every program indexes with the same reader: the input is checked again, not read again.
+    expect(sourceOf(draft, 'query').base!.revisionId).toBe(revision);
     expect(sourceOf(draft, 'query').check).toEqual({ state: 'ok', records: 1 });
+    expect(checks.at(-1)).toMatch(/^blastx\|query\|/);
   });
 });
 
@@ -161,12 +160,23 @@ describe('SearchDraft submit', () => {
     expect(draft.state.get().message).toEqual({ kind: 'error', text: 'Every subject record is excluded.' });
   });
 
-  it('refuses BLASTX until SX', async () => {
-    const { draft } = setup();
+  it('queues BLASTX without a region, which it does not take, and keeps the region of another program', async () => {
+    const { draft, requests } = setup();
+    draft.setPaste('query', '>q\nACGTACGTAC\n');
+    draft.setPaste('subject', '>s\nMKLVMKLV\n');
+    await draft.idle();
+    // A region that BLASTN refuses (the stop is past the record) does not stop BLASTX.
+    draft.setRegion('query', { start: '2', stop: '50' });
     draft.setProgram('blastx');
-    const result = await draft.submit();
-    expect(result.ok).toBe(false);
-    expect(!result.ok && result.message).toMatch(/^Not in LOSAT Web yet: use BLASTX of the LOSAT command line/);
+    await draft.idle();
+    expect(draft.regionRecord('query')).toBeUndefined();
+    expect(draft.parameters()).toEqual([]);
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    expect(requests[0]![0]!).toMatchObject({ program: 'blastx', parameters: [] });
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(draft.region('query')).toEqual({ start: '2', stop: '50' });
+    expect(draft.regionRecord('query')?.id).toBe('q');
   });
 
   it('queues one combined search of all files, named as plan §5.3 says', async () => {

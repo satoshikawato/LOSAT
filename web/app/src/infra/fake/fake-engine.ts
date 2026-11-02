@@ -51,8 +51,6 @@ export class FakeEngine implements EngineGateway {
   async validate(argv: readonly string[]): Promise<ValidationResult> {
     const program = argv[0];
     if (!PROGRAMS.some((p) => p.id === program)) return { ok: false, message: `unknown program: ${program}` };
-    // As ABI v2 does until session SX (web/adapter/src/run.rs `Program::parse`).
-    if (program === 'blastx') return { ok: false, message: 'blastx is not available in LOSAT Web ABI v2 yet' };
     return { ok: true };
   }
 
@@ -98,8 +96,8 @@ export class FakeEngine implements EngineGateway {
     const program = request.argv[0] ?? '';
     const queries = fakeRecordKeys(request.query.bytes).slice(0, 200);
     const subjects = fakeRecordKeys(request.subject.bytes).slice(0, 3);
-    const nucleotide = { query: program === 'blastn' || program === 'tblastx', subject: program !== 'blastp' };
-    const translated = { query: program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
+    const nucleotide = { query: ['blastn', 'blastx', 'tblastx'].includes(program), subject: ['blastn', 'tblastn', 'tblastx'].includes(program) };
+    const translated = { query: program === 'blastx' || program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
     let out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;
     // outfmt 6 has no comment lines; this first line is what makes an exported fake outfmt 6
     // say that it is not a search result. The rows are read by their `out6` ranges.

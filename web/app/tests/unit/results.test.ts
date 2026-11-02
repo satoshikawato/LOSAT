@@ -301,6 +301,14 @@ describe('verificationBadge', () => {
     expect(badge.level).toBe('certified');
     expect(badge.label).toBe('Certified profile');
     expect(badge.details.join(' ')).toMatch(/not a comparison of your inputs with NCBI/);
+    expect(badge.details.join(' ')).toMatch(/on the certification fixtures/);
+  });
+
+  it("says that BLASTX's comparisons are the manifest's frozen rows, not a release certification (DW-36)", () => {
+    const blastx = { ...input, program: 'blastx', argv: ['blastx'] } as const;
+    const badge = verificationBadge(blastx, { ...table, programs: { blastx: table.programs.blastn! } });
+    expect(badge.level).toBe('certified');
+    expect(badge.details[0]).toMatch(/on the frozen rows of the outfmt 0 manifest \(searches of -subject\); this is not the certification of a LOSAT release\.$/);
   });
 
   it('says why a run is outside the certified profiles', () => {

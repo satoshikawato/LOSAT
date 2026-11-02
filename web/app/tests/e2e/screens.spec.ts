@@ -98,15 +98,13 @@ for (const size of SIZES) {
     await page.getByTestId('tab-search').click();
 
     // Parameters of the other programs.
-    for (const program of ['blastp', 'tblastn', 'tblastx'] as const) {
+    for (const program of ['blastp', 'blastx', 'tblastn', 'tblastx'] as const) {
       await page.getByTestId(`program-${program}`).check();
       await expect(page.getByTestId('parameter-form')).toBeVisible();
       if (program === 'tblastx') await page.getByTestId('param-db_gencode').selectOption('11');
       await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
       await shoot(page, browserName, size.name, `04-${program}`);
     }
-    await page.getByTestId('program-blastx').check();
-    await shoot(page, browserName, size.name, '05-blastx-unavailable');
 
     // A run that fails: a TBLASTX subject record without residues. `register` and `validate`
     // accept it, and the run ends with NCBI's `BLAST engine error: The average subject length

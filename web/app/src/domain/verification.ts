@@ -95,6 +95,12 @@ export interface Badge {
 export const CERTIFIED_LABEL = 'Certified profile';
 export const OUTSIDE_LABEL = 'Outside certified profile';
 
+/**
+ * Programs compared with NCBI on the frozen rows of LOSAT/tests/outfmt0_manifest.tsv only, without
+ * the certification of a LOSAT release (BLASTX, DW-36): the badge says so.
+ */
+const MANIFEST_ROWS_ONLY: ReadonlySet<ProgramId> = new Set(['blastx']);
+
 export function verificationBadge(input: BadgeInput, table: VerificationTable): Badge {
   const exceptions = approvedExceptions(input.program, input.argv);
   if (input.runtimePath === 'fake') {
@@ -136,7 +142,9 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
     level: 'certified',
     label: CERTIFIED_LABEL,
     details: [
-      `The program and these options were compared byte for byte with NCBI BLAST+ ${table.ncbi} for outfmt ${list(input.formats)} on the certification fixtures.`,
+      MANIFEST_ROWS_ONLY.has(input.program)
+        ? `The program and these options were compared byte for byte with NCBI BLAST+ ${table.ncbi} for outfmt ${list(input.formats)} on the frozen rows of the outfmt 0 manifest (searches of -subject); this is not the certification of a LOSAT release.`
+        : `The program and these options were compared byte for byte with NCBI BLAST+ ${table.ncbi} for outfmt ${list(input.formats)} on the certification fixtures.`,
       `The ${input.runtimePath} runtime in the browser was checked against the native engine with ${list(browser!.threads)} threads in ${list(browser!.browsers)}.`,
       'This is a statement about the engine build and the options, not a comparison of your inputs with NCBI.',
     ],

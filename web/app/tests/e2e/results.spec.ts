@@ -1642,7 +1642,7 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   await expect(heading).toBeInViewport({ ratio: 1 });
 });
 
-test('the Outputs view lays out blocks of lines near the view, and shows, finds and selects every line', async ({ page }) => {
+test('the Outputs view lays out blocks of lines near the view, and shows, finds and selects every line', async ({ page, browserName }) => {
   test.skip(!BUILD_HAS_ENGINE, 'an output of many lines');
   await openSearch(page);
   await program(page, 'tblastx');
@@ -1720,9 +1720,11 @@ test('the Outputs view lays out blocks of lines near the view, and shows, finds 
     expect(view.found).toBe(true);
     expect(view.markedAfter).toBe(0);
   }
-  // Select all of the page, as the keyboard does, with the output's end in it.
+  // Select all of the page, as the keyboard does, with the output's end in it (WPE WebKit binds
+  // no key to the command).
   await output.click();
-  await page.keyboard.press('ControlOrMeta+a');
+  if (browserName === 'webkit') await page.evaluate(() => document.execCommand('selectAll'));
+  else await page.keyboard.press('ControlOrMeta+a');
   const selected = await output.evaluate(async (element) => {
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const last = (element.textContent ?? '').trimEnd().split('\n').at(-1)!;

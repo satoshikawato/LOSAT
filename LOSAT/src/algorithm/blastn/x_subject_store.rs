@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::blastinput::fasta_reader::{FastaInputSource, FastaRecord};
 use crate::sequence::packed_subject::PackedNucleotide;
 use crate::utils::dust::MaskedInterval;
+use crate::utils::threading::SearchPool;
 
 use super::coordination::collect_lowercase_masks;
 
@@ -105,6 +106,21 @@ impl<'a> SubjectLetters<'a> {
 pub(crate) fn x_blastna_into(store: &PackedNucleotide, out: &mut Vec<u8>) {
     BLASTNA_MADE.fetch_add(1, Ordering::Relaxed);
     store.blastna_into(out);
+}
+
+/// EXPERIMENT (LOSAT_X_BNSTORE): `x_blastna_into` decoded on the threads of `pool`
+/// (`PackedNucleotide::blastna_into_par`; on this thread without a pool).
+pub(crate) fn x_blastna_into_pool(
+    store: &PackedNucleotide,
+    out: &mut Vec<u8>,
+    pool: &SearchPool<'_>,
+) {
+    BLASTNA_MADE.fetch_add(1, Ordering::Relaxed);
+    if pool.enabled() {
+        pool.install(|| store.blastna_into_par(out));
+    } else {
+        store.blastna_into(out);
+    }
 }
 
 /// EXPERIMENT (LOSAT_X_BNSTORE): the subject records (`read_subjects` without a range), each one's

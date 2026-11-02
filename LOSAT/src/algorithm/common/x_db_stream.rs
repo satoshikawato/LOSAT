@@ -21,7 +21,9 @@
 //!   (`XDbStream::with_block`): each thread keeps the last block it used, and a block that another
 //!   thread holds or reads is not read again. The threads that hand out the sequences one at a
 //!   time read each block about once, and the error of a failed read (the text of a damaged block
-//!   names the block's bytes) does not depend on the threads or their order.
+//!   names the block's bytes) does not depend on the threads or their order. A thread that
+//!   searches a chunk of subjects (`x_plan_chunk`) lets its block go with the chunk; the threads
+//!   of the neighbouring chunks share the block that the chunk's end cuts across.
 //! - A long sequence (a block of its own) is read once while anything holds it: the stages and
 //!   the query batches that run at the same time share it, and a thread that asks for it while
 //!   another reads it waits for that read (`XDbStream::read_shared`). With more than one thread
@@ -48,7 +50,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, Weak};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 
 use anyhow::Result;
 
@@ -237,7 +239,8 @@ impl<'a> XDbStream<'a> {
     /// last block it used; a block that another thread holds or reads is shared
     /// (`XSharedReads::read_once`). A block of one sequence (a long one) is read alone and shared
     /// (`read_shared`). The thread's block is out of its cell while `make` runs: a nested call
-    /// (a pool thread that takes another subject while it waits) does not borrow it.
+    /// (a pool thread that takes another subject while it waits) does not borrow it. A thread that
+    /// searches a chunk of subjects (`x_plan_chunk`) lets its block go with the chunk.
     pub(crate) fn with_block<R>(
         &self,
         oid: usize,
@@ -259,6 +262,11 @@ impl<'a> XDbStream<'a> {
                 let store = self.read_shared(oid)?;
                 return make(store.packed(), store.len());
             }
+            // LOSAT_X_TBNPLANCUT: the block goes with this thread's chunk.
+            crate::utils::xreach::x_reach!(
+                "LOSAT_X_TBNPLANCUT",
+                X_PLAN_CHUNKS.with(std::cell::Cell::get) > 0
+            );
             kept = Some(XPlanBlock {
                 stream: self.id,
                 first,
@@ -350,6 +358,45 @@ struct XPlanBlock {
 thread_local! {
     /// This thread's block.
     static X_PLAN_BLOCK: std::cell::Cell<Option<XPlanBlock>> = const { std::cell::Cell::new(None) };
+    /// The chunks of subjects this thread searches now (`x_plan_chunk`; they nest).
+    static X_PLAN_CHUNKS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+// No NCBI counterpart (memory only; every sequence is made from the same bytes): reads the
+// LOSAT_X_TBNPLANCUT variable once.
+/// LOSAT_X_TBNPLANCUT, in the strict set (on unless `=0`): whether a thread's block goes with the
+/// chunk of subjects the thread searches (`x_plan_chunk`).
+fn x_plan_cut() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNPLANCUT"))
+}
+
+/// A thread's search of a chunk of subjects (`x_plan_chunk`), until it is dropped.
+pub(crate) struct XPlanChunk(());
+
+impl Drop for XPlanChunk {
+    fn drop(&mut self) {
+        X_PLAN_CHUNKS.with(|chunks| chunks.set(chunks.get() - 1));
+        let _ = X_PLAN_BLOCK.try_with(std::cell::Cell::take);
+    }
+}
+
+/// The calling thread searches a chunk of subjects until the value returned is dropped, and the
+/// block it holds then goes with the chunk. A chunk holds about a sixteenth of the sequence file
+/// over the threads and a thread's next chunk is about a sixteenth of the file further on, so past
+/// 4 MiB of file the next chunk is outside the block; without this a thread kept its last block
+/// until its next read, through the later stages of the search. The block is the grid's
+/// (`x_block_grid`), not cut at the chunk's end: the threads of the neighbouring chunks, searched
+/// at the same time, take the rest of it from the shared table (`XDbStream::with_block`), where a
+/// block cut at a chunk's end would be the thread's own read. Chunks nest when a thread that waits
+/// runs another flow's loop (query batches side by side): the inner one's end lets the outer block
+/// go, and the outer chunk takes the block of its next sequence again. `None` with
+/// `LOSAT_X_TBNPLANCUT=0`.
+pub(crate) fn x_plan_chunk() -> Option<XPlanChunk> {
+    x_plan_cut().then(|| {
+        X_PLAN_CHUNKS.with(|chunks| chunks.set(chunks.get() + 1));
+        XPlanChunk(())
+    })
 }
 
 #[cfg(test)]
@@ -557,6 +604,63 @@ mod tests {
         let reads = stream.block_reads.load(Ordering::Relaxed);
         stream.with_block(first, |_, _| Ok(())).unwrap();
         assert_eq!(stream.block_reads.load(Ordering::Relaxed), reads);
+    }
+
+    /// A thread that searches a chunk of subjects lets its block go with the chunk, and so does an
+    /// inner chunk; the block is the grid's whole block wherever the chunk ends, and while another
+    /// thread holds it a chunk takes it again without a read.
+    #[test]
+    fn a_block_goes_with_the_chunk_of_its_thread() {
+        let db = nucleotides("nucl_v4");
+        let stream = stream_of(&db, 2, u64::MAX);
+        let block = stream
+            .grid
+            .windows(2)
+            .find(|block| block[1] - block[0] > 2)
+            .expect("a block of three sequences or more");
+        let (first, end) = (block[0], block[1]);
+        let ask = |ordinal: u32| stream.with_block(ordinal as usize, |_, _| Ok(())).unwrap();
+        let held = || {
+            let kept = X_PLAN_BLOCK.with(std::cell::Cell::take);
+            let seen = kept.as_ref().map(|kept| {
+                assert_eq!(
+                    (kept.first, kept.block.len() as u32),
+                    (first, end - first),
+                    "the grid's block"
+                );
+                Arc::clone(&kept.block)
+            });
+            X_PLAN_BLOCK.with(|cell| cell.set(kept));
+            seen
+        };
+        let reads = || stream.block_reads.load(Ordering::Relaxed);
+        // Outside a chunk the block stays.
+        ask(first);
+        assert!(held().is_some());
+        X_PLAN_BLOCK.with(std::cell::Cell::take);
+        // `None` with LOSAT_X_TBNPLANCUT=0, as in the gate's arm of the switches off.
+        let Some(chunk) = x_plan_chunk() else {
+            return;
+        };
+        let before = reads();
+        ask(first);
+        let other = held().expect("the chunk's block");
+        {
+            let _inner = x_plan_chunk();
+            ask(first + 1);
+            assert!(held().is_some());
+        }
+        assert!(held().is_none(), "the inner chunk's end lets the block go");
+        ask(first + 2);
+        assert!(Arc::ptr_eq(&held().unwrap(), &other));
+        drop(chunk);
+        assert!(held().is_none());
+        assert_eq!(X_PLAN_CHUNKS.with(std::cell::Cell::get), 0);
+        assert_eq!(reads(), before + 1, "taken from the thread that holds it");
+        drop(other);
+        ask(first);
+        assert_eq!(reads(), before + 2, "read again once nothing holds it");
+        X_PLAN_BLOCK.with(std::cell::Cell::take);
     }
 
     /// Threads that ask for the same sequences at once read each block once: the one that comes

@@ -73,6 +73,16 @@ const BASES_OF_BYTE: [[u8; 4]; 256] = {
 /// The letters of one block of `PackedNucleotide::from_subject_letters`'s fast path.
 const BLOCK: usize = 32;
 
+/// ncbi4na code -> its blastna code (`encode_iupac_to_blastna` of the code's IUPAC letter).
+fn blastna_of_ncbi4na() -> [u8; 16] {
+    std::array::from_fn(|code| encode_iupac_to_blastna(&[NCBI4NA_TO_IUPACNA[code]])[0])
+}
+
+// No NCBI counterpart: LOSAT's speed (`blastna_into_par`); the packed bytes of one piece, 128 Ki
+// bases (a piece is a few tens of microseconds of decoding; 3 Mb is 23 pieces).
+/// The packed bytes that `blastna_into_par` decodes as one piece.
+const DECODE_PIECE: usize = 32 * 1024;
+
 // No NCBI counterpart: LOSAT's speed (the check of a block's letters is vectorized, and four
 // letters take one multiplication instead of four table reads); the bytes are those of the
 // letter-by-letter packing.
@@ -507,9 +517,50 @@ impl PackedNucleotide {
     /// The blastna code of every base (`encode_iupac_to_blastna` of the letters).
     pub fn blastna_into(&self, out: &mut Vec<u8>) {
         self.unpack_into(out, [0, 1, 2, 3]);
-        let blastna: [u8; 16] =
-            std::array::from_fn(|code| encode_iupac_to_blastna(&[NCBI4NA_TO_IUPACNA[code]])[0]);
-        self.apply_runs(out, &blastna);
+        self.apply_runs(out, &blastna_of_ncbi4na());
+    }
+
+    // No NCBI counterpart: LOSAT's speed. The traceback of a long subject decoded it on one thread
+    // while the other threads of the pool waited (blastn `-subject`, 31,168 cDNAs x 3 Mb: 91 query
+    // batches, each decoding the 3 Mb subject again). The pieces write disjoint bytes; the codes
+    // are those of `blastna_into`.
+    /// `blastna_into` with the whole packed bytes decoded in pieces of `DECODE_PIECE` bytes on the
+    /// rayon pool this thread runs in (a subject of one piece, up to 128 Ki bases, is decoded on
+    /// this thread). Call it inside the search pool (`SearchPool::install`).
+    pub fn blastna_into_par(&self, out: &mut Vec<u8>) {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        {
+            use rayon::prelude::*;
+            let whole = self.length / 4;
+            out.clear();
+            out.reserve(self.length);
+            let spare = &mut out.spare_capacity_mut()[..self.length];
+            let (head, tail) = spare.split_at_mut(whole * 4);
+            head.par_chunks_mut(4 * DECODE_PIECE)
+                .zip(self.packed[..whole].par_chunks(DECODE_PIECE))
+                .for_each(|(bases, packed)| {
+                    for (four, &byte) in bases.chunks_exact_mut(4).zip(packed) {
+                        for (slot, base) in four.iter_mut().enumerate() {
+                            base.write((byte >> (6 - 2 * slot)) & 3);
+                        }
+                    }
+                });
+            for (slot, base) in tail.iter_mut().enumerate() {
+                base.write(self.code(whole * 4 + slot));
+            }
+            // SAFETY: the pieces wrote bytes `[0, whole * 4)` and the loop above
+            // `[whole * 4, self.length)`, within the capacity reserved above.
+            unsafe { out.set_len(self.length) };
+            self.apply_runs(out, &blastna_of_ncbi4na());
+        }
+        #[cfg(not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )))]
+        self.blastna_into(out);
     }
 
     /// The bases as packed, one `A`, `C`, `G` or `T` per base: every ambiguous base resolved as
@@ -752,6 +803,43 @@ mod tests {
                 .map(|interval| (interval.start, interval.end))
                 .collect();
             assert_eq!(held, lower);
+        }
+    }
+
+    /// `blastna_into_par` on a pool writes the bytes of `blastna_into`: every case above, and
+    /// subjects of several pieces with runs and intervals across the pieces' ends, every length
+    /// remainder, into a buffer that held other bytes.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn the_pool_decode_writes_the_bytes_of_blastna_into() {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .expect("a pool of 4 threads");
+        let mut cases = cases();
+        let bases = 4 * DECODE_PIECE;
+        for (seed, share) in [(9u64, 0u64), (10, 3), (11, 60)] {
+            for length in [bases - 1, bases, bases + 1, 3 * bases + 2, 3 * bases + 3] {
+                let mut seq = random_letters(length, seed * 1_000_003 + length as u64, share);
+                // a run of N and a lower-case interval across each piece's end
+                for end in (bases..length).step_by(bases) {
+                    seq[end - 3..(end + 3).min(length)].fill(b'N');
+                    seq[end - 9..end - 4].make_ascii_lowercase();
+                }
+                cases.push(seq);
+            }
+        }
+        let mut serial = Vec::new();
+        let mut out = vec![0xAB; 17];
+        for seq in cases {
+            let store = PackedNucleotide::from_subject_letters(&seq).expect("IUPAC letters");
+            store.blastna_into(&mut serial);
+            pool.install(|| store.blastna_into_par(&mut out));
+            assert_eq!(out, serial, "length {}", seq.len());
+            assert_eq!(out, encode_iupac_to_blastna(&seq), "length {}", seq.len());
         }
     }
 

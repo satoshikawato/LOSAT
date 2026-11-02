@@ -54,14 +54,15 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | 「Discontiguous Word Options」：Template length、Template type | 同じ節（`-template_length`、`-template_type`）。task が dc-megablast のとき、または値があるときに出す | 採る | NCBI は discontiguous megablast のときだけ出す。値が隠れたまま argv に入らないよう、値があれば出す |
 | 「PSI/PHI/DELTA BLAST」の節 | なし | 採らない | LOSAT に無い |
 | （無い） | 「Other Parameters」：NCBI の画面に無い LOSAT の option（4 program の Number of descriptions・Number of alignments（`-num_descriptions` / `-num_alignments`。hit list の大きさが outfmt 0 と outfmt 6 / 7 で違うと検索を 2 回行う、`docs/web/abi_v2.md` §7）、BLASTN の Max HSPs per subject・Percent identity・Subject best hit、BLASTP・TBLASTN・TBLASTX の Neighboring words threshold・Two-hit window size、TBLASTN の X-dropoff・Sum statistics） | LOSAT だけ | Algorithm parameters の最後の節 |
-| 2 つ目の BLAST のボタン | Algorithm parameters を開いたとき、その下に 2 つ目の「Run LOSAT」（`add-to-queue-bottom`） | 採る | |
+| 2 つ目の BLAST のボタン | Algorithm parameters を開いたとき、その下に 2 つ目の「Run LOSAT」（`run-losat-bottom`） | 採る | |
+| BLAST のボタンを押すと結果のページへ移り、終わるまで状態（Searching…）を示す | 「Run LOSAT」（`run-losat`）で Results のタブへ移り、始めた Run の結果のページを開く。終わるまで状態の行（`run-status`：Waiting / Preparing / Searching / Organizing results、経過時間、Cancel）を示し、終わると結果が出る。保守者の指示（2026-11-02）「検索開始したら結果に直接飛ぶようにして。NCBI BLAST みたいに」 | 採る | 2026-11-02 まではキューに加えるだけで、「Open results」で開いていた |
 | フッター、ヘッダー、ロゴ | LOSAT の見出し（「LOSAT Web」と「Local processing…」） | 採らない | ブランド |
 
 **select の選択肢**：NCBI の Word size・Match/Mismatch・Gap Costs・Max target sequences の select は、program と task ごとに許す値を画面に埋めている。LOSAT はこれを写さない。欄の名前と並びを NCBI に合わせ、値は自由な欄のまま（Matrix は候補つき）、エンジンの `validate` が判断する（W3 の判断 3・9、TS で検証の規則を作らない）。既定の値は `describe` の placeholder で示す。
 
 ## 2. 結果画面
 
-NCBI の結果は、上から操作の行（Edit Search、Save Search、Search Summary）、見出しの塊（Job Title、RID、Program、Query ID…）と右の「Filter Results」、タブ（Descriptions、Graphic Summary、Alignments、（Taxonomy）、Dot Plot）、タブの中身、の順である。LOSAT はこの順に置き、タブに Run details と Outputs を足す。
+NCBI の今の結果は、上から操作の行（Edit Search、Save Search、Search Summary）、見出しの塊（Job Title、RID、Program、Query ID…）と右の「Filter Results」、タブ（Descriptions、Graphic Summary、Alignments、（Taxonomy）、Dot Plot）、タブの中身、の順である。LOSAT は見出しの塊までこの順に置き、その下は NCBI の以前の（classic の）結果のページのとおり、Graphic Summary、Descriptions、Alignments を 1 ページに上から下へ並べる（保守者の指示 2026-10-10「Graphic Summary の下に Description が直接出てくるやつ」、2026-11-02「タブで分けるんじゃなくて上下に配置して（NCBI の以前の方式）」）。Dot Plot と LOSAT の Run details・Outputs はタブのまま。
 
 ### 見出しの塊
 
@@ -82,9 +83,11 @@ NCBI の結果は、上から操作の行（Edit Search、Save Search、Search S
 | 当たりの無い query：黄色の帯「No significant similarity found.」、タブが消える | 「No significant similarity found for this query.」（`results-notice` の `no-hits`）。タブは残す（Run details と Outputs は query に依らない） | 寄せる | outfmt 0 の「No hits found」と同じ事実。値は作らない |
 | 「Filter Results」：Percent Identity、E value、Query Coverage の from / to、「Filter」「Reset」 | 「Filter Results」：E value ≤、Bit score ≥、Subject ID contains、「Filter」（`filter-apply`）「Reset」（`filter-clear`） | 寄せる | Percent Identity は採らない（レコードに原値が無い、`results_columns.md`）。Query Coverage はエンジン待ち（E2j）。表示だけを変え、検索をやり直さない（ViewState の規則は変えない） |
 
-### タブ
+### タブと 1 ページの並び
 
-NCBI と同じ順で「Descriptions」（`results-view-hits`）、「Graphic Summary」（`results-view-graphic`）、「Alignments」（`pane-alignment`）、「Dot Plot」（`pane-dotplot`）、その後に LOSAT の「Run details」（`results-view-details`）と「Outputs」（`results-view-outputs`）。「Taxonomy」は採らない（ローカルの FASTA に無い）。NCBI のタブの形（選んだタブを塗り、帯の下に道具の行）を LOSAT の色で写す。どのタブも同じ選択（中心は HSP の ID、`ResultsBrowser`）に従う。
+タブは「Hits」（`results-view-hits`：Graphic Summary・Descriptions・Alignments を 1 ページに）、「Dot Plot」（`pane-dotplot`）、その後に LOSAT の「Run details」（`results-view-details`）と「Outputs」（`results-view-outputs`）。2026-11-02 までは NCBI の今のページと同じ 3 つのタブ（Descriptions、Graphic Summary、Alignments）だった。「Taxonomy」は採らない（ローカルの FASTA に無い）。NCBI のタブの形（選んだタブを塗り、帯の下に道具の行）を LOSAT の色で写す。どのタブも同じ選択（中心は HSP の ID、`ResultsBrowser`）に従う。
+
+「Hits」の中は上から「Graphic Summary」（`section-graphic`）、「Descriptions」（`section-descriptions`）、「Alignments」（`section-alignments`、選んだ subject の塊）の節で、Descriptions の行か Graphic Summary の棒を選ぶと Alignments がその subject に変わる。Graphic Summary の棒のクリックはその Range を見える所へ送る。
 
 ### Descriptions
 
@@ -93,7 +96,7 @@ NCBI と同じ順で「Descriptions」（`results-view-hits`）、「Graphic Sum
 | 見出し「Sequences producing significant alignments」 | 同じ見出し | 採る | |
 | BLASTP の最初のタブ「Clusters」（「Clusters producing significant alignments」、Cluster Representative Sequence） | 「Descriptions」のまま | 採らない | NCBI のデータベースの配列のまとまり。ローカルの subject はまとめない |
 | 「Download」「Select columns」「Show」、「select all」と行の印、「GenBank」「Graphics」「MSA Viewer」 | なし | 採らない（Download は Outputs、行の選択は S14 で検討） | 抽出（S14）が行の選択を求めれば、その段階で足す |
-| 列 Description（リンク） | 「Description」：outfmt 0 の見出しの題（`results_columns.md`）。行を選ぶとその subject が選ばれ、Alignments・Graphic Summary・Dot Plot が従う | 寄せる | 行は 1 つのボタン（中にリンクを入れない）。選んだ subject の Alignments へは「Alignments」タブで |
+| 列 Description（リンク） | 「Description」：outfmt 0 の見出しの題（`results_columns.md`）。行を選ぶとその subject が選ばれ、Alignments・Graphic Summary・Dot Plot が従う | 寄せる | 行は 1 つのボタン（中にリンクを入れない）。選んだ subject の Alignments は同じページの下に出る |
 | 列 Scientific Name、Common Name、Taxid | なし | 採らない | ローカルの FASTA に無い |
 | 列 Max Score | E2j の前：「Score (bits)」（その subject の最初の HSP の outfmt 6 の bitscore）をこの位置に | エンジン待ち | 列名は今の意味のまま（Max Score と名乗らない） |
 | 列 Total Score、Query Cover、Per. Ident | なし | エンジン待ち（E2j） | |
@@ -123,7 +126,7 @@ NCBI と同じ順で「Descriptions」（`results-view-hits`）、「Graphic Sum
 | NCBI の要素 | LOSAT Web | 採否 | 理由 |
 |---|---|---|---|
 | 「Alignment view」（Pairwise、Query-anchored など）、「CDS feature」、「Restore defaults」、「Line length」 | なし | 採らない | エンジンが書くのは outfmt 0 の pairwise だけ。原文を書き換えない（`web/AGENTS.md` 規則 2） |
-| subject ごとの塊（全部の subject を続けて） | 選んだ subject の塊（`alignments-subject`）。「Previous」「Next」で前後の subject、「Descriptions」で一覧へ | 寄せる | 数千の subject を 1 ページに並べず、選択に従う |
+| subject ごとの塊（全部の subject を続けて） | 選んだ subject の塊（`alignments-subject`）。「Previous」「Next」で前後の subject（一覧はすぐ上） | 寄せる | 数千の subject を 1 ページに並べず、選択に従う |
 | 「Download」「GenBank」「Graphics」「Sort by」 | なし | 採らない（Download は Outputs） | |
 | 題（subject の説明）、「Sequence ID」「Length」「Number of Matches」 | 題（outfmt 0 の見出しの題）、「Sequence ID」（sseqid）、「Length」（レコードの長さ）、「Number of Matches」（HSP の数） | 採る | |
 | （無い） | その subject の HSP の表（`hsp-table`、outfmt 6 の欄、並べ替え）。frame は翻訳した配列のものだけ：TBLASTN は「Subject frame」（`+2`）、BLASTX は「Query frame」、TBLASTX は「Frames (q/s)」（`-2/+2`） | LOSAT だけ | 塊の見出しの下。行を選ぶとその Range へ。TBLASTN の「–/+2」は TBLASTX の「-2/+2」と並ぶとマイナス鎖に読めた（W4b の画面レビュー L9）。NCBI の節も「Frame = +2」 |
@@ -156,15 +159,23 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 
 | LOSAT の要素 | 置き場所 |
 |---|---|
-| キュー（Run の状態、取消、「Open results」） | 右の補助の領域（どのタブでも同じ幅と位置）。カードはどの状態も同じ形：1 行目 Run の番号・program・状態、2 行目 段階と時間（終わった Run は「Took」）、3 行目 操作（Cancel・Open results）を右に、その下に題・入力・option |
-| 離れることへの備え（wake lock、戻ったときの確認）、保存の状態 | 右の補助の領域、キューの下 |
+| Run の状態、取消 | 結果のページの中：終わっていない Run は「Run」の select の下に状態の行（`run-status`：段階、経過時間、待っている理由、Cancel・Cancel the group）。Run の一覧は「Run」の select（状態つき）。2026-11-02 まで右にあったキューの領域（カードと「Open results」）は保守者の指示「検索の queue 要らない」で無くした。検索は今も 1 つずつ順に走る（coordinator は変えない） |
+| 離れることへの備え（wake lock、戻ったときの確認）、保存の状態 | ページの下の注の行（`notes`、広い画面で 2 列） |
 | Combined / Separate、レコード一覧と除外 | 検索画面の各枠の中 |
-| Subject の保持（R1） | キューの Run の詳細 |
+| Subject の保持（R1） | Run details |
 | 検証バッジ | 結果の見出しの塊の Program の横、Run details |
 | Outputs（outfmt 0/6/7 の原文、診断、書き出し） | タブ「Outputs」と見出しの「Download All」 |
 | FakeEngine の帯 | 画面の上（W0） |
 
-## 4. 見た目
+## 4. 文言の方針（stop-describing-ui、2026-11-02）
+
+保守者の指示（2026-11-02）「基本これでいこう。NCBI 由来の説明文は残す」で、LOSAT Web の文言は [artouc/stop-describing-ui](https://github.com/artouc/stop-describing-ui) の 9 の規則に従う：1 機能でなく操作を名乗る、2 具体的な動詞、3 最も重い帰結だけ残す、4 内部の仕組みは書かない、5 同じ操作で戻せることは説明しない、6 画面が示していることを繰り返さない、7 無いものを言わない（試して失敗する場合を除く）、8 有効にする方法でなく操作そのものを見せる、9 短い行、記号の区切りや長い散文を避ける。規則に通らず何も残らない文は何も出さない。
+
+- **残す（NCBI の文）**：program のタブの下の一文（「BLASTN searches…」）、Job Title の「Enter a descriptive title for your search」、Algorithm parameters の「Parameter values that differ from the default are highlighted in yellow and marked with ♦ sign」と「Restore default search parameters」、Run LOSAT の横の「Search nucleotide subjects with BLASTN, task megablast (…)」（LOSAT が足していた「Runs in this browser.」は消す）、Graphic Summary の「hover to see the title」「click to show alignments」と「Distribution of N HSPs on M subject sequences」、Descriptions・Alignments の見出しと Range の語、「No significant similarity found for this query.」。
+- **消す（LOSAT の説明）**：見出しの「Local processing: your sequences stay in this browser.」（鍵のアイコンと「Nothing leaves this browser」に）、Threads の説明、「The engine accepts these options.」と「Checking the options…」（拒否だけ出す）、下書きの readiness の行（押したときの誤りだけ出す）、「Preparing the inputs…」「Search started.」（ボタンが「Starting…」になり、ページが Run へ移る）、subrange の「The whole record is searched…」と「A subject region can be set when…」（当てはまらないときは何も出さない）、「Files are read in place, not copied into the box.」、「The BLASTN engine reads N records.」（チェックのアイコン。拒否の文は残す）、Program Selection の task の列挙（`describe` の help は各欄の「?」の後ろ）、各 option の help の段落（「?」ボタンで開く。欄の placeholder はエンジンの既定値そのもの）、Filter Results の注、Graphic Summary の説明文、dot plot の Mouse / Touch の説明と「Each line is an HSP…」、表の「Scroll the table sideways…」、Outputs と Run details の説明の行、「While searching」の段落（検索中の Run のページに「Closing or reloading this tab ends the search」の 1 行だけ）、「Temporary storage」の見出しと使用量（メモリへの退避と掃除の不能の警告だけ）、Run の状態ページの説明（「Waiting for run N」と段階の時刻だけ）、結果タブの空の文（「Run a search」のボタン）。
+- **短くする**：検証バッジ「Engine-supported, outside certified profile」→「Outside certified profile」、「Keep the screen on while a search runs」→ Run LOSAT の行の「Keep screen on while searching」（「The screen stays on until the search ends.」は消す）、subject の遺伝暗号の注、Combined / Separate の説明、重複 ID と塩基・アミノ酸の見た目の注（2 文目を消す）、BLASTX の「not available」の文。
+
+## 5. 見た目
 
 - 節：検索画面の枠は NCBI と同じく、薄い灰色の面に見出しのつまみ（legend）を載せる。見出しは LOSAT の青（`--accent`）の太字。
 - 「Algorithm parameters」は幅いっぱいの帯のボタン（`+` / `−` の印、`aria-expanded`）。

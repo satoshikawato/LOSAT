@@ -61,6 +61,15 @@ impl TblastxDatabase {
         self
     }
 
+    /// The ids of the queries of the search (`SeqDb::id_scope`).
+    pub(super) fn in_id_scope(
+        mut self,
+        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
+    ) -> Self {
+        self.db.set_id_scope(id_scope);
+        self
+    }
+
     /// Opens the nucleotide database `name` as NCBI's `CSearchDatabase` opens it
     /// (`common::database::open_database`). A total length that LOSAT cannot hold as an index
     /// (above `usize`) or as NCBI's `Int8` is LOSAT's refusal.

@@ -72,6 +72,15 @@ impl BlastxDatabase {
         self
     }
 
+    /// The ids of the queries of the search (`SeqDb::id_scope`).
+    pub(super) fn in_id_scope(
+        mut self,
+        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
+    ) -> Self {
+        self.db.set_id_scope(id_scope);
+        self
+    }
+
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {

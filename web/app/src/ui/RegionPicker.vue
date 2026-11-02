@@ -6,7 +6,7 @@ import { computed, ref } from 'vue';
 import type { SearchDraft } from '../application/draft';
 import type { DatasetRecord } from '../domain/dataset';
 import type { InputRole } from '../domain/programs';
-import { REGION_FLAG, regionFromPositions, regionProblem, regionRange, regionValue, type RegionText } from '../domain/region';
+import { regionFromPositions, regionProblem, regionRange, type RegionText } from '../domain/region';
 import { formatCount } from './format';
 
 const props = defineProps<{
@@ -111,9 +111,6 @@ function up(): void {
       </button>
     </div>
     <p v-if="problem" class="error" :data-testid="`${testid}-problem`">{{ problem }}</p>
-    <p v-else-if="region" class="hint" :data-testid="`${testid}-argument`">
-      Searches {{ REGION_FLAG[role] }} {{ regionValue(region) }}. Positions in the results stay those of the record.
-    </p>
-    <p v-else class="hint">The whole record is searched. Drag on the bar or enter positions (1-based, inclusive) to search a part.</p>
+    <p v-else-if="region" class="hint" :data-testid="`${testid}-argument`">Positions in the results are those of the whole record.</p>
   </fieldset>
 </template>

@@ -513,6 +513,11 @@ pub(crate) struct FastaReader<R: Read> {
     believed_molecule: Option<bool>,
     /// The keys of the ids read so far (`believed::duplicate_id`).
     believed_keys: std::collections::HashSet<u64>,
+    /// The ids of the other role's records of the search (`set_id_scope`).
+    id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
+    /// The defline of the record, as written, when its ids are too (`IdScope`'s records without a
+    /// mark have generated ids).
+    believed_written: Vec<u8>,
     /// The defline line as read, kept when the configuration asks for it
     /// (`ReaderConfig::keep_defline`).
     defline: Vec<u8>,
@@ -563,11 +568,21 @@ impl<R: Read> FastaReader<R> {
             believed: None,
             believed_molecule: None,
             believed_keys: std::collections::HashSet::new(),
+            id_scope: None,
+            believed_written: Vec::new(),
             defline: Vec::new(),
             bad_positions: Vec::new(),
             x_pack: false,
             x_packed: None,
         }
+    }
+
+    /// The search whose records this reader reads under `-parse_deflines`.
+    pub(crate) fn set_id_scope(
+        &mut self,
+        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
+    ) {
+        self.id_scope = id_scope;
     }
 
     /// EXPERIMENT (LOSAT_X_BNQPACK): pack the letters of the nucleotide records read from now on.
@@ -1073,6 +1088,10 @@ impl<R: Read> FastaReader<R> {
             )));
         }
         self.believed_molecule = named_molecule(&parsed.ids);
+        self.believed_written.clear();
+        if self.id_scope.is_some() && !parsed.ids.is_empty() && !parsed.range {
+            self.believed_written.extend_from_slice(defline);
+        }
         let ids = if parsed.ids.is_empty() || parsed.range {
             generated_ids(&self.generate_id())
         } else {
@@ -1969,6 +1988,7 @@ impl<R: Read> FastaReader<R> {
             self.parse_title(title, warn)?;
         }
         self.titles = titles;
+        self.add_to_id_scope()?;
         let gap_char = if self.config.protein { b'X' } else { b'N' };
         // EXPERIMENT (LOSAT_X_BNQPACK): the letters the branches below would give, packed from the
         // buffer (`U` as `T` first, the mask as lower-case intervals) instead of copied out of it.
@@ -2051,6 +2071,33 @@ impl<R: Read> FastaReader<R> {
                 })
             }),
         })
+    }
+
+    /// `-parse_deflines` (`IdScope::add_record`): the record's letters are complete and its letters
+    /// in `seq_data` are in upper case, whether or not they are packed next. Cold: no reader without
+    /// the option has an id scope.
+    fn add_to_id_scope(&mut self) -> Result<(), ReadError> {
+        use crate::seqid::id_scope::RecordMark;
+        let (Some(scope), Some(believed)) = (&self.id_scope, &mut self.believed) else {
+            return Ok(());
+        };
+        let mark = (!self.believed_written.is_empty() && !believed.subject_local()).then(|| {
+            RecordMark::new(
+                &self.believed_written,
+                self.config.protein,
+                &self.seq_data,
+                self.gaps.iter().map(|gap| (gap.position, gap.length)),
+                !self.mask.is_empty(),
+            )
+        });
+        let shared = scope
+            .add_record(&believed.ids, mark, self.config.role, self.config.program)
+            .map_err(ReadError::Unsupported)?;
+        // The defline made the only handle of the ids.
+        if let Some(ids) = std::sync::Arc::get_mut(believed) {
+            ids.shared = shared;
+        }
+        Ok(())
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:670-686

@@ -24,8 +24,9 @@
 //! The switch is on by default: the AVX2 forms where the CPU has AVX2, the plain loops for sparse
 //! tables (at most three tenths of the backbone cells with hits) on x86-64 without AVX2 and in
 //! WebAssembly, nothing on aarch64; `=2` takes the plain loops for every table and `=3` for sparse
-//! ones, on any CPU. It acts in the direct loop only, which on x86-64 with AVX2 scans the subjects
-//! of batches with few hits per used cell (a short query) and elsewhere every batch;
+//! ones, on any CPU. It acts in the direct loop only, which on x86-64 with AVX2 and POPCNT scans the
+//! subjects of batches with few hits per used cell (a short query) and elsewhere every batch (also
+//! with `LOSAT_X_BXCROSS=0`);
 //! `LOSAT_X_BXDIAG=0` makes it scan every subject here. `LOSAT_X_REACH` shows the side each run
 //! took (the scan on presence bytes, or the scan before for a table that is not sparse under
 //! `=3`).

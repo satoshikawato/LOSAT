@@ -67,8 +67,9 @@
 //!                     continue;
 //!                 }
 //! ```
-//! Where the direct loop scans every subject (`LOSAT_X_BXDIAG=0`, and the default without AVX2:
-//! aarch64, WebAssembly) 79-81 % of the hits of the three blastx cases of v4-A10 probe bx1 are too
+//! Where the direct loop scans every subject (`LOSAT_X_BXDIAG=0`, and the default without
+//! LOSAT_X_BXCROSS's cell test: `LOSAT_X_BXCROSS=0`, a CPU without AVX2 or POPCNT, aarch64,
+//! WebAssembly) 79-81 % of the hits of the three blastx cases of v4-A10 probe bx1 are too
 //! far and 14.5-17.4 % overlap, which of the two is hard to predict, and 1.2-1.4 % meet a flag-1
 //! cell and 2.1-2.8 % are candidates for the extension.
 //!
@@ -117,8 +118,8 @@
 //! cells with hits) on x86-64 without AVX2 and in WebAssembly, nothing on aarch64 (not timed); `=2`
 //! the plain loops for every table, `=3` for sparse tables, on any CPU. Where it does not act the
 //! branch-free scan of BXSCANBF (graduated, always on) runs. The fused loop of LOSAT_X_BXDIAG keeps
-//! its candidate loop. On x86-64 with AVX2 the direct loop scans the subjects of batches with few hits
-//! per used cell (BXDIAGMIN: short queries); without AVX2 every batch.
+//! its candidate loop. On x86-64 with AVX2 and POPCNT the direct loop scans the subjects of batches
+//! with few hits per used cell (BXDIAGMIN: short queries); elsewhere every batch.
 
 use super::x_ungap_sent::XSent;
 use super::*;

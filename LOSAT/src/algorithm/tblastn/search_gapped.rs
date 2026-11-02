@@ -347,6 +347,23 @@ fn x_query_frames(queries: &[&[u8]], profile: PreliminaryProfile<'_>) -> Result<
             }
         })
         .collect();
+    x_query_frames_of(query_frames, queries)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-623 (`BLAST_MainSetUp`)
+// ```c
+//     status = s_GetFilteringLocations(query_blk, query_info, program_number, qsup_options,
+//                                       &filter_maskloc, &blast_message);
+// ...
+//     if (!mask_at_hash) {
+//         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc, program_number);
+//     }
+// ```
+// NCBI masks the query of a batch once, in its setup; the lookup table, the word finder and the
+// score block read that query. `x_query_frames` with the frames made already (by the batch's setup,
+// `stage_d_pipeline::query_set_setup`, which masks each query as `x_query_frames` does).
+/// The query-side state of `queries` from their frames `query_frames` (one per query).
+fn x_query_frames_of(query_frames: Vec<QueryFrame>, queries: &[&[u8]]) -> Result<XQueryFrames> {
     let mut context_offsets = Vec::with_capacity(queries.len());
     let mut total_query_length = 0i32;
     for query in queries {
@@ -385,17 +402,19 @@ fn x_query_frames(queries: &[&[u8]], profile: PreliminaryProfile<'_>) -> Result<
 //                                  query, lookup_segments, 0);
 // ```
 // NCBI builds the lookup table once per query batch. XQuerySide keeps the query frames and the
-// lookup table for all subjects of one query set; the first subject that needs a part builds it,
-// exactly as every subject did before.
+// lookup table for all subjects of one query set. The frames are the ones the batch's setup masked
+// (`x_with_frames`); the table is built before the subjects on a pool of two or more threads
+// (`x_build_lookup_on`), otherwise by the first subject that needs it.
 /// The query-side state of the unit-wise preliminary stage for one query set, shared by all
 /// its subjects (graduated 2026-10-22, was `LOSAT_X_TBNQSIDE`).
 ///
 /// The masked query frames and the neighbourhood lookup table depend on the
 /// queries and the word-finder options, not on the subject, yet the stage is
 /// entered once per subject and rebuilt them every time (NCBI builds its
-/// lookup table once per query batch, `lookup_wrap.c:91-100`). The first
-/// subject that needs a part computes it, exactly as before; the others read
-/// it. One value serves one query set with one set of options only.
+/// lookup table once per query batch, `lookup_wrap.c:91-100`). The frames come
+/// from the batch's setup (`x_with_frames`); the table is built once, before the
+/// subjects (`x_build_lookup_on`) or by the first subject that needs it, and the
+/// others read it. One value serves one query set with one set of options only.
 pub(super) struct XQuerySide {
     frames: std::sync::OnceLock<XQueryFrames>,
     /// Held while `frames` is being made, so that subjects searched at the
@@ -439,6 +458,64 @@ impl XQuerySide {
         }
         let built = build()?;
         Ok(self.frames.get_or_init(|| built))
+    }
+
+    /// The side of a query set whose frames its setup made (`query_set_setup`, one per query, the
+    /// frames `x_query_frames` makes): the query is masked once per batch, as NCBI masks it once
+    /// in `BLAST_MainSetUp` (`x_query_frames_of`).
+    pub(super) fn x_with_frames(
+        setup_frames: &[Vec<QueryFrame>],
+        queries: &[&[u8]],
+    ) -> Result<Self> {
+        anyhow::ensure!(
+            setup_frames.len() == queries.len() && setup_frames.iter().all(|f| f.len() == 1),
+            "one query frame per TBLASTN query"
+        );
+        let side = Self::new();
+        let frames = setup_frames.iter().map(|f| f[0].clone()).collect();
+        let _ = side.frames.set(x_query_frames_of(frames, queries)?);
+        Ok(side)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100 (cited at
+    // `x_scan_plan`) and c++/src/algo/blast/api/prelim_stage.cpp:145-188
+    // ```c
+    // TBlastThreads the_threads(GetNumberOfThreads());
+    // (*thread)->Run(); (*thread)->Join(&result);
+    // ```
+    // NCBI builds the batch's table in its setup, before its threads search the subjects. The table
+    // `x_scan_plan` builds at the first subject that needs it, built now, its lists on `pool`'s
+    // threads (`x_build_lean_in`): the same table, from the frames the setup masked, which are the
+    // table's query without soft masking. With soft masking, or the compressed table of word sizes
+    // 5 to 7, the first subject builds it.
+    /// Builds the query set's lookup table now, on `pool`, where the side holds the table's query.
+    pub(super) fn x_build_lookup_on(
+        &self,
+        profile: PreliminaryProfile<'_>,
+        pool: &crate::utils::threading::SearchPool<'_>,
+    ) {
+        if profile.soft_masking || profile.word_size > 4 {
+            return;
+        }
+        let Some(frames) = self.frames.get() else {
+            return;
+        };
+        self.lookup.get_or_init(|| {
+            let query_frames: Vec<Vec<QueryFrame>> = frames
+                .query_frames
+                .iter()
+                .map(|frame| vec![frame.clone()])
+                .collect();
+            std::sync::Arc::new(
+                crate::algorithm::tblastx::lookup::x_lookup_table_for_profile_in(
+                    &query_frames,
+                    profile.threshold,
+                    profile.matrix,
+                    profile.word_size,
+                    Some(pool),
+                ),
+            )
+        });
     }
 }
 
@@ -646,6 +723,10 @@ fn x_preliminary_protein_hsps_by_unit(
         &x_query_side.lookup,
         &x_query_side.compressed,
         x_subject,
+        // Without soft masking the frames are the lookup query's (both
+        // `encode_tblastn_lookup_query` with the profile's SEG and lowercase options), masked once
+        // for the batch.
+        (!profile.soft_masking).then_some(query_frames.as_slice()),
     )?
     else {
         return Ok(Vec::new());

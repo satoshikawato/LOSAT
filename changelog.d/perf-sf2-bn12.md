@@ -1,0 +1,1 @@
+- `blastn` at two or more threads gives each query's HSP list from the traceback straight to the hit lists, and unpacks the subject on the search pool, at each query batch. 31,168 cDNAs against a 3 Mb `-subject` take 5.6 % less time at 16 threads, with the same output and peak memory within 2 %.

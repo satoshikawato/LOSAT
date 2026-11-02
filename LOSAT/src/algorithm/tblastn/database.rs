@@ -58,6 +58,15 @@ impl TblastnDatabase {
         self
     }
 
+    /// The ids of the queries of the search (`SeqDb::id_scope`).
+    pub(super) fn in_id_scope(
+        mut self,
+        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
+    ) -> Self {
+        self.db.set_id_scope(id_scope);
+        self
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:188-194
     // ```c++
     //         /*** Initialize the database/subject ***/

@@ -1,0 +1,53 @@
+<!doctype html><meta charset="utf-8"><title>WO stale atomic</title>
+<script>
+const uleb = v => { const o = []; do { let b = v & 127; v >>>= 7; if (v) b |= 128; o.push(b); } while (v); return o; };
+const sleb = v => { const o = []; for (;;) { const b = v & 127; v >>= 7; if ((v === 0 && !(b & 64)) || (v === -1 && (b & 64))) { o.push(b); return o; } o.push(b | 128); } };
+const vec = items => [...uleb(items.length), ...items.flat()];
+const sec = (id, body) => [id, ...uleb(body.length), ...body];
+const str = s => [...uleb(s.length), ...new TextEncoder().encode(s)];
+const ENTERED = 0, POINTER = 4;
+function moduleBytes(fences) {
+  const fence = new Array(fences * 3);
+  for (let i = 0; i < fences; i += 1) { fence[3 * i] = 0xfe; fence[3 * i + 1] = 3; fence[3 * i + 2] = 0; }
+  const c = v => [0x41, ...sleb(v)];
+  const body = [1, 1, 0x7f,
+    ...c(ENTERED), ...c(1), 0xfe, 0x17, 2, 0,
+    ...c(ENTERED), ...c(1), 0xfe, 0x00, 2, 0, 0x1a,
+    ...fence,
+    ...c(POINTER), 0x28, 2, 0, 0x21, 1,
+    0x20, 0, ...c(2), 0x46, 0x04, 0x40, ...c(0), 0x40, 0, 0x1a, 0x0b,
+    0x20, 0, 0x45, 0x04, 0x40, 0x20, 1, ...c(7), 0x36, 2, 0, ...c(0), 0x0f, 0x0b,
+    0x20, 1, ...c(7), 0xfe, 0x1e, 2, 0, 0x0b];
+  return new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0,
+    ...sec(1, vec([[0x60, 1, 0x7f, 1, 0x7f]])),
+    ...sec(2, vec([[...str("env"), ...str("memory"), 2, 3, 1, ...uleb(1024)]])),
+    ...sec(3, vec([[0]])),
+    ...sec(7, vec([[...str("probe"), 0, 0]])),
+    ...sec(10, vec([[...uleb(body.length), ...body]]))]);
+}
+async function run(rounds, fences) {
+  const module = await WebAssembly.compile(moduleBytes(fences));
+  const counts = [{}, {}, {}, {}];
+  const guarded = await WebAssembly.compile(await (await fetch("guarded.wasm")).arrayBuffer());
+  for (let r = 0; r < rounds; r += 1) for (const kind of [0, 1, 2, 3]) {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 1024, shared: true });
+    // The main thread only waits: one worker runs probe, another grows the memory.
+    const grower = new Worker("grower.js");
+    const worker = new Worker("worker.js");
+    await Promise.all([grower, worker].map(w => new Promise(resolve => { w.onmessage = resolve; })));
+    const done = new Promise(resolve => { worker.onmessage = e => resolve(e.data); });
+    const grown = new Promise(resolve => { grower.onmessage = e => resolve(e.data); });
+    grower.postMessage({ memory });
+    // Arm 3: the same atomic through the fixed guard.
+    worker.postMessage(kind === 3 ? { module: guarded, memory, kind: 1 } : { module, memory, kind });
+    const outcome = await Promise.race([done, new Promise(resolve => setTimeout(resolve, 30000, "no outcome in 30 s"))]);
+    const growth = await Promise.race([grown, new Promise(resolve => setTimeout(resolve, 1000, "grower did not finish"))]);
+    grower.terminate();
+    if (growth !== "grown") counts[kind][growth] = (counts[kind][growth] || 0) + 1;
+    worker.terminate();
+    counts[kind][outcome] = (counts[kind][outcome] || 0) + 1;
+  }
+  return { ua: navigator.userAgent, isolated: crossOriginIsolated, rounds, fences,
+    plain: counts[0], atomic: counts[1], atomic_after_grow0: counts[2], atomic_guarded: counts[3] };
+}
+</script>

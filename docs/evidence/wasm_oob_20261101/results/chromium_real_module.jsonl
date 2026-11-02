@@ -1,0 +1,12 @@
+{"arm": "devampv1", "pass": 0, "chromium": "156.0.8078.4", "s": 1.2, "err": "LOSAT pair #1: LOSAT thread 2 failed: memory access out of bounds", "traps": 4, "probes": 7, "probes_get_or_init_slow": 7}
+{"arm": "devampv1", "pass": 1, "chromium": "156.0.8078.4", "s": 5.6, "err": "LOSAT pair #5: LOSAT thread 1 failed: memory access out of bounds", "traps": 3, "probes": 7, "probes_get_or_init_slow": 7}
+{"arm": "devampv1", "pass": 2, "chromium": "156.0.8078.4", "s": 19.8, "err": null, "traps": 6, "probes": 9, "probes_get_or_init_slow": 9}
+{"arm": "devampv1", "pass": 3, "chromium": "156.0.8078.4", "s": 21.5, "err": null, "traps": 7, "probes": 11, "probes_get_or_init_slow": 11}
+{"arm": "devampv1", "pass": 4, "chromium": "156.0.8078.4", "s": 21.3, "err": null, "traps": 8, "probes": 12, "probes_get_or_init_slow": 12}
+{"arm": "devampv1", "pass": 5, "chromium": "156.0.8078.4", "s": 26.6, "err": null, "traps": 2, "probes": 2, "probes_get_or_init_slow": 2}
+{"arm": "devampv2", "pass": 0, "chromium": "156.0.8078.4", "s": 19.9, "err": null, "traps": 0, "probes": 0, "probes_get_or_init_slow": 0}
+{"arm": "devampv2", "pass": 1, "chromium": "156.0.8078.4", "s": 17.8, "err": null, "traps": 0, "probes": 0, "probes_get_or_init_slow": 0}
+{"arm": "devampv2", "pass": 2, "chromium": "156.0.8078.4", "s": 20.8, "err": null, "traps": 0, "probes": 0, "probes_get_or_init_slow": 0}
+{"arm": "devampv2", "pass": 3, "chromium": "156.0.8078.4", "s": 19.9, "err": null, "traps": 0, "probes": 0, "probes_get_or_init_slow": 0}
+{"arm": "devampv2", "pass": 4, "chromium": "156.0.8078.4", "s": 29.1, "err": null, "traps": 0, "probes": 0, "probes_get_or_init_slow": 0}
+{"arm": "devampv2", "pass": 5, "chromium": "156.0.8078.4", "s": 28.1, "err": null, "traps": 0, "probes": 0, "probes_get_or_init_slow": 0}

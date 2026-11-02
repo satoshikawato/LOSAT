@@ -884,11 +884,6 @@ fn split_quoted(dbname: &[u8], keep_quote: bool) -> Vec<&[u8]> {
     dbs
 }
 
-/// Whether `dbname` names several databases (`x_Tokenize`: more than one name).
-pub(crate) fn lists_several_names(dbname: &str) -> bool {
-    split_quoted(dbname.as_bytes(), false).len() > 1
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:479-500
 // ```c++
 //     vector<CTempString> dbs;

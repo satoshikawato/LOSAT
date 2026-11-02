@@ -384,7 +384,7 @@ impl Failed {
 struct Searched {
     writers: Vec<StreamWriter>,
     recorder: RangeRecorder,
-    hits: Option<Vec<PairwiseHit>>,
+    hits: Option<std::sync::Arc<Vec<PairwiseHit>>>,
     ordinals: Option<Vec<usize>>,
 }
 
@@ -410,10 +410,10 @@ fn search(
         fault: None,
     };
     let outfmts: Vec<String> = formats.iter().map(u32::to_string).collect();
-    let mut collected: Option<Vec<PairwiseHit>> = None;
+    let mut collected: Option<std::sync::Arc<Vec<PairwiseHit>>> = None;
     let ordinals;
     let outcome = {
-        let mut on_hits = |hits: &[PairwiseHit]| collected = Some(hits.to_vec());
+        let mut on_hits = |hits| collected = Some(hits);
         let mut outputs = ReportOutputs {
             formats: outfmts
                 .iter()

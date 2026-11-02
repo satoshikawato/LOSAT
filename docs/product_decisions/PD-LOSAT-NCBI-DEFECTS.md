@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.9
+- Version: 1.10
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -13,7 +13,10 @@
   1.8 2026-11-01 (exception 5 also for `losat blastdbcmd -taxids`, line BDC's BDC3a);
   1.9 2026-11-01 (a version 5 database list that mixes databases with and without accession
   tables, and a negative seqid list that excludes a sequence of a volume the database does
-  not hold, rule 3, line DI-8f)
+  not hold, rule 3, line DI-8f);
+  1.10 2026-11-02 (the type of a `gb`, `emb` or `dbj` id, exception 2 for the tabular first
+  word of an `lcl|Subject_N` id, and the reported sequences of a database with parsed Seq-ids
+  that are refused, line DBID)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -216,6 +219,42 @@ defects are fixed and presented as differences); its PR (DI-8b) asks the maintai
    sequences (H110), and with the first of them in the bulk lookup of `-entry_batch`
    (`LmdbEntry::oids`, `IdLookup`; `LOSAT/tests/blastdbcmd_retrieve.rs`).
 
+## Approved difference (`gb`, `emb` and `dbj` ids, version 1.10)
+
+The maintainer accepted this on 2026-10-21 for the tabular `sseqid` of a database with parsed
+Seq-ids (line DBID `DECISIONS.md` 5). NCBI's result is deterministic, so rule 2 would otherwise
+reproduce it. The other places the same table reaches (below) follow under the maintainer's
+standing delegation; the PR of version 1.10 asks the maintainer to accept them.
+
+NCBI's Seq-id table keeps these three types in one tree for the whole process
+(`c++/src/objects/seq/seq_id_tree.cpp:255-259`, `CSeq_id_GB_Tree` `:1707-1719`). While it lives,
+an entry holds the ids of one prefix, digit count and version (`CSeq_id_Textseq_Info::ParseAcc`,
+`:825-880`) with the type of the id that made it (`FindOrCreate`, `:1161-1177`;
+`GetPackedSeqId`, `:938-968`), so NCBI can print `gb|AF000002.1|` for a sequence stored as
+`emb|AF000002.1|`. LOSAT prints the stored type. That is NCBI's own output with
+`OBJECTS_PACK_TEXTID=0`, which turns the packing off (the probes compared them in every format
+in BLASTN and BLASTP). LOSAT does not read this variable, and it refuses the registry entry
+`[OBJECTS] PACK_TEXTID`, in a file or in the environment. `tpg`, `tpe`, `tpd`, `ref`, `sp` and
+`gpp` ids keep their type in NCBI, and so do an id of another version or digit count, an id
+with a locus name and an accession with a prefix longer than 4 characters.
+
+Where it shows, in all programs that take the option: the tabular `sseqid` with `-db` (the default
+fields, `sacc`, `saccver`, `sallseqid` and the other formats agree), `qseqid` with
+`-parse_deflines`, and with `-subject -parse_deflines` also `sseqid`, `sallseqid` and the
+Seq-align id of outfmt 5, 8, 9, 11, 12 and 13 to 16. It needs definition lines that give one key two of these types: in a copy of NCBI's
+core_nt, the 57,267,555 such ids of its 145,503,554 definition lines have no such key (a scan of
+2026-11-02), so the outputs agree there. Probes: `blastdb-ids-20261021/R/id9` of the line's
+records.
+
+## Exception 2 on a database with parsed Seq-ids (version 1.10)
+
+Decided under the maintainer's standing delegation (line DBID `DECISIONS.md` 10); the PR of
+version 1.10 asks the maintainer to accept it. For a nucleotide record `lcl|Subject_N , ,` NCBI's
+tabular id is the first word of the generated title, so BLASTN, TBLASTN and TBLASTX crash in
+outfmt 6 as well as in outfmt 0 (SIGSEGV). LOSAT stops at the end of the string and writes `,`,
+which is what NCBI writes for the nearby record `lcl|Subject_N , x`. Other ids with such a title
+do not build it in the tabular formats, and NCBI and LOSAT agree there, as exception 2 says.
+
 ## Reproduced as NCBI (rule 2)
 
 - A text seqid list whose ids all go in NCBI's rewriting for a version 5 database (gi ids
@@ -298,6 +337,33 @@ defects are fixed and presented as differences); its PR (DI-8b) asks the maintai
   and searched; it now refuses the list (`the negative seqid list excludes sequence N of the
   LMDB file, in a volume that the database does not hold`; version 1.9). A positive list on
   such a database is NCBI's and LOSAT's alike.
+
+- On a database with parsed Seq-ids, where NCBI stops (a reported sequence that its formatters
+  cannot fetch, in the default tabular fields), pads the line without end (an outfmt 0
+  description id of 65 bytes or more) or crashes (a protein title of punctuation): version 1.10,
+  the table in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md).
+
+## Explicit rejections of deterministic results (rule 2, version 1.10)
+
+On a database with parsed Seq-ids NCBI gives these results without failing, and they look wrong
+or need NCBI's object manager to reproduce. LOSAT refuses them instead (line DBID
+`DECISIONS.md` 9, 20 and 21, line DI-7 for the query's id), under the maintainer's standing
+delegation; the PR of version 1.10 asks the maintainer to accept them. Each is a row of the table
+in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md), which also lists refusals that rule 4
+would port:
+
+- A reported sequence whose id NCBI's formatters do not find, in the formats and field lists
+  where NCBI exits 0: it writes `Unknown` or the id alone.
+- A reported sequence whose id NCBI's lookup finds as another sequence first: NCBI writes that
+  sequence's names, in every program but BLASTN also its identities.
+- Following hits whose ids NCBI takes for one sequence: NCBI shows them as one hit, and
+  PSIBLAST's cut to `-max_target_seqs` counts them as one subject.
+- A reported sequence with the id of a query read with `-parse_deflines`: NCBI shows the query's
+  title and letters for it.
+- A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
+  each time it reads the definition line.
+- Titles NCBI takes from the tax ids: an empty title made from the taxonomy database, and a
+  title whose end `x_AdjustProteinTitleSuffix` rewrites.
 
 ## Ported (rule 4)
 

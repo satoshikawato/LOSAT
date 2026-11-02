@@ -63,6 +63,8 @@ function fixtures(): Map<string, Fixture[]> {
     if ((row['extra_args'] ?? '').includes("'") || (row['extra_args'] ?? '').includes('"')) continue;
     const words = [...(row['task'] ? ['-task', row['task']] : []), ...(row['extra_args'] ?? '').split(/\s+/).filter((w) => w !== '')];
     if (words.includes('-outfmt') || words.includes('-out')) continue;
+    // LOSAT Web refuses the option: it registers a record before the options of a run are known.
+    if (words.includes('-parse_deflines')) continue;
     const stream = ({ '': 0, '0': 0, '6': 6, '7': 7 } as const)[row['outfmt'] ?? ''];
     const fixture: Fixture = {
       id: row['fixture_id']!,

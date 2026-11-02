@@ -6,7 +6,6 @@
 // opened.
 import { computed, ref } from 'vue';
 import type { DraftState, SearchDraft } from '../application/draft';
-import { includedOf } from '../application/draft';
 import { sectionsAt, writtenValue } from '../domain/parameters';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
 import ParameterField from './ParameterField.vue';
@@ -22,7 +21,6 @@ const dragging = ref(false);
 const fileInput = ref<HTMLInputElement>();
 
 const readySources = computed(() => roleState.value.sources.filter((source) => source.status === 'ready'));
-const includedCount = computed(() => readySources.value.reduce((sum, source) => sum + includedOf(source).length, 0));
 const regionRecord = computed(() => {
   void props.state;
   return props.draft.regionRecord(props.role);
@@ -98,14 +96,7 @@ function onDrop(event: DragEvent): void {
           :region="region"
           :unit="residueUnit(kind)"
         />
-        <template v-else>
-          <p class="subrange-title">{{ title }} subrange</p>
-          <p v-if="includedCount > 1" class="hint" :data-testid="`${role}-region-unavailable`">
-            A {{ title.toLowerCase() }} region can be set when exactly one {{ title.toLowerCase() }} record is included
-            ({{ includedCount }} are).
-          </p>
-          <p v-else class="hint">From and To can be set once one {{ title.toLowerCase() }} record is included.</p>
-        </template>
+        <!-- With no single record, no subrange: nothing says so (stop-describing-ui rule 7). -->
       </div>
     </div>
 
@@ -123,14 +114,13 @@ function onDrop(event: DragEvent): void {
           :data-testid="`${role}-files`"
           @change="onFiles"
         />
-        <span class="hint">or drop files here. Files are read in place, not copied into the box.</span>
+        <span class="hint">or drop files here</span>
       </div>
     </div>
 
     <ParameterField v-for="field in codeFields" :key="field.flag" :draft="draft" :state="state" :field="field" />
     <p v-if="subjectCodeNote" class="note" data-testid="subject-gencode-note">
-      Approved LOSAT exception: LOSAT translates the subjects with this code. NCBI BLAST+ treats a non-default subject
-      code differently for local subject files, so results with this code can differ from NCBI's.
+      Results with this code can differ from NCBI BLAST+, which translates local subjects otherwise (approved LOSAT exception).
     </p>
 
     <div v-if="role === 'query'" class="param-row">
@@ -172,7 +162,7 @@ function onDrop(event: DragEvent): void {
           :data-testid="`${role}-mode-combined`"
           @change="draft.setMode(role, 'combined')"
         />
-        Combined: one search of all of them
+        Combined: one search of all
       </label>
       <label>
         <input
@@ -183,7 +173,7 @@ function onDrop(event: DragEvent): void {
           :data-testid="`${role}-mode-separate`"
           @change="draft.setMode(role, 'separate')"
         />
-        Separate: one search for each, queued as a group
+        Separate: one search for each
       </label>
     </fieldset>
   </fieldset>

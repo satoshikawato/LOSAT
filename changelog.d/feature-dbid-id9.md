@@ -1,0 +1,1 @@
+- Documents databases built with `-parse_seqids` (README, `PD-LOSAT-DATABASE-SEARCH` 1.3, `PD-LOSAT-NCBI-DEFECTS` 1.10): `-db` gives NCBI's bytes in every format a program writes, with the reported sequences LOSAT refuses and the known differences listed. A `gb`, `emb` or `dbj` id prints the stored type, where NCBI BLAST+ can print the type of another id.

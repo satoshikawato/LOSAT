@@ -313,10 +313,8 @@ fn out_and_logfile_take_what_ncbi_writes_there() {
     );
 }
 
-/// The probe's cases that LOSAT's BLASTDBCMD does not serve (line BDC DECISIONS 6): several
-/// names in `-db` (I38), the toolkit words LOSAT refuses.
+/// The probe's cases that LOSAT's BLASTDBCMD does not serve: the toolkit words LOSAT refuses.
 const REFUSALS: &[(&str, &[&str])] = &[
-    ("I38", &["-db", "db/p5 db/pm5", "-info"]),
     ("B20", &["-db", "db/p5", "-info", "-version-full"]),
     ("B21", &["-db", "db/p5", "-info", "-conffile", "x.ini"]),
     ("B22", &["-db", "db/p5", "-info", "-dryrun"]),

@@ -12,6 +12,8 @@ mod blastdbcmd_info;
 mod blastdbcmd_masks;
 #[path = "../blastdbcmd_retrieve.rs"]
 mod blastdbcmd_retrieve;
+#[path = "../blastdbcmd_several_names.rs"]
+mod blastdbcmd_several_names;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
 #[path = "../cli_v2.rs"]

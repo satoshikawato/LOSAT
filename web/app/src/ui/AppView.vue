@@ -5,8 +5,6 @@ import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
 import type { ResultsBrowser } from '../application/results';
 import { useStore } from './useStore';
-import AttentionPanel from './AttentionPanel.vue';
-import QueuePanel from './QueuePanel.vue';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
@@ -27,9 +25,9 @@ const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
 const resultsView = ref<ResultsView>('hits');
 
 /**
- * Opens a run's results from the queue (S12's screen review L7), and brings the results
- * panel into view with the focus on its heading: on a narrow screen the queue is below the
- * results (S13 screen review M3).
+ * Opens a run's results: "Run LOSAT" goes straight to the results page of the run it started, as
+ * NCBI BLAST's "BLAST" button does (Owner, 2026-11-02); the page shows the run's status until it
+ * completes, then its results. The results panel comes into view with the focus on its heading.
  */
 async function openResults(runId: string): Promise<void> {
   tab.value = 'results';
@@ -56,7 +54,10 @@ onUnmounted(() => {
 <template>
   <header class="app-header">
     <h1>LOSAT Web</h1>
-    <span class="local-note">Local processing: your sequences stay in this browser.</span>
+    <span class="local-note">
+      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+      Nothing leaves this browser
+    </span>
   </header>
   <p v-if="usesFakeEngine" class="banner" data-testid="fake-engine-banner">
     Development build: a fake engine is in use. Outputs are not search results.
@@ -68,8 +69,8 @@ onUnmounted(() => {
   </nav>
   <main class="layout">
     <section class="primary">
-      <!-- The search form stays mounted, so the next job keeps its edits while results are viewed. -->
-      <SearchPanel v-show="tab === 'search'" :draft="draft" :runs="state.runs" />
+      <!-- The search form stays mounted, so the next search keeps its edits while results are viewed. -->
+      <SearchPanel v-show="tab === 'search'" :draft="draft" :attention="attention" :attention-state="attentionState" @submitted="openResults" />
       <ResultsPanel
         v-if="tab === 'results'"
         ref="resultsPanel"
@@ -77,11 +78,11 @@ onUnmounted(() => {
         :coordinator="coordinator"
         :results="results"
         :runs="state.runs"
+        @search="tab = 'search'"
       />
     </section>
-    <aside class="secondary">
-      <QueuePanel :coordinator="coordinator" :runs="state.runs" @open-results="openResults" />
-      <AttentionPanel :attention="attention" :state="attentionState" />
+    <!-- Under the page: the storage's warnings, when there are any (design §3.4). -->
+    <aside class="notes">
       <StorageStatus :storage="state.storage" />
     </aside>
   </main>

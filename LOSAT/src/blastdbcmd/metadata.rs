@@ -77,9 +77,9 @@ use super::{database_error, refusal, Diag};
 // 		}
 // 	}
 // ```
-// The name is the `-db` value LOSAT opened as one database; a name with a double quote is
-// refused (NCBI's name list would keep the quote in `dbname`). A date `CTime` does not read
-// ends NCBI with an exception that names its source files (exit status 255, probes J189,
+// `GetDBNameList` is the `-db` value as given (`m_DBNames`, seqdbimpl.cpp:55): the names of a
+// list go by spaces alone, and a double quote stays in the piece it is in (probes N121-N175 of
+// line BDC). A date `CTime` does not read ends NCBI with an exception that names its source files (exit status 255, probes J189,
 // J190 of line BDC), which LOSAT refuses. The JSON ends with the line feed of `NcbiEndl`
 // (`DbMetadata::to_json`, probes T13, T14, S39, J180-J199).
 /// `-metadata` of the database `name` opened as `db`, its files named after
@@ -92,11 +92,6 @@ pub(super) fn metadata(
     diag: &mut Diag,
     out: &mut dyn Write,
 ) -> i32 {
-    if name.contains('"') {
-        return diag.refuse(&refusal(&format!(
-            "-metadata of the database name {name} with a double quote"
-        )));
-    }
     let mut prefix = args
         .value("metadata_output_prefix")
         .unwrap_or("")

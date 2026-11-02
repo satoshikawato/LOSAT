@@ -51,6 +51,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         dbsize: None,
         show_gis: false,
         parse_deflines: false,
+        id_scope: None,
         searchsp: None,
         evalue: 10.0,
         threshold: None,

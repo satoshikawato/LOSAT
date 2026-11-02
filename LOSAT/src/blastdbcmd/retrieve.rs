@@ -187,8 +187,8 @@ impl<'a> Source<'a> {
         match self.db.mask_ranges(oid, algo)? {
             MaskRanges::Ranges(ranges) => Ok(ranges),
             MaskRanges::AlgorithmNotInVolume { volume } => Err(Stop::refused(format!(
-                "filtering algorithm {algo} in {}, a volume of an alias with masks of other \
-                 algorithms (NCBI reads the masks of another algorithm there)",
+                "filtering algorithm {algo} in {}, a volume of an alias or a list of names with \
+                 masks of other algorithms (NCBI reads the masks of another algorithm there)",
                 volume.display()
             ))),
         }

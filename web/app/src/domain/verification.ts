@@ -93,7 +93,7 @@ export interface Badge {
 }
 
 export const CERTIFIED_LABEL = 'Certified profile';
-export const OUTSIDE_LABEL = 'Engine-supported, outside certified profile';
+export const OUTSIDE_LABEL = 'Outside certified profile';
 
 export function verificationBadge(input: BadgeInput, table: VerificationTable): Badge {
   const exceptions = approvedExceptions(input.program, input.argv);

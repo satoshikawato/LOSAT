@@ -259,6 +259,8 @@ fn run_inner(
     output: &mut Option<BufWriter<Box<dyn Write>>>,
     archive_slot: &mut Option<crate::report::archive::ArchiveHandle>,
 ) -> Result<()> {
+    let id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>> =
+        args.parse_deflines.then(Default::default);
     // Diagnostic (LOSAT_TIMING): the clock of the run (x_timing.rs). No NCBI counterpart.
     let x_t_run = super::x_timing::lap();
     use super::x_timing::Run as XRun;
@@ -402,6 +404,7 @@ fn run_inner(
             &mut {
                 let mut stream = FastaStream::from_file(subject_file);
                 stream.parse_deflines = args.parse_deflines;
+                stream.id_scope = id_scope.clone();
                 stream
             },
             true,
@@ -525,7 +528,8 @@ fn run_inner(
         (Some(name), Some(settings)) => {
             let database =
                 BlastxDatabase::open_restricted(name, settings, list.as_ref(), &mut stderr)?
-                    .showing_gis(args.show_gis);
+                    .showing_gis(args.show_gis)
+                    .in_id_scope(id_scope.clone());
             crate::algorithm::common::database::note_archive_database_filter(
                 archive.as_ref(),
                 &args.db_filter,
@@ -661,6 +665,7 @@ fn run_inner(
     let query_is_regular = args.query.as_os_str() != "-" && archive::query_is_regular(&query_file);
     let mut query_stream = FastaStream::from_file(query_file);
     query_stream.parse_deflines = args.parse_deflines;
+    query_stream.id_scope = id_scope.clone();
     query_stream.strand = crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand);
     if stream_is_empty(&mut query_stream) {
         stderr.write_all(b"Warning: [blastx] Query is Empty!\n")?;

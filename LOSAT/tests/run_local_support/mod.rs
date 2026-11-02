@@ -195,7 +195,7 @@ pub fn run_formats(
     let collected = Arc::new(Mutex::new(Vec::new()));
     let collected_sink = collected.clone();
     let mut on_hits =
-        move |hits: &[PairwiseHit]| collected_sink.lock().unwrap().extend_from_slice(hits);
+        move |hits: Arc<Vec<PairwiseHit>>| collected_sink.lock().unwrap().extend_from_slice(&hits);
     let mut diagnostics = Vec::new();
     {
         let mut outputs = ReportOutputs {

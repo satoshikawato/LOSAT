@@ -16,6 +16,7 @@
 //! - `defline_set`: the definition lines of one sequence, the Seq-align id, the definition
 //!   line of the subject Bioseq and of the shown id, and the joins of the formats that show
 //!   every definition line.
+//! - `id_scope`: the ids of the queries and subjects of one search under `-parse_deflines`.
 //!
 //! A format chooses and prints a database sequence's ids only through these functions; it
 //! keeps only its own joins and escaping. The search programs (psiblast too) take the ids of a
@@ -24,6 +25,7 @@
 pub mod accguide;
 pub mod ber;
 pub mod defline_set;
+pub mod id_scope;
 pub mod label;
 pub mod model;
 pub mod parse;

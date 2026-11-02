@@ -1251,6 +1251,7 @@ mod tests {
             &std::sync::OnceLock::new(),
             &Default::default(),
             None,
+            None,
         )
         .unwrap()
         .unwrap();
@@ -1315,6 +1316,7 @@ mod tests {
             3,
             &std::sync::OnceLock::new(),
             &Default::default(),
+            None,
             None,
         )
         .unwrap()
@@ -1418,6 +1420,7 @@ mod tests {
             3,
             &std::sync::OnceLock::new(),
             &Default::default(),
+            None,
             None,
         )
         .unwrap()

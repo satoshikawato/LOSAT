@@ -37,7 +37,7 @@ const inputs = computed(() => [
         <dd>
           {{ snapshot.number }}<template v-if="snapshot.group">, group run {{ snapshot.group.position }} of {{ snapshot.group.size }}</template>
         </dd>
-        <dt>Program</dt>
+        <dt>Mode</dt>
         <dd>{{ programById(snapshot.program).label }}</dd>
         <dt>Arguments</dt>
         <dd><code data-testid="run-argv"><CommandText :text="snapshot.argv.join(' ')" /></code></dd>

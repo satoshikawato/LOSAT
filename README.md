@@ -397,7 +397,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 - `-subject_besthit`: `blastp`, `tblastn`, `tblastx`.
 
 **Query and subject**
-- `-query_loc` and `-subject_loc`: `blastx`.
+- `-query_loc` and `-subject_loc` with `-outfmt` 5, 8, 9 and 11 to 16: `blastx` (0, 6, 7 and 10 work).
 - `-parse_deflines`: two queries or two subjects with one id; a query and a subject with one id, unless they are one record (the same definition line and the same letters; `blastx` and `tblastn` refuse that too, and with `-outfmt 0` `blastn`, `blastp` and `tblastx` refuse it when the record has masks); a database sequence with the id of a query.
 
 **Databases**

@@ -1,0 +1,27 @@
+# BLASTX 2.17.0+
+# Query: m_fam MelaMJNV 26001-31000
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 11 hits found
+m_fam	BDT61962.1	55.882	34	13	1	2620	2519	39	70	1.43e-08	40.8
+m_fam	BDT61962.1	60.870	23	6	2	2224	2159	49	69	0.003	26.2
+m_fam	BDT61959.1	43.182	44	23	2	2599	2468	10	51	2.88e-06	34.3
+m_fam	BDT61959.1	28.571	56	33	1	2917	2750	10	58	0.011	24.3
+m_fam	BDT61963.1	48.276	29	14	1	2839	2753	39	66	4.58e-05	31.2
+m_fam	BDT61963.1	35.000	40	24	1	2587	2468	23	60	0.004	25.8
+m_fam	BDT61964.1	32.558	43	26	2	2227	2105	25	66	8.61e-04	27.3
+m_fam	BDT61964.1	40.000	35	18	1	2854	2759	36	70	0.16	21.2
+m_fam	BDT61956.1	43.750	16	9	0	2314	2267	33	48	1.1	18.9
+m_fam	BDT61865.1	34.783	23	15	0	2511	2579	29	51	1.4	18.5
+m_fam	BDT61868.1	25.000	36	27	0	2402	2509	10	45	8.3	16.5
+# BLASTX 2.17.0+
+# Query: m_mix MelaMJNV 56001-61600
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+m_mix	BDT61861.1	66.667	51	17	0	1370	1522	20	70	1.71e-21	77.4
+m_mix	BDT61960.1	52.941	17	8	0	2919	2969	18	34	0.58	19.6
+m_mix	BDT61956.1	33.333	27	18	0	1364	1444	16	42	1.8	18.5
+m_mix	BDT61889.1	42.105	19	10	1	2074	2018	30	47	4.0	17.3
+m_mix	BDT61954.1	71.429	7	2	0	2803	2823	25	31	7.6	16.5
+# BLAST processed 2 queries

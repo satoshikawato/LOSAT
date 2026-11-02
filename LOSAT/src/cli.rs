@@ -304,11 +304,11 @@ where
     let mut input = tokens.into_iter();
     let mut translated = vec![input.next().unwrap_or_else(|| "losat".into())];
     let mut scope = &command;
-    // The first option of the four programs whose value is not UTF-8, rejected once the
+    // The first option of the NCBI search programs whose value is not UTF-8, rejected once the
     // command line parses (`non_utf8_value_error`).
     let mut non_utf8_value: Option<(&clap::Command, String)> = None;
     while let Some(token) = input.next() {
-        // In the four programs a word that is not UTF-8 keeps its key readable
+        // In the NCBI search programs a word that is not UTF-8 keeps its key readable
         // (`-name=value` with a value that is not UTF-8 is read below).
         let lossy = token.to_string_lossy();
         let text: &str = if is_ncbi_search_program(scope) {
@@ -439,12 +439,11 @@ fn inline_value(token: &std::ffi::OsStr, name: &str) -> OsString {
     unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(&bytes[start..]) }.to_os_string()
 }
 
-/// Whether `scope` is one of the programs whose command lines follow NCBI's (BLASTX keeps
-/// its own until SX).
+/// Whether `scope` is one of the programs whose command lines follow NCBI's.
 fn is_ncbi_search_program(scope: &clap::Command) -> bool {
     matches!(
         scope.get_name(),
-        "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast"
+        "blastn" | "blastp" | "blastx" | "tblastn" | "tblastx" | "psiblast"
     )
 }
 
@@ -944,9 +943,7 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
 fn is_unported_blastx_arg(name: &str) -> bool {
     matches!(
         name,
-        "query_loc"
-            | "subject_loc"
-            | "line_length"
+        "line_length"
             | "html"
             | "sorthits"
             | "sorthsps"
@@ -1187,6 +1184,57 @@ mod tests {
                     "{message}"
                 );
             }
+        }
+    }
+
+    // BLASTX reads both ranges (line SX, SXd1), excludes `-subject_loc` with `-db` as the other
+    // programs do, and rejects an option's value that is not UTF-8 with their text (DECISIONS 10
+    // (c) of line SX).
+    #[test]
+    fn blastx_reads_the_ranges_and_rejects_values_that_are_not_utf8() {
+        let parsed = try_parse_from::<Cli, _, _>([
+            "losat",
+            "blastx",
+            "-query",
+            "q.fa",
+            "-subject",
+            "s.faa",
+            "-query_loc",
+            "1-10",
+            "-subject_loc",
+            "2-5",
+        ])
+        .unwrap();
+        let Commands::Blastx(args) = parsed.command else {
+            panic!("a BLASTX command line");
+        };
+        assert_eq!(args.query_loc.as_deref(), Some("1-10"));
+        assert_eq!(args.subject_loc.as_deref(), Some("2-5"));
+        let error = try_parse_from::<Cli, _, _>([
+            "losat",
+            "blastx",
+            "-query",
+            "q.fa",
+            "-db",
+            "d",
+            "-subject_loc",
+            "2-5",
+        ])
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+        for (option, value) in [
+            ("-query_loc", vec![0xff]),
+            ("-subject_loc", b"1-\xff".to_vec()),
+            ("-outfmt", vec![0xfe]),
+        ] {
+            let mut argv = blastn_argv(vec![OsString::from(option), OsString::from_vec(value)]);
+            argv[1] = OsString::from("blastx");
+            let message = render_message(&try_parse_from::<Cli, _, _>(argv).unwrap_err());
+            assert!(
+                message.contains(&format!("the value of {option} is not UTF-8"))
+                    && message.contains("not supported by LOSAT's BLASTX"),
+                "{message}"
+            );
         }
     }
 

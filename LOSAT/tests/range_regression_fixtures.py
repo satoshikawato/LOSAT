@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Frozen NCBI BLAST+ 2.17.0 outputs of `-query_loc` / `-subject_loc` searches that end with an
-error or need an environment variable (Session S11, E2d), for all four programs.
+error or need an environment variable (Session S11, E2d; BLASTX: line SX, SXd1), for all five
+programs.
 
 The successful range searches are outfmt 0/6/7 fixtures of LOSAT/tests/outfmt0_manifest.tsv
-(`e2d.*`). These cases cover what that manifest cannot hold: NCBI's range errors and their
+(`e2d.*`, BLASTX `sxd.blastx.*`). These cases cover what that manifest cannot hold: NCBI's range errors and their
 order (exit 3 for a range NCBI cannot read, exit 1 for a subject record shorter than the
 range start), query records that the range skips until a query batch is empty (`Empty
 CBlastQueryVector`, exit 3, after the reports of the batches before), and a split ranged
@@ -43,6 +44,7 @@ N = f"-query {O}/e2d_n_q.fa -subject {O}/e2d_n_s_plus.fa"
 P = f"-query {O}/e2d_p_q.faa -subject {O}/e2d_p_s3.faa"
 T = f"-query {O}/e2d_p_q.faa -subject {O}/e2d_n_sub8k.fa"
 X = f"-query {O}/e2d_x_q.fa -subject {O}/e2d_t_ts.fa"
+BX = "-query tests/db_search/bslice_q.fna -subject tests/db_search/bslice.faa"
 # (case_id, NCBI argv (program first), extra LOSAT-only arguments[, environment])
 _CASES = [
     # ParseSequenceRange (blast_input_aux.cpp:145-179): CBlastException, exit 3.
@@ -89,6 +91,34 @@ _CASES = [
     ("blastn.split_masks", f"blastn -task blastn -query {O}/e2d_n_split_q.fa -subject {O}/e2d_n_split_s.fa -query_loc 10001-60000 -lcase_masking -outfmt 6", "", "CHUNK_SIZE=20000"),
     ("blastn.split_masks.0", f"blastn -task blastn -query {O}/e2d_n_split_q.fa -subject {O}/e2d_n_split_s.fa -query_loc 10001-60000 -lcase_masking -outfmt 0", "", "CHUNK_SIZE=20000"),
     ("blastn.split_nomask_range", f"blastn -task blastn -query {O}/e2d_n_split_q.fa -subject {O}/e2d_n_split_s.fa -query_loc 1-60000 -lcase_masking -outfmt 6", "", "CHUNK_SIZE=20000"),
+    # BLASTX (line SX, SXd1): the parse, its order (the subjects are read before the query range,
+    # whose error comes before the validation of the options), the reading of the subjects stopped
+    # at a record shorter than the range start (no warning of a later record), skipped queries, a
+    # lone query without letters in the range, and BATCH_SIZE (whole-record batch lengths).
+    ("blastx.parse_format", f"blastx {BX} -query_loc 10-20-30 -outfmt 6", ""),
+    ("blastx.parse_blank", f"blastx {BX} -query_loc '' -outfmt 6", ""),
+    ("blastx.parse_open_end", f"blastx {BX} -query_loc 10- -outfmt 0", ""),
+    ("blastx.parse_hyphen_value", f"blastx {BX} -query_loc=-5 -outfmt 6", ""),
+    ("blastx.parse_empty_range", f"blastx {BX} -query_loc 5-5 -outfmt 7", ""),
+    ("blastx.parse_reversed", f"blastx {BX} -query_loc 10-5 -outfmt 6", ""),
+    ("blastx.parse_zero", f"blastx {BX} -subject_loc 0-10 -outfmt 6", ""),
+    ("blastx.parse_subject", f"blastx {BX} -subject_loc 10 -outfmt 7", ""),
+    ("blastx.parse_subject_first", f"blastx {BX} -query_loc 10-20-30 -subject_loc 2-1 -outfmt 6", ""),
+    ("blastx.parse_query_after_subjects", f"blastx {BX} -query_loc 2-1 -subject_loc 100-300 -outfmt 6", ""),
+    ("blastx.parse_query_before_validate", f"blastx {BX} -query_loc 2-1 -evalue 0 -outfmt 6", ""),
+    ("blastx.parse_subject_before_validate", f"blastx {BX} -subject_loc 2-1 -threshold 0 -outfmt 6", ""),
+    ("blastx.parse_query_before_sam", f"blastx {BX} -query_loc 2-1 -outfmt 17", ""),
+    ("blastx.sam_after_ranges", f"blastx {BX} -query_loc 1-100 -outfmt 17", ""),
+    ("blastx.subject_past_end", f"blastx {BX} -subject_loc 100-300 -outfmt 0", ""),
+    ("blastx.subject_past_end_warnings", f"blastx -query tests/db_search/bslice_q.fna -subject {O}/sxd_bx_sloc_warn.faa -subject_loc 100-300 -outfmt 6", ""),
+    ("blastx.query_without_letters", f"blastx -query {O}/bx_best_hsp_query.fna -subject {O}/bx_best_hsp_subject.faa -query_loc 2506-3000 -outfmt 0", ""),
+    ("blastx.all_skipped", f"blastx {BX} -query_loc 9000-9100 -outfmt 0", ""),
+    ("blastx.all_skipped.7", f"blastx {BX} -query_loc 9000-9100 -outfmt 7", ""),
+    ("blastx.last_batch_skipped", f"blastx -query {O}/x16_bx_q_unsearched.fna -subject tests/db_search/bslice.faa -query_loc 400-1000 -outfmt 0", ""),
+    ("blastx.last_batch_skipped.7", f"blastx -query {O}/x16_bx_q_unsearched.fna -subject tests/db_search/bslice.faa -query_loc 400-1000 -outfmt 7", ""),
+    ("blastx.last_batch_skipped.batch_size", f"blastx -query {O}/x16_bx_q_unsearched.fna -subject tests/db_search/bslice.faa -query_loc 400-1000 -outfmt 7", "", "BATCH_SIZE=500"),
+    ("blastx.batch_size.7", f"blastx {BX} -query_loc 1001-3000 -outfmt 7", "", "BATCH_SIZE=3000"),
+    ("blastx.many.batch_size.7", f"blastx -query {O}/sxd_bx_many_q.fna -subject tests/fasta/MjeNMV.faa -query_loc 2001-6000 -outfmt 7", "", "BATCH_SIZE=4000"),
 ]
 CASES = [(case[0], case[1], case[2], case[3] if len(case) > 3 else "", "") for case in _CASES]
 

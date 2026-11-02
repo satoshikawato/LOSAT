@@ -697,8 +697,9 @@ impl ReaderDifference {
     }
 }
 
-/// LOSAT Web writes outfmt 0, 6 and 7 and refuses the rest, with a database and the ids of the
-/// deflines, before anything is written.
+/// LOSAT Web writes outfmt 0, 6 and 7 and refuses the rest, with a database, the ids of the
+/// deflines and the command line's ranges (until line SX's session SXd3), before anything is
+/// written.
 #[test]
 fn refusals_come_before_any_output() {
     let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
@@ -707,6 +708,8 @@ fn refusals_come_before_any_output() {
         (&["0", "11"][..], &[][..]),
         (&["6 qseqid sseqid"][..], &[][..]),
         (&["6"][..], &["-parse_deflines"][..]),
+        (&["6"][..], &["-query_loc", "1-100"][..]),
+        (&["0"][..], &["-subject_loc", "2-50"][..]),
     ] {
         let queries = queries(&Inputs::path(&inputs.query)).unwrap();
         let subjects = subjects(&Inputs::path(&inputs.subject)).unwrap();

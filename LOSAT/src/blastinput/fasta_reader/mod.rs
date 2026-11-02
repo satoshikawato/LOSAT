@@ -208,6 +208,9 @@ pub struct RecordSource {
     pub believed: Option<std::sync::Arc<believed::BelievedIds>>,
     /// The start of the letters after a cut to a range, in the record.
     pub cut_from: usize,
+    /// The length of the record before a cut to a range (`None` for a record that no range
+    /// cut); BLASTX's reports read where the letters lie in the record from it and `cut_from`.
+    pub uncut_length: Option<usize>,
 }
 
 impl FastaRecord {
@@ -360,6 +363,7 @@ impl FastaRecord {
                     ),
                     believed: source.believed.clone(),
                     cut_from: source.cut_from + from,
+                    uncut_length: Some(source.uncut_length.unwrap_or(self.sequence.len())),
                 })
             }),
         }
@@ -388,6 +392,7 @@ impl FastaRecord {
     pub fn cut_in_place(&mut self, from: usize, to_exclusive: usize) {
         if let Some(source) = self.source.as_mut() {
             source.uncut.get_or_insert_with(|| self.sequence.clone());
+            source.uncut_length.get_or_insert(self.sequence.len());
             source.cut_from += from;
         }
         self.sequence.truncate(to_exclusive);

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // A role's block ("Enter Query Sequence", "Enter Subject Sequence"), in the order of NCBI's
 // two-sequence page: the paste box with its subrange beside it, "Or, upload file", the
-// role's genetic code (TBLASTN, TBLASTX), the Job Title (query), then LOSAT's own parts: the
+// role's genetic code (BLASTX, TBLASTN, TBLASTX), the Job Title (query), then LOSAT's own parts: the
 // inputs with their records, and Combined / Separate. A file dropped anywhere on the block is
 // opened.
 import { computed, ref } from 'vue';
@@ -30,7 +30,7 @@ const region = computed(() => {
   return props.draft.region(props.role);
 });
 
-/** The role's genetic code (the query's of TBLASTX, the subjects' of TBLASTN and TBLASTX). */
+/** The role's genetic code (the query's of BLASTX and TBLASTX, the subjects' of TBLASTN and TBLASTX). */
 const codeFields = computed(() =>
   sectionsAt(program.value, props.state.description?.parameters, props.role).flatMap((section) => section.fields),
 );

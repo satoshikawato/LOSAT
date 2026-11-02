@@ -353,10 +353,14 @@ function drawBase(): void {
  * An axis title, "Query <ID> (<unit>)". A protein axis against a nucleotide one says that it is
  * drawn at 3 nt per aa (S13b decision 26), unless the 120 px minimum changed its scale (the note
  * under the plot then says so). Where the room is short, the ID is cut and the unit kept (W4b
- * screen review M3: a phone lost the "(kbp)" of a long subject ID).
+ * screen review M3: a phone lost the "(kbp)" of a long subject ID), and where even the cut ID
+ * leaves no room for the note, the note is dropped and the unit kept (BLASTX: a short protein
+ * subject against a long query has a short vertical axis).
  */
 function axisTitle(context: CanvasRenderingContext2D, role: string, id: string, unit: string, weight: number, room: number): string {
-  return fitId(context, `${role} `, id, ` (${unit}${scaleNote(weight)})`, room);
+  const noted = ` (${unit}${scaleNote(weight)})`;
+  const tail = context.measureText(`${role} …${noted}`).width <= room ? noted : ` (${unit})`;
+  return fitId(context, `${role} `, id, tail, room);
 }
 
 /** The hovered HSP drawn thicker, and the selected one wider on its halo. */

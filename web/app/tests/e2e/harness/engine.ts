@@ -275,8 +275,7 @@ export async function retention(
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const parser = search.program === 'blastx' ? 1 : 0;
-        const revision = await data.indexSource(source.sourceId, parser);
+        const revision = await data.indexSource(source.sourceId, 0);
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       })();

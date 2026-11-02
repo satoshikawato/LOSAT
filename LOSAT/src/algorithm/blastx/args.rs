@@ -150,7 +150,7 @@ pub struct BlastxArgs {
     //         arg_desc.AddOptionalKey(kArgWordSize, "int_value", description,
     //                                 CArgDescriptions::eInteger);
     // ```
-    #[arg(long, value_parser = word_size)]
+    #[arg(long, value_parser = word_size, help = "Word size for wordfinder algorithm [default: 3; 5 for blastx-fast]")]
     pub word_size: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:203-205
     // ```c++
@@ -176,7 +176,7 @@ pub struct BlastxArgs {
     //                      	 	"Use sum statistics",
     //                      	 	CArgDescriptions::eBoolean);
     // ```
-    #[arg(long, value_parser = boolean, action = clap::ArgAction::Set)]
+    #[arg(long, value_parser = boolean, action = clap::ArgAction::Set, help = "Use sum statistics [default: true]")]
     pub sum_stats: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:175-177
     // ```c++
@@ -184,7 +184,7 @@ pub struct BlastxArgs {
     //                                 "Cost to open a gap",
     //                                 CArgDescriptions::eInteger);
     // ```
-    #[arg(long = "gapopen")]
+    #[arg(long = "gapopen", help = "Cost to open a gap [default: 11]")]
     pub gap_open: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:180-182
     // ```c++
@@ -192,7 +192,7 @@ pub struct BlastxArgs {
     //                                "Cost to extend a gap",
     //                                CArgDescriptions::eInteger);
     // ```
-    #[arg(long = "gapextend")]
+    #[arg(long = "gapextend", help = "Cost to extend a gap [default: 1]")]
     pub gap_extend: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:937-942
     // ```c++
@@ -233,7 +233,7 @@ pub struct BlastxArgs {
     //                            CArgDescriptions::eString,
     //                            string(""));
     // ```
-    #[arg(long)]
+    #[arg(long, help = "Scoring matrix name [default: BLOSUM62]")]
     pub matrix: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:578-583
     // ```c++
@@ -244,7 +244,11 @@ pub struct BlastxArgs {
     //     arg_desc.SetConstraint(kArgWordScoreThreshold,
     //                            new CArgAllowValuesGreaterThanOrEqual(0));
     // ```
-    #[arg(long, value_parser = blastx_threshold)]
+    #[arg(
+        long,
+        value_parser = blastx_threshold,
+        help = "Minimum word score such that the word is added to the BLAST lookup table [default: 12; 20 for blastx-fast; 19.3 for -word_size 5]"
+    )]
     pub threshold: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:475-478
     // ```c++
@@ -253,7 +257,7 @@ pub struct BlastxArgs {
     //                             "1-hit algorithm",
     //                             CArgDescriptions::eInteger);
     // ```
-    #[arg(long, value_parser = nonnegative)]
+    #[arg(long, value_parser = nonnegative, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]")]
     pub window_size: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3296-3299
     // ```c++
@@ -262,7 +266,11 @@ pub struct BlastxArgs {
     //                      "least this many higher-scoring hits, delete the hit",
     //                      CArgDescriptions::eInteger);
     // ```
-    #[arg(long, value_parser = nonnegative)]
+    #[arg(
+        long,
+        value_parser = nonnegative,
+        help = "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit [default: 0, no culling]"
+    )]
     pub culling_limit: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329-3329
     // ```c++
@@ -319,7 +327,12 @@ pub struct BlastxArgs {
     //     						"Default = `" + NStr::IntToString(BLAST_HITLIST_SIZE) + "'",
     //                             CArgDescriptions::eInteger);
     // ```
-    #[arg(long, value_parser = positive, conflicts_with_all = ["num_descriptions", "num_alignments"])]
+    #[arg(
+        long,
+        value_parser = positive,
+        help = "Maximum number of aligned sequences to keep [default: 500]",
+        conflicts_with_all = ["num_descriptions", "num_alignments"]
+    )]
     pub max_target_seqs: Option<i32>,
     // NCBI blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
     #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]

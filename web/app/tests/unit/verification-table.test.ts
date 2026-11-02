@@ -19,7 +19,7 @@ function grammar(program: string): OptionGrammar {
   };
 }
 
-const PROGRAMS = ['blastn', 'blastp', 'tblastn', 'tblastx'] as const;
+const PROGRAMS = ['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx'] as const;
 const table = generateVerificationTable(repository);
 const formatsOf = (program: (typeof PROGRAMS)[number], words: string[]) => {
   const key = optionKey([program, ...words], grammar(program));
@@ -27,7 +27,7 @@ const formatsOf = (program: (typeof PROGRAMS)[number], words: string[]) => {
 };
 
 describe('verification table', () => {
-  it('lists the four programs of the engine and the NCBI version', () => {
+  it('lists the five programs of the engine and the NCBI version', () => {
     expect(table.ncbi).toBe('2.17.0');
     expect(Object.keys(table.programs).sort()).toEqual([...PROGRAMS]);
   });
@@ -47,6 +47,9 @@ describe('verification table', () => {
     // No record of the sources compares the default BLASTN options in outfmt 7: the BLASTN
     // gate manifest (LOSAT/tests/blastn_parity_manifest.tsv) is not one of them.
     expect(formatsOf('blastn', [])).toEqual([0, 6]);
+    // BLASTX's frozen rows of outfmt0_manifest.tsv (-subject; DW-36): outfmt 7 of blastx-fast only.
+    expect(formatsOf('blastx', [])).toEqual([0, 6]);
+    expect(formatsOf('blastx', ['-task', 'blastx-fast'])).toEqual([0, 6, 7]);
   });
 
   it('has the options of the regression fixtures and the approved exception', () => {

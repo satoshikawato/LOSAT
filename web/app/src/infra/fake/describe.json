@@ -830,6 +830,351 @@
    }
   }
  },
+ "blastx": {
+  "program": "blastx",
+  "formats": [
+   0,
+   6,
+   7
+  ],
+  "parameters": [
+   {
+    "flag": "-query",
+    "help": "",
+    "takes_value": true,
+    "default": "-"
+   },
+   {
+    "flag": "-subject",
+    "help": "",
+    "takes_value": true
+   },
+   {
+    "flag": "-db",
+    "help": "BLAST database name (a protein database, with or without parsed Seq-ids)",
+    "takes_value": true
+   },
+   {
+    "flag": "-seqidlist",
+    "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_seqidlist",
+    "help": "Restrict search of database to everything except the specified SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-taxids",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxids",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxidlist",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-no_taxid_expansion",
+    "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-dbsize",
+    "help": "Effective length of the database",
+    "takes_value": true
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
+   },
+   {
+    "flag": "-task",
+    "help": "",
+    "takes_value": true,
+    "default": "blastx",
+    "choices": [
+     "blastx",
+     "blastx-fast"
+    ]
+   },
+   {
+    "flag": "-evalue",
+    "help": "",
+    "takes_value": true,
+    "default": "10"
+   },
+   {
+    "flag": "-word_size",
+    "help": "Word size for wordfinder algorithm [default: 3; 5 for blastx-fast]",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_hsps",
+    "help": "",
+    "takes_value": true
+   },
+   {
+    "flag": "-qcov_hsp_perc",
+    "help": "Percent query coverage per hsp",
+    "takes_value": true
+   },
+   {
+    "flag": "-sum_stats",
+    "help": "Use sum statistics [default: true]",
+    "takes_value": true
+   },
+   {
+    "flag": "-gapopen",
+    "help": "Cost to open a gap [default: 11]",
+    "takes_value": true
+   },
+   {
+    "flag": "-gapextend",
+    "help": "Cost to extend a gap [default: 1]",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_intron_length",
+    "help": "",
+    "takes_value": true,
+    "default": "0"
+   },
+   {
+    "flag": "-seg",
+    "help": "",
+    "takes_value": true,
+    "default": "12 2.2 2.5"
+   },
+   {
+    "flag": "-soft_masking",
+    "help": "",
+    "takes_value": true,
+    "default": "false"
+   },
+   {
+    "flag": "-matrix",
+    "help": "Scoring matrix name [default: BLOSUM62]",
+    "takes_value": true
+   },
+   {
+    "flag": "-threshold",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 12; 20 for blastx-fast; 19.3 for -word_size 5]",
+    "takes_value": true
+   },
+   {
+    "flag": "-window_size",
+    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]",
+    "takes_value": true
+   },
+   {
+    "flag": "-culling_limit",
+    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit [default: 0, no culling]",
+    "takes_value": true
+   },
+   {
+    "flag": "-subject_besthit",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-ungapped",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-lcase_masking",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-strand",
+    "help": "",
+    "takes_value": true,
+    "default": "both",
+    "choices": [
+     "both",
+     "plus",
+     "minus"
+    ]
+   },
+   {
+    "flag": "-query_gencode",
+    "help": "",
+    "takes_value": true,
+    "default": "1"
+   },
+   {
+    "flag": "-max_target_seqs",
+    "help": "Maximum number of aligned sequences to keep [default: 500]",
+    "takes_value": true
+   },
+   {
+    "flag": "-num_descriptions",
+    "help": "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]",
+    "takes_value": true
+   },
+   {
+    "flag": "-num_alignments",
+    "help": "Number of database sequences to show alignments for [default: 250]",
+    "takes_value": true
+   },
+   {
+    "flag": "-comp_based_stats",
+    "help": "",
+    "takes_value": true,
+    "default": "2"
+   }
+  ],
+  "query_gencodes": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30,
+   31,
+   33
+  ],
+  "defaults": {
+   "tasks": {
+    "blastx": {
+     "-culling_limit": "0",
+     "-evalue": "10",
+     "-gapextend": "1",
+     "-gapopen": "11",
+     "-matrix": "BLOSUM62",
+     "-max_target_seqs": "500",
+     "-num_alignments": "250",
+     "-num_descriptions": "500",
+     "-soft_masking": "false",
+     "-sum_stats": "true",
+     "-threshold": "12",
+     "-window_size": "40",
+     "-word_size": "3"
+    },
+    "blastx-fast": {
+     "-culling_limit": "0",
+     "-evalue": "10",
+     "-gapextend": "1",
+     "-gapopen": "11",
+     "-matrix": "BLOSUM62",
+     "-max_target_seqs": "500",
+     "-num_alignments": "250",
+     "-num_descriptions": "500",
+     "-soft_masking": "false",
+     "-sum_stats": "true",
+     "-threshold": "20",
+     "-window_size": "40",
+     "-word_size": "5"
+    }
+   },
+   "by": {
+    "-word_size": {
+     "3": {
+      "blastx": {
+       "-threshold": "12"
+      },
+      "blastx-fast": {
+       "-threshold": "20"
+      }
+     },
+     "5": {
+      "blastx": {
+       "-threshold": "19.3"
+      },
+      "blastx-fast": {
+       "-threshold": "19.3"
+      }
+     }
+    }
+   },
+   "unless": {
+    "-max_target_seqs": [
+     "-num_descriptions",
+     "-num_alignments"
+    ],
+    "-num_alignments": [
+     "-max_target_seqs"
+    ],
+    "-num_descriptions": [
+     "-max_target_seqs"
+    ]
+   },
+   "given": {
+    "-max_target_seqs": [
+     "blastx",
+     "blastx-fast"
+    ],
+    "-num_alignments": [
+     "blastx",
+     "blastx-fast"
+    ],
+    "-num_descriptions": [
+     "blastx",
+     "blastx-fast"
+    ],
+    "-word_size": [
+     "blastx-fast"
+    ]
+   }
+  }
+ },
  "tblastn": {
   "program": "tblastn",
   "formats": [

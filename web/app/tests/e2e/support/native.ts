@@ -106,9 +106,8 @@ export function manifestCase(id: string, rowIds: readonly string[]): VbrCase {
 }
 
 /**
- * The V-BR cells (plan §7 S09): BLASTP, TBLASTN, BLASTN and TBLASTX, every format each
- * supports (0, 6, 7), compared with the native CLI and with NCBI's frozen bytes. BLASTX
- * joins in SX.
+ * The V-BR cells (plan §7 S09): BLASTP, TBLASTN, BLASTN, TBLASTX and BLASTX (line SX), every
+ * format each supports (0, 6, 7), compared with the native CLI and with NCBI's frozen bytes.
  */
 export function vbrCases(): VbrCase[] {
   return [
@@ -118,6 +117,21 @@ export function vbrCases(): VbrCase[] {
     manifestCase('width.blastp', ['width.blastp']),
     manifestCase('width.tblastn', ['width.tblastn']),
     manifestCase('tblastx.multi', ['tblastx.multi.0', 'tblastx.multi.7']),
+    // BLASTX's frozen NCBI rows of the three formats are those of blastx-fast (-subject, DW-36).
+    manifestCase('bxfast.def', ['bxfast.def.0', 'bxfast.def.6', 'bxfast.def.7']),
+    {
+      // A genome of 306,008 nt against its 111 proteins: BLASTX reads the query in 31 batches
+      // of up to 10,002 letters and, at 2 threads or more, searches the batches with the flow of
+      // LOSAT_X_BXFLOW (its workers wait with `recv_timeout` and `rayon::yield_now`, which
+      // must work in a browser's Worker; DECISIONS of line SX 5 (f)).
+      id: 'blastx.batches',
+      program: 'blastx',
+      options: [],
+      cwd: 'LOSAT',
+      query: 'tests/fasta/MjeNMV.fasta',
+      subject: 'tests/fasta/MjeNMV.faa',
+      frozen: {},
+    },
     {
       // A genetic code other than the standard one (TLOSAN Stage D fixtures, V-ABI quick).
       id: 'tblastn.code4',

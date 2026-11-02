@@ -77,7 +77,7 @@
   /* Look B of the redesign (Owner, 2026-11-02, DW-33): a grey-blue ground (--page), white groups
      with a visible edge (--group, --border-strong), white controls, tables and outputs (--bg).
      Bands inside a group (toolbars, table heads) are --band. Text that can be used is at least
-     4.5:1 on all of them, --muted too; only the unavailable tab is paler. */
+     4.5:1 on all of them, --muted too. */
   --page: #e9eef3;
   --group: #ffffff;
   --band: #f1f4f7;
@@ -97,8 +97,6 @@
   --tab: #d6dfe8;
   --tab-hover: #e6edf4;
   --tab-fg: #14263a;
-  --tab-off: #e6ebf0;
-  --tab-off-fg: #7d8896;
   --legend: #e3eaf1;
   --panel: #f3f8fa;
   /* The accent and the status colours are Okabe–Ito's colour-universal palette (Owner,
@@ -370,7 +368,7 @@ input[type='radio'] {
 /* Search screen */
 
 /* The mode tabs as NCBI's older tab row (look B, DW-33): grey-blue tabs with dark text on an
-   accent rule, the selected one filled with the accent; the unavailable one paler. */
+   accent rule, the selected one filled with the accent. */
 .program-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -405,17 +403,10 @@ input[type='radio'] {
   cursor: pointer;
 }
 
-.program-tab.selected,
-.program-tab.unavailable.selected {
+.program-tab.selected {
   border-color: var(--accent);
   color: #fff;
   background: var(--accent);
-}
-
-.program-tab.unavailable {
-  color: var(--tab-off-fg);
-  background: var(--tab-off);
-  font-weight: 500;
 }
 
 .program-tab:focus-within {

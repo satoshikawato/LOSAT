@@ -5238,16 +5238,19 @@ Scheduling (each value computed by one thread with the original function; order 
   cDNAs at 8 threads 70 -> 37 MiB (NCBI 16). Before (dev 23db0a4f, `TBNSSIDE=0` (a variable that graduated 2026-10-22) against the
   default, 38 pairs): x0.980-0.994 at 4, 8 and 16 threads on the two large sets, no pair slower.
 - `LOSAT_X_TBNPLANCUT=1` tblastn (memory; in the strict set from the pull request that added it, 2026-11-01; `=0`
-  turns it off; `common/x_db_stream.rs` `x_plan_chunk`, `XDbStream::plan_with`; `tblastn/x_oid_flow.rs` `search_chunk`):
-  a thread that searches a chunk of subjects of a `-db` stream reads its block of 256 KiB of the sequence file no
-  further than the chunk, and the block goes when the chunk is searched. A chunk holds the file's bytes / (16 x the
-  threads), about 40 KiB at 48 threads on a 30 MB sequence file, and a thread's next chunk is about a sixteenth of the file
-  further on: past 4 MiB of file it is outside the block, so the rest of the block was read for nothing, and below that
-  the next chunk now reads what the block held. The last block also stayed in the thread's heap through the redo (48
-  threads: 11 MiB live at the peak; in the recorder the block raised the heaps' summed high water by 21 MiB).
+  turns it off; `common/x_db_stream.rs` `x_plan_chunk`, `XDbStream::with_block`; `tblastn/x_oid_flow.rs` `search_chunk`):
+  a thread that searches a chunk of subjects of a `-db` stream lets its block of 256 KiB of the sequence file go when
+  the chunk is searched. A chunk holds the file's bytes / (16 x the threads), about 40 KiB at 48 threads on a 30 MB
+  sequence file, and a thread's next chunk is about a sixteenth of the file further on: past 4 MiB of file it is
+  outside the block. The last block stayed in the thread's heap through the redo (48 threads: 11 MiB live at the peak;
+  in the recorder the block raised the heaps' summed high water by 21 MiB). Until the stream's blocks became a grid
+  shared by the threads (`x_block_grid`, 2026-11-02), each thread read its own block from the sequence it asked for,
+  and this switch also cut that block at the chunk's end (the measurements below). With the grid the threads of the
+  neighbouring chunks, searched at the same time, take the rest of a block from the shared table without a read, and a
+  block cut at a chunk's end would be the thread's own read again, so the block is the grid's whole block.
   The sequences are the same bytes wherever the block ends, so no report changes; outside a chunk (one thread, one
-  subject) nothing changes. Unit test `a_block_ends_with_the_chunk_of_its_thread_and_goes_with_it`;
-  `tests/tblastn_db_stream.rs` `a_block_that_ends_with_its_chunk_gives_the_same_reports`.
+  subject) nothing changes. Unit test `a_block_goes_with_the_chunk_of_its_thread`;
+  `tests/tblastn_db_stream.rs` `a_block_that_goes_with_its_chunk_gives_the_same_reports`.
   Reach: `-db` with 2+ threads and several subjects, the block reads of a chunk.
   Measured 2026-11-02 on the workstation (2x Xeon Gold 6338; base dev 71837aa5; every output of a case the same
   bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16

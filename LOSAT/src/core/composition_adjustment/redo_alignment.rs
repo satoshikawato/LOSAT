@@ -2798,7 +2798,13 @@ fn x_newton_lanes_prefetch_windows<'seq>(
     composition_workspace: &BlastCompositionWorkspace,
     ranges: &mut Vec<(XLaneRangeKey, BlastRedoRangeResult)>,
 ) -> usize {
-    let mut inputs = Vec::new();
+    let probe = super::x_newton_lanes::x_probe_newton_cap();
+    let mut inputs = if probe & 1 != 0 {
+        Vec::with_capacity(x_probe_counted_inputs(windows, first_window))
+    } else {
+        Vec::new()
+    };
+    let counted = inputs.capacity();
     let mut window_index = first_window;
     while window_index < windows.len() && inputs.len() < X_LANES_PREFETCH_INPUTS {
         let window = &windows[window_index];
@@ -2813,6 +2819,12 @@ fn x_newton_lanes_prefetch_windows<'seq>(
         let Some(window_align_head) = window.align.as_deref() else {
             continue;
         };
+        if probe & 2 != 0 {
+            let hsps = x_probe_hsps(window.align.as_deref());
+            if inputs.capacity() - inputs.len() < hsps {
+                inputs.reserve_exact(hsps);
+            }
+        }
         let mut range_position = 0usize;
         let mut old_near_identical = false;
         let mut subject_maybe_biased = true;
@@ -2881,8 +2893,32 @@ fn x_newton_lanes_prefetch_windows<'seq>(
             hsp_index += 1;
         }
     }
+    super::x_newton_lanes::x_probe_cap_note(counted, inputs.capacity(), inputs.len());
     super::x_newton_lanes::prefetch(inputs);
     window_index
+}
+
+/// PROBE (LOSAT_PROBE_NEWTONCAP bit 1): the HSPs of the windows from `first_window` on, up to the
+/// window in which they reach `X_LANES_PREFETCH_INPUTS` (the replica's inputs are at most these).
+fn x_probe_counted_inputs(windows: &[WindowInfo], first_window: usize) -> usize {
+    let mut hsps = 0usize;
+    for window in &windows[first_window..] {
+        hsps += x_probe_hsps(window.align.as_deref());
+        if hsps >= X_LANES_PREFETCH_INPUTS {
+            break;
+        }
+    }
+    hsps
+}
+
+/// PROBE: the length of an alignment list.
+fn x_probe_hsps(mut align: Option<&BlastCompoAlignment>) -> usize {
+    let mut hsps = 0usize;
+    while let Some(current) = align {
+        hsps += 1;
+        align = current.next.as_deref();
+    }
+    hsps
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1274

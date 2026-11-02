@@ -116,6 +116,32 @@ static ROUNDS8: AtomicU64 = AtomicU64::new(0);
 static TAIL_ROUNDS: AtomicU64 = AtomicU64::new(0);
 static DROPPED: AtomicU64 = AtomicU64::new(0);
 static KEPT: AtomicU64 = AtomicU64::new(0);
+static PROBE_GATHERS: AtomicU64 = AtomicU64::new(0);
+static PROBE_OVERRUNS: AtomicU64 = AtomicU64::new(0);
+static PROBE_SLOTS: AtomicU64 = AtomicU64::new(0);
+static PROBE_UNUSED: AtomicU64 = AtomicU64::new(0);
+
+/// PROBE: `LOSAT_PROBE_NEWTONCAP` bits, read once: 1 = TBLASTN prefetch inputs sized by a count of
+/// the HSPs, 2 = grown by the exact HSPs of a window when short.
+pub(crate) fn x_probe_newton_cap() -> u8 {
+    static V: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("LOSAT_PROBE_NEWTONCAP")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+/// PROBE: counts one TBLASTN gathering: capacity counted ahead, final capacity, inputs.
+pub(crate) fn x_probe_cap_note(counted: usize, cap: usize, len: usize) {
+    PROBE_GATHERS.fetch_add(1, Ordering::Relaxed);
+    if cap > counted && counted > 0 {
+        PROBE_OVERRUNS.fetch_add(1, Ordering::Relaxed);
+    }
+    PROBE_SLOTS.fetch_add(cap as u64, Ordering::Relaxed);
+    PROBE_UNUSED.fetch_add((cap - len) as u64, Ordering::Relaxed);
+}
 
 // No NCBI counterpart: prints the counters at exit; it does not change any value NCBI computes.
 pub(crate) fn print_stats() {
@@ -140,6 +166,13 @@ pub(crate) fn print_stats() {
             eprintln!(
                 "[X_STATS] NEWTONBATCH kept={}",
                 KEPT.load(Ordering::Relaxed)
+            );
+            eprintln!(
+                "[X_STATS] PROBE_NEWTONCAP gathers={} overruns={} slots={} unused={}",
+                PROBE_GATHERS.load(Ordering::Relaxed),
+                PROBE_OVERRUNS.load(Ordering::Relaxed),
+                PROBE_SLOTS.load(Ordering::Relaxed),
+                PROBE_UNUSED.load(Ordering::Relaxed),
             );
         }
         if eight_lanes() {

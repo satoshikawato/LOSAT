@@ -120,7 +120,7 @@ LOSAT_X_PAIRPARNA	blastn	conditional	gap	required	-task blastn-short (word 4-8 t
 LOSAT_X_PAIRWISEPAR	blastn,blastp,tblastx	conditional	required	required	outfmt 0 only, 2+ threads; serial for Web observer
 LOSAT_X_QGROUPPAR	blastn	conditional	required	required	2+ threads, one subject at a time, 2+ queries with HSPs, no query holding >1/4 of HSPs, no debug
 LOSAT_X_QPREPPAR	blastn	conditional	required	required	2+ threads and 2+ queries (encoding, DUST masks) or contexts (blocks); QDUSTPAR folded in on 2026-11-01
-LOSAT_X_QSTREAM	blastn	conditional	required	required	only with RPTSTREAM; off for -task megablast, stdin/pipes, file <2x largest batch; the first reading in parts at 2+ threads (unix, parallel) on files of 4 MiB or more (QSCANPAR folded in on 2026-11-01)
+LOSAT_X_QSTREAM	blastn	conditional	required	required	only with RPTSTREAM; off for -task megablast, stdin/pipes, file <2x largest batch; the first reading in parts at 2+ threads (unix, parallel) (QSCANPAR folded in on 2026-11-01, its 4 MiB minimum removed on 2026-11-02)
 LOSAT_X_REDOCONTAINIDX	blastp,blastx,tblastn	conditional	required	required	composition-based redo: a query's list of kept alignments in one match reaches 32 (X_INDEX_FROM) -> index by subject start; ref: every list of the match shorter
 LOSAT_X_RPTSTREAM	blastn	conditional	required	required	usually on (CLI); off for Web adapter/observers, debug, several formats, refused scoring/titles/search space (outfmt 17 streams despite titles and ambiguity: sam_despite); checks only with 2+ batches
 LOSAT_X_SEEDBUCKET	tblastx	conditional	gap	required	only where PAIRPAR leaves scan loop and diagonal table >=2^21 cells (query >=524 kb); new gap: needs the reference frame loop with a diagonal table >= 2^21 cells (query >= 524 kb)

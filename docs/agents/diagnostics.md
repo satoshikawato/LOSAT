@@ -4783,10 +4783,10 @@ Scheduling (each value computed by one thread with the original function; order 
   records from its caller. Where
   `LOSAT_X_RPTSTREAM` is on but keeps the reports after the loop for a search (its `off=` reasons),
   the records of every batch are kept for them (the memory of the records read before the search).
-  Since 2026-11-01 (line SF S3, family bn-query-read) the first reading is read in parts wherever the switch acts on a
-  file of 4 MiB or more after the reader's start (`LOSAT_X_QSCANPARMIN`, tuning, sets the minimum), at two threads or
-  more on a `unix` build with the `parallel` feature (formerly a switch of its own, `LOSAT_X_QSCANPAR`, in the strict
-  set from 2026-10-26, `blastn/blast_engine/x_query_scan_par.rs`). The
+  Since 2026-11-01 (line SF S3, family bn-query-read) the first reading is read in parts wherever the switch acts, at
+  two threads or more on a `unix` build with the `parallel` feature (formerly a switch of its own, `LOSAT_X_QSCANPAR`,
+  in the strict set from 2026-10-26, `blastn/blast_engine/x_query_scan_par.rs`; until 2026-11-02 only on files of
+  4 MiB or more after the reader's start, `LOSAT_X_QSCANPARMIN`). The
   bytes from the reader's start to the end of the file are cut at targets at most 256 KiB apart (at least four parts per
   thread); a part runs from the first record start at or after its target (a `>` that begins a line, not followed by
   `?`) to the next part's, and a new reader with the same configuration reads it with the loop of `scan` on the calling
@@ -4796,12 +4796,14 @@ Scheduling (each value computed by one thread with the original function; order 
   `\r` or a `>?` anywhere in the file, a record start not within 256 KiB after a target, a byte of a part not read, a
   part whose reading ends otherwise than at the end of its bytes (an `eEOF`, a reader error or LOSAT's rejection of a
   Seq-id line), and for the BLAST archive,
-  other targets than `unix` (WebAssembly, Windows), one thread and a file below the minimum. The minimum stays
-  (2026-11-01): forced below it (`LOSAT_X_QSCANPARMIN=0`), blastn of 2.1 and 4.0 MB at two threads on the
-  workstation's node 1 (an idle socket, cores warmed) ran 0.07-0.32 s longer in 11 of 32 runs, against 1 of 32 with
-  the one-thread reading (medians x0.999-1.056), while at 16 threads the parts read x0.969-0.998, and on a loaded node
-  0 the two-thread runs had the same user cycles and 0.04 % more user instructions in every arm; the cause is not
-  known. Earlier evidence of the parts
+  other targets than `unix` (WebAssembly, Windows) and one thread. The minimum of 4 MiB went on 2026-11-02: the slow
+  two-thread runs that had kept it (blastn of 2.1 and 4.0 MB on the workstation's node 1, 0.07-0.32 s longer in 11 of
+  32 runs in parts) came only with the 2 ms RSS sampler of the measurements, which runs on the run's two cores: with
+  it 15 of 64 runs in parts were slow against 1 of 64 on one thread, without it (`perf stat`, `time`) 1 of 136 against
+  2 of 72. Without the sampler (2026-11-02, node 1, 24, 16 and 8 pairs, outputs identical and NCBI's) blastn of 2.1
+  and 4.0 MB read x0.995-0.998 at two threads (no slow run in 56), x0.977-0.987 at 16 and x0.971-0.989 at 32; max RSS
+  in a separate sampled run (node 0, 12 pairs) x1.000-1.034 at 16 threads and x1.005-1.016 at 8, against x0.993-1.009
+  for a second arm of the one-thread reading. Earlier evidence of the parts
   against one thread (workstation node 1, 16 threads, outputs identical and NCBI's): the first reading of 31,168 cDNAs
   (96 MB) 0.123 -> 0.009 s on the local i9, dc-megablast of them x0.932 wall at 16 threads (20 of 20 rounds) and x0.964
   at 8, blastn x0.972 (`-subject`) and x0.983 (`-db`), a file below 4 MiB within noise, max RSS unchanged. In the stats

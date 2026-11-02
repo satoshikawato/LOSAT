@@ -57,7 +57,7 @@ pub use crate::cli::{exit_on_native_error, NativeError};
 //             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
 //             exit_code = BLAST_ENGINE_ERROR;                                 \
 // ```
-fn engine(message: impl fmt::Display) -> anyhow::Error {
+pub(super) fn engine(message: impl fmt::Display) -> anyhow::Error {
     NativeError {
         exit: 3,
         message: format!("BLAST engine error: {message}\n"),
@@ -80,7 +80,7 @@ fn database_error(kept: anyhow::Error) -> anyhow::Error {
 //         exit_code = BLAST_INPUT_ERROR;                                      \
 //     }                                                                       \
 // ```
-fn input_error(error: anyhow::Error) -> anyhow::Error {
+pub(super) fn input_error(error: anyhow::Error) -> anyhow::Error {
     if let Some(e) = error.downcast_ref::<FastaParseError>() {
         NativeError {
             exit: 1,
@@ -99,7 +99,7 @@ fn input_error(error: anyhow::Error) -> anyhow::Error {
 //         exit_code = BLAST_OUTPUT_ERROR;                                     \
 //     }                                                                       \
 // ```
-fn output_error(_: io::Error) -> anyhow::Error {
+pub(super) fn output_error(_: io::Error) -> anyhow::Error {
     NativeError {
         exit: 6,
         message: "BLAST failed to write output\n".into(),
@@ -133,7 +133,7 @@ fn archive_error(error: anyhow::Error) -> anyhow::Error {
 //         exit_code = BLAST_OUTPUT_ERROR;                                     \
 //     }                                                                       \
 // ```
-fn report_error(error: anyhow::Error) -> anyhow::Error {
+pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
     // ```c++
     // CBlastTabularInfo::~CBlastTabularInfo()
@@ -507,12 +507,7 @@ fn run_inner(
     //         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
     //         exit_code = BLAST_INPUT_ERROR;                                      \
     // ```
-    let mut options = resolution.map_err(|e| NativeError {
-        exit: 1,
-        message: format!(
-            "BLAST query/options error: {e}\nPlease refer to the BLAST+ user manual.\n"
-        ),
-    })?;
+    let mut options = resolution.map_err(options_error)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-200
     // ```c++
     //         /*** Initialize the database/subject ***/
@@ -726,14 +721,7 @@ fn run_inner(
     //         		ERR_POST(Warning << warning);
     //         		continue;
     // ```
-    for s in subjects.iter().filter(|s| s.sequence.is_empty()) {
-        writeln!(
-            stderr,
-            "Warning: [blastx] {} {}: Subject sequence contains no data",
-            String::from_utf8_lossy(s.warning_id()),
-            s.title
-        )?;
-    }
+    write_empty_subject_warnings(&subjects, &mut *stderr)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:251-254
     // ```c++
     // 	if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
@@ -1115,10 +1103,54 @@ fn run_inner(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
+// ```c++
+//     catch (const blast::CInputException& e) {                               \
+//         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
+//         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
+//         exit_code = BLAST_INPUT_ERROR;                                      \
+// ```
+/// NCBI's error of the options that `BlastxArgs::resolve` defers (`SemanticOptionsError`).
+pub(super) fn options_error(error: anyhow::Error) -> anyhow::Error {
+    NativeError {
+        exit: 1,
+        message: format!(
+            "BLAST query/options error: {error}\nPlease refer to the BLAST+ user manual.\n"
+        ),
+    }
+    .into()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
+// ```c++
+//         catch(CBlastException & e ) {
+//         	// Skip bad subject sequence
+//         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
+//         ...
+//         		warning += "Subject sequence contains no data";
+//         		ERR_POST(Warning << warning);
+//         		continue;
+// ```
+/// The warning of each `-subject` record without letters.
+pub(super) fn write_empty_subject_warnings(
+    subjects: &[FastaRecord],
+    stderr: &mut dyn Write,
+) -> Result<()> {
+    for s in subjects.iter().filter(|s| s.sequence.is_empty()) {
+        writeln!(
+            stderr,
+            "Warning: [blastx] {} {}: Subject sequence contains no data",
+            String::from_utf8_lossy(s.warning_id()),
+            s.title
+        )?;
+    }
+    Ok(())
+}
+
 /// A reader of a run's query batches (`run_query_batches`): it delivers each reader batch and
-/// writes the bytes of each reader warning, in the reader's order, and returns the records read.
-/// The command line reads the query file (`parse_fasta_stream_keeping`); LOSAT Web's `run_local`
-/// delivers the records its host registered.
+/// writes the bytes of each reader warning, in the reader's order, and returns the records it
+/// keeps. The command line reads the query file (`parse_fasta_stream_keeping`) and keeps every
+/// record; LOSAT Web's `run_local` delivers the records its host registered and keeps none.
 pub(super) type QueryBatchReader<'r> = dyn FnMut(
         &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
         &mut dyn FnMut(&[u8]) -> Result<()>,

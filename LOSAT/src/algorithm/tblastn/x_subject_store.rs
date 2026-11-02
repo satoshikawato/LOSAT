@@ -70,6 +70,26 @@ impl<'a> SubjectLetters<'a> {
         (0..self.count()).map(|oid| self.length(oid))
     }
 
+    /// The number of letters of the longest subject and of all the subjects (saturated): a `-db`
+    /// database holds them from its check, so that a search does not walk its lengths for them.
+    pub(super) fn longest_and_total(&self) -> (usize, u64) {
+        if let Self::Stream(stream) = self {
+            return stream.longest_and_total();
+        }
+        self.lengths().fold((0, 0), |(longest, total), length| {
+            let length_u64 = u64::try_from(length).unwrap_or(u64::MAX);
+            (
+                usize::max(longest, length),
+                total.saturating_add(length_u64),
+            )
+        })
+    }
+
+    /// The total of `longest_and_total`, saturated to `usize`.
+    pub(super) fn total_bases(&self) -> usize {
+        usize::try_from(self.longest_and_total().1).unwrap_or(usize::MAX)
+    }
+
     /// `f` of the letters of subject `oid`, made in a buffer that the thread keeps between
     /// subjects (a buffer above `X_KEPT_BUFFER` is freed after use, so that a thread does not keep
     /// a chromosome's letters). Re-entrant: a nested call (a pool thread that takes another
@@ -178,6 +198,13 @@ const X_KEPT_BUFFER: usize = 8 << 20;
 thread_local! {
     /// EXPERIMENT (LOSAT_X_TBNSTORE): this thread's letter buffer between subjects.
     static X_LETTERS: Cell<Vec<u8>> = const { Cell::new(Vec::new()) };
+}
+
+/// Frees this thread's letter buffer at the end of its loop over the chunks of the subject flow
+/// (`x_oid_flow::x_loop_free`, LOSAT_X_TBNLOOPFREE).
+#[cfg(feature = "parallel")]
+pub(super) fn x_free_letters() {
+    let _ = X_LETTERS.try_with(|buffer| drop(buffer.take()));
 }
 
 /// EXPERIMENT (LOSAT_X_TBNSTORE): the subject records, each one's letters packed as soon as it has

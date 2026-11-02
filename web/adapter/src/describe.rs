@@ -3,6 +3,7 @@
 //! defaults and allowed values of the command line.
 
 use std::fmt::Write as _;
+use std::sync::{Mutex, PoisonError};
 
 use clap::CommandFactory;
 use LOSAT::cli::Cli;
@@ -29,8 +30,23 @@ const ADAPTER_OWNED: [&str; 6] = [
 /// Genetic codes are small integers; every accepted one is below this bound.
 const GENETIC_CODE_PROBE: u32 = 64;
 
+/// Each program's response after its first `describe`: the response is pure, and its
+/// `defaults` resolve some hundred probe argvs (`defaults::defaults`), while the application
+/// asks again each time it opens a result.
+static DESCRIBED: Mutex<Vec<(Program, String)>> = Mutex::new(Vec::new());
+
 pub fn describe(program: &str) -> Result<String, String> {
     let program = Program::parse(program)?;
+    let mut described = DESCRIBED.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((_, response)) = described.iter().find(|(known, _)| *known == program) {
+        return Ok(response.clone());
+    }
+    let response = describe_program(program)?;
+    described.push((program, response.clone()));
+    Ok(response)
+}
+
+fn describe_program(program: Program) -> Result<String, String> {
     let root = Cli::command();
     let command = root
         .find_subcommand(program.name())
@@ -118,6 +134,8 @@ pub fn describe(program: &str) -> Result<String, String> {
         }
         out.push(']');
     }
+    out.push_str(",\"defaults\":");
+    crate::defaults::write(&mut out, &crate::defaults::defaults(program)?);
     out.push('}');
     Ok(out)
 }
@@ -128,7 +146,7 @@ mod tests {
 
     #[test]
     fn options_the_adapter_owns_or_refuses_are_not_described() {
-        for program in ["blastp", "tblastn", "blastn", "tblastx"] {
+        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             let described = describe(program).unwrap();
             for flag in ADAPTER_OWNED {
                 assert!(

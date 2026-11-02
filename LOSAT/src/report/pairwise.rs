@@ -5087,6 +5087,9 @@ pub struct BlastxPairwiseOptions {
 //     _ASSERT(results.HasAlignments());
 //     if (m_IsUngappedSearch) {
 // ```
+/// Writes the BLASTX pairwise report (outfmt 0) of `queries`, whose hits are `hits` in the
+/// order of the reports (`q_idx` is the index in `queries`). `probe` marks each subject's
+/// heading and each HSP, `hits[i]` being HSP `first_hsp + i`, without changing the written bytes.
 #[allow(clippy::too_many_arguments)]
 pub fn write_blastx_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
@@ -5106,11 +5109,15 @@ pub fn write_blastx_pairwise_report<W: Write>(
         &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     )>,
     records_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    mut probe: Option<&mut FormatProbe<'_>>,
+    first_hsp: HspIndex,
 ) -> io::Result<()> {
     let mut writer = io::BufWriter::new(writer);
-    let mut by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
-    for hit in hits {
-        by_query[hit.hit.q_idx as usize].push(hit);
+    // `hits[i]` is HSP `first_hsp + i` of the run's hit list (LOSAT Web's `run_local` writes a run
+    // batch by batch).
+    let mut by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    for (index, hit) in hits.iter().enumerate() {
+        by_query[hit.hit.q_idx as usize].push((first_hsp + index, hit));
     }
     for (qidx, query) in queries.iter().enumerate() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
@@ -5133,15 +5140,20 @@ pub fn write_blastx_pairwise_report<W: Write>(
             write_no_hits_found(&mut writer)?;
         } else {
             let mut grouped = std::collections::HashMap::new();
+            // The HSP indices of each subject's hits, for the probe only.
+            let mut indices = std::collections::HashMap::<u32, Vec<HspIndex>>::new();
             let mut order = Vec::new();
-            for hit in query_hits {
+            for &(index, hit) in query_hits {
                 if !grouped.contains_key(&hit.hit.s_idx) {
                     order.push(hit.hit.s_idx);
                 }
                 grouped
                     .entry(hit.hit.s_idx)
                     .or_insert_with(Vec::new)
-                    .push(*hit);
+                    .push(hit);
+                if probe.is_some() {
+                    indices.entry(hit.hit.s_idx).or_default().push(index);
+                }
             }
             // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-611
             // ```c++
@@ -5166,6 +5178,11 @@ pub fn write_blastx_pairwise_report<W: Write>(
             for oid in order.iter().take(options.num_alignments) {
                 let shits = &grouped[oid];
                 let first = shits[0];
+                let hsp_indices = indices.get(oid).map_or(&[][..], Vec::as_slice);
+                if let Some(probe) = probe.as_deref_mut() {
+                    writer.flush()?;
+                    probe.subject_begin(hsp_indices[0]);
+                }
                 // A database sequence's heading is its stored title after `>` (as
                 // BLASTP's, BLASTN's and TBLASTN's `-db` reports).
                 match database {
@@ -5195,10 +5212,22 @@ pub fn write_blastx_pairwise_report<W: Write>(
                         )?,
                     },
                 }
-                for hit in shits {
+                if let Some(probe) = probe.as_deref_mut() {
+                    writer.flush()?;
+                    probe.subject_end(hsp_indices[0]);
+                }
+                for (position, hit) in shits.iter().enumerate() {
+                    if let Some(probe) = probe.as_deref_mut() {
+                        writer.flush()?;
+                        probe.begin(hsp_indices[position]);
+                    }
                     write_tblastn_hsp_info(&mut writer, hit)?;
                     write_blastx_alignment(&mut writer, hit, config)?;
                     writeln!(writer)?;
+                    if let Some(probe) = probe.as_deref_mut() {
+                        writer.flush()?;
+                        probe.end(hsp_indices[position]);
+                    }
                 }
             }
         }

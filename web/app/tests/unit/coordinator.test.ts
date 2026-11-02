@@ -258,12 +258,13 @@ describe('Coordinator', () => {
     expect(storage.cleanup).toEqual({ state: 'done', removedSessions: 0 });
   });
 
-  it('refuses BLASTX as ABI v2 does until session SX', async () => {
+  it('runs BLASTX as the other programs (line SX)', async () => {
     const { coordinator } = setup();
-    expect(await coordinator.enqueue({ ...request, program: 'blastx' })).toEqual({
-      ok: false,
-      message: 'blastx is not available in LOSAT Web ABI v2 yet',
-    });
+    const runId = (await coordinator.enqueue({ ...request, program: 'blastx', subject: { text: '>s\nMKLV\n' } })).runId!;
+    await waitFor(coordinator, runId, 'completed');
+    const snapshot = viewOf(coordinator, runId)!.snapshot;
+    expect(snapshot.argv).toEqual(['blastx', '-query', 'query.fa', '-subject', 'subject.fa']);
+    expect(snapshot.subject.records).toEqual([{ id: 's', length: 4 }]);
   });
 
   it('does not queue a request that the engine rejects', async () => {

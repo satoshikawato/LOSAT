@@ -39,6 +39,10 @@ pub use crate::algorithm::blastn::blast_engine::run as run_blastn;
 // ```
 pub use crate::algorithm::blastn::blast_engine::run_local as run_local_blastn;
 
+// Re-export the pool of a run of several searches (`run_local` calls of one argv), which they
+// share instead of building one each (no NCBI counterpart: NCBI's CLI searches once per run).
+pub use crate::utils::threading::with_run_pool;
+
 // Re-export BLASTP run function
 // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:1196-1218
 // ```c
@@ -63,6 +67,15 @@ pub use crate::algorithm::blastp::blast_engine::run_local as run_local_blastp;
 // }
 // ```
 pub use crate::algorithm::tblastn::run_local as run_local_tblastn;
+
+// Re-export BLASTX's shared entry (web ABI v2).
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
+// ```c++
+//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+//                 results = lcl_blast.Run();
+// ```
+pub use crate::algorithm::blastx::run_local as run_local_blastx;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
 // ```c

@@ -1,6 +1,7 @@
 //! The database of a `-db` search, read where it is searched, instead of a copy of the whole
 //! database made before the first query batch: the core of TBLASTN's stream
-//! (`tblastn/x_db_stream.rs` holds what only TBLASTN's stages do with it).
+//! (`tblastn/x_db_stream.rs` holds what only TBLASTN's stages do with it) and TBLASTX's
+//! (`tblastx::subjects::Subjects::Stream`).
 //!
 //! A copy packs every sequence of the database into anonymous memory before the first query
 //! batch, and it stays until the reports, where NCBI maps the sequence file.
@@ -12,10 +13,18 @@
 //!   length of every sequence. A block of one sequence (a long one) is checked without its 2-bit
 //!   data: its last 2-bit byte and its ambiguity data only (`SeqDb::x_nucleotide_check`). Its
 //!   error is the error that the copy gave, which fails the same query batch with the same text.
-//! - Each thread keeps the last block of 256 KiB of the sequence file it read
-//!   (`XDbStream::plan_with`), from whose bytes the search of the next short subjects makes what
-//!   it needs, without a store. A thread that searches chunks of subjects (`x_plan_chunk`) reads
-//!   no further than its chunk and lets the block go with it.
+//!   The check keeps no more than a `u32` per sequence, with the longest sequence and the sum of
+//!   the lengths, so that a search does not walk the lengths for them.
+//! - The blocks of 256 KiB of the sequence file are fixed once, from the index alone
+//!   (`x_block_grid`), since `SeqDb::next_block` starts a block at the sequence asked for and
+//!   threads that ask for different sequences would cut different blocks. The search of a short
+//!   subject makes what it needs from the bytes of its block, without a store
+//!   (`XDbStream::with_block`): each thread keeps the last block it used, and a block that another
+//!   thread holds or reads is not read again. The threads that hand out the sequences one at a
+//!   time read each block about once, and the error of a failed read (the text of a damaged block
+//!   names the block's bytes) does not depend on the threads or their order. A thread that
+//!   searches a chunk of subjects (`x_plan_chunk`) lets its block go with the chunk; the threads
+//!   of the neighbouring chunks share the block that the chunk's end cuts across.
 //! - A long sequence (a block of its own) is read once while anything holds it: the stages and
 //!   the query batches that run at the same time share it, and a thread that asks for it while
 //!   another reads it waits for that read (`XDbStream::read_shared`). With more than one thread
@@ -25,12 +34,24 @@
 //!   thread it is read into the heap, where a dropped store's pages serve the next read.
 //! - While a stream is open (`x_frames_pooled`), a search may give its idle large buffers to
 //!   `X_BYTES`. When the last stream of the process closes, the idle buffers are freed.
+//! - TBLASTX makes the frames of a short subject from the bytes of its block, with the ambiguity
+//!   runs that its store would keep (`XSequence::with_view`), and keeps the block for the frames
+//!   of its letters when it has ambiguous bases; a long one is read alone (`read_shared`) for its
+//!   frames, and again for its letters' frames when it has ambiguous bases and hits reach the
+//!   re-evaluation. Each query batch reads the sequences it reports once each
+//!   (`tblastx::database::read_reported`), when a report reads their letters.
 //!
 //! Every read packs the stored bytes as the copy did (`common::database::x_read_nucleotide_store`:
-//! the packing of `PackedNucleotide::from_stored`), so every stage computes the same values on the
+//! the packing of `PackedNucleotide::from_stored`), and a view of a block's bytes gives the letters
+//! and bases of that store (`XSequence::with_view`), so every stage computes the same values on the
 //! same subjects in the same order. A read that fails during the search (a database changed or
 //! damaged after the check, an error of the file system) is an `XReadError` holding the error that
 //! the check gives for the same read; the program decides how the batch that read it fails.
+//! The check does not read the 2-bit data of a block of one sequence but its last byte, so an
+//! error of the disk in the rest comes in the search's read of the sequence and not in the check:
+//! TBLASTX fails the batch that reads it, if one does, as the copy failed the first batch with a
+//! valid context, except that a batch without one that comes first and is reported with the batch
+//! (`tblastx::report_stream`) is reported before LOSAT's refusal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:374-376 (the sequence of
 //! the search is the mapped volume's bytes, not a copy)
@@ -47,8 +68,8 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 use anyhow::Result;
 
 use crate::algorithm::common::database as shared;
-use crate::seqdb::SeqDb;
-use crate::sequence::packed_subject::PackedNucleotide;
+use crate::seqdb::{AmbiguityRun, SeqDb, SequenceBlock};
+use crate::sequence::packed_subject::{x_stored_runs, PackedNucleotide, PackedRef};
 
 /// A read of the database that failed during the search, with
 /// the error that the check (`XDbStream::new`) gives for the same read.
@@ -63,28 +84,80 @@ impl std::fmt::Display for XReadError {
 
 impl std::error::Error for XReadError {}
 
-/// The sequences of `XDbStream::read_shared`.
-#[derive(Default)]
-struct XShared {
-    /// The stores that something holds, by ordinal id.
-    held: HashMap<usize, Weak<PackedNucleotide>>,
-    /// The sequences that a thread reads now.
+/// What the threads of a stream read once while anything holds it, by a number of its own: the
+/// long sequences by ordinal id (`XDbStream::read_shared`), the blocks by their number in the grid
+/// (`XDbStream::with_block`).
+struct XSharedReads<T> {
+    table: Mutex<XShared<T>>,
+    /// Woken when a read ends.
+    read_done: Condvar,
+}
+
+struct XShared<T> {
+    /// What something holds.
+    held: HashMap<usize, Weak<T>>,
+    /// What a thread reads now.
     reading: HashSet<usize>,
 }
 
-/// The read of a sequence by `XDbStream::read_shared`; dropped
-/// (the read made, failed or unwound), the sequence is no longer read and the waiters wake.
-struct XReading<'s, 'a> {
-    stream: &'s XDbStream<'a>,
-    oid: usize,
+/// A read of `XSharedReads::read_once`; dropped (the read made, failed or unwound), its key is no
+/// longer read and the waiters wake.
+struct XReading<'s, T> {
+    reads: &'s XSharedReads<T>,
+    key: usize,
 }
 
-impl Drop for XReading<'_, '_> {
+impl<T> Drop for XReading<'_, T> {
     fn drop(&mut self) {
-        let mut shared = self.stream.shared.lock().unwrap_or_else(|e| e.into_inner());
-        shared.reading.remove(&self.oid);
-        drop(shared);
-        self.stream.read_done.notify_all();
+        let mut table = self.reads.table.lock().unwrap_or_else(|e| e.into_inner());
+        table.reading.remove(&self.key);
+        drop(table);
+        self.reads.read_done.notify_all();
+    }
+}
+
+impl<T> XSharedReads<T> {
+    fn new() -> Self {
+        Self {
+            table: Mutex::new(XShared {
+                held: HashMap::new(),
+                reading: HashSet::new(),
+            }),
+            read_done: Condvar::new(),
+        }
+    }
+
+    /// What `key` names: the value that something holds, or the value of the read that a thread
+    /// makes now (this thread waits for it), or else `read` of this thread, whose value the next
+    /// threads share. It is read again once nothing holds it, and after a read that failed. `read`
+    /// runs no rayon work, so a waiting worker depends on no task that could be stolen below it.
+    fn read_once(&self, key: usize, read: impl FnOnce() -> Result<T>) -> Result<Arc<T>> {
+        let mut table = self.table.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some(value) = table.held.get(&key).and_then(Weak::upgrade) {
+                return Ok(value);
+            }
+            if !table.reading.contains(&key) {
+                break;
+            }
+            table = self
+                .read_done
+                .wait(table)
+                .unwrap_or_else(|e| e.into_inner());
+        }
+        table.reading.insert(key);
+        drop(table);
+        let reading = XReading { reads: self, key };
+        let value = Arc::new(read()?);
+        let mut table = self.table.lock().unwrap_or_else(|e| e.into_inner());
+        // A dead `Weak` still holds its allocation.
+        if table.held.len() >= 64 && table.held.len().is_power_of_two() {
+            table.held.retain(|_, value| value.strong_count() > 0);
+        }
+        table.held.insert(key, Arc::downgrade(&value));
+        drop(table);
+        drop(reading);
+        Ok(value)
     }
 }
 
@@ -96,33 +169,56 @@ pub(crate) struct XDbStream<'a> {
     /// A number of its own in the process (`XPlanBlock::stream`).
     id: u64,
     /// The length of every sequence, by ordinal id (`x_check_nucleotide_stores`).
-    lengths: Vec<usize>,
+    lengths: Vec<u32>,
+    /// The largest of `lengths`.
+    longest: u32,
+    /// The sum of `lengths`.
+    total: u64,
+    /// The ordinal ids that the blocks start at, and the number of sequences (`x_block_grid`).
+    grid: Vec<u32>,
     /// Whether a sequence is read into a buffer that glibc maps (`x_read_nucleotide_store`): with
     /// more than one thread. The freed stores of the workers stayed resident in their arenas; at
     /// one thread the heap's freed store serves the next read without faults (TBLASTN, C. elegans
     /// genome: 19 reads of its 7 sequences, against one read of the copy).
     mapped: bool,
-    /// The sequences that something holds or a thread reads (`read_shared`).
-    shared: Mutex<XShared>,
-    /// Woken when a read of `read_shared` ends.
-    read_done: Condvar,
+    /// The long sequences that something holds or a thread reads, by ordinal id (`read_shared`).
+    stores: XSharedReads<PackedNucleotide>,
+    /// The blocks that something holds or a thread reads, by their number in `grid` (`with_block`).
+    blocks: XSharedReads<SequenceBlock>,
+    /// The blocks read (`with_block`).
+    #[cfg(test)]
+    block_reads: AtomicUsize,
+    /// The sequences whose reads fail, and whether with LOSAT's refusal (`x_failing`).
+    #[cfg(test)]
+    x_failing: (Vec<usize>, bool),
 }
 
 impl<'a> XDbStream<'a> {
-    /// Checks `db` as the copy of the database was read (`common::database::x_check_nucleotide_stores`)
-    /// and keeps the lengths. The errors name `program`.
+    /// Checks `db` as the copy of the database was read (`common::database::x_check_nucleotide_stores`),
+    /// keeps the lengths and fixes the blocks (`x_block_grid`). The errors name `program`.
     pub(crate) fn new(db: &'a SeqDb, threads: usize, program: &'static str) -> Result<Self> {
         static STREAMS: AtomicU64 = AtomicU64::new(0);
         let lengths = shared::x_check_nucleotide_stores(db, program)?;
+        let (longest, total) = lengths.iter().fold((0, 0), |(longest, total), &length| {
+            (u32::max(longest, length), total + u64::from(length))
+        });
+        let grid = x_block_grid(db, PLAN_BLOCK_BYTES);
         X_OPEN_STREAMS.fetch_add(1, Ordering::Relaxed);
         Ok(Self {
             db,
             program,
             id: STREAMS.fetch_add(1, Ordering::Relaxed),
             lengths,
+            longest,
+            total,
+            grid,
             mapped: threads > 1,
-            shared: Mutex::new(XShared::default()),
-            read_done: Condvar::new(),
+            stores: XSharedReads::new(),
+            blocks: XSharedReads::new(),
+            #[cfg(test)]
+            block_reads: AtomicUsize::new(0),
+            #[cfg(test)]
+            x_failing: (Vec::new(), false),
         })
     }
 
@@ -133,12 +229,19 @@ impl<'a> XDbStream<'a> {
 
     /// The number of bases of sequence `oid`.
     pub(crate) fn length(&self, oid: usize) -> usize {
-        self.lengths[oid]
+        self.lengths[oid] as usize
+    }
+
+    /// The number of bases of the longest sequence and of all the sequences.
+    pub(crate) fn longest_and_total(&self) -> (usize, u64) {
+        (self.longest as usize, self.total)
     }
 
     /// Sequence `oid`, packed as the copy of the database packed it, with one read (`XReadError` if it fails).
     pub(crate) fn read(&self, oid: usize) -> Result<PackedNucleotide> {
         let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
+        #[cfg(test)]
+        self.x_failed(oid..oid + 1)?;
         shared::x_read_nucleotide_store(self.db, ordinal, self.program, self.mapped)
             .map_err(|error| XReadError(error).into())
     }
@@ -148,44 +251,20 @@ impl<'a> XDbStream<'a> {
     /// reads it waits for that read (the threads of a stage that first align the same subject at
     /// once made one copy each). It is read again once nothing holds it.
     pub(crate) fn read_shared(&self, oid: usize) -> Result<Arc<PackedNucleotide>> {
-        let mut shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
-        loop {
-            if let Some(store) = shared.held.get(&oid).and_then(Weak::upgrade) {
-                return Ok(store);
-            }
-            if !shared.reading.contains(&oid) {
-                break;
-            }
-            shared = self
-                .read_done
-                .wait(shared)
-                .unwrap_or_else(|e| e.into_inner());
-        }
-        shared.reading.insert(oid);
-        drop(shared);
-        let reading = XReading { stream: self, oid };
-        let store = Arc::new(self.read(oid)?);
-        let mut shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
-        if shared.held.len() >= 1024 && shared.held.len().is_power_of_two() {
-            shared.held.retain(|_, store| store.strong_count() > 0);
-        }
-        shared.held.insert(oid, Arc::downgrade(&store));
-        drop(shared);
-        drop(reading);
-        Ok(store)
+        self.stores.read_once(oid, || self.read(oid))
     }
 
-    /// `make` of the packed bytes and the length of sequence `oid`. The thread keeps the last
-    /// block of sequences it read (`SeqDb::next_block` of `PLAN_BLOCK_BYTES` from the sequence
-    /// asked for) and gives the next sequences of the block from its bytes, with the errors of
-    /// their stores but without the stores: a search that asks for the subjects of a range in
-    /// ascending order on each thread gets most short subjects without a read or a copy. A block
-    /// of one sequence (a long one) is read alone and shared (`read_shared`); a block that a chunk
-    /// cuts to one short sequence (`x_plan_chunk`) is an ordinary block.
-    pub(crate) fn plan_with<R>(
+    /// `make` of sequence `oid` (`XSequence`), from the bytes of its block (`x_block_grid`), with
+    /// the errors of its store but without the store. The thread keeps the last block it used; a
+    /// block that another thread holds or reads is shared (`XSharedReads::read_once`). A block of
+    /// one sequence (a long one) is read alone and shared (`read_shared`). The thread's block is
+    /// out of its cell while `make` runs: a nested call (a pool thread that takes another subject
+    /// while it waits) does not borrow it. A thread that searches a chunk of subjects
+    /// (`x_plan_chunk`) lets its block go with the chunk.
+    pub(crate) fn with_block<R>(
         &self,
         oid: usize,
-        make: impl FnOnce(&[u8], usize) -> Result<R>,
+        make: impl FnOnce(XSequence<'_>) -> Result<R>,
     ) -> Result<R> {
         let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
         let mut kept = X_PLAN_BLOCK.with(std::cell::Cell::take);
@@ -197,48 +276,147 @@ impl<'a> XDbStream<'a> {
         };
         if !held(&kept) {
             kept = None;
-            match self.db.next_block(ordinal, PLAN_BLOCK_BYTES) {
-                Some(mut range) if range.len() > 1 => {
-                    // LOSAT_X_TBNPLANCUT: nothing after this thread's chunk is read.
-                    let end = X_PLAN_END.with(std::cell::Cell::get);
-                    crate::utils::xreach::x_reach!("LOSAT_X_TBNPLANCUT", end != u32::MAX);
-                    if end > ordinal && end < range.end_ordinal() {
-                        range.end = range.first + (end - ordinal);
-                    }
-                    let block = self.db.read_block(range).map_err(|error| {
-                        XReadError(shared::search_read_error(error, self.program))
-                    })?;
-                    kept = Some(XPlanBlock {
-                        stream: self.id,
-                        first: range.first_ordinal,
-                        block,
-                    });
-                }
-                _ => {
-                    let store = self.read_shared(oid)?;
-                    return make(store.packed(), store.len());
-                }
+            let number = self.grid.partition_point(|&first| first <= ordinal) - 1;
+            let (first, end) = (self.grid[number], self.grid[number + 1]);
+            if end - first == 1 {
+                let store = self.read_shared(oid)?;
+                return make(XSequence::Store(&store));
             }
+            // LOSAT_X_TBNPLANCUT: the block goes with this thread's chunk.
+            crate::utils::xreach::x_reach!(
+                "LOSAT_X_TBNPLANCUT",
+                X_PLAN_CHUNKS.with(std::cell::Cell::get) > 0
+            );
+            kept = Some(XPlanBlock {
+                stream: self.id,
+                first,
+                block: self
+                    .blocks
+                    .read_once(number, || self.read_grid_block(first, end))?,
+            });
         }
         let block = kept.as_ref().expect("a block holds the sequence");
         let i = (ordinal - block.first) as usize;
         let made = self
-            .length_in(&block.block, i, oid)
-            .and_then(|length| make(block.block.nucleotide_packed(i), length));
+            .parts_in(&block.block, i, oid)
+            .and_then(|(length, runs)| {
+                make(XSequence::Block {
+                    block: &block.block,
+                    i,
+                    length,
+                    runs,
+                })
+            });
         X_PLAN_BLOCK.with(|cell| cell.set(kept));
         made
     }
 
-    /// The length of sequence `oid`, sequence `i` of `block`, with the errors of its store
-    /// (`XReadError`).
-    fn length_in(
+    /// The stream with the blocks of `max_bytes` (`x_block_grid`), for the tests of a program:
+    /// the fixtures are smaller than a block of the search.
+    #[cfg(test)]
+    pub(crate) fn x_regrid(mut self, max_bytes: u64) -> Self {
+        self.grid = x_block_grid(self.db, max_bytes);
+        self
+    }
+
+    /// The stream whose reads of the sequences `oids` fail (a block's read when it holds one of
+    /// them) with NCBI's read error, or with LOSAT's refusal: a read that fails after the check,
+    /// which the files of a test cannot give (the check keeps their handles and lengths).
+    #[cfg(test)]
+    pub(crate) fn x_failing(mut self, oids: &[usize], refusal: bool) -> Self {
+        self.x_failing = (oids.to_vec(), refusal);
+        self
+    }
+
+    /// The error of a read of the sequences `oids` that `x_failing` names one of.
+    #[cfg(test)]
+    fn x_failed(&self, oids: std::ops::Range<usize>) -> Result<()> {
+        let (failing, refusal) = &self.x_failing;
+        let error = match failing.iter().find(|oid| oids.contains(oid)) {
+            None => return Ok(()),
+            Some(oid) if *refusal => shared::refusal(
+                &format!("the read of database sequence {oid} failed"),
+                self.program,
+            ),
+            Some(_) => shared::PreliminaryReadError("Database memory map file error").into(),
+        };
+        Err(XReadError(error).into())
+    }
+
+    /// The block of the sequences `first..end` of the grid (`XReadError` if it cannot be read).
+    fn read_grid_block(&self, first: u32, end: u32) -> Result<SequenceBlock> {
+        #[cfg(test)]
+        self.block_reads.fetch_add(1, Ordering::Relaxed);
+        #[cfg(test)]
+        self.x_failed(first as usize..end as usize)?;
+        let range = self
+            .db
+            .x_block_range(first, end)
+            .expect("a block of the grid is a range of the database");
+        self.db
+            .read_block(range)
+            .map_err(|error| XReadError(shared::search_read_error(error, self.program)).into())
+    }
+
+    /// The length and the ambiguity runs of sequence `oid`, sequence `i` of `block`, with the
+    /// errors of its store (`XReadError`).
+    pub(crate) fn parts_in(
         &self,
-        block: &crate::seqdb::SequenceBlock,
+        block: &SequenceBlock,
         i: usize,
         oid: usize,
-    ) -> Result<usize> {
-        shared::x_nucleotide_length_in(block, i, oid as u32, self.program)
+    ) -> Result<(usize, Vec<AmbiguityRun>)> {
+        shared::x_nucleotide_parts_in(block, i, oid as u32, self.program)
             .map_err(|error| XReadError(error).into())
+    }
+}
+
+/// A sequence that `XDbStream::with_block` gives.
+pub(crate) enum XSequence<'b> {
+    /// Sequence `i` of a block of several, with its length and its ambiguity runs as stored.
+    Block {
+        block: &'b Arc<SequenceBlock>,
+        i: usize,
+        length: usize,
+        runs: Vec<AmbiguityRun>,
+    },
+    /// A long sequence (a block of its own), read alone and shared (`XDbStream::read_shared`).
+    Store(&'b Arc<PackedNucleotide>),
+}
+
+impl XSequence<'_> {
+    /// The packed bytes, as the store's (`PackedNucleotide::packed`).
+    pub(crate) fn packed(&self) -> &[u8] {
+        match self {
+            Self::Block { block, i, .. } => block.nucleotide_packed(*i),
+            Self::Store(store) => store.packed(),
+        }
+    }
+
+    /// The number of bases.
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Self::Block { length, .. } => *length,
+            Self::Store(store) => store.len(),
+        }
+    }
+
+    /// `f` of the sequence as its store reads it (`PackedRef`): the store's view, or the block's
+    /// bytes with the runs that the store keeps (`x_stored_runs`).
+    pub(crate) fn with_view<R>(self, f: impl FnOnce(PackedRef<'_>) -> R) -> R {
+        match self {
+            Self::Block {
+                block,
+                i,
+                length,
+                mut runs,
+            } => {
+                let packed = block.nucleotide_packed(i);
+                x_stored_runs(packed, length, &mut runs);
+                f(PackedRef::x_stored(packed, length, &runs))
+            }
+            Self::Store(store) => f(store.view()),
+        }
     }
 }
 
@@ -265,28 +443,43 @@ pub(crate) fn x_frames_pooled() -> bool {
     X_OPEN_STREAMS.load(Ordering::Relaxed) > 0
 }
 
-/// No NCBI counterpart: the bytes of the sequence file in a block that a thread keeps
-/// (`XDbStream::plan_with`; the blocks of BLASTX's `-db` stream are 256 KiB too).
+/// No NCBI counterpart: the bytes of the sequence file in a block of the grid
+/// (`XDbStream::with_block`; the blocks of BLASTX's `-db` stream are 256 KiB too).
 const PLAN_BLOCK_BYTES: u64 = 256 << 10;
 
-/// A block of sequences that a thread keeps (`XDbStream::plan_with`), and its stream.
+/// No NCBI counterpart: where the reads of a stream start, and no value depends on them. The
+/// ordinal ids that the blocks of at most `max_bytes` of the sequence file start at, chained from
+/// the first sequence (`SeqDb::next_block`, which cuts them at the end of a volume and at the
+/// sequences a list excludes), then the number of sequences. It reads the index, not the sequences.
+fn x_block_grid(db: &SeqDb, max_bytes: u64) -> Vec<u32> {
+    let mut grid = vec![0];
+    let mut first = 0;
+    while let Some(range) = db.next_block(first, max_bytes) {
+        first = range.end_ordinal();
+        grid.push(first);
+    }
+    grid.shrink_to_fit();
+    grid
+}
+
+/// A block of sequences that a thread keeps (`XDbStream::with_block`), and its stream.
 struct XPlanBlock {
     /// `XDbStream::id` of the stream that read it.
     stream: u64,
     first: u32,
-    block: crate::seqdb::SequenceBlock,
+    block: Arc<SequenceBlock>,
 }
 
 thread_local! {
     /// This thread's block.
     static X_PLAN_BLOCK: std::cell::Cell<Option<XPlanBlock>> = const { std::cell::Cell::new(None) };
-    /// The ordinal id after the last sequence of the chunk this thread searches (`x_plan_chunk`).
-    static X_PLAN_END: std::cell::Cell<u32> = const { std::cell::Cell::new(u32::MAX) };
+    /// The chunks of subjects this thread searches now (`x_plan_chunk`; they nest).
+    static X_PLAN_CHUNKS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 // No NCBI counterpart (memory only; every sequence is made from the same bytes): reads the
 // LOSAT_X_TBNPLANCUT variable once.
-/// LOSAT_X_TBNPLANCUT, in the strict set (on unless `=0`): whether a thread's block ends with the
+/// LOSAT_X_TBNPLANCUT, in the strict set (on unless `=0`): whether a thread's block goes with the
 /// chunk of subjects the thread searches (`x_plan_chunk`).
 fn x_plan_cut() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
@@ -294,83 +487,578 @@ fn x_plan_cut() -> bool {
 }
 
 /// A thread's search of a chunk of subjects (`x_plan_chunk`), until it is dropped.
-pub(crate) struct XPlanChunk {
-    before: u32,
-}
+pub(crate) struct XPlanChunk(());
 
 impl Drop for XPlanChunk {
     fn drop(&mut self) {
-        X_PLAN_END.with(|end| end.set(self.before));
+        X_PLAN_CHUNKS.with(|chunks| chunks.set(chunks.get() - 1));
         let _ = X_PLAN_BLOCK.try_with(std::cell::Cell::take);
     }
 }
 
-/// The calling thread searches a chunk of subjects that ends before ordinal id `end`, until the
-/// value returned is dropped: its next blocks (`XDbStream::plan_with`) stop at `end`, and the block
-/// it holds then goes with the chunk. A chunk holds about a sixteenth of the sequence file over the
-/// threads and a thread's next chunk is about a sixteenth of the file further on, so past 4 MiB of
-/// file the next chunk is outside the block and the rest of the block was read for nothing;
-/// below that the next chunk reads what the block held. Without this a thread also kept its last
-/// block through the later stages of the search. Chunks nest when a thread that waits runs another
-/// flow's loop (query batches side by side): the inner one's end lets the outer block go, and the
-/// outer chunk reads its next sequence again. `None` with `LOSAT_X_TBNPLANCUT=0`.
-pub(crate) fn x_plan_chunk(end: usize) -> Option<XPlanChunk> {
-    x_plan_cut().then(|| XPlanChunk {
-        before: X_PLAN_END.with(|cell| cell.replace(u32::try_from(end).unwrap_or(u32::MAX))),
+/// The calling thread searches a chunk of subjects until the value returned is dropped, and the
+/// block it holds then goes with the chunk. A chunk holds about a sixteenth of the sequence file
+/// over the threads and a thread's next chunk is about a sixteenth of the file further on, so past
+/// 4 MiB of file the next chunk is outside the block; without this a thread kept its last block
+/// until its next read, through the later stages of the search. The block is the grid's
+/// (`x_block_grid`), not cut at the chunk's end: the threads of the neighbouring chunks, searched
+/// at the same time, take the rest of it from the shared table (`XDbStream::with_block`), where a
+/// block cut at a chunk's end would be the thread's own read. Chunks nest when a thread that waits
+/// runs another flow's loop (query batches side by side): the inner one's end lets the outer block
+/// go, and the outer chunk takes the block of its next sequence again. `None` with
+/// `LOSAT_X_TBNPLANCUT=0`.
+pub(crate) fn x_plan_chunk() -> Option<XPlanChunk> {
+    x_plan_cut().then(|| {
+        X_PLAN_CHUNKS.with(|chunks| chunks.set(chunks.get() + 1));
+        XPlanChunk(())
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::seqdb::SeqType;
+    use crate::seqdb::{DbList, SeqType, SeqidList, TaxidList};
+    use std::path::Path;
+    use std::sync::Barrier;
 
-    /// The first ordinal id and the sequences of this thread's block.
-    fn held() -> Option<(u32, usize)> {
-        let kept = X_PLAN_BLOCK.with(std::cell::Cell::take);
-        let seen = kept.as_ref().map(|kept| (kept.first, kept.block.len()));
-        X_PLAN_BLOCK.with(|cell| cell.set(kept));
-        seen
+    fn fixture(path: &str, seqtype: SeqType) -> SeqDb {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join(path);
+        SeqDb::open(path.to_str().unwrap(), seqtype).unwrap()
+    }
+
+    fn nucleotides(name: &str) -> SeqDb {
+        fixture(&format!("seqdb/db/{name}"), SeqType::Nucleotide)
+    }
+
+    /// The nucleotide fixture of parsed ids without the sequence `mynuc6`, in the middle of it: a
+    /// block is cut there as a volume ends (`SeqDb::included_end`).
+    fn listed() -> SeqDb {
+        let mut db = fixture("db_search/ids/nucl_v5", SeqType::Nucleotide);
+        let mut warnings = Vec::new();
+        let list = SeqidList {
+            negative: true,
+            file: crate::seqdb::seqidlist::read_si_list(b"mynuc6\n", &mut warnings).unwrap(),
+        };
+        db.restrict(&DbList::Seqids(list), &mut Vec::new()).unwrap();
+        db
+    }
+
+    /// The fixture with NCBI's OIDs of a taxid list (`tests/seqdb/lmdb/expected/tx_oracle.txt`:
+    /// 0 1 2, 4 5 6, 9, 11 12 13), which the grid reads as it reads any other list (proteins here:
+    /// the grid does not read the sequences).
+    fn taxids() -> SeqDb {
+        let mut db = fixture("seqdb/lmdb/tx", SeqType::Protein);
+        db.restrict_taxids(&TaxidList::Positive([100, 200].into_iter().collect()))
+            .unwrap();
+        db
+    }
+
+    /// The database of several volumes without every third OID: runs of two OIDs, some across
+    /// the end of a volume.
+    fn volumes_and_list() -> SeqDb {
+        let mut db = nucleotides("nucl_mv");
+        db.x_keep_oids(|oid| oid % 3 != 2);
+        db
+    }
+
+    /// `db`'s stream with the blocks of `max_bytes`: the fixtures are smaller than a block of the
+    /// search.
+    fn stream_of(db: &SeqDb, threads: usize, max_bytes: u64) -> XDbStream<'_> {
+        let mut stream = XDbStream::new(db, threads, "TBLASTN").unwrap();
+        stream.grid = x_block_grid(db, max_bytes);
+        stream
+    }
+
+    /// The bytes and the length of sequence `oid` that a store gives.
+    fn stored(stream: &XDbStream<'_>, oid: usize) -> (Vec<u8>, usize) {
+        let store = stream.read(oid).unwrap();
+        (store.packed().to_vec(), store.len())
+    }
+
+    /// The blocks of more than one sequence, which `with_block` reads as blocks.
+    fn read_blocks(stream: &XDbStream<'_>) -> usize {
+        stream.grid.windows(2).filter(|b| b[1] - b[0] > 1).count()
+    }
+
+    /// The grid is the chain of `next_block` from the first sequence, whatever cuts its blocks,
+    /// and each of its blocks is found again from its two ends, without the index: both give one
+    /// read of the same bytes. The check's blocks are such a chain too.
+    fn check_grid(db: &SeqDb, max_bytes: u64, what: &str) -> Vec<u32> {
+        let grid = x_block_grid(db, max_bytes);
+        assert_eq!(grid[0], 0, "{what}");
+        assert_eq!(*grid.last().unwrap(), db.num_seqs(), "{what}");
+        for block in grid.windows(2) {
+            let range = db.next_block(block[0], max_bytes).unwrap();
+            assert_eq!(range.first_ordinal, block[0], "{what}");
+            assert_eq!(range.end_ordinal(), block[1], "{what}");
+            assert_eq!(db.x_block_range(block[0], block[1]), Some(range), "{what}");
+        }
+        grid
     }
 
     #[test]
-    fn a_block_ends_with_the_chunk_of_its_thread_and_goes_with_it() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db/nucl_v4");
-        let db = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide).unwrap();
-        let stream = XDbStream::new(&db, 2, "TBLASTN").unwrap();
-        let count = stream.count();
-        assert!(count >= 4, "{count} sequences");
-        let bytes = |oid| {
-            stream
-                .plan_with(oid, |packed, length| Ok((packed.to_vec(), length)))
-                .unwrap()
+    fn the_grid_is_the_chain_of_the_blocks_from_the_first_sequence() {
+        for max_bytes in [0, 16, 64, 128, 256, 1024, PLAN_BLOCK_BYTES] {
+            for name in ["nucl_v4", "nucl_v5", "nucl_mv"] {
+                check_grid(&nucleotides(name), max_bytes, name);
+            }
+            check_grid(&listed(), max_bytes, "listed");
+            check_grid(&taxids(), max_bytes, "taxids");
+            check_grid(&volumes_and_list(), max_bytes, "volumes and list");
+            // A volume without sequences, first in the order.
+            check_grid(
+                &fixture("seqdb/db/alias_emptyvol", SeqType::Protein),
+                max_bytes,
+                "empty volume",
+            );
+        }
+        // Every volume of several starts a block, and with no limit on the bytes its last sequence
+        // is in the block of its volume; with a tight one that sequence is alone.
+        let db = nucleotides("nucl_mv");
+        let grid = check_grid(&db, u64::MAX, "nucl_mv");
+        assert!(grid.len() > 2, "several volumes: {grid:?}");
+        assert!(grid.windows(2).any(|block| block[1] - block[0] > 1));
+        let tight = check_grid(&db, 0, "nucl_mv");
+        assert_eq!(tight, (0..=db.num_seqs()).collect::<Vec<u32>>());
+        // A sequence that a list excludes cuts the block.
+        let whole = check_grid(
+            &fixture("db_search/ids/nucl_v5", SeqType::Nucleotide),
+            u64::MAX,
+            "whole",
+        );
+        assert_eq!(whole.len(), 2);
+        assert_eq!(check_grid(&listed(), u64::MAX, "listed").len(), 3);
+        // With several volumes and a list, a block ends where its run of OIDs or its volume does.
+        let db = volumes_and_list();
+        let mut starts = Vec::new();
+        let mut volume_start = 0;
+        for volume in db.volumes() {
+            starts.push(volume_start);
+            volume_start += volume.num_oids();
+        }
+        let oids: Vec<u32> = (0..db.num_seqs()).map(|ordinal| db.oid(ordinal)).collect();
+        let want: Vec<u32> = (0..db.num_seqs())
+            .filter(|&ordinal| {
+                let oid = oids[ordinal as usize];
+                ordinal == 0 || oids[ordinal as usize - 1] + 1 != oid || starts.contains(&oid)
+            })
+            .chain([db.num_seqs()])
+            .collect();
+        assert!(want.len() > 2);
+        assert_eq!(check_grid(&db, u64::MAX, "volumes and list"), want);
+        // The empty volume adds no block.
+        let empty = fixture("seqdb/db/alias_emptyvol", SeqType::Protein);
+        assert_eq!(
+            check_grid(&empty, u64::MAX, "empty volume"),
+            [0, empty.num_seqs()]
+        );
+        // The stream's blocks are the search's.
+        let db = nucleotides("nucl_mv");
+        assert_eq!(
+            XDbStream::new(&db, 1, "TBLASTN").unwrap().grid,
+            x_block_grid(&db, PLAN_BLOCK_BYTES)
+        );
+        assert_eq!(check_grid(&taxids(), u64::MAX, "taxids"), [0, 3, 6, 7, 10]);
+    }
+
+    /// The bytes and the length of `with_block` are those of the sequence's store, for a thread
+    /// that goes up, comes down, or starts anywhere; a long sequence (a block of its own) too.
+    #[test]
+    fn a_block_gives_the_bytes_of_the_stores() {
+        for db in [
+            nucleotides("nucl_v4"),
+            nucleotides("nucl_v5"),
+            nucleotides("nucl_mv"),
+            listed(),
+            volumes_and_list(),
+        ] {
+            for max_bytes in [0, 64, 256, u64::MAX] {
+                let stream = stream_of(&db, 1, max_bytes);
+                let count = stream.count();
+                let oids = (0..count)
+                    .chain((0..count).rev())
+                    .chain((0..count).step_by(3));
+                for oid in oids {
+                    let (packed, length) = stored(&stream, oid);
+                    assert_eq!(length, stream.length(oid));
+                    stream
+                        .with_block(oid, |sequence| {
+                            assert_eq!(sequence.len(), length, "{oid}");
+                            assert_eq!(sequence.packed(), packed, "{oid}");
+                            Ok(())
+                        })
+                        .unwrap();
+                }
+            }
+        }
+    }
+
+    /// A nested call replaces the thread's block; the outer call's bytes are its own, and what
+    /// the outer call puts back is the block of its sequence.
+    #[test]
+    fn a_nested_call_does_not_disturb_the_block_of_the_outer_one() {
+        let db = nucleotides("nucl_mv");
+        let stream = stream_of(&db, 1, u64::MAX);
+        let blocks: Vec<&[u32]> = stream.grid.windows(2).filter(|b| b[1] - b[0] > 1).collect();
+        assert!(blocks.len() > 1, "two blocks of several sequences");
+        let (first, other) = (blocks[0][0] as usize, blocks[1][0] as usize);
+        let (packed, _) = stored(&stream, first);
+        let (inner, _) = stored(&stream, other);
+        stream
+            .with_block(first, |sequence| {
+                stream.with_block(other, |nested| {
+                    assert_eq!(nested.packed(), inner);
+                    Ok(())
+                })?;
+                assert_eq!(sequence.packed(), packed);
+                Ok(())
+            })
+            .unwrap();
+        let reads = stream.block_reads.load(Ordering::Relaxed);
+        stream.with_block(first, |_| Ok(())).unwrap();
+        assert_eq!(stream.block_reads.load(Ordering::Relaxed), reads);
+    }
+
+    /// A thread that searches a chunk of subjects lets its block go with the chunk, and so does an
+    /// inner chunk; the block is the grid's whole block wherever the chunk ends, and while another
+    /// thread holds it a chunk takes it again without a read.
+    #[test]
+    fn a_block_goes_with_the_chunk_of_its_thread() {
+        let db = nucleotides("nucl_v4");
+        let stream = stream_of(&db, 2, u64::MAX);
+        let block = stream
+            .grid
+            .windows(2)
+            .find(|block| block[1] - block[0] > 2)
+            .expect("a block of three sequences or more");
+        let (first, end) = (block[0], block[1]);
+        let ask = |ordinal: u32| stream.with_block(ordinal as usize, |_| Ok(())).unwrap();
+        let held = || {
+            let kept = X_PLAN_BLOCK.with(std::cell::Cell::take);
+            let seen = kept.as_ref().map(|kept| {
+                assert_eq!(
+                    (kept.first, kept.block.len() as u32),
+                    (first, end - first),
+                    "the grid's block"
+                );
+                Arc::clone(&kept.block)
+            });
+            X_PLAN_BLOCK.with(|cell| cell.set(kept));
+            seen
         };
-        // Outside a chunk the block runs on, and stays.
-        let whole: Vec<_> = (0..count).map(bytes).collect();
-        assert_eq!(held(), Some((0, count)));
+        let reads = || stream.block_reads.load(Ordering::Relaxed);
+        // Outside a chunk the block stays.
+        ask(first);
+        assert!(held().is_some());
         X_PLAN_BLOCK.with(std::cell::Cell::take);
         // `None` with LOSAT_X_TBNPLANCUT=0, as in the gate's arm of the switches off.
-        let Some(chunk) = x_plan_chunk(2) else {
+        let Some(chunk) = x_plan_chunk() else {
             return;
         };
-        // A chunk of one short sequence holds a block of one.
+        let before = reads();
+        ask(first);
+        let other = held().expect("the chunk's block");
         {
-            let _one = x_plan_chunk(1);
-            assert_eq!(bytes(0), whole[0]);
-            assert_eq!(held(), Some((0, 1)));
+            let _inner = x_plan_chunk();
+            ask(first + 1);
+            assert!(held().is_some());
         }
-        assert_eq!(held(), None);
-        assert_eq!(bytes(0), whole[0]);
-        assert_eq!(held(), Some((0, 2)));
-        assert_eq!(bytes(1), whole[1]);
-        assert_eq!(held(), Some((0, 2)));
-        // A sequence past the end, asked for by a job the thread runs meanwhile: no end to cut at.
-        assert_eq!(bytes(2), whole[2]);
-        assert_eq!(held(), Some((2, count - 2)));
+        assert!(held().is_none(), "the inner chunk's end lets the block go");
+        ask(first + 2);
+        assert!(Arc::ptr_eq(&held().unwrap(), &other));
         drop(chunk);
-        assert_eq!(held(), None);
-        assert_eq!(bytes(0), whole[0]);
-        assert_eq!(held(), Some((0, count)));
+        assert!(held().is_none());
+        assert_eq!(X_PLAN_CHUNKS.with(std::cell::Cell::get), 0);
+        assert_eq!(reads(), before + 1, "taken from the thread that holds it");
+        drop(other);
+        ask(first);
+        assert_eq!(reads(), before + 2, "read again once nothing holds it");
         X_PLAN_BLOCK.with(std::cell::Cell::take);
+    }
+
+    /// Threads that ask for the same sequences at once read each block once: the one that comes
+    /// first reads it, and the others wait for that read or take what it holds.
+    #[test]
+    fn threads_that_ask_together_read_each_block_once() {
+        let db = nucleotides("nucl_v5");
+        let stream = stream_of(&db, 4, 256);
+        assert!(read_blocks(&stream) > 1);
+        let together = Barrier::new(4);
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    for oid in 0..stream.count() {
+                        together.wait();
+                        stream.with_block(oid, |_| Ok(())).unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(
+            stream.block_reads.load(Ordering::Relaxed),
+            read_blocks(&stream)
+        );
+    }
+
+    /// Threads that take the next sequence of one counter (TBLASTX's hand-out) get the same bytes
+    /// and read about one block each per pass. It is a limit, not the number: a thread held up
+    /// after it took its sequence reads a block again when the others have let it go.
+    #[test]
+    fn threads_that_take_the_next_sequence_read_each_block_about_once() {
+        let db = nucleotides("nucl_v5");
+        let stream = stream_of(&db, 4, 256);
+        let stores: Vec<_> = (0..stream.count())
+            .map(|oid| stored(&stream, oid))
+            .collect();
+        const PASSES: usize = 16;
+        for _ in 0..PASSES {
+            let next = AtomicUsize::new(0);
+            std::thread::scope(|scope| {
+                for _ in 0..4 {
+                    scope.spawn(|| {
+                        loop {
+                            let oid = next.fetch_add(1, Ordering::Relaxed);
+                            if oid >= stream.count() {
+                                break;
+                            }
+                            stream
+                                .with_block(oid, |sequence| {
+                                    assert_eq!(
+                                        (sequence.packed(), sequence.len()),
+                                        (&*stores[oid].0, stores[oid].1)
+                                    );
+                                    Ok(())
+                                })
+                                .unwrap();
+                        }
+                        // `scope` can return before the destructors of its threads' locals run: the
+                        // block goes now, so that no thread's block serves the next pass.
+                        drop(X_PLAN_BLOCK.with(std::cell::Cell::take));
+                    });
+                }
+            });
+        }
+        let reads = stream.block_reads.load(Ordering::Relaxed);
+        assert!(reads >= PASSES * read_blocks(&stream), "{reads}");
+        assert!(reads <= 2 * PASSES * read_blocks(&stream), "{reads}");
+    }
+
+    #[test]
+    fn the_stream_holds_the_longest_length_and_their_sum() {
+        for db in [nucleotides("nucl_mv"), listed()] {
+            let stream = XDbStream::new(&db, 1, "TBLASTN").unwrap();
+            let lengths: Vec<usize> = (0..stream.count())
+                .map(|oid| stored(&stream, oid).1)
+                .collect();
+            assert_eq!(
+                stream.longest_and_total(),
+                (
+                    lengths.iter().copied().max().unwrap(),
+                    lengths.iter().map(|&length| length as u64).sum()
+                )
+            );
+        }
+    }
+
+    /// A value is read once while something holds it and again when nothing does.
+    #[test]
+    fn a_shared_read_lives_as_long_as_what_holds_it() {
+        let reads = XSharedReads::<u32>::new();
+        let held = reads.read_once(7, || Ok(1)).unwrap();
+        let again = reads
+            .read_once(7, || panic!("read while it is held"))
+            .unwrap();
+        assert!(Arc::ptr_eq(&held, &again));
+        assert_eq!(*reads.read_once(8, || Ok(2)).unwrap(), 2);
+        drop((held, again));
+        assert_eq!(*reads.read_once(7, || Ok(3)).unwrap(), 3);
+    }
+
+    /// A thread that asks while another reads waits for that read, and takes its value.
+    #[test]
+    fn a_shared_read_is_waited_for() {
+        let reads = XSharedReads::<u32>::new();
+        let (started, asked) = (Barrier::new(2), Barrier::new(2));
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let value = reads
+                    .read_once(1, || {
+                        started.wait();
+                        Ok(5)
+                    })
+                    .unwrap();
+                asked.wait();
+                drop(value);
+            });
+            started.wait();
+            let value = reads.read_once(1, || panic!("read twice")).unwrap();
+            assert_eq!(*value, 5);
+            asked.wait();
+        });
+    }
+
+    /// A read that fails or unwinds frees its key: the next thread reads, and nobody is left
+    /// waiting.
+    #[test]
+    fn a_failed_read_leaves_the_next_thread_to_read() {
+        let reads = XSharedReads::<u32>::new();
+        let error = reads.read_once(1, || anyhow::bail!("no")).unwrap_err();
+        assert_eq!(error.to_string(), "no");
+        assert_eq!(*reads.read_once(1, || Ok(1)).unwrap(), 1);
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = reads.read_once(2, || panic!("unwound"));
+        }));
+        assert!(unwound.is_err());
+        assert_eq!(*reads.read_once(2, || Ok(2)).unwrap(), 2);
+    }
+
+    /// A thread that waits for a read that fails makes the read itself, whenever it comes.
+    #[test]
+    fn a_failed_read_wakes_the_thread_that_waits_for_it() {
+        let reads = XSharedReads::<u32>::new();
+        let started = Barrier::new(2);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let error = reads
+                    .read_once(1, || {
+                        started.wait();
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                        anyhow::bail!("no")
+                    })
+                    .unwrap_err();
+                assert_eq!(error.to_string(), "no");
+            });
+            started.wait();
+            assert_eq!(*reads.read_once(1, || Ok(9)).unwrap(), 9);
+        });
+    }
+
+    /// Dead entries do not pile up in the table of a long pass over a database.
+    #[test]
+    fn a_table_lets_go_of_what_nothing_holds() {
+        let reads = XSharedReads::<u32>::new();
+        for key in 0..10_000 {
+            reads.read_once(key, || Ok(0)).unwrap();
+        }
+        assert!(reads.table.lock().unwrap().held.len() <= 64);
+    }
+
+    /// The files of the fixture `seqdb/db/{name}` copied into a directory of their own (`tag`), for
+    /// a test that damages them.
+    fn copied(name: &str, tag: &str) -> std::path::PathBuf {
+        let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db");
+        let dir =
+            std::env::temp_dir().join(format!("losat-x-db-stream-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for entry in std::fs::read_dir(&from).unwrap() {
+            let path = entry.unwrap().path();
+            let file = path.file_name().unwrap().to_str().unwrap();
+            if file.starts_with(&format!("{name}.")) {
+                std::fs::copy(&path, dir.join(file)).unwrap();
+            }
+        }
+        dir
+    }
+
+    /// The check of a stream fails where the copy of the database
+    /// (`common::database::read_nucleotide_stores`) fails, with its error: a sequence file
+    /// missing, cut at every length or with any byte changed, and an index with any byte changed,
+    /// in one volume and in several.
+    #[test]
+    fn the_check_fails_where_the_copy_fails_with_its_error() {
+        let mut failed = 0;
+        for (name, files) in [
+            ("nucl_v4", &["nucl_v4.nsq", "nucl_v4.nin"][..]),
+            ("nucl_mv", &["nucl_mv.01.nsq", "nucl_mv.05.nsq"][..]),
+        ] {
+            let dir = copied(name, &format!("check-{name}"));
+            let path = dir.join(name);
+            for file in files {
+                let file = dir.join(file);
+                let original = std::fs::read(&file).unwrap();
+                let mut damaged = vec![None];
+                damaged.extend((0..original.len()).map(|cut| Some(original[..cut].to_vec())));
+                damaged.extend((0..original.len()).map(|at| {
+                    let mut bytes = original.clone();
+                    bytes[at] ^= 0xFF;
+                    Some(bytes)
+                }));
+                for (number, bytes) in damaged.iter().enumerate() {
+                    match bytes {
+                        None => std::fs::remove_file(&file).unwrap(),
+                        Some(bytes) => std::fs::write(&file, bytes).unwrap(),
+                    }
+                    let Ok(db) = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide) else {
+                        continue;
+                    };
+                    let what = format!("{} damage {number}", file.display());
+                    let check = XDbStream::new(&db, 1, "TBLASTX").map(|_| ());
+                    let copy = shared::read_nucleotide_stores(&db, "TBLASTX").map(|_| ());
+                    match (check, copy) {
+                        (Ok(()), Ok(())) => {}
+                        (Err(check), Err(copy)) => {
+                            assert_eq!(format!("{check:#}"), format!("{copy:#}"), "{what}");
+                            assert_eq!(
+                                check.is::<shared::PreliminaryReadError>(),
+                                copy.is::<shared::PreliminaryReadError>(),
+                                "{what}"
+                            );
+                            failed += 1;
+                        }
+                        (check, copy) => panic!("{what}: check {check:?}, copy {copy:?}"),
+                    }
+                }
+                std::fs::write(&file, &original).unwrap();
+            }
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+        assert!(failed > 100, "{failed} damaged databases fail");
+    }
+
+    /// A read that fails after the check (`x_failing`) is the error of every thread that asks for
+    /// it, the one that reads and those that wait for its read, for a block of several sequences
+    /// and for a sequence alone, with NCBI's read error and with LOSAT's refusal; the other blocks
+    /// are read.
+    #[test]
+    fn a_read_that_fails_fails_the_reader_and_the_threads_that_wait() {
+        let db = nucleotides("nucl_v4");
+        for max_bytes in [0, 64] {
+            let grid = x_block_grid(&db, max_bytes);
+            let block = grid
+                .windows(2)
+                .find(|block| block[1] - block[0] > 1 || max_bytes == 0)
+                .expect("a block of several sequences");
+            let (first, failing) = (block[0] as usize, block[1] as usize - 1);
+            for refusal in [false, true] {
+                let what = format!("blocks of {max_bytes} refusal {refusal}");
+                let stream = stream_of(&db, 4, max_bytes).x_failing(&[failing], refusal);
+                let together = Barrier::new(4);
+                let errors: Vec<String> = std::thread::scope(|scope| {
+                    let threads: Vec<_> = (0..4)
+                        .map(|_| {
+                            scope.spawn(|| {
+                                together.wait();
+                                let error = stream.with_block(first, |_| Ok(())).unwrap_err();
+                                let XReadError(error) = error.downcast::<XReadError>().unwrap();
+                                assert_eq!(
+                                    error.is::<shared::PreliminaryReadError>(),
+                                    !refusal,
+                                    "{what}"
+                                );
+                                error.to_string()
+                            })
+                        })
+                        .collect();
+                    threads.into_iter().map(|t| t.join().unwrap()).collect()
+                });
+                assert!(errors.iter().all(|error| *error == errors[0]), "{what}");
+                assert!(stream.read_shared(failing).is_err(), "{what}");
+                for oid in block[1] as usize..stream.count() {
+                    stream.with_block(oid, |_| Ok(())).unwrap();
+                }
+            }
+        }
     }
 }

@@ -7628,7 +7628,7 @@ fn search_cli(
     // EXPERIMENT (LOSAT_X_QSTREAM): whether the query file is read a second time, batch by batch
     // (a second handle on it, at the position its reader starts from), where the reports may be
     // written batch by batch (LOSAT_X_RPTSTREAM).
-    let x_opening = x_query_stream::Opening::new(
+    let mut x_opening = x_query_stream::Opening::new(
         &args.query,
         &query_file,
         shared_standard_input,
@@ -7678,6 +7678,9 @@ fn search_cli(
     // EXPERIMENT (LOSAT_X_QSTREAM): with the switch acting this reading keeps only each record's
     // length and how the reading ends; the batches read their records again (`x_query_stream`).
     let mut x_packed = Vec::new();
+    // EXPERIMENT (LOSAT_X_BNQPARTS): the parts of the store, and whether they were read in parts.
+    let mut x_parts = None;
+    let mut x_parts_read_in_parts = false;
     let (records, end, x_store) = if x_opening.acts() {
         let (store, end) = x_query_stream::Store::read(
             x_opening,
@@ -7687,6 +7690,19 @@ fn search_cli(
             args.num_threads,
         )?;
         (Vec::new(), end, store)
+    } else if x_store_acts && x_query_drop::parts_on() {
+        // EXPERIMENT (LOSAT_X_BNQPARTS): the records read into the parts of the store, on the
+        // search's threads where the file can be cut into parts (each part read to its end: the
+        // reading ended at the end), else by the search's reader.
+        let (parts, end) = match x_opening.store_parts(query_config, args.num_threads) {
+            Some(parts) => {
+                x_parts_read_in_parts = true;
+                (parts, QueryEnd::Input)
+            }
+            None => x_query_drop::read_parts(&mut query_source, query_config.id_prefix),
+        };
+        x_parts = Some(parts);
+        (Vec::new(), end, x_query_stream::Store::off(x_opening))
     } else if x_store_acts {
         let (QueryRecords { records, end }, packed) =
             crate::blastinput::fasta_reader::x_read_queries_packed(&mut query_source);
@@ -7729,6 +7745,10 @@ fn search_cli(
     let x_taken_store;
     let queries = if x_store.acts() {
         SearchQueries::Streamed(&x_store)
+    } else if let Some(parts) = x_parts {
+        x_taken_store =
+            x_query_drop::Store::from_parts(parts, query_config.id_prefix, x_parts_read_in_parts);
+        SearchQueries::Taken(&x_taken_store)
     } else if x_store_acts {
         x_taken_store = x_query_drop::Store::new(records, x_packed);
         SearchQueries::Taken(&x_taken_store)

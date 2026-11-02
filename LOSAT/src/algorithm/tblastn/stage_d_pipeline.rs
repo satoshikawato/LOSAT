@@ -335,7 +335,8 @@ pub(super) fn run_local_for_report(
 // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //        != BLAST_SEQSRC_EOF) {
 //    Int4 stat_length;
-// The pool owns one search; ordered subject results enter the same Stage D stream.
+// The pool owns one search (or is the run's, `with_run_pool`); ordered subject results enter
+// the same Stage D stream.
 pub(super) fn run_local_for_report_threads(
     queries: &[Vec<u8>],
     subjects: SubjectLetters<'_>,
@@ -537,8 +538,8 @@ fn x_searched_side_by_side(subjects: SubjectLetters<'_>, batches: usize, threads
         if threads < 2 {
             return false;
         }
-        let fits = super::search_seed::XSubjectSide::all_fit(subjects.lengths());
-        let bases = subjects.lengths().fold(0usize, usize::saturating_add);
+        let bases = subjects.total_bases();
+        let fits = super::search_seed::XSubjectSide::all_fit(bases, subjects.count());
         let side_by_side = x_side_by_side_batches(bases, subjects.count(), batches, threads, fits);
         side_by_side > 0
             || x_own_pool_batches(batches - side_by_side, bases, subjects.count(), threads) > 0
@@ -679,7 +680,14 @@ pub(super) fn x_search_batches<'p>(
     let x_ssided_layout = ranges.len() >= super::search_seed::XSubjectSide::KEEP_FROM_BATCHES;
     let x_keep = ranges.len() < super::search_seed::XSubjectSide::KEEP_FROM_BATCHES
         || !super::search_seed::XSubjectSide::keep_few()
-        || super::search_seed::XSubjectSide::kept_within_threads(subjects.lengths(), threads)
+        || {
+            let (longest, _) = subjects.longest_and_total();
+            super::search_seed::XSubjectSide::kept_within_threads(
+                longest,
+                subjects.total_bases(),
+                threads,
+            )
+        }
         || x_searched_side_by_side(subjects, ranges.len(), threads);
     // The plans are dropped (the switch's own path) or kept as before.
     if ranges.len() >= super::search_seed::XSubjectSide::KEEP_FROM_BATCHES
@@ -744,8 +752,8 @@ pub(super) fn x_search_batches<'p>(
         // would fit and at least one batch per thread, the batches are searched side by side, each
         // as the one-thread search, and the reports are returned in batch order.
         if pool.enabled() {
-            let fits = super::search_seed::XSubjectSide::all_fit(subjects.lengths());
-            let bases = subjects.lengths().fold(0usize, usize::saturating_add);
+            let bases = subjects.total_bases();
+            let fits = super::search_seed::XSubjectSide::all_fit(bases, subjects.count());
             let side_by_side = x_side_by_side_batches(
                 bases,
                 subjects.count(),
@@ -825,10 +833,11 @@ pub(super) fn x_search_batches<'p>(
         return Ok(None);
     };
     // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): each of the last batches on a pool of its own with its
-    // share of the threads, all at the same time, once the shared pool has ended (a pool cannot
-    // be started from a worker of another, `with_search_pool`). Each batch is the same search
-    // as on the shared pool, whose report does not depend on the number of threads; the reports
-    // are taken in batch order, and the first failing batch in that order gives the error.
+    // share of the threads, all at the same time, once the search on the shared pool has ended
+    // (a pool cannot be started from a worker of another, `with_search_pool`). Each batch is the
+    // same search as on the shared pool, whose report does not depend on the number of threads;
+    // the reports are taken in batch order, and the first failing batch in that order gives the
+    // error.
     #[cfg(feature = "parallel")]
     if !x_own_pools.is_empty() {
         let side = x_subject_side.as_ref();
@@ -1867,10 +1876,7 @@ fn x_oid_chunk_bases(threads: usize, largest_file: u64) -> u64 {
 /// ceil(bases of all subjects / 4).
 #[cfg(feature = "parallel")]
 fn x_subject_file_size(subjects: SubjectLetters<'_>) -> u64 {
-    let bases = subjects.lengths().fold(0u64, |sum, length| {
-        sum.saturating_add(u64::try_from(length).unwrap_or(u64::MAX))
-    });
-    bases.div_ceil(4)
+    subjects.longest_and_total().1.div_ceil(4)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697-707
@@ -2895,6 +2901,12 @@ fn run_preliminary_subjects_into(
     if super::x_oid_flow::x_flow_help().is_some() {
         crate::utils::xreach::x_reach!("LOSAT_X_TBNFLOWHELP", x_chunk_bases.is_some());
     }
+    // LOSAT_X_TBNLOOPFREE: the threads of the flow free the buffers they kept between subjects when
+    // their loops end; no flow, nothing freed here.
+    #[cfg(feature = "parallel")]
+    if super::x_oid_flow::x_loop_free_on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBNLOOPFREE", x_chunk_bases.is_some());
+    }
     #[cfg(feature = "parallel")]
     let x_flow = x_chunk_bases.map(|bases| {
         super::x_oid_flow::XOidFlow::new(
@@ -2979,13 +2991,16 @@ fn run_preliminary_subjects_into(
     #[cfg(feature = "parallel")]
     match (x_flow.as_ref(), pool) {
         (Some(flow), Some(pool)) => pool.install(|| {
-            rayon::scope(|scope| {
+            let reduced = rayon::scope(|scope| {
                 for _ in 1..pool.threads() {
                     scope.spawn(|_| flow.work(&x_flow_search));
                 }
                 let _close = super::x_oid_flow::XCloseOnDrop(flow);
                 reduce_subjects()
-            })
+            });
+            // LOSAT_X_TBNLOOPFREE: the owner's loop has ended too.
+            super::x_oid_flow::x_loop_free();
+            reduced
         })?,
         _ => reduce_subjects()?,
     }
@@ -6378,7 +6393,13 @@ mod tests {
             })
             .collect();
         let lengths = || subjects.iter().map(Vec::len);
-        assert!(!super::super::search_seed::XSubjectSide::kept_within_threads(lengths(), 2));
+        assert!(
+            !super::super::search_seed::XSubjectSide::kept_within_threads(
+                lengths().max().unwrap(),
+                lengths().sum(),
+                2
+            )
+        );
         assert!(
             x_searched_side_by_side(SubjectLetters::Records(&subject_slices(&subjects)), 4, 2)
                 || !x_tbn_batch_rule()

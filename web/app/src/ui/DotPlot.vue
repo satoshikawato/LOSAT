@@ -8,7 +8,9 @@
 // computes nothing else: no comparison of the two sequences runs behind it.
 //
 // Zoom (Ctrl or ⌘ and the wheel, buttons, + and -), pan (drag, arrow keys) and selection (click,
-// n and p) act on the same selection as the tables. The wheel alone and a finger moving up or down
+// n and p) act on the same selection as the tables. The subject is chosen in the tool band (the
+// Owner, 2026-11-02: chosen only by a Descriptions row, the plotted pair was a riddle) or by a
+// Descriptions row: one selection. The wheel alone and a finger moving up or down
 // scroll the page (S13 screen review L4). The grid and the HSPs are drawn on a base canvas, the
 // HSPs by colour and opacity class, one stroke each; hover and selection on a canvas above it, so
 // that they redraw cheaply. Input is gathered and drawn once per animation frame. A TBLASTN or
@@ -34,7 +36,7 @@ import {
   type View,
 } from '../domain/plot-geometry';
 import { axisTicks, axisUnit, identityClass, IDENTITY_CLASSES, tickLabel, type AxisTicks } from '../domain/plot-scale';
-import { formatCount, framesLabel, framesPhrase, framesText } from './format';
+import { formatCount, formatCounted, framesLabel, framesPhrase, framesText } from './format';
 import './plots.css';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
@@ -351,10 +353,14 @@ function drawBase(): void {
  * An axis title, "Query <ID> (<unit>)". A protein axis against a nucleotide one says that it is
  * drawn at 3 nt per aa (S13b decision 26), unless the 120 px minimum changed its scale (the note
  * under the plot then says so). Where the room is short, the ID is cut and the unit kept (W4b
- * screen review M3: a phone lost the "(kbp)" of a long subject ID).
+ * screen review M3: a phone lost the "(kbp)" of a long subject ID), and where even the cut ID
+ * leaves no room for the note, the note is dropped and the unit kept (BLASTX: a short protein
+ * subject against a long query has a short vertical axis).
  */
 function axisTitle(context: CanvasRenderingContext2D, role: string, id: string, unit: string, weight: number, room: number): string {
-  return fitId(context, `${role} `, id, ` (${unit}${scaleNote(weight)})`, room);
+  const noted = ` (${unit}${scaleNote(weight)})`;
+  const tail = context.measureText(`${role} …${noted}`).width <= room ? noted : ` (${unit})`;
+  return fitId(context, `${role} `, id, tail, room);
 }
 
 /** The hovered HSP drawn thicker, and the selected one wider on its halo. */
@@ -685,11 +691,23 @@ const targets = computed(() => {
   return JSON.stringify(out);
 });
 const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, view.value.y1].map((n) => Math.round(n)).join(','));
+
+function pickSubject(event: Event): void {
+  props.results.selectSubject(Number((event.target as HTMLSelectElement).value));
+}
 </script>
 
 <template>
   <figure class="dot-plot" data-testid="dotplot">
     <div class="plot-tools tool-band">
+      <label class="plot-subject">
+        <span>Subject</span>
+        <select data-testid="dotplot-subject" @change="pickSubject">
+          <option v-for="s in state.subjects" :key="s.sIdx" :value="s.sIdx" :selected="s.sIdx === state.sIdx">
+            {{ s.first.sseqid }} · {{ formatCount(s.length) }} {{ units.subject }} · {{ formatCounted(s.hspCount, 'HSP') }}
+          </option>
+        </select>
+      </label>
       <button type="button" data-testid="dotplot-zoom-in" @click="zoom(1.5)">Zoom in</button>
       <button type="button" data-testid="dotplot-zoom-out" @click="zoom(1 / 1.5)">Zoom out</button>
       <button type="button" data-testid="dotplot-zoom-hsp" :disabled="!selected" @click="zoomToSelected">Zoom to HSP</button>

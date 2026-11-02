@@ -73,30 +73,25 @@ function host(behaviour: Behaviour, readyTimeoutMs = 100) {
 }
 
 describe('ThreadHost', () => {
-  it('prepares two sets of thread workers and starts threads in them with increasing thread IDs', async () => {
+  it('prepares one thread worker for each thread and starts threads in them with increasing thread IDs', async () => {
     const { threads, workers } = host('ready-and-start');
     await threads.prepare(2);
-    expect(workers).toHaveLength(4);
+    expect(workers).toHaveLength(2);
     expect(threads.spawn(1000)).toBe(1);
     expect(threads.spawn(2000)).toBe(2);
+    expect(workers.map((worker) => worker.starts)).toEqual([[1], [2]]);
     threads.terminate();
     expect(workers.every((worker) => worker.terminated)).toBe(true);
   });
 
-  it('starts the next pool of a search in the spare set while the threads of the previous pool still run', async () => {
-    const { threads, workers } = host('ready-and-start');
+  it('fails a spawn at once when every thread worker runs a thread', async () => {
+    const { threads } = host('ready-and-start');
     await threads.prepare(1);
     expect(threads.spawn(1000)).toBe(1);
-    // The thread of the first pool has not returned (its slot is running): the next pool's
-    // spawn takes the spare thread worker at once instead of waiting for it.
-    const started = performance.now();
-    expect(threads.spawn(2000)).toBe(2);
-    expect(performance.now() - started).toBeLessThan(50);
-    expect(workers.map((worker) => worker.starts)).toEqual([[1], [2]]);
-    // With every thread worker running, a spawn fails at once: the threads it would wait
-    // for may need this spawn to return before they can.
+    // The thread has not returned (its slot is running): the threads a spawn would wait for
+    // may need this spawn to return before they can, so it does not wait.
     const failing = performance.now();
-    expect(threads.spawn(3000)).toBe(-1);
+    expect(threads.spawn(2000)).toBe(-1);
     expect(performance.now() - failing).toBeLessThan(50);
     threads.terminate();
   });
@@ -106,8 +101,7 @@ describe('ThreadHost', () => {
     const { threads, workers } = host('ready-and-start', 5_000);
     await threads.prepare(1);
     expect(threads.spawn(1000)).toBe(1);
-    expect(threads.spawn(2000)).toBe(2);
-    // The first thread returned; its worker becomes ready 30 ms later, while spawn waits.
+    // The thread returned; its worker becomes ready 30 ms later, while spawn waits.
     const state = workers[0]!.state!;
     Atomics.store(state, 0, SLOT_PREPARING);
     const ready = new NodeWorker(
@@ -116,8 +110,8 @@ describe('ThreadHost', () => {
        setTimeout(() => { Atomics.store(state, 0, ${SLOT_READY}); Atomics.notify(state, 0); }, 30);`,
       { eval: true, workerData: state.buffer },
     );
-    expect(threads.spawn(3000)).toBe(3);
-    expect(workers[0]!.starts).toEqual([1, 3]);
+    expect(threads.spawn(3000)).toBe(2);
+    expect(workers[0]!.starts).toEqual([1, 2]);
     await ready.terminate();
     threads.terminate();
   });

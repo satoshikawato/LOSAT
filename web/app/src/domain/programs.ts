@@ -16,7 +16,7 @@ export type InputRole = 'query' | 'subject';
  * - `text`: free text (numbers too: the engine's parser decides what it accepts).
  * - `choice`: a list; the choices are `describe`'s, or the field's own `choices` where
  *   `describe` writes them only in the help text.
- * - `radio`: a choice shown as radio buttons (the task, NCBI's "Program Selection"); the
+ * - `radio`: a choice shown as radio buttons (the task, in "Task Selection"); the
  *   engine's default is checked while nothing is set.
  * - `boolean`: an option that takes `true` or `false`.
  * - `flag`: an option without a value, written alone.
@@ -38,6 +38,13 @@ export interface ParameterField {
   /** Suggestions offered with a `text` field (they do not limit what can be typed). */
   readonly suggestions?: readonly string[];
   /**
+   * For `text` fields: the values of NCBI's select, offered in a select (one list, or a list per
+   * task); its "Other" takes any other value in a text box, which the engine's parser reads.
+   */
+  readonly list?: readonly string[] | Readonly<Record<string, readonly string[]>>;
+  /** NCBI's sentence beside the control ("Select the maximum number of aligned sequences to display"). */
+  readonly hint?: string;
+  /**
    * The name of a row that shows this field with its neighbours of the same row (NCBI's
    * "Match/Mismatch Scores" and "Gap Costs", which are one select on NCBI's page).
    */
@@ -45,7 +52,7 @@ export interface ParameterField {
 }
 
 /**
- * Where a section is shown: in "Program Selection", in the query's or the subject's block
+ * Where a section is shown: in "Task Selection", in the query's or the subject's block
  * (the genetic codes), or under "Algorithm parameters".
  */
 export type SectionPlacement = 'program' | 'query' | 'subject' | 'algorithm';
@@ -78,8 +85,11 @@ export interface ProgramDescriptor {
   readonly subject: SequenceKind;
   /** The engine's FASTA reader for this program, which the index scan follows (plan TD-8). */
   readonly fastaParser: FastaParserKind;
-  /** Why the program cannot be searched in this release; undefined when it can. */
-  readonly unavailable?: string;
+  /**
+   * False when the engine takes no -query_loc / -subject_loc for the program: the form shows
+   * no subrange and writes none (DW-9).
+   */
+  readonly subrange?: false;
   /**
    * The search form. The order of the sections and fields is the order of the argv: the
    * task first, as on a command line, then the genetic codes and the algorithm parameters
@@ -90,15 +100,23 @@ export interface ProgramDescriptor {
 
 const integer = { kind: 'text', inputMode: 'numeric' } as const;
 const decimal = { kind: 'text', inputMode: 'decimal' } as const;
-/** Matrix names of NCBI BLAST+; the engine says which ones it searches with. */
-const MATRICES = ['BLOSUM45', 'BLOSUM50', 'BLOSUM62', 'BLOSUM80', 'BLOSUM90', 'PAM30', 'PAM70', 'PAM250', 'IDENTITY'];
+/** NCBI's matrix select, in its order; "Other" takes the other names that the engine reads. */
+const MATRICES = ['PAM30', 'PAM70', 'BLOSUM90', 'BLOSUM80', 'BLOSUM62', 'BLOSUM50', 'BLOSUM45', 'PAM250'];
+/** NCBI's word size selects of the protein programs. */
+const PROTEIN_WORD_SIZES = ['2', '3', '5', '6'];
 
 // General Parameters.
-const maxTargetSeqs: ParameterField = { flag: '-max_target_seqs', label: 'Max target sequences', ...integer };
+const maxTargetSeqs: ParameterField = {
+  flag: '-max_target_seqs',
+  label: 'Max target sequences',
+  ...integer,
+  list: ['10', '50', '100', '250', '500', '1000', '5000'],
+  hint: 'Select the maximum number of aligned sequences to display',
+};
 const evalue: ParameterField = { flag: '-evalue', label: 'Expect threshold', ...decimal };
-const wordSize: ParameterField = { flag: '-word_size', label: 'Word size', ...integer };
+const wordSize: ParameterField = { flag: '-word_size', label: 'Word size', ...integer, list: PROTEIN_WORD_SIZES };
 // Scoring Parameters: NCBI's "Gap Costs" select is one row of the two costs here.
-const matrix: ParameterField = { flag: '-matrix', label: 'Matrix', kind: 'text', suggestions: MATRICES };
+const matrix: ParameterField = { flag: '-matrix', label: 'Matrix', kind: 'text', list: MATRICES };
 const gapOpen: ParameterField = { flag: '-gapopen', label: 'Existence', row: 'Gap Costs', ...integer };
 const gapExtend: ParameterField = { flag: '-gapextend', label: 'Extension', row: 'Gap Costs', ...integer };
 // `describe` explains the values of -comp_based_stats only in its help text; the names are NCBI's.
@@ -116,8 +134,9 @@ const compBasedStats: ParameterField = {
 };
 // Filters and Masking.
 const seg: ParameterField = { flag: '-seg', label: 'Low complexity regions filter (SEG)', kind: 'text', suggestions: ['no', 'yes'] };
-const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag' };
-const softMasking: ParameterField = { flag: '-soft_masking', label: 'Mask for lookup table only', kind: 'boolean' };
+// NCBI's "Mask" row: two checkboxes.
+const softMasking: ParameterField = { flag: '-soft_masking', label: 'Mask for lookup table only', kind: 'boolean', row: 'Mask' };
+const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag', row: 'Mask' };
 // Other Parameters: LOSAT's options that NCBI's page does not show.
 const maxHsps: ParameterField = { flag: '-max_hsps', label: 'Max HSPs per subject', ...integer };
 const threshold: ParameterField = { flag: '-threshold', label: 'Neighboring words threshold', ...decimal };
@@ -134,7 +153,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
   {
     id: 'blastn',
     label: 'BLASTN',
-    summary: 'BLASTN searches nucleotide subjects using a nucleotide query.',
+    summary: 'BLASTN mode searches nucleotide subjects using a nucleotide query.',
     searches: 'nucleotide subjects',
     taskNotes: {
       megablast: 'optimized for highly similar sequences',
@@ -144,11 +163,11 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     },
     query: 'nucleotide',
     subject: 'nucleotide',
-    // Kind 0 is the `bio::io::fasta` reader; kind 1 is BLASTX's NCBI-style reader (ABI v2 §4).
+    // Kind 0 is the `bio::io::fasta` reader (ABI v2 §4), which every program indexes with.
     fastaParser: 0,
     sections: [
       {
-        title: 'Program Selection',
+        title: 'Task Selection',
         placement: 'program',
         fields: [
           // `describe` lists the tasks only in its help text. LOSAT adds blastn-short, which
@@ -167,7 +186,23 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           },
         ],
       },
-      { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize] },
+      {
+        title: 'General Parameters',
+        placement: 'algorithm',
+        fields: [
+          maxTargetSeqs,
+          evalue,
+          {
+            ...wordSize,
+            list: {
+              megablast: ['16', '20', '24', '28', '32', '48', '64'],
+              'dc-megablast': ['11', '12'],
+              blastn: ['7', '11', '15'],
+              'blastn-short': ['7', '11', '15'],
+            },
+          },
+        ],
+      },
       {
         title: 'Scoring Parameters',
         placement: 'algorithm',
@@ -213,7 +248,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
   {
     id: 'blastp',
     label: 'BLASTP',
-    summary: 'BLASTP searches protein subjects using a protein query.',
+    summary: 'BLASTP mode searches protein subjects using a protein query.',
     searches: 'protein subjects',
     taskNotes: { blastp: 'protein-protein BLAST', 'blastp-fast': 'Quick BLASTP' },
     query: 'protein',
@@ -221,7 +256,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     fastaParser: 0,
     sections: [
       {
-        title: 'Program Selection',
+        title: 'Task Selection',
         placement: 'program',
         fields: [
           {
@@ -244,26 +279,61 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
   {
     id: 'blastx',
     label: 'BLASTX',
-    summary: 'BLASTX searches protein subjects using a translated nucleotide query.',
+    summary: 'BLASTX mode searches protein subjects using a translated nucleotide query.',
     searches: 'protein subjects',
     queryNote: 'translated nucleotide query',
     query: 'nucleotide',
     subject: 'protein',
-    fastaParser: 1,
-    unavailable: 'Not in LOSAT Web yet: use BLASTX of the LOSAT command line.',
-    sections: [],
+    fastaParser: 0,
+    // The engine refuses -query_loc and -subject_loc for BLASTX (line SX, DW-11).
+    subrange: false,
+    sections: [
+      { title: 'Task Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
+      { title: 'Genetic code', placement: 'query', fields: [{ flag: '-query_gencode', label: 'Genetic code', kind: 'gencode' }] },
+      {
+        title: 'General Parameters',
+        placement: 'algorithm',
+        // LOSAT's BLASTX reads word sizes 3 and 5 only.
+        fields: [
+          maxTargetSeqs,
+          evalue,
+          { ...wordSize, list: ['3', '5'] },
+          { flag: '-culling_limit', label: 'Max matches in a query range', ...integer },
+        ],
+      },
+      // LOSAT's BLASTX scores with BLOSUM62 and gap costs 11/1 only, and adjusts with modes 0 and 2.
+      {
+        title: 'Scoring Parameters',
+        placement: 'algorithm',
+        fields: [{ ...matrix, list: ['BLOSUM62'] }, gapOpen, gapExtend, { ...compBasedStats, choices: ['0', '2'] }],
+      },
+      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
+      {
+        title: OTHER,
+        placement: 'algorithm',
+        fields: [
+          numDescriptions,
+          numAlignments,
+          threshold,
+          windowSize,
+          maxHsps,
+          { flag: '-strand', label: 'Query strand', kind: 'choice' },
+          { flag: '-sum_stats', label: 'Sum statistics', kind: 'boolean' },
+        ],
+      },
+    ],
   },
   {
     id: 'tblastn',
     label: 'TBLASTN',
-    summary: 'TBLASTN searches translated nucleotide subjects using a protein query.',
+    summary: 'TBLASTN mode searches translated nucleotide subjects using a protein query.',
     searches: 'translated nucleotide subjects',
     queryNote: 'protein query',
     query: 'protein',
     subject: 'nucleotide',
     fastaParser: 0,
     sections: [
-      { title: 'Program Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
+      { title: 'Task Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
       { title: 'Genetic code', placement: 'subject', fields: [{ flag: '-db_gencode', label: 'Genetic code', kind: 'gencode' }] },
       { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize] },
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats] },
@@ -290,7 +360,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
   {
     id: 'tblastx',
     label: 'TBLASTX',
-    summary: 'TBLASTX searches translated nucleotide subjects using a translated nucleotide query.',
+    summary: 'TBLASTX mode searches translated nucleotide subjects using a translated nucleotide query.',
     searches: 'translated nucleotide subjects',
     queryNote: 'translated nucleotide query',
     query: 'nucleotide',
@@ -303,7 +373,12 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         title: 'General Parameters',
         placement: 'algorithm',
         // NCBI's "Max matches in a query range" (HSP_RANGE_MAX) is BLAST+'s -culling_limit.
-        fields: [maxTargetSeqs, evalue, wordSize, { flag: '-culling_limit', label: 'Max matches in a query range', ...integer }],
+        fields: [
+          maxTargetSeqs,
+          evalue,
+          { ...wordSize, list: ['2', '3'] },
+          { flag: '-culling_limit', label: 'Max matches in a query range', ...integer },
+        ],
       },
       // TBLASTX is ungapped: NCBI's page has the matrix and no gap costs.
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix] },
@@ -335,8 +410,28 @@ export function residueUnit(kind: SequenceKind): string {
  * and where. `task` is the task the search uses (set, or the engine's default), if known.
  */
 export function searchSummary(program: ProgramDescriptor, task: string | undefined): string {
+  return searchSummaryParts(program, task)
+    .map((part) => part.text)
+    .join('');
+}
+
+/**
+ * The line beside the "Run LOSAT" button in parts: what is searched and the program with its
+ * task are set off (`strong`), as NCBI sets off "database core_nt" and "Megablast (Optimize for
+ * highly similar sequences)".
+ */
+export function searchSummaryParts(
+  program: ProgramDescriptor,
+  task: string | undefined,
+): ReadonlyArray<{ readonly text: string; readonly strong?: true }> {
   const query = program.queryNote === undefined ? '' : ` (${program.queryNote})`;
   const note = task === undefined ? undefined : program.taskNotes?.[task];
   const taskText = task === undefined ? '' : `, task ${task}${note === undefined ? '' : ` (${note})`}`;
-  return `Search ${program.searches} with ${program.label}${query}${taskText}.`;
+  return [
+    { text: 'Search ' },
+    { text: program.searches, strong: true },
+    { text: ' with ' },
+    { text: `${program.label}${query}${taskText}`, strong: true },
+    { text: '.' },
+  ];
 }

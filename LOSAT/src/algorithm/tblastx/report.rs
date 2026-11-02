@@ -323,13 +323,19 @@ pub(crate) enum SubjectLetters<'a> {
     /// The records of `-subject` (`run_local`'s, or the command line's with LOSAT_X_TBXSTORE=0):
     /// their letters.
     Records(&'a [FastaRecord]),
-    /// The reported sequences of a `-db` search by rank (`ordinals`, the ordinal id of each
-    /// rank, into `stores`), or (LOSAT_X_TBXSTORE) the packed records of `-subject` (ordinals
-    /// `0..n`): a row reads the letters of its HSP's codons only, made from the stored codes
-    /// (`codon_window`).
+    /// (LOSAT_X_TBXSTORE) The packed records of `-subject` (`ordinals`, the record of each
+    /// subject index, `0..n`, into `stores`): a row reads the letters of its HSP's codons only,
+    /// made from the stored codes (`codon_window`).
     Stored {
         stores: &'a [PackedNucleotide],
         ordinals: &'a [u32],
+    },
+    /// The reported sequences of a `-db` search by rank (`database::ReportedSubjects`): their
+    /// lengths, and their stores, read where their batches were reported (empty when no report
+    /// reads letters); a row reads the letters of its HSP's codons as `Stored`.
+    Database {
+        lengths: &'a [u32],
+        stores: &'a [std::sync::Arc<PackedNucleotide>],
     },
 }
 
@@ -339,6 +345,7 @@ impl<'a> SubjectLetters<'a> {
         match self {
             Self::Records(records) => records[s_idx].seq().len(),
             Self::Stored { stores, ordinals } => stores[ordinals[s_idx] as usize].len(),
+            Self::Database { lengths, .. } => lengths[s_idx] as usize,
         }
     }
 
@@ -351,8 +358,12 @@ impl<'a> SubjectLetters<'a> {
         let s_idx = hsp.hit.s_idx as usize;
         match self {
             Self::Records(records) => (records[s_idx].seq(), 0),
-            Self::Stored { stores, ordinals } => {
-                let store = &stores[ordinals[s_idx] as usize];
+            Self::Stored { .. } | Self::Database { .. } => {
+                let store = match self {
+                    Self::Stored { stores, ordinals } => &stores[ordinals[s_idx] as usize],
+                    Self::Database { stores, .. } => &*stores[s_idx],
+                    Self::Records(_) => unreachable!("the records' letters are above"),
+                };
                 let (from, to) = (hsp.hit.sort_subject_offset, hsp.hit.sort_subject_end);
                 let (start, length) = codon_window(store.len(), hsp.subject_frame, from, to);
                 store.letters_into(start, start + length, window);

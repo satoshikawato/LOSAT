@@ -8,9 +8,7 @@
 // with the stored outputs as the Outputs view shows them (the outfmt 6 rows and the outfmt 0
 // text), never with values computed here.
 //
-// Every program that LOSAT Web runs is covered: BLASTN, BLASTP, TBLASTN and TBLASTX. BLASTX
-// is not in ABI v2 until session SX (docs/losat_web_gui_sessions/session_sx_blastx_integration.md;
-// the search screen refuses it, search.spec.ts), so it has no results screen to test yet.
+// Every program that LOSAT Web runs is covered: BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX.
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -22,13 +20,13 @@ import { REPOSITORY } from './support/harness-server';
 import { chooseRun, fasta, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
 import { repeats } from './support/synthetic';
 
-type ProgramId = 'blastn' | 'blastp' | 'tblastn' | 'tblastx';
+type ProgramId = 'blastn' | 'blastp' | 'blastx' | 'tblastn' | 'tblastx';
 type Unit = 'nt' | 'aa';
 type Orientation = 'forward' | 'reverse' | 'unknown';
 type Tab = 'hits' | 'dotplot' | 'details' | 'outputs';
 
 const FORMATS = [0, 6, 7] as const satisfies readonly OutputFormat[];
-const LABELS: Readonly<Record<ProgramId, string>> = { blastn: 'BLASTN', blastp: 'BLASTP', tblastn: 'TBLASTN', tblastx: 'TBLASTX' };
+const LABELS: Readonly<Record<ProgramId, string>> = { blastn: 'BLASTN', blastp: 'BLASTP', blastx: 'BLASTX', tblastn: 'TBLASTN', tblastx: 'TBLASTX' };
 /** The tabs' test IDs (the Hits view with its three sections, the dot plot, the run's views). */
 const TABS: Readonly<Record<Tab, string>> = {
   hits: 'results-view-hits',
@@ -77,8 +75,9 @@ const PANEL_QUERIES = Array.from({ length: 150 }, (_, i) => {
 /**
  * Searches of the outfmt 0 fixtures of LOSAT/tests/outfmt0_manifest.tsv with the program's
  * default options: multi.megablast (both strands, a subject with an HSP on each, a query
- * without hits), method.blastp, e2e.tblastn.amb (minus frames; inputs large enough for Auto
- * to choose the threaded runtime) and tblastx.ambig.0 (frames of opposite signs).
+ * without hits), method.blastp, the inputs of pd.blastx.0 (two queries, query frames of both
+ * signs), e2e.tblastn.amb (minus frames; inputs large enough for Auto to choose the threaded
+ * runtime) and tblastx.ambig.0 (frames of opposite signs).
  */
 const PROGRAM_CASES: readonly {
   readonly id: ProgramId;
@@ -90,6 +89,13 @@ const PROGRAM_CASES: readonly {
 }[] = [
   { id: 'blastn', query: 'outfmt0/multi_query.fasta', subject: 'outfmt0/multi_subject.fasta', units: { query: 'nt', subject: 'nt' } },
   { id: 'blastp', query: 'outfmt0/e2e_protein_query.faa', subject: 'outfmt0/e2e_protein_subject.faa', units: { query: 'aa', subject: 'aa' } },
+  {
+    id: 'blastx',
+    query: 'outfmt0/pd_sub_q.fna',
+    subject: 'outfmt0/pd_sub_p.faa',
+    units: { query: 'nt', subject: 'aa' },
+    frameLine: (query) => ` Frame = ${query}\n`,
+  },
   {
     id: 'tblastn',
     query: 'outfmt0/e2e_protein_query.faa',
@@ -633,13 +639,14 @@ for (const c of PROGRAM_CASES) {
           const orientation = orientationOf(fields, c.units, translated);
           if (orientation !== undefined) expect(await row.getAttribute('data-orientation')).toBe(orientation);
           if (translated) {
-            // TBLASTN shows the subject's frame only (W4b screen review L9), TBLASTX both.
-            expect(await field('frames')).toMatch(c.id === 'tblastn' ? /^[+-][123]$/ : /^[+-][123]\/[+-][123]$/);
+            // TBLASTN shows the subject's frame only (W4b screen review L9), BLASTX the query's, TBLASTX both.
+            const frames = await field('frames');
+            expect(frames).toMatch(c.id === 'tblastx' ? /^[+-][123]\/[+-][123]$/ : /^[+-][123]$/);
             // The frames' signs agree with the coordinates' directions.
-            const [q, s] = c.id === 'tblastn' ? [undefined, await field('frames')] : (await field('frames')).split('/');
+            const [q, s] = c.id === 'tblastn' ? [undefined, frames] : c.id === 'blastx' ? [frames, undefined] : frames.split('/');
             const sign = (frame: string | undefined) => (frame === undefined ? 1 : frame.startsWith('-') ? -1 : 1);
             expect(sign(q) === sign(s) ? 'forward' : 'reverse').toBe(await row.getAttribute('data-orientation'));
-            seen.frames.add(await field('frames'));
+            seen.frames.add(frames);
           } else {
             await expect(row.locator('[data-field="frames"]')).toHaveCount(0);
           }
@@ -678,7 +685,7 @@ for (const c of PROGRAM_CASES) {
         if (c.id === 'blastn') expect(section).toContain(` Strand=Plus/${orientation === 'reverse' ? 'Minus' : 'Plus'}\n`);
         if (translated && BUILD_HAS_ENGINE) {
           const shown = await text(first.locator('[data-field="frames"]'));
-          const [q, s] = c.id === 'tblastn' ? ['', shown] : shown.split('/');
+          const [q, s] = c.id === 'tblastn' ? ['', shown] : c.id === 'blastx' ? [shown, ''] : shown.split('/');
           expect(section).toContain(c.frameLine!(q!, s!));
         }
       }
@@ -737,24 +744,35 @@ for (const c of PROGRAM_CASES) {
     await expect(page.getByTestId('dotplot')).toContainText(new RegExp(`\\([\\d,]+ ${c.units.query}\\) against subject .* \\([\\d,]+ ${c.units.subject}\\)\\.`));
     await expect(page.getByTestId('dotplot-selected')).toContainText(
       `query ${fields[6]}–${fields[7]} ${c.units.query}, subject ${fields[8]}–${fields[9]} ${c.units.subject}` +
-        (c.id === 'tblastn' ? `, subject frame ${frames}.` : translated ? `, frames ${frames.replace('/', ' / ')}.` : '.'),
+        (c.id === 'tblastn' ? `, subject frame ${frames}.` : c.id === 'blastx' ? `, query frame ${frames}.` : translated ? `, frames ${frames.replace('/', ' / ')}.` : '.'),
     );
     // The same scale on both axes, a residue counting as 3 nt against nucleotides (S13b decision
-    // 26: TBLASTN's query), unless the shorter side was raised to 120 px (then the note says so).
+    // 26: TBLASTN's query, BLASTX's subject), unless the shorter side was raised to 120 px (then the
+    // note says so).
     const [queryLength, subjectLength] = /\(([\d,]+) \w+\) against subject .* \(([\d,]+) \w+\)\./
       .exec(await text(page.getByTestId('dotplot')))!
       .slice(1)
       .map((n) => Number(n.replace(/,/g, '')));
-    const ratio = (queryLength! * (c.units.query === 'aa' && c.units.subject === 'nt' ? 3 : 1)) / subjectLength!;
+    const codon = (unit: Unit, other: Unit) => (unit === 'aa' && other === 'nt' ? 3 : 1);
+    const ratio = (queryLength! * codon(c.units.query, c.units.subject)) / (subjectLength! * codon(c.units.subject, c.units.query));
     const [width, height] = (await canvas.getAttribute('data-plot'))!.split('x').map(Number);
-    if ((await page.getByTestId('dotplot-scale-note').count()) === 0) {
+    const toScale = (await page.getByTestId('dotplot-scale-note').count()) === 0;
+    if (toScale) {
       expect(Math.min(Math.abs(width! - height! * ratio), Math.abs(height! - width! / ratio))).toBeLessThanOrEqual(0.5);
     } else expect(Math.min(width!, height!)).toBe(120);
     // The axis titles as drawn: the IDs and the units of the visible spans. The plot is drawn on
     // an animation frame, after the attributes above are rendered, so the titles are waited for.
     const titles = async () => JSON.parse((await canvas.getAttribute('data-titles'))!) as [string, string];
     await expect(canvas).toHaveAttribute('data-titles', /^\[/);
-    expect((await titles())[1]).toMatch(new RegExp(`^Subject ${literal(fields[1]!)} \\((${c.units.subject === 'aa' ? 'aa|kaa' : 'bp|kbp'})\\)$`));
+    // A protein axis against a nucleotide one says, while to scale, that it is drawn at 3 nt per aa,
+    // where its room holds the note with the unit (BLASTX's short subject axis may not).
+    const drawnAt = (unit: Unit, other: Unit) => (codon(unit, other) === 3 && toScale ? '(?:; drawn at 3 nt per aa)?' : '');
+    // Where the room is short, the ID is cut with an ellipsis and the unit kept.
+    const subjectTitle = (await titles())[1];
+    const shown = new RegExp(`^Subject (.+) \\((${c.units.subject === 'aa' ? 'aa|kaa' : 'bp|kbp'})${drawnAt(c.units.subject, c.units.query)}\\)$`).exec(subjectTitle);
+    expect(shown, subjectTitle).not.toBeNull();
+    const shownId = shown![1]!;
+    expect(shownId === fields[1] || (shownId.endsWith('…') && fields[1]!.startsWith(shownId.slice(0, -1))), subjectTitle).toBe(true);
     if (c.id === 'tblastn') {
       // TBLASTN's pair is to scale at 1280 px, its protein axis drawn at 3 nt per aa, which its title
       // says; on a phone the 120 px minimum changes the scale, and the note says so instead (W4b
@@ -790,7 +808,7 @@ for (const c of PROGRAM_CASES) {
       const [, path, threads] = /^\s*(serial|threaded), (\d+) threads?\s*$/.exec(await text(page.getByTestId('run-record').locator('[data-detail="path"]')))!;
       const level = tableLevel(c.id, argv, path!, Number(threads));
       await expect(badge).toHaveAttribute('data-level', level);
-      await expect(badge).toHaveText(level === 'certified' ? 'Certified profile' : 'Outside certified profile');
+      await expect(badge).toHaveText(level === 'certified' ? 'Supported' : 'Not supported');
       test.info().annotations.push({ type: 'verification', description: `${c.id} ${argv.slice(5).join(' ') || 'defaults'}, ${path} ${threads}: ${level}` });
     }
     await expect(page.getByTestId('verification-details')).toHaveAttribute('data-level', (await badge.getAttribute('data-level'))!);
@@ -865,7 +883,9 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   const limit = BUILD_HAS_ENGINE ? 255 : 3;
   await page.getByTestId('tab-search').click();
   await openParameters(page);
-  await page.getByTestId('param-max_target_seqs').fill(String(limit));
+  // 3 and 255 are not in NCBI's list: "Other" takes them.
+  await page.getByTestId('param-max_target_seqs').selectOption('other');
+  await page.getByTestId('param-max_target_seqs-other').fill(String(limit));
   await run(page, 2);
   await openRun(page, 2);
   await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
@@ -949,7 +969,8 @@ test("BLASTN: an HSP of one letter has no orientation in its record; the note po
   await program(page, 'blastn');
   await task(page, 'blastn');
   await openParameters(page);
-  await page.getByTestId('param-word_size').fill('4');
+  await page.getByTestId('param-word_size').selectOption('other');
+  await page.getByTestId('param-word_size-other').fill('4');
   await paste(page, 'query', BUILD_HAS_ENGINE ? '>q\nTAGGACGG\n' : '>q1\nACGTACGTACGT\n>q2\nACGTACGTACGT\n>q\nTAGGACGG\n');
   await paste(page, 'subject', '>s\nYCAYAANTNCRGYACT\n');
   await run(page, 1);
@@ -1520,6 +1541,33 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
 
 // --- the phone size (S13 screen review) ------------------------------------------------------------
 
+
+test('the dot plot: its Subject list chooses the plotted subject, the same selection as a Descriptions row', async ({ page }) => {
+  // The Owner (2026-11-02): chosen only by a Descriptions row on another tab, the plotted pair was
+  // a riddle. q1 is A; both subjects hold it.
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${A}\n`);
+  await paste(page, 'subject', `>s1\n${A}${dna(12, 60)}\n>s2\n${dna(13, 40)}${A}\n`);
+  await run(page, 1);
+  await openRun(page, 1);
+  await show(page, 'dotplot');
+  const select = page.getByTestId('dotplot-subject');
+  const options = select.locator('option');
+  await expect(options).toHaveCount(2);
+  const [first, second] = [(await options.nth(0).getAttribute('value'))!, (await options.nth(1).getAttribute('value'))!];
+  const secondId = (await options.nth(1).textContent())!.trim().split(' · ')[0]!;
+  await expect(select).toHaveValue(first);
+
+  await select.selectOption(second);
+  await expect(page.getByTestId('dotplot-title')).toHaveText(`Plot of q1 vs ${secondId}`);
+  await show(page, 'hits');
+  await expect(page.getByTestId(`subject-row-${second}`)).toHaveAttribute('aria-pressed', 'true');
+
+  // And back: a Descriptions row chooses the plotted subject too.
+  await page.getByTestId(`subject-row-${first}`).click();
+  await show(page, 'dotplot');
+  await expect(select).toHaveValue(first);
+});
 test('narrow screens: the results are no wider than the screen; "Run LOSAT" opens them; the tables show the key values first', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   // A translated search (frames) of files with long names: the run's label in the run picker is long.

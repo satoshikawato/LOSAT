@@ -139,13 +139,17 @@ export interface ScoreBin {
   readonly color: string;
 }
 
-/** The "Alignment Scores" bins of NCBI's Graphic Summary, half-open: < 40, [40, 50), [50, 80), [80, 200), >= 200. */
+/**
+ * The "Alignment Scores" bins of NCBI's Graphic Summary, half-open: < 40, [40, 50), [50, 80), [80, 200), >= 200.
+ * The colours are Okabe–Ito's colour-universal palette (Owner, 2026-11-02) in place of NCBI's blue, green,
+ * magenta and red: black, blue, bluish green, reddish purple, vermillion, told apart in every common colour vision.
+ */
 export const SCORE_BINS: readonly ScoreBin[] = Object.freeze([
   { label: '< 40', color: '#000000' },
-  { label: '40 - 50', color: '#0020e9' },
-  { label: '50 - 80', color: '#75ea4c' },
-  { label: '80 - 200', color: '#db3de9' },
-  { label: '>= 200', color: '#db3324' },
+  { label: '40 - 50', color: '#0072b2' },
+  { label: '50 - 80', color: '#009e73' },
+  { label: '80 - 200', color: '#cc79a7' },
+  { label: '>= 200', color: '#d55e00' },
 ]);
 
 /** The bin (an index of SCORE_BINS) of an HSP record's bit score; a value that is not a number falls in the first. */

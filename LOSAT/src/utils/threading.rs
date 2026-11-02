@@ -4,7 +4,7 @@ use anyhow::{ensure, Context, Result};
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // TBlastThreads the_threads(GetNumberOfThreads());
 // (*thread)->Run(); (*thread)->Join(&result);
-// This borrow cannot outlive the one search that owns the pool.
+// This borrow cannot outlive the one search, or the run (`with_run_pool`), that owns the pool.
 pub struct SearchPool<'a> {
     requested: &'a usize,
     #[cfg(feature = "parallel")]
@@ -152,6 +152,14 @@ where
     validate_threads(requested)?;
     #[cfg(feature = "parallel")]
     if requested > 1 {
+        // The run's pool was reported once, when the run built it.
+        if let Some(pool) = run_pool(requested) {
+            return work(&SearchPool {
+                requested: &requested,
+                pool: Some(pool),
+                x_ext: None,
+            });
+        }
         ensure!(
             rayon::current_thread_index().is_none(),
             "cannot start a search from an already registered Rayon worker"
@@ -268,7 +276,8 @@ where
     // the thread that called it: without a pool directly, with a pool as slot
     // zero, which is the caller's own thread running the Rayon worker loop
     // (`caller.run()` above), from where `ThreadPool::install` runs its
-    // closure in place. The result is written to and read from a slot on that
+    // closure in place, or inside a run (`with_run_pool`) on the run's pool
+    // from this same thread. The result is written to and read from a slot on that
     // same thread's stack. Neither value is ever touched by another thread.
     unsafe impl<T> Send for Local<T> {}
     let work = Local(work);
@@ -278,6 +287,69 @@ where
         Ok(Local((work.0)(pool)))
     })?;
     result.0
+}
+
+// No NCBI counterpart: the pool of a run that searches more than once. The Web adapter's run
+// searches once for each hit list size of its formats (docs/web/abi_v2.md §7), and BLASTP's
+// block search can search again when it does not apply; each search builds its own pool in the
+// CLI. In the browser a thread worker is held for each thread that may start, and the threads of
+// one pool may not have returned when the next pool spawns (they need the lock that wasi-libc's
+// spawn holds), so every pool after the first needed thread workers of its own.
+/// Runs `work`, which may start several searches of `requested` threads, with one pool for all of
+/// them: inside `work`, `with_search_pool(requested, ..)` on this thread searches on this pool
+/// instead of building one. Each search is the same function on the same inputs, so only the
+/// threads that run its work change, as for the batches of `x_with_search_pool_local`. When the
+/// pool cannot be built (a thread count that `validate_threads` rejects, or threads that do not
+/// start), `work` runs without it, and its first search fails as it does without a run.
+pub fn with_run_pool<F, R>(requested: usize, program: &str, work: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    let mut work = Some(work);
+    #[cfg(feature = "parallel")]
+    if requested > 1 {
+        let pooled = x_with_search_pool_local(requested, program, |search| {
+            let work = work.take().expect("one run per pool");
+            let Some(pool) = search.pool else {
+                return Ok(work());
+            };
+            struct Restore(Option<(usize, *const rayon::ThreadPool)>);
+            impl Drop for Restore {
+                fn drop(&mut self) {
+                    RUN_POOL.with(|slot| slot.set(self.0));
+                }
+            }
+            let _restore =
+                Restore(RUN_POOL.with(|slot| {
+                    slot.replace(Some((requested, pool as *const rayon::ThreadPool)))
+                }));
+            Ok(work())
+        });
+        // `work` is left only when the pool was not built.
+        if let Ok(done) = pooled {
+            return done;
+        }
+    }
+    let _ = program;
+    work.take().expect("work not run")()
+}
+
+#[cfg(feature = "parallel")]
+thread_local! {
+    /// The pool of the `with_run_pool` running on this thread, with its size.
+    static RUN_POOL: std::cell::Cell<Option<(usize, *const rayon::ThreadPool)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// The pool of the `with_run_pool` running on this thread, if it has `requested` threads.
+#[cfg(feature = "parallel")]
+fn run_pool<'a>(requested: usize) -> Option<&'a rayon::ThreadPool> {
+    let (size, pool) = RUN_POOL.with(std::cell::Cell::get)?;
+    // SAFETY: `with_run_pool` sets the slot on this thread only while its `work` runs inside
+    // the pool, which `with_search_pool` owns until `work` has returned, and restores it before
+    // then. A search that finds the pool here runs and returns within that `work`, and its
+    // `SearchPool` does not outlive the search.
+    (size == requested).then(|| unsafe { &*pool })
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:172-180
@@ -400,6 +472,60 @@ mod tests {
         assert_eq!(rayon::current_thread_index(), None);
         with_search_pool(4, "test", |_| Ok(())).unwrap();
         assert_eq!(rayon::current_thread_index(), None);
+    }
+
+    // The searches of a run share its pool: the same worker threads, no pool of their own; a
+    // search of another size cannot start inside it, and after the run a search builds its pool.
+    #[test]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    fn searches_of_a_run_share_its_pool() {
+        let workers = |search: &SearchPool<'_>| {
+            let mut ids = search
+                .pool
+                .expect("a pool")
+                .broadcast(|_| format!("{:?}", std::thread::current().id()));
+            ids.sort();
+            ids
+        };
+        let (first, second) = with_run_pool(3, "test", || {
+            let first = with_search_pool(3, "test", |search| Ok(workers(search))).unwrap();
+            let second = with_search_pool(3, "test", |search| Ok(workers(search))).unwrap();
+            assert!(with_search_pool(2, "test", |_| Ok(())).is_err());
+            assert!(!with_search_pool(1, "test", |search| Ok(search.enabled())).unwrap());
+            (first, second)
+        });
+        assert_eq!(first.len(), 3);
+        assert_eq!(first, second);
+        // A search after the run builds its pool: new threads besides the caller.
+        let caller = format!("{:?}", std::thread::current().id());
+        let after = with_search_pool(3, "test", |search| Ok(workers(search))).unwrap();
+        assert!(after
+            .iter()
+            .filter(|id| **id != caller)
+            .all(|id| !first.contains(id)));
+        // A run of one thread has no pool, and its searches none either.
+        assert!(
+            !with_run_pool(1, "test", || with_search_pool(1, "test", |search| Ok(
+                search.enabled()
+            )))
+            .unwrap()
+        );
+        // A run whose pool cannot be built runs without it: its search fails as on its own.
+        let too_many = rayon::max_num_threads() + 1;
+        let mut ran = false;
+        let error = with_run_pool(too_many, "test", || {
+            ran = true;
+            with_search_pool(too_many, "test", |_| Ok(()))
+        })
+        .unwrap_err();
+        assert!(ran);
+        assert_eq!(
+            format!("{error:#}"),
+            format!(
+                "{:#}",
+                with_search_pool(too_many, "test", |_| Ok(())).unwrap_err()
+            )
+        );
     }
 }
 

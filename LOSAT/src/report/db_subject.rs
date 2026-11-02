@@ -39,7 +39,8 @@ pub struct ParsedSubject {
     alignment_id: ParsedSeqId,
     /// `DeflineSet::bioseq_defline` of `alignment_id`.
     target: usize,
-    /// Whether NCBI's formatters cannot find the sequence by its Seq-align id (`fetched`).
+    /// Whether NCBI's formatters find no Bioseq by the Seq-align id whatever its lookup gives
+    /// (`new`, `fetched`).
     unfetchable: bool,
     /// What NCBI's lookup of the Seq-align id in the database finds where that is not this
     /// sequence (`found_instead`, `fetched`).
@@ -95,6 +96,10 @@ pub enum FoundInstead {
     /// Another sequence of the database first, by ordinal id: NCBI's formatters show it where
     /// its ids compare equal to the Seq-align id, else no sequence.
     Sequence(u32),
+    /// The sequence itself first (or the same record), and later another sequence of the
+    /// database, by ordinal id, that holds an id NCBI's scope takes for the Seq-align id: where
+    /// both are reported, NCBI's formatters can show that one for it.
+    AlsoHeld(u32),
     /// No sequence.
     Nothing,
     /// The lookup fails on a file of the database or on the id, with this message: NCBI's
@@ -118,31 +123,34 @@ pub struct HitDescription {
 }
 
 impl ParsedSubject {
-    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:406-415
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:390-395
     // ```c++
     //     int oid = -1;
-    //     ...
-    //     if (m_BlastDb->SeqidToOid(*seq_id, oid)) {
+    //
+    //     if (! m_BlastDb->SeqidToOid(*seqid, oid)) {
+    //         _TRACE("FAILED to find '" << seqid->AsFastaString() << "'");
+    //         return -1;
+    //     }
     // ```
-    // NCBI's formatters find the subject's sequence again from its Seq-align id. For a gibbsq
-    // id, a `general` id of the database `PIG`, a named-annotation-track id and a `general`
-    // id `BL_ORD_ID` that makeblastdb stored as written, the lookup finds no sequence or
-    // another one: NCBI 2.17.0 stops with a CCoreException in outfmt 6 (exit status 255) and
-    // writes the title `Unknown`, or another sequence's, in outfmt 0 and 5 (probe of line
-    // DBID, DECISIONS 8 (3); `LOSAT/tests/seqid/fasta/variants.fa`). In a version 5 database
-    // (LMDB) a local integer id (`lcl|123`) is not found either (the same failures; probe of
-    // ID2a, `blastdb-ids-20261021/R/probe`), where version 4 (ISAM) finds it. LOSAT refuses
-    // these subjects instead of repeating a defect of NCBI's. So it does where the definition
-    // line of the Bioseq is found by the content of a local id alone (`lcl|777` before the
-    // definition line of the Seq-align id `gi|777`, `DeflineSet::bioseq_defline`): NCBI 2.17.0
-    // finds no Bioseq then, in version 4 and 5 (outfmt 6 stops with a CCoreException, XML2 writes
-    // the Seq-align id alone; probe of the ID2a review).
-    /// The subject of the definition lines `set` of a database of format version 5
-    /// (`version5`) or 4. `Err` names what LOSAT does not write as NCBI: a stored title or
-    /// Seq-id with a byte outside ' ' ..= '~' (NCBI writes an error message each time it reads
-    /// the definition line) and a definition line without a Seq-id (NCBI's formatters take the
-    /// best of none; makeblastdb writes none such).
-    pub fn new(set: DeflineSet, version5: bool) -> Result<Self, String> {
+    // NCBI's formatters find the subject's sequence again from its Seq-align id, by the lookup that
+    // `found_instead` ports, whatever kind of id it is: in version 5 `bbs|123`, `nat|X.1|` and
+    // `lcl|777` by their LMDB keys, in version 4 the ISAM files that makeblastdb writes for neither
+    // `bbs|` nor `nat|`, a `gnl|PIG|` id in the PIG files that it fills from no FASTA id, and a
+    // `gnl|BL_ORD_ID|n` as the stored n plus the first ordinal id of its volume
+    // (`SeqDb::defline_set`), looked up from the start of each volume, so as its own sequence where
+    // the stored n is its own number in its volume, also beside another id (probe of line DBID N2b,
+    // `blastdb-ids-20261021/R/unfetch/p1`: 317 cases of NCBI 2.17.0, databases of NCBI's and
+    // LOSAT's makeblastdb). The lookup does not decide one case: where the definition line of the
+    // Bioseq is found by the content of a local id alone (`lcl|777` before the definition line of
+    // the Seq-align id `gi|777`, `DeflineSet::bioseq_defline`), NCBI 2.17.0 finds no Bioseq, in
+    // version 4 and 5 (outfmt 6 stops with a CCoreException, XML2 writes the Seq-align id alone;
+    // probe of the ID2a review). LOSAT refuses that subject instead of repeating a defect of
+    // NCBI's.
+    /// The subject of the definition lines `set` of a database. `Err` names what LOSAT does not
+    /// write as NCBI: a stored title or Seq-id with a byte outside ' ' ..= '~' (NCBI writes an
+    /// error message each time it reads the definition line) and a definition line without a
+    /// Seq-id (NCBI's formatters take the best of none; makeblastdb writes none such).
+    pub fn new(set: DeflineSet) -> Result<Self, String> {
         if set
             .deflines
             .iter()
@@ -159,10 +167,9 @@ impl ParsedSubject {
         let Some(target) = set.bioseq_defline(&alignment_id) else {
             return Err("has no definition line that holds its Seq-align id".into());
         };
-        let unfetchable = unfetchable(&alignment_id, version5)
-            || set
-                .display_defline(&alignment_id)
-                .is_some_and(|shown| shown.index != target);
+        let unfetchable = set
+            .display_defline(&alignment_id)
+            .is_some_and(|shown| shown.index != target);
         Ok(Self {
             set,
             alignment_id,
@@ -279,8 +286,8 @@ impl ParsedSubject {
         self
     }
 
-    /// Whether NCBI's formatters cannot find the sequence by its Seq-align id whatever the
-    /// database holds (see `new`), so that no lookup is needed.
+    /// Whether NCBI's formatters find no Bioseq by the Seq-align id whatever its lookup gives
+    /// (see `new`), so that no lookup is needed.
     pub fn unfetchable(&self) -> bool {
         self.unfetchable
     }
@@ -383,6 +390,10 @@ impl ParsedSubject {
             (false, None) => Ok(()),
             (false, Some(FoundInstead::Sequence(ordinal))) => Err(format!(
                 "has the Seq-align id {}, by which NCBI BLAST+'s lookup gives database sequence {ordinal} first (NCBI BLAST+ 2.17.0 writes that sequence's names and letters, or stops)",
+                id()
+            )),
+            (false, Some(FoundInstead::AlsoHeld(ordinal))) => Err(format!(
+                "has the Seq-align id {}, which database sequence {ordinal} also holds (where both are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)",
                 id()
             )),
             (false, Some(FoundInstead::Failed(message))) => Err(format!(
@@ -989,17 +1000,6 @@ fn check_pairwise_record(
     Ok(())
 }
 
-/// Whether NCBI's formatters cannot find a sequence by the Seq-align id `id` in a database of
-/// version 5 (`version5`) or 4 (`ParsedSubject::new`).
-fn unfetchable(id: &ParsedSeqId, version5: bool) -> bool {
-    match id {
-        ParsedSeqId::Gibbsq(_) | ParsedSeqId::NamedAnnotTrack(_) => true,
-        ParsedSeqId::Local(ObjectId::Id(_)) => version5,
-        ParsedSeqId::General(dbtag) => dbtag.db == b"PIG" || dbtag.db == b"BL_ORD_ID",
-        _ => false,
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/accguide2.txt (the rows of the RefSeq
 // kinds that `x_SetFlags` tests; `3+6` is a prefix of three characters and six digits)
 // ```
@@ -1176,7 +1176,7 @@ mod tests {
             let mut fasta = Vec::new();
             label::fasta(&set.deflines[0].ids[0], &mut fasta);
             if fasta == first.as_bytes() {
-                return ParsedSubject::new(set, false).unwrap();
+                return ParsedSubject::new(set).unwrap();
             }
         }
         panic!("no sequence {first}");
@@ -1199,12 +1199,9 @@ mod tests {
                 ids: vec![id],
                 ..BlastDefline::default()
             };
-            ParsedSubject::new(
-                DeflineSet {
-                    deflines: vec![defline],
-                },
-                true,
-            )
+            ParsedSubject::new(DeflineSet {
+                deflines: vec![defline],
+            })
             .unwrap()
         };
         let stored = crate::report::defline::generate_defline(b", ,", false, true).unwrap();
@@ -1242,7 +1239,7 @@ mod tests {
         let db = SeqDb::open(base.to_str().unwrap(), SeqType::Nucleotide).unwrap();
         let names: Vec<String> = (0..db.num_seqs())
             .map(|ordinal| {
-                let subject = ParsedSubject::new(db.defline_set(ordinal).unwrap(), true).unwrap();
+                let subject = ParsedSubject::new(db.defline_set(ordinal).unwrap()).unwrap();
                 let mut name = Vec::new();
                 crate::report::seqid::SeqId::Db(subject.sam_id()).sam_name(&mut name);
                 String::from_utf8(name).unwrap()
@@ -1389,7 +1386,7 @@ mod tests {
                 ..BlastDefline::default()
             })
             .collect();
-        ParsedSubject::new(DeflineSet { deflines }, true).unwrap()
+        ParsedSubject::new(DeflineSet { deflines }).unwrap()
     }
 
     fn strings(subject: &ParsedSubject) -> Vec<String> {
@@ -1450,19 +1447,17 @@ mod tests {
     }
 
     #[test]
-    fn seq_align_ids_that_ncbi_does_not_find() {
-        let local_id = one_defline(vec![ParsedSeqId::Local(ObjectId::Id(123))]);
-        assert!(ParsedSubject::new(local_id.clone(), false)
-            .unwrap()
-            .fetched()
-            .is_ok());
-        let error = ParsedSubject::new(local_id, true)
-            .unwrap()
-            .fetched()
-            .unwrap_err();
-        assert!(error.contains("Seq-align id lcl|123,"), "{error}");
+    fn the_kind_of_a_seq_align_id_refuses_nothing_before_its_lookup() {
+        // NCBI's lookup decides whether its formatters find these (`found_instead`; probe of line
+        // DBID N2b), not the kind of id.
         for id in [
+            ParsedSeqId::Local(ObjectId::Id(123)),
             ParsedSeqId::Gibbsq(123),
+            ParsedSeqId::NamedAnnotTrack(crate::seqid::model::TextseqId {
+                accession: Some(b"NA000001".to_vec()),
+                version: Some(1),
+                ..Default::default()
+            }),
             ParsedSeqId::General(Dbtag {
                 db: b"PIG".to_vec(),
                 tag: ObjectId::Id(123),
@@ -1472,12 +1467,24 @@ mod tests {
                 tag: ObjectId::Id(5),
             }),
         ] {
-            let subject = ParsedSubject::new(one_defline(vec![id]), false).unwrap();
-            assert!(subject.fetched().is_err());
+            let subject = ParsedSubject::new(one_defline(vec![id])).unwrap();
+            assert!(!subject.unfetchable(), "{subject:?}");
+            assert!(subject.fetched().is_ok());
         }
+        // A local id that alone decides the definition line of the Bioseq: no lookup finds it.
+        let shown = lines(vec![
+            vec![ParsedSeqId::Local(ObjectId::Id(777))],
+            vec![ParsedSeqId::Gi(777)],
+        ]);
+        assert!(shown.unfetchable());
+        let error = shown.fetched().unwrap_err();
+        assert!(
+            error.contains("Seq-align id gi|777, by which NCBI BLAST+'s formatters do not find"),
+            "{error}"
+        );
         // A GI in the set makes the GI the Seq-align id.
         let with_gi = one_defline(vec![ParsedSeqId::Gibbsq(123), ParsedSeqId::Gi(7)]);
-        assert!(ParsedSubject::new(with_gi, true).unwrap().fetched().is_ok());
+        assert!(ParsedSubject::new(with_gi).unwrap().fetched().is_ok());
         let replaced = DeflineSet {
             deflines: vec![BlastDefline {
                 ids: vec![ParsedSeqId::Gi(7)],
@@ -1485,13 +1492,13 @@ mod tests {
                 ..BlastDefline::default()
             }],
         };
-        assert!(ParsedSubject::new(replaced, false).is_err());
-        assert!(ParsedSubject::new(DeflineSet::default(), false).is_err());
+        assert!(ParsedSubject::new(replaced).is_err());
+        assert!(ParsedSubject::new(DeflineSet::default()).is_err());
     }
 
     #[test]
     fn a_seq_align_id_by_which_ncbi_finds_another_sequence_or_none() {
-        let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)]), true).unwrap();
+        let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
         assert!(subject.clone().found_instead(None).fetched().is_ok());
         let error = subject
             .clone()
@@ -1529,7 +1536,7 @@ mod tests {
                 rel: None,
                 chain_id: chain_id.map(|id| id.as_bytes().to_vec()),
             });
-            ParsedSubject::new(one_defline(vec![id]), false).unwrap()
+            ParsedSubject::new(one_defline(vec![id])).unwrap()
         };
         assert!(joined_in_reports(&pdb(None), &pdb(Some("AA"))));
         assert!(!joined_in_reports(&pdb(Some("A")), &pdb(Some("B"))));

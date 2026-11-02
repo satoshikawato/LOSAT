@@ -164,12 +164,12 @@ fn a_stage_lets_a_subject_go_after_its_last_match_with_the_same_reports() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// `LOSAT_X_TBNPLANCUT`: a thread's block ends with its chunk of subjects; the reports are those
-/// of the block of 256 KiB kept to the next read, in one query batch and in several, with
-/// composition-based statistics and without.
+/// `LOSAT_X_TBNPLANCUT`: a thread's block goes with its chunk of subjects; the reports are those
+/// of the block kept to the next read, in one query batch and in several, with composition-based
+/// statistics and without.
 #[test]
-fn a_block_that_ends_with_its_chunk_gives_the_same_reports() {
-    let dir = temp_dir("plan-cut");
+fn a_block_that_goes_with_its_chunk_gives_the_same_reports() {
+    let dir = temp_dir("plan-chunk");
     let (db, query) = inputs(&dir);
     for threads in [2, 4, 8] {
         for args in [
@@ -181,11 +181,48 @@ fn a_block_that_ends_with_its_chunk_gives_the_same_reports() {
                     let env: Vec<_> = batch.iter().chain(off).copied().collect();
                     tblastn(&query, &db, args, threads, &env)
                 };
-                let (cut, kept) = (run(&[]), run(&[("LOSAT_X_TBNPLANCUT", "0")]));
-                assert_eq!(cut.0, Some(0), "{}", cut.2);
-                assert!(!cut.1.is_empty());
-                assert_eq!(cut.1, kept.1, "threads {threads} {args:?} {batch:?}");
+                let (gone, kept) = (run(&[]), run(&[("LOSAT_X_TBNPLANCUT", "0")]));
+                assert_eq!(gone.0, Some(0), "{}", gone.2);
+                assert!(!gone.1.is_empty());
+                assert_eq!(gone.1, kept.1, "threads {threads} {args:?} {batch:?}");
             }
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `LOSAT_X_TBNLOOPFREE`: a thread frees the buffers it kept between subjects when its loop over
+/// the chunks ends, and makes new ones for the next query batch; the reports are those of the
+/// buffers kept to the next batch, with composition-based statistics and without: one query batch,
+/// batches searched one after another on one pool (2 threads with 3 batches; 4 and 8 threads with
+/// 6 batches and no pools of their own), and batches on pools of their own (8 threads).
+#[test]
+fn buffers_freed_at_the_end_of_a_threads_loop_give_the_same_reports() {
+    let dir = temp_dir("loop-free");
+    let (db, query) = inputs(&dir);
+    let own_pools_off = [("BATCH_SIZE", "2000"), ("LOSAT_X_TBNOWNPOOLS", "0")];
+    let cases: [(u32, &[(&str, &str)]); 7] = [
+        (2, &[]),
+        (4, &[]),
+        (8, &[]),
+        (2, &[("BATCH_SIZE", "5000")]),
+        (4, &own_pools_off),
+        (8, &own_pools_off),
+        (8, &[("BATCH_SIZE", "2000")]),
+    ];
+    for (threads, batch) in cases {
+        for args in [
+            &["-outfmt", "6"][..],
+            &["-outfmt", "6", "-comp_based_stats", "0"],
+        ] {
+            let run = |off: &[(&str, &str)]| {
+                let env: Vec<_> = batch.iter().chain(off).copied().collect();
+                tblastn(&query, &db, args, threads, &env)
+            };
+            let (freed, kept) = (run(&[]), run(&[("LOSAT_X_TBNLOOPFREE", "0")]));
+            assert_eq!(freed.0, Some(0), "{}", freed.2);
+            assert!(!freed.1.is_empty());
+            assert_eq!(freed.1, kept.1, "threads {threads} {args:?} {batch:?}");
         }
     }
     std::fs::remove_dir_all(&dir).unwrap();

@@ -2830,6 +2830,7 @@ fn run_in_pool(
         numbers: &subjects.numbers,
         titles: std::cell::RefCell::new(DatabaseTitles::new()),
         stores: std::cell::RefCell::default(),
+        lengths: std::cell::RefCell::default(),
         reads_letters: outputs.hits.is_some()
             || outputs.observer.is_some()
             || outputs
@@ -3439,22 +3440,28 @@ fn run_batch_loop(
             }
             // The sequences that the batch reports, read once each where NCBI fetches them before
             // the batch's reports (`BlastFormatter_PreFetchSequenceData`, below), when a report
-            // reads their letters: with the reports of each batch (`report_stream`) they go after
+            // reads their letters, else their lengths alone (the index and the last byte of each):
+            // with the reports of each batch (`report_stream`) they go after
             // them, else they stay to the reports after the loop, as the titles do. A read that
             // fails fails this batch as a read of its search does (above).
-            if let (
-                ShownSubjects::Database {
-                    stream: Some(stream),
-                    ..
-                },
-                true,
-            ) = (&subjects.shown, reports.reads_letters)
+            if let ShownSubjects::Database {
+                stream: Some(stream),
+                ..
+            } = &subjects.shown
             {
-                let read = super::super::database::read_reported(
-                    stream,
-                    ordered,
-                    &mut reports.stores.borrow_mut(),
-                );
+                let read = if reports.reads_letters {
+                    super::super::database::read_reported(
+                        stream,
+                        ordered,
+                        &mut reports.stores.borrow_mut(),
+                    )
+                } else {
+                    super::super::database::read_reported_lengths(
+                        stream,
+                        ordered,
+                        &mut reports.lengths.borrow_mut(),
+                    )
+                };
                 if let Err(error) = read {
                     let XReadError(error) = error.downcast::<XReadError>()?;
                     let read_error = error
@@ -3564,6 +3571,7 @@ fn run_batch_loop(
             };
             reports.write(outputs, batch_done, &warnings, false)?;
             reports.stores.borrow_mut().clear();
+            reports.lengths.borrow_mut().clear();
             for query_warnings in &mut warnings[start..end] {
                 *query_warnings = Vec::new();
             }
@@ -3616,6 +3624,9 @@ struct BatchReports<'a> {
     /// `-db`: the stores of the reported sequences of the batches not yet reported
     /// (`database::read_reported`), read when a report reads letters (`reads_letters`).
     stores: std::cell::RefCell<super::super::database::ReportedStores>,
+    /// `-db`: the lengths of the reported sequences of the batches not yet reported
+    /// (`database::read_reported_lengths`), read when no report reads letters.
+    lengths: std::cell::RefCell<super::super::database::ReportedLengths>,
     /// Whether a report reads the letters of the subjects: every format but a custom tabular
     /// report without a field that reads them (`tabular::reads_letters`), and the hits and the
     /// observer of a library caller (`report_counts`).
@@ -3686,9 +3697,7 @@ impl BatchReports<'_> {
                 None,
             ),
             ShownSubjects::Database {
-                database,
-                pairwise,
-                stream,
+                database, pairwise, ..
             } => {
                 let formats: Vec<report::TblastxOutputFormat> = outputs
                     .formats
@@ -3707,8 +3716,8 @@ impl BatchReports<'_> {
                     database,
                     &self.titles.borrow(),
                     &mut hits,
-                    *stream,
                     self.reads_letters.then_some(&*self.stores.borrow()),
+                    &self.lengths.borrow(),
                     shown,
                 )?;
                 (
@@ -4741,7 +4750,7 @@ fn search_query_batch<S: TbxScore>(
     } else {
         (
             if subjects.count() > 0 {
-                subjects.length(0) as i64
+                subjects.first_length() as i64
             } else {
                 0
             },
@@ -5081,8 +5090,17 @@ fn search_query_batch<S: TbxScore>(
         // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
         // return word_length * 3 + 2;
         // if (subject->length < min_subj_seq_length) { ... continue; }
-        // Statistics include all records, including ones too short to search.
-        let s_len = subjects.length(s_idx);
+        // Statistics include all records, including ones too short to search. A `-db` sequence's
+        // length is read with its block (`XDbStream::length`), which its frames use below; a read
+        // that fails ends the subject as a read of its frames does.
+        let s_len = match subjects.length(s_idx) {
+            Ok(length) => length,
+            Err(error) => {
+                x_read_failure.fail(s_idx, error);
+                emit_subject_hits(st, s_idx);
+                return;
+            }
+        };
         if s_len < (wordsize * 3 + 2) as usize {
             emit_subject_hits(st, s_idx);
             return;

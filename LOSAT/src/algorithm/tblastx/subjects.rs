@@ -61,13 +61,30 @@ impl<'a> Subjects<'a> {
         }
     }
 
-    /// The number of bases of subject `oid`.
-    pub(crate) fn length(&self, oid: usize) -> usize {
+    /// The number of bases of subject `oid`: a `-db` stream's read where the search reads the
+    /// sequence (`XDbStream::length`; a read that fails is an `XReadError`).
+    pub(crate) fn length(&self, oid: usize) -> Result<usize> {
+        match self {
+            Self::Stream(stream) => stream.length(oid),
+            _ => Ok(self.held_length(oid)),
+        }
+    }
+
+    /// The number of bases of subject `oid` of the subjects held in memory.
+    fn held_length(&self, oid: usize) -> usize {
         match self {
             Self::Fasta(records) => records[oid].seq().len(),
             Self::Stored(stores) => stores[oid].len(),
-            Self::Stream(stream) => stream.length(oid),
+            Self::Stream(_) => unreachable!("a -db stream reads its lengths (`length`)"),
             Self::Unreadable => 0,
+        }
+    }
+
+    /// The number of bases of the first subject (a stream's from its check); there is one.
+    pub(crate) fn first_length(&self) -> usize {
+        match self {
+            Self::Stream(stream) => stream.first_length(),
+            _ => self.held_length(0),
         }
     }
 
@@ -77,7 +94,7 @@ impl<'a> Subjects<'a> {
         match self {
             Self::Stream(stream) => stream.longest_and_total(),
             _ => (0..self.count()).fold((0, 0), |(longest, total), oid| {
-                let length = self.length(oid);
+                let length = self.held_length(oid);
                 (longest.max(length), total + length as u64)
             }),
         }
@@ -801,7 +818,11 @@ mod tests {
             let table = GeneticCode::from_id(id);
             for oid in 0..records.len() {
                 let what = format!("record {oid} code {id}");
-                assert_eq!(stored.length(oid), fasta.length(oid), "{what}");
+                assert_eq!(
+                    stored.length(oid).unwrap(),
+                    fasta.length(oid).unwrap(),
+                    "{what}"
+                );
                 let (frames, of_letters, _) = fasta.x_preliminary_frames(oid, &table).unwrap();
                 let (got, got_of_letters, _) = stored.x_preliminary_frames(oid, &table).unwrap();
                 assert_eq!(got_of_letters, of_letters, "{what}");

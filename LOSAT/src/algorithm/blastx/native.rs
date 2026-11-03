@@ -290,18 +290,6 @@ fn run_inner(
     use crate::blastinput::app::{self, Program};
     let choice = app::parse_formatting_string(&args.outfmt)?;
     let format = app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
-    // No NCBI counterpart: the reports of `-query_loc` and `-subject_loc` are those of the
-    // pairwise and tabular formats for now (line SX, session SXd1); the other formats come with
-    // SXd2. SAM (17), AIRR (19) and FASTA (21) are NCBI's errors of BLASTX's formatting handler,
-    // after the ranges.
-    if (args.query_loc.is_some() || args.subject_loc.is_some())
-        && !matches!(choice.number, 0 | 6 | 7 | 10 | 17 | 19 | 20 | 21)
-    {
-        bail!(
-            "-query_loc and -subject_loc with -outfmt {} are not supported by LOSAT's BLASTX yet (outfmt 0, 6, 7, 10 and 20 are)",
-            choice.number
-        );
-    }
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
     // before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -467,12 +455,17 @@ fn run_inner(
         None => Vec::new(),
     };
     // The subjects as NCBI searches them: each cut to its interval (an interval without letters
-    // leaves a record without letters, `write_empty_subject_warnings`).
+    // leaves a record without letters, `write_empty_subject_warnings`). The archive's Bioseqs and
+    // the lower case of outfmt 0's Sbjct rows (`x_soft_subject::x_masked_subject_rows`, records
+    // with lower case only) read the whole record.
     if let Some(range) = &subject_range {
+        let shows_lower_case = args.lcase_masking && choice.number == 0;
         for record in &mut subjects {
             let (from, to_exclusive) =
                 crate::blastinput::seq_range::record_cut(range, record.sequence.len())?;
-            record.cut_in_place(from, to_exclusive);
+            let keep_whole =
+                archive.is_some() || (shows_lower_case && !record.lowercase_masks.is_empty());
+            record.cut_in_place(from, to_exclusive, keep_whole);
         }
     }
     // LOSAT's refusal of a title the archive cannot write, before its first byte.
@@ -679,8 +672,11 @@ fn run_inner(
             );
         }
         let query_file = File::open(&args.query).map_err(|_| inaccessible("query", &args.query))?;
-        let messages_may_be_refused =
-            super::blast_xml::prescan_queries(query_file, args.lcase_masking)?;
+        let messages_may_be_refused = super::blast_xml::prescan_queries(
+            query_file,
+            args.lcase_masking,
+            query_range.as_ref(),
+        )?;
         // The documents of a `-db` search with a taxonomy database on the search path: a later
         // batch can still refuse the scientific name of a taxid (XML2 and JSON), or the damaged
         // database (`read_reported_taxids`, which needs the batch's hits; outfmt 5 looks the
@@ -773,7 +769,12 @@ fn run_inner(
         if !query_is_regular {
             archive::refuse_irregular_query()?;
         }
-        archive::prescan_query_titles(&args.query, args.lcase_masking, batch_size)?;
+        archive::prescan_query_titles(
+            &args.query,
+            args.lcase_masking,
+            batch_size,
+            query_range.as_ref(),
+        )?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
     // ```c++
@@ -806,6 +807,15 @@ fn run_inner(
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file is LOSAT's rejection, above).
     app::xinclude_check_for(&choice, args.out.as_deref())?;
+    // `BL2SEQ_LEGACY` makes NCBI search each `-subject` sequence on its own and write the
+    // bl2seq report, and a `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert stops it before each
+    // batch's report; LOSAT refuses both before the search, where an empty query has already
+    // ended the run as NCBI ends it (`Query is Empty!`, exit status 0).
+    app::check_search_environment(
+        "BLASTX",
+        database.is_none(),
+        format == Some(app::ReportFormat::ArchiveFormat),
+    )?;
     // LOSAT_X_DBIDXREAD acts on a database's index files only; the new side is marked where a
     // volume is opened (`seqdb::Volume::open`).
     if database.is_none() && crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
@@ -882,7 +892,9 @@ fn run_inner(
     };
     let search_error = |error: anyhow::Error| -> anyhow::Error {
         // LOSAT's refusal, not an error of NCBI's engine.
-        if error.is::<super::parameters::SearchSpaceOverflow>() {
+        if error.is::<super::parameters::SearchSpaceOverflow>()
+            || error.is::<super::split::QuerySplitRefusal>()
+        {
             return error;
         }
         if error.is::<UnreadableSubjects>() {

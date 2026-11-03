@@ -63,6 +63,10 @@ describe('verification table', () => {
     const ranged = keys.filter((key) => key.includes('"-query_loc"'));
     expect(ranged.length).toBeGreaterThan(0);
     for (const key of ranged) expect(key).toContain(`["-query_loc","${RANGE_VALUE}"]`);
+    // BLASTX's ranges with the default options (line SX, DW-39): sxd.blastx.qloc.*, sloc.0, qsloc.7.
+    expect(formatsOf('blastx', ['-query_loc', '1001-3000'])).toEqual([0, 6, 7]);
+    expect(formatsOf('blastx', ['-subject_loc', '10-70'])).toContain(0);
+    expect(formatsOf('blastx', ['-query_loc', '1-9', '-subject_loc', '2-5'])).toEqual([7]);
   });
 
   it('keeps nothing outside the inputs, outputs and threads in a key', () => {

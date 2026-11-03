@@ -1372,14 +1372,20 @@ pub(super) fn reported_subjects(
 /// The stored data of database sequence `ordinal` that a report reads its letters from: its
 /// 2-bit data and ambiguity runs (`PackedNucleotide::from_stored`, whose letters are those of
 /// `SequenceBlock::nucleotide_iupac`), with the errors of `nucleotide_iupac` in the same order
-/// (`SequenceBlock::nucleotide_stored`). The read's buffer goes back (`x_done_block`); the store
-/// holds a copy of the 2-bit data, a quarter of a byte per letter.
+/// (`SequenceBlock::nucleotide_stored`). The store is the read's buffer cut to the 2-bit data, a
+/// quarter of a byte per letter, as `common::database::x_read_nucleotide_store` keeps it: with
+/// LOSAT_X_BNMAPPED a buffer of 1 MiB or more is mapped and leaves at the store's drop (it is not
+/// given back to `x_mapped::X_BYTES`), and no copy is made in the heap.
 fn reported_store(db: &SeqDb, ordinal: u32) -> Result<PackedNucleotide> {
     let block = x_read_sequence(db, ordinal).map_err(database_error)?;
     let (length, runs) = block.nucleotide_stored(0).map_err(database_error)?;
-    let store = PackedNucleotide::from_stored(block.nucleotide_packed(0), length, &runs);
-    x_done_block(block);
-    Ok(store)
+    let packed = block.x_into_nucleotide_packed();
+    if crate::utils::x_mapped::x_is_mapped(packed.capacity()) {
+        crate::utils::x_mapped::X_BYTES.x_disown(&packed);
+    }
+    Ok(PackedNucleotide::x_from_stored_buffer(
+        packed, length, &runs,
+    ))
 }
 
 /// A reported sequence's record, its stored data (`reported_store`, when the reports show

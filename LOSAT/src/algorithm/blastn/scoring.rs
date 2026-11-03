@@ -408,7 +408,7 @@ pub(crate) fn check_scoring_for_formats_with(
 ) -> anyhow::Result<()> {
     // The host has no database files (`run_local`).
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
+        anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
     // `args.report_counts` is set by `process_options` of a run; a host that has not run
     // it derives the counts the same way, for the output formats of the search.

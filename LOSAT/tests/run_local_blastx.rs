@@ -713,7 +713,7 @@ fn refusals_come_before_any_output() {
         let (result, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, formats, extra);
         let error = result.expect_err("refused");
         assert!(
-            error.to_string().contains("not supported by LOSAT Web"),
+            error.to_string().contains("not supported in the browser"),
             "{formats:?} {extra:?}: {error}"
         );
         assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());

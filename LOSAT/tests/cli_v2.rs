@@ -1649,7 +1649,8 @@ fn blastp_takes_a_database_and_its_size() {
         LOSAT::algorithm::blastp::blast_engine::check_options(&blastp(&["-db", "d"]).unwrap())
             .unwrap_err();
     assert!(
-        format!("{error:#}").contains("-db (a database search) is not supported by LOSAT Web yet"),
+        format!("{error:#}")
+            .contains("-db (a database search) is not supported in the browser yet"),
         "{error:#}"
     );
 }
@@ -1712,7 +1713,8 @@ fn blastn_takes_a_database_and_its_size() {
     let error = LOSAT::algorithm::blastn::scoring::check_scoring(&blastn(&["-db", "d"]).unwrap())
         .unwrap_err();
     assert!(
-        format!("{error:#}").contains("-db (a database search) is not supported by LOSAT Web yet"),
+        format!("{error:#}")
+            .contains("-db (a database search) is not supported in the browser yet"),
         "{error:#}"
     );
 }
@@ -1762,7 +1764,8 @@ fn tblastn_takes_a_database_and_its_size() {
     let error =
         LOSAT::algorithm::tblastn::check_options(&tblastn(&["-db", "d"]).unwrap()).unwrap_err();
     assert!(
-        format!("{error:#}").contains("-db (a database search) is not supported by LOSAT Web yet"),
+        format!("{error:#}")
+            .contains("-db (a database search) is not supported in the browser yet"),
         "{error:#}"
     );
 }
@@ -1813,7 +1816,8 @@ fn tblastx_takes_a_database_and_its_size() {
         LOSAT::algorithm::tblastx::blast_engine::check_options(&tblastx(&["-db", "d"]).unwrap())
             .unwrap_err();
     assert!(
-        format!("{error:#}").contains("-db (a database search) is not supported by LOSAT Web yet"),
+        format!("{error:#}")
+            .contains("-db (a database search) is not supported in the browser yet"),
         "{error:#}"
     );
 }

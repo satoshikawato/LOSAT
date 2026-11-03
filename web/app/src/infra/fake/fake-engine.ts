@@ -48,9 +48,22 @@ export class FakeEngine implements EngineGateway {
     return toProgramDescription(json);
   }
 
+  /**
+   * Refuses an unknown program, and a word that is neither an option of the program's
+   * `describe` nor the value of the option before it, with the CLI's message; the engine's
+   * other checks are not imitated.
+   */
   async validate(argv: readonly string[]): Promise<ValidationResult> {
     const program = argv[0];
     if (!PROGRAMS.some((p) => p.id === program)) return { ok: false, message: `unknown program: ${program}` };
+    const { parameters } = await this.describe(program as ProgramId);
+    for (let i = 1; i < argv.length; i++) {
+      const word = argv[i]!;
+      const [flag, value] = word.split(/=(.*)/s, 2);
+      const option = parameters.find((p) => p.flag === flag);
+      if (option === undefined) return { ok: false, message: `error: unknown option or argument '${word}'; use -help for CLI v2 syntax` };
+      if (option.takesValue && value === undefined) i++;
+    }
     return { ok: true };
   }
 

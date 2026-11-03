@@ -1289,7 +1289,7 @@ pub(crate) fn check_losat_limits(args: &TblastxArgs) -> Result<()> {
 pub fn check_options(args: &TblastxArgs) -> Result<()> {
     // The host has no database files (`run_local_with`).
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
+        anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
     check_ncbi_options(args, &cli_outfmts(args)?, &mut std::io::sink())?;
     check_losat_limits(args)?;
@@ -1521,7 +1521,7 @@ pub(crate) fn run_local_with(
 ) -> Result<()> {
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
+        anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
     // NCBI parses -outfmt before its option handlers read the subjects (BLASTN's
     // `run_local`); `search` checks the formats again.
@@ -1718,7 +1718,11 @@ fn search(
     check_report_formats(outputs, args.out.as_deref())?;
     // LOSAT's limits come where NCBI starts the search, after its checks.
     check_losat_limits(&args)?;
-    crate::blastinput::app::check_unsupported_environment("TBLASTX")?;
+    crate::blastinput::app::check_search_environment(
+        "TBLASTX",
+        !matches!(source, SubjectSource::Database(_)),
+        outputs.only_archive(),
+    )?;
     // The query range applies to every query record as NCBI's batch reader reads it
     // (`seq_range::cut_queries`): a record is searched cut, and one whose interval starts
     // just past its end is a query without data (`run_in_pool`).

@@ -725,7 +725,7 @@ pub fn run_local(
 ) -> Result<()> {
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
+        anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
     // cannot write, and a diagnostics stream that saves the messages. The records' deflines are
@@ -934,7 +934,7 @@ fn search(
     } else {
         0
     };
-    app::check_unsupported_environment("TBLASTN")?;
+    app::check_search_environment("TBLASTN", database.is_none(), outputs.only_archive())?;
     app::check_old_fsc("TBLASTN")?;
     app::check_query_split_environment("TBLASTN", false)??;
     let subjects = subject_records;

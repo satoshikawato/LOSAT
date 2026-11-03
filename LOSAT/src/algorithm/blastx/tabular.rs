@@ -399,7 +399,8 @@ pub(super) fn write_blastx_tabular(
                 //             else
                 //             	m_QueryLength = query_bh.GetBioseqLength();
                 // ```
-                // BLASTX has no `-query_loc`: the searched query is the record.
+                // The searched letters: the record, or its `-query_loc` interval (`qcovhsp` below);
+                // `m_QueryRange` is the range as given (`query_length`).
                 let searched_length = query.sequence.len();
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:880-887
                 // ```c++

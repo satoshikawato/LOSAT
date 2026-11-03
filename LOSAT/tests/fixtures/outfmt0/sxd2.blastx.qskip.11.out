@@ -1,0 +1,1826 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">m_mix MelaMJNV 56001-61600"
+                  }
+                }
+              },
+              title "m_mix MelaMJNV 56001-61600"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 5600,
+              seq-data ncbi2na '7DFBE28C3FFD8A5FEBDE73EB8E3B773D7FF7DF7F7FEFF1
+F8B74FCCAFC7F8DAC4E0DCF1438E39773D7FF7F77FEFEF71F8B74FC4AFC7F8DAC4E0DCF1438E39
+773D7FF7D77FEFEF71F8B747C4AFC7F8DAC4E0DCF1EB8E0DCF1EB8EF957BF83388FFF3FFFB1E3D
+628DCDEF16B3E2AF70FF3DFFB87FFEFF8EBDFFECD8EAF3C7F8F2CDC5FFF1EB2EBBE7DFFECFDCBF
+DBF12B8FD2FB7531FDECF34DFF73C534CF75EF0B886297434CD1CF34DEB0C46F7BBEF34C5E3A8F
+34FF9EC5EC7B16BEF027B3C32FD4CEB0D38F280573C4B14AEF02D9ACF34D4ED30D74FE92EDBCFB
+353B4E34D3FA4B80DB9EF34D4E3B0F30D5D2CF513C3D9378ECFBF4CCF3BCF200E013B3BFD0EFC3
+338CC0CFC4333FC733CD7B0C3034CCCCCCCCCCCCCCCCCCE080720FCDFB08C42CC14FCC0CF33CF0
+C3033F33DFC0003D33A1A9FC2338000C0CC8B2130F7448DF314CF735DB50F009008C83713773D5
+6CF10CE9020D54334BC3E3AE333F8FC13F200583BFB379410EC3EEC91E00546B7F702132584EFE
+9F31901DF399B6C0A0244404F9635D0D08A2C5E8DDD8BFEC0AC757BBA60DDFCB4B33B3A0252843
+306FD2F0238E3F8E02B345FA31338C46E083339B1FB7A30FEF2237C9030D39E13231AFB7F53308
+CA79ABC9EBA43E84633B2038C0C3FE7842FCE03E0031C14EC3CCBC0023CE36640805083C48E0DA
+3D7B0FF2F39E31478F0ED70E88E3E203C0CC1330C99F87AF7414FA4FBF84FDEE1EBDD053EB3EFE
+13F7A0710C3F81DF903310CE03CF0F3700CCC10D12E319CDDEC0C8D2003331C8E2C2C052424D3E
+0C33F74F3EEC0CC2AFEFB2031583813E3123CF7C28D1FD3DE343B0CBEC082D2722F40C037E4D0F
+93CF39F078DF8AD3408EC0FC175F005B70123FC8FFFCF923108BEECF03FCEC08008C0CC41EB037
+F200ACEDF30E80B00847F4D3FFFF3F2CF83708EC3B0F0C0BEB3332CF133C033301038F87EFFCF1
+537B34F7F3F008FF9D89F550D44FF321314C7AF0DDFFFFFD1B03D5CF733D0B8E720B54E3F59C00
+EDDCCE7434C83DD40C54974F14CF8D3AB3783532271CDA0FF45B013C8241ACF3C7E0D23F4488E3
+E3D34D34D34F3F323DB53148CE8306DD8FE3FFE23335FFBFFBEFBFDDFC019D38C3F3ECCFB3371C
+10BDFEF7C3ACCB3CF2CCEF77DCCC00CCC4CC43137FD31F02B3BFE00200003F3C433FEC04F0ECC3
+13330000CCECF313C33F10BB6F042FFC4C03EC30331F77413F7E37DBDF7EFFD307F50FBF37E0D1
+0CB74337FCFF3FEF7FC18F7B9FDCFF4F34CFF420FD2CFFC73075FE3EC36CFB83C4CDE130E7BF54
+01F10AC081F820FFF0088EBF010A901F752051AE2E1EFECF3CF3CF3CF3CFC4F7CF2F1E08E30445
+3DD9C88AC336E4D51DF72E090956AB9D03CDF8ECF1FE23CCC2ABB1CCCE8F3DFC3A16D0F00EF0CD
+08D3F134B34EFEBAE7B672C4E3B18BEFF3AB34F4412C100534D80334ECCBEF743ECF31BDCC9FC3
+FF0DB30F3D4D7C7F7376B8CA3C2ACF2BA073439EDFC0230FF48C0CB5F8FAC9E3834377EBB2A508
+3033BD35353F2ED010021EB39FDC02F53ECF8CCCFD7FBB8B50D37EC3F3F8238030F4C0CF40047F
+E61309B333D0CEF750F7052BB7E4C8333ABAC3DB0113BC4F34C52B23F0C7DF913FC0EA7FCCE884
+0EE83137FC0A0C333F622CCDF430FFBF1C8FCEAB0DE40F474D40C7B80E0D0C8315ADEF66F7FC54
+6ADB7F34FFCDABA3D58E33FFCAADFFDD72C7EA0CD8A03EFD0F803ACCD34D0F33B0135B4FAA38BF
+2DB3473CC1C2BCBE0C1FFF833CDC8030D230DF8777B6C3F34BD2FD43E3F3CFDDC09BE08D05DCFF
+7FDFE38C5F70E3FC43F6F8C84CAF71D8533D7B07BFFC574F0CFEF74B3C30C3DE33C13B330FD243
+7EF3AE00B0EFC73C1624BB19B5F0237B268DD71D9424D48FCFD26A04C8B5C2FFCFF5337FF77347
+A7FAB7F4F0B53DF1FDC47FBDB45507177779F7D402333E333FFC79F7D001E331CF3FFA4F0B0F50
+BF20FFCFFBF8CC7FCE3CD4F3'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61857.1 innexin [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61857.1 innexin [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 378,
+            seq-data ncbieaa "MASLGLLSTLRGILQGKRNADIENLISKLHYRVTTTTVFCFCLLVTTN
+TLVGDPISCVYDSGHPKLNDKVVNTYCWIHTTFTLPNRPYRDMSAISSPGIGTHNLSDPVTYHAYYQWVPFMLFIQGL
+LFYAPHYIWKTWEGGRMQSITADLSVPILNKEDQRKRVNQLADYLQNSLWNNNTYALKYLFCQCLSLVNCIVNMVLMN
+KFLNGKFLTYGADVFSYSEAVDQESRTDPMIEVFPRVTKCSMSMFGSSGTLQKHDFLCVLAVNVINEKIYLAMWLWFI
+LLISLSILVFFFHLAVFAVPVIRRLYLVYLLGSGDKARIVARTFNQMGDVFLLYLLKKNVECQSLNLLLTELCREPIT
+GDDESKKYQKYLRRESEV"
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61858.1 wsv026-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61858.1 wsv026-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 1472,
+            seq-data ncbieaa "MIEKDRIKWQKDSLPLLFPSEETAKAIGSNTFAVPSFEVYESKALLEV
+GRCESLTRGGMDDCWVDGYVQPRFLLRPMSLITLQGEAVRLFSVQYYKHRGNLGQGDAKSKNAYGGGFIIGDGTGVGK
+SREIAGMIVTAILVEQYLYRKSESHKPPLVIWLTCSELLFANCKRAFAEVLTLANASKYSLRSMNDNGLTTIDLEGND
+LFIHFTTLKNFLADTNDTCDYPLPQPTVLFLTYNGLMANFEDLMEIFDKGIILPTAVFCDEFHKTKNISDKMKWVIQS
+RSERYDGDDSDHNSPSLFVAMRNTFCRNKRNKLQLTVADSVKLFVDHLKNTTFFVMSSATPFQNNQDLHMIDHIIRNI
+APRYHLLDQYNGTPTGMNSSEYSTLFLESIIKLLYNNGIYVSRTISMKGIRCAIVQKPISAANMYMINEISSYLAEMK
+CLAKTAHSDVKVLGKKIDQIIKSKKWESPSALMSRLEEFGEAVNTGKCGEVAIRTGYRLVFAEWNSAWQYLYDGRRRK
+TTYSNDDDDDDDDDDDDDIFSKRKKIKMDPTIQESLSSSSPPPPPPHQTEKGDTIDSDIISMSKVFSTRSCRLLSGQL
+KVNLAACCVAINKNILLSLKNKSVLKYIETVRKQKEPQKMVITVDQTGDSYYSHITDELIKIPLLESGAKKKKKGKKK
+KNAISVNRLSVFDKAPASHFIGNAYKTLLKIILLDTTYRITSLEKERVCFLLLPRLPPPAPLALLEENFLDSIEVGVG
+EGRYIEVTKRKYSGRLMSEGTLEIIPINTSAKNTTRDFQLFKHSKSVDVAIVGRSGNTGFDFHDSKDNITRARRIHII
+ADLPHDAISFLQSIGRTHRNNQRSLPRYCLFLTNIPTEKRFVDTLESRVRDSKAGTYGDRYCQNTISLKKEGKGVDGK
+IIASTTDGDSVFAGSGTDDNDDTAATAIAAVTNSVTSTITTTANTTSVIETKRPTNKDITTCTDSSHDDLSKQNKCID
+KIDFLENDFVMKVLGILLQLLAGEYNPLDIFLQIAKSGYRDGSLFIPLEGLGDSKIYLSIVEFAFECAAALLYESKIK
+CASQSFRISKVARATVSKIDRDKKRKTLDEILERLCYFYDSSIMDIGLRGNIVEEKREIKNLVSVAIQFWKTFSPLKM
+TKFSHLLVAVKDIQRGNNISVNSISKSSSNSSGNNYAASRQRKMSIRDIFRRSAVLVFGYTVRDNIQLPPPTDVLTVS
+IHDGTMKLIMNGVVSNIPMVAACNLLDALREKTPSLLLDLVNEITPYKKENSDDVESCLLTLSKLLVNKGLTYKQFRN
+YFMTIPLSEQDMLQSLFSKVQEWLSTEERFSRMCMMRRSNCISAEYTNVIACPSDVSRLYARVDDNDVTNITCDSNFA
+IDCRLSLCNDNEGPARRSTLTNTTTTTTTTTTTTSTSTGVTTAARGDINIRLTPENTIFINNLFNTLLLTNARSDMVK
+FKFWNSEIVGLPSVALVRYQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_3"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61861.1 wsv206-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61861.1 wsv206-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 234,
+            seq-data ncbieaa "MTEYSSRWENRIFREDVKNYHIIEGDIFADRFRKKNICICQQCNCITL
+KPHGLSADIVKHFGEYANSYGRRRAKPNTINTATLETRAEPGTVDFCEGTPCVANLFAQFFYGSSSNVQYLSRKYLDP
+HIRKGVDNDTAEKRLMYFRSCLNNLMFDLRNKYTYIDTVVFPHRIGCGMAGGSWADYQNVLLQFADRLSEDNITVFEV
+RNDAAIEATKRYHSRPVEGRWREREGITTD"
+          }
+        },
+        {
+          id {
+            local str "Subject_4"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61864.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61864.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 154,
+            seq-data ncbieaa "MPSLLAGLEDPSTPSEGTTVEQPLMSSGGAEGEEVERGEKMDPDNLSS
+PSVENNEADQRSQPQPQSKLSPMPELKPLPRTRYQSPQISQCQSLQMTQTLSLKAIHSPTIRVFLKEDAQPIILQDSL
+PWLDGRILEPEYDVFVRLTRRDNRPNPM"
+          }
+        },
+        {
+          id {
+            local str "Subject_5"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61865.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61865.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 215,
+            seq-data ncbieaa "MEEYSSESTESSMGSPVVTINRKRRRMKNPEKEYSVDKRKKCQMSKND
+PRRNEVGRSNSSDDTHSHNDDDDDDDDDDQGPYSRLSEDEATSPADVHHIDSDETDIEIYDDNNIENNNSNDYDDDNN
+DNNNNNNNNDDGNIVHYRFRPFTAEAALAQQILSNTAGNICGILGKLEYHLSELCPKIRAITTYSNHFSKELEKLKDN
+MEKDLENSSST"
+          }
+        },
+        {
+          id {
+            local str "Subject_6"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61866.1 wsv220-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 731,
+            seq-data ncbieaa "MSNKMTILYSELMSARENSIAAFEEAVKNISIYLLEEAERGSWGDDQN
+KLKDLYDGKSEADGLEEDTENKNLGLYVPAGIDMRAWRAGDALGDYKNAYAARLIVNITFHHNKIAEILYTLIAELLL
+LLEDNINDDGKTQLQEYGRLKPASVNETVKSLENVIREKNIEVDLKRFREIVLRLENDSRNFDRESRLSDWLLDNIQE
+RYPAGGGTTTTTTTSNNEYLCTIDDTTPLSTDTILSTLPSARRERPVRNIVGESSSAPPDRPWEDEREQTGYSIFSFR
+SVWMSEYGDYPINLVNAIIERLLLRYVVPLRDVFHVCFHLKAHLTCARNVNATWYENATFAYGLPPVYSMRDTWLELE
+NLLNVYACVAKLFLNMYDLLSSSSHGFHQSDLTRTKEAYINTIELLECMPMYLFDSKWMDENFYSWPYTRRGVRQLPV
+RNYLSENYLLRTVLVIPPNGIHPITKRKNNSGILMRLKVKAVEYITHLRTDMREIFDDGFVTIVKDNLQKTTNTTPRS
+DSRNINGMNDFEARILCDSTFENNPYVVHPLYHLKIAHRPSNWSGKGLASIEEWDARYHLASESGTLSSSVTNKNNNN
+NNNNNNNNNNNRSSWFWRSLPLFKPSLLKDSSSDSLPYKFWEAALRHIHSHQEFDRPMMNYSKNTEALEIMIKMVEVT
+EASTEKKKKSDIEDILVQDKQLESYEKQEERRLRNVERSIFLTILCKNMLTTLMNVGGI"
+          }
+        },
+        {
+          id {
+            local str "Subject_7"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61867.1 wsv216-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61867.1 wsv216-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 918,
+            seq-data ncbieaa "MEGYEIFSFISVRLVVIVLLLLSLLLYPIIRMISDYKKQTDEIVSPKV
+DSFVNTEISHIVKDIDDKEHANYIASKIRNRVYDCCNVYDNDDDDNERSDNVEDDYSSSKDTLLSIKQVRIRMSEKGE
+NNRIVSLSALYFLKASILRGRLPVSVRITFYRKDRPLCYMDTIIQSLGKPIVLKEISKCLIYGEIYRVRIESRRTVFF
+DDFVLIDSPFPEMVPVLICQDAILLKCNYKTQTATPFKAVEYNSKLFSGVYLTDFPKLLPTAGVQTGRDNILEPIPGK
+TSGHCLLYAKDPIRFDGSLSFFSDESDGTTNADLTLIKSSANPIEYYVLLKRDSPQPTRRTHANIKGWVINYRSSEGA
+EYKQIFSLSASIEKYYPRSQIEIRPNEKLRDITPEDTVTVWNTDEKIGVDKPETGTATAAETITVNGSKLFSRNAKDK
+GISFPKDSSFFQRDPHIVLDRETGECVMVTLGFHEDVALNPRWASSPCHFTSRDKLLVINPQRKHHLSPFVTSVRIYR
+GIPGGRSFTSQQGEALCSSVIVDRGDNLPSLHLPTISLPEERQRFCVHIQHKEPGTSRYSLIEHFPRSLPLETPLDVS
+SDRIYRIYTRIPSSGIASPTTANQTYANVGVINETDRPYSDLANILDDDAEGDGDDRAKHRERRTCTIFAIGLVNTYS
+DGTSIPDTIVKAIRSSLPEVVSITDINGTEVVRSKNIIVNNSSVLIILKNIQIDGSSQRWISSTPFGLGPCKTSGRCG
+ILGNWVPLYTVDHVLPICKVFSYRYADDSTARGFTVYLSNTCANGRSVSESGISEIVALYLSPEIQGKRIVLNAVAIN
+CNANGKDSNNSTDSKRTKIFSIPSKESIGGGAEGATSIIILDRVVYALMAVVITKDVERERRHFARNGLFTARSVTLS
+EEFVRRHRNVMN"
+          }
+        },
+        {
+          id {
+            local str "Subject_8"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61868.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61868.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 76,
+            seq-data ncbieaa "MFKEKIRINKQSTVILFSFYSLKIHASTYLYKIILKETIIFLLTIIED
+RGVHIDPIILLPFLSSFLETSWVTEIMI"
+          }
+        },
+        {
+          id {
+            local str "Subject_9"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61874.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61874.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 741,
+            seq-data ncbieaa "MSDKQLLEVERVLLGASSTTDPQKGLNVITKGAIRQLLSDRERKLKEW
+SPVPKPTPSTSSSTSIESAILSATKSNRADTNVADYKTCKDNSIEDNMKYIDDEFSDSDIDIMTYKVTKDMIMEEGKR
+RCSYNNDDNNINNTTAATTSSNNDNDNIISDSNNFTGYQKRIDDEASGISNINITTYTGSLLKNLLETDKRYTIVSSR
+QTLRDTPNDPHAQQQTPTGDQEQSVEQQIIRDKNTTAQQQQQIHIIQDTDQKPIRIYHLQKNSSAIALPLKPVTESSI
+SSSFSSAAATPPPPPPLPPPVPIETPAPALPLLLPPFPPPPITKPASAPVSAPALAPTSAPASALASVLLQPPPPPPP
+TPPPPPSQPMNDADSDVNVVDLTRSTSPLPPPPPPPLAHPNNSTQASSNTPQIPEFQPAAGSLFAVPYTFLIHSNYPI
+PLYLPYGSCYYHNSQYAPYNYSFRYLDNFYLPPPPPPPPPLPLPITPPFYSYRNPYSYPYFHSNHCHYCHRRTPMNID
+RQQYDLNYYRDHHHHHNYHHHHHYHYNQEGKQEVEEGNEEIARERTEIPEEMEREEVNEQDEQQFQQQQYYHHHHHHQ
+HQQQQQQQQQYRHRQYNNESEPRHGEYQYYGYNHYQQQRRSALPQRQRQRYFRNRSIPPYVNSYNYNYNNNDDNVGGW
+YIDSNTSTMREKRSGSVFEHDINNMREKRIKHQNNNSNSNSNNNTNNSSSNNNNKNNNSDDNNNTANKK"
+          }
+        },
+        {
+          id {
+            local str "Subject_10"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61876.1 baculoviral IAP repeat-containing
+ protein [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61876.1 baculoviral IAP repeat-containing protein
+ [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 181,
+            seq-data ncbieaa "MQNIFICARLRAQATLSASAIYIERSLAMPVSHFLKTECRFIDTQYNS
+HIRPTHLLLTNVYFYITVLIILGSKHFPNPIHQEYVMHQRRLETFRWWPKETAQSPHKLAEAGFVSSGLGDTVYCFHC
+GVYLEQWEKNDMPWKEHAKWSPRCRYVKMVKGDKFIIRWGPLDIDSVDIYDTIER"
+          }
+        },
+        {
+          id {
+            local str "Subject_11"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61877.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61877.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 162,
+            seq-data ncbieaa "MLSKCNRSRNRKNNKIKKKRNVTIERMDLDNELRRWLLDGWKTGGPLN
+RFRRKNTGSTNNEAPTTSQGKSKQNISSVNNTTNNTTNNSNNKKVNDFSDNSNSCSNISNSSYSSSSSSSSSSSSSSG
+SNSGNVSSSSSSRRSGNNRTIVKTNDEKKIGLNNYY"
+          }
+        },
+        {
+          id {
+            local str "Subject_12"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61886.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61886.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 233,
+            seq-data ncbieaa "MVAPHNSGIATRSFVRISGSGPCSAAGTVYMDFSRVCGAAAIVAARHR
+PPQAVMQAQHRRLSNSMDAAFLRKMAAIEDSFAESARVEIGGSEARRARREVSNLRAGARAGGGASARPAAGEGRGVP
+ARKRTSALPARDRSPDGGQRKRLRSHPSEENGKAIAPPQAKAPKTIYIVVGMKGDDARLRTVAAGQPFLLSAESLRRL
+MDQTNRLLQENQALSQRVRAYQLNESVLR"
+          }
+        },
+        {
+          id {
+            local str "Subject_13"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61889.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61889.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 504,
+            seq-data ncbieaa "PLASVHIEHTLLGFLFKMLARNIVLLLIACQWLTSHPHRHRVFGYPIE
+DTSSPFILKSPWTIRFPSAEKLDFICGICSSSSNSSSSTVEYGLTVSTNVYMYQYPIRLQRSQNCKALSITFNPIAET
+GLINVRLTEQNKNKDSNTTTSSSINSSSSSSSSSSSSSSRSRSTRSNIINNNIEVVEGADIPYSISSDEKDEKHKDVY
+IYALNFQNVDSRIRLLGSAADGFATVAEDYWSYGISGITCIFRSFPLSTDDDKSLPDEQTEITTNDNTDSVNLLQPLG
+TPSSTLPITALAALGTFSSTSPPAPTIPVSLTAIELVPSPPVEPSVLSSSTVAPPNNEREKENTTNDYFYEYYIYDDD
+DNETRGRLSTVSPRTTTVAAENAADDDYGNVEDDYNDGEEDPENKDRDRPSASSATTTTTNTTTTTNTTTTTTTSKRT
+TTTVLEGIGDNESGNRVDPVITETEKEYIVGDIGDDRVMLIMLILIVVMLVLELCIIATGLCILGY"
+          }
+        },
+        {
+          id {
+            local str "Subject_14"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61891.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61891.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 82,
+            seq-data ncbieaa "MGNLRIPVIRSTDDYDRDEYVDDGNNIVDDNNNNDVNTNDDDDDDDNN
+NDDDDDDDDDNDNNNNNSDDDDDDDKLDTIMQPK"
+          }
+        },
+        {
+          id {
+            local str "Subject_15"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61892.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61892.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 137,
+            seq-data ncbieaa "MAASPIMFIRHVLLIWMFTNSIPFLRQADGHRHTFIKLAPTTIHRLKI
+KTILDDNKVIAIWGFCDRPPVCEVCHDPPLCKHRNNAWTGSYRLDGYTQVPCDPSTQDPCNSSTRLHFHEGETLCGRS
+LGRKARGAAAR"
+          }
+        },
+        {
+          id {
+            local str "Subject_16"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61894.1 dUTPase [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61894.1 dUTPase [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 146,
+            seq-data ncbieaa "MSELNNVLKFKKLTEHAFTPSKGSKLAAGFDLYSAYDLTIPANGKSLV
+KTDIQIELPEGCYGRIAPRSGLSWKHHLDVGAGVIDRDYRGDIGVILFNHAKSDYKVKKGDRIAQLICEKIIYPDIEQ
+VEELTKTERGEGGYGSTGKQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_17"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61897.1 wsv427-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61897.1 wsv427-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 639,
+            seq-data ncbieaa "MFNNRIDTYTNRARDLLAEINNLEYVLMNNPSLLPSKEKLHTPKDEES
+QLDETHESYDESVASSSSSSSSSIFYKPECDLSLANVPLSEMVNHLTPLRTTIGARVREYVDCYGYLKKGIKINDALK
+NIWRDIIDFSFTASDNIVKETVTNRLVNVWKDTLKGVQDHQDVFSNITEKRRSSVLILLRVIERIIDANMQYSQHFVK
+DALLCRLIRGATYSLNVKNTGVLPTVMRYIPLCTETSLQPPPPPPPLSSSSSSSSSSSSASSSSLSTSTIPETDTTLE
+YRIKGVYGYGEFHPRCEDDHKIALRDICSDYFLKLLFEFLLSPHIHSTWRETYLIVFISSALKLIRNHEPFILALGKK
+KYQQEQQEQEEEQEQQQQNTLDEQQTEYNCKKYFDDNIDFTMRNPITAAGCHPFVFLPTATDFWSFCKNGQPIYNVRN
+VLVNARPSSFPPICGGPAGISQGKQLAWERYCQRQGVCDHGCECIACNRRNFLVDRVRQRIGQISGEARVTDVTKWHQ
+GTILMITFYAFTGLLAHRNYARDMDDKADFFKNLITAIEKSHYMRSKDKLITSGGGESDTSNILHTITFGVEEEFRQK
+LKSPQKKPIFITASIDDDILEGDNISRVQLTALRNRRVSEFNCWF"
+          }
+        },
+        {
+          id {
+            local str "Subject_18"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61900.1 wsv303-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61900.1 wsv303-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 851,
+            seq-data ncbieaa "MNKRLEKIAHNTYTRDNLCIGISLDFGKNKNNVSFLPKNKKPRLIDKT
+IMVKSLNETSQKQFTALRLREEFPPCSILIFSMGSVIIVGLRKLGLTPLSVLQAVSAIADTQEHPITISNVEIVNVVS
+TFNLFRLNMQSLKEFFKENKIAYTHVPDSFPGLFFKVLVPIRHLKRGETIGGYYTRAAREREAGDADAVKKNFRGKTV
+LVFQVGKCTILGACGGDDIHVIFKMLFGFFWYFIDDTVHLSAEELECGNRTYHIPPLSWYLMIDFFLRTVPGYQLKPN
+VALADLAVEDKPSVVNRRGASDLLDAFDRLSITKDRMLRRTPRENHGAWFINCLEVQPSTEGRRGRGGGGVSASAQKR
+QNLFEKELGQLKTVQEKSTANQWGVTTQQCYRRLLRLHNLTREIGEETPTPIHAPVSHTARCIFEGFEGYLPYTEEEL
+SHPERIRIEMPPKDARVTKFHQRRPLFSKESKAREVRSNHRMKIRQLDQLEEIYDLVGKAANEGRCDEIAAFLGVQPY
+IISGLLNRDISVPLQESSVFGRDYTHMTPAQIFFNKNLYKEYSNAEVANENRRGVLDFMINKDANTESIKQDHNNFNN
+IKEEAEQEQENEEEMEVEIDIDDDGNDFKDDDIYDDTSNDDDDDDDDDDDDDINNHDGDDDDDDDDNRDNDTEIYLDI
+HGMEKFLEEQVQHGMIFAPLSNYRTQHHQSLQTRLILEDLKRKTNMNMLQQQQFKQQQQQQQQQQKLNSTMLNVKSLY
+KKKESFLHKECCECKYKNKYESNFNFNTVTIPYTNVNTTTSFTTTTTSTSTTSSTTTTTTTEKLKLKRSKCITNSDIT
+ENKRQKYTLPKWKRQEHTLPQKE"
+          }
+        },
+        {
+          id {
+            local str "Subject_19"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61901.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61901.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 325,
+            seq-data ncbieaa "MPDRYIIPQRRKRRGGGGRGERRRSTSTYKDEQIKNDYHISQGIIHHT
+YRNDEINNIRNRDNWRLLKSQYNDNNNNNNHRHDHHHHQHPHHRHGWQQLIDDHRVYRNFRKCNKAKSWSNASDEHEG
+VVEMISYLNSNNEHIQKQQQQRISLYDTVTVSTETTEKEICNSVATVLTLPMSSLSQPPLLPSLLPPPLLSSSFSSSS
+SFSSSSPSYFSNIPEEGIVKVFSLSSRDNNLFATVARNVKTFSYHRDHILYLAVVAFIFLRESSLVLTPTDMKSMFNS
+PVVESLLKKLIIILQYENKTVETCMIIYNVERVAYDVICDYYN"
+          }
+        },
+        {
+          id {
+            local str "Subject_20"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61913.1 wsv136-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61913.1 wsv136-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 139,
+            seq-data ncbieaa "MCRVKNEFSKRLENFLKTQETYKFFLLLFLITAVCLCASHFIYYEIVY
+NSAHKPLEYLHQLSTSLPRVNPRKAAILIYGLQDDDHSSSSSLLLSSVDLLPPKMMDNLRKTLIDPRSFLMTSYGTHL
+GRSDYVDAPVYMS"
+          }
+        },
+        {
+          id {
+            local str "Subject_21"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61930.1 semaphorin-1A-like protein [Penaeus
+ monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61930.1 semaphorin-1A-like protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 575,
+            seq-data ncbieaa "MLPYGKEDVRLSCFKTCFLEYLITTLSIFKEAICLNNIKTVDSKSNSK
+SITDSDSDNQHFLKFKKINFSHSTSERRICLNMYIERDDQFCMEYVVYVLLAIDMFISMLDKTDDKHNNNNDNDDNDA
+NRDNYDGKKTRRSLIDISYINRDVLLAEDCKSCENSLYGFAAALLENRVKPFSFLFLSRNKKNFNDYYAGDPTSVFFT
+ADEIKSISRRIKTSRKNERIKIILSKYRKKIKDDSTKTENGLVLRARATNILIRCDDDNDIFMDVCVHIVDKESYVWI
+KTIEKQTKQLNKSLIDYLDALVKIDDSVCPDRLRVVNDVIAFKERMTDNTHKYFPTFKFSGSRKYAAISRAIETLANE
+CEPHASTPQYHHTTIKEHCSYVKDNYGSFEPFMNTILPLLINETITNIWFNRLFLLNTQREVATNNDIRSTGFLSFLK
+GVEREADKTKVMDVLRKFSNVCVTLRRNRLPFPLREYDRPTKRQKNTAVADNRYNESQPLRDIQYIQTLSKGTVNVKS
+LSSHRTPKISGDIVVGKYGADDIVNETDNNSNTSRRLANIDAGQFLQYFTPIAKGLFAQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_22"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61932.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61932.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 118,
+            seq-data ncbieaa "MSSKACRSFFFFDVKISTIIPAQHSRSVQFLSALAFCGSTSFQQQNTI
+SRANETFTRHLEHDGDFLDRLFFDIKISTIRPAQHSRSLSGSVQILLSHYHFFFCMNKTMFYFVSVYSIL"
+          }
+        },
+        {
+          id {
+            local str "Subject_23"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61938.1 wsv308-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61938.1 wsv308-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 592,
+            seq-data ncbieaa "MFPMKRKRIQGDYTRGQSRHTSTTVIPARDDYLKDSLLFETRLESFIK
+RMIERQAALSIQNAMDISDIISPNVGVDKDVLKMQAVYSTCDPDTYIENLLDFLKGEFAGNLIENNIILRNMKERRLK
+SLETIRRCLLEDAMCGDFTYDIFRSCVTLSDKREGSINADNNIVSNNPYRYRYQHQHCTPVIDAHEAFIVTMDEQNKS
+NRSIDPSHSGNDEYNKESVPLDSDDDDDDVVDDDDDDDNDDSVDYKNDDTDKLERESKGDTETDIINNVVRMLNAILY
+DEESTRGEIGKRNDPCYIYNHVKNIFKKSQDILQTGECLSCNHQPIEKFLFTLDHNSSTRSMEDLLAQLEGVINFTFP
+KGESQLSSIEEITVLRIFFKNILLLKTATLVNRYRLFLSFVVTYSISHNLNHNIRVYFQKNRAYNTHCMMDRTVNPNV
+DQRVVDKFLLSKLSSEESVFILSLLAHFLGPCLETFLCPANLYDAAINYIDSANSEWGKRYVDVSLSSKIKRILDQIA
+TRETFLKERRKRKSINTVIAYMTENRDSDTLLNPLHCIISDIGNVVEIITDGFRDLFIRTTSALNIISTLISPRNK"
+          }
+        },
+        {
+          id {
+            local str "Subject_24"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61939.1 wsv306-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61939.1 wsv306-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 426,
+            seq-data ncbieaa "MHTAHIKPNCSAVDIFCTDDRDCHVQCGSSALSVSSHTIIPEKDDYSV
+VTIYLCNKSTKRCEPNTVLKGFYDMAMHDLKGLLKRKSTLSRGLHSYLQMYDGKYFILARARFYESLSLHLHDNENLE
+MAIRNIRSEHQRKRRTYLYEKIKYLEHEGAVTDKDEVKKMMDWLSTPALTSQNPIAENTTITMDVYKQQLFGHRMPHP
+PRDTTVLTRAEEYDDRRGEYVQNVTAVLPRQHDRHRRGEHLLKPTTTTTTLERHEELSSNLQTKSPSRELQFHCNEEM
+GAGIMMAAFRDGDGIILPVCICTHPLYLTGPTCKHRTYDSVIDYELWEKSGIPEFLTDPFNDYTKANDICKRTTLNTT
+AVFDEREGVFRCQPLAAHIGQSLQFRGPYEPALILDRDYIDTFNANHQQGFKINVDYIDLLGKFWQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_25"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61945.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61945.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 251,
+            seq-data ncbieaa "MSKSYSVIGIMNKLAKKENRDISSSFIYKNTRDEDVYIGKEKQDEDEK
+DDDDTSSNVVVMQELKRVQTQRDKNDDMPSSDKVHEDDDDDDDHTPSRDNEHKDTRVVKVHDDERRECNEDDGRNENV
+NVFDLQKATNTTNTNTITVTNIKIDDNDTTNLHDQDAFKIERRLYFINSLKRVLARRKNKPANIFSIHRKKEKDDVTY
+ISAEDFAINNTKEKERTDCHKCLIHVFNRLVDCFELLIKLKTRSSVL"
+          }
+        },
+        {
+          id {
+            local str "Subject_26"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61950.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61950.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 224,
+            seq-data ncbieaa "MCNFINSIASTSIIENGKDFLRTDESNTVIIILSEDLIRNNSSASITE
+QQRLIEKTCVSTLLSTIVQKKYINKALCNLSFYIQNKMRTKREYCIVIKNPRHIEIYSYKSVMCSCDRDDEYGTDTEE
+EYICEWTTKRCINVPYIPPNYKKKIKPPYVFIFTGRHIPSILRNFSDDICAPLFVKIIYITRDDEFANVGLDDLLEHL
+PYKNCTMKVLIQRLKSNNRS"
+          }
+        },
+        {
+          id {
+            local str "Subject_27"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61954.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61954.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 284,
+            seq-data ncbieaa "MNKQGEGISPSLIFKSNSGDIKRPIDLQYWLGIINARPSKIAKQSFPG
+DDKYWQNEENLKNFLVNEKTVDRVYHFVRSEFDLNEFRLLLRTYYDRRPLYVEAVFFIHLMDGRLIHTLSNLMTLTFN
+VQHFICSVVGIYKDRCAILKFIKDDELDARATWNTALPLQHLCYRAAAKLWENGRTTLCKIPPPRIWETIKATVAIRK
+IEEGYERRICMAEHLVYPVDRAAVRERGEHSTIAYSPREVYLNINYFREDDYDSEEENSDEYYNSLVKRRPPTNNTYR
+VL"
+          }
+        },
+        {
+          id {
+            local str "Subject_28"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61955.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61955.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 266,
+            seq-data ncbieaa "MNRAIDFKCYTNLLNGVDSSVAENVEKAIEWINTRLYRNGKVYIFPDE
+AKDWKDEEVTKIAFDKDRVDRVYYFMGFMFDPTTFHIAFRTHYKSRLLYVEFVTLNLDCHDETMLILTYNAQRFVDTA
+VRSLHKDRDTVLQHMLDDRVNVCRSWRNISPLKQLCSRTITDQKIDFLSENIPKCIKDTLIKDEEISKIESKRARLIE
+EVYGNIRHCWLPGNYRVTHFAENHMWDDDNSDDEPGEYRYHEHDRRTIDTFKREILEILDII"
+          }
+        },
+        {
+          id {
+            local str "Subject_29"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61956.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61956.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 353,
+            seq-data ncbieaa "MDIDGGKGGGLFVWKPETRILDSDFELLTSGSPPKKICASRNDYSGIY
+NAINMNPNKGENNRGLLSSVTPVASALYRRRTSSKAGSPHKLLKTPPKPLTKFILDGTTISDGDMSTEQNQNSPVGEG
+RPGGTKRTSIRPDVTIRSILSAEPDRPIGSHRTSSQSECETIHPLGKINSPTDADDSERESKSNNSPTDSLCLSKEIE
+ETLTGIENRVEMDRGGRAEFEADRHVRSRRTFVPGPDQLNGLAELTFDDIYISEEDDDDDDDHETNHPLEMANSITRV
+ETDRGGRAEFEADRHVRSRRTFVPGPDQLNGLAELTFDDIYISEEDDDDDDHETNHPLEMANSITHGIVDG"
+          }
+        },
+        {
+          id {
+            local str "Subject_30"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61959.1 baculoviral IAP repeat-containing
+ protein [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61959.1 baculoviral IAP repeat-containing protein
+ [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 261,
+            seq-data ncbieaa "MNSYSVKCKSLRYESERLLTFINWPFGSLAKSLAWNGFYRKCPDDLVC
+YFCGICINVEDYSSLIEKGSGYINMKNIHYRSCPFIYGNSSMNVTREQEILISEMMRRYCKRYAKRTRTLYKTPKKRF
+LSFTNFPNRYCNVNRMAESGFYFTGELDAVRCFSCQIDIYGWQHNDDPISVHAQWSPDCEYIQAIVDDNFIDSVRDKR
+YDTLIDPNVYQTLKDCGIPDYIIRHAHRKHIIQSGELFTDAVQCLSVIEKLYNFKDK"
+          }
+        },
+        {
+          id {
+            local str "Subject_31"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61960.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61960.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 492,
+            seq-data ncbieaa "MYDYIDYKLLFFGEDVIHRILQIRNQALFVINGIKKVQEHDNLLFSKE
+KIYTVNNVMELASCTASDDDADADTNNPILMDIIGVLIYGILNEGWSESTMRCIENELVDKCLVHKYITEEEYRYCRK
+KYNNSDNDKSKNDNIPYIIDFLWNMCYFNKLYRDRYLNKNMTLRLIEKSTSSMSRNALIKHDLSFFHLPTAAGIAIYE
+YLTHRDTNLRLVKEAAKTLVAEEKYLRYSRNIRNTIEDDTTNKKKNIRLAYVNKRSKTSCALLLCKSASKINYSKKDT
+KSKLFNLQWLFNVTDIQNQKFKKCLGVIYDSIDVGDMLPNTSLSQKSKPLDWYYRFMNTGIVPFDQHNGCSEFRQYHR
+EEGNEEKEHIYHNIDEENTYVIMNINTNTIDRVTPTTLSNTDVNTVQIHNKSMKHYNTLPVDKKKNRTHRTETFTPTV
+PSSSMMMSSSVSVYDIPKKATTSIYNCKSLMIQCHKCQRYNISPYVVKCNRCRC"
+          }
+        },
+        {
+          id {
+            local str "Subject_32"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61961.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61961.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 207,
+            seq-data ncbieaa "MREYGKIYYSSMVGLLNALTEAGYPISIHDLSDRDGIKSSYRDDGVII
+THASEEALCLTLYCALGLLMEKGITVNLKRSNAAEYLLHFPTVKVEVRPNCETNTIVRGRIQRNDDRVAIGEEPVNTS
+DIYNGGKAYVYQNKALYSHSSGHLKTVIIESKGRGHTANDTLSTVLYIDSYDRSRLPDIIEDIAKYPLKFFRAIILRG
+KLL"
+          }
+        },
+        {
+          id {
+            local str "Subject_33"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61962.1 baculoviral IAP repeat-containing
+ protein [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61962.1 baculoviral IAP repeat-containing protein
+ [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 577,
+            seq-data ncbieaa "MDISHPNSFLQQEEYRLTTFSEHETSPIDTTRVYRNMPFVSYDCLRYE
+EKRLGTFIDWPHEWLKPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQ
+GNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSPDETGLYQHSGPKRSDFTTLDSRLKSYVEGWPIL
+GLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTAST
+TIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLEDVIHR
+MSVTENRVADNCSESTEREPSYGGTDISSSIFQQQAPIFPSTSETMGNRVASIQSLPSESTEVELLSQQQQVSILPST
+PEIIRQQASIFPTAPLNTTLSSSSSSSERENTETEANHILQIVEEIISQVSEEEKEGYEEKEGYEEKEEFKSRQSYEQ
+LKEELERMREDRTCKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDIKHVCRAIVS"
+          }
+        },
+        {
+          id {
+            local str "Subject_34"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61963.1 baculoviral IAP repeat-containing
+ protein [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61963.1 baculoviral IAP repeat-containing protein
+ [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 728,
+            seq-data ncbieaa "MSDSGNMDNATDIDRDLTRMCEETHRANTYGDYDQYVHHPKIMAKAGF
+YELDKRLICFRCGLNIDIDDIGKTDDIVEVHQTKRPSCVFARNLPSLPRSRLVVASDLRYETKRLETFIDWPLGEVIE
+ARDLAAAGFFYSRRNVECICFCCKVRISFKPCTRHGCCARHASTSQYITEKHLNSAYCDFAMEKVTGNVPIRINKIIS
+KIIGHQETDNEKNSCGNNEGRSRGASGEEDGGDSRESENDSSSRISAGNILSEMGIESYSGPEHENFVTPISRKYTYD
+DWPLGDIMLPKKLIAAGFFYSGYGDHVNCFHCGVGIRNWEKGDDPWTQHAMWNPECHYVRTLMGQTFIDTAKTVKNVL
+FRKPTRERTYSVTDEDWNAVMGLDITKDLLISLFPVAAVRDCVREQILVHKIPFITKHEGLYYVREKIAAYGNMDITL
+AKKISRMSTEYIQNYHAVYSVMYFLMDLKRIFIMNQDVDRNVSIDLFKPDQSLFLFRQPSYNPAATPMYQYRLSFTIP
+HPSHNSDFKFQQEYRIALEQLNRGLPVHVTNLYFRERDSISLFDIWNHLIRLSIIINDNNRSSGSSINSSNNNNNNNN
+NNNNNNNSSSSSSSSSSSSNNNNNNNNNNNNNNNNNNDDDDDDDDDDDKNSYDVFSVIREHHQRQEDEERSSEIKEAP
+DSVIGDRYLCKICLNSCVKTVTLPCRHMSCCGNCIVTQTKCPICRKKIKYTLEPYL"
+          }
+        },
+        {
+          id {
+            local str "Subject_35"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61964.1 baculoviral IAP repeat-containing
+ protein [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61964.1 baculoviral IAP repeat-containing protein
+ [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 719,
+            seq-data ncbieaa "MSQNIPLHIDDQQYHVDFSGMTSEYNRRMTFGHESSSYVINPKILAKA
+GFMRCGLSSKQYIVCVDCHLYIDIDTIMPWDDIVKIHKDKNPLCLLARNLPPLPRSKIFENRFDPATGLPADLRYEIK
+RLETFIDWPNKVVQAKDLAAAGFFYTRDTTCCICFSCHKYMNFSYDKPIVIRDMHLKKSPNCKFAQGKSVGNIPIRMS
+NILNSIVNQKRVAVTSATATATATATVDQEDLIKTRYEYAGPLHDYYKTTQSRLESFLNWPHRHRQKIEALVEAGFYY
+LGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSRIPMWRHSSSTSQDTSEHDWNI
+LLGLDYTKRLILVQGFPVVAVRDALCEQILQTGIPFSREVDCTSAVRKKIESYEEKNNNKLLTAERIANYRTVYAVMR
+FIQMVMGKSYNRSYPTGCIENSVYLYKQSAFNDSGDPNIPMYRHEISFNLPYPDHTYTGYHIESEYRMTLDRLNSYEI
+TSRISSILDQEQSASLTAIWGYLVRQTTTTKKTNTSASNVDRGDITNALDSVGEAAAAAAAAVDEEEELEVEEEEEEL
+EVEEEEEDIVVSELENQSAIGITIAPVPTMTPIPTVHTNGRDLIFHTRLYIISNANSRRVVPYQNFNSIIRGEPDIQH
+RQFNNRDEEAESKLSRSTGIEEGSMVNQTRTSIKTRGISVRSAWMPK"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 1111947
+        }
+      },
+      program-options {
+        {
+          name "RequiredStart",
+          value integer 5199
+        },
+        {
+          name "RequiredEnd",
+          value integer 5599
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 355
+          },
+          {
+            id str "blast_score",
+            value int 355
+          },
+          {
+            id str "e_value",
+            value real { 760322493040633, 10, -57 }
+          },
+          {
+            id str "bit_score",
+            value real { 141354081730704, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 71
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 88
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 794473684210526, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_6"
+            },
+            loc {
+              int {
+                from 5435,
+                to 5524,
+                strand minus,
+                id local str "Query_2"
+              },
+              int {
+                from 18,
+                to 47,
+                strand unknown,
+                id local str "Subject_6"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_6"
+            },
+            loc {
+              int {
+                from 5432,
+                to 5434,
+                strand minus,
+                id local str "Query_2"
+              },
+              empty local str "Subject_6"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_6"
+            },
+            loc {
+              int {
+                from 5210,
+                to 5431,
+                strand minus,
+                id local str "Query_2"
+              },
+              int {
+                from 48,
+                to 121,
+                strand unknown,
+                id local str "Subject_6"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 52
+          },
+          {
+            id str "blast_score",
+            value int 52
+          },
+          {
+            id str "e_value",
+            value real { 224984450443416, 10, -16 }
+          },
+          {
+            id str "bit_score",
+            value real { 246386102277464, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 8
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 13
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 147857142857143, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_11"
+            },
+            loc {
+              int {
+                from 5276,
+                to 5332,
+                strand minus,
+                id local str "Query_2"
+              },
+              int {
+                from 37,
+                to 55,
+                strand unknown,
+                id local str "Subject_11"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 45
+          },
+          {
+            id str "blast_score",
+            value int 45
+          },
+          {
+            id str "e_value",
+            value real { 297267764546862, 10, -15 }
+          },
+          {
+            id str "bit_score",
+            value real { 219422131963249, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 18
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 30
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 418533834586466, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 5441,
+                to 5473,
+                strand minus,
+                id local str "Query_2"
+              },
+              int {
+                from 222,
+                to 232,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_34"
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 233,
+                to 235,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 5375,
+                to 5440,
+                strand minus,
+                id local str "Query_2"
+              },
+              int {
+                from 236,
+                to 257,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_34"
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 258,
+                to 265,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 5309,
+                to 5374,
+                strand minus,
+                id local str "Query_2"
+              },
+              int {
+                from 266,
+                to 287,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 38
+          },
+          {
+            id str "blast_score",
+            value int 38
+          },
+          {
+            id str "e_value",
+            value real { 218332263624104, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 192458161649034, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 6
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 10
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 952255639097744, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_29"
+            },
+            loc {
+              int {
+                from 5447,
+                to 5482,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 191,
+                to 202,
+                strand unknown,
+                id local str "Subject_29"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 34
+          },
+          {
+            id str "blast_score",
+            value int 34
+          },
+          {
+            id str "e_value",
+            value real { 633784686456068, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 17705017861234, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 8
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 8
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 952255639097744, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_17"
+            },
+            loc {
+              int {
+                from 5490,
+                to 5525,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 602,
+                to 613,
+                strand unknown,
+                id local str "Subject_17"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 33
+          },
+          {
+            id str "blast_score",
+            value int 33
+          },
+          {
+            id str "e_value",
+            value real { 803659397318097, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 173198182853167, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 4
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 9
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 726691729323308, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_31"
+            },
+            loc {
+              int {
+                from 5459,
+                to 5485,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 149,
+                to 157,
+                strand unknown,
+                id local str "Subject_31"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 33
+          },
+          {
+            id str "blast_score",
+            value int 33
+          },
+          {
+            id str "e_value",
+            value real { 973353311236924, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 173198182853167, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 8
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 15
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 185451127819549, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_13"
+            },
+            loc {
+              int {
+                from 5324,
+                to 5395,
+                strand minus,
+                id local str "Query_2"
+              },
+              int {
+                from 191,
+                to 214,
+                strand unknown,
+                id local str "Subject_13"
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 5364,
+              to 5445,
+              id local str "Query_2"
+            },
+            {
+              from 5553,
+              to 5595,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5464,
+              to 5527,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5351,
+              to 5420,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5528,
+              to 5578,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5278,
+              to 5295,
+              id local str "Query_2"
+            },
+            {
+              from 5230,
+              to 5268,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus2
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 1111947",
+      "Effective search space used: 1111947",
+      "Length adjustment: 46"
+    }
+  }
+}

@@ -80,7 +80,10 @@ pub fn run_local(
         diagnostics.write_all(&record.warnings)?;
         if let Some(range) = &subject_range {
             let (from, to_exclusive) = record_cut(range, subject.sequence.len())?;
-            subject.cut_in_place(from, to_exclusive);
+            // The lower case of the whole record, which outfmt 0's Sbjct rows and the hits show
+            // (`x_soft_subject::x_masked_subject_rows`).
+            let keep_whole = args.lcase_masking && !subject.lowercase_masks.is_empty();
+            subject.cut_in_place(from, to_exclusive, keep_whole);
         }
         subjects.push(subject);
     }
@@ -169,8 +172,10 @@ pub fn run_local(
             records_read += 1;
             match query_range.map(|range| record_interval(&range, length)) {
                 None => {}
-                Some(RecordInterval::Letters { from, to }) => query.cut_in_place(from, to + 1),
-                Some(RecordInterval::Empty) => query.cut_in_place(length, length),
+                Some(RecordInterval::Letters { from, to }) => {
+                    query.cut_in_place(from, to + 1, false)
+                }
+                Some(RecordInterval::Empty) => query.cut_in_place(length, length, false),
                 Some(RecordInterval::PastEnd) => continue,
             }
             letters += length;

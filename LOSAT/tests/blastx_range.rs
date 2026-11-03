@@ -1,12 +1,13 @@
-//! BLASTX's `-query_loc` and `-subject_loc` on the command line (line SX, session SXd1).
+//! BLASTX's `-query_loc` and `-subject_loc` on the command line (line SX, sessions SXd1 and SXd2).
 //!
-//! That the reports equal NCBI's is the business of the fixtures: the `sxd.blastx.*` rows of
-//! `tests/outfmt0_manifest.tsv`, the `blastx.*` rows of `tests/fixtures/range_regression/` and the
-//! `db.bxloc.*` rows of `tests/db_search_manifest.tsv`. Here: what a run writes with a range does
-//! not depend on the threads or on the path its query batches take (`LOSAT_X_BXFLOW`, the
-//! serial batches of `-parse_deflines`), also when a later batch holds only skipped records
-//! (NCBI's `Empty CBlastQueryVector` after the reports of the batches before); and LOSAT's
-//! refusal of the formats that SXd2 brings.
+//! That the reports equal NCBI's is the business of the fixtures: the `sxd.blastx.*` and
+//! `sxd2.blastx.*` rows of `tests/outfmt0_manifest.tsv`, the `blastx.*` rows of
+//! `tests/fixtures/range_regression/` and the `db.bxloc.*` rows of `tests/db_search_manifest.tsv`.
+//! Here: what a run writes with a range does not depend on the threads or on the path its query
+//! batches take (`LOSAT_X_BXFLOW`, the serial batches of `-parse_deflines`), also when a later
+//! batch holds only skipped records (NCBI's `Empty CBlastQueryVector` after the reports of the
+//! batches before); and that a range goes with every format but those NCBI's formatting handler
+//! refuses.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -80,7 +81,7 @@ fn ranged_runs_do_not_depend_on_the_threads_or_the_batch_flow() {
     let bslice = fixture("tests/db_search/bslice.faa");
     let pd_query = fixture("tests/fasta/outfmt0/pd_sub_q.fna");
     let pd_subject = fixture("tests/fasta/outfmt0/pd_sub_p.faa");
-    let searches: [(&str, Vec<&str>, &str, bool); 5] = [
+    let searches: [(&str, Vec<&str>, &str, bool); 7] = [
         (
             "many records, outfmt 7",
             vec![
@@ -142,6 +143,36 @@ fn ranged_runs_do_not_depend_on_the_threads_or_the_batch_flow() {
             true,
         ),
         (
+            "many records, outfmt 11 (an archive per batch)",
+            vec![
+                "-query",
+                &many,
+                "-subject",
+                &mje,
+                "-query_loc",
+                "2001-6000",
+                "-outfmt",
+                "11",
+            ],
+            "2500",
+            false,
+        ),
+        (
+            "a last batch of skipped records, outfmt 5",
+            vec![
+                "-query",
+                &unsearched,
+                "-subject",
+                &bslice,
+                "-query_loc",
+                "400-1000",
+                "-outfmt",
+                "5",
+            ],
+            "500",
+            true,
+        ),
+        (
             "-parse_deflines (serial batches)",
             vec![
                 "-query",
@@ -196,16 +227,15 @@ fn ranged_runs_do_not_depend_on_the_threads_or_the_batch_flow() {
     }
 }
 
-/// No NCBI counterpart: until session SXd2 a range goes with outfmt 0, 6, 7, 10 and 20 only; the
-/// other formats are refused before anything is read or written (no `-out` file either). SAM,
-/// AIRR and FASTA stop with NCBI's errors of BLASTX's formatting handler.
+/// SAM, AIRR and FASTA stop with NCBI's errors of BLASTX's formatting handler, which comes after
+/// the ranges (an empty `-out` file, as NCBI's); the other formats search the ranges (session
+/// SXd2: their bytes are the `sxd2.blastx.*` rows of outfmt0_manifest.tsv, outfmt 13 and 14 with
+/// their side files).
 #[test]
-fn a_range_with_another_format_is_refused_before_any_output() {
+fn a_range_goes_with_every_format_but_ncbis_errors() {
     let query = fixture("tests/db_search/bslice_q.fna");
     let subject = fixture("tests/db_search/bslice.faa");
-    for format in [
-        "5", "8", "9", "11", "12", "13", "14", "15", "16", "17", "19", "21",
-    ] {
+    for format in ["5", "8", "9", "11", "12", "15", "16", "17", "19", "21"] {
         for range in ["-query_loc", "-subject_loc"] {
             let out = temp_path("out");
             let out_text = out.to_string_lossy().into_owned();
@@ -223,27 +253,20 @@ fn a_range_with_another_format_is_refused_before_any_output() {
                 "21" => Some("FASTA output format is only applicable to magicblast"),
                 _ => None,
             };
+            assert!(run.stdout.is_empty(), "{format} {range}");
+            let written = std::fs::read(&out).ok();
+            let _ = std::fs::remove_file(&out);
             if let Some(ncbi_error) = ncbi_error {
-                // NCBI's errors of BLASTX's formatting handler, which comes after the ranges.
                 assert_eq!(run.code, Some(1), "{format} {range}: {stderr}");
                 assert!(stderr.contains(ncbi_error), "{format} {range}: {stderr}");
+                // The handler of `-query` and `-out` comes before the formatting handler.
+                assert_eq!(written, Some(Vec::new()), "{range}");
             } else {
-                assert_eq!(run.code, Some(1), "{format} {range}: {stderr}");
+                assert_eq!(run.code, Some(0), "{format} {range}: {stderr}");
                 assert!(
-                    stderr.contains(&format!(
-                        "-query_loc and -subject_loc with -outfmt {format} are not supported by LOSAT's BLASTX yet"
-                    )),
-                    "{format} {range}: {stderr}"
+                    written.is_some_and(|bytes| !bytes.is_empty()),
+                    "{format} {range}: no report"
                 );
-            }
-            assert!(run.stdout.is_empty(), "{format} {range}");
-            if ncbi_error.is_some() {
-                // The handler of `-query` and `-out` comes before the formatting handler: an empty
-                // `-out` file, as NCBI's.
-                assert_eq!(std::fs::read(&out).ok(), Some(Vec::new()), "{range}");
-                let _ = std::fs::remove_file(&out);
-            } else {
-                assert!(!out.exists(), "{format} {range}: an -out file");
             }
         }
     }

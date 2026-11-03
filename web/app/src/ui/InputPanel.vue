@@ -61,17 +61,31 @@ watch(
   () => (picked.value = {}),
 );
 const groupKey = (group: FetchGroup) => group.sources.join(',');
+const groupCame = (group: FetchGroup) => group.lines.every((line) => roleState.value.fetched?.[line] !== undefined);
+/** A group's site: where it came from, else the one picked, else where it starts (groupSite). */
 function groupSource(group: FetchGroup): FetchSourceId {
+  const came = roleState.value.fetched?.[group.lines[0]!]?.source;
+  if (came !== undefined) return came;
   const pick = picked.value[groupKey(group)];
   return pick !== undefined && group.sources.includes(pick)
     ? pick
     : groupSite(group.sources, props.state.fetchSource, props.state.race[kind.value]);
 }
-const groupCame = (group: FetchGroup) => group.lines.every((line) => roleState.value.fetched?.[line] !== undefined);
+/** "C_AA004835.1", "P12345 and 1 more": each group names its first accession, which no other group has. */
 const groupName = (group: FetchGroup) =>
-  group.accessions.length === 1 ? group.accessions[0]! : `${group.accessions.length} accessions`;
+  group.accessions.length === 1 ? group.accessions[0]! : `${group.accessions[0]!} and ${group.accessions.length - 1} more`;
+function pick(group: FetchGroup, source: FetchSourceId): void {
+  picked.value = { ...picked.value, [groupKey(group)]: source };
+}
 function onGroupSource(group: FetchGroup, event: Event): void {
-  picked.value = { ...picked.value, [groupKey(group)]: (event.target as HTMLSelectElement).value as FetchSourceId };
+  pick(group, (event.target as HTMLSelectElement).value as FetchSourceId);
+  props.draft.clearFetchFailure(props.role);
+}
+function onGroupFetch(group: FetchGroup, index: number): void {
+  // The site pressed stays on the row while the group is fetched, whatever the race says meanwhile.
+  const source = groupSource(group);
+  pick(group, source);
+  props.draft.fetchGroup(props.role, index, source);
 }
 /** The in-place sentence: where Fetch sends the accessions. */
 const fetchNote = computed(() => {
@@ -194,12 +208,14 @@ function onDrop(event: DragEvent): void {
               type="button"
               :disabled="fetchBusy || groupCame(group)"
               :aria-label="`${groupCame(group) ? 'Fetched' : 'Fetch'} ${groupName(group)} from ${sourceLabel(groupSource(group))}`"
+              :title="group.accessions.length > 1 ? group.accessions.join(', ') : undefined"
               :data-testid="`${role}-fetch-group-${index}-button`"
-              @click="draft.fetchGroup(role, index, groupSource(group))"
+              @click="onGroupFetch(group, index)"
             >
               {{ groupCame(group) ? 'Fetched' : 'Fetch' }} {{ groupName(group) }}
             </button>
-            from
+            <!-- The button's name already says where it sends. -->
+            <span aria-hidden="true">from</span>
             <select
               v-if="group.sources.length > 1"
               :value="groupSource(group)"
@@ -210,7 +226,7 @@ function onDrop(event: DragEvent): void {
             >
               <option v-for="source in group.sources" :key="source" :value="source">{{ sourceLabel(source) }}</option>
             </select>
-            <template v-else>{{ sourceLabel(group.sources[0]!) }}</template>
+            <span v-else aria-hidden="true">{{ sourceLabel(group.sources[0]!) }}</span>
           </li>
         </ul>
         <p v-if="fetchState?.state === 'racing'" class="muted" role="status" :data-testid="`${role}-fetch-status`">

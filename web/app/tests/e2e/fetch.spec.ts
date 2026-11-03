@@ -15,6 +15,8 @@ const RECORDS: Readonly<Record<string, string>> = {
   P12345: '>sp|P12345|AATM_RABIT Aspartate aminotransferase, mitochondrial\nMALLHSARVLSGVASAFHPGLAAAASARASSWWAHVEMGPPDPILGVTEAYKRDTNSKK\n',
   'MH011443.1': '>MH011443.1 Homo sapiens TP53 (TP53) gene, exon 5 and partial cds\nTGGGTTGATTCCACACCCCCGCCCGGCACCCGCGTCCGCGCCGTGGCCATCTAC\n',
   'C_AA004835.1': '>C_AA004835.1 GenBase protein\nMESLVPGFNEKTHVQLSLPVLQVRDVLVRGFGDSVEEVLSEARQHLKDGTCGLVEVEKGVLPQ\n',
+  'NP_414542.1': '>NP_414542.1 thr operon leader peptide [Escherichia coli str. K-12 substr. MG1655]\nMKRISTTITTTITITTGNGAG\n',
+  P0AD86: '>sp|P0AD86|LPT_ECOLI thr operon leader peptide OS=Escherichia coli (strain K12)\nMKRISTTITTTITITTGNGAG\n',
 };
 const PROBES = [
   'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=MH011443.1&rettype=fasta&retmode=text',
@@ -150,9 +152,10 @@ test('a box that no one site serves has a Fetch per group, each sends its access
   await page.getByTestId('subject-input').fill('C_AA004835.1\nP12345\nP99999');
   await expect(page.getByTestId('subject-fetch-note')).toHaveText('No one site has all of these accessions');
   await expect(page.getByTestId('subject-fetch')).toHaveCount(0);
-  await expect(page.getByTestId('subject-fetch-group-0')).toHaveText('Fetch C_AA004835.1 from CNCB');
-  await expect(page.getByTestId('subject-fetch-group-1-button')).toHaveText('Fetch 2 accessions');
-  await expect(page.getByRole('button', { name: 'Fetch 2 accessions from NCBI' })).toBeVisible();
+  await expect(page.getByTestId('subject-fetch-group-0')).toHaveText(/^Fetch C_AA004835\.1\s*from\s*CNCB$/);
+  await expect(page.getByRole('button', { name: 'Fetch C_AA004835.1 from CNCB' })).toBeVisible();
+  await expect(page.getByTestId('subject-fetch-group-1-button')).toHaveText('Fetch P12345 and 1 more');
+  await expect(page.getByRole('button', { name: 'Fetch P12345 and 1 more from NCBI' })).toHaveAttribute('title', 'P12345, P99999');
   await expect(page.getByTestId('subject-fetch-group-1-source')).toHaveValue('ncbi');
   expect(away).toEqual([]);
 
@@ -166,8 +169,10 @@ test('a box that no one site serves has a Fetch per group, each sends its access
   await page.getByTestId('subject-fetch-group-1-button').click();
   await expect(page.getByTestId('subject-fetch-error')).toHaveText('NCBI has no protein record P99999.');
   await expect(page.getByTestId('subject-fetch-group-0-button')).toHaveText('Fetched C_AA004835.1');
+  // Another site for the group drops the message of the failed one.
   await page.getByTestId('subject-fetch-group-1-source').selectOption('ebi');
-  await expect(page.getByRole('button', { name: 'Fetch 2 accessions from EBI' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Fetch P12345 and 1 more from EBI' })).toBeVisible();
+  await expect(page.getByTestId('subject-fetch-error')).toHaveCount(0);
   await page.getByTestId('subject-input').fill('C_AA004835.1\nP12345');
   // An edit of the box drops what came.
   await expect(page.getByTestId('subject-fetch-group-0-button')).toHaveText('Fetch C_AA004835.1');
@@ -198,7 +203,7 @@ test('a site chosen by hand starts each group it serves; a box that one site ser
   await page.getByTestId('subject-input').fill('C_AA004835.1\nP12345');
   await expect(page.getByTestId('subject-fetch-note')).toHaveText('No one site has all of these accessions');
   await expect(page.getByTestId('subject-fetch-group-1-source')).toHaveValue('ebi');
-  await expect(page.getByTestId('subject-fetch-group-0')).toHaveText('Fetch C_AA004835.1 from CNCB');
+  await expect(page.getByTestId('subject-fetch-group-0')).toHaveText(/^Fetch C_AA004835\.1\s*from\s*CNCB$/);
   await page.getByTestId('subject-input').fill('C_AA004835.1');
   await expect(page.getByTestId('subject-fetch-groups')).toHaveCount(0);
   await expect(page.getByTestId('subject-fetch-source')).toHaveValue('ebi');
@@ -207,4 +212,37 @@ test('a site chosen by hand starts each group it serves; a box that one site ser
     'EBI (UniProt) has UniProt accessions only: fetch C_AA004835.1 from CNCB.',
   );
   expect(away).toEqual([]);
+});
+
+test('a group starts at the race order of the tab, and keeps the site its records came from', async ({ page }) => {
+  const away = await stubSources(page, { 'eutils.ncbi.nlm.nih.gov': 1500, 'ngdc.cncb.ac.cn': 1000 });
+  await openSearch(page);
+  await program(page, 'blastp');
+  await page.getByTestId('subject-input').fill('C_AA004835.1\nP12345');
+  await expect(page.getByTestId('subject-fetch-group-1-source')).toHaveValue('ncbi');
+  await page.getByTestId('subject-fetch-group-1-button').click();
+  await expect(page.getByTestId('subject-fetch-status')).toHaveText('Fetching 1 of 1 from NCBI…');
+  await expect(page.getByRole('button', { name: 'Fetched P12345 from NCBI' })).toBeDisabled();
+
+  // The query's Fetch races the protein sites; EBI answers first.
+  await page.getByTestId('query-input').fill('P12345');
+  await page.getByTestId('query-fetch').click();
+  await expect(page.getByTestId('query-input')).toHaveValue(RECORDS['P12345']!);
+  // What came stays named by where it came from; a new box starts at the race's first.
+  await expect(page.getByRole('button', { name: 'Fetched P12345 from NCBI' })).toBeDisabled();
+  await expect(page.getByTestId('subject-fetch-group-1-source')).toHaveValue('ncbi');
+  await page.getByTestId('subject-input').fill('C_AA004835.1\nP12345\n');
+  await expect(page.getByTestId('subject-fetch-group-1-source')).toHaveValue('ebi');
+  expect(away.slice(0, 1)).toEqual([
+    'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=protein&id=P12345&rettype=fasta&retmode=text',
+  ]);
+  // The race's fixed records, then the query's accession at EBI; nothing more of the subject.
+  expect([...away.slice(1)].sort()).toEqual(
+    [
+      'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=protein&id=NP_414542.1&rettype=fasta&retmode=text',
+      'https://rest.uniprot.org/uniprotkb/P0AD86.fasta',
+      'https://ngdc.cncb.ac.cn/genbase/api/file/fasta?acc=NP_414542.1',
+      'https://rest.uniprot.org/uniprotkb/P12345.fasta',
+    ].sort(),
+  );
 });

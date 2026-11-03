@@ -220,21 +220,26 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
 
 1. **組**：どこか 1 か所が全部を扱える欄はこれまでどおり 1 つの「Fetch」（§8、§10）。どこも全部は扱えない欄だけを、各 accession を
    扱える取得先の組（`servingSources`）で分ける：GenBase の `C_…` は CNCB だけ、UniProt のタンパク質は NCBI と EBI、RefSeq の核酸は
-   EBI を除く。組の並びは欄の中の最初の accession の順（`domain/accession.ts` の `fetchGroups`）。
+   EBI を除く。組の並びは欄の中の最初の accession の順（`domain/accession.ts` の `fetchGroups`）。CNCB はどの核酸の accession も
+   扱うので、組ができるのはタンパク質の欄（`C_…` と UniProt の accession が混ざる欄）だけ。
 2. **送り先**：取得先が 1 つの組はそこ。いくつかある組はその取得先だけの選択（「Fastest」は無い：ボタンは送る先を 1 つ名乗る）を持ち、
    初めは手で選んだ取得先（その組を扱えるなら）、無ければこのタブの競走の順の最初（走っている競走にも従う）、それも無ければ NCBI、EBI、
-   CNCB の順の最初（`application/source-race.ts` の `groupSite`）。組は競走を始めない（読み込み、Run、組のボタンのどれでも）。
+   CNCB の順で競走に落ちていない最初（`application/source-race.ts` の `groupSite`）。組は競走を始めない（読み込み、Run、組のボタンのどれでも）。
 3. **手で選んだ取得先**：ボタンは選択に関わらず、どこも全部は扱えない欄に出る（手で選んだ所で止めると、その文が名指す所も別の
    accession で止まる）。1 か所が全部を扱えるのに選んだ所が扱えない欄は §8 のとおり要求の前に断る（利用者が取得先を名指した）。
 4. **届いた組**：全部が届くまで draft のメモリ（`RoleDraft.fetched`、欄の行ごと）に持ち、最後の組が届いたら欄の行の順（組の順ではない）
    で一度に書く。欄の編集、mode を別の kind に変えること、欄全体の Fetch で捨てる。1 つの欄で取得は 1 組ずつ（他のボタンは待つ）。
    失敗した組は取得先と accession を名乗り（文に accession が無ければ前に付ける：「P12345: NCBI could not be reached (offline).」）、
-   届いた組は残すので、そのボタンでその組だけをもう一度取れる。§8 の大きさと数の上限は欄全体で数える。欄が書かれるまで Run は
-   「Fetch the subject accessions first.」で止まる。
+   届いた組は残すので、そのボタンでその組だけをもう一度取れる。組の選択を変えると失敗の文は消える。§8 の大きさと数の上限は欄全体で
+   数える。欄が書かれるまで Run は「Fetch the subject accessions first.」で、組を取っている間は「The subject accessions are still being
+   fetched.」で止まる。
 5. **画面**：行は「No one site has all of these accessions」（dev のまま）と組ごとの行：「[Fetch C_AA004835.1] from CNCB」、
-   「[Fetch 2 accessions] from [NCBI ▾]」（1 つの Fetch の行「Fetch from [Fastest ▾]」と同じ読み方。ボタンの名前は
-   「Fetch C_AA004835.1 from CNCB」まで）。届いた組は押せない「Fetched C_AA004835.1」。取得中は §8 の「Fetching 1 of 2 from CNCB…」。
-   その場の一文は足さず、「?」は §10 のまま（送るのは accession だけ、ここで選んだ所へ）。
+   「[Fetch P12345 and 1 more] from [NCBI ▾]」（1 つの Fetch の行「Fetch from [Fastest ▾]」と同じ読み方。いくつかの accession の組は
+   最初の accession を名乗る：「2 accessions」では 2 つの組が同じ名前になりうる。全部は title に並べる）。ボタンの名前（支援技術）は
+   「Fetch C_AA004835.1 from CNCB」まで。届いた組は押せない「Fetched C_AA004835.1」で、取得先は届いた所のまま（後の競走や手の選択で
+   変わらない。押した所は取得の間も行に残る）。取得中は §8 の「Fetching 1 of 2 from CNCB…」。その場の一文は足さず、「?」は §10 のまま
+   （送るのは accession だけ、ここで選んだ所へ）。
 6. **e2e**：blastp の subject に「C_AA004835.1 / P12345 / P99999」を入れ、CNCB の組は CNCB へ `C_` だけ、NCBI の組は NCBI へ 2 つ
-   （P99999 で失敗、CNCB の組は残る）、EBI を選んで UniProt へ、最後に欄が欄の順で書かれること、競走の要求が出ないことを数える
-   （`tests/e2e/fetch.spec.ts`）。
+   （P99999 で失敗、CNCB の組は残る）、EBI を選んで UniProt へ、最後に欄が欄の順で書かれること、競走の要求が出ないことを数える。
+   別の欄の Fetch の競走で EBI が先になった後も、NCBI から届いた組は「Fetched P12345 from NCBI」のままで、新しい欄の組は EBI から
+   始まる（`tests/e2e/fetch.spec.ts`）。

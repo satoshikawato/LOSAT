@@ -53,12 +53,14 @@ describe('accessionLines', () => {
       { sources: ['ncbi', 'ebi'], accessions: ['P12345', 'Q9Y261'], lines: [0, 2] },
       { sources: ['cncb'], accessions: ['C_AA004835.1', 'C_AA000002.1'], lines: [1, 3] },
     ]);
-    // EBI (ENA) is left out for RefSeq nucleotides.
-    expect(fetchGroups('nucleotide', ['C_AA004835.1', 'NR_074540.1', 'AB000001.1'])).toEqual([
+    // RefSeq proteins are neither UniProt's nor only GenBase's: a third group.
+    expect(fetchGroups('protein', ['C_AA004835.1', 'NP_414542.1', 'P12345', 'WP_000001.1'])).toEqual([
       { sources: ['cncb'], accessions: ['C_AA004835.1'], lines: [0] },
-      { sources: ['ncbi', 'cncb'], accessions: ['NR_074540.1'], lines: [1] },
-      { sources: ['ncbi', 'ebi', 'cncb'], accessions: ['AB000001.1'], lines: [2] },
+      { sources: ['ncbi', 'cncb'], accessions: ['NP_414542.1', 'WP_000001.1'], lines: [1, 3] },
+      { sources: ['ncbi', 'ebi'], accessions: ['P12345'], lines: [2] },
     ]);
+    // CNCB serves every nucleotide accession: a nucleotide box is never one that no one site serves.
+    expect(servingSources('nucleotide', ['C_AA004835.1', 'NR_074540.1', 'AB000001.1', 'P12345'])).toEqual(['cncb']);
   });
 
   it('starts a group at the site chosen by hand if it serves the group, else at the race, else at the first site', () => {
@@ -70,6 +72,9 @@ describe('accessionLines', () => {
     expect(groupSite(['ncbi', 'ebi'], 'ncbi', standing)).toBe('ncbi');
     expect(groupSite(['ncbi', 'ebi'], 'cncb', standing)).toBe('ebi');
     expect(groupSite(['cncb'], 'ebi', standing)).toBe('cncb');
+    // Not a site that failed the race while another of the group's has yet to answer.
+    expect(groupSite(['ncbi', 'ebi'], 'fastest', { answered: [{ source: 'cncb', ms: 300 }], failed: ['ncbi'] })).toBe('ebi');
+    expect(groupSite(['ncbi', 'ebi'], 'fastest', { answered: [{ source: 'cncb', ms: 300 }], failed: ['ncbi', 'ebi'] })).toBe('ncbi');
   });
 
   it('races with records that every source serves, of the kind raced', () => {

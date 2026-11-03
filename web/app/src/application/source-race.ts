@@ -36,7 +36,7 @@ export function raceChoice(standing: RaceStanding | undefined, eligible: readonl
 /**
  * Where a group of a box that no one source serves starts (line WF-5): the source chosen by hand
  * if it serves the group, else the race's choice among the group's sources, else the first of
- * them. A group never starts a race.
+ * them that has not failed the race (the first of them when all have). A group never starts a race.
  */
 export function groupSite(
   sources: readonly FetchSourceId[],
@@ -44,7 +44,7 @@ export function groupSite(
   standing: RaceStanding | undefined,
 ): FetchSourceId {
   if (choice !== 'fastest' && sources.includes(choice)) return choice;
-  return raceChoice(standing, sources) ?? sources[0]!;
+  return raceChoice(standing, sources) ?? sources.find((source) => !standing?.failed.includes(source)) ?? sources[0]!;
 }
 
 interface Race {

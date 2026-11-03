@@ -498,7 +498,7 @@ describe('SearchDraft accessions by groups, one site a press (line WF-5)', () =>
       ['cncb', 'C_AA004835.1'],
       ['cncb', 'C_AA000002.1'],
     ]);
-    expect(draft.state.get().subject.fetched).toEqual({ 0: C1, 2: C2 });
+    expect(draft.state.get().subject.fetched).toEqual({ 0: { fasta: C1, source: 'cncb' }, 2: { fasta: C2, source: 'cncb' } });
     expect(draft.state.get().subject.paste).toBe('C_AA004835.1\nP12345\nC_AA000002.1');
     expect(draft.readiness()).toBe('Fetch the subject accessions first.');
     // A site that does not serve the group is not asked.
@@ -536,11 +536,11 @@ describe('SearchDraft accessions by groups, one site a press (line WF-5)', () =>
     draft.fetchGroup('query', 1, 'ncbi');
     await draft.idle();
     expect(draft.state.get().query.fetch).toEqual({ state: 'failed', message: 'P12345: NCBI could not be reached (offline).' });
-    expect(draft.state.get().query.fetched).toEqual({ 0: C1 });
+    expect(draft.state.get().query.fetched).toEqual({ 0: { fasta: C1, source: 'cncb' } });
     // Another choice clears the message, not what came.
-    draft.setFetchSource('ebi');
+    draft.clearFetchFailure('query');
     expect(draft.state.get().query.fetch).toBeUndefined();
-    expect(draft.state.get().query.fetched).toEqual({ 0: C1 });
+    expect(draft.state.get().query.fetched).toEqual({ 0: { fasta: C1, source: 'cncb' } });
     draft.fetchGroup('query', 1, 'ebi');
     await draft.idle();
     expect(asked(fetcher)).toEqual([
@@ -562,7 +562,7 @@ describe('SearchDraft accessions by groups, one site a press (line WF-5)', () =>
     expect(draft.state.get().subject.fetched).toBeUndefined();
     draft.fetchGroup('subject', 0, 'cncb');
     await draft.idle();
-    expect(draft.state.get().subject.fetched).toEqual({ 0: C1 });
+    expect(draft.state.get().subject.fetched).toEqual({ 0: { fasta: C1, source: 'cncb' } });
     // BLASTN's subject is nucleotide: there CNCB serves both, and the box has no groups.
     draft.setProgram('blastn');
     expect(draft.state.get().subject.fetched).toBeUndefined();
@@ -577,7 +577,31 @@ describe('SearchDraft accessions by groups, one site a press (line WF-5)', () =>
     draft.fetchGroup('subject', 0, 'cncb');
     await draft.idle();
     expect(draft.state.get().subject.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10 MB') });
-    expect(draft.state.get().subject.fetched).toEqual({ 1: P });
+    expect(draft.state.get().subject.fetched).toEqual({ 1: { fasta: P, source: 'ncbi' } });
+  });
+
+  it('writes nothing of a group whose fetch an edit or a mode of the other kind stopped', async () => {
+    const fetcher = new FakeAccessionFetcher(records);
+    const { draft } = setup({ fetcher });
+    draft.setProgram('blastp');
+    draft.setPaste('subject', 'C_AA004835.1\nP12345');
+    fetcher.hold();
+    draft.fetchGroup('subject', 0, 'cncb');
+    await Promise.resolve();
+    draft.setPaste('subject', 'C_AA004835.1\nP12345\n');
+    fetcher.release();
+    await draft.idle();
+    expect(draft.state.get().subject.fetched).toBeUndefined();
+    expect(draft.state.get().subject.fetch).toBeUndefined();
+    expect(draft.state.get().subject.paste).toBe('C_AA004835.1\nP12345\n');
+    fetcher.hold();
+    draft.fetchGroup('subject', 1, 'ncbi');
+    await Promise.resolve();
+    draft.setProgram('blastn');
+    fetcher.release();
+    await draft.idle();
+    expect(draft.state.get().subject.fetched).toBeUndefined();
+    expect(draft.state.get().subject.fetch).toBeUndefined();
   });
 
   it('fetches a box that one site serves whole with the one Fetch, not by groups', async () => {

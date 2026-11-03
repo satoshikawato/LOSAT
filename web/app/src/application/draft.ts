@@ -109,9 +109,9 @@ export interface RoleDraft {
   readonly fetch?: FetchState;
   /**
    * The FASTA that the groups of a box that no one source serves have brought (fetchGroup), by
-   * line of the box; the box is written once every line has come.
+   * line of the box, with the source it came from; the box is written once every line has come.
    */
-  readonly fetched?: Readonly<Record<number, string>>;
+  readonly fetched?: Readonly<Record<number, { readonly fasta: string; readonly source: FetchSourceId }>>;
   /** The paste source first, then the files in the order they were added. */
   readonly sources: readonly DraftSource[];
   readonly mode: InputMode;
@@ -413,9 +413,12 @@ export class SearchDraft {
 
   setFetchSource(source: FetchChoice): void {
     this.set({ fetchSource: source });
-    for (const role of ROLES) {
-      if (this.role(role).fetch?.state === 'failed') this.updateRole(role, withoutFetch);
-    }
+    for (const role of ROLES) this.clearFetchFailure(role);
+  }
+
+  /** Drops the message of the role's failed fetch (another source is chosen for it). */
+  clearFetchFailure(role: InputRole): void {
+    if (this.role(role).fetch?.state === 'failed') this.updateRole(role, withoutFetch);
   }
 
   /**
@@ -542,7 +545,7 @@ export class SearchDraft {
     }
     // The limit counts the whole box: the groups that have come, then this one.
     let bytes = 0;
-    for (const text of Object.values(this.role(role).fetched ?? {})) bytes += new TextEncoder().encode(text).byteLength;
+    for (const { fasta } of Object.values(this.role(role).fetched ?? {})) bytes += new TextEncoder().encode(fasta).byteLength;
     const texts: string[] = [];
     for (const [done, accession] of group.accessions.entries()) {
       this.updateRole(role, (draft) => ({ ...draft, fetch: { state: 'fetching', source, done, total: group.accessions.length } }));
@@ -564,9 +567,9 @@ export class SearchDraft {
     }
     this.fetches.delete(role);
     const fetched = { ...this.role(role).fetched };
-    for (const [index, line] of group.lines.entries()) fetched[line] = texts[index]!;
+    for (const [index, line] of group.lines.entries()) fetched[line] = { fasta: texts[index]!, source };
     if (accessions.every((_, line) => fetched[line] !== undefined)) {
-      this.setPaste(role, accessions.map((_, line) => fetched[line]).join(''));
+      this.setPaste(role, accessions.map((_, line) => fetched[line]!.fasta).join(''));
     } else {
       this.updateRole(role, (draft) => ({ ...withoutFetch(draft), fetched }));
     }

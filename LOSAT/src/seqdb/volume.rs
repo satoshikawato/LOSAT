@@ -992,25 +992,6 @@ impl Volume {
         )
     }
 
-    /// `visit_deflines` for `defline_set`: the same pieces and fallbacks, with its decoder
-    /// (`header::decode_full`); a `general` id `BL_ORD_ID` keeps its volume-relative tag.
-    pub(super) fn visit_defline_sets(
-        &self,
-        first: u32,
-        end: u32,
-        piece_bytes: u64,
-        visit: &mut dyn FnMut(u32, Result<crate::seqid::DeflineSet, SeqDbError>) -> bool,
-    ) -> bool {
-        self.visit_headers(
-            first,
-            end,
-            piece_bytes,
-            &|oid| self.defline_set(oid),
-            &|oid, record, path| self.decode_kept_set(oid, record, path),
-            visit,
-        )
-    }
-
     /// `visit_deflines` for `header`: the same pieces and fallbacks, with its decoder.
     pub(super) fn visit_sequence_headers(
         &self,

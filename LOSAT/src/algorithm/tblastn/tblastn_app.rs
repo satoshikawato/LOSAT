@@ -1697,7 +1697,6 @@ fn parsed_shown(
                 .iter()
                 .any(|format| super::stage_e_report::is_structured_xml(&format.outfmt)),
         sam: false,
-        all_ids: false,
     }
 }
 

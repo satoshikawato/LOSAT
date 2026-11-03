@@ -1140,11 +1140,6 @@ pub(crate) struct ParsedShown {
     pub(crate) joined: bool,
     /// SAM (outfmt 17), which names a subject by an id of its Bioseq (`ParsedSubject::sam_id`).
     pub(crate) sam: bool,
-    /// The custom tabular fields of every definition line (`sallseqid`, `sallgi`, `sallacc`,
-    /// `salltitles`; `ParsedSubject::all_tabular_ids`). The tabular writers refuse those of
-    /// the call's reported sequences before their first byte; only `reports_may_refuse`, which
-    /// asks about every sequence before the search, reads this.
-    pub(crate) all_ids: bool,
 }
 
 impl ParsedShown {
@@ -1314,11 +1309,6 @@ pub(crate) fn reports_may_refuse(
                     program,
                 )
                 .map_err(|_| ReportRefusal::Headers)?;
-                if shown.all_ids {
-                    subject
-                        .all_tabular_ids(protein)
-                        .map_err(|_| ReportRefusal::Headers)?;
-                }
                 if shown.joined {
                     let mut keys = Vec::new();
                     crate::report::db_subject::join_keys(&subject, &mut keys);
@@ -2377,23 +2367,6 @@ pub(crate) fn taxdb_may_refuse(db: &SeqDb, names: bool) -> bool {
         }
     }
     database_side(db, &taxdb, names)
-}
-
-/// Whether a lookup of the taxonomy database of some taxid could be refused, for the rows of a
-/// custom tabular report that show its names (`TabularNames::look_up`), which look up every
-/// taxid of each reported sequence's definition lines (taxid 0 and the leaf taxids too), more
-/// than the prefetch's lookups that [`taxdb_may_refuse`] asks about: decided by [`taxdb_side`]
-/// alone, which asks it of every taxid of the taxonomy database in one pass; a taxonomy
-/// database that it cannot read answers `true`. `false` without `taxdb.bti` on the search path.
-pub(crate) fn any_taxdb_lookup_may_refuse(db: &SeqDb) -> bool {
-    if !db.taxdb_found() {
-        return false;
-    }
-    let Some(search_path) = db.search_path() else {
-        return false;
-    };
-    let taxdb = crate::seqdb::taxdb::LazyTaxDb::new(search_path.clone());
-    taxdb_side(&taxdb, false) != Some(false)
 }
 
 /// The taxonomy side of [`taxdb_may_refuse`]: `Some(false)` when no lookup of any taxid can be

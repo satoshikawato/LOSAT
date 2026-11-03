@@ -401,9 +401,11 @@ export const RECORD_SCANNER_CASES: readonly ContractCase<RecordScannerEnv>[] = [
     },
   },
   {
-    name: 'scan: an unknown parser kind is refused',
+    name: 'scan: an unknown parser kind is refused, kind 0 (bio\'s reader, removed) too',
     async run({ scanner }) {
-      await rejects(scanner.scan(3 as unknown as FastaParserKind, chunked(encoder.encode('>a\nAC\n'), 0)), /parser kind 3/, 'kind 3');
+      for (const kind of [0, 3]) {
+        await rejects(scanner.scan(kind as FastaParserKind, chunked(encoder.encode('>a\nAC\n'), 0)), new RegExp(`parser kind ${kind}$`), `kind ${kind}`);
+      }
     },
   },
 ];

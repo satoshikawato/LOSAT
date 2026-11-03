@@ -28,6 +28,7 @@ test('a state in progress shows the loader; it draws, and stands still when the 
   });
   await openSearch(page);
   await page.getByTestId('query-input').fill('NR_074540.1');
+  await page.getByTestId('query-fetch-source').selectOption('ncbi');
   await page.getByTestId('query-fetch').click();
 
   const status = page.getByTestId('query-fetch-status');
@@ -50,4 +51,21 @@ test('a state in progress shows the loader; it draws, and stands still when the 
 
   release();
   await expect(status).toHaveCount(0);
+});
+
+test('the race for the fastest site shows the loader too', async ({ page }) => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(/^https:\/\/(?:eutils\.ncbi\.nlm\.nih\.gov|www\.ebi\.ac\.uk|rest\.uniprot\.org|ngdc\.cncb\.ac\.cn)\//, async (route) => {
+    await held;
+    await route.fulfill({ status: 404, headers: { 'Access-Control-Allow-Origin': '*' }, body: 'not found' });
+  });
+  await openSearch(page);
+  await page.getByTestId('query-input').fill('NR_074540.1');
+  await expect(page.getByTestId('query-fetch-source')).toHaveValue('fastest');
+  await page.getByTestId('query-fetch').click();
+  const status = page.getByTestId('query-fetch-status');
+  await expect(status).toHaveText('Finding the fastest site…');
+  await expect(status.getByTestId('losat-loader')).toBeVisible();
+  release();
 });

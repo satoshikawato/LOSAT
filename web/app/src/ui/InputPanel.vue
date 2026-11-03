@@ -161,7 +161,7 @@ function onDrop(event: DragEvent): void {
           <HelpTip :id="`${role}-fetch`" label="About fetching accessions" :text="fetchHelp" />
         </div>
         <p v-if="fetchState?.state === 'racing'" class="muted" role="status" :data-testid="`${role}-fetch-status`">
-          Finding the fastest site…
+          <LosatLoader />Finding the fastest site…
         </p>
         <p
           v-else-if="fetchState?.state === 'fetching'"

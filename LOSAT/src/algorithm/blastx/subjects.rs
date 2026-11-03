@@ -297,10 +297,23 @@ fn encode(record: &FastaRecord) -> Vec<u8> {
 /// The NCBIstdaa residue that the search reads for the letter `letter` of a `-subject` record:
 /// a pyrrolysine (O) is read as X, so it is identical to an X of the query in the Seq-aligns'
 /// `num_ident` (`statistics::identity_and_positive`). The reports show the record's letters.
+#[inline(always)]
 fn search_residue(letter: u8) -> u8 {
-    match letter {
-        b'O' => aa_char_to_ncbistdaa(b'X'),
-        letter => aa_char_to_ncbistdaa(letter),
+    // `aa_char_to_ncbistdaa` of each ASCII byte with O as X: one load per letter, as before.
+    const TABLE: [u8; 128] = {
+        let mut table = [0; 128];
+        let mut byte = 0;
+        while byte < 128 {
+            table[byte] = aa_char_to_ncbistdaa(byte as u8);
+            byte += 1;
+        }
+        table[b'O' as usize] = aa_char_to_ncbistdaa(b'X');
+        table
+    };
+    if letter < 128 {
+        TABLE[letter as usize]
+    } else {
+        aa_char_to_ncbistdaa(letter)
     }
 }
 

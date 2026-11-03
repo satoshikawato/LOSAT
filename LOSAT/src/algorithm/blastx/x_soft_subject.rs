@@ -293,14 +293,18 @@ fn x_shifted_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaRecord]) {
                 hit.hit.s_end as i32 - shift,
             ));
     }
+    let mut record_runs: std::collections::HashMap<u32, Vec<(i32, i32)>> =
+        std::collections::HashMap::new();
     for hit in hits.iter_mut() {
         let Some(record) = subjects.get(hit.hit.s_idx as usize) else {
             continue;
         };
         let ranges = &hsp_ranges[&(hit.hit.q_idx, hit.hit.s_idx)];
-        let runs: Vec<(i32, i32)> = record
-            .archive_lowercase_runs()
-            .into_iter()
+        let runs: Vec<(i32, i32)> = record_runs
+            .entry(hit.hit.s_idx)
+            .or_insert_with(|| record.archive_lowercase_runs())
+            .iter()
+            .copied()
             .filter(|&(from, to)| {
                 ranges
                     .iter()

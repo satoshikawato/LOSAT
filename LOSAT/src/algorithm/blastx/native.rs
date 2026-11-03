@@ -456,13 +456,15 @@ fn run_inner(
     };
     // The subjects as NCBI searches them: each cut to its interval (an interval without letters
     // leaves a record without letters, `write_empty_subject_warnings`). The archive's Bioseqs and
-    // the lower case of outfmt 0's Sbjct rows (`x_soft_subject::x_masked_subject_rows`) read the
-    // whole record.
+    // the lower case of outfmt 0's Sbjct rows (`x_soft_subject::x_masked_subject_rows`, records
+    // with lower case only) read the whole record.
     if let Some(range) = &subject_range {
-        let keep_whole = archive.is_some() || args.lcase_masking;
+        let shows_lower_case = args.lcase_masking && choice.number == 0;
         for record in &mut subjects {
             let (from, to_exclusive) =
                 crate::blastinput::seq_range::record_cut(range, record.sequence.len())?;
+            let keep_whole =
+                archive.is_some() || (shows_lower_case && !record.lowercase_masks.is_empty());
             record.cut_in_place(from, to_exclusive, keep_whole);
         }
     }

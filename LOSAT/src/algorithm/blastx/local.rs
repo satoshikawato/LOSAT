@@ -80,9 +80,10 @@ pub fn run_local(
         diagnostics.write_all(&record.warnings)?;
         if let Some(range) = &subject_range {
             let (from, to_exclusive) = record_cut(range, subject.sequence.len())?;
-            // The lower case of the whole record, which outfmt 0's Sbjct rows show
+            // The lower case of the whole record, which outfmt 0's Sbjct rows and the hits show
             // (`x_soft_subject::x_masked_subject_rows`).
-            subject.cut_in_place(from, to_exclusive, args.lcase_masking);
+            let keep_whole = args.lcase_masking && !subject.lowercase_masks.is_empty();
+            subject.cut_in_place(from, to_exclusive, keep_whole);
         }
         subjects.push(subject);
     }

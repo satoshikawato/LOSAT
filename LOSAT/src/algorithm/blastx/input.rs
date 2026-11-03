@@ -108,8 +108,8 @@ impl FastaRecord {
         }
     }
 
-    /// The letters of the record as the archive's Bioseq holds them: the whole record even when
-    /// a range cut it (`cut_in_place`).
+    /// The letters of the record as the archive's Bioseq holds them: the whole record when a range
+    /// cut it keeping them (`cut_in_place`'s `keep_whole`), else the searched letters.
     pub fn archive_letters(&self) -> &[u8] {
         self.source
             .as_deref()
@@ -117,31 +117,21 @@ impl FastaRecord {
             .unwrap_or(&self.sequence)
     }
 
-    /// The record's lower-case runs `[left, right]` as the reader found them, in the whole
-    /// record: those of `archive_letters` for a record a range cut, else `lowercase_masks`.
+    /// The record's lower-case runs `[left, right]` as the reader found them: in the whole record
+    /// for a record that keeps its whole letters (those of `archive_letters`), else in the searched
+    /// letters (`lowercase_masks`).
     pub fn archive_lowercase_runs(&self) -> Vec<(i32, i32)> {
-        let Some(uncut) = self
+        match self
             .source
             .as_deref()
             .and_then(|source| source.uncut.as_deref())
-        else {
-            return self.lowercase_masks.clone();
-        };
-        let mut runs: Vec<(i32, i32)> = Vec::new();
-        for (offset, letter) in uncut.iter().enumerate() {
-            if !letter.is_ascii_lowercase() {
-                continue;
-            }
-            let offset = offset as i32;
-            match runs.last_mut().filter(|run| run.1 + 1 == offset) {
-                Some(run) => run.1 = offset,
-                None => runs.push((offset, offset)),
-            }
+        {
+            Some(uncut) => crate::algorithm::tblastn::archive::lowercase_runs(uncut),
+            None => self.lowercase_masks.clone(),
         }
-        runs
     }
 
-    /// Whether the whole record has lower-case runs (`archive_lowercase_runs`).
+    /// Whether the record has lower-case runs (`archive_lowercase_runs`).
     pub fn has_lowercase_runs(&self) -> bool {
         match self
             .source
@@ -183,16 +173,20 @@ impl FastaRecord {
         source.uncut_length = length;
         source.cut_from = from;
         if keep_whole {
-            // As the shared reader keeps them: lower case where the lower-case masks lie, which
-            // the archive's `LCaseMask` reads back (`archive_lowercase_runs`).
-            let mut uncut = self.sequence.clone();
+            // The searched letters are copied out and the record's letters become the whole
+            // letters, so the record holds them once. As the shared reader keeps them: lower case
+            // where the lower-case masks lie, which the archive's `LCaseMask` reads back
+            // (`archive_lowercase_runs`).
+            let mut uncut = std::mem::take(&mut self.sequence);
+            self.sequence = uncut[from..to_exclusive].to_vec();
             for &(left, right) in &self.lowercase_masks {
                 uncut[left as usize..=right as usize].make_ascii_lowercase();
             }
             source.uncut = Some(uncut);
+        } else {
+            self.sequence.truncate(to_exclusive);
+            self.sequence.drain(..from);
         }
-        self.sequence.truncate(to_exclusive);
-        self.sequence.drain(..from);
         let (from, last) = (from as i32, to_exclusive as i32 - 1);
         self.lowercase_masks.retain_mut(|(left, right)| {
             *left = (*left - from).max(0);

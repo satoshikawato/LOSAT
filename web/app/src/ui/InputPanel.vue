@@ -1,13 +1,15 @@
 <script setup lang="ts">
 // A role's block ("Enter Query Sequence", "Enter Subject Sequence"), in the order of NCBI's
-// two-sequence page: the paste box with its subrange beside it, "Or, upload file", the
+// two-sequence page: the paste box (FASTA, or accessions to fetch) with its subrange beside it, "Or, upload file", the
 // role's genetic code (BLASTX, TBLASTN, TBLASTX), the Job Title (query), then LOSAT's own parts: the
 // inputs with their records, and Combined / Separate. A file dropped anywhere on the block is
 // opened.
 import { computed, ref } from 'vue';
 import type { DraftState, SearchDraft } from '../application/draft';
+import { accessionLines, FETCH_SOURCES, type FetchSourceId } from '../domain/accession';
 import { sectionsAt, writtenValue } from '../domain/parameters';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
+import HelpTip from './HelpTip.vue';
 import ParameterField from './ParameterField.vue';
 import RegionPicker from './RegionPicker.vue';
 import SourceCard from './SourceCard.vue';
@@ -19,6 +21,12 @@ const program = computed(() => programById(props.state.program));
 const kind = computed(() => sequenceKind(program.value, props.role));
 const dragging = ref(false);
 const fileInput = ref<HTMLInputElement>();
+
+/** The box's accessions, when it holds accessions only: "Fetch" brings their FASTA into it. */
+const accessions = computed(() => accessionLines(roleState.value.paste));
+const fetchState = computed(() => roleState.value.fetch);
+const sourceLabel = (id: FetchSourceId) => FETCH_SOURCES.find((source) => source.id === id)!.label;
+const fetchSource = computed(() => sourceLabel(props.state.fetchSource));
 
 const readySources = computed(() => roleState.value.sources.filter((source) => source.status === 'ready'));
 const regionRecord = computed(() => {
@@ -44,6 +52,10 @@ const subjectCodeNote = computed(() => {
 
 function onPaste(event: Event): void {
   props.draft.setPaste(props.role, (event.target as HTMLTextAreaElement).value);
+}
+
+function onFetchSource(event: Event): void {
+  props.draft.setFetchSource((event.target as HTMLSelectElement).value as FetchSourceId);
 }
 
 function onFiles(event: Event): void {
@@ -72,7 +84,7 @@ function onDrop(event: DragEvent): void {
     <div class="entry">
       <div class="entry-paste">
         <div class="entry-label">
-          <label :for="`${role}-input`">Enter FASTA sequence(s)</label>
+          <label :for="`${role}-input`">Enter accession number(s) or FASTA sequence(s)</label>
           <span class="kind">{{ kind }}</span>
           <button type="button" class="link" :data-testid="`${role}-clear`" @click="draft.setPaste(role, '')">Clear</button>
         </div>
@@ -85,6 +97,46 @@ function onDrop(event: DragEvent): void {
           :data-testid="`${role}-input`"
           @input="onPaste"
         />
+        <div v-if="accessions" class="fetch-row" :data-testid="`${role}-fetch-row`">
+          <button
+            type="button"
+            :disabled="fetchState?.state === 'fetching'"
+            :data-testid="`${role}-fetch`"
+            @click="draft.fetchAccessions(role)"
+          >
+            Fetch
+          </button>
+          <label>
+            from
+            <select
+              :value="state.fetchSource"
+              :disabled="fetchState?.state === 'fetching'"
+              :data-testid="`${role}-fetch-source`"
+              @change="onFetchSource"
+            >
+              <option v-for="source in FETCH_SOURCES" :key="source.id" :value="source.id">{{ source.label }}</option>
+            </select>
+          </label>
+          <span class="hint" :data-testid="`${role}-fetch-note`">
+            Sends the {{ accessions.length === 1 ? 'accession' : 'accessions' }} to {{ fetchSource }}
+          </span>
+          <HelpTip
+            :id="`${role}-fetch`"
+            label="About fetching accessions"
+            text="Fetch sends only the accessions, to the site chosen here, and writes the FASTA it gets into the box. Sequences, files and results stay in this browser. EBI answers from ENA for nucleotides and from UniProt for proteins, CNCB from GenBase."
+          />
+        </div>
+        <p
+          v-if="fetchState?.state === 'fetching'"
+          class="muted"
+          role="status"
+          :data-testid="`${role}-fetch-status`"
+        >
+          Fetching {{ fetchState.done + 1 }} of {{ fetchState.total }} from {{ sourceLabel(fetchState.source) }}…
+        </p>
+        <p v-else-if="fetchState?.state === 'failed'" class="error" role="alert" :data-testid="`${role}-fetch-error`">
+          {{ fetchState.message }}
+        </p>
       </div>
       <div class="entry-subrange">
         <RegionPicker

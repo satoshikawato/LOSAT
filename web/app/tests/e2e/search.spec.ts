@@ -593,13 +593,13 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
     ['subject', 'Subject'],
   ] as const) {
     const panel = page.getByTestId(`${role}-panel`);
-    await expect(panel).toContainText('Enter FASTA sequence(s)');
+    await expect(panel).toContainText('Enter accession number(s) or FASTA sequence(s)');
     // The subrange appears only once one record is included.
     await expect(page.getByTestId(`${role}-region`)).toHaveCount(0);
     await expect(panel).not.toContainText(`${title} subrange`);
     await expect(panel).toContainText('or drop files here');
     await expect(panel).toContainText('Or, upload file');
-    await expect(page.getByTestId(`${role}-input`)).toHaveAccessibleName('Enter FASTA sequence(s)');
+    await expect(page.getByTestId(`${role}-input`)).toHaveAccessibleName('Enter accession number(s) or FASTA sequence(s)');
   }
   await expect(page.getByTestId('query-panel')).toContainText('Job Title');
   await expect(page.getByTestId('query-panel')).toContainText('Enter a descriptive title for your search');

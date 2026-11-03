@@ -7,6 +7,7 @@ import { SearchDraft } from './application/draft';
 import { ResultsBrowser } from './application/results';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
+import { BrowserAccessionFetcher } from './infra/browser/accession-fetcher';
 import { browserPage } from './infra/browser/page';
 import { browserDownloader } from './infra/browser/platform';
 import { startDataWorker } from './infra/data-worker/gateway';
@@ -58,6 +59,7 @@ export function createApp(options: AppOptions = {}): App {
     engine,
     data,
     enqueueAll: (requests) => coordinator.enqueueAll(requests),
+    fetcher: new BrowserAccessionFetcher(),
     now: () => performance.now(),
   });
   const results = new ResultsBrowser({

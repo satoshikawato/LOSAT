@@ -85,7 +85,7 @@ const extraChanged = computed(() => extra.value.trim() !== '');
           <HelpTip
             id="param-extra"
             label="About Additional options"
-            text="Other options of the losat command line, written as there: -ungapped -qcov_hsp_perc 50. Quote a value with spaces: -dust '20 64 1'."
+            text="Other options of the losat command line, written as there: -qcov_hsp_perc 50 -ungapped"
           />
         </div>
       </div>

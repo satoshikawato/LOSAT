@@ -905,9 +905,12 @@ test("Additional options: the command line's other options after the form's, mar
   await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is managed by LOSAT');
-  await extra.fill("-dust '20 64");
+  await extra.fill("-strand 'plus");
   await expect(validation).toHaveText("Additional options: a quote (') is not closed");
-  await extra.fill("-ungapped  -dust '20 64 1'");
+  // An option of the form is set there.
+  await extra.fill('-ungapped -evalue=1');
+  await expect(validation).toHaveText('-evalue is set in the form: Expect threshold');
+  await extra.fill("-ungapped  -strand 'plus'");
   await expect(validation).toHaveAttribute('data-state', 'ok');
   await expect(field).toHaveClass(/\bchanged\b/);
   await expect(field).toContainText('♦');
@@ -917,14 +920,14 @@ test("Additional options: the command line's other options after the form's, mar
   await paste(page, 'query', '>q\nACGTACGTACGTAAACCCGGGTTT\n');
   await paste(page, 'subject', '>s\nACGTACGTACGTAAACCCGGGTTTACGT\n');
   await submit(page);
-  await expect(page.getByTestId('results-run-options')).toHaveText('-culling_limit 1 -ungapped -dust 20 64 1');
+  await expect(page.getByTestId('results-run-options')).toHaveText('-culling_limit 1 -ungapped -strand plus');
   await waitStatus(page, 1, 'completed');
   await backToSearch(page);
   // Each mode has its own; "Restore default search parameters" empties them.
   await program(page, 'blastp');
   await expect(extra).toHaveValue('');
   await program(page, 'blastn');
-  await expect(extra).toHaveValue("-ungapped  -dust '20 64 1'");
+  await expect(extra).toHaveValue("-ungapped  -strand 'plus'");
   await page.getByTestId('restore-defaults').click();
   await expect(extra).toHaveValue('');
   await expect(field).not.toHaveClass(/\bchanged\b/);

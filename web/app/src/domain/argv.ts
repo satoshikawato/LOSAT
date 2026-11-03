@@ -45,6 +45,11 @@ export function buildArgv(input: ArgvInput): readonly string[] {
     // -flag=value is the command line's form of -flag value too.
     const flag = word.split('=', 1)[0]!;
     if (RESERVED_FLAGS.includes(flag)) throw new Error(`${flag} is managed by LOSAT`);
+    // The engine reads the argv as one NUL-separated text whose last empty word it drops, and a
+    // run adds -num_threads after the words, which a last -- would leave out of the options: a
+    // word that the validation and the run would read differently is refused.
+    const unread = word === '' ? "''" : word === '--' ? '--' : word.includes('\0') ? 'a NUL character' : undefined;
+    if (unread !== undefined) throw new Error(`Additional options: ${unread} is not accepted`);
     argv.push(word);
   }
   return Object.freeze(argv);
@@ -93,9 +98,14 @@ export function splitOptions(text: string): readonly string[] {
  * CLI default format, so a command without it may not run.
  */
 export function toShellCommand(argv: readonly string[], outfmt: OutputFormat): string {
+  return shellWords(['losat', ...argv, '-outfmt', String(outfmt)]);
+}
+
+/** Words as a POSIX shell reads them back (`splitOptions`): quoted only where they need it. */
+export function shellWords(words: readonly string[]): string {
   const quote = (word: string) =>
     /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
-  return ['losat', ...argv, '-outfmt', String(outfmt)].map(quote).join(' ');
+  return words.map(quote).join(' ');
 }
 
 /** The value of an option in an argv (the word after its last occurrence), or undefined where it is not given. */

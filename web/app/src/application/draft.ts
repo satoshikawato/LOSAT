@@ -14,7 +14,7 @@
 // input, or separate searches (one run per source, started as a group).
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES, splitOptions } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
-import { formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
+import { formControlOf, formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
 import { fastaParser, PROGRAMS, programById, type InputRole, type ProgramId } from '../domain/programs';
 import { REGION_FLAG, regionProblem, regionValue, type RegionText } from '../domain/region';
 import type { DataGateway } from '../ports/data';
@@ -370,10 +370,21 @@ export class SearchDraft {
     return parameters;
   }
 
-  /** The words of the program's "Additional options" (throws on an unclosed quote). */
+  /**
+   * The words of the program's "Additional options". Throws on an unclosed quote, and on an
+   * option that the form sets (`formControlOf`) or a role's subrange, which are set there.
+   */
   extraWords(): readonly string[] {
-    const { program, extra } = this.state.get();
-    return splitOptions(extra[program]);
+    const { program, extra, description } = this.state.get();
+    const words = splitOptions(extra[program]);
+    for (const word of words) {
+      const flag = word.split('=', 1)[0]!;
+      const role = ROLES.find((r) => REGION_FLAG[r] === flag);
+      const control =
+        role === undefined ? formControlOf(programById(program), description?.parameters, flag) : `${role === 'query' ? 'Query' : 'Subject'} subrange`;
+      if (control !== undefined) throw new Error(`${flag} is set in the form: ${control}`);
+    }
+    return words;
   }
 
   /** The name of the role's input in the argv of a combined search (plan §5.3). */

@@ -359,20 +359,20 @@ describe('SearchDraft submit', () => {
   it('writes the words of Additional options after the form\'s, for each program, and refuses an unclosed quote', async () => {
     const { draft, requests, validated } = setup();
     draft.setField('-evalue', '1e-5');
-    draft.setExtra(" -ungapped  -dust '20 64 1' ");
+    draft.setExtra(" -ungapped  -strand 'plus' ");
     await draft.idle();
     expect(validated.at(-1)).toEqual([
-      'blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-evalue', '1e-5', '-ungapped', '-dust', '20 64 1',
+      'blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-evalue', '1e-5', '-ungapped', '-strand', 'plus',
     ]);
     draft.setPaste('query', '>q\nACGT\n');
     draft.setPaste('subject', '>s\nACGT\n');
     expect((await draft.submit()).ok).toBe(true);
     expect(requests[0]![0]!.parameters).toEqual([['-evalue', '1e-5']]);
-    expect(requests[0]![0]!.extra).toEqual(['-ungapped', '-dust', '20 64 1']);
+    expect(requests[0]![0]!.extra).toEqual(['-ungapped', '-strand', 'plus']);
     // Each program keeps its own words; a program without them adds none.
     draft.setProgram('blastp');
     await draft.idle();
-    expect(draft.state.get().extra).toMatchObject({ blastn: " -ungapped  -dust '20 64 1' ", blastp: '' });
+    expect(draft.state.get().extra).toMatchObject({ blastn: " -ungapped  -strand 'plus' ", blastp: '' });
     expect(validated.at(-1)).toEqual(['blastp', '-query', 'query.fa', '-subject', 'subject.fa']);
     expect((await draft.submit()).ok).toBe(true);
     expect(requests[1]![0]!).not.toHaveProperty('extra');
@@ -392,9 +392,34 @@ describe('SearchDraft submit', () => {
     await draft.idle();
     expect(draft.state.get().validation).toEqual({ state: 'invalid', message: '-num_threads is managed by LOSAT' });
     expect(await draft.submit()).toEqual({ ok: false, message: '-num_threads is managed by LOSAT' });
-    draft.setExtra('-culling_limit 2 -ungapped');
+    draft.setExtra('-qcov_hsp_perc 50 -ungapped');
     expect((await draft.submit()).ok).toBe(true);
-    expect(coordinator.state.get().runs[0]!.snapshot.argv.slice(5)).toEqual(['-culling_limit', '2', '-ungapped']);
+    expect(coordinator.state.get().runs[0]!.snapshot.argv.slice(5)).toEqual(['-qcov_hsp_perc', '50', '-ungapped']);
+  });
+
+  it('refuses in Additional options the options that the form sets, and the subranges, with the control that sets them', async () => {
+    const { draft } = setup();
+    await draft.idle();
+    const refusal = async (text: string) => {
+      draft.setExtra(text);
+      await draft.idle();
+      const validation = draft.state.get().validation;
+      return validation.state === 'invalid' ? validation.message : validation.state;
+    };
+    // A -task here would change the defaults that the form leaves out of the argv.
+    expect(await refusal('-ungapped -task=blastn')).toBe('-task is set in the form: Optimize for');
+    expect(await refusal('-evalue 1')).toBe('-evalue is set in the form: Expect threshold');
+    expect(await refusal('-penalty -3')).toBe('-penalty is set in the form: Match/Mismatch Scores');
+    expect(await refusal('-gapopen 5')).toBe('-gapopen is set in the form: Gap Costs');
+    expect(await refusal("-dust '20 64 1'")).toBe('-dust is set in the form: Low complexity regions');
+    expect(await refusal('-culling_limit 2')).toBe('-culling_limit is set in the form: Max matches in a query range');
+    expect(await refusal('-query_loc 1-10')).toBe('-query_loc is set in the form: Query subrange');
+    expect(await refusal('-subject_loc=1-10')).toBe('-subject_loc is set in the form: Subject subrange');
+    // Another program's form: BLASTP has no -dust field, TBLASTX's genetic codes are fields.
+    draft.setProgram('tblastx');
+    expect(await refusal('-db_gencode 4')).toBe('-db_gencode is set in the form: Genetic code');
+    draft.setProgram('blastp');
+    expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
   });
 
   it('gives every run of the draft its Job Title, outside the argv', async () => {

@@ -392,10 +392,15 @@ mod tests {
     /// batch of several queries).
     #[test]
     fn a_unit_of_a_reader_batch_of_several_queries_is_not_split() {
-        use super::super::split::split_queries;
+        use super::super::split::{split_queries, DEFAULT_SIZES};
         let (records, mut full, options) =
             super::super::stage_c_tests::fixture("S12_split19411.fna");
-        assert_eq!(split_queries(&records, &full, &options).unwrap().len(), 2);
+        assert_eq!(
+            split_queries(&records, &full, &options, DEFAULT_SIZES)
+                .unwrap()
+                .len(),
+            2
+        );
         full.reader_shape = Some(Arc::new(ReaderBatchShape {
             query_count: 2,
             concatenated_length: 2 * full.batch_concatenated_length(),
@@ -404,6 +409,11 @@ mod tests {
             word_cutoff_min: None,
             redo_cutoff_min: None,
         }));
-        assert_eq!(split_queries(&records, &full, &options).unwrap().len(), 1);
+        assert_eq!(
+            split_queries(&records, &full, &options, DEFAULT_SIZES)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 }

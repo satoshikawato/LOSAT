@@ -870,7 +870,10 @@ pub fn check_query_split_environment(
 ///     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
 ///         retval = NStr::StringToInt(chunk_sz_str);
 /// ```
-fn read_query_split_variable(program: &str, variable: &str) -> anyhow::Result<Option<i32>> {
+pub(crate) fn read_query_split_variable(
+    program: &str,
+    variable: &str,
+) -> anyhow::Result<Option<i32>> {
     match std::env::var_os(variable) {
         Some(value) if !crate::blastinput::input_files::is_blank(value.as_encoded_bytes()) => {
             match crate::blastinput::query_batch::ncbi_string_to_int(&value) {

@@ -5,7 +5,7 @@ use super::{
     preliminary::{sort_by_score, PreliminaryHsp},
     query_setup::{prepare_queries, PreparedQueryBatch},
 };
-use crate::algorithm::blastn::query_split::{restrict_masks, ChunkQuery};
+use crate::algorithm::blastn::query_split::{restrict_masks, ChunkQuery, SplitSizes};
 use crate::utils::dust::MaskedInterval;
 use anyhow::{ensure, Result};
 use std::ops::Range;
@@ -35,7 +35,100 @@ pub const CHUNK_SIZE: usize = 10002;
 //     return retval;
 // ```
 pub const OVERLAP_NT: usize = 297;
-pub const OVERLAP_AA: i32 = 99;
+
+/// The sizes when neither `CHUNK_SIZE` nor `OVERLAP_CHUNK_SIZE` is set.
+pub const DEFAULT_SIZES: SplitSizes = SplitSizes {
+    chunk_size: CHUNK_SIZE as u64,
+    overlap: OVERLAP_NT as u64,
+};
+
+/// LOSAT's refusal of a query split (`split_sizes`, `split_queries`), not an error of NCBI's
+/// engine: it gets no `BLAST engine error:` (`native.rs` `search_error`).
+#[derive(Debug)]
+pub struct QuerySplitRefusal(pub String);
+
+impl std::fmt::Display for QuerySplitRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for QuerySplitRefusal {}
+
+fn refusal(message: impl Into<String>) -> anyhow::Error {
+    QuerySplitRefusal(message.into()).into()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:54-62
+// ```c++
+// SplitQuery_GetChunkSize(EProgram program)
+// {
+//     size_t retval = 0;
+//
+//     // used for experimentation purposes
+//     char* chunk_sz_str = getenv("CHUNK_SIZE");
+//     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
+//         retval = NStr::StringToInt(chunk_sz_str);
+//         _TRACE("Using query chunk size from environment " << retval);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:50-60
+// ```c++
+// size_t
+// SplitQuery_GetOverlapChunkSize(EBlastProgramType program)
+// {
+//     size_t retval = 100;
+//     // used for experimentation purposes
+//     char* overlap_sz_str = getenv("OVERLAP_CHUNK_SIZE");
+//     if (overlap_sz_str && !NStr::IsBlank(overlap_sz_str)) {
+//         retval = NStr::StringToInt(overlap_sz_str);
+//         _TRACE("Using overlap chunk size from environment " << retval);
+//         return retval;
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:105-111
+// ```c++
+//     if ( !SplitQuery_ShouldSplit(program, *chunk_size,
+//                                  concatenated_query_length, num_queries)) {
+//         _TRACE("Not splitting queries");
+//         return 1;
+//     }
+//
+//     size_t overlap_size = SplitQuery_GetOverlapChunkSize(program);
+// ```
+/// The chunk size and overlap of the query batch of `records` (prepared as `full`), in
+/// nucleotides, as NCBI's query splitter reads them for each batch before the batch's queries
+/// are set up:
+/// `CHUNK_SIZE` always, `OVERLAP_CHUNK_SIZE` only when the batch has one query
+/// (`SplitQuery_ShouldSplit`), also for an ungapped search, which is not split. The `int`
+/// becomes NCBI's 64-bit `size_t`, so -1 passes the check of 3 and -2 does not. A chunk size
+/// not divisible by 3 is NCBI's engine error; a value NCBI cannot convert is LOSAT's refusal
+/// (NCBI stops with a `CStringException` that names its build's source files).
+pub fn split_sizes(records: &[FastaRecord], full: &PreparedQueryBatch) -> Result<SplitSizes> {
+    let read = |variable: &str| {
+        crate::blastinput::app::read_query_split_variable("BLASTX", variable)
+            .map_err(|error| refusal(error.to_string()))
+    };
+    let chunk_size = read("CHUNK_SIZE")?.map_or(CHUNK_SIZE as u64, |value| i64::from(value) as u64);
+    validate_chunk_size(chunk_size)?;
+    let overlap = match batch_query_count(records, full) > 1 {
+        true => OVERLAP_NT as u64,
+        false => {
+            read("OVERLAP_CHUNK_SIZE")?.map_or(OVERLAP_NT as u64, |value| i64::from(value) as u64)
+        }
+    };
+    Ok(SplitSizes {
+        chunk_size,
+        overlap,
+    })
+}
+
+/// The queries of the query batch whose records (or reader-batch unit) are `records`: with a
+/// reader batch of several units it is the reader batch's (`reader_batch.rs`).
+fn batch_query_count(records: &[FastaRecord], full: &PreparedQueryBatch) -> usize {
+    full.reader_shape
+        .as_deref()
+        .map_or(records.len(), |shape| shape.query_count)
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:105-145
 // ```c++
@@ -81,21 +174,27 @@ pub const OVERLAP_AA: i32 = 99;
 //
 //     return num_chunks;
 // ```
-pub fn calculate_num_chunks(chunk_size: &mut usize, length: usize, num_queries: usize) -> usize {
+pub fn calculate_num_chunks(
+    chunk_size: &mut u64,
+    overlap: u64,
+    length: usize,
+    num_queries: usize,
+) -> usize {
     if num_queries > 1 {
         return 1;
     }
     *chunk_size -= *chunk_size % 3;
-    let n = if *chunk_size > OVERLAP_NT {
-        length / (*chunk_size - OVERLAP_NT)
+    // `Uint4 num_chunks` (split_query_aux_priv.cpp:112).
+    let n = if *chunk_size > overlap {
+        (length as u64 / (*chunk_size - overlap)) as u32
     } else {
         0
     };
     if n <= 1 {
-        *chunk_size = length;
+        *chunk_size = length as u64;
         1
     } else {
-        n
+        n as usize
     }
 }
 
@@ -111,7 +210,7 @@ pub fn calculate_num_chunks(chunk_size: &mut usize, length: usize, num_queries: 
 // CLocalBlast::CLocalBlast(CRef<IQueryFactory> qf,
 //                          CRef<CBlastOptionsHandle> opts_handle,
 // ```
-pub fn validate_chunk_size(size: usize) -> Result<()> {
+pub fn validate_chunk_size(size: u64) -> Result<()> {
     ensure!(
         size % 3 == 0,
         "Split query chunk size must be divisible by 3"
@@ -174,6 +273,9 @@ pub struct QueryChunk {
     pub absolute_contexts: Vec<i32>,
     pub corrections: Vec<i32>,
     pub prepared: PreparedQueryBatch,
+    /// The overlap of the batch's chunks in residues (`kOverlap`, `SetChunkOverlapSize`; 0 when
+    /// the batch is not split), which the merge of two chunks' HSPs reads.
+    pub overlap: i32,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:50-62
@@ -381,16 +483,13 @@ pub fn split_queries(
     records: &[FastaRecord],
     full: &PreparedQueryBatch,
     options: &ResolvedOptions,
+    sizes: SplitSizes,
 ) -> Result<Vec<QueryChunk>> {
-    let mut size = CHUNK_SIZE;
+    let mut size = sizes.chunk_size;
     let length = records.iter().map(|r| r.sequence.len()).sum();
-    // `num_queries` is the query batch's: with a reader batch of several units it is the reader
-    // batch's (`reader_batch.rs`), and a batch of several queries is not split.
-    let num_queries = full
-        .reader_shape
-        .as_deref()
-        .map_or(records.len(), |shape| shape.query_count);
-    let mut count = calculate_num_chunks(&mut size, length, num_queries);
+    // A batch of several queries is not split.
+    let num_queries = batch_query_count(records, full);
+    let mut count = calculate_num_chunks(&mut size, sizes.overlap, length, num_queries);
     if !options.gapped {
         count = 1;
     }
@@ -400,7 +499,70 @@ pub fn split_queries(
             absolute_contexts: (0..full.contexts.len() as i32).collect(),
             corrections: vec![0; full.contexts.len()],
             prepared: full.clone(),
+            overlap: 0,
         }]);
+    }
+    // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below it;
+    // NCBI's `size_t` chunk ranges then wrap (it stops with a CCoreException).
+    if (size as i64) < 0 {
+        return Err(refusal(
+            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's BLASTX",
+        ));
+    }
+    // NCBI splits the nucleotide query and translates each chunk, so an overlap that is not a
+    // multiple of 3 starts the chunks after the first out of the query's reading frames
+    // (split_query_aux_priv.cpp:62-64: "this value must be divisible by 3 to work with
+    // translated queries"), and NCBI then moves their HSPs onto contexts of other frames.
+    if sizes.overlap % 3 != 0 {
+        return Err(refusal(format!(
+            "OVERLAP_CHUNK_SIZE={}, which is not a multiple of 3, splits this query in chunks out of its reading frames (NCBI BLAST+ requires a multiple of 3 for a translated query); this is not supported by LOSAT's BLASTX",
+            sizes.overlap
+        )));
+    }
+    let step = (size - sizes.overlap) as usize;
+    let size = size as usize;
+    let overlap = (sizes.overlap / 3) as i32;
+    let range = |index: usize| {
+        let start = index * step;
+        let end = if index + 1 == count {
+            length
+        } else {
+            (start + size).min(length)
+        };
+        start..end
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
+    // ```c++
+    //     BlastSeqSrc* seqsrc =
+    //         BlastSeqSrcCopy(full_data->m_SeqSrc->GetPointer());
+    //     CRef<SBlastSetupData> setup_data =
+    //         BlastSetupPreliminarySearchEx(
+    //                 qf, options,
+    //                 CRef<objects::CPssmWithParameters>(),
+    //                 seqsrc, num_threads);
+    //     BlastSeqSrcResetChunkIterator(seqsrc);
+    //     setup_data->m_InternalData->m_SeqSrc.Reset(new TBlastSeqSrc(seqsrc,
+    //                                                BlastSeqSrcFree));
+    //
+    //     _ASSERT(setup_data->m_QuerySplitter->IsQuerySplit() == false);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-208
+    // ```c++
+    //     // 5. Create the lookup table
+    //     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
+    //         LookupTableWrap* lut =
+    // ```
+    // Each chunk's setup builds its own query splitter with the same sizes; when it would split
+    // the chunk again (an overlap of half the chunk size or more), the release build skips the
+    // chunk's lookup table and stops with a null reference. This also covers a loop that ends
+    // before `count` chunks (a chunk then holds twice the step).
+    if (0..count).any(|index| {
+        let mut chunk_size = size as u64;
+        calculate_num_chunks(&mut chunk_size, sizes.overlap, range(index).len(), 1) > 1
+    }) {
+        return Err(refusal(
+            "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's BLASTX",
+        ));
     }
     // A chunk's query setup (translation, SEG) reads only its own slice of the query, so the chunks
     // can be prepared on the search pool; the corrections below still run in chunk order.
@@ -418,12 +580,7 @@ pub fn split_queries(
     // data, which holds the translation and the filtering). make_chunk is the same preparation for
     // one chunk, as a closure so that several chunks can be prepared at once.
     let make_chunk = |index: usize| -> Result<QueryChunk> {
-        let start = index * (size - OVERLAP_NT);
-        let end = if index + 1 == count {
-            length
-        } else {
-            (start + size).min(length)
-        };
+        let Range { start, end } = range(index);
         let record = if x_chunk_slice() {
             x_chunk_record(&records[0], start, end)
         } else {
@@ -459,6 +616,7 @@ pub fn split_queries(
             absolute_contexts,
             corrections: vec![i32::MAX; 6],
             prepared,
+            overlap,
         })
     };
     let mut chunks: Vec<QueryChunk> = Vec::new();
@@ -505,7 +663,7 @@ pub fn split_queries(
                 for k in 1..=index {
                     let prev = absolute_length(&chunks, k as isize - 1, absolute);
                     let curr = absolute_length(&chunks, k as isize, absolute);
-                    sum += prev - OVERLAP_AA.min(curr).min(prev);
+                    sum += prev - overlap.min(curr).min(prev);
                 }
                 sum
             } else if index + 1 == count {
@@ -525,7 +683,7 @@ pub fn split_queries(
                 for k in (0..=index).rev() {
                     let prev = absolute_length(&chunks, k as isize - 1, absolute);
                     let curr = absolute_length(&chunks, k as isize, absolute);
-                    sub += curr - OVERLAP_AA.min(curr).min(prev);
+                    sub += curr - overlap.min(curr).min(prev);
                 }
                 full.contexts[absolute as usize].length as i32 - sub
             };
@@ -891,6 +1049,7 @@ pub fn merge_chunk_hsps(
     combined: &mut Vec<PreliminaryHsp>,
     mut incoming: Vec<PreliminaryHsp>,
     points: &[i32; 6],
+    overlap: i32,
     max_hsps: usize,
 ) {
     if incoming.is_empty() {
@@ -908,7 +1067,7 @@ pub fn merge_chunk_hsps(
             && (if h.frame >= 0 {
                 h.q_end > point
             } else {
-                h.q_start < point + OVERLAP_AA
+                h.q_start < point + overlap
             })
         {
             combined.swap(nold, i);
@@ -923,7 +1082,7 @@ pub fn merge_chunk_hsps(
             && (if h.frame < 0 {
                 h.q_end > point
             } else {
-                h.q_start < point + OVERLAP_AA
+                h.q_start < point + overlap
             })
         {
             incoming.swap(nnew, i);
@@ -960,6 +1119,7 @@ pub fn merge_chunk_hsps(
 mod x_chunk_record_tests {
     use super::{
         prepare_queries, split_queries, x_chunk_record, x_chunk_record_from_copy, FastaRecord,
+        DEFAULT_SIZES,
     };
     use crate::algorithm::blastx::input::InputWarning;
     use crate::blastinput::fasta_reader::RecordSource;
@@ -1014,7 +1174,7 @@ mod x_chunk_record_tests {
         let options = super::super::stage_c_tests::options();
         let records = std::slice::from_ref(&whole);
         let full = prepare_queries(records, &options).unwrap();
-        let chunks = split_queries(records, &full, &options).unwrap();
+        let chunks = split_queries(records, &full, &options, DEFAULT_SIZES).unwrap();
         assert!(chunks.len() > 1, "{} chunks", chunks.len());
         for chunk in &chunks {
             let (start, end) = (chunk.range.start, chunk.range.end);

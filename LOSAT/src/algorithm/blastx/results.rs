@@ -3,7 +3,7 @@ use super::{
     args::ResolvedOptions,
     linking::{LinkedHsp, LinkedHspList},
     preliminary::{compare_score, PreliminaryHsp},
-    split::{QueryChunk, OVERLAP_AA},
+    split::QueryChunk,
 };
 use crate::common::GapEditOp;
 use anyhow::{ensure, Result};
@@ -1456,7 +1456,7 @@ impl HspStream {
                         if points.iter().any(|p| *p > 0) {
                             trace.hsps("OVERLAP_OLD", a.oid, &a.hsps);
                             trace.hsps("OVERLAP_NEW", b.oid, &b.hsps);
-                            merge_hsps(&mut a.hsps, b.hsps, &points);
+                            merge_hsps(&mut a.hsps, b.hsps, &points, chunk.overlap);
                             trace.hsps("OVERLAP_OUT", a.oid, &a.hsps);
                         } else {
                             a.hsps.extend(b.hsps);
@@ -1801,7 +1801,7 @@ impl HspStream {
 //    }
 //
 // ```
-fn merge_hsps(combined: &mut Vec<Hsp>, mut incoming: Vec<Hsp>, points: &[i32; 6]) {
+fn merge_hsps(combined: &mut Vec<Hsp>, mut incoming: Vec<Hsp>, points: &[i32; 6], overlap: i32) {
     let mut nold = 0;
     for i in 0..combined.len() {
         let h = &combined[i].hsp;
@@ -1810,7 +1810,7 @@ fn merge_hsps(combined: &mut Vec<Hsp>, mut incoming: Vec<Hsp>, points: &[i32; 6]
             && if h.frame >= 0 {
                 h.q_end > p
             } else {
-                h.q_start < p + OVERLAP_AA
+                h.q_start < p + overlap
             }
         {
             combined.swap(nold, i);
@@ -1825,7 +1825,7 @@ fn merge_hsps(combined: &mut Vec<Hsp>, mut incoming: Vec<Hsp>, points: &[i32; 6]
             && if h.frame < 0 {
                 h.q_end > p
             } else {
-                h.q_start < p + OVERLAP_AA
+                h.q_start < p + overlap
             }
         {
             incoming.swap(nnew, i);

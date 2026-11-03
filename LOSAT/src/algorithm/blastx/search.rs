@@ -9,7 +9,7 @@ use super::{
     query_setup::{batch_ranges, PreparedQueryBatch, BATCH_SIZE},
     reader_batch::{prepare_reader_batch, UnitPrep},
     seed::{word_finder, Diagonals, InitHsp, Lookup},
-    split::{adjust_chunk_hsps, merge_chunk_hsps, split_queries, QueryChunk},
+    split::{adjust_chunk_hsps, merge_chunk_hsps, split_queries, split_sizes, QueryChunk},
     subjects::Subjects,
 };
 use anyhow::{ensure, Result};
@@ -593,6 +593,18 @@ pub(crate) fn search_core(
             }
         };
         super::x_timing::batch(XBatch::QuerySetup, x_t);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:138-150
+        // ```c++
+        //     CRef<SBlastSetupData> retval(new SBlastSetupData(qf, options));
+        //     ...
+        //     // 1. Initialize the query data (borrow it from the factory)
+        //     CRef<ILocalQueryData> query_data(qf->MakeLocalQueryData(&*options));
+        // ```
+        // NCBI's query splitter reads its sizes (`SBlastSetupData`, `CQuerySplitter`) before the
+        // batch's queries are set up, so their errors come also for a batch that is not searched.
+        // Here they are read after the setup, which needs the batch's shape for its query count;
+        // the setup of a batch that has queries does not fail (`prepare_queries`).
+        let sizes = split_sizes(queries, &full)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
         // ```c++
         //
@@ -660,7 +672,7 @@ pub(crate) fn search_core(
         //     int retval = 0;
         // ```
         sink.batch_start(range.start, &full, &full_params)?;
-        let chunks = split_queries(queries, &full, options)?;
+        let chunks = split_queries(queries, &full, options, sizes)?;
         super::x_timing::batch(XBatch::Setup, x_t);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-236
         // ```c++
@@ -1281,6 +1293,7 @@ pub(crate) fn search_core(
                                 &mut merged[query][oid],
                                 hsps,
                                 &points,
+                                chunk.overlap,
                                 i32::MAX as usize,
                             );
                         }

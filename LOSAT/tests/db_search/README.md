@@ -54,6 +54,8 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
     makeblastdb -in tests/db_search/vol2.faa -dbtype prot -out tests/db_search/vol2_nophr \
         -title "two volumes, the second without its header file" -blastdb_version 4 -max_file_sz 128B
     rm tests/db_search/vol2_nophr.01.phr
+    makeblastdb -in tests/db_search/bxchunk.faa -dbtype prot -out tests/db_search/bxchunk \
+        -title "proteins planted in bxchunk_q.fna" -blastdb_version 4
 
 `wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
 `LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:
@@ -162,6 +164,12 @@ without hits come from seeded generators):
 - `bslice_nohit.fna`: 300 random bases with no hit in `bslice` (candidate 25 of 40 from `random.Random(20261019)`;
   the others all have weak hits at the default E value). `bslice_alln.fna`: 300 N (NCBI warns that it cannot
   calculate Karlin-Altschul parameters).
+- `bxchunk_q.fna`: one query of 25,001 random bases (`random.Random(5)`, as the review of #702 made it) with a
+  back-translated protein of 150 residues planted 200 bases before each of 3000, 5997, 6000, 9705, 10001, 12000,
+  15000, 19410 and 20000 (the chunk borders of several `CHUNK_SIZE` values), and short lower-case runs at those
+  points; `bxchunk.faa`: the nine planted proteins with a quarter of their residues changed, for the database
+  `bxchunk` (rows `db.bxchunk.*`: BLASTX `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE`). `bxchunk_empty.fna`: a record of a
+  defline only (NCBI reports the query splitter's errors before the empty query's `Sequence contains no data`).
 - `bnophr.pin` and `bnophr.psq` are copies of `bslice.pin` and `.psq`: the database without its header file, used
   with the query without hits (with a hit NCBI fails with exit 2).
 

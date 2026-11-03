@@ -3193,13 +3193,27 @@ struct UngappedHit {
     // } BlastOffsetPair;
     // ```
     // Initial word hit offsets (seed) stored in init_hsp->offsets.qs_offsets.
-    seed_q_off: usize,
-    seed_s_off: usize,
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:142-147
+    // ```c
+    // typedef struct BlastUngappedData {
+    //    Int4 q_start; /**< Start of the ungapped alignment in query */
+    //    Int4 s_start; /**< Start of the ungapped alignment in subject */
+    //    Int4 length;  /**< Length of the ungapped alignment */
+    //    Int4 score;   /**< Score of the ungapped alignment */
+    // } BlastUngappedData;
+    // ```
+    // The offsets are 32-bit, as NCBI's: those in the query are within one context (whose
+    // start, `query_context_offset`, is an `i32`), those in the subject within one chunk of at
+    // most `MAX_DBSEQ_LEN` letters. A subject's hits and the scratch of their sort by score
+    // (`X_SORT`) then hold 44 bytes per hit each, not 72 (pyani's fragments of one genome x
+    // another, about a million hits per chunk: 69 MiB each).
+    seed_q_off: u32,
+    seed_s_off: u32,
     // Ungapped extension results (0-based coordinates)
-    qs: usize,  // query start
-    qe: usize,  // query end (exclusive)
-    ss: usize,  // subject start in search_seq coordinates
-    se: usize,  // subject end in search_seq coordinates
+    qs: u32,    // query start
+    qe: u32,    // query end (exclusive)
+    ss: u32,    // subject start in search_seq coordinates
+    se: u32,    // subject end in search_seq coordinates
     score: i32, // ungapped score
 }
 
@@ -13877,12 +13891,12 @@ fn search_query_batch<const UNGAPPED: bool>(
                                         // ```c
                                         // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
                                         // ```
-                                        seed_q_off: q_off - q_context_start,
-                                        seed_s_off: s_off,
-                                        qs,
-                                        qe,
-                                        ss,
-                                        se: ungapped_se,
+                                        seed_q_off: (q_off - q_context_start) as u32,
+                                        seed_s_off: s_off as u32,
+                                        qs: qs as u32,
+                                        qe: qe as u32,
+                                        ss: ss as u32,
+                                        se: ungapped_se as u32,
                                         score: ungapped_score,
                                     },
                                 );
@@ -15235,12 +15249,12 @@ fn search_query_batch<const UNGAPPED: bool>(
                                         // ```c
                                         // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
                                         // ```
-                                        seed_q_off: q_off,
-                                        seed_s_off: s_off,
-                                        qs,
-                                        qe,
-                                        ss,
-                                        se: ungapped_se,
+                                        seed_q_off: q_off as u32,
+                                        seed_s_off: s_off as u32,
+                                        qs: qs as u32,
+                                        qe: qe as u32,
+                                        ss: ss as u32,
+                                        se: ungapped_se as u32,
                                         score: ungapped_score,
                                     },
                                 );
@@ -15377,13 +15391,13 @@ fn search_query_batch<const UNGAPPED: bool>(
                         query_idx: uh.query_idx,
                         query_frame: uh.query_frame,
                         query_context_offset: uh.query_context_offset,
-                        prelim_qs: uh.qs,
-                        prelim_qe: uh.qe,
-                        prelim_ss: uh.ss.saturating_add(chunk.offset),
-                        prelim_se: uh.se.saturating_add(chunk.offset),
+                        prelim_qs: uh.qs as usize,
+                        prelim_qe: uh.qe as usize,
+                        prelim_ss: (uh.ss as usize).saturating_add(chunk.offset),
+                        prelim_se: (uh.se as usize).saturating_add(chunk.offset),
                         prelim_score: uh.score,
-                        seed_qs: uh.seed_q_off,
-                        seed_ss: uh.seed_s_off.saturating_add(chunk.offset),
+                        seed_qs: uh.seed_q_off as usize,
+                        seed_ss: (uh.seed_s_off as usize).saturating_add(chunk.offset),
                         prelim_evalue: 0.0,
                     })
                     .collect();
@@ -15529,9 +15543,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                  -> Option<(usize, usize, usize, usize, i32, usize, usize)> {
                     let q_seq_blastna = encoded_queries_blastna[uh.context_idx as usize];
                     if use_dp {
-                        let mut seed_qs = uh.seed_q_off;
-                        let mut seed_ss = uh.seed_s_off;
-                        if uh.se >= uh.seed_s_off.saturating_add(8) {
+                        let mut seed_qs = uh.seed_q_off as usize;
+                        let mut seed_ss = uh.seed_s_off as usize;
+                        if uh.se as usize >= (uh.seed_s_off as usize).saturating_add(8) {
                             seed_qs = seed_qs.saturating_add(3);
                             seed_ss = seed_ss.saturating_add(3);
                         }
@@ -15555,9 +15569,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                             );
                         Some((p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss))
                     } else {
-                        let ungapped_len = uh.qe.saturating_sub(uh.qs);
-                        let seed_qs = uh.qs + ungapped_len / 2;
-                        let seed_ss = uh.ss + ungapped_len / 2;
+                        let ungapped_len = uh.qe.saturating_sub(uh.qs) as usize;
+                        let seed_qs = uh.qs as usize + ungapped_len / 2;
+                        let seed_ss = uh.ss as usize + ungapped_len / 2;
                         x_greedy_prelim::x_greedy_gapped_alignment_score_only(
                             x_prelim_s.expect(
                                 "the one-byte copy exists wherever a score-only greedy call runs",
@@ -15753,10 +15767,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                                     uh.context_idx,
                                     s_idx,
                                     s_id,
-                                    uh.qs,
-                                    uh.qe,
-                                    uh.ss.saturating_add(chunk.offset),
-                                    uh.se.saturating_add(chunk.offset),
+                                    uh.qs as usize,
+                                    uh.qe as usize,
+                                    (uh.ss as usize).saturating_add(chunk.offset),
+                                    (uh.se as usize).saturating_add(chunk.offset),
                                     ctx.len,
                                     ctx.frame,
                                 )
@@ -15768,10 +15782,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 s_id,
                                 s_idx,
                                 uh.context_idx,
-                                uh.qs,
-                                uh.qe,
-                                uh.ss.saturating_add(chunk.offset),
-                                uh.se.saturating_add(chunk.offset),
+                                uh.qs as usize,
+                                uh.qe as usize,
+                                (uh.ss as usize).saturating_add(chunk.offset),
+                                (uh.se as usize).saturating_add(chunk.offset),
                                 uh.score,
                                 is_contained,
                                 containing_hsp,
@@ -15871,9 +15885,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 //        init_hsp->offsets.qs_offsets.q_off,
                                 //        init_hsp->offsets.qs_offsets.s_off, ...);
                                 // ```
-                                let mut seed_qs = uh.seed_q_off;
-                                let mut seed_ss = uh.seed_s_off;
-                                if uh.se >= uh.seed_s_off.saturating_add(8) {
+                                let mut seed_qs = uh.seed_q_off as usize;
+                                let mut seed_ss = uh.seed_s_off as usize;
+                                if uh.se as usize >= (uh.seed_s_off as usize).saturating_add(8) {
                                     seed_qs = seed_qs.saturating_add(3);
                                     seed_ss = seed_ss.saturating_add(3);
                                 }
@@ -15957,9 +15971,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                             } else {
                                 // Greedy seed selection (megablast)
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4017
-                                let ungapped_len = uh.qe.saturating_sub(uh.qs);
-                                let seed_qs = uh.qs + ungapped_len / 2;
-                                let seed_ss = uh.ss + ungapped_len / 2;
+                                let ungapped_len = uh.qe.saturating_sub(uh.qs) as usize;
+                                let seed_qs = uh.qs as usize + ungapped_len / 2;
+                                let seed_ss = uh.ss as usize + ungapped_len / 2;
 
                                 let prelim =
                                     match x_greedy_prelim::x_greedy_gapped_alignment_score_only(

@@ -609,6 +609,45 @@ pub fn record_frame(plus: bool, start: usize, record_length: usize) -> i32 {
     }
 }
 
+/// A mask of the searched letters `[from, to]` (0-based) as the reports show it: moved into the
+/// record by the start of the interval (`offset`, 0 without a range) and cut at the interval's end
+/// (`length` letters searched); `None` for an empty mask, one past the interval, or one that
+/// covers the whole interval.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:825-843
+/// ```c++
+/// template <class Position>
+/// CRange<Position> Map(const CRange<Position>& target,
+///                      const CRange<Position>& range)
+/// {
+///     ...
+///     if (range.Empty() ||
+///         (range.GetFrom() > target.GetTo()) ||
+///         ((range.GetFrom() + target.GetFrom()) > target.GetTo())) {
+///         return target;
+///     }
+///
+///     CRange<Position> retval;
+///     retval.SetFrom(max(target.GetFrom() + range.GetFrom(), target.GetFrom()));
+///     retval.SetTo(min(target.GetFrom() + range.GetTo(), target.GetTo()));
+///     return retval;
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-938
+/// ```c++
+///                 TSeqRange masked_range(loc->ssr->left, loc->ssr->right);
+///                 TSeqRange range(Map(kTarget, masked_range));
+///                 if (range.NotEmpty() && range != kTarget) {
+/// ```
+pub fn record_mask(from: i32, to: i32, length: usize, offset: usize) -> Option<(i32, i32)> {
+    let target = (offset as i32, (offset + length) as i32 - 1);
+    if from > to || from > target.1 || from + target.0 > target.1 {
+        return None;
+    }
+    let mapped = (target.0 + from, (target.0 + to).min(target.1));
+    (mapped != target).then_some(mapped)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -749,5 +788,18 @@ mod tests {
         assert_eq!(record_frame(true, 4, 100), 2);
         assert_eq!(record_frame(false, 99, 100), -1);
         assert_eq!(record_frame(false, 97, 100), -3);
+    }
+
+    #[test]
+    fn masks_move_into_the_record_and_stop_at_the_interval() {
+        // Without a range: as found, other than the whole record.
+        assert_eq!(record_mask(10, 20, 100, 0), Some((10, 20)));
+        assert_eq!(record_mask(0, 99, 100, 0), None);
+        assert_eq!(record_mask(5, 4, 100, 0), None);
+        // The interval 501-600 of a record: moved by its start, cut at its end.
+        assert_eq!(record_mask(10, 20, 100, 500), Some((510, 520)));
+        assert_eq!(record_mask(90, 150, 100, 500), Some((590, 599)));
+        assert_eq!(record_mask(0, 99, 100, 500), None);
+        assert_eq!(record_mask(100, 120, 100, 500), None);
     }
 }

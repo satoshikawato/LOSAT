@@ -9,6 +9,7 @@ import type { DraftState, SearchDraft } from '../application/draft';
 import { knownDefault, pairEntries, pairList, pairValue, writtenValue, type PairRow } from '../domain/parameters';
 import { programById, type ParameterField as Field } from '../domain/programs';
 import { optionHelp } from './format';
+import HelpTip from './HelpTip.vue';
 import ParameterField from './ParameterField.vue';
 
 const props = defineProps<{ draft: SearchDraft; state: DraftState; pair: PairRow; fields: readonly Field[] }>();
@@ -38,11 +39,13 @@ watchEffect(() => {
 const fieldsShown = computed(() => other.value || list.value.length === 0);
 
 const label = (value: string) => props.pair.select.labels?.(value) ?? value;
-const showHelp = ref(false);
+/** The two flags' help, a line each, behind the "?" (HelpTip). */
 const help = computed(() =>
   props.fields
     .map((field) => [field.flag, optionHelp(options.value?.find((o) => o.flag === field.flag)?.help)] as const)
-    .filter(([, text]) => text !== ''),
+    .filter(([, text]) => text !== '')
+    .map(([flag, text]) => `${flag}: ${text}`)
+    .join('\n'),
 );
 
 function onList(next: string): void {
@@ -75,21 +78,7 @@ function onList(next: string): void {
       <div v-if="fieldsShown" class="param-group">
         <ParameterField v-for="field in fields" :key="field.flag" :draft="draft" :state="state" :field="field" inline />
       </div>
-      <button
-        v-if="help.length > 0 && !fieldsShown"
-        type="button"
-        class="help-toggle"
-        :aria-expanded="showHelp"
-        :aria-controls="`${id}-help`"
-        :aria-label="`About ${pair.flags.join(' and ')}`"
-        :data-testid="`${id}-help-toggle`"
-        @click="showHelp = !showHelp"
-      >
-        ?
-      </button>
-      <p v-if="help.length > 0 && showHelp && !fieldsShown" :id="`${id}-help`" class="help" :data-testid="`${id}-help`">
-        <template v-for="([flag, text], i) in help" :key="flag"><br v-if="i > 0" />{{ flag }}: {{ text }}</template>
-      </p>
+      <HelpTip v-if="help !== '' && !fieldsShown" :id="id" :label="`About ${pair.flags.join(' and ')}`" :text="help" />
     </div>
   </div>
 </template>

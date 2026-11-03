@@ -214,6 +214,20 @@ pub struct RecordSource {
     pub uncut_length: usize,
 }
 
+impl RecordSource {
+    /// The source of a part of the record (a chunk of a split query): all of it but the whole
+    /// letters, which only the archive's Bioseq of the record reads.
+    pub fn without_uncut(&self) -> Box<Self> {
+        Box::new(Self {
+            defline: self.defline.clone(),
+            uncut: None,
+            believed: self.believed.clone(),
+            cut_from: self.cut_from,
+            uncut_length: self.uncut_length,
+        })
+    }
+}
+
 impl FastaRecord {
     /// A record from its parts (tests and the ABI's records).
     pub fn new(local_id: impl Into<String>, title: &[u8], sequence: &[u8]) -> Self {

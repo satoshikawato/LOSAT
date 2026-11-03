@@ -123,15 +123,19 @@ fn refuse(refusal: names::Refusal, what: &str) -> anyhow::Error {
 
 /// The masked regions of a query as NCBI hands them to the XML writer
 /// (`Blast_GetSeqLocInfoVector`, blast_aux.cpp:930-959): per context, in context order, the
-/// context's nucleotide intervals other than an empty one and the whole query, with the
-/// context's frame. LOSAT's BLASTX has no `-query_loc`, so the interval is the whole record.
-fn query_masks(batch: &BatchResults, qidx: usize, length: usize) -> Vec<QueryMask> {
+/// context's nucleotide intervals moved into the record (`seq_range::record_mask`: other than an
+/// empty one and the whole interval), with the context's frame, which counts from the ends of the
+/// searched letters (`-query_loc`).
+fn query_masks(batch: &BatchResults, qidx: usize, query: &FastaRecord) -> Vec<QueryMask> {
+    let (length, offset) = (query.sequence.len(), query.placement().offset);
     let mut masks = Vec::new();
     for context in &batch.prepared.contexts[qidx * 6..qidx * 6 + 6] {
         for &(from, to) in &context.dna_masks {
-            if from > to || (from == 0 && to == length as i32 - 1) {
+            let Some((from, to)) =
+                crate::blastinput::seq_range::record_mask(from, to, length, offset)
+            else {
                 continue;
-            }
+            };
             masks.push(QueryMask {
                 from,
                 to,
@@ -551,17 +555,24 @@ fn query_text(
 /// a written byte. Returns whether some query would be refused if NCBI had not searched its
 /// batch (a title that only its message cannot carry); the run then holds the document.
 ///
-/// The reader is the search's own (same records and titles). A record it refuses for every
-/// format (a title that is not UTF-8) ends the scan: the run reads the file again and fails
+/// The reader is the search's own (same records and titles, cut to `range` as the search cuts
+/// them: a record the range skips is never reported and is not checked). A record it refuses for
+/// every format (a title that is not UTF-8) ends the scan: the run reads the file again and fails
 /// there as it always did.
-pub(super) fn prescan_queries(file: std::fs::File, lowercase: bool) -> Result<bool> {
+pub(super) fn prescan_queries(
+    file: std::fs::File,
+    lowercase: bool,
+    range: Option<&crate::blastinput::seq_range::SequenceRange>,
+) -> Result<bool> {
     let mut stream = super::input::FastaStream::from_file(file);
     let mut may_be_refused = false;
-    let scanned = super::input::parse_fasta_stream_with_warnings(
+    let scanned = super::input::parse_fasta_stream_keeping(
         &mut stream,
         false,
         lowercase,
         super::query_setup::BATCH_SIZE,
+        false,
+        range,
         &mut |batch| {
             for query in batch {
                 query_text(query, false, false, true)?;
@@ -748,7 +759,10 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             let query = &queries[batch.query_ordinal + qidx];
             let text = texts.next().context("one text per query")?;
             let length = query.sequence.len();
-            let masks = query_masks(batch, qidx, length);
+            // A record cut to `-query_loc`: `query-len` is the interval's, the coordinates and
+            // frames the record's (`RemapToQueryLoc`, `report::alignment`).
+            let place = query.placement();
+            let masks = query_masks(batch, qidx, query);
             let xml_query = XmlQuery {
                 id: query.internal_id.as_bytes(),
                 title: &text.title,
@@ -765,7 +779,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     let names = subject_cache
                         .get(&list.oid)
                         .context("names of a subject with hits")?;
-                    let hit = XmlHit::of(names, i32::try_from(subject.sequence.len())?);
+                    let subject_place = subject.placement();
+                    let subject_offset = subject_place.offset as i32;
+                    let hit = XmlHit::of(names, i32::try_from(subject_place.length)?);
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time.
@@ -780,6 +796,10 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                             // outfmt 6 order is not the XML's.
                             let (query_from, query_to) =
                                 xml_rows(hsp, subject, query, &code, &mut qrow, &mut srow)?;
+                            let (query_from, query_to) = (
+                                query_from + place.offset as i32,
+                                query_to + place.offset as i32,
+                            );
                             let plus = hsp.hsp.frame > 0;
                             hsps.hsp(&XmlHsp {
                                 score: hsp.hsp.score,
@@ -787,13 +807,13 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                 evalue: seqalign_evalue(hsp.evalue),
                                 query_from,
                                 query_to,
-                                hit_from: hsp.hsp.s_start + 1,
-                                hit_to: hsp.hsp.s_end,
+                                hit_from: hsp.hsp.s_start + 1 + subject_offset,
+                                hit_to: hsp.hsp.s_end + subject_offset,
                                 query_frame: translation_frame(
                                     plus,
                                     query_from,
                                     query_to,
-                                    length as i32,
+                                    place.length as i32,
                                 ),
                                 hit_frame: 0,
                                 qrow: &qrow,

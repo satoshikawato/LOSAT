@@ -482,6 +482,10 @@ test.describe('leaving and returning', () => {
         visibility = visible ? 'visible' : 'hidden';
         document.dispatchEvent(new Event('visibilitychange'));
       };
+      // A handheld device (coarse pointer): "Keep searching while you're away" is shown there.
+      const matchMedia = window.matchMedia.bind(window);
+      window.matchMedia = (query: string) =>
+        query.includes('pointer: coarse') ? ({ matches: true, media: query } as MediaQueryList) : matchMedia(query);
       Object.defineProperty(navigator, 'wakeLock', {
         configurable: true,
         value: {
@@ -498,7 +502,8 @@ test.describe('leaving and returning', () => {
       });
     });
     await openSearch(page);
-    await page.getByTestId('keep-awake').check();
+    // On unless turned off (Owner 2026-11-03).
+    await expect(page.getByTestId('keep-awake')).toBeChecked();
     await startSlowSearch(page);
     await expect(page.getByTestId('keep-awake').locator('xpath=..')).toHaveAttribute('data-wake-lock', 'held');
     await page.evaluate(() => (window as unknown as { __setVisible: (v: boolean) => void }).__setVisible(false));
@@ -525,6 +530,51 @@ test.describe('leaving and returning', () => {
     expect(log[0]).toBe('request');
     expect(log.at(-1)).toBe('release');
   });
+});
+
+test('the header, and the "?" help that shows on hover or keyboard focus and stays on click (DW-41)', async ({ page }) => {
+  await openSearch(page);
+  await expect(page).toHaveTitle('LOSAT');
+  await expect(page.locator('.app-header h1')).toHaveText('LOSAT');
+  await expect(page.locator('.app-header .tagline')).toHaveText('A miniaturized reimplementation of NCBI BLAST algorithm');
+  // A desktop (fine pointer) is not offered the wake lock's choice; its screen does not turn off by itself.
+  await expect(page.getByTestId('keep-awake')).toHaveCount(0);
+
+  const toggle = page.getByTestId('param-task-help-toggle');
+  const help = page.getByTestId('param-task-help');
+  await expect(help).toHaveCount(0);
+  // Pointed at: shown; pointed away: gone (as NCBI's helpbox).
+  await toggle.hover();
+  await expect(help).toHaveText('Task to execute: megablast, blastn, dc-megablast or blastn-short');
+  await expect(help).toHaveAttribute('data-pinned', 'false');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await page.mouse.move(0, 0);
+  await expect(help).toHaveCount(0);
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  // Clicked: stays while the pointer is elsewhere; a click elsewhere closes it.
+  await toggle.click();
+  await expect(help).toHaveAttribute('data-pinned', 'true');
+  await page.mouse.move(0, 0);
+  await expect(help).toBeVisible();
+  await page.getByTestId('program-summary').click();
+  await expect(help).toHaveCount(0);
+  // Clicked again: the next click closes it, although the pointer is still over the "?".
+  await toggle.click();
+  await expect(help).toHaveAttribute('data-pinned', 'true');
+  await toggle.click();
+  await expect(help).toHaveCount(0);
+  // Escape closes it too.
+  await toggle.click();
+  await expect(help).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(help).toHaveCount(0);
+  // Reached with the keyboard (Tab from the task's radio): shown until the focus moves on.
+  await page.getByTestId('param-task-megablast').click();
+  await page.keyboard.press('Tab');
+  await expect(toggle).toBeFocused();
+  await expect(help).toBeVisible();
+  await page.keyboard.press('Tab');
+  await expect(help).toHaveCount(0);
 });
 
 test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {

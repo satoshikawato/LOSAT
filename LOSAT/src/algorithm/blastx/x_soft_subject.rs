@@ -223,9 +223,21 @@ pub(super) fn x_scan(
 /// HSP holds no letter of the row). The runs (`FastaRecord::lowercase_masks`) are sorted and apart.
 /// Only records of `-subject` read with `-lcase_masking` have runs; the caller calls this when one
 /// has.
+///
+/// With `-subject_loc` the HSP ranges are in the searched letters and the runs in the whole record
+/// (`FastaRecord::archive_lowercase_runs`): a run is kept by where it would lie in the interval and
+/// shown where it lies in the record ([`x_shifted_subject_rows`], BLASTP's
+/// `x_soft_subject::x_masked_subject_rows`). An interval that starts at the record's start moves
+/// nothing, and the rule above holds for its clipped runs.
 #[cold]
 #[inline(never)]
 pub(super) fn x_masked_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaRecord]) {
+    if subjects
+        .iter()
+        .any(|subject| subject.placement().offset > 0)
+    {
+        return x_shifted_subject_rows(hits, subjects);
+    }
     for hit in hits.iter_mut() {
         let Some(record) = subjects.get(hit.hit.s_idx as usize) else {
             continue;
@@ -253,6 +265,69 @@ pub(super) fn x_masked_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaR
                 next += 1;
             }
             if runs.get(next).is_some_and(|&(from, _)| from <= position) {
+                letter.make_ascii_lowercase();
+            }
+            position += 1;
+        }
+        *row = String::from_utf8(bytes).expect("ASCII alignment row");
+    }
+}
+
+/// [`x_masked_subject_rows`] of subjects cut to a `-subject_loc` interval that starts past the
+/// record's start. A query's hits with a subject keep the runs of the whole record (record
+/// coordinates) that meet the closed range `[offset, end]` of one of their HSPs in the searched
+/// letters (the end one past the HSP); each row shows the kept runs where they lie in the record.
+fn x_shifted_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaRecord]) {
+    let mut hsp_ranges: std::collections::HashMap<(u32, u32), Vec<(i32, i32)>> =
+        std::collections::HashMap::new();
+    for hit in hits.iter() {
+        let Some(record) = subjects.get(hit.hit.s_idx as usize) else {
+            continue;
+        };
+        let shift = record.placement().offset as i32;
+        hsp_ranges
+            .entry((hit.hit.q_idx, hit.hit.s_idx))
+            .or_default()
+            .push((
+                hit.hit.s_start as i32 - 1 - shift,
+                hit.hit.s_end as i32 - shift,
+            ));
+    }
+    let mut record_runs: std::collections::HashMap<u32, Vec<(i32, i32)>> =
+        std::collections::HashMap::new();
+    for hit in hits.iter_mut() {
+        let Some(record) = subjects.get(hit.hit.s_idx as usize) else {
+            continue;
+        };
+        let ranges = &hsp_ranges[&(hit.hit.q_idx, hit.hit.s_idx)];
+        let runs: Vec<(i32, i32)> = record_runs
+            .entry(hit.hit.s_idx)
+            .or_insert_with(|| record.archive_lowercase_runs())
+            .iter()
+            .copied()
+            .filter(|&(from, to)| {
+                ranges
+                    .iter()
+                    .any(|&(offset, end)| from <= end && offset <= to)
+            })
+            .collect();
+        if runs.is_empty() {
+            continue;
+        }
+        let Some(row) = hit.subject_seq.as_mut() else {
+            continue;
+        };
+        let mut bytes = std::mem::take(row).into_bytes();
+        let mut position = hit.hit.s_start as i32 - 1;
+        for (column, letter) in bytes.iter_mut().enumerate() {
+            // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`).
+            if *letter == b'-' && !hit.subject_stored_gaps.contains(&(column as u32)) {
+                continue;
+            }
+            if runs
+                .iter()
+                .any(|&(from, to)| from <= position && position <= to)
+            {
                 letter.make_ascii_lowercase();
             }
             position += 1;

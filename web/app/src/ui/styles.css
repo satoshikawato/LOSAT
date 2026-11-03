@@ -266,14 +266,14 @@ input[type='radio'] {
   color: var(--header-fg);
 }
 
-.local-note,
+.tagline,
 .command,
 .muted,
 .hint {
   color: var(--muted);
 }
 
-.app-header .local-note {
+.app-header .tagline {
   color: var(--header-muted);
 }
 
@@ -540,6 +540,7 @@ input[type='radio'] {
 }
 
 .param-control {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, max-content) max-content;
   align-content: start;
@@ -547,11 +548,6 @@ input[type='radio'] {
   justify-items: start;
   gap: 2px 8px;
   min-width: 0;
-}
-
-/* The "?" sits beside the control; the help it opens takes the row under both. */
-.param-control > .help {
-  grid-column: 1 / -1;
 }
 
 .param-row[data-kind='radio'] .param-control {
@@ -582,11 +578,6 @@ input[type='radio'] {
 .select-clip select {
   min-width: min(16em, 100%);
   max-width: 100%;
-}
-
-.param-control .help {
-  margin: 0;
-  color: var(--muted);
 }
 
 /* W4b search: a row of several fields (Match/Mismatch Scores, Gap Costs, NCBI's "Filter" and "Mask"). */
@@ -961,6 +952,7 @@ textarea {
 }
 
 .run-options {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1049,10 +1041,6 @@ textarea {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
-}
-
-.parameter-form .param-control > .help {
-  flex-basis: 100%;
 }
 
 .parameter-form input[type='text'],
@@ -1253,7 +1241,32 @@ textarea {
 }
 
 /* The engine's help of an option waits behind "?" (stop-describing-ui), a filled circle in the
-   accent as NCBI's. */
+   accent as NCBI's. As NCBI's helpbox, the help opens while the "?" is pointed at or focused and
+   a click keeps it open (HelpTip.vue); it floats under the control, from the left of the nearest
+   positioned ancestor (.param-control, .run-options), so the page does not move. */
+.help-tip {
+  display: inline-flex;
+  align-items: center;
+}
+
+.help-tip .help {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(44em, calc(100vw - 32px));
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--group);
+  color: var(--fg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  white-space: pre-line; /* a pair row's help: a line per flag */
+}
+
 .help-toggle {
   flex: none;
   width: 20px;
@@ -1277,11 +1290,6 @@ textarea {
 .search-summary-line strong {
   color: var(--accent);
   font-weight: 600;
-}
-
-.local-note svg {
-  vertical-align: -2px;
-  margin-right: 4px;
 }
 
 .run-status-warning svg {

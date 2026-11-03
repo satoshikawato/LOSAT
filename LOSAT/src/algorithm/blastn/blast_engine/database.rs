@@ -1202,6 +1202,10 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
         sam: output_formats
             .iter()
             .any(|format| matches!(format, BlastnOutputFormat::Sam(_))),
+        all_ids: output_formats
+            .iter()
+            .filter_map(|format| format.tabular_spec())
+            .any(|spec| spec.needs().all_deflines),
     }
 }
 
@@ -1430,6 +1434,11 @@ impl ReportedSubjects {
 ///   before its reports. A definition line whose taxid does not decode is `Off::Titles` then:
 ///   the titles' pass decodes the taxids too (`SeqDb::visit_deflines_taxids`; one sequence at a
 ///   time, `SeqDb::defline_taxids`), as blastp's block search does.
+/// - what a custom tabular report `tabular` reads besides (`x_tabular_refusal`): with a taxonomy
+///   field (`staxid`, `staxids`, the names) every definition line as `SeqDb::defline_set` decodes
+///   it (`BlastnDatabase::tabular_taxonomy`; `Off::Titles`), with a name of the taxonomy database
+///   a lookup of any taxid (`TabularNames::look_up`; `Off::Taxonomy`), and with parsed Seq-ids
+///   and an `sall*` field every definition line's ids (`ParsedShown::all_ids`, in `shown`).
 /// Every ordinal id is read in `pool` (the titles, then the ambiguity data of the sequences that
 /// have any; `SeqDb::check_ambiguity` reads only those bytes); a reader error is a refusal too
 /// (the reports then stay after the loop, and the batch that meets the error fails where it does
@@ -1442,6 +1451,7 @@ pub(super) fn x_streaming_refusal(
     database: &BlastnDatabase,
     shown: ParsedShown,
     taxids: bool,
+    tabular: Option<&crate::report::tabular::TabularSpec>,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Option<super::x_rpt_stream::Off> {
     use super::x_rpt_stream::Off;
@@ -1453,7 +1463,8 @@ pub(super) fn x_streaming_refusal(
             taxids,
             pool,
             shared::PARSED_CHECK_SEQUENCES_MAX,
-        );
+        )
+        .or_else(|| x_tabular_refusal(database, tabular, pool));
     }
     let title_allowed = |ordinal: u32, stored: Result<shared::StoredTitle>| -> bool {
         match stored {
@@ -1492,7 +1503,9 @@ pub(super) fn x_streaming_refusal(
         if !all(&titles) {
             return Some(Off::Titles);
         }
-        return x_ambiguity_refusal(db, pool).or_else(|| x_taxonomy_refusal(database, taxids));
+        return x_ambiguity_refusal(db, pool)
+            .or_else(|| x_taxonomy_refusal(database, taxids))
+            .or_else(|| x_tabular_refusal(database, tabular, pool));
     }
     // One sequence at a time (`LOSAT_X_DBIDXREAD=0`): the taxid after the title.
     let title = |ordinal: u32| -> bool {
@@ -1502,7 +1515,51 @@ pub(super) fn x_streaming_refusal(
     if !x_all_ordinals(db, pool, &title) {
         return Some(Off::Titles);
     }
-    x_ambiguity_refusal(db, pool).or_else(|| x_taxonomy_refusal(database, taxids))
+    x_ambiguity_refusal(db, pool)
+        .or_else(|| x_taxonomy_refusal(database, taxids))
+        .or_else(|| x_tabular_refusal(database, tabular, pool))
+}
+
+/// EXPERIMENT (LOSAT_X_RPTSTREAM): what the custom tabular report `tabular` (`None`: no such
+/// report) reads of the reported sequences besides the other reports, for `x_streaming_refusal`:
+/// with a taxonomy field the definition lines as `SeqDb::defline_set` decodes them
+/// (`BlastnDatabase::tabular_taxonomy`, every sequence read in `pool`: `SeqDb::visit_defline_sets`
+/// in ranges with LOSAT_X_DBIDXREAD, else one sequence at a time; `Off::Titles`), and with a
+/// name of the taxonomy database a lookup of any taxid (`BlastnDatabase::tabular_names`;
+/// `shared::any_taxdb_lookup_may_refuse`, `Off::Taxonomy`).
+fn x_tabular_refusal(
+    database: &BlastnDatabase,
+    tabular: Option<&crate::report::tabular::TabularSpec>,
+    pool: &SearchPool<'_>,
+) -> Option<super::x_rpt_stream::Off> {
+    use super::x_rpt_stream::Off;
+    let needs = tabular?.needs();
+    let db = &database.db;
+    if needs.taxonomy {
+        let decodes = if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
+            let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
+            let decodes = |range: &BlockRange| -> bool {
+                db.visit_defline_sets(*range, |_, set| set.is_ok())
+            };
+            let all = || -> bool {
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
+                if pool.enabled() {
+                    return pool.install(|| ranges.par_iter().all(decodes));
+                }
+                ranges.iter().all(decodes)
+            };
+            all()
+        } else {
+            x_all_ordinals(db, pool, &|ordinal| db.defline_set(ordinal).is_ok())
+        };
+        if !decodes {
+            return Some(Off::Titles);
+        }
+    }
+    (needs.taxonomy_names && shared::any_taxdb_lookup_may_refuse(db)).then_some(Off::Taxonomy)
 }
 
 /// EXPERIMENT (LOSAT_X_RPTSTREAM): `x_streaming_refusal` of a database with parsed Seq-ids: with at
@@ -2309,6 +2366,7 @@ mod tests {
                         database,
                         parsed_shown(&[BlastnOutputFormat::Tabular]),
                         false,
+                        None,
                         pool,
                     ))
                 })
@@ -2491,9 +2549,12 @@ mod tests {
             for threads in [1, 4] {
                 crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
                     let shown = parsed_shown(&[BlastnOutputFormat::Tabular]);
-                    assert_eq!(x_streaming_refusal(&database, shown, false, pool), None);
                     assert_eq!(
-                        x_streaming_refusal(&database, shown, true, pool),
+                        x_streaming_refusal(&database, shown, false, None, pool),
+                        None
+                    );
+                    assert_eq!(
+                        x_streaming_refusal(&database, shown, true, None, pool),
                         refused,
                         "{taxdb:?} threads {threads}"
                     );
@@ -2556,7 +2617,13 @@ mod tests {
             for threads in [1, 4] {
                 crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
                     assert_eq!(
-                        x_streaming_refusal(&database, parsed_shown(&[format]), prefetch, pool),
+                        x_streaming_refusal(
+                            &database,
+                            parsed_shown(&[format]),
+                            prefetch,
+                            format.tabular_spec(),
+                            pool
+                        ),
                         expected,
                         "{name} {taxdb:?} {format:?} threads {threads}"
                     );

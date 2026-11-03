@@ -4662,9 +4662,7 @@ Scheduling (each value computed by one thread with the original function; order 
   with two or more batches the switch acts only where none can come after the first batch, and a subject
   set's tabular ids, outfmt 0 titles and `-lcase_masking` masks are then made once; with one batch (the
   first batch takes every query record) nothing is checked or made ahead (no refusal can follow its
-  batch). Otherwise the reports stay after the loop, and `off=` names why: `custom_tabular` (a tabular
-  field list or delimiter, or outfmt 10 or 20: `BlastnOutputFormat::CustomTabular`, whose refusals of
-  taxonomy names and stored data come in its one report call), `outputs` (hit records, a format
+  batch). Otherwise the reports stay after the loop, and `off=` names why: `outputs` (hit records, a format
   observer, a file sink, or two or more formats, which the library API allows on one stream and the batch
   writes would interleave: the Web adapter; the command line and ABI v1 are streamed), `debug` (`-verbose`,
   `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, `LOSAT_DEBUG_COORDS[_START]`, the blastn trace,
@@ -4677,7 +4675,16 @@ Scheduling (each value computed by one thread with the original function; order 
   it, holds a byte outside ' ' ..= '~' or gives no tabular id, as blastp's block search checks) and
   `ambiguity` (a sequence whose ambiguity data the traceback cannot decode; the preliminary stage reads
   only the 2-bit letters, so the traceback of the batch whose lists name the sequence decodes them first;
-  `SeqDb::check_ambiguity` reads only those bytes). With `LOSAT_TIMING` the `[TIMING]` blocks are printed
+  `SeqDb::check_ambiguity` reads only those bytes). The tabular reports with a field list or a delimiter
+  and outfmt 10 and 20 are streamed too (since 2026-11-03, NCMEM1; before, `off=custom_tabular`): the same
+  checks also read what their writer reads of a reported sequence, so `titles` covers, where a field shows
+  the taxonomy (`staxid`, `staxids`, the names), every definition line decoded as `SeqDb::defline_set`
+  decodes it (`SeqDb::visit_defline_sets`) and with parsed Seq-ids the ids of every definition line for
+  `sall*`; `taxonomy` covers a name of the taxonomy database whose lookup could be refused for any taxid
+  (one pass over the taxonomy database, `any_taxdb_lookup_may_refuse`; the rows look up taxid 0 and every
+  definition line's taxids, more than the prefetch); and with `-parse_deflines` `subject_ids` covers the
+  parsed ids of a subject set's subjects. Outfmt 20's line of the field names comes with the first batch's
+  report (or, where an error of NCBI's stops the first batch, from the call of the off path). With `LOSAT_TIMING` the `[TIMING]` blocks are printed
   when the loop takes a batch, as before, so with the switch a block comes after the query warnings of the
   batches before it (the same lines in another order). Memory: a batch's lists, flags, masks, blocks,
   search spaces and its queries' warnings are dropped after its write; kept for the whole search, as without

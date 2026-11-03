@@ -1918,6 +1918,39 @@ impl SeqDb {
         )
     }
 
+    /// `visit(ordinal, self.defline_set(ordinal))` for the sequences of `range` in order until
+    /// `visit` returns false; returns whether every call returned true. The headers of the range
+    /// are read as [`SeqDb::visit_deflines`] reads them (one read of the index file and one read
+    /// of the header file per MiB): the check before the search of BLASTN's streamed custom
+    /// tabular reports with a taxonomy field, which read the definition lines of each reported
+    /// sequence so (`LOSAT_X_RPTSTREAM`).
+    pub fn visit_defline_sets(
+        &self,
+        range: BlockRange,
+        mut visit: impl FnMut(u32, Result<DeflineSet, SeqDbError>) -> bool,
+    ) -> bool {
+        let Some(vol) = self.volumes.get(range.volume) else {
+            return range.is_empty().then_some(true).unwrap_or_else(|| {
+                visit(range.first_ordinal, Err(volume_range_error(range, self)))
+            });
+        };
+        if self.excludes_all(range) {
+            return true;
+        }
+        vol.visit_defline_sets(
+            range.first,
+            range.end,
+            header_piece_bytes(),
+            &mut |oid, set| match self.range_ordinal(range, oid) {
+                Some(ordinal) => visit(
+                    ordinal,
+                    set.and_then(|set| self.ordinal_set(range.volume, ordinal, set)),
+                ),
+                None => true,
+            },
+        )
+    }
+
     /// `visit(ordinal, self.read_header(ordinal))` for the sequences of `range` in order until
     /// `visit` returns false; returns whether every call returned true. The headers of the range
     /// are read as [`SeqDb::visit_deflines`] reads them (one read of the index file and one read

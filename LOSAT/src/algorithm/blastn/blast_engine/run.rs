@@ -9093,7 +9093,9 @@ fn run_in_pool(
                         },
                     )
                 };
-                if stream.acting() {
+                // In the first batch nothing was streamed: the call of the off path writes the
+                // prologs that come with the reports (outfmt 20's line of the field names).
+                if stream.acting() && start > 0 {
                     stream.finish_sam(outputs)?;
                 } else {
                     before(outputs)?;
@@ -9142,7 +9144,9 @@ fn run_in_pool(
                     },
                 )
             };
-            if stream.acting() {
+            // In the first batch nothing was streamed: the call of the off path writes the
+            // prologs that come with the reports (outfmt 20's line of the field names).
+            if stream.acting() && start > 0 {
                 stream.finish_sam(outputs)?;
             } else {
                 before(outputs)?;
@@ -9224,7 +9228,9 @@ fn run_in_pool(
                         },
                     )
                 };
-                if stream.acting() {
+                // In the first batch nothing was streamed: the call of the off path writes the
+                // prologs that come with the reports (outfmt 20's line of the field names).
+                if stream.acting() && start > 0 {
                     stream.finish_sam(outputs)?;
                 } else {
                     before(outputs)?;
@@ -9302,7 +9308,9 @@ fn run_in_pool(
                     },
                 )
             };
-            if stream.acting() {
+            // In the first batch nothing was streamed: the call of the off path writes the
+            // prologs that come with the reports (outfmt 20's line of the field names).
+            if stream.acting() && start > 0 {
                 stream.finish_sam(outputs)?;
             } else {
                 before(outputs)?;
@@ -9406,7 +9414,9 @@ fn run_in_pool(
                             None,
                         )
                     };
-                    if stream.acting() {
+                    // In the first batch nothing was streamed: the call of the off path writes the
+                    // prologs that come with the reports (outfmt 20's line of the field names).
+                    if stream.acting() && start > 0 {
                         stream.finish_sam(outputs)?;
                     } else {
                         before(outputs)?;
@@ -9514,7 +9524,9 @@ fn run_in_pool(
                         },
                     )
                 };
-                if stream.acting() {
+                // In the first batch nothing was streamed: the call of the off path writes the
+                // prologs that come with the reports (outfmt 20's line of the field names).
+                if stream.acting() && start > 0 {
                     stream.finish_sam(outputs)?;
                 } else {
                     before(outputs)?;

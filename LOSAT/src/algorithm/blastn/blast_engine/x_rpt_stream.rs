@@ -52,7 +52,16 @@
 //!   (the number of queries formatted, NCBI's `m_QueriesFormatted`: the last call counts the
 //!   queries of every batch, `BlastnReportInputs::queries_before`), and outfmt 6 has none. The
 //!   formats 8, 9 and 12 (OF3) write per query like 6; BLAST XML (5, OF4a) is not argued here
-//!   and is never streamed (`Off::Xml`, below).
+//!   and is never streamed (`Off::Xml`, below). The tabular reports with a field list or a
+//!   delimiter and outfmt 10 and 20 (`algorithm::blastn::tabular`) write per query like 6 and 7
+//!   (the delimiter and the kind change only how a row is written; `qcovs` and `qcovus` are a
+//!   query's and a subject's; the texts of the rows' lookups of the taxonomy database are a
+//!   taxid's), and outfmt 20's line of the field names comes with the first report
+//!   (`queries_before` 0: the first batch's call), or, where an error of NCBI's stops the first
+//!   batch, from `write_before_failed_batch` as without the switch. The texts of opening the
+//!   taxonomy database that a batch's rows keep (`TaxdbRun::open_for_rows`) go to the first
+//!   report call whose rows look a name up (`common::database::tabular_names`), as they go to the
+//!   first such row of the one call.
 //! - the errors: an error of NCBI's that a batch meets (a reader error, an `eEOF` batch, a batch
 //!   of queries without letters, `ErrorAfterInvalidBatches`, a header file that cannot be read)
 //!   comes after the reports of the batches before, without the epilog, in both: here they were
@@ -75,7 +84,13 @@
 //!   most `common::database::PARSED_CHECK_SEQUENCES_MAX` sequences, `Off::LargeParsed`) and the
 //!   ambiguity data of every sequence, which the preliminary stage does not read
 //!   (`database::x_streaming_refusal`; one pass over the database's sequences before the search,
-//!   in the pool). With one batch (the first batch takes every query record) nothing can come
+//!   in the pool). A custom tabular report reads more, refused in the call of the batch that
+//!   reports the sequence (the writer's checks before its first byte): with `-parse_deflines` the
+//!   parsed ids of a subject set's subjects (`Off::SubjectIds`), and with `-db` the definition
+//!   lines as `SeqDb::defline_set` decodes them where a field shows the taxonomy
+//!   (`Off::Titles`), the names of the taxonomy database (any lookup that could be refused,
+//!   `Off::Taxonomy`), and with parsed Seq-ids the ids of every definition line for `sall*`
+//!   (`ParsedShown::all_ids`); the same pass reads them. With one batch (the first batch takes every query record) nothing can come
 //!   after it, so none of these checks is made and no subject value is made ahead (the one call
 //!   makes them as without the switch). LOSAT's internal invariant errors and panics are not
 //!   argued; a write error of the output stops the run where it happens (at the end without the
@@ -88,9 +103,7 @@
 //!   so with the switch a block comes after the warnings of the batches before it (the same
 //!   lines in another order).
 //!
-//! Off (the reports after the loop, as without the switch): the switch off; a tabular report
-//! with a field list or a delimiter, and outfmt 10 and 20 (`Off::CustomTabular`: its refusals of
-//! taxonomy names and of the stored data it reads are made in its report call); outputs other
+//! Off (the reports after the loop, as without the switch): the switch off; outputs other
 //! than one format of the command line's kind (the hit records and the format observer of the Web
 //! adapter, whose HSP numbers count over the whole search; file sinks, which are created when
 //! their report is written; two or more formats, which the library API allows on one stream,
@@ -184,9 +197,11 @@ pub(super) enum Off {
     UngappedCutoff,
     /// A database length times a query length that could overflow NCBI's 64-bit search space.
     SearchSpace,
-    /// A subject of the set whose tabular id LOSAT refuses.
+    /// A subject of the set whose tabular id LOSAT refuses (with `-parse_deflines`, the parsed
+    /// ids that a custom tabular report shows).
     SubjectIds,
-    /// A database whose definition lines do not all read as the reports read them, or with
+    /// A database whose definition lines do not all read as the reports read them (a custom
+    /// tabular report with a taxonomy field: as `SeqDb::defline_set` decodes them), or with
     /// parsed Seq-ids a header that the reports could refuse (outfmt 17 streams all the same).
     Titles,
     /// A database with parsed Seq-ids two of whose sequences outfmt 0 would join
@@ -199,12 +214,9 @@ pub(super) enum Off {
     /// all the same).
     Ambiguity,
     /// A lookup of the taxonomy database that could be refused, where the batches' prefetch
-    /// reads it (outfmt 0, 6, 7 and 17 with `taxdb.bti` on the search path).
+    /// reads it (outfmt 0, 6, 7 and 17 with `taxdb.bti` on the search path) or the rows of a
+    /// custom tabular report look a name up.
     Taxonomy,
-    /// A tabular report with a field list or a delimiter, or outfmt 10 or 20
-    /// (`BlastnOutputFormat::CustomTabular`), which is written after the loop (the module doc
-    /// has the reason).
-    CustomTabular,
 }
 
 impl Off {
@@ -224,7 +236,6 @@ impl Off {
             Off::LargeParsed => "large_parsed",
             Off::Ambiguity => "ambiguity",
             Off::Taxonomy => "taxonomy",
-            Off::CustomTabular => "custom_tabular",
         }
     }
 }
@@ -480,18 +491,6 @@ fn check(
     {
         return Err(Off::Xml);
     }
-    // The custom tabular reports (line CLI C2, PR 1): their writer refuses a name of the
-    // taxonomy database for a subject with a taxid (DECISIONS 3) and reads the taxids and
-    // definition lines of the reported sequences, which a later batch's report call would do
-    // after the first batch's rows were written; and outfmt 20's header line comes with the
-    // first report. They keep the one report call after the search, where every refusal comes
-    // before the first byte, and never take the streamed path of the default 6 and 7.
-    if output_formats
-        .iter()
-        .any(|format| format.tabular_spec().is_some())
-    {
-        return Err(Off::CustomTabular);
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
     // ```c++
     //     TSeqPos size_read = 0;
@@ -571,6 +570,35 @@ fn check(
                 .collect();
             let ids = ids.ok_or(Off::SubjectIds)?;
             let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
+            // A custom tabular report of `-parse_deflines` shows the parsed ids of each reported
+            // subject (`TabularSubjects::values`: `tabular_ids`, and `all_tabular_ids` for the
+            // `sall*` fields), refused in the report call of the batch that reports it: every
+            // subject's, made as the report calls make them (`write_reports_untimed`).
+            if let Some(spec) = output_formats
+                .iter()
+                .find_map(|format| format.tabular_spec())
+                .filter(|_| args.parse_deflines)
+            {
+                let all_ids = spec.needs().all_deflines;
+                let parsed = crate::report::db_subject::parsed_records(
+                    prepared
+                        .letters()
+                        .records()
+                        .iter()
+                        .map(|record| (record.believed(), record.title.as_slice())),
+                    args.show_gis,
+                    false,
+                    pairwise,
+                    "BLASTN",
+                )
+                .map_err(|_| Off::SubjectIds)?;
+                if !parsed.iter().flatten().all(|subject| {
+                    subject.tabular_ids(false).is_ok()
+                        && (!all_ids || subject.all_tabular_ids(false).is_ok())
+                }) {
+                    return Err(Off::SubjectIds);
+                }
+            }
             let titles = pairwise.then(|| prepared.records.iter().map(record_title).collect());
             // The records as read with `-subject_loc` (never packed), else the searched ones.
             let masks = (pairwise && args.lcase_masking).then(|| {
@@ -611,7 +639,10 @@ fn check(
                 });
             }
             let shown = database::parsed_shown(output_formats);
-            match database::x_streaming_refusal(db, shown, prefetch, pool) {
+            let tabular = output_formats
+                .first()
+                .and_then(|format| format.tabular_spec());
+            match database::x_streaming_refusal(db, shown, prefetch, tabular, pool) {
                 // Outfmt 17 writes no byte before its end (`SamDocument::finish`, which no
                 // refusal of LOSAT's follows) and to standard error with its report calls only
                 // the batch's query warnings, which the one call after the loop writes before

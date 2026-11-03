@@ -282,6 +282,8 @@ fn database_check(
         pairwise,
         joined: pairwise,
         sam: false,
+        // The custom tabular reports, which show `sall*`, are not streamed (`Off::CustomTabular`).
+        all_ids: false,
     };
     // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
     let prefetch = format.prefetches_subjects() && database.taxdb_found();

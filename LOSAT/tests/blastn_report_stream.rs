@@ -13,7 +13,8 @@
 //! on the error paths that come after the reports of earlier batches (a reader error, a batch of
 //! queries without letters), and with `-db`. Where the switch must not act (LOSAT's refusal of a
 //! subject's id, which comes before every report without the switch; a search space that could
-//! overflow; the debug output) the `[X_STATS]` line names why and the bytes are the same too. That
+//! overflow; the debug output) the `[X_STATS]` line names why and the bytes are the same too. The
+//! tabular reports with a field list or a delimiter and outfmt 10 and 20 are streamed alike. That
 //! those bytes equal NCBI's is the business of the blastn fixtures.
 
 use std::path::{Path, PathBuf};
@@ -593,6 +594,28 @@ fn a_database_search_where_the_switch_must_not_act() {
     }
 }
 
+/// Eight queries of 488 random letters (no hits) and then the records of `query`, in `late.fa`:
+/// in batches of four (`BATCH_SIZE=1500`) only the third and later batches report a sequence.
+fn hits_late(dir: &TempDir, query: &str) -> PathBuf {
+    let mut text = Vec::new();
+    let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+    for at in 0..8 {
+        let letters: Vec<u8> = (0..488)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                b"ACGT"[(state >> 62) as usize]
+            })
+            .collect();
+        record(&mut text, format!("nohit{at}").as_bytes(), &letters);
+    }
+    text.extend(std::fs::read(query).unwrap());
+    let late = dir.path("late.fa");
+    std::fs::write(&late, text).unwrap();
+    late
+}
+
 /// Databases with parsed Seq-ids (line DBID; `tests/db_search/ids`, `make_ids.py`), with the 25
 /// records of `nucl.fna` (variants of one sequence: every query hits every sequence) as queries
 /// in batches of four (`BATCH_SIZE=1500`): the off bytes, written batch by batch where no report
@@ -670,22 +693,7 @@ fn a_database_with_parsed_seqids_gives_the_off_bytes() {
     }
     // Eight queries of 488 random letters (no hits) before the 25 records.
     let dir = TempDir::new("parsedlate");
-    let mut text = Vec::new();
-    let mut state: u64 = 0x2545_f491_4f6c_dd1d;
-    for at in 0..8 {
-        let letters: Vec<u8> = (0..488)
-            .map(|_| {
-                state = state
-                    .wrapping_mul(6_364_136_223_846_793_005)
-                    .wrapping_add(1_442_695_040_888_963_407);
-                b"ACGT"[(state >> 62) as usize]
-            })
-            .collect();
-        record(&mut text, format!("nohit{at}").as_bytes(), &letters);
-    }
-    text.extend(std::fs::read(&query).unwrap());
-    let late = dir.path("late.fa");
-    std::fs::write(&late, text).unwrap();
+    let late = hits_late(&dir, &query);
     let late = late.to_str().unwrap();
     for (db, outfmt, threads, expected) in [
         ("nucl_v5", "7", 4, "none"),
@@ -853,22 +861,264 @@ fn where_the_switch_must_not_act_the_counters_name_why() {
         same_two("debug", &plain, 1, &[("LOSAT_DEBUG_COORDS", "1")], None);
     assert!(!off.report.is_empty());
     assert_eq!((batches, reason.as_str()), (0, "debug"));
-    // A tabular field list or delimiter, and outfmt 10 and 20 (line CLI C2): written after the
-    // loop, where the custom report's refusals come before its first byte.
-    for outfmt in [
-        "7 std qcovs qcovus sstrand",
-        "6 delim=, std",
-        "10",
-        "20 qseqid sseqid",
-    ] {
-        let mut custom = plain.to_vec();
-        custom[7] = outfmt;
-        let (off, (batches, reason)) = same_two(outfmt, &custom, 4, &[], None);
-        assert!(!off.report.is_empty(), "{outfmt}");
-        assert_eq!(
-            (batches, reason.as_str()),
-            (0, "custom_tabular"),
-            "{outfmt}"
+}
+
+/// The tabular reports with a field list or a delimiter and outfmt 10 and 20 (NCMEM1), written
+/// batch by batch: the off bytes. With `-subject` (every task; with a plural name of the taxonomy
+/// database, whose formatter warns for each query without `taxdb.bti`), with `-parse_deflines`,
+/// with `-db` (`stitle`, `sseq`, `staxids`, `sall*` and the names: the definition lines as the
+/// report decodes them, the taxonomy database's lookups and their texts), and on NCBI's errors in
+/// the first batch, where outfmt 20's line of the field names comes as without the switch. Where a
+/// later batch's report would be refused (a subject's id, a stored title, a header or taxonomy
+/// record of a database with parsed Seq-ids) the switch does not act and the refusal comes before
+/// every row.
+#[test]
+fn custom_tabular_reports_give_the_off_bytes() {
+    let dir = TempDir::new("custom");
+    let query = queries(&dir, "q.fa", b"");
+    let subject = fasta("LC738868.fasta");
+    let streamed = |what: &str, off: &Run, batches: u64, reason: &str| {
+        assert_eq!(off.status, Some(0), "{what}: {off:?}");
+        assert!(!off.report.is_empty(), "{what}");
+        assert!(
+            reason == "none" && batches >= 6,
+            "{what}: {batches} {reason}"
         );
+    };
+    for (at, (outfmt, parse_deflines)) in [
+        (
+            "6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue \
+             bitscore qlen slen sseq",
+            false,
+        ),
+        ("7 std qcovs qcovus sstrand staxids sscinames", false),
+        ("6 delim=, std qcovs", false),
+        ("10", false),
+        ("10 qseqid sseqid sseq btop", false),
+        ("20 qseqid sseqid qcovs", false),
+        ("20 delim=; qseqid sseqid", false),
+        ("6 qseqid sseqid sallseqid sacc stitle", true),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let task = TASKS[at % 3];
+        let mut args = vec![
+            "-task",
+            task,
+            "-query",
+            query.to_str().unwrap(),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            outfmt,
+        ];
+        if parse_deflines {
+            args.push("-parse_deflines");
+        }
+        let what = format!("{task} outfmt {outfmt} -parse_deflines {parse_deflines}");
+        let (off, (batches, reason)) = same_two(&what, &args, [1, 4][at % 2], &[], None);
+        streamed(&what, &off, batches, &reason);
+        if outfmt.contains("sscinames") {
+            assert!(
+                String::from_utf8_lossy(&off.stderr).contains("Taxonomy name lookup"),
+                "{what}"
+            );
+        }
+    }
+    // A subject whose tabular id LOSAT refuses, which only the last batches report.
+    let mut subjects = Vec::new();
+    record(&mut subjects, b"LC738868 first", &letters("LC738868.fasta"));
+    record(
+        &mut subjects,
+        b"Subject_\x81 undecodable",
+        &letters("LC738874.fasta")[150_000..190_000],
+    );
+    let refused = dir.path("subjects.fa");
+    std::fs::write(&refused, subjects).unwrap();
+    let args = [
+        "-task",
+        "megablast",
+        "-query",
+        query.to_str().unwrap(),
+        "-subject",
+        refused.to_str().unwrap(),
+        "-outfmt",
+        "10 qseqid sseqid stitle",
+    ];
+    let (off, (batches, reason)) = same_two("Subject_ id, outfmt 10", &args, 4, &[], None);
+    assert_ne!(off.status, Some(0), "the refusal");
+    assert!(off.report.is_empty(), "the refusal comes before every row");
+    assert_eq!((batches, reason.as_str()), (0, "subject_ids"));
+    // NCBI's errors in the first batch: a reader error, a batch of queries without letters. The
+    // one batch streams; outfmt 20's line of the field names comes before the error.
+    let reader_error = dir.path("bad.fa");
+    std::fs::write(&reader_error, b">bad\n@@@@\n").unwrap();
+    let empty = dir.path("empty.fa");
+    std::fs::write(&empty, b">e1\n>e2\n").unwrap();
+    for (bad, status) in [(&reader_error, 1), (&empty, 3)] {
+        let args = [
+            "-task",
+            "megablast",
+            "-query",
+            bad.to_str().unwrap(),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            "20 qseqid sseqid",
+        ];
+        let what = format!("outfmt 20, {bad:?}");
+        let (off, (batches, reason)) = same_two(&what, &args, 1, &[], None);
+        assert_eq!(off.status, Some(status), "{what}: {off:?}");
+        assert!(
+            !off.report.is_empty(),
+            "{what}: the line of the field names"
+        );
+        assert_eq!((batches, reason.as_str()), (0, "none"), "{what}");
+    }
+    // `-db`: two sequences, the second hit by the last batches only; and the same database with
+    // the second title holding a byte outside ' ' ..= '~'.
+    let intact = database(&dir, "intact", |_| {});
+    let title = database(&dir, "title", |db| {
+        let path = format!("{db}.nhr");
+        let mut header = std::fs::read(&path).unwrap();
+        let at = header
+            .windows(12)
+            .position(|window| window == b"LC738874part")
+            .expect("the second title");
+        header[at + 3] = 0xE9;
+        std::fs::write(&path, header).unwrap();
+    });
+    for (outfmt, threads) in [
+        ("6 qseqid sseqid stitle sseq staxids", 4),
+        ("7 qseqid sallseqid salltitles sscinames qcovs", 1),
+        ("10 qseqid sseqid slen", 4),
+        ("20 qseqid stitle staxid", 1),
+    ] {
+        for (db, expected) in [(&intact, "none"), (&title, "titles")] {
+            let args = [
+                "-task",
+                "megablast",
+                "-query",
+                query.to_str().unwrap(),
+                "-db",
+                db,
+                "-outfmt",
+                outfmt,
+            ];
+            let what = format!("-db {db} outfmt {outfmt}");
+            let (off, (batches, reason)) = same_two(&what, &args, threads, &[], None);
+            if expected == "none" {
+                streamed(&what, &off, batches, &reason);
+            } else {
+                assert_ne!(off.status, Some(0), "{what}: the refusal");
+                assert!(off.report.is_empty(), "{what}: the refusal comes first");
+                assert_eq!((batches, reason.as_str()), (0, expected), "{what}");
+            }
+        }
+    }
+    // Databases with parsed Seq-ids and taxids (`tests/db_search/ids`), with taxonomy databases
+    // (`tests/seqdb/taxdb`: `good`; `bad_magic`, whose texts of opening the first row that looks a
+    // name up writes; `btd_empty`, whose records LOSAT refuses; `offset_mid_past_end`, whose
+    // offsets do not increase (the record of taxid 9606 begins past the end of `taxdb.btd`, so its
+    // names are not found), so that the pass over it before the search cannot tell whether a
+    // lookup could be refused: the reports stay after the loop), the queries that hit only from
+    // the third batch on, 25 sequences each (the sequences with taxids among them).
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let ids = |name: &str| {
+        tests
+            .join("db_search/ids")
+            .join(name)
+            .to_str()
+            .unwrap()
+            .to_string()
+    };
+    let taxdb = |variant: &str| {
+        tests
+            .join("seqdb/taxdb")
+            .join(variant)
+            .to_str()
+            .unwrap()
+            .to_string()
+    };
+    let late = hits_late(&dir, &ids("nucl.fna"));
+    for (db, outfmt, blastdb, threads, expected) in [
+        (
+            "nucl_v5",
+            "6 qseqid sseqid sallseqid sallacc staxids",
+            None,
+            4,
+            "none",
+        ),
+        (
+            "nucl_v5",
+            "7 qseqid sseqid staxids sscinames scomnames sblastnames sskingdoms",
+            Some("good"),
+            1,
+            "none",
+        ),
+        (
+            "nucl_v5",
+            "6 qseqid ssciname sscinames",
+            Some("bad_magic"),
+            4,
+            "none",
+        ),
+        (
+            "nucl_v4",
+            "20 qseqid sseqid staxid",
+            Some("good"),
+            1,
+            "none",
+        ),
+        (
+            "nucl_v5",
+            "10 qseqid ssciname",
+            Some("offset_mid_past_end"),
+            1,
+            "taxonomy",
+        ),
+        (
+            "nucl_v5",
+            "6 qseqid sseqid sscinames",
+            Some("btd_empty"),
+            4,
+            "taxonomy",
+        ),
+        ("nrefuse_v5", "6 qseqid sallseqid", None, 4, "titles"),
+    ] {
+        let path = ids(db);
+        let args = [
+            "-task",
+            "megablast",
+            "-query",
+            late.to_str().unwrap(),
+            "-db",
+            &path,
+            "-outfmt",
+            outfmt,
+            "-max_target_seqs",
+            "25",
+        ];
+        let blastdb = blastdb.map(taxdb);
+        let mut extra = vec![("BATCH_SIZE", "1500")];
+        if let Some(dir) = &blastdb {
+            extra.push(("BLASTDB", dir.as_str()));
+        }
+        let what = format!("{db} outfmt {outfmt} {blastdb:?}");
+        let (off, (batches, reason)) = same_two(&what, &args, threads, &extra, None);
+        if expected == "none" {
+            streamed(&what, &off, batches, &reason);
+        } else if blastdb
+            .as_deref()
+            .is_some_and(|dir| dir.ends_with("offset_mid_past_end"))
+        {
+            assert_eq!(off.status, Some(0), "{what}: no refusal");
+            assert_eq!((batches, reason.as_str()), (0, expected), "{what}");
+        } else {
+            assert_ne!(off.status, Some(0), "{what}: the refusal");
+            assert!(off.report.is_empty(), "{what}: the refusal comes first");
+            assert_eq!((batches, reason.as_str()), (0, expected), "{what}");
+        }
     }
 }

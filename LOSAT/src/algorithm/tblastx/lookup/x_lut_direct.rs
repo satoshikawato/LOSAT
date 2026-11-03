@@ -66,7 +66,7 @@ use std::cell::RefCell;
 
 // EXPERIMENT (PAIRLUT): the per-group tables of the TBLASTX unit
 // path built by this file's count, layout and fill passes on the lookup locations of one group; a
-// child module so that it uses `x_target_list` and the memo type below unchanged (see x_pair_lut.rs).
+// child module so that it uses `x_target_list` and the memos below unchanged (see x_pair_lut.rs).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467
 // ```c
@@ -91,6 +91,25 @@ struct XNeighborMemo {
 
 thread_local! {
     static X_MEMO: RefCell<Option<XNeighborMemo>> = const { RefCell::new(None) };
+}
+
+// No NCBI counterpart (memoised neighbour lists, as `X_MEMO` keeps them for a thread's builds): the
+// memos of TBLASTX's table builds (the unit path's group tables, `x_pair_lut.rs`, and a batch's
+// full table, `x_tbx_build_lookup`), as many as builds ran at once. A batch is searched on
+// whichever pool thread starts it (TBXPIPE), so a memo per thread made the lists again in each
+// thread's first build (16 of 40 builds at 16 threads, 22-33 ms against 7-10). A build takes a
+// memo the builds before it gave back and gives it back.
+static X_TBX_MEMOS: std::sync::Mutex<Vec<XNeighborMemo>> = std::sync::Mutex::new(Vec::new());
+
+// No NCBI counterpart: `f` on a memo of `X_TBX_MEMOS` (`None` where none is kept: the build makes
+// one, and replaces one of another key, as it does with `X_MEMO`), then the memo back.
+fn x_with_tbx_memo<R>(f: impl FnOnce(&mut Option<XNeighborMemo>) -> R) -> R {
+    let mut memo = x_pool_lock(&X_TBX_MEMOS).pop();
+    let result = f(&mut memo);
+    if let Some(memo) = memo {
+        x_pool_lock(&X_TBX_MEMOS).push(memo);
+    }
+    result
 }
 
 // No NCBI counterpart (buffer reuse and one memo for all threads; the table is the one
@@ -2513,8 +2532,32 @@ pub(super) fn x_tbx_build_lookup(
         karlin_params,
         check_ideal,
         |direct| crate::utils::xreach::x_reach!("LOSAT_X_TBXLUT", direct),
-        x_build_direct,
+        x_tbx_build_direct,
     )
+}
+
+/// [`x_build_direct`] on a memo of TBLASTX's builds (`x_with_tbx_memo`) instead of the thread's,
+/// so that a run whose batches take the unit path and the full table keeps one memo, as before.
+fn x_tbx_build_direct(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+    x_with_tbx_memo(|memo| {
+        x_build_direct_in::<BackboneCell>(
+            prepared,
+            threshold,
+            matrix,
+            word_length,
+            memo,
+            None,
+            false,
+            1,
+            false,
+        )
+        .map(|table| table.expect("fresh vectors have the room for any table"))
+    })
 }
 
 /// The query of `queries` prepared as `build_ncbi_lookup_for_profile(.., Blosum62,

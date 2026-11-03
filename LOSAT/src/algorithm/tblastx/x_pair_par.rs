@@ -1233,11 +1233,11 @@ fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
 // lookup locations of its contexts (`XPairLutQuery::x_build_group`). Scheduling only: the groups
 // are independent. They are built in order on the calling thread; with `on_pool` (the tuning knob
 // LOSAT_X_PAIRLUT_POOL, `lut_on_pool`) and a search pool they are built on the pool (an indexed
-// map, results in group order; each build takes a memo of neighbour lists the builds before it gave
-// back, `x_with_group_memo`). The calling thread
-// is the default because the pool gained at most 17 ms per batch (AP027131, 6 x 220,702 aa) and
-// cost memory: tables allocated in the pool threads' arenas and freed by the search thread
-// (+17 MiB on a 50-batch run at 8 threads, measured when every pool thread kept its own memo).
+// map, results in group order; each build takes a memo of neighbour lists, `x_with_tbx_memo`). The
+// calling thread is the default because the pool gained at most 17 ms per batch (AP027131, 6 x
+// 220,702 aa) and cost memory: a memo for each group built at once (kept for the next builds), and
+// tables allocated in the pool threads' arenas and freed by the search thread (+17 MiB on a
+// 50-batch run at 8 threads).
 /// The groups `build_groups` would filter out of the full table of `q`, built directly. None
 /// when a lookup location does not lie inside one group.
 fn lut_direct_groups(
@@ -4953,8 +4953,8 @@ mod tests {
     // ```c
     // TBlastThreads the_threads(GetNumberOfThreads());
     // ```
-    // The groups built on a search pool (each build on a memo of neighbour lists the builds before
-    // it gave back) are the groups built in order on one thread.
+    // The groups built on a search pool (each build on a memo of neighbour lists of
+    // `X_TBX_MEMOS`) are the groups built in order on one thread.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     #[test]
     fn direct_groups_on_a_search_pool_equal_build_groups() {
@@ -4991,8 +4991,8 @@ mod tests {
     // ```c
     // TBlastThreads the_threads(GetNumberOfThreads());
     // ```
-    // Builds of two keys at once (two searches in one process) each take a memo of
-    // `X_GROUP_MEMOS` and give it back; a memo kept for the other key is dropped, never read.
+    // Builds of two keys side by side (two searches in one process) each take a memo of
+    // `X_TBX_MEMOS` and give it back; a memo kept for the other key is replaced, never read.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     #[test]
     fn direct_groups_of_two_keys_at_once_equal_build_groups() {

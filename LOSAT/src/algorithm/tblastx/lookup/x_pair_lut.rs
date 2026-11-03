@@ -4,8 +4,8 @@
 //!
 //! This file is a child module of `x_lut_direct.rs` (declared there with `#[path]`, as that file
 //! is for `backbone.rs`), so it uses the neighbour lists of the in-place builder (`x_target_list`,
-//! its memo) and the reference builder pieces of `backbone.rs` (`prepare_lookup_query`,
-//! `blast_lookup_index_query_exact_matches`) without changing them.
+//! the memos of TBLASTX's builds, `X_TBX_MEMOS`) and the reference builder pieces of `backbone.rs`
+//! (`prepare_lookup_query`, `blast_lookup_index_query_exact_matches`) without changing them.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:92-94,105-115
 //! ```c
@@ -177,34 +177,6 @@ fn x_group_zeroed(elements: usize, mapped: bool) -> Vec<u32> {
     let mut zeroed = vec![0u32; x_group_capacity::<u32>(elements, mapped)];
     zeroed.truncate(elements);
     zeroed
-}
-
-// No NCBI counterpart (memoised neighbour lists, as `X_MEMO` keeps them for a thread's builds): the
-// memos of the group builds, as many as builds ran at once. A batch's groups
-// are built on whichever pool thread starts the batch (TBXPIPE), so a memo per thread made the
-// lists again in each thread's first build (16 of 40 builds at 16 threads, 22-33 ms against
-// 7-10). A build takes a memo the builds before it gave back, or a new one, and gives it back.
-static X_GROUP_MEMOS: std::sync::Mutex<Vec<XNeighborMemo>> = std::sync::Mutex::new(Vec::new());
-
-// No NCBI counterpart: `f` on the lists of a memo of `X_GROUP_MEMOS` for `key` (a new memo where
-// none is kept; one kept for another key is dropped), then the memo back into the pool.
-fn x_with_group_memo<R>(
-    key: (ScoringMatrix, i32, usize, usize),
-    backbone_size: usize,
-    f: impl FnOnce(&mut Vec<Option<Box<[u16]>>>) -> R,
-) -> R {
-    let kept = x_pool_lock(&X_GROUP_MEMOS).pop();
-    let mut memo = kept
-        .filter(|m| m.key == key && m.lists.len() == backbone_size)
-        .unwrap_or_else(|| XNeighborMemo {
-            key,
-            lists: std::iter::repeat_with(|| None)
-                .take(backbone_size)
-                .collect(),
-        });
-    let result = f(&mut memo.lists);
-    x_pool_lock(&X_GROUP_MEMOS).push(memo);
-    result
 }
 
 impl XPairLutQuery {
@@ -383,7 +355,7 @@ impl XPairLutQuery {
     // ```
     // The count, layout and fill passes of `x_lut_direct.rs::x_build_direct` on the reference
     // exact backbone of `locations` (one group's lookup locations), reading the prepared query in
-    // place. The neighbour lists come from a memo of `X_GROUP_MEMOS` (`x_with_group_memo`).
+    // place. The neighbour lists come from a memo of TBLASTX's builds (`x_with_tbx_memo`).
     /// The lookup table of one group: the table `build_groups` filters out of the full table for
     /// the group whose lookup locations are `locations` (module comment).
     /// `mapped`: the build's large blocks take `x_group_capacity`'s mapped capacity.
@@ -410,8 +382,21 @@ impl XPairLutQuery {
             &mut skipped_invalid_residue,
         );
 
-        let key = (matrix, threshold, word_length, alphabet_size);
-        x_with_group_memo(key, backbone_size, |lists| {
+        x_with_tbx_memo(|memo| {
+            let key = (matrix, threshold, word_length, alphabet_size);
+            if memo
+                .as_ref()
+                .is_none_or(|m| m.key != key || m.lists.len() != backbone_size)
+            {
+                *memo = Some(XNeighborMemo {
+                    key,
+                    lists: std::iter::repeat_with(|| None)
+                        .take(backbone_size)
+                        .collect(),
+                });
+            }
+            let lists = &mut memo.as_mut().expect("memo set above").lists;
+
             // Count pass: count[w] = number of appends the reference makes to cell w from the
             // source words of this group. The bounds of the entries are taken on the way: every
             // offset of a source word with a target is an entry of the table.

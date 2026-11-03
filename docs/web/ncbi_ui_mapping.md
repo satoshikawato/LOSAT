@@ -76,7 +76,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | Gap Costs（BLASTP・TBLASTN、matrix ごと） | BLOSUM62：11 2、10 2、9 2、8 2、7 2、6 2、13 1、12 1、11 1、10 1、9 1 ほか（PAM30、PAM70、BLOSUM80、BLOSUM45、BLOSUM50、PAM250、BLOSUM90 の一覧は `programs.ts`） | BLOSUM62 11 1、PAM30 9 1、PAM70 10 1、BLOSUM80 10 1、BLOSUM45 14 2、BLOSUM50 13 2、PAM250 15 2、BLOSUM90 10 1（エンジンが matrix ごとに解決する値と同じ。unit test が `describe.json` と照らす） |
 | Gap Costs（BLASTX） | 11 1 だけ（LOSAT の BLASTX が読む値、DW-36） | 11 1 |
 
-task・組・matrix を選んで Gap Costs の一覧が変わると、Gap Costs はその一覧の既定になる（NCBI の画面の `changeOptionList` と同じ。BLAST+ は一覧に無い組を止めることがある：task blastn の 4,-5 に既定の 5 2 は「Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -5」、megablast の 1,-1 に 0 0 も止まる。CLI 2.16.0 と LOSAT で確かめた）。一覧が同じ変更（blastp と blastp-fast の切り替え）や、一覧の無い値（「Other」で打った matrix や組）では書いた値を残す。
+task・組・matrix を選んで Gap Costs の一覧が変わると、Gap Costs はその一覧の既定になる（NCBI の画面の `changeOptionList` と同じ。BLAST+ は一覧に無い組を止めることがある：task blastn の 4,-5 に既定の 5 2 は「Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -5」、megablast の 1,-1 に 0 0 も止まる。CLI 2.16.0 と LOSAT で確かめた）。一覧が同じ変更（blastp と blastp-fast の切り替え）や、一覧の無い値（「Other」で打った matrix や組）では書いた値を残す。ただし一覧が同じでも、使う組が一覧から外れるとき（task blastn で 1,-1 を選び megablast に替えると既定の 0 0）は一覧の既定にする。組を選ぶと 2 つの値を書く（既定の組を選んだときは書かない）ので、task を替えても選んだ組のまま（megablast で選んだ 1,-4 は blastn でも 1,-4。argv には既定と違う値だけが出る）。
 
 **横の一文**：NCBI の画面で欄の横に見えている文は Max target sequences の「Select the maximum number of aligned sequences to display」だけ（ほかの文は「?」の helpbox の中、checkbox の名前は「Low complexity regions filter」「Mask for lookup table only」などの label）。この一文を同じ位置に出す（`ParameterField.hint`）。ほかの行に LOSAT の文は足さない（§4）。「?」は今までどおり CLI の help を開く。
 

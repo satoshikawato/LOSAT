@@ -12,6 +12,8 @@ const RECORDS: Readonly<Record<string, string>> = {
   'NR_074540.1': '>NR_074540.1 Bacillus cereus ATCC 14579 16S ribosomal RNA (rrnA), partial sequence\nTTATTGGAGAGTTTGATCCTGGCTCAGGATGAACGCTGGCGGCGTGCCTAATACATGCAAGTCGAGCGAA\n',
   'AB000001.1': '>ENA|AB000001|AB000001.1 Rhizoctonia solani genes for 18S rRNA\nAATTTTAATGAAAAAACTTTCAACAACGGATCTCTTGGTTCTCGCATCGATGAAGAACGCAGC\n',
   P12345: '>sp|P12345|AATM_RABIT Aspartate aminotransferase, mitochondrial\nMALLHSARVLSGVASAFHPGLAAAASARASSWWAHVEMGPPDPILGVTEAYKRDTNSKK\n',
+  'C_AA004835.1': '>C_AA004835.1 Severe acute respiratory syndrome coronavirus 2, nsp1 (part)\nMESLVPGFNEKTHVQLSLPVLQVRDVLVRGFGDSVEEVLSEARQHLKDGTCGLVEVEKGVLPQLEQPYVFIKRSDARTAPHGHVMVELVAELEGIQYGRSGETLGVLVPHVGEIPVAYRKVLLRKNGNKGAGGHSYGADLKSFDLGDELGTDPYEDFQENWNTKHSSGVTRELMRELNGG\n',
+  'NP_414542.1': '>NP_414542.1 thr operon leader peptide [Escherichia coli str. K-12 substr. MG1655]\nMKRISTTITTTITITTGNGAG\n',
   'MH011443.1': '>MH011443.1 Homo sapiens TP53 (TP53) gene, exon 5 and partial cds\nTGGGTTGATTCCACACCCCCGCCCGGCACCCGCGTCCGCGCCGTGGCCATCTAC\n',
 };
 const PROBES = [
@@ -137,4 +139,22 @@ test('Fastest races a fixed public record at the three sources on the first Fetc
   await expect(page.getByTestId('query-fetch-source').locator('option[value="fastest"]')).toHaveText('Fastest (EBI)');
   await expect(page.getByTestId('query-fetch-note')).toHaveText('Sends the accession to EBI');
   expect(away).toHaveLength(5);
+});
+
+test('a box that no one source serves is split: the line says where each accession goes (line WF-4)', async ({ page }) => {
+  const away = await stubSources(page);
+  await openSearch(page);
+  await program(page, 'blastp');
+  await page.getByTestId('subject-input').fill('P12345\nC_AA004835.1');
+  await expect(page.getByTestId('subject-fetch-note')).toHaveText(
+    'Sends P12345 to the fastest of NCBI and EBI, C_AA004835.1 to CNCB',
+  );
+  await page.getByTestId('subject-fetch').click();
+  await expect(page.getByTestId('subject-input')).toHaveValue(RECORDS['P12345']! + RECORDS['C_AA004835.1']!);
+  expect(away.filter((url) => !url.includes('NP_414542.1') && !url.includes('P0AD86'))).toEqual([
+    expect.stringMatching(/^https:\/\/(?:eutils\.ncbi\.nlm\.nih\.gov\/.*id=P12345&|rest\.uniprot\.org\/uniprotkb\/P12345\.fasta$)/),
+    'https://ngdc.cncb.ac.cn/genbase/api/file/fasta?acc=C_AA004835.1',
+  ]);
+  await page.getByTestId('subject-input').fill('P12345\nC_AA004835.1\nC_AA004835.1');
+  await expect(page.getByTestId('subject-fetch-note')).toHaveText(/^Sends P12345 to (?:NCBI|EBI), 2 accessions to CNCB$/);
 });

@@ -188,8 +188,8 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    走り、ページを開いた・mode を変えた・Run を押した・取得先を手で選んでいるときは走らない。1 つのタブで kind ごとに 1 回で、走っている
    間の別の Fetch は同じ競走を待つ。accession は、その全部を扱える取得先のうち最初に答えた所へ、その答えが来た時点で送る。扱えない所は
    問い合わせずに外す（§8 の 5 の EBI に加え、2026-11-03 の実測で：CNCB は UniProt の accession に空の本文を返す、GenBase の `C_…` は
-   NCBI も ENA も持たない）。扱える所が 1 つなら競走しない（`C_…` は CNCB へ直に）。どこも全部は扱えない欄は何も送らず
-   「No one site has all of these accessions: C_AA004835.1 only from CNCB, P12345 only from NCBI or EBI.」で止まる。他の答えは
+   NCBI も ENA も持たない）。扱える所が 1 つなら競走しない（`C_…` は CNCB へ直に）。どこも全部は扱えない欄は §11 のとおり分けて送る（WF-3 では
+   止めていた）。他の答えは
    後ろで届いて順位を埋める。失敗した所は外し、扱える所のどれも答えなければその最初（ふつう NCBI）へ送る（失敗はその取得が名乗る）。どこも答えなかった競走は残さない（次の Fetch でもう一度、
    たとえばオフラインから戻った後）。順位はタブの間（メモリ）だけ保ち、読み込み直すとまた測る。手で選んだ取得先は §8 の 1 のとおり保つ
    （`web/app/src/application/source-race.ts`）。
@@ -210,4 +210,20 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
 6. **e2e**：競走は route の遅れで EBI を先にし（NCBI 1.5 s、CNCB 1.0 s）、最初の Fetch で 3 か所へ MH011443.1 だけ、accession は EBI へ、
    次の Fetch は競走しないことを数える（`tests/e2e/fetch.spec.ts`）。フォルダの picker は動かせないので、Chromium では OPFS のフォルダを
    返す picker に置き換えて書いた中身を読み、Firefox では download を受けて中身を比べる（`tests/e2e/examples.spec.ts`）。
+
+## 11. WF-4：どこも全部は扱えない欄（2026-11-03）
+
+保守者の決定（2026-11-03 20:3x）：「DDBJ にコンタクトはとらない」（DDBJ は取得先に入れないまま、§2）、「止める代わりに案内を出す」。
+案内の形は Owner-delegated（作業記録は web-fetch-20261103/DECISIONS.md の 24〜25）。
+
+1. 「Fastest」で、どの取得先も欄の accession の全部は扱えないとき（たとえばタンパク質の `C_AA004835.1` と `P12345`：GenBase の
+   accession は CNCB だけ、UniProt の accession は NCBI と EBI だけ）、止めずに分けて送る。扱える取得先の組ごとにまとめ
+   （`fetchGroups`）、組の取得先が 1 つならそこへ、複数なら競走で最初に答えた所へ。取得は欄の順で、1 つの accession は 1 か所に
+   だけ送る。送るのは今までどおり accession だけ。
+2. 1 か所で全部を扱える欄は今までどおりその 1 か所へ送る（知らせる取得先を少なく保つ）。手で選んだ取得先が扱えない accession は
+   §8 の 4 のとおり送る前に断る（利用者が取得先を名指ししている）。
+3. 案内はその場の一文：押す前に分け方を言う。「Sends P12345 to the fastest of NCBI and EBI, C_AA004835.1 to CNCB」（競走の後は
+   「Sends P12345 to NCBI, C_AA004835.1 to CNCB」、組に複数あれば「2 accessions to CNCB」）。取得中は「Fetching 2 of 2 from CNCB…」と
+   その時の送り先を言う。「Fastest (NCBI)」の括弧は欄の全部が 1 か所へ行くときだけ。「?」に「When no one site has all the
+   accessions, each goes to the first site that has it.」を足した。
 

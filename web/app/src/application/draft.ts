@@ -20,7 +20,7 @@ import {
   accessionLines,
   FETCH_ACCESSION_LIMIT,
   FETCH_BYTE_LIMIT,
-  FETCH_SOURCES,
+  fetchGroups,
   servingSources,
   sourceLabel,
   sourceList,
@@ -449,35 +449,38 @@ export class SearchDraft {
         return;
       }
     }
-    let source: FetchSourceId;
+    // The source of each accession: the one chosen, or with "Fastest" the first source of its
+    // group (fetchGroups) that the race found; a group that one source serves needs no race.
+    const sources = new Map<string, FetchSourceId>();
     if (choice === 'fastest') {
-      const eligible = servingSources(kind, accessions);
-      if (eligible.length === 0) {
-        const only = accessions
-          .map((accession) => ({ accession, sources: servingSources(kind, [accession]) }))
-          .filter((entry) => entry.sources.length < FETCH_SOURCES.length)
-          .map((entry) => `${entry.accession} only from ${sourceList(entry.sources)}`);
-        fail(`No one site has all of these accessions: ${only.join(', ')}.`);
-        return;
-      }
-      if (eligible.length === 1) {
-        // One site has them: nothing to race.
-        source = eligible[0]!;
-      } else {
+      const groups = fetchGroups(kind, accessions);
+      if (groups.some((group) => group.sources.length > 1)) {
         this.updateRole(role, (draft) => ({ ...draft, fetch: { state: 'racing' } }));
-        try {
-          source = await this.race.fastest(kind, eligible, signal);
-        } catch (error) {
-          fail(`The race of the sites failed: ${messageOf(error)}`);
-          return;
-        }
       }
-    } else {
-      source = choice;
+      let raced = false;
+      for (const group of groups) {
+        let source: FetchSourceId;
+        if (group.sources.length === 1) {
+          source = group.sources[0]!;
+        } else if (raced && this.state.get().race[kind] === undefined) {
+          // The race of this fetch had no answers and was dropped: one race per fetch, so the first source.
+          source = group.sources[0]!;
+        } else {
+          try {
+            source = await this.race.fastest(kind, group.sources, signal);
+          } catch (error) {
+            fail(`The race of the sites failed: ${messageOf(error)}`);
+            return;
+          }
+          raced = true;
+        }
+        for (const accession of group.accessions) sources.set(accession, source);
+      }
     }
     const texts: string[] = [];
     let bytes = 0;
     for (const [done, accession] of accessions.entries()) {
+      const source = choice === 'fastest' ? sources.get(accession)! : choice;
       this.updateRole(role, (draft) => ({ ...draft, fetch: { state: 'fetching', source, done, total: accessions.length } }));
       let result: FetchResult;
       try {

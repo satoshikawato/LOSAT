@@ -448,17 +448,72 @@ describe('SearchDraft accessions from the fastest source (line WF-3)', () => {
       message: 'EBI (ENA) has no GenBase records: fetch C_AA004835.1 from CNCB.',
     });
 
-    // No one site has both.
+    // No one site has both (line WF-4): each goes to a site that has it, in the box's order.
     draft.setFetchSource('fastest');
     draft.setProgram('blastp');
-    draft.setPaste('subject', 'C_AA004835.1\nP12345');
+    draft.setPaste('subject', 'C_AA004835.1\nP12345\nC_AA004835.1');
     draft.fetchAccessions('subject');
     await draft.idle();
-    expect(draft.state.get().subject.fetch).toEqual({
-      state: 'failed',
-      message: 'No one site has all of these accessions: C_AA004835.1 only from CNCB, P12345 only from NCBI or EBI.',
+    expect(draft.state.get().subject.fetch).toBeUndefined();
+    expect(asked(fetcher).slice(5)).toEqual([
+      ['cncb', 'C_AA004835.1', false],
+      ['ebi', 'P12345', false],
+      ['cncb', 'C_AA004835.1', false],
+    ]);
+    expect(draft.state.get().subject.paste).toBe(
+      '>C_AA004835.1 SARS-CoV-2\nACGT\n>sp|P12345|AATM_RABIT\nMALLHS\n>C_AA004835.1 SARS-CoV-2\nACGT\n',
+    );
+  });
+
+  it('races once per fetch of a split box, also when no site answered', async () => {
+    const fetcher = new FakeAccessionFetcher({
+      P12345: '>sp|P12345|AATM_RABIT\nMALLHS\n',
+      'C_AA004835.1': '>C_AA004835.1 SARS-CoV-2\nACGT\n',
+      'WP_000001.1': '>WP_000001.1 x\nMKV\n',
     });
-    expect(asked(fetcher)).toHaveLength(5);
+    const { draft } = setup({ fetcher });
+    draft.setProgram('blastp');
+    // UniProt (NCBI, EBI), GenBase (CNCB), RefSeq protein (NCBI, CNCB): two groups that need the race, which nobody answers.
+    draft.setPaste('subject', 'P12345\nC_AA004835.1\nWP_000001.1');
+    draft.fetchAccessions('subject');
+    await draft.idle();
+    await draft.raceIdle();
+    expect(fetcher.requests.filter((r) => r.fresh === true)).toHaveLength(3);
+    expect(asked(fetcher).slice(3)).toEqual([
+      ['ncbi', 'P12345', false],
+      ['cncb', 'C_AA004835.1', false],
+      ['ncbi', 'WP_000001.1', false],
+    ]);
+  });
+
+  it('splits a box that no one site serves while the race runs, and names each site as it goes', async () => {
+    const fetcher = new FakeAccessionFetcher({
+      'NP_414542.1': '>NP_414542.1 thr operon leader peptide\nMKRISTTITTTITITTGNGAG\n',
+      P12345: '>sp|P12345|AATM_RABIT\nMALLHS\n',
+      'C_AA004835.1': '>C_AA004835.1 SARS-CoV-2\nACGT\n',
+    });
+    const { draft } = setup({ fetcher });
+    draft.setProgram('blastp');
+    fetcher.hold();
+    draft.setPaste('subject', 'P12345\nC_AA004835.1');
+    draft.fetchAccessions('subject');
+    await Promise.resolve();
+    expect(draft.state.get().subject.fetch).toEqual({ state: 'racing' });
+    // CNCB has GenBase's records, but its race answer does not count for P12345.
+    fetcher.release('cncb');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(draft.state.get().subject.fetch).toEqual({ state: 'racing' });
+    fetcher.release('ncbi');
+    fetcher.hold('ncbi');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(draft.state.get().subject.fetch).toEqual({ state: 'fetching', source: 'ncbi', done: 0, total: 2 });
+    fetcher.release();
+    await draft.idle();
+    expect(asked(fetcher).slice(3)).toEqual([
+      ['ncbi', 'P12345', false],
+      ['cncb', 'C_AA004835.1', false],
+    ]);
+    expect(draft.state.get().subject.paste).toBe('>sp|P12345|AATM_RABIT\nMALLHS\n>C_AA004835.1 SARS-CoV-2\nACGT\n');
   });
 
   it('lets the race finish when the box is edited during it, and sends nothing of the box', async () => {

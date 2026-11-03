@@ -10,11 +10,12 @@ import { raceChoice } from '../application/source-race';
 import {
   accessionLines,
   FETCH_SOURCES,
+  fetchGroups,
   RACE_RECORDS,
-  servingSources,
   sourceLabel,
   sourceList,
   type FetchChoice,
+  type FetchSourceId,
 } from '../domain/accession';
 import { sectionsAt, writtenValue } from '../domain/parameters';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
@@ -41,19 +42,32 @@ const busy = (role: InputRole) => {
 const fetchBusy = computed(() => busy(props.role));
 /** The choice is shared by both boxes: it stays while either fetches, so that each line names where its fetch goes. */
 const choiceLocked = computed(() => busy('query') || busy('subject'));
-/** The sources that serve the box's accessions, and where "Fastest" sends them (once the race says). */
-const serving = computed(() => (accessions.value === undefined ? [] : servingSources(kind.value, accessions.value)));
-const fastest = computed(() =>
-  serving.value.length === 1 ? serving.value[0] : raceChoice(props.state.race[kind.value], serving.value),
-);
-/** The in-place sentence: where Fetch sends the accessions. */
+/** How "Fastest" splits the box among the sources: one group unless no one source serves it all. */
+const groups = computed(() => (accessions.value === undefined ? [] : fetchGroups(kind.value, accessions.value)));
+/** Where "Fastest" sends a group: its only source, or the first that the race found. */
+const groupSource = (sources: readonly FetchSourceId[]) =>
+  sources.length === 1 ? sources[0] : raceChoice(props.state.race[kind.value], sources);
+const groupTarget = (sources: readonly FetchSourceId[]) => {
+  const source = groupSource(sources);
+  return source === undefined ? `the fastest of ${sourceList(sources, 'and')}` : sourceLabel(source);
+};
+/** The source of "Fastest (NCBI)", when the whole box goes to one. */
+const fastest = computed(() => (groups.value.length === 1 ? groupSource(groups.value[0]!.sources) : undefined));
+/**
+ * The in-place sentence: where Fetch sends the accessions. A box that no one source serves is
+ * split, and the sentence says how (line WF-4).
+ */
 const fetchNote = computed(() => {
   const noun = accessions.value?.length === 1 ? 'accession' : 'accessions';
   const choice = props.state.fetchSource;
   if (choice !== 'fastest') return `Sends the ${noun} to ${sourceLabel(choice)}`;
-  if (serving.value.length === 0) return 'No one site has all of these accessions';
-  if (fastest.value !== undefined) return `Sends the ${noun} to ${sourceLabel(fastest.value)}`;
-  return `Sends the ${noun} to the fastest of ${sourceList(serving.value, 'and')}`;
+  if (groups.value.length === 1) return `Sends the ${noun} to ${groupTarget(groups.value[0]!.sources)}`;
+  const parts = groups.value.map(
+    (group) =>
+      `${group.accessions.length === 1 ? group.accessions[0] : `${group.accessions.length} accessions`} to ${groupTarget(group.sources)}`,
+  );
+  // "the fastest of NCBI and EBI" has its own "and": the parts are separated by commas.
+  return `Sends ${parts.join(', ')}`;
 });
 const fetchHelp = computed(() => {
   const records = RACE_RECORDS[kind.value];
@@ -62,7 +76,8 @@ const fetchHelp = computed(() => {
     'Fetch sends only the accessions, to the site chosen here, and writes the FASTA it gets into the box. Sequences, ' +
     'files and results stay in this browser. EBI answers from ENA for nucleotides and from UniProt for proteins, CNCB ' +
     `from GenBase. Fastest: the first fetch asks each site for one public record (${record}) and sends the ` +
-    'accessions to the first that answers; this tab keeps that order.'
+    'accessions to the first that answers; this tab keeps that order. When no one site has all the accessions, each ' +
+    'goes to the first site that has it.'
   );
 });
 

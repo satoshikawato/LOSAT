@@ -95,6 +95,29 @@ export function sourceLabel(source: FetchSourceId): string {
   return FETCH_SOURCES.find((candidate) => candidate.id === source)!.label;
 }
 
+/**
+ * How "Fastest" splits a box among the sources (line WF-4, fetch_design.md §11): one group of all
+ * the accessions when one source serves them all (the fewest sources are told), else a group per
+ * set of sources that serve its accessions, in the order of the box. Each accession goes to one
+ * source of its group.
+ */
+export function fetchGroups(
+  kind: SequenceKind,
+  accessions: readonly string[],
+): ReadonlyArray<{ readonly sources: readonly FetchSourceId[]; readonly accessions: readonly string[] }> {
+  const all = servingSources(kind, accessions);
+  if (all.length > 0) return [{ sources: all, accessions }];
+  const groups = new Map<string, { sources: readonly FetchSourceId[]; accessions: string[] }>();
+  for (const accession of accessions) {
+    const sources = servingSources(kind, [accession]);
+    const key = sources.join(',');
+    const group = groups.get(key) ?? { sources, accessions: [] };
+    group.accessions.push(accession);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
 /** "NCBI", "NCBI or CNCB", "NCBI, EBI or CNCB" (`word` "and" for a list of all of them). */
 export function sourceList(sources: readonly FetchSourceId[], word: 'or' | 'and' = 'or'): string {
   const labels = sources.map(sourceLabel);

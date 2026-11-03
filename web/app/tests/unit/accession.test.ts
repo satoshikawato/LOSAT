@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SourceRace, type RaceStanding } from '../../src/application/source-race';
-import { accessionLines, RACE_RECORDS, servingSources, sourceList, unserved } from '../../src/domain/accession';
+import { accessionLines, fetchGroups, RACE_RECORDS, servingSources, sourceList, unserved } from '../../src/domain/accession';
 import { BrowserAccessionFetcher, fetchUrl } from '../../src/infra/browser/accession-fetcher';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 
@@ -43,6 +43,11 @@ describe('accessionLines', () => {
     expect(unserved('ebi', 'nucleotide', 'C_AA004835.1')).toBe('EBI (ENA) has no GenBase records');
     expect(servingSources('nucleotide', ['C_AA004835.1'])).toEqual(['cncb']);
     expect(servingSources('protein', ['C_AA004835.1', 'P12345'])).toEqual([]);
+    expect(fetchGroups('protein', ['NP_414542.1', 'P12345'])).toEqual([{ sources: ['ncbi'], accessions: ['NP_414542.1', 'P12345'] }]);
+    expect(fetchGroups('protein', ['P12345', 'C_AA004835.1', 'Q9Y261', 'C_AA000001.1'])).toEqual([
+      { sources: ['ncbi', 'ebi'], accessions: ['P12345', 'Q9Y261'] },
+      { sources: ['cncb'], accessions: ['C_AA004835.1', 'C_AA000001.1'] },
+    ]);
     expect(sourceList(['cncb'])).toBe('CNCB');
     expect(sourceList(['ncbi', 'cncb'])).toBe('NCBI or CNCB');
     expect(sourceList(['ncbi', 'ebi', 'cncb'], 'and')).toBe('NCBI, EBI and CNCB');

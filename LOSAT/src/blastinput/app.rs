@@ -956,6 +956,13 @@ pub fn check_unsupported_environment(program: &str) -> anyhow::Result<()> {
 ///                 		                            fmt_args->GetFormattedOutputChoice());
 /// ```
 /// The archive is written without the prefetch, so NCBI never converts the value there.
+///
+/// LOSAT refuses before the search, so the refusal is wider than NCBI's stop: an error that
+/// NCBI raises in the first batch's search before its prefetch (a query record without
+/// letters, `-query_loc` past every record: `BLAST engine error`, exit status 3) is this
+/// refusal here, and so is a `-subject` search with `BL2SEQ_LEGACY` whose report would not
+/// change (no hits). With `-mt_mode 1` and `-db`, NCBI's split-by-queries nodes catch the
+/// exception: NCBI writes nothing to standard output and exits 0.
 pub fn check_search_environment(
     program: &str,
     fasta_subjects: bool,

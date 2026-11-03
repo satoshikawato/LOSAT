@@ -837,3 +837,92 @@ fn environment_that_ncbi_reads_around_the_report_is_rejected_where_it_reads_it()
         );
     }
 }
+
+/// The environment variable that makes `environment_child` run: the file it writes.
+const ENVIRONMENT_CHILD: &str = "DBID_RUN_LOCAL_ENVIRONMENT_CHILD";
+
+// `run_local` (LOSAT Web, the library) refuses the environment of the CLI's `-subject` search
+// (`environment_that_ncbi_reads_around_the_report_is_rejected_where_it_reads_it`), and an
+// integer PRE_FETCH_SEQS_LIMIT leaves its outputs as they are without it. The variables are
+// read from the process environment, so a child process of this test binary runs `run_local`
+// with each of them.
+#[test]
+fn run_local_refuses_the_environment_as_the_cli() {
+    let child = |variable: Option<(&str, &str)>| {
+        let out = temp_path("blastx_environment_child.out");
+        let mut command = Command::new(std::env::current_exe().expect("test binary"));
+        command
+            .args([
+                "run_local_blastx::environment_child",
+                "--exact",
+                "--nocapture",
+                "--test-threads",
+                "1",
+            ])
+            .env(ENVIRONMENT_CHILD, &out)
+            .env_remove("BATCH_SIZE")
+            .env_remove("PRE_FETCH_SEQS_LIMIT")
+            .env_remove("BL2SEQ_LEGACY");
+        if let Some((name, value)) = variable {
+            command.env(name, value);
+        }
+        let output = command.output().expect("run the child");
+        assert!(
+            output.status.success(),
+            "{variable:?}: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let written = std::fs::read(&out).expect("the child's file");
+        let _ = std::fs::remove_file(&out);
+        written
+    };
+    let plain = child(None);
+    assert!(
+        plain.starts_with(b"ok\n") && plain.len() > 1000,
+        "{plain:?}"
+    );
+    for (variable, value, text) in [
+        ("PRE_FETCH_SEQS_LIMIT", "abc", "has the value \"abc\""),
+        ("PRE_FETCH_SEQS_LIMIT", "", "has the value \"\""),
+        (
+            "BL2SEQ_LEGACY",
+            "1",
+            "the environment variable BL2SEQ_LEGACY",
+        ),
+    ] {
+        let written = String::from_utf8(child(Some((variable, value)))).expect("text");
+        assert!(
+            written.starts_with("refused: ")
+                && written.contains(text)
+                && written.contains("not supported by LOSAT's BLASTX"),
+            "{variable}={value:?}: {written}"
+        );
+    }
+    assert!(child(Some(("PRE_FETCH_SEQS_LIMIT", "5"))) == plain);
+}
+
+/// The child of `run_local_refuses_the_environment_as_the_cli`: without `ENVIRONMENT_CHILD` it
+/// does nothing. It writes `ok` and every format's output and the diagnostics, or `refused:` and
+/// the error, after checking that nothing was written.
+#[test]
+fn environment_child() {
+    let Some(out) = std::env::var_os(ENVIRONMENT_CHILD) else {
+        return;
+    };
+    let inputs = Inputs::new("tests/db_search/bslice_q.fna", "tests/db_search/bslice.faa");
+    let queries = queries(&Inputs::path(&inputs.query)).expect("query records");
+    let subjects = subjects(&Inputs::path(&inputs.subject)).expect("subject records");
+    let (result, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, &FORMATS, &[]);
+    let written = match result {
+        Ok(()) => [b"ok\n".to_vec(), outputs.concat(), diagnostics].concat(),
+        Err(error) => {
+            assert!(
+                outputs.iter().all(Vec::is_empty) && diagnostics.is_empty(),
+                "{error:#}"
+            );
+            format!("refused: {error:#}\n").into_bytes()
+        }
+    };
+    std::fs::write(out, written).expect("write the child's file");
+}

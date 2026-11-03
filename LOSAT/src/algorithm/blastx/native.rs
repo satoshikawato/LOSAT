@@ -806,9 +806,10 @@ fn run_inner(
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file is LOSAT's rejection, above).
     app::xinclude_check_for(&choice, args.out.as_deref())?;
-    // NCBI reads the environment of its search and report after the prolog (the subjects of
-    // `-subject` with `BL2SEQ_LEGACY`, `PRE_FETCH_SEQS_LIMIT` before each batch's report);
-    // LOSAT refuses what it does not reproduce before the search.
+    // `BL2SEQ_LEGACY` makes NCBI search each `-subject` sequence on its own and write the
+    // bl2seq report, and a `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert stops it before each
+    // batch's report; LOSAT refuses both before the search, where an empty query has already
+    // ended the run as NCBI ends it (`Query is Empty!`, exit status 0).
     app::check_search_environment(
         "BLASTX",
         database.is_none(),

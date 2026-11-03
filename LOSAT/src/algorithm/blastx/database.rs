@@ -700,7 +700,7 @@ mod tests {
     }
 
     #[test]
-    fn a_record_of_the_stored_letters_encodes_to_the_stored_bytes() {
+    fn a_record_of_the_stored_letters_encodes_to_the_searched_bytes() {
         // A record of the stored letters encodes every residue byte 1..=27 back to itself but
         // O (26): the search reads a `-subject` O as X (`subjects::search_residue`), and a
         // database's stored O as it is (`read_encoded`).

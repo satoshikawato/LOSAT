@@ -11,6 +11,8 @@ export interface FetchRequest {
   readonly accession: string;
   /** The answer is dropped ('too-large') once it passes this many bytes (FETCH_BYTE_LIMIT in all). */
   readonly maxBytes: number;
+  /** Ask the site, not the browser's HTTP cache: the race times the site (application/source-race.ts). */
+  readonly fresh?: boolean;
 }
 
 export type FetchResult =

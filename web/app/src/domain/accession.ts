@@ -16,6 +16,23 @@ export const FETCH_SOURCES: ReadonlyArray<{ readonly id: FetchSourceId; readonly
   { id: 'cncb', label: 'CNCB' },
 ];
 
+/**
+ * Where "Fetch" asks: a source, or 'fastest' (the default, line WF-3), the first source that
+ * answers this browser among those that serve the accessions (application/source-race.ts).
+ */
+export type FetchChoice = FetchSourceId | 'fastest';
+
+/**
+ * The fixed public record that the race asks each source for, never the user's accession
+ * (fetch_design.md §10): nucleotide MH011443.1 (TP53 exon 5, 192 bytes) at all three; protein
+ * the E. coli thr operon leader peptide, which NCBI and CNCB name NP_414542.1 and UniProt P0AD86
+ * (CNCB has no UniProt accessions).
+ */
+export const RACE_RECORDS: Readonly<Record<SequenceKind, Readonly<Record<FetchSourceId, string>>>> = {
+  nucleotide: { ncbi: 'MH011443.1', ebi: 'MH011443.1', cncb: 'MH011443.1' },
+  protein: { ncbi: 'NP_414542.1', ebi: 'P0AD86', cncb: 'NP_414542.1' },
+};
+
 /** Bytes of FASTA that one fetch writes into a paste box at most. */
 export const FETCH_BYTE_LIMIT = 10_000_000;
 
@@ -55,4 +72,15 @@ export function unserved(source: FetchSourceId, kind: SequenceKind, accession: s
   if (kind === 'nucleotide' && REFSEQ.test(accession)) return 'EBI (ENA) has no RefSeq records';
   if (kind === 'protein' && !UNIPROT.test(accession)) return 'EBI (UniProt) has UniProt accessions only';
   return undefined;
+}
+
+/** The sources that serve every one of the accessions (unserved), in the order of FETCH_SOURCES; NCBI always does. */
+export function servingSources(kind: SequenceKind, accessions: readonly string[]): readonly FetchSourceId[] {
+  return FETCH_SOURCES.map((source) => source.id).filter((source) =>
+    accessions.every((accession) => unserved(source, kind, accession) === undefined),
+  );
+}
+
+export function sourceLabel(source: FetchSourceId): string {
+  return FETCH_SOURCES.find((candidate) => candidate.id === source)!.label;
 }

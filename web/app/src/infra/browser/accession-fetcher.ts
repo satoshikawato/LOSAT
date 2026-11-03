@@ -55,6 +55,7 @@ export class BrowserAccessionFetcher implements AccessionFetcher {
         signal: timeout.signal,
         credentials: 'omit',
         referrerPolicy: 'no-referrer',
+        ...(request.fresh === true ? { cache: 'no-store' as const } : {}),
       });
       clearTimeout(timer);
       if (response.status === 400 || response.status === 404) return { ok: false, reason: 'not-found' };

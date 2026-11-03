@@ -5,6 +5,8 @@
 // next time. One set loads at a time; another click, Cancel, a mode without the set, or a
 // failure ends the load, and a failure names the site and leaves the draft as it was. Delete
 // removes the saved copy and the subject sources made from it, in this tab and in the others.
+// "Save to folder…" (or "Download") writes the saved copy outside the browser's storage (line
+// WF-3); LOSAT does not read it back by itself: "Open FASTA files…" opens it.
 import {
   EXAMPLE_BYTE_LIMIT,
   EXAMPLE_SETS,
@@ -23,6 +25,7 @@ import type {
   FileDownloader,
   SavedExample,
 } from '../ports/example';
+import type { FileSaver } from '../ports/download';
 import type { DraftState, SearchDraft } from './draft';
 import { Store } from './store';
 
@@ -38,8 +41,13 @@ export interface ExamplesState {
   readonly saved: Readonly<Partial<Record<ExampleId, ExampleCopy | null>>>;
   /** The set being loaded, or the one whose load failed. */
   readonly load?: { readonly id: ExampleId; readonly progress: ExampleLoad };
-  /** Why the set loaded last was not kept for the next time (it is used in this tab only). */
+  /**
+   * A word on a set: why the set loaded last was not kept for the next time (it is used in this
+   * tab only), or where its copy was saved.
+   */
   readonly note?: { readonly id: ExampleId; readonly text: string };
+  /** The set whose saved copy is being written into a folder or downloaded. */
+  readonly copying?: ExampleId;
 }
 
 export interface ExamplesDeps {
@@ -48,6 +56,8 @@ export interface ExamplesDeps {
   readonly draft: Pick<SearchDraft, 'useExample' | 'dropExample'> & { readonly state: Pick<Store<DraftState>, 'get'> };
   /** Deletions between tabs; without it, a tab hears only its own. */
   readonly deletions?: ExampleDeletions;
+  /** Where a saved copy can be written; without it, "Save to folder…" and "Download" are not offered. */
+  readonly saver?: FileSaver;
 }
 
 export class ExampleLoader {
@@ -126,6 +136,48 @@ export class ExampleLoader {
     this.deps.deletions?.announce(id);
     this.setSaved(id, null);
     if (this.state.get().note?.id === id) this.update({ note: undefined });
+  }
+
+  /** How a saved copy leaves the browser's storage: a folder that the user picks, the browser's download, or not at all. */
+  get copyTo(): 'folder' | 'download' | undefined {
+    const saver = this.deps.saver;
+    return saver === undefined ? undefined : saver.folders ? 'folder' : 'download';
+  }
+
+  /**
+   * Writes the saved copy of a set into a folder that the user picks (Chromium, Edge), or
+   * downloads it (other browsers), as the file that the subject source names. Nothing is sent:
+   * the file comes from this browser.
+   */
+  saveCopy(id: ExampleId): void {
+    const saver = this.deps.saver;
+    if (saver === undefined || this.state.get().copying !== undefined) return;
+    const set = exampleById(id);
+    this.update({ copying: id, ...(this.state.get().note?.id === id ? { note: undefined } : {}) });
+    const work = async () => {
+      try {
+        if (saver.folders) {
+          const folder = await saver.saveToFolder(set.fileName, () => this.copyOf(set));
+          if (folder !== undefined) this.update({ note: { id, text: `Saved ${set.fileName} in ${folder}.` } });
+        } else {
+          saver.download(set.fileName, await this.copyOf(set));
+        }
+      } catch (error) {
+        this.update({ note: { id, text: `Not saved: ${messageOf(error)}` } });
+      } finally {
+        this.update({ copying: undefined });
+      }
+    };
+    this.track(work());
+  }
+
+  private async copyOf(set: ExampleSet): Promise<File> {
+    const kept = await this.deps.store.readExample(set.id, set.url);
+    if (kept === undefined) {
+      this.setSaved(set.id, null);
+      throw new Error('the copy in this browser is gone');
+    }
+    return kept.file;
   }
 
   /** Resolves when no load or look-up is running (tests). */

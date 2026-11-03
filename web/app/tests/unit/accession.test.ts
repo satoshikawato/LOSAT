@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { accessionLines, unserved } from '../../src/domain/accession';
+import { SourceRace, type RaceStanding } from '../../src/application/source-race';
+import { accessionLines, RACE_RECORDS, servingSources, unserved } from '../../src/domain/accession';
 import { BrowserAccessionFetcher, fetchUrl } from '../../src/infra/browser/accession-fetcher';
+import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 
 describe('accessionLines', () => {
   it('takes INSDC, RefSeq, GenBase and UniProt accessions, one per line, in upper case', () => {
@@ -29,6 +31,62 @@ describe('accessionLines', () => {
     expect(unserved('ebi', 'protein', 'WP_000001.1')).toBe('EBI (UniProt) has UniProt accessions only');
     expect(unserved('ebi', 'protein', 'P12345')).toBeUndefined();
     expect(unserved('ncbi', 'protein', 'WP_000001.1')).toBeUndefined();
+    expect(servingSources('nucleotide', ['AB000001.1', 'NR_074540.1'])).toEqual(['ncbi', 'cncb']);
+    expect(servingSources('protein', ['P12345'])).toEqual(['ncbi', 'ebi', 'cncb']);
+  });
+
+  it('races with records that every source serves, of the kind raced', () => {
+    for (const kind of ['nucleotide', 'protein'] as const) {
+      for (const [source, accession] of Object.entries(RACE_RECORDS[kind])) {
+        expect(accessionLines(accession), accession).toEqual([accession]);
+        expect(unserved(source as keyof (typeof RACE_RECORDS)[typeof kind], kind, accession)).toBeUndefined();
+      }
+    }
+  });
+});
+
+describe('SourceRace', () => {
+  it('times each source from its request to its answer, and orders them by arrival', async () => {
+    let clock = 0;
+    const fetcher = new FakeAccessionFetcher({ 'MH011443.1': '>MH011443.1\nACGT\n' });
+    const changes: Array<RaceStanding | undefined> = [];
+    const race = new SourceRace({ fetcher, now: () => clock, onChange: (_, standing) => changes.push(standing) });
+    fetcher.hold();
+    const first = race.fastest('nucleotide', ['ncbi', 'cncb'], new AbortController().signal);
+    clock = 300;
+    fetcher.release('ebi');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    clock = 800;
+    fetcher.release('cncb');
+    expect(await first).toBe('cncb');
+    clock = 1500;
+    fetcher.release('ncbi');
+    await race.idle();
+    expect(changes.at(-1)).toEqual({
+      answered: [
+        { source: 'ebi', ms: 300 },
+        { source: 'cncb', ms: 800 },
+        { source: 'ncbi', ms: 1500 },
+      ],
+      failed: [],
+    });
+    // Kept: no second race.
+    expect(await race.fastest('nucleotide', ['ncbi', 'ebi', 'cncb'], new AbortController().signal)).toBe('ebi');
+    expect(fetcher.requests).toHaveLength(3);
+  });
+
+  it('rejects a waiting fetch that aborts, and goes on without it', async () => {
+    const fetcher = new FakeAccessionFetcher({ 'MH011443.1': '>MH011443.1\nACGT\n' });
+    const race = new SourceRace({ fetcher, now: () => 0, onChange: () => undefined });
+    fetcher.hold();
+    const controller = new AbortController();
+    const waiting = race.fastest('nucleotide', ['ncbi'], controller.signal);
+    controller.abort(new DOMException('edited', 'AbortError'));
+    await expect(waiting).rejects.toThrow('edited');
+    fetcher.release();
+    await race.idle();
+    expect(await race.fastest('nucleotide', ['ncbi'], new AbortController().signal)).toBe('ncbi');
+    expect(fetcher.requests).toHaveLength(3);
   });
 });
 
@@ -59,6 +117,23 @@ describe('BrowserAccessionFetcher', () => {
     }
     const fetcher = new BrowserAccessionFetcher({ fetch: answer(429, '') });
     expect(await fetcher.fetch(request, signal)).toEqual({ ok: false, reason: 'refused', status: 429 });
+  });
+
+  it("asks past the browser's HTTP cache only for the race, without cookies or referrer", async () => {
+    const inits: RequestInit[] = [];
+    const fetcher = new BrowserAccessionFetcher({
+      fetch: async (_url, init) => {
+        inits.push(init ?? {});
+        return new Response('>x\nA\n');
+      },
+    });
+    const signal = new AbortController().signal;
+    await fetcher.fetch({ ...request, source: 'cncb' }, signal);
+    await fetcher.fetch({ ...request, source: 'cncb', fresh: true }, signal);
+    expect(inits.map((init) => [init.cache, init.credentials, init.referrerPolicy])).toEqual([
+      [undefined, 'omit', 'no-referrer'],
+      ['no-store', 'omit', 'no-referrer'],
+    ]);
   });
 
   it('returns the FASTA with a final newline, and drops an answer over the limit', async () => {

@@ -693,33 +693,6 @@ impl Volume {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2364-2384
-    // ```c++
-    //     int length = int(end_offset - start_offset);
-    //
-    //     if (length) {
-    //         int total = length / 4;
-    //         ...
-    //         ambchars.resize(total);
-    //
-    //         for(int i = 0; i<total; i++) {
-    //             ambchars[i] = SeqDB_GetStdOrd((const int *)(& buffer[i]));
-    //         }
-    // ```
-    /// Whether the ambiguity data of nucleotide `oid` (volume-relative;
-    /// `ordinal` its database ordinal id, for the message) decode as
-    /// `SequenceBlock::ambiguity_runs` decodes them: the same error, read
-    /// without the sequence's letters (only the bytes between its ambiguity
-    /// offset and the next sequence; nothing when it has none). A protein
-    /// volume has no ambiguity data.
-    pub fn check_ambiguity(&self, oid: u32, ordinal: u32) -> Result<(), SeqDbError> {
-        self.check_range(oid, oid.saturating_add(1))?;
-        let Some((amb_start, next)) = self.index.ambiguity_words(oid)? else {
-            return Ok(());
-        };
-        self.check_ambiguity_data(amb_start, next, ordinal)
-    }
-
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1838
     // ```c++
     //         int whole_bytes = int(end_offset - start_offset - 1);
@@ -869,32 +842,6 @@ impl Volume {
             .collect();
         ambiguity.overlay(from, to, &mut letters);
         Ok(letters)
-    }
-
-    /// `check_ambiguity` of the sequence whose ambiguity data are
-    /// `amb_start..next` of the sequence file.
-    fn check_ambiguity_data(
-        &self,
-        amb_start: u32,
-        next: u32,
-        ordinal: u32,
-    ) -> Result<(), SeqDbError> {
-        if u64::from(amb_start) >= u64::from(next) {
-            return Ok(());
-        }
-        let file = self.seq_file()?;
-        let block = SequenceBlock {
-            seqtype: SeqType::Nucleotide,
-            first_ordinal: ordinal,
-            path: file.path().to_path_buf(),
-            data: file.read_range(u64::from(amb_start), u64::from(next))?,
-            data_start: u64::from(amb_start),
-            // The block holds the ambiguity data only: its letters' range is
-            // empty, and nothing but `ambiguity_runs` reads it.
-            seq_offsets: vec![amb_start, next],
-            amb_offsets: vec![amb_start],
-        };
-        block.ambiguity_runs(0).map(|_| ())
     }
 
     /// EXPERIMENT (LOSAT_X_DBIDXREAD): calls `visit(oid, self.deflines(oid))`
@@ -1075,43 +1022,6 @@ impl Volume {
             i = stop;
         }
         true
-    }
-
-    /// EXPERIMENT (LOSAT_X_DBIDXREAD): calls `visit(oid, self.check_ambiguity(oid, ordinal))`
-    /// for the sequences `first..end` (volume-relative, non-empty; `first_ordinal` the
-    /// database ordinal id of `first`) in order until `visit` returns false; returns whether
-    /// every call returned true. The sequence and ambiguity offsets of the range are read at
-    /// once; the ambiguity data are read as `check_ambiguity` reads them, only for the
-    /// sequences that have any. A range whose offsets cannot be read goes through
-    /// `check_ambiguity` one sequence at a time.
-    pub(super) fn visit_ambiguity(
-        &self,
-        first: u32,
-        end: u32,
-        first_ordinal: u32,
-        visit: &mut dyn FnMut(u32, Result<(), SeqDbError>) -> bool,
-    ) -> bool {
-        let offsets = match self.check_range(first, end) {
-            Ok(()) if self.index.seqtype == SeqType::Nucleotide => self
-                .index
-                .sequence_offsets(first, end)
-                .and_then(|seq| Ok((seq, self.index.ambiguity_offsets(first, end)?))),
-            _ => Err(SeqDbError::Range(String::new())),
-        };
-        let Ok((seq, amb)) = offsets else {
-            return (first..end).all(|oid| {
-                visit(
-                    oid,
-                    self.check_ambiguity(oid, first_ordinal + (oid - first)),
-                )
-            });
-        };
-        (0..(end - first) as usize).all(|i| {
-            visit(
-                first + i as u32,
-                self.check_ambiguity_data(amb[i], seq[i + 1], first_ordinal + i as u32),
-            )
-        })
     }
 }
 

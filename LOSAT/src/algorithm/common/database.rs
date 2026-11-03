@@ -1219,8 +1219,8 @@ pub(crate) fn tabular_subject_ids(
 
 // No NCBI counterpart: bounds LOSAT's own check before the search (`reports_may_refuse`).
 /// The most sequences of a database with parsed Seq-ids whose headers a program's check before
-/// the search reads with `reports_may_refuse` (blastn's `x_parsed_refusal`, tblastx's
-/// `report_stream::check`). The check decodes each header (2.3-5.6 us at one thread with
+/// the search reads with `reports_may_refuse` (tblastx's `report_stream::check`; blastn's
+/// report stream read none before the search since 2026-11-03). The check decodes each header (2.3-5.6 us at one thread with
 /// tblastx's 18S, line DBID ID4t fix 2b) and keeps 16 bytes per join key with outfmt 0, so this
 /// bounds the pass to a few seconds and some tens of MiB; a larger database (NCBI's `nt` and
 /// `core_nt`) keeps its reports after the batch loop, as before the stream took databases with
@@ -2123,9 +2123,10 @@ pub(crate) fn tabular_names<'t>(
         program,
     )
     .map_err(|error| taxdb_error(error, program))?;
-    // The texts of opening of an open by the rows of an earlier batch ([`TaxdbRun::open_for_rows`]),
-    // which the first row that looks a name up writes: a report without such a row leaves them
-    // for the next report of the run (BLASTN writes a report per query batch).
+    // No NCBI counterpart: NCBI writes these texts where its first lookup opens the taxonomy
+    // database; LOSAT's report calls are per query batch. The texts of opening of an open by the
+    // rows of an earlier batch ([`TaxdbRun::open_for_rows`]), which the first row that looks a
+    // name up writes: a report without such a row leaves them for the next report of the run.
     if !names.looks_up() {
         return Ok(Some(names));
     }

@@ -1638,8 +1638,8 @@ Rebuilding less:
   errors in the same order. The checks of every title that the block search of `LOSAT_X_BPQBLOCK` runs before it
   starts (and, until 2026-11-03, the report streaming of `LOSAT_X_RPTSTREAM` of blastn) read the headers in ranges of
   1,024 sequences (one read of the index file and one read of the header file per MiB, `SeqDb::visit_deflines`) instead
-  of two reads per sequence; `SeqDb::visit_ambiguity` reads the ambiguity offsets of the same ranges at once (blastn's
-  check before the search used it until 2026-11-03). Every value read is the one of the held arrays, so blocks, reports and
+  of two reads per sequence (blastn's check also read the ambiguity data of every sequence in such ranges until
+  2026-11-03, when the check and its readers `SeqDb::check_ambiguity` and `visit_ambiguity` were removed). Every value read is the one of the held arrays, so blocks, reports and
   errors do not change; a read of the index file that fails after the volume was opened is a LOSAT error of the read of
   the block (or title) that needs it. After the open, every range of the arrays read again must keep the order the open
   checked (the header and sequence offsets ascending, each ambiguity offset inside its sequence's data): an index file
@@ -4685,9 +4685,15 @@ Scheduling (each value computed by one thread with the original function; order 
   byte outside ' ' ..= '~' or gives no tabular id, a parsed Seq-id header that the reports refuse or two
   sequences that outfmt 0 would join, ambiguity data that the traceback cannot decode, a taxid or a lookup
   of the taxonomy database that the prefetch refuses, what a custom tabular report reads (the taxonomy
-  fields, the names, `sall*`), a subject set's tabular id and with `-parse_deflines` its parsed ids. An
-  input that LOSAT does not refuse gives the same bytes either way; outfmt 17 writes its document only at
-  the end, so a refused run writes none in both. With two or more batches the switch still keeps the
+  fields, the names, `sall*`), a subject set's tabular id and with `-parse_deflines` its parsed ids
+  (without `sall*` refused while the rows are made, after the rows of the queries before in both paths:
+  the same bytes). Where several sequences are refused, the one named is the refused batch's first, not
+  the search's. An error of NCBI's of the taxonomy database or of reading the database that a later
+  batch's prefetch or report meets likewise comes after the reports of the batches before, as NCBI's
+  loop writes them (without the switch after none). Any other input that LOSAT does not refuse gives the
+  same bytes either way; outfmt 17 writes its document only at the end, so a refused run writes none in
+  both. ABI v1 callers, which are streamed, get the reports of the batches before a refusal, then the
+  error. With two or more batches the switch still keeps the
   reports after the loop where a refusal of the options or the query lengths could come after the first
   batch, and a subject set's tabular ids (where LOSAT refuses none), outfmt 0 titles and `-lcase_masking`
   masks are made once; with one batch (the first batch takes every query record) nothing is checked or made

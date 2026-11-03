@@ -47,8 +47,8 @@ find no sequence by the Seq-align id `gi|777`). `njoined_a.*` and `njoined_b.*` 
 `njoined_a.fna` and `njoined_b.fna`, read through the alias `njoined.nal`: `gb|AF000040.1|` and
 `gb|AF000040|` follow each other in the hits, and NCBI's XML and outfmt 0 take them for one sequence.
 `nambig_v4.*` (version 4) from `nambig.fna` (the sequence of the first record of `nucl.fna`, and a copy of it
-with runs of N, an R and a Y, so with ambiguity data; the unit test of blastn's report stream raises its
-ambiguity count, `x_streaming_refusal`).
+with runs of N, an R and a Y, so with ambiguity data; `tests/blastn_report_stream.rs` raises its
+ambiguity count in a copy, which the traceback of a later batch refuses).
 
 Seq-align ids that NCBI's lookup finds in another record (line DBID N1; the FASTA comes from
 `make_found_fasta.py`): `pfound_v5.*` and `pfound_v4.*` from `pfound.faa`, five pairs of unrelated proteins, the

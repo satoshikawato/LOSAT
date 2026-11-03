@@ -196,8 +196,6 @@ pub(super) struct BlastnDatabase {
     /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
     /// and the batches' prefetch of outfmt 0, 5, 6, 7 and 17).
     taxdb: shared::TaxdbRun,
-    /// Whether the first header of some volume holds parsed Seq-ids (`shared::check_seqids`).
-    parsed: bool,
 }
 
 /// The length and the ambiguity runs of the database sequences that one report call wrote
@@ -399,7 +397,7 @@ impl BlastnDatabase {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
-        let parsed = shared::check_seqids(&db, settings, PROGRAM)?;
+        shared::check_seqids(&db, settings, PROGRAM)?;
         shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         let (total, num_seqs) = db.statistics_numbers();
         let db_len_total = usize::try_from(total)
@@ -419,7 +417,6 @@ impl BlastnDatabase {
             name: name.to_string(),
             metadata,
             taxdb: shared::TaxdbRun::default(),
-            parsed,
         })
     }
 
@@ -455,11 +452,6 @@ impl BlastnDatabase {
     /// (`prefetch_messages`).
     pub(super) fn taxdb_found(&self) -> bool {
         self.taxdb.found(&self.db)
-    }
-
-    /// Whether the first header of some volume holds parsed Seq-ids (`shared::check_seqids`).
-    pub(super) fn parsed(&self) -> bool {
-        self.parsed
     }
 
     /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
@@ -2117,7 +2109,6 @@ mod tests {
                 db_len_total: db.total_length() as usize,
                 db_num_seqs: db.num_seqs() as usize,
             },
-            parsed: db.has_parsed_seqids().unwrap(),
             db,
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),

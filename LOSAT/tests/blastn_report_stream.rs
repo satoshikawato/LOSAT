@@ -3,7 +3,8 @@
 //!
 //! The switch is in the strict set (on unless it is `0`). It chooses when LOSAT
 //! writes the same reports: each batch's when the loop takes it, or all of them after the loop.
-//! So the property under test is that nothing a run writes depends on it: for megablast, blastn
+//! So the property under test is that nothing a run that LOSAT does not refuse writes depends on
+//! it: for megablast, blastn
 //! and dc-megablast, outfmt 0, 6 and 7, at 1 and 4 threads, with small query batches
 //! (`BATCH_SIZE`), the searches without the switch and with it give the same exit status,
 //! standard output (or `-out` file) and standard error, and the `[X_STATS] RPTSTREAM` line (the arm
@@ -11,11 +12,15 @@
 //! batches. The same holds with `-out` files, with `-query_loc`, `-subject_loc` and `-lcase_masking`, with `-max_target_seqs`,
 //! `-max_hsps` and `-subject_besthit`, with the warnings of the reader and of invalid queries,
 //! on the error paths that come after the reports of earlier batches (a reader error, a batch of
-//! queries without letters), and with `-db`. Where the switch must not act (LOSAT's refusal of a
-//! subject's id, which comes before every report without the switch; a search space that could
-//! overflow; the debug output) the `[X_STATS]` line names why and the bytes are the same too. The
-//! tabular reports with a field list or a delimiter and outfmt 10 and 20 are streamed alike. That
-//! those bytes equal NCBI's is the business of the blastn fixtures.
+//! queries without letters, a header file that cannot be read), and with `-db`. Where the switch
+//! must not act (a search space that could overflow; scoring options without Karlin-Altschul
+//! values; a negative `CHUNK_SIZE`; the debug output) the `[X_STATS]` line names why and the bytes
+//! are the same too. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
+//! streamed alike. Where LOSAT refuses a sequence that a later batch reports (a stored title,
+//! ambiguity data, a parsed Seq-id, a taxonomy record, a subject's id), the switch writes the
+//! reports of the batches before and then the same refusal (drop-in DECISIONS 44): those reports
+//! begin the reports of the same search not refused. That the bytes equal NCBI's is the business
+//! of the blastn fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -690,9 +695,9 @@ fn a_database_search_refused_in_a_later_batch_writes_the_batches_before() {
     ] {
         for threads in [1, 4] {
             let what = format!("-db {db} threads {threads}");
-            let args = args(&query, db, "6");
-            let args: Vec<&str> = args.iter().map(String::as_str).collect();
-            let (off, on, (batches, _)) = refused_late(&what, &args, threads, &[]);
+            let tabular = args(&query, db, "6");
+            let tabular: Vec<&str> = tabular.iter().map(String::as_str).collect();
+            let (off, on, _) = refused_late(&what, &tabular, threads, &[]);
             assert!(
                 String::from_utf8_lossy(&off.stderr).contains(refusal),
                 "{what}: {}",
@@ -700,22 +705,34 @@ fn a_database_search_refused_in_a_later_batch_writes_the_batches_before() {
             );
             assert!(off.report.is_empty(), "{what}: off, no row");
             reports_before(&what, &off, &on, &reference, &reference_stderr, None);
-            assert!(batches >= 1, "{what}");
             // Queries that do not reach the second sequence: no refusal, the off bytes.
             let (off, (batches, reason)) = run(&early, db, "6", threads);
             assert_eq!(off.status, Some(0), "{what}, early queries: {off:?}");
             assert!(batches >= 2 && reason == "none", "{what}, early queries");
+            // Outfmt 17 writes its document only at the end: a refused run writes none, with the
+            // switch too (the blank title is not refused there).
+            if db != &blank {
+                let sam = args(&query, db, "17");
+                let sam: Vec<&str> = sam.iter().map(String::as_str).collect();
+                let what = format!("{what} outfmt 17");
+                let (off, on, _) = refused_late(&what, &sam, threads, &[]);
+                assert!(
+                    off.report.is_empty() && on.report.is_empty(),
+                    "{what}: {on:?}"
+                );
+            }
         }
     }
 }
 
-/// Eight queries of 488 random letters (no hits) and then the records of `query`, in `late.fa`:
-/// in batches of four (`BATCH_SIZE=1500`) only the third and later batches report a sequence.
-/// The eight alone are in `nohit.fa` (`no_hits`).
+/// Eight queries of 488 random letters (no hits) and then the records of `query`, in
+/// `late_<query's file name>`: in batches of four (`BATCH_SIZE=1500`) only the third and later
+/// batches report a sequence. The eight alone are in `nohit.fa` (`no_hits`).
 fn hits_late(dir: &TempDir, query: &str) -> PathBuf {
     let mut text = std::fs::read(no_hits(dir)).unwrap();
     text.extend(std::fs::read(query).unwrap());
-    let late = dir.path("late.fa");
+    let name = Path::new(query).file_name().unwrap().to_str().unwrap();
+    let late = dir.path(&format!("late_{name}"));
     std::fs::write(&late, text).unwrap();
     late
 }
@@ -847,6 +864,7 @@ fn a_database_with_parsed_seqids_gives_the_off_bytes() {
         assert_eq!(reason, "none", "{what}");
         if refused {
             assert_ne!(off.status, Some(0), "{what}: the refusal");
+            // The first batch's (its report call counts as a batch written, though refused).
             assert!(batches <= 1, "{what}: the first batch's");
         } else {
             assert_eq!(off.status, Some(0), "{what}");
@@ -906,6 +924,114 @@ fn a_database_with_parsed_seqids_gives_the_off_bytes() {
             assert_eq!(off.status, Some(0), "{what}");
             assert!(batches >= 8 && reason == "none", "{what}");
         }
+    }
+    // `nambig_v4` (the sequence of the first record of `nucl.fna` and a copy of it with ambiguity
+    // codes), intact, and with the second sequence's ambiguity count raised by one: the traceback
+    // of the third batch refuses it, after the reports of the first two.
+    let source = PathBuf::from(ids("nambig_v4"));
+    let copy = |name: &str| -> String {
+        for ext in ["nhr", "nin", "njs", "nog", "nsd", "nsi", "nsq"] {
+            std::fs::copy(
+                source.with_extension(ext),
+                dir.path(&format!("{name}.{ext}")),
+            )
+            .unwrap();
+        }
+        dir.path(name).to_str().unwrap().to_string()
+    };
+    let intact = copy("nambig_intact");
+    let raised = copy("nambig_raised");
+    {
+        let db = LOSAT::seqdb::SeqDb::open(&raised, LOSAT::seqdb::SeqType::Nucleotide).unwrap();
+        let (at, next) = db.volumes()[0].index().ambiguity_range(1).unwrap().unwrap();
+        let (at, next) = (at as usize, next as usize);
+        assert!(at < next, "the second sequence has ambiguity data");
+        drop(db);
+        let path = format!("{raised}.nsq");
+        let mut sequences = std::fs::read(&path).unwrap();
+        let count = u32::from_be_bytes(sequences[at..at + 4].try_into().unwrap());
+        sequences[at..at + 4].copy_from_slice(&(count + 1).to_be_bytes());
+        std::fs::write(&path, sequences).unwrap();
+    }
+    for (db, threads) in [(&intact, 4), (&raised, 1)] {
+        let mut args = [
+            "-task",
+            "megablast",
+            "-query",
+            late,
+            "-db",
+            db,
+            "-outfmt",
+            "7",
+            "-max_target_seqs",
+            "3",
+        ];
+        let what = format!("{db} outfmt 7, queries without hits first");
+        let extra = [("BATCH_SIZE", "1500")];
+        if db == &intact {
+            let (off, (batches, reason)) = same_two(&what, &args, threads, &extra, None);
+            assert_eq!(off.status, Some(0), "{what}: {off:?}");
+            assert!(batches >= 8 && reason == "none", "{what}");
+            continue;
+        }
+        let (off, on, (batches, _)) = refused_late(&what, &args, threads, &extra);
+        assert!(
+            String::from_utf8_lossy(&off.stderr).contains("ambiguity data"),
+            "{what}: {}",
+            String::from_utf8_lossy(&off.stderr)
+        );
+        args[3] = nohit;
+        let (eight, _) = same_two(&what, &args, threads, &extra, None);
+        assert_eq!(eight.status, Some(0), "{what}: {eight:?}");
+        reports_before(
+            &what,
+            &off,
+            &on,
+            &eight.report,
+            &eight.stderr,
+            Some(("# Query: ", 8)),
+        );
+        assert!(batches >= 2, "{what}");
+    }
+    // Seq-align ids that NCBI's formatters do not find (`nord_v5`: `gnl|BL_ORD_ID|3`) or find in
+    // another sequence first (`nlook_v5`: `lcl|300`), which the third batch reports
+    // (`db_search_manifest.tsv` refuses them in one batch).
+    for (db, queries, refusal, threads) in [
+        ("nord_v5", "nord_qall.fna", "gnl|BL_ORD_ID|3", 1),
+        ("nlook_v5", "nlook_qall.fna", "lcl|300", 4),
+    ] {
+        let queries = hits_late(&dir, &ids(queries));
+        let path = ids(db);
+        let mut args = [
+            "-task",
+            "megablast",
+            "-query",
+            queries.to_str().unwrap(),
+            "-db",
+            &path,
+            "-outfmt",
+            "7",
+        ];
+        let what = format!("{db} outfmt 7, queries without hits first");
+        let extra = [("BATCH_SIZE", "1500")];
+        let (off, on, (batches, _)) = refused_late(&what, &args, threads, &extra);
+        assert!(
+            String::from_utf8_lossy(&off.stderr).contains(refusal),
+            "{what}: {}",
+            String::from_utf8_lossy(&off.stderr)
+        );
+        args[3] = nohit;
+        let (eight, _) = same_two(&what, &args, threads, &extra, None);
+        assert_eq!(eight.status, Some(0), "{what}: {eight:?}");
+        reports_before(
+            &what,
+            &off,
+            &on,
+            &eight.report,
+            &eight.stderr,
+            Some(("# Query: ", 8)),
+        );
+        assert!(batches >= 2, "{what}");
     }
     // `-parse_deflines`: the same queries under ids of their own stream; under their own ids (the
     // database's) the third batch's report refuses them (`refuse_id_of_a_query`), after the
@@ -1004,14 +1130,13 @@ fn a_refused_subject_id_comes_after_the_batches_before(dir: &TempDir, query: &Pa
         outfmt,
     ];
     let what = format!("Subject_ id, outfmt {outfmt}");
-    let (off, on, (batches, _)) = refused_late(&what, &args, 4, &[]);
+    let (off, on, _) = refused_late(&what, &args, 4, &[]);
     assert!(
         String::from_utf8_lossy(&off.stderr).contains("'Subject_'"),
         "{what}: {}",
         String::from_utf8_lossy(&off.stderr)
     );
     assert!(off.report.is_empty(), "{what}: off, no row");
-    assert!(batches >= 1, "{what}");
     // Outfmt 0 and 17 show the subject (and stream, with the off bytes).
     for (outfmt, threads) in [("0", 1), ("17", 4)].into_iter().filter(|_| outfmt == "6") {
         let mut shown = args;
@@ -1207,7 +1332,7 @@ fn custom_tabular_reports_give_the_off_bytes() {
             .replace(intact.as_str(), title.as_str());
         args[5] = &title;
         let what = format!("-db {title} outfmt {outfmt}");
-        let (off, on, (batches, _)) = refused_late(&what, &args, threads, &[]);
+        let (off, on, _) = refused_late(&what, &args, threads, &[]);
         assert!(off.report.is_empty(), "{what}: off, no row");
         reports_before(
             &what,
@@ -1217,7 +1342,6 @@ fn custom_tabular_reports_give_the_off_bytes() {
             &reference_stderr,
             None,
         );
-        assert!(batches >= 1, "{what}");
     }
     // Databases with parsed Seq-ids and taxids (`tests/db_search/ids`), with taxonomy databases
     // (`tests/seqdb/taxdb`: `good`; `bad_magic`, whose texts of opening the first row that looks a

@@ -66,7 +66,8 @@
 //!   parsed Seq-ids, two sequences that the reports would join, the prefetch's taxids and
 //!   taxonomy database; a database with parsed Seq-ids of more than
 //!   `common::database::PARSED_CHECK_SEQUENCES_MAX` sequences is not read and keeps its reports
-//!   after the loop, `Off::LargeParsed`, as blastn's does). The refusals that depend on the
+//!   after the loop, `Off::LargeParsed`; blastn's reads nothing before the search since
+//!   2026-11-03 and refuses in the batch that reports the sequence). The refusals that depend on the
 //!   arguments only (the matrix, the `-seg` value) come in the first batch, where nothing of the
 //!   stream is written yet. With one batch (the first batch takes every query record) nothing can
 //!   come after it, so the stream does not act and nothing is checked. LOSAT's internal

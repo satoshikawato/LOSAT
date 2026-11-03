@@ -81,9 +81,17 @@
 //!   none, `SubjectCache`) and with `-parse_deflines` the parsed ids that a custom tabular report
 //!   shows. Each is made by the report call (or the search) of the batch before that batch writes
 //!   a byte, so the output is the reports of the batches before (without the epilog) and their
-//!   query warnings, then the refusal and its exit status; an input that LOSAT does not refuse
-//!   gives the same bytes either way. Outfmt 17 writes its document only at the end
-//!   (`SamDocument::finish`), so a refusal in a later batch finds nothing written there either.
+//!   query warnings, then the refusal and its exit status (the search's refusals, of the titles'
+//!   reading, the traceback and the prefetch, come after the batch's title warnings, as without
+//!   the switch; where several sequences are refused, the one named is the batch's first, not the
+//!   search's). The parsed ids of `-parse_deflines` without `sall*` are refused while the rows are
+//!   made (`TabularSubjects::values`), after the rows of the queries before in both paths, so
+//!   their bytes do not change. An error of NCBI's of the taxonomy database or of reading the
+//!   database that a later batch's prefetch or report meets likewise comes after the reports of
+//!   the batches before, as NCBI's loop writes them (without the switch after none); any other
+//!   input that LOSAT does not refuse gives the same bytes either way. Outfmt 17 writes its
+//!   document only at the end (`SamDocument::finish`), so a refusal in a later batch finds nothing
+//!   written there either.
 //!   BLAST XML has refusals of its own (a `-db` name, query title or id, or a title of a subject
 //!   with a hit that cannot be written, `blast_xml.rs`), made per report call; `-outfmt 5` is
 //!   never streamed (`Off::Xml`, any number of batches). The refusals of the options and the
@@ -108,8 +116,10 @@
 //! adapter, whose HSP numbers count over the whole search; file sinks, which are created when
 //! their report is written; two or more formats, which the library API allows on one stream,
 //! where the off path writes each format for all queries and the batch writes would interleave
-//! them); `-verbose` and the debug output (`x_debug_output`); and
-//! the refusals of the options and the query lengths above. The command line (`-out` file or standard output) and ABI v1 are streamed.
+//! them); `-verbose` and the debug output (`x_debug_output`); BLAST XML; and the refusals of the
+//! options and the query lengths above. The command line (`-out` file or standard output) and ABI
+//! v1 are streamed (an ABI caller gets the reports of the batches before a refusal, then its
+//! error).
 //!
 //! The taxonomy database (DBID item T): NCBI prefetches the subjects that each batch reports
 //! before the batch's reports in outfmt 0, 5, 6, 7 and 17, and with `taxdb.bti` on the search path
@@ -150,7 +160,7 @@ use crate::stats::NuclValues;
 use crate::utils::dust::MaskedInterval;
 
 use super::{
-    check_greedy_gap_costs, configure_task, database, record_title, x_debug_output, BlastnArgs,
+    check_greedy_gap_costs, configure_task, record_title, x_debug_output, BlastnArgs,
     BlastnOutputFormat, QueryBatching, SubjectLetters, SubjectRanges, SubjectSource,
 };
 
@@ -509,10 +519,17 @@ fn check(
     if (db_length.abs() + metadata.db_num_seqs as i128 * factor) * factor > i128::from(i64::MAX) {
         return Err(Off::SearchSpace);
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-312
+    // ```c++
+    //                 ITERATE(CSearchResultSet, result, *results) {
+    //                     formatter.PrintOneResultSet(**result, query_batch);
+    //                 }
+    // ```
     // The stored data and the report ids of the reported subjects (a database's definition
     // lines, ambiguity data and taxonomy, a subject set's ids) are checked by the report call of
-    // the batch that reports them, as NCBI reads them (drop-in DECISIONS 44): a refusal there
-    // comes after the reports of the batches before (the module doc).
+    // the batch that reports them, as NCBI's formatter reads them for each batch's result sets
+    // (drop-in DECISIONS 44): a refusal there comes after the reports of the batches before (the
+    // module doc).
     let cache = match source {
         SubjectSource::Prepared(prepared) => {
             // `tabular_subject_ids` of every subject, where LOSAT refuses none.

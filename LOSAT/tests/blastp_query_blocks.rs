@@ -18,11 +18,10 @@
 //! blocks of 50,000 letters need all of them. The block plan reads no other size whose outcome the
 //! four change (it needs more than one block, the `Int8` search space of the database and the
 //! longest query, the diagonal table's window, the batches' split sizes and, for blastp-fast, their
-//! words, `x_block_words_fit`). Three rules of other default switches that read sizes are not
+//! words, `x_block_words_fit`). Two rules of other default switches that read sizes are not
 //! reached by the four: a build ahead that lacks the room (`LOSAT_X_BPLKPAHEAD`:
-//! `blastp_lookup_ahead.rs`), several redo windows that end inside queries (`LOSAT_X_BPREDOPAR`:
-//! the default test, `blastp_redo_par.rs`) and the DP band past lane 1024 (`LOSAT_X_DPWINDOW`: the
-//! default test, the reach gate's fixtures).
+//! `blastp_lookup_ahead.rs`) and several redo windows that end inside queries
+//! (`LOSAT_X_BPREDOPAR`: the default test, `blastp_redo_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-287
 //! ```c++

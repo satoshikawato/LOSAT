@@ -609,7 +609,8 @@ pub(crate) struct HeaderReader<'a> {
     /// Whether NCBI's formatters may read the reported sequences one by one
     /// (`prefetch_may_be_off`).
     prefetch_off: bool,
-    /// `SeqDb::taxdb_found`, asked at the first record found with other taxids (`copy_of`).
+    /// `SeqDb::taxdb_found`, asked at the first record found with other taxids (`copy_of`) or
+    /// whose title NCBI can make from its taxids (`ParsedSubject::with_taxonomy_title`).
     taxdb_found: std::cell::OnceCell<bool>,
     /// `LookupTexts::of`, asked at the first record found with other taxids or in another
     /// volume (`copy_of`).
@@ -796,7 +797,9 @@ impl<'a> HeaderReader<'a> {
     /// sequence that holds the same definition lines and letters is shown as the subject itself
     /// (the same record in two volumes or two databases of an alias), one that differs only in
     /// their taxids as the subject but by the reports that write taxids
-    /// (`FoundInstead::OtherTaxids`, `copy_of`). Where NCBI may read the
+    /// (`FoundInstead::OtherTaxids`, `copy_of`) and, where a title can be made from them, those
+    /// of a generated title (`CopyApart::Title`); these come after any other finding, of which
+    /// the first is returned. Where NCBI may read the
     /// reported sequences one by one (`prefetch_off`), also another sequence that holds an id the
     /// Seq-align id matches weakly (`weakly_held`). A lookup that fails is kept for the formats
     /// that read the Bioseq; the others never look the id up. A subject whose Bioseq NCBI's
@@ -834,15 +837,34 @@ impl<'a> HeaderReader<'a> {
         let Some(&first) = oids.first() else {
             return Some(FoundInstead::Nothing);
         };
-        // The first other sequence found that only the reports of taxids show apart.
+        // The first other sequence found that only the reports of taxids show apart, and the
+        // first that those of a generated title also show apart, which those of taxids show
+        // apart too (`ParsedSubject::fetched`).
         let mut other_taxids = None;
+        let mut title_apart = None;
+        let mut copy = |other: u32| -> Option<RecordCopy> {
+            let copy = self.copy_of(subject, ordinal, other);
+            match copy {
+                RecordCopy::Same => None,
+                RecordCopy::OtherTaxids => {
+                    other_taxids.get_or_insert(other);
+                    None
+                }
+                RecordCopy::Apart(crate::report::db_subject::CopyApart::Title) => {
+                    title_apart.get_or_insert(other);
+                    None
+                }
+                RecordCopy::Apart(_) | RecordCopy::Differs => Some(copy),
+            }
+        };
         if first != own {
             let other = self.db.ordinal_of(first);
-            match self.copy_of(subject, ordinal, other) {
-                RecordCopy::Same => {}
-                RecordCopy::OtherTaxids => other_taxids = Some(other),
-                RecordCopy::Apart(cause) => return Some(FoundInstead::CopyApart(other, cause)),
-                RecordCopy::Differs => return Some(FoundInstead::Sequence(other)),
+            match copy(other) {
+                Some(RecordCopy::Apart(cause)) => {
+                    return Some(FoundInstead::CopyApart(other, cause));
+                }
+                Some(_) => return Some(FoundInstead::Sequence(other)),
+                None => {}
             }
         }
         let folded = match lookup.case_folded_oids(id) {
@@ -860,13 +882,12 @@ impl<'a> HeaderReader<'a> {
             if !self.holds_key(other, &keys, crate::seqid::defline_set::scope_keys) {
                 continue;
             }
-            match self.copy_of(subject, ordinal, other) {
-                RecordCopy::Same => {}
-                RecordCopy::OtherTaxids => {
-                    other_taxids.get_or_insert(other);
+            match copy(other) {
+                Some(RecordCopy::Apart(cause)) => {
+                    return Some(FoundInstead::CopyApart(other, cause));
                 }
-                RecordCopy::Apart(cause) => return Some(FoundInstead::CopyApart(other, cause)),
-                RecordCopy::Differs => return Some(FoundInstead::AlsoHeld(other)),
+                Some(_) => return Some(FoundInstead::AlsoHeld(other)),
+                None => {}
             }
         }
         if self.prefetch_off {
@@ -876,7 +897,11 @@ impl<'a> HeaderReader<'a> {
                 Err(error) => return failed(error),
             }
         }
-        other_taxids.map(FoundInstead::OtherTaxids)
+        title_apart
+            .map(|other| {
+                FoundInstead::CopyApart(other, crate::report::db_subject::CopyApart::Title)
+            })
+            .or(other_taxids.map(FoundInstead::OtherTaxids))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:128-135
@@ -999,15 +1024,21 @@ impl<'a> HeaderReader<'a> {
     // taxids in both rows (outfmt 6 `staxids`, `sscinames`, 15, 16) and the same bytes as for one
     // taxid in outfmt 0, 5, 6, 7 and 10, but the outfmt 0 title of an empty one made from the
     // source with the taxonomy database (probe of line DBID N1b, `blastdb-ids-20261021/R/copytaxid/p1`).
+    /// `SeqDb::taxdb_found`, asked once.
+    fn taxdb_found(&self) -> bool {
+        *self.taxdb_found.get_or_init(|| self.db.taxdb_found())
+    }
+
     /// How the sequence `b` differs from the sequence `a`, `subject`, as NCBI's formatters show
     /// one for the other: the same where both hold the same definition lines, as the reports
     /// read them, and letters; also where only the taxids of the definition lines differ
     /// (`RecordCopy::OtherTaxids`, which the reports of taxids and their names alone show apart).
-    /// Shown apart by every report that reads the Bioseq (`RecordCopy::Apart`): where a title can
-    /// depend on the Bioseq's source (`ParsedSubject::title_reads_source`) and the sources differ,
-    /// and where the taxonomy database's texts depend on which copy NCBI fetches, whose volume
-    /// looks its taxids up (`LookupTexts::differ`; for the same taxids in another volume, the
-    /// offset error, `LookupTexts::per_volume`).
+    /// Shown apart (`RecordCopy::Apart`): by every report that reads the Bioseq where the
+    /// taxonomy database's texts depend on which copy NCBI fetches, whose volume looks its taxids
+    /// up (`LookupTexts::differ`; for the same taxids in another volume, the offset error,
+    /// `LookupTexts::per_volume`), and by the reports that show a generated title where it can
+    /// depend on the Bioseq's source (`ParsedSubject::title_reads_source`) and the sources
+    /// differ.
     fn copy_of(
         &self,
         subject: &crate::report::db_subject::ParsedSubject,
@@ -1074,12 +1105,13 @@ impl<'a> HeaderReader<'a> {
                     return RecordCopy::Differs;
                 };
                 let other = copy.volume_taxids();
-                let taxdb_found = *self.taxdb_found.get_or_init(|| self.db.taxdb_found());
-                if other != taxids && subject.title_reads_source(protein, taxdb_found) {
-                    return RecordCopy::Apart(CopyApart::Title);
-                }
+                // The texts first: every report that reads the Bioseq shows them, a generated
+                // title only some (`ParsedSubject::generated_title_fetched`).
                 if texts().differ(&taxids, &other) {
                     return RecordCopy::Apart(CopyApart::TaxonomyTexts);
+                }
+                if other != taxids && subject.title_reads_source(protein, self.taxdb_found()) {
+                    return RecordCopy::Apart(CopyApart::Title);
                 }
                 RecordCopy::OtherTaxids
             }
@@ -1126,6 +1158,7 @@ fn reported_header(
                     let found = headers.found_instead(&subject, ordinal);
                     Ok(ReportedHeader::Parsed(std::sync::Arc::new(
                         subject
+                            .with_taxonomy_title(|| headers.taxdb_found())
                             .showing_gis(db.reports_show_gis())
                             .under_positive_list(db.has_positive_list())
                             .found_instead(found),
@@ -1334,7 +1367,9 @@ pub(crate) fn refuse_parsed_taxonomy(ordinal: u32, program: &str) -> anyhow::Err
 /// than NCBI's cut of the line leaves room for (NCBI then pads the line without end), a
 /// generated heading title whose end NCBI rewrites from the taxids
 /// (`ParsedSubject::title_suffix_adjusted`), and a title that NCBI makes from the sequence's
-/// taxids and the taxonomy database (`taxdb_found`, `ParsedSubject::title_from_taxonomy`).
+/// taxids and the taxonomy database (`taxdb_found`, `ParsedSubject::title_from_taxonomy`) or
+/// from those of the same record that it can show for the sequence
+/// (`ParsedSubject::generated_title_fetched`).
 pub(crate) fn check_shown_parsed_subject(
     subject: &crate::report::db_subject::ParsedSubject,
     protein: bool,
@@ -1373,6 +1408,11 @@ pub(crate) fn check_shown_parsed_subject(
             "has an outfmt 0 description id longer than 65 bytes (NCBI BLAST+ 2.17.0 pads the description line without end)",
             program,
         ));
+    }
+    if subject.pairwise_title_reads_source(protein, taxdb_found) {
+        subject
+            .generated_title_fetched()
+            .map_err(|reason| parsed_refusal(ordinal, &reason, program))?;
     }
     if generated && subject.title_suffix_adjusted(protein) {
         return Err(parsed_refusal(
@@ -1902,6 +1942,39 @@ mod tests {
         let abt = open("pjoin_abt");
         assert_eq!(copy(&abt, 0, 3), RecordCopy::OtherTaxids);
         assert_eq!(copy(&abt, 0, 7), RecordCopy::Same);
+    }
+
+    // Line DBID N1b L1: of pdupe_at's copies of a record without a title (a without a taxid 0,
+    // t with 9606 1), NCBI can make the title of the other from its taxids where the taxonomy
+    // database is found; `found_instead` gives that copy, which only the reports of generated
+    // titles and of taxids refuse (`ParsedSubject::generated_title_fetched`, `fetched`).
+    #[test]
+    fn a_copy_whose_title_is_made_from_its_taxids_is_found_for_the_reports_of_titles() {
+        use crate::report::db_subject::{CopyApart, FoundInstead, ParsedSubject};
+        let base =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/ids/pdupe_at");
+        let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+        let subject = match db.read_header(0).unwrap() {
+            crate::seqdb::SequenceHeader::Parsed(set) => ParsedSubject::new(set).unwrap(),
+            _ => panic!("parsed Seq-ids"),
+        };
+        for (taxdb_found, copy, found) in [
+            (
+                true,
+                RecordCopy::Apart(CopyApart::Title),
+                FoundInstead::CopyApart(1, CopyApart::Title),
+            ),
+            (false, RecordCopy::OtherTaxids, FoundInstead::OtherTaxids(1)),
+        ] {
+            let headers = HeaderReader::new(&db);
+            headers.taxdb_found.set(taxdb_found).unwrap();
+            assert_eq!(headers.copy_of(&subject, 0, 1), copy, "{taxdb_found}");
+            assert_eq!(
+                headers.found_instead(&subject, 0),
+                Some(found),
+                "{taxdb_found}"
+            );
+        }
     }
 
     // Line DBID N3: in NCBI's order of pjoin_abc's hits (r1 of c, r6, r1 of b and a, r2, r4,

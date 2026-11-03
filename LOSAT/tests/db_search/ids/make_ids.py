@@ -86,7 +86,11 @@ a taxid) and `pdup_tu.pal` (`pdup_t` first); `pdup_n.*` and `pdup_o.*` from `pdu
 last entry of `tests/seqdb/taxdb/*`, whose lookup writes the offset error of `offset_last_past_end`), through
 `pdup_no.pal`; `pdupe_a.*` and `pdupe_t.*` from `pdupe.faa` (no title) without a taxid and with 9606, through
 `pdupe_at.pal`; `ndup_a.*` from `ndup.fna` without a taxid and `ndup_t.*` with taxid 9606, through `ndup_at.nal`.
-`--copytaxid-only` builds only these.
+`--copytaxid-only` builds only these. Line DBID N1b L1 (titles that NCBI can make from the taxids): `ndupe_a.*` and
+`ndupe_t.*` from `ndupe.fna` (no title) without a taxid and with 9606, through `ndupe_at.nal`; `nsubj_t.*` from
+`nsubj.fna` (lcl|Subject_1, no title) with 9606; `psubj_a.*`, `psubj_t.*` from `psubj.faa` (lcl|Subject_1, no title)
+and `psubjb_a.*`, `psubjb_t.*` from `psubjb.faa` (lcl|Subject_2, a title ending in ']'), through `psubj_at.pal` and
+`psubjb_at.pal`. `--titlesrc-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
@@ -145,6 +149,24 @@ def build_copytaxid(args: argparse.Namespace) -> None:
             f"DBLIST {names}\n")
 
 
+def build_titlesrc(args: argparse.Namespace) -> None:
+    for name, fasta, dbtype, taxid in (("ndupe_a", "ndupe.fna", "nucl", None), ("ndupe_t", "ndupe.fna", "nucl", "9606"),
+                                       ("nsubj_t", "nsubj.fna", "nucl", "9606"),
+                                       ("psubj_a", "psubj.faa", "prot", None), ("psubj_t", "psubj.faa", "prot", "9606"),
+                                       ("psubjb_a", "psubjb.faa", "prot", None),
+                                       ("psubjb_t", "psubjb.faa", "prot", "9606")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", dbtype, "-parse_seqids",
+             "-blastdb_version", "5", "-title", name, "-out", str(args.out / name)]
+            + (["-taxid", taxid] if taxid else []),
+            check=True, stdout=subprocess.DEVNULL)
+    for alias, names, extension in (("ndupe_at", "ndupe_a ndupe_t", "nal"), ("psubj_at", "psubj_a psubj_t", "pal"),
+                                    ("psubjb_at", "psubjb_a psubjb_t", "pal")):
+        (args.out / f"{alias}.{extension}").write_text(
+            f"#\n# Alias file of line DBID, N1b L1\n#\nTITLE {alias} (two databases, parsed Seq-ids)\n"
+            f"DBLIST {names}\n")
+
+
 def build_join(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("pjoin_a", "pjoin_a.faa", "prot", None), ("pjoin_b", "pjoin_b.faa", "prot", None),
                                        ("pjoin_c", "pjoin_c.faa", "prot", None), ("pjoin_bt", "pjoin_b.faa", "prot", "9606"),
@@ -176,6 +198,7 @@ def main() -> int:
     ap.add_argument("--weak-only", action="store_true", help="build only the databases of line DBID N2c")
     ap.add_argument("--copytaxid-only", action="store_true", help="build only the databases of line DBID N1b")
     ap.add_argument("--join-only", action="store_true", help="build only the databases of line DBID N3")
+    ap.add_argument("--titlesrc-only", action="store_true", help="build only the databases of line DBID N1b L1")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
@@ -185,6 +208,9 @@ def main() -> int:
         return 0
     if args.join_only:
         build_join(args)
+        return 0
+    if args.titlesrc_only:
+        build_titlesrc(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants
@@ -298,6 +324,7 @@ def main() -> int:
     build_weak(args)
     build_copytaxid(args)
     build_join(args)
+    build_titlesrc(args)
     return 0
 
 

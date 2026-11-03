@@ -11,7 +11,10 @@ the same record with another title. `nfound.fna`: the sequence of `njoined_a.fna
 with three substitutions, gb|AF000050|. `../seqidlist/sl_pfound_neg.txt`: AAA00001.1. Line DBID N1b: `ndup.fna`
 holds one record gb|EEN00005.1|, the back-translation of `pdup.faa` (query `ndup_q.fna`, the same letters), and
 `pdupe.faa` the letters of `pdup.faa` as gb|EEE00006.1| without a title, for the databases of the same record with
-other taxids.
+other taxids. Line DBID N1b L1: `ndupe.fna` the letters of `ndup.fna` as gb|EEN00006.1| without a title, `nsubj.fna`
+as lcl|Subject_1 without a title, `psubj.faa` the letters of `pdup.faa` as lcl|Subject_1 without a title and
+`psubjb.faa` as lcl|Subject_2 with a title ending in ']' (the tabular formats replace a `lcl|Subject_` id by the
+first word of the generated title).
 
 usage: make_found_fasta.py [--out LOSAT/tests/db_search/ids]
 """
@@ -63,6 +66,10 @@ def main() -> int:
     (out / "ndup.fna").write_text(f">gb|EEN00005.1| duplicated nucleotide record\n{wrap(nseq_dup)}")
     (out / "ndup_q.fna").write_text(f">ndq query of the duplicated nucleotide record\n{wrap(nseq_dup)}")
     (out / "pdupe.faa").write_text(f">gb|EEE00006.1|\n{wrap(seq)}")
+    (out / "ndupe.fna").write_text(f">gb|EEN00006.1|\n{wrap(nseq_dup)}")
+    (out / "nsubj.fna").write_text(f">lcl|Subject_1\n{wrap(nseq_dup)}")
+    (out / "psubj.faa").write_text(f">lcl|Subject_1\n{wrap(seq)}")
+    (out / "psubjb.faa").write_text(f">lcl|Subject_2 alpha, partial [Homo sapiens]\n{wrap(seq)}")
     nseq = "".join(line.strip() for line in (out / "njoined_a.fna").read_text().splitlines()[1:])
     (out / "nfound.fna").write_text(
         f">gb|AF000050.1| nucleotide pair, versioned\n{wrap(nseq)}"

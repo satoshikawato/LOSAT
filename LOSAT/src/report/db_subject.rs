@@ -47,6 +47,9 @@ pub struct ParsedSubject {
     found_instead: Option<FoundInstead>,
     /// `-show_gis`: the outfmt 0 description line and heading show it (`description`, `heading`).
     show_gis: bool,
+    /// Whether NCBI makes the subject Bioseq's title from its source with the taxonomy database
+    /// (`with_taxonomy_title`).
+    taxonomy_title: bool,
     /// Whether this is a `-subject` record (`of_record`): a Bioseq without definition lines.
     record: bool,
     /// Whether it is a record that the reports show as a record without `-parse_deflines`
@@ -128,7 +131,9 @@ pub enum FoundInstead {
 /// their taxids (`FoundInstead::CopyApart`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CopyApart {
-    /// A title can be made from the taxids (`ParsedSubject::title_reads_source`).
+    /// A title can be made from the taxids (`ParsedSubject::title_reads_source`), which only
+    /// the reports that show a generated title show apart
+    /// (`ParsedSubject::generated_title_fetched`).
     Title,
     /// The taxonomy database writes a text at a lookup that the volume of the copy makes for
     /// its taxids.
@@ -205,6 +210,7 @@ impl ParsedSubject {
             unfetchable,
             found_instead: None,
             show_gis: false,
+            taxonomy_title: false,
             record: false,
             local_record: false,
             use_this_seqid: Vec::new(),
@@ -249,6 +255,7 @@ impl ParsedSubject {
             unfetchable: false,
             found_instead: None,
             show_gis: false,
+            taxonomy_title: false,
             record: true,
             local_record: ids.subject_local(),
             use_this_seqid: Vec::new(),
@@ -323,6 +330,14 @@ impl ParsedSubject {
     /// The subject as the outfmt 0 report of a run with or without `-show_gis` shows it.
     pub fn showing_gis(mut self, show_gis: bool) -> Self {
         self.show_gis = show_gis;
+        self
+    }
+
+    /// The subject as NCBI's formatters show it where `taxdb.bti` is found (`taxdb_found`, asked
+    /// only where `title_from_taxonomy`): its generated title is made from its source and the
+    /// taxonomy database (`generated_title_word`).
+    pub fn with_taxonomy_title(mut self, taxdb_found: impl FnOnce() -> bool) -> Self {
+        self.taxonomy_title = self.title_from_taxonomy() && taxdb_found();
         self
     }
 
@@ -414,18 +429,27 @@ impl ParsedSubject {
     /// write the Seq-align id alone. `taxonomy`: whether a report writes the subject's taxids
     /// or their names (outfmt 13 to 16, the tabular `staxid`, `staxids` and the names), which
     /// alone refuse a sequence found as the same record with other taxids
-    /// (`FoundInstead::OtherTaxids`).
+    /// (`FoundInstead::OtherTaxids`; also where a generated title can be made from them, which
+    /// the reports that show it refuse, `generated_title_fetched`).
     pub fn fetched(&self, taxonomy: bool) -> Result<(), String> {
         let id = || String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
         match (self.unfetchable, &self.found_instead) {
             (false, None) => Ok(()),
-            (false, Some(FoundInstead::OtherTaxids(_))) if !taxonomy => Ok(()),
-            (false, Some(FoundInstead::OtherTaxids(ordinal))) => Err(format!(
+            (
+                false,
+                Some(
+                    FoundInstead::OtherTaxids(_)
+                    | FoundInstead::CopyApart(_, CopyApart::Title),
+                ),
+            ) if !taxonomy => Ok(()),
+            (
+                false,
+                Some(
+                    FoundInstead::OtherTaxids(ordinal)
+                    | FoundInstead::CopyApart(ordinal, CopyApart::Title),
+                ),
+            ) => Err(format!(
                 "has the Seq-align id {}, which database sequence {ordinal} also holds with the same definition lines and letters but other taxids (NCBI BLAST+ 2.17.0 can write that sequence's taxids and their names for it)",
-                id()
-            )),
-            (false, Some(FoundInstead::CopyApart(ordinal, CopyApart::Title))) => Err(format!(
-                "has the Seq-align id {}, which database sequence {ordinal} also holds with the same definition lines and letters but other taxids, from which NCBI BLAST+ 2.17.0 can make that sequence's title for it (a title made from the taxids with the taxonomy database, or the end of a protein title rewritten)",
                 id()
             )),
             (false, Some(FoundInstead::CopyApart(ordinal, CopyApart::TaxonomyTexts))) => Err(format!(
@@ -456,6 +480,39 @@ impl ParsedSubject {
                 "has the Seq-align id {}, by which NCBI BLAST+'s formatters do not find the sequence (NCBI BLAST+ 2.17.0 writes Unknown or another sequence's names, or stops)",
                 id()
             )),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2250-2255
+    // ```c++
+    // 		if(bdl->IsSetTitle()){
+    // 			alnDispParams->title = bdl->GetTitle();
+    // 		}
+    //         if(alnDispParams->title.empty()) {
+    //             alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
+    //         }
+    // ```
+    // NCBI's formatters generate the title of the Bioseq they fetch (`CDeflineGenerator`, from
+    // the sources of that sequence's volume) for the outfmt 0 description (showdefline.cpp:498)
+    // and heading, for the first word that replaces an id in the tabular formats
+    // (showdefline.cpp:227) and for the XML2 and JSON `title` (blastxml2_format.cpp:405); the
+    // tabular `stitle` and `salltitles` (tabular.cpp:415-434) and the XML `Hit_def`
+    // (`GetBioseqHandleDeflineAndId`, showdefline.cpp:283-299) write the titles of the
+    // definition lines.
+    /// `Err` for a subject found as the same record with other taxids from which NCBI's
+    /// formatters can make the title they generate for it (`FoundInstead::CopyApart` with
+    /// `CopyApart::Title`), for the reports that show a generated title: outfmt 0
+    /// (`check_shown_parsed_subject`) and the tabular word of a replaced id
+    /// (`generated_title_word`); outfmt 13 to 16 write the taxids (`fetched`). The callers ask
+    /// it where the title they show can depend on the source (`pairwise_title_reads_source`, the
+    /// word of a nucleotide or of a protein title ending in `]`).
+    pub fn generated_title_fetched(&self) -> Result<(), String> {
+        match &self.found_instead {
+            Some(FoundInstead::CopyApart(ordinal, CopyApart::Title)) => Err(format!(
+                "has the Seq-align id {}, which database sequence {ordinal} also holds with the same definition lines and letters but other taxids, from which NCBI BLAST+ 2.17.0 can make that sequence's title for it (a title made from the taxids with the taxonomy database, or the end of a protein title rewritten)",
+                String::from_utf8_lossy(&self.alignment_fasta())
+            )),
+            _ => Ok(()),
         }
     }
 
@@ -604,22 +661,31 @@ impl ParsedSubject {
 
     /// Whether a title that the reports write of the subject can depend on its Bioseq's
     /// source, the taxids of its definition lines, whatever they are (`title_from_taxonomy`,
-    /// `title_suffix_adjusted`): a title made from the source where `taxdb.bti` is found
-    /// (`taxdb_found`; without it NCBI 2.17.0 writes the title of a Bioseq without a source,
-    /// probe of line DBID N1b, `blastdb-ids-20261021/R/copytaxid/p1`), and a protein title ending
-    /// in `]` where a report shows the generated title without `fLeavePrefixSuffix` (the outfmt 0
-    /// heading of a set with a definition line without a title, the tabular word of an id that
-    /// `seq_id_list` replaces).
+    /// `title_suffix_adjusted`): in outfmt 0 (`pairwise_title_reads_source`), and the tabular word
+    /// of an id that `seq_id_list` replaces, of a protein title ending in `]` (a title made from
+    /// the source with the taxonomy database is also shown in outfmt 0; of a protein the word is
+    /// `unnamed` either way).
     pub fn title_reads_source(&self, protein: bool, taxdb_found: bool) -> bool {
-        let title = self.target().title.as_deref().unwrap_or_default();
         let replaced =
             self.set.deflines.iter().any(|defline| {
                 matches!(seq_id_list(&defline.ids, b"x"), std::borrow::Cow::Owned(_))
             });
+        self.pairwise_title_reads_source(protein, taxdb_found)
+            || (protein && self.title_ends_in_bracket() && replaced)
+    }
+
+    /// Whether a title that outfmt 0 shows of the subject can depend on its Bioseq's source
+    /// (`title_reads_source`): a title made from the source where `taxdb.bti` is found
+    /// (`taxdb_found`; without it NCBI 2.17.0 writes the title of a Bioseq without a source,
+    /// probe of line DBID N1b, `blastdb-ids-20261021/R/copytaxid/p1`) in the description and the
+    /// heading, and a protein title ending in `]` in the heading of a set with a definition line
+    /// without a title, which shows the generated title without `fLeavePrefixSuffix` (the
+    /// description keeps the stored end: probe of line DBID N1b L1,
+    /// `blastdb-ids-20261021/R/titlesrc/p1`).
+    pub fn pairwise_title_reads_source(&self, protein: bool, taxdb_found: bool) -> bool {
+        let title = self.target().title.as_deref().unwrap_or_default();
         (taxdb_found && bioseq_title_from_source(title, &self.bioseq_ids()))
-            || (protein
-                && self.title_ends_in_bracket()
-                && (self.heading_generates_title() || replaced))
+            || (protein && self.title_ends_in_bracket() && self.heading_generates_title())
     }
 
     /// Whether the outfmt 0 alignment heading shows the subject Bioseq's generated title: some
@@ -644,9 +710,35 @@ impl ParsedSubject {
         self.generated_title_word(protein)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:222-230
+    // ```c++
+    //         if (((*itr)->IsGeneral() &&
+    //             (*itr)->AsFastaString().find("gnl|BL_ORD_ID")
+    //             != string::npos) ||
+    // 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
+    //             vector<string> title_tokens;
+    //             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
+    //             if (defline != NcbiEmptyString) {
+    //                 id_token =
+    //                     NStr::Split(defline, " ", title_tokens)[0];
+    // ```
+    // The first word of a title that NCBI makes from the source with the taxonomy database is
+    // the organism's for a nucleotide (`Homo` for an empty title with taxid 9606) and `unnamed`
+    // for a protein, as without a source; of a protein title ending in `]`, the word before the
+    // end that `x_AdjustProteinTitleSuffix` rewrites where the Bioseq has a source (probe of line
+    // DBID N1b L1, `blastdb-ids-20261021/R/titlesrc/p1`).
     /// The first word of the subject Bioseq's generated title (`title_word` without the check
-    /// of the target's ids).
+    /// of the target's ids). `Err` also where NCBI makes a nucleotide title from the source with
+    /// the taxonomy database (`with_taxonomy_title`), and where it can make the word from the
+    /// taxids of the same record found for the subject (`generated_title_fetched`): of a
+    /// nucleotide, or of a protein title ending in `]`.
     fn generated_title_word(&self, protein: bool) -> Result<Vec<u8>, &'static str> {
+        if !protein && self.taxonomy_title {
+            return Err("a title that NCBI BLAST+ 2.17.0 makes from the taxids with the taxonomy database, whose first word replaces an id");
+        }
+        if self.generated_title_fetched().is_err() && (!protein || self.title_ends_in_bracket()) {
+            return Err("a Seq-align id that another database sequence also holds with the same definition lines and letters but other taxids, from which NCBI BLAST+ 2.17.0 can make the title whose first word replaces an id (a title made from the taxids with the taxonomy database, or the end of a protein title rewritten)");
+        }
         if self.title_suffix_adjusted(protein) {
             return Err("a title ending in ']' whose first word NCBI BLAST+ takes after it rewrites the title's end from the taxids (x_AdjustProteinTitleSuffix)");
         }
@@ -1674,6 +1766,123 @@ mod tests {
             error.contains("whose lookup in the database fails (DB contains no accession info.;"),
             "{error}"
         );
+    }
+
+    // Line DBID N1b L1: a copy with other taxids from which NCBI can make the subject's title is
+    // refused by the reports that show a generated title (outfmt 0, the tabular word of a
+    // replaced id) and by those of taxids, not by the others (tabular ids, `stitle`, XML).
+    #[test]
+    fn a_title_made_from_a_copy_s_taxids_is_refused_where_a_generated_title_is_shown() {
+        use crate::algorithm::common::database::check_shown_parsed_subject;
+        let title_apart = Some(FoundInstead::CopyApart(3, CopyApart::Title));
+        let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
+            .unwrap()
+            .found_instead(title_apart.clone());
+        assert!(subject.fetched(false).is_ok());
+        let error = subject.fetched(true).unwrap_err();
+        assert!(error.contains("database sequence 3 also holds"), "{error}");
+        assert!(error.contains("taxids and their names for it"), "{error}");
+        assert!(subject.check_tabular_ids(true).is_ok());
+        assert!(subject.all_tabular_ids(true).is_ok());
+        // Outfmt 0 where it shows a title that can depend on the source: an empty title with
+        // the taxonomy database, a heading generated of a title ending in `]`.
+        assert!(check_shown_parsed_subject(&subject, true, true, 0, "BLASTP").is_ok());
+        let titled = |titles: &[&str]| {
+            let deflines = titles
+                .iter()
+                .enumerate()
+                .map(|(line, title)| BlastDefline {
+                    title: Some(title.as_bytes().to_vec()),
+                    ids: vec![gb(&format!("AF00000{line}"), 1)],
+                    ..BlastDefline::default()
+                })
+                .collect();
+            ParsedSubject::new(DeflineSet { deflines })
+                .unwrap()
+                .found_instead(title_apart.clone())
+        };
+        let error = check_shown_parsed_subject(&titled(&[""]), false, true, 0, "BLASTN")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("can make that sequence's title"), "{error}");
+        assert!(check_shown_parsed_subject(&titled(&[""]), false, false, 0, "BLASTN").is_ok());
+        let heading = titled(&["alpha, partial [Homo sapiens]", ""]);
+        assert!(check_shown_parsed_subject(&heading, true, false, 0, "BLASTP").is_err());
+        let bracket = titled(&["alpha, partial [Homo sapiens]"]);
+        assert!(check_shown_parsed_subject(&bracket, true, true, 0, "BLASTP").is_ok());
+        // A local id `Subject_N` that the title's first word replaces, of the target or of
+        // another definition line: the word can depend on the source for a nucleotide and for a
+        // protein title ending in `]`.
+        let local = || ParsedSeqId::Local(ObjectId::Str(b"Subject_1".to_vec()));
+        let replaced = ParsedSubject::new(one_defline(vec![local()]))
+            .unwrap()
+            .found_instead(title_apart.clone());
+        let error = replaced.check_tabular_ids(false).unwrap_err();
+        assert!(error.contains("whose first word replaces an id"), "{error}");
+        assert!(replaced.check_tabular_ids(true).is_ok());
+        let second = ParsedSubject::new(DeflineSet {
+            deflines: vec![
+                one_defline(vec![gb("AAA00001", 1)]).deflines.remove(0),
+                one_defline(vec![local()]).deflines.remove(0),
+            ],
+        })
+        .unwrap()
+        .found_instead(title_apart.clone());
+        assert!(second.check_tabular_ids(false).is_ok());
+        assert!(second.all_tabular_ids(false).is_err());
+        assert!(second.all_tabular_ids(true).is_ok());
+        let bracket = ParsedSubject::new(DeflineSet {
+            deflines: vec![BlastDefline {
+                title: Some(b"alpha, partial [Homo sapiens]".to_vec()),
+                ids: vec![local()],
+                ..BlastDefline::default()
+            }],
+        })
+        .unwrap()
+        .found_instead(title_apart);
+        assert!(bracket.check_tabular_ids(true).is_err());
+        // The other copies are refused as before: the taxonomy texts by every report that reads
+        // the Bioseq, the taxids by those that write them.
+        let texts = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
+            .unwrap()
+            .found_instead(Some(FoundInstead::CopyApart(3, CopyApart::TaxonomyTexts)));
+        assert!(texts.fetched(false).is_err());
+        assert!(texts.generated_title_fetched().is_ok());
+        let taxids = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
+            .unwrap()
+            .found_instead(Some(FoundInstead::OtherTaxids(3)));
+        assert!(taxids.fetched(false).is_ok());
+        assert!(taxids.generated_title_fetched().is_ok());
+    }
+
+    // Line DBID N1b L1 probe: of a nucleotide `lcl|Subject_1` without a title and with taxid 9606,
+    // NCBI's tabular id is the first word of the title it makes from the source with the
+    // taxonomy database (`Homo`), which LOSAT refuses; a protein's is `unnamed` either way.
+    #[test]
+    fn a_tabular_word_of_a_title_made_from_the_taxonomy_database_is_refused_for_a_nucleotide() {
+        let subject = |taxid: Option<i32>, taxdb_found: bool| {
+            ParsedSubject::new(DeflineSet {
+                deflines: vec![BlastDefline {
+                    ids: vec![ParsedSeqId::Local(ObjectId::Str(b"Subject_1".to_vec()))],
+                    taxid,
+                    ..BlastDefline::default()
+                }],
+            })
+            .unwrap()
+            .with_taxonomy_title(|| taxdb_found)
+        };
+        let error = subject(Some(9606), true)
+            .check_tabular_ids(false)
+            .unwrap_err();
+        assert!(
+            error.contains("makes from the taxids with the taxonomy database"),
+            "{error}"
+        );
+        assert!(subject(Some(9606), true).all_tabular_ids(false).is_err());
+        let [id, _, _] = subject(Some(9606), true).tabular_ids(true).unwrap();
+        assert_eq!(text(&id), "unnamed");
+        assert!(subject(Some(9606), false).check_tabular_ids(false).is_ok());
+        assert!(subject(None, true).check_tabular_ids(false).is_ok());
     }
 
     #[test]

@@ -434,6 +434,17 @@ LOSAT writes; LOSAT refuses the sequence in the formats of taxids and their name
 taxonomy database (a title made from the taxids), and with a taxonomy database on `BLASTDB` whose texts depend on
 the copy NCBI fetches (`bad_magic` for `pdup_at`, `offset_last_past_end` for the copies of 99990 in `pdup_no`).
 
+Copies whose title NCBI can make from the taxids (line DBID N1b L1; rows `db.id.title.*`): `make_ids.py
+--titlesrc-only` writes `ids/ndupe_a` and `ids/ndupe_t` (`ndupe.fna`, the letters of `ndup.fna` without a title,
+without a taxid and with 9606, through `ids/ndupe_at.nal`), `ids/psubj_a`, `ids/psubj_t` (`psubj.faa`, lcl|Subject_1
+without a title) and `ids/psubjb_a`, `ids/psubjb_t` (`psubjb.faa`, lcl|Subject_2 with a title ending in `]`), through
+`ids/psubj_at.pal` and `ids/psubjb_at.pal`, and `ids/nsubj_t` (`nsubj.fna`, lcl|Subject_1 without a title, taxid
+9606, one database). NCBI generates the title of the copy it fetches, from its taxids with the taxonomy database,
+only in outfmt 0 and for the tabular word that replaces a `lcl|Subject_` id: LOSAT writes the other formats
+(`pdupe_at` and `ndupe_at` with `tests/seqdb/taxdb/good`, `psubj_at`, whose word is `unnamed` either way) and refuses
+those two (`psubjb_at`, whose word is taken after NCBI rewrites the end of the title), also for `nsubj_t` alone with
+the taxonomy database (NCBI's word is `Homo`, the organism's).
+
 Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
 --join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and
 `ids/njoin_a`, `ids/njoin_b`, `ids/njoin_c` (version 5; r1 in all three, r3 with two definition lines and two

@@ -53,11 +53,8 @@ onUnmounted(() => {
 
 <template>
   <header class="app-header">
-    <h1>LOSAT Web</h1>
-    <span class="local-note">
-      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
-      Nothing leaves this browser
-    </span>
+    <h1>LOSAT</h1>
+    <span class="tagline">A miniaturized reimplementation of NCBI BLAST algorithm</span>
   </header>
   <p v-if="usesFakeEngine" class="banner" data-testid="fake-engine-banner">
     Development build: a fake engine is in use. Outputs are not search results.

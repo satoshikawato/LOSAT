@@ -8177,7 +8177,11 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
-    check_unsupported_environment(matches!(subjects, Subjects::Database(_)))?;
+    app::check_search_environment(
+        "BLASTN",
+        !matches!(subjects, Subjects::Database(_)),
+        outputs.only_archive(),
+    )?;
     let batching = query_batching_from_environment(
         super::super::coordination::task_uses_megablast_chunks(&args.task),
     )?;
@@ -8260,62 +8264,6 @@ fn search(
     // No NCBI counterpart: the PAIRPAR counters with LOSAT_TIMING; nothing without it.
     x_pair_seed::summary();
     x_result
-}
-
-/// Rejects the environment variables that put NCBI BLAST+ into a search mode or report that
-/// LOSAT does not reproduce.
-///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:204-210
-/// ```c
-///     if ( (subjects = db_args->GetSubjects(scope)) ) {
-///         _ASSERT(search_db.Empty());
-/// 	char* bl2seq_legacy = getenv("BL2SEQ_LEGACY");
-/// 	if (bl2seq_legacy)
-///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, false));
-/// 	else
-///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
-/// ```
-/// `BL2SEQ_LEGACY` (any value, also an empty one) turns off the scan of the subjects as a
-/// database: `CLocalBlast` then searches each subject on its own (local_blast.cpp:189,289)
-/// and `CBlastFormat` writes the legacy bl2seq report (`m_IsBl2Seq && !m_IsDbScan`). NCBI
-/// reads it in that branch only: a database search (`database`) does not read it.
-fn check_unsupported_environment(database: bool) -> Result<()> {
-    if !database && std::env::var_os("BL2SEQ_LEGACY").is_some() {
-        anyhow::bail!(
-            "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's BLASTN"
-        );
-    }
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:732-737
-    // ```c
-    // 		char * pre_fetch_limit_str = getenv("PRE_FETCH_SEQS_LIMIT");
-    // 		if (pre_fetch_limit_str) {
-    // 			int pre_fetch_limit = NStr::StringToInt(pre_fetch_limit_str);
-    // 			if(pre_fetch_limit == 0) {
-    // 				return false;
-    // 			}
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:761-766
-    // ```c
-    //     if (results.size() == 0) {
-    //         return;
-    //     }
-    //     if(!s_PreFetchSeqs(results, format_type)){
-    //     	return;
-    //     }
-    // ```
-    // An integer only decides whether the report's sequences are fetched ahead, which
-    // changes no output. Before the report of each query batch NCBI converts the value, and
-    // one that `NStr::StringToInt` cannot convert (an empty one too) stops it with a
-    // `CStringException` whose text names its build's source files (exit 255).
-    if let Some(value) = std::env::var_os("PRE_FETCH_SEQS_LIMIT") {
-        if crate::blastinput::query_batch::ncbi_string_to_int(&value).is_none() {
-            anyhow::bail!(
-                "the environment variable PRE_FETCH_SEQS_LIMIT has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's BLASTN",
-                value.to_string_lossy()
-            );
-        }
-    }
-    Ok(())
 }
 
 /// An error of a query batch after the first that does not depend on the batch's queries

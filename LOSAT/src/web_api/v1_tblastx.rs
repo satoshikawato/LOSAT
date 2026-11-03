@@ -155,7 +155,7 @@ impl V1Checks for V1Records<'_> {
         };
         check_report_titles(self.queries, subjects, outputs)?;
         check_losat_limits(args)?;
-        crate::blastinput::app::check_unsupported_environment("TBLASTX")?;
+        crate::blastinput::app::check_search_environment("TBLASTX", true, outputs.only_archive())?;
         check_residues_of(subjects, "subject", "TBLASTX")?;
         check_no_empty_interval(
             named_subjects,

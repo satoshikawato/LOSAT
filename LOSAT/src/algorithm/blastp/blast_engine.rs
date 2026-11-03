@@ -5878,7 +5878,7 @@ fn search(
     if v1.is_some() {
         check_v1_query_intervals(&searched_queries, &query_input)?;
     }
-    check_blastp_environment(args.app.name())?;
+    check_blastp_environment(args.app, database.is_none(), outputs.only_archive())?;
     let batches = match args.app {
         BlastpApp::Blastp => crate::blastinput::query_batch::read_query_batches(
             query_records,
@@ -6956,13 +6956,22 @@ struct BlastpReports<'a> {
 }
 
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
-/// `BL2SEQ_LEGACY`, `OLD_FSC` and query split values that NCBI cannot convert. Other
+/// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`), a
+/// `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless every requested format is the
+/// archive (`archive`), `OLD_FSC` and query split values that NCBI cannot convert. Other
 /// batch sizes change a blastp report only through the query batches
 /// (`read_query_batches`; the redo of a query reads the heaps of its batch,
 /// `kappa_query_batches`) and the query split (`search_split_query_batches`).
-fn check_blastp_environment(app_name: &str) -> Result<()> {
+fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool) -> Result<()> {
     use crate::blastinput::app;
-    app::check_unsupported_environment(app_name)?;
+    let app_name = app.name();
+    // psiblast's iterations fetch the report's sequences ahead before they choose the
+    // archive (`app::check_search_environment`).
+    app::check_search_environment(
+        app_name,
+        fasta_subjects,
+        archive && app == BlastpApp::Blastp,
+    )?;
     app::check_old_fsc(app_name)?;
     app::check_query_split_environment(app_name, false)??;
     Ok(())

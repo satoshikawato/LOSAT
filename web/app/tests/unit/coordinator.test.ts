@@ -161,7 +161,7 @@ describe('Coordinator', () => {
     expect(await coordinator.enqueue({ ...request, query: { text: '>q\nACGT\n>?10\n' } })).toEqual({
       ok: false,
       message:
-        "Query FASTA: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT Web's index to locate; gap lines are not supported by LOSAT Web",
+        "Query FASTA: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser",
     });
     expect(coordinator.state.get().runs).toHaveLength(0);
   });

@@ -240,7 +240,7 @@ const CORPUS: readonly Corpus[] = [
 
 const NOT_PLAUSIBLE = (line: number) =>
   new RegExp(`CFastaReader: Near line ${line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment\\.$`);
-const GAP = (line: number) => new RegExp(`line ${line} is a gap line \\('>\\?'\\), .* gap lines are not supported by LOSAT Web$`);
+const GAP = (line: number) => new RegExp(`line ${line} is a gap line \\('>\\?'\\), .* gap lines are not supported in the browser$`);
 
 const ERRORS: ReadonlyArray<{ readonly name: string; readonly input: Uint8Array; readonly error: RegExp }> = [
   { name: 'a gap line', input: encoder.encode('>a\nACGT\n>?10\nAC\n'), error: GAP(3) },

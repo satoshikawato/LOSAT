@@ -426,7 +426,7 @@ test('empty inputs, every record excluded, a sequence without a defline, and the
   // A gap line fails the index: NCBI's reader reads it as data of the record before it.
   await paste(page, 'query', '>q\nACGT\n>?10\nACGT\n');
   await expect(page.getByTestId('query-source-0-error')).toHaveText(
-    "This input cannot be read: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT Web's index to locate; gap lines are not supported by LOSAT Web",
+    "This input cannot be read: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser",
   );
   if (BUILD_HAS_ENGINE) {
     // A first line that NCBI's data loaders would fetch as a Seq-id fails; a defline can go first.

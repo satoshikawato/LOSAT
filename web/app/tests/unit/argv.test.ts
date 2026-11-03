@@ -20,7 +20,7 @@ describe('buildArgv', () => {
   it.each(RESERVED_FLAGS)('rejects the application-managed flag %s', (flag) => {
     expect(() =>
       buildArgv({ program: 'blastp', queryName: 'q.fa', subjectName: 's.fa', parameters: [[flag, 'x']] }),
-    ).toThrow(/managed by LOSAT Web/);
+    ).toThrow(/managed by LOSAT/);
   });
 
   it('rejects parameters that are not flags', () => {

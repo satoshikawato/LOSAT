@@ -5030,7 +5030,7 @@ fn read_cli_subjects(
 pub fn check_options(args: &BlastpArgs) -> Result<()> {
     // The host has no database files (`run_local_with`).
     if args.db.is_some() {
-        bail!("-db (a database search) is not supported by LOSAT Web yet");
+        bail!("-db (a database search) is not supported in the browser yet");
     }
     let resolved = args.resolve()?;
     validate_requested_blastp_support(&resolved)?;
@@ -5320,7 +5320,7 @@ pub(crate) fn run_local_with(
     // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
     // database is read from files by the command line only.
     if args.db.is_some() {
-        bail!("-db (a database search) is not supported by LOSAT Web yet");
+        bail!("-db (a database search) is not supported in the browser yet");
     }
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
     // cannot write, and a diagnostics stream that saves the messages.

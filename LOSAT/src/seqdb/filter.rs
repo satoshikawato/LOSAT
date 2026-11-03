@@ -2546,8 +2546,8 @@ impl SeqDb {
     // a read of the sequence file. Scheduling only.
     /// Calls `visit` with the length of every sequence in ordinal order as `scan_totals` reads it
     /// (NCBI's `GetSeqLengthApprox` for a nucleotide, from the index alone), `SCAN_WINDOW` index
-    /// entries at a time: the chunks of TBLASTN's `-db` search (`XDbStream::x_cut`). An error of
-    /// the index ends the visit; the sequences before it were visited.
+    /// entries at a time: the chunks of TBLASTN's `-db` search (`XDbStream::x_approx_lengths`,
+    /// `x_kept_cut`). An error of the index ends the visit; the sequences before it were visited.
     pub fn x_approx_lengths(&self, mut visit: impl FnMut(u32)) -> Result<(), SeqDbError> {
         for (at, volume) in self.volumes.iter().enumerate() {
             let start = self.volume_starts[at];

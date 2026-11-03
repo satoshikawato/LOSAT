@@ -2795,7 +2795,10 @@ fn run_preliminary_subjects_into(
     // subject one after another. A subject longer than a chunk's budget, a chunk of its own, runs
     // its (frame, chunk) units on the pool as the single subject of a search does, so that threads
     // without a chunk to search take them; its merge, linking and reaping stay on its thread after
-    // its last unit. The other subjects keep `unit_pool`. Scheduling only.
+    // its last unit. The other subjects keep `unit_pool`. Scheduling only. (A `-db` stream's chunks
+    // are cut from the index's lengths, a few bases off the subject's length that decides here:
+    // a subject within those bases of the budget may share its chunk and still run its units on
+    // the pool.)
     #[cfg(feature = "parallel")]
     let x_units_beyond = x_chunk_bases;
     let x_unit_pool = |subject: XPrelimSubject<'_>| {

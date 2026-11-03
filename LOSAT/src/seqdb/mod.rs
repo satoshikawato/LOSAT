@@ -1714,8 +1714,7 @@ impl SeqDb {
     /// EXPERIMENT (LOSAT_X_DBIDXREAD): the ordinal ids of the database cut
     /// into ranges of at most `max_seqs` sequences (at least one) inside one
     /// volume each, in order: the ranges that a check of every sequence's
-    /// header or ambiguity data reads one at a time
-    /// ([`SeqDb::visit_deflines`], [`SeqDb::visit_ambiguity`]).
+    /// header reads one at a time ([`SeqDb::visit_deflines`]).
     ///
     /// With a taxid list (`restrict_taxids`) a range is still `max_seqs` OIDs of a volume:
     /// the visits skip the OIDs that the list excludes, `first_ordinal` is the ordinal id of

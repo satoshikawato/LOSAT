@@ -482,9 +482,8 @@ impl Volume {
     /// its 2-bit data: the index reads and checks of `read_block` in its order and the checks of
     /// the file range it reads (`DbFile::x_check_range`), then the last byte of the 2-bit data and
     /// the ambiguity data only. Returns the length, with `nucleotide_len`'s error, and a block of
-    /// the ambiguity data whose `ambiguity_runs(0)` is the one of `read_block`'s block (as in
-    /// `check_ambiguity_data`). An I/O error in the bytes between is not seen here; the search
-    /// reads them later.
+    /// the ambiguity data whose `ambiguity_runs(0)` is the one of `read_block`'s block. An I/O
+    /// error in the bytes between is not seen here; the search reads them later.
     pub fn x_nucleotide_check(
         &self,
         first: u32,

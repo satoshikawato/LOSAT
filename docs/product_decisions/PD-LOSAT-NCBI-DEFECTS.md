@@ -355,7 +355,8 @@ would port:
 - A reported sequence whose id NCBI's formatters do not find, in the formats and field lists
   where NCBI exits 0: it writes `Unknown` or the id alone.
 - A reported sequence whose id NCBI's lookup finds as another sequence first: NCBI writes that
-  sequence's names, in every program but BLASTN also its identities.
+  sequence's names, in every program but BLASTN also its identities (for the same record with
+  other tax ids, its tax ids).
 - Following hits whose ids NCBI takes for one sequence: NCBI shows them as one hit, and
   PSIBLAST's cut to `-max_target_seqs` counts them as one subject.
 - A reported sequence with the id of a query read with `-parse_deflines`: NCBI shows the query's

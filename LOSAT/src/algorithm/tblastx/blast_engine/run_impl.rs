@@ -3702,6 +3702,7 @@ impl BatchReports<'_> {
                     joined: pairwise_shown
                         || formats.iter().any(|format| format.is_structured_xml()),
                     sam: false,
+                    taxonomy: formats.iter().any(|format| format.writes_taxonomy()),
                 };
                 reported_subjects = super::super::database::reported_subjects(
                     database,

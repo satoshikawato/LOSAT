@@ -10,6 +10,7 @@ import { accessionLines, FETCH_SOURCES, type FetchSourceId } from '../domain/acc
 import { sectionsAt, writtenValue } from '../domain/parameters';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
 import HelpTip from './HelpTip.vue';
+import LosatLoader from './LosatLoader.vue';
 import ParameterField from './ParameterField.vue';
 import RegionPicker from './RegionPicker.vue';
 import SourceCard from './SourceCard.vue';
@@ -132,7 +133,7 @@ function onDrop(event: DragEvent): void {
           role="status"
           :data-testid="`${role}-fetch-status`"
         >
-          Fetching {{ fetchState.done + 1 }} of {{ fetchState.total }} from {{ sourceLabel(fetchState.source) }}…
+          <LosatLoader />Fetching {{ fetchState.done + 1 }} of {{ fetchState.total }} from {{ sourceLabel(fetchState.source) }}…
         </p>
         <p v-else-if="fetchState?.state === 'failed'" class="error" role="alert" :data-testid="`${role}-fetch-error`">
           {{ fetchState.message }}

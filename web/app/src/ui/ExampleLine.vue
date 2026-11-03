@@ -9,6 +9,7 @@ import { exampleHost, examplesFor, type ExampleSet } from '../domain/examples';
 import type { ProgramId } from '../domain/programs';
 import { formatBytes } from './format';
 import HelpTip from './HelpTip.vue';
+import LosatLoader from './LosatLoader.vue';
 import { useStore } from './useStore';
 
 const props = defineProps<{ examples: ExampleLoader; program: ProgramId }>();
@@ -65,7 +66,7 @@ const busy = (set: ExampleSet) => {
         <button type="button" :disabled="busy(set)" :data-testid="`example-${set.id}`" @click="examples.load(set.id)">
           {{ set.label }}
         </button>
-        <span class="hint" :data-testid="`example-${set.id}-note`">{{ sentence(set) }}</span>
+        <span class="hint" :data-testid="`example-${set.id}-note`"><LosatLoader v-if="busy(set)" />{{ sentence(set) }}</span>
         <button
           v-if="busy(set)"
           type="button"

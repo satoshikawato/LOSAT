@@ -244,5 +244,7 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 
 2026-11-02 までの見た目（W4b）：薄い灰色の面に青い見出しのつまみ、幅いっぱいの青い帯の「Algorithm parameters」、青く塗った結果のタブ、薄い青の表の見出し。gbdraw の見た目に置き換えた。
 
+**ロゴとローダー**（DW-43、2026-11-03。保守者「Web UIの左上のロゴを…使ってほしい」「ロード中/ラン中に、gbdrawみたくAの三角形を左から一筆書きするアニメーションを付けてほしい」）：見出しの帯の「LOSAT」の字を保守者の描いたロゴ（Inter Bold の輪郭、A は左下の開いた三角）に替える。高さ 24 px、帯の白（`web/app/src/ui/logo.ts`、`LosatLogo.vue`）。見出しの名前は隠した字の「LOSAT」。ロゴは動かさない（検索は数分続くことがある）。ローダーは gbdraw の `.gbdraw-loader` と同じ作りで、マスクの中の白いペンが A の線の中ほどを左足の下 → 頂点 → 右脚 → 底辺を左へと進み、塗った A を見せる（`LosatLoader.vue`、`.losat-loader-pen`）。1 周 2.22 s（描く 0.9 s、止める 0.26 s、書き始めから消す 0.9 s、休む 0.16 s）、「動きを減らす」の設定では描き終えた形で止まる。色はアクセント、塗ったボタンの中はボタンの字の色。出すのは進行中の状態の言葉の前だけ：結果のページの Status（Waiting・Preparing・Searching・Organizing results）、Run LOSAT の「Starting…」、「Loading the engine…」（mode のエンジンの説明を待つ間、Run LOSAT の行。初回はエンジンの取得で数秒かかる。すでにあるエンジンではすぐ終わるので 0.4 s 続いたときだけ出す）、「Reading the results…」、開いた HSP の「Reading the alignment…」、「Reading the records…」、入力の「Checking…」、「Fetching … from …」、「Checking the stored results…」、Example の取得・読み出し・保存の間。Alignments の HSP ごとの読み待ちの欄（1 ページに数百ありうる）は字だけ。タブの icon は帯の紺の角丸に白い A（`public/favicon.svg`）。起動の画面は付けない：JS は gzip で 106 kB、CSS は 7 kB で、マウントまでの白紙は普通の回線で 0.2 s に満たない。
+
 変わらない基準（S13、W4 の判断 16〜23）：1280 px で表が切れない、390 px で横に流れない、触れる対象は 24 px 以上、コントラスト、キーボード操作。Graphic Summary の凡例とドットプロットの線の色は §2 の約束のまま。
 

@@ -260,9 +260,6 @@ input[type='radio'] {
 
 .app-header h1 {
   margin: 0;
-  font-size: 1.5em;
-  font-weight: 700;
-  letter-spacing: -0.01em;
   color: var(--header-fg);
 }
 
@@ -276,6 +273,70 @@ input[type='radio'] {
 .app-header .tagline {
   color: var(--header-muted);
 }
+
+/* The logo (DW-43) in place of the heading's word, 24 px high; the heading's box ends at the logo's
+   bottom, which the header's row puts on the tagline's baseline (the O and the S go 0.4 px lower). */
+.losat-logo {
+  display: block;
+  height: 24px;
+  width: calc(24px * 39.08 / 10.72);
+  fill: currentColor;
+}
+
+/* The loader (DW-43), after gbdraw's .gbdraw-loader: the pen in the mask runs along the A in
+   pathLength 100. Loop 2.22 s: draw 0.9 s, hold 0.26 s, erase 0.9 s from the start, rest 0.16 s.
+   In the accent colour, or the text colour on a filled button. */
+.losat-loader {
+  display: inline-block;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  margin-inline-end: 0.4em;
+  vertical-align: -0.15em;
+  color: var(--accent);
+  fill: currentColor;
+}
+
+.primary-action .losat-loader {
+  color: inherit;
+}
+
+/* The pen is the mask's white, also in forced colours. */
+.losat-loader-pen {
+  forced-color-adjust: none;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.6;
+  stroke-dasharray: 100 100;
+  animation: losat-loader-stroke 2.22s infinite;
+}
+
+@keyframes losat-loader-stroke {
+  0% {
+    stroke-dashoffset: 100;
+    animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
+  }
+  40.5405% {
+    stroke-dashoffset: 0;
+    animation-timing-function: linear;
+  }
+  52.2523% {
+    stroke-dashoffset: 0;
+    animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
+  }
+  92.7928%,
+  100% {
+    stroke-dashoffset: -100;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .losat-loader-pen {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}
+
 
 .hint,
 .help {

@@ -9,7 +9,7 @@ use super::{
     query_setup::{batch_ranges, PreparedQueryBatch, BATCH_SIZE},
     reader_batch::{prepare_reader_batch, UnitPrep},
     seed::{word_finder, Diagonals, InitHsp, Lookup},
-    split::{adjust_chunk_hsps, merge_chunk_hsps, split_queries, QueryChunk},
+    split::{adjust_chunk_hsps, merge_chunk_hsps, split_queries, split_sizes, QueryChunk},
     subjects::Subjects,
 };
 use anyhow::{ensure, Result};
@@ -560,6 +560,22 @@ pub(crate) fn search_core(
     // it does not change any value NCBI computes.
     let x_containment = diagnostics || sink.x_wants_containment();
     use super::x_timing::Batch as XBatch;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:138-150
+    // ```c++
+    //     CRef<SBlastSetupData> retval(new SBlastSetupData(qf, options));
+    //     ...
+    //     // 1. Initialize the query data (borrow it from the factory)
+    //     CRef<ILocalQueryData> query_data(qf->MakeLocalQueryData(&*options));
+    // ```
+    // NCBI's query splitter reads its sizes (`SBlastSetupData`, `CQuerySplitter`) before the
+    // batch's queries are set up, so their errors come before the setup's (an empty query's
+    // `Sequence contains no data`), also for a batch that is not searched. `records` are one
+    // query batch, or one prepared unit of it (`prep`, whose shape counts the batch's queries).
+    let sizes = split_sizes(
+        prep.as_ref()
+            .and_then(|prep| prep.prepared.reader_shape.as_deref())
+            .map_or(records.len(), |shape| shape.query_count),
+    )?;
     let ranges = batch_ranges(records, BATCH_SIZE);
     // The units of a reader batch (`records`) are prepared first, together, and the values NCBI
     // takes of the whole query batch are reduced (`reader_batch.rs`); each unit is then searched
@@ -660,7 +676,7 @@ pub(crate) fn search_core(
         //     int retval = 0;
         // ```
         sink.batch_start(range.start, &full, &full_params)?;
-        let chunks = split_queries(queries, &full, options)?;
+        let chunks = split_queries(queries, &full, options, sizes)?;
         super::x_timing::batch(XBatch::Setup, x_t);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-236
         // ```c++
@@ -1281,6 +1297,7 @@ pub(crate) fn search_core(
                                 &mut merged[query][oid],
                                 hsps,
                                 &points,
+                                chunk.overlap,
                                 i32::MAX as usize,
                             );
                         }

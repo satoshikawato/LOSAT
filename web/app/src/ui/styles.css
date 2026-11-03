@@ -426,6 +426,43 @@ input[type='radio'] {
   font-size: 0.92em;
 }
 
+/* Line WF-2: "Example" under the mode's sentence, a button per set with its in-place sentence. */
+.example-line {
+  /* The "?" help floats under the line (.help-tip .help). */
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0 0 10px;
+}
+
+.example-title {
+  font-weight: 600;
+}
+
+.example-sets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.example-sets li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.example-line > .error,
+.example-line > .muted {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 /* NCBI's blocks ("Enter Query Sequence", "Task Selection", the groups of "Algorithm
    parameters", the sections of the results): a white group with a visible edge, whose name is a
    grey-blue tab on its top edge in dark text (look B, DW-33). */

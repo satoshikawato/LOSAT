@@ -13,6 +13,8 @@
 // `register`), shown with its message. Several sources of a role are one combined search
 // input, or separate searches (one run per source, started as a group). A box of accessions
 // only is fetched when the user asks (fetchAccessions, line WF-1) and becomes a pasted text.
+// An Example (useExample, line WF-2) replaces both roles: its query becomes the query box's
+// text and its subject set the only subject source.
 import {
   accessionLines,
   FETCH_ACCESSION_LIMIT,
@@ -23,6 +25,7 @@ import {
 } from '../domain/accession';
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES, splitOptions } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
+import type { ExampleId } from '../domain/examples';
 import { formControlOf, formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
 import {
   fastaParser,
@@ -60,6 +63,8 @@ export interface DraftSource {
   readonly size: number;
   /** The File of the source (pasted text is a File too); a source is indexed again from it. */
   readonly file: File;
+  /** The Example set whose copy the file is (useExample). */
+  readonly example?: ExampleId;
   readonly status: 'indexing' | 'ready' | 'failed';
   /** The FASTA reader kind of the index (running, failed or its record table), the program's for the role (TD-8). */
   readonly parser: FastaParserKind;
@@ -312,25 +317,61 @@ export class SearchDraft {
 
   /** Adds files; each is indexed at once (S12 instructions). */
   addFiles(role: InputRole, files: readonly File[]): void {
-    for (const file of files) {
-      const key = `file-${this.nextKey++}`;
-      const parser = this.parserOf(role);
-      this.updateRole(role, (draft) => ({
-        ...draft,
-        sources: [
-          ...draft.sources,
-          { key, origin: 'file', name: file.name, size: file.size, file, status: 'indexing', parser, excluded: [] },
-        ],
-      }));
-      this.track(this.index(role, key, file, parser));
-    }
+    for (const file of files) this.addFile(role, file, undefined);
     this.set({ message: undefined });
     this.scheduleValidation();
+  }
+
+  private addFile(role: InputRole, file: File, example: ExampleId | undefined): void {
+    const key = `file-${this.nextKey++}`;
+    const parser = this.parserOf(role);
+    const source: DraftSource = {
+      key,
+      origin: 'file',
+      name: file.name,
+      size: file.size,
+      file,
+      ...(example === undefined ? {} : { example }),
+      status: 'indexing',
+      parser,
+      excluded: [],
+    };
+    this.updateRole(role, (draft) => ({ ...draft, sources: [...draft.sources, source] }));
+    this.track(this.index(role, key, file, parser));
   }
 
   removeSource(role: InputRole, key: string): void {
     this.dropSource(role, key);
     if (key === PASTE_KEY) this.updateRole(role, (draft) => ({ ...draft, paste: '' }));
+  }
+
+  // --- Example sets (line WF-2) ------------------------------------------------------------
+
+  /**
+   * Replaces both roles with an Example (as "Use example sequence" does at EBI): `query`, its
+   * FASTA, becomes the query box's text, and `subject`, the copy of its set, the only subject
+   * source. The other sources and the regions go.
+   */
+  useExample(example: ExampleId, query: string, subject: File): void {
+    for (const role of ROLES) {
+      for (const source of this.role(role).sources) {
+        if (source.key !== PASTE_KEY) this.dropSource(role, source.key);
+      }
+      this.setRegion(role, undefined);
+    }
+    this.setPaste('subject', '');
+    this.setPaste('query', query);
+    this.addFile('subject', subject, example);
+    this.scheduleValidation();
+  }
+
+  /** Removes the sources made from an Example's copy, which was deleted and can no longer be read. */
+  dropExample(example: ExampleId): void {
+    for (const role of ROLES) {
+      for (const source of this.role(role).sources) {
+        if (source.example === example) this.dropSource(role, source.key);
+      }
+    }
   }
 
   // --- accessions (line WF-1) ---------------------------------------------------------------

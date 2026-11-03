@@ -1367,6 +1367,8 @@ pub(super) fn reported_subjects(
     })
 }
 
+// No NCBI counterpart: NCBI's formatter reads the Bioseq of its scope (the references above
+// `reported_subjects`); this is the form in which LOSAT holds a reported sequence's data.
 /// The stored data of database sequence `ordinal` that a report reads its letters from: its
 /// 2-bit data and ambiguity runs (`PackedNucleotide::from_stored`, whose letters are those of
 /// `SequenceBlock::nucleotide_iupac`), with the errors of `nucleotide_iupac` in the same order
@@ -1957,9 +1959,10 @@ mod tests {
     }
 
     // The reports name the reported sequences by rank (the order of the ordinal ids), with
-    // the stored title, the id `gnl|BL_ORD_ID|n` and the stored letters in upper case with
-    // their ambiguity codes (seqdbvol.cpp:1406-1414, blast_encoding.c:80-83), and the
-    // tabular ids are the first words of the titles.
+    // the stored title, the id `gnl|BL_ORD_ID|n` and the stored data, whose letters are the
+    // stored letters in upper case with their ambiguity codes (seqdbvol.cpp:1406-1414,
+    // blast_encoding.c:80-83), whole and in any range, and the tabular ids are the first
+    // words of the titles.
     #[test]
     fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         let database = open("nucl_mv");
@@ -1995,15 +1998,25 @@ mod tests {
         };
         assert_eq!(ranks(&hit_lists[0]), [(1, vec![1]), (0, vec![0])]);
         assert_eq!(ranks(&hit_lists[2]), [(0, vec![0]), (11, vec![])]);
+        let letters = crate::algorithm::blastn::x_subject_store::SubjectLetters::new(
+            &reported.records,
+            reported.stores.as_deref(),
+        );
         for (rank, &ordinal) in reported.ordinals.iter().enumerate() {
             let record = &reported.records[rank];
             assert_eq!(record.local_id, format!("gnl|BL_ORD_ID|{ordinal}"));
             assert_eq!(record.title, entries[ordinal as usize].2.as_bytes());
-            assert_eq!(record.seq(), entries[ordinal as usize].1.as_bytes());
+            assert!(record.seq().is_empty(), "the records keep no letters");
+            let stored = entries[ordinal as usize].1.as_bytes();
+            assert_eq!(letters.len(rank), stored.len());
+            assert_eq!(letters.upper_letters(rank, 0, stored.len()), stored);
+            let (from, to) = (stored.len() / 3, stored.len() - stored.len() / 4);
+            assert_eq!(letters.upper_letters(rank, from, to), &stored[from..to]);
+            assert!(letters.lowercase_masks(rank).is_empty());
         }
         // n10 was stored from lower case letters: the database has upper case only.
-        assert!(reported.records[1]
-            .seq()
+        assert!(letters
+            .upper_letters(1, 0, letters.len(1))
             .iter()
             .all(|letter| !letter.is_ascii_lowercase()));
         assert_eq!(
@@ -2015,7 +2028,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             [&b"n06"[..], b"n10"]
         );
-        // Without the letters (the tabular formats only): the records are empty.
+        // Without the letters (the tabular formats without alignment rows): no stored data.
         let mut hit_lists = vec![hit_list(vec![(9, 1e-9)], 1)];
         let reported = reported_subjects(
             &database,
@@ -2028,6 +2041,7 @@ mod tests {
         )
         .unwrap();
         assert!(reported.records[0].seq().is_empty());
+        assert!(reported.stores.is_none());
     }
 
     // NCBI writes an error message for a stored title byte outside ' ' ..= '~' each time

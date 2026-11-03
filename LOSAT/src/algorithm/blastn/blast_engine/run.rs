@@ -5604,8 +5604,8 @@ struct SamTarget<'a> {
 /// final hit list.
 struct BlastnReportInputs<'a> {
     queries: &'a [FastaRecord],
-    /// The subject records and their letters (theirs, or with LOSAT_X_BNSTORE their packed
-    /// subjects').
+    /// The subject records and their letters (theirs, or their packed subjects': with
+    /// LOSAT_X_BNSTORE a subject set's, with `-db` the reported sequences' stored data).
     subjects: SubjectLetters<'a>,
     /// Where the searched letters lie in the records (`-query_loc`, `-subject_loc`).
     ranges: &'a ReportRanges<'a>,
@@ -10128,8 +10128,8 @@ fn write_reports_untimed(
     }
     // A database: the reported sequences, named by rank from here on, with their stored
     // titles, and their stored data where a report shows letters (outfmt 0, the hit records,
-    // the XML2 and JSON formats and the tabular fields of the alignment rows, such as `sseq`;
-    // `database::reported_subjects`).
+    // BLAST XML, the XML2 and JSON formats and the tabular fields of the alignment rows, such
+    // as `sseq`; `database::reported_subjects`).
     let reported = match subjects.source {
         SubjectSource::Prepared(_) => None,
         SubjectSource::Database(database) => {

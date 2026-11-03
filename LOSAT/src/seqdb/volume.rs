@@ -1603,6 +1603,8 @@ impl SequenceBlock {
         Ok(letters)
     }
 
+    // NCBI reference: the checks of `x_GetSequence` quoted above `nucleotide_blastna`
+    // (seqdbvol.cpp:1619-1707: `base_length < 1` is "Error: could not get sequence or range.").
     /// The length of nucleotide `i` and its ambiguity runs in stored order, as
     /// [`Self::nucleotide_iupac`] reads them before it makes the letters (the same errors in the
     /// same order: the length, a sequence without bases, the ambiguity data), for a store of the

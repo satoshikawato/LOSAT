@@ -609,9 +609,9 @@ pub(crate) struct HeaderReader<'a> {
     /// Whether NCBI's formatters may read the reported sequences one by one
     /// (`prefetch_may_be_off`).
     prefetch_off: bool,
-    /// `SeqDb::taxdb_found`, asked at the first record found with other taxids (`copy_of`) or
-    /// whose title NCBI can make from its taxids (`ParsedSubject::with_taxonomy_title`).
-    taxdb_found: std::cell::OnceCell<bool>,
+    /// The taxonomy database of the search path where `taxdb.bti` is found and it opens, opened
+    /// at the first record whose title NCBI can make from its taxids (`source_named`).
+    taxdb: std::cell::OnceCell<Option<crate::seqdb::taxdb::TaxDb>>,
     /// `LookupTexts::of`, asked at the first record found with other taxids or in another
     /// volume (`copy_of`).
     lookup_texts: std::cell::OnceCell<LookupTexts>,
@@ -751,9 +751,30 @@ impl<'a> HeaderReader<'a> {
             db,
             lookup: std::cell::OnceCell::new(),
             prefetch_off: prefetch_may_be_off(),
-            taxdb_found: std::cell::OnceCell::new(),
+            taxdb: std::cell::OnceCell::new(),
             lookup_texts: std::cell::OnceCell::new(),
         }
+    }
+
+    /// Whether the taxonomy database gives a scientific name for the first of the taxids
+    /// `taxids` that a volume looks up for a Bioseq (`ParsedSubject::volume_taxids`), which NCBI
+    /// then puts in the source its titles are made from (`ParsedSubject::with_taxonomy_title`);
+    /// also where the lookup fails, which LOSAT cannot tell from a name.
+    fn source_named(&self, taxids: &[i32]) -> bool {
+        let Some(&taxid) = taxids.first() else {
+            return false;
+        };
+        let taxdb = self.taxdb.get_or_init(|| {
+            let path = self.db.search_path().filter(|_| self.db.taxdb_found())?;
+            crate::seqdb::taxdb::TaxDb::open(path).ok()
+        });
+        let Some(taxdb) = taxdb else {
+            return false;
+        };
+        let mut messages = Vec::new();
+        taxdb.names(taxid, &mut messages).map_or(true, |names| {
+            names.is_some_and(|names| !names.scientific_name.is_empty())
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:213-221
@@ -873,10 +894,11 @@ impl<'a> HeaderReader<'a> {
         };
         let mut keys = Vec::new();
         crate::report::db_subject::scope_keys(subject, &mut keys);
+        // The first was compared above.
         for other in oids
             .iter()
             .chain(&folded)
-            .filter(|&&oid| oid != own)
+            .filter(|&&oid| oid != own && oid != first)
             .map(|&oid| self.db.ordinal_of(oid))
         {
             if !self.holds_key(other, &keys, crate::seqid::defline_set::scope_keys) {
@@ -1024,11 +1046,6 @@ impl<'a> HeaderReader<'a> {
     // taxids in both rows (outfmt 6 `staxids`, `sscinames`, 15, 16) and the same bytes as for one
     // taxid in outfmt 0, 5, 6, 7 and 10, but the outfmt 0 title of an empty one made from the
     // source with the taxonomy database (probe of line DBID N1b, `blastdb-ids-20261021/R/copytaxid/p1`).
-    /// `SeqDb::taxdb_found`, asked once.
-    fn taxdb_found(&self) -> bool {
-        *self.taxdb_found.get_or_init(|| self.db.taxdb_found())
-    }
-
     /// How the sequence `b` differs from the sequence `a`, `subject`, as NCBI's formatters show
     /// one for the other: the same where both hold the same definition lines, as the reports
     /// read them, and letters; also where only the taxids of the definition lines differ
@@ -1110,7 +1127,8 @@ impl<'a> HeaderReader<'a> {
                 if texts().differ(&taxids, &other) {
                     return RecordCopy::Apart(CopyApart::TaxonomyTexts);
                 }
-                if other != taxids && subject.title_reads_source(protein, self.taxdb_found()) {
+                let named = self.source_named(&taxids) || self.source_named(&other);
+                if other != taxids && subject.title_reads_source(protein, named) {
                     return RecordCopy::Apart(CopyApart::Title);
                 }
                 RecordCopy::OtherTaxids
@@ -1158,7 +1176,7 @@ fn reported_header(
                     let found = headers.found_instead(&subject, ordinal);
                     Ok(ReportedHeader::Parsed(std::sync::Arc::new(
                         subject
-                            .with_taxonomy_title(|| headers.taxdb_found())
+                            .with_taxonomy_title(|taxids| headers.source_named(taxids))
                             .showing_gis(db.reports_show_gis())
                             .under_positive_list(db.has_positive_list())
                             .found_instead(found),
@@ -1350,11 +1368,11 @@ fn joined_apart(
 }
 
 /// LOSAT's refusal of a parsed subject whose outfmt 0 title NCBI makes from the source
-/// (`ParsedSubject::title_from_taxonomy`): with `taxdb.bti` on the search path NCBI names the
-/// organism of the taxids in it, which LOSAT does not do.
+/// (`ParsedSubject::taxonomy_title`): where the taxonomy database names the taxid NCBI names the
+/// organism in it, which LOSAT does not do.
 pub(crate) fn refuse_parsed_taxonomy(ordinal: u32, program: &str) -> anyhow::Error {
     anyhow::Error::new(ParsedRefusal(format!(
-        "database sequence {ordinal} has an empty title that NCBI BLAST+'s outfmt 0 makes from its taxids and the taxonomy database (taxdb.bti is on the search path); this is not supported by LOSAT's {program}"
+        "database sequence {ordinal} has an empty title that NCBI BLAST+'s outfmt 0 makes from its taxids and the taxonomy database (which names its taxid); this is not supported by LOSAT's {program}"
     )))
 }
 
@@ -1421,7 +1439,7 @@ pub(crate) fn check_shown_parsed_subject(
             program,
         ));
     }
-    if taxdb_found && subject.title_from_taxonomy() {
+    if subject.taxonomy_title() {
         return Err(refuse_parsed_taxonomy(ordinal, program));
     }
     Ok(())
@@ -1444,6 +1462,8 @@ pub(crate) struct ParsedShown {
     /// The formats that write the subjects' taxids or their names: outfmt 13 to 16 and the
     /// tabular `staxid`, `staxids` and the names (`ParsedSubject::fetched`).
     pub(crate) taxonomy: bool,
+    /// The subject ids that the tabular formats print (`ParsedSubject::check_printed_word`).
+    pub(crate) words: crate::report::tabular::PrintedIds,
 }
 
 impl ParsedShown {
@@ -1480,6 +1500,7 @@ pub(crate) fn check_reported_parsed(
     if shown.tabular {
         subject
             .check_tabular_ids(protein)
+            .and_then(|()| subject.check_printed_word(protein, shown.words))
             .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program))?;
     }
     Ok(())
@@ -1942,39 +1963,6 @@ mod tests {
         let abt = open("pjoin_abt");
         assert_eq!(copy(&abt, 0, 3), RecordCopy::OtherTaxids);
         assert_eq!(copy(&abt, 0, 7), RecordCopy::Same);
-    }
-
-    // Line DBID N1b L1: of pdupe_at's copies of a record without a title (a without a taxid 0,
-    // t with 9606 1), NCBI can make the title of the other from its taxids where the taxonomy
-    // database is found; `found_instead` gives that copy, which only the reports of generated
-    // titles and of taxids refuse (`ParsedSubject::generated_title_fetched`, `fetched`).
-    #[test]
-    fn a_copy_whose_title_is_made_from_its_taxids_is_found_for_the_reports_of_titles() {
-        use crate::report::db_subject::{CopyApart, FoundInstead, ParsedSubject};
-        let base =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/ids/pdupe_at");
-        let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
-        let subject = match db.read_header(0).unwrap() {
-            crate::seqdb::SequenceHeader::Parsed(set) => ParsedSubject::new(set).unwrap(),
-            _ => panic!("parsed Seq-ids"),
-        };
-        for (taxdb_found, copy, found) in [
-            (
-                true,
-                RecordCopy::Apart(CopyApart::Title),
-                FoundInstead::CopyApart(1, CopyApart::Title),
-            ),
-            (false, RecordCopy::OtherTaxids, FoundInstead::OtherTaxids(1)),
-        ] {
-            let headers = HeaderReader::new(&db);
-            headers.taxdb_found.set(taxdb_found).unwrap();
-            assert_eq!(headers.copy_of(&subject, 0, 1), copy, "{taxdb_found}");
-            assert_eq!(
-                headers.found_instead(&subject, 0),
-                Some(found),
-                "{taxdb_found}"
-            );
-        }
     }
 
     // Line DBID N3: in NCBI's order of pjoin_abc's hits (r1 of c, r6, r1 of b and a, r2, r4,
@@ -3182,10 +3170,22 @@ mod taxdb_prepass_tests {
             ),
             // The same record without taxids looks nothing up.
             ("ids/pdup_ab", Some("offset_last_past_end"), 1, (None, None)),
-            // An empty title made from the taxids where the taxonomy database is found.
+            // An empty title made from the taxids where the taxonomy database is found, which the
+            // reports of generated titles refuse (below).
             ("ids/pdupe_at", None, 0, (None, Some(taxids(1)))),
-            ("ids/pdupe_at", Some("good"), 0, both(title(1))),
-            ("ids/pdupe_at", Some("good"), 1, both(title(0))),
+            ("ids/pdupe_at", Some("good"), 0, (None, Some(taxids(1)))),
+            ("ids/pdupe_at", Some("good"), 1, (None, Some(taxids(0)))),
+            // A taxonomy database that names no taxid: NCBI makes no title from them.
+            ("ids/pdupe_at", Some("no_btd"), 0, (None, Some(taxids(1)))),
+            (
+                "ids/pdupe_at",
+                Some("empty_fields"),
+                0,
+                (None, Some(taxids(1))),
+            ),
+            // One that writes a text at the run's first lookup, which only the copy with a taxid
+            // makes.
+            ("ids/pdupe_at", Some("bad_magic"), 0, both(texts(1))),
             // Another title is another record whatever the taxids.
             ("ids/pdup_ac", None, 1, both(first(0))),
         ] {
@@ -3205,6 +3205,17 @@ mod taxdb_prepass_tests {
                     }
                     (got, _) => panic!("{name} {ordinal} {taxdb:?} {taxonomy}: {got:?}"),
                 }
+            }
+            // Line DBID N1b L1: outfmt 0 and the tabular word of a replaced id
+            // (`ParsedSubject::generated_title_fetched`).
+            let shown =
+                name == "ids/pdupe_at" && taxdb.as_deref().is_some_and(|dir| dir.ends_with("good"));
+            match subject.generated_title_fetched() {
+                Ok(()) => assert!(!shown, "{name} {ordinal} {taxdb:?}"),
+                Err(error) => assert!(
+                    shown && error.contains(&title(1 - ordinal)),
+                    "{name} {ordinal} {taxdb:?}: {error}"
+                ),
             }
         }
         std::fs::remove_dir_all(&cwd).unwrap();

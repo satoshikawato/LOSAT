@@ -12,7 +12,7 @@ with three substitutions, gb|AF000050|. `../seqidlist/sl_pfound_neg.txt`: AAA000
 holds one record gb|EEN00005.1|, the back-translation of `pdup.faa` (query `ndup_q.fna`, the same letters), and
 `pdupe.faa` the letters of `pdup.faa` as gb|EEE00006.1| without a title, for the databases of the same record with
 other taxids. Line DBID N1b L1: `ndupe.fna` the letters of `ndup.fna` as gb|EEN00006.1| without a title, `nsubj.fna`
-as lcl|Subject_1 without a title, `psubj.faa` the letters of `pdup.faa` as lcl|Subject_1 without a title and
+as lcl|Subject_1 without a title, `nsubjg.fna` as lcl|Subject_3 beside gb|EEN00007.1| without a title, `psubj.faa` the letters of `pdup.faa` as lcl|Subject_1 without a title and
 `psubjb.faa` as lcl|Subject_2 with a title ending in ']' (the tabular formats replace a `lcl|Subject_` id by the
 first word of the generated title).
 
@@ -68,6 +68,7 @@ def main() -> int:
     (out / "pdupe.faa").write_text(f">gb|EEE00006.1|\n{wrap(seq)}")
     (out / "ndupe.fna").write_text(f">gb|EEN00006.1|\n{wrap(nseq_dup)}")
     (out / "nsubj.fna").write_text(f">lcl|Subject_1\n{wrap(nseq_dup)}")
+    (out / "nsubjg.fna").write_text(f">lcl|Subject_3|gb|EEN00007.1|\n{wrap(nseq_dup)}")
     (out / "psubj.faa").write_text(f">lcl|Subject_1\n{wrap(seq)}")
     (out / "psubjb.faa").write_text(f">lcl|Subject_2 alpha, partial [Homo sapiens]\n{wrap(seq)}")
     nseq = "".join(line.strip() for line in (out / "njoined_a.fna").read_text().splitlines()[1:])

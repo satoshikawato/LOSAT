@@ -439,11 +439,12 @@ Copies whose title NCBI can make from the taxids (line DBID N1b L1; rows `db.id.
 without a taxid and with 9606, through `ids/ndupe_at.nal`), `ids/psubj_a`, `ids/psubj_t` (`psubj.faa`, lcl|Subject_1
 without a title) and `ids/psubjb_a`, `ids/psubjb_t` (`psubjb.faa`, lcl|Subject_2 with a title ending in `]`), through
 `ids/psubj_at.pal` and `ids/psubjb_at.pal`, and `ids/nsubj_t` (`nsubj.fna`, lcl|Subject_1 without a title, taxid
-9606, one database). NCBI generates the title of the copy it fetches, from its taxids with the taxonomy database,
+9606, one database). NCBI generates the title of the copy it fetches, from its taxids where the taxonomy database names them,
 only in outfmt 0 and for the tabular word that replaces a `lcl|Subject_` id: LOSAT writes the other formats
 (`pdupe_at` and `ndupe_at` with `tests/seqdb/taxdb/good`, `psubj_at`, whose word is `unnamed` either way) and refuses
-those two (`psubjb_at`, whose word is taken after NCBI rewrites the end of the title), also for `nsubj_t` alone with
-the taxonomy database (NCBI's word is `Homo`, the organism's).
+those two where the word is printed (`psubjb_at`, whose word is taken after NCBI rewrites the end of the title), also
+for `nsubj_t` alone with the taxonomy database (NCBI's word is `Homo`, the organism's; not with `6 salltitles`, which
+prints no id).
 
 Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
 --join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and

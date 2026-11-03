@@ -2359,6 +2359,15 @@ impl BlastpReport {
                 | BlastpReport::CustomTabular(_)
         )
     }
+
+    /// The subject ids that the report prints (`PrintedIds`): none but in a table.
+    fn printed_ids(self) -> crate::report::tabular::PrintedIds {
+        match self {
+            BlastpReport::CustomTabular(spec) => crate::report::tabular::PrintedIds::of(Some(spec)),
+            _ if self.is_tabular() => crate::report::tabular::PrintedIds::of(None),
+            _ => crate::report::tabular::PrintedIds::default(),
+        }
+    }
 }
 
 /// The Seq-annot format of a `-outfmt` value (outfmt 8, 12), read as NCBI reads the value
@@ -11153,6 +11162,10 @@ fn run_resolved_in_pool(
                 BlastpReport::CustomTabular(spec) => spec.needs().taxonomy,
                 _ => false,
             }),
+            format_plans.iter().fold(
+                crate::report::tabular::PrintedIds::default(),
+                |words, outfmt| words.or(outfmt.printed_ids()),
+            ),
         )?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288

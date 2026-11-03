@@ -333,12 +333,37 @@ impl ParsedSubject {
         self
     }
 
-    /// The subject as NCBI's formatters show it where `taxdb.bti` is found (`taxdb_found`, asked
-    /// only where `title_from_taxonomy`): its generated title is made from its source and the
-    /// taxonomy database (`generated_title_word`).
-    pub fn with_taxonomy_title(mut self, taxdb_found: impl FnOnce() -> bool) -> Self {
-        self.taxonomy_title = self.title_from_taxonomy() && taxdb_found();
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1168
+    // ```c++
+    //         bool found_taxid_in_taxonomy_blastdb = true;
+    //         ...
+    //         try {
+    //             found_taxid_in_taxonomy_blastdb = tax_info.GetTaxNames(*taxid, namerecord);
+    //         }
+    //         catch (CSeqDBException &) {
+    //             found_taxid_in_taxonomy_blastdb = false;
+    //         }
+    //         ...
+    //         if (found_taxid_in_taxonomy_blastdb) {
+    //             org->SetTaxname().swap(namerecord.scientific_name);
+    // ```
+    // A title made from the source (`x_SetTitleFromBioSrc`, of the first source of the Bioseq,
+    // whose volume puts the target's taxids first) names the organism only where the taxonomy
+    // database gives a name for the taxid; else NCBI writes the title of a Bioseq without one
+    // (review 1 of line DBID N1b L1, `blastdb-ids-20261021/R/titlesrc/review1/r2.tsv`).
+    /// The subject as NCBI's formatters show it where the taxonomy database names a taxid
+    /// (`named` of the taxids its volume looks up, `volume_taxids`, asked only where
+    /// `title_from_taxonomy`): its generated title is made from its source
+    /// (`taxonomy_title`).
+    pub fn with_taxonomy_title(mut self, named: impl FnOnce(&[i32]) -> bool) -> Self {
+        self.taxonomy_title = self.title_from_taxonomy() && named(&self.volume_taxids());
         self
+    }
+
+    /// Whether NCBI makes the subject Bioseq's title from its source and the organism's name in
+    /// the taxonomy database (`with_taxonomy_title`).
+    pub fn taxonomy_title(&self) -> bool {
+        self.taxonomy_title
     }
 
     /// The subject as a database with a positive list (`positive_list`,
@@ -503,7 +528,7 @@ impl ParsedSubject {
     /// formatters can make the title they generate for it (`FoundInstead::CopyApart` with
     /// `CopyApart::Title`), for the reports that show a generated title: outfmt 0
     /// (`check_shown_parsed_subject`) and the tabular word of a replaced id
-    /// (`generated_title_word`); outfmt 13 to 16 write the taxids (`fetched`). The callers ask
+    /// (`check_printed_word`); outfmt 13 to 16 write the taxids (`fetched`). The callers ask
     /// it where the title they show can depend on the source (`pairwise_title_reads_source`, the
     /// word of a nucleotide or of a protein title ending in `]`).
     pub fn generated_title_fetched(&self) -> Result<(), String> {
@@ -726,19 +751,62 @@ impl ParsedSubject {
     // the organism's for a nucleotide (`Homo` for an empty title with taxid 9606) and `unnamed`
     // for a protein, as without a source; of a protein title ending in `]`, the word before the
     // end that `x_AdjustProteinTitleSuffix` rewrites where the Bioseq has a source (probe of line
-    // DBID N1b L1, `blastdb-ids-20261021/R/titlesrc/p1`).
+    // DBID N1b L1, `blastdb-ids-20261021/R/titlesrc/p1`). NCBI prints of the ids that
+    // `GetSeqIdList` makes the GI and the best one (`GetSeqIdListString`, showdefline.cpp:155-187),
+    // so a replaced id beside a better one is not printed.
+    /// `Err` where a tabular report prints (`printed`) an id that the first word of a title
+    /// NCBI can make from the source replaces: the subject's own nucleotide title made from its
+    /// taxids (`taxonomy_title`), and a title made from the taxids of the same record found for
+    /// the subject (`generated_title_fetched`) for a nucleotide or a protein title ending in
+    /// `]`. The other refusals of the word are `tabular_ids`' and `all_tabular_ids`'.
+    pub fn check_printed_word(
+        &self,
+        protein: bool,
+        printed: super::tabular::PrintedIds,
+    ) -> Result<(), &'static str> {
+        let problem = if !protein && self.taxonomy_title {
+            "a title that NCBI BLAST+ 2.17.0 makes from the taxids with the taxonomy database, whose first word replaces a printed id"
+        } else if self.generated_title_fetched().is_err()
+            && (!protein || self.title_ends_in_bracket())
+        {
+            "a Seq-align id that another database sequence also holds with the same definition lines and letters but other taxids, from which NCBI BLAST+ 2.17.0 can make the title whose first word replaces a printed id (a title made from the taxids with the taxonomy database, or the end of a protein title rewritten)"
+        } else {
+            return Ok(());
+        };
+        // Whether the printed ids of `ids` change with the word.
+        let shows_word = |ids: &[ParsedSeqId], kinds: &[TabularId]| {
+            let (one, other) = (seq_id_list(ids, b"x"), seq_id_list(ids, b"y"));
+            kinds.iter().any(|&kind| {
+                let (mut a, mut b) = (Vec::new(), Vec::new());
+                tabular_id(&one, kind, &mut a);
+                tabular_id(&other, kind, &mut b);
+                a != b
+            })
+        };
+        let subject = printed.subject
+            && shows_word(
+                &self.target().ids,
+                &[
+                    TabularId::Full,
+                    TabularId::Accession,
+                    TabularId::AccessionVersion,
+                ],
+            );
+        let all =
+            printed.all
+                && !self.record
+                && self.set.deflines.iter().any(|defline| {
+                    shows_word(&defline.ids, &[TabularId::Full, TabularId::Accession])
+                });
+        if subject || all {
+            return Err(problem);
+        }
+        Ok(())
+    }
+
     /// The first word of the subject Bioseq's generated title (`title_word` without the check
-    /// of the target's ids). `Err` also where NCBI makes a nucleotide title from the source with
-    /// the taxonomy database (`with_taxonomy_title`), and where it can make the word from the
-    /// taxids of the same record found for the subject (`generated_title_fetched`): of a
-    /// nucleotide, or of a protein title ending in `]`.
+    /// of the target's ids).
     fn generated_title_word(&self, protein: bool) -> Result<Vec<u8>, &'static str> {
-        if !protein && self.taxonomy_title {
-            return Err("a title that NCBI BLAST+ 2.17.0 makes from the taxids with the taxonomy database, whose first word replaces an id");
-        }
-        if self.generated_title_fetched().is_err() && (!protein || self.title_ends_in_bracket()) {
-            return Err("a Seq-align id that another database sequence also holds with the same definition lines and letters but other taxids, from which NCBI BLAST+ 2.17.0 can make the title whose first word replaces an id (a title made from the taxids with the taxonomy database, or the end of a protein title rewritten)");
-        }
         if self.title_suffix_adjusted(protein) {
             return Err("a title ending in ']' whose first word NCBI BLAST+ takes after it rewrites the title's end from the taxids (x_AdjustProteinTitleSuffix)");
         }
@@ -1812,14 +1880,33 @@ mod tests {
         assert!(check_shown_parsed_subject(&bracket, true, true, 0, "BLASTP").is_ok());
         // A local id `Subject_N` that the title's first word replaces, of the target or of
         // another definition line: the word can depend on the source for a nucleotide and for a
-        // protein title ending in `]`.
+        // protein title ending in `]`; refused where a printed id shows the word.
+        use crate::report::tabular::PrintedIds;
+        let (subject_ids, all_ids) = (
+            PrintedIds {
+                subject: true,
+                all: false,
+            },
+            PrintedIds {
+                subject: false,
+                all: true,
+            },
+        );
         let local = || ParsedSeqId::Local(ObjectId::Str(b"Subject_1".to_vec()));
         let replaced = ParsedSubject::new(one_defline(vec![local()]))
             .unwrap()
             .found_instead(title_apart.clone());
-        let error = replaced.check_tabular_ids(false).unwrap_err();
-        assert!(error.contains("whose first word replaces an id"), "{error}");
-        assert!(replaced.check_tabular_ids(true).is_ok());
+        assert!(replaced.check_tabular_ids(false).is_ok());
+        let error = replaced.check_printed_word(false, subject_ids).unwrap_err();
+        assert!(
+            error.contains("whose first word replaces a printed id"),
+            "{error}"
+        );
+        assert!(replaced.check_printed_word(false, all_ids).is_err());
+        assert!(replaced
+            .check_printed_word(false, PrintedIds::default())
+            .is_ok());
+        assert!(replaced.check_printed_word(true, subject_ids).is_ok());
         let second = ParsedSubject::new(DeflineSet {
             deflines: vec![
                 one_defline(vec![gb("AAA00001", 1)]).deflines.remove(0),
@@ -1828,9 +1915,15 @@ mod tests {
         })
         .unwrap()
         .found_instead(title_apart.clone());
-        assert!(second.check_tabular_ids(false).is_ok());
-        assert!(second.all_tabular_ids(false).is_err());
-        assert!(second.all_tabular_ids(true).is_ok());
+        assert!(second.check_printed_word(false, subject_ids).is_ok());
+        assert!(second.check_printed_word(false, all_ids).is_err());
+        assert!(second.check_printed_word(true, all_ids).is_ok());
+        // A replaced id beside a better one is not printed (`GetSeqIdListString`).
+        let beside = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1), local()]))
+            .unwrap()
+            .found_instead(title_apart.clone());
+        assert!(beside.check_printed_word(false, subject_ids).is_ok());
+        assert!(beside.check_printed_word(false, all_ids).is_ok());
         let bracket = ParsedSubject::new(DeflineSet {
             deflines: vec![BlastDefline {
                 title: Some(b"alpha, partial [Homo sapiens]".to_vec()),
@@ -1840,7 +1933,7 @@ mod tests {
         })
         .unwrap()
         .found_instead(title_apart);
-        assert!(bracket.check_tabular_ids(true).is_err());
+        assert!(bracket.check_printed_word(true, subject_ids).is_err());
         // The other copies are refused as before: the taxonomy texts by every report that reads
         // the Bioseq, the taxids by those that write them.
         let texts = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
@@ -1856,11 +1949,13 @@ mod tests {
     }
 
     // Line DBID N1b L1 probe: of a nucleotide `lcl|Subject_1` without a title and with taxid 9606,
-    // NCBI's tabular id is the first word of the title it makes from the source with the
-    // taxonomy database (`Homo`), which LOSAT refuses; a protein's is `unnamed` either way.
+    // NCBI's tabular id is the first word of the title it makes from the source where the
+    // taxonomy database names the taxid (`Homo`), which LOSAT refuses where a table prints it; a
+    // protein's is `unnamed` either way.
     #[test]
     fn a_tabular_word_of_a_title_made_from_the_taxonomy_database_is_refused_for_a_nucleotide() {
-        let subject = |taxid: Option<i32>, taxdb_found: bool| {
+        use crate::report::tabular::PrintedIds;
+        let subject = |taxid: Option<i32>, named: bool| {
             ParsedSubject::new(DeflineSet {
                 deflines: vec![BlastDefline {
                     ids: vec![ParsedSeqId::Local(ObjectId::Str(b"Subject_1".to_vec()))],
@@ -1869,20 +1964,34 @@ mod tests {
                 }],
             })
             .unwrap()
-            .with_taxonomy_title(|| taxdb_found)
+            .with_taxonomy_title(|taxids| {
+                assert_eq!(taxids, [9606]);
+                named
+            })
         };
+        let printed = PrintedIds::of(None);
+        assert!(subject(Some(9606), true).taxonomy_title());
         let error = subject(Some(9606), true)
-            .check_tabular_ids(false)
+            .check_printed_word(false, printed)
             .unwrap_err();
         assert!(
             error.contains("makes from the taxids with the taxonomy database"),
             "{error}"
         );
-        assert!(subject(Some(9606), true).all_tabular_ids(false).is_err());
+        assert!(subject(Some(9606), true).check_tabular_ids(false).is_ok());
+        assert!(subject(Some(9606), true)
+            .check_printed_word(false, PrintedIds::default())
+            .is_ok());
+        assert!(subject(Some(9606), true)
+            .check_printed_word(true, printed)
+            .is_ok());
         let [id, _, _] = subject(Some(9606), true).tabular_ids(true).unwrap();
         assert_eq!(text(&id), "unnamed");
-        assert!(subject(Some(9606), false).check_tabular_ids(false).is_ok());
-        assert!(subject(None, true).check_tabular_ids(false).is_ok());
+        assert!(!subject(Some(9606), false).taxonomy_title());
+        assert!(subject(Some(9606), false)
+            .check_printed_word(false, printed)
+            .is_ok());
+        assert!(!subject(None, true).taxonomy_title());
     }
 
     #[test]

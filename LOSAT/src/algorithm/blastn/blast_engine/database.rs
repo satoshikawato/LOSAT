@@ -44,6 +44,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
+use crate::report::tabular::PrintedIds;
 use crate::seqdb::{BlockRange, NucleotideAmbiguity, SeqDb, SeqDbError, SeqType, SequenceBlock};
 use crate::utils::threading::SearchPool;
 
@@ -1204,6 +1205,12 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
                     .tabular_spec()
                     .is_some_and(|spec| spec.needs().taxonomy)
         }),
+        words: output_formats
+            .iter()
+            .filter(|format| format.is_tabular())
+            .fold(PrintedIds::default(), |words, format| {
+                words.or(PrintedIds::of(format.tabular_spec()))
+            }),
     }
 }
 

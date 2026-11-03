@@ -1705,6 +1705,22 @@ fn parsed_shown(
                 || super::tabular::tabular_spec(&format.outfmt)
                     .is_some_and(|spec| spec.needs().taxonomy)
         }),
+        words: formats
+            .iter()
+            .filter(|format| {
+                matches!(
+                    super::stage_e_report::format_number(&format.outfmt),
+                    6 | 7 | 10 | 20
+                )
+            })
+            .fold(
+                crate::report::tabular::PrintedIds::default(),
+                |words, format| {
+                    words.or(crate::report::tabular::PrintedIds::of(
+                        super::tabular::tabular_spec(&format.outfmt).as_ref(),
+                    ))
+                },
+            ),
     }
 }
 

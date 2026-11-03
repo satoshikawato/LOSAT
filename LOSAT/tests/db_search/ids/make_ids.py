@@ -88,7 +88,8 @@ last entry of `tests/seqdb/taxdb/*`, whose lookup writes the offset error of `of
 `pdupe_at.pal`; `ndup_a.*` from `ndup.fna` without a taxid and `ndup_t.*` with taxid 9606, through `ndup_at.nal`.
 `--copytaxid-only` builds only these. Line DBID N1b L1 (titles that NCBI can make from the taxids): `ndupe_a.*` and
 `ndupe_t.*` from `ndupe.fna` (no title) without a taxid and with 9606, through `ndupe_at.nal`; `nsubj_t.*` from
-`nsubj.fna` (lcl|Subject_1, no title) with 9606; `psubj_a.*`, `psubj_t.*` from `psubj.faa` (lcl|Subject_1, no title)
+`nsubj.fna` (lcl|Subject_1, no title) and `nsubjg_t.*` from `nsubjg.fna` (lcl|Subject_3 beside gb|EEN00007.1|) with
+9606; `psubj_a.*`, `psubj_t.*` from `psubj.faa` (lcl|Subject_1, no title)
 and `psubjb_a.*`, `psubjb_t.*` from `psubjb.faa` (lcl|Subject_2, a title ending in ']'), through `psubj_at.pal` and
 `psubjb_at.pal`. `--titlesrc-only` builds only these.
 
@@ -152,6 +153,7 @@ def build_copytaxid(args: argparse.Namespace) -> None:
 def build_titlesrc(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("ndupe_a", "ndupe.fna", "nucl", None), ("ndupe_t", "ndupe.fna", "nucl", "9606"),
                                        ("nsubj_t", "nsubj.fna", "nucl", "9606"),
+                                       ("nsubjg_t", "nsubjg.fna", "nucl", "9606"),
                                        ("psubj_a", "psubj.faa", "prot", None), ("psubj_t", "psubj.faa", "prot", "9606"),
                                        ("psubjb_a", "psubjb.faa", "prot", None),
                                        ("psubjb_t", "psubjb.faa", "prot", "9606")):

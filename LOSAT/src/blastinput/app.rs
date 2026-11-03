@@ -909,19 +909,12 @@ pub fn protein_query_split_sizes(
     )
 }
 
-/// The environment that changes NCBI's blastp, tblastn or tblastx in a way that LOSAT does
-/// not reproduce, refused wherever it is set: a superset of NCBI, which reads `BL2SEQ_LEGACY`
-/// only for `-subject` and converts `PRE_FETCH_SEQS_LIMIT` only for formats other than 11
-/// (`check_search_environment`, BLASTX's check).
-pub fn check_unsupported_environment(program: &str) -> anyhow::Result<()> {
-    check_search_environment(program, true, false)
-}
-
 /// The environment that changes NCBI's search or report in a way that LOSAT does not
 /// reproduce, where NCBI reads it: `BL2SEQ_LEGACY` in a search of `-subject` sequences
 /// (`fasta_subjects`; NCBI searches each subject on its own and writes another report, a
 /// `-db` search ignores it), and a `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless
-/// the report is the BLAST archive (`archive`).
+/// the report is the BLAST archive (`archive`: every requested format is outfmt 11,
+/// `ReportOutputs::only_archive`).
 ///
 /// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:206-210
 /// ```c
@@ -931,6 +924,9 @@ pub fn check_unsupported_environment(program: &str) -> anyhow::Result<()> {
 /// 	else
 ///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
 /// ```
+/// `BL2SEQ_LEGACY` (any value, also an empty one) turns off the scan of the subjects as a
+/// database: `CLocalBlast` then searches each subject on its own (local_blast.cpp:189,289)
+/// and `CBlastFormat` writes the legacy bl2seq report (`m_IsBl2Seq && !m_IsDbScan`).
 ///
 /// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:732-737
 /// ```c
@@ -943,8 +939,7 @@ pub fn check_unsupported_environment(program: &str) -> anyhow::Result<()> {
 /// ```
 /// An integer only decides whether the report's sequences are fetched ahead; a value
 /// that `NStr::StringToInt` cannot convert (an empty one too) stops NCBI before the report
-/// of each query batch with a `CStringException` that names its build's source files (as
-/// BLASTN's `check_unsupported_environment`).
+/// of each query batch with a `CStringException` that names its build's source files.
 ///
 /// NCBI reference: ncbi-blast/c++/src/app/blast/blastx_app.cpp:283-288
 /// ```c
@@ -955,14 +950,28 @@ pub fn check_unsupported_environment(program: &str) -> anyhow::Result<()> {
 ///                 BlastFormatter_PreFetchSequenceData(*results, scope,
 ///                 		                            fmt_args->GetFormattedOutputChoice());
 /// ```
-/// The archive is written without the prefetch, so NCBI never converts the value there.
+/// The archive is written without the prefetch, so NCBI never converts the value there;
+/// blastp, tblastn, tblastx and blastn write it so too (blastp_app.cpp:280-285,
+/// tblastn_app.cpp:294-299 and 330-335, tblastx_app.cpp:197-202, blastn_app.cpp:304-309).
+/// psiblast's iterations fetch ahead before they choose the archive, so PSIBLAST passes
+/// `archive` false.
+///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/psiblast_app.cpp:262-266
+/// ```c
+///                    results = psiblast->Run();
+///                    BlastFormatter_PreFetchSequenceData(*results, scope,
+///                 		   m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice());
+///                    if(CFormattingArgs::eArchiveFormat ==
+///                 	  m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice())
+/// ```
 ///
 /// LOSAT refuses before the search, so the refusal is wider than NCBI's stop: an error that
 /// NCBI raises in the first batch's search before its prefetch (a query record without
 /// letters, `-query_loc` past every record: `BLAST engine error`, exit status 3) is this
 /// refusal here, and so is a `-subject` search with `BL2SEQ_LEGACY` whose report would not
-/// change (no hits). With `-mt_mode 1` and `-db`, NCBI's split-by-queries nodes catch the
-/// exception: NCBI writes nothing to standard output and exits 0.
+/// change (no hits). With `-mt_mode 1` and `-db` (blastp, blastx, tblastn, blastn), NCBI's
+/// split-by-queries nodes catch the exception: NCBI writes nothing to standard output and
+/// exits 0.
 pub fn check_search_environment(
     program: &str,
     fasta_subjects: bool,

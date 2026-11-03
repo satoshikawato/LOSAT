@@ -1718,7 +1718,11 @@ fn search(
     check_report_formats(outputs, args.out.as_deref())?;
     // LOSAT's limits come where NCBI starts the search, after its checks.
     check_losat_limits(&args)?;
-    crate::blastinput::app::check_unsupported_environment("TBLASTX")?;
+    crate::blastinput::app::check_search_environment(
+        "TBLASTX",
+        !matches!(source, SubjectSource::Database(_)),
+        outputs.only_archive(),
+    )?;
     // The query range applies to every query record as NCBI's batch reader reads it
     // (`seq_range::cut_queries`): a record is searched cut, and one whose interval starts
     // just past its end is a query without data (`run_in_pool`).

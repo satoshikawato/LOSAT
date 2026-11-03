@@ -309,6 +309,19 @@ pub struct ReportOutputs<'a> {
 }
 
 impl ReportOutputs<'_> {
+    /// Whether every requested format is the BLAST archive (outfmt 11), which NCBI's apps but
+    /// psiblast write without fetching the report's sequences ahead
+    /// (`blastinput::app::check_search_environment`).
+    pub(crate) fn only_archive(&self) -> bool {
+        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+        !self.formats.is_empty()
+            && self.formats.iter().all(|format| {
+                parse_formatting_string(format.outfmt).is_ok_and(|choice| {
+                    ReportFormat::from_number(choice.number) == Some(ReportFormat::ArchiveFormat)
+                })
+            })
+    }
+
     /// Runs `f` with the same outputs and a diagnostics stream that also saves what it
     /// writes as the messages of the BLAST archive (outfmt 11) of `handle`.
     pub(crate) fn with_archive_diagnostics<R>(

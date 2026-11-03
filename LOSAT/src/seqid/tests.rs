@@ -1083,3 +1083,47 @@ fn taxid_map_keys_drop_the_general_database_and_the_version() {
     );
     assert_eq!(key(&ParsedSeqId::Gi(777)), "777");
 }
+
+/// `weak_keys` gives the ids that NCBI's scope matches weakly by an id (`GetMatchingHandles` with
+/// `eAllowWeakMatch`) and `kind_keys` the keys by which such an id is found, in the directions
+/// NCBI 2.17.0 showed a query read with `-parse_deflines` for a database sequence (probe of line
+/// DBID N2c, `blastdb-ids-20261021/R/weak/p1.out`, cases q1 to q6).
+#[test]
+fn weak_keys_find_the_ids_that_ncbis_scope_matches_weakly() {
+    use super::id_scope::{kind_keys, weak_keys};
+    let text = |accession: Option<&str>, name: Option<&str>, version: Option<i32>| TextseqId {
+        name: name.map(|name| name.as_bytes().to_vec()),
+        accession: accession.map(|accession| accession.as_bytes().to_vec()),
+        release: None,
+        version,
+    };
+    let finds = |by: &ParsedSeqId, id: &ParsedSeqId| {
+        let (mut weak, mut held) = (Vec::new(), Vec::new());
+        weak_keys(by, &mut weak);
+        kind_keys(id, &mut held);
+        held.iter().any(|key| weak.contains(key))
+    };
+    let sp = |accession, name, version| ParsedSeqId::Swissprot(text(accession, name, version));
+    let gb = |accession, version| ParsedSeqId::Genbank(text(Some(accession), None, version));
+    let pir = |accession, name| ParsedSeqId::Pir(text(accession, name, None));
+    // q1, q2: a name with an accession and the name alone, both ways, in any case.
+    let named = sp(Some("P00001"), Some("NAME_B"), Some(1));
+    assert!(finds(&named, &sp(None, Some("NAME_B"), None)));
+    assert!(finds(&named, &sp(None, Some("name_b"), None)));
+    assert!(finds(&sp(None, Some("NAME_B"), None), &named));
+    // Two accessions: the scope compares them, not their names.
+    assert!(!finds(&named, &sp(Some("P00002"), Some("NAME_B"), Some(1))));
+    // q3, q4: an accession without a version finds its versions, not the other way.
+    assert!(finds(&gb("CCC00020", None), &gb("CCC00020", Some(1))));
+    assert!(finds(&gb("CCC00020", None), &gb("ccc00020", Some(2))));
+    assert!(!finds(&gb("CCC00020", Some(1)), &gb("CCC00020", None)));
+    assert!(!finds(&gb("CCC00020", Some(1)), &gb("CCC00020", Some(2))));
+    // q5, q6: a `pir` accession alone finds that name alone, not the other way.
+    assert!(finds(&pir(Some("ABCD"), None), &pir(None, Some("ABCD"))));
+    assert!(!finds(&pir(None, Some("ABCD")), &pir(Some("ABCD"), None)));
+    assert!(!finds(&gb("ABCD", None), &pir(None, Some("ABCD"))));
+    // Other alternatives have no weak keys (their keys fold case and number forms already).
+    let mut weak = Vec::new();
+    weak_keys(&ParsedSeqId::Gi(777), &mut weak);
+    assert!(weak.is_empty());
+}

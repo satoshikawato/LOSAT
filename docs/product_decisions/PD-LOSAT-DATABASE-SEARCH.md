@@ -9,7 +9,8 @@
   maintainer accepted on 2026-11-02; the same day line DBID N2a refused a stored
   `gnl|BL_ORD_ID|n` of another number, which version 1.3 listed as a known difference, and
   line DBID N2b left every kind of Seq-align id to the lookup, which ported refusals that
-  version 1.3 listed as wider than NCBI's failure)
+  version 1.3 listed as wider than NCBI's failure; on 2026-11-03 line DBID N2c refused the weak
+  matches of NCBI's scope, one of which version 1.3 listed as a known difference)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -581,6 +582,8 @@ a result that LOSAT does not reproduce.
 | Following hits of a query whose Seq-align ids `Match`: `pdb|1ABC|` and `pdb|1ABC|AA`, `gb|X|` and `gb|X.1|`, one accession and version under `gb`, `emb` or `dbj`, two copies of one record | 0, 5, 13 to 16 | Shows them as one hit | 2 |
 | In `psiblast`, such hits among the first `-max_target_seqs` + 1 of a longer list | every format | `PruneSeqalign` counts them as one subject and keeps one more | 2 |
 | A Seq-align id that is the id of a query read with `-parse_deflines` | every format | Shows the query's title and letters for it | 2 |
+| A Seq-align id by which NCBI's scope finds a query read with `-parse_deflines` as a weak match (`x_GetSeqMatch`): `sp||NAME` for `sp|P00001.1|NAME` and the other way, `gb|X.1|` for `gb|X|`, `pir||ABCD` for `pir|ABCD|` | every format | Shows the query's title and letters for it (not `gb|X|` for `gb|X.1|`, nor `pir|ABCD|` for `pir||ABCD`) | 2 |
+| With `PRE_FETCH_SEQS_LIMIT` an integer other than 2147483647: a Seq-align id that an id of another sequence matches weakly, as in the row above, in any letter case and across the alternatives (`tpg|X.1|NAME` and `prf||NAME`). In version 4 where the lookup of the Seq-align id or of its name alone finds such a sequence; in version 5 an accession without a version where the lookup finds a version of it, and any Seq-align id with a name or of `pir` or `prf` (version 5 keys a name only in its own letter case and only without an accession, and a `pir` or `prf` id by its FASTA text) | 0, 5, 6, 7, 10, 13 to 17, 20 | With 0 or a value below the batch's number of Seq-aligns it reads the reported sequences one by one, and where it has read that other sequence first, it writes that sequence's names (in BLASTP also its identities) | 2 |
 | A stored title or Seq-id with a byte outside ' ' to '~' (makeblastdb stores `#` for such a byte) | every format | Prints `#` and an error message each time it reads the line, exit 0 | 2 |
 | A definition line without a Seq-id (makeblastdb writes none) | every format | Not compared | |
 | An outfmt 0 description id of 65 bytes or more | 0 | Pads the line without end, from 65 bytes with a title of 3 bytes or more, from 67 with any title | 3 |
@@ -605,10 +608,16 @@ Known differences that remain:
     Seq-ids, so the lookup does not take it for the same record.
   - A Seq-align id that another sequence also holds is refused also where NCBI writes the subject's
     own report: where that sequence is not reported, or its scope reads the subject first.
-- With `PRE_FETCH_SEQS_LIMIT` below the number of reported sequences, NCBI's scope reads them one by
-  one and also matches ids weakly (a name-only id such as `sp||NAME` to `sp|P00001.1|NAME`, an
-  unversioned accession to its versions), so it can show another sequence for the subject. LOSAT
-  writes the subject's own report.
+  - With `PRE_FETCH_SEQS_LIMIT`, a Seq-align id that an id of another sequence matches weakly is
+    refused also where NCBI writes the subject's own report: where the value is not below the
+    batch's number of Seq-aligns (NCBI prefetches; LOSAT does not count them), where that sequence
+    is not reported or not read first, and where that id is in another definition line than the one
+    NCBI reads that sequence by. In version 5 a Seq-align id with a name, or of `pir` or `prf`, is
+    refused whatever the database holds.
+  - The weak matches ignore the release of an id (`sp` and `tr` ids carry `reviewed` and
+    `unreviewed`; NCBI matches a name only within one release), in both refusals of a weak match.
+  - A weak match with a query read with `-parse_deflines` is refused also in outfmt 8, 9, 11 and 12,
+    which write the Seq-align id alone (as the exact match).
   - A tabular field list without the fields on which NCBI stops (`6 qseqid evalue`, `6 sseqid`,
     `6 sallseqid`), where NCBI exits 0.
   - A title ending in `]` without `taxdb.bti` on the search path, where NCBI keeps the title.

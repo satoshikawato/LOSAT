@@ -9,7 +9,7 @@ import { BrowserFileDownloader } from '../../src/infra/browser/example-downloade
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
-import { FakeDeletionChannel, FakeFileDownloader, MemoryExampleStore } from '../../src/infra/fake/fake-examples';
+import { FakeDeletionChannel, FakeFileDownloader, FakeFileSaver, MemoryExampleStore } from '../../src/infra/fake/fake-examples';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
@@ -26,6 +26,7 @@ function setup(
     store?: MemoryExampleStore;
     deletions?: ExampleDeletions;
     wrapStore?: (store: MemoryExampleStore) => ExampleStore;
+    saver?: FakeFileSaver;
   } = {},
 ) {
   let token = 0;
@@ -53,6 +54,7 @@ function setup(
     store: options.wrapStore?.(store) ?? store,
     draft,
     ...(options.deletions === undefined ? {} : { deletions: options.deletions }),
+    ...(options.saver === undefined ? {} : { saver: options.saver }),
   });
   const settle = async () => {
     await examples.idle();
@@ -325,6 +327,52 @@ describe('ExampleLoader', () => {
     expect(store.copies.size).toBe(0);
     expect(examples.state.get().saved['refseq-16s-bacteria']).toBeNull();
     expect(draft.state.get().subject.sources.map((s) => s.name)).toEqual(['mine.fa']);
+  });
+});
+
+describe('Example copies outside the browser (line WF-3)', () => {
+  it('writes the saved copy into the folder picked, named as the subject source, without a request', async () => {
+    const saver = new FakeFileSaver(true);
+    const { examples, downloader, settle } = setup({ saver });
+    expect(examples.copyTo).toBe('folder');
+    examples.load('refseq-16s-bacteria');
+    await settle();
+    examples.saveCopy('refseq-16s-bacteria');
+    expect(examples.state.get().copying).toBe('refseq-16s-bacteria');
+    await settle();
+    expect(saver.written).toEqual([{ folder: 'Examples', fileName: 'bacteria.16SrRNA.fna', text: SET_16S }]);
+    expect(examples.state.get().copying).toBeUndefined();
+    expect(examples.state.get().note).toEqual({ id: 'refseq-16s-bacteria', text: 'Saved bacteria.16SrRNA.fna in Examples.' });
+    expect(downloader.requests).toHaveLength(1);
+    // The picker closed: nothing is written and nothing is said.
+    saver.folder = undefined;
+    examples.saveCopy('refseq-16s-bacteria');
+    await settle();
+    expect(saver.written).toHaveLength(1);
+    expect(examples.state.get().note).toBeUndefined();
+  });
+
+  it('downloads the saved copy where the browser picks no folder, and says when the copy is gone', async () => {
+    const saver = new FakeFileSaver(false);
+    const { examples, store, settle } = setup({ saver });
+    expect(examples.copyTo).toBe('download');
+    examples.load('refseq-16s-bacteria');
+    await settle();
+    examples.saveCopy('refseq-16s-bacteria');
+    await settle();
+    expect(saver.downloads.map((d) => d.fileName)).toEqual(['bacteria.16SrRNA.fna']);
+    expect(await saver.downloads[0]!.file.text()).toBe(SET_16S);
+    expect(examples.state.get().note).toBeUndefined();
+    store.copies.clear();
+    examples.saveCopy('refseq-16s-bacteria');
+    await settle();
+    expect(saver.downloads).toHaveLength(1);
+    expect(examples.state.get().note).toEqual({ id: 'refseq-16s-bacteria', text: 'Not saved: the copy in this browser is gone' });
+    expect(examples.state.get().saved['refseq-16s-bacteria']).toBeNull();
+  });
+
+  it('offers nothing without a saver', () => {
+    expect(setup().examples.copyTo).toBeUndefined();
   });
 });
 

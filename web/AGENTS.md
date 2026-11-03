@@ -28,7 +28,8 @@ still governs everything under `LOSAT/`, including engine changes made for LOSAT
 4. Never send research data (sequences, headers, file names, results, notes) over the
    network. A fetch the user asks for (an accession, an Example set; line WF,
    `docs/web/fetch_design.md`) sends only that identifier or the file's URL, to NCBI,
-   EBI or CNCB, and never on load or on Run. Serve every runtime asset from the site itself; do
+   EBI or CNCB (with "Fastest", the first fetch of a kind also asks each of them for one
+   fixed public record, §10), and never on load or on Run. Serve every runtime asset from the site itself; do
    not load scripts from other origins in documents that handle research data. The
    response headers, including the CSP (`connect-src` names the fetch hosts), are
    defined once in `web/app/public/_headers`.

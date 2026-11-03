@@ -12,7 +12,8 @@
 // Whether the engine reads a source is the engine's verdict (`checkInput`, the program's
 // `register`), shown with its message. Several sources of a role are one combined search
 // input, or separate searches (one run per source, started as a group). A box of accessions
-// only is fetched when the user asks (fetchAccessions, line WF-1) and becomes a pasted text.
+// only is fetched when the user asks (fetchAccessions, line WF-1) and becomes a pasted text;
+// with "Fastest" (line WF-3), the first fetch of a kind races the sources (source-race.ts).
 // An Example (useExample, line WF-2) replaces both roles: its query becomes the query box's
 // text and its subject set the only subject source.
 import {
@@ -20,7 +21,11 @@ import {
   FETCH_ACCESSION_LIMIT,
   FETCH_BYTE_LIMIT,
   FETCH_SOURCES,
+  servingSources,
+  sourceLabel,
+  sourceList,
   unserved,
+  type FetchChoice,
   type FetchSourceId,
 } from '../domain/accession';
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES, splitOptions } from '../domain/argv';
@@ -42,6 +47,7 @@ import type { EngineGateway, ProgramDescription } from '../ports/engine';
 import type { AccessionFetcher, FetchResult } from '../ports/fetch';
 import type { InputCheck } from '../ports/input-check';
 import type { EnqueueAllResult, SearchRequest } from './coordinator';
+import { SourceRace, type RaceStanding } from './source-race';
 import { Store } from './store';
 
 export type InputMode = 'combined' | 'separate';
@@ -85,6 +91,8 @@ export interface DraftSource {
 
 /** The fetch of the paste box's accessions (fetchAccessions). */
 export type FetchState =
+  /** Waiting for the race of the sources ("Fastest"): no accession was sent yet. */
+  | { readonly state: 'racing' }
   /** `done` of `total` accessions have come. */
   | { readonly state: 'fetching'; readonly source: FetchSourceId; readonly done: number; readonly total: number }
   | { readonly state: 'failed'; readonly message: string };
@@ -123,7 +131,9 @@ export interface DraftState {
   readonly title: string;
   readonly threads: number | 'auto';
   /** Where "Fetch" asks for accessions; the choice stays for the session. */
-  readonly fetchSource: FetchSourceId;
+  readonly fetchSource: FetchChoice;
+  /** What the race of the sources found for each kind (source-race.ts), kept for the tab. */
+  readonly race: Readonly<Partial<Record<SequenceKind, RaceStanding>>>;
   /** The engine's `describe` of the program, once it has arrived. */
   readonly description?: ProgramDescription;
   readonly descriptionError?: string;
@@ -173,11 +183,22 @@ export class SearchDraft {
   private readonly pending = new Set<Promise<unknown>>();
   /** The running fetch of each role's accessions. */
   private readonly fetches = new Map<InputRole, AbortController>();
+  private readonly race: SourceRace;
   /** The argv of the latest validation that the engine accepted (the prepare hint's argv). */
   private validArgv: readonly string[] | undefined;
   private nextKey = 1;
 
   constructor(private readonly deps: DraftDeps) {
+    this.race = new SourceRace({
+      fetcher: deps.fetcher,
+      now: deps.now,
+      onChange: (kind, standing) => {
+        const race = { ...this.state.get().race };
+        if (standing === undefined) delete race[kind];
+        else race[kind] = standing;
+        this.set({ race });
+      },
+    });
     const values = Object.fromEntries(PROGRAMS.map((program) => [program.id, Object.freeze({})])) as Record<
       ProgramId,
       FormValues
@@ -190,7 +211,8 @@ export class SearchDraft {
       extra: Object.fromEntries(PROGRAMS.map((program) => [program.id, ''])) as Record<ProgramId, string>,
       title: '',
       threads: 'auto',
-      fetchSource: 'ncbi',
+      fetchSource: 'fastest',
+      race: {},
       validation: { state: 'idle' },
       submitting: false,
     });
@@ -381,7 +403,7 @@ export class SearchDraft {
     return accessionLines(this.role(role).paste);
   }
 
-  setFetchSource(source: FetchSourceId): void {
+  setFetchSource(source: FetchChoice): void {
     this.set({ fetchSource: source });
     for (const role of ROLES) {
       if (this.role(role).fetch?.state === 'failed') this.updateRole(role, withoutFetch);
@@ -391,8 +413,9 @@ export class SearchDraft {
   /**
    * Fetches the FASTA of the paste box's accessions from the chosen source, one after another,
    * and writes it into the box, which is then read as any pasted text. The user asks for it
-   * ("Fetch"); only the accessions are sent. An edit of the box drops the fetch; a failure
-   * leaves the box as it was and says why.
+   * ("Fetch"); only the accessions are sent. With "Fastest", they go to the source that the
+   * race of the kind found first among those that serve them. An edit of the box drops the
+   * fetch; a failure leaves the box as it was and says why.
    */
   fetchAccessions(role: InputRole): void {
     const accessions = this.accessions(role);
@@ -407,7 +430,7 @@ export class SearchDraft {
   private async fetchAll(
     role: InputRole,
     accessions: readonly string[],
-    source: FetchSourceId,
+    choice: FetchChoice,
     kind: SequenceKind,
     signal: AbortSignal,
   ): Promise<void> {
@@ -420,11 +443,37 @@ export class SearchDraft {
     }
     // Before any request: an accession the source cannot serve stops the fetch without sending the others.
     for (const accession of accessions) {
-      const reason = unserved(source, kind, accession);
+      const reason = choice === 'fastest' ? undefined : unserved(choice, kind, accession);
       if (reason !== undefined) {
-        fail(`${reason}: fetch ${accession} from NCBI or CNCB.`);
+        fail(`${reason}: fetch ${accession} from ${sourceList(servingSources(kind, [accession]))}.`);
         return;
       }
+    }
+    let source: FetchSourceId;
+    if (choice === 'fastest') {
+      const eligible = servingSources(kind, accessions);
+      if (eligible.length === 0) {
+        const only = accessions
+          .map((accession) => ({ accession, sources: servingSources(kind, [accession]) }))
+          .filter((entry) => entry.sources.length < FETCH_SOURCES.length)
+          .map((entry) => `${entry.accession} only from ${sourceList(entry.sources)}`);
+        fail(`No one site has all of these accessions: ${only.join(', ')}.`);
+        return;
+      }
+      if (eligible.length === 1) {
+        // One site has them: nothing to race.
+        source = eligible[0]!;
+      } else {
+        this.updateRole(role, (draft) => ({ ...draft, fetch: { state: 'racing' } }));
+        try {
+          source = await this.race.fastest(kind, eligible, signal);
+        } catch (error) {
+          fail(`The race of the sites failed: ${messageOf(error)}`);
+          return;
+        }
+      }
+    } else {
+      source = choice;
     }
     const texts: string[] = [];
     let bytes = 0;
@@ -604,6 +653,11 @@ export class SearchDraft {
     }
   }
 
+  /** Resolves when the race requests have ended; idle does not wait for them, nor does Run (tests). */
+  async raceIdle(): Promise<void> {
+    await this.race.idle();
+  }
+
   private async prepareAndEnqueue(): Promise<EnqueueAllResult> {
     // Run never fetches, nor waits for a fetch that is running (fetchAccessions).
     for (const role of ROLES) {
@@ -669,7 +723,8 @@ export class SearchDraft {
     if (accessions === undefined) return undefined;
     const title = role === 'query' ? 'query' : 'subject';
     const noun = accessions.length === 1 ? 'accession' : 'accessions';
-    return this.role(role).fetch?.state === 'fetching'
+    const fetch = this.role(role).fetch?.state;
+    return fetch === 'fetching' || fetch === 'racing'
       ? `The ${title} ${noun} ${accessions.length === 1 ? 'is' : 'are'} still being fetched.`
       : `Fetch the ${title} ${noun} first.`;
   }
@@ -998,10 +1053,6 @@ function withoutFetch(draft: RoleDraft): RoleDraft {
   const next = { ...draft };
   delete (next as { fetch?: unknown }).fetch;
   return next;
-}
-
-function sourceLabel(source: FetchSourceId): string {
-  return FETCH_SOURCES.find((s) => s.id === source)!.label;
 }
 
 /** Why a fetch brought no record, for the line under the box. */

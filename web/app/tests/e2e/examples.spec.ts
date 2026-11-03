@@ -3,7 +3,9 @@
 // keeps the set in this browser (OPFS examples/), so that the next time it loads without a
 // request. The download hosts are stubbed with routes at their real addresses, so the page runs
 // under the deployed CSP (public/_headers connect-src); the tests count every request that
-// leaves the site.
+// leaves the site. Line WF-3: the saved copy goes to a folder that the user picks (Chromium; the
+// picker is stubbed with a folder of OPFS) or to the browser's download (Firefox).
+import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { expect, test, type Page } from '@playwright/test';
 import { exampleById, exampleQuery } from '../../src/domain/examples';
@@ -109,4 +111,44 @@ test('Delete in one tab removes the subject source made from the copy in another
   await b.getByTestId('example-refseq-16s-bacteria-delete').click();
   await expect(a.getByTestId('subject-source-0')).toHaveCount(0);
   await expect(a.getByTestId('example-refseq-16s-bacteria-note')).toHaveText('Downloads 8.0 MB from ftp.ncbi.nlm.nih.gov');
+});
+
+test("the saved copy goes to a folder that the user picks, or to the browser's download, without a request", async ({ page }) => {
+  const away = await stubHosts(page);
+  // The folder picker cannot be driven: where the browser has one, it picks the folder "picked" of OPFS,
+  // and refuses as the real one does when the click's activation has passed.
+  await page.addInitScript(() => {
+    const target = window as { showDirectoryPicker?: unknown };
+    if (typeof target.showDirectoryPicker === 'function') {
+      target.showDirectoryPicker = async () => {
+        if (!navigator.userActivation.isActive) {
+          throw new DOMException('Must be handling a user gesture to show a file picker.', 'SecurityError');
+        }
+        return (await navigator.storage.getDirectory()).getDirectoryHandle('picked', { create: true });
+      };
+    }
+  });
+  await openSearch(page);
+  test.skip((await page.getByTestId('storage-status').getAttribute('data-backend')) !== 'opfs', 'nothing is saved without OPFS');
+  const folders = await page.evaluate(() => typeof (window as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function');
+  console.log(`the copy goes to ${folders ? 'a folder' : 'the download'}`);
+  await page.getByTestId('example-refseq-16s-bacteria').click();
+  await settled(page, 'subject');
+  const save = page.getByTestId('example-refseq-16s-bacteria-save');
+  if (folders) {
+    await expect(save).toHaveText('Save to folder…');
+    await save.click();
+    await expect(page.getByTestId('example-note')).toHaveText('Saved bacteria.16SrRNA.fna in picked.');
+    const written = await page.evaluate(async () => {
+      const folder = await (await navigator.storage.getDirectory()).getDirectoryHandle('picked');
+      return (await (await folder.getFileHandle('bacteria.16SrRNA.fna')).getFile()).text();
+    });
+    expect(written).toBe(SET);
+  } else {
+    await expect(save).toHaveText('Download');
+    const [download] = await Promise.all([page.waitForEvent('download'), save.click()]);
+    expect(download.suggestedFilename()).toBe('bacteria.16SrRNA.fna');
+    expect(readFileSync(await download.path(), 'utf8')).toBe(SET);
+  }
+  expect(away).toEqual([SIXTEEN_S.url]);
 });

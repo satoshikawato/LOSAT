@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // "Example" under the mode tabs (line WF-2, docs/web/fetch_design.md §9): a button per set of the
 // mode, each with its in-place sentence: what pressing it sends ("Downloads 8.0 MB from
-// ftp.ncbi.nlm.nih.gov"), or the copy saved in this browser with Delete, or the download's
-// progress with Cancel. The rest waits behind "?" (stop-describing-ui).
+// ftp.ncbi.nlm.nih.gov"), or the copy saved in this browser with "Save to folder…" (or
+// "Download", line WF-3) and Delete, or the download's progress with Cancel. The rest waits
+// behind "?" (stop-describing-ui).
 import { computed, watch } from 'vue';
 import type { ExampleLoader } from '../application/examples';
 import { exampleHost, examplesFor, type ExampleSet } from '../domain/examples';
@@ -28,6 +29,10 @@ const help = computed(
   () =>
     'Example puts a query in the query box and a public set in the subject list. It asks only for the file named, ' +
     'from the site named, and keeps the file in this browser: the next time, it is read from there without a request. ' +
+    (props.examples.copyTo === undefined
+      ? ''
+      : `${props.examples.copyTo === 'folder' ? 'Save to folder…' : 'Download'} writes that file outside this browser's storage, ` +
+        'which clearing the site data empties; "Open FASTA files…" opens it again. ') +
     sets.value.map((set) => `${set.label}: ${set.provenance}`).join(' '),
 );
 
@@ -75,15 +80,27 @@ const busy = (set: ExampleSet) => {
         >
           Cancel
         </button>
-        <button
-          v-else-if="state.saved[set.id]"
-          type="button"
-          class="link"
-          :data-testid="`example-${set.id}-delete`"
-          @click="examples.delete(set.id)"
-        >
-          Delete
-        </button>
+        <template v-else-if="state.saved[set.id]">
+          <button
+            v-if="examples.copyTo"
+            type="button"
+            class="link"
+            :disabled="state.copying === set.id"
+            :data-testid="`example-${set.id}-save`"
+            @click="examples.saveCopy(set.id)"
+          >
+            {{ examples.copyTo === 'folder' ? 'Save to folder…' : 'Download' }}
+          </button>
+          <button
+            type="button"
+            class="link"
+            :disabled="state.copying === set.id"
+            :data-testid="`example-${set.id}-delete`"
+            @click="examples.delete(set.id)"
+          >
+            Delete
+          </button>
+        </template>
       </li>
     </ul>
     <HelpTip id="example" label="About the examples" :text="help" />

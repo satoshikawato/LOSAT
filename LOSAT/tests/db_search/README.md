@@ -24,6 +24,9 @@ FASTA files:
   hyphen and an invalid letter (`7`) in its first data line, the second starts with a line that is not plausible
   data, the BLASTX query of `db.bxtitle.stop.6` (NCBI writes the first record's title warning after its data
   warnings, then stops; the second record's title warning is never posted).
+- `bx_title_later_q.fna`: the same first record; the second has a data line `EF-` (no nucleotide letter: a hyphen
+  and two invalid letters, with their warnings), then a line that is not plausible data, which NCBI still checks
+  because the record has no residues yet (`db.bxtitle.later.6`).
 - `p3.faa`: records p01, p03 and p08 of `LOSAT/tests/seqdb/prot.faa`, in that order.
 - `d1_q.faa`: D1, a hit that `-db` keeps and `-subject` drops. Two proteins of `LOSAT/tests/fasta/WSSV.faa`
   (YP_009220551.1 and YP_009220614.1: for each, NCBI `blastp -db paja -outfmt 6` prints 2 rows and

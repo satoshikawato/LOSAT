@@ -362,13 +362,13 @@ fn read_options(
         // No NCBI counterpart: the formats of LOSAT Web (`docs/web/abi_v2.md`).
         if !matches!(choice.number, 0 | 6 | 7) {
             bail!(
-                "output format {} is not supported by BLASTX in the browser",
+                "output format {} is not supported in the browser for BLASTX",
                 choice.number
             );
         }
         if choice.custom() {
             bail!(
-                "a custom output format specification (fields or a delimiter) is not supported by BLASTX in the browser"
+                "a custom output format specification (fields or a delimiter) is not supported in the browser for BLASTX"
             );
         }
         choices.push(choice);

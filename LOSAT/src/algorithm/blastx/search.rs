@@ -520,10 +520,6 @@ pub(crate) fn search_core(
     pool: &crate::utils::threading::SearchPool<'_>,
     prep: Option<UnitPrep>,
 ) -> Result<Vec<BatchStage>> {
-    ensure!(
-        !subjects.is_empty() || subjects.is_unreadable() || options.filtered_empty,
-        "BLASTX preliminary requires a protein subject"
-    );
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
     // ```c++
     //     if(dbscan_mode)
@@ -547,10 +543,8 @@ pub(crate) fn search_core(
     //         subject->length = MAX_DBSEQ_LEN;
     //         backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
     // ```
-    ensure!(
-        subjects.longest_length() <= 5_000_000,
-        "BLASTX preliminary protein-subject splitting above 5000000 residues is not implemented"
-    );
+    // LOSAT does not split a subject; a batch that is searched refuses longer ones (below).
+    let longest_subject = subjects.longest_length();
     let db_length = subjects.total_length()?;
     let db_count = i64::try_from(subjects.statistics_len())?;
     let min_subject_length = subjects.shortest_length();
@@ -644,7 +638,17 @@ pub(crate) fn search_core(
             continue;
         }
         // NCBI reads the database's sequences in the preliminary search of the first batch
-        // with a valid context (batches without one are not searched, above).
+        // with a valid context (batches without one are not searched, above). The subjects are
+        // checked there too, after the split sizes and the setup of the queries, whose errors
+        // come first at any thread count (`native.rs`, `XUnit::take_prep`).
+        ensure!(
+            !subjects.is_empty() || subjects.is_unreadable() || options.filtered_empty,
+            "BLASTX preliminary requires a protein subject"
+        );
+        ensure!(
+            longest_subject <= 5_000_000,
+            "BLASTX preliminary protein-subject splitting above 5000000 residues is not implemented"
+        );
         if subjects.is_unreadable() {
             return Err(super::subjects::UnreadableSubjects.into());
         }

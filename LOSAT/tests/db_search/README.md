@@ -180,6 +180,11 @@ without hits come from seeded generators):
   points; `bxchunk.faa`: the nine planted proteins with a quarter of their residues changed, for the database
   `bxchunk` (rows `db.bxchunk.*`: BLASTX `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE`). `bxchunk_empty.fna`: a record of a
   defline only (NCBI reports the query splitter's errors before the empty query's `Sequence contains no data`).
+- `bxempty_*.fna` (rows `db.bxempty.*`, against `bxchunk`, with `BATCH_SIZE=200000`: LOSAT searches such a batch in
+  units of 10002 letters): `bxempty_le.fna` is the query of `bxchunk_q.fna` and an empty record (a defline only);
+  `bxempty_lel.fna` adds a second query (its first 12,000 bases) and a second empty record; `bxempty_none.fna` is an
+  empty record, 5,001 records of 2 bases (no context to search) and an empty record; `bxempty_none1.fna` the 5,001
+  records and one empty record.
 - `bnophr.pin` and `bnophr.psq` are copies of `bslice.pin` and `.psq`: the database without its header file, used
   with the query without hits (with a hit NCBI fails with exit 2).
 

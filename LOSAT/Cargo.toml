@@ -71,6 +71,9 @@ rayon = { version = "1.11", optional = true }
 libm = "0.2.15"
 indicatif = "0.18"
 rustc-hash = "1.1"
+# gzip input (`-query`, `-subject`, `makeblastdb -in` named `.gz`): the pure-Rust backend
+# (miniz_oxide), as the pure-Rust runtime boundary requires; no `links` metadata.
+flate2 = "1.1"
 
 # NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
 # ```c++

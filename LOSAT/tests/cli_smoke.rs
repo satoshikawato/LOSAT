@@ -267,6 +267,251 @@ fn malformed_fasta_reports_parse_error() {
     );
 }
 
+/// Gzip members of `members`, each with bgzip's extra field, concatenated as `bgzip` and
+/// `cat a.gz b.gz` write them.
+fn gzip_members(members: &[&[u8]]) -> Vec<u8> {
+    use std::io::Write;
+    let mut bytes = Vec::new();
+    for member in members {
+        let mut encoder = flate2::GzBuilder::new()
+            .extra(b"BC\x02\x00\x00\x00".to_vec())
+            .write(&mut bytes, flate2::Compression::default());
+        encoder.write_all(member).unwrap();
+        encoder.finish().unwrap();
+    }
+    bytes
+}
+
+const GZ_QUERY: &str = ">q1 first\nACGTTGCAAGGCTTAACCGTATGCGATCCTAGGATCCAATGGTACCTTAGCAGTCGATCGACGTTGCAAGGCTTAACCGTATGCG\n>q2 second\nGGCATGCATGCATTTAGGCCAAGTACGATCGATCGACGTTGCAAGGCTTAACCGTATGCGATCCTAGGATCCAATGG\n";
+const GZ_SUBJECT: &str = ">s1 the subject\nTTTTACGTTGCAAGGCTTAACCGTATGCGATCCTAGGATCCAATGGTACCTTAGCAGTCGATCGACGTTGCAAGGCTTAACCGTATGCGAAAAGGCATGCATGCATTTAGGCCAAGTACGATCGATCGACGTTGCAAGGCTTAACCGTATGCGATCCTAGGATCCAATGGCCCC\n";
+
+fn blastn_output(query: &std::path::Path, subject: &std::path::Path, outfmt: &str) -> Output {
+    clean_losat_command()
+        .args(["blastn", "-outfmt", outfmt, "-query"])
+        .arg(query)
+        .arg("-subject")
+        .arg(subject)
+        .output()
+        .expect("run blastn")
+}
+
+// No NCBI counterpart (line GZ, DECISIONS 1 and 3; `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
+// exception 8): a `-query` or `-subject` named `.gz` reads as the plain file, in any case of
+// the suffix; the name the user gave is the one the reports show.
+#[test]
+fn gzip_query_and_subject_read_as_the_plain_files() {
+    let query = temp_path("gz_query", "fa");
+    let subject = temp_path("gz_subject", "fa");
+    let query_gz = temp_path("gz_query", "fa.gz");
+    let subject_gz = temp_path("gz_subject", "fna.GZ");
+    fs::write(&query, GZ_QUERY).unwrap();
+    fs::write(&subject, GZ_SUBJECT).unwrap();
+    fs::write(&query_gz, gzip_members(&[GZ_QUERY.as_bytes()])).unwrap();
+    fs::write(&subject_gz, gzip_members(&[GZ_SUBJECT.as_bytes()])).unwrap();
+
+    let plain = blastn_output(&query, &subject, "6");
+    let inflated = blastn_output(&query_gz, &subject_gz, "6");
+    let plain_7 = blastn_output(&query, &subject, "7");
+    let inflated_7 = blastn_output(&query_gz, &subject_gz, "7");
+
+    let _ = fs::remove_file(&query);
+    let _ = fs::remove_file(&subject);
+    let _ = fs::remove_file(&query_gz);
+    let _ = fs::remove_file(&subject_gz);
+
+    assert_eq!(
+        plain.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&plain.stderr)
+    );
+    assert_eq!(
+        inflated.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&inflated.stderr)
+    );
+    assert!(plain.stdout.len() > 0, "the plain run has rows");
+    assert_eq!(inflated.stdout, plain.stdout);
+    assert_eq!(inflated.stderr, plain.stderr);
+    let plain_7 = String::from_utf8_lossy(&plain_7.stdout).into_owned();
+    let inflated_7 = String::from_utf8_lossy(&inflated_7.stdout).into_owned();
+    let input_line = |text: &str, path: &std::path::Path| {
+        let line = format!(
+            "# Database: User specified sequence set (Input: {})",
+            path.display()
+        );
+        assert!(text.contains(&line), "{text}");
+        text.replace(
+            &line,
+            "# Database: User specified sequence set (Input: SUBJECT)",
+        )
+    };
+    assert_eq!(
+        input_line(&inflated_7, &subject_gz),
+        input_line(&plain_7, &subject)
+    );
+}
+
+// No NCBI counterpart (line GZ, DECISIONS 4): the members of a concatenated gzip file (bgzip's
+// blocks, each with its extra field, and its empty end block) are all read; a reader error
+// inside the inflated file keeps the line number of the plain file.
+#[test]
+fn concatenated_gzip_members_are_read_whole_with_the_plain_line_numbers() {
+    let subject = temp_path("members_subject", "fa");
+    let query_gz = temp_path("members_query", "fa.gz");
+    fs::write(&subject, GZ_SUBJECT).unwrap();
+    let (first, second) = GZ_QUERY.split_at(GZ_QUERY.find(">q2").unwrap());
+    fs::write(
+        &query_gz,
+        gzip_members(&[first.as_bytes(), second.as_bytes(), b""]),
+    )
+    .unwrap();
+    let both = blastn_output(&query_gz, &subject, "6");
+    let bad_gz = temp_path("members_bad", "fa.gz");
+    fs::write(
+        &bad_gz,
+        gzip_members(&[b"!a comment line\n", b"@@@@ACGT\n"]),
+    )
+    .unwrap();
+    let bad = blastn_output(&bad_gz, &subject, "6");
+    let _ = fs::remove_file(&subject);
+    let _ = fs::remove_file(&query_gz);
+    let _ = fs::remove_file(&bad_gz);
+
+    assert_eq!(
+        both.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&both.stderr)
+    );
+    let rows = String::from_utf8_lossy(&both.stdout).into_owned();
+    assert!(rows.lines().any(|row| row.starts_with("q1\t")), "{rows}");
+    assert!(rows.lines().any(|row| row.starts_with("q2\t")), "{rows}");
+    assert_eq!(bad.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&bad.stderr),
+        "BLAST query error: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n"
+    );
+}
+
+// No NCBI counterpart (line GZ, DECISIONS 5): a `.gz` that is not gzip data is refused before
+// the search, with exit status 1, and `-` is read as it comes (never inflated).
+#[test]
+fn a_gz_name_without_gzip_data_is_refused_before_the_search() {
+    let query_gz = temp_path("text_query", "fa.gz");
+    let subject = temp_path("text_subject", "fa");
+    fs::write(&query_gz, GZ_QUERY).unwrap();
+    fs::write(&subject, GZ_SUBJECT).unwrap();
+    let refused = blastn_output(&query_gz, &subject, "6");
+    let _ = fs::remove_file(&query_gz);
+    let _ = fs::remove_file(&subject);
+    assert_eq!(refused.status.code(), Some(1));
+    assert_eq!(refused.stdout, b"");
+    let stderr = String::from_utf8_lossy(&refused.stderr).into_owned();
+    assert!(stderr.starts_with("Error: -query: '"), "{stderr}");
+    assert!(
+        stderr.contains("' is named .gz but is not gzip data ("),
+        "{stderr}"
+    );
+    assert!(
+        stderr
+            .trim_end()
+            .ends_with("); LOSAT reads a file named .gz through gzip"),
+        "{stderr}"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1037-1050 (an `-in` name that
+// ends in `.gz`, in any case, is read through a gzip stream; the title defaults to the name as
+// given). The database built from the inflated file is the one built from the plain file;
+// `.bz2` and `.zst` stay refused (line GZ, DECISIONS 2).
+#[test]
+fn makeblastdb_reads_a_gz_input_as_makeblastdb_does() {
+    let dir = temp_path("makedb_gz", "dir");
+    fs::create_dir_all(&dir).unwrap();
+    let plain = dir.join("s.fna");
+    let gz = dir.join("s.fna.GZ");
+    let query = dir.join("q.fna");
+    fs::write(&plain, GZ_SUBJECT).unwrap();
+    fs::write(&gz, gzip_members(&[GZ_SUBJECT.as_bytes()])).unwrap();
+    fs::write(&query, GZ_QUERY).unwrap();
+    let build = |input: &std::path::Path, out: &str| {
+        clean_losat_command()
+            .current_dir(&dir)
+            .args(["makeblastdb", "-dbtype", "nucl", "-in"])
+            .arg(input.file_name().unwrap())
+            .args(["-out", out])
+            .output()
+            .expect("run makeblastdb")
+    };
+    let from_plain = build(&plain, "db_plain");
+    let from_gz = build(&gz, "db_gz");
+    assert_eq!(
+        from_plain.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&from_plain.stderr)
+    );
+    assert_eq!(
+        from_gz.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&from_gz.stderr)
+    );
+    assert_eq!(from_gz.stderr, from_plain.stderr);
+    let log = String::from_utf8_lossy(&from_gz.stdout).into_owned();
+    assert!(log.contains("New DB title:  s.fna.GZ\n"), "{log}");
+    assert!(log.contains("added 1 sequences in"), "{log}");
+    for extension in ["nsq", "nhr"] {
+        assert_eq!(
+            fs::read(dir.join(format!("db_gz.{extension}"))).unwrap(),
+            fs::read(dir.join(format!("db_plain.{extension}"))).unwrap(),
+            "{extension}"
+        );
+    }
+    let search = |db: &str| {
+        clean_losat_command()
+            .current_dir(&dir)
+            .args(["blastn", "-outfmt", "6", "-query", "q.fna", "-db", db])
+            .output()
+            .expect("run blastn -db")
+    };
+    let plain_rows = search("db_plain");
+    let gz_rows = search("db_gz");
+    assert_eq!(
+        plain_rows.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&plain_rows.stderr)
+    );
+    assert!(plain_rows.stdout.len() > 0);
+    assert_eq!(gz_rows.stdout, plain_rows.stdout);
+
+    let text_gz = dir.join("text.fna.gz");
+    fs::write(&text_gz, GZ_SUBJECT).unwrap();
+    let refused = build(&text_gz, "db_text");
+    assert_eq!(refused.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&refused.stderr).into_owned();
+    assert!(
+        stderr
+            .contains("losat makeblastdb: -in: 'text.fna.gz' is named .gz but is not gzip data ("),
+        "{stderr}"
+    );
+    assert!(
+        !dir.join("db_text.nsq").exists(),
+        "the failed build leaves no files"
+    );
+
+    let bz2 = dir.join("s.fna.bz2");
+    fs::write(&bz2, GZ_SUBJECT).unwrap();
+    let refused = build(&bz2, "db_bz2");
+    assert_eq!(refused.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&refused.stderr).into_owned();
+    assert!(stderr.contains("s.fna.bz2: makeblastdb reads a file of this name as compressed; losat makeblastdb reads uncompressed FASTA and gzip (.gz) only"), "{stderr}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:140-152
 // ```c++
 //     while (size_read < GetBatchSize()) {

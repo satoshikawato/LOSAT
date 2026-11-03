@@ -166,13 +166,16 @@ pub(crate) fn refuse_irregular_query() -> Result<()> {
 /// records are cut to `range` as the search cuts them: a record the range skips is never
 /// written and is not checked.
 pub(crate) fn prescan_query_titles(
-    path: &std::path::Path,
+    file: &std::fs::File,
     lowercase: bool,
     batch_size: usize,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
 ) -> Result<()> {
-    let file = std::fs::File::open(path)?;
-    let mut stream = super::input::FastaStream::from_file(file);
+    use std::io::Seek;
+    // A second handle on the open file (a `.gz` query is an unnamed inflated file that no path
+    // reaches, `input_files::open_file_input`); the handles share one position, put back below.
+    let start = (&*file).stream_position()?;
+    let mut stream = super::input::FastaStream::from_file(file.try_clone()?);
     let scanned = super::input::parse_fasta_stream_keeping(
         &mut stream,
         false,
@@ -185,6 +188,8 @@ pub(crate) fn prescan_query_titles(
         },
         &mut |_| Ok(()),
     );
+    drop(stream);
+    (&*file).seek(std::io::SeekFrom::Start(start))?;
     match scanned {
         Err(error) if error.is::<TitleRefusal>() => Err(error),
         _ => Ok(()),

@@ -187,29 +187,31 @@ describe('SearchDraft submit', () => {
     expect(draft.state.get().message).toEqual({ kind: 'error', text: 'Every subject record is excluded.' });
   });
 
-  it('queues BLASTX without a region, which it does not take, and keeps the region of another program', async () => {
+  it("queues BLASTX with the regions of its nucleotide query and protein subject (DW-39)", async () => {
     const { draft, requests } = setup();
     draft.setPaste('query', '>q\nACGTACGTAC\n');
     draft.setPaste('subject', '>s\nMKLVMKLV\n');
     await draft.idle();
-    draft.setRegion('query', { start: '2', stop: '8' });
-    expect(draft.parameters()).toEqual([['-query_loc', '2-8']]);
     draft.setProgram('blastx');
     await draft.idle();
-    expect(draft.regionRecord('query')).toBeUndefined();
-    expect(draft.parameters()).toEqual([]);
-    // Nor does a region that BLASTN refuses (the stop is past the record) stop BLASTX.
-    draft.setProgram('blastn');
-    draft.setRegion('query', { start: '2', stop: '50' });
-    expect(await draft.submit()).toMatchObject({ ok: false, message: expect.stringMatching(/^Query region: /) });
-    draft.setProgram('blastx');
-    await draft.idle();
-    expect(await draft.submit()).toMatchObject({ ok: true });
-    expect(requests.at(-1)![0]!).toMatchObject({ program: 'blastx', parameters: [] });
-    draft.setProgram('blastn');
-    await draft.idle();
-    expect(draft.region('query')).toEqual({ start: '2', stop: '50' });
     expect(draft.regionRecord('query')?.id).toBe('q');
+    expect(draft.regionRecord('subject')?.id).toBe('s');
+    draft.setRegion('query', { start: '2', stop: '8' });
+    draft.setRegion('subject', { start: '3', stop: '8' });
+    expect(draft.parameters()).toEqual([
+      ['-query_loc', '2-8'],
+      ['-subject_loc', '3-8'],
+    ]);
+    // The subject's region is checked against its residues, the query's against its bases.
+    draft.setRegion('subject', { start: '3', stop: '9' });
+    expect(await draft.submit()).toEqual({
+      ok: false,
+      message: 'Subject region: The stop must be between 1 and 8, the length of the record.',
+    });
+    draft.setRegion('subject', undefined);
+    draft.setRegion('query', { start: '2', stop: '10' });
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    expect(requests.at(-1)![0]!).toMatchObject({ program: 'blastx', parameters: [['-query_loc', '2-10']] });
   });
 
   it('queues one combined search of all files, named as plan §5.3 says', async () => {

@@ -135,8 +135,8 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
             .and_then(|()| LOSAT::algorithm::tblastn::check_options(&args))
             .map_err(|error| format!("{error:#}"))?,
         // The checks of each search's formats, as for BLASTN: BLASTX resolves its options for
-        // each format (the hit list size), and LOSAT Web's BLASTX refuses `-query_loc` and
-        // `-subject_loc` until line SX's session SXd3 (`blastx::check_options`).
+        // each format (the hit list size). Its ranges are read among them, where its run reads
+        // them: after LOSAT's limits of the options (`blastx::check_options`).
         Commands::Blastx(args) => {
             let mut first_error = None;
             for group in &groups {
@@ -501,10 +501,8 @@ fn search(
                 ordinals = searched_queries(args.query_loc.as_deref(), "TBLASTX", query);
                 run_local_tblastx(args, query, subject, &mut outputs)
             }
-            // LOSAT Web's BLASTX refuses `-query_loc` until line SX's session SXd3: every query is
-            // searched.
             Commands::Blastx(args) => {
-                ordinals = None;
+                ordinals = searched_queries(args.query_loc.as_deref(), "BLASTX", query);
                 run_local_blastx(args, query, subject, &mut outputs)
             }
             Commands::Psiblast(_) | Commands::Makedb(_) => {
@@ -1464,6 +1462,68 @@ mod tests {
         assert_eq!(validate(&both).unwrap_err(), error);
         let format0 = parse(&both).unwrap().1;
         assert!(group_rejected(&format0, &[0]) && group_rejected(&format0, &[6, 7]));
+    }
+
+    // BLASTX reads -query_loc and -subject_loc as the CLI does (DW-39): the rows give record
+    // coordinates, a query that the range skips keeps its registered index in the HSP records,
+    // and validate reads the ranges where the run reads them, after LOSAT's limits of the
+    // options and the subject range first.
+    #[test]
+    fn blastx_ranges_as_the_other_programs() {
+        let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
+        let query = [
+            FastaRecord::new("short", b"short", b"ACGTACGT"),
+            FastaRecord::new("q", b"q", CODING),
+        ];
+        let subject = [FastaRecord::new("s", b"s", protein)];
+        let words = [
+            "blastx",
+            "-query",
+            "q.fna",
+            "-subject",
+            "s.faa",
+            "-query_loc",
+            "31-198",
+            "-subject_loc",
+            "5-66",
+        ];
+        assert!(validate(&words).is_ok());
+        let ranged = streams(&words, &query, &subject).unwrap();
+        let row = text(&ranged[&6]);
+        assert!(
+            row.starts_with("q\ts\t100.000\t56\t0\t0\t31\t198\t11\t66\t"),
+            "{row}"
+        );
+        let records = text(&ranged[&1]);
+        assert_eq!(records.lines().count(), 1);
+        assert!(records.contains("\"q_idx\":1"), "{records}");
+        assert_eq!(
+            searched_queries(Some("31-198"), "BLASTX", &query),
+            Some(vec![1])
+        );
+        // The errors of the argv, as the run reports them.
+        for extra in [
+            &["-subject_loc", "5-2", "-query_loc", "9-1"][..],
+            &["-query_loc", "9-1", "-evalue", "0"],
+            &["-subject_loc", "5-2", "-matrix", "PAM30"],
+        ] {
+            let argv = [&words[..5], extra].concat();
+            let error = run(&argv, &query, &subject).unwrap_err();
+            assert_eq!(validate(&argv).unwrap_err(), error, "{extra:?}");
+        }
+        let error =
+            validate(&[&words[..5], &["-subject_loc", "5-2", "-query_loc", "9-1"]].concat())
+                .unwrap_err();
+        assert!(error.contains("subject location"), "{error}");
+        let error = validate(&[&words[..5], &["-subject_loc", "5-2", "-matrix", "PAM30"]].concat())
+            .unwrap_err();
+        assert!(error.starts_with("unsupported BLASTX matrix"), "{error}");
+        // A subject range that starts past the subject's end is an error of the records, which
+        // validate does not see.
+        let past = [&words[..5], &["-subject_loc", "70-80"]].concat();
+        assert!(validate(&past).is_ok());
+        let error = run(&past, &query, &subject).unwrap_err();
+        assert!(error.contains("Invalid from coordinate"), "{error}");
     }
 
     // Observer events that break the formatter contract fail the run instead of

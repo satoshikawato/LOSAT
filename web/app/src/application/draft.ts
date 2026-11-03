@@ -317,19 +317,12 @@ export class SearchDraft {
 
   // --- derived views ----------------------------------------------------------------------
 
-  /**
-   * The record that the role's region applies to: the role's only included record, for a
-   * program that takes a subrange (a region chosen for another program is kept, unused).
-   */
+  /** The record that the role's region applies to: the role's only included record. */
   regionRecord(role: InputRole): DatasetRecord | undefined {
-    if (programById(this.state.get().program).subrange === false) return undefined;
     return this.onlyRecord(role)?.record;
   }
 
-  /**
-   * The region of the role, if it was chosen on the role's only record as it is now. A program
-   * without a subrange keeps it unused (`regionRecord` gives no record).
-   */
+  /** The region of the role, if it was chosen on the record that `regionRecord` gives now. */
   region(role: InputRole): RegionText | undefined {
     const region = this.role(role).region;
     return region !== undefined && region.record === this.regionIdentity(role) ? region.text : undefined;

@@ -29,7 +29,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | 「Reset page」「Bookmark」 | なし | 採らない | Reset page は開いた大きなファイルの選択も消す（入力は Remove で 1 つずつ外す）。Bookmark は URL に検索の状態を持たない（研究データを URL に入れない、`web/AGENTS.md` 規則 4） |
 | 枠「Enter Query Sequence」 | 枠「Enter Query Sequence」（`query-panel`） | 採る | |
 | 「Enter accession number(s), gi(s), or FASTA sequence(s)」と textarea、「Clear」 | 「Enter FASTA sequence(s)」と textarea（`query-input`）、「Clear」（貼った文字だけを消す） | 寄せる | accession の取得は NCBI への送信になる（`web/AGENTS.md` 規則 4）。FASTA だけを受ける |
-| 「Query subrange」From / To | 「Query subrange」From / To と範囲の棒（`query-region`、`-query_loc`） | 寄せる | LOSAT は含めたレコードが 1 つのときだけ範囲を指定できる（DW-9）。それ以外は理由の一文。BLASTX は範囲の欄を出さず argv にも書かない（エンジンが BLASTX の `-query_loc` / `-subject_loc` を受けるのは線 SX の SXd から、DW-11・DW-36）。他の mode で選んだ範囲は残る |
+| 「Query subrange」From / To | 「Query subrange」From / To と範囲の棒（`query-region`、`-query_loc`） | 寄せる | LOSAT は含めたレコードが 1 つのときだけ範囲を指定できる（DW-9）。それ以外は理由の一文。BLASTX も同じ（query は nt、subject は aa。DW-11・DW-39） |
 | 「Or, upload file」 | 「Or, upload file」：「Open FASTA files…」と落とす場所（`query-open`、`query-files`） | 寄せる | LOSAT は複数のファイルを受け、中身を貼る欄に写さない |
 | 「Genetic code」（blastx・tblastx の query） | 「Genetic code」（`param-query_gencode`）を Enter Query Sequence の中に | 採る | W3 は Algorithm parameters の「Genetic codes」に置いていた |
 | 「Job Title」と「Enter a descriptive title for your BLAST search」 | 「Job Title」（`job-title`）。Run の名前として RunSnapshot の `title` に持ち、argv には入れない。キューの Run と結果の見出しに示す | 採る | NCBI は最初の query の defline で自動で埋めるが、LOSAT は埋めない（空なら名前なし） |

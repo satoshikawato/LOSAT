@@ -617,7 +617,7 @@ describe('program descriptors', () => {
     for (const program of PROGRAMS) expect(programById(program.id)).toBe(program);
   });
 
-  it("reads each input with NCBI's reader kind of its sequence kind (DW-38), and gives BLASTX no subrange (DW-11)", () => {
+  it("reads each input with NCBI's reader kind of its sequence kind (DW-38)", () => {
     expect(Object.fromEntries(PROGRAMS.map((p) => [p.id, [fastaParser(p, 'query'), fastaParser(p, 'subject')]]))).toEqual({
       blastn: [1, 1],
       blastp: [2, 2],
@@ -625,7 +625,6 @@ describe('program descriptors', () => {
       tblastx: [1, 1],
       blastx: [1, 2],
     });
-    expect(PROGRAMS.filter((p) => p.subrange === false).map((p) => p.id)).toEqual(['blastx']);
   });
 
   it.each(PROGRAMS.map((p) => [p.id, p] as const))('%s has a form with unique flags', (_id, program) => {

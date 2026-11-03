@@ -51,6 +51,7 @@ export class BrowserAccessionFetcher implements AccessionFetcher {
       timeout.abort(new DOMException('no answer in time', 'TimeoutError'));
     }, this.options.timeoutMs ?? TIMEOUT_MS);
     try {
+      request.onStart?.();
       const response = await (this.options.fetch ?? fetch)(fetchUrl(request.source, request.kind, request.accession), {
         signal: timeout.signal,
         credentials: 'omit',

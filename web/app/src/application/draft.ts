@@ -20,8 +20,10 @@ import {
   accessionLines,
   FETCH_ACCESSION_LIMIT,
   FETCH_BYTE_LIMIT,
+  FETCH_SOURCES,
   servingSources,
   sourceLabel,
+  sourceList,
   unserved,
   type FetchChoice,
   type FetchSourceId,
@@ -443,17 +445,32 @@ export class SearchDraft {
     for (const accession of accessions) {
       const reason = choice === 'fastest' ? undefined : unserved(choice, kind, accession);
       if (reason !== undefined) {
-        fail(`${reason}: fetch ${accession} from NCBI or CNCB.`);
+        fail(`${reason}: fetch ${accession} from ${sourceList(servingSources(kind, [accession]))}.`);
         return;
       }
     }
     let source: FetchSourceId;
     if (choice === 'fastest') {
-      this.updateRole(role, (draft) => ({ ...draft, fetch: { state: 'racing' } }));
-      try {
-        source = await this.race.fastest(kind, servingSources(kind, accessions), signal);
-      } catch {
+      const eligible = servingSources(kind, accessions);
+      if (eligible.length === 0) {
+        const only = accessions
+          .map((accession) => ({ accession, sources: servingSources(kind, [accession]) }))
+          .filter((entry) => entry.sources.length < FETCH_SOURCES.length)
+          .map((entry) => `${entry.accession} only from ${sourceList(entry.sources)}`);
+        fail(`No one site has all of these accessions: ${only.join(', ')}.`);
         return;
+      }
+      if (eligible.length === 1) {
+        // One site has them: nothing to race.
+        source = eligible[0]!;
+      } else {
+        this.updateRole(role, (draft) => ({ ...draft, fetch: { state: 'racing' } }));
+        try {
+          source = await this.race.fastest(kind, eligible, signal);
+        } catch (error) {
+          fail(`The race of the sites failed: ${messageOf(error)}`);
+          return;
+        }
       }
     } else {
       source = choice;

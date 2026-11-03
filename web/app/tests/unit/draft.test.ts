@@ -371,10 +371,10 @@ describe('SearchDraft accessions from the fastest source (line WF-3)', () => {
     });
     expect(draft.state.get().race.nucleotide).toBeUndefined();
     draft.setFetchSource('cncb');
-    draft.setPaste('subject', 'P12345');
+    draft.setPaste('subject', 'WP_000001.1');
     draft.fetchAccessions('subject');
     await draft.idle();
-    expect(asked(fetcher).slice(4)).toEqual([['cncb', 'P12345', false]]);
+    expect(asked(fetcher).slice(4)).toEqual([['cncb', 'WP_000001.1', false]]);
     expect(draft.state.get().fetchSource).toBe('cncb');
   });
 
@@ -408,6 +408,57 @@ describe('SearchDraft accessions from the fastest source (line WF-3)', () => {
     second.draft.fetchAccessions('subject');
     await second.draft.idle();
     expect(offline.requests.filter((r) => r.fresh === true)).toHaveLength(6);
+  });
+
+  it('sends no accession to a source that lacks it: UniProt not to CNCB, GenBase only to CNCB', async () => {
+    const fetcher = new FakeAccessionFetcher({
+      'NP_414542.1': '>NP_414542.1 thr operon leader peptide\nMKRISTTITTTITITTGNGAG\n',
+      'ebi:P0AD86': '>sp|P0AD86|LPT_ECOLI thr operon leader peptide\nMKRISTTITTTITITTGNGAG\n',
+      P12345: '>sp|P12345|AATM_RABIT\nMALLHS\n',
+      'C_AA004835.1': '>C_AA004835.1 SARS-CoV-2\nACGT\n',
+    });
+    const { draft } = setup({ fetcher });
+    draft.setProgram('blastp');
+    fetcher.hold('ncbi', 'ebi');
+    draft.setPaste('subject', 'P12345');
+    draft.fetchAccessions('subject');
+    // CNCB answers first, but it has no UniProt records: the fetch waits for NCBI or EBI.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(draft.state.get().race.protein?.answered.map((entry) => entry.source)).toEqual(['cncb']);
+    expect(draft.state.get().subject.fetch).toEqual({ state: 'racing' });
+    fetcher.release('ebi');
+    await draft.idle();
+    expect(asked(fetcher).slice(3)).toEqual([['ebi', 'P12345', false]]);
+    fetcher.release();
+    await draft.raceIdle();
+
+    // Only CNCB has GenBase records: no race, and EBI is not asked.
+    draft.setProgram('blastn');
+    draft.setPaste('query', 'C_AA004835.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(asked(fetcher).slice(4)).toEqual([['cncb', 'C_AA004835.1', false]]);
+    expect(draft.state.get().race.nucleotide).toBeUndefined();
+    draft.setFetchSource('ebi');
+    draft.setPaste('query', 'C_AA004835.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(draft.state.get().query.fetch).toEqual({
+      state: 'failed',
+      message: 'EBI (ENA) has no GenBase records: fetch C_AA004835.1 from CNCB.',
+    });
+
+    // No one site has both.
+    draft.setFetchSource('fastest');
+    draft.setProgram('blastp');
+    draft.setPaste('subject', 'C_AA004835.1\nP12345');
+    draft.fetchAccessions('subject');
+    await draft.idle();
+    expect(draft.state.get().subject.fetch).toEqual({
+      state: 'failed',
+      message: 'No one site has all of these accessions: C_AA004835.1 only from CNCB, P12345 only from NCBI or EBI.',
+    });
+    expect(asked(fetcher)).toHaveLength(5);
   });
 
   it('lets the race finish when the box is edited during it, and sends nothing of the box', async () => {

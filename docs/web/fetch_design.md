@@ -92,7 +92,7 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
 
 保守者の常設の指示（2026-09-29、2026-10-07 に再掲）により、推奨の案を採って記録する。作業記録は web-fetch-20261103/DECISIONS.md の 7〜13。
 
-1. **取得先は手で選ぶ**（NCBI が既定、選んだ先はセッション中保ち、query と subject で共通）。§2 の競走は §6 のとおり WF-3。利用者の
+1. **取得先は手で選ぶ**（NCBI が既定、選んだ先はセッション中保ち、query と subject で共通。WF-3 で既定は「Fastest」になった、§10 の 3）。§2 の競走は §6 のとおり WF-3。利用者の
    accession を 3 か所へ同時に送る競走はしない（その場の一文「Sends the accession to NCBI」と食い違う）。WF-3 の競走は固定の公開
    accession か Range 要求で測る。
 2. **accession の形**は §4 の `^[A-Z]{1,2}_?\d+(\.\d+)?$` を広げる：INSDC（1〜2 文字 + 5〜8 桁、タンパク質の 3 文字 + 5〜7 桁、WGS の
@@ -180,24 +180,29 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    efetch の速さを言わない）。レコードは核酸が MH011443.1（TP53 の exon 5、192 B、3 か所とも）、タンパク質が大腸菌の thr operon leader
    peptide（NCBI と CNCB は NP_414542.1、UniProt は P0AD86。CNCB は UniProt の accession に空の本文を返す）。利用者の accession は
    送らない。要求は取得と同じ（`credentials: 'omit'`、referrer 無し、NCBI は 340 ms 空ける）に `cache: 'no-store'`（UniProt は
-   `max-age=43200` を返し、ブラウザの写しの速さは何も測らない）。EBI の host は kind で違う（ENA / UniProt）ので kind ごとに測る。
+   `max-age=43200` を返し、ブラウザの写しの速さは何も測らない）。時間は要求が出た時から測る（NCBI の 340 ms の待ちは数えない、
+   `FetchRequest.onStart`）。10 s 以内に答えない所は失敗と数える（ENA は 20〜25 s かかったことがある）。EBI の host は kind で
+   違う（ENA / UniProt）ので kind ごとに測る。
    2026-11-03 の実測（日本から）：ENA は同じレコードに 20.1 s、25.6 s、1.3 s。アプリからの競走では 3 ブラウザとも NCBI が先（0.3〜0.6 s）。
 3. **いつ走るか**：取得先の選択の既定を「Fastest」にする（保守者の 6「一番アクセスしやすい DB」、§2）。kind の最初の「Fetch」のときだけ
    走り、ページを開いた・mode を変えた・Run を押した・取得先を手で選んでいるときは走らない。1 つのタブで kind ごとに 1 回で、走っている
-   間の別の Fetch は同じ競走を待つ。accession は、その全部を扱える取得先（§8 の 5：EBI は RefSeq の核酸と UniProt 以外のタンパク質を
-   扱わない、問い合わせずに外す）のうち最初に答えた所へ、その答えが来た時点で送る。他の答えは後ろで届いて順位を埋める。失敗した所は
-   外し、扱える所のどれも答えなければ NCBI へ送る（失敗はその取得が名乗る）。どこも答えなかった競走は残さない（次の Fetch でもう一度、
+   間の別の Fetch は同じ競走を待つ。accession は、その全部を扱える取得先のうち最初に答えた所へ、その答えが来た時点で送る。扱えない所は
+   問い合わせずに外す（§8 の 5 の EBI に加え、2026-11-03 の実測で：CNCB は UniProt の accession に空の本文を返す、GenBase の `C_…` は
+   NCBI も ENA も持たない）。扱える所が 1 つなら競走しない（`C_…` は CNCB へ直に）。どこも全部は扱えない欄は何も送らず
+   「No one site has all of these accessions: C_AA004835.1 only from CNCB, P12345 only from NCBI or EBI.」で止まる。他の答えは
+   後ろで届いて順位を埋める。失敗した所は外し、扱える所のどれも答えなければその最初（ふつう NCBI）へ送る（失敗はその取得が名乗る）。どこも答えなかった競走は残さない（次の Fetch でもう一度、
    たとえばオフラインから戻った後）。順位はタブの間（メモリ）だけ保ち、読み込み直すとまた測る。手で選んだ取得先は §8 の 1 のとおり保つ
    （`web/app/src/application/source-race.ts`）。
 4. **画面**：選択は「Fastest」「NCBI」「EBI」「CNCB」。競走の後は「Fastest (NCBI)」（その欄の accession を扱える最初の所）。その場の一文は
    競走の前は「Sends the accession to the fastest of NCBI, EBI and CNCB」（扱える所だけを並べる）、後は「Sends the accession to NCBI」。
-   競走の間は「Finding the fastest site…」で、Run は「The query accession is still being fetched.」で止まる。「?」に競走が各取得先へ
+   競走の間は「Finding the fastest site…」で、Run は「The query accession is still being fetched.」で止まる。選択は query と subject で
+   共通なので、どちらかが取得している間は両方の欄で止める（取得中の欄の一文が送り先と食い違わないように）。「?」に競走が各取得先へ
    送るレコードの名前を足した。
 5. **保存先**：Example が読むのは OPFS の写し（§9 の 5）のまま（確認の窓が出ない、オフラインで動く、3 ブラウザ）。保存した写しの横に
    「Save to folder…」（`showDirectoryPicker` のある Chromium / Edge。`mode: 'readwrite'`、`id: 'losat-examples'` で前回のフォルダから
    開く）を置き、選んだフォルダへ写しを `fileName`（展開した FASTA、subject の source と同じ名前なので、後で「Open FASTA files…」で
    開けば入力の名前も同じ）として OPFS のファイルから流して書く。同じ名前のファイルは置き換える（`createWritable` は閉じたときに
-   入れ替わる）。API の無いブラウザ（Firefox、Safari、Android の Chromium）は「Download」（OPFS の File の object URL。メモリに
+   入れ替わる。新しく作ったファイルは、写しに失敗したら消す：空のファイルを残さない）。API の無いブラウザ（Firefox、Safari、Android の Chromium）は「Download」（OPFS の File の object URL。メモリに
    写さない）。LOSAT はフォルダの handle を持たず、フォルダを自分では読まない：handle は site のデータに置くしかなく、それは OPFS の
    写しと一緒に消える（サイトデータの消去、容量不足の追い出し）。フォルダの写しが要るのはまさにそのときなので、「Open FASTA files…」で
    開く（3 ブラウザ）。メモリだけの経路（OPFS の無いタブ）には出さない。要求は出さない（ファイルはこのブラウザのもの）

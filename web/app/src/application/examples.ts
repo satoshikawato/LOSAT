@@ -172,6 +172,8 @@ export class ExampleLoader {
   }
 
   private async copyOf(set: ExampleSet): Promise<File> {
+    // A copy being deleted is gone first.
+    await this.deleting.get(set.id);
     const kept = await this.deps.store.readExample(set.id, set.url);
     if (kept === undefined) {
       this.setSaved(set.id, null);

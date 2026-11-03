@@ -13,6 +13,8 @@ export interface FetchRequest {
   readonly maxBytes: number;
   /** Ask the site, not the browser's HTTP cache: the race times the site (application/source-race.ts). */
   readonly fresh?: boolean;
+  /** Called when the request goes out, after any wait between NCBI requests (the race times from there). */
+  readonly onStart?: () => void;
 }
 
 export type FetchResult =

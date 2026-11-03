@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SourceRace, type RaceStanding } from '../../src/application/source-race';
-import { accessionLines, RACE_RECORDS, servingSources, unserved } from '../../src/domain/accession';
+import { accessionLines, RACE_RECORDS, servingSources, sourceList, unserved } from '../../src/domain/accession';
 import { BrowserAccessionFetcher, fetchUrl } from '../../src/infra/browser/accession-fetcher';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 
@@ -32,7 +32,20 @@ describe('accessionLines', () => {
     expect(unserved('ebi', 'protein', 'P12345')).toBeUndefined();
     expect(unserved('ncbi', 'protein', 'WP_000001.1')).toBeUndefined();
     expect(servingSources('nucleotide', ['AB000001.1', 'NR_074540.1'])).toEqual(['ncbi', 'cncb']);
-    expect(servingSources('protein', ['P12345'])).toEqual(['ncbi', 'ebi', 'cncb']);
+    expect(servingSources('protein', ['WP_000001.1'])).toEqual(['ncbi', 'cncb']);
+  });
+
+  it('knows that CNCB has no UniProt records and that only CNCB has GenBase records (2026-11-03)', () => {
+    expect(unserved('cncb', 'protein', 'P12345')).toBe('CNCB has no UniProt records');
+    expect(unserved('cncb', 'protein', 'NP_414542.1')).toBeUndefined();
+    expect(servingSources('protein', ['P12345'])).toEqual(['ncbi', 'ebi']);
+    expect(unserved('ncbi', 'nucleotide', 'C_AA004835.1')).toBe('NCBI has no GenBase records');
+    expect(unserved('ebi', 'nucleotide', 'C_AA004835.1')).toBe('EBI (ENA) has no GenBase records');
+    expect(servingSources('nucleotide', ['C_AA004835.1'])).toEqual(['cncb']);
+    expect(servingSources('protein', ['C_AA004835.1', 'P12345'])).toEqual([]);
+    expect(sourceList(['cncb'])).toBe('CNCB');
+    expect(sourceList(['ncbi', 'cncb'])).toBe('NCBI or CNCB');
+    expect(sourceList(['ncbi', 'ebi', 'cncb'], 'and')).toBe('NCBI, EBI and CNCB');
   });
 
   it('races with records that every source serves, of the kind raced', () => {
@@ -81,12 +94,46 @@ describe('SourceRace', () => {
     fetcher.hold();
     const controller = new AbortController();
     const waiting = race.fastest('nucleotide', ['ncbi'], controller.signal);
+    const other = race.fastest('nucleotide', ['ncbi', 'cncb'], new AbortController().signal);
     controller.abort(new DOMException('edited', 'AbortError'));
     await expect(waiting).rejects.toThrow('edited');
+    fetcher.release('cncb');
+    expect(await other).toBe('cncb');
     fetcher.release();
     await race.idle();
     expect(await race.fastest('nucleotide', ['ncbi'], new AbortController().signal)).toBe('ncbi');
     expect(fetcher.requests).toHaveLength(3);
+  });
+
+  it('times from the moment the request goes out, not from the wait between NCBI requests', async () => {
+    let clock = 0;
+    const changes: Array<RaceStanding | undefined> = [];
+    const fetcher = {
+      // Each request waits until 1000 before it goes out, then is answered at once.
+      fetch: async (request: { readonly onStart?: () => void }) => {
+        clock = 1000;
+        request.onStart?.();
+        return { ok: true as const, fasta: '>x\nA\n' };
+      },
+    };
+    const race = new SourceRace({ fetcher, now: () => clock, onChange: (_, standing) => changes.push(standing) });
+    await race.fastest('nucleotide', ['ncbi'], new AbortController().signal);
+    await race.idle();
+    expect(changes.at(-1)?.answered.map((entry) => entry.ms)).toEqual([0, 0, 0]);
+  });
+
+  it('counts a source that has not answered by the deadline as failed, and races again after a race without answers', async () => {
+    const fetcher = new FakeAccessionFetcher({ 'MH011443.1': '>MH011443.1\nACGT\n' });
+    const changes: Array<RaceStanding | undefined> = [];
+    const race = new SourceRace({ fetcher, now: () => 0, deadlineMs: 20, onChange: (_, standing) => changes.push(standing) });
+    fetcher.hold();
+    // Every eligible source failed: the first of them.
+    expect(await race.fastest('nucleotide', ['cncb', 'ncbi'], new AbortController().signal)).toBe('cncb');
+    await race.idle();
+    expect(changes.at(-1)).toBeUndefined();
+    fetcher.release();
+    expect(await race.fastest('nucleotide', ['ncbi'], new AbortController().signal)).toBe('ncbi');
+    expect(fetcher.requests).toHaveLength(6);
   });
 });
 

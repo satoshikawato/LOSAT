@@ -115,11 +115,17 @@ test('Delete in one tab removes the subject source made from the copy in another
 
 test("the saved copy goes to a folder that the user picks, or to the browser's download, without a request", async ({ page }) => {
   const away = await stubHosts(page);
-  // The folder picker cannot be driven: where the browser has one, it picks the folder "picked" of OPFS.
+  // The folder picker cannot be driven: where the browser has one, it picks the folder "picked" of OPFS,
+  // and refuses as the real one does when the click's activation has passed.
   await page.addInitScript(() => {
     const target = window as { showDirectoryPicker?: unknown };
     if (typeof target.showDirectoryPicker === 'function') {
-      target.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('picked', { create: true });
+      target.showDirectoryPicker = async () => {
+        if (!navigator.userActivation.isActive) {
+          throw new DOMException('Must be handling a user gesture to show a file picker.', 'SecurityError');
+        }
+        return (await navigator.storage.getDirectory()).getDirectoryHandle('picked', { create: true });
+      };
     }
   });
   await openSearch(page);

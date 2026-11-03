@@ -30,6 +30,7 @@ export class FakeAccessionFetcher implements AccessionFetcher {
 
   async fetch(request: FetchRequest, signal: AbortSignal): Promise<FetchResult> {
     this.requests.push(request);
+    request.onStart?.();
     if (this.holding.has(request.source)) {
       await new Promise<void>((resolve) => {
         const held = this.held.get(request.source) ?? [];

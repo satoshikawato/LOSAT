@@ -31,9 +31,19 @@ export const browserFileSaver: FileSaver = {
       throw error;
     }
     const data = await file();
+    const existed = await folder.getFileHandle(fileName).then(
+      () => true,
+      () => false,
+    );
     const handle = await folder.getFileHandle(fileName, { create: true });
-    // The writable replaces the file when it closes; a failed copy aborts it and leaves the old file.
-    await data.stream().pipeTo(await handle.createWritable());
+    try {
+      // The writable replaces the file when it closes; a failed copy aborts it and leaves an old file as it was.
+      await data.stream().pipeTo(await handle.createWritable());
+    } catch (error) {
+      // A file created for the copy would stay empty: remove it.
+      if (!existed) await folder.removeEntry(fileName).catch(() => undefined);
+      throw error;
+    }
     return folder.name;
   },
   download: downloadBlob,

@@ -91,7 +91,13 @@ const busy = (set: ExampleSet) => {
           >
             {{ examples.copyTo === 'folder' ? 'Save to folder…' : 'Download' }}
           </button>
-          <button type="button" class="link" :data-testid="`example-${set.id}-delete`" @click="examples.delete(set.id)">
+          <button
+            type="button"
+            class="link"
+            :disabled="state.copying === set.id"
+            :data-testid="`example-${set.id}-delete`"
+            @click="examples.delete(set.id)"
+          >
             Delete
           </button>
         </template>

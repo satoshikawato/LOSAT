@@ -1012,7 +1012,10 @@ fn run_inner(
                             matches!(options.outfmt, 6 | 7 | 10 | 20),
                             options.outfmt == 0,
                             matches!(options.outfmt, 13..=16),
-                            matches!(options.outfmt, 0 | 5 | 13..=16),
+                            matches!(options.outfmt, 0 | 5 | 13..=16)
+                                || options
+                                    .tabular
+                                    .is_some_and(|spec| spec.needs().joins_subjects()),
                             matches!(options.outfmt, 13..=16)
                                 || options.tabular.is_some_and(|spec| spec.needs().taxonomy),
                         );

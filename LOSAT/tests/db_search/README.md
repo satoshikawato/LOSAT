@@ -434,6 +434,20 @@ LOSAT writes; LOSAT refuses the sequence in the formats of taxids and their name
 taxonomy database (a title made from the taxids), and with a taxonomy database on `BLASTDB` whose texts depend on
 the copy NCBI fetches (`bad_magic` for `pdup_at`, `offset_last_past_end` for the copies of 99990 in `pdup_no`).
 
+Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
+--join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and
+`ids/njoin_a`, `ids/njoin_b`, `ids/njoin_c` (version 5; r1 in all three, r3 with two definition lines and two
+pieces of the query in a and b, r6 the letters of r1 under another id in b), `ids/pjoin_bt` and `ids/njoin_bt` (the b
+records with taxid 9606), and the aliases `ids/pjoin_abc.pal`, `ids/pjoin_abt.pal`, `ids/njoin_abc.nal` and
+`ids/njoin_abt.nal` (queries `pjoin_q.faa`, `njoin_q.fna` and `njoin_q2.fna`, the last with two records for two
+query batches). NCBI orders tied hits by the later ordinal id first: r1 of c, r6, then r1 of b and a, which outfmt 0,
+5 and 13 to 16 show in one hit (r3 of b and a too), as LOSAT does; `-num_descriptions`, `-num_alignments` and
+psiblast's cut to `-max_target_seqs` count them as one subject, the tabular `qcovs` and `qcovus` take the group's
+coverage. `ids/pjoin_x` and `ids/njoin_x` hold the definition lines of r1 and r3 with other letters (no copies,
+refused; aliases `ids/pjoin_ax.pal`, `ids/njoin_ax.nal`); `ids/njoin_ta` and `ids/njoin_tb` (alias `ids/njoin_tab.nal`)
+hold r10 with taxid 9606 and a second definition line `lcl|loc10`, which the outfmt 0 heading under `-taxids 9606
+-no_taxid_expansion` hides where each copy has one HSP.
+
 Sequences whose only Seq-id is `gnl|BL_ORD_ID|n` (line DBID N2a; rows `db.id.*.ord.*`): `make_ids.py` writes, from
 the FASTA of `ids/make_ord_fasta.py`, `ids/pord_v5` and `ids/pord_v4` from `ids/pord.faa` (two accessions, then
 `gnl|BL_ORD_ID|2`, its own number, `gnl|BL_ORD_ID|6`, the number of no sequence, and `gnl|BL_ORD_ID|1`, the

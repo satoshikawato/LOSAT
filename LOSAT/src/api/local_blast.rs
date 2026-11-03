@@ -216,8 +216,10 @@ pub trait FormatObserver {
     // ```
     /// The outfmt 0 formatter for `ReportOutputs::formats[format]` starts the heading of
     /// a subject (its defline and length line), which precedes the first HSP of that
-    /// subject, `first_hsp`. Every byte written for that format before this call has
-    /// reached its sink. Formatters without subject headings never call it.
+    /// subject, `first_hsp`, and the HSPs of the copies of one database record that follow it
+    /// and that the heading also covers (`report::db_subject::joins_as_copy`). Every byte
+    /// written for that format before this call has reached its sink. Formatters without
+    /// subject headings never call it.
     fn subject_begin(&mut self, _format: usize, _first_hsp: HspIndex) {}
     /// The formatter finished the heading that `subject_begin` announced. Every byte of
     /// it has reached the sink.

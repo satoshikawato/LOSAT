@@ -12,7 +12,8 @@
   version 1.3 listed as wider than NCBI's failure; on 2026-11-03 line DBID N2c refused the weak
   matches of NCBI's scope, one of which version 1.3 listed as a known difference, and line DBID
   N1b compared the same record with other tax ids as the reports show it, which version 1.3 listed
-  as a refusal wider than NCBI's failure)
+  as a refusal wider than NCBI's failure, and line DBID N3 showed copies of one record that follow
+  each other in one hit, as NCBI shows them, which version 1.3 refused)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -568,6 +569,13 @@ program writes, the same bytes at every `-num_threads` (P1, P1.1), apart from wh
   its volume is found also beside another id. NCBI's scope first looks among the sequences of the
   batch it has already read, without case, so another reported sequence that holds the id can be
   shown in its place (refused below).
+- Following hits whose Seq-align ids `Match` (`CSeq_id::Match`): outfmt 0, 5 and 13 to 16 show the
+  alignments of copies of one record (the same definition lines but for their tax ids) that follow
+  each other in one hit, with the description line, heading and names of the first and its HSPs
+  then the others' (`Hsp_num` going on); `-num_descriptions`, `-num_alignments` and `psiblast`'s cut
+  to `-max_target_seqs` count them as one subject. The other formats keep a row per copy (the
+  tabular `qcovs` and `qcovus` count the group, which for copies is each copy's own coverage). Other
+  sequences whose Seq-align ids `Match` are refused below.
 - Approved difference: a `gb`, `emb` or `dbj` id prints the stored type
   ([`PD-LOSAT-NCBI-DEFECTS`](PD-LOSAT-NCBI-DEFECTS.md), version 1.10).
 
@@ -582,8 +590,8 @@ a result that LOSAT does not reproduce.
 | A Seq-align id that another sequence also holds, in any letter case, where the lookup finds the sequence itself (or the same record) first: `lcl|555` and `gb|X.1|` with `lcl|555` in a second definition line, `lcl|abc` and `lcl|ABC`, `bbs|123` in two databases of an alias. Not the same record in two volumes or databases (with other tax ids: the row below) | 0, 5, 6, 7, 10, 13 to 17, 20 | Where both are reported (also for different queries), its scope, which reads them in the order of its prefetch and compares ids without case, can write the other sequence's names, in every program but BLASTN also its identities; for `pdb|1ABC|A` and `pdb|1abc|A` in two databases it stops (exit 2) | 2, 3 |
 | The same record in another volume or database of an alias, or of `-db "a b"`, with other tax ids, which the lookup gives first or which also holds the Seq-align id. In every format where a title can depend on the tax ids (an empty title with `taxdb.bti` on the search path, a protein title ending in `]` where a definition line has no title or the id is `lcl|Subject_N`) and where the taxonomy database's texts depend on the copy: texts of opening it where only one copy has a tax id, the offset error of a tax id that a copy holds (also for the same tax ids in another volume) | 13 to 16 and the tabular `staxid`, `staxids` and name fields; else 0, 5, 6, 7, 10, 13 to 17, 20 | Shows for both the copy that the lookup gives first: its tax ids and their names, the title made from them, and the taxonomy database's texts of the lookups that the volume of that copy makes (the offset error of `taxdb.btd` once for that volume); the other formats write the same bytes | 2 |
 | A Seq-align id whose lookup fails (an LMDB file without the accession table; `gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) | 0, 5, 6, 7, 10, 13 to 17, 20 | Stops (exit 2; for the text tag "Error pre-fetching sequence data", exit 255) | 3 |
-| Following hits of a query whose Seq-align ids `Match`: `pdb|1ABC|` and `pdb|1ABC|AA`, `gb|X|` and `gb|X.1|`, one accession and version under `gb`, `emb` or `dbj`, two copies of one record | 0, 5, 13 to 16 | Shows them as one hit | 2 |
-| In `psiblast`, such hits among the first `-max_target_seqs` + 1 of a longer list | every format | `PruneSeqalign` counts them as one subject and keeps one more | 2 |
+| Following hits of a query whose Seq-align ids `Match` but that are not copies of one record: `pdb|1ABC|` and `pdb|1ABC|AA`, `gb|X|` and `gb|X.1|`, one accession and version under `gb`, `emb` or `dbj` | 0, 5, 13 to 16; tabular `qcovs` and `qcovus` | Shows them as one hit; writes the coverage of both on the first row and `N/A` on the other | 2 |
+| In `psiblast`, such hits that its cut of a longer list to `-max_target_seqs` counts (copies of one record count as one) | every format | `PruneSeqalign` counts them as one subject and keeps one more | 2 |
 | A Seq-align id that is the id of a query read with `-parse_deflines` | every format | Shows the query's title and letters for it | 2 |
 | A Seq-align id by which NCBI's scope finds a query read with `-parse_deflines` as a weak match (`x_GetSeqMatch`): `sp||NAME` for `sp|P00001.1|NAME` and the other way, `gb|X.1|` for `gb|X|`, `pir||ABCD` for `pir|ABCD|` | every format | Shows the query's title and letters for it (not `gb|X|` for `gb|X.1|`, nor `pir|ABCD|` for `pir||ABCD`) | 2 |
 | With `PRE_FETCH_SEQS_LIMIT` an integer other than 2147483647: a Seq-align id that an id of another sequence matches weakly, as in the row above, in any letter case and across the alternatives (`tpg|X.1|NAME` and `prf||NAME`). In version 4 where the lookup of the Seq-align id or of its name alone finds such a sequence; in version 5 an accession without a version where the lookup finds a version of it, and any Seq-align id with a name or of `pir` or `prf` (version 5 keys a name only in its own letter case and only without an accession, and a `pir` or `prf` id by its FASTA text) | 0, 5, 6, 7, 10, 13 to 17, 20 | With 0 or a value below the batch's number of Seq-aligns it reads the reported sequences one by one, and where it has read that other sequence first, it writes that sequence's names (in BLASTP also its identities) | 2 |

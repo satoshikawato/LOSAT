@@ -53,8 +53,9 @@
 //! of a 5.5 Mb query (E. coli Sakai x MG1655) were 5.2 MiB beside the 10.5 MiB of the BLASTNA
 //! buffer and the 106 MiB of the lookup table (plan v4 line MF, `REPORT.md` §2.3): its peak
 //! `RssAnon` falls by 4.4-6.4 MiB at one and 16 threads, `-subject` and `-db`. Megablast of 31,168
-//! cDNAs at one thread (37 batches, 89 MB of letters) drops each batch's letters after its
-//! encoding; its peak, in the first batches, falls by 4.4 MiB.
+//! cDNAs at one thread (37 batches, 89 MB of letters) dropped each batch's letters after its
+//! encoding; its peak, in the first batches, fell by 4.4 MiB (until 2026-11-03: LOSAT_X_QSTREAM now
+//! reads such a file batch by batch where the reports are written batch by batch).
 //!
 //! Timing: with LOSAT_TIMING, `[TIMING] x_bn_q_drop: batches= records= letters=` gives the number
 //! of batches and records whose letters were dropped, and their letters.

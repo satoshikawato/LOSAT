@@ -3,22 +3,22 @@
 //! searches.
 //!
 //! The parts have no switch of their own: wherever LOSAT_X_QSTREAM acts, at two threads or more on
-//! unix with the `parallel` feature and on a file of `LOSAT_X_QSCANPARMIN` bytes or more (4 MiB;
-//! 0 here, so that a small file is cut), the first reading is in parts, and it falls back to one
+//! unix with the `parallel` feature and on a file of `LOSAT_X_QSCANPARMIN` bytes or more (4 MiB; 0
+//! here, so that a small file is cut), the first reading is in parts, and it falls back to one
 //! thread on a `\r`, a gap line (`>?`), a reader error and the like. (`LOSAT_X_QSCANPAR` was folded
-//! into LOSAT_X_QSTREAM on 2026-11-01.) It changes who
-//! reads the lengths, not the lengths, so the property under test is that nothing a run writes
-//! depends on the thread count (exit status, report and standard error), and that the parts were
-//! taken where the rule says so: `scan_par=1` in the `[X_STATS] QSTREAM` line (printed with
-//! `LOSAT_X_STATS`), `scan_par=0` at one thread and on the fallback files. The searches keep
-//! LOSAT_X_QSTREAM acting: small batches (`BATCH_SIZE`; the query files are far above two batches).
-//! Cases:
-//! 240 pieces of two genomes (lower case, `N` runs, a line with digits that the reader warns
-//! about, records without letters and without ids) with dc-megablast and blastn against a subject
-//! file (`-subject`) at one, two and four threads and against a database (`-db`) at four; the same
-//! file with `\r\n` line ends, with a gap line (`>?`) and with a reader error in its last record,
-//! where the one-thread reading is kept. That those bytes equal NCBI's is the business of the
-//! fixture suites.
+//! into LOSAT_X_QSTREAM on 2026-11-01.) Since 2026-11-03 the second reading reads the same parts
+//! again on the search's threads, each by a reader that starts at the part's line and record. It
+//! changes who reads the lengths and the records, not them, so the property under test is that
+//! nothing a run writes depends on the thread count (exit status, report and standard error), and
+//! that the parts were taken where the rule says so: `scan_par=1` in the `[X_STATS] QSTREAM` line
+//! (printed with `LOSAT_X_STATS`), `scan_par=0` at one thread and on the fallback files. The
+//! searches keep LOSAT_X_QSTREAM acting: small batches (`BATCH_SIZE`; the query files are far above
+//! two batches). Cases: 240 pieces of two genomes (lower case, `N` runs, a line with digits that
+//! the reader warns about, records without letters and without ids) with dc-megablast, megablast
+//! and blastn against a subject file (`-subject`) at one, two and four threads and against a
+//! database (`-db`) at four (dc-megablast and megablast); the same file with `\r\n` line ends, with
+//! a gap line (`>?`) and with a reader error in its last record, where the one-thread reading is
+//! kept. That those bytes equal NCBI's is the business of the fixture suites.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -205,6 +205,7 @@ fn the_parts_give_the_reports_of_the_one_thread_reading() {
     let subject = fasta("LC738868.fasta");
     let target = ["-subject", subject.to_str().unwrap()];
     check(&query, target, "dc-megablast", &[1, 2, 4], true);
+    check(&query, target, "megablast", &[1, 2, 4], true);
     check(&query, target, "blastn", &[1, 4], true);
 }
 
@@ -228,6 +229,7 @@ fn a_database_search_gives_the_same_bytes() {
         .expect("run losat makeblastdb");
     assert!(output.status.success(), "makeblastdb");
     check(&query, ["-db", &db], "dc-megablast", &[4], true);
+    check(&query, ["-db", &db], "megablast", &[4], true);
 }
 
 #[test]

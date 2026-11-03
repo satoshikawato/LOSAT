@@ -577,6 +577,26 @@ impl<R: Read> FastaReader<R> {
         }
     }
 
+    /// LOSAT_X_QSTREAM's second reading in parts (`FastaInputSource::x_from_reader_at`): a reader
+    /// that has read nothing counts its lines from `lines` and its local IDs from `next_id`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:364-367
+    /// ```c++
+    ///     CRef<CSeqIdGenerator> idgen
+    ///         (new CSeqIdGenerator(m_Config.GetLocalIdCounterInitValue(),
+    ///                              m_Config.GetLocalIdPrefix()));
+    ///     m_InputReader->SetIDGenerator(*idgen);
+    /// ```
+    /// No NCBI counterpart for the start itself: NCBI reads the query file once, with one reader
+    /// whose counter starts at the configuration's value (1) and whose line count starts at 0
+    /// (`LineReader::new`); a reader of a part starts both where that one reader has them at the
+    /// part's first byte. It reads the same records (scheduling only).
+    #[cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
+    pub(crate) fn x_start_at(&mut self, lines: u64, next_id: i64) {
+        self.lines.x_start_at(lines);
+        self.id_counter = next_id;
+    }
+
     /// The search whose records this reader reads under `-parse_deflines`.
     pub(crate) fn set_id_scope(
         &mut self,

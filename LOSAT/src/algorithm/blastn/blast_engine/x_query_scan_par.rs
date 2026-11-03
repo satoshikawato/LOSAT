@@ -71,6 +71,21 @@
 //! With `LOSAT_X_STATS`, `scan_par=1` in LOSAT_X_QSTREAM's line says that the parts' lengths were
 //! taken (`scan_par=0`: the one-thread reading).
 //!
+//! The second reading (since 2026-11-03). Where the parts' lengths were taken, LOSAT_X_QSTREAM's
+//! second reading reads the same parts again (`Span`: each part's bytes, first record, records, the
+//! lines before it and its lines, the line number of a reader that read it to its end), when the
+//! batch loop needs their records, on the search's threads (`x_query_stream::State::read_parts`).
+//! Each part is read by a new reader that starts with the line number and the local-ID counter the
+//! one reader has at the part's first byte (`read_again`, `FastaInputSource::x_from_reader_at`):
+//! the two values above are all that a record's reading takes from the records before it, so the
+//! part's records are the one reader's, their local IDs and the line numbers of their messages
+//! included (so, unlike the parts of the store, a record with a message in a later part needs no
+//! one reader). `read_again` checks that the file did not change in a way that would make that
+//! untrue: the part starts at a record start, its bytes end where the first reading's did and hold
+//! no `\r` or `>?`, its records have the first reading's number and lengths, and its lines are the
+//! first reading's; the last part is read to the file's end, up to its records, as the one reader
+//! reads it.
+//!
 //! The records of the store (EXPERIMENT LOSAT_X_BNQPARTS, `store_parts`). Where LOSAT_X_BNQPACK's
 //! store holds the records read before the search, the same parts of the file (the same cut, the
 //! same `read_part` conditions) are read on the same threads into the parts of the store
@@ -87,9 +102,12 @@
 #![cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
 
 use std::fs::File;
+use std::ops::Range;
 use std::sync::OnceLock;
 
 use super::x_query_drop::Part;
+#[cfg(all(unix, feature = "parallel"))]
+use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::fasta_reader::ReaderConfig;
 
 /// The bytes after the reader's start below which the first reading stays on one thread: about
@@ -113,17 +131,54 @@ fn min_bytes() -> u64 {
     })
 }
 
+/// A part of the first reading that holds records, for the second reading (`read_again`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Span {
+    /// The part's bytes in the file.
+    pub(super) bytes: Range<u64>,
+    /// Its first record (the input record number) and its records.
+    pub(super) first: usize,
+    pub(super) records: usize,
+    /// The lines before it and its lines (the line number of a reader that read it to its end).
+    pub(super) line: u64,
+    pub(super) lines: u64,
+}
+
+/// The first reading in parts: every record's length, and the parts that hold records.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Scan {
+    pub(super) lengths: Vec<usize>,
+    pub(super) spans: Vec<Span>,
+}
+
 /// The lengths of the query records from byte `start` of `file` to its end, read in parts by
-/// `threads` threads, or `None` where the first reading runs as before (the module's header).
-/// `config` is the first reading's configuration, without the BLAST archive.
+/// `threads` threads, with the parts, or `None` where the first reading runs as before (the
+/// module's header). `config` is the first reading's configuration, without the BLAST archive.
 pub(super) fn lengths(
     file: &File,
     start: u64,
     config: ReaderConfig,
     threads: usize,
-) -> Option<Vec<usize>> {
+) -> Option<Scan> {
     debug_assert!(!config.keep_defline);
     lengths_with(file, start, config, threads, min_bytes(), Limits::DEFAULT)
+}
+
+/// `lengths` without a minimum size and with small parts, for the tests of the second reading
+/// (`x_query_stream.rs`).
+#[cfg(all(test, unix, feature = "parallel"))]
+pub(super) fn small_lengths(
+    file: &File,
+    start: u64,
+    config: ReaderConfig,
+    threads: usize,
+) -> Option<Scan> {
+    let limits = Limits {
+        max_span: 4 << 10,
+        max_reach: 2 << 20,
+        parts_per_thread: 4,
+    };
+    lengths_with(file, start, config, threads, 0, limits)
 }
 
 /// The sizes of the parts (tests make them small).
@@ -150,7 +205,7 @@ fn lengths_with(
     _threads: usize,
     _min_bytes: u64,
     _limits: Limits,
-) -> Option<Vec<usize>> {
+) -> Option<Scan> {
     None
 }
 
@@ -162,16 +217,38 @@ fn lengths_with(
     threads: usize,
     min_bytes: u64,
     limits: Limits,
-) -> Option<Vec<usize>> {
+) -> Option<Scan> {
     let parts = parts_with(
         file,
         start,
         threads,
         min_bytes,
         limits,
-        |from, to, _, failed| read_part(file, from, to, config, failed),
+        |from, to, _, failed| {
+            let (lengths, lines) = read_part(file, from..to, config, failed)?;
+            Some((from..to, lengths, lines))
+        },
     )?;
-    Some(parts.into_iter().flatten().collect())
+    let mut scan = Scan {
+        lengths: Vec::new(),
+        spans: Vec::new(),
+    };
+    let mut line = 0;
+    for (bytes, lengths, lines) in parts {
+        // An empty part (two targets found the same record start) holds no records.
+        if !lengths.is_empty() {
+            scan.spans.push(Span {
+                bytes,
+                first: scan.lengths.len(),
+                records: lengths.len(),
+                line,
+                lines,
+            });
+        }
+        line += lines;
+        scan.lengths.extend(lengths);
+    }
+    Some(scan)
 }
 
 /// The results of `read` on the parts of `file` from byte `start` to its end (the module's header),
@@ -331,52 +408,32 @@ fn read_part_store(
     part: usize,
     failed: &std::sync::atomic::AtomicBool,
 ) -> Option<Part> {
-    use crate::blastinput::fasta_reader::FastaInputSource;
-    use std::sync::atomic::Ordering;
-
     // The store of a part takes about a third of its bytes (titles, and a quarter of a byte per
     // letter); it grows where it needs more.
     let span = usize::try_from(to.saturating_sub(from)).ok()?;
     let mut store = Part::with_capacity(span / 2, span / 128);
-    if from >= to {
-        return Some(store);
-    }
-    let mut refused = false;
-    let mut source = FastaInputSource::x_from_reader(
-        PartReader {
-            file,
-            at: from,
-            end: to,
-            last: b'\n',
-            refused: &mut refused,
-        },
+    read_records(
+        file,
+        from..to,
         config,
-    );
-    source.x_pack_letters();
-    loop {
-        if source.end() {
-            break;
-        }
-        if failed.load(Ordering::Relaxed) {
-            return None;
-        }
-        match source.next_sequence(&mut |_| Ok(())) {
-            Ok(record) => {
-                if part > 0 && !record.warnings.is_empty() {
-                    return None;
-                }
-                let packed = source.x_take_packed();
-                let n = store.len() + 1;
-                if !store.push(record, packed, config.id_prefix, n) {
-                    return None;
-                }
+        (0, 1),
+        true,
+        failed,
+        |record, packed| {
+            if part > 0 && !record.warnings.is_empty() {
+                return After::Refuse;
             }
-            Err(_) => return None,
-        }
-    }
-    drop(source);
+            let n = store.len() + 1;
+            if store.push(record, packed, config.id_prefix, n) {
+                After::Next
+            } else {
+                After::Refuse
+            }
+        },
+    )
+    .ok()?;
     store.shrink();
-    (!refused).then_some(store)
+    Some(store)
 }
 
 /// The first record start at or after `target` (a `>` that begins a line after `start` and is not
@@ -417,49 +474,210 @@ fn record_start(file: &File, start: u64, target: u64, end: u64, max_reach: u64) 
     (limit == end).then_some(end)
 }
 
-/// The lengths of the records of bytes `from..to` of `file`, read by a new reader with the loop of
-/// `x_query_stream::scan`, or `None` if they hold a `\r` or a `>?`, cannot all be read, the reading
-/// ends otherwise than at the end of the bytes, or another part failed (`failed`).
+/// What a part's reading does after a record (`read_records`).
 #[cfg(all(unix, feature = "parallel"))]
-fn read_part(
+enum After {
+    /// Reads the next record, if its bytes hold one.
+    Next,
+    /// Stops: the records wanted are read.
+    Stop,
+    /// Gives the part up.
+    Refuse,
+}
+
+/// Why a part's reading failed (`read_records`).
+#[cfg(all(unix, feature = "parallel"))]
+enum PartError {
+    /// Its bytes hold a `\r` or a `>?`, or could not all be read (`PartReader`).
+    Bytes,
+    /// The reader failed: an `eEOF`, a reader error or LOSAT's rejection of a Seq-id line.
+    Reader(crate::blastinput::fasta_reader::ReadError),
+    /// A record was refused (`After::Refuse`), or another part failed (`failed`).
+    Refused,
+}
+
+/// Reads the records of bytes `bytes` of `file` with a new reader that starts at `start` (the lines
+/// before it and the local ID of its first record, `x_from_reader_at`; `(0, 1)` is a new reader's)
+/// with the loop of `x_query_stream::scan` (`end()`, then `next_sequence`), the letters packed as
+/// the search's reader packs them where `pack` is set, and gives each record (and its packed
+/// letters) to `each`. Returns the lines read (those of the part), or why the reading failed; it
+/// stops when another part failed (`failed`).
+#[cfg(all(unix, feature = "parallel"))]
+fn read_records(
     file: &File,
-    from: u64,
-    to: u64,
+    bytes: Range<u64>,
     config: ReaderConfig,
+    start: (u64, i64),
+    pack: bool,
     failed: &std::sync::atomic::AtomicBool,
-) -> Option<Vec<usize>> {
+    mut each: impl FnMut(FastaRecord, Option<crate::sequence::packed_letters::PackedLetters>) -> After,
+) -> Result<u64, PartError> {
     use crate::blastinput::fasta_reader::FastaInputSource;
     use std::sync::atomic::Ordering;
 
-    let mut lengths = Vec::new();
-    if from >= to {
-        return Some(lengths);
+    if bytes.start >= bytes.end {
+        return Ok(0);
     }
     let mut refused = false;
-    let mut source = FastaInputSource::x_from_reader(
+    let mut source = FastaInputSource::x_from_reader_at(
         PartReader {
             file,
-            at: from,
-            end: to,
+            at: bytes.start,
+            end: bytes.end,
             last: b'\n',
             refused: &mut refused,
         },
         config,
+        start.0,
+        start.1,
     );
+    if pack {
+        source.x_pack_letters();
+    }
     loop {
         if source.end() {
             break;
         }
         if failed.load(Ordering::Relaxed) {
-            return None;
+            return Err(PartError::Refused);
         }
         match source.next_sequence(&mut |_| Ok(())) {
-            Ok(record) => lengths.push(record.sequence.len()),
-            Err(_) => return None,
+            Ok(record) => {
+                let packed = if pack { source.x_take_packed() } else { None };
+                match each(record, packed) {
+                    After::Next => {}
+                    After::Stop => break,
+                    After::Refuse => return Err(PartError::Refused),
+                }
+            }
+            Err(error) => return Err(PartError::Reader(error)),
         }
     }
+    // The reader counts from the lines before the part.
+    let lines = source.x_line_number() - start.0;
     drop(source);
-    (!refused).then_some(lengths)
+    if refused {
+        return Err(PartError::Bytes);
+    }
+    Ok(lines)
+}
+
+/// The lengths of the records of bytes `bytes` of `file` and the lines read, as the first reading
+/// reads a part (`read_records`), or `None` where its reading fails.
+#[cfg(all(unix, feature = "parallel"))]
+fn read_part(
+    file: &File,
+    bytes: Range<u64>,
+    config: ReaderConfig,
+    failed: &std::sync::atomic::AtomicBool,
+) -> Option<(Vec<usize>, u64)> {
+    let mut lengths = Vec::new();
+    let lines = read_records(file, bytes, config, (0, 1), false, failed, |record, _| {
+        lengths.push(record.sequence.len());
+        After::Next
+    })
+    .ok()?;
+    Some((lengths, lines))
+}
+
+/// LOSAT_X_QSTREAM's second reading of part `span` of the first reading of `file`: its records read
+/// again by a new reader that starts at the part's line and record (`read_records`), each with the
+/// length the first reading found (`lengths`, every input record's). The last part (`last`) is read
+/// up to the file's end now and only up to its records: like the one reader of
+/// `x_query_stream::State::read_one`, it does not read a record added after them, and reads letters
+/// added to the last record. Returns the records read and, where the file changed since the first
+/// reading, the first input record it cannot give with what changed: a record of another length, a
+/// reader error, a part that holds fewer records or more (the bytes after its records hold
+/// another); for the part as a whole (the input record is its first), a part that no longer starts
+/// at a record start (a `>` after a `\n`), whose bytes hold a `\r` or a `>?` or cannot all be read,
+/// or whose lines are not the first reading's (the parts after it start at the first reading's
+/// line). No NCBI counterpart: NCBI reads the query file once, with one reader; the part's reader
+/// starts where that reader is (scheduling only).
+#[cfg(all(unix, feature = "parallel"))]
+pub(super) fn read_again(
+    file: &File,
+    span: &Span,
+    last: bool,
+    config: ReaderConfig,
+    lengths: &[usize],
+) -> (Vec<FastaRecord>, Option<(usize, String)>) {
+    use std::os::unix::fs::FileExt;
+
+    let whole = |what: &str| (Vec::new(), Some((span.first, what.to_string())));
+    // The first part starts where the reader starts; every other at a record start.
+    if span.first > 0 {
+        let mut mark = [0u8; 2];
+        if file.read_exact_at(&mut mark, span.bytes.start - 1).is_err() || &mark != b"\n>" {
+            return whole("its part no longer starts at a record start");
+        }
+    }
+    let end = if last {
+        match file.metadata() {
+            Ok(metadata) => metadata.len(),
+            Err(error) => return whole(&format!("{error}")),
+        }
+    } else {
+        span.bytes.end
+    };
+    let mut records: Vec<FastaRecord> = Vec::with_capacity(span.records);
+    let mut changed = None;
+    let read = read_records(
+        file,
+        span.bytes.start..end,
+        config,
+        (span.line, span.first as i64 + 1),
+        false,
+        &std::sync::atomic::AtomicBool::new(false),
+        |record, _| {
+            let index = span.first + records.len();
+            if records.len() == span.records {
+                changed = Some((index, "the part before it holds another record".to_string()));
+                return After::Refuse;
+            }
+            if record.sequence.len() != lengths[index] {
+                changed = Some((
+                    index,
+                    format!(
+                        "{} letters where the first reading read {}",
+                        record.sequence.len(),
+                        lengths[index]
+                    ),
+                ));
+                return After::Refuse;
+            }
+            records.push(record);
+            if last && records.len() == span.records {
+                After::Stop
+            } else {
+                After::Next
+            }
+        },
+    );
+    let index = span.first + records.len();
+    match read {
+        Err(PartError::Bytes) => whole(
+            "its part holds a carriage return or a gap line, or ends before the first reading's end",
+        ),
+        // Only a record that differs gives the part up here (no other part sets `failed`).
+        Err(PartError::Refused) => (
+            records,
+            changed.or_else(|| Some((index, "its part was given up".to_string()))),
+        ),
+        Err(PartError::Reader(error)) => (records, Some((index, format!("{error}")))),
+        Ok(_) if records.len() < span.records => {
+            let what = if last {
+                "the file ends before it"
+            } else {
+                "its part ends before it"
+            };
+            (records, Some((index, what.to_string())))
+        }
+        Ok(lines) if !last && lines != span.lines => whole(&format!(
+            "its part holds {lines} lines where the first reading read {}",
+            span.lines
+        )),
+        Ok(_) => (records, None),
+    }
 }
 
 /// Bytes `at..end` of a file, read at their offsets (the file's position stays where it is), that
@@ -558,7 +776,8 @@ mod tests {
         limits: Limits,
     ) -> Option<Vec<usize>> {
         let (path, file) = file_of(bytes, "p");
-        let lengths = lengths_with(&file, start, config, threads, 0, limits);
+        let lengths =
+            lengths_with(&file, start, config, threads, 0, limits).map(|scan| scan.lengths);
         let _ = std::fs::remove_file(path);
         lengths
     }
@@ -668,6 +887,53 @@ mod tests {
             refused > 300 && failed > 30,
             "refused {refused}, failed readings {failed}"
         );
+    }
+
+    /// The second reading of each part (`read_again`) gives the records of the first reading's
+    /// parts as the file's reader reads them (their local IDs, titles, letters and messages, with
+    /// the file's line numbers), and the lines before each part are the line ends before it.
+    #[test]
+    fn the_parts_read_again_give_the_readers_records() {
+        let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+        let (mut taken, mut warned) = (0, 0);
+        for round in 0..200 {
+            let config = ReaderConfig::query("BLASTN", false, round % 2 == 0);
+            let text = random_fasta(&mut rng, 1 + round % 40);
+            let (expected, clean) = serial_records(&text, config);
+            let (path, file) = file_of(&text, "again");
+            let limits = Limits {
+                max_span: 7,
+                max_reach: 2000,
+                parts_per_thread: 1,
+            };
+            for (threads, limits) in [(2, SMALL), (3, limits)] {
+                let Some(scan) = lengths_with(&file, 0, config, threads, 0, limits) else {
+                    continue;
+                };
+                assert!(clean, "round {round}: parts taken where the reading fails");
+                let mut got: Vec<FastaRecord> = Vec::new();
+                for (index, span) in scan.spans.iter().enumerate() {
+                    let ends = text[..span.bytes.start as usize]
+                        .iter()
+                        .filter(|&&byte| byte == b'\n')
+                        .count();
+                    assert_eq!(span.line, ends as u64, "round {round}");
+                    assert_eq!(span.first, got.len(), "round {round}");
+                    let last = index + 1 == scan.spans.len();
+                    let (records, failure) = read_again(&file, span, last, config, &scan.lengths);
+                    assert_eq!(failure, None, "round {round}");
+                    assert_eq!(records.len(), span.records, "round {round}");
+                    if index > 0 && records.iter().any(|record| !record.warnings.is_empty()) {
+                        warned += 1;
+                    }
+                    got.extend(records);
+                }
+                assert_eq!(got, expected, "round {round} threads {threads}");
+                taken += 1;
+            }
+            let _ = std::fs::remove_file(path);
+        }
+        assert!(taken > 100 && warned > 20, "taken {taken}, warned {warned}");
     }
 
     /// The records of `bytes` as `read_queries` reads them, and whether the reading ended at the
@@ -844,9 +1110,9 @@ mod tests {
         for (bytes, taken) in [(&gap, false), (&plain, true)] {
             let (path, file) = file_of(bytes, "gap");
             let end = bytes.len() as u64;
-            assert_eq!(read_part(&file, 0, end, config, &failed).is_some(), taken);
+            assert_eq!(read_part(&file, 0..end, config, &failed).is_some(), taken);
             // A part past the end of the file: the reader would take the early end for its own.
-            assert_eq!(read_part(&file, 0, end + 100, config, &failed), None);
+            assert_eq!(read_part(&file, 0..end + 100, config, &failed), None);
             let _ = std::fs::remove_file(path);
         }
     }

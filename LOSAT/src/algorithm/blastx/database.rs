@@ -701,9 +701,14 @@ mod tests {
 
     #[test]
     fn a_record_of_the_stored_letters_encodes_to_the_stored_bytes() {
-        // Every residue byte 1..=27 (O = 26 included) reads back as itself through its
-        // letter: the records of the reported sequences and `-subject` records alike.
+        // A record of the stored letters encodes every residue byte 1..=27 back to itself but
+        // O (26): the search reads a `-subject` O as X (`subjects::search_residue`), and a
+        // database's stored O as it is (`read_encoded`).
         let bytes: Vec<u8> = (1..28).collect();
+        let searched: Vec<u8> = bytes
+            .iter()
+            .map(|&residue| if residue == 26 { 21 } else { residue })
+            .collect();
         let record = FastaRecord {
             internal_id: "gnl|BL_ORD_ID|0".into(),
             title: String::new(),
@@ -716,7 +721,7 @@ mod tests {
             source: None,
         };
         let records = [record];
-        assert_eq!(&*Subjects::Fasta(&records).encoded(0), &bytes[..]);
+        assert_eq!(&*Subjects::Fasta(&records).encoded(0), &searched[..]);
     }
 
     /// The fixture database `name` of `tests/db_search`, with the taxonomy database variant

@@ -135,7 +135,8 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
             .and_then(|()| LOSAT::algorithm::tblastn::check_options(&args))
             .map_err(|error| format!("{error:#}"))?,
         // The checks of each search's formats, as for BLASTN: BLASTX resolves its options for
-        // each format (the hit list size), and its parser rejects `-query_loc` and `-subject_loc`.
+        // each format (the hit list size), and LOSAT Web's BLASTX refuses `-query_loc` and
+        // `-subject_loc` until line SX's session SXd3 (`blastx::check_options`).
         Commands::Blastx(args) => {
             let mut first_error = None;
             for group in &groups {
@@ -500,7 +501,8 @@ fn search(
                 ordinals = searched_queries(args.query_loc.as_deref(), "TBLASTX", query);
                 run_local_tblastx(args, query, subject, &mut outputs)
             }
-            // BLASTX's CLI rejects `-query_loc`: every query is searched.
+            // LOSAT Web's BLASTX refuses `-query_loc` until line SX's session SXd3: every query is
+            // searched.
             Commands::Blastx(args) => {
                 ordinals = None;
                 run_local_blastx(args, query, subject, &mut outputs)
@@ -987,16 +989,6 @@ mod tests {
                 "s",
                 "-db_gencode",
                 "7",
-            ][..],
-            // BLASTX's parser rejects the ranges (until session SXd).
-            &[
-                "blastx",
-                "-query",
-                "q",
-                "-subject",
-                "s",
-                "-query_loc",
-                "1-9",
             ][..],
         ] {
             let cli = LOSAT::cli::try_parse_from::<Cli, _, _>(

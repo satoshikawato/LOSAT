@@ -55,6 +55,22 @@ pub struct BlastxArgs {
     // after the parsing (`blastinput/app.rs` `missing_subject_error`).
     #[arg(long, value_name = "PATH")]
     pub subject: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
+    // ```c++
+    //         // subject location
+    //         arg_desc.AddOptionalKey(kArgSubjectLocation, "range",
+    //                         "Location on the subject sequence in 1-based offsets "
+    //                         "(Format: start-stop)",
+    //                         CArgDescriptions::eString);
+    // ```
+    // Read by the database arguments handler when it reads the subjects (`native::run`).
+    #[arg(
+        long = "subject_loc",
+        value_name = "RANGE",
+        conflicts_with_all = crate::blastinput::db_filter::DB_FILTER_OPTIONS,
+        help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
+    )]
+    pub subject_loc: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199
     // ```c++
     //     arg_desc.SetCurrentGroup("General search options");
@@ -67,14 +83,13 @@ pub struct BlastxArgs {
     //                                 CArgDescriptions::eString);
     //     }
     // ```
-    // NCBI excludes `-subject` (and `-subject_loc`, which LOSAT's BLASTX rejects) with
-    // `-db` (blast_args.cpp:2364-2381). The exclusion is an error of the argument parser:
-    // LOSAT's parser reports it with its own text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES,
-    // exception 1).
+    // NCBI excludes `-subject` and `-subject_loc` with `-db` (blast_args.cpp:2364-2381). The
+    // exclusion is an error of the argument parser: LOSAT's parser reports it with its own text
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1).
     #[arg(
         long,
         value_name = "NAME",
-        conflicts_with = "subject",
+        conflicts_with_all = ["subject", "subject_loc"],
         help = "BLAST database name (a protein database, with or without parsed Seq-ids)"
     )]
     pub db: Option<String>,
@@ -299,6 +314,21 @@ pub struct BlastxArgs {
     // ```
     #[arg(long, default_value = "both", value_parser = ["both", "plus", "minus"])]
     pub strand: String,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
+    // ```c++
+    //     // query location
+    //     arg_desc.AddOptionalKey(kArgQueryLocation, "range",
+    //                             "Location on the query sequence in 1-based offsets "
+    //                             "(Format: start-stop)",
+    //                             CArgDescriptions::eString);
+    // ```
+    // Read by the query options handler (`native::run`).
+    #[arg(
+        long = "query_loc",
+        value_name = "RANGE",
+        help = "Location on the query sequence in 1-based offsets (Format: start-stop)"
+    )]
+    pub query_loc: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1021-1024
     // ```c++
     //         arg_desc.AddDefaultKey(kArgQueryGeneticCode, "int_value",
@@ -774,6 +804,10 @@ pub struct ResolvedOptions {
     /// searched batches have `EMPTY_DATABASE_MESSAGE`.
     pub filtered_empty: bool,
     pub num_threads: i32,
+    /// The `-query_loc` range as given, which the tabular formats print as `qlen` and divide
+    /// `qcovs` by; read by `native::run` where NCBI's query options handler reads it (after the
+    /// subjects), `None` otherwise.
+    pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
 // ```c++
@@ -1104,6 +1138,7 @@ impl BlastxArgs {
             taxdb_found: false,
             filtered_empty: false,
             num_threads: self.num_threads,
+            query_range: None,
         })
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-220

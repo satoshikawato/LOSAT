@@ -1,0 +1,3 @@
+CFastaReader: Hyphens are invalid and will be ignored around line 3
+BLAST query/options error: Invalid from coordinate (greater than sequence length)
+Please refer to the BLAST+ user manual.

@@ -3718,6 +3718,10 @@ impl BatchReports<'_> {
                         }),
                     sam: false,
                     taxonomy: formats.iter().any(|format| format.writes_taxonomy()),
+                    words: formats.iter().fold(
+                        crate::report::tabular::PrintedIds::default(),
+                        |words, format| words.or(format.printed_ids()),
+                    ),
                 };
                 reported_subjects = super::super::database::reported_subjects(
                     database,

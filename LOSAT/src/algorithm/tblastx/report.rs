@@ -1452,6 +1452,17 @@ impl TblastxOutputFormat {
         }
     }
 
+    /// The subject ids that the format prints (`PrintedIds`): none but in a table.
+    pub(crate) fn printed_ids(self) -> crate::report::tabular::PrintedIds {
+        match self {
+            Self::Tabular | Self::TabularWithComments => {
+                crate::report::tabular::PrintedIds::of(None)
+            }
+            Self::CustomTabular(spec) => crate::report::tabular::PrintedIds::of(Some(spec)),
+            _ => crate::report::tabular::PrintedIds::default(),
+        }
+    }
+
     /// Whether the format is a table that counts following subjects whose Seq-align ids match as
     /// one (`TabularNeeds::joins_subjects`: `qcovs`, `qcovus`).
     pub(crate) fn tabular_joins_subjects(self) -> bool {

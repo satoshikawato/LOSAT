@@ -13,7 +13,11 @@
   matches of NCBI's scope, one of which version 1.3 listed as a known difference, and line DBID
   N1b compared the same record with other tax ids as the reports show it, which version 1.3 listed
   as a refusal wider than NCBI's failure, and line DBID N3 showed copies of one record that follow
-  each other in one hit, as NCBI shows them, which version 1.3 refused)
+  each other in one hit, as NCBI shows them, which version 1.3 refused; on 2026-11-04 line DBID
+  N1b L1 refused such copies for a title made from the tax ids only where a report shows that
+  title and an empty title only where the taxonomy database names its tax id, which version 1.3
+  listed as refusals wider than NCBI's failure, and refused the tabular id that NCBI takes from
+  a nucleotide title made from the tax ids)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -588,7 +592,7 @@ a result that LOSAT does not reproduce.
 | A Seq-align id that the lookup does not find: `gnl|PIG|` (makeblastdb fills the PIG files from no FASTA id), in version 4 `bbs|` and `nat|` (makeblastdb writes no ISAM key for them), `gnl|BL_ORD_ID|n` where n plus the first ordinal id of each volume is no sequence (makeblastdb stores such an id only when the FASTA names it), any other id of a version 4 database without ISAM files; and a local id that alone decides the definition line (`lcl|777` before `gi|777`), which the lookup finds but the formatters do not | 0, 5, 6, 7, 10, 13 to 17, 20 | The default tabular fields and any list with `sacc`, `saccver` or a field that reads the letters stop (exit 255). Other lists exit 0: `sseqid` writes `Unknown`, `sallseqid` the stored id. Outfmt 0 and 5 write `Unknown`, 13 to 16 and SAM the id | 2, 3 |
 | A Seq-align id that the lookup finds first on another sequence, for example `gb|X|` after `gb|X.1|`, `emb|X.1|` after `gb|X.1|`, `gb|X|` after `emb|X.1|`, `lcl|X` after `gb|X.1|`, in version 5 `lcl|300` after `bbs|300` and `bbs|301` after `lcl|301` (one LMDB key), `gnl|BL_ORD_ID|n` where n plus the first ordinal id of a volume is another sequence. The lookup does not refuse the same record in two volumes or in two databases of an alias (with other tax ids: the row below) | 0, 5, 6, 7, 10, 13 to 17, 20 | Writes the other sequence's names, in every program but BLASTN also its identities, where one of its ids equals the Seq-align id (`gb|X.1|` for `gb|X|`, a `gnl|BL_ORD_ID|n` that is its own number); otherwise as in the row above | 2, 3 |
 | A Seq-align id that another sequence also holds, in any letter case, where the lookup finds the sequence itself (or the same record) first: `lcl|555` and `gb|X.1|` with `lcl|555` in a second definition line, `lcl|abc` and `lcl|ABC`, `bbs|123` in two databases of an alias. Not the same record in two volumes or databases (with other tax ids: the row below) | 0, 5, 6, 7, 10, 13 to 17, 20 | Where both are reported (also for different queries), its scope, which reads them in the order of its prefetch and compares ids without case, can write the other sequence's names, in every program but BLASTN also its identities; for `pdb|1ABC|A` and `pdb|1abc|A` in two databases it stops (exit 2) | 2, 3 |
-| The same record in another volume or database of an alias, or of `-db "a b"`, with other tax ids, which the lookup gives first or which also holds the Seq-align id. In every format where a title can depend on the tax ids (an empty title with `taxdb.bti` on the search path, a protein title ending in `]` where a definition line has no title or the id is `lcl|Subject_N`) and where the taxonomy database's texts depend on the copy: texts of opening it where only one copy has a tax id, the offset error of a tax id that a copy holds (also for the same tax ids in another volume) | 13 to 16 and the tabular `staxid`, `staxids` and name fields; else 0, 5, 6, 7, 10, 13 to 17, 20 | Shows for both the copy that the lookup gives first: its tax ids and their names, the title made from them, and the taxonomy database's texts of the lookups that the volume of that copy makes (the offset error of `taxdb.btd` once for that volume); the other formats write the same bytes | 2 |
+| The same record in another volume or database of an alias, or of `-db "a b"`, with other tax ids, which the lookup gives first or which also holds the Seq-align id. In the formats that show a title made from the tax ids (outfmt 0 for an empty title whose tax id the taxonomy database names or a protein title ending in `]` where a definition line has no title; the tabular formats where a printed id is the first word of the title that replaces an `lcl|Subject_N` id, for a nucleotide or a protein title ending in `]`), and in every format where the taxonomy database's texts depend on the copy: texts of opening it where only one copy has a tax id, the offset error of a tax id that a copy holds (also for the same tax ids in another volume) | 13 to 16 and the tabular `staxid`, `staxids` and name fields; for such a title the formats named; for the texts 0, 5, 6, 7, 10, 13 to 17, 20 | Shows for both the copy that the lookup gives first: its tax ids and their names, the title made from them, and the taxonomy database's texts of the lookups that the volume of that copy makes (the offset error of `taxdb.btd` once for that volume); the other formats write the same bytes | 2 |
 | A Seq-align id whose lookup fails (an LMDB file without the accession table; `gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) | 0, 5, 6, 7, 10, 13 to 17, 20 | Stops (exit 2; for the text tag "Error pre-fetching sequence data", exit 255) | 3 |
 | Following hits of a query whose Seq-align ids `Match` but that are not copies of one record: `pdb|1ABC|` and `pdb|1ABC|AA`, `gb|X|` and `gb|X.1|`, one accession and version under `gb`, `emb` or `dbj` | 0, 5, 13 to 16; tabular `qcovs` and `qcovus` | Shows them as one hit; writes the coverage of both on the first row and `N/A` on the other | 2 |
 | In `psiblast`, such hits that its cut of a longer list to `-max_target_seqs` counts (copies of one record count as one) | every format | `PruneSeqalign` counts them as one subject and keeps one more | 2 |
@@ -600,7 +604,7 @@ a result that LOSAT does not reproduce.
 | An outfmt 0 description id of 65 bytes or more | 0 | Pads the line without end, from 65 bytes with a title of 3 bytes or more, from 67 with any title | 3 |
 | A protein title of punctuation that `x_CleanAndCompress` reads past | 0; tabular formats for an `lcl|Subject_N` id | Crashes | 3 |
 | A protein with a tax id and a title ending in `]`, where a definition line has no title (0) or the id is `lcl|Subject_N` (tabular formats) | 0, tabular formats | With `taxdb.bti` on the search path `x_AdjustProteinTitleSuffix` rewrites the title from the tax ids; without it NCBI keeps the title | 2 |
-| An empty title of a sequence with a tax id, with `taxdb.bti` on the search path (not a `pdb` id with a chain or a patent) | 0 | Makes the title from the tax ids and the taxonomy database | 2 |
+| An empty title of a sequence with a tax id that the taxonomy database names (not a `pdb` id with a chain or a patent) | 0; tabular formats that print a nucleotide `lcl|Subject_N` id | Makes the title from the tax ids and the taxonomy database (the tabular id is its first word, the organism's; for a protein `unnamed`, as LOSAT writes it); for a tax id the database does not name, the title of a sequence without one | 2 |
 | A title in no encoding that NCBI recognises, for an `lcl|Subject_N` id | tabular formats | Not compared | |
 
 A nucleotide title of punctuation is not refused: it stops at the end of the string, in outfmt 0 and
@@ -634,9 +638,11 @@ Known differences that remain:
   - A title ending in `]` without `taxdb.bti` on the search path, where NCBI keeps the title.
   - The same record with other tax ids is refused in outfmt 13 to 16 and the tabular tax id and name
     fields also where NCBI writes the subject's own tax ids (the copy it shows is the subject, or is
-    not reported), and in every format where a title can depend on the tax ids or the taxonomy
-    database's texts depend on the copy, also where the bytes do not change (an empty title that only
-    outfmt 0 shows; the copy with a tax id fetched first, which makes the same first lookup).
+    not reported), in the formats that show a title made from the tax ids also where that title
+    does not change (the copy it shows is the subject; a protein title ending in `]` without
+    `taxdb.bti` on the search path), and in every format where the taxonomy database's texts depend
+    on the copy, also where the bytes do not change (the copy with a tax id fetched first, which
+    makes the same first lookup).
 - A damaged LMDB file can stop NCBI and LOSAT with other exit statuses and texts.
 - `psiblast` does not write NCBI's taxdb prefetch messages for a damaged `taxdb`.
 

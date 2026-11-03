@@ -1302,15 +1302,17 @@ impl ListedTitles<'_> {
     /// 6, 7, 13 to 16; `ParsedSubject::fetched`), two of them that follow each
     /// other in a hit list with matching Seq-align ids where outfmt 0, 5 or 13 to 16 is written,
     /// but for copies of one record, which those reports show in one hit (`joined`,
-    /// `shared::refuse_joined_hits`). `taxonomy`: whether a format writes the
-    /// subjects' taxids or their names (13 to 16, a table of taxonomy fields). `hit_lists` are
-    /// in the order of the reports.
+    /// `shared::refuse_joined_hits`), and a word of a title made from the taxids that a table
+    /// prints (`words`, `ParsedSubject::check_printed_word`). `taxonomy`: whether a format
+    /// writes the subjects' taxids or their names (13 to 16, a table of taxonomy fields).
+    /// `hit_lists` are in the order of the reports.
     pub(super) fn check_parsed_reports(
         &self,
         hit_lists: &[Option<BlastpHitList>],
         fetched: bool,
         joined: bool,
         taxonomy: bool,
+        words: crate::report::tabular::PrintedIds,
     ) -> Result<()> {
         if self.parsed.is_empty() {
             return Ok(());
@@ -1320,6 +1322,13 @@ impl ListedTitles<'_> {
                 if let Some(subject) = self.parsed_subject(rank) {
                     subject.fetched(taxonomy).map_err(|reason| {
                         shared::parsed_refusal(self.listed.ordinals[rank], &reason, self.program)
+                    })?;
+                    subject.check_printed_word(true, words).map_err(|problem| {
+                        shared::parsed_refusal(
+                            self.listed.ordinals[rank],
+                            &format!("has {problem}"),
+                            self.program,
+                        )
                     })?;
                 }
             }

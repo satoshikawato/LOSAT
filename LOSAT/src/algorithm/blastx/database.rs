@@ -270,8 +270,9 @@ impl ReportedSubjects {
     /// (`shared::read_header`), with LOSAT's refusals of `ParsedSubject::fetched`, of
     /// `shared::check_shown_parsed_subject` (with `pairwise`), of `shared::refuse_joined_hits`
     /// (with `joined`: outfmt 0, 5 and 13 to 16) and of `ParsedSubject::tabular_ids` (with
-    /// `tabular`). `taxonomy`: whether the report writes the sequences' taxids or their names
-    /// (13 to 16, a table of taxonomy fields; `ParsedSubject::fetched`).
+    /// `tabular`, and `ParsedSubject::check_printed_word` of the ids it prints, `words`).
+    /// `taxonomy`: whether the report writes the sequences' taxids or their names (13 to 16, a
+    /// table of taxonomy fields; `ParsedSubject::fetched`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -283,6 +284,7 @@ impl ReportedSubjects {
         taxids: bool,
         joined: bool,
         taxonomy: bool,
+        words: crate::report::tabular::PrintedIds,
     ) -> Result<Self> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
@@ -365,8 +367,10 @@ impl ReportedSubjects {
                     )?;
                 }
                 if tabular {
-                    let [id, accession, version] =
-                        subject.tabular_ids(true).map_err(|problem| {
+                    let [id, accession, version] = subject
+                        .tabular_ids(true)
+                        .and_then(|ids| subject.check_printed_word(true, words).map(|()| ids))
+                        .map_err(|problem| {
                             shared::parsed_refusal(ordinal, &format!("has {problem}"), PROGRAM)
                         })?;
                     // The ids of a stored definition line are VisibleStrings: ASCII.
@@ -827,6 +831,7 @@ mod tests {
                 false,
                 false,
                 false,
+                crate::report::tabular::PrintedIds::default(),
             )
             .unwrap();
             let messages = reported.prefetch_messages(database, &batches, true);

@@ -365,8 +365,9 @@ would port:
   title and letters for it.
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
-- Titles NCBI takes from the tax ids: an empty title made from the taxonomy database, and a
-  title whose end `x_AdjustProteinTitleSuffix` rewrites.
+- Titles NCBI takes from the tax ids, where a report shows them (outfmt 0, a printed tabular id
+  that replaces `lcl|Subject_N`): an empty title made from the taxonomy database's name of the
+  tax id, and a title whose end `x_AdjustProteinTitleSuffix` rewrites.
 
 ## Ported (rule 4)
 

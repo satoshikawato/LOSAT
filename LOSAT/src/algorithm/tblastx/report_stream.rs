@@ -284,6 +284,7 @@ fn database_check(
         joined: pairwise || format.tabular_joins_subjects(),
         sam: false,
         taxonomy: format.writes_taxonomy(),
+        words: format.printed_ids(),
     };
     // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
     let prefetch = format.prefetches_subjects() && database.taxdb_found();

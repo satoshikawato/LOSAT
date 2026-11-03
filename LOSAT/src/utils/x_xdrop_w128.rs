@@ -137,8 +137,8 @@
 //!    running best is formed as the inclusive one moved up by a lane (the same values), so that no
 //!    shift is applied to a shifted vector, a pair the compiler merges into one general shuffle.
 //!
-//! Unchanged: the 8 / 16-bit choice (`fits_8bit`), the per-row `sc.ensure`, the rebase test, the
-//! traceback walk (`finish` of the 128-bit kernels) and the cell count.
+//! Unchanged: the 8 / 16-bit choice (`fits_8bit`), the row-start `sc.fits` / `x_room`, the rebase
+//! test, the traceback walk (`finish` of the 128-bit kernels) and the cell count.
 
 #![allow(clippy::too_many_arguments)]
 

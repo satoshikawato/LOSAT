@@ -800,7 +800,10 @@ impl XdropScratch {
         (self.ha, self.hb, self.e) = (Rows::new(n), Rows::new(n), Rows::new(n));
         (self.h8a, self.h8b, self.e8) = (Rows::new(n), Rows::new(n), Rows::new(n));
         self.sb = Rows::new(n);
+        // `grow` sizes `surv` to the rows it makes and may have shrunk it below `n`
+        self.surv = vec![0; n / 32 + 8];
         (self.dirty, self.dirty8, self.sb_filled) = (0, 0, 0);
+        (self.fence_k, self.bad_k, self.x_sh) = (usize::MAX, usize::MAX, 0);
     }
 
     // No NCBI counterpart: the move of `x_room`. `x_sh` adds `d` back where a column leaves the
@@ -864,14 +867,16 @@ fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
 // ```
 // NCBI keeps the traceback states of a gap_align in chunks of at least `CHUNKSIZE` cells, one
 // byte each, and keeps every chunk it made until the search ends (`s_GapPurgeState` only sets
-// `used` to 0). Here a scratch on a Rayon pool thread keeps its own trace up to the four-bit rows
-// (`LOSAT_X_DPNIBBLE`, the layout such a scratch uses) of one chunk; a trace that passes it
-// while it grows takes the largest idle pair of a pool the scratches share (its rows so far are
-// copied over) and gives it back after the traceback call (`XdropScratch::x_trace_release`). The
-// pool keeps at most `X_POOL_IDLE` idle pairs (the smallest is freed), and frees them when the
-// last scratch goes (`X_SCRATCHES`). A one-thread search keeps its trace, as NCBI does. Off
-// (`LOSAT_X_DPNIBBLE=0`): every scratch keeps its own trace. Placement of memory only: the
-// kernels write and the walk reads the same rows either way.
+// `used` to 0). Here the size is the four-bit rows (`LOSAT_X_DPNIBBLE`, the layout of a scratch
+// on a Rayon pool thread) of one chunk, the same for every scratch: a trace that passes it while
+// it grows takes the largest idle pair of a pool the scratches share, if there is one (its rows so
+// far are copied over), and gives it back after the traceback call
+// (`XdropScratch::x_trace_release`); a scratch on a Rayon pool thread whose own trace grew past
+// it gives that trace to the pool. The pool keeps at most `X_POOL_IDLE` idle pairs (the smallest
+// is freed), and frees them when the last scratch goes (`X_SCRATCHES`). A one-thread search keeps
+// its trace, as NCBI does: nothing goes to its pool. Off (`LOSAT_X_DPNIBBLE=0`): every scratch
+// keeps its own trace. Placement of memory only: the kernels write and the walk reads the same
+// rows either way.
 const X_POOL_FROM: usize = 2_097_152 / 2;
 // No NCBI counterpart: how many idle trace + rows pairs the pool keeps: one, what the one scratch
 // of a one-thread search keeps.

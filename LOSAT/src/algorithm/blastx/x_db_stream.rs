@@ -11,8 +11,8 @@
 //! The stream:
 //!
 //! - Before the first query batch the run reads no sequence (`BlastxDatabase::x_open_stream`): the
-//!   length of the longest sequence is the index's (`SeqDb::max_length`), and the empty database
-//!   and a longest above 5,000,000 residues give the error of the check (`x_check_stores`, which
+//!   length of the longest sequence comes from the index's offsets, and the empty database, an
+//!   index that cannot be read and a longest above 5,000,000 residues give the error of the check (`x_check_stores`, which
 //!   reads the database once in blocks of `PROTEIN_STORE_BLOCK_BYTES` with the checks of the copy
 //!   in its order: the empty database, `check_protein_sequence`, the 5,000,000-residue limit), which
 //!   fails the first query batch with a valid context. The reads of the search check each block
@@ -40,11 +40,11 @@
 //! or the check's). Until the reads have checked every sequence, the run reports the check's first
 //! error in ordinal order, whichever sequence the threads read first (`native::search_error`:
 //! NCBI's engine error, or LOSAT's refusal), so the text and the query batch it fails are those of
-//! the check that read the database before the first query batch, except that the batch's own
-//! refusals of its setup (a search space or a diagonal length past NCBI's integers, a query split
-//! past its chunks), which come before its first read, as NCBI sets up a batch before it reads
-//! the database, now come before the database's error. After that, a read that fails (a file
-//! changed during the run) gives its own error.
+//! the check that read the database before the first query batch. An error that the batch raises
+//! before its first read but after the point where a database refused before the search fails it
+//! (its setup's refusals: a search space or a diagonal length past NCBI's integers, a query split
+//! past its chunks) comes after the database's error, as before (`XPastHead`). After that, a read
+//! that fails (a file changed during the run) gives its own error.
 //!
 //! The stored bytes are the same in every read (the sentinel before and after the residues is the
 //! file's byte, which the check requires to be 0, as the copy held), so every stage computes the
@@ -90,6 +90,20 @@ impl std::fmt::Display for XReadError {
 }
 
 impl std::error::Error for XReadError {}
+
+/// An error of a search raised after the point where a database refused before the search fails
+/// it, while the reads have not checked every sequence (`Subjects::x_past_head`): the run reports
+/// the database's first error instead, if the check finds one (`native::search_error`).
+#[derive(Debug)]
+pub(crate) struct XPastHead(pub(crate) anyhow::Error);
+
+impl std::fmt::Display for XPastHead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for XPastHead {}
 
 /// The reader's error `error` of a read during the search.
 fn read_error(error: crate::seqdb::SeqDbError) -> anyhow::Error {
@@ -629,6 +643,17 @@ mod tests {
         let (dir, path) = copy_of("prot_v5", "head");
         let longest = open("prot_v5").x_check_stores().unwrap();
         std::fs::remove_file(dir.join("prot_v5.psq")).unwrap();
+        // The index header's longest, big-endian after the total length, set to 1: the head
+        // counts the offsets' lengths, not the header's.
+        let pin = dir.join("prot_v5.pin");
+        let mut index = std::fs::read(&pin).unwrap();
+        let header = (longest as u32).to_be_bytes();
+        let at: Vec<usize> = (0..index.len() - 3)
+            .filter(|&i| index[i..i + 4] == header)
+            .collect();
+        assert_eq!(at.len(), 1, "one longest length in the index");
+        index[at[0]..at[0] + 4].copy_from_slice(&1u32.to_be_bytes());
+        std::fs::write(&pin, index).unwrap();
         let database =
             BlastxDatabase::open(path.to_str().unwrap(), &ApplicationSettings::default()).unwrap();
         assert_eq!(database.x_open_stream().unwrap(), longest);

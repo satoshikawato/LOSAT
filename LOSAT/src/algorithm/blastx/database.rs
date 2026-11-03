@@ -43,6 +43,10 @@ const PROGRAM: &str = "BLASTX";
 /// The longest subject BLASTX searches in one piece (NCBI's `MAX_DBSEQ_LEN`).
 pub(super) const MAX_DBSEQ_LEN: usize = 5_000_000;
 
+/// Sequences whose lengths `BlastxDatabase::x_open_stream` reads with one read of the index (64 KiB
+/// of offsets). No NCBI counterpart; the size changes nothing but the number of reads.
+const X_LENGTHS_PER_READ: u32 = 16_384;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-119
 // ```c
 // const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
@@ -161,19 +165,34 @@ impl BlastxDatabase {
     // sequence): NCBI opens it, writes the outfmt 0 prolog, reads the first query batch and
     // fails in that batch's preliminary search, where its reader cannot map the sequence
     // file (BLASTP's `-db`, fixture `LOSAT/tests/seqdb/db/empty`).
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:128-136 (quoted
-    // at `SeqDb::max_length`): the longest length is the volumes' index headers', not a scan.
+    // No NCBI counterpart for the lengths (NCBI takes the longest from the volumes' index headers,
+    // seqdbimpl.cpp:128-136, quoted at `SeqDb::max_length`): the choices that read the longest
+    // (`x_subject_flow::offsets_stay_below_2_30`, `search_core`'s limit, `x_bx_mem`) take the
+    // value the check counted, also where a damaged header says less (with a `-window_size` near
+    // 2^28 that header chose the kept tables of 2 GiB a thread).
     /// What the search needs of the database before the first query batch, without reading its
-    /// sequences: the residues of the longest sequence (`SeqDb::max_length`, which the check would
-    /// count: makeblastdb writes it in the index, a list scans its OIDs). The empty database's
-    /// error, and, where the longest is above `MAX_DBSEQ_LEN`, the check's (`x_check_stores`),
-    /// belong to the first query batch with a valid context, which the caller fails with it. The
-    /// search checks each sequence where it first reads it (`XStreamDb::x_check`).
+    /// sequences: the residues of the longest sequence, from the index's offsets
+    /// (`SeqDb::x_protein_lengths`, the lengths of the check's reads; 4 bytes a sequence where the
+    /// check read the residues). The empty database's error, and the check's (`x_check_stores`)
+    /// where the longest is above `MAX_DBSEQ_LEN` or the index cannot be read, belong to the first
+    /// query batch with a valid context, which the caller fails with it. The search checks each
+    /// sequence where it first reads it (`XStreamDb::x_check`).
     pub(crate) fn x_open_stream(&self) -> Result<usize> {
         if self.db.printed_num_seqs() == 0 {
             return Err(PreliminaryReadError("Database memory map file error").into());
         }
-        let longest = self.db.max_length() as usize;
+        let count = self.db.num_seqs();
+        let mut longest = 0;
+        let mut first = 0;
+        while first < count {
+            let end = count.min(first.saturating_add(X_LENGTHS_PER_READ));
+            let lengths = match self.db.x_protein_lengths(first, end) {
+                Ok(lengths) if !lengths.is_empty() => lengths,
+                _ => return self.x_check_stores(),
+            };
+            longest = longest.max(lengths.iter().copied().max().unwrap_or(0) as usize);
+            first += lengths.len() as u32;
+        }
         if longest > MAX_DBSEQ_LEN {
             return self.x_check_stores();
         }

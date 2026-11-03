@@ -913,6 +913,21 @@ fn run_inner(
         (Some(_), None) => Subjects::Unreadable,
     };
     let search_error = |error: anyhow::Error| -> anyhow::Error {
+        // An error the search raised after the point where a database refused before the search
+        // fails it: the database's first error comes before it (`search::search_core`).
+        let error = match error.downcast::<super::x_db_stream::XPastHead>() {
+            Ok(super::x_db_stream::XPastHead(error)) => {
+                if let (Some(database), Some(stream)) = (&database, &x_stream) {
+                    if !stream.x_checked() {
+                        if let Err(first) = database.x_check_stores() {
+                            return database_error(first);
+                        }
+                    }
+                }
+                error
+            }
+            Err(error) => error,
+        };
         // LOSAT's refusal, not an error of NCBI's engine.
         if error.is::<super::parameters::SearchSpaceOverflow>()
             || error.is::<super::split::QuerySplitRefusal>()

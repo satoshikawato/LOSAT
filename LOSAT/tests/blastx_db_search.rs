@@ -309,6 +309,25 @@ fn a_refused_database_sequence_is_named_in_ordinal_order_at_every_thread_count()
             "{threads}: {stderr}"
         );
     }
+    // A refusal of the first searched batch's setup that the search raises before its first
+    // read (a search space past Int8) comes after the database's error, as when the database was
+    // read before the first batch.
+    for threads in ["1", "4"] {
+        let output = losat()
+            .arg("blastx")
+            .arg("-query")
+            .arg(&query)
+            .args(["-db", &db, "-dbsize", "4000000000000000000"])
+            .args(["-outfmt", "6", "-num_threads", threads])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{threads}: {stderr}");
+        assert!(
+            stderr.contains("database sequence 40 holds a byte"),
+            "{threads}: {stderr}"
+        );
+    }
     // A first batch without a valid context (a query of N alone, longer than a batch) is
     // reported before the batch that reads the database fails.
     let all_n = dir.join("nn.fna");
@@ -364,10 +383,9 @@ fn a_refused_database_sequence_is_named_in_ordinal_order_at_every_thread_count()
             "{stderr}"
         );
     };
-    // The index's longest (before the search) ...
+    // The longest of the index's offsets, before the search ...
     refused(&db);
-    // ... and, with an index header that says 1,000 (big-endian, after the total length), the
-    // search's read of the sequence.
+    // ... also with an index header that says 1,000 (big-endian, after the total length).
     let pin = format!("{db}.pin");
     let mut index = std::fs::read(&pin).unwrap();
     let longest = 5_000_001u32.to_be_bytes();

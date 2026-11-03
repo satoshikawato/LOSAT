@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use anyhow::{anyhow, Result};
 
 use super::input::FastaRecord;
-use super::x_db_stream::{XBlock, XCursor, XPass, XStream};
+use super::x_db_stream::{XBlock, XCursor, XPass, XPastHead, XStream};
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
@@ -81,6 +81,16 @@ impl<'a> Subjects<'a> {
     /// Whether the subjects are `Unreadable`.
     pub(crate) fn is_unreadable(&self) -> bool {
         matches!(self, Subjects::Unreadable)
+    }
+
+    /// `error`, raised by a search after the point where `Unreadable` subjects fail it
+    /// (`search::search_core`): an `XPastHead` where the subjects are a stream whose reads have
+    /// not checked every sequence, else `error` itself.
+    pub(crate) fn x_past_head(&self, error: anyhow::Error) -> anyhow::Error {
+        match self {
+            Subjects::Stream(stream) if !stream.db.x_checked() => XPastHead(error).into(),
+            _ => error,
+        }
     }
 
     /// Whether there is no subject.

@@ -423,11 +423,13 @@ seqidlist/sl_pfound_neg.txt` leaves `gb|AAA00001.1|` out of the search, and NCBI
 The same record with other taxids (line DBID N1b; rows `db.id.*.found.taxid.*`): `make_ids.py --copytaxid-only`
 writes `ids/pdup_t` (`pdup.faa` with taxid 9606), `ids/pdup_u` (without one), `ids/pdup_n` and `ids/pdup_o` (both
 with taxid 99990, the last entry of the taxonomy databases of `../seqdb/taxdb`), `ids/ndup_a` and `ids/ndup_t`
-(`ndup.fna`, the back-translation of `pdup.faa`, without a taxid and with 9606), and the aliases `ids/pdup_at.pal`,
-`ids/pdup_tu.pal`, `ids/pdup_no.pal` and `ids/ndup_at.nal` (queries `pdup_q.faa` and `ndup_q.fna`). NCBI shows for
+(`ndup.fna`, the back-translation of `pdup.faa`, without a taxid and with 9606), `ids/pdupe_a` and `ids/pdupe_t`
+(`pdupe.faa`, without a title, without a taxid and with 9606), and the aliases `ids/pdup_at.pal`, `ids/pdup_tu.pal`,
+`ids/pdup_no.pal`, `ids/pdupe_at.pal` and `ids/ndup_at.nal` (queries `pdup_q.faa` and `ndup_q.fna`). NCBI shows for
 both copies the one its lookup gives first, with its taxids: the same rows where no report writes taxids, which
-LOSAT writes; LOSAT refuses the sequence in the formats of taxids and their names, and with a taxonomy database on
-`BLASTDB` that writes a text at its lookups (`bad_magic`, and `offset_last_past_end` for the copies of 99990).
+LOSAT writes; LOSAT refuses the sequence in the formats of taxids and their names, for `pdupe_at` with the
+taxonomy database (a title made from the taxids), and with a taxonomy database on `BLASTDB` whose texts depend on
+the copy NCBI fetches (`bad_magic` for `pdup_at`, `offset_last_past_end` for the copies of 99990 in `pdup_no`).
 
 Sequences whose only Seq-id is `gnl|BL_ORD_ID|n` (line DBID N2a; rows `db.id.*.ord.*`): `make_ids.py` writes, from
 the FASTA of `ids/make_ord_fasta.py`, `ids/pord_v5` and `ids/pord_v4` from `ids/pord.faa` (two accessions, then

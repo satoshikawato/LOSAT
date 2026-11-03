@@ -106,6 +106,9 @@ pub enum FoundInstead {
     /// formatters can show it for the subject, which only the reports that write the subject's
     /// taxids show apart (`fetched`).
     OtherTaxids(u32),
+    /// Such a sequence, also with the same taxids in another volume, that every report that
+    /// reads the Bioseq can show apart, for the reason given.
+    CopyApart(u32, CopyApart),
     /// Where NCBI's formatters may read the reported sequences one by one
     /// (`PRE_FETCH_SEQS_LIMIT`), another sequence of the database, by ordinal id, that holds an id
     /// the Seq-align id matches weakly (`seqid::id_scope::weak_keys`): where that one is read
@@ -119,6 +122,17 @@ pub enum FoundInstead {
     /// The lookup fails on a file of the database or on the id, with this message: NCBI's
     /// formatters stop with an exception.
     Failed(String),
+}
+
+/// Why the reports can show apart a copy of a subject with the same definition lines but for
+/// their taxids (`FoundInstead::CopyApart`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyApart {
+    /// A title can be made from the taxids (`ParsedSubject::title_reads_source`).
+    Title,
+    /// The taxonomy database writes a text at a lookup that the volume of the copy makes for
+    /// its taxids.
+    TaxonomyTexts,
 }
 
 /// One `HitDescr` of the XML2 and JSON formats (`s_SeqAlignToXMLHit`).
@@ -408,6 +422,14 @@ impl ParsedSubject {
             (false, Some(FoundInstead::OtherTaxids(_))) if !taxonomy => Ok(()),
             (false, Some(FoundInstead::OtherTaxids(ordinal))) => Err(format!(
                 "has the Seq-align id {}, which database sequence {ordinal} also holds with the same definition lines and letters but other taxids (NCBI BLAST+ 2.17.0 can write that sequence's taxids and their names for it)",
+                id()
+            )),
+            (false, Some(FoundInstead::CopyApart(ordinal, CopyApart::Title))) => Err(format!(
+                "has the Seq-align id {}, which database sequence {ordinal} also holds with the same definition lines and letters but other taxids, from which NCBI BLAST+ 2.17.0 can make that sequence's title for it (a title made from the taxids with the taxonomy database, or the end of a protein title rewritten)",
+                id()
+            )),
+            (false, Some(FoundInstead::CopyApart(ordinal, CopyApart::TaxonomyTexts))) => Err(format!(
+                "has the Seq-align id {}, which database sequence {ordinal} also holds with the same definition lines and letters: where NCBI BLAST+ 2.17.0 shows that sequence for it, the volume of that sequence looks its taxids up, and the taxonomy database writes a text at such a lookup",
                 id()
             )),
             (false, Some(FoundInstead::Sequence(ordinal))) => Err(format!(

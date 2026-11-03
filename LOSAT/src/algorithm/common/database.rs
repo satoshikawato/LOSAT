@@ -567,9 +567,9 @@ pub(crate) struct HeaderReader<'a> {
     prefetch_off: bool,
     /// `SeqDb::taxdb_found`, asked at the first record found with other taxids (`copy_of`).
     taxdb_found: std::cell::OnceCell<bool>,
-    /// `taxdb_lookups_write`, asked at the first record found with other taxids or in
-    /// another volume (`copy_of`).
-    taxdb_writes: std::cell::OnceCell<bool>,
+    /// `LookupTexts::of`, asked at the first record found with other taxids or in another
+    /// volume (`copy_of`).
+    lookup_texts: std::cell::OnceCell<LookupTexts>,
 }
 
 /// How a sequence of a database differs from another as the reports show them
@@ -580,26 +580,79 @@ enum RecordCopy {
     Same,
     /// The same but where a report writes the taxids or their names.
     OtherTaxids,
+    /// The same definition lines but for their taxids, and letters, that a report can still
+    /// show apart (`FoundInstead::CopyApart`).
+    Apart(crate::report::db_subject::CopyApart),
     /// A report can show the one apart.
     Differs,
 }
 
-/// Whether a lookup of the taxonomy database of the search path of `db` writes a text: one that
-/// NCBI treats as missing with a text of opening, or with the offset error of its last entry
-/// (`TaxdbRun`); a database that does not open or read is taken to write one. Without
-/// `taxdb.bti` on the path, no.
-fn taxdb_lookups_write(db: &SeqDb) -> bool {
-    if !db.taxdb_found() {
-        return false;
-    }
-    let Some(search_path) = db.search_path() else {
-        return false;
-    };
-    match crate::seqdb::taxdb::TaxDb::open(search_path) {
-        Ok(taxdb) => {
-            !taxdb.open_messages().is_empty() || !matches!(taxdb.offset_error_taxid(), Ok(None))
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:216-220
+// ```c++
+// bool CSeqDBTaxInfo::GetTaxNames(TTaxId           tax_id,
+//                                 SSeqDBTaxInfo  & info )
+// {
+// 	static CTaxDBFileInfo t;
+//     if (t.IsMissingTaxInfo()) return false;
+// ```
+/// What the lookups of the taxonomy database of the search path of a database write
+/// (`TaxdbRun`): the texts of opening it, once at the run's first lookup (the static
+/// `CTaxDBFileInfo`), and the offset error of its last entry at each volume's lookup of that
+/// taxid. Nothing without `taxdb.bti` on the path.
+#[derive(Clone, Copy, Debug, Default)]
+struct LookupTexts {
+    /// The database writes texts of opening.
+    open: bool,
+    /// The taxid whose lookup writes the offset error (`TaxDb::offset_error_taxid`).
+    offset_error_taxid: Option<i32>,
+    /// The database does not open or read: taken to write a text at any lookup.
+    unknown: bool,
+}
+
+impl LookupTexts {
+    /// The texts of the lookups of the taxonomy database of `db`.
+    fn of(db: &SeqDb) -> Self {
+        if !db.taxdb_found() {
+            return Self::default();
         }
-        Err(_) => true,
+        let Some(search_path) = db.search_path() else {
+            return Self::default();
+        };
+        let unknown = Self {
+            unknown: true,
+            ..Self::default()
+        };
+        let Ok(taxdb) = crate::seqdb::taxdb::TaxDb::open(search_path) else {
+            return unknown;
+        };
+        let Ok(offset_error_taxid) = taxdb.offset_error_taxid() else {
+            return unknown;
+        };
+        Self {
+            open: !taxdb.open_messages().is_empty(),
+            offset_error_taxid,
+            unknown: false,
+        }
+    }
+
+    /// Whether the texts depend on which of two copies NCBI fetches, the one with the taxids
+    /// `taxids` looked up by its volume or the other with `other` by another volume (each
+    /// `ParsedSubject::volume_taxids`): the offset error where either holds its taxid, the texts
+    /// of opening where only one of them looks a taxid up (the run's first lookup can move).
+    fn differ(self, taxids: &[i32], other: &[i32]) -> bool {
+        (self.open && taxids.is_empty() != other.is_empty())
+            || self.per_volume(taxids)
+            || self.per_volume(other)
+    }
+
+    /// Whether a volume's lookups of the taxids `taxids` can write a text that another volume's
+    /// lookups of them write again: the offset error.
+    fn per_volume(self, taxids: &[i32]) -> bool {
+        !taxids.is_empty()
+            && (self.unknown
+                || self
+                    .offset_error_taxid
+                    .is_some_and(|taxid| taxids.contains(&taxid)))
     }
 }
 
@@ -654,7 +707,7 @@ impl<'a> HeaderReader<'a> {
             lookup: std::cell::OnceCell::new(),
             prefetch_off: prefetch_may_be_off(),
             taxdb_found: std::cell::OnceCell::new(),
-            taxdb_writes: std::cell::OnceCell::new(),
+            lookup_texts: std::cell::OnceCell::new(),
         }
     }
 
@@ -744,6 +797,7 @@ impl<'a> HeaderReader<'a> {
             match self.copy_of(subject, ordinal, other) {
                 RecordCopy::Same => {}
                 RecordCopy::OtherTaxids => other_taxids = Some(other),
+                RecordCopy::Apart(cause) => return Some(FoundInstead::CopyApart(other, cause)),
                 RecordCopy::Differs => return Some(FoundInstead::Sequence(other)),
             }
         }
@@ -767,6 +821,7 @@ impl<'a> HeaderReader<'a> {
                 RecordCopy::OtherTaxids => {
                     other_taxids.get_or_insert(other);
                 }
+                RecordCopy::Apart(cause) => return Some(FoundInstead::CopyApart(other, cause)),
                 RecordCopy::Differs => return Some(FoundInstead::AlsoHeld(other)),
             }
         }
@@ -903,11 +958,12 @@ impl<'a> HeaderReader<'a> {
     /// How the sequence `b` differs from the sequence `a`, `subject`, as NCBI's formatters show
     /// one for the other: the same where both hold the same definition lines, as the reports
     /// read them, and letters; also where only the taxids of the definition lines differ
-    /// (`RecordCopy::OtherTaxids`, which the reports of taxids and their names alone show apart),
-    /// unless a title can depend on the Bioseq's source (`ParsedSubject::title_reads_source`) and
-    /// the sources differ, or the taxonomy database writes a text at its lookups, which each
-    /// volume makes for the taxids of the sequence it fetches (also for the same taxids in another
-    /// volume).
+    /// (`RecordCopy::OtherTaxids`, which the reports of taxids and their names alone show apart).
+    /// Shown apart by every report that reads the Bioseq (`RecordCopy::Apart`): where a title can
+    /// depend on the Bioseq's source (`ParsedSubject::title_reads_source`) and the sources differ,
+    /// and where the taxonomy database's texts depend on which copy NCBI fetches, whose volume
+    /// looks its taxids up (`LookupTexts::differ`; for the same taxids in another volume, the
+    /// offset error, `LookupTexts::per_volume`).
     fn copy_of(
         &self,
         subject: &crate::report::db_subject::ParsedSubject,
@@ -953,30 +1009,33 @@ impl<'a> HeaderReader<'a> {
         if !same_letters {
             return RecordCopy::Differs;
         }
-        let taxdb_writes = || {
-            *self
-                .taxdb_writes
-                .get_or_init(|| taxdb_lookups_write(self.db))
-        };
+        use crate::report::db_subject::CopyApart;
+        let texts = || *self.lookup_texts.get_or_init(|| LookupTexts::of(self.db));
+        let taxids = subject.volume_taxids();
         match copy {
             RecordCopy::Same => {
                 let other_volume = !matches!(
                     (self.db.volume_index(a), self.db.volume_index(b)),
                     (Ok(volume_a), Ok(volume_b)) if volume_a == volume_b
                 );
-                if other_volume && !subject.volume_taxids().is_empty() && taxdb_writes() {
-                    return RecordCopy::Differs;
+                // The same taxids look the same up first: of the texts only the offset error
+                // comes per volume.
+                if other_volume && texts().per_volume(&taxids) {
+                    return RecordCopy::Apart(CopyApart::TaxonomyTexts);
                 }
                 RecordCopy::Same
             }
             _ => {
-                let taxdb_found = *self.taxdb_found.get_or_init(|| self.db.taxdb_found());
-                let other_sources = crate::report::db_subject::ParsedSubject::new(set_b)
-                    .map_or(true, |copy| copy.volume_taxids() != subject.volume_taxids());
-                if (other_sources && subject.title_reads_source(protein, taxdb_found))
-                    || taxdb_writes()
-                {
+                let Ok(copy) = crate::report::db_subject::ParsedSubject::new(set_b) else {
                     return RecordCopy::Differs;
+                };
+                let other = copy.volume_taxids();
+                let taxdb_found = *self.taxdb_found.get_or_init(|| self.db.taxdb_found());
+                if other != taxids && subject.title_reads_source(protein, taxdb_found) {
+                    return RecordCopy::Apart(CopyApart::Title);
+                }
+                if texts().differ(&taxids, &other) {
+                    return RecordCopy::Apart(CopyApart::TaxonomyTexts);
                 }
                 RecordCopy::OtherTaxids
             }
@@ -2821,56 +2880,65 @@ mod taxdb_prepass_tests {
     fn the_same_record_with_other_taxids_is_shown_apart_by_the_reports_of_taxids_only() {
         // tests/db_search/ids/make_ids.py (line DBID N1b): `pdup_at` holds `gb|EEE00005.1|`
         // without a taxid then with taxid 9606, `pdup_tu` the other way, `pdup_no` twice with
-        // taxid 99990; `taxdb`, the variant of tests/seqdb/taxdb on BLASTDB. `want`: the
-        // refusal without the reports of taxids (`fetched(false)`) and with them.
+        // taxid 99990 (the last entry of every variant of tests/seqdb/taxdb, whose lookup writes
+        // the offset error of `offset_last_past_end`), `pdupe_at` an empty title without a taxid
+        // then with 9606; `taxdb`, the variant on BLASTDB. `without`, `with`: the refusal without
+        // the reports of taxids (`fetched(false)`) and with them.
         let cwd = empty_cwd("other_taxids");
         let first = |n: u32| format!("lookup gives database sequence {n} first");
-        let held = |n: u32| format!("which database sequence {n} also holds (");
         let taxids = |n: u32| {
-            format!("database sequence {n} also holds with the same definition lines and letters but other taxids")
+            format!("database sequence {n} also holds with the same definition lines and letters but other taxids (")
         };
-        for (name, taxdb, ordinal, without, with) in [
-            ("ids/pdup_at", None, 0, None, Some(taxids(1))),
-            ("ids/pdup_at", None, 1, None, Some(taxids(0))),
-            ("ids/pdup_tu", None, 0, None, Some(taxids(1))),
-            ("ids/pdup_tu", None, 1, None, Some(taxids(0))),
-            ("ids/pdup_at", Some("good"), 1, None, Some(taxids(0))),
-            // The taxonomy database writes a text at its lookups, which the volume of the
-            // sequence NCBI fetches makes for that sequence's taxids.
+        let title = |n: u32| {
+            format!("database sequence {n} also holds with the same definition lines and letters but other taxids, from which")
+        };
+        let texts = |n: u32| {
+            format!("database sequence {n} also holds with the same definition lines and letters: where")
+        };
+        let both = |text: String| (Some(text.clone()), Some(text));
+        for (name, taxdb, ordinal, (without, with)) in [
+            ("ids/pdup_at", None, 0, (None, Some(taxids(1)))),
+            ("ids/pdup_at", None, 1, (None, Some(taxids(0)))),
+            ("ids/pdup_tu", None, 0, (None, Some(taxids(1)))),
+            ("ids/pdup_tu", None, 1, (None, Some(taxids(0)))),
+            ("ids/pdup_at", Some("good"), 1, (None, Some(taxids(0)))),
+            // Texts of opening at the run's first lookup, which only the copy with a taxid makes.
+            ("ids/pdup_at", Some("bad_magic"), 0, both(texts(1))),
+            ("ids/pdup_at", Some("bad_magic"), 1, both(texts(0))),
+            ("ids/pdup_tu", Some("count_larger"), 1, both(texts(0))),
+            // The offset error of a taxid that neither copy holds.
             (
                 "ids/pdup_at",
-                Some("bad_magic"),
-                0,
-                Some(held(1)),
-                Some(held(1)),
-            ),
-            (
-                "ids/pdup_at",
-                Some("bad_magic"),
+                Some("offset_last_past_end"),
                 1,
-                Some(first(0)),
-                Some(first(0)),
+                (None, Some(taxids(0))),
             ),
-            ("ids/pdup_no", None, 1, None, None),
-            ("ids/pdup_no", Some("good"), 1, None, None),
+            // The same taxids: the texts of opening come at the same lookup, the offset error
+            // once per volume.
+            ("ids/pdup_no", None, 1, (None, None)),
+            ("ids/pdup_no", Some("good"), 1, (None, None)),
+            ("ids/pdup_no", Some("bad_magic"), 1, (None, None)),
+            ("ids/pdup_no", Some("count_larger"), 0, (None, None)),
             (
                 "ids/pdup_no",
                 Some("offset_last_past_end"),
                 1,
-                Some(first(0)),
-                Some(first(0)),
+                both(texts(0)),
             ),
             (
                 "ids/pdup_no",
                 Some("offset_last_past_end"),
                 0,
-                Some(held(1)),
-                Some(held(1)),
+                both(texts(1)),
             ),
             // The same record without taxids looks nothing up.
-            ("ids/pdup_ab", Some("offset_last_past_end"), 1, None, None),
+            ("ids/pdup_ab", Some("offset_last_past_end"), 1, (None, None)),
+            // An empty title made from the taxids where the taxonomy database is found.
+            ("ids/pdupe_at", None, 0, (None, Some(taxids(1)))),
+            ("ids/pdupe_at", Some("good"), 0, both(title(1))),
+            ("ids/pdupe_at", Some("good"), 1, both(title(0))),
             // Another title is another record whatever the taxids.
-            ("ids/pdup_ac", None, 1, Some(first(0)), Some(first(0))),
+            ("ids/pdup_ac", None, 1, both(first(0))),
         ] {
             let taxdb = taxdb.map(|variant| root().join("seqdb/taxdb").join(variant));
             let db = db_search(name, taxdb.as_deref(), &cwd);

@@ -84,7 +84,8 @@ The same record with other taxids (line DBID N1b; `make_found_fasta.py`), all ve
 with taxid 9606 and `pdup_u.*` without one, read through `pdup_at.pal` (`pdup_a` first: NCBI shows the copy without
 a taxid) and `pdup_tu.pal` (`pdup_t` first); `pdup_n.*` and `pdup_o.*` from `pdup.faa`, both with taxid 99990 (the
 last entry of `tests/seqdb/taxdb/*`, whose lookup writes the offset error of `offset_last_past_end`), through
-`pdup_no.pal`; `ndup_a.*` from `ndup.fna` without a taxid and `ndup_t.*` with taxid 9606, through `ndup_at.nal`.
+`pdup_no.pal`; `pdupe_a.*` and `pdupe_t.*` from `pdupe.faa` (no title) without a taxid and with 9606, through
+`pdupe_at.pal`; `ndup_a.*` from `ndup.fna` without a taxid and `ndup_t.*` with taxid 9606, through `ndup_at.nal`.
 `--copytaxid-only` builds only these.
 """
 import argparse
@@ -121,6 +122,7 @@ def build_weak(args: argparse.Namespace) -> None:
 def build_copytaxid(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("pdup_t", "pdup.faa", "prot", "9606"), ("pdup_u", "pdup.faa", "prot", None),
                                        ("pdup_n", "pdup.faa", "prot", "99990"), ("pdup_o", "pdup.faa", "prot", "99990"),
+                                       ("pdupe_a", "pdupe.faa", "prot", None), ("pdupe_t", "pdupe.faa", "prot", "9606"),
                                        ("ndup_a", "ndup.fna", "nucl", None), ("ndup_t", "ndup.fna", "nucl", "9606")):
         subprocess.run(
             [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", dbtype, "-parse_seqids",
@@ -128,7 +130,8 @@ def build_copytaxid(args: argparse.Namespace) -> None:
             + (["-taxid", taxid] if taxid else []),
             check=True, stdout=subprocess.DEVNULL)
     for alias, names, extension in (("pdup_at", "pdup_a pdup_t", "pal"), ("pdup_tu", "pdup_t pdup_u", "pal"),
-                                    ("pdup_no", "pdup_n pdup_o", "pal"), ("ndup_at", "ndup_a ndup_t", "nal")):
+                                    ("pdup_no", "pdup_n pdup_o", "pal"), ("pdupe_at", "pdupe_a pdupe_t", "pal"),
+                                    ("ndup_at", "ndup_a ndup_t", "nal")):
         (args.out / f"{alias}.{extension}").write_text(
             f"#\n# Alias file of line DBID, N1b\n#\nTITLE {alias} (two databases, parsed Seq-ids)\n"
             f"DBLIST {names}\n")

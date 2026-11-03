@@ -9,8 +9,9 @@ pair 5: pdb|2XYZ| then pdb|2XYZ|AA. `pfound_q1.fna` and `pfound_q4.fna` are back
 queries of pairs 1 and 4. `pdup.faa` holds one record gb|EEE00005.1| (query `pdup_q.faa`), `pdup_c.faa`
 the same record with another title. `nfound.fna`: the sequence of `njoined_a.fna` as gb|AF000050.1| and,
 with three substitutions, gb|AF000050|. `../seqidlist/sl_pfound_neg.txt`: AAA00001.1. Line DBID N1b: `ndup.fna`
-holds one record gb|EEN00005.1|, the back-translation of `pdup.faa` (query `ndup_q.fna`, the same letters), for the
-databases of the same record with other taxids.
+holds one record gb|EEN00005.1|, the back-translation of `pdup.faa` (query `ndup_q.fna`, the same letters), and
+`pdupe.faa` the letters of `pdup.faa` as gb|EEE00006.1| without a title, for the databases of the same record with
+other taxids.
 
 usage: make_found_fasta.py [--out LOSAT/tests/db_search/ids]
 """
@@ -61,6 +62,7 @@ def main() -> int:
     nseq_dup = "".join(CODON[a] for a in seq)
     (out / "ndup.fna").write_text(f">gb|EEN00005.1| duplicated nucleotide record\n{wrap(nseq_dup)}")
     (out / "ndup_q.fna").write_text(f">ndq query of the duplicated nucleotide record\n{wrap(nseq_dup)}")
+    (out / "pdupe.faa").write_text(f">gb|EEE00006.1|\n{wrap(seq)}")
     nseq = "".join(line.strip() for line in (out / "njoined_a.fna").read_text().splitlines()[1:])
     (out / "nfound.fna").write_text(
         f">gb|AF000050.1| nucleotide pair, versioned\n{wrap(nseq)}"

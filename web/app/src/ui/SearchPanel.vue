@@ -56,8 +56,15 @@ const describeState = computed(() => {
 });
 const taskFields = computed(() => sectionsAt(program.value, options.value, 'program').flatMap((section) => section.fields));
 const summaryParts = computed(() => searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value)));
-/** The Algorithm parameters that the argv writes: each differs from the engine's default. */
-const changed = computed(() => formParameters(program.value, values.value, options.value, 'algorithm').length);
+/**
+ * The Algorithm parameters that the argv writes: each differs from the engine's default; the
+ * words of "Additional options" count as one.
+ */
+const changed = computed(
+  () =>
+    formParameters(program.value, values.value, options.value, 'algorithm').length +
+    (state.value.extra[state.value.program].trim() === '' ? 0 : 1),
+);
 /**
  * "Algorithm parameters" starts closed, as on NCBI's page, unless one of its values is
  * written to the argv; a program whose values differ from the defaults opens it when it is
@@ -83,6 +90,7 @@ async function submit(from: 'top' | 'bottom'): Promise<void> {
 
 function restoreDefaults(): void {
   props.draft.resetFields(placementFlags(program.value, 'algorithm'));
+  props.draft.setExtra('');
 }
 
 function onThreads(event: Event): void {

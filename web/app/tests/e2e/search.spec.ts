@@ -881,6 +881,56 @@ test("NCBI's selects of pairs follow the scores and the matrix; Other shows the 
   await expect(gaps.locator('option')).toHaveText(['Existence: 11 Extension: 1', 'Other']);
 });
 
+test("Additional options: the command line's other options after the form's, marked and counted, read by the engine; Max matches in a query range in every mode (DW-42)", async ({
+  page,
+}) => {
+  await openParameters(page);
+  for (const id of ['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx']) {
+    await program(page, id);
+    await expect(page.getByTestId('param-culling_limit-field')).toContainText('Max matches in a query range');
+    // The last row of the form, in Other Parameters.
+    await expect(page.getByTestId('parameter-form').locator('.parameter-section').last().locator('.param-row').last()).toHaveAttribute(
+      'data-testid',
+      'param-extra-field',
+    );
+  }
+  await program(page, 'blastn');
+  const field = page.getByTestId('param-extra-field');
+  const extra = page.getByTestId('param-extra');
+  const validation = page.getByTestId('argv-validation');
+  await expect(field).not.toHaveClass(/\bchanged\b/);
+  await expect(extra).toHaveAccessibleName('Additional options');
+  // The engine reads the words as the command line does, and says what it does not read.
+  await extra.fill('-qcov_hsp_perc 50 -foo');
+  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
+  await extra.fill('-num_threads 2');
+  await expect(validation).toHaveText('-num_threads is managed by LOSAT');
+  await extra.fill("-dust '20 64");
+  await expect(validation).toHaveText("Additional options: a quote (') is not closed");
+  await extra.fill("-ungapped  -dust '20 64 1'");
+  await expect(validation).toHaveAttribute('data-state', 'ok');
+  await expect(field).toHaveClass(/\bchanged\b/);
+  await expect(field).toContainText('♦');
+  await expect(extra).toHaveAccessibleName(/^Additional options\s*, changed from the default$/);
+  await page.getByTestId('param-culling_limit').fill('1');
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(2 changed)');
+  await paste(page, 'query', '>q\nACGTACGTACGTAAACCCGGGTTT\n');
+  await paste(page, 'subject', '>s\nACGTACGTACGTAAACCCGGGTTTACGT\n');
+  await submit(page);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-culling_limit 1 -ungapped -dust 20 64 1');
+  await waitStatus(page, 1, 'completed');
+  await backToSearch(page);
+  // Each mode has its own; "Restore default search parameters" empties them.
+  await program(page, 'blastp');
+  await expect(extra).toHaveValue('');
+  await program(page, 'blastn');
+  await expect(extra).toHaveValue("-ungapped  -dust '20 64 1'");
+  await page.getByTestId('restore-defaults').click();
+  await expect(extra).toHaveValue('');
+  await expect(field).not.toHaveClass(/\bchanged\b/);
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveCount(0);
+});
+
 test('narrow screens put the inputs one under the other, without horizontal scrolling', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await paste(page, 'query', '>NZ_CP006932.1 first\nACGTACGTACGTACGTAC\n>NZ_CP006932.1 second\nACGT!ACGT\n');

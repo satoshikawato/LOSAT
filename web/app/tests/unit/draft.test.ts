@@ -356,6 +356,47 @@ describe('SearchDraft submit', () => {
     expect(validated.at(-1)).toEqual(['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-task', 'dc-megablast']);
   });
 
+  it('writes the words of Additional options after the form\'s, for each program, and refuses an unclosed quote', async () => {
+    const { draft, requests, validated } = setup();
+    draft.setField('-evalue', '1e-5');
+    draft.setExtra(" -ungapped  -dust '20 64 1' ");
+    await draft.idle();
+    expect(validated.at(-1)).toEqual([
+      'blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-evalue', '1e-5', '-ungapped', '-dust', '20 64 1',
+    ]);
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', '>s\nACGT\n');
+    expect((await draft.submit()).ok).toBe(true);
+    expect(requests[0]![0]!.parameters).toEqual([['-evalue', '1e-5']]);
+    expect(requests[0]![0]!.extra).toEqual(['-ungapped', '-dust', '20 64 1']);
+    // Each program keeps its own words; a program without them adds none.
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(draft.state.get().extra).toMatchObject({ blastn: " -ungapped  -dust '20 64 1' ", blastp: '' });
+    expect(validated.at(-1)).toEqual(['blastp', '-query', 'query.fa', '-subject', 'subject.fa']);
+    expect((await draft.submit()).ok).toBe(true);
+    expect(requests[1]![0]!).not.toHaveProperty('extra');
+    // An unclosed quote: the argv is not made, and nothing is queued.
+    draft.setExtra("-seg '12 2.2");
+    await draft.idle();
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: "Additional options: a quote (') is not closed" });
+    expect(await draft.submit()).toEqual({ ok: false, message: "Additional options: a quote (') is not closed" });
+    expect(requests).toHaveLength(2);
+  });
+
+  it('runs the words of Additional options in the coordinator; it refuses the options that LOSAT manages', async () => {
+    const { draft, coordinator } = setup({ useCoordinator: true });
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setExtra('-num_threads 4');
+    await draft.idle();
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: '-num_threads is managed by LOSAT' });
+    expect(await draft.submit()).toEqual({ ok: false, message: '-num_threads is managed by LOSAT' });
+    draft.setExtra('-culling_limit 2 -ungapped');
+    expect((await draft.submit()).ok).toBe(true);
+    expect(coordinator.state.get().runs[0]!.snapshot.argv.slice(5)).toEqual(['-culling_limit', '2', '-ungapped']);
+  });
+
   it('gives every run of the draft its Job Title, outside the argv', async () => {
     const { draft, requests, coordinator } = setup({ useCoordinator: true });
     draft.addFiles('subject', [file('s1.fa', '>s1\nACGT\n'), file('s2.fa', '>s2\nACGT\n')]);

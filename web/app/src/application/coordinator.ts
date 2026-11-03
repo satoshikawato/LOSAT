@@ -39,6 +39,8 @@ export interface SearchRequest {
   readonly query: SequenceInput;
   readonly subject: SequenceInput;
   readonly parameters: ReadonlyArray<readonly [string, string | true]>;
+  /** Words of other options, after the parameters ("Additional options", ArgvInput.extra). */
+  readonly extra?: readonly string[];
   readonly requestedThreads: number | 'auto';
   /** The run's name (NCBI's "Job Title"); the snapshot keeps it trimmed, or not at all when empty. */
   readonly title?: string;
@@ -108,7 +110,7 @@ export class Coordinator {
       const subjectName = inputName(request.subject, PASTED_NAMES.subject);
       let argv: readonly string[];
       try {
-        argv = buildArgv({ program: request.program, queryName, subjectName, parameters: request.parameters });
+        argv = buildArgv({ program: request.program, queryName, subjectName, parameters: request.parameters, extra: request.extra ?? [] });
       } catch (error) {
         return { ok: false, message: errorMessage(error) };
       }

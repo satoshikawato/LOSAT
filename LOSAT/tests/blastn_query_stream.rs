@@ -492,10 +492,12 @@ fn ranges_masks_and_hit_list_options_give_the_off_bytes() {
 
 /// The errors of a later batch that come after the reports of the batches before (a reader error
 /// late in the file; a batch of queries without letters; with `-query_loc`, a batch of skipped
-/// records only), a reader error in the first record (before any output), and LOSAT's refusals,
-/// which come before every report (a subject id that a later batch reaches, scoring without
-/// Karlin-Altschul values, a negative `CHUNK_SIZE`): the off bytes, status and standard error,
-/// with the reports per batch and tasks the switch acts for (each query with each format once).
+/// records only), a reader error in the first record (before any output), and LOSAT's refusals (a
+/// subject id that a later batch reaches, which comes after the reports of the batches before
+/// with the reports per batch, drop-in DECISIONS 44; scoring without Karlin-Altschul values and a
+/// negative `CHUNK_SIZE`, which come before every report): the off bytes, status and standard
+/// error, with the reports per batch and tasks the switch acts for (each query with each format
+/// once).
 #[test]
 fn errors_and_refusals_give_the_off_bytes() {
     let dir = TempDir::new("errors");
@@ -657,13 +659,14 @@ fn errors_and_refusals_give_the_off_bytes() {
         extra.push(RPTSTREAM);
         let (off, numbers) = same_two(what, &args, 4, &extra, None);
         assert_ne!(off.status, Some(0), "{what}: the refusal");
-        assert!(
+        // The Subject_ id is refused by the report of the batch that reaches it, after the reports
+        // of the batches before; the other two are refused in the first batch's search, where
+        // LOSAT_X_RPTSTREAM keeps the reports after the loop.
+        assert_eq!(
             off.report.is_empty(),
-            "{what}: no report before the refusal"
+            what != "Subject_ id",
+            "{what}: the reports before the refusal"
         );
-        // The switch acts and LOSAT_X_RPTSTREAM keeps the reports after the loop. The Subject_ id
-        // is refused when they are written, so the records of every batch are kept for them; the
-        // other two are refused in the first batch's search.
         assert_eq!(numbers.off, "none", "{what}");
     }
 }

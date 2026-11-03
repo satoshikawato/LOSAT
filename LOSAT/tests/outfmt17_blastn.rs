@@ -186,9 +186,8 @@ fn several_batches_write_one_document() {
 /// `db/snucl_bt` is `snucl` and a third subject (`sn3`, random, no hit of any query here) whose stored
 /// title holds the byte 0xE9: NCBI reads no title for a subject without a hit, so a search that no
 /// query hits `sn3` in prints no message and writes the whole document. LOSAT refuses a stored title
-/// outside `' '..'~'` when a report shows it, and its streaming used to stay off for such a database
-/// (`Off::Titles`): outfmt 17 now streams (`sam_despite=titles`), one report call per batch, with the
-/// bytes of NCBI.
+/// outside `' '..'~'` when a report shows it, and nothing is read before the search for that (drop-in
+/// DECISIONS 44): outfmt 17 streams, one report call per batch, with the bytes of NCBI.
 #[test]
 fn a_stored_title_that_no_hit_reads_still_streams_the_document() {
     equals_frozen_in(
@@ -228,9 +227,7 @@ fn a_stored_title_that_no_hit_reads_still_streams_the_document() {
         // Three queries in three batches, each batch written by its own report call; the
         // switch acts (`off=none`) though the database has a title the reports would refuse.
         assert!(
-            stats.contains(" batches=3 ")
-                && stats.contains(" off=none ")
-                && stats.contains(" sam_despite=titles"),
+            stats.contains(" batches=3 ") && stats.contains(" off=none "),
             "{format}: {stats}"
         );
     }

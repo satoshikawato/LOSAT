@@ -65,7 +65,7 @@ use anyhow::{anyhow, Result};
 use crate::algorithm::common::database::{check_protein_sequence, search_read_error};
 use crate::seqdb::{SeqDb, SequenceBlock};
 
-use super::database::{too_long, MAX_DBSEQ_LEN};
+use super::database::{too_long, x_check_whole, MAX_DBSEQ_LEN};
 
 /// The program that the reader's errors name (`database::PROGRAM`).
 const PROGRAM: &str = "BLASTX";
@@ -122,6 +122,10 @@ pub(crate) struct XStreamDb<'a> {
     x_checked: std::sync::atomic::AtomicBool,
     /// The ordinal ranges the reads have checked, merged, until they cover the database.
     x_covered: std::sync::Mutex<Vec<(usize, usize)>>,
+    /// Whether the whole check finds an error (`x_damaged`), run at most once for the stream.
+    x_damaged: std::sync::OnceLock<bool>,
+    /// The whole check's error, kept by `x_damaged` for the run's report (`x_first_error`).
+    x_first: std::sync::Mutex<Option<anyhow::Error>>,
     /// EXPERIMENT (LOSAT_X_BXTASKRES): the subject flow's task bounds by tasks' `k`, made once
     /// (`x_task_starts`).
     x_task_starts: std::sync::Mutex<Vec<(usize, std::sync::Arc<[u32]>)>>,
@@ -144,6 +148,8 @@ impl<'a> XStreamDb<'a> {
             block_bytes,
             x_checked: std::sync::atomic::AtomicBool::new(false),
             x_covered: std::sync::Mutex::new(Vec::new()),
+            x_damaged: std::sync::OnceLock::new(),
+            x_first: std::sync::Mutex::new(None),
             x_task_starts: std::sync::Mutex::new(Vec::new()),
         }
     }
@@ -217,6 +223,37 @@ impl<'a> XStreamDb<'a> {
     /// Whether the reads have checked every sequence (`x_check`).
     pub(crate) fn x_checked(&self) -> bool {
         self.x_checked.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    // No NCBI counterpart: LOSAT's check of the stored bytes, on the paths of an error only (an
+    // error raised before the reads have checked every sequence).
+    /// Whether the database fails the whole check (`database::x_check_whole`: the first error in
+    /// ordinal order, which the check before the first query batch gave), run at most once for the
+    /// stream; its error is kept for `x_first_error`.
+    pub(crate) fn x_damaged(&self) -> bool {
+        *self.x_damaged.get_or_init(|| match x_check_whole(self.db) {
+            Ok(_) => false,
+            Err(error) => {
+                *self
+                    .x_first
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
+                true
+            }
+        })
+    }
+
+    /// The whole check's first error (`x_damaged`), `None` where it finds none.
+    pub(crate) fn x_first_error(&self) -> Option<anyhow::Error> {
+        if !self.x_damaged() {
+            return None;
+        }
+        let kept = self
+            .x_first
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        kept.or_else(|| x_check_whole(self.db).err())
     }
 
     /// The scanned shortest length with a list (`SeqDb::min_length`), `None` for a whole database.

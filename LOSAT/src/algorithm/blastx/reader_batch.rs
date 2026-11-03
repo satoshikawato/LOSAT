@@ -241,20 +241,31 @@ pub(crate) fn prepare_unit(
         && !subjects.is_empty()
     {
         let mut minima = params.clone();
-        subject_parameters(
-            &prepared,
-            &mut minima,
-            options,
-            subjects.total_length()?,
-            i64::try_from(subjects.len())?,
-            subjects.shortest_length(),
-            None,
-        )?;
-        let valid = || minima.iter().filter(|p| p.valid);
-        word_cutoff_min = ungapped_link
-            .then(|| valid().map(|p| p.word_cutoff).min())
-            .flatten();
-        redo_cutoff_min = kappa.then(|| valid().map(|p| p.hit_cutoff).min()).flatten();
+        let computed = (|| {
+            subject_parameters(
+                &prepared,
+                &mut minima,
+                options,
+                subjects.total_length()?,
+                i64::try_from(subjects.len())?,
+                subjects.shortest_length(),
+                None,
+            )
+        })();
+        match computed {
+            Ok(_) => {
+                let valid = || minima.iter().filter(|p| p.valid);
+                word_cutoff_min = ungapped_link
+                    .then(|| valid().map(|p| p.word_cutoff).min())
+                    .flatten();
+                redo_cutoff_min = kappa.then(|| valid().map(|p| p.hit_cutoff).min()).flatten();
+            }
+            // A database that fails the whole check takes no minima, as when it was refused
+            // before the search: its error comes where the unit is searched
+            // (`search::search_core`, `XPastHead`).
+            Err(_) if subjects.x_damaged() => {}
+            Err(error) => return Err(error),
+        }
     }
     Ok(UnitPrep {
         prepared,

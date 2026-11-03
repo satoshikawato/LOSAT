@@ -328,6 +328,38 @@ fn a_refused_database_sequence_is_named_in_ordinal_order_at_every_thread_count()
             "{threads}: {stderr}"
         );
     }
+    // The same with a reader batch of two units (`BATCH_SIZE` above a unit's 10,002 letters):
+    // the batch's cutoff minima, taken before its units are searched, raise no refusal first.
+    let genome: String = std::fs::read_to_string(fasta("MelaMJNV.fasta"))
+        .unwrap()
+        .lines()
+        .skip(1)
+        .flat_map(str::chars)
+        .take(30_000)
+        .collect();
+    let two = dir.join("two.fna");
+    std::fs::write(
+        &two,
+        format!(">one\n{}\n>two\n{}\n", &genome[..15_000], &genome[15_000..]),
+    )
+    .unwrap();
+    for threads in ["1", "4"] {
+        let output = losat()
+            .env("BATCH_SIZE", "40000")
+            .arg("blastx")
+            .arg("-query")
+            .arg(&two)
+            .args(["-db", &db, "-dbsize", "4000000000000000000"])
+            .args(["-outfmt", "6", "-num_threads", threads])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{threads}: {stderr}");
+        assert!(
+            stderr.contains("database sequence 40 holds a byte"),
+            "{threads}: {stderr}"
+        );
+    }
     // A first batch without a valid context (a query of N alone, longer than a batch) is
     // reported before the batch that reads the database fails.
     let all_n = dir.join("nn.fna");

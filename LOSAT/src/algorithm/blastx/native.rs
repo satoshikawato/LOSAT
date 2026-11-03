@@ -917,11 +917,9 @@ fn run_inner(
         // fails it: the database's first error comes before it (`search::search_core`).
         let error = match error.downcast::<super::x_db_stream::XPastHead>() {
             Ok(super::x_db_stream::XPastHead(error)) => {
-                if let (Some(database), Some(stream)) = (&database, &x_stream) {
-                    if !stream.x_checked() {
-                        if let Err(first) = database.x_check_stores() {
-                            return database_error(first);
-                        }
+                if let Some(stream) = x_stream.as_ref().filter(|stream| !stream.x_checked()) {
+                    if let Some(first) = stream.x_first_error() {
+                        return database_error(first);
                     }
                 }
                 error
@@ -946,14 +944,10 @@ fn run_inner(
         // ordinal order that fails, whichever the search's threads read first; the search's own
         // where the check finds none), and as its own after that (a file changed during the run).
         match error.downcast::<super::x_db_stream::XReadError>() {
-            Ok(super::x_db_stream::XReadError(kept)) => {
-                database_error(match (&database, &x_stream) {
-                    (Some(database), Some(stream)) if !stream.x_checked() => {
-                        database.x_check_stores().err().unwrap_or(kept)
-                    }
-                    _ => kept,
-                })
-            }
+            Ok(super::x_db_stream::XReadError(kept)) => database_error(match &x_stream {
+                Some(stream) if !stream.x_checked() => stream.x_first_error().unwrap_or(kept),
+                _ => kept,
+            }),
             Err(error) => engine(error),
         }
     };

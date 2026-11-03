@@ -199,43 +199,48 @@ impl BlastxDatabase {
         Ok(longest)
     }
 
-    /// Reads every sequence of the database once, in blocks (`x_check_protein_stores`), and keeps
-    /// nothing but the residues of the longest sequence. The error (a reader error of NCBI's
-    /// preliminary search, LOSAT's refusal of a sequence, or the empty database's) is that of the
-    /// first sequence in ordinal order: the error of a database whose longest is above
-    /// `MAX_DBSEQ_LEN` (`x_open_stream`), and the error the run reports for a read or a check
-    /// that fails during the search (`native::search_error`), whichever sequence the search's
-    /// threads read first.
+    /// The whole check of the database (`x_check_whole`).
     pub(crate) fn x_check_stores(&self) -> Result<usize> {
-        if self.db.printed_num_seqs() == 0 {
-            return Err(PreliminaryReadError("Database memory map file error").into());
-        }
-        let mut longest = 0;
-        let mut first_too_long = None;
-        shared::x_check_protein_stores(&self.db, PROGRAM, |ordinal, length| {
-            longest = longest.max(length);
-            if length > MAX_DBSEQ_LEN && first_too_long.is_none() {
-                first_too_long = Some((ordinal, length));
-            }
-        })?;
-        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
-        // ```c
-        // /** Split subject sequences if longer than this */
-        // #define MAX_DBSEQ_LEN 5000000
-        // ```
-        // NCBI searches a longer subject in overlapping parts, which BLASTX does not port (the
-        // same limit stops `-subject` in `search::search_core`); the refusal belongs to the
-        // first batch with a valid context, as the reader's errors.
-        if let Some((ordinal, length)) = first_too_long {
-            return Err(too_long(ordinal as usize, length));
-        }
-        Ok(longest)
+        x_check_whole(&self.db)
     }
 
     /// The opened database.
     pub(crate) fn x_seqdb(&self) -> &SeqDb {
         &self.db
     }
+}
+
+/// Reads every sequence of the database once, in blocks (`x_check_protein_stores`), and keeps
+/// nothing but the residues of the longest sequence. The error (a reader error of NCBI's
+/// preliminary search, LOSAT's refusal of a sequence, or the empty database's) is that of the
+/// first sequence in ordinal order: the error of a database whose longest is above
+/// `MAX_DBSEQ_LEN` (`x_open_stream`), and the error the run reports for a read or a check
+/// that fails during the search (`native::search_error`), whichever sequence the search's
+/// threads read first.
+pub(super) fn x_check_whole(db: &SeqDb) -> Result<usize> {
+    if db.printed_num_seqs() == 0 {
+        return Err(PreliminaryReadError("Database memory map file error").into());
+    }
+    let mut longest = 0;
+    let mut first_too_long = None;
+    shared::x_check_protein_stores(db, PROGRAM, |ordinal, length| {
+        longest = longest.max(length);
+        if length > MAX_DBSEQ_LEN && first_too_long.is_none() {
+            first_too_long = Some((ordinal, length));
+        }
+    })?;
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
+    // ```c
+    // /** Split subject sequences if longer than this */
+    // #define MAX_DBSEQ_LEN 5000000
+    // ```
+    // NCBI searches a longer subject in overlapping parts, which BLASTX does not port (the
+    // same limit stops `-subject` in `search::search_core`); the refusal belongs to the
+    // first batch with a valid context, as the reader's errors.
+    if let Some((ordinal, length)) = first_too_long {
+        return Err(too_long(ordinal as usize, length));
+    }
+    Ok(longest)
 }
 
 /// LOSAT's refusal of database sequence `ordinal` of `length` residues, longer than

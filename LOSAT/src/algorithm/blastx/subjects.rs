@@ -93,6 +93,16 @@ impl<'a> Subjects<'a> {
         }
     }
 
+    /// Whether the subjects are a stream whose reads have not checked every sequence and whose
+    /// database fails the whole check (`XStreamDb::x_damaged`): such a database was refused before
+    /// the search (`Unreadable`) when it was read before the first batch.
+    pub(crate) fn x_damaged(&self) -> bool {
+        match self {
+            Subjects::Stream(stream) => !stream.db.x_checked() && stream.db.x_damaged(),
+            _ => false,
+        }
+    }
+
     /// Whether there is no subject.
     pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0

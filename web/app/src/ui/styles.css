@@ -251,7 +251,7 @@ input[type='radio'] {
 .app-header {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 4px 14px;
   margin: 0 -16px 12px;
   padding: 10px 16px;
@@ -274,8 +274,9 @@ input[type='radio'] {
   color: var(--header-muted);
 }
 
-/* The logo (DW-43) in place of the heading's word, 24 px high; the heading's box ends at the logo's
-   bottom, which the header's row puts on the tagline's baseline (the O and the S go 0.4 px lower). */
+/* The logo (DW-43) in place of the heading's word, 24 px high. The header's row centres it on the
+   tagline (Owner: on the tagline's baseline the logo looked lifted), which puts the middle of the
+   logo at the middle of the tagline's capitals. */
 .losat-logo {
   display: block;
   height: 24px;

@@ -91,6 +91,33 @@ export function servingSources(kind: SequenceKind, accessions: readonly string[]
   );
 }
 
+/** A part of a box that no one source serves: the accessions that the same sources serve (fetchGroups). */
+export interface FetchGroup {
+  readonly sources: readonly FetchSourceId[];
+  readonly accessions: readonly string[];
+  /** The lines of the box (among its accessions, 0-based) that the accessions are, ascending. */
+  readonly lines: readonly number[];
+}
+
+/**
+ * The box's accessions by the set of sources that serve each, in the order of each group's first
+ * accession in the box (line WF-5, fetch_design.md §11). Each group has a "Fetch" of its own,
+ * which sends its accessions to one of its sources; fetchAccessions sends a box that one source
+ * serves whole.
+ */
+export function fetchGroups(kind: SequenceKind, accessions: readonly string[]): readonly FetchGroup[] {
+  const groups = new Map<string, { sources: readonly FetchSourceId[]; accessions: string[]; lines: number[] }>();
+  for (const [line, accession] of accessions.entries()) {
+    const sources = servingSources(kind, [accession]);
+    const key = sources.join(',');
+    const group = groups.get(key) ?? { sources, accessions: [], lines: [] };
+    group.accessions.push(accession);
+    group.lines.push(line);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
 export function sourceLabel(source: FetchSourceId): string {
   return FETCH_SOURCES.find((candidate) => candidate.id === source)!.label;
 }

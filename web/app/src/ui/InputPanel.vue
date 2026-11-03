@@ -4,17 +4,20 @@
 // role's genetic code (BLASTX, TBLASTN, TBLASTX), the Job Title (query), then LOSAT's own parts: the
 // inputs with their records, and Combined / Separate. A file dropped anywhere on the block is
 // opened.
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { DraftState, SearchDraft } from '../application/draft';
-import { raceChoice } from '../application/source-race';
+import { groupSite, raceChoice } from '../application/source-race';
 import {
   accessionLines,
   FETCH_SOURCES,
+  fetchGroups,
   RACE_RECORDS,
   servingSources,
   sourceLabel,
   sourceList,
   type FetchChoice,
+  type FetchGroup,
+  type FetchSourceId,
 } from '../domain/accession';
 import { sectionsAt, writtenValue } from '../domain/parameters';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
@@ -47,12 +50,49 @@ const serving = computed(() => (accessions.value === undefined ? [] : servingSou
 const fastest = computed(() =>
   serving.value.length === 1 ? serving.value[0] : raceChoice(props.state.race[kind.value], serving.value),
 );
+/** A box that no one site serves: its groups, each with a Fetch of its own that names its site (line WF-5). */
+const groups = computed(() =>
+  accessions.value === undefined || serving.value.length > 0 ? [] : fetchGroups(kind.value, accessions.value),
+);
+/** The sites picked in the groups' selects, by the group's sites, for this text of the box. */
+const picked = ref<Record<string, FetchSourceId>>({});
+watch(
+  () => roleState.value.paste,
+  () => (picked.value = {}),
+);
+const groupKey = (group: FetchGroup) => group.sources.join(',');
+const groupCame = (group: FetchGroup) => group.lines.every((line) => roleState.value.fetched?.[line] !== undefined);
+/** A group's site: where it came from, else the one picked, else where it starts (groupSite). */
+function groupSource(group: FetchGroup): FetchSourceId {
+  const came = roleState.value.fetched?.[group.lines[0]!]?.source;
+  if (came !== undefined) return came;
+  const pick = picked.value[groupKey(group)];
+  return pick !== undefined && group.sources.includes(pick)
+    ? pick
+    : groupSite(group.sources, props.state.fetchSource, props.state.race[kind.value]);
+}
+/** "C_AA004835.1", "P12345 and 1 more": each group names its first accession, which no other group has. */
+const groupName = (group: FetchGroup) =>
+  group.accessions.length === 1 ? group.accessions[0]! : `${group.accessions[0]!} and ${group.accessions.length - 1} more`;
+function pick(group: FetchGroup, source: FetchSourceId): void {
+  picked.value = { ...picked.value, [groupKey(group)]: source };
+}
+function onGroupSource(group: FetchGroup, event: Event): void {
+  pick(group, (event.target as HTMLSelectElement).value as FetchSourceId);
+  props.draft.clearFetchFailure(props.role);
+}
+function onGroupFetch(group: FetchGroup, index: number): void {
+  // The site pressed stays on the row while the group is fetched, whatever the race says meanwhile.
+  const source = groupSource(group);
+  pick(group, source);
+  props.draft.fetchGroup(props.role, index, source);
+}
 /** The in-place sentence: where Fetch sends the accessions. */
 const fetchNote = computed(() => {
   const noun = accessions.value?.length === 1 ? 'accession' : 'accessions';
   const choice = props.state.fetchSource;
-  if (choice !== 'fastest') return `Sends the ${noun} to ${sourceLabel(choice)}`;
   if (serving.value.length === 0) return 'No one site has all of these accessions';
+  if (choice !== 'fastest') return `Sends the ${noun} to ${sourceLabel(choice)}`;
   if (fastest.value !== undefined) return `Sends the ${noun} to ${sourceLabel(fastest.value)}`;
   return `Sends the ${noun} to the fastest of ${sourceList(serving.value, 'and')}`;
 });
@@ -137,29 +177,58 @@ function onDrop(event: DragEvent): void {
           @input="onPaste"
         />
         <div v-if="accessions" class="fetch-row" :data-testid="`${role}-fetch-row`">
-          <button
-            type="button"
-            :disabled="fetchBusy"
-            :data-testid="`${role}-fetch`"
-            @click="draft.fetchAccessions(role)"
-          >
-            Fetch
-          </button>
-          <label>
-            from
-            <select
-              :value="state.fetchSource"
-              :disabled="choiceLocked"
-              :data-testid="`${role}-fetch-source`"
-              @change="onFetchSource"
+          <template v-if="groups.length === 0">
+            <button
+              type="button"
+              :disabled="fetchBusy"
+              :data-testid="`${role}-fetch`"
+              @click="draft.fetchAccessions(role)"
             >
-              <option value="fastest">Fastest{{ fastest === undefined ? '' : ` (${sourceLabel(fastest)})` }}</option>
-              <option v-for="source in FETCH_SOURCES" :key="source.id" :value="source.id">{{ source.label }}</option>
-            </select>
-          </label>
+              Fetch
+            </button>
+            <label>
+              from
+              <select
+                :value="state.fetchSource"
+                :disabled="choiceLocked"
+                :data-testid="`${role}-fetch-source`"
+                @change="onFetchSource"
+              >
+                <option value="fastest">Fastest{{ fastest === undefined ? '' : ` (${sourceLabel(fastest)})` }}</option>
+                <option v-for="source in FETCH_SOURCES" :key="source.id" :value="source.id">{{ source.label }}</option>
+              </select>
+            </label>
+          </template>
           <span class="hint" :data-testid="`${role}-fetch-note`">{{ fetchNote }}</span>
           <HelpTip :id="`${role}-fetch`" label="About fetching accessions" :text="fetchHelp" />
         </div>
+        <ul v-if="groups.length > 0" class="fetch-groups" :data-testid="`${role}-fetch-groups`">
+          <li v-for="(group, index) in groups" :key="groupKey(group)" :data-testid="`${role}-fetch-group-${index}`">
+            <button
+              type="button"
+              :disabled="fetchBusy || groupCame(group)"
+              :aria-label="`${groupCame(group) ? 'Fetched' : 'Fetch'} ${groupName(group)} from ${sourceLabel(groupSource(group))}`"
+              :title="group.accessions.length > 1 ? group.accessions.join(', ') : undefined"
+              :data-testid="`${role}-fetch-group-${index}-button`"
+              @click="onGroupFetch(group, index)"
+            >
+              {{ groupCame(group) ? 'Fetched' : 'Fetch' }} {{ groupName(group) }}
+            </button>
+            <!-- The button's name already says where it sends. -->
+            <span aria-hidden="true">from</span>
+            <select
+              v-if="group.sources.length > 1"
+              :value="groupSource(group)"
+              :disabled="fetchBusy || groupCame(group)"
+              :aria-label="`Site for ${groupName(group)}`"
+              :data-testid="`${role}-fetch-group-${index}-source`"
+              @change="onGroupSource(group, $event)"
+            >
+              <option v-for="source in group.sources" :key="source" :value="source">{{ sourceLabel(source) }}</option>
+            </select>
+            <span v-else aria-hidden="true">{{ sourceLabel(group.sources[0]!) }}</span>
+          </li>
+        </ul>
         <p v-if="fetchState?.state === 'racing'" class="muted" role="status" :data-testid="`${role}-fetch-status`">
           <LosatLoader />Finding the fastest site…
         </p>

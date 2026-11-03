@@ -16,7 +16,8 @@
 //! a subject file and a database, outfmt 6
 //! and 7, with `-lcase_masking`, with `-parse_deflines` (the ids the reader parsed are kept beside
 //! the parts), and the same file with a hyphen in its last record (a reader message after the first
-//! part). That those bytes equal NCBI's is the business of the fixture suites.
+//! part). `LOSAT_X_QSTREAM=0` keeps the records read before the search (the file is longer than
+//! twice its batch). That those bytes equal NCBI's is the business of the fixture suites.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -96,8 +97,8 @@ fn query_text(tail: &[u8]) -> Vec<u8> {
 }
 
 /// One megablast search of `query` with `target` (`-subject FILE` or `-db NAME`) and `args`,
-/// `BATCH_SIZE` 20,000, `LOSAT_X_QSCANPARMIN=0` and the given variables as its only `LOSAT_*`
-/// variables. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
+/// `BATCH_SIZE` 20,000, `LOSAT_X_QSCANPARMIN=0`, `LOSAT_X_QSTREAM=0` and the given variables as its
+/// only `LOSAT_*` variables. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more than
 /// one thread, and it selects nothing. Returns the exit status, the report and the standard error.
 fn search(
@@ -132,6 +133,7 @@ fn search(
         .args(["-num_threads", &threads.to_string()])
         .env("BATCH_SIZE", "20000")
         .env("LOSAT_X_QSCANPARMIN", "0")
+        .env("LOSAT_X_QSTREAM", "0")
         .envs(vars.iter().copied())
         .output()
         .expect("run LOSAT");

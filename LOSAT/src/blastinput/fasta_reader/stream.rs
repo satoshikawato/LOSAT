@@ -1308,6 +1308,15 @@ impl<R: Read> LineReader<R> {
     pub(crate) fn line_number(&self) -> u64 {
         self.line_number
     }
+
+    /// `FastaReader::x_start_at`: a line reader that has read nothing counts its lines from `lines`.
+    /// No NCBI counterpart: `CStreamLineReader` starts at `m_LineNumber(0)` (line_reader.cpp:86-92,
+    /// `LineReader`); a reader of a part of the file starts where the file's one reader is.
+    #[cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
+    pub(crate) fn x_start_at(&mut self, lines: u64) {
+        debug_assert!(self.line_number == 0 && !self.unget_line);
+        self.line_number = lines;
+    }
 }
 
 #[cfg(test)]

@@ -4770,9 +4770,10 @@ Scheduling (each value computed by one thread with the original function; order 
   without the switch): `reports` (`LOSAT_X_RPTSTREAM` off: the reports after the loop read every
   record), `standard_input` (`-query -`), `not_a_file` (a named pipe, a device such as
   `/dev/stdin`: `metadata().is_file()`), `io` (no position or second handle, e.g. `try_clone` on
-  WASI), and the rule (`x_query_stream::Rule::off`): `megablast` (`-task megablast`),
+  WASI), and the rule (`x_query_stream::Rule::off`):
   `batch` (a file shorter than twice the largest query batch: `BATCH_SIZE`, or the `CBatchSizeMixer` maximum,
-  999,000 letters for blastn and 4,999,000 for dc-megablast; the file's bytes against the batch's letters);
+  999,000 letters for blastn and 4,999,000 for megablast and dc-megablast; the file's bytes against the batch's
+  letters; until 2026-11-03 the rule also kept the switch off for `-task megablast`, `off=megablast`);
   `run_local` (the Web adapter, ABI v1) gets its
   records from its caller. Where
   `LOSAT_X_RPTSTREAM` is on but keeps the reports after the loop for a search (its `off=` reasons),
@@ -4800,6 +4801,16 @@ Scheduling (each value computed by one thread with the original function; order 
   (96 MB) 0.123 -> 0.009 s on the local i9, dc-megablast of them x0.932 wall at 16 threads (20 of 20 rounds) and x0.964
   at 8, blastn x0.972 (`-subject`) and x0.983 (`-db`), a file below 4 MiB within noise, max RSS unchanged. In the stats
   line below `scan_par=1` says that the parts' lengths were taken, `scan_par=0` the one-thread reading.
+  Since 2026-11-03 (NCMEM2) the second reading reads the same parts again where the first did, when the batch loop
+  needs their records: the parts up to the one that holds the batch's last record, each by a new reader on the
+  search's threads (`x_query_scan_par::read_again`, `x_query_stream::State::read_parts`) that starts with the line
+  number and local-ID counter the one reader has at the part's first byte (`FastaInputSource::x_from_reader_at`), so
+  the records, their local ids and the line numbers of their messages are the one reader's; the records of the last
+  part after the batch wait for the next batch. A file changed between the readings so that a part no longer starts
+  at a record start, ends elsewhere or has other lines is LOSAT's error at the batch that needs the part's first
+  record. Without it the second reading ran on the loop's thread between the batches while the search's threads
+  waited, which kept `-task megablast` out of the switch (megablast at 16 threads on the workstation, the reason
+  removed: x1.10-1.15 of the time in 7 of 9 cases, NCMEM2 p1); the megablast reason went with it.
   With `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM records= read= batches=
   kept= scan_s= scan_par= read_s= peak_window= off=` (kept: the searched records kept for a writer after their batch, 0 where
   `LOSAT_X_RPTSTREAM` writes each batch's reports; scan_s / read_s: the first

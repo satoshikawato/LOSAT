@@ -48,7 +48,13 @@
 //!   loop takes its batch's records when it reaches the batch (`Queries::batch`). The records read
 //!   wait in a window of chunks, each a run of consecutive records read at once (`read_to`), which
 //!   the loop takes when it reaches their batch. The loop's batch is held until the batch is done,
-//!   then dropped.
+//!   then dropped. Where the first reading was read in parts (`x_query_scan_par.rs`), the second
+//!   reads the same parts again (`State::read_parts`): when the loop takes its batch, the parts up
+//!   to the one that holds the batch's last record, each by a reader of its own on the search's
+//!   threads (`x_query_scan_par::read_again`), one chunk per part; the records of the last part
+//!   after the batch wait in the window for the next batch. Without the parts, the second reading
+//!   runs on the loop's thread between the batches, while the search's threads wait: for megablast
+//!   at 16 threads on the workstation that cost 1.10 to 1.15 of the time (NCMEM2 p1).
 //!
 //! Why the records are the same: the reader is a function of the bytes it reads and of its
 //! configuration (the same `ReaderConfig`; the local-ID counter starts at 1 in a new reader and
@@ -58,13 +64,20 @@
 //! window of a regular file depends only on the file's size and the position) and reads the same
 //! lines. The first reading's `IsIStreamEmpty` leaves no state but the position (it seeks back and
 //! drops its buffered bytes), which the second source starts at. It reads only the records the
-//! first reading read without an error, so it never meets the error or the `eEOF`. Each record's
-//! length is compared with the first reading's: a record whose length changed, a file that ends
-//! early or a reader error (the file changed between the two readings) ends the search with
-//! LOSAT's error, and every later reading of the search returns it (`State::failed`); a change
-//! that keeps every record's length is read as the new content (as NCBI, which reads per batch,
-//! would read it). The batches are cut from the first reading's lengths by the same code as
-//! before (`next_ranged_batch`), so they have the same boundaries, the same records in the same
+//! first reading read without an error, so it never meets the error or the `eEOF`. In parts, each
+//! part's reader starts at a record start with the line number and the local-ID counter that the
+//! one reader has there (`FastaInputSource::x_from_reader_at`), the only state a reader carries
+//! from record to record in a file without `\r` (`x_query_scan_par.rs`, "Why the lengths are the
+//! first reading's"), so it reads the same records, the line numbers of their messages included.
+//! Each record's length is compared with the first reading's: a record whose length changed, a
+//! file that ends early or a reader error (the file changed between the two readings) ends the
+//! search with LOSAT's error, and every later reading of the search returns it (`State::failed`);
+//! a change that keeps every record's length is read as the new content (as NCBI, which reads per
+//! batch, would read it). In parts the change must also keep where each part starts and ends and
+//! its lines, or the reading of that part is the error; the parts are read whole, so an error found
+//! ahead of the loop's batch waits for the batch that needs its record (`State::pending`), as the
+//! one reader finds it only there. The batches are cut from the first reading's lengths by the same
+//! code as before (`next_ranged_batch`), so they have the same boundaries, the same records in the same
 //! order, the same cut letters (`FastaRecord::cut` at the placement of `query_input_of`), the same
 //! lower case letters (the `-lcase_masking` masks), the same local ids and titles (every outfmt's
 //! ids and titles are made from them), and the same reader warnings per record (written per batch,
@@ -79,19 +92,17 @@
 //! handle cannot be had (`Io`, for example `try_clone` on WASI). LOSAT reads no compressed query
 //! file. `run_local` (the Web adapter and ABI v1) gets its records from its caller.
 //!
-//! The rule (`Rule::off`): the switch does not act on a regular file where the
-//! second reading saves little memory and costs time (v4-D sessions 4 and 5, ws windows w1, w4):
-//! - `-task megablast` (`Megablast`): its searches are fast for their query bytes, so the serial
-//!   first reading is several % of the time (31,168 cDNAs against 3 Mb at 4 and 16 threads: 1.052
-//!   and 1.037 of the time; 1,775 cDNAs at 8 and 16 threads: 1.039 and 1.063), and its max RSS
-//!   stays below NCBI's without the switch (31,168 cDNAs at 4 threads: 241 MiB, NCBI 358.5);
-//! - a file shorter than twice the largest query batch (`Batch`, `Rule::batch_letters`: `BATCH_SIZE`,
-//!   or the `CBatchSizeMixer` maximum, 999,000 letters for blastn and 4,999,000 for dc-megablast):
-//!   the batch in flight holds most of the file anyway. The file's bytes are compared with the
-//!   batch's letters (titles and line ends make the file a little longer than its letters).
+//! The rule (`Rule::off`): the switch does not act on a regular file shorter than twice the largest
+//! query batch (`Batch`, `Rule::batch_letters`: `BATCH_SIZE`, or the `CBatchSizeMixer` maximum,
+//! 999,000 letters for blastn and 4,999,000 for megablast and dc-megablast): the batch in flight
+//! holds most of the file anyway. The file's bytes are compared with the batch's letters (titles
+//! and line ends make the file a little longer than its letters).
 //!
 //! Until 2026-10-28 the rule had a third reason, `slots`, for the query-batch slots of
-//! LOSAT_X_QBATCHPAR, which were removed then.
+//! LOSAT_X_QBATCHPAR, which were removed then. Until 2026-11-03 it had `megablast`: megablast
+//! searches are fast for their query bytes, so a reading on one thread while the search's threads
+//! wait is several % of their time (v4-D sessions 4 and 5: 31,168 cDNAs against 3 Mb at 4 and 16
+//! threads 1.052 and 1.037 of the time); it went when the second reading was read in parts.
 //!
 //! Elsewhere the second reading saved 3-77 MiB at 0.994-1.006 of the time (blastn and
 //! dc-megablast).
@@ -108,8 +119,9 @@
 //! off: why the switch did not act, `none` when it did; kept: the searched records the loop kept for
 //! a writer after their batch, 0 where LOSAT_X_RPTSTREAM writes each batch's reports; scan_s: the
 //! first reading; scan_par: 1 where it was read in parts on the search's threads,
-//! `x_query_scan_par.rs`, else 0; read_s: the second; peak_window: the most records read ahead of
-//! the loop at once). The line is printed for searches of the command line only.
+//! `x_query_scan_par.rs`, and the second reading reads those parts, else 0; read_s: the second, on
+//! the loop's clock; peak_window: the most records read ahead of the loop at once). The line is
+//! printed for searches of the command line only.
 
 use std::collections::VecDeque;
 use std::fs::File;
@@ -151,8 +163,6 @@ pub(super) enum Off {
     NotAFile,
     /// The file's position or a second handle on it could not be had.
     Io,
-    /// `-task megablast` (`Rule::off`).
-    Megablast,
     /// The file is shorter than twice the largest query batch (`Rule::off`).
     Batch,
 }
@@ -165,7 +175,6 @@ impl Off {
             Off::StandardInput => "standard_input",
             Off::NotAFile => "not_a_file",
             Off::Io => "io",
-            Off::Megablast => "megablast",
             Off::Batch => "batch",
         }
     }
@@ -298,8 +307,6 @@ impl Opening {
 /// reads of a search (`Rule::off`).
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Rule {
-    /// `-task megablast`.
-    pub(super) megablast: bool,
     /// The letters of the largest query batch of the search: `BATCH_SIZE` when it is set, else
     /// the `CBatchSizeMixer` maximum of the task (`run.rs`, `x_query_batch_letters`).
     pub(super) batch_letters: u64,
@@ -307,12 +314,8 @@ pub(super) struct Rule {
 
 impl Rule {
     /// Why the switch does not act on a regular query file of `file_bytes` bytes (the module's
-    /// rule), or `None` where it acts: `-task megablast`; a file shorter than twice the largest
-    /// query batch.
+    /// rule), or `None` where it acts: a file shorter than twice the largest query batch.
     fn off(self, file_bytes: u64) -> Option<Off> {
-        if self.megablast {
-            return Some(Off::Megablast);
-        }
         if file_bytes < self.batch_letters.saturating_mul(2) {
             return Some(Off::Batch);
         }
@@ -396,7 +399,7 @@ struct Acting {
 
 /// The second reading.
 struct State {
-    source: FastaInputSource<File>,
+    second: Second,
     /// The input records read again.
     next: usize,
     /// The input records `base..next`, read and not taken by the loop, in chunks of consecutive
@@ -408,7 +411,27 @@ struct State {
     /// The error of a failed reading: every later reading of the search returns it (the records
     /// of the failed reading are lost, and the reader is past the record that failed).
     failed: Option<String>,
+    /// A change of the file that the reading in parts found ahead of the loop's batch (it reads
+    /// whole parts): the first input record it cannot give and the error, which the reading of a
+    /// batch that needs that record returns (then `failed`).
+    pending: Option<(usize, String)>,
     stats: Stats,
+}
+
+/// How the second reading reads the records.
+enum Second {
+    /// One reader over the file, record after record (`State::read_one`), where the first reading
+    /// was not read in parts.
+    Serial(FastaInputSource<File>),
+    /// The parts of the first reading (`x_query_scan_par::Span`), each read again by a reader of its
+    /// own on the search's threads (`State::read_parts`): `next` is the first part not read.
+    #[cfg(all(unix, feature = "parallel"))]
+    Parts {
+        file: File,
+        spans: Vec<super::x_query_scan_par::Span>,
+        next: usize,
+        config: ReaderConfig,
+    },
 }
 
 #[derive(Default)]
@@ -443,6 +466,20 @@ impl Store {
         range: Option<&SequenceRange>,
         threads: usize,
     ) -> Result<(Store, QueryEnd)> {
+        Store::read_with(opening, source, config, range, |file, start| {
+            super::x_query_scan_par::lengths(file, start, config, threads)
+        })
+    }
+
+    /// `read` with the first reading in parts `in_parts` (from the second handle and the position
+    /// the source starts from; the tests cut small parts).
+    fn read_with(
+        opening: Opening,
+        source: &mut FastaInputSource<File>,
+        config: ReaderConfig,
+        range: Option<&SequenceRange>,
+        in_parts: impl FnOnce(&File, u64) -> Option<super::x_query_scan_par::Scan>,
+    ) -> Result<(Store, QueryEnd)> {
         let (again, start) = opening
             .again
             .expect("LOSAT_X_QSTREAM reads a file it can read again");
@@ -453,14 +490,17 @@ impl Store {
         // the source starts from; where the parts are not taken, the source reads them (its
         // position is where it was: the parts read at offsets).
         let parts = if !config.keep_defline {
-            super::x_query_scan_par::lengths(&again, start, config, threads)
+            in_parts(&again, start)
         } else {
             None
         };
         let scan_par = parts.is_some();
-        let (input_lengths, end) = match parts {
-            Some(lengths) => (lengths, QueryEnd::Input),
-            None => scan(source, config.keep_defline)?,
+        let (input_lengths, spans, end) = match parts {
+            Some(parts) => (parts.lengths, Some(parts.spans), QueryEnd::Input),
+            None => {
+                let (lengths, end) = scan(source, config.keep_defline)?;
+                (lengths, None, end)
+            }
         };
         let scan = started.elapsed();
         let (query_input, lengths) = query_input_of(input_lengths, range);
@@ -473,8 +513,18 @@ impl Store {
                 .context("LOSAT_X_QSTREAM: the query file cannot be read again")?;
             Ok(handle)
         };
-        let source = FastaInputSource::from_file(reopen(&again)?, config);
-        drop(again);
+        // The second reading reads the parts of the first where it read in parts, else the file with
+        // one reader.
+        let second = match spans {
+            #[cfg(all(unix, feature = "parallel"))]
+            Some(spans) => Second::Parts {
+                file: again,
+                spans,
+                next: 0,
+                config,
+            },
+            _ => Second::Serial(FastaInputSource::from_file(reopen(&again)?, config)),
+        };
         let store = Store {
             on: opening.on,
             off: None,
@@ -485,12 +535,13 @@ impl Store {
                 scan,
                 scan_par,
                 state: Mutex::new(State {
-                    source,
+                    second,
                     next: 0,
                     base: 0,
                     chunks: VecDeque::new(),
                     current: None,
                     failed: None,
+                    pending: None,
                     stats: Stats::default(),
                 }),
             }),
@@ -568,27 +619,129 @@ impl Acting {
     }
 }
 
+/// The error of a reading that found the file changed at input record `index`.
+fn changed(index: usize, what: &str) -> String {
+    format!(
+        "LOSAT_X_QSTREAM: the query file changed while LOSAT read it (record {}: {what})",
+        index + 1
+    )
+}
+
 impl State {
-    /// Reads the input records up to `end` into one new chunk (`input_lengths`: the first
-    /// reading's lengths).
-    fn read_to(&mut self, end: usize, input_lengths: &[usize]) -> Result<()> {
+    /// Reads the input records up to `end` at least (`input_lengths`: the first reading's lengths):
+    /// with one reader exactly up to `end`, into one new chunk; in parts, the parts up to the one
+    /// that holds input record `end - 1`, one chunk each, on `pool`'s threads.
+    fn read_to(
+        &mut self,
+        end: usize,
+        input_lengths: &[usize],
+        pool: &crate::utils::threading::SearchPool<'_>,
+    ) -> Result<()> {
         if let Some(failed) = &self.failed {
             return Err(anyhow::anyhow!("{failed}"));
+        }
+        if let Some((index, message)) = &self.pending {
+            if end > *index {
+                self.failed = Some(message.clone());
+                return Err(anyhow::anyhow!("{message}"));
+            }
         }
         if self.next >= end {
             return Ok(());
         }
         let started = Instant::now();
-        let first = self.next;
-        let mut records = Vec::with_capacity(end - first);
-        while self.next < end {
-            records.push(self.read_one(input_lengths)?);
-            self.next += 1;
+        if matches!(self.second, Second::Serial(_)) {
+            let first = self.next;
+            let mut records = Vec::with_capacity(end - first);
+            while self.next < end {
+                records.push(self.read_one(input_lengths)?);
+                self.next += 1;
+            }
+            self.chunks.push_back((first, Arc::new(records)));
+        } else {
+            self.read_parts(end, input_lengths, pool);
         }
-        self.chunks.push_back((first, Arc::new(records)));
         self.stats.read += started.elapsed();
         self.stats.peak_window = self.stats.peak_window.max(self.next - self.base);
+        if let Some((index, message)) = &self.pending {
+            if end > *index {
+                self.failed = Some(message.clone());
+                return Err(anyhow::anyhow!("{message}"));
+            }
+        }
         Ok(())
+    }
+
+    /// `read_to` in parts: the parts from the first not read up to the one that holds input record
+    /// `end - 1`, each read by a reader of its own (`x_query_scan_par::read_again`) on `pool`'s
+    /// threads, their records moved into the chunks in order up to the first record a part cannot
+    /// give (the file changed), which is kept `pending`.
+    #[cfg(all(unix, feature = "parallel"))]
+    fn read_parts(
+        &mut self,
+        end: usize,
+        input_lengths: &[usize],
+        pool: &crate::utils::threading::SearchPool<'_>,
+    ) {
+        let Second::Parts {
+            file,
+            spans,
+            next,
+            config,
+        } = &mut self.second
+        else {
+            unreachable!("LOSAT_X_QSTREAM reads its parts")
+        };
+        let from = *next;
+        let mut to = from;
+        while to < spans.len() && spans[to].first < end {
+            to += 1;
+        }
+        *next = to;
+        let (file, spans, config) = (&*file, &spans[..], *config);
+        let read = |index: usize| {
+            super::x_query_scan_par::read_again(
+                file,
+                &spans[index],
+                index + 1 == spans.len(),
+                config,
+                input_lengths,
+            )
+        };
+        let parts: Vec<_> = if pool.enabled() && pool.threads() > 1 && to - from > 1 {
+            use rayon::prelude::*;
+            pool.install(|| {
+                (from..to)
+                    .into_par_iter()
+                    .with_max_len(1)
+                    .map(read)
+                    .collect()
+            })
+        } else {
+            (from..to).map(read).collect()
+        };
+        for (records, failure) in parts {
+            if !records.is_empty() {
+                let first = self.next;
+                self.next += records.len();
+                self.chunks.push_back((first, Arc::new(records)));
+            }
+            if let Some((index, what)) = failure {
+                debug_assert_eq!(index, self.next);
+                self.pending = Some((index, changed(index, &what)));
+                return;
+            }
+        }
+    }
+
+    #[cfg(not(all(unix, feature = "parallel")))]
+    fn read_parts(
+        &mut self,
+        _end: usize,
+        _input_lengths: &[usize],
+        _pool: &crate::utils::threading::SearchPool<'_>,
+    ) {
+        unreachable!("LOSAT_X_QSTREAM reads in parts on unix with the parallel feature only")
     }
 
     /// A chunk boundary at input record `at` (`base <= at <= next`): the chunk across it is cut in
@@ -619,8 +772,9 @@ impl State {
         &mut self,
         input: Range<usize>,
         input_lengths: &[usize],
+        pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Result<Arc<Vec<FastaRecord>>> {
-        self.read_to(input.end, input_lengths)?;
+        self.read_to(input.end, input_lengths, pool)?;
         self.split(input.end);
         let mut taken = Vec::new();
         while self
@@ -660,10 +814,13 @@ impl State {
             return Err(anyhow::anyhow!("{failed}"));
         }
         let index = self.next;
-        let what = if self.source.end() {
+        let Second::Serial(source) = &mut self.second else {
+            unreachable!("LOSAT_X_QSTREAM reads record after record with one reader")
+        };
+        let what = if source.end() {
             "the file ends before it".to_string()
         } else {
-            match self.source.next_sequence(&mut |_| Ok(())) {
+            match source.next_sequence(&mut |_| Ok(())) {
                 Ok(record) if record.sequence.len() == input_lengths[index] => return Ok(record),
                 Ok(record) => format!(
                     "{} letters where the first reading read {}",
@@ -673,12 +830,36 @@ impl State {
                 Err(error) => format!("{error}"),
             }
         };
-        let message = format!(
-            "LOSAT_X_QSTREAM: the query file changed while LOSAT read it (record {}: {what})",
-            index + 1
-        );
+        let message = changed(index, &what);
         self.failed = Some(message.clone());
         Err(anyhow::anyhow!(message))
+    }
+
+    /// Writes the reader's warnings of every input record not read yet, in input order (no batch
+    /// taken): record after record with one reader, part after part on this thread in parts.
+    fn write_warnings(
+        &mut self,
+        input_lengths: &[usize],
+        out: &mut (dyn Write + Send),
+    ) -> Result<()> {
+        debug_assert!(self.chunks.is_empty() && self.current.is_none());
+        let serial = crate::utils::threading::SearchPool::x_serial();
+        while self.next < input_lengths.len() {
+            if matches!(self.second, Second::Serial(_)) {
+                let record = self.read_one(input_lengths)?;
+                self.next += 1;
+                out.write_all(&record.warnings)?;
+            } else {
+                self.read_to(self.next + 1, input_lengths, &serial)?;
+                for (_, records) in self.chunks.drain(..) {
+                    for record in records.iter() {
+                        out.write_all(&record.warnings)?;
+                    }
+                }
+            }
+            self.base = self.next;
+        }
+        Ok(())
     }
 }
 
@@ -794,15 +975,9 @@ impl<'a> Queries<'a> {
             Queries::Taken(store) => store.write_warnings(out)?,
             Queries::Streamed(store) => {
                 let acting = store.acting();
-                let input_lengths = &acting.query_input.input_lengths;
-                let mut state = acting.lock();
-                while state.next < input_lengths.len() {
-                    debug_assert!(state.chunks.is_empty() && state.current.is_none());
-                    let record = state.read_one(input_lengths)?;
-                    state.next += 1;
-                    state.base = state.next;
-                    out.write_all(&record.warnings)?;
-                }
+                acting
+                    .lock()
+                    .write_warnings(&acting.query_input.input_lengths, out)?;
             }
         }
         Ok(())
@@ -851,7 +1026,7 @@ impl<'a> Queries<'a> {
                     "LOSAT_X_QSTREAM: the batch of the input records {input:?} after those up to {}",
                     state.base
                 );
-                let records = state.take(input.clone(), &acting.query_input.input_lengths)?;
+                let records = state.take(input.clone(), &acting.query_input.input_lengths, pool)?;
                 state.current = Some((input.start, Arc::clone(&records)));
                 state.stats.batches += 1;
                 let cut = acting.ranged.then(|| {
@@ -1217,6 +1392,25 @@ mod tests {
         text
     }
 
+    /// `store` with the first reading in small parts on `threads` threads where the file can be cut
+    /// (`x_query_scan_par::small_lengths`), so that the second reading reads those parts.
+    #[cfg(all(unix, feature = "parallel"))]
+    fn store_in_parts(
+        path: &Path,
+        range: Option<&SequenceRange>,
+        threads: usize,
+    ) -> (Store, QueryEnd) {
+        let file = File::open(path).expect("open the test file");
+        let opening = Opening::with_mode(true, path, &file, false, true, NO_RULE);
+        assert!(opening.acts());
+        let mut source = FastaInputSource::from_file(file, config());
+        assert!(!source.stream_is_empty());
+        Store::read_with(opening, &mut source, config(), range, |file, start| {
+            super::super::x_query_scan_par::small_lengths(file, start, config(), threads)
+        })
+        .expect("the first reading")
+    }
+
     /// The batches of the second reading in `sizes` records (cycled): every record equals the
     /// first's.
     fn read_in_batches(
@@ -1226,10 +1420,25 @@ mod tests {
         sizes: &[usize],
     ) {
         let (store, end) = store(path, range);
-        assert_eq!(end_text(&end), end_text(&old.end), "{path:?}");
+        let pool = crate::utils::threading::SearchPool::x_serial();
+        check_batches(&store, &end, path, old, range, sizes, &pool);
+    }
+
+    /// The batches of `store`'s second reading in `sizes` records (cycled), taken with `pool`:
+    /// every record equals the first's.
+    fn check_batches(
+        store: &Store,
+        end: &QueryEnd,
+        path: &Path,
+        old: &QueryRecords,
+        range: Option<&SequenceRange>,
+        sizes: &[usize],
+        pool: &crate::utils::threading::SearchPool<'_>,
+    ) {
+        assert_eq!(end_text(end), end_text(&old.end), "{path:?}");
         let cut = range.map(|range| cut_queries(&old.records, range));
         let searched_old: &[FastaRecord] = cut.as_ref().map_or(&old.records, |cut| &cut.records);
-        let queries = Queries::Streamed(&store);
+        let queries = Queries::Streamed(store);
         let input = store.query_input();
         let count = input.input_lengths.len();
         assert_eq!(count, old.records.len());
@@ -1242,7 +1451,9 @@ mod tests {
             let end = (start + sizes[turn % sizes.len()]).min(count);
             turn += 1;
             let searched = input.searched_in(start..end);
-            let batch = queries.batch(start..end, searched.clone()).unwrap();
+            let batch = queries
+                .batch_in(start..end, searched.clone(), pool)
+                .unwrap();
             assert_eq!(batch.input(), &old.records[start..end], "{path:?}");
             assert_eq!(
                 batch.searched(),
@@ -1284,6 +1495,174 @@ mod tests {
         );
     }
 
+    /// The second reading in parts (the first reading in parts: a file without `\r`, whose reading
+    /// ends at its end) reads the records of the first, in batches of every size, on a pool of 2 and
+    /// 4 threads, with and without `-query_loc`: their local IDs, titles, letters and messages (the
+    /// line numbers of the file); a file with a `\r` is read by one reader.
+    #[cfg(all(unix, feature = "parallel"))]
+    #[test]
+    fn the_second_reading_in_parts_reads_the_records_of_the_first() {
+        let range = crate::blastinput::seq_range::parse_sequence_range(
+            "50-1200",
+            RangeRole::Query,
+            "BLASTN",
+        )
+        .unwrap();
+        let (mut in_parts, mut warned) = (0, 0);
+        for seed in 1..=60u64 {
+            let text = text(seed);
+            let file = TempFile::new("parts", &text);
+            let old = old(&file.0);
+            for threads in [2, 4] {
+                for ranged in [None, Some(&range)] {
+                    for sizes in [&[1usize][..], &[3, 1, 7], &[usize::MAX]] {
+                        let (store, end) = store_in_parts(&file.0, ranged, threads);
+                        let parts = store.acting().scan_par;
+                        assert_eq!(
+                            parts,
+                            matches!(store.acting().lock().second, Second::Parts { .. })
+                        );
+                        if text.contains(&b'\r') {
+                            assert!(!parts, "seed {seed}: parts with a `\\r`");
+                        }
+                        in_parts += usize::from(parts);
+                        warned += usize::from(
+                            parts && old.records.iter().skip(1).any(|r| !r.warnings.is_empty()),
+                        );
+                        crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
+                            check_batches(&store, &end, &file.0, &old, ranged, sizes, pool);
+                            Ok(())
+                        })
+                        .unwrap();
+                    }
+                }
+            }
+        }
+        assert!(in_parts >= 100 && warned >= 20, "{in_parts} {warned}");
+    }
+
+    /// Records of about 1,100 bytes each (a title and ten lines of 100 letters), `count` of them,
+    /// the letters of record `index` from `letter`.
+    fn even_records(count: usize, letter: impl Fn(usize) -> u8) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for index in 0..count {
+            bytes.extend_from_slice(format!(">r{index} a title\n").as_bytes());
+            for _ in 0..10 {
+                bytes.extend(std::iter::repeat_n(letter(index), 100));
+                bytes.push(b'\n');
+            }
+        }
+        bytes
+    }
+
+    /// The batches of one record of the second reading in parts of the file `path` changed to
+    /// `changed` after the first reading: the records read up to the first error (in order) and
+    /// the error, where the reading failed. A second reading of the failed batch is the same error.
+    #[cfg(all(unix, feature = "parallel"))]
+    fn read_changed(path: &Path, changed: &[u8]) -> (Vec<FastaRecord>, Option<(usize, String)>) {
+        let (store, _) = store_in_parts(path, None, 2);
+        assert!(store.acting().scan_par, "the first reading in parts");
+        std::fs::write(path, changed).unwrap();
+        let queries = Queries::Streamed(&store);
+        let count = queries.input_count();
+        crate::utils::threading::with_search_pool(2, "blastn", |pool| {
+            let mut records = Vec::new();
+            for index in 0..count {
+                match queries.batch_in(index..index + 1, index..index + 1, pool) {
+                    Ok(batch) => {
+                        records.extend_from_slice(batch.input());
+                        drop(batch);
+                        queries.done(index + 1);
+                    }
+                    Err(error) => {
+                        let again = queries
+                            .batch_in(index..index + 1, index..index + 1, pool)
+                            .err()
+                            .expect("the error again");
+                        assert_eq!(again.to_string(), error.to_string());
+                        return Ok((records, Some((index, error.to_string()))));
+                    }
+                }
+            }
+            Ok((records, None))
+        })
+        .unwrap()
+    }
+
+    /// The second reading in parts of a file changed after the first reading: a record of another
+    /// length is LOSAT's error at the batch that needs it (the parts are read whole, ahead of the
+    /// loop's batch: the error waits for that batch, and the records before it are read); a change
+    /// that keeps the bytes of every part and its lines is read as the new content; a change that
+    /// moves a part is an error; letters added to the last record are an error, a record added after
+    /// it is not read.
+    #[cfg(all(unix, feature = "parallel"))]
+    #[test]
+    fn a_file_changed_between_the_readings_in_parts() {
+        let bytes = even_records(40, |_| b'A');
+        let file = TempFile::new("changed_parts", &bytes);
+        let read = |path: &Path| old(path).records;
+        let old_records = read(&file.0);
+        // Record 30 one letter shorter.
+        let mut shorter = bytes.clone();
+        let at = shorter
+            .windows(5)
+            .position(|window| window == b">r30 ")
+            .unwrap();
+        let line = at + b">r30 a title\n".len();
+        shorter.remove(line);
+        let (records, error) = read_changed(&file.0, &shorter);
+        let (index, error) = error.expect("an error");
+        assert_eq!(index, 30);
+        assert!(
+            error.contains("changed while LOSAT read it (record 31: 999 letters where the first reading read 1000)"),
+            "{error}"
+        );
+        assert_eq!(records, old_records[..30]);
+        // Record 25's letters changed, every byte in its place: the new records.
+        std::fs::write(&file.0, &bytes).unwrap();
+        let same = even_records(40, |index| if index == 25 { b'C' } else { b'A' });
+        let (records, error) = read_changed(&file.0, &same);
+        assert_eq!(error, None);
+        let file_same = TempFile::new("changed_same", &same);
+        assert_eq!(records, read(&file_same.0));
+        assert_ne!(records, old_records);
+        // A longer title in record 5 moves every later byte: its part, which still ends at the old
+        // place, reads records of the old lengths (the new title), and the next part no longer
+        // starts at a record start: an error there.
+        std::fs::write(&file.0, &bytes).unwrap();
+        let mut moved = bytes.clone();
+        let at = moved
+            .windows(5)
+            .position(|window| window == b">r5 a")
+            .unwrap();
+        moved.insert(at + 4, b'x');
+        let (records, error) = read_changed(&file.0, &moved);
+        let (index, error) = error.expect("an error");
+        assert!(
+            index > 5 && error.contains("no longer starts at a record start"),
+            "{index} {error}"
+        );
+        assert_eq!(records[..5], old_records[..5]);
+        assert_eq!(records[5].title, b"r5 xa title");
+        assert_eq!(records[6..], old_records[6..index]);
+        // Letters added to the last record: an error at the last batch.
+        std::fs::write(&file.0, &bytes).unwrap();
+        let mut longer = bytes.clone();
+        longer.extend_from_slice(b"ACGT\n");
+        let (records, error) = read_changed(&file.0, &longer);
+        let (index, error) = error.expect("an error");
+        assert_eq!(index, 39);
+        assert!(error.contains("record 40: 1004 letters"), "{error}");
+        assert_eq!(records, old_records[..39]);
+        // A record added after the last: not read.
+        std::fs::write(&file.0, &bytes).unwrap();
+        let mut added = bytes.clone();
+        added.extend_from_slice(b">r40\nACGT\n");
+        let (records, error) = read_changed(&file.0, &added);
+        assert_eq!(error, None);
+        assert_eq!(records, old_records);
+    }
+
     /// The warnings of every record read again (a search that reads its batches and searches
     /// none) are those of the first reading's records.
     #[test]
@@ -1302,6 +1681,18 @@ mod tests {
                 .write_input_warnings(&mut written)
                 .unwrap();
             assert_eq!(written, expected, "seed {seed}");
+            // The same where the second reading reads the parts of the first (the texts that end
+            // with a record the reader refuses are read by one reader).
+            #[cfg(all(unix, feature = "parallel"))]
+            {
+                let (store, _) = store_in_parts(&file.0, None, 4);
+                assert_eq!(store.acting().scan_par, seed % 4 != 2, "seed {seed}");
+                let mut written = Vec::new();
+                Queries::Streamed(&store)
+                    .write_input_warnings(&mut written)
+                    .unwrap();
+                assert_eq!(written, expected, "seed {seed} in parts");
+            }
         }
     }
 
@@ -1406,20 +1797,10 @@ mod tests {
             Some(Off::StandardInput)
         );
         assert!(Opening::with_mode(true, &file.0, &handle, false, true, NO_RULE).acts());
-        // The rule turns the switch off; it reads the file's length.
-        let megablast = Rule {
-            megablast: true,
-            ..NO_RULE
-        };
-        assert_eq!(
-            Opening::with_mode(true, &file.0, &handle, false, true, megablast).off,
-            Some(Off::Megablast)
-        );
-        // The file is 8 bytes: off for a batch of 5 letters, on for 4.
+        // The rule turns the switch off; it reads the file's length. The file is 8 bytes: off for a batch of 5 letters, on for 4.
         for (letters, off) in [(5, Some(Off::Batch)), (4, None)] {
             let rule = Rule {
                 batch_letters: letters,
-                ..NO_RULE
             };
             assert_eq!(
                 Opening::with_mode(true, &file.0, &handle, false, true, rule).off,
@@ -1452,43 +1833,33 @@ mod tests {
     }
 
     /// A rule that never turns the switch off.
-    const NO_RULE: Rule = Rule {
-        megablast: false,
-        batch_letters: 0,
-    };
+    const NO_RULE: Rule = Rule { batch_letters: 0 };
 
-    /// The rule: off for `-task megablast` and for a file shorter than twice the largest batch; the
-    /// files of v4-D's ws windows (1,775 cDNAs 5,398,904 bytes, 3,492 cDNAs 10,779,147, 5,000 cDNAs
-    /// 15,440,261, 40 MB 40,005,015, 31,168 cDNAs 96,191,719).
+    /// The rule: off for a file shorter than twice the largest batch; the files of v4-D's ws windows
+    /// (1,775 cDNAs 5,398,904 bytes, 3,492 cDNAs 10,779,147, 5,000 cDNAs 15,440,261, 40 MB
+    /// 40,005,015, 31,168 cDNAs 96,191,719).
     #[test]
-    fn the_rule_follows_the_task_and_the_batch() {
+    fn the_rule_follows_the_batch() {
         const BLASTN: u64 = 999_000;
         const DC: u64 = 4_999_000;
-        let rule = |megablast, batch_letters| Rule {
-            megablast,
-            batch_letters,
-        };
+        let rule = |batch_letters| Rule { batch_letters };
         assert_eq!(NO_RULE.off(0), None);
-        // megablast: off at any size.
-        for bytes in [5_398_904, 96_191_719, 1] {
-            assert_eq!(rule(true, DC).off(bytes), Some(Off::Megablast));
-        }
-        // The batch: blastn off below 1,998,000 bytes, dc-megablast below 9,998,000, BATCH_SIZE
-        // 4,000 below 8,000.
-        assert_eq!(rule(false, BLASTN).off(1_997_999), Some(Off::Batch));
-        assert_eq!(rule(false, BLASTN).off(1_998_000), None);
+        // The batch: blastn off below 1,998,000 bytes, megablast and dc-megablast below 9,998,000,
+        // BATCH_SIZE 4,000 below 8,000.
+        assert_eq!(rule(BLASTN).off(1_997_999), Some(Off::Batch));
+        assert_eq!(rule(BLASTN).off(1_998_000), None);
         for bytes in [5_398_904, 10_779_147, 15_440_261, 40_005_015, 96_191_719] {
-            assert_eq!(rule(false, BLASTN).off(bytes), None);
+            assert_eq!(rule(BLASTN).off(bytes), None);
         }
-        assert_eq!(rule(false, DC).off(5_398_904), Some(Off::Batch));
-        assert_eq!(rule(false, DC).off(9_997_999), Some(Off::Batch));
-        assert_eq!(rule(false, DC).off(9_998_000), None);
-        assert_eq!(rule(false, DC).off(96_191_719), None);
-        assert_eq!(rule(false, 4_000).off(7_999), Some(Off::Batch));
-        assert_eq!(rule(false, 4_000).off(8_000), None);
+        assert_eq!(rule(DC).off(5_398_904), Some(Off::Batch));
+        assert_eq!(rule(DC).off(9_997_999), Some(Off::Batch));
+        assert_eq!(rule(DC).off(9_998_000), None);
+        assert_eq!(rule(DC).off(96_191_719), None);
+        assert_eq!(rule(4_000).off(7_999), Some(Off::Batch));
+        assert_eq!(rule(4_000).off(8_000), None);
         // The ends saturate.
-        assert_eq!(rule(false, u64::MAX).off(u64::MAX - 1), Some(Off::Batch));
-        assert_eq!(rule(false, u64::MAX).off(u64::MAX), None);
-        assert_eq!(rule(false, 0).off(0), None);
+        assert_eq!(rule(u64::MAX).off(u64::MAX - 1), Some(Off::Batch));
+        assert_eq!(rule(u64::MAX).off(u64::MAX), None);
+        assert_eq!(rule(0).off(0), None);
     }
 }

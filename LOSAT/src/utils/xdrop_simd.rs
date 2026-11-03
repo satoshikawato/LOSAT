@@ -601,15 +601,15 @@ pub(crate) struct XdropScratch {
     /// Traceback operations in walk order (alignment end -> start), run-length encoded.
     pub ops: Vec<(u8, u32)>,
     /// The column of lane 0 of the rows (`ha` .. `e8`, `sb`): a kernel moves its lanes down when
-    /// the band moves right (`x_shift`), so the rows hold the band and not every column before it.
+    /// the band moves right (`x_room`), so the rows hold the band and not every column before it.
     x_sh: usize,
-    /// The band start, in lanes, at which a kernel moves its rows (`LOSAT_X_DPWINDOW`); `usize::MAX`
-    /// when they hold every column.
-    x_win_at: usize,
     /// Whether the kernels write `trace` as four-bit codes, two cells per byte (`LOSAT_X_DPNIBBLE`;
     /// `NIB_SUB`; a search's scratch follows `x_dp_nibble_here`); the walk reads the rows the same
     /// way.
     x_nib: bool,
+    /// Test only: the rows never move (they hold every column, the reference of `x_room`).
+    #[cfg(test)]
+    x_hold: bool,
 }
 
 impl XdropScratch {
@@ -644,8 +644,9 @@ impl XdropScratch {
             surv: Vec::new(),
             ops: Vec::new(),
             x_sh: 0,
-            x_win_at: x_dp_window_at(),
             x_nib: x_dp_nibble(),
+            #[cfg(test)]
+            x_hold: false,
         }
     }
 
@@ -679,8 +680,9 @@ impl XdropScratch {
             surv: vec![0; 64],
             ops: Vec::new(),
             x_sh: 0,
-            x_win_at: x_dp_window_at(),
             x_nib: x_dp_nibble(),
+            #[cfg(test)]
+            x_hold: false,
         }
     }
 
@@ -697,10 +699,16 @@ impl XdropScratch {
     // Grows the rows when the band needs more room, as the C code enlarges `score_array`.
     #[inline(always)]
     fn ensure(&mut self, lanes: usize) {
-        let need = lanes + 2 * PAD + 64;
-        if self.ha.len() < need {
-            self.grow(need);
+        if !self.fits(lanes) {
+            self.grow(lanes + 2 * PAD + 64);
         }
+    }
+
+    // The test of `ensure` and of the C code above: whether the rows hold `lanes` and their
+    // margins. A kernel that finds them short calls `x_room`.
+    #[inline(always)]
+    fn fits(&self, lanes: usize) -> bool {
+        self.ha.len() >= lanes + 2 * PAD + 64
     }
 
     #[cold]
@@ -757,18 +765,49 @@ impl XdropScratch {
     //             gap_align->dp_mem_alloc = MAX(last_b_index + num_extra_cells + 100,
     //                                           2 * gap_align->dp_mem_alloc);
     // ```
-    // NCBI's `score_array` is indexed by column and grows to the last column of the band, like
-    // these rows before `LOSAT_X_DPWINDOW`. Here a kernel whose band start `first` reached
-    // `x_win_at` moves the lanes from `d` on down to lane 0 (`d` a multiple of 64 with at least 64
-    // lanes left below `first`) and lowers every column it keeps by `d`; `x_sh` adds `d` back
-    // where a column leaves the kernel (the best cell, the start of a traceback row). The lanes
-    // keep their values, the `d` lanes freed at the top are zero as lanes never written are, and
-    // the lanes below `first` are not read, so the DP is the same; only the rows' length changes.
+    // NCBI's `score_array` is indexed by column and grows to the last column of the band. Here,
+    // where NCBI grows it (the rows do not hold the band's end: `fits`), a kernel calls this at the
+    // start of a row with its band start `first`. When half the rows or more lie below `first`,
+    // the lanes from `d` on move down to lane 0 (`x_shift`, `d` a multiple of 64 with at least 64
+    // lanes left below `first`) and the kernel lowers every column it keeps by the `d` returned;
+    // otherwise (`d` = 0) the rows grow, as NCBI's do. So the rows stay within twice the band and
+    // its margins, and each move copies about as many lanes as the band crossed since the last.
     // `wide`: the 16-bit rows (`ha`, `hb`, `e`), else the 8-bit ones (`h8a`, `h8b`, `e8`).
     #[cold]
     #[inline(never)]
+    fn x_room(&mut self, first: usize, lanes: usize, wide: bool) -> usize {
+        let mut d = 0;
+        if 2 * first >= self.ha.len() {
+            d = first.saturating_sub(64) & !63;
+        }
+        #[cfg(test)]
+        if self.x_hold {
+            d = 0;
+        }
+        if d > 0 {
+            self.x_shift(d, wide);
+        }
+        self.ensure(lanes - d);
+        d
+    }
+
+    // Test only: rows of `lanes` lanes that move with the band (`x_room`) or, with `None`, rows
+    // that never move and so hold every column: the arms of the kernels' tests.
+    #[cfg(test)]
+    pub(crate) fn x_test_rows(&mut self, lanes: Option<usize>) {
+        self.x_hold = lanes.is_none();
+        let n = lanes.unwrap_or(1024);
+        (self.ha, self.hb, self.e) = (Rows::new(n), Rows::new(n), Rows::new(n));
+        (self.h8a, self.h8b, self.e8) = (Rows::new(n), Rows::new(n), Rows::new(n));
+        self.sb = Rows::new(n);
+        (self.dirty, self.dirty8, self.sb_filled) = (0, 0, 0);
+    }
+
+    // No NCBI counterpart: the move of `x_room`. `x_sh` adds `d` back where a column leaves the
+    // kernel (the best cell, the start of a traceback row). The lanes keep their values, the `d`
+    // lanes freed at the top are zero as lanes never written are, and the lanes below `first` are
+    // not read, so the DP is the same; only the rows' length changes.
     fn x_shift(&mut self, d: usize, wide: bool) {
-        crate::utils::xreach::x_reach!("LOSAT_X_DPWINDOW", true);
         if wide {
             let n = self.dirty + 2 * PAD + 32;
             x_shift_lanes(&mut self.ha, d, n);
@@ -810,31 +849,39 @@ fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
     }
 }
 
-/// No NCBI counterpart: `LOSAT_X_DPTRACEPOOL` (strict set): the traceback rows of long alignments
-/// (trace past `X_POOL_FROM` bytes) come from a pool the scratches of a search share, instead of
-/// each scratch keeping the largest trace it ever held. A scratch whose trace passes the size while
-/// it grows takes the largest idle pair (its rows so far are copied over) and gives it back after
-/// the traceback call (`XdropScratch::x_trace_release`); the pool keeps at most `X_POOL_IDLE` idle
-/// pairs (the smallest is freed), and frees them when the last scratch goes (`X_SCRATCHES`). Off:
-/// every scratch keeps its own trace, as before. Placement of memory only: the kernels write and
-/// the walk reads the same rows either way.
-pub(crate) fn x_dp_trace_pool() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DPTRACEPOOL"))
-}
-
-// No NCBI counterpart: the trace size (bytes) from which a traceback's rows come from the pool
-// (`LOSAT_X_DPTRACEPOOL`); below it a scratch keeps its own trace.
-const X_POOL_FROM: usize = 1 << 20;
-// No NCBI counterpart: how many idle trace + rows pairs the pool keeps (`LOSAT_X_DPTRACEPOOL`).
-const X_POOL_IDLE: usize = 2;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:61,75,94-97,135
+// ```c
+// #define	CHUNKSIZE	2097152
+// ...
+//    Int4	chunksize = MAX(CHUNKSIZE, length + length/3);
+// ...
+//          } else if (var->used == 0) {
+//             /* If it's empty and too small, replace. */
+//             sfree(var->state_array);
+//             var->state_array = (Uint1*) malloc(chunksize*sizeof(Uint1));
+// ...
+//       state_struct->used = 0;
+// ```
+// NCBI keeps the traceback states of a gap_align in chunks of at least `CHUNKSIZE` cells, one
+// byte each, and keeps every chunk it made until the search ends (`s_GapPurgeState` only sets
+// `used` to 0). Here a scratch on a Rayon pool thread keeps its own trace up to the four-bit rows
+// (`LOSAT_X_DPNIBBLE`, the layout such a scratch uses) of one chunk; a trace that passes it
+// while it grows takes the largest idle pair of a pool the scratches share (its rows so far are
+// copied over) and gives it back after the traceback call (`XdropScratch::x_trace_release`). The
+// pool keeps at most `X_POOL_IDLE` idle pairs (the smallest is freed), and frees them when the
+// last scratch goes (`X_SCRATCHES`). A one-thread search keeps its trace, as NCBI does. Off
+// (`LOSAT_X_DPNIBBLE=0`): every scratch keeps its own trace. Placement of memory only: the
+// kernels write and the walk reads the same rows either way.
+const X_POOL_FROM: usize = 2_097_152 / 2;
+// No NCBI counterpart: how many idle trace + rows pairs the pool keeps: one, what the one scratch
+// of a one-thread search keeps.
+const X_POOL_IDLE: usize = 1;
 
 // No NCBI counterpart: one trace + rows pair of the pool (`XdropScratch::trace`, `rows`).
 type XTracePair = (Vec<u8>, Vec<(u32, u32, u32)>);
-// No NCBI counterpart: the idle pairs (`LOSAT_X_DPTRACEPOOL`).
+// No NCBI counterpart: the idle pairs (`X_POOL_FROM`).
 static X_TRACE_POOL: std::sync::Mutex<Vec<XTracePair>> = std::sync::Mutex::new(Vec::new());
-// No NCBI counterpart: the scratches alive (`LOSAT_X_DPTRACEPOOL`). The last one to go (the end of
+// No NCBI counterpart: the scratches alive (`X_POOL_FROM`). The last one to go (the end of
 // a search's traceback stage) frees the pool's idle pairs, as the scratches' own traces were freed
 // with them before the pool.
 static X_SCRATCHES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -845,7 +892,7 @@ thread_local! {
     static X_TEST_FROM: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
 
-// No NCBI counterpart: the pool size in bytes, `usize::MAX` when `LOSAT_X_DPTRACEPOOL` is off.
+// No NCBI counterpart: the pool size in bytes, `usize::MAX` when `LOSAT_X_DPNIBBLE` is off.
 #[inline]
 fn x_pool_from() -> usize {
     #[cfg(test)]
@@ -855,7 +902,7 @@ fn x_pool_from() -> usize {
     use std::sync::OnceLock;
     static FROM: OnceLock<usize> = OnceLock::new();
     *FROM.get_or_init(|| {
-        if x_dp_trace_pool() {
+        if x_dp_nibble() {
             X_POOL_FROM
         } else {
             usize::MAX
@@ -877,7 +924,7 @@ thread_local! {
 }
 
 /// No NCBI counterpart: room for `n` more trace bytes, the kernels' reserve of a traceback row
-/// (`Vec::reserve`, and the pool of `LOSAT_X_DPTRACEPOOL` when the trace passes its size). Only the
+/// (`Vec::reserve`, and the pool of `X_POOL_FROM` when the trace passes its size). Only the
 /// two buffers are passed, so that the kernels keep the rest of the scratch in registers.
 #[inline(always)]
 pub(crate) fn x_trace_reserve(trace: &mut Vec<u8>, rows: &mut Vec<(u32, u32, u32)>, n: usize) {
@@ -886,7 +933,7 @@ pub(crate) fn x_trace_reserve(trace: &mut Vec<u8>, rows: &mut Vec<(u32, u32, u32
     }
 }
 
-// No NCBI counterpart: the growth of `x_trace_reserve` (`LOSAT_X_DPTRACEPOOL`).
+// No NCBI counterpart: the growth of `x_trace_reserve` (`X_POOL_FROM`).
 #[cold]
 #[inline(never)]
 fn x_trace_grow(trace: &mut Vec<u8>, rows: &mut Vec<(u32, u32, u32)>, n: usize) {
@@ -928,7 +975,7 @@ impl Drop for XdropScratch {
 }
 
 impl XdropScratch {
-    /// No NCBI counterpart: after a traceback call (`LOSAT_X_DPTRACEPOOL`): a pooled pair goes back
+    /// No NCBI counterpart: after a traceback call (`X_POOL_FROM`): a pooled pair goes back
     /// (the thread's own buffers return), and the trace of a scratch on a Rayon pool thread that
     /// grew past the pool size by itself goes to the pool. A one-thread search (no pool) keeps its
     /// trace: it has nothing to share it with.
@@ -954,11 +1001,11 @@ impl XdropScratch {
                 std::mem::take(&mut self.rows),
             ),
             None => {
-                crate::utils::xreach::x_reach!("LOSAT_X_DPTRACEPOOL", false);
+                crate::utils::xreach::x_reach!("LOSAT_X_DPNIBBLE", false);
                 return;
             }
         };
-        crate::utils::xreach::x_reach!("LOSAT_X_DPTRACEPOOL", true);
+        crate::utils::xreach::x_reach!("LOSAT_X_DPNIBBLE", true);
         let dropped = {
             let mut pool = x_pool_lock();
             pool.push(pair);
@@ -978,20 +1025,11 @@ impl XdropScratch {
     }
 }
 
-/// No NCBI counterpart: `LOSAT_X_DPWINDOW` (strict set, a value switch): the band start, in
-/// lanes, at which the vector kernels move their rows down (`XdropScratch::x_shift`); built-in
-/// 1024, at least 128. Off: the rows hold every column up to the band's end, as before.
-pub(crate) fn x_dp_window_at() -> usize {
-    use std::sync::OnceLock;
-    static AT: OnceLock<usize> = OnceLock::new();
-    *AT.get_or_init(|| {
-        crate::utils::xswitch::value("LOSAT_X_DPWINDOW", 128..=usize::MAX, 1024)
-            .unwrap_or(usize::MAX)
-    })
-}
-
-/// No NCBI counterpart: `LOSAT_X_DPNIBBLE` (strict set): the vector kernels keep the traceback rows
-/// at four bits per cell, two cells per byte (`NIB_SUB`). Off: one byte per cell, as before.
+/// No NCBI counterpart: `LOSAT_X_DPNIBBLE` (strict set): the traceback memory of the scratches on
+/// a Rayon pool thread. The vector kernels keep the traceback rows at four bits per cell, two
+/// cells per byte (`NIB_SUB`), and a trace past the four-bit rows of one NCBI chunk comes from a
+/// pool the scratches share (`X_POOL_FROM`). Off: one byte per cell and every scratch keeps its
+/// own trace, as before.
 pub(crate) fn x_dp_nibble() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -1003,8 +1041,9 @@ pub(crate) fn x_dp_nibble() -> bool {
 /// pool, that is in a search on two threads or more (its pool, or the one-thread pools of the
 /// blastn query-batch slots); one byte per cell on the calling thread of a one-thread search,
 /// which has no pool. One thread keeps the bytes because there the codes' packing cost time
-/// (Sakai x EDL933 x1.009) and the memory they save is one trace. Memory only: both layouts give
-/// every script NCBI gives.
+/// (Sakai x EDL933 x1.009) and the memory they save is one trace; it keeps its trace too, as it
+/// has nothing to share it with (`x_trace_give_back`). Memory only: both layouts give every
+/// script NCBI gives.
 fn x_dp_nibble_here() -> bool {
     if !x_dp_nibble() {
         return false;
@@ -2043,21 +2082,17 @@ mod kernel {
         let mut wend = [b_size, 0usize];
         let mut cur = 0usize; // buffer holding the previous row
 
-        // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
-        // `sc.x_sh`
-        let win_at = sc.x_win_at;
+        // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
         let mut len2 = len2;
         for a in 1..=len1 {
-            if first >= win_at {
-                let d = (first - 64) & !63;
-                sc.x_shift(d, true);
+            if !sc.fits(b_size + num_extra + 64) {
+                let d = sc.x_room(first, b_size + num_extra + 64, true);
                 first -= d;
                 b_size -= d;
                 len2 -= d;
                 wend[0] = wend[0].saturating_sub(d);
                 wend[1] = wend[1].saturating_sub(d);
             }
-            sc.ensure(b_size + num_extra + 64);
             if sc.sb_filled < b_size {
                 let to = (b_size + 64).min(len2 + 1);
                 let sh = sc.x_sh;
@@ -2595,21 +2630,17 @@ mod kernel {
         let mut wend = [b_size, 0usize];
         let mut cur = 0usize;
 
-        // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
-        // `sc.x_sh`
-        let win_at = sc.x_win_at;
+        // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
         let mut len2 = len2;
         for a in 1..=len1 {
-            if first >= win_at {
-                let d = (first - 64) & !63;
-                sc.x_shift(d, false);
+            if !sc.fits(b_size + num_extra + 64) {
+                let d = sc.x_room(first, b_size + num_extra + 64, false);
                 first -= d;
                 b_size -= d;
                 len2 -= d;
                 wend[0] = wend[0].saturating_sub(d);
                 wend[1] = wend[1].saturating_sub(d);
             }
-            sc.ensure(b_size + num_extra + 64);
             if sc.sb_filled < b_size {
                 let to = (b_size + 64).min(len2 + 1);
                 let sh = sc.x_sh;
@@ -3896,8 +3927,8 @@ mod tests {
         let mut sc = XdropScratch::new();
         let (mut handled, mut fences, mut ops_total) = (0usize, 0usize, 0usize);
         for case in 0..cases {
-            // band window (LOSAT_X_DPWINDOW): rows moved from band start 128 or 320 on, or never
-            sc.x_win_at = [128, 320, usize::MAX][case % 3];
+            // rows over the band (`x_room`): 128 or 320 lanes to start with, or every column
+            sc.x_test_rows([Some(128), Some(320), None][case % 3]);
             // trace layout (LOSAT_X_DPNIBBLE): four-bit codes or one byte per cell
             sc.x_nib = case % 2 == 0;
             let n = if rng.below(2) == 0 { 16 } else { 28 };
@@ -3987,18 +4018,19 @@ mod tests {
         }
     }
 
-    // No NCBI counterpart: the band window of the vector kernels (`XdropScratch::x_shift`,
-    // `LOSAT_X_DPWINDOW`). Long problems whose band moves right (both scores of the blastn task
-    // and a protein matrix, score-only and traceback, forward columns) run with the rows moved
-    // from band start 128 on and with every column held: the offsets, score, fence flag, edit
+    // No NCBI counterpart: the rows over the band of the vector kernels (`XdropScratch::x_room`).
+    // Long problems whose band moves right (both scores of the blastn task and a protein matrix,
+    // score-only and traceback, forward columns) run with rows of 128 lanes to start with that
+    // move with the band and with every column held: the offsets, score, fence flag, edit
     // script and cell count are equal, equal to the scalar loops, and the moved rows stay short.
     #[test]
     fn band_window_keeps_every_result() {
         let mut rng = Rng(0x5851_F42D_4C95_7F2D);
         let (mut on, mut off) = (XdropScratch::new(), XdropScratch::new());
-        (on.x_win_at, off.x_win_at) = (128, usize::MAX);
         let (mut shifted, mut handled) = (0usize, 0usize);
         for case in 0..40 {
+            on.x_test_rows(Some(128));
+            off.x_test_rows(None);
             let n = if case % 2 == 0 { 16 } else { 28 };
             let len = 1500 + rng.below(2500) as usize;
             let p = random_problem(&mut rng, n, 1, len);
@@ -4152,7 +4184,7 @@ mod tests {
         }
     }
 
-    // No NCBI counterpart: the pool of long traceback rows (`LOSAT_X_DPTRACEPOOL`). On a thread of
+    // No NCBI counterpart: the pool of long traceback rows (`X_POOL_FROM`). On a thread of
     // a two-thread Rayon pool, with a pool size of 4 KiB, two scratches run long tracebacks in turn
     // (each gives its trace back after the call, the other takes it while its trace grows): the
     // offsets, score, fence flag, edit script and cell count equal those of a scratch that keeps its

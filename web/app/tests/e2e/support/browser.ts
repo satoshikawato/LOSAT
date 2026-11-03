@@ -8,6 +8,7 @@ import { siteHeaders } from '../../../build/headers';
 import { findReactors, losatEngine, type Reactors } from '../../../build/reactors';
 import { losatVerification } from '../../../build/verification';
 import { SESSION_LOCK_PREFIX, TMP_DIRECTORY } from '../../../src/infra/data/session';
+import { navigate } from './navigate';
 import { E2E_ORIGIN } from './origin';
 import { showOutput } from './search';
 
@@ -29,7 +30,7 @@ export async function openProbe(context: BrowserContext): Promise<Page> {
     route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>probe</title>' }),
   );
   const probe = await context.newPage();
-  await probe.goto('/__probe');
+  await navigate(probe, '/__probe');
   return probe;
 }
 
@@ -108,7 +109,7 @@ export async function setQuota(page: Page, bytes: number | null): Promise<void> 
 /** Opens the application and waits until its start-up cleanup has finished. */
 export async function openApp(context: BrowserContext): Promise<Page> {
   const page = await context.newPage();
-  await page.goto('/');
+  await navigate(page, '/');
   await expect(page.getByTestId('storage-status')).toHaveAttribute('data-cleanup', 'done');
   return page;
 }

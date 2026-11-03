@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
+import { navigate } from './support/navigate';
 import { chooseRun, openSearch, paste, program, waitStatus } from './support/search';
 
 test('the page is cross-origin isolated, so the threaded engine can use shared memory', async ({ page }) => {
-  await page.goto('/');
+  await navigate(page, '/');
   expect(await page.evaluate(() => globalThis.crossOriginIsolated)).toBe(true);
   expect(await page.evaluate(() => typeof SharedArrayBuffer)).toBe('function');
 });

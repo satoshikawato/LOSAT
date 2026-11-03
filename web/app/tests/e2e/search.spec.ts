@@ -368,8 +368,8 @@ test("the engine's refusals of option values are shown as the engine writes them
   test.skip(!BUILD_HAS_ENGINE, "the engine's messages need the engine build");
   await program(page, 'tblastx');
   await openParameters(page);
-  // A toolkit word in a free-text value (S08+a, D14).
-  await page.getByTestId('param-seg').fill('-version');
+  // A toolkit word in a free-text value (S08+a, D14): the arguments of the Low complexity regions filter.
+  await page.getByTestId('param-seg-value').fill('-version');
   await expect(page.getByTestId('argv-validation')).toHaveText(
     "error: the NCBI BLAST+ option -version is not supported by LOSAT's TBLASTX",
   );
@@ -643,12 +643,9 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
     'Expect threshold',
     'Word size',
     'Match/Mismatch Scores',
-    'Match',
-    'Mismatch',
     'Gap Costs',
-    'Existence',
-    'Extension',
-    'Low complexity regions filter (DUST)',
+    'Filter',
+    'Low complexity regions',
     'Mask lower case letters',
     'Template length',
     'Template type',
@@ -659,13 +656,22 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   // form shows its values; NCBI's lists are selects, and NCBI's sentence is beside its control.
   await expect(page.getByTestId('param-word_size')).toHaveValue('11');
   await expect(page.getByTestId('param-word_size').locator('option')).toHaveText(['11', '12', 'Other']);
-  await expect(page.getByTestId('param-reward')).toHaveValue('2');
+  // NCBI's pairs are one select each; the gap costs are those of the scores' list (no Linear: megablast only).
+  await expect(page.getByTestId('param-matchscores')).toHaveValue('2,-3');
+  await expect(page.getByTestId('param-matchscores').locator('option')).toHaveText(['1,-2', '1,-3', '1,-4', '2,-3', '4,-5', '1,-1', 'Other']);
+  await expect(page.getByTestId('param-gapcosts')).toHaveValue('5 2');
+  await expect(page.getByTestId('param-gapcosts').locator('option').first()).toHaveText('Existence: 4 Extension: 4');
+  await expect(page.getByTestId('param-reward')).toHaveCount(0);
+  await expect(page.getByTestId('param-dust')).toBeChecked();
+  await expect(page.getByTestId('param-dust-value')).toHaveValue('20 64 1');
   await expect(page.getByTestId('param-soft_masking')).toBeChecked();
   await expect(page.getByTestId('param-max_target_seqs')).toHaveValue('500');
   await expect(page.getByTestId('param-max_target_seqs-field')).toContainText('Select the maximum number of aligned sequences to display');
   await expect(line.locator('strong')).toHaveText(['nucleotide subjects', 'BLASTN, task dc-megablast (optimized for more dissimilar sequences)']);
-  await expect(page.getByTestId('param-reward')).toHaveAccessibleName('Match -reward');
-  await expect(page.getByTestId('param-gapopen')).toHaveAccessibleName('Existence -gapopen');
+  await expect(page.getByTestId('param-matchscores')).toHaveAccessibleName('Match/Mismatch Scores -reward -penalty');
+  await expect(page.getByTestId('param-gapcosts')).toHaveAccessibleName('Gap Costs -gapopen -gapextend');
+  await expect(page.getByTestId('param-dust')).toHaveAccessibleName('Low complexity regions -dust');
+  await expect(page.getByTestId('param-dust-value')).toHaveAccessibleName('Low complexity regions -dust arguments');
 
   await program(page, 'blastp');
   await expect(page.getByTestId('program-summary')).toHaveText('BLASTP mode searches protein subjects using a protein query.');
@@ -684,7 +690,10 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   await expect(cbs.locator('option[value="2"]')).toHaveText('2: Conditional compositional score matrix adjustment');
   await expect(cbs.locator('option[value="0"]')).toHaveText('0: No adjustment');
   await expect(cbs.locator('option[value="3"]')).toHaveText('3: Universal compositional score matrix adjustment');
-  await expect(page.getByTestId('param-seg-field')).toContainText('Low complexity regions filter (SEG)');
+  await expect(page.getByTestId('param-seg-field')).toContainText('Low complexity regions');
+  await expect(page.getByTestId('param-seg')).not.toBeChecked();
+  await expect(page.getByTestId('param-seg-value')).toHaveCount(0);
+  await expect(page.getByTestId('param-gapcosts')).toHaveValue('11 1');
   await program(page, 'tblastx');
   await expect(page.getByTestId('param-culling_limit-field')).toContainText('Max matches in a query range');
   await expect(line).toHaveText(
@@ -709,18 +718,20 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   const evalue = page.getByTestId('param-evalue-field');
   await expect(evalue).not.toHaveClass(/\bchanged\b/);
   await page.getByTestId('param-evalue').fill('1e-3');
-  await page.getByTestId('param-reward').fill('2');
+  await page.getByTestId('param-matchscores').selectOption('2,-3');
   await expect(evalue).toHaveClass(/\bchanged\b/);
   await expect(evalue).toContainText('♦');
   await expect(page.getByTestId('param-evalue')).toHaveAccessibleName(/^Expect threshold -evalue\s*, changed from the default$/);
-  await expect(page.getByTestId('param-reward-field')).toHaveClass(/\bchanged\b/);
-  await expect(page.getByTestId('param-penalty-field')).not.toHaveClass(/\bchanged\b/);
-  await expect(toggle).toContainText('(2 changed)');
-  // The task is chosen in Task Selection: it is not counted. Match 2 is the blastn task's
+  await expect(page.getByTestId('param-matchscores-field')).toHaveClass(/\bchanged\b/);
+  await expect(page.getByTestId('param-matchscores')).toHaveAccessibleName(/^Match\/Mismatch Scores -reward -penalty\s*, changed from the default$/);
+  await expect(page.getByTestId('param-gapcosts-field')).not.toHaveClass(/\bchanged\b/);
+  // The count is that of the options written: -evalue, -reward and -penalty.
+  await expect(toggle).toContainText('(3 changed)');
+  // The task is chosen in Task Selection: it is not counted. 2,-3 is the blastn task's
   // default: it is neither counted nor written any more.
   await task(page, 'blastn');
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
-  await expect(page.getByTestId('param-reward-field')).not.toHaveClass(/\bchanged\b/);
+  await expect(page.getByTestId('param-matchscores-field')).not.toHaveClass(/\bchanged\b/);
 
   await page.getByTestId('job-title').fill('  Globin check  ');
   await paste(page, 'query', '>q\nACGTACGTACGTAAACCCGGGTTT\n');
@@ -745,7 +756,7 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   await page.getByTestId('restore-defaults').click();
   // The controls show the blastn task's defaults again.
   await expect(page.getByTestId('param-evalue')).toHaveValue('10');
-  await expect(page.getByTestId('param-reward')).toHaveValue('2');
+  await expect(page.getByTestId('param-matchscores')).toHaveValue('2,-3');
   await expect(evalue).not.toHaveClass(/\bchanged\b/);
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveCount(0);
   await expect(page.getByTestId('param-task-blastn')).toBeChecked();
@@ -795,6 +806,79 @@ test("Algorithm parameters show the task's values; NCBI's lists with Other; a de
   await submit(page);
   await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -word_size 9 -soft_masking false -num_alignments 3');
   await waitStatus(page, 1, 'completed');
+});
+
+test("NCBI's selects of pairs follow the scores and the matrix; Other shows the two fields; Low complexity regions is a checkbox", async ({
+  page,
+}) => {
+  await program(page, 'blastn');
+  await openParameters(page);
+  const scores = page.getByTestId('param-matchscores');
+  const gaps = page.getByTestId('param-gapcosts');
+  // Megablast's Linear (0 0) is its default.
+  await expect(gaps).toHaveValue('0 0');
+  await expect(gaps.locator('option:checked')).toHaveText('Linear');
+  // "Other" with nothing typed stays while other state changes (review of SURVEY #13, 3).
+  await gaps.selectOption('other');
+  await page.getByTestId('job-title').fill('pairs');
+  await expect(page.getByTestId('param-gapopen')).toHaveValue('0');
+  await gaps.selectOption('0 0');
+  await expect(page.getByTestId('param-gapopen')).toHaveCount(0);
+  await page.getByTestId('job-title').fill('');
+  await task(page, 'blastn');
+  await expect(gaps).toHaveValue('5 2');
+  // 4,-5 has its own list, whose default NCBI chooses (BLAST stops with 5 2 there).
+  await scores.selectOption('4,-5');
+  await expect(gaps).toHaveValue('12 8');
+  await expect(gaps.locator('option:checked')).toHaveText('Existence: 12 Extension: 8');
+  await expect(page.getByTestId('param-gapcosts-field')).toHaveClass(/\bchanged\b/);
+  // Other: the two fields, with the values that the search uses.
+  await gaps.selectOption('other');
+  await expect(page.getByTestId('param-gapopen')).toHaveValue('12');
+  await expect(page.getByTestId('param-gapopen')).toHaveAccessibleName(/^Existence -gapopen/);
+  await page.getByTestId('param-gapopen').fill('6');
+  await page.getByTestId('param-gapextend').fill('5');
+  await expect(gaps).toHaveValue('other');
+  // The filter: off writes no; on again is the default.
+  const dust = page.getByTestId('param-dust');
+  await dust.uncheck();
+  await expect(page.getByTestId('param-dust-value')).toHaveCount(0);
+  await expect(page.getByTestId('param-dust-field')).toHaveClass(/\bchanged\b/);
+  await paste(page, 'query', '>q\nACGTACGTACGTAAACCCGGGTTT\n');
+  await paste(page, 'subject', '>s\nACGTACGTACGTAAACCCGGGTTTACGT\n');
+  await submit(page);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -reward 4 -penalty -5 -gapopen 6 -gapextend 5 -dust no');
+  await waitStatus(page, 1, 'completed');
+  await backToSearch(page);
+  await dust.check();
+  await expect(page.getByTestId('param-dust-value')).toHaveValue('');
+  await expect(page.getByTestId('param-dust-value')).toHaveAttribute('placeholder', '20 64 1');
+  await expect(page.getByTestId('param-dust-field')).not.toHaveClass(/\bchanged\b/);
+  // blastn-short filters with no by default: on is yes, and the text box takes the arguments.
+  await task(page, 'blastn-short');
+  await expect(dust).not.toBeChecked();
+  await dust.check();
+  await expect(page.getByTestId('param-dust-value')).toHaveValue('yes');
+  await page.getByTestId('param-dust-value').fill('20 32 1');
+  await expect(dust).toBeChecked();
+
+  // The protein programs' gap costs follow the matrix: its default, as NCBI's page and the engine have it.
+  await program(page, 'blastp');
+  const matrix = page.getByTestId('param-matrix');
+  await expect(gaps).toHaveValue('11 1');
+  await gaps.selectOption('10 1');
+  await expect(page.getByTestId('param-gapcosts-field')).toHaveClass(/\bchanged\b/);
+  await matrix.selectOption('PAM30');
+  await expect(gaps).toHaveValue('9 1');
+  await expect(page.getByTestId('param-gapcosts-field')).not.toHaveClass(/\bchanged\b/);
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
+  const seg = page.getByTestId('param-seg');
+  await seg.check();
+  await expect(page.getByTestId('param-seg-value')).toHaveValue('yes');
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(2 changed)');
+  // BLASTX's list holds the one pair that LOSAT's BLASTX reads.
+  await program(page, 'blastx');
+  await expect(gaps.locator('option')).toHaveText(['Existence: 11 Extension: 1', 'Other']);
 });
 
 test('narrow screens put the inputs one under the other, without horizontal scrolling', async ({ page }) => {

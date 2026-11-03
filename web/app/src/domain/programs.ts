@@ -22,8 +22,10 @@ export type InputRole = 'query' | 'subject';
  * - `flag`: an option without a value, written alone.
  * - `gencode`: a genetic code; the engine's list (`describe` `query_gencodes` /
  *   `subject_gencodes`) gives the choices.
+ * - `filter`: a low complexity filter (`no`, `yes` or the filter's arguments): NCBI's "Low
+ *   complexity regions" checkbox, with the value in a text box while it is checked.
  */
-export type FieldKind = 'text' | 'choice' | 'radio' | 'boolean' | 'flag' | 'gencode';
+export type FieldKind = 'text' | 'choice' | 'radio' | 'boolean' | 'flag' | 'gencode' | 'filter';
 
 export interface ParameterField {
   readonly flag: string;
@@ -35,8 +37,6 @@ export interface ParameterField {
   readonly choiceLabels?: Readonly<Record<string, string>>;
   /** For `text` fields: a hint for the on-screen keyboard. */
   readonly inputMode?: 'numeric' | 'decimal' | 'text';
-  /** Suggestions offered with a `text` field (they do not limit what can be typed). */
-  readonly suggestions?: readonly string[];
   /**
    * For `text` fields: the values of NCBI's select, offered in a select (one list, or a list per
    * task); its "Other" takes any other value in a text box, which the engine's parser reads.
@@ -46,9 +46,34 @@ export interface ParameterField {
   readonly hint?: string;
   /**
    * The name of a row that shows this field with its neighbours of the same row (NCBI's
-   * "Match/Mismatch Scores" and "Gap Costs", which are one select on NCBI's page).
+   * "Match/Mismatch Scores", "Gap Costs", "Filter" and "Mask").
    */
   readonly row?: string;
+}
+
+/**
+ * NCBI's select of a row of two fields, in NCBI's order: "Match/Mismatch Scores" (1,-2 writes
+ * -reward 1 -penalty -2) and "Gap Costs" ("Existence: 11 Extension: 1" writes -gapopen 11
+ * -gapextend 1). Its "Other" shows the two fields. The values are those of NCBI's page; which
+ * pairs the engine reads is still its `validate`'s and its search's to say.
+ */
+export interface PairSelect {
+  /** NCBI's id of the select (`matchscores`, `gapcosts`). */
+  readonly id: string;
+  /** What separates the two values in NCBI's values ("1,-2", "11 1"). */
+  readonly separator: ',' | ' ';
+  /**
+   * The options whose values (as the search uses them, joined with ",") choose the list: the
+   * matrix, or BLASTN's scores. One list (key '') without.
+   */
+  readonly by?: readonly string[];
+  readonly lists: Readonly<Record<string, readonly string[]>>;
+  /** NCBI's default of each list (its "Deflt"), which a change of the list chooses. */
+  readonly defaults?: Readonly<Record<string, string>>;
+  /** Values offered for these tasks only, and then the default of their list (NCBI's "Linear" gap costs of megablast). */
+  readonly only?: { readonly tasks: readonly string[]; readonly values: readonly string[] };
+  /** NCBI's words for a value ("Existence: 11 Extension: 1"); the value itself without. */
+  readonly labels?: (value: string) => string;
 }
 
 /**
@@ -67,6 +92,8 @@ export interface ParameterSection {
    * is never written to the argv from a hidden field (NCBI's "Discontiguous Word Options").
    */
   readonly shownFor?: { readonly flag: string; readonly values: readonly string[] };
+  /** NCBI's selects of the section's rows of two fields, by row name. */
+  readonly pairs?: Readonly<Record<string, PairSelect>>;
 }
 
 export interface ProgramDescriptor {
@@ -108,10 +135,61 @@ const maxTargetSeqs: ParameterField = {
 };
 const evalue: ParameterField = { flag: '-evalue', label: 'Expect threshold', ...decimal };
 const wordSize: ParameterField = { flag: '-word_size', label: 'Word size', ...integer, list: PROTEIN_WORD_SIZES };
-// Scoring Parameters: NCBI's "Gap Costs" select is one row of the two costs here.
+// Scoring Parameters: NCBI's "Gap Costs" select writes the two costs of its row.
 const matrix: ParameterField = { flag: '-matrix', label: 'Matrix', kind: 'text', list: MATRICES };
 const gapOpen: ParameterField = { flag: '-gapopen', label: 'Existence', row: 'Gap Costs', ...integer };
 const gapExtend: ParameterField = { flag: '-gapextend', label: 'Extension', row: 'Gap Costs', ...integer };
+const gapCostsLabel = (value: string): string => {
+  const [existence, extension] = value.split(' ');
+  return value === '0 0' ? 'Linear' : `Existence: ${existence} Extension: ${extension}`;
+};
+// NCBI's lists of BLASTN's two-sequence page (gapcosts_1-2 ...): each pair of scores has its own,
+// and megablast's "Linear" (0 0) is the default where it is listed.
+const MATCH_SCORES: PairSelect = { id: 'matchscores', separator: ',', lists: { '': ['1,-2', '1,-3', '1,-4', '2,-3', '4,-5', '1,-1'] } };
+const NUCLEOTIDE_GAP_COSTS: PairSelect = {
+  id: 'gapcosts',
+  separator: ' ',
+  by: ['-reward', '-penalty'],
+  lists: {
+    '1,-2': ['0 0', '5 2', '2 2', '1 2', '0 2', '3 1', '2 1', '1 1'],
+    '1,-3': ['0 0', '5 2', '2 2', '1 2', '0 2', '2 1', '1 1'],
+    '1,-4': ['0 0', '5 2', '1 2', '0 2', '2 1', '1 1'],
+    '2,-3': ['0 0', '4 4', '2 4', '0 4', '3 3', '6 2', '5 2', '4 2', '2 2'],
+    '4,-5': ['0 0', '12 8', '6 5', '5 5', '4 5', '3 5'],
+    '1,-1': ['5 2', '3 2', '2 2', '1 2', '0 2', '4 1', '3 1', '2 1'],
+  },
+  defaults: { '1,-2': '5 2', '1,-3': '5 2', '1,-4': '5 2', '2,-3': '5 2', '4,-5': '12 8', '1,-1': '5 2' },
+  only: { tasks: ['megablast'], values: ['0 0'] },
+  labels: gapCostsLabel,
+};
+// NCBI's lists of the protein programs' pages (the same on BLASTP's, TBLASTN's and TBLASTX's), by matrix.
+const PROTEIN_GAP_COSTS: PairSelect = {
+  id: 'gapcosts',
+  separator: ' ',
+  by: ['-matrix'],
+  lists: {
+    BLOSUM62: ['11 2', '10 2', '9 2', '8 2', '7 2', '6 2', '13 1', '12 1', '11 1', '10 1', '9 1'],
+    PAM30: ['7 2', '6 2', '5 2', '10 1', '9 1', '8 1', '13 3', '15 3', '14 1', '14 2'],
+    PAM70: ['8 2', '7 2', '6 2', '11 1', '10 1', '9 1', '12 3', '11 2'],
+    BLOSUM80: ['8 2', '7 2', '6 2', '11 1', '10 1', '9 1'],
+    BLOSUM45: ['13 3', '12 3', '11 3', '10 3', '15 2', '14 2', '13 2', '12 2', '19 1', '18 1', '17 1', '16 1'],
+    BLOSUM50: ['13 3', '12 3', '11 3', '10 3', '9 3', '16 2', '15 2', '14 2', '13 2', '12 2', '19 1', '18 1', '17 1', '16 1', '15 1'],
+    PAM250: ['15 3', '14 3', '13 3', '12 3', '11 3', '17 2', '16 2', '15 2', '14 2', '13 2', '21 1', '20 1', '19 1', '18 1', '17 1'],
+    BLOSUM90: ['9 2', '8 2', '7 2', '6 2', '11 1', '10 1', '9 1'],
+  },
+  defaults: {
+    BLOSUM62: '11 1',
+    PAM30: '9 1',
+    PAM70: '10 1',
+    BLOSUM80: '10 1',
+    BLOSUM45: '14 2',
+    BLOSUM50: '13 2',
+    PAM250: '15 2',
+    BLOSUM90: '10 1',
+  },
+  labels: gapCostsLabel,
+};
+const PROTEIN_SCORING: Pick<ParameterSection, 'pairs'> = { pairs: { 'Gap Costs': PROTEIN_GAP_COSTS } };
 // `describe` explains the values of -comp_based_stats only in its help text; the names are NCBI's.
 const compBasedStats: ParameterField = {
   flag: '-comp_based_stats',
@@ -125,8 +203,8 @@ const compBasedStats: ParameterField = {
     '3': '3: Universal compositional score matrix adjustment',
   },
 };
-// Filters and Masking.
-const seg: ParameterField = { flag: '-seg', label: 'Low complexity regions filter (SEG)', kind: 'text', suggestions: ['no', 'yes'] };
+// Filters and Masking: NCBI's "Filter" row, its "Low complexity regions" checkbox.
+const seg: ParameterField = { flag: '-seg', label: 'Low complexity regions', kind: 'filter', row: 'Filter' };
 // NCBI's "Mask" row: two checkboxes.
 const softMasking: ParameterField = { flag: '-soft_masking', label: 'Mask for lookup table only', kind: 'boolean', row: 'Mask' };
 const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag', row: 'Mask' };
@@ -203,12 +281,13 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           gapOpen,
           gapExtend,
         ],
+        pairs: { 'Match/Mismatch Scores': MATCH_SCORES, 'Gap Costs': NUCLEOTIDE_GAP_COSTS },
       },
       {
         title: 'Filters and Masking',
         placement: 'algorithm',
         fields: [
-          { flag: '-dust', label: 'Low complexity regions filter (DUST)', kind: 'text', suggestions: ['no', 'yes'] },
+          { flag: '-dust', label: 'Low complexity regions', kind: 'filter', row: 'Filter' },
           softMasking,
           lcaseMasking,
         ],
@@ -261,7 +340,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         ],
       },
       { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize] },
-      { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats] },
+      { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats], ...PROTEIN_SCORING },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
       { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize, maxHsps] },
     ],
@@ -293,6 +372,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         title: 'Scoring Parameters',
         placement: 'algorithm',
         fields: [{ ...matrix, list: ['BLOSUM62'] }, gapOpen, gapExtend, { ...compBasedStats, choices: ['0', '2'] }],
+        pairs: { 'Gap Costs': { id: 'gapcosts', separator: ' ', lists: { '': ['11 1'] }, labels: gapCostsLabel } },
       },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
       {
@@ -322,7 +402,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       { title: 'Task Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
       { title: 'Genetic code', placement: 'subject', fields: [{ flag: '-db_gencode', label: 'Genetic code', kind: 'gencode' }] },
       { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize] },
-      { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats] },
+      { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats], ...PROTEIN_SCORING },
       {
         title: 'Filters and Masking',
         placement: 'algorithm',

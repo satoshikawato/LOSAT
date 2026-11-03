@@ -550,11 +550,6 @@ input[type='radio'] {
   min-width: 0;
 }
 
-/* The "?" sits beside the control; the help it opens floats under the control (.help-tip). */
-.param-control > datalist {
-  grid-column: 1 / -1;
-}
-
 .param-row[data-kind='radio'] .param-control {
   align-items: start;
 }
@@ -585,7 +580,7 @@ input[type='radio'] {
   max-width: 100%;
 }
 
-/* W4b search: a row of several fields (Match/Mismatch Scores, Gap Costs, NCBI's "Mask"). */
+/* W4b search: a row of several fields (Match/Mismatch Scores, Gap Costs, NCBI's "Filter" and "Mask"). */
 .param-group {
   display: flex;
   flex-wrap: wrap;
@@ -1269,6 +1264,7 @@ textarea {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  white-space: pre-line; /* a pair row's help: a line per flag */
 }
 
 .help-toggle {

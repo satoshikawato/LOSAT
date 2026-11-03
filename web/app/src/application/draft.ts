@@ -21,9 +21,9 @@ import {
   unserved,
   type FetchSourceId,
 } from '../domain/accession';
-import { buildArgv, COMBINED_NAMES, PASTED_NAMES } from '../domain/argv';
+import { buildArgv, COMBINED_NAMES, PASTED_NAMES, splitOptions } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
-import { formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
+import { formControlOf, formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
 import {
   fastaParser,
   PROGRAMS,
@@ -112,6 +112,8 @@ export interface DraftState {
   readonly subject: RoleDraft;
   /** The form's values of each program: what the user set, nothing else. */
   readonly values: Readonly<Record<ProgramId, FormValues>>;
+  /** The "Additional options" of each program, as typed: other options, as on a command line (`splitOptions`). */
+  readonly extra: Readonly<Record<ProgramId, string>>;
   /** The Job Title of the next runs, as typed ('' for none); never part of the argv. */
   readonly title: string;
   readonly threads: number | 'auto';
@@ -180,6 +182,7 @@ export class SearchDraft {
       query: emptyRole(),
       subject: emptyRole(),
       values,
+      extra: Object.fromEntries(PROGRAMS.map((program) => [program.id, ''])) as Record<ProgramId, string>,
       title: '',
       threads: 'auto',
       fetchSource: 'ncbi',
@@ -238,6 +241,13 @@ export class SearchDraft {
     const next: Record<string, FieldValue> = { ...values[program] };
     for (const flag of flags) delete next[flag];
     this.set({ values: { ...values, [program]: Object.freeze(next) }, message: undefined });
+    this.scheduleValidation();
+  }
+
+  /** The program's "Additional options": words of other options, after the form's in the argv. */
+  setExtra(text: string): void {
+    const { program, extra } = this.state.get();
+    this.set({ extra: { ...extra, [program]: text }, message: undefined });
     this.scheduleValidation();
   }
 
@@ -484,6 +494,23 @@ export class SearchDraft {
     return parameters;
   }
 
+  /**
+   * The words of the program's "Additional options". Throws on an unclosed quote, and on an
+   * option that the form sets (`formControlOf`) or a role's subrange, which are set there.
+   */
+  extraWords(): readonly string[] {
+    const { program, extra, description } = this.state.get();
+    const words = splitOptions(extra[program]);
+    for (const word of words) {
+      const flag = word.split('=', 1)[0]!;
+      const role = ROLES.find((r) => REGION_FLAG[r] === flag);
+      const control =
+        role === undefined ? formControlOf(programById(program), description?.parameters, flag) : `${role === 'query' ? 'Query' : 'Subject'} subrange`;
+      if (control !== undefined) throw new Error(`${flag} is set in the form: ${control}`);
+    }
+    return words;
+  }
+
   /** The name of the role's input in the argv of a combined search (plan §5.3). */
   inputName(role: InputRole): string {
     const sources = this.role(role).sources.filter((source) => source.status !== 'failed');
@@ -551,6 +578,12 @@ export class SearchDraft {
     // Everything from one state, before any wait.
     const groups = { query: this.inputGroups('query'), subject: this.inputGroups('subject') };
     const parameters = this.parameters();
+    let extra: readonly string[];
+    try {
+      extra = this.extraWords();
+    } catch (error) {
+      return { ok: false, message: messageOf(error) };
+    }
     const resolved = {
       query: await Promise.all(groups.query.map((group) => this.resolveGroup(group))),
       subject: await Promise.all(groups.subject.map((group) => this.resolveGroup(group))),
@@ -563,6 +596,7 @@ export class SearchDraft {
           query: { dataset: query },
           subject: { dataset: subject },
           parameters,
+          ...(extra.length === 0 ? {} : { extra }),
           requestedThreads: threads,
           ...(title.trim() === '' ? {} : { title }),
         });
@@ -816,6 +850,7 @@ export class SearchDraft {
         queryName: this.inputName('query'),
         subjectName: this.inputName('subject'),
         parameters: this.parameters(),
+        extra: this.extraWords(),
       });
     } catch (error) {
       this.set({ validation: { state: 'invalid', message: messageOf(error) } });

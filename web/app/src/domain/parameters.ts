@@ -60,6 +60,22 @@ export function describedSections(
     .filter((section) => section.fields.length > 0);
 }
 
+/**
+ * The form's control of an option among the fields that the engine describes: the field's label,
+ * or its row's name for NCBI's select of a pair ("Gap Costs"); undefined for an option that the
+ * form does not have. "Additional options" refuses such an option (DW-42): the form leaves out a
+ * value equal to the default that it reads from its own values, which a -task or -matrix written
+ * beside the form would change.
+ */
+export function formControlOf(program: ProgramDescriptor, options: readonly EngineOption[] | undefined, flag: string): string | undefined {
+  for (const section of describedSections(program, options)) {
+    const field = section.fields.find((f) => f.flag === flag);
+    if (field === undefined) continue;
+    return field.row !== undefined && section.pairs?.[field.row] !== undefined ? field.row : field.label;
+  }
+  return undefined;
+}
+
 /** The described sections shown at one place of the screen, in the descriptor's order. */
 export function sectionsAt(
   program: ProgramDescriptor,

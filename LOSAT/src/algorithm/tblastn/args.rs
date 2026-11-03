@@ -851,7 +851,7 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
 pub fn check_options(args: &TblastnArgs) -> Result<()> {
     // The host has no database files (`run_local`).
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
+        anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
     search_settings(&args.resolve()?).map(|_| ())
 }

@@ -366,9 +366,9 @@ mod tests {
     fn register_rejects_what_ncbi_rejects_and_what_web_cannot_index() {
         let gap = register("blastn", ROLE_SUBJECT, b">s\nACGT\n>?10\nACGT\n").unwrap_err();
         assert!(gap.starts_with("line 3 is a gap line ('>?')"), "{gap}");
-        assert!(gap.ends_with("not supported by LOSAT Web"), "{gap}");
+        assert!(gap.ends_with("not supported in the browser"), "{gap}");
         let seq_id = register("tblastx", ROLE_QUERY, b"AB123456\nACGT\n").unwrap_err();
-        assert!(seq_id.contains("not supported by LOSAT Web"), "{seq_id}");
+        assert!(seq_id.contains("not supported in the browser"), "{seq_id}");
         let reader =
             register("blastp", ROLE_QUERY, b">q\n1234567890123456789012345\n").unwrap_err();
         assert_eq!(

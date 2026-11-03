@@ -5,7 +5,7 @@
 import { computed } from 'vue';
 import type { RunView } from '../application/coordinator';
 import type { LoadedRun } from '../application/results';
-import { toShellCommand } from '../domain/argv';
+import { shellWords, toShellCommand } from '../domain/argv';
 import { programById } from '../domain/programs';
 import CommandText from './CommandText.vue';
 import { formatBytes, formatCount, formatDateTime, formatDuration } from './format';
@@ -40,7 +40,7 @@ const inputs = computed(() => [
         <dt>Mode</dt>
         <dd>{{ programById(snapshot.program).label }}</dd>
         <dt>Arguments</dt>
-        <dd><code data-testid="run-argv"><CommandText :text="snapshot.argv.join(' ')" /></code></dd>
+        <dd><code data-testid="run-argv"><CommandText :text="shellWords(snapshot.argv)" /></code></dd>
         <template v-for="{ role, input } in inputs" :key="role">
           <dt>{{ role }}</dt>
           <dd :data-testid="`run-input-${role.toLowerCase()}`">

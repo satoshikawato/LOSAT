@@ -644,4 +644,72 @@ mod tests {
             }
         }
     }
+
+    // One task's table across runs that skip the subjects of other tasks, with and without a
+    // reset of the one-thread order among the skipped ones (the order of `x_search_runs` when
+    // other tasks take the runs in between): every subject still starts at its one-thread offset
+    // from a table that reads as cleared.
+    #[test]
+    fn a_task_skipping_runs_starts_each_run_from_a_cleared_table() {
+        let seen = Mutex::new(Vec::new());
+        let process_subject = |scratch: &mut BlastpSubjectScratch,
+                               s_idx: usize,
+                               subject: BlastpSubjectRef<'_>,
+                               result: &mut BlastpSubjectResult| {
+            result.reset(s_idx);
+            if subject.aa_len == 0 {
+                return;
+            }
+            let offset = scratch.diag_offset;
+            seen.lock().unwrap().push((
+                s_idx,
+                offset,
+                x_first_uncleared(&scratch.diag_array, offset, WINDOW),
+            ));
+            let length = subject.aa_len as i32;
+            for k in 0..TABLE as usize {
+                let entry = &mut scratch.diag_array[k];
+                entry.set_last_hit(offset + (k as i32 * 13) % length);
+                entry.set_flag((k % 2) as u32);
+            }
+            scratch.finish_subject(subject.aa_len, WINDOW);
+        };
+        // Short subjects (no reset), and subjects long enough to reset between the task's runs.
+        let short: Vec<usize> = (0..12).map(|i| 30 + 7 * i).collect();
+        let long = vec![200_000_000; 12];
+        for (lengths, task_runs) in [
+            (&short, [0..2, 5..7, 10..12]),
+            (&long, [0..2, 4..6, 9..11]),
+        ] {
+            let subjects = proteins(lengths);
+            let offsets = blastp_subject_diag_offsets(&subjects, WINDOW);
+            if lengths == &long {
+                let back = task_runs
+                    .windows(2)
+                    .filter(|pair| offsets[pair[1].start] < offsets[pair[0].end - 1])
+                    .count();
+                assert!(back >= 1, "{offsets:?}");
+            }
+            let mut scratch = BlastpSubjectScratch::new(16, TABLE, WINDOW, 100);
+            seen.lock().unwrap().clear();
+            for run in &task_runs {
+                let mut slots: Vec<Option<BlastpSubjectResult>> =
+                    std::iter::repeat_with(|| None).take(run.len()).collect();
+                x_search_run(
+                    &mut scratch,
+                    run.clone(),
+                    &mut slots,
+                    &subjects,
+                    &offsets,
+                    &process_subject,
+                );
+            }
+            let expected: Vec<Seen> = task_runs
+                .iter()
+                .flat_map(|run| run.clone())
+                .map(|s_idx| (s_idx, offsets[s_idx], None))
+                .collect();
+            assert_eq!(*seen.lock().unwrap(), expected, "{lengths:?}");
+        }
+    }
 }

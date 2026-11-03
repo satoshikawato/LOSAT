@@ -10904,18 +10904,27 @@ fn run_resolved_in_pool(
     // `max_target_seqs` subjects that have one (the pairwise report shows at most as many, its
     // numbers of descriptions and alignments).
     // NCBI's cut counts the Seq-aligns of subjects whose Seq-align ids match as those of one
-    // subject (`PruneSeqalign`, quoted at `refuse_joined_cut`): where it keeps another subject
-    // than the cut below, the run is LOSAT's refusal before any format is written.
-    if let (BlastpApp::Psiblast, Some(titles)) = (args.app, listed_titles.as_ref()) {
-        titles.check_joined_cut(&hit_lists, args.max_target_seqs)?;
-    }
+    // subject (`PruneSeqalign`, quoted at `joined_cut`): a copy of one record that follows
+    // another is kept with it; where it keeps another subject for others, the run is LOSAT's
+    // refusal before any format is written.
+    let psiblast_kept: Option<Vec<usize>> = match (args.app, listed_titles.as_ref()) {
+        (BlastpApp::Psiblast, Some(titles)) => {
+            Some(titles.joined_cut(&hit_lists, args.max_target_seqs)?)
+        }
+        _ => None,
+    };
     let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
         hit_lists
             .iter_mut()
-            .map(|hit_list_opt| {
+            .enumerate()
+            .map(|(query, hit_list_opt)| {
                 let found = blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt));
                 if let Some(hit_list) = hit_list_opt {
-                    hit_list.prune_by_size(args.max_target_seqs);
+                    hit_list.prune_by_size(
+                        psiblast_kept
+                            .as_ref()
+                            .map_or(args.max_target_seqs, |kept| kept[query]),
+                    );
                 }
                 found
             })
@@ -11139,8 +11148,9 @@ fn run_resolved_in_pool(
         titles.check_reported_titles(&hit_lists)?;
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
         // (the formats that read a subject's Bioseq need its sequence found by its Seq-align
-        // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids; 13 to 16 and
-        // the tables of taxonomy fields write their taxids).
+        // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids, which LOSAT
+        // does for copies of one record; 13 to 16 and the tables of taxonomy fields write their
+        // taxids).
         titles.check_parsed_reports(
             &hit_lists,
             format_plans

@@ -357,8 +357,9 @@ would port:
 - A reported sequence whose id NCBI's lookup finds as another sequence first: NCBI writes that
   sequence's names, in every program but BLASTN also its identities (for the same record with
   other tax ids, its tax ids).
-- Following hits whose ids NCBI takes for one sequence: NCBI shows them as one hit, and
-  PSIBLAST's cut to `-max_target_seqs` counts them as one subject.
+- Following hits whose ids NCBI takes for one sequence, other than copies of one record (which
+  LOSAT shows in one hit as NCBI does): NCBI shows them as one hit, and PSIBLAST's cut to
+  `-max_target_seqs` counts them as one subject.
 - A reported sequence with the id of a query read with `-parse_deflines`: NCBI shows the query's
   title and letters for it.
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message

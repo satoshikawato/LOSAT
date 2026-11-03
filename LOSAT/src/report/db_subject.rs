@@ -1223,6 +1223,46 @@ pub fn joined_in_reports(a: &ParsedSubject, b: &ParsedSubject) -> bool {
     compare(&a.alignment_id, &b.alignment_id) == Sic::Yes
 }
 
+// No NCBI counterpart: LOSAT joins the hits that NCBI joins only where they are copies of one
+// record; it refuses the others (`common::database::refuse_joined_hits`).
+/// Whether `later`, which follows `earlier` in a hit list, is shown in `earlier`'s hit by the
+/// reports that join following hits (`joined_in_reports`) as LOSAT writes them: the two are
+/// copies of one record (the same definition lines but for their taxids). NCBI shows that hit
+/// with the names of the copy its lookup gives first, and each alignment with the letters of the
+/// copy its scope holds for the Seq-align id; the reports that read the Bioseq refuse either
+/// subject where another sequence holding its Seq-align id is not shown as it (`fetched`: other
+/// letters, other taxids where they are written), so the copies' names and letters are the same.
+pub fn joins_as_copy(earlier: &ParsedSubject, later: &ParsedSubject) -> bool {
+    let without_taxid = |defline: &BlastDefline| BlastDefline {
+        taxid: None,
+        ..defline.clone()
+    };
+    joined_in_reports(earlier, later)
+        && earlier.set.deflines.len() == later.set.deflines.len()
+        && earlier
+            .set
+            .deflines
+            .iter()
+            .zip(&later.set.deflines)
+            .all(|(a, b)| without_taxid(a) == without_taxid(b))
+}
+
+/// `joins_as_copy` of the subjects of ranks `earlier` and `later` of `parsed` (the subjects with
+/// parsed Seq-ids by rank): false where either has none.
+pub fn rank_joins_as_copy(
+    parsed: &[Option<std::sync::Arc<ParsedSubject>>],
+    earlier: usize,
+    later: usize,
+) -> bool {
+    match (
+        parsed.get(earlier).and_then(Option::as_deref),
+        parsed.get(later).and_then(Option::as_deref),
+    ) {
+        (Some(earlier), Some(later)) => joins_as_copy(earlier, later),
+        _ => false,
+    }
+}
+
 // No NCBI counterpart: LOSAT's check that no two sequences of a database are joined
 // (`common::database::reports_may_refuse`).
 /// Adds to `keys` the keys of the Seq-align id of `subject` (`defline_set::match_keys`): two
@@ -1649,6 +1689,62 @@ mod tests {
         };
         assert!(joined_in_reports(&pdb(None), &pdb(Some("AA"))));
         assert!(!joined_in_reports(&pdb(Some("A")), &pdb(Some("B"))));
+    }
+
+    // Line DBID N3: the copies of one record in the databases of an alias (three of r1, two of
+    // r3, the b ones with taxid 9606 in pjoin_abt) are joined; r6 (r1's letters under another id)
+    // and a Seq-align id that matches another one's without being its copy (pfound_v5's
+    // gb|DDD00004| and gb|DDD00004.1|, pdb|2XYZ| and pdb|2XYZ|AA) are not.
+    #[test]
+    fn copies_of_one_record_are_joined_and_other_matching_ids_are_not() {
+        let open = |name: &str| {
+            let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/ids")
+                .join(name);
+            let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+            (0..db.num_seqs())
+                .map(|ordinal| ParsedSubject::new(db.defline_set(ordinal).unwrap()).unwrap())
+                .collect::<Vec<_>>()
+        };
+        // a: r1 r2 r3, b: r1 r3 r4 r6, c: r1.
+        for name in ["pjoin_abc", "pjoin_abt"] {
+            let s = open(name);
+            assert_eq!(s.len(), 8);
+            for (earlier, later) in [(0, 3), (3, 0), (3, 7), (7, 0), (2, 4)] {
+                assert!(
+                    joins_as_copy(&s[earlier], &s[later]),
+                    "{name} {earlier} {later}"
+                );
+            }
+            for (earlier, later) in [(7, 6), (6, 3), (0, 1), (2, 5)] {
+                assert!(
+                    !joined_in_reports(&s[earlier], &s[later]),
+                    "{name} {earlier} {later}"
+                );
+                assert!(
+                    !joins_as_copy(&s[earlier], &s[later]),
+                    "{name} {earlier} {later}"
+                );
+            }
+        }
+        let s = open("pfound_v5");
+        for prefix in ["gb|DDD00004", "pdb|2XYZ|"] {
+            let pair: Vec<&ParsedSubject> = s
+                .iter()
+                .filter(|subject| subject.alignment_fasta().starts_with(prefix.as_bytes()))
+                .collect();
+            assert_eq!(pair.len(), 2, "{prefix}");
+            assert!(joined_in_reports(pair[0], pair[1]), "{prefix}");
+            assert!(!joins_as_copy(pair[0], pair[1]), "{prefix}");
+        }
+        let parsed: Vec<Option<std::sync::Arc<ParsedSubject>>> = open("pjoin_abc")
+            .into_iter()
+            .map(|subject| Some(std::sync::Arc::new(subject)))
+            .chain([None])
+            .collect();
+        assert!(rank_joins_as_copy(&parsed, 3, 0));
+        assert!(!rank_joins_as_copy(&parsed, 0, 8));
+        assert!(!rank_joins_as_copy(&parsed, 8, 0));
     }
 
     #[test]

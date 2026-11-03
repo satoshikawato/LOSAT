@@ -102,7 +102,8 @@ pub(crate) fn pool<'p, 'q>(pool: &'p SearchPool<'q>) -> Option<&'p SearchPool<'q
 
 /// One query's hits by subject, as the serial writers group them: the subjects in the order of
 /// their first hit, each subject's hits and their indices in the report's hit list, and the
-/// subjects' title bytes (by subject index).
+/// subjects' title bytes (by subject index). The hits of a subject that the report shows in the
+/// hit of the subject before it (`QuerySections::joins`) are that subject's.
 pub(crate) struct QueryGroup<'h> {
     pub(crate) subject_order: Vec<u32>,
     pub(crate) subject_hits: HashMap<u32, Vec<&'h PairwiseHit>>,
@@ -111,10 +112,13 @@ pub(crate) struct QueryGroup<'h> {
 }
 
 impl<'h> QueryGroup<'h> {
-    /// The group of `query_hits`; `None` for a query without hits.
+    /// The group of `query_hits`; `None` for a query without hits. `joins(previous, s_idx)`:
+    /// whether the hits of subject `s_idx`, whose first hit follows a hit of subject
+    /// `previous`, are shown in `previous`'s hit (`QuerySections::joins`).
     pub(crate) fn new(
         query_hits: &[(HspIndex, &'h PairwiseHit)],
         subject_titles: &[Arc<[u8]>],
+        joins: impl Fn(u32, u32) -> bool,
     ) -> Option<Self> {
         if query_hits.is_empty() {
             return None;
@@ -122,14 +126,29 @@ impl<'h> QueryGroup<'h> {
         let mut subject_hits: HashMap<u32, Vec<&PairwiseHit>> = HashMap::new();
         let mut subject_hit_indices: HashMap<u32, Vec<HspIndex>> = HashMap::new();
         let mut subject_order: Vec<u32> = Vec::new();
+        // The subject whose hit shows each subject's hits.
+        let mut shown_in: HashMap<u32, u32> = HashMap::new();
+        let mut previous: Option<u32> = None;
         for &(hsp_index, hit) in query_hits {
             let s_idx = hit.hit.s_idx;
-            if !subject_hits.contains_key(&s_idx) {
-                subject_order.push(s_idx);
+            let shown = match shown_in.get(&s_idx) {
+                Some(&shown) => shown,
+                None => {
+                    let shown = match previous {
+                        Some(previous) if joins(previous, s_idx) => shown_in[&previous],
+                        _ => s_idx,
+                    };
+                    shown_in.insert(s_idx, shown);
+                    shown
+                }
+            };
+            previous = Some(s_idx);
+            if !subject_hits.contains_key(&shown) {
+                subject_order.push(shown);
             }
-            subject_hits.entry(s_idx).or_default().push(hit);
+            subject_hits.entry(shown).or_default().push(hit);
             subject_hit_indices
-                .entry(s_idx)
+                .entry(shown)
                 .or_default()
                 .push(hsp_index);
         }
@@ -150,6 +169,15 @@ impl<'h> QueryGroup<'h> {
         })
     }
 
+    /// The number of the hits of subject `s_idx` that are its own, not those of the subjects
+    /// shown in its hit.
+    pub(crate) fn own_hsps(&self, s_idx: u32) -> usize {
+        self.subject_hits[&s_idx]
+            .iter()
+            .filter(|hit| hit.hit.s_idx == s_idx)
+            .count()
+    }
+
     /// The subjects of the description table (the first `num_descriptions`).
     pub(crate) fn described(&self, num_descriptions: usize) -> &[u32] {
         &self.subject_order[..self.subject_order.len().min(num_descriptions)]
@@ -168,6 +196,12 @@ impl<'h> QueryGroup<'h> {
 pub(crate) trait QuerySections: Sync {
     /// The subjects with alignments per query (`QueryGroup::aligned`).
     fn num_alignments(&self) -> usize;
+
+    /// Whether the hits of subject `s_idx` that follow those of subject `previous` are shown in
+    /// `previous`'s hit (`report::db_subject::joins_as_copy`; `QueryGroup::new`).
+    fn joins(&self, _previous: u32, _s_idx: u32) -> bool {
+        false
+    }
 
     /// `\n\n`, the query's header, then "No hits found" and the query's footer (`group` is
     /// `None`), or the description table and the blank line after it.
@@ -254,7 +288,9 @@ fn write_serial<S: QuerySections, W: Write>(
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
         }
-        let group = QueryGroup::new(query_hits, subject_titles);
+        let group = QueryGroup::new(query_hits, subject_titles, |previous, s_idx| {
+            sections.joins(previous, s_idx)
+        });
         sections.head(writer, q_idx, group.as_ref())?;
         if let Some(group) = &group {
             for &s_idx in group.aligned(sections.num_alignments()) {
@@ -500,7 +536,9 @@ fn write_parallel_with<S: QuerySections, W: Write>(
         .collect();
     for window in query_windows(&estimates, budget) {
         let groups = map(pool, &hits_by_query[window.clone()], |query_hits| {
-            QueryGroup::new(query_hits, subject_titles)
+            QueryGroup::new(query_hits, subject_titles, |previous, s_idx| {
+                sections.joins(previous, s_idx)
+            })
         });
         let first = first_query + window.start;
         let planned = pieces(sections, first, &groups, piece_bytes);
@@ -571,11 +609,17 @@ mod tests {
     struct Marks {
         num_alignments: usize,
         fail_at: Option<usize>,
+        /// The subjects `(previous, s_idx)` whose hits are shown as one (`joins`).
+        joined: Option<(u32, u32)>,
     }
 
     impl QuerySections for Marks {
         fn num_alignments(&self) -> usize {
             self.num_alignments
+        }
+
+        fn joins(&self, previous: u32, s_idx: u32) -> bool {
+            self.joined == Some((previous, s_idx))
         }
 
         fn head<W: Write>(
@@ -652,12 +696,13 @@ mod tests {
             let marks = Marks {
                 num_alignments,
                 fail_at: None,
+                joined: None,
             };
             let mut serial = Vec::new();
             write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).unwrap();
             let groups: Vec<_> = by_query
                 .iter()
-                .map(|query_hits| QueryGroup::new(query_hits, &titles))
+                .map(|query_hits| QueryGroup::new(query_hits, &titles, |_, _| false))
                 .collect();
             for piece_bytes in [1, 500, 900, 2_000, 5_000, usize::MAX] {
                 let planned = pieces(&marks, 0, &groups, piece_bytes);
@@ -707,21 +752,42 @@ mod tests {
         let hits = report_hits();
         let by_query = by_query(&hits);
         let titles = titles();
-        let marks = Marks {
-            num_alignments: 10,
-            fail_at: None,
-        };
-        let mut serial = Vec::new();
-        write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).unwrap();
+        // Also with subject 2 shown in the hit of subject 5 before it (line DBID N3).
+        for joined in [None, Some((5, 2))] {
+            let marks = Marks {
+                num_alignments: 10,
+                fail_at: None,
+                joined,
+            };
+            let mut serial = Vec::new();
+            write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).unwrap();
+            let heads = String::from_utf8(serial.clone()).unwrap();
+            let expected_head = if joined.is_some() {
+                "head 0 subjects 2"
+            } else {
+                "head 0 subjects 3"
+            };
+            assert!(heads.contains(expected_head), "{heads}");
+            parallel_reports_equal(&marks, &by_query, &titles, &serial);
+        }
+    }
+
+    /// The parallel writer's reports of `marks` in several chunks and pieces are `serial`.
+    fn parallel_reports_equal(
+        marks: &Marks,
+        by_query: &[Vec<(HspIndex, &PairwiseHit)>],
+        titles: &[Arc<[u8]>],
+        serial: &[u8],
+    ) {
         crate::utils::threading::with_search_pool(4, "test", |pool| {
             for (budget, piece_bytes) in [(1, 1), (1_000, 500), (3_000, 900), (usize::MAX, 2_000)] {
                 let mut parallel = Vec::new();
                 let (chunks, pieces) = write_parallel_with(
                     &mut parallel,
-                    &marks,
+                    marks,
                     0,
-                    &by_query,
-                    &titles,
+                    by_query,
+                    titles,
                     None,
                     pool,
                     budget,
@@ -741,6 +807,39 @@ mod tests {
         .unwrap();
     }
 
+    // Line DBID N3: the hits of a subject whose first hit follows a hit of another subject that
+    // shows them (a copy of one record, `QuerySections::joins`) are the other's, after its own;
+    // the counts of descriptions and alignments count the two as one, and the subject's own HSPs
+    // are still told apart (`own_hsps`, the heading).
+    #[test]
+    fn a_joined_subject_s_hits_are_those_of_the_subject_before_it() {
+        let hits = report_hits();
+        let by_query = by_query(&hits);
+        let titles = titles();
+        let group = QueryGroup::new(&by_query[0], &titles, |previous, s_idx| {
+            (previous, s_idx) == (5, 2)
+        })
+        .unwrap();
+        assert_eq!(group.subject_order, [5, 7]);
+        assert_eq!(group.subject_hit_indices[&5], [0, 1, 2, 3]);
+        assert_eq!((group.subject_hits[&5].len(), group.own_hsps(5)), (4, 3));
+        assert_eq!(group.aligned(1), [5]);
+        assert_eq!(group.described(2), [5, 7]);
+        // Only a subject that follows is asked: 7 follows 2, not 5.
+        let group = QueryGroup::new(&by_query[0], &titles, |previous, s_idx| {
+            (previous, s_idx) == (5, 7)
+        })
+        .unwrap();
+        assert_eq!(group.subject_order, [5, 2, 7]);
+        // A chain of three.
+        let group = QueryGroup::new(&by_query[0], &titles, |previous, s_idx| {
+            matches!((previous, s_idx), (5, 2) | (2, 7))
+        })
+        .unwrap();
+        assert_eq!(group.subject_order, [5]);
+        assert_eq!((group.subject_hits[&5].len(), group.own_hsps(5)), (8, 3));
+    }
+
     #[test]
     fn windows_of_queries_written_in_turn_write_the_whole_report() {
         let hits = report_hits();
@@ -749,6 +848,7 @@ mod tests {
         let marks = Marks {
             num_alignments: 10,
             fail_at: None,
+            joined: None,
         };
         let mut serial = Vec::new();
         write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).unwrap();
@@ -833,6 +933,7 @@ mod tests {
         let marks = Marks {
             num_alignments: 10,
             fail_at: Some(185),
+            joined: None,
         };
         let mut serial = Vec::new();
         assert!(write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).is_err());

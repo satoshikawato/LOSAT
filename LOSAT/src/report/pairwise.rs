@@ -572,7 +572,9 @@ pub enum DatabaseHeading<'a> {
 
 impl<'a> DatabaseHeading<'a> {
     /// The heading of a subject with parsed Seq-ids and `hsps` HSPs in a search that is
-    /// `gapped` or not (`ParsedSubject::heading`).
+    /// `gapped` or not (`ParsedSubject::heading`): the subject's own HSPs, not those of the
+    /// copies shown in its hit (`QueryGroup::own_hsps`), as the Seq-align of each subject's
+    /// HSPs is split.
     fn parsed(
         subject: &'a crate::report::db_subject::ParsedSubject,
         gapped: bool,
@@ -2239,6 +2241,14 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         self.report.num_alignments
     }
 
+    fn joins(&self, previous: u32, s_idx: u32) -> bool {
+        crate::report::db_subject::rank_joins_as_copy(
+            self.parsed_subjects,
+            previous as usize,
+            s_idx as usize,
+        )
+    }
+
     fn head<W: Write>(
         &self,
         writer: &mut W,
@@ -2335,9 +2345,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         let parsed = parsed_subject(self.parsed_subjects, s_idx);
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {
-                Some(subject) => {
-                    DatabaseHeading::parsed(subject, true, group.subject_hits[&s_idx].len())
-                }
+                Some(subject) => DatabaseHeading::parsed(subject, true, group.own_hsps(s_idx)),
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
             return write_database_subject_alignments_part(
@@ -3075,6 +3083,14 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         self.report.num_alignments
     }
 
+    fn joins(&self, previous: u32, s_idx: u32) -> bool {
+        crate::report::db_subject::rank_joins_as_copy(
+            &self.report.parsed_subjects,
+            previous as usize,
+            s_idx as usize,
+        )
+    }
+
     fn head<W: Write>(
         &self,
         writer: &mut W,
@@ -3140,11 +3156,9 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
         if self.report.database.is_some() || parsed.is_some() {
             let heading = match parsed {
-                Some(subject) => DatabaseHeading::parsed(
-                    subject,
-                    self.report.gapped,
-                    group.subject_hits[&s_idx].len(),
-                ),
+                Some(subject) => {
+                    DatabaseHeading::parsed(subject, self.report.gapped, group.own_hsps(s_idx))
+                }
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
             return write_database_subject_alignments_part(
@@ -3734,6 +3748,14 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         self.report.num_alignments
     }
 
+    fn joins(&self, previous: u32, s_idx: u32) -> bool {
+        crate::report::db_subject::rank_joins_as_copy(
+            &self.report.parsed_subjects,
+            previous as usize,
+            s_idx as usize,
+        )
+    }
+
     fn head<W: Write>(
         &self,
         writer: &mut W,
@@ -3812,9 +3834,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {
-                Some(subject) => {
-                    DatabaseHeading::parsed(subject, false, group.subject_hits[&s_idx].len())
-                }
+                Some(subject) => DatabaseHeading::parsed(subject, false, group.own_hsps(s_idx)),
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
             return write_database_subject_alignments_part(
@@ -4629,21 +4649,6 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             }
             continue;
         }
-        let mut subject_hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
-            std::collections::HashMap::new();
-        let mut subject_hit_indices: std::collections::HashMap<u32, Vec<HspIndex>> =
-            std::collections::HashMap::new();
-        let mut subject_order = Vec::new();
-        for &(hsp_index, hit) in query_hits {
-            if !subject_hits.contains_key(&hit.hit.s_idx) {
-                subject_order.push(hit.hit.s_idx);
-            }
-            subject_hits.entry(hit.hit.s_idx).or_default().push(hit);
-            subject_hit_indices
-                .entry(hit.hit.s_idx)
-                .or_default()
-                .push(hsp_index);
-        }
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:1004-1011
         // ```c++
         // void CShowBlastDefline::DisplayBlastDefline(CNcbiOstream & out)
@@ -4657,22 +4662,33 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         // E-value, and the title of the subject (`CDeflineGenerator`), for the first
         // `m_NumDescriptions` subjects. The titles are those of the records read (by
         // subject index), as BLASTN's and TBLASTX's.
-        let subject_titles: std::collections::HashMap<u32, Vec<u8>> = subject_order
-            .iter()
-            .map(|&s_idx| {
-                let title = subject_titles
-                    .get(s_idx as usize)
-                    .map_or(&b""[..], |title| title.as_ref());
-                (s_idx, title.to_vec())
-            })
-            .collect();
+        // The subjects' hits; a copy of one record that follows another is shown in its hit
+        // (`QueryGroup::new`, `db_subject::joins_as_copy`).
+        let group = super::x_pairwise_par::QueryGroup::new(
+            query_hits,
+            subject_titles,
+            |previous, s_idx| {
+                crate::report::db_subject::rank_joins_as_copy(
+                    parsed_subjects,
+                    previous as usize,
+                    s_idx as usize,
+                )
+            },
+        )
+        .expect("a query with hits has a group");
+        let super::x_pairwise_par::QueryGroup {
+            subject_order,
+            subject_hits,
+            subject_hit_indices,
+            subject_titles,
+        } = &group;
         let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
         write_blastn_description_table(
             &mut writer,
             described,
             subject_order.len() <= report.num_descriptions,
-            &subject_hits,
-            &subject_titles,
+            subject_hits,
+            subject_titles,
             parsed_subjects,
             false,
             false,
@@ -4695,9 +4711,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             let parsed = parsed_subject(parsed_subjects, s_idx);
             if database.is_some() || parsed.is_some() {
                 let heading = match parsed {
-                    Some(subject) => {
-                        DatabaseHeading::parsed(subject, true, subject_hits[&s_idx].len())
-                    }
+                    Some(subject) => DatabaseHeading::parsed(subject, true, group.own_hsps(s_idx)),
                     None => DatabaseHeading::Title(&subject_titles[&s_idx]),
                 };
                 write_database_subject_alignments(
@@ -5139,22 +5153,24 @@ pub fn write_blastx_pairwise_report<W: Write>(
         if query_hits.is_empty() {
             write_no_hits_found(&mut writer)?;
         } else {
-            let mut grouped = std::collections::HashMap::new();
-            // The HSP indices of each subject's hits, for the probe only.
-            let mut indices = std::collections::HashMap::<u32, Vec<HspIndex>>::new();
-            let mut order = Vec::new();
-            for &(index, hit) in query_hits {
-                if !grouped.contains_key(&hit.hit.s_idx) {
-                    order.push(hit.hit.s_idx);
-                }
-                grouped
-                    .entry(hit.hit.s_idx)
-                    .or_insert_with(Vec::new)
-                    .push(hit);
-                if probe.is_some() {
-                    indices.entry(hit.hit.s_idx).or_default().push(index);
-                }
-            }
+            // The subjects' hits; a copy of one record of the database that follows another
+            // is shown in its hit (`QueryGroup::new`, `db_subject::joins_as_copy`).
+            let group =
+                super::x_pairwise_par::QueryGroup::new(query_hits, &[], |previous, s_idx| {
+                    database.is_some_and(|(_, _, parsed)| {
+                        crate::report::db_subject::rank_joins_as_copy(
+                            parsed,
+                            previous as usize,
+                            s_idx as usize,
+                        )
+                    })
+                })
+                .expect("a query with hits has a group");
+            let (grouped, indices, order) = (
+                &group.subject_hits,
+                &group.subject_hit_indices,
+                &group.subject_order,
+            );
             // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-611
             // ```c++
             //     CShowBlastDefline showdef(*aln_set, *m_Scope,
@@ -5170,7 +5186,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
                 &mut writer,
                 descriptions,
                 order.len() <= options.num_descriptions,
-                &grouped,
+                grouped,
                 subject_ids,
                 !options.gapped && options.sum_stats,
             )?;
@@ -5189,9 +5205,11 @@ pub fn write_blastx_pairwise_report<W: Write>(
                     Some((_, titles, parsed)) => write_database_subject_heading(
                         &mut writer,
                         match parsed_subject(parsed, *oid) {
-                            Some(subject) => {
-                                DatabaseHeading::parsed(subject, options.gapped, shits.len())
-                            }
+                            Some(subject) => DatabaseHeading::parsed(
+                                subject,
+                                options.gapped,
+                                group.own_hsps(*oid),
+                            ),
                             None => DatabaseHeading::Title(&titles[*oid as usize]),
                         },
                         true,

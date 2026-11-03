@@ -11,6 +11,7 @@ import { geneticCodeLabel } from '../domain/genetic-codes';
 import { effectiveValue, fieldChoices, fieldList, knownDefault, writtenValue } from '../domain/parameters';
 import { programById, type ParameterField } from '../domain/programs';
 import { optionHelp } from './format';
+import HelpTip from './HelpTip.vue';
 
 const props = defineProps<{ draft: SearchDraft; state: DraftState; field: ParameterField; inline?: boolean }>();
 
@@ -55,9 +56,7 @@ watchEffect(() => {
 const otherInput = ref<HTMLInputElement | null>(null);
 
 const choiceLabel = (choice: string) => props.field.choiceLabels?.[choice] ?? choice;
-/** The engine's help, opened with the "?" button (stop-describing-ui: the control shows, the help waits). */
-const showHelp = ref(false);
-
+/** The engine's help, behind the "?" (HelpTip). */
 const help = computed(() => optionHelp(option.value?.help));
 
 const defaultLabel = computed(() => {
@@ -238,19 +237,8 @@ function onList(next: string): void {
         </select>
       </span>
       <span v-if="field.hint" class="param-hint">{{ field.hint }}</span>
-      <button
-        v-if="help"
-        type="button"
-        class="help-toggle"
-        :aria-expanded="showHelp"
-        :aria-controls="`${id}-help`"
-        :aria-label="`About ${field.flag}`"
-        :data-testid="`${id}-help-toggle`"
-        @click="showHelp = !showHelp"
-      >
-        ?
-      </button>
-      <p v-if="help && showHelp" :id="`${id}-help`" class="help" :data-testid="`${id}-help`">{{ help }}</p>
+      <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
+      <HelpTip v-if="help" :id="id" :label="`About ${field.flag}`" :text="help" />
     </div>
   </div>
 </template>

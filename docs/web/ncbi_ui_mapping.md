@@ -57,7 +57,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | （無い） | 「Other Parameters」：NCBI の画面に無い LOSAT の option（4 program の Number of descriptions・Number of alignments（`-num_descriptions` / `-num_alignments`。hit list の大きさが outfmt 0 と outfmt 6 / 7 で違うと検索を 2 回行う、`docs/web/abi_v2.md` §7）、BLASTN の Max HSPs per subject・Percent identity・Subject best hit、BLASTP・TBLASTN・TBLASTX の Neighboring words threshold・Two-hit window size、TBLASTN の X-dropoff・Sum statistics） | LOSAT だけ | Algorithm parameters の最後の節 |
 | 2 つ目の BLAST のボタン | Algorithm parameters を開いたとき、その下に 2 つ目の「Run LOSAT」（`run-losat-bottom`） | 採る | |
 | BLAST のボタンを押すと結果のページへ移り、終わるまで状態（Searching…）を示す | 「Run LOSAT」（`run-losat`）で Results のタブへ移り、始めた Run の結果のページを開く。終わるまで状態の行（`run-status`：Waiting / Preparing / Searching / Organizing results、経過時間、Cancel）を示し、終わると結果が出る。保守者の指示（2026-11-02）「検索開始したら結果に直接飛ぶようにして。NCBI BLAST みたいに」 | 採る | 2026-11-02 まではキューに加えるだけで、「Open results」で開いていた |
-| フッター、ヘッダー、ロゴ | LOSAT の見出し（「LOSAT Web」と「Local processing…」） | 採らない | ブランド |
+| フッター、ヘッダー、ロゴ | LOSAT の見出し（「LOSAT」とリポジトリの一文「A miniaturized reimplementation of NCBI BLAST algorithm」。2026-11-03 まで「LOSAT Web」と鍵の「Nothing leaves this browser」、DW-41） | 採らない | ブランド |
 
 **select の選択肢**（line WR、2026-11-02）：NCBI の画面（2026-11-02 に取得した blastn・blastp・tblastn・tblastx の 2 配列の画面）の select の一覧を写し、最後に「Other」を置く。「Other」は横に文字の欄を開き、CLI が受ける他の値を書ける（どの値が通るかは今までどおりエンジンの `validate` が決める。TS で検証の規則を作らない、W3 の判断 3・9）。
 
@@ -195,7 +195,7 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 | LOSAT の要素 | 置き場所 |
 |---|---|
 | Run の状態、取消 | 結果のページの中：終わっていない Run は「Run」の select の下に状態の行（`run-status`：段階、経過時間、待っている理由、Cancel・Cancel the group）。Run の一覧は「Run」の select（状態つき）。2026-11-02 まで右にあったキューの領域（カードと「Open results」）は保守者の指示「検索の queue 要らない」で無くした。検索は今も 1 つずつ順に走る（coordinator は変えない） |
-| 離れることへの備え（wake lock、戻ったときの確認）、保存の状態 | ページの下の注の行（`notes`、広い画面で 2 列） |
+| 離れることへの備え（wake lock、戻ったときの確認）、保存の状態 | ページの下の注の行（`notes`、広い画面で 2 列）。wake lock の選択「Keep searching while you're away」は既定 ON で、手持ちの端末（`(pointer: coarse)`）だけに出す。理由は「?」の後ろ（DW-41、§4） |
 | Combined / Separate、レコード一覧と除外 | 検索画面の各枠の中 |
 | Subject の保持（R1） | Run details |
 | 検証バッジ | 結果の見出しの塊の Program の横、Run details |
@@ -209,6 +209,7 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 - **残す（NCBI の文）**：mode のタブの下の一文（「BLASTN mode searches…」）、Job Title の「Enter a descriptive title for your search」、Algorithm parameters の「Parameter values that differ from the default are highlighted in yellow and marked with ♦ sign」と「Restore default search parameters」、Run LOSAT の横の「Search nucleotide subjects with BLASTN, task megablast (…)」（LOSAT が足していた「Runs in this browser.」は消す）、Graphic Summary の「hover to see the title」「click to show alignments」と「Distribution of N HSPs on M subject sequences」、Descriptions・Alignments の見出しと Range の語、「No significant similarity found for this query.」。
 - **消す（LOSAT の説明）**：見出しの「Local processing: your sequences stay in this browser.」（鍵のアイコンと「Nothing leaves this browser」に）、Threads の説明、「The engine accepts these options.」と「Checking the options…」（拒否だけ出す）、下書きの readiness の行（押したときの誤りだけ出す）、「Preparing the inputs…」「Search started.」（ボタンが「Starting…」になり、ページが Run へ移る）、subrange の「The whole record is searched…」と「A subject region can be set when…」（当てはまらないときは何も出さない）、「Files are read in place, not copied into the box.」、「The BLASTN engine reads N records.」（チェックのアイコン。拒否の文は残す）、Program Selection の task の列挙（`describe` の help は各欄の「?」の後ろ）、各 option の help の段落（「?」ボタンで開く。欄は既定値を値として示す、§1「既定値」）、Filter Results の注、Graphic Summary の説明文、dot plot の Mouse / Touch の説明と「Each line is an HSP…」、表の「Scroll the table sideways…」、Outputs と Run details の説明の行、「While searching」の段落（検索中の Run のページに「Closing or reloading this tab ends the search」の 1 行だけ）、「Temporary storage」の見出しと使用量（メモリへの退避と掃除の不能の警告だけ）、Run の状態ページの説明（「Waiting for run N」と段階の時刻だけ）、結果タブの空の文（「Run a search」のボタン）。
 - **短くする**：検証バッジ「Engine-supported, outside certified profile」→「Outside certified profile」（2026-11-02 に「Supported」／「Not supported」へ。保守者「Certify って別に公式じゃないじゃん。使えます、だけでいいじゃん」「使えれば Support、使えなければ Not supported でいいと思う」、DW-36 (7)）、「Keep the screen on while a search runs」→ Run LOSAT の行の「Keep screen on while searching」（「The screen stays on until the search ends.」は消す）、subject の遺伝暗号の注、Combined / Separate の説明、重複 ID と塩基・アミノ酸の見た目の注（2 文目を消す）、BLASTX の「not available」の文。
+- **2026-11-03（DW-41、保守者の 3 点）**：(1) 見出しは「LOSAT」と一文「A miniaturized reimplementation of NCBI BLAST algorithm」（リポジトリの説明）。鍵と「Nothing leaves this browser」は外した（accession や例データの取得の線が入れば無条件には言えない）。(2) 「?」の help は NCBI の helpbox と同じく、マウスやペンで乗せる・キーボードで focus すると出て、クリックで留まる（もう一度のクリック、Escape、外のクリックで閉じる。タッチはタップで開閉）。2026-11-03 まではクリックだけだった（保守者「NCBI はマウスオーバーするだけで何かしら出てくる」）。欄の下に浮かぶ箱（`HelpTip.vue`、`.help-tip`）で、ページは動かない。(3) wake lock の選択は「Keep searching while you're away」（保守者「"スクリーンが ON" が検索の駆動とどうつながるのか直感的に理解できる人は少ない」。「タブを見ていないときも検索を続ける」とは書かない：wake lock は画面を消さないだけで、別のタブやアプリへ移ると検索は止まり得る、設計 §9.4）、既定 ON（保守者「規定ONにしとこうぜ」）、手持ちの端末だけに出す（机上の PC では意味が無い。PC でも既定どおり lock は持つ）。「?」：「Keeps the screen on until the search ends. A phone or tablet ends the search when its screen turns off; switching to another app can end it too.」
 
 ## 5. 見た目
 

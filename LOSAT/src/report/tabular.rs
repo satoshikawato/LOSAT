@@ -357,6 +357,19 @@ pub struct TabularNeeds {
     pub all_deflines: bool,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:612-660
+// (`CBlastFormatUtil::InsertSubjectScores`: after a group's first Seq-align it takes the following
+// ones whose subject id `Match`es that first id, and stores the coverage of the whole group on the
+// first; `CBlastTabularInfo::x_SetQueryCovSubject`, tabular.cpp:707-719, writes it on the later
+// rows of the same FASTA id and `N/A` on the others).
+impl TabularNeeds {
+    /// Whether the rows count following subjects whose Seq-align ids match as one subject:
+    /// `qcovs` and `qcovus` (`ParsedShown::joined`).
+    pub fn joins_subjects(&self) -> bool {
+        self.qcovs || self.qcovus
+    }
+}
+
 impl TabularSpec {
     /// The tabular report of `format` with the custom specification of `choice`, or `None` for
     /// a format that is not tabular and for the default outfmt 6 and 7 (the `std` fields and a
@@ -679,6 +692,12 @@ impl TabularNames {
             }
         }
         Ok(names)
+    }
+
+    /// Whether a row of the report looks a name up (a taxid was asked for): only then are the
+    /// texts of opening written (`row_messages`).
+    pub fn looks_up(&self) -> bool {
+        !self.answers.is_empty()
     }
 
     /// These lookups with `texts`, the texts of an open of the database by the rows before them

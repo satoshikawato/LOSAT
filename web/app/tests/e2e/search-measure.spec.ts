@@ -13,6 +13,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
+import { navigate } from './support/navigate';
 
 const MEASURE = new Set((process.env['LOSAT_WEB_MEASURE'] ?? '').split(',').filter((name) => name !== ''));
 const EVIDENCE = process.env['LOSAT_WEB_EVIDENCE'] || undefined;
@@ -54,7 +55,7 @@ interface Sample {
 }
 
 async function once(page: Page, file: Buffer, count: number): Promise<Sample> {
-  await page.goto('/');
+  await navigate(page, '/');
   await page.getByTestId('program-blastp').check();
   await page.getByTestId('subject-input').fill('>s\nMKLVVLAAGGHHKL\n');
   await expect(page.getByTestId('subject-source-0-check')).toHaveAttribute('data-check', 'ok');

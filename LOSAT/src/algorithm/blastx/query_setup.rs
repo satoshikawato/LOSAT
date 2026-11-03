@@ -270,6 +270,16 @@ pub fn prepare_queries(
     records: &[FastaRecord],
     options: &ResolvedOptions,
 ) -> Result<PreparedQueryBatch> {
+    prepare_unit_queries(records, None, options)
+}
+
+/// `prepare_queries` for `records`, one unit of the reader batch of `batch` when it is given
+/// (`reader_batch.rs`): whether the setup fails for want of data is the reader batch's.
+pub(crate) fn prepare_unit_queries(
+    records: &[FastaRecord],
+    batch: Option<&super::reader_batch::ReaderBatchShape>,
+    options: &ResolvedOptions,
+) -> Result<PreparedQueryBatch> {
     if records.is_empty() {
         bail!("cannot prepare an empty BLASTX query batch");
     }
@@ -357,12 +367,17 @@ pub fn prepare_queries(
     //         NCBI_THROW(CBlastException, eSetup, messages.ToString());
     //     }
     // ```
-    if !contexts.iter().any(|c| c.is_valid) && records.iter().any(|q| q.sequence.is_empty()) {
-        anyhow::bail!(
-            "{}",
-            "Warning: Sequence contains no data "
-                .repeat(records.iter().filter(|q| q.sequence.is_empty()).count())
-        );
+    // `qinfo` is the query batch's: a unit of a reader batch (`batch`) fails only when no
+    // context of the reader batch is valid, with the messages of all its empty queries.
+    let (valid, empty) = match batch {
+        Some(batch) => (batch.valid, batch.empty_queries),
+        None => (
+            contexts.iter().any(|c| c.is_valid),
+            records.iter().filter(|q| q.sequence.is_empty()).count(),
+        ),
+    };
+    if !valid && empty > 0 {
+        anyhow::bail!("{}", "Warning: Sequence contains no data ".repeat(empty));
     }
     let nomask = buffer.clone();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1144-1158

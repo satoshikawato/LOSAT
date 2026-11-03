@@ -300,6 +300,70 @@ impl XmlSubjects<'_> {
             }
         }
     }
+
+    /// Whether the HSPs of subject `s_idx`, which follows subject `previous` in a hit list, are
+    /// shown in `previous`'s `Hit`: copies of one record of a database
+    /// (`db_subject::joins_as_copy`).
+    pub fn joins(&self, previous: usize, s_idx: usize) -> bool {
+        match self {
+            XmlSubjects::Records { .. } => false,
+            XmlSubjects::Database { parsed, .. } => {
+                crate::report::db_subject::rank_joins_as_copy(parsed, previous, s_idx)
+            }
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:465-487
+// ```c++
+//     int index = 1;
+//     bool incremental_output = (bool)out_stream;
+//     while (iter != alnset.Get().end()) {
+//         CRef<CHit> new_hit;
+//         // Retrieve the next set of results for a single subject sequence.
+//         // If the next Seq-align is discontinuous, then take it as is,
+//         // otherwise go along the chain of Seq-aligns until the subject Seq-id
+//         // changes, then wrap the single subject list into a discontinuous
+//         // Seq-align.
+//         if ((*iter)->GetSegs().IsDisc()) {
+//             s_SeqAlignToXMLHit(new_hit, *(*iter), scope, matrix, mask_info,
+//                                ungapped, master_gentice_code, slave_genetic_code);
+//             ++iter;
+//         } else {
+//             CSeq_align_set one_subject_alnset;
+//             CConstRef<CSeq_id> current_id(s_GetSubjectId(*(*iter)));
+//             for ( ; iter != alnset.Get().end(); ++iter) {
+//                 CConstRef<CSeq_id> next_id(s_GetSubjectId(*(*iter)));
+//                 if (!current_id->Match(*next_id)) {
+//                     break;
+//                 }
+// ```
+// (XML2 and JSON: blastxml2_format.cpp:480-497, the same.)
+/// The HSP lists of a query's hit list `lists` that the XML, XML2 and JSON reports show as one
+/// `Hit` each, in order: ranges of the lists, each of a subject and the copies that follow it
+/// (`joins`, `XmlSubjects::joins`; a list of the same subject as the one before goes on its
+/// `Hit`, as an id matches itself). `subject_of` gives the subject of a list, `None` for a list
+/// without HSPs, which shows nothing (it can lie inside a range).
+pub fn hit_ranges<T>(
+    lists: &[T],
+    subject_of: impl Fn(&T) -> Option<usize>,
+    joins: impl Fn(usize, usize) -> bool,
+) -> Vec<std::ops::Range<usize>> {
+    let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut previous: Option<usize> = None;
+    for (index, list) in lists.iter().enumerate() {
+        let Some(s_idx) = subject_of(list) else {
+            continue;
+        };
+        match (ranges.last_mut(), previous) {
+            (Some(range), Some(previous)) if previous == s_idx || joins(previous, s_idx) => {
+                range.end = index + 1
+            }
+            _ => ranges.push(index..index + 1),
+        }
+        previous = Some(s_idx);
+    }
+    ranges
 }
 
 /// The names of the subjects of a report, made once per subject (the definition line of a
@@ -327,5 +391,33 @@ impl<'s, 'a> SubjectNameCache<'s, 'a> {
                 .context("HSP of an unknown subject")? = Some(made);
         }
         Ok(self.names[s_idx].as_ref().expect("made above"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Line DBID N3: following lists of joined subjects, or of one subject, make one `Hit`; a list
+    // without HSPs shows nothing and does not part them.
+    #[test]
+    fn lists_of_joined_subjects_make_one_hit() {
+        let lists = [
+            Some(4),
+            Some(4),
+            None,
+            Some(9),
+            Some(2),
+            None,
+            Some(3),
+            Some(5),
+        ];
+        let joins = |previous: usize, s_idx: usize| matches!((previous, s_idx), (4, 9) | (3, 5));
+        assert_eq!(hit_ranges(&lists, |list| *list, joins), [0..4, 4..5, 6..8]);
+        assert_eq!(
+            hit_ranges(&lists, |list| *list, |_, _| false),
+            [0..2, 3..4, 4..5, 6..7, 7..8]
+        );
+        assert!(hit_ranges(&[None::<usize>], |list| *list, joins).is_empty());
     }
 }

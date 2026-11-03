@@ -3713,7 +3713,9 @@ impl BatchReports<'_> {
                     tabular: formats.iter().any(|format| format.is_tabular()),
                     pairwise: pairwise_shown,
                     joined: pairwise_shown
-                        || formats.iter().any(|format| format.is_structured_xml()),
+                        || formats.iter().any(|format| {
+                            format.is_structured_xml() || format.tabular_joins_subjects()
+                        }),
                     sam: false,
                     taxonomy: formats.iter().any(|format| format.writes_taxonomy()),
                 };

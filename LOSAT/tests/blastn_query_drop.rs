@@ -228,12 +228,9 @@ fn the_reports_without_query_letters_do_not_depend_on_the_drop() {
     let (query, db) = inputs(&dir);
     let subject = fasta("LC738868.fasta");
     for task in ["megablast", "blastn"] {
-        // blastn reads a query file of twice its batch or more batch by batch (LOSAT_X_QSTREAM,
-        // whose records leave with their batch); megablast reads its records before the search.
-        let mut base = vec![("BATCH_SIZE", "3000")];
-        if task == "blastn" {
-            base.push(("LOSAT_X_QSTREAM", "0"));
-        }
+        // A query file of twice its batch or more is read batch by batch (LOSAT_X_QSTREAM, whose
+        // records leave with their batch): the store holds the records read before the search.
+        let base = [("BATCH_SIZE", "3000"), ("LOSAT_X_QSTREAM", "0")];
         for subjects in [("-subject", subject.as_path()), ("-db", db.as_path())] {
             for format in ["6", "7", "8", "9", "12", "17", "17 SQ"] {
                 let words = ["-outfmt", format];
@@ -355,10 +352,7 @@ fn the_letters_packed_as_read_give_the_same_reports() {
     let query = packing_queries(&dir);
     let subject = fasta("LC738868.fasta");
     for task in ["megablast", "blastn"] {
-        let mut base = vec![("BATCH_SIZE", "3000")];
-        if task == "blastn" {
-            base.push(("LOSAT_X_QSTREAM", "0"));
-        }
+        let base = [("BATCH_SIZE", "3000"), ("LOSAT_X_QSTREAM", "0")];
         for subjects in [("-subject", subject.as_path()), ("-db", db.as_path())] {
             for words in [&["-outfmt", "6"][..], &["-outfmt", "7", "-lcase_masking"]] {
                 let what = format!("{task} {} {words:?}", subjects.0);

@@ -12,7 +12,7 @@ import { BrowserAccessionFetcher } from './infra/browser/accession-fetcher';
 import { browserExampleDeletions } from './infra/browser/example-deletions';
 import { BrowserFileDownloader } from './infra/browser/example-downloader';
 import { browserPage } from './infra/browser/page';
-import { browserDownloader } from './infra/browser/platform';
+import { browserDownloader, browserFileSaver } from './infra/browser/platform';
 import { startDataWorker } from './infra/data-worker/gateway';
 import { WasmEngine } from './infra/engine-worker/gateway';
 import type { RenewalLimits } from './infra/engine-worker/policy';
@@ -72,6 +72,7 @@ export function createApp(options: AppOptions = {}): App {
     store: data,
     draft,
     deletions: browserExampleDeletions(),
+    saver: browserFileSaver,
   });
   const results = new ResultsBrowser({
     data,

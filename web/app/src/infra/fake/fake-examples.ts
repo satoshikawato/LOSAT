@@ -1,8 +1,10 @@
 // Example set doubles for the tests (ports/example.ts): a downloader that answers from a table
 // of texts by URL, keeps the requests and can hold its answers until `release`, a store that
 // keeps saved copies in memory (or keeps nothing, as a browser without OPFS does), and the
-// deletions between tabs (each `tab()` hears the others, as a BroadcastChannel).
+// deletions between tabs (each `tab()` hears the others, as a BroadcastChannel), and a file saver
+// whose folder picker picks a named folder (or is closed) and whose downloads are kept.
 import type { ExampleId } from '../../domain/examples';
+import type { FileSaver } from '../../ports/download';
 import type {
   DownloadProgress,
   DownloadRequest,
@@ -101,5 +103,27 @@ export class FakeDeletionChannel {
         return () => this.listeners.delete(entry);
       },
     };
+  }
+}
+
+export class FakeFileSaver implements FileSaver {
+  readonly written: Array<{ readonly folder: string; readonly fileName: string; readonly text: string }> = [];
+  readonly downloads: Array<{ readonly fileName: string; readonly file: Blob }> = [];
+
+  /** `folder` is the folder that the picker picks; undefined closes the picker. */
+  constructor(
+    readonly folders: boolean,
+    public folder: string | undefined = 'Examples',
+  ) {}
+
+  async saveToFolder(fileName: string, file: () => Promise<Blob>): Promise<string | undefined> {
+    const folder = this.folder;
+    if (folder === undefined) return undefined;
+    this.written.push({ folder, fileName, text: await (await file()).text() });
+    return folder;
+  }
+
+  download(fileName: string, file: Blob): void {
+    this.downloads.push({ fileName, file });
   }
 }

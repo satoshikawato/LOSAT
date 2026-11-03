@@ -6,10 +6,20 @@
 // opened.
 import { computed, ref } from 'vue';
 import type { DraftState, SearchDraft } from '../application/draft';
-import { accessionLines, FETCH_SOURCES, type FetchSourceId } from '../domain/accession';
+import { raceChoice } from '../application/source-race';
+import {
+  accessionLines,
+  FETCH_SOURCES,
+  RACE_RECORDS,
+  servingSources,
+  sourceLabel,
+  sourceList,
+  type FetchChoice,
+} from '../domain/accession';
 import { sectionsAt, writtenValue } from '../domain/parameters';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
 import HelpTip from './HelpTip.vue';
+import LosatLoader from './LosatLoader.vue';
 import ParameterField from './ParameterField.vue';
 import RegionPicker from './RegionPicker.vue';
 import SourceCard from './SourceCard.vue';
@@ -25,8 +35,37 @@ const fileInput = ref<HTMLInputElement>();
 /** The box's accessions, when it holds accessions only: "Fetch" brings their FASTA into it. */
 const accessions = computed(() => accessionLines(roleState.value.paste));
 const fetchState = computed(() => roleState.value.fetch);
-const sourceLabel = (id: FetchSourceId) => FETCH_SOURCES.find((source) => source.id === id)!.label;
-const fetchSource = computed(() => sourceLabel(props.state.fetchSource));
+const busy = (role: InputRole) => {
+  const state = props.state[role].fetch?.state;
+  return state === 'fetching' || state === 'racing';
+};
+const fetchBusy = computed(() => busy(props.role));
+/** The choice is shared by both boxes: it stays while either fetches, so that each line names where its fetch goes. */
+const choiceLocked = computed(() => busy('query') || busy('subject'));
+/** The sources that serve the box's accessions, and where "Fastest" sends them (once the race says). */
+const serving = computed(() => (accessions.value === undefined ? [] : servingSources(kind.value, accessions.value)));
+const fastest = computed(() =>
+  serving.value.length === 1 ? serving.value[0] : raceChoice(props.state.race[kind.value], serving.value),
+);
+/** The in-place sentence: where Fetch sends the accessions. */
+const fetchNote = computed(() => {
+  const noun = accessions.value?.length === 1 ? 'accession' : 'accessions';
+  const choice = props.state.fetchSource;
+  if (choice !== 'fastest') return `Sends the ${noun} to ${sourceLabel(choice)}`;
+  if (serving.value.length === 0) return 'No one site has all of these accessions';
+  if (fastest.value !== undefined) return `Sends the ${noun} to ${sourceLabel(fastest.value)}`;
+  return `Sends the ${noun} to the fastest of ${sourceList(serving.value, 'and')}`;
+});
+const fetchHelp = computed(() => {
+  const records = RACE_RECORDS[kind.value];
+  const record = records.ebi === records.ncbi ? records.ncbi : `${records.ncbi}, at UniProt ${records.ebi}`;
+  return (
+    'Fetch sends only the accessions, to the site chosen here, and writes the FASTA it gets into the box. Sequences, ' +
+    'files and results stay in this browser. EBI answers from ENA for nucleotides and from UniProt for proteins, CNCB ' +
+    `from GenBase. Fastest: the first fetch asks each site for one public record (${record}) and sends the ` +
+    'accessions to the first that answers; this tab keeps that order.'
+  );
+});
 
 const readySources = computed(() => roleState.value.sources.filter((source) => source.status === 'ready'));
 const regionRecord = computed(() => {
@@ -55,7 +94,7 @@ function onPaste(event: Event): void {
 }
 
 function onFetchSource(event: Event): void {
-  props.draft.setFetchSource((event.target as HTMLSelectElement).value as FetchSourceId);
+  props.draft.setFetchSource((event.target as HTMLSelectElement).value as FetchChoice);
 }
 
 function onFiles(event: Event): void {
@@ -100,7 +139,7 @@ function onDrop(event: DragEvent): void {
         <div v-if="accessions" class="fetch-row" :data-testid="`${role}-fetch-row`">
           <button
             type="button"
-            :disabled="fetchState?.state === 'fetching'"
+            :disabled="fetchBusy"
             :data-testid="`${role}-fetch`"
             @click="draft.fetchAccessions(role)"
           >
@@ -110,29 +149,27 @@ function onDrop(event: DragEvent): void {
             from
             <select
               :value="state.fetchSource"
-              :disabled="fetchState?.state === 'fetching'"
+              :disabled="choiceLocked"
               :data-testid="`${role}-fetch-source`"
               @change="onFetchSource"
             >
+              <option value="fastest">Fastest{{ fastest === undefined ? '' : ` (${sourceLabel(fastest)})` }}</option>
               <option v-for="source in FETCH_SOURCES" :key="source.id" :value="source.id">{{ source.label }}</option>
             </select>
           </label>
-          <span class="hint" :data-testid="`${role}-fetch-note`">
-            Sends the {{ accessions.length === 1 ? 'accession' : 'accessions' }} to {{ fetchSource }}
-          </span>
-          <HelpTip
-            :id="`${role}-fetch`"
-            label="About fetching accessions"
-            text="Fetch sends only the accessions, to the site chosen here, and writes the FASTA it gets into the box. Sequences, files and results stay in this browser. EBI answers from ENA for nucleotides and from UniProt for proteins, CNCB from GenBase."
-          />
+          <span class="hint" :data-testid="`${role}-fetch-note`">{{ fetchNote }}</span>
+          <HelpTip :id="`${role}-fetch`" label="About fetching accessions" :text="fetchHelp" />
         </div>
+        <p v-if="fetchState?.state === 'racing'" class="muted" role="status" :data-testid="`${role}-fetch-status`">
+          <LosatLoader />Finding the fastest site…
+        </p>
         <p
-          v-if="fetchState?.state === 'fetching'"
+          v-else-if="fetchState?.state === 'fetching'"
           class="muted"
           role="status"
           :data-testid="`${role}-fetch-status`"
         >
-          Fetching {{ fetchState.done + 1 }} of {{ fetchState.total }} from {{ sourceLabel(fetchState.source) }}…
+          <LosatLoader />Fetching {{ fetchState.done + 1 }} of {{ fetchState.total }} from {{ sourceLabel(fetchState.source) }}…
         </p>
         <p v-else-if="fetchState?.state === 'failed'" class="error" role="alert" :data-testid="`${role}-fetch-error`">
           {{ fetchState.message }}

@@ -4,8 +4,8 @@
 //!
 //! This file is a child module of `x_lut_direct.rs` (declared there with `#[path]`, as that file
 //! is for `backbone.rs`), so it uses the neighbour lists of the in-place builder (`x_target_list`,
-//! the per-thread memo) and the reference builder pieces of `backbone.rs` (`prepare_lookup_query`,
-//! `blast_lookup_index_query_exact_matches`) without changing them.
+//! the memos of TBLASTX's builds, `X_TBX_MEMOS`) and the reference builder pieces of `backbone.rs`
+//! (`prepare_lookup_query`, `blast_lookup_index_query_exact_matches`) without changing them.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:92-94,105-115
 //! ```c
@@ -355,7 +355,7 @@ impl XPairLutQuery {
     // ```
     // The count, layout and fill passes of `x_lut_direct.rs::x_build_direct` on the reference
     // exact backbone of `locations` (one group's lookup locations), reading the prepared query in
-    // place. The neighbour lists come from the calling thread's memo, as there.
+    // place. The neighbour lists come from a memo of TBLASTX's builds (`x_with_tbx_memo`).
     /// The lookup table of one group: the table `build_groups` filters out of the full table for
     /// the group whose lookup locations are `locations` (module comment).
     /// `mapped`: the build's large blocks take `x_group_capacity`'s mapped capacity.
@@ -382,8 +382,7 @@ impl XPairLutQuery {
             &mut skipped_invalid_residue,
         );
 
-        X_MEMO.with(|memo| {
-            let mut memo = memo.borrow_mut();
+        x_with_tbx_memo(|memo| {
             let key = (matrix, threshold, word_length, alphabet_size);
             if memo
                 .as_ref()

@@ -51,10 +51,12 @@ export class BrowserAccessionFetcher implements AccessionFetcher {
       timeout.abort(new DOMException('no answer in time', 'TimeoutError'));
     }, this.options.timeoutMs ?? TIMEOUT_MS);
     try {
+      request.onStart?.();
       const response = await (this.options.fetch ?? fetch)(fetchUrl(request.source, request.kind, request.accession), {
         signal: timeout.signal,
         credentials: 'omit',
         referrerPolicy: 'no-referrer',
+        ...(request.fresh === true ? { cache: 'no-store' as const } : {}),
       });
       clearTimeout(timer);
       if (response.status === 400 || response.status === 404) return { ok: false, reason: 'not-found' };

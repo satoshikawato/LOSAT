@@ -1,5 +1,6 @@
 //! EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel preliminary loop of a `-subject` search in runs of
-//! consecutive subjects, one diagonal table fill per run.
+//! consecutive subjects, one diagonal table per task, filled only where it would not read as
+//! cleared.
 //!
 //! Without the switch, the parallel loop of `run_resolved_in_pool` searches each subject on its own:
 //! `for_each_init` makes a new `BlastpSubjectScratch` for every piece rayon splits the subjects into
@@ -12,9 +13,11 @@
 //! self-scheduling, each run the next `1 / (X_PARTS_PER_THREAD x threads)` of the letters left, so
 //! the runs shrink to single subjects at the end), and the search runs one task per thread of the
 //! pool in one `rayon::scope`; each task makes one scratch when it takes its first run and takes
-//! the runs, in order, from one counter. A run starts as a subject of the loop without the switch
-//! does: `prepare_independent_subject` at the diagonal offset that the one-thread order gives its
-//! first subject (`blastp_subject_diag_offsets`). The later subjects of the run are searched as the
+//! the runs, in order, from one counter. A run starts at the diagonal offset that the one-thread
+//! order gives its first subject (`blastp_subject_diag_offsets`), from a table that reads as
+//! cleared there (`x_start_run`): the task fills its table (`prepare_independent_subject`) only
+//! when that offset is below the one its table reads as cleared from, and otherwise sets the offset
+//! and runs the other per-subject resets (below). The later subjects of the run are searched as the
 //! one-thread loop searches them: the table is not filled again, and the offset is the one that
 //! the previous subject's `finish_subject` left (`Blast_ExtendWordExit`, below), which is the
 //! one-thread order's offset of the subject, because the run holds consecutive subjects and
@@ -47,6 +50,20 @@
 //! and clears the table (`s_BlastDiagClear`) inside the run, as the one-thread loop does, and
 //! `blastp_subject_diag_offsets` gives the next subject the offset `window` too. This is the
 //! property the database path uses for its blocks (`database::search_blocks`).
+//!
+//! Why a run needs no fill. The same holds for a task's table from one of its runs to the next:
+//! a new scratch's table (every entry 0 with flag 0, at the offset `window`) reads as cleared at
+//! every offset from `window` on, and after each `finish_subject` every entry reads as cleared at
+//! every offset from the one it leaves on (the bounds above only get looser as the offset grows;
+//! after the reset the entries of `s_BlastDiagClear` read so from `window` on). Only the task's own
+//! subjects write its table, so the subjects other tasks search in between, and the resets of the
+//! one-thread order among them, do not matter: a run whose first offset is at least the table's
+//! offset starts from a table that reads as cleared, as a filled one does, and only a run whose
+//! first offset is below it needs the fill. A task takes its runs in increasing order, so that
+//! happens only after the one-thread order's offset has gone back to `window` since the task's
+//! previous run, and never in a search whose offsets stay below INT4_MAX / 4. Until 2026-11-03
+//! every run filled the table (Species4 x Species6 blastp-fast at 16 threads: 68,627 runs of 256
+//! KiB, 17.7 GB of writes; structural line S1).
 //!
 //! The argument is in integers; `last_hit` is a 31-bit field (`DiagStruct`), whose stored values
 //! are exact while `d + L < 2^30`. The offsets stay below INT4_MAX / 4 plus one subject and one
@@ -215,6 +232,23 @@ fn x_cut_runs(lengths: &[usize], parts: usize) -> Vec<Range<usize>> {
 //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
 //         }
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-103
+// (`s_BlastDiagClear`, module header)
+/// The start of a run whose first subject's offset in the one-thread order is `diag_offset`: the
+/// task's table at that offset, reading as cleared there. `scratch.diag_offset` is the offset from
+/// which every entry of the table reads as cleared (module header, "Why a run needs no fill"), so
+/// the table is filled (`prepare_independent_subject`) only when `diag_offset` is below it;
+/// otherwise the offset is set and the other per-subject resets run, as before every later subject
+/// of a run.
+fn x_start_run(scratch: &mut BlastpSubjectScratch, diag_offset: i32) {
+    if diag_offset < scratch.diag_offset {
+        scratch.prepare_independent_subject(diag_offset);
+    } else {
+        scratch.diag_offset = diag_offset;
+        scratch.reset_subject_state();
+    }
+}
+
 /// The subjects of one run, `run`, searched with `scratch` into `slots` (the run's slots of the
 /// subject results).
 fn x_search_run<K>(
@@ -230,11 +264,7 @@ fn x_search_run<K>(
     for (s_idx, slot) in run.clone().zip(slots.iter_mut()) {
         let diag_offset = subject_diag_offsets[s_idx];
         if s_idx == run.start {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-103
-            // (`s_BlastDiagClear`, module header): the run starts from a cleared table at the
-            // one-thread order's offset of its first subject, as each subject does without the
-            // switch.
-            scratch.prepare_independent_subject(diag_offset);
+            x_start_run(scratch, diag_offset);
         } else {
             // The previous subject's `finish_subject` (`Blast_ExtendWordExit`) left the
             // one-thread order's offset, and its entries read as cleared ones (module header).
@@ -459,6 +489,39 @@ mod tests {
         assert_eq!(x_first_uncleared(&table, offset, WINDOW), None);
         table[3].set_last_hit(offset + 1);
         assert_eq!(x_first_uncleared(&table, offset, WINDOW), Some(3));
+    }
+
+    // A run keeps the task's table at or above the offset it reads as cleared from, and fills it
+    // below that offset (`x_start_run`).
+    #[test]
+    fn a_run_fills_the_table_only_below_its_offset() {
+        let mut scratch = BlastpSubjectScratch::new(16, TABLE, WINDOW, 100);
+        let fresh = scratch.diag_array.clone();
+        // A new table reads as cleared from `window` on.
+        x_start_run(&mut scratch, WINDOW + 500);
+        assert_eq!(scratch.diag_offset, WINDOW + 500);
+        // A subject of 40 letters writes entries below its end.
+        let d = scratch.diag_offset;
+        scratch.diag_array[3].set_last_hit(d + 39);
+        scratch.diag_array[3].set_flag(1);
+        scratch.diag_array[5].set_last_hit(d + 10);
+        scratch.finish_subject(40, WINDOW);
+        let left = scratch.diag_offset;
+        assert_eq!(left, d + 40 + WINDOW);
+        let written = scratch.diag_array.clone();
+        // A run at or beyond that offset keeps the entries, which read as cleared there.
+        for start in [left, left + 1_000] {
+            x_start_run(&mut scratch, start);
+            assert_eq!(scratch.diag_offset, start);
+            assert_eq!(scratch.diag_array, written);
+            assert_eq!(x_first_uncleared(&scratch.diag_array, start, WINDOW), None);
+        }
+        // Below it (the one-thread order went back to `window`) the entries need not read as
+        // cleared, so the run fills the table.
+        assert_eq!(x_first_uncleared(&written, WINDOW, WINDOW), Some(3));
+        x_start_run(&mut scratch, WINDOW);
+        assert_eq!(scratch.diag_offset, WINDOW);
+        assert_eq!(scratch.diag_array, fresh);
     }
 
     /// What the test kernel saw at the start of a subject's search: the subject, the table's

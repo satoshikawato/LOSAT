@@ -36,6 +36,8 @@ CNCB の GenBase は取れる（2026-11-03 17:3x 実測）ので取得先に入�
 
 ## 3. Example セット（mode ごと、各 50 MB 以下、固定 URL、SHA-256 を表に持つ）
 
+WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない。TBLASTN / TBLASTX は E. coli K-12 のゲノム）。下は設計の時点の案。
+
 | mode | subject | 大きさ（gz） | query の例 |
 |---|---|---|---|
 | BLASTN | RefSeq Targeted Loci bacteria 16S（`bacteria.16SrRNA.fna.gz`） | 8.0 MB | `NR_074540.1`（B. cereus 16S）の部分配列 |
@@ -60,7 +62,7 @@ CNCB の GenBase は取れる（2026-11-03 17:3x 実測）ので取得先に入�
 ## 5. データの持ち方
 
 - 取得した FASTA は既存の source の経路に乗せる：小さい accession は貼り付けと同じ bytes、Example セットは Data worker の
-  OPFS block store（`infra/data/opfs-block-store.ts`）に **キャッシュ**（URL + SHA-256 を鍵に）。次回は取得せずに読む。
+  OPFS block store（`infra/data/opfs-block-store.ts`）に **キャッシュ**（URL + SHA-256 を鍵に。WF-2 では URL が鍵、§9）。次回は取得せずに読む。
   OPFS は origin 専用で、サイトデータの消去で消える。使用量と「Delete」は既存の Temporary storage の表示に載せる。
 - 「任意のフォルダに保存」= File System Access API（`showDirectoryPicker`）。Chromium / Edge だけ。Firefox / Safari は
   「Download」で落として次回「Open FASTA files…」から開く（ファイル参照なので大きくても速い）。
@@ -112,3 +114,51 @@ CNCB の GenBase は取れる（2026-11-03 17:3x 実測）ので取得先に入�
 7. **e2e は Playwright の route で実アドレスを stub**（`web/app/tests/e2e/fetch.spec.ts`）。localhost の stub サーバでは配備の CSP の
    `connect-src` に例外が要る。route なら配備の CSP のまま試せ、ページから出た要求を全部数えられる。
 
+## 9. WF-2 の実装（2026-11-03、Owner-delegated）
+
+保守者の常設の指示（2026-09-29、2026-10-07 に再掲）により、推奨の案を採って記録する。作業記録は web-fetch-20261103/DECISIONS.md の 15〜18、
+実測は同 NOTES.md「WF-2 facts」。
+
+1. **表**（`web/app/src/domain/examples.ts`）。mode のタブの下の「Example」の行に、その mode の組をボタンで並べる。
+
+   | mode | 組（ボタン） | 取得先（gz の大きさ、2026-11-03） | 展開後 | query（表に持つ） |
+   |---|---|---|---|---|
+   | BLASTN | 16S rRNA (bacteria) | NCBI FTP `refseq/TargetedLoci/Bacteria/bacteria.16SrRNA.fna.gz`（8.0 MB） | 41.8 MB、26,888 本 | NR_102783.2（B. subtilis 168 の 16S） |
+   | BLASTN | ITS (fungi) | NCBI FTP `refseq/TargetedLoci/Fungi/fungi.ITS.fna.gz`（3.0 MB） | 13.9 MB、20,390 本 | NR_111007.1（S. cerevisiae の ITS） |
+   | BLASTP / BLASTX | E. coli K-12 proteins (UniProt reviewed) | UniProt REST `uniprotkb/stream?query=reviewed:true+AND+organism_id:83333&format=fasta&compressed=true`（0.98 MB） | 1.9 MB、4,531 本 | P16971（B. subtilis RecA）/ その CDS AL009126.3:1764645-1765691 |
+   | BLASTP / BLASTX | PDB proteins (pdbaa) | NCBI FTP `blast/db/FASTA/pdbaa.gz`（36.8 MB） | 101 MB、156,894 本 | 同上 |
+   | TBLASTN / TBLASTX | E. coli K-12 genome | NCBI FTP `genomes/all/GCF/000/005/845/GCF_000005845.2_ASM584v2/…_genomic.fna.gz`（1.4 MB） | 4.7 MB、1 本 | 同上（TBLASTN は RecA、TBLASTX は CDS） |
+
+   query は表に埋め込む（数百 B〜1.6 kB）。1 回の操作で送る要求は 1 つで、その場の一文が名乗る host だけになる。§3 のファージ（efetch）は
+   accession を 3 つ eutils へ送り、Content-Length も無いので、固定の版の E. coli K-12 のゲノムにした。話は 1 本：B. subtilis 168 の
+   16S・RecA を RefSeq と E. coli K-12 に当てる（RecA の CDS の翻訳は P16971 と一致、単体試験で確かめる）。
+2. **SHA-256 は表に持たない**。RefSeq Targeted Loci は release ごとに変わり（Last-Modified 2026-10-27）、UniProt も release ごとに
+   変わる（2026_03）ので、固定した hash は次の release で Example を壊す。表は URL、その場の一文の大きさ（「Downloads 8.0 MB from
+   ftp.ncbi.nlm.nih.gov」、実測の値）、ファイル名、出典と利用条件だけ。保存した写しが来たものを記録する：URL、版（FTP は
+   Last-Modified の日付、UniProt は X-UniProt-Release）、取得と保存の大きさ、日時。鍵は表の id と URL（URL が変われば別物）。
+   検索の入力は今までどおり SHA-256 で識別される（RunInput.sha256 とレコードごとの hash）。写しはそのまま使う（要求しない、
+   オフラインで動く）。新しい release は「Delete」の後に取り直す。
+3. **UniProt の stream の構文**は 11-03 の記録どおりで正しい。500 は UniProt 側の間欠的なもの（同じ URL が 500 を 3 回の後 12/12 回
+   200、他の分類群も初回 500 の後 200）。失敗は「rest.uniprot.org answered HTTP 500: try again in a moment.」と出し、ボタンを
+   残す。自動の再試行はしない（1 回の操作に 1 要求）。
+4. **取得と展開**（`infra/browser/example-downloader.ts`）。ページ（main thread）が配備の CSP の下で取得する（`credentials: 'omit'`、
+   referrer 無し。WF-1 と同じ）。NCBI の .gz は `application/x-gzip`、UniProt の `compressed=true` は Content-Encoding 無しで来るので
+   ブラウザは展開しない。本文が gzip の magic で始まるときだけ `DecompressionStream('gzip')` に通す（途中で展開済みの本文はそのまま）。
+   展開した部分は約 8 MiB ごとの Blob にまとめ、メモリの山は保存の大きさほどに留める。展開後 256 MiB を超える本文は止める。
+   時間切れは 60 s（応答の見出しまで）。進捗は「Downloading 3.1 of 8.0 MB from ftp.ncbi.nlm.nih.gov…」（Content-Length の無い
+   UniProt は全体を言わない）と「Cancel」。失敗は host と理由の一文（HTTP の状態、届かない、gzip が壊れている、大きすぎる）で、
+   欄はそのまま。
+5. **保存**（`infra/data/example-store.ts`、Data worker）。OPFS の `examples/<id>/` に `data`、最後に `meta.json`（meta の無い
+   ディレクトリは書きかけで、次の保存が消す）。書き込みは block store と同じ同期 access handle、保存と削除は Web Lock
+   `losat-web:example:<id>` の下（2 つのタブが 1 つの写しを同時に書かない。保存中に他のタブが同じ URL を保存していれば、それを使う）。
+   `tmp/`（作業セッション）の外なので、起動時の掃除は触れない。subject の source になるのは OPFS のファイルの File で、メモリの
+   写しは捨てる。OPFS か Web Locks の無いブラウザ（結果をメモリに置くタブ）では何も残さず、そのタブでだけ使う。保存を断られた
+   （容量が一杯）ときもそのタブでは使い、「Not kept for the next time: …」と出す。
+6. **画面**（`ui/ExampleLine.vue`）。ボタンの横のその場の一文が、押すと何を送るか（「Downloads 8.0 MB from ftp.ncbi.nlm.nih.gov」）、
+   保存した写し（「Saved in this browser (2026-10-27, 41.8 MB)」と「Delete」）、取得中の進捗と「Cancel」を言う。設計の「Temporary
+   storage の表示に載せる」（§5）は、その表示が stop-describing-ui で外れた（`ncbi_ui_mapping.md` §4）ので、Example の行に置く。
+   「Delete」は写しと、それから作った subject の source を外す（File が読めなくなる）。他の説明は「?」の後ろ。
+7. **Example は両方の欄を置き換える**（EBI の「Use example sequence」と同じ）：query の欄に表の query、subject は組の写しだけ。
+   他の source と範囲（subrange）は外れる。読み込みは 1 つずつで、別のボタン、Cancel、失敗で終わる。
+8. **e2e**（`tests/e2e/examples.spec.ts`）は WF-1 と同じく Playwright の route で実アドレスを stub し、配備の CSP のまま、ページから
+   出た要求を数える。読み込み直しの後は要求が増えないこと、Delete で写しと source が消えることを OPFS のブラウザで見る。

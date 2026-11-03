@@ -10,15 +10,22 @@
 import { computed, ref, watch } from 'vue';
 import type { Attention, AttentionState } from '../application/attention';
 import type { SearchDraft } from '../application/draft';
+import type { ExampleLoader } from '../application/examples';
 import { effectiveValue, formParameters, placementFlags, sectionsAt } from '../domain/parameters';
 import { PROGRAMS, programById, searchSummaryParts, type InputRole } from '../domain/programs';
 import { useStore } from './useStore';
+import ExampleLine from './ExampleLine.vue';
 import HelpTip from './HelpTip.vue';
 import InputPanel from './InputPanel.vue';
 import ParameterField from './ParameterField.vue';
 import ParameterForm from './ParameterForm.vue';
 
-const props = defineProps<{ draft: SearchDraft; attention: Attention; attentionState: AttentionState }>();
+const props = defineProps<{
+  draft: SearchDraft;
+  examples: ExampleLoader;
+  attention: Attention;
+  attentionState: AttentionState;
+}>();
 /** A search was started: the ID of its first run (a group of separate searches starts several). */
 const emit = defineEmits<{ submitted: [runId: string] }>();
 const state = useStore(props.draft.state);
@@ -122,6 +129,7 @@ function onThreads(event: Event): void {
       </label>
     </fieldset>
     <p class="program-summary" data-testid="program-summary">{{ program.summary }}</p>
+    <ExampleLine :examples="examples" :program="state.program" />
 
     <InputPanel v-for="role in roles" :key="role" :draft="draft" :state="state" :role="role" />
 

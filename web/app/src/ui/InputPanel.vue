@@ -19,6 +19,7 @@ import {
 import { sectionsAt, writtenValue } from '../domain/parameters';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
 import HelpTip from './HelpTip.vue';
+import LosatLoader from './LosatLoader.vue';
 import ParameterField from './ParameterField.vue';
 import RegionPicker from './RegionPicker.vue';
 import SourceCard from './SourceCard.vue';
@@ -160,7 +161,7 @@ function onDrop(event: DragEvent): void {
           <HelpTip :id="`${role}-fetch`" label="About fetching accessions" :text="fetchHelp" />
         </div>
         <p v-if="fetchState?.state === 'racing'" class="muted" role="status" :data-testid="`${role}-fetch-status`">
-          Finding the fastest site…
+          <LosatLoader />Finding the fastest site…
         </p>
         <p
           v-else-if="fetchState?.state === 'fetching'"
@@ -168,7 +169,7 @@ function onDrop(event: DragEvent): void {
           role="status"
           :data-testid="`${role}-fetch-status`"
         >
-          Fetching {{ fetchState.done + 1 }} of {{ fetchState.total }} from {{ sourceLabel(fetchState.source) }}…
+          <LosatLoader />Fetching {{ fetchState.done + 1 }} of {{ fetchState.total }} from {{ sourceLabel(fetchState.source) }}…
         </p>
         <p v-else-if="fetchState?.state === 'failed'" class="error" role="alert" :data-testid="`${role}-fetch-error`">
           {{ fetchState.message }}

@@ -482,9 +482,11 @@ fn each_query_batch_is_reported_where_no_refusal_can_follow() {
         ("nucl_v4", "0", &batches[..], "none"),
         ("nucl_v5", "7", &taxdb[..], "none"),
         ("nucl_v5", "7", &messages[..], "none"),
-        // With `taxdb.bti` found, outfmt 0 refuses a sequence whose title NCBI makes from the
-        // taxonomy database (`refuse_parsed_taxonomy`).
-        ("nucl_v5", "0", &messages[..], "database_headers"),
+        // Where the taxonomy database names its taxid, outfmt 0 refuses a sequence whose title
+        // NCBI makes from it (`refuse_parsed_taxonomy`); one with a bad magic number names none
+        // (line DBID N1b L1).
+        ("nucl_v5", "0", &taxdb[..], "database_headers"),
+        ("nucl_v5", "0", &messages[..], "none"),
         ("nucl_v5", "7", &refused[..], "database_taxonomy"),
         ("njoined", "6", &batches[..], "none"),
         ("njoined", "0", &batches[..], "database_joined"),

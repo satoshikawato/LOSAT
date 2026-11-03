@@ -965,3 +965,171 @@ fn errors_of_the_ranges_follow_the_command_line() {
     }
     let _ = std::fs::remove_file(&short_subject);
 }
+
+// NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-210,732-737 and
+// c++/src/app/blast/blastx_app.cpp:283-288: NCBI searches each `-subject` sequence on its own
+// with BL2SEQ_LEGACY, and converts PRE_FETCH_SEQS_LIMIT with NStr::StringToInt before each
+// batch's report (its CStringException names its build's source files), except for the archive
+// of outfmt 11, which it writes without the prefetch. The -db cases are the db.bxenv.* rows.
+#[test]
+fn environment_that_ncbi_reads_around_the_report_is_rejected_where_it_reads_it() {
+    let inputs = Inputs::new("tests/db_search/bslice_q.fna", "tests/db_search/bslice.faa");
+    let run = |outfmt: &str, variable: Option<(&str, &str)>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+        command
+            .current_dir(crate_dir())
+            .env_remove("BATCH_SIZE")
+            .env_remove("PRE_FETCH_SEQS_LIMIT")
+            .env_remove("BL2SEQ_LEGACY")
+            .env(
+                "LOSAT_BLASTX_WORKER_LOG",
+                std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+                    .unwrap_or_else(|| temp_path("blastx_worker.log").into_os_string()),
+            )
+            .args([
+                "blastx",
+                "-query",
+                &inputs.query,
+                "-subject",
+                &inputs.subject,
+            ])
+            .args(["-outfmt", outfmt]);
+        if let Some((name, value)) = variable {
+            command.env(name, value);
+        }
+        command.output().expect("run LOSAT CLI")
+    };
+    for (variable, value, outfmt, text) in [
+        ("PRE_FETCH_SEQS_LIMIT", "abc", "6", "has the value \"abc\""),
+        ("PRE_FETCH_SEQS_LIMIT", "", "0", "has the value \"\""),
+        (
+            "BL2SEQ_LEGACY",
+            "1",
+            "6",
+            "the environment variable BL2SEQ_LEGACY",
+        ),
+        (
+            "BL2SEQ_LEGACY",
+            "",
+            "11",
+            "the environment variable BL2SEQ_LEGACY",
+        ),
+    ] {
+        let output = run(outfmt, Some((variable, value)));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{variable}: {output:?}");
+        assert!(
+            output.stdout.is_empty()
+                && stderr.contains(text)
+                && stderr.contains("not supported by LOSAT's BLASTX"),
+            "{variable} {outfmt}: {stderr}"
+        );
+    }
+    // The archive, and an integer in any format, are written as without the variable.
+    for (value, outfmt) in [("abc", "11"), ("", "11"), ("5", "6")] {
+        let plain = run(outfmt, None);
+        let output = run(outfmt, Some(("PRE_FETCH_SEQS_LIMIT", value)));
+        assert!(
+            plain.status.success() && !plain.stdout.is_empty(),
+            "{plain:?}"
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{value} {outfmt}: {output:?}"
+        );
+        assert!(
+            output.stdout == plain.stdout && output.stderr == plain.stderr,
+            "{value} {outfmt}"
+        );
+    }
+}
+
+/// The environment variable that makes `environment_child` run: the file it writes.
+const ENVIRONMENT_CHILD: &str = "DBID_RUN_LOCAL_ENVIRONMENT_CHILD";
+
+// `run_local` (LOSAT Web, the library) refuses the environment of the CLI's `-subject` search
+// (`environment_that_ncbi_reads_around_the_report_is_rejected_where_it_reads_it`), and an
+// integer PRE_FETCH_SEQS_LIMIT leaves its outputs as they are without it. The variables are
+// read from the process environment, so a child process of this test binary runs `run_local`
+// with each of them.
+#[test]
+fn run_local_refuses_the_environment_as_the_cli() {
+    let child = |variable: Option<(&str, &str)>| {
+        let out = temp_path("blastx_environment_child.out");
+        let mut command = Command::new(std::env::current_exe().expect("test binary"));
+        command
+            .args([
+                "run_local_blastx::environment_child",
+                "--exact",
+                "--nocapture",
+                "--test-threads",
+                "1",
+            ])
+            .env(ENVIRONMENT_CHILD, &out)
+            .env_remove("BATCH_SIZE")
+            .env_remove("PRE_FETCH_SEQS_LIMIT")
+            .env_remove("BL2SEQ_LEGACY");
+        if let Some((name, value)) = variable {
+            command.env(name, value);
+        }
+        let output = command.output().expect("run the child");
+        assert!(
+            output.status.success(),
+            "{variable:?}: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let written = std::fs::read(&out).expect("the child's file");
+        let _ = std::fs::remove_file(&out);
+        written
+    };
+    let plain = child(None);
+    assert!(
+        plain.starts_with(b"ok\n") && plain.len() > 1000,
+        "{plain:?}"
+    );
+    for (variable, value, text) in [
+        ("PRE_FETCH_SEQS_LIMIT", "abc", "has the value \"abc\""),
+        ("PRE_FETCH_SEQS_LIMIT", "", "has the value \"\""),
+        (
+            "BL2SEQ_LEGACY",
+            "1",
+            "the environment variable BL2SEQ_LEGACY",
+        ),
+    ] {
+        let written = String::from_utf8(child(Some((variable, value)))).expect("text");
+        assert!(
+            written.starts_with("refused: ")
+                && written.contains(text)
+                && written.contains("not supported by LOSAT's BLASTX"),
+            "{variable}={value:?}: {written}"
+        );
+    }
+    assert!(child(Some(("PRE_FETCH_SEQS_LIMIT", "5"))) == plain);
+}
+
+/// The child of `run_local_refuses_the_environment_as_the_cli`: without `ENVIRONMENT_CHILD` it
+/// does nothing. It writes `ok` and every format's output and the diagnostics, or `refused:` and
+/// the error, after checking that nothing was written.
+#[test]
+fn environment_child() {
+    let Some(out) = std::env::var_os(ENVIRONMENT_CHILD) else {
+        return;
+    };
+    let inputs = Inputs::new("tests/db_search/bslice_q.fna", "tests/db_search/bslice.faa");
+    let queries = queries(&Inputs::path(&inputs.query)).expect("query records");
+    let subjects = subjects(&Inputs::path(&inputs.subject)).expect("subject records");
+    let (result, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, &FORMATS, &[]);
+    let written = match result {
+        Ok(()) => [b"ok\n".to_vec(), outputs.concat(), diagnostics].concat(),
+        Err(error) => {
+            assert!(
+                outputs.iter().all(Vec::is_empty) && diagnostics.is_empty(),
+                "{error:#}"
+            );
+            format!("refused: {error:#}\n").into_bytes()
+        }
+    };
+    std::fs::write(out, written).expect("write the child's file");
+}

@@ -59,9 +59,11 @@ NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "OLD_FSC", "BL2SEQ
 TIMEOUT = 600
 # The `NAME=VALUE` tokens of `extra_args` that are environment variables of both programs: BLASTDB
 # (the directory of a `taxdb.bti`), the three that cut a query file into batches and chunks, and
-# ARCHIVE_FORMAT (how outfmt 11 writes its archive: unset text, `bin...` binary), and PRE_FETCH_SEQS_LIMIT
-# (the number of Seq-aligns above which NCBI's formatter reads the reported sequences one by one).
-ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "ARCHIVE_FORMAT", "PRE_FETCH_SEQS_LIMIT")
+# ARCHIVE_FORMAT (how outfmt 11 writes its archive: unset text, `bin...` binary), PRE_FETCH_SEQS_LIMIT
+# (the number of Seq-aligns above which NCBI's formatter reads the reported sequences one by one), and
+# BL2SEQ_LEGACY (read for -subject only; a -db search ignores it).
+ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "ARCHIVE_FORMAT", "PRE_FETCH_SEQS_LIMIT",
+             "BL2SEQ_LEGACY")
 
 
 def read_manifest() -> tuple[list[str], list[dict[str, str]]]:

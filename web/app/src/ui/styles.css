@@ -1058,6 +1058,13 @@ textarea {
   width: 12em;
 }
 
+/* "Additional options" holds a command line's options (DW-42), with its "?" beside it on a phone too. */
+.parameter-form .param-control > input.extra-options[type='text'] {
+  width: 36em;
+  max-width: calc(100% - 2.5em);
+  box-sizing: border-box;
+}
+
 .parameter-form .select-clip select {
   min-width: 0;
 }

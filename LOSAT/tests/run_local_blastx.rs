@@ -758,3 +758,82 @@ fn check_options_fails_as_a_run_does() {
     // Every case but the two searches fails.
     assert_eq!(failed, 8);
 }
+
+// NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-210,732-737 and
+// c++/src/app/blast/blastx_app.cpp:283-288: NCBI searches each `-subject` sequence on its own
+// with BL2SEQ_LEGACY, and converts PRE_FETCH_SEQS_LIMIT with NStr::StringToInt before each
+// batch's report (its CStringException names its build's source files), except for the archive
+// of outfmt 11, which it writes without the prefetch. The -db cases are the db.bxenv.* rows.
+#[test]
+fn environment_that_ncbi_reads_around_the_report_is_rejected_where_it_reads_it() {
+    let inputs = Inputs::new("tests/db_search/bslice_q.fna", "tests/db_search/bslice.faa");
+    let run = |outfmt: &str, variable: Option<(&str, &str)>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+        command
+            .current_dir(crate_dir())
+            .env_remove("BATCH_SIZE")
+            .env_remove("PRE_FETCH_SEQS_LIMIT")
+            .env_remove("BL2SEQ_LEGACY")
+            .env(
+                "LOSAT_BLASTX_WORKER_LOG",
+                std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+                    .unwrap_or_else(|| temp_path("blastx_worker.log").into_os_string()),
+            )
+            .args([
+                "blastx",
+                "-query",
+                &inputs.query,
+                "-subject",
+                &inputs.subject,
+            ])
+            .args(["-outfmt", outfmt]);
+        if let Some((name, value)) = variable {
+            command.env(name, value);
+        }
+        command.output().expect("run LOSAT CLI")
+    };
+    for (variable, value, outfmt, text) in [
+        ("PRE_FETCH_SEQS_LIMIT", "abc", "6", "has the value \"abc\""),
+        ("PRE_FETCH_SEQS_LIMIT", "", "0", "has the value \"\""),
+        (
+            "BL2SEQ_LEGACY",
+            "1",
+            "6",
+            "the environment variable BL2SEQ_LEGACY",
+        ),
+        (
+            "BL2SEQ_LEGACY",
+            "",
+            "11",
+            "the environment variable BL2SEQ_LEGACY",
+        ),
+    ] {
+        let output = run(outfmt, Some((variable, value)));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{variable}: {output:?}");
+        assert!(
+            output.stdout.is_empty()
+                && stderr.contains(text)
+                && stderr.contains("not supported by LOSAT's BLASTX"),
+            "{variable} {outfmt}: {stderr}"
+        );
+    }
+    // The archive, and an integer in any format, are written as without the variable.
+    for (value, outfmt) in [("abc", "11"), ("", "11"), ("5", "6")] {
+        let plain = run(outfmt, None);
+        let output = run(outfmt, Some(("PRE_FETCH_SEQS_LIMIT", value)));
+        assert!(
+            plain.status.success() && !plain.stdout.is_empty(),
+            "{plain:?}"
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{value} {outfmt}: {output:?}"
+        );
+        assert!(
+            output.stdout == plain.stdout && output.stderr == plain.stderr,
+            "{value} {outfmt}"
+        );
+    }
+}

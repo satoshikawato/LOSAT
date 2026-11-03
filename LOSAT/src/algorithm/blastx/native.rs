@@ -806,6 +806,14 @@ fn run_inner(
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file is LOSAT's rejection, above).
     app::xinclude_check_for(&choice, args.out.as_deref())?;
+    // NCBI reads the environment of its search and report after the prolog (the subjects of
+    // `-subject` with `BL2SEQ_LEGACY`, `PRE_FETCH_SEQS_LIMIT` before each batch's report);
+    // LOSAT refuses what it does not reproduce before the search.
+    app::check_search_environment(
+        "BLASTX",
+        database.is_none(),
+        format == Some(app::ReportFormat::ArchiveFormat),
+    )?;
     // LOSAT_X_DBIDXREAD acts on a database's index files only; the new side is marked where a
     // volume is opened (`seqdb::Volume::open`).
     if database.is_none() && crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {

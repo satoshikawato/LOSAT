@@ -602,7 +602,8 @@ pub(crate) struct HeaderReader<'a> {
 /// before its report: `PRE_FETCH_SEQS_LIMIT` is an integer other than `INT_MAX` (0, or one below
 /// the batch's number of Seq-aligns, which LOSAT does not count, turns NCBI's prefetch off).
 /// A value that is no integer stops NCBI before its report; LOSAT refuses it in
-/// `blastinput::app::check_unsupported_environment`, which BLASTX does not call.
+/// `blastinput::app::check_search_environment` (not for outfmt 11, whose archive NCBI writes
+/// without the prefetch).
 fn prefetch_may_be_off() -> bool {
     std::env::var_os("PRE_FETCH_SEQS_LIMIT")
         .and_then(|value| crate::blastinput::query_batch::ncbi_string_to_int(&value))

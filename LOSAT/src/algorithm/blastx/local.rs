@@ -98,6 +98,9 @@ pub fn run_local(
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
+    // The environment of a search of subject records (`native::run_inner`); none of the
+    // formats written here is the archive.
+    app::check_search_environment("BLASTX", true, false)?;
     write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
     let records_parsed = RecordsParsed::default();
     let shown = ShownSubjects::Fasta {

@@ -437,6 +437,60 @@ pub(super) fn batch_input(query_input: &QueryInput, searched: Range<usize>) -> Q
     }
 }
 
+/// The reasons of `check` that need neither the query records nor the subjects: the switch off,
+/// the outputs, the verbose and debug output, BLAST XML and the custom tabular reports. Where one
+/// applies the reports are written after the loop whatever the query file holds, so
+/// LOSAT_X_QSTREAM reads the records before the search (its `off=reports`) instead of reading them
+/// twice to keep them all for those reports. `on` is `switch_on()`.
+pub(super) fn refused_before_reading(
+    on: bool,
+    args: &BlastnArgs,
+    outputs: &ReportOutputs<'_>,
+    output_formats: &[BlastnOutputFormat],
+) -> Option<Off> {
+    if !on {
+        return Some(Off::NotSet);
+    }
+    if outputs.hits.is_some()
+        || outputs.observer.is_some()
+        || outputs.formats.len() > 1
+        || outputs
+            .formats
+            .iter()
+            .any(|format| matches!(format.sink, OutputSink::File(_)))
+    {
+        return Some(Off::Outputs);
+    }
+    if x_debug_output(args) {
+        return Some(Off::Debug);
+    }
+    // BLAST XML (DESIGN_OF4 Q8, Owner-delegated 2026-10-20): the XML writer refuses a `-db` name,
+    // a query title or id, or the title of a subject with a hit that it cannot write as NCBI's
+    // XML (DESIGN_OF4 Q2), and those checks are made by the report call of the batch that holds
+    // the query or the subject. With several batches a later batch's refusal would come after
+    // the first batch's Iterations were written, so outfmt 5 is never streamed: the one report
+    // call after the search finds every refusal before the first byte.
+    if output_formats
+        .iter()
+        .any(|format| format.is_structured_xml())
+    {
+        return Some(Off::Xml);
+    }
+    // The custom tabular reports (line CLI C2, PR 1): their writer refuses a name of the
+    // taxonomy database for a subject with a taxid (DECISIONS 3) and reads the taxids and
+    // definition lines of the reported sequences, which a later batch's report call would do
+    // after the first batch's rows were written; and outfmt 20's header line comes with the
+    // first report. They keep the one report call after the search, where every refusal comes
+    // before the first byte, and never take the streamed path of the default 6 and 7.
+    if output_formats
+        .iter()
+        .any(|format| format.tabular_spec().is_some())
+    {
+        return Some(Off::CustomTabular);
+    }
+    None
+}
+
 /// Why the switch does not act for this search, or what it needs where it does (`Stream::start`;
 /// the module doc has the reasons). `on` is `switch_on()` (a parameter for the unit tests).
 #[allow(clippy::too_many_arguments)]
@@ -452,45 +506,8 @@ fn check(
     batching: QueryBatching,
     pool: &SearchPool<'_>,
 ) -> std::result::Result<Ready, Off> {
-    if !on {
-        return Err(Off::NotSet);
-    }
-    if outputs.hits.is_some()
-        || outputs.observer.is_some()
-        || outputs.formats.len() > 1
-        || outputs
-            .formats
-            .iter()
-            .any(|format| matches!(format.sink, OutputSink::File(_)))
-    {
-        return Err(Off::Outputs);
-    }
-    if x_debug_output(args) {
-        return Err(Off::Debug);
-    }
-    // BLAST XML (DESIGN_OF4 Q8, Owner-delegated 2026-10-20): the XML writer refuses a `-db` name,
-    // a query title or id, or the title of a subject with a hit that it cannot write as NCBI's
-    // XML (DESIGN_OF4 Q2), and those checks are made by the report call of the batch that holds
-    // the query or the subject. With several batches a later batch's refusal would come after
-    // the first batch's Iterations were written, so outfmt 5 is never streamed: the one report
-    // call after the search finds every refusal before the first byte.
-    if output_formats
-        .iter()
-        .any(|format| format.is_structured_xml())
-    {
-        return Err(Off::Xml);
-    }
-    // The custom tabular reports (line CLI C2, PR 1): their writer refuses a name of the
-    // taxonomy database for a subject with a taxid (DECISIONS 3) and reads the taxids and
-    // definition lines of the reported sequences, which a later batch's report call would do
-    // after the first batch's rows were written; and outfmt 20's header line comes with the
-    // first report. They keep the one report call after the search, where every refusal comes
-    // before the first byte, and never take the streamed path of the default 6 and 7.
-    if output_formats
-        .iter()
-        .any(|format| format.tabular_spec().is_some())
-    {
-        return Err(Off::CustomTabular);
+    if let Some(off) = refused_before_reading(on, args, outputs, output_formats) {
+        return Err(off);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
     // ```c++

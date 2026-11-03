@@ -665,9 +665,21 @@ impl<R: Read> FastaInputSource<R> {
     }
 
     /// LOSAT_X_QSTREAM's second reading in parts: `x_from_reader` for a part whose first record the
-    /// file's reader reads after `lines` lines, with the local ID `next_id` (NCBI's
-    /// `local_id_counter`, which the BLAST programs leave at 1: `FastaReader::new`,
-    /// `FastaReader::x_start_at`).
+    /// file's reader reads after `lines` lines, with the local ID `next_id`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:48-56
+    /// ```c++
+    /// CBlastInputSourceConfig::CBlastInputSourceConfig
+    ///     (const SDataLoaderConfig& dlconfig,
+    ///      objects::ENa_strand strand         /* = objects::eNa_strand_other */,
+    ///      bool lowercase                     /* = false */,
+    ///      bool believe_defline               /* = false */,
+    ///      TSeqRange range                    /* = TSeqRange() */,
+    ///      bool retrieve_seq_data             /* = true */,
+    ///      int local_id_counter               /* = 1 */,
+    /// ```
+    /// The BLAST programs leave `local_id_counter` at 1 (`FastaReader::new`); a part's reader starts
+    /// it where the file's one reader is (`FastaReader::x_start_at`).
     #[cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
     pub(crate) fn x_from_reader_at(
         input: R,
@@ -681,7 +693,7 @@ impl<R: Read> FastaInputSource<R> {
     }
 
     /// LOSAT_X_QSTREAM's reading in parts: the lines read so far (`GetLineNumber`,
-    /// `LineReader::line_number`).
+    /// line_reader.cpp:208-216, `LineReader::line_number`).
     #[cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
     pub(crate) fn x_line_number(&self) -> u64 {
         self.reader.lines.line_number()

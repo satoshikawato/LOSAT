@@ -76,14 +76,15 @@
 //! lines before it and its lines, the line number of a reader that read it to its end), when the
 //! batch loop needs their records, on the search's threads (`x_query_stream::State::read_parts`).
 //! Each part is read by a new reader that starts with the line number and the local-ID counter the
-//! one reader has at the part's first byte (`read_again`, `FastaInputSource::x_from_reader_at`): the
-//! two values above are all that a record's reading takes from the records before it, so the part's
-//! records are the one reader's, their local IDs and the line numbers of their messages included
-//! (so, unlike the parts of the store, a record with a message in a later part needs no one reader).
-//! `read_again` checks that the file did not change in a way that would make that untrue: the part
-//! starts at a record start, its bytes end where the first reading's did and hold no `\r` or `>?`,
-//! its records have the first reading's number and lengths, and its lines are the first reading's;
-//! the last part is read to the file's end, up to its records, as the one reader reads it.
+//! one reader has at the part's first byte (`read_again`, `FastaInputSource::x_from_reader_at`):
+//! the two values above are all that a record's reading takes from the records before it, so the
+//! part's records are the one reader's, their local IDs and the line numbers of their messages
+//! included (so, unlike the parts of the store, a record with a message in a later part needs no
+//! one reader). `read_again` checks that the file did not change in a way that would make that
+//! untrue: the part starts at a record start, its bytes end where the first reading's did and hold
+//! no `\r` or `>?`, its records have the first reading's number and lengths, and its lines are the
+//! first reading's; the last part is read to the file's end, up to its records, as the one reader
+//! reads it.
 //!
 //! The records of the store (EXPERIMENT LOSAT_X_BNQPARTS, `store_parts`). Where LOSAT_X_BNQPACK's
 //! store holds the records read before the search, the same parts of the file (the same cut, the
@@ -105,7 +106,9 @@ use std::ops::Range;
 use std::sync::OnceLock;
 
 use super::x_query_drop::Part;
-use crate::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
+#[cfg(all(unix, feature = "parallel"))]
+use crate::blastinput::fasta_reader::FastaRecord;
+use crate::blastinput::fasta_reader::ReaderConfig;
 
 /// The bytes after the reader's start below which the first reading stays on one thread: about
 /// 4 ms of it on the workstation.
@@ -149,8 +152,8 @@ pub(super) struct Scan {
 }
 
 /// The lengths of the query records from byte `start` of `file` to its end, read in parts by
-/// `threads` threads, with the parts, or `None` where the first reading runs as before (the module's
-/// header). `config` is the first reading's configuration, without the BLAST archive.
+/// `threads` threads, with the parts, or `None` where the first reading runs as before (the
+/// module's header). `config` is the first reading's configuration, without the BLAST archive.
 pub(super) fn lengths(
     file: &File,
     start: u64,
@@ -495,10 +498,10 @@ enum PartError {
 
 /// Reads the records of bytes `bytes` of `file` with a new reader that starts at `start` (the lines
 /// before it and the local ID of its first record, `x_from_reader_at`; `(0, 1)` is a new reader's)
-/// with the loop of `x_query_stream::scan` (`end()`, then `next_sequence`), the letters packed as the
-/// search's reader packs them where `pack` is set, and gives each record (and its packed letters) to
-/// `each`. Returns the lines read (those of the part), or why the reading failed; it stops when
-/// another part failed (`failed`).
+/// with the loop of `x_query_stream::scan` (`end()`, then `next_sequence`), the letters packed as
+/// the search's reader packs them where `pack` is set, and gives each record (and its packed
+/// letters) to `each`. Returns the lines read (those of the part), or why the reading failed; it
+/// stops when another part failed (`failed`).
 #[cfg(all(unix, feature = "parallel"))]
 fn read_records(
     file: &File,
@@ -584,10 +587,12 @@ fn read_part(
 /// `x_query_stream::State::read_one`, it does not read a record added after them, and reads letters
 /// added to the last record. Returns the records read and, where the file changed since the first
 /// reading, the first input record it cannot give with what changed: a record of another length, a
-/// reader error, a part that holds fewer records or more (the bytes after its records hold another);
-/// for the part as a whole (the input record is its first), a part that no longer starts at a record
-/// start (a `>` after a `\n`), whose bytes hold a `\r` or a `>?` or cannot all be read, or whose
-/// lines are not the first reading's (the parts after it start at the first reading's line).
+/// reader error, a part that holds fewer records or more (the bytes after its records hold
+/// another); for the part as a whole (the input record is its first), a part that no longer starts
+/// at a record start (a `>` after a `\n`), whose bytes hold a `\r` or a `>?` or cannot all be read,
+/// or whose lines are not the first reading's (the parts after it start at the first reading's
+/// line). No NCBI counterpart: NCBI reads the query file once, with one reader; the part's reader
+/// starts where that reader is (scheduling only).
 #[cfg(all(unix, feature = "parallel"))]
 pub(super) fn read_again(
     file: &File,
@@ -653,7 +658,11 @@ pub(super) fn read_again(
         Err(PartError::Bytes) => whole(
             "its part holds a carriage return or a gap line, or ends before the first reading's end",
         ),
-        Err(PartError::Refused) => (records, changed),
+        // Only a record that differs gives the part up here (no other part sets `failed`).
+        Err(PartError::Refused) => (
+            records,
+            changed.or_else(|| Some((index, "its part was given up".to_string()))),
+        ),
         Err(PartError::Reader(error)) => (records, Some((index, format!("{error}")))),
         Ok(_) if records.len() < span.records => {
             let what = if last {

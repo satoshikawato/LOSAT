@@ -3673,6 +3673,9 @@ Scheduling (each value computed by one thread with the original function; order 
   x0.59-x0.99. At one thread the reads case faults 2.5 times as often (sys +0.55 s, user -0.45 s): freeing the taken
   parts moves glibc's dynamic mmap and trim thresholds (fixed thresholds give dev's count). Parts of 64 KiB, which stay
   in the heap, cut the faults below dev's but took 23 MiB more for x0.995, so the parts stay at 1 MiB.
+  Since 2026-11-03 megablast, as the other tasks, reads a file of twice its largest batch or more batch by batch
+  (`LOSAT_X_QSTREAM`, below) where `LOSAT_X_RPTSTREAM` may write the reports batch by batch, so the megablast cases
+  above take the store only where that switch does not act.
 - `LOSAT_X_GREEDYROWFUSE=1` (BLASTN megablast, the distances of the non-affine greedy alignment that `x_greedy_row` runs:
   every traceback, and the score-only calls the fused loop GREEDYFUSE declines; speed; in the strict set from the pull
   request that added it, 2026-10-24; `=0` runs `x_greedy_row_avx2`, the three passes) runs one distance in two passes per
@@ -4805,8 +4808,12 @@ Scheduling (each value computed by one thread with the original function; order 
   needs their records: the parts up to the one that holds the batch's last record, each by a new reader on the
   search's threads (`x_query_scan_par::read_again`, `x_query_stream::State::read_parts`) that starts with the line
   number and local-ID counter the one reader has at the part's first byte (`FastaInputSource::x_from_reader_at`), so
-  the records, their local ids and the line numbers of their messages are the one reader's; the records of the last
-  part after the batch wait for the next batch. A file changed between the readings so that a part no longer starts
+  the records, their local ids and the line numbers of their messages are the one reader's; with a pool at least one
+  part per thread is read (the size mixer's first batches are smaller than a part), and the records after the batch
+  wait for the next batches. The switch also does not act (`off=reports`) where `LOSAT_X_RPTSTREAM` keeps the reports
+  after the loop for a reason the search shows before the reading (several formats or a file sink, verbose or debug
+  output, BLAST XML, the custom tabular reports: `x_rpt_stream::refused_before_reading`): every record would be kept
+  for those reports, so reading twice would only cost time. A file changed between the readings so that a part no longer starts
   at a record start, ends elsewhere or has other lines is LOSAT's error at the batch that needs the part's first
   record. Without it the second reading ran on the loop's thread between the batches while the search's threads
   waited, which kept `-task megablast` out of the switch (megablast at 16 threads on the workstation, the reason

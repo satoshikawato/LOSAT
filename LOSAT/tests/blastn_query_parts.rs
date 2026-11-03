@@ -98,9 +98,10 @@ fn query_text(tail: &[u8]) -> Vec<u8> {
 
 /// One megablast search of `query` with `target` (`-subject FILE` or `-db NAME`) and `args`,
 /// `BATCH_SIZE` 20,000, `LOSAT_X_QSCANPARMIN=0`, `LOSAT_X_QSTREAM=0` and the given variables as its
-/// only `LOSAT_*` variables. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
-/// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more than
-/// one thread, and it selects nothing. Returns the exit status, the report and the standard error.
+/// only `LOSAT_*` variables. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
+/// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
+/// soon as a search has more than one thread, and it selects nothing. Returns the exit status, the
+/// report and the standard error.
 fn search(
     query: &Path,
     target: [&str; 2],

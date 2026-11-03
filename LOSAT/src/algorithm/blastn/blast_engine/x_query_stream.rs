@@ -50,11 +50,12 @@
 //!   the loop takes when it reaches their batch. The loop's batch is held until the batch is done,
 //!   then dropped. Where the first reading was read in parts (`x_query_scan_par.rs`), the second
 //!   reads the same parts again (`State::read_parts`): when the loop takes its batch, the parts up
-//!   to the one that holds the batch's last record, each by a reader of its own on the search's
-//!   threads (`x_query_scan_par::read_again`), one chunk per part; the records of the last part
-//!   after the batch wait in the window for the next batch. Without the parts, the second reading
-//!   runs on the loop's thread between the batches, while the search's threads wait: for megablast
-//!   at 16 threads on the workstation that cost 1.10 to 1.15 of the time (NCMEM2 p1).
+//!   to the one that holds the batch's last record, and at least one per thread, each by a reader
+//!   of its own on the search's threads (`x_query_scan_par::read_again`), one chunk per part; the
+//!   records of those parts after the batch wait in the window for the next batches. Without the
+//!   parts, the second reading runs on the loop's thread between the batches, while the search's
+//!   threads wait: for megablast at 16 threads on the workstation that cost 1.10 to 1.15 of the
+//!   time (NCMEM2 p1).
 //!
 //! Why the records are the same: the reader is a function of the bytes it reads and of its
 //! configuration (the same `ReaderConfig`; the local-ID counter starts at 1 in a new reader and
@@ -69,23 +70,25 @@
 //! one reader has there (`FastaInputSource::x_from_reader_at`), the only state a reader carries
 //! from record to record in a file without `\r` (`x_query_scan_par.rs`, "Why the lengths are the
 //! first reading's"), so it reads the same records, the line numbers of their messages included.
-//! Each record's length is compared with the first reading's: a record whose length changed, a
-//! file that ends early or a reader error (the file changed between the two readings) ends the
-//! search with LOSAT's error, and every later reading of the search returns it (`State::failed`);
-//! a change that keeps every record's length is read as the new content (as NCBI, which reads per
-//! batch, would read it). In parts the change must also keep where each part starts and ends and
-//! its lines, or the reading of that part is the error; the parts are read whole, so an error found
+//! Each record's length is compared with the first reading's: a record whose length changed, a file
+//! that ends early or a reader error (the file changed between the two readings) ends the search
+//! with LOSAT's error, and every later reading of the search returns it (`State::failed`); a change
+//! that keeps every record's length is read as the new content (as NCBI, which reads per batch,
+//! would read it). In parts the change must also keep where each part starts and ends and its
+//! lines, or the reading of that part is the error; the parts are read whole, so an error found
 //! ahead of the loop's batch waits for the batch that needs its record (`State::pending`), as the
 //! one reader finds it only there. The batches are cut from the first reading's lengths by the same
-//! code as before (`next_ranged_batch`), so they have the same boundaries, the same records in the same
-//! order, the same cut letters (`FastaRecord::cut` at the placement of `query_input_of`), the same
-//! lower case letters (the `-lcase_masking` masks), the same local ids and titles (every outfmt's
-//! ids and titles are made from them), and the same reader warnings per record (written per batch,
-//! as before). DUST and the rest of the search read only the batch's records.
+//! code as before (`next_ranged_batch`), so they have the same boundaries, the same records in the
+//! same order, the same cut letters (`FastaRecord::cut` at the placement of `query_input_of`), the
+//! same lower case letters (the `-lcase_masking` masks), the same local ids and titles (every
+//! outfmt's ids and titles are made from them), and the same reader warnings per record (written
+//! per batch, as before). DUST and the rest of the search read only the batch's records.
 //!
 //! Where the switch does not act (`Off`; the records are read before the search as without it):
-//! where the reports are written after the loop (LOSAT_X_RPTSTREAM off: every record is then
-//! read by a writer after the search, so the records would all be held anyway and the second
+//! where the reports are written after the loop (LOSAT_X_RPTSTREAM off, or one of its reasons that
+//! the search shows before the reading: several formats or a file sink, verbose or debug output,
+//! BLAST XML, the custom tabular reports, `x_rpt_stream::refused_before_reading`; every record is
+//! then read by a writer after the search, so the records would all be held anyway and the second
 //! reading would only cost time), standard input (`-query -`, also with `-subject -`), a query
 //! that is not a regular file (a named pipe, a character device such as `/dev/stdin`, a socket:
 //! `metadata().is_file()`, which follows symbolic links), and a file whose position or second
@@ -111,8 +114,9 @@
 //! skipped, the input position and placement of each searched query and its searched length
 //! (about 33 bytes per record without `-query_loc`). The records of every batch are kept as well
 //! (cloned when the loop takes them) where a writer reads them after their batch: LOSAT_X_RPTSTREAM
-//! on but not acting for the search (one of its refusals, `x_rpt_stream::check`); there the memory
-//! is that of the records read before the search. With LOSAT_X_RPTSTREAM acting they are not kept.
+//! on but not acting for the search for a reason it finds after the reading (one of the refusals
+//! of `x_rpt_stream::check` that read the queries' lengths or the subjects); there the memory is
+//! that of the records read before the search. With LOSAT_X_RPTSTREAM acting they are not kept.
 //!
 //! With `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM records= read= batches= kept= scan_s=
 //! scan_par= read_s= peak_window= off=` (records: the input records; read: the records read again;
@@ -155,7 +159,8 @@ fn on() -> bool {
 pub(super) enum Off {
     /// The switch is off (`LOSAT_X_QSTREAM=0`).
     NotSet,
-    /// The reports are written after the loop (LOSAT_X_RPTSTREAM off), which reads every record.
+    /// The reports are written after the loop (LOSAT_X_RPTSTREAM off, or refusing the search before
+    /// the reading: `x_rpt_stream::refused_before_reading`), which reads every record.
     Reports,
     /// `-query -` (standard input), which cannot be read twice.
     StandardInput,
@@ -194,8 +199,9 @@ pub(super) struct Opening {
 impl Opening {
     /// `path` is `-query` and `file` the file `run` opened for it, before its reader is made;
     /// `shared_standard_input` is `-query -` with `-subject -`; `reports_streamed` is whether
-    /// LOSAT_X_RPTSTREAM is on (`x_rpt_stream::switch_on`); `rule` is what the rule reads of the
-    /// search (`Rule::off`).
+    /// LOSAT_X_RPTSTREAM may write the reports batch by batch (on, and no reason of
+    /// `x_rpt_stream::refused_before_reading`); `rule` is what the rule reads of the search
+    /// (`Rule::off`).
     pub(super) fn new(
         path: &Path,
         file: &File,
@@ -489,7 +495,10 @@ impl Store {
         // The lengths read in parts on the search's threads, from the second handle at the position
         // the source starts from; where the parts are not taken, the source reads them (its
         // position is where it was: the parts read at offsets).
-        let parts = if !config.keep_defline {
+        // A part's reader numbers its records from the part's first (`-parse_deflines`, whose
+        // records with ids take no number and whose reader refuses an id read twice across the
+        // file, is never read batch by batch: `run.rs`).
+        let parts = if !config.keep_defline && !config.parse_deflines {
             in_parts(&again, start)
         } else {
             None
@@ -673,9 +682,11 @@ impl State {
     }
 
     /// `read_to` in parts: the parts from the first not read up to the one that holds input record
-    /// `end - 1`, each read by a reader of its own (`x_query_scan_par::read_again`) on `pool`'s
-    /// threads, their records moved into the chunks in order up to the first record a part cannot
-    /// give (the file changed), which is kept `pending`.
+    /// `end - 1`, and with a pool at least one part per thread, each read by a reader of its own
+    /// (`x_query_scan_par::read_again`) on `pool`'s threads, their records moved into the chunks in
+    /// order up to the first record a part cannot give (the file changed), which is kept `pending`.
+    /// No NCBI counterpart: NCBI reads its query batches with one reader (blast_input.cpp:134-171,
+    /// the module doc); the parts give the same records (scheduling only).
     #[cfg(all(unix, feature = "parallel"))]
     fn read_parts(
         &mut self,
@@ -697,6 +708,13 @@ impl State {
         while to < spans.len() && spans[to].first < end {
             to += 1;
         }
+        // A batch smaller than a part per thread (the size mixer's first batches, a search with
+        // many hits per letter) would leave threads idle, or read one part at a time on this
+        // thread: the parts read ahead wait in the window, at most a part per thread.
+        let parallel = pool.enabled() && pool.threads() > 1;
+        if parallel {
+            to = to.max(from + pool.threads()).min(spans.len());
+        }
         *next = to;
         let (file, spans, config) = (&*file, &spans[..], *config);
         let read = |index: usize| {
@@ -708,7 +726,7 @@ impl State {
                 input_lengths,
             )
         };
-        let parts: Vec<_> = if pool.enabled() && pool.threads() > 1 && to - from > 1 {
+        let parts: Vec<_> = if parallel && to - from > 1 {
             use rayon::prelude::*;
             pool.install(|| {
                 (from..to)
@@ -814,8 +832,12 @@ impl State {
             return Err(anyhow::anyhow!("{failed}"));
         }
         let index = self.next;
-        let Second::Serial(source) = &mut self.second else {
-            unreachable!("LOSAT_X_QSTREAM reads record after record with one reader")
+        let source = match &mut self.second {
+            Second::Serial(source) => source,
+            #[cfg(all(unix, feature = "parallel"))]
+            Second::Parts { .. } => {
+                unreachable!("LOSAT_X_QSTREAM reads record after record with one reader")
+            }
         };
         let what = if source.end() {
             "the file ends before it".to_string()
@@ -850,7 +872,9 @@ impl State {
                 self.next += 1;
                 out.write_all(&record.warnings)?;
             } else {
+                let before = self.next;
                 self.read_to(self.next + 1, input_lengths, &serial)?;
+                debug_assert!(self.next > before, "the parts cover every record");
                 for (_, records) in self.chunks.drain(..) {
                     for record in records.iter() {
                         out.write_all(&record.warnings)?;
@@ -1543,6 +1567,7 @@ mod tests {
 
     /// Records of about 1,100 bytes each (a title and ten lines of 100 letters), `count` of them,
     /// the letters of record `index` from `letter`.
+    #[cfg(all(unix, feature = "parallel"))]
     fn even_records(count: usize, letter: impl Fn(usize) -> u8) -> Vec<u8> {
         let mut bytes = Vec::new();
         for index in 0..count {
@@ -1797,7 +1822,8 @@ mod tests {
             Some(Off::StandardInput)
         );
         assert!(Opening::with_mode(true, &file.0, &handle, false, true, NO_RULE).acts());
-        // The rule turns the switch off; it reads the file's length. The file is 8 bytes: off for a batch of 5 letters, on for 4.
+        // The rule turns the switch off; it reads the file's length. The file is 8 bytes: off for a
+        // batch of 5 letters, on for 4.
         for (letters, off) in [(5, Some(Off::Batch)), (4, None)] {
             let rule = Rule {
                 batch_letters: letters,

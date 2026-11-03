@@ -7642,12 +7642,21 @@ fn search_cli(
     };
     // EXPERIMENT (LOSAT_X_QSTREAM): whether the query file is read a second time, batch by batch
     // (a second handle on it, at the position its reader starts from), where the reports may be
-    // written batch by batch (LOSAT_X_RPTSTREAM).
+    // written batch by batch (LOSAT_X_RPTSTREAM, unless it keeps them after the loop for a reason
+    // known before the reading).
+    let x_reports_streamed = !args.parse_deflines
+        && x_rpt_stream::refused_before_reading(
+            x_rpt_stream::switch_on(),
+            &args,
+            outputs,
+            &output_formats,
+        )
+        .is_none();
     let mut x_opening = x_query_stream::Opening::new(
         &args.query,
         &query_file,
         shared_standard_input,
-        x_rpt_stream::switch_on() && !args.parse_deflines,
+        x_reports_streamed,
         x_rule,
     );
     // EXPERIMENT (LOSAT_X_BNQPACK): whether the records read before the search move into a store

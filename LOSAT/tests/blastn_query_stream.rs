@@ -8,27 +8,26 @@
 //! may be written batch by batch (LOSAT_X_RPTSTREAM on; off, the `[X_STATS]` line says
 //! `off=reports`). So the property under test is that nothing a run writes depends on it: for
 //! blastn, dc-megablast and megablast, outfmt 0, 6 and 7, at 1 and 4 threads, with small query
-//! batches (`BATCH_SIZE`)
-//! and LOSAT_X_RPTSTREAM on, the searches without the switch and with it give the same exit
-//! status, standard output (or `-out` file) and standard error, and the `[X_STATS] QSTREAM` line
-//! (the arm with `LOSAT_X_STATS`; its lines are taken out of the comparison) shows that the
-//! batches were read again (the tests keep `BATCH_SIZE` small, so the batch part of the rule does
-//! not apply). Where the switch does not act (its rule, or LOSAT_X_RPTSTREAM off), `run.rs` reads
-//! the records before the search as without the switch (`read_queries`, `Store::off`), so one
-//! case shows why and the same bytes: LOSAT_X_RPTSTREAM off (`off=reports`). The same holds with
-//! `-out` files, with `-query_loc` (skipped records and queries without data), `-subject_loc` and
-//! `-lcase_masking`, with `-max_target_seqs`, `-max_hsps` and `-subject_besthit`, with the
-//! reader's warnings and errors (late in the file, and in the first record, before any output), a
-//! batch of queries without letters, LOSAT's refusals that come before every report
-//! (LOSAT_X_RPTSTREAM then keeps its reports after the loop, and for a refusal that comes when
-//! they are written the records of every batch are kept for them), and `-db`. Those cases run at
-//! one thread count each, 1 or 4: below 4 MiB (`LOSAT_X_QSCANPARMIN`) both readings run on the
-//! loop's thread, and the rule does not read the thread count. With `LOSAT_X_QSCANPARMIN=0` at four
-//! threads (unix, `parallel` feature) both readings are read in parts, the second on the search's
-//! threads (`scan_par=1`): the three tasks give the off bytes, the reader's warnings of the later
-//! parts included. Standard input and a pipe are read once (the `[X_STATS]` line names why), and
-//! the switch is on by default and off by its rule. That those bytes equal NCBI's is the business
-//! of the blastn fixtures.
+//! batches (`BATCH_SIZE`) and LOSAT_X_RPTSTREAM on, the searches without the switch and with it
+//! give the same exit status, standard output (or `-out` file) and standard error, and the
+//! `[X_STATS] QSTREAM` line (the arm with `LOSAT_X_STATS`; its lines are taken out of the
+//! comparison) shows that the batches were read again (the tests keep `BATCH_SIZE` small, so the
+//! batch part of the rule does not apply). Where the switch does not act (its rule, or
+//! LOSAT_X_RPTSTREAM off), `run.rs` reads the records before the search as without the switch
+//! (`read_queries`, `Store::off`), so one case shows why and the same bytes: LOSAT_X_RPTSTREAM off
+//! (`off=reports`). The same holds with `-out` files, with `-query_loc` (skipped records and
+//! queries without data), `-subject_loc` and `-lcase_masking`, with `-max_target_seqs`, `-max_hsps`
+//! and `-subject_besthit`, with the reader's warnings and errors (late in the file, and in the
+//! first record, before any output), a batch of queries without letters, LOSAT's refusals that come
+//! before every report (LOSAT_X_RPTSTREAM then keeps its reports after the loop, and for a refusal
+//! that comes when they are written the records of every batch are kept for them), and `-db`. Those
+//! cases run at one thread count each, 1 or 4: below 4 MiB (`LOSAT_X_QSCANPARMIN`) both readings
+//! run on the loop's thread, and the rule does not read the thread count. With
+//! `LOSAT_X_QSCANPARMIN=0` at four threads (unix, `parallel` feature) both readings are read in
+//! parts, the second on the search's threads (`scan_par=1`): the three tasks give the off bytes,
+//! the reader's warnings of the later parts included. Standard input and a pipe are read once (the
+//! `[X_STATS]` line names why), and the switch is on by default and off by its rule. That those
+//! bytes equal NCBI's is the business of the blastn fixtures.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -382,6 +381,36 @@ fn every_task_format_thread_count_and_report_mode_gives_the_off_bytes() {
             "{what}: {stderr}"
         );
         read_as_the_reports_need(&what, reports, &numbers);
+    }
+}
+
+/// Where LOSAT_X_RPTSTREAM keeps the reports after the loop for a reason the search shows before
+/// the reading (here BLAST XML, `x_rpt_stream::refused_before_reading`), the records are read once,
+/// before the search (`off=reports`), as with LOSAT_X_RPTSTREAM off: the off bytes, for megablast
+/// and blastn.
+#[test]
+fn reports_after_the_loop_for_a_reason_known_before_the_reading_read_the_records_once() {
+    let dir = TempDir::new("xml");
+    let query = queries(&dir, "q.fa", b"");
+    let subject = fasta("LC738868.fasta");
+    for task in ["megablast", "blastn"] {
+        let args = [
+            "-task",
+            task,
+            "-query",
+            query.to_str().unwrap(),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            "5",
+        ];
+        let what = format!("{task} outfmt 5");
+        let (off, numbers) = same_two(&what, &args, 4, &[RPTSTREAM], None);
+        assert_eq!(off.status, Some(0), "{what}");
+        assert!(
+            numbers.off == "reports" && numbers.batches == 0 && numbers.read == 0,
+            "{what}: {numbers:?}"
+        );
     }
 }
 

@@ -28,7 +28,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | program の一文（「BLASTN programs search nucleotide subjects using a nucleotide query.」） | タブの下の一文（「BLASTN mode searches nucleotide subjects using a nucleotide query.」など） | 寄せる | NCBI の 2 配列の画面の一文の形。「programs」は「mode」に（DW-32） |
 | 「Reset page」「Bookmark」 | なし | 採らない | Reset page は開いた大きなファイルの選択も消す（入力は Remove で 1 つずつ外す）。Bookmark は URL に検索の状態を持たない（研究データを URL に入れない、`web/AGENTS.md` 規則 4） |
 | 枠「Enter Query Sequence」 | 枠「Enter Query Sequence」（`query-panel`） | 採る | |
-| 「Enter accession number(s), gi(s), or FASTA sequence(s)」と textarea、「Clear」 | 「Enter FASTA sequence(s)」と textarea（`query-input`）、「Clear」（貼った文字だけを消す） | 寄せる | accession の取得は NCBI への送信になる（`web/AGENTS.md` 規則 4）。FASTA だけを受ける |
+| 「Enter accession number(s), gi(s), or FASTA sequence(s)」と textarea、「Clear」 | 「Enter FASTA sequence(s)」と textarea（`query-input`）、「Clear」（貼った文字だけを消す）。線 WF-1 で「Enter accession number(s) or FASTA sequence(s)」に：accession の形の入力に「Fetch from NCBI / EBI」が現れ、取得した FASTA を欄に写す（gi は受けない） | 寄せる | 2026-11-03 まで「accession の取得は NCBI への送信になる。FASTA だけを受ける」（`web/AGENTS.md` 規則 4）。保守者の決定（2026-11-03、`fetch_design.md` §7）で、明示に頼んだ取得は accession と URL だけを送るものとして許す |
 | 「Query subrange」From / To | 「Query subrange」From / To と範囲の棒（`query-region`、`-query_loc`） | 寄せる | LOSAT は含めたレコードが 1 つのときだけ範囲を指定できる（DW-9）。それ以外は理由の一文。BLASTX も同じ（query は nt、subject は aa。DW-11・DW-39） |
 | 「Or, upload file」 | 「Or, upload file」：「Open FASTA files…」と落とす場所（`query-open`、`query-files`） | 寄せる | LOSAT は複数のファイルを受け、中身を貼る欄に写さない |
 | 「Genetic code」（blastx・tblastx の query） | 「Genetic code」（`param-query_gencode`）を Enter Query Sequence の中に | 採る | W3 は Algorithm parameters の「Genetic codes」に置いていた |

@@ -9,13 +9,13 @@ describe('_headers', () => {
     expect(headers['Cross-Origin-Resource-Policy']).toBe('same-origin');
   });
 
-  it('limits every fetch to the site itself and allows Wasm compilation', () => {
+  it('limits every fetch to the site itself and the fetch hosts (docs/web/fetch_design.md), and allows Wasm compilation', () => {
     const csp = siteHeaders()['Content-Security-Policy'] ?? '';
     for (const directive of [
       "default-src 'self'",
       "script-src 'self' 'wasm-unsafe-eval'",
       "worker-src 'self'",
-      "connect-src 'self'",
+      "connect-src 'self' https://eutils.ncbi.nlm.nih.gov https://ftp.ncbi.nlm.nih.gov https://www.ebi.ac.uk https://rest.uniprot.org",
       "object-src 'none'",
     ]) {
       expect(csp).toContain(directive);

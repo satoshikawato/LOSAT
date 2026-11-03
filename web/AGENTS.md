@@ -26,9 +26,12 @@ still governs everything under `LOSAT/`, including engine changes made for LOSAT
    run snapshot). Never split one search into independent searches and join the
    results.
 4. Never send research data (sequences, headers, file names, results, notes) over the
-   network. Serve every runtime asset from the site itself; do not load scripts from
-   other origins in documents that handle research data. The response headers,
-   including the CSP, are defined once in `web/app/public/_headers`.
+   network. A fetch the user asks for (an accession, an Example set; line WF,
+   `docs/web/fetch_design.md`) sends only that identifier or the file's URL, to NCBI or
+   EBI, and never on load or on Run. Serve every runtime asset from the site itself; do
+   not load scripts from other origins in documents that handle research data. The
+   response headers, including the CSP (`connect-src` names the fetch hosts), are
+   defined once in `web/app/public/_headers`.
 5. Keep the layers of `web/app/src` (plan §3.3): `domain` depends on nothing;
    `application` depends on `domain` and `ports`; `infra` implements `ports`; `ui`
    acts through `application` and may import only types and constants from `domain`

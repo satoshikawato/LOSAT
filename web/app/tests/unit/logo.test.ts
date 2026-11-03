@@ -55,9 +55,41 @@ describe('the logo outside the app (DW-44)', () => {
 
   it('the PNG icons have their sizes (scripts/icons.mjs draws them from favicon.svg)', () => {
     for (const [name, size] of [['favicon-32.png', 32], ['apple-touch-icon.png', 180]] as const) {
-      const png = readFileSync(resolve(import.meta.dirname, '../../public', name));
-      // IHDR: the width and the height follow the signature (8 bytes) and the chunk's length and type.
-      expect([png.readUInt32BE(16), png.readUInt32BE(20)], name).toEqual([size, size]);
+      expect(pngSize(name), name).toEqual([size, size]);
     }
+  });
+});
+
+/** The width and the height of a PNG in public/: IHDR's follow the signature (8 bytes) and the chunk's length and type. */
+function pngSize(name: string): [number, number] {
+  const png = readFileSync(resolve(import.meta.dirname, '../../public', name));
+  return [png.readUInt32BE(16), png.readUInt32BE(20)];
+}
+
+describe('the web app manifest (DW-45)', () => {
+  const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../public/manifest.webmanifest'), 'utf8')) as {
+    theme_color: string;
+    background_color: string;
+    icons: { src: string; sizes: string; type: string; purpose?: string }[];
+  };
+
+  it('opens LOSAT at the root in a window of its own', () => {
+    expect(manifest).toMatchObject({ id: '/', name: 'LOSAT', start_url: '/', display: 'standalone' });
+  });
+
+  it("takes the header band's navy and the page's ground from styles.css", () => {
+    expect(manifest.theme_color).toBe(/--header: (#[0-9a-f]{6});/.exec(css)![1]);
+    expect(manifest.background_color).toBe(/--page: (#[0-9a-f]{6});/.exec(css)![1]);
+  });
+
+  it('lists icons of 192 and 512 px and a maskable one, each PNG of the size it says', () => {
+    for (const icon of manifest.icons) {
+      const [width, height] = icon.sizes.split('x').map(Number);
+      expect(icon.type, icon.src).toBe('image/png');
+      expect(pngSize(icon.src.replace(/^\//, '')), icon.src).toEqual([width, height]);
+    }
+    const any = manifest.icons.filter((icon) => (icon.purpose ?? 'any') === 'any').map((icon) => icon.sizes);
+    expect(any).toEqual(['192x192', '512x512']);
+    expect(manifest.icons.filter((icon) => icon.purpose === 'maskable').map((icon) => icon.sizes)).toEqual(['512x512']);
   });
 });

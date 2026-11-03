@@ -197,6 +197,7 @@ test('several runs; the next search is edited while one runs; separate searches 
     await expect(page.getByTestId('run-1-option')).toHaveAttribute('data-status', 'running');
     await pickRun(page, 1);
     await expect(page.getByTestId('run-status-phase')).toHaveText('Searching');
+    await expect(page.getByTestId('run-status-phase').getByTestId('losat-loader')).toBeVisible(); // the loader before the words (DW-43)
     await expect(page.getByTestId('run-status-elapsed')).toHaveText(/^\d+:\d\d$/);
     await backToSearch(page);
     await submit(page); // the same group again, behind run 1
@@ -204,6 +205,9 @@ test('several runs; the next search is edited while one runs; separate searches 
     await pickRun(page, 1);
     await page.getByTestId('run-status-cancel').click();
     await waitStatus(page, 1, 'cancelled');
+    // A run that ended leaves the status block, and its loader, for the results message.
+    await expect(page.getByTestId('results-status')).toHaveAttribute('data-run-status', 'cancelled');
+    await expect(page.getByTestId('run-status')).toHaveCount(0);
     await waitStatus(page, 4, 'completed');
     await waitStatus(page, 5, 'completed');
   } else {

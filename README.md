@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/losat-logo-white.svg">
+  <img alt="LOSAT" src="docs/assets/losat-logo.svg" height="64">
+</picture>
+
 # LOSAT: LOcal Sequence Alignment Tool
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -8,7 +13,6 @@
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/losat/badges/downloads.svg)](https://anaconda.org/bioconda/losat)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/losat/badges/latest_release_date.svg)](https://anaconda.org/bioconda/losat)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/losat/badges/platforms.svg)](https://anaconda.org/bioconda/losat)
-[![Anaconda-Server Badge](https://anaconda.org/bioconda/losat/badges/latest_release_date.svg)](https://anaconda.org/bioconda/losat)
 
 
 **LOSAT** is a lightweight, pure-Rust reimplementation of the NCBI BLAST sequence alignment algorithm designed specifically for pairwise sequence-to-sequence comparisons (`-query` vs `-subject`).

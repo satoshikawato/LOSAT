@@ -196,8 +196,6 @@ pub(super) struct BlastnDatabase {
     /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
     /// and the batches' prefetch of outfmt 0, 5, 6, 7 and 17).
     taxdb: shared::TaxdbRun,
-    /// Whether the first header of some volume holds parsed Seq-ids (`shared::check_seqids`).
-    parsed: bool,
 }
 
 /// The length and the ambiguity runs of the database sequences that one report call wrote
@@ -399,7 +397,7 @@ impl BlastnDatabase {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
-        let parsed = shared::check_seqids(&db, settings, PROGRAM)?;
+        shared::check_seqids(&db, settings, PROGRAM)?;
         shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         let (total, num_seqs) = db.statistics_numbers();
         let db_len_total = usize::try_from(total)
@@ -419,7 +417,6 @@ impl BlastnDatabase {
             name: name.to_string(),
             metadata,
             taxdb: shared::TaxdbRun::default(),
-            parsed,
         })
     }
 
@@ -455,11 +452,6 @@ impl BlastnDatabase {
     /// (`prefetch_messages`).
     pub(super) fn taxdb_found(&self) -> bool {
         self.taxdb.found(&self.db)
-    }
-
-    /// Whether the first header of some volume holds parsed Seq-ids (`shared::check_seqids`).
-    pub(super) fn parsed(&self) -> bool {
-        self.parsed
     }
 
     /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
@@ -1189,8 +1181,8 @@ pub(super) fn read_titles(
 }
 
 /// What the reports `output_formats` show of a reported sequence with parsed Seq-ids
-/// (`reported_subjects`, `x_streaming_refusal`); outfmt 13 to 16 and the tabular reports of
-/// taxonomy fields write its taxids.
+/// (`reported_subjects`); outfmt 13 to 16 and the tabular reports of taxonomy fields write its
+/// taxids.
 pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown {
     let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
     ParsedShown {
@@ -1411,199 +1403,6 @@ impl ReportedSubjects {
     pub(super) fn tabular_subject_ids(&self) -> Result<Vec<Arc<[u8]>>> {
         shared::tabular_subject_ids(&self.records, &self.ordinals, &self.parsed, false, PROGRAM)
     }
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-312
-// ```c++
-//                 ITERATE(CSearchResultSet, result, *results) {
-//                     formatter.PrintOneResultSet(**result, query_batch);
-//                 }
-// ```
-/// EXPERIMENT (LOSAT_X_RPTSTREAM): which of LOSAT's refusals of the database's stored data could
-/// come in a batch after the first, where it comes before any of the search's reports without
-/// the switch (`x_rpt_stream`; the same test as blastp's block search,
-/// `blastp::blast_engine::database::x_titles_allow_blocks`), or `None`:
-/// - `Off::Titles`: a definition line that does not read as the reports read those of the
-///   reported sequences (`read_title`: NCBI's reader, one definition line), holds a byte outside
-///   ' ' ..= '~' (`check_reported_title`) or gives no tabular subject id
-///   (`ReportedSubjects::tabular_subject_ids`);
-/// - `Off::Ambiguity`: a sequence whose ambiguity data the traceback cannot decode
-///   (`traceback_listed` and `reported_subjects` read them with
-///   `SequenceBlock::nucleotide_blastna`, first for the batch whose lists name the sequence; the
-///   preliminary stage reads the 2-bit letters only);
-/// - `Off::Taxonomy`, with `taxids` (the batches' prefetch reads the taxonomy database: outfmt 0,
-///   6, 7 and 17 with `taxdb.bti` on the search path, `BlastnDatabase::prefetch_messages`, DBID
-///   item T): a lookup of the taxonomy database that could be refused
-///   (`shared::taxdb_may_refuse` without the scientific names, which only XML2 and JSON write
-///   and XML is never streamed). The prefetch's refusal of NCBI's taxonomy cache
-///   (`shared::TaxdbRun::cache_collision`) comes at the run's first prefetch, in the first batch
-///   before its reports. A definition line whose taxid does not decode is `Off::Titles` then:
-///   the titles' pass decodes the taxids too (`SeqDb::visit_deflines_taxids`; one sequence at a
-///   time, `SeqDb::defline_taxids`), as blastp's block search does.
-/// Every ordinal id is read in `pool` (the titles, then the ambiguity data of the sequences that
-/// have any; `SeqDb::check_ambiguity` reads only those bytes); a reader error is a refusal too
-/// (the reports then stay after the loop, and the batch that meets the error fails where it does
-/// without the switch). EXPERIMENT (LOSAT_X_DBIDXREAD): both are read in ranges of
-/// `HEADER_RANGE_SEQS` sequences (`SeqDb::visit_deflines`, `SeqDb::visit_ambiguity`, the same
-/// results as `read_title` and `SeqDb::check_ambiguity`) instead of one sequence at a time.
-/// A database with parsed Seq-ids (`BlastnDatabase::parsed`; the readers above read ordinal ids
-/// alone): `x_parsed_refusal` with `shared::PARSED_CHECK_SEQUENCES_MAX` (`Off::LargeParsed`).
-pub(super) fn x_streaming_refusal(
-    database: &BlastnDatabase,
-    shown: ParsedShown,
-    taxids: bool,
-    pool: &crate::utils::threading::SearchPool<'_>,
-) -> Option<super::x_rpt_stream::Off> {
-    use super::x_rpt_stream::Off;
-    let db = &database.db;
-    if database.parsed {
-        return x_parsed_refusal(
-            database,
-            shown,
-            taxids,
-            pool,
-            shared::PARSED_CHECK_SEQUENCES_MAX,
-        );
-    }
-    let title_allowed = |ordinal: u32, stored: Result<shared::StoredTitle>| -> bool {
-        match stored {
-            Ok(stored) => {
-                !stored.replaced_bytes
-                    && shared::tabular_subject_id(&stored.title, ordinal, false, PROGRAM).is_ok()
-            }
-            Err(_) => false,
-        }
-    };
-    if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
-        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
-        let all = |allowed: &(dyn Fn(&BlockRange) -> bool + Sync)| -> bool {
-            #[cfg(all(
-                feature = "parallel",
-                any(not(target_arch = "wasm32"), feature = "wasm-threads")
-            ))]
-            if pool.enabled() {
-                return pool.install(|| ranges.par_iter().all(allowed));
-            }
-            let _ = pool;
-            ranges.iter().all(allowed)
-        };
-        // With `taxids` a record whose taxid does not decode is an `Err`
-        // (`visit_deflines_taxids`).
-        let titles = |range: &BlockRange| -> bool {
-            let visit = |ordinal: u32, deflines| {
-                title_allowed(ordinal, shared::stored_title(deflines, ordinal, 0, PROGRAM))
-            };
-            if taxids {
-                db.visit_deflines_taxids(*range, visit)
-            } else {
-                db.visit_deflines(*range, visit)
-            }
-        };
-        if !all(&titles) {
-            return Some(Off::Titles);
-        }
-        return x_ambiguity_refusal(db, pool).or_else(|| x_taxonomy_refusal(database, taxids));
-    }
-    // One sequence at a time (`LOSAT_X_DBIDXREAD=0`): the taxid after the title.
-    let title = |ordinal: u32| -> bool {
-        title_allowed(ordinal, shared::read_title(db, ordinal, 0, PROGRAM))
-            && (!taxids || db.defline_taxids(ordinal).is_ok())
-    };
-    if !x_all_ordinals(db, pool, &title) {
-        return Some(Off::Titles);
-    }
-    x_ambiguity_refusal(db, pool).or_else(|| x_taxonomy_refusal(database, taxids))
-}
-
-/// EXPERIMENT (LOSAT_X_RPTSTREAM): `x_streaming_refusal` of a database with parsed Seq-ids: with at
-/// most `max_sequences` sequences, its headers read and checked as the reports `shown` read and
-/// check them (`shared::reports_may_refuse`, line DBID: the header, the stored title, the tabular
-/// id, the parsed Seq-ids, two sequences that outfmt 0 would join, `Off::Joined`, and with `taxids`
-/// the prefetch's taxids and their lookups), then the ambiguity data as `x_streaming_refusal` reads
-/// them.
-fn x_parsed_refusal(
-    database: &BlastnDatabase,
-    shown: ParsedShown,
-    taxids: bool,
-    pool: &SearchPool<'_>,
-    max_sequences: u32,
-) -> Option<super::x_rpt_stream::Off> {
-    use super::x_rpt_stream::Off;
-    let db = &database.db;
-    if db.printed_num_seqs() > max_sequences {
-        return Some(Off::LargeParsed);
-    }
-    let refusal = shared::reports_may_refuse(
-        db,
-        shown,
-        false,
-        database.taxdb_found(),
-        taxids,
-        pool,
-        PROGRAM,
-    );
-    match refusal {
-        Some(shared::ReportRefusal::Headers) => Some(Off::Titles),
-        Some(shared::ReportRefusal::Joined) => Some(Off::Joined),
-        Some(shared::ReportRefusal::Taxonomy) => Some(Off::Taxonomy),
-        None => x_ambiguity_refusal(db, pool),
-    }
-}
-
-/// EXPERIMENT (LOSAT_X_RPTSTREAM): whether `allowed` holds for every ordinal id of `db`, asked in
-/// `pool`.
-fn x_all_ordinals(
-    db: &SeqDb,
-    pool: &SearchPool<'_>,
-    allowed: &(dyn Fn(u32) -> bool + Sync),
-) -> bool {
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    if pool.enabled() {
-        return pool.install(|| {
-            (0..db.num_seqs())
-                .into_par_iter()
-                .with_min_len(4096)
-                .all(allowed)
-        });
-    }
-    let _ = pool;
-    (0..db.num_seqs()).all(allowed)
-}
-
-/// EXPERIMENT (LOSAT_X_RPTSTREAM): `Off::Ambiguity` of `x_streaming_refusal`: the ambiguity data
-/// of every sequence of `db` that has any, read in `pool` (in ranges with LOSAT_X_DBIDXREAD,
-/// `SeqDb::visit_ambiguity`; else `SeqDb::check_ambiguity` one sequence at a time).
-fn x_ambiguity_refusal(db: &SeqDb, pool: &SearchPool<'_>) -> Option<super::x_rpt_stream::Off> {
-    let decodes = if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
-        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
-        let decodes =
-            |range: &BlockRange| -> bool { db.visit_ambiguity(*range, |_, result| result.is_ok()) };
-        let all = || -> bool {
-            #[cfg(all(
-                feature = "parallel",
-                any(not(target_arch = "wasm32"), feature = "wasm-threads")
-            ))]
-            if pool.enabled() {
-                return pool.install(|| ranges.par_iter().all(decodes));
-            }
-            ranges.iter().all(decodes)
-        };
-        all()
-    } else {
-        x_all_ordinals(db, pool, &|ordinal| db.check_ambiguity(ordinal).is_ok())
-    };
-    (!decodes).then_some(super::x_rpt_stream::Off::Ambiguity)
-}
-
-/// EXPERIMENT (LOSAT_X_RPTSTREAM): `Off::Taxonomy` of `x_streaming_refusal`, asked with `taxids`
-/// only (`shared::taxdb_may_refuse` without the names, `false` without `taxdb.bti` on the search
-/// path).
-fn x_taxonomy_refusal(database: &BlastnDatabase, taxids: bool) -> Option<super::x_rpt_stream::Off> {
-    (taxids && shared::taxdb_may_refuse(&database.db, false))
-        .then_some(super::x_rpt_stream::Off::Taxonomy)
 }
 
 #[cfg(test)]
@@ -2304,118 +2103,6 @@ mod tests {
         assert_eq!(format!("{error}"), "refused 300");
     }
 
-    // EXPERIMENT (LOSAT_X_RPTSTREAM): each batch's reports are written when the loop takes it
-    // only when every definition line of the database reads and none is refused, and the
-    // ambiguity data of every sequence decode (`x_streaming_refusal`), at one thread and in a
-    // pool. (A path in the system's temporary directory: Unix spelling.)
-    #[cfg(unix)]
-    #[test]
-    fn streaming_needs_every_title_and_every_ambiguity_record_to_read() {
-        use super::super::x_rpt_stream::Off;
-        let refusal = |database: &BlastnDatabase| -> [Option<Off>; 2] {
-            [1, 4].map(|threads| {
-                crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
-                    Ok(x_streaming_refusal(
-                        database,
-                        parsed_shown(&[BlastnOutputFormat::Tabular]),
-                        false,
-                        pool,
-                    ))
-                })
-                .unwrap()
-            })
-        };
-        assert_eq!(refusal(&open("nucl_v4")), [None, None]);
-        assert_eq!(refusal(&open("nucl_mv")), [None, None]);
-        let dir = temp_dir("streamtitles");
-        // A header file that cannot be read (the fifth volume's): the batch that reads one of
-        // its titles fails where NCBI's does, after the reports of the batches before.
-        for entry in
-            std::fs::read_dir(fixture("nucl_mv.nal").trim_end_matches("nucl_mv.nal")).unwrap()
-        {
-            let path = entry.unwrap().path();
-            let name = path.file_name().unwrap().to_str().unwrap().to_string();
-            if name.starts_with("nucl_mv.") && name != "nucl_mv.04.nhr" {
-                std::fs::copy(&path, dir.join(&name)).unwrap();
-            }
-        }
-        let missing =
-            BlastnDatabase::open(dir.join("nucl_mv").to_str().unwrap(), &Default::default())
-                .unwrap();
-        assert_eq!(refusal(&missing), [Some(Off::Titles); 2]);
-        // A stored title with a byte outside ' ' ..= '~' (LOSAT's refusal when it is reported).
-        for ext in ["nin", "nsq"] {
-            std::fs::copy(fixture("nucl_v4") + "." + ext, dir.join(format!("b.{ext}"))).unwrap();
-        }
-        let mut header = std::fs::read(fixture("nucl_v4") + ".nhr").unwrap();
-        let at = header
-            .windows(13)
-            .position(|window| window == b"n02 length 41")
-            .expect("the title of n02");
-        header[at + 5] = 0xE9;
-        std::fs::write(dir.join("b.nhr"), header).unwrap();
-        let bad =
-            BlastnDatabase::open(dir.join("b").to_str().unwrap(), &Default::default()).unwrap();
-        assert_eq!(refusal(&bad), [Some(Off::Titles); 2]);
-        // The ambiguity count of each sequence with ambiguity data raised by one entry (the
-        // old format of n05 and the new format of n06): the traceback's decoding refuses it.
-        let clean = open("nucl_v4");
-        let volume = &clean.db.volumes()[0];
-        let num_oids = volume.num_oids();
-        let (seq_offsets, amb_offsets) = (
-            volume.index().sequence_offsets(0, num_oids).unwrap(),
-            volume.index().ambiguity_offsets(0, num_oids).unwrap(),
-        );
-        drop(clean);
-        for (ordinal, tag) in [(4u32, "c"), (5, "d")] {
-            let at = amb_offsets[ordinal as usize] as usize;
-            assert!(
-                at < seq_offsets[ordinal as usize + 1] as usize,
-                "n0{}",
-                ordinal + 1
-            );
-            for ext in ["nin", "nhr"] {
-                std::fs::copy(
-                    fixture("nucl_v4") + "." + ext,
-                    dir.join(format!("{tag}.{ext}")),
-                )
-                .unwrap();
-            }
-            let mut sequences = std::fs::read(fixture("nucl_v4") + ".nsq").unwrap();
-            let count = u32::from_be_bytes(sequences[at..at + 4].try_into().unwrap());
-            sequences[at..at + 4].copy_from_slice(&(count + 1).to_be_bytes());
-            std::fs::write(dir.join(format!("{tag}.nsq")), sequences).unwrap();
-            let corrupt =
-                BlastnDatabase::open(dir.join(tag).to_str().unwrap(), &Default::default()).unwrap();
-            let error = corrupt
-                .db
-                .check_ambiguity(ordinal)
-                .expect_err("the raised count");
-            assert!(
-                error
-                    .to_string()
-                    .contains("the ambiguity data are shorter than their count"),
-                "{error}"
-            );
-            // The traceback's read of the same sequence fails with the same error.
-            let block = corrupt.db.read_sequence(ordinal).unwrap();
-            assert_eq!(
-                block.nucleotide_blastna(0).unwrap_err().to_string(),
-                error.to_string()
-            );
-            assert_eq!(
-                refusal(&corrupt),
-                [Some(Off::Ambiguity); 2],
-                "n0{}",
-                ordinal + 1
-            );
-        }
-        // A sequence without ambiguity data reads nothing more (n01).
-        open("nucl_v4").db.check_ambiguity(0).unwrap();
-        drop((missing, bad));
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
     /// The fixture database `name` of `tests/db_search`, with the taxonomy database variant
     /// `taxdb` of `tests/seqdb/taxdb` (`None`: none) as `BLASTDB`, from the directory `cwd`.
     fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> BlastnDatabase {
@@ -2432,7 +2119,6 @@ mod tests {
                 db_len_total: db.total_length() as usize,
                 db_num_seqs: db.num_seqs() as usize,
             },
-            parsed: db.has_parsed_seqids().unwrap(),
             db,
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
@@ -2476,204 +2162,6 @@ mod tests {
             text(&database, &[hit_list(vec![(0, 1e-9), (1, 1e-8)], 2)]),
             ""
         );
-        std::fs::remove_dir_all(&cwd).unwrap();
-    }
-
-    // EXPERIMENT (LOSAT_X_RPTSTREAM), DBID item T: where the batches' prefetch reads the taxonomy
-    // database (`taxids`), each batch's reports are written when the loop takes it only when no
-    // lookup can be refused (`Off::Taxonomy`). `x16_ntaxid` (taxid 9606) with no taxonomy
-    // database, ones whose lookups cannot be refused (a wrong magic number is a message; a
-    // scientific name of 9606 that XML2 cannot write is not asked for by the prefetch) and one
-    // whose record of 9606 is (an empty `taxdb.btd`, `shared::taxdb_may_refuse`), at one thread
-    // and in a pool.
-    #[test]
-    fn streaming_with_the_prefetch_needs_lookups_that_cannot_be_refused() {
-        use super::super::x_rpt_stream::Off;
-        let cwd = temp_dir("streamtaxdb");
-        for (taxdb, refused) in [
-            (None, None),
-            (Some("good"), None),
-            (Some("bad_magic"), None),
-            (Some("high_bytes_utf8"), None),
-            (Some("btd_empty"), Some(Off::Taxonomy)),
-        ] {
-            let database = open_with_taxdb("x16_ntaxid", taxdb, &cwd);
-            for threads in [1, 4] {
-                crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
-                    let shown = parsed_shown(&[BlastnOutputFormat::Tabular]);
-                    assert_eq!(x_streaming_refusal(&database, shown, false, pool), None);
-                    assert_eq!(
-                        x_streaming_refusal(&database, shown, true, pool),
-                        refused,
-                        "{taxdb:?} threads {threads}"
-                    );
-                    Ok(())
-                })
-                .unwrap();
-            }
-        }
-        std::fs::remove_dir_all(&cwd).unwrap();
-    }
-
-    // Line DBID: a database with parsed Seq-ids streams where no report of its sequences can be
-    // refused (`x_streaming_refusal` with `shared::reports_may_refuse`), at one thread and in a
-    // pool: `nucl_v5` / `nucl_v4` in the tabular formats and outfmt 0; `njoined`, whose two
-    // volumes hold `gb|AF000040.1|` and `gb|AF000040|` (outfmt 0 joins their hits; the tabular
-    // formats do not); `nrefuse_v5`, whose `gi|777` NCBI's formatters do not find; with
-    // `taxdb.bti` found, a taxonomy record that LOSAT refuses (`btd_empty`) where the prefetch
-    // reads it, and an outfmt 0 title that NCBI makes from the taxonomy database.
-    #[test]
-    fn streaming_reads_a_database_with_parsed_seqids_as_its_reports() {
-        use super::super::x_rpt_stream::Off;
-        use crate::report::serial::SerialFormat;
-        use BlastnOutputFormat::{Archive, Pairwise, Sam, Seqalign, Tabular, TabularWithComments};
-        let cwd = temp_dir("streamparsed");
-        let sam = Sam(crate::report::sam::SamSpec::default());
-        for (name, taxdb, format, expected) in [
-            ("ids/nucl_v5", None, Tabular, None),
-            ("ids/nucl_v5", None, Pairwise, None),
-            ("ids/nucl_v5", None, sam, None),
-            // The Seq-annots and the archive write the Seq-align id alone: nothing to refuse.
-            (
-                "ids/nrefuse_v5",
-                None,
-                Seqalign(SerialFormat::AsnText),
-                None,
-            ),
-            ("ids/nrefuse_v5", None, Archive, None),
-            ("ids/nucl_v4", None, Pairwise, None),
-            ("ids/njoined", None, Tabular, None),
-            ("ids/njoined", None, Pairwise, Some(Off::Joined)),
-            ("ids/nrefuse_v5", None, Tabular, Some(Off::Titles)),
-            ("ids/nucl_v5", Some("good"), TabularWithComments, None),
-            ("ids/nucl_v5", Some("bad_magic"), Tabular, None),
-            (
-                "ids/nucl_v5",
-                Some("btd_empty"),
-                Tabular,
-                Some(Off::Taxonomy),
-            ),
-            (
-                "ids/nucl_v5",
-                Some("bad_magic"),
-                Pairwise,
-                Some(Off::Titles),
-            ),
-        ] {
-            let database = open_with_taxdb(name, taxdb, &cwd);
-            assert!(database.parsed, "{name}");
-            let prefetch = format.prefetches_subjects() && database.taxdb_found();
-            for threads in [1, 4] {
-                crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
-                    assert_eq!(
-                        x_streaming_refusal(&database, parsed_shown(&[format]), prefetch, pool),
-                        expected,
-                        "{name} {taxdb:?} {format:?} threads {threads}"
-                    );
-                    Ok(())
-                })
-                .unwrap();
-            }
-        }
-        std::fs::remove_dir_all(&cwd).unwrap();
-    }
-
-    // Line DBID: the check of a database with parsed Seq-ids reads at most `max_sequences`
-    // sequences (`shared::PARSED_CHECK_SEQUENCES_MAX`; a larger one keeps the reports after the
-    // loop, also where a taxid list leaves fewer: the walk decodes the excluded ones too),
-    // reads the stored titles of an alias's volumes without parsed Seq-ids as the reports read
-    // them, and reads the ambiguity data of every sequence: `nambig_v4`'s second sequence with
-    // its ambiguity count raised by one (the traceback's decoding refuses it), at one thread and
-    // in a pool. (A path in the system's temporary directory: Unix spelling.)
-    #[cfg(unix)]
-    #[test]
-    fn streaming_bounds_and_completes_the_check_of_parsed_seqids() {
-        use super::super::x_rpt_stream::Off;
-        let cwd = temp_dir("streamparsed2");
-        let tabular = parsed_shown(&[BlastnOutputFormat::Tabular]);
-        let pairwise = parsed_shown(&[BlastnOutputFormat::Pairwise]);
-        let refusal =
-            |database: &BlastnDatabase, shown: ParsedShown, max: u32| -> [Option<Off>; 2] {
-                [1, 4].map(|threads| {
-                    crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
-                        Ok(x_parsed_refusal(database, shown, false, pool, max))
-                    })
-                    .unwrap()
-                })
-            };
-        let nucl = open_with_taxdb("ids/nucl_v5", None, &cwd);
-        let count = nucl.db.num_seqs();
-        assert_eq!(refusal(&nucl, pairwise, count), [None; 2]);
-        assert_eq!(
-            refusal(&nucl, pairwise, count - 1),
-            [Some(Off::LargeParsed); 2]
-        );
-        let mut restricted = open_with_taxdb("ids/nucl_v5", None, &cwd);
-        restricted
-            .db
-            .restrict_taxids(&crate::seqdb::TaxidList::Positive(
-                [9606].into_iter().collect(),
-            ))
-            .unwrap();
-        let included = restricted.db.num_seqs();
-        assert!(included > 0 && included < count);
-        assert_eq!(refusal(&restricted, pairwise, count), [None; 2]);
-        assert_eq!(
-            refusal(&restricted, pairwise, count - 1),
-            [Some(Off::LargeParsed); 2]
-        );
-        let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-        for ext in ["nhr", "nin", "nsq"] {
-            std::fs::copy(
-                tests.join("seqdb/db/nucl_v4").with_extension(ext),
-                cwd.join(format!("stored.{ext}")),
-            )
-            .unwrap();
-        }
-        std::fs::write(
-            cwd.join("mixed.nal"),
-            format!(
-                "TITLE mixed\nDBLIST {} stored\n",
-                tests.join("db_search/ids/nucl_v4").display()
-            ),
-        )
-        .unwrap();
-        let mixed = open_with_taxdb(cwd.join("mixed").to_str().unwrap(), None, &cwd);
-        assert!(mixed.parsed);
-        for shown in [tabular, pairwise] {
-            assert_eq!(refusal(&mixed, shown, u32::MAX), [None; 2], "{shown:?}");
-        }
-        let fixture = tests.join("db_search/ids/nambig_v4");
-        assert_eq!(
-            refusal(
-                &open_with_taxdb("ids/nambig_v4", None, &cwd),
-                tabular,
-                u32::MAX
-            ),
-            [None; 2]
-        );
-        for ext in ["nhr", "nin", "nog", "nsd", "nsi"] {
-            std::fs::copy(fixture.with_extension(ext), cwd.join(format!("amb.{ext}"))).unwrap();
-        }
-        let mut sequences = std::fs::read(fixture.with_extension("nsq")).unwrap();
-        let clean = open_with_taxdb("ids/nambig_v4", None, &cwd);
-        let (at, next) = clean.db.volumes()[0]
-            .index()
-            .ambiguity_range(1)
-            .unwrap()
-            .unwrap();
-        let (at, next) = (at as usize, next as usize);
-        assert!(at < next, "the second sequence has ambiguity data");
-        let count = u32::from_be_bytes(sequences[at..at + 4].try_into().unwrap());
-        sequences[at..at + 4].copy_from_slice(&(count + 1).to_be_bytes());
-        std::fs::write(cwd.join("amb.nsq"), sequences).unwrap();
-        let ambiguity = open_with_taxdb(cwd.join("amb").to_str().unwrap(), None, &cwd);
-        assert!(ambiguity.parsed);
-        assert_eq!(
-            refusal(&ambiguity, tabular, u32::MAX),
-            [Some(Off::Ambiguity); 2]
-        );
-        drop((nucl, mixed, clean, ambiguity));
         std::fs::remove_dir_all(&cwd).unwrap();
     }
 }

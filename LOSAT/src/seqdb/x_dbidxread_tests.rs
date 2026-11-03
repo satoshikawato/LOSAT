@@ -275,11 +275,6 @@ fn blocks_read_alike() {
                 assert_eq!(format!("{a:?}"), format!("{b:?}"), "{name} {first}..{end}");
             }
             assert_eq!(
-                format!("{:?}", held.check_ambiguity(first, first)),
-                format!("{:?}", read.check_ambiguity(first, first)),
-                "{name} {first}"
-            );
-            assert_eq!(
                 held.header_bytes(first).unwrap(),
                 read.header_bytes(first).unwrap()
             );
@@ -524,64 +519,8 @@ fn database_ranges_cover_every_sequence_once() {
                     .map(|ordinal| (ordinal, db.deflines(ordinal).unwrap()))
                     .collect();
                 assert_eq!(titles, expected, "{name}");
-                let mut checked = Vec::new();
-                assert!(db.visit_ambiguity(*range, |ordinal, result| {
-                    checked.push((ordinal, result.is_ok()));
-                    true
-                }));
-                let expected: Vec<_> = (range.first_ordinal..range.end_ordinal())
-                    .map(|ordinal| (ordinal, db.check_ambiguity(ordinal).is_ok()))
-                    .collect();
-                assert_eq!(checked, expected, "{name}");
             }
             assert_eq!(next, db.num_seqs(), "{name}");
-        }
-    }
-}
-
-#[test]
-fn damaged_ambiguity_data_check_in_ranges_as_one_by_one() {
-    let dir = TempDir::new("ambiguity");
-    let base = copy_database("nucl_v4", &["nin", "nsq", "nhr"], &dir.0);
-    let nsq = base.with_extension("nsq");
-    let bytes = std::fs::read(&nsq).unwrap();
-    let clean = Volume::open_as(&base, SeqType::Nucleotide, XDbIdxRead::Off).unwrap();
-    let n = clean.num_oids();
-    let mut damages = Vec::new();
-    for oid in 0..n {
-        let (at, next) = clean.index().ambiguity_range(oid).unwrap().unwrap();
-        if at < next {
-            // The entry count raised by one, and the data cut off inside the sequence's data.
-            let mut damaged = bytes.clone();
-            damaged[at as usize + 3] = damaged[at as usize + 3].wrapping_add(1);
-            damages.push(damaged);
-            damages.push(bytes[..next as usize - 1].to_vec());
-        }
-    }
-    drop(clean);
-    assert!(damages.len() >= 2, "the fixture has ambiguity data");
-    for damaged in damages {
-        std::fs::write(&nsq, &damaged).unwrap();
-        let read = Volume::open_as(&base, SeqType::Nucleotide, XDbIdxRead::On).unwrap();
-        for (first, end) in [(0, n), (1, n), (0, 1), (n - 1, n)] {
-            let mut seen = Vec::new();
-            read.visit_ambiguity(first, end, 100 + first, &mut |oid, result| {
-                seen.push(format!(
-                    "{oid}: {:?}",
-                    result.map_err(|error| error.to_string())
-                ));
-                true
-            });
-            let expected: Vec<String> = (first..end)
-                .map(|oid| {
-                    format!(
-                        "{oid}: {:?}",
-                        read.check_ambiguity(oid, 100 + oid)
-                            .map_err(|error| error.to_string())
-                    )
-                })
-                .collect();
-            assert_eq!(seen, expected, "{first}..{end}");
         }
     }
 }

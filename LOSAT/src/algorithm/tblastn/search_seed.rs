@@ -599,12 +599,19 @@ pub(super) struct XSubjectSide {
 #[derive(Default)]
 struct XSubjectSlot {
     /// Whether the plan is kept (its bytes reserved within the limit), decided
-    /// by the first batch that reaches the subject (`XSubjectSide::keeps`).
-    kept: std::sync::OnceLock<bool>,
+    /// by the first batch that reaches the subject (`XSubjectSide::keeps`), and the subject's
+    /// length (`XSubjectSlot::KEPT` and the bits below it): the later batches do not read the
+    /// length of a `-db` sequence (`XSubjectSide::length`).
+    kept: std::sync::OnceLock<u32>,
     /// The kept plan, made by the first batch that reaches the subject, or
     /// `None` when it could not be prepared (every later use then makes its
     /// own).
     plan: std::sync::OnceLock<Option<std::sync::Arc<XSubjectPlan>>>,
+}
+
+impl XSubjectSlot {
+    /// The bit of `kept` that keeps the plan; a length (NCBI's `Int4`) is below it.
+    const KEPT: u32 = 1 << 31;
 }
 
 // No NCBI counterpart: the methods below keep, count and hand out the cached subject plans (a memo
@@ -738,12 +745,26 @@ impl XSubjectSide {
     /// (`x_scan_plan`; `x_lean_subject` reads the decision before a `-db`
     /// sequence is read for its units).
     fn keeps(&self, slot: &XSubjectSlot, length: usize) -> bool {
-        *slot.kept.get_or_init(|| {
+        let decided = slot.kept.get_or_init(|| {
             let kept = Self::reserve(&self.kept_bytes, Self::plan_bytes_of(length), self.limit);
             // The own side is recorded where a plan is kept or refused.
             crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", kept);
-            kept
-        })
+            // A `-db` sequence's length (NCBI's `Int4`) is below the bit; a longer record's is
+            // kept saturated (`length` reads `-db` sequences only).
+            let length = u32::try_from(length)
+                .unwrap_or(u32::MAX)
+                .min(XSubjectSlot::KEPT - 1);
+            length | if kept { XSubjectSlot::KEPT } else { 0 }
+        });
+        decided & XSubjectSlot::KEPT != 0
+    }
+
+    /// The length of subject `oid` that an earlier search of it gave `keeps` (none before), for
+    /// the search's genetic code and masking option: a `-db` sequence whose plan the side keeps
+    /// is not read again, not even for its length.
+    pub(super) fn length(&self, oid: usize, gencode: u8, mask_lowercase: bool) -> Option<usize> {
+        let decided = *self.slot(oid, gencode, mask_lowercase)?.kept.get()?;
+        Some((decided & !XSubjectSlot::KEPT) as usize)
     }
 
     /// True when the plans of subjects of these lengths are all kept: a plan
@@ -988,7 +1009,7 @@ pub(super) fn x_scan_plan(
         match subject {
             // The plan is made from the sequence's bytes, read
             // for it (a database sequence has no lower-case letters).
-            XPrelimSubject::Stream(stream, oid) => stream.with_block(oid, |sequence| {
+            XPrelimSubject::Stream(stream, oid, _) => stream.with_block(oid, |sequence| {
                 super::x_subject_translate::x_packed_bytes_plan(
                     sequence.packed(),
                     sequence.len(),
@@ -2695,6 +2716,35 @@ mod tests {
         assert_eq!(side.kept_bytes(), 0);
         assert_eq!(slot.plan.get().map(Option::is_none), Some(true));
         assert!(side.plan(slot, 30_000, failing).is_err());
+    }
+
+    // No NCBI counterpart: test of the length a side keeps for a `-db` sequence; it does not
+    // change any value NCBI computes.
+    // The first `keeps` of a subject keeps its length with the decision, kept or refused, for the
+    // search's genetic code and masking option only; a longer record's is saturated.
+    #[test]
+    fn x_side_keeps_the_length_of_its_decision() {
+        let side = XSubjectSide::new(3, 1, false);
+        assert_eq!(side.length(0, 1, false), None);
+        assert!(side.keeps(side.slot(0, 1, false).unwrap(), 30_000));
+        assert_eq!(side.length(0, 1, false), Some(30_000));
+        assert_eq!(side.length(0, 2, false), None);
+        assert_eq!(side.length(0, 1, true), None);
+        // Refused (over the limit): the length is kept all the same; a later `keeps` keeps the
+        // first decision and length.
+        let length = XSubjectSide::KEEP_LIMIT;
+        assert!(!side.keeps(side.slot(1, 1, false).unwrap(), length));
+        assert_eq!(side.length(1, 1, false), Some(length));
+        assert!(!side.keeps(side.slot(1, 1, false).unwrap(), 10));
+        assert_eq!(side.length(1, 1, false), Some(length));
+        assert!(side.keeps(side.slot(0, 1, false).unwrap(), 10));
+        assert_eq!(side.length(0, 1, false), Some(30_000));
+        let longest = i32::MAX as usize;
+        side.keeps(side.slot(2, 1, false).unwrap(), longest);
+        assert_eq!(side.length(2, 1, false), Some(longest));
+        let side = XSubjectSide::new(1, 1, false);
+        side.keeps(side.slot(0, 1, false).unwrap(), usize::MAX);
+        assert_eq!(side.length(0, 1, false), Some(longest));
     }
 
     // No NCBI counterpart: test of the size a subject's plan is charged before it is made; it does

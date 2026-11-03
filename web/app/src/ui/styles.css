@@ -426,6 +426,43 @@ input[type='radio'] {
   font-size: 0.92em;
 }
 
+/* Line WF-2: "Example" under the mode's sentence, a button per set with its in-place sentence. */
+.example-line {
+  /* The "?" help floats under the line (.help-tip .help). */
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0 0 10px;
+}
+
+.example-title {
+  font-weight: 600;
+}
+
+.example-sets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.example-sets li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.example-line > .error,
+.example-line > .muted {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 /* NCBI's blocks ("Enter Query Sequence", "Task Selection", the groups of "Algorithm
    parameters", the sections of the results): a white group with a visible edge, whose name is a
    grey-blue tab on its top edge in dark text (look B, DW-33). */
@@ -489,6 +526,22 @@ input[type='radio'] {
 .kind {
   color: var(--muted);
   font-size: 0.9em;
+}
+
+/* Line WF-1: "Fetch from NCBI" under a box of accessions. */
+.fetch-row {
+  /* The "?" help floats under the row (.help-tip .help). */
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 6px;
+}
+
+.entry-paste > .muted,
+.entry-paste > .error {
+  margin: 4px 0 0;
 }
 
 .subrange-title,
@@ -1056,6 +1109,13 @@ textarea {
 
 .parameter-form .param-control > input[inputmode='text'] {
   width: 12em;
+}
+
+/* "Additional options" holds a command line's options (DW-42), with its "?" beside it on a phone too. */
+.parameter-form .param-control > input.extra-options[type='text'] {
+  width: 36em;
+  max-width: calc(100% - 2.5em);
+  box-sizing: border-box;
 }
 
 .parameter-form .select-clip select {

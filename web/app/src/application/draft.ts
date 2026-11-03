@@ -11,16 +11,43 @@
 // change is the same revision from search to search (the engine then keeps it, R1).
 // Whether the engine reads a source is the engine's verdict (`checkInput`, the program's
 // `register`), shown with its message. Several sources of a role are one combined search
-// input, or separate searches (one run per source, started as a group).
-import { buildArgv, COMBINED_NAMES, PASTED_NAMES } from '../domain/argv';
+// input, or separate searches (one run per source, started as a group). A box of accessions
+// only is fetched when the user asks (fetchAccessions, line WF-1) and becomes a pasted text;
+// with "Fastest" (line WF-3), the first fetch of a kind races the sources (source-race.ts).
+// An Example (useExample, line WF-2) replaces both roles: its query becomes the query box's
+// text and its subject set the only subject source.
+import {
+  accessionLines,
+  FETCH_ACCESSION_LIMIT,
+  FETCH_BYTE_LIMIT,
+  FETCH_SOURCES,
+  servingSources,
+  sourceLabel,
+  sourceList,
+  unserved,
+  type FetchChoice,
+  type FetchSourceId,
+} from '../domain/accession';
+import { buildArgv, COMBINED_NAMES, PASTED_NAMES, splitOptions } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
-import { formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
-import { fastaParser, PROGRAMS, programById, type InputRole, type ProgramId } from '../domain/programs';
+import type { ExampleId } from '../domain/examples';
+import { formControlOf, formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
+import {
+  fastaParser,
+  PROGRAMS,
+  programById,
+  sequenceKind,
+  type InputRole,
+  type ProgramId,
+  type SequenceKind,
+} from '../domain/programs';
 import { REGION_FLAG, regionProblem, regionValue, type RegionText } from '../domain/region';
 import type { DataGateway } from '../ports/data';
 import type { EngineGateway, ProgramDescription } from '../ports/engine';
+import type { AccessionFetcher, FetchResult } from '../ports/fetch';
 import type { InputCheck } from '../ports/input-check';
 import type { EnqueueAllResult, SearchRequest } from './coordinator';
+import { SourceRace, type RaceStanding } from './source-race';
 import { Store } from './store';
 
 export type InputMode = 'combined' | 'separate';
@@ -42,6 +69,8 @@ export interface DraftSource {
   readonly size: number;
   /** The File of the source (pasted text is a File too); a source is indexed again from it. */
   readonly file: File;
+  /** The Example set whose copy the file is (useExample). */
+  readonly example?: ExampleId;
   readonly status: 'indexing' | 'ready' | 'failed';
   /** The FASTA reader kind of the index (running, failed or its record table), the program's for the role (TD-8). */
   readonly parser: FastaParserKind;
@@ -60,9 +89,21 @@ export interface DraftSource {
   readonly checkMs?: number;
 }
 
+/** The fetch of the paste box's accessions (fetchAccessions). */
+export type FetchState =
+  /** Waiting for the race of the sources ("Fastest"): no accession was sent yet. */
+  | { readonly state: 'racing' }
+  /** `done` of `total` accessions have come. */
+  | { readonly state: 'fetching'; readonly source: FetchSourceId; readonly done: number; readonly total: number }
+  | { readonly state: 'failed'; readonly message: string };
+
 export interface RoleDraft {
-  /** The text of the paste box; its source is the role's paste source. */
+  /**
+   * The text of the paste box; its source is the role's paste source. A text of accessions only
+   * has no source until it is fetched.
+   */
   readonly paste: string;
+  readonly fetch?: FetchState;
   /** The paste source first, then the files in the order they were added. */
   readonly sources: readonly DraftSource[];
   readonly mode: InputMode;
@@ -84,9 +125,15 @@ export interface DraftState {
   readonly subject: RoleDraft;
   /** The form's values of each program: what the user set, nothing else. */
   readonly values: Readonly<Record<ProgramId, FormValues>>;
+  /** The "Additional options" of each program, as typed: other options, as on a command line (`splitOptions`). */
+  readonly extra: Readonly<Record<ProgramId, string>>;
   /** The Job Title of the next runs, as typed ('' for none); never part of the argv. */
   readonly title: string;
   readonly threads: number | 'auto';
+  /** Where "Fetch" asks for accessions; the choice stays for the session. */
+  readonly fetchSource: FetchChoice;
+  /** What the race of the sources found for each kind (source-race.ts), kept for the tab. */
+  readonly race: Readonly<Partial<Record<SequenceKind, RaceStanding>>>;
   /** The engine's `describe` of the program, once it has arrived. */
   readonly description?: ProgramDescription;
   readonly descriptionError?: string;
@@ -103,6 +150,7 @@ export interface DraftDeps {
     'addSource' | 'indexSource' | 'reviseDataset' | 'checkInput' | 'previewSource'
   >;
   readonly enqueueAll: (requests: readonly SearchRequest[]) => Promise<EnqueueAllResult>;
+  readonly fetcher: AccessionFetcher;
   readonly now: () => number;
   /** Milliseconds of quiet before a pasted text is indexed and the argv is validated. */
   readonly debounceMs?: number;
@@ -133,11 +181,24 @@ export class SearchDraft {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly workers = new Map<string, () => void>();
   private readonly pending = new Set<Promise<unknown>>();
+  /** The running fetch of each role's accessions. */
+  private readonly fetches = new Map<InputRole, AbortController>();
+  private readonly race: SourceRace;
   /** The argv of the latest validation that the engine accepted (the prepare hint's argv). */
   private validArgv: readonly string[] | undefined;
   private nextKey = 1;
 
   constructor(private readonly deps: DraftDeps) {
+    this.race = new SourceRace({
+      fetcher: deps.fetcher,
+      now: deps.now,
+      onChange: (kind, standing) => {
+        const race = { ...this.state.get().race };
+        if (standing === undefined) delete race[kind];
+        else race[kind] = standing;
+        this.set({ race });
+      },
+    });
     const values = Object.fromEntries(PROGRAMS.map((program) => [program.id, Object.freeze({})])) as Record<
       ProgramId,
       FormValues
@@ -147,8 +208,11 @@ export class SearchDraft {
       query: emptyRole(),
       subject: emptyRole(),
       values,
+      extra: Object.fromEntries(PROGRAMS.map((program) => [program.id, ''])) as Record<ProgramId, string>,
       title: '',
       threads: 'auto',
+      fetchSource: 'fastest',
+      race: {},
       validation: { state: 'idle' },
       submitting: false,
     });
@@ -160,7 +224,12 @@ export class SearchDraft {
 
   setProgram(program: ProgramId): void {
     if (this.state.get().program === program) return;
+    const previous = programById(this.state.get().program);
     const next = programById(program);
+    for (const role of ROLES) {
+      // A fetch of the other kind's record would write it into the box.
+      if (sequenceKind(previous, role) !== sequenceKind(next, role)) this.cancelFetch(role);
+    }
     const description = this.described.get(program);
     this.set({ program, description, descriptionError: undefined, message: undefined });
     this.loadDescription(program);
@@ -202,6 +271,13 @@ export class SearchDraft {
     this.scheduleValidation();
   }
 
+  /** The program's "Additional options": words of other options, after the form's in the argv. */
+  setExtra(text: string): void {
+    const { program, extra } = this.state.get();
+    this.set({ extra: { ...extra, [program]: text }, message: undefined });
+    this.scheduleValidation();
+  }
+
   /** The Job Title of the runs that "Run LOSAT" makes next. */
   setTitle(title: string): void {
     this.set({ title, message: undefined });
@@ -220,10 +296,12 @@ export class SearchDraft {
    * after a pause in typing.
    */
   setPaste(role: InputRole, text: string): void {
+    // A newer text supersedes a fetch that is still running.
+    this.cancelFetch(role);
     this.updateRole(role, (draft) => ({ ...draft, paste: text }));
     this.set({ message: undefined });
-    if (text === '') {
-      this.removeSource(role, PASTE_KEY);
+    if (text === '' || accessionLines(text) !== undefined) {
+      this.dropSource(role, PASTE_KEY);
       return;
     }
     const file = new File([text], PASTED_NAMES[role], { type: 'text/plain' });
@@ -261,30 +339,176 @@ export class SearchDraft {
 
   /** Adds files; each is indexed at once (S12 instructions). */
   addFiles(role: InputRole, files: readonly File[]): void {
-    for (const file of files) {
-      const key = `file-${this.nextKey++}`;
-      const parser = this.parserOf(role);
-      this.updateRole(role, (draft) => ({
-        ...draft,
-        sources: [
-          ...draft.sources,
-          { key, origin: 'file', name: file.name, size: file.size, file, status: 'indexing', parser, excluded: [] },
-        ],
-      }));
-      this.track(this.index(role, key, file, parser));
-    }
+    for (const file of files) this.addFile(role, file, undefined);
     this.set({ message: undefined });
     this.scheduleValidation();
   }
 
+  private addFile(role: InputRole, file: File, example: ExampleId | undefined): void {
+    const key = `file-${this.nextKey++}`;
+    const parser = this.parserOf(role);
+    const source: DraftSource = {
+      key,
+      origin: 'file',
+      name: file.name,
+      size: file.size,
+      file,
+      ...(example === undefined ? {} : { example }),
+      status: 'indexing',
+      parser,
+      excluded: [],
+    };
+    this.updateRole(role, (draft) => ({ ...draft, sources: [...draft.sources, source] }));
+    this.track(this.index(role, key, file, parser));
+  }
+
   removeSource(role: InputRole, key: string): void {
+    this.dropSource(role, key);
+    if (key === PASTE_KEY) this.updateRole(role, (draft) => ({ ...draft, paste: '' }));
+  }
+
+  // --- Example sets (line WF-2) ------------------------------------------------------------
+
+  /**
+   * Replaces both roles with an Example (as "Use example sequence" does at EBI): `query`, its
+   * FASTA, becomes the query box's text, and `subject`, the copy of its set, the only subject
+   * source. The other sources and the regions go.
+   */
+  useExample(example: ExampleId, query: string, subject: File): void {
+    for (const role of ROLES) {
+      for (const source of this.role(role).sources) {
+        if (source.key !== PASTE_KEY) this.dropSource(role, source.key);
+      }
+      this.setRegion(role, undefined);
+    }
+    this.setPaste('subject', '');
+    this.setPaste('query', query);
+    this.addFile('subject', subject, example);
+    this.scheduleValidation();
+  }
+
+  /** Removes the sources made from an Example's copy, which was deleted and can no longer be read. */
+  dropExample(example: ExampleId): void {
+    for (const role of ROLES) {
+      for (const source of this.role(role).sources) {
+        if (source.example === example) this.dropSource(role, source.key);
+      }
+    }
+  }
+
+  // --- accessions (line WF-1) ---------------------------------------------------------------
+
+  /** The accessions of the role's paste box, when it holds accessions only. */
+  accessions(role: InputRole): readonly string[] | undefined {
+    return accessionLines(this.role(role).paste);
+  }
+
+  setFetchSource(source: FetchChoice): void {
+    this.set({ fetchSource: source });
+    for (const role of ROLES) {
+      if (this.role(role).fetch?.state === 'failed') this.updateRole(role, withoutFetch);
+    }
+  }
+
+  /**
+   * Fetches the FASTA of the paste box's accessions from the chosen source, one after another,
+   * and writes it into the box, which is then read as any pasted text. The user asks for it
+   * ("Fetch"); only the accessions are sent. With "Fastest", they go to the source that the
+   * race of the kind found first among those that serve them. An edit of the box drops the
+   * fetch; a failure leaves the box as it was and says why.
+   */
+  fetchAccessions(role: InputRole): void {
+    const accessions = this.accessions(role);
+    if (accessions === undefined) return;
+    const { fetchSource, program } = this.state.get();
+    this.cancelFetch(role);
+    const controller = new AbortController();
+    this.fetches.set(role, controller);
+    this.track(this.fetchAll(role, accessions, fetchSource, sequenceKind(programById(program), role), controller.signal));
+  }
+
+  private async fetchAll(
+    role: InputRole,
+    accessions: readonly string[],
+    choice: FetchChoice,
+    kind: SequenceKind,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const fail = (message: string) => {
+      if (!signal.aborted) this.updateRole(role, (draft) => ({ ...draft, fetch: { state: 'failed', message } }));
+    };
+    if (accessions.length > FETCH_ACCESSION_LIMIT) {
+      fail(`Fetch takes up to ${FETCH_ACCESSION_LIMIT} accessions at a time.`);
+      return;
+    }
+    // Before any request: an accession the source cannot serve stops the fetch without sending the others.
+    for (const accession of accessions) {
+      const reason = choice === 'fastest' ? undefined : unserved(choice, kind, accession);
+      if (reason !== undefined) {
+        fail(`${reason}: fetch ${accession} from ${sourceList(servingSources(kind, [accession]))}.`);
+        return;
+      }
+    }
+    let source: FetchSourceId;
+    if (choice === 'fastest') {
+      const eligible = servingSources(kind, accessions);
+      if (eligible.length === 0) {
+        const only = accessions
+          .map((accession) => ({ accession, sources: servingSources(kind, [accession]) }))
+          .filter((entry) => entry.sources.length < FETCH_SOURCES.length)
+          .map((entry) => `${entry.accession} only from ${sourceList(entry.sources)}`);
+        fail(`No one site has all of these accessions: ${only.join(', ')}.`);
+        return;
+      }
+      if (eligible.length === 1) {
+        // One site has them: nothing to race.
+        source = eligible[0]!;
+      } else {
+        this.updateRole(role, (draft) => ({ ...draft, fetch: { state: 'racing' } }));
+        try {
+          source = await this.race.fastest(kind, eligible, signal);
+        } catch (error) {
+          fail(`The race of the sites failed: ${messageOf(error)}`);
+          return;
+        }
+      }
+    } else {
+      source = choice;
+    }
+    const texts: string[] = [];
+    let bytes = 0;
+    for (const [done, accession] of accessions.entries()) {
+      this.updateRole(role, (draft) => ({ ...draft, fetch: { state: 'fetching', source, done, total: accessions.length } }));
+      let result: FetchResult;
+      try {
+        result = await this.deps.fetcher.fetch({ source, kind, accession, maxBytes: FETCH_BYTE_LIMIT - bytes }, signal);
+      } catch (error) {
+        fail(`${accession} could not be fetched from ${sourceLabel(source)}: ${messageOf(error)}`);
+        return;
+      }
+      if (signal.aborted) return;
+      if (!result.ok) {
+        fail(fetchProblem(result, source, kind, accession));
+        return;
+      }
+      texts.push(result.fasta);
+      bytes += new TextEncoder().encode(result.fasta).byteLength;
+    }
+    this.fetches.delete(role);
+    this.setPaste(role, texts.join(''));
+  }
+
+  private cancelFetch(role: InputRole): void {
+    this.fetches.get(role)?.abort();
+    this.fetches.delete(role);
+    if (this.role(role).fetch !== undefined) this.updateRole(role, withoutFetch);
+  }
+
+  /** Removes a source; the paste box keeps its text. */
+  private dropSource(role: InputRole, key: string): void {
     this.cancelTask(`${role}:${key}`);
     if (key === PASTE_KEY) this.cancelTask(`paste:${role}`);
-    this.updateRole(role, (draft) => ({
-      ...draft,
-      paste: key === PASTE_KEY ? '' : draft.paste,
-      sources: draft.sources.filter((source) => source.key !== key),
-    }));
+    this.updateRole(role, (draft) => ({ ...draft, sources: draft.sources.filter((source) => source.key !== key) }));
     this.set({ message: undefined });
     this.scheduleValidation();
   }
@@ -360,6 +584,23 @@ export class SearchDraft {
     return parameters;
   }
 
+  /**
+   * The words of the program's "Additional options". Throws on an unclosed quote, and on an
+   * option that the form sets (`formControlOf`) or a role's subrange, which are set there.
+   */
+  extraWords(): readonly string[] {
+    const { program, extra, description } = this.state.get();
+    const words = splitOptions(extra[program]);
+    for (const word of words) {
+      const flag = word.split('=', 1)[0]!;
+      const role = ROLES.find((r) => REGION_FLAG[r] === flag);
+      const control =
+        role === undefined ? formControlOf(programById(program), description?.parameters, flag) : `${role === 'query' ? 'Query' : 'Subject'} subrange`;
+      if (control !== undefined) throw new Error(`${flag} is set in the form: ${control}`);
+    }
+    return words;
+  }
+
   /** The name of the role's input in the argv of a combined search (plan §5.3). */
   inputName(role: InputRole): string {
     const sources = this.role(role).sources.filter((source) => source.status !== 'failed');
@@ -412,7 +653,17 @@ export class SearchDraft {
     }
   }
 
+  /** Resolves when the race requests have ended; idle does not wait for them, nor does Run (tests). */
+  async raceIdle(): Promise<void> {
+    await this.race.idle();
+  }
+
   private async prepareAndEnqueue(): Promise<EnqueueAllResult> {
+    // Run never fetches, nor waits for a fetch that is running (fetchAccessions).
+    for (const role of ROLES) {
+      const problem = this.accessionProblem(role);
+      if (problem !== undefined) return { ok: false, message: problem };
+    }
     await this.idle();
     const { program, threads, title } = this.state.get();
     for (const role of ROLES) {
@@ -422,6 +673,12 @@ export class SearchDraft {
     // Everything from one state, before any wait.
     const groups = { query: this.inputGroups('query'), subject: this.inputGroups('subject') };
     const parameters = this.parameters();
+    let extra: readonly string[];
+    try {
+      extra = this.extraWords();
+    } catch (error) {
+      return { ok: false, message: messageOf(error) };
+    }
     const resolved = {
       query: await Promise.all(groups.query.map((group) => this.resolveGroup(group))),
       subject: await Promise.all(groups.subject.map((group) => this.resolveGroup(group))),
@@ -434,6 +691,7 @@ export class SearchDraft {
           query: { dataset: query },
           subject: { dataset: subject },
           parameters,
+          ...(extra.length === 0 ? {} : { extra }),
           requestedThreads: threads,
           ...(title.trim() === '' ? {} : { title }),
         });
@@ -459,10 +717,24 @@ export class SearchDraft {
     return undefined;
   }
 
+  /** A box of accessions only, fetched or not yet: it is not searched. */
+  private accessionProblem(role: InputRole): string | undefined {
+    const accessions = accessionLines(this.role(role).paste);
+    if (accessions === undefined) return undefined;
+    const title = role === 'query' ? 'query' : 'subject';
+    const noun = accessions.length === 1 ? 'accession' : 'accessions';
+    const fetch = this.role(role).fetch?.state;
+    return fetch === 'fetching' || fetch === 'racing'
+      ? `The ${title} ${noun} ${accessions.length === 1 ? 'is' : 'are'} still being fetched.`
+      : `Fetch the ${title} ${noun} first.`;
+  }
+
   private problemOf(role: InputRole): { readonly message: string; readonly short: string } | undefined {
     const draft = this.role(role);
     const title = role === 'query' ? 'query' : 'subject';
     const label = role === 'query' ? 'Query' : 'Subject';
+    const accessions = this.accessionProblem(role);
+    if (accessions !== undefined) return { message: accessions, short: accessions };
     if (draft.sources.length === 0) {
       const message = `Add the ${title} sequences: paste them or open FASTA files.`;
       return { message, short: message };
@@ -674,6 +946,7 @@ export class SearchDraft {
         queryName: this.inputName('query'),
         subjectName: this.inputName('subject'),
         parameters: this.parameters(),
+        extra: this.extraWords(),
       });
     } catch (error) {
       this.set({ validation: { state: 'invalid', message: messageOf(error) } });
@@ -773,6 +1046,29 @@ export class SearchDraft {
       if (change[key] === undefined) delete next[key];
     }
     this.state.set(next as DraftState);
+  }
+}
+
+function withoutFetch(draft: RoleDraft): RoleDraft {
+  const next = { ...draft };
+  delete (next as { fetch?: unknown }).fetch;
+  return next;
+}
+
+/** Why a fetch brought no record, for the line under the box. */
+function fetchProblem(result: Exclude<FetchResult, { ok: true }>, source: FetchSourceId, kind: SequenceKind, accession: string): string {
+  const label = sourceLabel(source);
+  switch (result.reason) {
+    case 'not-found':
+      return `${label} has no ${kind} record ${accession}.`;
+    case 'too-large':
+      return `${accession} makes the fetched text larger than ${FETCH_BYTE_LIMIT / 1_000_000} MB: download it from ${label} and open it with "Open FASTA files…".`;
+    case 'unreachable':
+      return `${label} could not be reached (${result.detail}).`;
+    case 'refused':
+      return result.status === 429
+        ? `${label} asks to wait (too many requests): fetch again in a moment.`
+        : `${label} answered HTTP ${result.status} for ${accession}.`;
   }
 }
 

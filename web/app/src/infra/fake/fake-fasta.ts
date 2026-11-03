@@ -73,7 +73,7 @@ function angle(bytes: Uint8Array, at: number, end: number): number | undefined {
 
 function gapError(line: number): Error {
   return new Error(
-    `line ${line} is a gap line ('>?'), whose residues have no bytes in the input for LOSAT Web's index to locate; gap lines are not supported by LOSAT Web`,
+    `line ${line} is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser`,
   );
 }
 

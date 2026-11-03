@@ -8039,13 +8039,13 @@ fn run_local_formats(
     // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
     // database is read from files by the command line only.
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
+        anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
     // The counts file of `-window_masker_db` comes from the caller's counts source (LOSAT
     // Web's registered inputs); a caller that gives none has no file to read.
     if args.window_masker_db.is_some() && args.window_masker_counts.is_none() {
         anyhow::bail!(
-            "-window_masker_db (a WindowMasker counts file) is not supported by LOSAT Web yet"
+            "-window_masker_db (a WindowMasker counts file) is not supported in the browser yet"
         );
     }
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.

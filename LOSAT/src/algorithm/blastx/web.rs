@@ -17,7 +17,7 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
         .iter()
         .any(|key| key.split('=').next().unwrap_or(key) == "-db")
     {
-        bail!("-db (a database search) is not supported by LOSAT Web yet");
+        bail!("-db (a database search) is not supported in the browser yet");
     }
     if extra.iter().any(|key| {
         matches!(

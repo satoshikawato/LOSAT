@@ -5030,7 +5030,7 @@ fn read_cli_subjects(
 pub fn check_options(args: &BlastpArgs) -> Result<()> {
     // The host has no database files (`run_local_with`).
     if args.db.is_some() {
-        bail!("-db (a database search) is not supported by LOSAT Web yet");
+        bail!("-db (a database search) is not supported in the browser yet");
     }
     let resolved = args.resolve()?;
     validate_requested_blastp_support(&resolved)?;
@@ -5320,7 +5320,7 @@ pub(crate) fn run_local_with(
     // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
     // database is read from files by the command line only.
     if args.db.is_some() {
-        bail!("-db (a database search) is not supported by LOSAT Web yet");
+        bail!("-db (a database search) is not supported in the browser yet");
     }
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
     // cannot write, and a diagnostics stream that saves the messages.
@@ -11139,7 +11139,8 @@ fn run_resolved_in_pool(
         titles.check_reported_titles(&hit_lists)?;
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
         // (the formats that read a subject's Bioseq need its sequence found by its Seq-align
-        // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids).
+        // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids; 13 to 16 and
+        // the tables of taxonomy fields write their taxids).
         titles.check_parsed_reports(
             &hit_lists,
             format_plans
@@ -11152,6 +11153,11 @@ fn run_resolved_in_pool(
                         | BlastpReport::Xml
                         | BlastpReport::Xml2(_)
                 )
+            }),
+            format_plans.iter().any(|outfmt| match outfmt {
+                BlastpReport::Xml2(_) => true,
+                BlastpReport::CustomTabular(spec) => spec.needs().taxonomy,
+                _ => false,
             }),
         )?;
     }

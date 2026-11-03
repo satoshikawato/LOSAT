@@ -352,7 +352,7 @@ fn read_options(
 ) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
-        bail!("-db (a database search) is not supported by LOSAT Web yet");
+        bail!("-db (a database search) is not supported in the browser yet");
     }
     // NCBI parses -outfmt before its option handlers read the subjects (`native::run_inner`).
     let mut choices = Vec::with_capacity(outfmts.len());
@@ -362,13 +362,13 @@ fn read_options(
         // No NCBI counterpart: the formats of LOSAT Web (`docs/web/abi_v2.md`).
         if !matches!(choice.number, 0 | 6 | 7) {
             bail!(
-                "output format {} is not supported by LOSAT Web's BLASTX",
+                "output format {} is not supported in the browser for BLASTX",
                 choice.number
             );
         }
         if choice.custom() {
             bail!(
-                "a custom output format specification (fields or a delimiter) is not supported by LOSAT Web's BLASTX"
+                "a custom output format specification (fields or a delimiter) is not supported in the browser for BLASTX"
             );
         }
         choices.push(choice);
@@ -377,7 +377,7 @@ fn read_options(
     // The records keep no ids read from their deflines (the host registers them before it knows
     // the options).
     if args.parse_deflines {
-        bail!("-parse_deflines is not supported by LOSAT Web yet");
+        bail!("-parse_deflines is not supported in the browser yet");
     }
     // The options of each format: LOSAT's refusals now, NCBI's errors of the options after the
     // subjects are read (`native::run_inner`).

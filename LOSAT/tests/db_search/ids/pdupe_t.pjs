@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pdupe_t",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pdupe_t",
+  "number-of-letters": 220,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-03T18:01:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49620,
+  "bytes-to-cache": 318,
+  "files": [
+    "pdupe_t.pdb",
+    "pdupe_t.phr",
+    "pdupe_t.pin",
+    "pdupe_t.pog",
+    "pdupe_t.pos",
+    "pdupe_t.pot",
+    "pdupe_t.psq",
+    "pdupe_t.ptf",
+    "pdupe_t.pto"
+  ]
+}

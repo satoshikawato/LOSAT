@@ -3,6 +3,7 @@ import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import type { Attention } from '../application/attention';
 import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
+import type { ExampleLoader } from '../application/examples';
 import type { ResultsBrowser } from '../application/results';
 import { useStore } from './useStore';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
@@ -13,6 +14,7 @@ import StorageStatus from './StorageStatus.vue';
 const props = defineProps<{
   coordinator: Coordinator;
   draft: SearchDraft;
+  examples: ExampleLoader;
   results: ResultsBrowser;
   attention: Attention;
   usesFakeEngine: boolean;
@@ -67,7 +69,14 @@ onUnmounted(() => {
   <main class="layout">
     <section class="primary">
       <!-- The search form stays mounted, so the next search keeps its edits while results are viewed. -->
-      <SearchPanel v-show="tab === 'search'" :draft="draft" :attention="attention" :attention-state="attentionState" @submitted="openResults" />
+      <SearchPanel
+        v-show="tab === 'search'"
+        :draft="draft"
+        :examples="examples"
+        :attention="attention"
+        :attention-state="attentionState"
+        @submitted="openResults"
+      />
       <ResultsPanel
         v-if="tab === 'results'"
         ref="resultsPanel"

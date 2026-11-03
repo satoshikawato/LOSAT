@@ -10,15 +10,22 @@
 import { computed, ref, watch } from 'vue';
 import type { Attention, AttentionState } from '../application/attention';
 import type { SearchDraft } from '../application/draft';
+import type { ExampleLoader } from '../application/examples';
 import { effectiveValue, formParameters, placementFlags, sectionsAt } from '../domain/parameters';
 import { PROGRAMS, programById, searchSummaryParts, type InputRole } from '../domain/programs';
 import { useStore } from './useStore';
+import ExampleLine from './ExampleLine.vue';
 import HelpTip from './HelpTip.vue';
 import InputPanel from './InputPanel.vue';
 import ParameterField from './ParameterField.vue';
 import ParameterForm from './ParameterForm.vue';
 
-const props = defineProps<{ draft: SearchDraft; attention: Attention; attentionState: AttentionState }>();
+const props = defineProps<{
+  draft: SearchDraft;
+  examples: ExampleLoader;
+  attention: Attention;
+  attentionState: AttentionState;
+}>();
 /** A search was started: the ID of its first run (a group of separate searches starts several). */
 const emit = defineEmits<{ submitted: [runId: string] }>();
 const state = useStore(props.draft.state);
@@ -56,8 +63,15 @@ const describeState = computed(() => {
 });
 const taskFields = computed(() => sectionsAt(program.value, options.value, 'program').flatMap((section) => section.fields));
 const summaryParts = computed(() => searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value)));
-/** The Algorithm parameters that the argv writes: each differs from the engine's default. */
-const changed = computed(() => formParameters(program.value, values.value, options.value, 'algorithm').length);
+/**
+ * The Algorithm parameters that the argv writes: each differs from the engine's default; the
+ * words of "Additional options" count as one.
+ */
+const changed = computed(
+  () =>
+    formParameters(program.value, values.value, options.value, 'algorithm').length +
+    (state.value.extra[state.value.program].trim() === '' ? 0 : 1),
+);
 /**
  * "Algorithm parameters" starts closed, as on NCBI's page, unless one of its values is
  * written to the argv; a program whose values differ from the defaults opens it when it is
@@ -83,6 +97,7 @@ async function submit(from: 'top' | 'bottom'): Promise<void> {
 
 function restoreDefaults(): void {
   props.draft.resetFields(placementFlags(program.value, 'algorithm'));
+  props.draft.setExtra('');
 }
 
 function onThreads(event: Event): void {
@@ -114,6 +129,7 @@ function onThreads(event: Event): void {
       </label>
     </fieldset>
     <p class="program-summary" data-testid="program-summary">{{ program.summary }}</p>
+    <ExampleLine :examples="examples" :program="state.program" />
 
     <InputPanel v-for="role in roles" :key="role" :draft="draft" :state="state" :role="role" />
 

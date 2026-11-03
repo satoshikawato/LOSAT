@@ -154,6 +154,17 @@ describe('formParameters', () => {
     expect(formParameters(blastn, { '-task': 'blastn', '-evalue': '1' }, options, 'program')).toEqual([['-task', 'blastn']]);
   });
 
+  it('has NCBI\'s "Max matches in a query range" (-culling_limit) last in General Parameters of every program, which the engine describes', () => {
+    const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+    for (const program of PROGRAMS) {
+      const general = describedSections(program, toProgramDescription(described[program.id]).parameters).find(
+        (section) => section.title === 'General Parameters',
+      );
+      expect(general?.fields.at(-1), program.id).toMatchObject({ flag: '-culling_limit', label: 'Max matches in a query range', kind: 'text' });
+      expect(formParameters(program, { '-culling_limit': '2' }, undefined, 'algorithm'), program.id).toEqual([['-culling_limit', '2']]);
+    }
+  });
+
   it('has "Number of descriptions" and "Number of alignments" in Other Parameters of the four programs, writing -num_descriptions N and -num_alignments N', () => {
     for (const id of ['blastn', 'blastp', 'tblastn', 'tblastx'] as const) {
       const program = programById(id);

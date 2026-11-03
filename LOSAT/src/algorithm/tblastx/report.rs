@@ -1442,6 +1442,16 @@ impl TblastxOutputFormat {
         matches!(self, Self::Xml | Self::Xml2(_))
     }
 
+    /// Whether the format writes the subjects' taxids or their names: the XML2 and JSON
+    /// documents and a table of taxonomy fields (`TabularNeeds::taxonomy`).
+    pub(crate) fn writes_taxonomy(self) -> bool {
+        match self {
+            Self::Xml2(_) => true,
+            Self::CustomTabular(spec) => spec.needs().taxonomy,
+            _ => false,
+        }
+    }
+
     /// Whether the format writes a query's own warnings to standard error
     /// (`ReportFormat::writes_query_warnings`: not the structured formats).
     pub(crate) fn writes_query_warnings(self) -> bool {

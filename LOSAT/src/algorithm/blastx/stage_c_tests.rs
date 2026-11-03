@@ -518,6 +518,26 @@ fn unported_long_subject_chunking_is_rejected_before_search() {
     );
 }
 
+/// A batch without a valid Karlin-Altschul context is not searched, so it does not reach the
+/// subjects: NCBI writes its report, and LOSAT does not refuse a long subject for it.
+#[test]
+fn a_batch_that_is_not_searched_does_not_refuse_a_long_subject() {
+    let (_, _, o) = fixture("S06_seed.fna");
+    let record = |id: &str, sequence: Vec<u8>| FastaRecord {
+        internal_id: id.into(),
+        title: String::new(),
+        sequence,
+        lowercase_masks: Vec::new(),
+        warnings: Vec::new(),
+        source: None,
+    };
+    let query = record("Query_1", vec![b'N'; 300]);
+    let subject = record("Subject_1", vec![b'W'; 5_000_001]);
+    let stages = super::search::search_preliminary(&[query], &[subject], &o).unwrap();
+    assert_eq!(stages.len(), 1);
+    assert!(stages[0].chunks.is_empty());
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:233-239
 // ```c++
 //     for (index=0; index<(*seq_info)->GetNumSeqs(); ++index)

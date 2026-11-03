@@ -61,21 +61,13 @@ impl<'a> Subjects<'a> {
         }
     }
 
-    /// The number of bases of subject `oid`: a `-db` stream's read where the search reads the
-    /// sequence (`XDbStream::length`; a read that fails is an `XReadError`).
-    pub(crate) fn length(&self, oid: usize) -> Result<usize> {
-        match self {
-            Self::Stream(stream) => stream.length(oid),
-            _ => Ok(self.held_length(oid)),
-        }
-    }
-
-    /// The number of bases of subject `oid` of the subjects held in memory.
+    /// The number of bases of subject `oid` of the subjects held in memory (a `-db` stream reads
+    /// a sequence's length with the sequence, `x_preliminary_frames`).
     fn held_length(&self, oid: usize) -> usize {
         match self {
             Self::Fasta(records) => records[oid].seq().len(),
             Self::Stored(stores) => stores[oid].len(),
-            Self::Stream(_) => unreachable!("a -db stream reads its lengths (`length`)"),
+            Self::Stream(_) => unreachable!("a -db stream reads its lengths with its sequences"),
             Self::Unreadable => 0,
         }
     }
@@ -158,16 +150,21 @@ impl<'a> Subjects<'a> {
     // window by window in letter order from one `CRandom` seeded with the record's length, which
     // draws what `preliminary_subject_bases` draws; a stored sequence gives the bases of its
     // 2-bit codes (`bases_into`).
-    /// The frames the preliminary stage of subject `oid` translates, whether they are the frames
-    /// of its letters as well (true when it has no ambiguous base), and what the search keeps for
-    /// the frames of its letters (`x_letter_frames`). A read of a `-db` stream that fails is an
-    /// `XReadError`.
+    /// The number of bases of subject `oid`, the frames its preliminary stage translates, whether
+    /// they are the frames of its letters as well (true when it has no ambiguous base), and what
+    /// the search keeps for the frames of its letters (`x_letter_frames`); none (no frame made)
+    /// for a subject of fewer than `shortest` bases, which the search does not search. A `-db`
+    /// stream's length is read with the sequence, in the one look-up of its block. A read of a
+    /// `-db` stream that fails is an `XReadError`.
     pub(crate) fn x_preliminary_frames(
         &self,
         oid: usize,
         table: &GeneticCode,
-    ) -> Result<(Vec<QueryFrame>, bool, XKept)> {
+        shortest: usize,
+    ) -> Result<Option<XPreliminary>> {
         match self {
+            Self::Fasta(records) if records[oid].seq().len() < shortest => Ok(None),
+            Self::Stored(stores) if stores[oid].len() < shortest => Ok(None),
             Self::Fasta(records) => {
                 let letters = records[oid].seq();
                 let unambiguous = is_unambiguous(letters);
@@ -182,13 +179,14 @@ impl<'a> Subjects<'a> {
                         &mut |from, out| out.copy_from_slice(&letters[from..from + out.len()]),
                         table,
                     );
-                    return Ok((frames, true, None));
+                    return Ok(Some((letters.len(), frames, true, None)));
                 }
-                Ok((
+                Ok(Some((
+                    letters.len(),
                     x_resolved_record_frames(letters, table, by_table),
                     false,
                     None,
-                ))
+                )))
             }
             Self::Stored(stores) => {
                 let store = &stores[oid];
@@ -197,12 +195,21 @@ impl<'a> Subjects<'a> {
                     &mut |from, out| store.bases_into(from, out),
                     table,
                 );
-                Ok((frames, store.ambiguity_runs().is_empty(), None))
+                Ok(Some((
+                    store.len(),
+                    frames,
+                    store.ambiguity_runs().is_empty(),
+                    None,
+                )))
             }
             // A short sequence keeps its block until its letters' frames are made, when it has
             // ambiguous bases (a nested subject on this thread may take another block); a long one
             // is read again then, instead of being held through the search.
             Self::Stream(stream) => stream.with_block(oid, |sequence| {
+                let length = sequence.len();
+                if length < shortest {
+                    return Ok(None);
+                }
                 let block = match &sequence {
                     XSequence::Block { block, i, .. } => Some((Arc::clone(block), *i)),
                     XSequence::Store(_) => None,
@@ -215,7 +222,12 @@ impl<'a> Subjects<'a> {
                     );
                     (frames, view.ambiguity_runs().is_empty())
                 });
-                Ok((frames, of_letters, block.filter(|_| !of_letters)))
+                Ok(Some((
+                    length,
+                    frames,
+                    of_letters,
+                    block.filter(|_| !of_letters),
+                )))
             }),
             Self::Unreadable => unreachable!("an unreadable database has no subject to search"),
         }
@@ -272,6 +284,11 @@ impl<'a> Subjects<'a> {
         })
     }
 }
+
+/// What `Subjects::x_preliminary_frames` makes of a subject long enough to be searched: its
+/// number of bases, its preliminary frames, whether they are the frames of its letters, and what
+/// the search keeps for those (`XKept`).
+pub(crate) type XPreliminary = (usize, Vec<QueryFrame>, bool, XKept);
 
 /// What the search of a `-db` subject keeps from its preliminary frames to the frames of its
 /// letters (`Subjects::x_letter_frames`): the block that holds a short sequence with ambiguous
@@ -667,7 +684,10 @@ mod tests {
                     bases.map(|bases| generate_frames(bases, table)),
                 )
             });
-            let (frames, of_letters, kept) = subjects.x_preliminary_frames(oid, table).unwrap();
+            let (_, frames, of_letters, kept) = subjects
+                .x_preliminary_frames(oid, table, 0)
+                .unwrap()
+                .unwrap();
             assert_eq!(of_letters, preliminary.is_none(), "oid {oid}");
             assert_same(
                 &frames,
@@ -818,13 +838,14 @@ mod tests {
             let table = GeneticCode::from_id(id);
             for oid in 0..records.len() {
                 let what = format!("record {oid} code {id}");
-                assert_eq!(
-                    stored.length(oid).unwrap(),
-                    fasta.length(oid).unwrap(),
-                    "{what}"
-                );
-                let (frames, of_letters, _) = fasta.x_preliminary_frames(oid, &table).unwrap();
-                let (got, got_of_letters, _) = stored.x_preliminary_frames(oid, &table).unwrap();
+                let (length, frames, of_letters, _) =
+                    fasta.x_preliminary_frames(oid, &table, 0).unwrap().unwrap();
+                let (got_length, got, got_of_letters, _) = stored
+                    .x_preliminary_frames(oid, &table, 0)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(length, records[oid].seq().len(), "{what}");
+                assert_eq!(got_length, length, "{what}");
                 assert_eq!(got_of_letters, of_letters, "{what}");
                 assert_same(&got, &frames, &what);
                 assert_same(
@@ -878,10 +899,26 @@ mod tests {
                     let table = GeneticCode::from_id(id);
                     check(streamed, &table);
                     for oid in 0..copy.len() {
-                        let (frames, of_letters, kept) =
-                            streamed.x_preliminary_frames(oid, &table).unwrap();
-                        let (want, want_of_letters, _) =
-                            stored.x_preliminary_frames(oid, &table).unwrap();
+                        let (length, frames, of_letters, kept) = streamed
+                            .x_preliminary_frames(oid, &table, 0)
+                            .unwrap()
+                            .unwrap();
+                        let (want_length, want, want_of_letters, _) = stored
+                            .x_preliminary_frames(oid, &table, 0)
+                            .unwrap()
+                            .unwrap();
+                        assert_eq!(length, copy[oid].len(), "{name} {oid}");
+                        assert_eq!(want_length, length, "{name} {oid}");
+                        // A subject shorter than `shortest` gets no frame, with either side.
+                        for subjects in [streamed, stored] {
+                            let at = |shortest| {
+                                subjects
+                                    .x_preliminary_frames(oid, &table, shortest)
+                                    .unwrap()
+                                    .is_some()
+                            };
+                            assert!(at(length) && !at(length + 1), "{name} {oid}");
+                        }
                         assert_eq!(of_letters, want_of_letters, "{name} {oid}");
                         assert_same(&frames, &want, "preliminary");
                         let want = stored.x_letter_frames(oid, &table, None).unwrap();
@@ -923,7 +960,7 @@ mod tests {
         let subjects = Subjects::Stream(&stream);
         for oid in 0..count {
             let failing = oid == smallest || oid == last;
-            let preliminary = subjects.x_preliminary_frames(oid, &table);
+            let preliminary = subjects.x_preliminary_frames(oid, &table, 0);
             let letters = subjects.x_letter_frames(oid, &table, None);
             for error in [preliminary.err(), letters.err()] {
                 assert_eq!(error.is_some(), failing, "{oid}");
@@ -953,7 +990,7 @@ mod tests {
                         if failure.skips(oid) {
                             continue;
                         }
-                        match subjects.x_preliminary_frames(oid, &table) {
+                        match subjects.x_preliminary_frames(oid, &table, 0) {
                             Ok(_) => searched.lock().unwrap().push(oid),
                             Err(error) => failure.fail(oid, error),
                         }

@@ -5087,24 +5087,6 @@ fn search_query_batch<S: TbxScore>(
             emit_subject_hits(st, s_idx);
             return;
         }
-        // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
-        // return word_length * 3 + 2;
-        // if (subject->length < min_subj_seq_length) { ... continue; }
-        // Statistics include all records, including ones too short to search. A `-db` sequence's
-        // length is read with its block (`XDbStream::length`), which its frames use below; a read
-        // that fails ends the subject as a read of its frames does.
-        let s_len = match subjects.length(s_idx) {
-            Ok(length) => length,
-            Err(error) => {
-                x_read_failure.fail(s_idx, error);
-                emit_subject_hits(st, s_idx);
-                return;
-            }
-        };
-        if s_len < (wordsize * 3 + 2) as usize {
-            emit_subject_hits(st, s_idx);
-            return;
-        }
         // NCBI: Creates ewp (diagonal table) ONCE per SUBJECT via BlastExtendWordNew
         // (blast_engine.c:1002). Each subject sequence gets a fresh diagonal array.
         // Reference: blast_extend.c:109-180 (BlastExtendWordNew) allocates with calloc,
@@ -5138,15 +5120,28 @@ fn search_query_batch<S: TbxScore>(
         // `-db`: the block of a short sequence with ambiguous bases, kept for the frames of its
         // letters (`Subjects::x_letter_frames`).
         let mut x_kept = None;
+        // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
+        // return word_length * 3 + 2;
+        // if (subject->length < min_subj_seq_length) { ... continue; }
+        // Statistics include all records, including ones too short to search: such a subject
+        // gets no frame and leaves here. A `-db` sequence's length is read with its block, in the
+        // frames' one look-up (it holds no length per sequence).
+        let s_len;
         let (s_frames, s_frames_preliminary_owned) = {
-            let (frames, of_letters, kept) = match subjects.x_preliminary_frames(s_idx, &db_code) {
-                Ok(made) => made,
-                Err(error) => {
-                    x_read_failure.fail(s_idx, error);
-                    emit_subject_hits(st, s_idx);
-                    return;
-                }
-            };
+            let (length, frames, of_letters, kept) =
+                match subjects.x_preliminary_frames(s_idx, &db_code, (wordsize * 3 + 2) as usize) {
+                    Ok(Some(made)) => made,
+                    Ok(None) => {
+                        emit_subject_hits(st, s_idx);
+                        return;
+                    }
+                    Err(error) => {
+                        x_read_failure.fail(s_idx, error);
+                        emit_subject_hits(st, s_idx);
+                        return;
+                    }
+                };
+            s_len = length;
             x_kept = kept;
             if of_letters {
                 (frames, None)

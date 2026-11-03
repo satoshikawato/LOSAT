@@ -841,18 +841,13 @@ fn shown_query_masks(
     query_length: usize,
     offset: usize,
 ) -> Vec<(i8, Vec<(i32, i32)>)> {
-    let target = (offset as i32, (offset + query_length) as i32 - 1);
     masks
         .into_iter()
         .map(|(frame, ranges)| {
             let shown = ranges
                 .into_iter()
                 .filter_map(|(from, to)| {
-                    if from > to || from > target.1 || from + target.0 > target.1 {
-                        return None;
-                    }
-                    let mapped = (target.0 + from, (target.0 + to).min(target.1));
-                    (mapped != target).then_some(mapped)
+                    crate::blastinput::seq_range::record_mask(from, to, query_length, offset)
                 })
                 .collect();
             (frame, shown)
@@ -1445,6 +1440,16 @@ impl TblastxOutputFormat {
     /// are made from the same records and refuse the same names.
     pub(crate) fn is_structured_xml(self) -> bool {
         matches!(self, Self::Xml | Self::Xml2(_))
+    }
+
+    /// Whether the format writes the subjects' taxids or their names: the XML2 and JSON
+    /// documents and a table of taxonomy fields (`TabularNeeds::taxonomy`).
+    pub(crate) fn writes_taxonomy(self) -> bool {
+        match self {
+            Self::Xml2(_) => true,
+            Self::CustomTabular(spec) => spec.needs().taxonomy,
+            _ => false,
+        }
     }
 
     /// Whether the format writes a query's own warnings to standard error

@@ -339,6 +339,10 @@ pub mod kappa;
 // The redo-stage subject SEG memoised per subject.
 mod x_seg_memo;
 
+// `-lcase_masking`: the word scan of a `-subject` with lower-case letters over its scan ranges,
+// and its lower case in the outfmt 0 rows.
+mod x_soft_subject;
+
 // Diagnostic (LOSAT_TIMING): the stage times of a BLASTX run. No NCBI counterpart.
 mod x_timing;
 

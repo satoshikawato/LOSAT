@@ -2529,13 +2529,7 @@ impl SeqDb {
                     if !filter.contains(start + oid) {
                         continue;
                     }
-                    let length = match self.seqtype {
-                        SeqType::Protein => i64::from(seq[i + 1]) - i64::from(seq[i]) - 1,
-                        SeqType::Nucleotide => {
-                            4 * (i64::from(amb[i]) - i64::from(seq[i]) - 1) + i64::from(oid & 3)
-                        }
-                    };
-                    let length = u32::try_from(length.max(0)).unwrap_or(u32::MAX);
+                    let length = approx_length(self.seqtype, &seq, &amb, i, oid);
                     total += u64::from(length);
                     longest = longest.max(length);
                     shortest = shortest.min(length);
@@ -2545,6 +2539,57 @@ impl SeqDb {
         }
         Ok((total, longest, shortest))
     }
+
+    // No NCBI counterpart: NCBI's database reader hands its search threads chunks of sequences
+    // whose exact lengths it reads from the mapped files (`CSeqDBImpl::x_FillSeqBuffer`); LOSAT
+    // cuts its chunks before the search from these lengths (`scan_totals`' NCBI lengths), without
+    // a read of the sequence file. Scheduling only.
+    /// Calls `visit` with the length of every sequence in ordinal order as `scan_totals` reads it
+    /// (NCBI's `GetSeqLengthApprox` for a nucleotide, from the index alone), `SCAN_WINDOW` index
+    /// entries at a time: the chunks of TBLASTN's `-db` search (`XDbStream::x_approx_lengths`,
+    /// `x_kept_cut`). An error of the index ends the visit; the sequences before it were visited.
+    pub fn x_approx_lengths(&self, mut visit: impl FnMut(u32)) -> Result<(), SeqDbError> {
+        for (at, volume) in self.volumes.iter().enumerate() {
+            let start = self.volume_starts[at];
+            let mut first = 0;
+            while first < volume.num_oids() {
+                let end = volume.num_oids().min(first.saturating_add(SCAN_WINDOW));
+                if let Some(filter) = &self.filter {
+                    if filter.rank(start + end) == filter.rank(start + first) {
+                        first = end;
+                        continue;
+                    }
+                }
+                let index = volume.index();
+                let seq = index.sequence_offsets(first, end)?;
+                let amb = index.ambiguity_offsets(first, end)?;
+                for i in 0..(end - first) as usize {
+                    let oid = first + i as u32;
+                    if self
+                        .filter
+                        .as_ref()
+                        .is_some_and(|filter| !filter.contains(start + oid))
+                    {
+                        continue;
+                    }
+                    visit(approx_length(self.seqtype, &seq, &amb, i, oid));
+                }
+                first = end;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The length of sequence `i` of a window of the index (`seq`, `amb`: its sequence and
+/// ambiguity offsets; `oid`: its volume-relative OID) as NCBI's scan reads it: exact for a
+/// protein, `GetSeqLengthApprox` for a nucleotide (`scan_totals`).
+fn approx_length(seqtype: SeqType, seq: &[u32], amb: &[u32], i: usize, oid: u32) -> u32 {
+    let length = match seqtype {
+        SeqType::Protein => i64::from(seq[i + 1]) - i64::from(seq[i]) - 1,
+        SeqType::Nucleotide => 4 * (i64::from(amb[i]) - i64::from(seq[i]) - 1) + i64::from(oid & 3),
+    };
+    u32::try_from(length.max(0)).unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]
@@ -2689,13 +2734,32 @@ mod tests {
             assert_eq!(db.total_length(), lengths, "{line}");
             let mut first = 0;
             let mut seen = Vec::new();
+            let mut listed = Vec::new();
             while let Some(range) = db.next_block(first, 1 << 20) {
+                listed.push(range);
                 for at in range.first..range.end {
                     seen.push(db.volume_starts[range.volume] + at);
                 }
                 first = range.end_ordinal();
             }
             assert_eq!(seen, want, "{line}: blocks");
+            // LOSAT_X_BNDBSMALL: listed in runs, the blocks are the same (cut at excluded OIDs).
+            assert_eq!(db.x_next_blocks(0, 1 << 20, usize::MAX), listed, "{line}");
+            for max_bytes in [0, 1, 100] {
+                let mut first = 0;
+                let mut listed = Vec::new();
+                while let Some(range) = db.next_block(first, max_bytes) {
+                    listed.push(range);
+                    first = range.end_ordinal();
+                }
+                for entries in [1, 2, 1 << 14] {
+                    assert_eq!(
+                        db.x_next_blocks_in(0, max_bytes, usize::MAX, entries),
+                        listed,
+                        "{line} within {max_bytes}, runs of {entries}"
+                    );
+                }
+            }
             checked += 1;
         }
         assert!(checked >= 30, "{checked}");

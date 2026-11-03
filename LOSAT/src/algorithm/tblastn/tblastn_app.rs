@@ -725,7 +725,7 @@ pub fn run_local(
 ) -> Result<()> {
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
+        anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
     // cannot write, and a diagnostics stream that saves the messages. The records' deflines are
@@ -934,7 +934,7 @@ fn search(
     } else {
         0
     };
-    app::check_unsupported_environment("TBLASTN")?;
+    app::check_search_environment("TBLASTN", database.is_none(), outputs.only_archive())?;
     app::check_old_fsc("TBLASTN")?;
     app::check_query_split_environment("TBLASTN", false)??;
     let subjects = subject_records;
@@ -1677,8 +1677,9 @@ fn search(
 
 /// What the reports `formats` show of the reported database sequences, for LOSAT's refusals of
 /// those with parsed Seq-ids (`common::database::ParsedShown`): the tabular formats (6, 7, 10,
-/// 20), outfmt 0, and the formats that join the alignments of following hits whose Seq-align
-/// ids match (0, 5, 13 to 16).
+/// 20), outfmt 0, the formats that join the alignments of following hits whose Seq-align
+/// ids match (0, 5, 13 to 16), and those that write the sequences' taxids (13 to 16, the
+/// tabular reports of taxonomy fields).
 fn parsed_shown(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
 ) -> crate::algorithm::common::database::ParsedShown {
@@ -1697,6 +1698,11 @@ fn parsed_shown(
                 .iter()
                 .any(|format| super::stage_e_report::is_structured_xml(&format.outfmt)),
         sam: false,
+        taxonomy: formats.iter().any(|format| {
+            super::stage_e_report::xml2_kind(&format.outfmt).is_some()
+                || super::tabular::tabular_spec(&format.outfmt)
+                    .is_some_and(|spec| spec.needs().taxonomy)
+        }),
     }
 }
 

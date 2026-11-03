@@ -48,9 +48,22 @@ export class FakeEngine implements EngineGateway {
     return toProgramDescription(json);
   }
 
+  /**
+   * Refuses an unknown program, and a word that is neither an option of the program's
+   * `describe` nor the value of the option before it, with the CLI's message; the engine's
+   * other checks are not imitated.
+   */
   async validate(argv: readonly string[]): Promise<ValidationResult> {
     const program = argv[0];
     if (!PROGRAMS.some((p) => p.id === program)) return { ok: false, message: `unknown program: ${program}` };
+    const { parameters } = await this.describe(program as ProgramId);
+    for (let i = 1; i < argv.length; i++) {
+      const word = argv[i]!;
+      const [flag, value] = word.split(/=(.*)/s, 2);
+      const option = parameters.find((p) => p.flag === flag);
+      if (option === undefined) return { ok: false, message: `error: unknown option or argument '${word}'; use -help for CLI v2 syntax` };
+      if (option.takesValue && value === undefined) i++;
+    }
     return { ok: true };
   }
 
@@ -79,7 +92,7 @@ export class FakeEngine implements EngineGateway {
   private register(request: EngineRunRequest): void {
     for (const role of ['query', 'subject'] as const) {
       const input = request[role];
-      const mismatch = recordMismatch(input.records, fakeRecordKeys(input.bytes));
+      const mismatch = recordMismatch(input.records, fakeRecordKeys(input.bytes, programOf(request), role));
       if (mismatch !== undefined) throw new InputMismatchError(role, mismatch);
     }
   }
@@ -94,8 +107,8 @@ export class FakeEngine implements EngineGateway {
   private writeOutputs(request: EngineRunRequest, writer: RunOutputWriter): void {
     const encoder = new TextEncoder();
     const program = request.argv[0] ?? '';
-    const queries = fakeRecordKeys(request.query.bytes).slice(0, 200);
-    const subjects = fakeRecordKeys(request.subject.bytes).slice(0, 3);
+    const queries = fakeRecordKeys(request.query.bytes, programOf(request), 'query').slice(0, 200);
+    const subjects = fakeRecordKeys(request.subject.bytes, programOf(request), 'subject').slice(0, 3);
     const nucleotide = { query: ['blastn', 'blastx', 'tblastx'].includes(program), subject: ['blastn', 'tblastn', 'tblastx'].includes(program) };
     const translated = { query: program === 'blastx' || program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
     let out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;
@@ -171,4 +184,9 @@ export class FakeEngine implements EngineGateway {
   private pause(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, this.phaseDelayMs));
   }
+}
+
+/** The program of a run: the first word of its argv. */
+function programOf(request: EngineRunRequest): ProgramId {
+  return request.argv[0] as ProgramId;
 }

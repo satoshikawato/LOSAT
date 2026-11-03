@@ -3,21 +3,29 @@
 // §1): the mode tabs and sentence, "Enter Query Sequence", "Enter Subject Sequence",
 // "Task Selection" (NCBI's "Program Selection"), the "Run LOSAT" button (NCBI's BLAST button) with the line that says
 // what it searches, and "Algorithm parameters", which opens and closes, with a second button
-// below it. LOSAT's own controls (threads, keep the screen on) are under the first button, with
+// below it. LOSAT's own controls (threads, keep searching while away) are under the first button, with
 // the engine's refusal of the options when there is one. "Run LOSAT" starts the search and the
 // page goes to its results (`submitted`), as NCBI's BLAST button does. Explanatory copy follows
 // stop-describing-ui (Owner, 2026-11-02): NCBI's sentences stay, LOSAT's explanations go.
 import { computed, ref, watch } from 'vue';
 import type { Attention, AttentionState } from '../application/attention';
 import type { SearchDraft } from '../application/draft';
+import type { ExampleLoader } from '../application/examples';
 import { effectiveValue, formParameters, placementFlags, sectionsAt } from '../domain/parameters';
 import { PROGRAMS, programById, searchSummaryParts, type InputRole } from '../domain/programs';
 import { useStore } from './useStore';
+import ExampleLine from './ExampleLine.vue';
+import HelpTip from './HelpTip.vue';
 import InputPanel from './InputPanel.vue';
 import ParameterField from './ParameterField.vue';
 import ParameterForm from './ParameterForm.vue';
 
-const props = defineProps<{ draft: SearchDraft; attention: Attention; attentionState: AttentionState }>();
+const props = defineProps<{
+  draft: SearchDraft;
+  examples: ExampleLoader;
+  attention: Attention;
+  attentionState: AttentionState;
+}>();
 /** A search was started: the ID of its first run (a group of separate searches starts several). */
 const emit = defineEmits<{ submitted: [runId: string] }>();
 const state = useStore(props.draft.state);
@@ -55,8 +63,15 @@ const describeState = computed(() => {
 });
 const taskFields = computed(() => sectionsAt(program.value, options.value, 'program').flatMap((section) => section.fields));
 const summaryParts = computed(() => searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value)));
-/** The Algorithm parameters that the argv writes: each differs from the engine's default. */
-const changed = computed(() => formParameters(program.value, values.value, options.value, 'algorithm').length);
+/**
+ * The Algorithm parameters that the argv writes: each differs from the engine's default; the
+ * words of "Additional options" count as one.
+ */
+const changed = computed(
+  () =>
+    formParameters(program.value, values.value, options.value, 'algorithm').length +
+    (state.value.extra[state.value.program].trim() === '' ? 0 : 1),
+);
 /**
  * "Algorithm parameters" starts closed, as on NCBI's page, unless one of its values is
  * written to the argv; a program whose values differ from the defaults opens it when it is
@@ -82,6 +97,7 @@ async function submit(from: 'top' | 'bottom'): Promise<void> {
 
 function restoreDefaults(): void {
   props.draft.resetFields(placementFlags(program.value, 'algorithm'));
+  props.draft.setExtra('');
 }
 
 function onThreads(event: Event): void {
@@ -113,6 +129,7 @@ function onThreads(event: Event): void {
       </label>
     </fieldset>
     <p class="program-summary" data-testid="program-summary">{{ program.summary }}</p>
+    <ExampleLine :examples="examples" :program="state.program" />
 
     <InputPanel v-for="role in roles" :key="role" :draft="draft" :state="state" :role="role" />
 
@@ -144,18 +161,27 @@ function onThreads(event: Event): void {
             <option v-for="n in threadChoices" :key="n" :value="String(n)">{{ n }}</option>
           </select>
         </label>
-        <label v-if="attentionState.wakeLock !== 'unsupported'" class="flag-label" :data-wake-lock="attentionState.wakeLock">
-          <input
-            type="checkbox"
-            :checked="attentionState.keepAwake"
-            data-testid="keep-awake"
-            @change="attention.setKeepAwake(($event.target as HTMLInputElement).checked)"
+        <!-- The screen wake lock, on unless turned off; the choice is shown on handheld devices, whose
+             screens turn off by themselves and end the search (docs/web/ncbi_ui_mapping.md §4, DW-41). -->
+        <template v-if="attentionState.wakeLock !== 'unsupported' && attentionState.handheld">
+          <label class="flag-label" :data-wake-lock="attentionState.wakeLock">
+            <input
+              type="checkbox"
+              :checked="attentionState.keepAwake"
+              data-testid="keep-awake"
+              @change="attention.setKeepAwake(($event.target as HTMLInputElement).checked)"
+            />
+            Keep searching while you're away
+          </label>
+          <HelpTip
+            id="keep-awake"
+            label="About keeping the search going"
+            text="Keeps the screen on until the search ends. A phone or tablet ends the search when its screen turns off; switching to another app can end it too."
           />
-          Keep screen on while searching
-        </label>
-        <span v-if="attentionState.wakeLock === 'failed'" class="warning" data-testid="wake-lock-failed">
-          The browser did not keep the screen on: {{ attentionState.wakeLockError }}
-        </span>
+          <span v-if="attentionState.wakeLock === 'failed'" class="warning" data-testid="wake-lock-failed">
+            The browser did not keep the screen on: {{ attentionState.wakeLockError }}
+          </span>
+        </template>
       </div>
       <!-- The engine's verdict on the options: only a refusal is shown (stop-describing-ui rule 7). -->
       <p class="validation" :data-state="state.validation.state" data-testid="argv-validation" aria-live="polite">

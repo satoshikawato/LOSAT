@@ -1,0 +1,20 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST query/options error: Invalid from coordinate (greater
+ than sequence length)"
+    },
+    {
+      code 2,
+      message "Please refer to the BLAST+ user manual."
+    }
+  }
+}

@@ -19,6 +19,8 @@ mod blastx_fast_flat;
 mod blastx_flow;
 #[path = "../blastx_hitbf.rs"]
 mod blastx_hitbf;
+#[path = "../blastx_range.rs"]
+mod blastx_range;
 #[path = "../blastx_scan_byte.rs"]
 mod blastx_scan_byte;
 #[path = "../blastx_subject_flow.rs"]

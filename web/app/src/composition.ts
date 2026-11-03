@@ -4,11 +4,15 @@ import { VERIFICATION_TABLE } from 'virtual:losat-verification';
 import { Attention } from './application/attention';
 import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
+import { ExampleLoader } from './application/examples';
 import { ResultsBrowser } from './application/results';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
+import { BrowserAccessionFetcher } from './infra/browser/accession-fetcher';
+import { browserExampleDeletions } from './infra/browser/example-deletions';
+import { BrowserFileDownloader } from './infra/browser/example-downloader';
 import { browserPage } from './infra/browser/page';
-import { browserDownloader } from './infra/browser/platform';
+import { browserDownloader, browserFileSaver } from './infra/browser/platform';
 import { startDataWorker } from './infra/data-worker/gateway';
 import { WasmEngine } from './infra/engine-worker/gateway';
 import type { RenewalLimits } from './infra/engine-worker/policy';
@@ -18,6 +22,8 @@ export interface App {
   readonly coordinator: Coordinator;
   /** The job being edited on the search screen. */
   readonly draft: SearchDraft;
+  /** The Example sets that load into the draft (line WF-2). */
+  readonly examples: ExampleLoader;
   /** What the results screen shows (application/results.ts). */
   readonly results: ResultsBrowser;
   /** Wake lock, the warning before leaving, and the check after the page was hidden. */
@@ -58,7 +64,15 @@ export function createApp(options: AppOptions = {}): App {
     engine,
     data,
     enqueueAll: (requests) => coordinator.enqueueAll(requests),
+    fetcher: new BrowserAccessionFetcher(),
     now: () => performance.now(),
+  });
+  const examples = new ExampleLoader({
+    downloader: new BrowserFileDownloader(),
+    store: data,
+    draft,
+    deletions: browserExampleDeletions(),
+    saver: browserFileSaver,
   });
   const results = new ResultsBrowser({
     data,
@@ -72,5 +86,5 @@ export function createApp(options: AppOptions = {}): App {
     probe: () => data.storageInfo(),
     now: () => Date.now(),
   });
-  return { coordinator, draft, results, attention, usesFakeEngine: ENGINE_ASSETS === null };
+  return { coordinator, draft, examples, results, attention, usesFakeEngine: ENGINE_ASSETS === null };
 }

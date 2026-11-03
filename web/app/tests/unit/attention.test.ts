@@ -26,6 +26,7 @@ class FakePage implements PagePort {
   leaveGuards: boolean[] = [];
   locks: FakeLock[] = [];
   nextRequestError: Error | undefined;
+  handheld = false;
   requestWakeLock = vi.fn(async (): Promise<WakeLockHandle> => {
     if (this.nextRequestError !== undefined) throw this.nextRequestError;
     const lock = new FakeLock();
@@ -66,6 +67,9 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 function setup(
   options: {
     supported?: boolean;
+    handheld?: boolean;
+    /** The initial choice; the default (on) unless given. */
+    keepAwake?: boolean;
     runs?: RunView[];
     probe?: AttentionDeps['probe'];
     probeTimeoutMs?: number;
@@ -73,11 +77,13 @@ function setup(
   } = {},
 ) {
   const page = new FakePage(options.supported ?? true);
+  page.handheld = options.handheld ?? false;
   const runs = new Store<AppState>({ runs: options.runs ?? [] });
   const clock = { now: 1_000 };
   const attention = new Attention({
     page,
     runs,
+    keepAwake: options.keepAwake,
     probe: options.probe ?? (() => Promise.resolve()),
     now: () => clock.now,
     probeTimeoutMs: options.probeTimeoutMs ?? 5_000,
@@ -127,15 +133,27 @@ describe('wake lock', () => {
     expect(page.requestWakeLock).not.toHaveBeenCalled();
   });
 
-  it('is off, and not requested, while keepAwake is false', async () => {
+  it('is on by default, and requested as soon as a run is active', async () => {
     const { page, state } = setup({ runs: [run('a', 1, 'running')] });
+    await flush();
+    expect(state()).toMatchObject({ keepAwake: true, wakeLock: 'held', handheld: false });
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a handheld device (where the choice is shown) from the page', () => {
+    expect(setup({ handheld: true }).state().handheld).toBe(true);
+    expect(setup({ handheld: true, supported: false }).state()).toMatchObject({ handheld: true, wakeLock: 'unsupported' });
+  });
+
+  it('is off, and not requested, while keepAwake is false', async () => {
+    const { page, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     await flush();
     expect(state()).toMatchObject({ keepAwake: false, wakeLock: 'off' });
     expect(page.requestWakeLock).not.toHaveBeenCalled();
   });
 
   it('is not requested without runs, and is held from a queued run to the end of the queue', async () => {
-    const { page, attention, setRuns, state } = setup({ runs: [run('a', 1, 'completed')] });
+    const { page, attention, setRuns, state } = setup({ keepAwake: false, runs: [run('a', 1, 'completed')] });
     attention.setKeepAwake(true);
     await flush();
     expect(page.requestWakeLock).not.toHaveBeenCalled();
@@ -155,7 +173,7 @@ describe('wake lock', () => {
   });
 
   it('is requested when keepAwake is turned on during a run, and released when the run completes', async () => {
-    const { page, attention, setRuns, state } = setup({ runs: [run('a', 1, 'running')] });
+    const { page, attention, setRuns, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     attention.setKeepAwake(true);
     expect(state()).toMatchObject({ keepAwake: true, wakeLock: 'requesting' });
     await flush();
@@ -182,7 +200,7 @@ describe('wake lock', () => {
   });
 
   it("is 'failed' with the error message when the request is rejected", async () => {
-    const { page, attention, state } = setup({ runs: [run('a', 1, 'running')] });
+    const { page, attention, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     page.nextRequestError = new Error('Battery is low');
     attention.setKeepAwake(true);
     await flush();
@@ -190,7 +208,7 @@ describe('wake lock', () => {
   });
 
   it('writes a non-Error rejection as a string', async () => {
-    const { page, attention, state } = setup({ runs: [run('a', 1, 'running')] });
+    const { page, attention, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     page.requestWakeLock.mockRejectedValueOnce('refused');
     attention.setKeepAwake(true);
     await flush();
@@ -198,7 +216,7 @@ describe('wake lock', () => {
   });
 
   it('is requested again after a failure, and the error is cleared', async () => {
-    const { page, attention, setRuns, state } = setup({ runs: [run('a', 1, 'running')] });
+    const { page, attention, setRuns, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     page.nextRequestError = new Error('Battery is low');
     attention.setKeepAwake(true);
     await flush();
@@ -212,7 +230,7 @@ describe('wake lock', () => {
   });
 
   it('is requested again when the browser releases it while the run is active and the page visible', async () => {
-    const { page, attention, state } = setup({ runs: [run('a', 1, 'running')] });
+    const { page, attention, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     attention.setKeepAwake(true);
     await flush();
     expect(page.requestWakeLock).toHaveBeenCalledTimes(1);
@@ -224,7 +242,7 @@ describe('wake lock', () => {
   });
 
   it('is not requested again when the browser releases it while the page is hidden', async () => {
-    const { page, attention, state } = setup({ runs: [run('a', 1, 'running')] });
+    const { page, attention, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     attention.setKeepAwake(true);
     await flush();
     page.visible = false;
@@ -235,7 +253,7 @@ describe('wake lock', () => {
   });
 
   it('is not requested while the page is hidden, and is requested when it is shown', async () => {
-    const { page, attention, state } = setup({ runs: [run('a', 1, 'running')] });
+    const { page, attention, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     page.setVisible(false);
     attention.setKeepAwake(true);
     await flush();

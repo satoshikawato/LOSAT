@@ -199,7 +199,8 @@ struct SubjectValues<'a> {
     taxonomy: &'a TabularTaxonomy,
 }
 
-/// The values of the subject `subject` (rank or index `oid`) of a report of `shown`.
+/// The values of the subject `subject` (rank or index `oid`) of a report of `shown`; `slen` is the
+/// length of the record, also with `-subject_loc`.
 fn subject_values<'a>(
     shown: &'a ShownSubjects<'_>,
     subject: &'a FastaRecord,
@@ -231,7 +232,7 @@ fn subject_values<'a>(
                     .map_or(0, |subject| subject.tabular_gi()),
                 all_ids: std::borrow::Cow::Borrowed(&ids.all_ids),
                 titles: None,
-                length: subject.sequence.len(),
+                length: subject.placement().length,
                 taxonomy: no_taxonomy,
             }
         }
@@ -254,7 +255,7 @@ fn subject_values<'a>(
                     std::borrow::Cow::Borrowed(&[])
                 },
                 titles: None,
-                length: subject.sequence.len(),
+                length: subject.placement().length,
                 taxonomy: no_taxonomy,
             }
         }
@@ -280,7 +281,7 @@ fn subject_values<'a>(
                         .get(oid)
                         .map_or(&[][..], |title| title)],
                 }),
-                length: subject.sequence.len(),
+                length: subject.placement().length,
                 taxonomy: reported.tabular_taxonomy(oid).unwrap_or(no_taxonomy),
             }
         }
@@ -398,12 +399,27 @@ pub(super) fn write_blastx_tabular(
                 //             else
                 //             	m_QueryLength = query_bh.GetBioseqLength();
                 // ```
-                // BLASTX has no `-query_loc`: the searched query is the record.
+                // The searched letters: the record, or its `-query_loc` interval (`qcovhsp` below);
+                // `m_QueryRange` is the range as given (`query_length`).
                 let searched_length = query.sequence.len();
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:880-887
+                // ```c++
+                //     if (x_IsFieldRequested(eQueryLength) && m_QueryLength == 0) {
+                //         ...
+                //     	if(m_QueryRange.NotEmpty())
+                //     		m_QueryLength = m_QueryRange.GetLength();
+                //     	else
+                //     		m_QueryLength = sequence::GetLength(align.GetSeq_id(0), &scope);
+                // ```
+                // `qlen` and the `qcovs` of the subjects: the length of the `-query_loc` range as
+                // given (even where it ends past the record), else the query's.
+                let query_length = options
+                    .query_range
+                    .map_or(searched_length, |range| range.length());
                 let tabular_query = TabularQuery::of_ids(
                     query.believed(),
                     local_id(query).as_bytes(),
-                    searched_length,
+                    query_length,
                 );
                 for list in lists {
                     let shown_hsps = || {
@@ -446,7 +462,7 @@ pub(super) fn write_blastx_tabular(
                                 query_endpoints(searched_length, raw.frame, raw.q_start, raw.q_end);
                             (start.min(end) as u64 - 1, start.max(end) as u64 - 1)
                         }));
-                        coverage_percent(union_length(&mut query_ranges), searched_length)
+                        coverage_percent(union_length(&mut query_ranges), query_length)
                     } else {
                         -1
                     };
@@ -506,6 +522,7 @@ pub(super) fn write_blastx_tabular(
                                 raw.q_end - raw.q_start,
                                 (a.qstart - a.qend).abs() + 1,
                                 searched_length,
+                                query_length,
                             ),
                         };
                         table.row(&mut buf, &tabular_query, &tabular_subject, &row);
@@ -529,8 +546,9 @@ pub(super) fn write_blastx_tabular(
 }
 
 /// `qcovhsp` of an HSP whose query span is `span` residues of its frame and `nucleotides` letters
-/// of the record (of `query_length` letters), in a subject with `hsps` HSPs that have a
-/// Seq-align.
+/// of the record, in a subject with `hsps` HSPs that have a Seq-align. `searched_length` is the
+/// length of the searched letters (the `-query_loc` interval), `query_length` that of the tabular
+/// `qlen` (the range as given).
 ///
 /// A gapped search: the HSP's own Seq-align carries `hsp_percent_coverage`, which
 /// `BLASTHspListToSeqAlign` computes for a translated query against a third of the query's
@@ -560,7 +578,7 @@ pub(super) fn write_blastx_tabular(
 /// several into one per HSP that takes the Std-seg's scores; one of a single HSP stays as it is,
 /// its scores on the Std-seg, so that the Seq-align has no `hsp_percent_coverage` and
 /// `x_SetQueryCovSeqalign` counts the Seq-align's span of the query (its nucleotides) against the
-/// query's length.
+/// query's length, which is the range as given with `-query_loc` (tabular.cpp:786-791).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1381-1384
 /// ```c++
@@ -607,15 +625,16 @@ fn query_coverage_per_hsp(
     hsps: usize,
     span: i32,
     nucleotides: i32,
+    searched_length: usize,
     query_length: usize,
 ) -> i32 {
-    let query_length = query_length as i32;
+    let searched_length = searched_length as i32;
     if gapped {
-        hsp_coverage(span, query_length / 3)
+        hsp_coverage(span, searched_length / 3)
     } else if hsps > 1 {
-        hsp_coverage(span, query_length)
+        hsp_coverage(span, searched_length)
     } else {
-        hsp_coverage(nucleotides, query_length)
+        hsp_coverage(nucleotides, query_length as i32)
     }
 }
 
@@ -628,10 +647,15 @@ mod tests {
     // span's nucleotides for a subject's single HSP). Values of tab.bx.cov.6 (qn2: 135 letters).
     #[test]
     fn hsp_coverage_follows_ncbis_seq_aligns() {
-        assert_eq!(query_coverage_per_hsp(true, 2, 6, 18, 135), 13);
-        assert_eq!(query_coverage_per_hsp(true, 1, 15, 45, 135), 33);
-        assert_eq!(query_coverage_per_hsp(false, 2, 6, 18, 135), 4);
-        assert_eq!(query_coverage_per_hsp(false, 1, 6, 18, 135), 13);
-        assert_eq!(query_coverage_per_hsp(true, 1, 140, 420, 420), 100);
+        assert_eq!(query_coverage_per_hsp(true, 2, 6, 18, 135, 135), 13);
+        assert_eq!(query_coverage_per_hsp(true, 1, 15, 45, 135, 135), 33);
+        assert_eq!(query_coverage_per_hsp(false, 2, 6, 18, 135, 135), 4);
+        assert_eq!(query_coverage_per_hsp(false, 1, 6, 18, 135, 135), 13);
+        assert_eq!(query_coverage_per_hsp(true, 1, 140, 420, 420, 420), 100);
+        // With `-query_loc`: the interval for the engine's coverage, the range as given for the
+        // formatter's.
+        assert_eq!(query_coverage_per_hsp(true, 1, 15, 45, 135, 300), 33);
+        assert_eq!(query_coverage_per_hsp(false, 2, 6, 18, 135, 300), 4);
+        assert_eq!(query_coverage_per_hsp(false, 1, 6, 18, 135, 300), 6);
     }
 }

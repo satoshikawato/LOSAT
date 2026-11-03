@@ -706,10 +706,10 @@ fn x_preliminary_protein_hsps_by_unit(
     // searched as the packed subject of the copy is: its units translate the store they read.
     let x_store;
     let subject = match subject {
-        XPrelimSubject::Stream(stream, oid)
+        XPrelimSubject::Stream(stream, oid, length)
             if super::search_seed::x_lean_subject(
                 x_subject,
-                stream.length(oid),
+                length,
                 db_gencode,
                 profile.mask_lowercase,
             ) =>

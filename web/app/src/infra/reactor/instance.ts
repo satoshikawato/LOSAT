@@ -69,7 +69,7 @@ function hostImports(emit: (stream: number, ptr: number, len: number) => void): 
 
 function checkVersion(abi: ReactorAbi): ReactorAbi {
   const version = abi.abiVersion();
-  if (version !== 2) throw new Error(`the engine module has ABI version ${version}; LOSAT Web needs version 2`);
+  if (version !== 2) throw new Error(`the engine module has ABI version ${version}; LOSAT needs version 2`);
   return abi;
 }
 

@@ -6,6 +6,7 @@ import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
+import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import type { EnginePrepareHint, ValidationResult } from '../../src/ports/engine';
 
@@ -14,6 +15,7 @@ function setup(
     validate?: (argv: readonly string[]) => ValidationResult;
     useCoordinator?: boolean;
     checkInput?: DataService['checkInput'];
+    fetcher?: FakeAccessionFetcher;
   } = {},
 ) {
   let token = 0;
@@ -58,6 +60,7 @@ function setup(
       requests.push([...batch]);
       return options.useCoordinator ? coordinator.enqueueAll(batch) : { ok: true, runIds: batch.map((_, i) => `r${i}`) };
     },
+    fetcher: options.fetcher ?? new FakeAccessionFetcher(),
     now: () => 0,
     debounceMs: 0,
   });
@@ -97,11 +100,12 @@ describe('SearchDraft inputs', () => {
     expect(draft.state.get().subject.sources).toHaveLength(0);
   });
 
-  it('reports the index scan error of a text without a defline, and adds one on request', async () => {
+  it('reads a text without a defline as one record without a title, and adds a defline on request', async () => {
     const { draft } = setup();
     draft.setPaste('query', 'ACGTACGT\n');
     await draft.idle();
-    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', error: 'Expected > at record start.' });
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 1 });
+    expect(sourceOf(draft, 'query').base?.records.map((r) => [r.id, r.header_offset, r.sequence_offset, r.length])).toEqual([['', 0, 0, 8]]);
     draft.addDefline('query');
     await draft.idle();
     expect(draft.state.get().query.paste).toBe('>pasted_query\nACGTACGT\n');
@@ -110,7 +114,7 @@ describe('SearchDraft inputs', () => {
 
   it('shows the engine refusal of a record and maps it to the record table; excluding it passes the check', async () => {
     const { draft } = setup();
-    draft.setPaste('query', '>a\nACGT\n>b\nAC!GT\n>c\nACGT\n');
+    draft.setPaste('query', '>a\nACGT\n>b\nACGT!ACGT\n>c\nACGT\n');
     await draft.idle();
     const refused = sourceOf(draft, 'query').check;
     expect(refused).toMatchObject({ state: 'refused', record: 1 });
@@ -122,7 +126,7 @@ describe('SearchDraft inputs', () => {
 
   it('maps a refused record among the included records only', async () => {
     const { draft } = setup();
-    draft.setPaste('query', '>a\nACGT\n>b\nACGT\n>c\nAC!GT\n');
+    draft.setPaste('query', '>a\nACGT\n>b\nACGT\n>c\nACGT!ACGT\n');
     await draft.idle();
     draft.setIncluded('query', 'paste', [0], false);
     await draft.idle();
@@ -130,17 +134,348 @@ describe('SearchDraft inputs', () => {
     expect(sourceOf(draft, 'query').check).toMatchObject({ state: 'refused', record: 2 });
   });
 
-  it('checks the inputs again for another program', async () => {
+  it('checks the inputs again for another program, and reads them again when it reads the role with another kind', async () => {
     const { draft, checks } = setup();
-    draft.setPaste('query', '>a\nACGT\n');
+    draft.setPaste('query', '>a\nMKLV\n');
+    draft.setPaste('subject', '>s\n$$$$\n');
     await draft.idle();
     const revision = sourceOf(draft, 'query').base!.revisionId;
+    expect(sourceOf(draft, 'query').base!.records[0]!.length).toBe(3);
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'failed', parser: 1 });
+    // BLASTX reads its query as BLASTN does (kind 1): the query is checked again, not read again.
+    // Its subject is protein (kind 2): the subject is read again, the failed one too.
     draft.setProgram('blastx');
     await draft.idle();
-    // Every program indexes with the same reader: the input is checked again, not read again.
     expect(sourceOf(draft, 'query').base!.revisionId).toBe(revision);
     expect(sourceOf(draft, 'query').check).toEqual({ state: 'ok', records: 1 });
     expect(checks.at(-1)).toMatch(/^blastx\|query\|/);
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'failed', parser: 2 });
+    // BLASTP reads its query with the protein flags (kind 2): read again.
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 2 });
+    expect(sourceOf(draft, 'query').base!.revisionId).not.toBe(revision);
+    expect(sourceOf(draft, 'query').base!.records[0]!.length).toBe(4);
+  });
+
+  it('reads a text pasted just before a program change once, with the new kind', async () => {
+    const { draft, data } = setup();
+    const kinds: number[] = [];
+    const indexSource = data.indexSource.bind(data);
+    data.indexSource = async (sourceId, parser) => {
+      kinds.push(parser);
+      return indexSource(sourceId, parser);
+    };
+    draft.setPaste('query', '>a\nMKLV\n>b\nMKLV\n');
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(kinds).toEqual([2]);
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 2 });
+  });
+});
+
+describe('SearchDraft accessions (line WF-1)', () => {
+  const NR = '>NR_074540.1 Bacillus cereus 16S\nACGTACGT\n';
+  const AB = '>AB000001.1 Rhizoctonia solani\nGGCCAATT\n';
+
+  it('keeps a box of accessions without a source until it is fetched, then reads the FASTA written into it', async () => {
+    const fetcher = new FakeAccessionFetcher({ 'NR_074540.1': NR, 'AB000001.1': AB });
+    const { draft } = setup({ fetcher });
+    draft.setFetchSource('ncbi');
+    draft.setPaste('query', 'nr_074540.1\n\nAB000001.1\n');
+    await draft.idle();
+    expect(draft.state.get().query.sources).toHaveLength(0);
+    expect(draft.accessions('query')).toEqual(['NR_074540.1', 'AB000001.1']);
+    expect(draft.readiness()).toBe('Fetch the query accessions first.');
+    expect(fetcher.requests).toHaveLength(0);
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(fetcher.requests.map((r) => [r.source, r.kind, r.accession])).toEqual([
+      ['ncbi', 'nucleotide', 'NR_074540.1'],
+      ['ncbi', 'nucleotide', 'AB000001.1'],
+    ]);
+    expect(draft.state.get().query.paste).toBe(NR + AB);
+    expect(draft.state.get().query.fetch).toBeUndefined();
+    expect(sourceOf(draft, 'query').base?.records.map((r) => r.id)).toEqual(['NR_074540.1', 'AB000001.1']);
+  });
+
+  it('asks the chosen source for the kind the program reads, and keeps the choice', async () => {
+    const fetcher = new FakeAccessionFetcher({ P12345: '>sp|P12345|AATM_RABIT\nMALLHS\n' });
+    const { draft } = setup({ fetcher });
+    draft.setProgram('blastp');
+    draft.setFetchSource('ebi');
+    draft.setPaste('subject', 'P12345');
+    draft.fetchAccessions('subject');
+    await draft.idle();
+    expect(fetcher.requests.map((r) => [r.source, r.kind, r.accession])).toEqual([['ebi', 'protein', 'P12345']]);
+    expect(draft.state.get().fetchSource).toBe('ebi');
+    expect(draft.state.get().subject.paste).toBe('>sp|P12345|AATM_RABIT\nMALLHS\n');
+  });
+
+  it('says why a fetch failed, leaves the box as it was, and asks EBI nothing it cannot serve', async () => {
+    const fetcher = new FakeAccessionFetcher({ 'AB000001.1': AB, 'ZZ000001.1': { ok: false, reason: 'refused', status: 429 } });
+    const { draft } = setup({ fetcher });
+    draft.setFetchSource('ncbi');
+    draft.setPaste('query', 'AB000001.1\nAB999999.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(draft.state.get().query.fetch).toEqual({ state: 'failed', message: 'NCBI has no nucleotide record AB999999.1.' });
+    expect(draft.state.get().query.paste).toBe('AB000001.1\nAB999999.1');
+    draft.setFetchSource('ebi');
+    expect(draft.state.get().query.fetch).toBeUndefined();
+    draft.setPaste('query', 'NR_074540.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(draft.state.get().query.fetch).toEqual({
+      state: 'failed',
+      message: 'EBI (ENA) has no RefSeq records: fetch NR_074540.1 from NCBI or CNCB.',
+    });
+    draft.setFetchSource('cncb');
+    draft.setPaste('query', 'ZZ000001.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(draft.state.get().query.fetch).toEqual({
+      state: 'failed',
+      message: 'CNCB asks to wait (too many requests): fetch again in a moment.',
+    });
+    expect(fetcher.requests.map((r) => [r.source, r.accession])).toEqual([
+      ['ncbi', 'AB000001.1'],
+      ['ncbi', 'AB999999.1'],
+      ['cncb', 'ZZ000001.1'],
+    ]);
+  });
+
+  it('asks EBI nothing when one accession of the box is not for it', async () => {
+    const fetcher = new FakeAccessionFetcher({ 'AB000001.1': AB });
+    const { draft } = setup({ fetcher });
+    draft.setFetchSource('ebi');
+    draft.setPaste('query', 'AB000001.1\nNR_074540.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(fetcher.requests).toHaveLength(0);
+    expect(draft.state.get().query.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('NR_074540.1') });
+  });
+
+  it('runs no search of accessions: Run neither fetches nor waits for a running fetch', async () => {
+    const fetcher = new FakeAccessionFetcher({ 'NR_074540.1': NR });
+    const { draft, requests } = setup({ fetcher });
+    draft.setFetchSource('ncbi');
+    draft.setPaste('subject', '>s\nACGT\n');
+    fetcher.hold();
+    draft.setPaste('query', 'NR_074540.1');
+    draft.fetchAccessions('query');
+    expect(await draft.submit()).toEqual({ ok: false, message: 'The query accession is still being fetched.' });
+    fetcher.release();
+    await draft.idle();
+    expect(requests).toHaveLength(0);
+    expect(draft.state.get().query.paste).toBe(NR);
+  });
+
+  it('drops a running fetch when the box is edited, and limits the fetched text', async () => {
+    const fetcher = new FakeAccessionFetcher({ 'NR_074540.1': NR, 'NC_000001.11': `>NC_000001.11\n${'A'.repeat(10_000_001)}\n` });
+    const { draft } = setup({ fetcher });
+    draft.setFetchSource('ncbi');
+    fetcher.hold();
+    draft.setPaste('query', 'NR_074540.1');
+    draft.fetchAccessions('query');
+    await Promise.resolve();
+    expect(draft.state.get().query.fetch).toEqual({ state: 'fetching', source: 'ncbi', done: 0, total: 1 });
+    draft.setPaste('query', '>mine\nACGT\n');
+    fetcher.release();
+    await draft.idle();
+    expect(draft.state.get().query.paste).toBe('>mine\nACGT\n');
+    expect(draft.state.get().query.fetch).toBeUndefined();
+    draft.setPaste('query', 'NC_000001.11');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(draft.state.get().query.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10 MB') });
+  });
+});
+
+describe('SearchDraft accessions from the fastest source (line WF-3)', () => {
+  const AB = '>AB000001.1 Rhizoctonia solani\nGGCCAATT\n';
+  const NR = '>NR_074540.1 Bacillus cereus 16S\nACGTACGT\n';
+  const PROBE = '>MH011443.1 Homo sapiens TP53 (TP53) gene, exon 5 and partial cds\nTGGGTTGATT\n';
+  const nucleotideProbes = { 'MH011443.1': PROBE };
+  const asked = (fetcher: FakeAccessionFetcher) => fetcher.requests.map((r) => [r.source, r.accession, r.fresh ?? false]);
+
+  it('races the sources with a fixed record on the first fetch, sends the accessions to the first that answers, and keeps the order', async () => {
+    const fetcher = new FakeAccessionFetcher({ ...nucleotideProbes, 'AB000001.1': AB, 'NR_074540.1': NR });
+    const { draft } = setup({ fetcher });
+    expect(draft.state.get().fetchSource).toBe('fastest');
+    fetcher.hold();
+    draft.setPaste('query', 'AB000001.1');
+    draft.fetchAccessions('query');
+    await Promise.resolve();
+    expect(draft.state.get().query.fetch).toEqual({ state: 'racing' });
+    expect(draft.readiness()).toBe('The query accession is still being fetched.');
+    // The race asks for its own record, never the user's accession, and not from the browser's cache.
+    expect(asked(fetcher)).toEqual([
+      ['ncbi', 'MH011443.1', true],
+      ['ebi', 'MH011443.1', true],
+      ['cncb', 'MH011443.1', true],
+    ]);
+    fetcher.release('ebi');
+    await draft.idle();
+    expect(draft.state.get().query.paste).toBe(AB);
+    expect(asked(fetcher).slice(3)).toEqual([['ebi', 'AB000001.1', false]]);
+    expect(draft.state.get().race.nucleotide?.answered.map((entry) => entry.source)).toEqual(['ebi']);
+    fetcher.release('cncb');
+    fetcher.release('ncbi');
+    await draft.raceIdle();
+    expect(draft.state.get().race.nucleotide).toEqual({
+      answered: [
+        { source: 'ebi', ms: 0 },
+        { source: 'cncb', ms: 0 },
+        { source: 'ncbi', ms: 0 },
+      ],
+      failed: [],
+    });
+    // The order stays: no race again, and a RefSeq accession goes to the first source that has it.
+    draft.setPaste('subject', 'AB000001.1');
+    draft.fetchAccessions('subject');
+    draft.setPaste('query', 'NR_074540.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(asked(fetcher).slice(4)).toEqual([
+      ['ebi', 'AB000001.1', false],
+      ['cncb', 'NR_074540.1', false],
+    ]);
+    expect(draft.state.get().query.paste).toBe(NR);
+  });
+
+  it('races each kind once, with its own record, and keeps a chosen source', async () => {
+    const fetcher = new FakeAccessionFetcher({
+      'ncbi:NP_414542.1': '>NP_414542.1 thr operon leader peptide\nMKRISTTITTTITITTGNGAG\n',
+      'ebi:P0AD86': '>sp|P0AD86|LPT_ECOLI thr operon leader peptide\nMKRISTTITTTITITTGNGAG\n',
+      P12345: '>sp|P12345|AATM_RABIT\nMALLHS\n',
+    });
+    const { draft } = setup({ fetcher });
+    draft.setProgram('blastp');
+    draft.setPaste('subject', 'P12345');
+    draft.fetchAccessions('subject');
+    await draft.idle();
+    await draft.raceIdle();
+    expect(asked(fetcher)).toEqual([
+      ['ncbi', 'NP_414542.1', true],
+      ['ebi', 'P0AD86', true],
+      ['cncb', 'NP_414542.1', true],
+      ['ncbi', 'P12345', false],
+    ]);
+    expect(draft.state.get().race.protein).toEqual({
+      answered: [
+        { source: 'ncbi', ms: 0 },
+        { source: 'ebi', ms: 0 },
+      ],
+      failed: ['cncb'],
+    });
+    expect(draft.state.get().race.nucleotide).toBeUndefined();
+    draft.setFetchSource('cncb');
+    draft.setPaste('subject', 'WP_000001.1');
+    draft.fetchAccessions('subject');
+    await draft.idle();
+    expect(asked(fetcher).slice(4)).toEqual([['cncb', 'WP_000001.1', false]]);
+    expect(draft.state.get().fetchSource).toBe('cncb');
+  });
+
+  it('goes to NCBI when no source that serves the accessions answered, and races again after a race without answers', async () => {
+    const fetcher = new FakeAccessionFetcher({
+      'ebi:MH011443.1': PROBE,
+      'NR_074540.1': NR,
+      'AB000001.1': AB,
+    });
+    const { draft } = setup({ fetcher });
+    fetcher.hold('ebi');
+    // EBI has no RefSeq records: its answer would not count for this box.
+    draft.setPaste('query', 'NR_074540.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(asked(fetcher).slice(3)).toEqual([['ncbi', 'NR_074540.1', false]]);
+    expect(draft.state.get().race.nucleotide).toEqual({ answered: [], failed: ['ncbi', 'cncb'] });
+    fetcher.release('ebi');
+    await draft.raceIdle();
+    expect(draft.state.get().race.nucleotide?.answered.map((entry) => entry.source)).toEqual(['ebi']);
+
+    const offline = new FakeAccessionFetcher({ 'AB000001.1': AB });
+    const second = setup({ fetcher: offline });
+    second.draft.setPaste('query', 'AB000001.1');
+    second.draft.fetchAccessions('query');
+    await second.draft.idle();
+    await second.draft.raceIdle();
+    expect(second.draft.state.get().race.nucleotide).toBeUndefined();
+    expect(second.draft.state.get().query.paste).toBe(AB);
+    second.draft.setPaste('subject', 'AB000001.1');
+    second.draft.fetchAccessions('subject');
+    await second.draft.idle();
+    expect(offline.requests.filter((r) => r.fresh === true)).toHaveLength(6);
+  });
+
+  it('sends no accession to a source that lacks it: UniProt not to CNCB, GenBase only to CNCB', async () => {
+    const fetcher = new FakeAccessionFetcher({
+      'NP_414542.1': '>NP_414542.1 thr operon leader peptide\nMKRISTTITTTITITTGNGAG\n',
+      'ebi:P0AD86': '>sp|P0AD86|LPT_ECOLI thr operon leader peptide\nMKRISTTITTTITITTGNGAG\n',
+      P12345: '>sp|P12345|AATM_RABIT\nMALLHS\n',
+      'C_AA004835.1': '>C_AA004835.1 SARS-CoV-2\nACGT\n',
+    });
+    const { draft } = setup({ fetcher });
+    draft.setProgram('blastp');
+    fetcher.hold('ncbi', 'ebi');
+    draft.setPaste('subject', 'P12345');
+    draft.fetchAccessions('subject');
+    // CNCB answers first, but it has no UniProt records: the fetch waits for NCBI or EBI.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(draft.state.get().race.protein?.answered.map((entry) => entry.source)).toEqual(['cncb']);
+    expect(draft.state.get().subject.fetch).toEqual({ state: 'racing' });
+    fetcher.release('ebi');
+    await draft.idle();
+    expect(asked(fetcher).slice(3)).toEqual([['ebi', 'P12345', false]]);
+    fetcher.release();
+    await draft.raceIdle();
+
+    // Only CNCB has GenBase records: no race, and EBI is not asked.
+    draft.setProgram('blastn');
+    draft.setPaste('query', 'C_AA004835.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(asked(fetcher).slice(4)).toEqual([['cncb', 'C_AA004835.1', false]]);
+    expect(draft.state.get().race.nucleotide).toBeUndefined();
+    draft.setFetchSource('ebi');
+    draft.setPaste('query', 'C_AA004835.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(draft.state.get().query.fetch).toEqual({
+      state: 'failed',
+      message: 'EBI (ENA) has no GenBase records: fetch C_AA004835.1 from CNCB.',
+    });
+
+    // No one site has both.
+    draft.setFetchSource('fastest');
+    draft.setProgram('blastp');
+    draft.setPaste('subject', 'C_AA004835.1\nP12345');
+    draft.fetchAccessions('subject');
+    await draft.idle();
+    expect(draft.state.get().subject.fetch).toEqual({
+      state: 'failed',
+      message: 'No one site has all of these accessions: C_AA004835.1 only from CNCB, P12345 only from NCBI or EBI.',
+    });
+    expect(asked(fetcher)).toHaveLength(5);
+  });
+
+  it('lets the race finish when the box is edited during it, and sends nothing of the box', async () => {
+    const fetcher = new FakeAccessionFetcher({ ...nucleotideProbes, 'AB000001.1': AB });
+    const { draft } = setup({ fetcher });
+    fetcher.hold();
+    draft.setPaste('query', 'AB000001.1');
+    draft.fetchAccessions('query');
+    await Promise.resolve();
+    draft.setPaste('query', '>mine\nACGT\n');
+    expect(draft.state.get().query.fetch).toBeUndefined();
+    fetcher.release();
+    await draft.idle();
+    await draft.raceIdle();
+    expect(asked(fetcher).map(([, accession]) => accession)).toEqual(['MH011443.1', 'MH011443.1', 'MH011443.1']);
+    expect(draft.state.get().query.paste).toBe('>mine\nACGT\n');
+    expect(draft.state.get().race.nucleotide?.answered).toHaveLength(3);
   });
 });
 
@@ -149,7 +484,7 @@ describe('SearchDraft submit', () => {
     const { draft, requests } = setup();
     expect(await draft.submit()).toEqual({ ok: false, message: 'Add the query sequences: paste them or open FASTA files.' });
     draft.setPaste('query', '>q\nACGT\n');
-    draft.setPaste('subject', '>s\nAC!GT\n');
+    draft.setPaste('subject', '>s\nACGT!ACGT\n');
     await draft.idle();
     const refused = await draft.submit();
     expect(refused.ok).toBe(false);
@@ -160,29 +495,31 @@ describe('SearchDraft submit', () => {
     expect(draft.state.get().message).toEqual({ kind: 'error', text: 'Every subject record is excluded.' });
   });
 
-  it('queues BLASTX without a region, which it does not take, and keeps the region of another program', async () => {
+  it("queues BLASTX with the regions of its nucleotide query and protein subject (DW-39)", async () => {
     const { draft, requests } = setup();
     draft.setPaste('query', '>q\nACGTACGTAC\n');
     draft.setPaste('subject', '>s\nMKLVMKLV\n');
     await draft.idle();
-    draft.setRegion('query', { start: '2', stop: '8' });
-    expect(draft.parameters()).toEqual([['-query_loc', '2-8']]);
     draft.setProgram('blastx');
     await draft.idle();
-    expect(draft.regionRecord('query')).toBeUndefined();
-    expect(draft.parameters()).toEqual([]);
-    // Nor does a region that BLASTN refuses (the stop is past the record) stop BLASTX.
-    draft.setProgram('blastn');
-    draft.setRegion('query', { start: '2', stop: '50' });
-    expect(await draft.submit()).toMatchObject({ ok: false, message: expect.stringMatching(/^Query region: /) });
-    draft.setProgram('blastx');
-    await draft.idle();
-    expect(await draft.submit()).toMatchObject({ ok: true });
-    expect(requests.at(-1)![0]!).toMatchObject({ program: 'blastx', parameters: [] });
-    draft.setProgram('blastn');
-    await draft.idle();
-    expect(draft.region('query')).toEqual({ start: '2', stop: '50' });
     expect(draft.regionRecord('query')?.id).toBe('q');
+    expect(draft.regionRecord('subject')?.id).toBe('s');
+    draft.setRegion('query', { start: '2', stop: '8' });
+    draft.setRegion('subject', { start: '3', stop: '8' });
+    expect(draft.parameters()).toEqual([
+      ['-query_loc', '2-8'],
+      ['-subject_loc', '3-8'],
+    ]);
+    // The subject's region is checked against its residues, the query's against its bases.
+    draft.setRegion('subject', { start: '3', stop: '9' });
+    expect(await draft.submit()).toEqual({
+      ok: false,
+      message: 'Subject region: The stop must be between 1 and 8, the length of the record.',
+    });
+    draft.setRegion('subject', undefined);
+    draft.setRegion('query', { start: '2', stop: '10' });
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    expect(requests.at(-1)![0]!).toMatchObject({ program: 'blastx', parameters: [['-query_loc', '2-10']] });
   });
 
   it('queues one combined search of all files, named as plan §5.3 says', async () => {
@@ -327,6 +664,72 @@ describe('SearchDraft submit', () => {
     expect(validated.at(-1)).toEqual(['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-task', 'dc-megablast']);
   });
 
+  it('writes the words of Additional options after the form\'s, for each program, and refuses an unclosed quote', async () => {
+    const { draft, requests, validated } = setup();
+    draft.setField('-evalue', '1e-5');
+    draft.setExtra(" -ungapped  -strand 'plus' ");
+    await draft.idle();
+    expect(validated.at(-1)).toEqual([
+      'blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-evalue', '1e-5', '-ungapped', '-strand', 'plus',
+    ]);
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', '>s\nACGT\n');
+    expect((await draft.submit()).ok).toBe(true);
+    expect(requests[0]![0]!.parameters).toEqual([['-evalue', '1e-5']]);
+    expect(requests[0]![0]!.extra).toEqual(['-ungapped', '-strand', 'plus']);
+    // Each program keeps its own words; a program without them adds none.
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(draft.state.get().extra).toMatchObject({ blastn: " -ungapped  -strand 'plus' ", blastp: '' });
+    expect(validated.at(-1)).toEqual(['blastp', '-query', 'query.fa', '-subject', 'subject.fa']);
+    expect((await draft.submit()).ok).toBe(true);
+    expect(requests[1]![0]!).not.toHaveProperty('extra');
+    // An unclosed quote: the argv is not made, and nothing is queued.
+    draft.setExtra("-seg '12 2.2");
+    await draft.idle();
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: "Additional options: a quote (') is not closed" });
+    expect(await draft.submit()).toEqual({ ok: false, message: "Additional options: a quote (') is not closed" });
+    expect(requests).toHaveLength(2);
+  });
+
+  it('runs the words of Additional options in the coordinator; it refuses the options that LOSAT manages', async () => {
+    const { draft, coordinator } = setup({ useCoordinator: true });
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setExtra('-num_threads 4');
+    await draft.idle();
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: '-num_threads is managed by LOSAT' });
+    expect(await draft.submit()).toEqual({ ok: false, message: '-num_threads is managed by LOSAT' });
+    draft.setExtra('-qcov_hsp_perc 50 -ungapped');
+    expect((await draft.submit()).ok).toBe(true);
+    expect(coordinator.state.get().runs[0]!.snapshot.argv.slice(5)).toEqual(['-qcov_hsp_perc', '50', '-ungapped']);
+  });
+
+  it('refuses in Additional options the options that the form sets, and the subranges, with the control that sets them', async () => {
+    const { draft } = setup();
+    await draft.idle();
+    const refusal = async (text: string) => {
+      draft.setExtra(text);
+      await draft.idle();
+      const validation = draft.state.get().validation;
+      return validation.state === 'invalid' ? validation.message : validation.state;
+    };
+    // A -task here would change the defaults that the form leaves out of the argv.
+    expect(await refusal('-ungapped -task=blastn')).toBe('-task is set in the form: Optimize for');
+    expect(await refusal('-evalue 1')).toBe('-evalue is set in the form: Expect threshold');
+    expect(await refusal('-penalty -3')).toBe('-penalty is set in the form: Match/Mismatch Scores');
+    expect(await refusal('-gapopen 5')).toBe('-gapopen is set in the form: Gap Costs');
+    expect(await refusal("-dust '20 64 1'")).toBe('-dust is set in the form: Low complexity regions');
+    expect(await refusal('-culling_limit 2')).toBe('-culling_limit is set in the form: Max matches in a query range');
+    expect(await refusal('-query_loc 1-10')).toBe('-query_loc is set in the form: Query subrange');
+    expect(await refusal('-subject_loc=1-10')).toBe('-subject_loc is set in the form: Subject subrange');
+    // Another program's form: BLASTP has no -dust field, TBLASTX's genetic codes are fields.
+    draft.setProgram('tblastx');
+    expect(await refusal('-db_gencode 4')).toBe('-db_gencode is set in the form: Genetic code');
+    draft.setProgram('blastp');
+    expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
+  });
+
   it('gives every run of the draft its Job Title, outside the argv', async () => {
     const { draft, requests, coordinator } = setup({ useCoordinator: true });
     draft.addFiles('subject', [file('s1.fa', '>s1\nACGT\n'), file('s2.fa', '>s2\nACGT\n')]);
@@ -409,10 +812,28 @@ describe('SearchDraft submit', () => {
     expect(draft.state.get()).toMatchObject({ submitting: false, message: { kind: 'error' } });
   });
 
+  it('refuses to combine a source that starts without a defline after another source', async () => {
+    const { draft } = setup();
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', 'ACGTACGT\n');
+    draft.addFiles('subject', [new File(['>s\nACGT\n'], 's.fa')]);
+    await draft.idle();
+    // The pasted subject comes first: its sequence without a defline is the input's first record.
+    expect(draft.readiness()).toBeUndefined();
+    draft.setPaste('subject', '');
+    draft.addFiles('subject', [new File(['GGCC\n'], 'bare.fa')]);
+    await draft.idle();
+    expect(draft.readiness()).toBe(
+      'Subject (file bare.fa) starts with a sequence without a defline (">"), which cannot follow another input.',
+    );
+    draft.setMode('subject', 'separate');
+    expect(draft.readiness()).toBeUndefined();
+  });
+
   it("maps a subject record that the engine refuses, and reports it in short above the button", async () => {
     const { draft } = setup();
     draft.setPaste('query', '>q\nACGT\n');
-    draft.setPaste('subject', '>s1\nACGT\n>s2\nAC!GT\n');
+    draft.setPaste('subject', '>s1\nACGT\n>s2\nACGT!ACGT\n');
     await draft.idle();
     expect(sourceOf(draft, 'subject').check).toMatchObject({ state: 'refused', record: 1 });
     expect(draft.readiness()).toBe(

@@ -197,7 +197,9 @@ fn check_database(db: &SeqDb, entries: &[Entry], max_bytes: u64, name: &str) {
     assert_eq!(db.num_seqs() as usize, entries.len(), "{name}: sequences");
     let mut next = 0u32;
     let mut blocks = 0;
+    let mut listed = Vec::new();
     while let Some(range) = db.next_block(next, max_bytes) {
+        listed.push(range);
         assert_eq!(range.first_ordinal, next, "{name}: blocks are contiguous");
         assert!(!range.is_empty(), "{name}: a block holds a sequence");
         let volume = &db.volumes()[range.volume];
@@ -228,6 +230,31 @@ fn check_database(db: &SeqDb, entries: &[Entry], max_bytes: u64, name: &str) {
     assert!(db.next_block(next, max_bytes).is_none());
     if max_bytes == 0 {
         assert_eq!(blocks, entries.len(), "{name}: one sequence per block");
+    }
+    check_listed_blocks(db, &listed, max_bytes, name);
+}
+
+/// LOSAT_X_BNDBSMALL: `x_next_blocks` lists the blocks of `next_block` (`listed`), whole or
+/// from any of them on, in runs of 1 offset to the whole volume.
+fn check_listed_blocks(db: &SeqDb, listed: &[BlockRange], max_bytes: u64, name: &str) {
+    assert_eq!(db.x_next_blocks(0, max_bytes, usize::MAX), listed, "{name}");
+    for entries in [1, 2, 3, 5, 1 << 14] {
+        let what = format!("{name} within {max_bytes}, runs of {entries}");
+        assert_eq!(
+            db.x_next_blocks_in(0, max_bytes, usize::MAX, entries),
+            listed,
+            "{what}"
+        );
+        for (k, range) in listed.iter().enumerate() {
+            for max in [1, 2, usize::MAX] {
+                let want = &listed[k..listed.len().min(k.saturating_add(max))];
+                let got = db.x_next_blocks_in(range.first_ordinal, max_bytes, max, entries);
+                assert_eq!(got, want, "{what} from {} max {max}", range.first_ordinal);
+            }
+        }
+        assert!(db
+            .x_next_blocks_in(db.num_seqs(), max_bytes, usize::MAX, entries)
+            .is_empty());
     }
 }
 

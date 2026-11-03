@@ -21,8 +21,9 @@
 //!   tabular formatter's recount from the displayed rows;
 //! - `comp_adjustment_method`: `composition_method`; `gap_info`: `edit_script` (empty for an
 //!   ungapped HSP);
-//! - the lengths of the construction: the query's nucleotide length (LOSAT's BLASTX has no
-//!   `-query_loc`) and the subject's length; no subject range (`-subject_loc` is rejected).
+//! - the lengths of the construction: the searched letters' lengths (with `-query_loc` /
+//!   `-subject_loc`, the interval's), and the intervals' starts, which `RemapToQueryLoc` and
+//!   `s_RemapToSubjectLoc` add to the rows (`FastaRecord::placement`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:518-531
 //! ```c
@@ -98,7 +99,7 @@ pub(super) fn write_blastx_seqalign(
             let query_record = QueryRecord {
                 id: query.seq_id(),
                 searched_length: i32::try_from(query.sequence.len())?,
-                offset: 0,
+                offset: i32::try_from(query.placement().offset)?,
             };
             write_query_to(
                 format,
@@ -145,7 +146,8 @@ pub(super) fn query_records<'a>(
                 },
             },
             searched_length: i32::try_from(subject.sequence.len())?,
-            offset: 0,
+            // `-subject_loc` (a `-db` subject is never cut).
+            offset: i32::try_from(subject.placement().offset)?,
             use_this_seqid: crate::report::db_subject::use_this_seqid(parsed),
         });
         for hsp in &list.hsps {

@@ -243,13 +243,19 @@ function checkSurface(reactor, native) {
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding"],
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding",
                        "-template_length", "17"],
-                      ["blastn", "-query", "q", "-subject", "s", "-task", "rmblastn"],
-                      ["blastx", "-query", "q", "-subject", "s", "-query_loc", "1-9"]]) {
+                      ["blastn", "-query", "q", "-subject", "s", "-task", "rmblastn"]]) {
     const validated = reactor.call("losat_web2_validate", argv.join("\0"));
     assert.equal(validated.status, -1, argv.join(" "));
     const cli = require("node:child_process").spawnSync(native, argv);
     assert.equal(validated.error, cli.stderr.toString(), `${argv.join(" ")}: the CLI's message`);
   }
+  // BLASTX's ranges (line SX, DW-39): validate reads their syntax, the subject range first.
+  const blastx = ["blastx", "-query", "q", "-subject", "s"];
+  assert.equal(reactor.call("losat_web2_validate", [...blastx, "-query_loc", "1-9", "-subject_loc", "2-5"].join("\0")).status, 0);
+  assert.match(reactor.call("losat_web2_validate", [...blastx, "-query_loc", "9-1", "-subject_loc", "5-2"].join("\0")).error,
+               /^BLAST engine error: Invalid specification of subject location/);
+  assert.match(reactor.call("losat_web2_validate", [...blastx, "-query_loc", "9-1"].join("\0")).error,
+               /^BLAST engine error: Invalid specification of query location/);
   // The host validates the argv that it runs, with its -num_threads, so a -num_threads in
   // the user's words is a repeated option (abi_v2.md §7). The adapter parses the argv as the
   // CLI does, so the whole message (its usage line too) and an unknown program's are the CLI's.
@@ -294,7 +300,7 @@ function checkSurface(reactor, native) {
   assert.equal(reactor.call("losat_web2_release", headless.status).status, 0);
   const gap = reactor.call("losat_web2_register", "blastn", 1, Buffer.from(">s\nACGT\n>?10\nACGT\n"));
   assert.equal(gap.status, -1);
-  assert.match(gap.error, /^line 3 is a gap line .*not supported by LOSAT Web$/);
+  assert.match(gap.error, /^line 3 is a gap line .*not supported in the browser$/);
 }
 
 async function main() {

@@ -32,7 +32,7 @@ use super::stage_d_results::{
 use super::stage_d_stats::{
     local_parameters_for_call, LocalParameterCall, LocalParameterOptions, LocalSubjectParameters,
 };
-use super::x_subject_store::{SubjectLetters, XPrelimSubject};
+use super::x_subject_store::{SubjectLetters, XPrelimSubject, XSearchSubject};
 use crate::algorithm::blastn::query_split::SplitSizes;
 use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
@@ -1189,7 +1189,7 @@ fn run_local_search_with_pool(
         trace.parameters = Some(batch_setup.parameters.clone());
         trace.ungapped_karlin = batch_setup.ungapped_karlin.clone();
         trace.query_validity = batch_setup.query_validity.clone();
-        trace.subject_nt_lengths = subjects.lengths().collect();
+        trace.subject_nt_lengths = subjects.x_read_lengths()?;
     }
     *setup = Some(batch_setup);
     // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
@@ -1893,13 +1893,65 @@ fn x_subject_file_size(subjects: SubjectLetters<'_>) -> u64 {
 //             res.length = vol->GetSequence(vol_oid++, &seq);
 //         } while (res.length >= 0 && tot_length >= res.length && vol_oid < m_RestrictEnd);
 // ```
-// A chunk takes the subject at `begin` and then the next ones while the bases taken stay within
+// A chunk takes its first subject and then the next ones while the bases taken stay within
 // the budget (`tot_length >= res.length` is `taken + length <= bases`). NCBI's last condition
 // compares the OID after the next one with the end, so the last subject of a database always
 // starts a chunk of its own, and a chunk never crosses a volume; LOSAT does not copy these, as
-// `-subject` has one volume and the rest is scheduling only.
-/// The end of the chunk of subjects that starts at `begin`.
+// `-subject` has one volume and the rest is scheduling only. NCBI reads the exact length of each
+// sequence of a database from its mapped files; a `-db` stream's chunks are cut from the index's
+// approximate lengths (`XDbStream::x_approx_lengths`, at most a few bases off), without a
+// read of the sequence file or a table of lengths. Scheduling only.
+/// The ends of the chunks of subjects, cut from their lengths given one after the other in OID
+/// order (`push`).
 #[cfg(feature = "parallel")]
+struct XChunkCut {
+    bases: u64,
+    /// The bases of the chunk that the last subject joined.
+    taken: u64,
+    /// The subjects given.
+    count: u32,
+    ends: Vec<u32>,
+}
+
+#[cfg(feature = "parallel")]
+impl XChunkCut {
+    fn new(bases: u64) -> Self {
+        Self {
+            bases,
+            taken: 0,
+            count: 0,
+            ends: Vec::new(),
+        }
+    }
+
+    /// The next subject, of `length` bases: it joins the last chunk if the chunk's bases stay
+    /// within the budget, else it starts the next chunk.
+    fn push(&mut self, length: u64) {
+        if self.count > 0 {
+            match self.taken.checked_add(length) {
+                Some(sum) if sum <= self.bases => self.taken = sum,
+                _ => {
+                    self.ends.push(self.count);
+                    self.taken = length;
+                }
+            }
+        } else {
+            self.taken = length;
+        }
+        self.count += 1;
+    }
+
+    /// The end of every chunk, the last one's included.
+    fn ends(mut self) -> Vec<u32> {
+        if self.count > 0 {
+            self.ends.push(self.count);
+        }
+        self.ends
+    }
+}
+
+/// The end of the chunk of subjects that starts at `begin`: the reference of `XChunkCut`'s tests.
+#[cfg(all(test, feature = "parallel"))]
 fn x_oid_chunk_end(subjects: SubjectLetters<'_>, begin: usize, bases: u64) -> usize {
     let length = |oid: usize| u64::try_from(subjects.length(oid)).unwrap_or(u64::MAX);
     if begin >= subjects.count() {
@@ -1932,17 +1984,32 @@ fn x_oid_chunk_end(subjects: SubjectLetters<'_>, begin: usize, bases: u64) -> us
 // ended. Each NCBI search thread takes the next chunk when it is free; LOSAT's pool takes the
 // chunks and each chunk is one task. Scheduling only.
 /// Graduated 2026-10-22 (was `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDCHUNK`): every chunk of the
-/// subjects, in OID order.
+/// subjects, in OID order (`XChunkCut`). A `-db` stream cuts its sequences once for each budget
+/// and keeps the cut for the run's query batches (`XDbStream::x_kept_cut`).
 #[cfg(feature = "parallel")]
 fn x_all_chunks(subjects: SubjectLetters<'_>, bases: u64) -> Vec<std::ops::Range<usize>> {
-    let mut chunks = Vec::new();
+    let ends: std::sync::Arc<[u32]> = match subjects {
+        SubjectLetters::Stream(stream) => stream.x_kept_cut(bases, || {
+            let mut cut = XChunkCut::new(bases);
+            stream.x_approx_lengths(|length| cut.push(u64::from(length)));
+            cut.ends()
+        }),
+        _ => {
+            let mut cut = XChunkCut::new(bases);
+            for length in subjects.lengths() {
+                cut.push(u64::try_from(length).unwrap_or(u64::MAX));
+            }
+            cut.ends().into()
+        }
+    };
     let mut start = 0;
-    while start < subjects.count() {
-        let end = x_oid_chunk_end(subjects, start, bases);
-        chunks.push(start..end);
-        start = end;
-    }
-    chunks
+    ends.iter()
+        .map(|&end| {
+            let chunk = start..end as usize;
+            start = end as usize;
+            chunk
+        })
+        .collect()
 }
 
 // No NCBI counterpart: NCBI's threads write their lists into the shared HSP stream at once. The
@@ -2728,7 +2795,10 @@ fn run_preliminary_subjects_into(
     // subject one after another. A subject longer than a chunk's budget, a chunk of its own, runs
     // its (frame, chunk) units on the pool as the single subject of a search does, so that threads
     // without a chunk to search take them; its merge, linking and reaping stay on its thread after
-    // its last unit. The other subjects keep `unit_pool`. Scheduling only.
+    // its last unit. The other subjects keep `unit_pool`. Scheduling only. (A `-db` stream's chunks
+    // are cut from the index's lengths, a few bases off the subject's length that decides here:
+    // a subject within those bases of the budget may share its chunk and still run its units on
+    // the pool.)
     #[cfg(feature = "parallel")]
     let x_units_beyond = x_chunk_bases;
     let x_unit_pool = |subject: XPrelimSubject<'_>| {
@@ -2781,8 +2851,26 @@ fn run_preliminary_subjects_into(
     // No NCBI counterpart: x_oid is only the index of the subject among the shared subject plans;
     // it does not change any value NCBI computes.
     let subject_core = |x_oid: usize,
-                        subject: XPrelimSubject<'_>|
+                        subject: XSearchSubject<'_>|
      -> Result<(Vec<(usize, GappedHsp)>, LinkedHspList)> {
+        // A `-db` sequence's length (the linking's and the E-values' subject length below, and
+        // the plan's): the one an earlier batch gave its kept plan (`XSubjectSide::length`, not
+        // read again), else read where the sequence is read (`XDbStream::length`: a short one's
+        // block, which its plan then reads; a long one's index and last byte). A read that fails
+        // fails the subject as a read of its plan does.
+        let subject = match subject {
+            XSearchSubject::Nt(subject) => XPrelimSubject::Nt(subject),
+            XSearchSubject::Stream(stream, oid) => {
+                let kept = x_subject_side.and_then(|side| {
+                    side.length(oid, inputs.genetic_code, inputs.search.mask_lowercase)
+                });
+                let length = match kept {
+                    Some(length) => length,
+                    None => stream.length(oid)?,
+                };
+                XPrelimSubject::Stream(stream, oid, length)
+            }
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1412-1413,1469-1470
         // ```c
         //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
@@ -6291,6 +6379,91 @@ mod tests {
         assert_eq!(all[79], 237..240);
     }
 
+    // `XChunkCut` cuts, one length after the other, the chunks that `x_oid_chunk_end` cuts from
+    // each chunk's first subject (NCBI's loop), on the lengths of every edge above and on random
+    // ones; `x_all_chunks` of a `-db` stream cuts the index's lengths and keeps them.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn x_chunk_cut_gives_the_chunks_of_each_first_subject() {
+        let reference = |lengths: &[usize], bases: u64| -> Vec<u32> {
+            let records: Vec<Vec<u8>> = lengths.iter().map(|&n| vec![b'A'; n]).collect();
+            let slices = subject_slices(&records);
+            let subjects = SubjectLetters::Records(&slices);
+            let mut ends = Vec::new();
+            let mut start = 0;
+            while start < lengths.len() {
+                start = x_oid_chunk_end(subjects, start, bases);
+                ends.push(start as u32);
+            }
+            ends
+        };
+        let cut = |lengths: &[usize], bases: u64| -> Vec<u32> {
+            let mut cut = XChunkCut::new(bases);
+            for &length in lengths {
+                cut.push(length as u64);
+            }
+            cut.ends()
+        };
+        let mut state = 0x2026_1103_u64;
+        let mut next = |below: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % below
+        };
+        let mut cases: Vec<(Vec<usize>, u64)> = vec![
+            (vec![], 12),
+            (vec![10, 10, 10], 20),
+            (vec![10, 10, 10], 19),
+            (vec![50, 1, 1], 20),
+            (vec![5, 50, 5], 20),
+            (vec![0, 0, 0], 1),
+            (vec![30, 0, 0], 20),
+            (vec![10, 0, 10, 0, 1], 20),
+            (vec![0, 30], 20),
+        ];
+        for _ in 0..500 {
+            let count = next(40) as usize;
+            let lengths = (0..count)
+                .map(|_| match next(4) {
+                    0 => 0,
+                    1 => next(5) as usize,
+                    _ => next(300) as usize,
+                })
+                .collect();
+            cases.push((lengths, 1 + next(400)));
+        }
+        for (lengths, bases) in cases {
+            assert_eq!(
+                cut(&lengths, bases),
+                reference(&lengths, bases),
+                "{lengths:?} {bases}"
+            );
+        }
+        // A sum past `u64` starts the next chunk.
+        let mut big = XChunkCut::new(u64::MAX);
+        for length in [u64::MAX, 1, 0] {
+            big.push(length);
+        }
+        assert_eq!(big.ends(), [1, 3]);
+        // A `-db` stream: the chunks of the index's lengths, cut once for each budget.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db/nucl_mv");
+        let db =
+            crate::seqdb::SeqDb::open(path.to_str().unwrap(), crate::seqdb::SeqType::Nucleotide)
+                .unwrap();
+        let stream =
+            crate::algorithm::common::x_db_stream::XDbStream::new(&db, 4, "TBLASTN").unwrap();
+        let mut approx = Vec::new();
+        stream.x_approx_lengths(|length| approx.push(length as usize));
+        for bases in [1, 50, 500, 5_000, u64::MAX] {
+            let chunks = x_all_chunks(SubjectLetters::Stream(&stream), bases);
+            let ends: Vec<u32> = chunks.iter().map(|chunk| chunk.end as u32).collect();
+            assert_eq!(ends, reference(&approx, bases), "{bases}");
+            assert_eq!(chunks.first().map(|chunk| chunk.start), Some(0));
+            assert_eq!(chunks.last().map(|chunk| chunk.end), Some(stream.count()));
+            assert_eq!(x_all_chunks(SubjectLetters::Stream(&stream), bases), chunks);
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
     // ```c++
     //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {

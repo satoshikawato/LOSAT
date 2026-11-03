@@ -10,7 +10,7 @@
 import { buildArgv, PASTED_NAMES } from '../domain/argv';
 import type { FastaParserKind } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
-import { programById, type ProgramId } from '../domain/programs';
+import { fastaParser, programById, type ProgramId } from '../domain/programs';
 import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
@@ -39,6 +39,8 @@ export interface SearchRequest {
   readonly query: SequenceInput;
   readonly subject: SequenceInput;
   readonly parameters: ReadonlyArray<readonly [string, string | true]>;
+  /** Words of other options, after the parameters ("Additional options", ArgvInput.extra). */
+  readonly extra?: readonly string[];
   readonly requestedThreads: number | 'auto';
   /** The run's name (NCBI's "Job Title"); the snapshot keeps it trimmed, or not at all when empty. */
   readonly title?: string;
@@ -108,7 +110,7 @@ export class Coordinator {
       const subjectName = inputName(request.subject, PASTED_NAMES.subject);
       let argv: readonly string[];
       try {
-        argv = buildArgv({ program: request.program, queryName, subjectName, parameters: request.parameters });
+        argv = buildArgv({ program: request.program, queryName, subjectName, parameters: request.parameters, extra: request.extra ?? [] });
       } catch (error) {
         return { ok: false, message: errorMessage(error) };
       }
@@ -129,8 +131,8 @@ export class Coordinator {
       let query: InputSnapshot;
       let subject: InputSnapshot;
       try {
-        query = await this.snapshotInput('Query', request.query, queryName, program.fastaParser);
-        subject = await this.snapshotInput('Subject', request.subject, subjectName, program.fastaParser);
+        query = await this.snapshotInput('Query', request.query, queryName, fastaParser(program, 'query'));
+        subject = await this.snapshotInput('Subject', request.subject, subjectName, fastaParser(program, 'subject'));
       } catch (error) {
         return { ok: false, message: errorMessage(error) };
       }

@@ -270,7 +270,8 @@ impl ReportedSubjects {
     /// (`shared::read_header`), with LOSAT's refusals of `ParsedSubject::fetched`, of
     /// `shared::check_shown_parsed_subject` (with `pairwise`), of `shared::refuse_joined_hits`
     /// (with `joined`: outfmt 0, 5 and 13 to 16) and of `ParsedSubject::tabular_ids` (with
-    /// `tabular`).
+    /// `tabular`). `taxonomy`: whether the report writes the sequences' taxids or their names
+    /// (13 to 16, a table of taxonomy fields; `ParsedSubject::fetched`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -281,6 +282,7 @@ impl ReportedSubjects {
         pairwise: bool,
         taxids: bool,
         joined: bool,
+        taxonomy: bool,
     ) -> Result<Self> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
@@ -350,7 +352,7 @@ impl ReportedSubjects {
                 // write its Seq-align id alone.
                 if tabular || pairwise || joined || taxids {
                     subject
-                        .fetched()
+                        .fetched(taxonomy)
                         .map_err(|reason| shared::parsed_refusal(ordinal, &reason, PROGRAM))?;
                 }
                 if pairwise {
@@ -700,10 +702,15 @@ mod tests {
     }
 
     #[test]
-    fn a_record_of_the_stored_letters_encodes_to_the_stored_bytes() {
-        // Every residue byte 1..=27 (O = 26 included) reads back as itself through its
-        // letter: the records of the reported sequences and `-subject` records alike.
+    fn a_record_of_the_stored_letters_encodes_to_the_searched_bytes() {
+        // A record of the stored letters encodes every residue byte 1..=27 back to itself but
+        // O (26): the search reads a `-subject` O as X (`subjects::search_residue`), and a
+        // database's stored O as it is (`read_encoded`).
         let bytes: Vec<u8> = (1..28).collect();
+        let searched: Vec<u8> = bytes
+            .iter()
+            .map(|&residue| if residue == 26 { 21 } else { residue })
+            .collect();
         let record = FastaRecord {
             internal_id: "gnl|BL_ORD_ID|0".into(),
             title: String::new(),
@@ -716,7 +723,7 @@ mod tests {
             source: None,
         };
         let records = [record];
-        assert_eq!(&*Subjects::Fasta(&records).encoded(0), &bytes[..]);
+        assert_eq!(&*Subjects::Fasta(&records).encoded(0), &searched[..]);
     }
 
     /// The fixture database `name` of `tests/db_search`, with the taxonomy database variant
@@ -815,6 +822,7 @@ mod tests {
                 }),
                 &mut batches,
                 true,
+                false,
                 false,
                 false,
                 false,

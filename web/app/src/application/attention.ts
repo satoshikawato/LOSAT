@@ -1,8 +1,10 @@
 // Keeping a search alive (design §9.4, REQ-22). Browsers slow down or stop the work of a
 // hidden page, mobile browsers end it, and closing the tab ends the search: LOSAT Web does
 // not say that a search continues without the tab. This module
-// - holds the screen wake lock while runs are active or queued, if the user chose it (not
-//   released and requested again between the runs of a queue);
+// - holds the screen wake lock while runs are active or queued, unless the user turned that off
+//   ("Keep searching while you're away", on by default, Owner 2026-11-03; the choice is shown on
+//   handheld devices, whose screens turn off by themselves and end the search), not released and
+//   requested again between the runs of a queue;
 // - asks the browser to warn before the page is left while runs are active or queued;
 // - when the page becomes visible again after being hidden with runs in progress, reports
 //   how long it was hidden, what became of those runs, and whether the Data worker (which
@@ -24,8 +26,10 @@ export interface ResumeReport {
 }
 
 export interface AttentionState {
-  /** The user's choice: keep the screen on while a search runs. */
+  /** Keep the screen on while a search runs ("Keep searching while you're away"): on unless turned off. */
   readonly keepAwake: boolean;
+  /** Whether the device is handheld (PagePort.handheld): the choice is shown there. */
+  readonly handheld: boolean;
   readonly wakeLock: WakeLockState;
   readonly wakeLockError?: string;
   /** A run is active (preparing, running or finalizing). */
@@ -37,6 +41,8 @@ export interface AttentionState {
 
 export interface AttentionDeps {
   readonly page: PagePort;
+  /** Whether keepAwake starts on (the default) or off. */
+  readonly keepAwake?: boolean | undefined;
   readonly runs: Store<AppState>;
   /** A call that the Data worker answers (its storage status). */
   readonly probe: () => Promise<unknown>;
@@ -57,8 +63,9 @@ export class Attention {
 
   constructor(private readonly deps: AttentionDeps) {
     this.state = new Store<AttentionState>({
-      keepAwake: false,
+      keepAwake: deps.keepAwake ?? true,
       wakeLock: deps.page.wakeLockSupported ? 'off' : 'unsupported',
+      handheld: deps.page.handheld,
       active: false,
       busy: false,
     });

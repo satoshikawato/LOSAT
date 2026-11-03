@@ -158,9 +158,10 @@ describe('Coordinator', () => {
 
   it('does not queue an input that the index scan cannot read', async () => {
     const { coordinator } = setup(new ManualEngine());
-    expect(await coordinator.enqueue({ ...request, query: { text: 'ACGT\n' } })).toEqual({
+    expect(await coordinator.enqueue({ ...request, query: { text: '>q\nACGT\n>?10\n' } })).toEqual({
       ok: false,
-      message: 'Query FASTA: Expected > at record start.',
+      message:
+        "Query FASTA: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser",
     });
     expect(coordinator.state.get().runs).toHaveLength(0);
   });
@@ -336,7 +337,7 @@ describe('Coordinator', () => {
     const { coordinator, data } = setup();
     const add = async (name: string, text: string) => {
       const source = await data.addSource(new File([text], name));
-      return (await data.indexSource(source.sourceId, 0)).revisionId;
+      return (await data.indexSource(source.sourceId, 1)).revisionId;
     };
     const subject = await add('s.fa', '>s1\nACGT\n>s2\nGGCC\n');
     const query = await add('q.fa', '>q\nACGT\n');

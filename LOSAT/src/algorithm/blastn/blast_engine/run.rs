@@ -3193,13 +3193,27 @@ struct UngappedHit {
     // } BlastOffsetPair;
     // ```
     // Initial word hit offsets (seed) stored in init_hsp->offsets.qs_offsets.
-    seed_q_off: usize,
-    seed_s_off: usize,
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:142-147
+    // ```c
+    // typedef struct BlastUngappedData {
+    //    Int4 q_start; /**< Start of the ungapped alignment in query */
+    //    Int4 s_start; /**< Start of the ungapped alignment in subject */
+    //    Int4 length;  /**< Length of the ungapped alignment */
+    //    Int4 score;   /**< Score of the ungapped alignment */
+    // } BlastUngappedData;
+    // ```
+    // The offsets are 32-bit, as NCBI's: those in the query are within one context (whose
+    // start, `query_context_offset`, is an `i32`), those in the subject within one chunk of at
+    // most `MAX_DBSEQ_LEN` letters. A subject's hits and the scratch of their sort by score
+    // (`X_SORT`) then hold 44 bytes per hit each, not 72 (pyani's fragments of one genome x
+    // another, about a million hits per chunk: 69 MiB each).
+    seed_q_off: u32,
+    seed_s_off: u32,
     // Ungapped extension results (0-based coordinates)
-    qs: usize,  // query start
-    qe: usize,  // query end (exclusive)
-    ss: usize,  // subject start in search_seq coordinates
-    se: usize,  // subject end in search_seq coordinates
+    qs: u32,    // query start
+    qe: u32,    // query end (exclusive)
+    ss: u32,    // subject start in search_seq coordinates
+    se: u32,    // subject end in search_seq coordinates
     score: i32, // ungapped score
 }
 
@@ -8023,13 +8037,13 @@ fn run_local_formats(
     // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
     // database is read from files by the command line only.
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
+        anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
     // The counts file of `-window_masker_db` comes from the caller's counts source (LOSAT
     // Web's registered inputs); a caller that gives none has no file to read.
     if args.window_masker_db.is_some() && args.window_masker_counts.is_none() {
         anyhow::bail!(
-            "-window_masker_db (a WindowMasker counts file) is not supported by LOSAT Web yet"
+            "-window_masker_db (a WindowMasker counts file) is not supported in the browser yet"
         );
     }
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
@@ -8163,7 +8177,11 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
-    check_unsupported_environment(matches!(subjects, Subjects::Database(_)))?;
+    app::check_search_environment(
+        "BLASTN",
+        !matches!(subjects, Subjects::Database(_)),
+        outputs.only_archive(),
+    )?;
     let batching = query_batching_from_environment(
         super::super::coordination::task_uses_megablast_chunks(&args.task),
     )?;
@@ -8246,62 +8264,6 @@ fn search(
     // No NCBI counterpart: the PAIRPAR counters with LOSAT_TIMING; nothing without it.
     x_pair_seed::summary();
     x_result
-}
-
-/// Rejects the environment variables that put NCBI BLAST+ into a search mode or report that
-/// LOSAT does not reproduce.
-///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:204-210
-/// ```c
-///     if ( (subjects = db_args->GetSubjects(scope)) ) {
-///         _ASSERT(search_db.Empty());
-/// 	char* bl2seq_legacy = getenv("BL2SEQ_LEGACY");
-/// 	if (bl2seq_legacy)
-///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, false));
-/// 	else
-///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
-/// ```
-/// `BL2SEQ_LEGACY` (any value, also an empty one) turns off the scan of the subjects as a
-/// database: `CLocalBlast` then searches each subject on its own (local_blast.cpp:189,289)
-/// and `CBlastFormat` writes the legacy bl2seq report (`m_IsBl2Seq && !m_IsDbScan`). NCBI
-/// reads it in that branch only: a database search (`database`) does not read it.
-fn check_unsupported_environment(database: bool) -> Result<()> {
-    if !database && std::env::var_os("BL2SEQ_LEGACY").is_some() {
-        anyhow::bail!(
-            "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's BLASTN"
-        );
-    }
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:732-737
-    // ```c
-    // 		char * pre_fetch_limit_str = getenv("PRE_FETCH_SEQS_LIMIT");
-    // 		if (pre_fetch_limit_str) {
-    // 			int pre_fetch_limit = NStr::StringToInt(pre_fetch_limit_str);
-    // 			if(pre_fetch_limit == 0) {
-    // 				return false;
-    // 			}
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:761-766
-    // ```c
-    //     if (results.size() == 0) {
-    //         return;
-    //     }
-    //     if(!s_PreFetchSeqs(results, format_type)){
-    //     	return;
-    //     }
-    // ```
-    // An integer only decides whether the report's sequences are fetched ahead, which
-    // changes no output. Before the report of each query batch NCBI converts the value, and
-    // one that `NStr::StringToInt` cannot convert (an empty one too) stops it with a
-    // `CStringException` whose text names its build's source files (exit 255).
-    if let Some(value) = std::env::var_os("PRE_FETCH_SEQS_LIMIT") {
-        if crate::blastinput::query_batch::ncbi_string_to_int(&value).is_none() {
-            anyhow::bail!(
-                "the environment variable PRE_FETCH_SEQS_LIMIT has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's BLASTN",
-                value.to_string_lossy()
-            );
-        }
-    }
-    Ok(())
 }
 
 /// An error of a query batch after the first that does not depend on the batch's queries
@@ -13929,12 +13891,12 @@ fn search_query_batch<const UNGAPPED: bool>(
                                         // ```c
                                         // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
                                         // ```
-                                        seed_q_off: q_off - q_context_start,
-                                        seed_s_off: s_off,
-                                        qs,
-                                        qe,
-                                        ss,
-                                        se: ungapped_se,
+                                        seed_q_off: (q_off - q_context_start) as u32,
+                                        seed_s_off: s_off as u32,
+                                        qs: qs as u32,
+                                        qe: qe as u32,
+                                        ss: ss as u32,
+                                        se: ungapped_se as u32,
                                         score: ungapped_score,
                                     },
                                 );
@@ -15287,12 +15249,12 @@ fn search_query_batch<const UNGAPPED: bool>(
                                         // ```c
                                         // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
                                         // ```
-                                        seed_q_off: q_off,
-                                        seed_s_off: s_off,
-                                        qs,
-                                        qe,
-                                        ss,
-                                        se: ungapped_se,
+                                        seed_q_off: q_off as u32,
+                                        seed_s_off: s_off as u32,
+                                        qs: qs as u32,
+                                        qe: qe as u32,
+                                        ss: ss as u32,
+                                        se: ungapped_se as u32,
                                         score: ungapped_score,
                                     },
                                 );
@@ -15429,13 +15391,13 @@ fn search_query_batch<const UNGAPPED: bool>(
                         query_idx: uh.query_idx,
                         query_frame: uh.query_frame,
                         query_context_offset: uh.query_context_offset,
-                        prelim_qs: uh.qs,
-                        prelim_qe: uh.qe,
-                        prelim_ss: uh.ss.saturating_add(chunk.offset),
-                        prelim_se: uh.se.saturating_add(chunk.offset),
+                        prelim_qs: uh.qs as usize,
+                        prelim_qe: uh.qe as usize,
+                        prelim_ss: (uh.ss as usize).saturating_add(chunk.offset),
+                        prelim_se: (uh.se as usize).saturating_add(chunk.offset),
                         prelim_score: uh.score,
-                        seed_qs: uh.seed_q_off,
-                        seed_ss: uh.seed_s_off.saturating_add(chunk.offset),
+                        seed_qs: uh.seed_q_off as usize,
+                        seed_ss: (uh.seed_s_off as usize).saturating_add(chunk.offset),
                         prelim_evalue: 0.0,
                     })
                     .collect();
@@ -15581,9 +15543,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                  -> Option<(usize, usize, usize, usize, i32, usize, usize)> {
                     let q_seq_blastna = encoded_queries_blastna[uh.context_idx as usize];
                     if use_dp {
-                        let mut seed_qs = uh.seed_q_off;
-                        let mut seed_ss = uh.seed_s_off;
-                        if uh.se >= uh.seed_s_off.saturating_add(8) {
+                        let mut seed_qs = uh.seed_q_off as usize;
+                        let mut seed_ss = uh.seed_s_off as usize;
+                        if uh.se as usize >= (uh.seed_s_off as usize).saturating_add(8) {
                             seed_qs = seed_qs.saturating_add(3);
                             seed_ss = seed_ss.saturating_add(3);
                         }
@@ -15607,9 +15569,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                             );
                         Some((p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss))
                     } else {
-                        let ungapped_len = uh.qe.saturating_sub(uh.qs);
-                        let seed_qs = uh.qs + ungapped_len / 2;
-                        let seed_ss = uh.ss + ungapped_len / 2;
+                        let ungapped_len = uh.qe.saturating_sub(uh.qs) as usize;
+                        let seed_qs = uh.qs as usize + ungapped_len / 2;
+                        let seed_ss = uh.ss as usize + ungapped_len / 2;
                         x_greedy_prelim::x_greedy_gapped_alignment_score_only(
                             x_prelim_s.expect(
                                 "the one-byte copy exists wherever a score-only greedy call runs",
@@ -15805,10 +15767,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                                     uh.context_idx,
                                     s_idx,
                                     s_id,
-                                    uh.qs,
-                                    uh.qe,
-                                    uh.ss.saturating_add(chunk.offset),
-                                    uh.se.saturating_add(chunk.offset),
+                                    uh.qs as usize,
+                                    uh.qe as usize,
+                                    (uh.ss as usize).saturating_add(chunk.offset),
+                                    (uh.se as usize).saturating_add(chunk.offset),
                                     ctx.len,
                                     ctx.frame,
                                 )
@@ -15820,10 +15782,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 s_id,
                                 s_idx,
                                 uh.context_idx,
-                                uh.qs,
-                                uh.qe,
-                                uh.ss.saturating_add(chunk.offset),
-                                uh.se.saturating_add(chunk.offset),
+                                uh.qs as usize,
+                                uh.qe as usize,
+                                (uh.ss as usize).saturating_add(chunk.offset),
+                                (uh.se as usize).saturating_add(chunk.offset),
                                 uh.score,
                                 is_contained,
                                 containing_hsp,
@@ -15923,9 +15885,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 //        init_hsp->offsets.qs_offsets.q_off,
                                 //        init_hsp->offsets.qs_offsets.s_off, ...);
                                 // ```
-                                let mut seed_qs = uh.seed_q_off;
-                                let mut seed_ss = uh.seed_s_off;
-                                if uh.se >= uh.seed_s_off.saturating_add(8) {
+                                let mut seed_qs = uh.seed_q_off as usize;
+                                let mut seed_ss = uh.seed_s_off as usize;
+                                if uh.se as usize >= (uh.seed_s_off as usize).saturating_add(8) {
                                     seed_qs = seed_qs.saturating_add(3);
                                     seed_ss = seed_ss.saturating_add(3);
                                 }
@@ -16009,9 +15971,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                             } else {
                                 // Greedy seed selection (megablast)
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4017
-                                let ungapped_len = uh.qe.saturating_sub(uh.qs);
-                                let seed_qs = uh.qs + ungapped_len / 2;
-                                let seed_ss = uh.ss + ungapped_len / 2;
+                                let ungapped_len = uh.qe.saturating_sub(uh.qs) as usize;
+                                let seed_qs = uh.qs as usize + ungapped_len / 2;
+                                let seed_ss = uh.ss as usize + ungapped_len / 2;
 
                                 let prelim =
                                     match x_greedy_prelim::x_greedy_gapped_alignment_score_only(

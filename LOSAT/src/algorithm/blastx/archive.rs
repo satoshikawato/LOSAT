@@ -162,19 +162,24 @@ pub(crate) fn refuse_irregular_query() -> Result<()> {
 /// ends the scan: the run reads the file again and fails there as it always did, after the
 /// archives of the batches before it (NCBI writes them), so the titles of the batches the reader
 /// completed before the error are checked; the records of the batch the error interrupts are
-/// never written and need no check. The file must be a regular file (`query_is_regular`).
+/// never written and need no check. The file must be a regular file (`query_is_regular`). The
+/// records are cut to `range` as the search cuts them: a record the range skips is never
+/// written and is not checked.
 pub(crate) fn prescan_query_titles(
     path: &std::path::Path,
     lowercase: bool,
     batch_size: usize,
+    range: Option<&crate::blastinput::seq_range::SequenceRange>,
 ) -> Result<()> {
     let file = std::fs::File::open(path)?;
     let mut stream = super::input::FastaStream::from_file(file);
-    let scanned = super::input::parse_fasta_stream_with_warnings(
+    let scanned = super::input::parse_fasta_stream_keeping(
         &mut stream,
         false,
         lowercase,
         batch_size,
+        false,
+        range,
         &mut |batch| {
             check_titles(batch, "query").map_err(|refusal| TitleRefusal(refusal.to_string()).into())
         },
@@ -250,12 +255,11 @@ fn bioseq_input<'a>(record: &'a FastaRecord, defline: &'a [u8], protein: bool) -
     BioseqInput {
         id: &record.internal_id,
         ids: record.believed().map(|ids| ids.ids.as_slice()),
-        seq_loc: record
-            .believed()
-            .and_then(|ids| ids.seq_loc(0, record.sequence.len() as i32 - 1)),
+        seq_loc: record.archive_seq_loc(),
         defline,
         title: record.title.as_bytes(),
-        letters: &record.sequence,
+        // The whole record, also when a range cut it (`FastaRecord::archive_letters`).
+        letters: record.archive_letters(),
         protein,
     }
 }
@@ -274,8 +278,9 @@ fn frame_of(frame: i8) -> Frame {
 
 /// The `masks` of the results: per query of a searched batch, one mask per frame with intervals,
 /// in the order plus1, plus2, plus3, minus1, minus2, minus3; the intervals are the context's
-/// nucleotide intervals other than an empty one and the whole query, in the order found (the
-/// minus frames descending). The same intervals outfmt 15 and 16 print.
+/// nucleotide intervals moved into the record (`seq_range::record_mask`: other than an empty one
+/// and the whole interval), in the order found (the minus frames descending). The same intervals
+/// outfmt 15 and 16 print.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:930-959
 /// (`Blast_GetSeqLocInfoVector`) and remote_blast.cpp:1064-1138.
@@ -287,13 +292,14 @@ fn results_masks(call: &ArchiveCall<'_>) -> Vec<MaskEntry> {
         }
         for qidx in 0..batch.queries.len() {
             let query = &call.queries[batch.query_ordinal + qidx];
-            let length = query.sequence.len() as i32;
+            let (length, offset) = (query.sequence.len(), query.placement().offset);
             for context in &batch.prepared.contexts[qidx * 6..qidx * 6 + 6] {
                 let intervals: Vec<(i32, i32)> = context
                     .dna_masks
                     .iter()
-                    .copied()
-                    .filter(|&(from, to)| from <= to && !(from == 0 && to == length - 1))
+                    .filter_map(|&(from, to)| {
+                        crate::blastinput::seq_range::record_mask(from, to, length, offset)
+                    })
                     .collect();
                 if !intervals.is_empty() {
                     masks.push(MaskEntry {
@@ -310,15 +316,16 @@ fn results_masks(call: &ArchiveCall<'_>) -> Vec<MaskEntry> {
 }
 
 /// The `LCaseMask` parameters of `-lcase_masking`: per lower-case interval of a query (the
-/// runs of the record, in nucleotide coordinates) one mask in frame `plus1` and one in `minus1`,
-/// whatever `-strand`.
+/// runs of the whole record, in nucleotide coordinates, also outside a `-query_loc` interval:
+/// the reader's mask of the record, `x_FastaToSeqLoc`) one mask in frame `plus1` and one in
+/// `minus1`, whatever `-strand`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:614-645
 /// (the user mask of a translated query is mapped to its plus and minus strand).
 fn lcase_masks(call: &ArchiveCall<'_>) -> Vec<MaskEntry> {
     let mut masks = Vec::new();
     for query in call.queries {
-        for &(from, to) in &query.lowercase_masks {
+        for (from, to) in query.archive_lowercase_runs() {
             for frame in [Frame::Plus1, Frame::Minus1] {
                 masks.push(MaskEntry {
                     id: query.internal_id.clone(),
@@ -366,7 +373,7 @@ impl<'a> AlignSource for BlastxAligns<'a> {
                 let query_record = QueryRecord {
                     id: query.seq_id(),
                     searched_length: i32::try_from(query.sequence.len())?,
-                    offset: 0,
+                    offset: i32::try_from(query.placement().offset)?,
                 };
                 out.write_with(|enc, flush| {
                     write_seq_aligns(
@@ -451,10 +458,33 @@ pub(crate) fn write_blastx_archive(call: &ArchiveCall<'_>, writer: &mut dyn Writ
     };
     let lcase = lcase_masks(call);
     let masks = results_masks(call);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:587-605
+    // ```c++
+    //         if (seqloc_list.front()->IsInt())
+    //         {
+    //             const int kStart((int)seqloc_list.front()->GetStart(eExtreme_Positional));
+    //             const int kStop((int)seqloc_list.front()->GetStop(eExtreme_Positional));
+    //             const int kRangeLength = kStop - kStart + 1;
+    //             ...
+    //             const int kFullLength =
+    //                 bioseq_set->GetSeq_set().front()->GetSeq().GetInst().GetLength();
+    //
+    //             if (kFullLength != kRangeLength)
+    //             {
+    //             	x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_RequiredStart), kStart);
+    //             	x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_RequiredEnd), kStop);
+    // ```
+    // `RequiredStart` / `RequiredEnd`: the interval of the batch's first query when a range cut it
+    // to less than its record (as `tblastn::archive`).
+    let required = call.queries.first().and_then(|query| {
+        let place = query.placement();
+        let cut = query.sequence.len();
+        (cut != place.length).then_some((place.offset as i32, (place.offset + cut) as i32 - 1))
+    });
     let batch = BatchArchive {
         queries: &queries,
         subjects: &subjects_input,
-        required: None,
+        required,
         lcase_masks: &lcase,
         masks: &masks,
         ka_blocks,

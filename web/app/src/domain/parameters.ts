@@ -3,7 +3,7 @@
 // `knownDefault`) is not written, so the argv and the CLI command stay minimal (DW-4).
 // Nothing here checks BLAST's rules: the engine's `validate` reads the argv as the command
 // line does, and the engine's `describe` gives the defaults it resolves.
-import type { ParameterField, ParameterSection, ProgramDescriptor, SectionPlacement } from './programs';
+import type { PairSelect, ParameterField, ParameterSection, ProgramDescriptor, SectionPlacement } from './programs';
 
 /**
  * The default that the engine resolves for an option that a search leaves out (`describe`'s
@@ -58,6 +58,22 @@ export function describedSections(
   return program.sections
     .map((section) => ({ ...section, fields: section.fields.filter((field) => described.has(field.flag)) }))
     .filter((section) => section.fields.length > 0);
+}
+
+/**
+ * The form's control of an option among the fields that the engine describes: the field's label,
+ * or its row's name for NCBI's select of a pair ("Gap Costs"); undefined for an option that the
+ * form does not have. "Additional options" refuses such an option (DW-42): the form leaves out a
+ * value equal to the default that it reads from its own values, which a -task or -matrix written
+ * beside the form would change.
+ */
+export function formControlOf(program: ProgramDescriptor, options: readonly EngineOption[] | undefined, flag: string): string | undefined {
+  for (const section of describedSections(program, options)) {
+    const field = section.fields.find((f) => f.flag === flag);
+    if (field === undefined) continue;
+    return field.row !== undefined && section.pairs?.[field.row] !== undefined ? field.row : field.label;
+  }
+  return undefined;
 }
 
 /** The described sections shown at one place of the screen, in the descriptor's order. */
@@ -202,15 +218,145 @@ export function fieldChoices(field: ParameterField, option: EngineOption | undef
   return option?.choices !== undefined && option.takesValue ? option.choices : (field.choices ?? []);
 }
 
-/** Sets one field and clears the fields that its new value excludes. */
-export function setField(values: FormValues, flag: string, value: FieldValue): FormValues {
-  const next: Record<string, FieldValue> = { ...values, [flag]: value };
-  for (const rule of CLEARED_BY) {
-    if (rule.flag === flag && typeof value === 'string' && rule.values.includes(value)) {
-      for (const cleared of rule.clears) delete next[cleared];
+/** A row of two fields with NCBI's select of their pairs (a section's `pairs`). */
+export interface PairRow {
+  readonly row: string;
+  readonly select: PairSelect;
+  readonly flags: readonly [string, string];
+}
+
+const PAIR_ROWS = new WeakMap<ProgramDescriptor, readonly PairRow[]>();
+
+/**
+ * The rows of a program that have NCBI's select of their two fields, the same objects for each
+ * call (a component's state that follows its row must not follow every render).
+ */
+export function pairRows(program: ProgramDescriptor): readonly PairRow[] {
+  let rows = PAIR_ROWS.get(program);
+  if (rows === undefined) {
+    rows = program.sections.flatMap((section) =>
+      Object.entries(section.pairs ?? {}).flatMap(([row, select]) => {
+        const [first, second, ...more] = section.fields.filter((field) => field.row === row);
+        return first === undefined || second === undefined || more.length > 0 ? [] : [{ row, select, flags: [first.flag, second.flag] as const }];
+      }),
+    );
+    PAIR_ROWS.set(program, rows);
+  }
+  return rows;
+}
+
+/** The value that the search uses for a field: the value set (trimmed), or else its known default. */
+function usedValue(program: ProgramDescriptor, flag: string, values: FormValues, options: readonly EngineOption[] | undefined): string | undefined {
+  const value = values[flag];
+  if (typeof value === 'string' && value.trim() !== '') return value.trim();
+  return knownDefault(program, flag, values, options)?.defaultValue;
+}
+
+/** The key of a pair row's list: the values that the search uses for its `by` options, joined with ','. */
+function listKey(program: ProgramDescriptor, select: PairSelect, values: FormValues, options: readonly EngineOption[] | undefined): string | undefined {
+  if (select.by === undefined) return '';
+  const parts = select.by.map((flag) => usedValue(program, flag, values, options));
+  return parts.some((part) => part === undefined) ? undefined : parts.join(',');
+}
+
+/**
+ * The values of a pair row's select: NCBI's list for the scores or the matrix that the search
+ * uses, without the values of other tasks; empty without a list.
+ */
+export function pairList(program: ProgramDescriptor, pair: PairRow, values: FormValues, options: readonly EngineOption[] | undefined): readonly string[] {
+  const key = listKey(program, pair.select, values, options);
+  const list = key === undefined ? undefined : pair.select.lists[key];
+  if (list === undefined) return [];
+  const only = pair.select.only;
+  if (only === undefined) return list;
+  const task = effectiveValue('-task', values, options) ?? '';
+  return list.filter((value) => !only.values.includes(value) || only.tasks.includes(task));
+}
+
+/** NCBI's default of a pair row's list: a value of the task's own (megablast's Linear), or else NCBI's "Deflt". */
+function pairListDefault(program: ProgramDescriptor, pair: PairRow, values: FormValues, options: readonly EngineOption[] | undefined): string | undefined {
+  const own = pairList(program, pair, values, options).find((value) => pair.select.only?.values.includes(value));
+  if (own !== undefined) return own;
+  const key = listKey(program, pair.select, values, options);
+  return key === undefined ? undefined : pair.select.defaults?.[key];
+}
+
+/** The pair that the search uses ("1,-2", "11 1"), or '' while one of its values is unknown. */
+export function pairValue(program: ProgramDescriptor, pair: PairRow, values: FormValues, options: readonly EngineOption[] | undefined): string {
+  const parts = pair.flags.map((flag) => usedValue(program, flag, values, options));
+  return parts.some((part) => part === undefined) ? '' : parts.join(pair.select.separator);
+}
+
+/**
+ * The field values that choosing a pair writes: its two values, so that the pair stays the one
+ * chosen when another task has other defaults (megablast's 1,-4 does not become blastn's 2,-4),
+ * or '' for both where the pair is the default (the fields follow the task again, as a default
+ * chosen in a select does).
+ */
+export function pairEntries(
+  program: ProgramDescriptor,
+  pair: PairRow,
+  value: string,
+  values: FormValues,
+  options: readonly EngineOption[] | undefined,
+): Array<readonly [string, FieldValue]> {
+  const parts = value.split(pair.select.separator);
+  const isDefault = pair.flags.every((flag, i) => {
+    const known = knownDefault(program, flag, values, options);
+    return known?.given !== true && parts[i] === known?.defaultValue;
+  });
+  return pair.flags.map((flag, i) => [flag, isDefault ? '' : (parts[i] ?? '')] as const);
+}
+
+/**
+ * Sets fields and clears the fields that a new value excludes. A pair row whose list the new
+ * values change (the task, the scores or the matrix) takes the new list's default, as on NCBI's
+ * page, where the gap costs follow the scores and the matrix: a pair that the list does not hold
+ * is one that BLAST may not read (4,-5 with BLASTN's 5 2 stops the search). So does a row whose
+ * pair in use leaves its list while the list stays (scores 1,-1 with megablast's default 0 0).
+ * A pair row whose own fields are set here keeps them.
+ */
+export function setFields(
+  program: ProgramDescriptor,
+  values: FormValues,
+  entries: ReadonlyArray<readonly [string, FieldValue]>,
+  options: readonly EngineOption[] | undefined,
+): FormValues {
+  const next: Record<string, FieldValue> = { ...values };
+  for (const [flag, value] of entries) {
+    next[flag] = value;
+    for (const rule of CLEARED_BY) {
+      if (rule.flag === flag && typeof value === 'string' && rule.values.includes(value)) {
+        for (const cleared of rule.clears) delete next[cleared];
+      }
+    }
+  }
+  for (const pair of pairRows(program)) {
+    if (entries.some(([flag]) => pair.flags.includes(flag))) continue;
+    const list = pairList(program, pair, next, options);
+    const used = pairValue(program, pair, next, options);
+    const listChanged = pairList(program, pair, values, options).join('|') !== list.join('|');
+    const leftList = used !== pairValue(program, pair, values, options) && list.length > 0 && !list.includes(used);
+    if (!listChanged && !leftList) continue;
+    const chosen = pairListDefault(program, pair, next, options);
+    if (chosen === undefined) continue;
+    for (const [flag, value] of pairEntries(program, pair, chosen, next, options)) {
+      if (value === '') delete next[flag];
+      else next[flag] = value;
     }
   }
   return Object.freeze(next);
+}
+
+/** Sets one field (`setFields`). */
+export function setField(
+  program: ProgramDescriptor,
+  values: FormValues,
+  flag: string,
+  value: FieldValue,
+  options: readonly EngineOption[] | undefined,
+): FormValues {
+  return setFields(program, values, [[flag, value]], options);
 }
 
 /**

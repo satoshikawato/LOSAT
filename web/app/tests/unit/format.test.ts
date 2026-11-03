@@ -1,6 +1,6 @@
 // The UI's display helpers (src/ui/format.ts).
 import { describe, expect, it } from 'vitest';
-import { formatCounted, formatDateTime, framesLabel, framesPhrase, framesText } from '../../src/ui/format';
+import { formatCounted, formatDateTime, framesLabel, framesPhrase, framesText, optionHelp } from '../../src/ui/format';
 
 describe('formatDateTime', () => {
   it('writes a local time in ISO 8601 form, day and month never swapped', () => {
@@ -10,6 +10,14 @@ describe('formatDateTime', () => {
 
   it('pads every field and drops the milliseconds', () => {
     expect(formatDateTime(new Date(999, 11, 31, 0, 0, 0, 999).getTime())).toBe('0999-12-31 00:00:00');
+  });
+});
+
+describe('optionHelp', () => {
+  it("keeps the help's first paragraph without the references to NCBI's sources", () => {
+    expect(optionHelp('Cost to open a gap [default: 11]\n\nMore text')).toBe('Cost to open a gap [default: 11]');
+    expect(optionHelp('Reward for a match. NCBI reference: blast_options.c:12')).toBe('Reward for a match.');
+    expect(optionHelp(undefined)).toBe('');
   });
 });
 

@@ -208,6 +208,24 @@ pub struct RecordSource {
     pub believed: Option<std::sync::Arc<believed::BelievedIds>>,
     /// The start of the letters after a cut to a range, in the record.
     pub cut_from: usize,
+    /// The length of the record before a cut to a range (0 for a record that no range cut);
+    /// BLASTX's reports read where the letters lie in the record from it and `cut_from`. A plain
+    /// `usize` keeps the source in glibc's 80-byte chunks.
+    pub uncut_length: usize,
+}
+
+impl RecordSource {
+    /// The source of a part of the record (a chunk of a split query): all of it but the whole
+    /// letters, which only the archive's Bioseq of the record reads.
+    pub fn without_uncut(&self) -> Box<Self> {
+        Box::new(Self {
+            defline: self.defline.clone(),
+            uncut: None,
+            believed: self.believed.clone(),
+            cut_from: self.cut_from,
+            uncut_length: self.uncut_length,
+        })
+    }
 }
 
 impl FastaRecord {
@@ -360,6 +378,7 @@ impl FastaRecord {
                     ),
                     believed: source.believed.clone(),
                     cut_from: source.cut_from + from,
+                    uncut_length: source.uncut_length.max(self.sequence.len()),
                 })
             }),
         }
@@ -388,6 +407,7 @@ impl FastaRecord {
     pub fn cut_in_place(&mut self, from: usize, to_exclusive: usize) {
         if let Some(source) = self.source.as_mut() {
             source.uncut.get_or_insert_with(|| self.sequence.clone());
+            source.uncut_length = source.uncut_length.max(self.sequence.len());
             source.cut_from += from;
         }
         self.sequence.truncate(to_exclusive);

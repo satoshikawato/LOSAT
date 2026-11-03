@@ -10,6 +10,8 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import type { HspId, ResultsBrowser } from '../application/results';
+import { shellWords } from '../domain/argv';
+import { recordName } from '../domain/dataset';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal } from '../domain/run';
 import { useStore } from './useStore';
@@ -82,10 +84,13 @@ function runLabel(run: RunView): string {
   return `Run ${number} · ${programById(program).label} · ${query.name} vs ${subject.name}${status}`;
 }
 
-/** The options of the run's argv: the words after the program and the two inputs (plan §5.3). */
+/**
+ * The options of the run's argv: the words after the program and the two inputs (plan §5.3),
+ * quoted as on a command line, so that they can be typed again ("Additional options").
+ */
 function options(run: RunView): string {
   const words = run.snapshot.argv.slice(5);
-  return words.length === 0 ? 'defaults' : words.join(' ');
+  return words.length === 0 ? 'defaults' : shellWords(words);
 }
 
 /** The program and the task that the search used (the argv's, or the engine's default once the run is read). */
@@ -165,13 +170,13 @@ async function toAlignments(id: HspId): Promise<void> {
             </dd>
             <template v-if="selected.snapshot.query.records.length === 1">
               <dt>Query ID</dt>
-              <dd data-testid="results-query-id">{{ selected.snapshot.query.records[0]!.id }}</dd>
+              <dd data-testid="results-query-id">{{ recordName(selected.snapshot.query.records[0]!.id, 'query', 0) }}</dd>
               <dt>Query Length</dt>
               <dd data-testid="results-query-length">{{ formatCount(selected.snapshot.query.records[0]!.length) }} {{ units.query }}</dd>
             </template>
             <template v-if="selected.snapshot.subject.records.length === 1">
               <dt>Subject ID</dt>
-              <dd data-testid="results-subject-id">{{ selected.snapshot.subject.records[0]!.id }}</dd>
+              <dd data-testid="results-subject-id">{{ recordName(selected.snapshot.subject.records[0]!.id, 'subject', 0) }}</dd>
               <dt>Subject Length</dt>
               <dd data-testid="results-subject-length">{{ formatCount(selected.snapshot.subject.records[0]!.length) }} {{ units.subject }}</dd>
             </template>

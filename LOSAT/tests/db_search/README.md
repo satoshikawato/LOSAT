@@ -17,6 +17,9 @@ FASTA files:
   reads the stored O (26), which is not the X the query holds for its own O, so `q_o` against `s_o` is not
   "near identical", the subject is SEG-filtered and scores 266 bits; against `s_x` it scores 307 (and
   `-subject` gives 307 for both).
+- `o_stored_bx_q.fna`: `s_x` back-translated with its twelve X as `NNN` codons, the BLASTX query of `db.o_stored.bx.8`
+  (BLASTX reads the stored O of `s_o` as stored, 154 identities; `-subject o_stored.faa` reads it as X, 166, row
+  `pyl.blastx.ostored.8` of `outfmt0_manifest.tsv`).
 - `p3.faa`: records p01, p03 and p08 of `LOSAT/tests/seqdb/prot.faa`, in that order.
 - `d1_q.faa`: D1, a hit that `-db` keeps and `-subject` drops. Two proteins of `LOSAT/tests/fasta/WSSV.faa`
   (YP_009220551.1 and YP_009220614.1: for each, NCBI `blastp -db paja -outfmt 6` prints 2 rows and
@@ -54,6 +57,8 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
     makeblastdb -in tests/db_search/vol2.faa -dbtype prot -out tests/db_search/vol2_nophr \
         -title "two volumes, the second without its header file" -blastdb_version 4 -max_file_sz 128B
     rm tests/db_search/vol2_nophr.01.phr
+    makeblastdb -in tests/db_search/bxchunk.faa -dbtype prot -out tests/db_search/bxchunk \
+        -title "proteins planted in bxchunk_q.fna" -blastdb_version 4
 
 `wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
 `LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:
@@ -162,6 +167,12 @@ without hits come from seeded generators):
 - `bslice_nohit.fna`: 300 random bases with no hit in `bslice` (candidate 25 of 40 from `random.Random(20261019)`;
   the others all have weak hits at the default E value). `bslice_alln.fna`: 300 N (NCBI warns that it cannot
   calculate Karlin-Altschul parameters).
+- `bxchunk_q.fna`: one query of 25,001 random bases (`random.Random(5)`, as the review of #702 made it) with a
+  back-translated protein of 150 residues planted 200 bases before each of 3000, 5997, 6000, 9705, 10001, 12000,
+  15000, 19410 and 20000 (the chunk borders of several `CHUNK_SIZE` values), and short lower-case runs at those
+  points; `bxchunk.faa`: the nine planted proteins with a quarter of their residues changed, for the database
+  `bxchunk` (rows `db.bxchunk.*`: BLASTX `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE`). `bxchunk_empty.fna`: a record of a
+  defline only (NCBI reports the query splitter's errors before the empty query's `Sequence contains no data`).
 - `bnophr.pin` and `bnophr.psq` are copies of `bslice.pin` and `.psq`: the database without its header file, used
   with the query without hits (with a hit NCBI fails with exit 2).
 
@@ -412,6 +423,17 @@ do not compare equal, so NCBI finds no sequence); `gb|DDD00004|` before `gb|DDD0
 sequence found holds the same definition lines and letters (`pdup_ab`); `-negative_seqidlist
 seqidlist/sl_pfound_neg.txt` leaves `gb|AAA00001.1|` out of the search, and NCBI's lookup with it.
 
+The same record with other taxids (line DBID N1b; rows `db.id.*.found.taxid.*`): `make_ids.py --copytaxid-only`
+writes `ids/pdup_t` (`pdup.faa` with taxid 9606), `ids/pdup_u` (without one), `ids/pdup_n` and `ids/pdup_o` (both
+with taxid 99990, the last entry of the taxonomy databases of `../seqdb/taxdb`), `ids/ndup_a` and `ids/ndup_t`
+(`ndup.fna`, the back-translation of `pdup.faa`, without a taxid and with 9606), `ids/pdupe_a` and `ids/pdupe_t`
+(`pdupe.faa`, without a title, without a taxid and with 9606), and the aliases `ids/pdup_at.pal`, `ids/pdup_tu.pal`,
+`ids/pdup_no.pal`, `ids/pdupe_at.pal` and `ids/ndup_at.nal` (queries `pdup_q.faa` and `ndup_q.fna`). NCBI shows for
+both copies the one its lookup gives first, with its taxids: the same rows where no report writes taxids, which
+LOSAT writes; LOSAT refuses the sequence in the formats of taxids and their names, for `pdupe_at` with the
+taxonomy database (a title made from the taxids), and with a taxonomy database on `BLASTDB` whose texts depend on
+the copy NCBI fetches (`bad_magic` for `pdup_at`, `offset_last_past_end` for the copies of 99990 in `pdup_no`).
+
 Sequences whose only Seq-id is `gnl|BL_ORD_ID|n` (line DBID N2a; rows `db.id.*.ord.*`): `make_ids.py` writes, from
 the FASTA of `ids/make_ord_fasta.py`, `ids/pord_v5` and `ids/pord_v4` from `ids/pord.faa` (two accessions, then
 `gnl|BL_ORD_ID|2`, its own number, `gnl|BL_ORD_ID|6`, the number of no sequence, and `gnl|BL_ORD_ID|1`, the
@@ -445,6 +467,29 @@ letters, so that the query `ids/pshare_q1.faa` hits both and NCBI's scope shows 
 `gnl|db|abc`) and `ids/pshare_d` (`pdb|1abc|A`, `gnl|DB|ABC`) through the alias `ids/pshare_cd.pal` (queries
 `ids/pshare_d_q<k>.faa`); `ids/pdup_abc.pal` reads the copies `pdup_a` and `pdup_b` and the record of another title
 `pdup_c`.
+
+Seq-ids that NCBI's scope matches weakly (line DBID N2c; rows `db.id.*.weak.*`): `make_ids.py` (`--weak-only` builds
+just these) writes, from the FASTA of `ids/make_weak_fasta.py`, `ids/pweak_v5` and `ids/pweak_v4` from `ids/pweak.faa`
+(`sp|P00041.1|NAMEW`, `gb|FFF00040|`, `pir|PIRW1|`, `sp||NAMEX`, `gb|FFF00041.1|`, then three pairs S, T of nearly
+equal letters: `sp||NAMEY` before `sp|P00042.1|NAMEY`, `gb|FFF00043|` before `gb|FFF00043.1|`, `sp|P00044.1|NAMEZ`
+before `sp||NAMEZ`) and `ids/nweak_v5` and `ids/nweak_v4` from `ids/nweak.fna` (`gb|AF000081|` before
+`gb|AF000081.1|`, then `gb|AF000082|`). NCBI's scope finds an accession without a version by the same one with a
+version, an id of accession and name by the name-only id, a name-only id by an id of that name and an accession, and a
+pir accession-only id by the name-only id; not the other way. The queries `ids/pweak_qa<k>.faa` (`.fna` for BLASTX,
+`ids/nweak_qa2.fna`) carry such an id and are read with -parse_deflines (`qa4` the direction NCBI does not match);
+`ids/pweak_q<k>.faa`, `ids/pweak_q8.fna`, `ids/nweak_q1.fna` and `.faa` hit record k (the second of a pair also hits
+the first) and are run with `PRE_FETCH_SEQS_LIMIT=N` in `extra_args`, an environment variable of both programs (NCBI
+reads the reported sequences one by one when N is 0 or below the batch's Seq-align count and then writes the names of
+the sequence it read first). LOSAT refuses both cases and every N but 2147483647 (it does not count the Seq-aligns);
+in a version 5 database LOSAT does not reproduce NCBI's lookup and refuses every Seq-align id with a name and every pir or prf id
+without it, in version 4 the lookup of the id decides (a name alone with no other holder is written as NCBI does:
+`db.id.blastp.weak.v4.pf.alone.6`, `v4.pf.none.6`). The `ncbi` rows are the searches without the variable or at 2147483647, the
+version 4 sequences with no weak holder and outfmt 8. Review 1 of N2c: `ids/pweak_r_v5` and `ids/pweak_r_v4` from `ids/pweak_r.faa`,
+four pairs S, T (T's first definition line holds its own id and the second id that S's matches weakly: `gb|FFF00051.1|`
+with `sp||NAME_R` for `sp|P00051.1|name_r` (another letter case), `gb|FFF00053.1|` with `prf||NAME_S` for
+`tpg|FFF00052.1|NAME_S`, `gb|FFF00054.1|` with `prf||PIRW3` for `pir|PIRW3|`, `gb|FFF00055.1|` with `emb|S12347.1|` for
+`pir|S12347|`; queries `ids/pweak_r_q<k>.faa` are T's letters; rows `db.id.blastp.weak.r.*` and `.v4.r.*`: NCBI writes T's names
+for S at `PRE_FETCH_SEQS_LIMIT=0` in both versions, and both its own rows without the variable).
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
@@ -593,3 +638,30 @@ without the accession table (`bn.mixed.6`: NCBI stops at the first hit of a pars
 volume of another name (`bn.aliasdup.0`), and of a negative seqid list (`multidb/sl_negpartial.txt`, FBtr0083245 of the
 second volume) on `taxfilter/tfn.00`, the first of the two volumes of one LMDB file (`bn.negpartial.6`: NCBI clears bit -1 of
 its OID mask and crashes).
+
+## The environment around BLASTX's search and report (line DBID, N2d)
+
+Rows `db.bxenv.*` search `bslice` with `bslice_q.fna` (BLASTX) with an environment variable in `extra_args`. NCBI converts
+`PRE_FETCH_SEQS_LIMIT` with `NStr::StringToInt` before the report of each query batch (`blast_app_util.cpp:732-737`) and
+stops with a `CStringException` (exit 255; with `-mt_mode 1` its nodes catch it, so NCBI writes nothing and exits 0) on a
+value it cannot convert, an empty one too; the archive of outfmt 11 is written without that call (`blastx_app.cpp:283-288`).
+`BL2SEQ_LEGACY` makes the subjects of `-subject` a search of each subject on its own (`blast_app_util.cpp:206-210`); a `-db`
+search ignores it. LOSAT refuses before the search: an error that NCBI raises in the first batch's search before the
+prefetch (a query record without letters, `-query_loc` past every record: `BLAST engine error`, exit 3) and a `-subject`
+search with `BL2SEQ_LEGACY` whose report would not change (no hits, or one subject record in outfmt 5, 6 or 10) are
+refused too. The three `losat-rejection` rows are `abc` in outfmt 6
+and 16 and an empty value in outfmt 0; the ncbi rows are `abc` in outfmt 11, the integer 5 in outfmt 6, and `BL2SEQ_LEGACY=1`
+in outfmt 0 and 6. The `-subject` cases are `environment_that_ncbi_reads_around_the_report_is_rejected_where_it_reads_it`
+in `tests/run_local_blastx.rs`.
+
+## The same environment in the other programs (line DBID, N2e)
+
+Rows `db.envshared.*` search `arch_sprot` (BLASTP, PSIBLAST), `arch_tbn_snucl` (TBLASTN), `arch_tbx_snucl` (TBLASTX) and
+`arch_snucl` (BLASTN) with the queries of `tests/fasta/outfmt11/` and the environment of the section above. BLASTP, TBLASTN,
+TBLASTX and BLASTN write the archive of outfmt 11 without the prefetch too (`blastp_app.cpp:280-285`,
+`tblastn_app.cpp:294-299`, `tblastx_app.cpp:197-202`, `blastn_app.cpp:304-309`), so a value that NCBI cannot convert leaves it
+as without the variable; psiblast's iterations fetch ahead before they write an archive (`psiblast_app.cpp:262-266`), which
+LOSAT's PSIBLAST does not write. A `-db` search of each of them ignores `BL2SEQ_LEGACY`. NCBI's automatic split of a `-db`
+search by queries (`-num_threads` 2 or more, a large query file, a small database) catches the exception as `-mt_mode 1` does. The ncbi rows are `abc` (BLASTN: an
+empty value) in outfmt 11 and `BL2SEQ_LEGACY=1` in outfmt 6 (TBLASTN: 0); the `losat-rejection` row is BLASTN's `abc` in
+outfmt 6. The `-subject` cases of the five programs are `tests/search_environment.rs`.

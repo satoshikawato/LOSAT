@@ -96,9 +96,9 @@ impl<'a> Subjects<'a> {
     }
 
     /// The NCBIstdaa residues of subject `oid` followed by the byte 0 (what the
-    /// preliminary stage scans): a record's letters encoded (`aa_char_to_ncbistdaa`), a
-    /// database sequence's stored bytes as they are (NCBI searches, redoes and shows the
-    /// stored bytes of a database, decision 108).
+    /// preliminary stage scans): a record's letters encoded (`search_residue`: a pyrrolysine
+    /// (O) as X), a database sequence's stored bytes as they are (NCBI searches, redoes and
+    /// shows the stored bytes of a database, decision 108).
     pub(crate) fn encoded_with_sentinel(&self, oid: usize) -> Cow<'a, [u8]> {
         match *self {
             Subjects::Fasta(records) => {
@@ -119,7 +119,7 @@ impl<'a> Subjects<'a> {
                 let record = &records[oid];
                 let mut encoded = Vec::with_capacity(record.sequence.len() + 2);
                 encoded.push(0);
-                encoded.extend(record.sequence.iter().copied().map(aa_char_to_ncbistdaa));
+                encoded.extend(record.sequence.iter().copied().map(search_residue));
                 encoded.push(0);
                 Cow::Owned(encoded)
             }
@@ -282,8 +282,39 @@ fn encode(record: &FastaRecord) -> Vec<u8> {
         .sequence
         .iter()
         .copied()
-        .map(aa_char_to_ncbistdaa)
+        .map(search_residue)
         .collect()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:894-899
+// ```c++
+//     for (i = 0; i < sv.size(); i++) {
+//         // Change unsupported residues to X
+//         if (sv[i] == AMINOACID_TO_NCBISTDAA[(int)'O']) {
+//             replaced_residues.push_back(i);
+//             *buf_var++ = AMINOACID_TO_NCBISTDAA[(int)'X'];
+// ```
+/// The NCBIstdaa residue that the search reads for the letter `letter` of a `-subject` record:
+/// a pyrrolysine (O) is read as X, so it is identical to an X of the query in the Seq-aligns'
+/// `num_ident` (`statistics::identity_and_positive`). The reports show the record's letters.
+#[inline(always)]
+fn search_residue(letter: u8) -> u8 {
+    // `aa_char_to_ncbistdaa` of each ASCII byte with O as X: one load per letter, as before.
+    const TABLE: [u8; 128] = {
+        let mut table = [0; 128];
+        let mut byte = 0;
+        while byte < 128 {
+            table[byte] = aa_char_to_ncbistdaa(byte as u8);
+            byte += 1;
+        }
+        table[b'O' as usize] = aa_char_to_ncbistdaa(b'X');
+        table
+    };
+    if letter < 128 {
+        TABLE[letter as usize]
+    } else {
+        aa_char_to_ncbistdaa(letter)
+    }
 }
 
 #[cfg(test)]
@@ -309,5 +340,22 @@ mod tests {
                 "{oid}"
             );
         }
+    }
+
+    // NCBI reference: `search_residue` (blast_setup_cxx.cpp:894-899).
+    /// A `-subject` record's pyrrolysine (O or o) is searched as X, through every encoding; the
+    /// record, whose letters the reports show, keeps the O.
+    #[test]
+    fn a_fasta_subject_pyrrolysine_is_searched_as_x() {
+        let records = parse_fasta(b">a\nSOSoXU\n", true, false).unwrap();
+        let subjects = Subjects::Fasta(&records);
+        let [s, x, u] = [b'S', b'X', b'U'].map(aa_char_to_ncbistdaa);
+        assert_eq!(*subjects.encoded(0), [s, x, s, x, x, u]);
+        assert_eq!(*subjects.encoded_with_sentinel(0), [s, x, s, x, x, u, 0]);
+        assert_eq!(
+            *subjects.x_encoded_with_sentinels(0),
+            [0, s, x, s, x, x, u, 0]
+        );
+        assert_eq!(records[0].sequence, b"SOSOXU");
     }
 }

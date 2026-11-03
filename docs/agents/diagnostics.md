@@ -310,6 +310,7 @@ count of the set anywhere, so that two pull requests that each add a switch do n
 export LOSAT_X_BNCSR=1
 export LOSAT_X_BNCSRPACK=1
 export LOSAT_X_BNDBCUT=1
+export LOSAT_X_BNDBSMALL=1
 export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNDBWIDE=1
 export LOSAT_X_BNDCONE=1
@@ -386,8 +387,6 @@ export LOSAT_X_DISCLUTPAR=1
 export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPNEON2=1
 export LOSAT_X_DPNIBBLE=1
-export LOSAT_X_DPTRACEPOOL=1
-export LOSAT_X_DPWINDOW=1
 export LOSAT_X_FOLDLEAN=1
 export LOSAT_X_GREEDYROWFUSE=1
 export LOSAT_X_MB24=1
@@ -737,21 +736,30 @@ Same values, faster computation:
   elsewhere (that branch's) made blastn of 31,168 dmel cDNAs against 3 Mb at 16 threads x1.023 slower, with the
   same instructions and blocked store forwards x3.1, all in this kernel; with the rows aligned x1.002 against dev
   [0.999-1.004], dev with the same rows x1.003.
-- `LOSAT_X_DPWINDOW=1` (every program's vector X-drop DP, memory; in the strict set from the pull request
-  that added it, 2026-10-23; a value switch: `=<n>`, 128 or more, is the band start at which the rows move,
-  built-in 1024; `=0` or `LOSAT_X_DEFAULT=0` returns to rows that hold every column) the vector kernels
+- `LOSAT_X_DPWINDOW` (every program's vector X-drop DP, memory; no variable since 2026-11-03, the fold of line
+  SF S3 family dp-trace; before, a value switch in the strict set from the pull request that added it,
+  2026-10-23: `=<n>`, 128 or more, was the band start at which the rows move, built-in 1024; `=0` or
+  `LOSAT_X_DEFAULT=0` returned to rows that hold every column. Now: where NCBI enlarges `score_array` (the rows
+  do not hold the band's end, `XdropScratch::fits`), a kernel calls `XdropScratch::x_room` at the start of the
+  row: when half the rows or more lie below the band start `first`, the rows move down (`x_shift`, by
+  `(first - 64) & !63` lanes), otherwise they grow as before. There is no band start constant, the rows stay
+  within a few times the band and its margins (about four times just after they double), and each move copies
+  at most as many lanes as the band crossed since the last; the kernels test once per row (`fits`) instead of twice. There is no way back to rows that
+  hold every column except the test-only `x_test_rows(None)`. Measured with the fold: Sakai x EDL933 `-subject` at 16 threads, blastn and dc-megablast x0.993 and x0.995 the time and x1.015 and x1.005 the max RSS (rounds 0.93-1.12, as dev's own spread); one-thread instructions x0.994-0.999. A band of more than about 1,000 lanes can keep up to twice the rows the 1,024 start kept (about 40 KiB more per scratch for a 2,000-lane band); a narrow band keeps 1,024 lanes where the old rows grew to 2,048. History of
+  the switch:) the vector kernels
   (`utils/xdrop_simd.rs`, `x_xdrop_avx2.rs`, `x_xdrop_w128.rs`) kept their DP rows (`H` and `E` on 8- and
   16-bit lanes and the column letters, 10 bytes per column) indexed by column, as NCBI's `score_array` is,
   so a scratch grew, zero-filled, to the last column its longest band reached: 524,288 lanes (5 MiB) on
   Sakai x EDL933, and a search grows one scratch per worker and stage (blastn `-subject` 16 threads: 92).
-  Now a kernel whose band start reaches the bound moves the lanes from `first - 64`, rounded down to a
-  multiple of 64, to lane 0 and lowers every column it keeps by the same amount (`XdropScratch::x_shift`:
+  With the switch a kernel whose band start reached the bound moved the lanes from `first - 64`, rounded down to
+  a multiple of 64, to lane 0 and lowered every column it kept by the same amount (`XdropScratch::x_shift`:
   the band, the buffers' write ends, the filled column letters, the fence and bad-letter columns); the best
-  cell and the traceback rows keep absolute columns. The lanes keep their values and the freed lanes are
-  zero as lanes never written are, so every score, drop decision, script byte and cell count is the same.
-  The fuzz tests against the scalar NCBI loops run each kernel with the bound at 128, 320 and off, and
-  every family and lane width moves rows there (20,000 cases); `band_window_keeps_every_result` compares
-  long problems on and off. All eight kernels move their rows: the six kernels of these three
+  cell and the traceback rows keep absolute columns (still so). The lanes keep their values and the freed
+  lanes are zero as lanes never written are, so every score, drop decision, script byte and cell count is the
+  same. The fuzz tests against the scalar NCBI loops run each kernel with rows of 128 and 320 lanes to start with
+  and with rows that hold every column (`x_test_rows`), and every family and lane width moves rows there
+  (20,000 cases); `band_window_keeps_every_result` compares rows of 128 lanes to start with against every
+  column on long problems. All eight kernels move their rows: the six kernels of these three
   families and the two NEON2 kernels (`x_xdrop_neon2.rs`, `LOSAT_X_DPNEON2`, on by default on
   aarch64; their fuzz and window tests run in the platform checks). Memory on the workstation
   (dev cd8e0f89 / this switch / `=0`, max RSS MiB, `v4-B/results/b16c/mem1/`, same output): Sakai x
@@ -765,7 +773,11 @@ Same values, faster computation:
   x1.011 (4 pairs, 0.993-1.015; user x1.000, instructions x0.9995); blastp sp4 `-subject` x1.000 (6),
   yeast `-db` x1.001 (4); user-space instructions x0.970-0.9995 in every cell.
 - `LOSAT_X_DPNIBBLE=1` (every program's vector X-drop traceback, memory; in the strict set from the
-  pull request that added it, 2026-10-24; `=0` returns to one byte per cell) the
+  pull request that added it, 2026-10-24; since 2026-11-03 (the fold of line SF S3 family dp-trace) it also
+  governs the pool of long traces, folded from `LOSAT_X_DPTRACEPOOL` (entry below): a trace past the four-bit
+  rows of one NCBI chunk (`CHUNKSIZE` 2,097,152 cells, `blast_gapalign.c:61`, 1 MiB) comes from a pool the
+  scratches on a Rayon pool thread share, and the pool keeps two idle pairs; `=0` returns to one byte per cell
+  and every scratch keeps its own trace. Measured with the fold: Sakai x EDL933 `-subject` at 16 threads, blastn and dc-megablast x0.993 and x0.995 the time and x1.015 and x1.005 the max RSS (rounds 0.93-1.12, as dev's own spread), at 4 threads x0.998 / x0.997 and x1.007 / x1.008; one-thread instructions x0.994-0.999; outputs equal to dev's and NCBI's) the
   traceback rows of the vector kernels (`XdropScratch::trace`, NCBI's `edit_script`) held one byte of
   `SCRIPT_*` bits per DP cell of the band, so a long gapped alignment kept one byte per cell: up to 36 MiB
   for one Sakai x EDL933 traceback, and each worker keeps its largest. Now the kernels store a code of
@@ -791,8 +803,14 @@ Same values, faster computation:
   the kernels' script codes in `const` blocks keep a one-byte kernel's register allocation, one thread at
   dev's instructions, x0.998 / x0.999): dc-megablast 16 threads x0.984 (8 pairs), 633 -> 476; blastn 16
   threads x0.986 (8), 535 -> 379; 4 threads x0.993 / x1.000 (6), 217 -> 189 / 257 -> 197.
-- `LOSAT_X_DPTRACEPOOL=1` (every program's vector X-drop traceback, memory; in the strict set from the pull
-  request that added it, 2026-10-26; `=0` returns to one trace per scratch) each scratch of a search
+- `LOSAT_X_DPTRACEPOOL=1` (every program's vector X-drop traceback, memory; folded into `LOSAT_X_DPNIBBLE` on
+  2026-11-03, line SF S3 family dp-trace: no variable any more, the pool follows `LOSAT_X_DPNIBBLE`'s rule
+  (a scratch on a Rayon pool thread) and `LOSAT_X_DPNIBBLE=0` gives every scratch its own trace; the pool keeps
+  two idle pairs as before (one was measured: dc-megablast Sakai x EDL933 `-subject` 1.046x the time at 16
+  threads and 1.16x the max RSS at 4, a trace given back to a full pool was freed and made again), and its size
+  is written as the four-bit rows of one NCBI chunk (`CHUNKSIZE` 2,097,152 cells), the same 1 MiB. Measured
+  with the fold: Sakai x EDL933 `-subject` at 16 threads, blastn and dc-megablast x0.993 and x0.995 the time and x1.015 and x1.005 the max RSS (rounds 0.93-1.12, as dev's own spread), at 4 threads x0.998 / x0.997 and x1.007 / x1.008; one-thread instructions x0.994-0.999; outputs equal to dev's and NCBI's. History of the switch: in the strict set from the pull
+  request that added it, 2026-10-26; `=0` returned to one trace per scratch) each scratch of a search
   (`XdropScratch`, one per worker and look-ahead helper) kept the largest traceback rows it ever held
   (`trace` and `rows`, NCBI's `edit_script` and `edit_start_offset`), so on 16 threads every worker ended
   the traceback stage of a genome pair holding a long trace (Sakai x EDL933: 130 dc-megablast calls of 1 MiB
@@ -841,8 +859,8 @@ Same values, faster computation:
   call they do not take (8-bit lanes with `32 * gap_extend - (gap_open + gap_extend) > 128`, 16-bit
   lanes with `16 * gap_extend - (gap_open + gap_extend) > 32768`) runs on the DPW128 /
   128-bit kernels (`utils/x_xdrop_neon2.rs`). It takes the place the 256-bit AVX2 kernels have on
-  x86_64 (first in the dispatch). They move their DP rows down with the band like the other
-  kernels (`LOSAT_X_DPWINDOW`). Evidence: #208, bench run 38590719673 on ubuntu-24.04-arm, 1 thread
+  x86_64 (first in the dispatch). They move their DP rows with the band like the other
+  kernels (`XdropScratch::x_room`; `LOSAT_X_DPWINDOW` until its fold on 2026-11-03). Evidence: #208, bench run 38590719673 on ubuntu-24.04-arm, 1 thread
   x0.867-0.974 on the cases with X-drop DP, x0.994-1.004 without, 4 threads x0.902-0.979, equal
   output hashes. Platform checks hash `=0` on the Linux and macOS arm64 runners (mode `nodpneon2`);
   the mode `dpneon2` was equal to the default on both arm64 runners in every run since 2026-10-15.
@@ -1313,6 +1331,42 @@ Rebuilding less:
   (dc-megablast at 16 threads: user 31.9 -> 18.6 s, system 8.71 -> 0.37 s), and the median max RSS falls in every cell (139-143
   -> 119-122 MiB and 147-151 -> 117-121 MiB for megablast at 16 threads), below NCBI's except for the Sakai query at
   16 threads: 197-203 MiB with the switch and 200-203 MiB without it, against NCBI's 194 MiB.
+- `LOSAT_X_BNDBSMALL=1` (BLASTN, every task, memory; in the strict set from the pull request that added it
+  (perf/bn-db-small-blocks, v4-D12 s29-s30, evidence at the end of this entry): on unless it is `0`; acts for `-db` at
+  more than one thread) the largest block of `LOSAT_X_BNDBCUT`'s cut is 256 KiB of the sequence file
+  (`X_BNDBSMALL_BLOCK_BYTES` in `blastn/blast_engine/x_db_cut.rs`) instead of 1 MiB (`BLOCK_BYTES`), and the blocks are
+  listed in runs of the index (below). When a search starts, each thread holds the block it reads and the results of the
+  blocks that wait for the owner, before the owner has handed any over, and that memory stays on the thread's arena.
+  Where most sequences hit most queries it is large: 1,000 amplicons against SILVA at 16 threads gave about 1 MiB of
+  preliminary HSPs per 1 MiB block, two or three blocks of them per thread, plus the 1 MiB read buffers, 5.9 MiB per
+  thread in all (heaptrack raw records read by arena, `v4-D12/STATE.md` s29). `LOSAT_X_BNDBWIDE`'s window keeps its bytes
+  (16 MiB of the sequence file per thread, `x_wide_blocks_per_thread` in `x_db_stream.rs`): 16 blocks of 128 KiB per thread
+  took x1.16 on core_nt. The list: `stream_blocks` lists a segment's blocks on one thread while the others wait, at every
+  query batch, and `next_block` reads two index entries and 1,024 more for each block; 81,218 blocks of 256 KiB of
+  ref_prok_rep_genomes took 183 ms per batch against 59 ms for its 26,469 blocks of 1 MiB, and that made a first form
+  without the new list x1.003-1.011 slower there. `SeqDb::x_next_blocks` reads a volume's sequence offsets 16 Ki entries at a time and keeps them
+  for the next blocks (`Volume::x_listed_block_end`): 5-7 ms per batch (probe exp/d12s30-wait). The cut, the window and
+  the list decide only which thread searches which sequences when, so reports are unchanged for the reasons given under
+  `LOSAT_X_BNDBSTREAM`, and the listed blocks are `next_block`'s (seqdb tests against `next_block` and `block_end` on
+  every fixture volume, multi-volume and taxid-restricted databases, runs of 1 entry to the whole volume;
+  `LOSAT/tests/blastn_db_stream.rs` `reports_with_small_blocks_are_the_reports_with_large_ones`). One thread keeps blocks
+  of 1 MiB and `next_block`.
+  Evidence 2026-11-02 (v4-D12 s30, workstation node 1, membind 1, head ca9cfbec on dev f62da7f6b; arms dev, default and
+  `=0`, rotated, 8 rounds unless stated, peak VmHWM and anonymous memory from 2 ms samples with the wall time of the same
+  runs; every report identical across arms, and to NCBI 2.17.0's where it ran): 1,000 amplicons against SILVA 144 SSURef
+  NR99 with QIIME 2 classify-consensus-blast's options at 16 threads, max RSS 41.4 [40.4-41.7] MiB against dev's 101.9
+  [99.4-104.4] (`=0` 100.8; 58.2-63.0 MiB lower in 8 of 8), peak anonymous memory 33.3 against 93.6 (NCBI 20.9, its max
+  RSS 546.3 with the database's pages), wall x0.9717 (8 of 8 below 1); 100 amplicons at 8 and 4 threads 27.6 and 21.0
+  against 59.1 and 36.8 MiB (8 of 8 lower), wall x0.9891 and x1.0014 (`=0` x0.9971 and x1.0027); 10^6 reads with
+  megablast at 16 threads 571.8 against 601.5 MiB (8 of 8), wall x0.9655; 100 16S queries against 28,036 16S rRNA genes
+  at 16 threads, whose cut of 161 KiB keeps dev's blocks, megablast, dc-megablast and blastn wall x1.0018, x1.0052 and
+  x0.9984 (`=0` x1.0060, x1.0027 and x0.9971), max RSS within 1 MiB; `draft200` with
+  BlobToolKit's megablast options against ref_prok_rep_genomes at 32 / 16 / 8 threads wall x0.9922 / x0.9938 / x0.9960
+  of dev (8 of 8 below 1; `=0` x1.0032 / x1.0003 / x1.0003) with max RSS unchanged within the rounds' spread, and against
+  its first volume at 2 threads x0.9996 (`=0` x1.0009); `draft200` against core_nt at 16 threads (4 rounds) wall
+  x0.9918 (`=0` x0.9979), system time 95.5 -> 88.0 s, max RSS unchanged within the rounds' spread (both the default and
+  `=0` 16-18 MiB below dev at the median); one thread (node 0, `perf stat`, 8 rounds)
+  instructions x1.00000-1.00002 of dev and the same peak anonymous memory.
 - `LOSAT_X_BNDBSTREAM=1` (BLASTN, every task, memory; in the strict set from the pull request that added it
   (perf/bn-db-stream, evidence at the end of this entry): on unless it is `0`;
   acts only where a `-db` search runs its preliminary stage on the pool: more than one thread) the parallel preliminary

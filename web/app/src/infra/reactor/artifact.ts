@@ -69,7 +69,7 @@ class Reader {
 
   limits(): MemoryLimits {
     const flags = this.u32();
-    if (flags & ~0x3) throw new Error('the engine module uses memory limits that LOSAT Web does not support');
+    if (flags & ~0x3) throw new Error('the engine module uses memory limits that LOSAT does not support');
     const initial = this.u32();
     const maximum = flags & 0x1 ? this.u32() : undefined;
     return { initial, ...(maximum === undefined ? {} : { maximum }), shared: (flags & 0x2) !== 0 };

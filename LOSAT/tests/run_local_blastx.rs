@@ -713,7 +713,7 @@ fn refusals_come_before_any_output() {
         let (result, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, formats, extra);
         let error = result.expect_err("refused");
         assert!(
-            error.to_string().contains("not supported by LOSAT Web"),
+            error.to_string().contains("not supported in the browser"),
             "{formats:?} {extra:?}: {error}"
         );
         assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());
@@ -741,6 +741,23 @@ fn check_options_fails_as_a_run_does() {
         (&["6", "7"][..], &["-num_alignments", "0"][..]),
         (&["0"][..], &["-num_alignments", "0"][..]),
         (&["0", "6"][..], &["-num_alignments", "3"][..]),
+        // The ranges' syntax where the command line reads them: the subject range before the
+        // query range, both after LOSAT's limits and before NCBI's errors of the options.
+        (&FORMATS[..], &["-query_loc", "2-1"][..]),
+        (&FORMATS[..], &["-subject_loc", "abc"][..]),
+        (
+            &FORMATS[..],
+            &["-query_loc", "2-1", "-subject_loc", "5-1"][..],
+        ),
+        (
+            &FORMATS[..],
+            &["-subject_loc", "2-1", "-matrix", "PAM30"][..],
+        ),
+        (&FORMATS[..], &["-query_loc", "2-1", "-evalue", "0"][..]),
+        (
+            &FORMATS[..],
+            &["-query_loc", "1-100", "-subject_loc", "2-50"][..],
+        ),
     ] {
         let args = blastx_args(&inputs.query, &inputs.subject, extra);
         let checked = LOSAT::algorithm::blastx::check_options(&args, formats)
@@ -750,6 +767,369 @@ fn check_options_fails_as_a_run_does() {
         assert_eq!(checked, run, "{formats:?} {extra:?}");
         failed += usize::from(run.is_err());
     }
-    // Every case but the two searches fails.
-    assert_eq!(failed, 8);
+    // Every case but the two searches and the valid ranges fails.
+    assert_eq!(failed, 13);
+}
+
+/// A query whose first batch ends on its first record only when the batch counts the whole record:
+/// 10,050 letters (9,950 in the range `101-20000`), then 200 (100 in the range) and 50 (skipped).
+/// Counting the cut letters would put the first two in one batch and leave the third alone, an
+/// empty last batch.
+fn whole_record_batch_query() -> PathBuf {
+    let genome = fixture_sequence("MjeNMV.fasta");
+    let mut query = Vec::new();
+    for (name, letters) in [
+        ("long", &genome[0..10_050]),
+        ("middle", &genome[20_000..20_200]),
+        ("short", &genome[30_000..30_050]),
+    ] {
+        query.extend_from_slice(format!(">{name}\n").as_bytes());
+        for line in letters.chunks(70) {
+            query.extend_from_slice(line);
+            query.push(b'\n');
+        }
+    }
+    let path = temp_path("blastx_whole_record_batch.fna");
+    std::fs::write(&path, query).expect("write query");
+    path
+}
+
+/// A subject file of records with the reader's warnings (`batch_late_warn.prot.faa`) and a record
+/// of 10 letters between them, after the first warning.
+fn short_subject_between_warnings() -> PathBuf {
+    let text = std::fs::read_to_string(Inputs::path(
+        "tests/fixtures/fasta_input/batch_late_warn.prot.faa",
+    ))
+    .expect("fixture");
+    let at = text.find(">q5").expect("q5");
+    let subject = format!("{}>short subject\nMLCRIFKDHL\n{}", &text[..at], &text[at..]);
+    let path = temp_path("blastx_short_subject.faa");
+    std::fs::write(&path, subject).expect("write subject");
+    path
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
+// ```c++
+//     TSeqPos size_read = 0;
+//
+//     while (size_read < GetBatchSize()) {
+// ...
+//         catch (const exception&) {
+//             continue; //SB-2307. ignore well formed, not found accession
+//         }
+// ...
+//             size_read += sequence::GetLength(loc->GetInt().GetId(),
+//                                              q->GetScope());
+// ```
+/// `-query_loc` and `-subject_loc` cut the records as the command line cuts them: the reports of
+/// the three formats from one search equal the CLI's of each format, with queries skipped or
+/// without letters in the range, subjects without letters, lower-case masks, the minus strand and
+/// queries of several batches, at 1, 2 and 4 threads.
+#[test]
+fn ranges_cut_the_records_as_the_command_line_does() {
+    let batches = Batches::new();
+    let whole_record_batch = whole_record_batch_query();
+    let bslice = || Inputs::new("tests/db_search/bslice_q.fna", "tests/db_search/bslice.faa");
+    let lowercase_subjects = || {
+        Inputs::new(
+            "tests/fasta/outfmt0/sml_bx_subj_q.fna",
+            "tests/fasta/outfmt0/sml_bx_subj_s.faa",
+        )
+    };
+    // (inputs, ranges and options, whether they have hits)
+    let cases = [
+        (bslice(), &["-query_loc", "1001-3000"][..], true),
+        // The first record ends before the range: it is not searched.
+        (bslice(), &["-query_loc", "5200-5600"][..], true),
+        // The first record has no letters in the range.
+        (bslice(), &["-query_loc", "5001-5600"][..], true),
+        (
+            bslice(),
+            &["-query_loc", "1002-3000", "-strand", "minus"][..],
+            true,
+        ),
+        (bslice(), &["-subject_loc", "10-70"][..], true),
+        // Subjects without letters in the range.
+        (bslice(), &["-subject_loc", "77-300"][..], true),
+        (
+            bslice(),
+            &["-query_loc", "1001-3000", "-subject_loc", "10-70"][..],
+            true,
+        ),
+        (
+            Inputs::new(
+                "tests/fasta/outfmt0/x5_bx_q_lc_mix.fna",
+                "tests/db_search/bslice.faa",
+            ),
+            &["-lcase_masking", "-query_loc", "501-2800"][..],
+            true,
+        ),
+        // Several reader batches: the records without letters and the short query are skipped,
+        // the batch counts the long record whole.
+        (batches.inputs(), &["-query_loc", "50-10050"][..], true),
+        // The batch counts the whole record: the first record fills the first batch.
+        (
+            Inputs::new(&whole_record_batch, "tests/fasta/MjeNMV.faa"),
+            &["-query_loc", "101-20000"][..],
+            true,
+        ),
+        // Lower-case runs in the subjects, cut by the subject range.
+        (
+            lowercase_subjects(),
+            &["-lcase_masking", "-subject_loc", "50-150"][..],
+            true,
+        ),
+        (
+            lowercase_subjects(),
+            &[
+                "-lcase_masking",
+                "-subject_loc",
+                "100-300",
+                "-query_loc",
+                "1-900",
+            ][..],
+            true,
+        ),
+        (
+            batches.inputs(),
+            &["-query_loc", "50-10050", "-lcase_masking"][..],
+            true,
+        ),
+    ];
+    for (inputs, ranges, hits) in &cases {
+        for threads in ["1", "2", "4"] {
+            let extra = [ranges, &["-num_threads", threads][..]].concat();
+            let context = format!("{} {extra:?}", inputs.query);
+            assert_matches_cli(inputs, &extra, *hits, &context);
+        }
+    }
+    let _ = std::fs::remove_file(&whole_record_batch);
+}
+
+/// The errors of the ranges and the records come where the command line's come, after the same
+/// output and warnings: a subject whose interval starts past its end stops the reading of the
+/// subjects after its warnings, and a batch whose queries are all skipped is NCBI's `Empty
+/// CBlastQueryVector`, the first batch before any report, a later one after the reports of the
+/// earlier batches.
+#[test]
+fn errors_of_the_ranges_follow_the_command_line() {
+    let batches = Batches::new();
+    let short_subject = short_subject_between_warnings();
+    let cases = [
+        (
+            Inputs::new("tests/db_search/bslice_q.fna", &short_subject),
+            &["-subject_loc", "30-50"][..],
+            "Invalid from coordinate",
+        ),
+        (
+            Inputs::new("tests/db_search/bslice_q.fna", "tests/db_search/bslice.faa"),
+            &["-query_loc", "6000-7000"][..],
+            "Empty CBlastQueryVector",
+        ),
+        // The long record fills the first batch; the later records are all skipped.
+        (
+            batches.inputs(),
+            &["-query_loc", "10001-10050"][..],
+            "Empty CBlastQueryVector",
+        ),
+    ];
+    for (inputs, ranges, message) in &cases {
+        for threads in ["1", "2", "4"] {
+            let extra = [ranges, &["-num_threads", threads][..]].concat();
+            let context = format!("{} {extra:?}", inputs.query);
+            let queries = queries(&Inputs::path(&inputs.query)).unwrap();
+            let subjects = subjects(&Inputs::path(&inputs.subject)).unwrap();
+            let (result, outputs, diagnostics) =
+                try_run(inputs, &queries, &subjects, &FORMATS, &extra);
+            let error = result.expect_err(&context);
+            let native = error
+                .downcast_ref::<LOSAT::cli::NativeError>()
+                .unwrap_or_else(|| panic!("{context}: {error:#}"));
+            assert!(native.message.contains(message), "{context}: {error:#}");
+            for (index, outfmt) in FORMATS.iter().enumerate() {
+                let (ok, output, stderr) = inputs.cli(outfmt, &extra);
+                assert!(!ok, "{context}: the CLI of outfmt {outfmt} fails too");
+                assert!(
+                    outputs[index] == output,
+                    "{context}: outfmt {outfmt} differs from the CLI"
+                );
+                assert_eq!(
+                    String::from_utf8_lossy(
+                        &[&diagnostics[..], native.message.as_bytes()].concat()
+                    ),
+                    String::from_utf8_lossy(&stderr),
+                    "{context}: outfmt {outfmt}'s warnings and error"
+                );
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&short_subject);
+}
+
+// NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-210,732-737 and
+// c++/src/app/blast/blastx_app.cpp:283-288: NCBI searches each `-subject` sequence on its own
+// with BL2SEQ_LEGACY, and converts PRE_FETCH_SEQS_LIMIT with NStr::StringToInt before each
+// batch's report (its CStringException names its build's source files), except for the archive
+// of outfmt 11, which it writes without the prefetch. The -db cases are the db.bxenv.* rows.
+#[test]
+fn environment_that_ncbi_reads_around_the_report_is_rejected_where_it_reads_it() {
+    let inputs = Inputs::new("tests/db_search/bslice_q.fna", "tests/db_search/bslice.faa");
+    let run = |outfmt: &str, variable: Option<(&str, &str)>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+        command
+            .current_dir(crate_dir())
+            .env_remove("BATCH_SIZE")
+            .env_remove("PRE_FETCH_SEQS_LIMIT")
+            .env_remove("BL2SEQ_LEGACY")
+            .env(
+                "LOSAT_BLASTX_WORKER_LOG",
+                std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+                    .unwrap_or_else(|| temp_path("blastx_worker.log").into_os_string()),
+            )
+            .args([
+                "blastx",
+                "-query",
+                &inputs.query,
+                "-subject",
+                &inputs.subject,
+            ])
+            .args(["-outfmt", outfmt]);
+        if let Some((name, value)) = variable {
+            command.env(name, value);
+        }
+        command.output().expect("run LOSAT CLI")
+    };
+    for (variable, value, outfmt, text) in [
+        ("PRE_FETCH_SEQS_LIMIT", "abc", "6", "has the value \"abc\""),
+        ("PRE_FETCH_SEQS_LIMIT", "", "0", "has the value \"\""),
+        (
+            "BL2SEQ_LEGACY",
+            "1",
+            "6",
+            "the environment variable BL2SEQ_LEGACY",
+        ),
+        (
+            "BL2SEQ_LEGACY",
+            "",
+            "11",
+            "the environment variable BL2SEQ_LEGACY",
+        ),
+    ] {
+        let output = run(outfmt, Some((variable, value)));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{variable}: {output:?}");
+        assert!(
+            output.stdout.is_empty()
+                && stderr.contains(text)
+                && stderr.contains("not supported by LOSAT's BLASTX"),
+            "{variable} {outfmt}: {stderr}"
+        );
+    }
+    // The archive, and an integer in any format, are written as without the variable.
+    for (value, outfmt) in [("abc", "11"), ("", "11"), ("5", "6")] {
+        let plain = run(outfmt, None);
+        let output = run(outfmt, Some(("PRE_FETCH_SEQS_LIMIT", value)));
+        assert!(
+            plain.status.success() && !plain.stdout.is_empty(),
+            "{plain:?}"
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{value} {outfmt}: {output:?}"
+        );
+        assert!(
+            output.stdout == plain.stdout && output.stderr == plain.stderr,
+            "{value} {outfmt}"
+        );
+    }
+}
+
+/// The environment variable that makes `environment_child` run: the file it writes.
+const ENVIRONMENT_CHILD: &str = "DBID_RUN_LOCAL_ENVIRONMENT_CHILD";
+
+// `run_local` (LOSAT Web, the library) refuses the environment of the CLI's `-subject` search
+// (`environment_that_ncbi_reads_around_the_report_is_rejected_where_it_reads_it`), and an
+// integer PRE_FETCH_SEQS_LIMIT leaves its outputs as they are without it. The variables are
+// read from the process environment, so a child process of this test binary runs `run_local`
+// with each of them.
+#[test]
+fn run_local_refuses_the_environment_as_the_cli() {
+    let child = |variable: Option<(&str, &str)>| {
+        let out = temp_path("blastx_environment_child.out");
+        let mut command = Command::new(std::env::current_exe().expect("test binary"));
+        command
+            .args([
+                "run_local_blastx::environment_child",
+                "--exact",
+                "--nocapture",
+                "--test-threads",
+                "1",
+            ])
+            .env(ENVIRONMENT_CHILD, &out)
+            .env_remove("BATCH_SIZE")
+            .env_remove("PRE_FETCH_SEQS_LIMIT")
+            .env_remove("BL2SEQ_LEGACY");
+        if let Some((name, value)) = variable {
+            command.env(name, value);
+        }
+        let output = command.output().expect("run the child");
+        assert!(
+            output.status.success(),
+            "{variable:?}: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let written = std::fs::read(&out).expect("the child's file");
+        let _ = std::fs::remove_file(&out);
+        written
+    };
+    let plain = child(None);
+    assert!(
+        plain.starts_with(b"ok\n") && plain.len() > 1000,
+        "{plain:?}"
+    );
+    for (variable, value, text) in [
+        ("PRE_FETCH_SEQS_LIMIT", "abc", "has the value \"abc\""),
+        ("PRE_FETCH_SEQS_LIMIT", "", "has the value \"\""),
+        (
+            "BL2SEQ_LEGACY",
+            "1",
+            "the environment variable BL2SEQ_LEGACY",
+        ),
+    ] {
+        let written = String::from_utf8(child(Some((variable, value)))).expect("text");
+        assert!(
+            written.starts_with("refused: ")
+                && written.contains(text)
+                && written.contains("not supported by LOSAT's BLASTX"),
+            "{variable}={value:?}: {written}"
+        );
+    }
+    assert!(child(Some(("PRE_FETCH_SEQS_LIMIT", "5"))) == plain);
+}
+
+/// The child of `run_local_refuses_the_environment_as_the_cli`: without `ENVIRONMENT_CHILD` it
+/// does nothing. It writes `ok` and every format's output and the diagnostics, or `refused:` and
+/// the error, after checking that nothing was written.
+#[test]
+fn environment_child() {
+    let Some(out) = std::env::var_os(ENVIRONMENT_CHILD) else {
+        return;
+    };
+    let inputs = Inputs::new("tests/db_search/bslice_q.fna", "tests/db_search/bslice.faa");
+    let queries = queries(&Inputs::path(&inputs.query)).expect("query records");
+    let subjects = subjects(&Inputs::path(&inputs.subject)).expect("subject records");
+    let (result, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, &FORMATS, &[]);
+    let written = match result {
+        Ok(()) => [b"ok\n".to_vec(), outputs.concat(), diagnostics].concat(),
+        Err(error) => {
+            assert!(
+                outputs.iter().all(Vec::is_empty) && diagnostics.is_empty(),
+                "{error:#}"
+            );
+            format!("refused: {error:#}\n").into_bytes()
+        }
+    };
+    std::fs::write(out, written).expect("write the child's file");
 }

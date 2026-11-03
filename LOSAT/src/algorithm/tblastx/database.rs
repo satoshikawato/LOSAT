@@ -358,6 +358,35 @@ pub(crate) fn read_reported(
     Ok(())
 }
 
+/// The lengths of the sequences that the reported hits of the query batches read so far name, by
+/// ordinal id, when no report reads their letters (`read_reported_lengths`).
+pub(crate) type ReportedLengths = BTreeMap<u32, u32>;
+
+/// Reads the lengths of the sequences that the reported hits `ordered` of a query batch name into
+/// `lengths`, once each (`XDbStream::read_length`: the index and the sequence's last byte, as
+/// NCBI reads the length of a sequence it does not fetch), for the reports that read no letters
+/// (`read_reported` reads the stores, which hold them, for the others). A read that fails is an
+/// `XReadError` (it fails the batch).
+pub(crate) fn read_reported_lengths(
+    stream: &XDbStream<'_>,
+    ordered: &[TblastxHsp],
+    lengths: &mut ReportedLengths,
+) -> Result<()> {
+    // A subject's HSPs follow each other: one look-up per run of them.
+    let mut previous = None;
+    for hsp in ordered {
+        let ordinal = hsp.hit.s_idx;
+        if previous.replace(ordinal) == Some(ordinal) {
+            continue;
+        }
+        if let std::collections::btree_map::Entry::Vacant(entry) = lengths.entry(ordinal) {
+            let length = stream.read_length(ordinal as usize)?;
+            entry.insert(u32::try_from(length).expect("a database sequence's length fits Int4"));
+        }
+    }
+    Ok(())
+}
+
 /// NCBI's messages about the taxonomy database when the query batch whose reported hits are
 /// `ordered` (subjects named by ordinal id, as `read_titles` reads them) prefetches the subjects
 /// it reports (`shared::prefetch_messages`): the sequences the hits name, with the definition
@@ -400,8 +429,9 @@ pub(crate) struct ReportedSubjects {
 /// The reported database sequences of `ordered` (the reported hits of all query batches in
 /// report order, subjects named by ordinal id): the hits name them by rank from here on (the
 /// rank grows with the ordinal id, so every comparison that breaks a tie by the subject index
-/// gives the same order), and their records (`titles`, by ordinal id), lengths (`stream`) and,
-/// when a report reads letters, stores (`stores`, `read_reported`) are kept for the reports. A reported sequence whose stored title LOSAT does not
+/// gives the same order), and their records (`titles`, by ordinal id), lengths and,
+/// when a report reads letters, stores (`stores`, `read_reported`, which give the lengths; else
+/// `lengths`, `read_reported_lengths`) are kept for the reports. A reported sequence whose stored title LOSAT does not
 /// report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports
 /// `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`).
@@ -409,8 +439,8 @@ pub(crate) fn reported_subjects(
     database: &TblastxDatabase,
     titles: &DatabaseTitles,
     ordered: &mut [TblastxHsp],
-    stream: Option<&XDbStream<'_>>,
     stores: Option<&ReportedStores>,
+    read_lengths: &ReportedLengths,
     shown: ParsedShown,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = ordered.iter().map(|hsp| hsp.hit.s_idx).collect();
@@ -447,14 +477,18 @@ pub(crate) fn reported_subjects(
                 subject.first_title().to_vec()
             }
         };
-        let stream = stream.with_context(|| format!("database sequence {ordinal} was not read"))?;
-        lengths.push(stream.length(ordinal as usize) as u32);
-        if let Some(stores) = stores {
-            let store = stores
+        lengths.push(match stores {
+            Some(stores) => {
+                let store = stores
+                    .get(&ordinal)
+                    .with_context(|| format!("database sequence {ordinal} was not read"))?;
+                kept.push(Arc::clone(store));
+                u32::try_from(store.len()).expect("a database sequence's length fits Int4")
+            }
+            None => *read_lengths
                 .get(&ordinal)
-                .with_context(|| format!("database sequence {ordinal} was not read"))?;
-            kept.push(Arc::clone(store));
-        }
+                .with_context(|| format!("database sequence {ordinal} was not read"))?,
+        });
         records.push(FastaRecord {
             // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
             // (line DI-8).

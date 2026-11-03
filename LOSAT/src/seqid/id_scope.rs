@@ -157,13 +157,86 @@ impl IdScope {
 pub(crate) fn name_keys(id: &ParsedSeqId) -> Option<(u64, u64)> {
     let text = id.textseq()?;
     let name = text.name.as_ref()?.to_ascii_uppercase();
-    let key = |accession: bool| {
-        let mut hasher = DefaultHasher::new();
-        (b"name kind", accession, &name).hash(&mut hasher);
-        hasher.finish()
-    };
     let accession = text.accession.is_some();
-    Some((key(accession), key(!accession)))
+    Some((
+        name_kind_key(&name, accession),
+        name_kind_key(&name, !accession),
+    ))
+}
+
+/// The key of the name `name` (in upper case) of a text Seq-id with or without an accession
+/// (`name_keys`).
+fn name_kind_key(name: &[u8], accession: bool) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    (b"name kind", accession, name).hash(&mut hasher);
+    hasher.finish()
+}
+
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:865-882
+// ```c++
+// SSeqMatch_Scope CDataSource_ScopeInfo::x_GetSeqMatch(const CSeq_id_Handle& idh)
+// {
+//     SSeqMatch_Scope ret = x_FindBestTSE(idh);
+//     if ( !ret && idh.HaveMatchingHandles() ) {
+//         CSeq_id_Handle::TMatches ids;
+//         idh.GetMatchingHandles(ids, eAllowWeakMatch);
+//         ITERATE ( CSeq_id_Handle::TMatches, it, ids ) {
+//             ...
+//             if ( SSeqMatch_Scope match = x_FindBestTSE(*it) ) {
+//                 ret = match;
+//             }
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1494-1507
+// ```c++
+//         if ( tid->IsSetAccession() ) {
+//             x_FindMatchByAcc(id_list, tid->GetAccession(), tid);
+//         }
+//         if ( tid->IsSetName() ) {
+//             x_FindMatchByName(id_list, tid->GetName(), tid);
+//         }
+//         // special case for PIR and PRF ids - matching accesstion to name
+//         // the id should have only accession and no other fields (version, name, release)
+//         if ( (type == CSeq_id::e_Pir || type == CSeq_id::e_Prf) &&
+//              tid->IsSetAccession() &&
+//              !tid->IsSetVersion() && !tid->IsSetName() && !tid->IsSetRelease() &&
+//              !m_ByName.empty() ) {
+//             x_FindMatchByName(id_list, tid->GetAccession(), nullptr, eOnlyName);
+//         }
+// ```
+// `x_FindMatchByAcc` takes every version of an accession without one (and the packed path at
+// 1469-1479 alike), `x_FindMatchByName` with an accession only the name-only ids (1367-1372),
+// and without one any id of that name.
+/// Adds to `keys` the keys (`version_keys`, `name_keys`) of the text Seq-ids that NCBI's scope
+/// finds by `id` where no sequence it holds has `id` itself (`GetMatchingHandles` with
+/// `eAllowWeakMatch`): for an accession without a version, that accession with one; for a name
+/// with an accession, the name alone; for a name alone, the name with an accession; for a `pir` or
+/// `prf` accession alone, that text as a name alone; in any letter case and across the alternatives
+/// (`CSeq_id_Mapper::GetMatchingHandles` asks every text tree), without the release that NCBI also
+/// compares for a name (a superset). A sequence that holds one of them has it among
+/// its `kind_keys`. NCBI 2.17.0 shows a query read with `-parse_deflines` that has one for a
+/// reported database sequence, and, where it reads the reported sequences one by one
+/// (`PRE_FETCH_SEQS_LIMIT`), another reported sequence read before (probe of line DBID N2c,
+/// `blastdb-ids-20261021/R/weak/p1.out`). Not the other way: `gb|X|` for `gb|X.1|`, `pir|ABCD|`
+/// for `pir||ABCD`.
+pub(crate) fn weak_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
+    let Some(text) = id.textseq() else {
+        return;
+    };
+    if text.version.is_none() {
+        keys.extend(version_keys(id).map(|(_, versioned)| versioned));
+    }
+    keys.extend(name_keys(id).map(|(_, other)| other));
+    if let (ParsedSeqId::Pir(_) | ParsedSeqId::Prf(_), Some(accession), None, None, None) =
+        (id, &text.accession, text.version, &text.name, &text.release)
+    {
+        keys.push(name_kind_key(&accession.to_ascii_uppercase(), false));
+    }
+}
+
+/// Adds to `keys` the keys of `id` that `weak_keys` gives for the ids that find it.
+pub(crate) fn kind_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
+    keys.extend(version_keys(id).map(|(own, _)| own));
+    keys.extend(name_keys(id).map(|(own, _)| own));
 }
 
 /// For a text Seq-id with an accession, the key of its accession with its kind of version (with or

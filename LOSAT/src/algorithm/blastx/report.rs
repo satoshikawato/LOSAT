@@ -690,12 +690,54 @@ pub(crate) fn alignment(
     // between the mapped mask endpoints. The masks here are the returned DNA
     // intervals, after the core protein-to-DNA conversion, not lookup AA masks.
     let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, raw.q_end);
-    for &(from, to) in &context.dna_masks {
-        if from > to
-            || (from == 0 && to == query_length as i32 - 1)
-            || to < qstart.min(qend) - 1
-            || from > qstart.max(qend) - 1
-        {
+    // A record cut to `-query_loc`: the reports read the frame from the record (NCBI reference:
+    // c++/src/objtools/align_format/showalign.cpp:411-422, `seq_range::record_frame`).
+    let query_place = query_record.placement();
+    let frame = if query_place.offset == 0 && query_place.length == query_length {
+        raw.frame
+    } else {
+        crate::blastinput::seq_range::record_frame(
+            raw.frame > 0,
+            (qstart - 1) as usize + query_place.offset,
+            query_place.length,
+        ) as i8
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-951
+    // ```c++
+    //                 TSeqRange masked_range(loc->ssr->left, loc->ssr->right);
+    //                 TSeqRange range(Map(kTarget, masked_range));
+    //                 if (range.NotEmpty() && range != kTarget) {
+    //                     int frame = BLAST_ContextToFrame(program, index);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2500-2502
+    // ```c++
+    //             int locFrame = (*iter)->seqloc->GetFrame();
+    //             if(id.Match((*iter)->seqloc->GetInterval().GetId())
+    //                && locFrame == frame){
+    // ```
+    // The masks a row shows are those labelled with the row's frame in the record; a mask keeps
+    // the frame of the context it was found in, which counts from the ends of the searched
+    // letters. With `-query_loc` the two can differ, and NCBI then shows the masks of another
+    // frame's context on the row (the TBLASTX display, `tblastx::report::shown_query_masks`).
+    // `Map` moves each mask into the record, cut at the interval's end, and drops one that
+    // covers the whole interval; here the masks stay in the searched letters' coordinates.
+    let shown_masks: &[(i32, i32)] = if frame == raw.frame {
+        &context.dna_masks
+    } else {
+        batch
+            .prepared
+            .contexts
+            .iter()
+            .find(|shown| shown.query_index == context.query_index && shown.frame == frame)
+            .map_or(&[], |shown| &shown.dna_masks)
+    };
+    let last = query_length as i32 - 1;
+    for &(from, to) in shown_masks {
+        if from > to || from > last {
+            continue;
+        }
+        let to = to.min(last);
+        if (from == 0 && to == last) || to < qstart.min(qend) - 1 || from > qstart.max(qend) - 1 {
             continue;
         }
         let map_nt = |nt: i32| {
@@ -750,6 +792,28 @@ pub(crate) fn alignment(
             positive += 1;
         }
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1520-1534
+    // ```c++
+    // void RemapToQueryLoc(CRef<CSeq_align> sar, const CSeq_loc & query)
+    // {
+    //     _ASSERT(sar);
+    //     const int query_row = 0;
+    //
+    //     TSeqPos q_shift = 0;
+    //
+    //     if (query.IsInt()) {
+    //         q_shift = query.GetInt().GetFrom();
+    //     }
+    //
+    //     if (q_shift > 0) {
+    //         sar->OffsetRow(query_row, q_shift);
+    //     }
+    // }
+    // ```
+    // The coordinates of records cut to `-query_loc` / `-subject_loc` move into the records by the
+    // starts of their intervals (the subject's alike, `s_RemapToSubjectLoc`).
+    let query_offset = query_place.offset as i32;
+    let subject_offset = subject.placement().offset as i32;
     Ok(DisplayAlignment {
         qseq: String::from_utf8(qseq)?,
         sseq: String::from_utf8(sseq)?,
@@ -758,11 +822,11 @@ pub(crate) fn alignment(
         positive,
         gaps,
         gap_opens,
-        qstart,
-        qend,
-        sstart: raw.s_start + 1,
-        send: raw.s_end,
-        frame: raw.frame,
+        qstart: qstart + query_offset,
+        qend: qend + query_offset,
+        sstart: raw.s_start + 1 + subject_offset,
+        send: raw.s_end + subject_offset,
+        frame,
         subject_stored_gaps,
     })
 }
@@ -1644,7 +1708,7 @@ fn write_pairwise(
                 //             out << "\nLength=";
                 // ```
                 query_name: query.query_line().into_owned(),
-                query_length: query.sequence.len(),
+                query_length: query.placement().length,
                 ungapped_karlin: stat.map_or(batch.parameters[qidx * 6].ungapped, |p| p.ungapped),
                 effective_search_space: stat.map_or(0, |p| p.search_space),
             });
@@ -1778,8 +1842,8 @@ pub(super) fn pairwise_hits(
                         e_value: hsp.evalue,
                         bit_score: hsp.bit_score,
                         num_ident: a.identity,
-                        query_frame: i32::from(raw.frame),
-                        query_length: query.sequence.len(),
+                        query_frame: i32::from(a.frame),
+                        query_length: query.placement().length,
                         q_idx: u32::try_from(absolute)?,
                         s_idx: u32::try_from(list.oid)?,
                         raw_score: raw.score,
@@ -1795,11 +1859,11 @@ pub(super) fn pairwise_hits(
                         hit,
                         query_seq: Some(a.masked_qseq),
                         subject_seq: Some(a.sseq),
-                        query_frame: Some(raw.frame),
+                        query_frame: Some(a.frame),
                         subject_frame: None,
                         positives: Some(a.positive),
                         gaps: Some(a.gaps),
-                        subject_length: Some(subject.sequence.len()),
+                        subject_length: Some(subject.placement().length),
                         // A database sequence's description line is made from its stored
                         // title alone (`ReportedSubjects::descriptions`).
                         subject_title: match shown {
@@ -1820,6 +1884,13 @@ pub(super) fn pairwise_hits(
                 }
             }
         }
+    }
+    // `-lcase_masking`: the subject rows show their records' lower case too (x_soft_subject.rs), in
+    // outfmt 0 and in the hits that LOSAT Web's `run_local` hands out, as the query rows do.
+    // A `-subject_loc` subject can show runs of its record outside the interval
+    // (`FastaRecord::archive_lowercase_runs`).
+    if subjects.iter().any(FastaRecord::has_lowercase_runs) {
+        super::x_soft_subject::x_masked_subject_rows(&mut hits, subjects);
     }
     Ok(hits)
 }

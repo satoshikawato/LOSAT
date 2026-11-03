@@ -371,7 +371,7 @@ const GLIBC: bool = cfg!(all(target_os = "linux", target_env = "gnu"));
 
 /// No NCBI counterpart (LOSAT_X_MBLUTONCE): a list of kept buffers (`SPARE_LINES`; the tests use
 /// lists of their own).
-type SpareLines = std::sync::Mutex<Vec<Vec<Line>>>;
+pub(super) type SpareLines = std::sync::Mutex<Vec<Vec<Line>>>;
 
 /// No NCBI counterpart (LOSAT_X_MBLUTONCE): the line buffers of finished fills, kept for the next
 /// fills and never freed, on Linux with glibc only (`GLIBC`). glibc raises its mmap threshold to the
@@ -412,7 +412,7 @@ pub(super) fn lines_capacity(n: usize) -> usize {
 /// glibc the largest buffer kept in `spare` when its lock is free and the buffer is large enough;
 /// one too small is freed here, never grown (`SPARE_LINES`). Otherwise a new buffer of
 /// `lines_capacity(n)` lines.
-fn take_lines(spare: &SpareLines, n: usize) -> Vec<Line> {
+pub(super) fn take_lines(spare: &SpareLines, n: usize) -> Vec<Line> {
     if GLIBC {
         let kept = spare.try_lock().ok().and_then(|mut spare| {
             let largest = (0..spare.len()).max_by_key(|&i| spare[i].capacity())?;

@@ -186,8 +186,8 @@ use super::x_disc_lookup_par::{
     PAGE_ELEMS_SHIFT, PREFAULT_MIN_WORDS_PER_PAGE,
 };
 use super::x_mb_lookup_par::{
-    flush_private, lines_capacity, plan, timing_on, Copies, Line, Private, Shared, SharedTables,
-    Tables, Unready, Words, K_COMPRESSION_FACTOR_SHIFT,
+    flush_private, lines_capacity, plan, take_lines, timing_on, Copies, Line, Private, Shared,
+    SharedTables, SpareLines, Tables, Unready, Words, K_COMPRESSION_FACTOR_SHIFT,
 };
 use super::{build_unmasked_ranges, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
 use std::cell::UnsafeCell;
@@ -209,7 +209,43 @@ const CHUNK_POSITIONS_PER_PART: usize = 1 << 15;
 /// LOSAT_X_QBATCHPAR, removed on 2026-10-28, whose fills ran at the same time). The chunk size
 /// changes no element of the tables (the module documentation).
 fn chunk_positions(parts: usize) -> usize {
-    CHUNK_POSITIONS.min(parts.clamp(1, 255) * CHUNK_POSITIONS_PER_PART)
+    CHUNK_POSITIONS.min(parts.clamp(1, 255) * sf1_cpp())
+}
+
+// PROBE (S1 s8, not for dev): SF1CPP = positions per part of a chunk (default 2^15), SF1KEEP=1 =
+// the arena kept from fill to fill (a spare list as the copies' `SPARE_LINES`).
+fn sf1_cpp() -> usize {
+    static V: OnceLock<usize> = OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("SF1CPP")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(CHUNK_POSITIONS_PER_PART)
+    })
+}
+fn sf1_keep() -> bool {
+    static V: OnceLock<bool> = OnceLock::new();
+    *V.get_or_init(|| std::env::var("SF1KEEP").map(|v| v == "1").unwrap_or(false))
+}
+static SF1_SPARE_ARENA: SpareLines = std::sync::Mutex::new(Vec::new());
+struct Sf1Arena(Vec<Line>);
+impl Sf1Arena {
+    fn new(n: usize) -> Self {
+        if sf1_keep() {
+            Self(take_lines(&SF1_SPARE_ARENA, n))
+        } else {
+            Self(Vec::with_capacity(lines_capacity(n)))
+        }
+    }
+}
+impl Drop for Sf1Arena {
+    fn drop(&mut self) {
+        if sf1_keep() {
+            if let Ok(mut spare) = SF1_SPARE_ARENA.try_lock() {
+                spare.push(std::mem::take(&mut self.0));
+            }
+        }
+    }
 }
 
 /// No NCBI counterpart (scheduling only): how far ahead phase B prefetches the cells of a
@@ -1088,7 +1124,7 @@ fn fill_chunked(
     );
     // A chunk holds at most `min(chunk, total)` positions: a small query gets a small arena.
     let shape = Shape::new(chunk.min(total), parts);
-    let mut arena: Vec<Line> = Vec::with_capacity(lines_capacity(shape.lines()));
+    let mut arena = Sf1Arena::new(shape.lines());
     let chunks = total.div_ceil(chunk);
     // Chunk `k` of the processing order: the chunks in stream order, last to first for
     // `ascending_cells`.
@@ -1127,7 +1163,7 @@ fn fill_chunked(
         parts,
         tables: shared,
         arena: SharedArena {
-            base: arena.spare_capacity_mut().as_mut_ptr() as *mut Line,
+            base: arena.0.spare_capacity_mut().as_mut_ptr() as *mut Line,
             shape,
         },
         copies: &slots,
@@ -1385,7 +1421,7 @@ fn csr_on_pool(
     // The reading-only `Fill`: `read::<false>` and `subrange` use only the words, the segments,
     // the owners and the arena.
     let shape = Shape::new(chunk.min(total), parts);
-    let mut arena: Vec<Line> = Vec::with_capacity(lines_capacity(shape.lines()));
+    let mut arena = Sf1Arena::new(shape.lines());
     let copies = Slots(Vec::new());
     let touched = Slots(Vec::new());
     let mut marks = PageBits::new(0, parts);
@@ -1405,7 +1441,7 @@ fn csr_on_pool(
             helper_array: Shared::new(&mut []),
         },
         arena: SharedArena {
-            base: arena.spare_capacity_mut().as_mut_ptr() as *mut Line,
+            base: arena.0.spare_capacity_mut().as_mut_ptr() as *mut Line,
             shape,
         },
         copies: &copies,

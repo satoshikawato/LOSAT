@@ -5,8 +5,9 @@
 //! turns it off. It acts only where the
 //! subjects of a `-subject` search are searched on the pool (more than one thread and more than
 //! one subject). With it on, the subjects are cut into runs of
-//! consecutive subjects, each run searched with one diagonal table that is filled once, at the
-//! one-thread order's offset of the run's first subject. These tests compare the reports with the
+//! consecutive subjects, each run searched with its task's diagonal table at the one-thread order's
+//! offset of the run's first subject, filled only where it would not read as cleared there. These
+//! tests compare the reports with the
 //! switch off (`LOSAT_X_BPSUBJRUN=0`) and on (the default; blastp and blastp-fast, one hit and two
 //! hits, the block search of `LOSAT_X_BPQBLOCK`); the reach rows of the run with the switch on
 //! (`LOSAT_X_REACH`, `tests/reach_support`) show that the path ran (and, at one thread and on

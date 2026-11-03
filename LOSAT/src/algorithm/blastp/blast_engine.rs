@@ -70,7 +70,7 @@ mod x_ih_pool;
 // of their positions.
 mod x_hits_flat;
 // EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel `-subject` loop in runs of subjects, one diagonal
-// table fill per run.
+// table per task, filled only where it would not read as cleared.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -618,8 +618,9 @@ impl BlastpSubjectScratch {
 
     // No NCBI counterpart as a function: the per-subject resets of `prepare_independent_subject`
     // other than the diagonal table's, split out of it unchanged (each with its NCBI reference
-    // below); EXPERIMENT (LOSAT_X_BPSUBJRUN) runs them alone before each later subject of a run
-    // (`blast_engine/x_subject_runs.rs`). It changes no value NCBI computes.
+    // below); EXPERIMENT (LOSAT_X_BPSUBJRUN) runs them alone before each later subject of a run,
+    // and at the start of a run that needs no fill (`blast_engine/x_subject_runs.rs`). It changes
+    // no value NCBI computes.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -9413,7 +9414,8 @@ fn run_resolved_in_pool(
                 )
             };
             // EXPERIMENT (LOSAT_X_BPSUBJRUN): runs of consecutive subjects, one scratch per
-            // thread and one diagonal table fill per run (`x_subject_runs.rs`).
+            // thread, whose diagonal table a run fills only where it would not read as cleared
+            // (`x_subject_runs.rs`).
             if x_subject_runs::x_bp_subj_run() {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPSUBJRUN", true);
                 x_subject_runs::x_search_subject_runs(

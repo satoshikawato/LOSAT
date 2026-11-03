@@ -61,16 +61,19 @@
 //! offset starts from a table that reads as cleared, as a filled one does, and only a run whose
 //! first offset is below it needs the fill. A task takes its runs in increasing order, so that
 //! happens only after the one-thread order's offset has gone back to `window` since the task's
-//! previous run, and never in a search whose offsets stay below INT4_MAX / 4. Until 2026-11-03
-//! every run filled the table (Species4 x Species6 blastp-fast at 16 threads: 68,627 runs of 256
-//! KiB, 17.7 GB of writes; structural line S1).
+//! previous run, and never in a search whose offsets stay below INT4_MAX / 4. A run also fills
+//! the table when the table's offset has reached 2^30, from where an entry's `last_hit` may have
+//! wrapped in its 31 bits (below). Until 2026-11-03 every run filled the table (Species4 x Species6
+//! blastp-fast at 16 threads: 68,627 fills, 17.7 GB of writes in all; structural line S1).
 //!
 //! The argument is in integers; `last_hit` is a 31-bit field (`DiagStruct`), whose stored values
-//! are exact while `d + L < 2^30`. The offsets stay below INT4_MAX / 4 plus one subject and one
-//! window, so this holds for every subject shorter than 2^29 letters. Only one subject of more than
-//! 2^29 letters in one-hit mode could leave a wrapped entry that a later subject of its run reads
-//! differently from a cleared one; there the run path keeps the leftovers as the one-thread loop
-//! and NCBI do, and it is the loop without the switch that departs from them.
+//! are exact while `d + L < 2^30`. An offset below INT4_MAX / 4 moves by one subject and one
+//! window, so a value can wrap only where consecutive subjects have about 2^29 letters or more
+//! together. A later subject of the same run reads such an entry as the one-thread loop and NCBI
+//! do (it may read differently from a cleared one), and it is the loop without the switch that
+//! departs from them. Every entry is at most the offset that `finish_subject` left, so none has
+//! wrapped while the table's offset is below 2^30; from there a run starts from a filled table, as
+//! every run did before 2026-11-03 (`x_start_run`), so which task takes the run does not matter.
 //!
 //! Which thread
 //! searches a run and in what order the runs end change nothing: the results are merged by
@@ -232,16 +235,23 @@ fn x_cut_runs(lengths: &[usize], parts: usize) -> Vec<Range<usize>> {
 //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
 //         }
 // ```
+// No NCBI counterpart: when a run's start may skip the fill (`x_start_run`); it changes no value
+// NCBI computes.
+/// The first offset at which a table's entries may hold `last_hit` values that wrapped in the
+/// 31-bit field (`DiagStruct`, 2^30): every entry is at most the offset `finish_subject` left, so
+/// below it none has (module header).
+const X_EXACT_LAST_HIT: i32 = 1 << 30;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-103
 // (`s_BlastDiagClear`, module header)
 /// The start of a run whose first subject's offset in the one-thread order is `diag_offset`: the
 /// task's table at that offset, reading as cleared there. `scratch.diag_offset` is the offset from
 /// which every entry of the table reads as cleared (module header, "Why a run needs no fill"), so
-/// the table is filled (`prepare_independent_subject`) only when `diag_offset` is below it;
-/// otherwise the offset is set and the other per-subject resets run, as before every later subject
-/// of a run.
+/// the table is filled (`prepare_independent_subject`) only when `diag_offset` is below it, or when
+/// the table's offset has reached `X_EXACT_LAST_HIT` (an entry may have wrapped); otherwise the
+/// offset is set and the other per-subject resets run, as before every later subject of a run.
 fn x_start_run(scratch: &mut BlastpSubjectScratch, diag_offset: i32) {
-    if diag_offset < scratch.diag_offset {
+    if diag_offset < scratch.diag_offset || scratch.diag_offset >= X_EXACT_LAST_HIT {
         scratch.prepare_independent_subject(diag_offset);
     } else {
         scratch.diag_offset = diag_offset;
@@ -522,6 +532,17 @@ mod tests {
         x_start_run(&mut scratch, WINDOW);
         assert_eq!(scratch.diag_offset, WINDOW);
         assert_eq!(scratch.diag_array, fresh);
+        // From 2^30 on an entry may have wrapped in its 31 bits: the run fills the table at any
+        // offset.
+        scratch.diag_array[3].set_last_hit(5);
+        scratch.diag_offset = X_EXACT_LAST_HIT;
+        x_start_run(&mut scratch, X_EXACT_LAST_HIT + 100);
+        assert_eq!(scratch.diag_offset, X_EXACT_LAST_HIT + 100);
+        assert_eq!(scratch.diag_array, fresh);
+        scratch.diag_array[3].set_last_hit(5);
+        scratch.diag_offset = X_EXACT_LAST_HIT - 1;
+        x_start_run(&mut scratch, X_EXACT_LAST_HIT + 100);
+        assert_eq!(scratch.diag_array[3].last_hit(), 5);
     }
 
     /// What the test kernel saw at the start of a subject's search: the subject, the table's
@@ -646,9 +667,10 @@ mod tests {
     }
 
     // One task's table across runs that skip the subjects of other tasks, with and without a
-    // reset of the one-thread order among the skipped ones (the order of `x_search_runs` when
-    // other tasks take the runs in between): every subject still starts at its one-thread offset
-    // from a table that reads as cleared.
+    // reset of the one-thread order among the skipped ones, and runs that start without a fill
+    // after a reset (by another task's subject, or by the task's own last one) (the order of
+    // `x_search_runs` when other tasks take the runs in between): every subject still starts at
+    // its one-thread offset from a table that reads as cleared.
     #[test]
     fn a_task_skipping_runs_starts_each_run_from_a_cleared_table() {
         let seen = Mutex::new(Vec::new());
@@ -677,19 +699,20 @@ mod tests {
         // Short subjects (no reset), and subjects long enough to reset between the task's runs.
         let short: Vec<usize> = (0..12).map(|i| 30 + 7 * i).collect();
         let long = vec![200_000_000; 12];
-        for (lengths, task_runs) in [
-            (&short, [0..2, 5..7, 10..12]),
-            (&long, [0..2, 4..6, 9..11]),
-        ] {
+        let cases: [(&Vec<usize>, Vec<Range<usize>>, bool); 4] = [
+            (&short, vec![0..2, 5..7, 10..12], false),
+            (&long, vec![0..2, 4..6, 9..11], true),
+            (&long, vec![0..1, 6..7], false),
+            (&long, vec![3..4, 6..7], true),
+        ];
+        for (lengths, task_runs, goes_back) in cases {
             let subjects = proteins(lengths);
             let offsets = blastp_subject_diag_offsets(&subjects, WINDOW);
-            if lengths == &long {
-                let back = task_runs
-                    .windows(2)
-                    .filter(|pair| offsets[pair[1].start] < offsets[pair[0].end - 1])
-                    .count();
-                assert!(back >= 1, "{offsets:?}");
-            }
+            let back = task_runs
+                .windows(2)
+                .filter(|pair| offsets[pair[1].start] < offsets[pair[0].end - 1])
+                .count();
+            assert_eq!(back >= 1, goes_back, "{task_runs:?} {offsets:?}");
             let mut scratch = BlastpSubjectScratch::new(16, TABLE, WINDOW, 100);
             seen.lock().unwrap().clear();
             for run in &task_runs {

@@ -1233,10 +1233,11 @@ fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
 // lookup locations of its contexts (`XPairLutQuery::x_build_group`). Scheduling only: the groups
 // are independent. They are built in order on the calling thread; with `on_pool` (the tuning knob
 // LOSAT_X_PAIRLUT_POOL, `lut_on_pool`) and a search pool they are built on the pool (an indexed
-// map, results in group order; each thread has its own neighbour-list memo). The calling thread
-// is the default because the pool gained at most 17 ms per batch (AP027131, 6 x 220,702 aa) and
-// cost memory: the memo of every pool thread, and tables allocated in the pool threads' arenas
-// and freed by the search thread (+17 MiB on a 50-batch run at 8 threads).
+// map, results in group order; each build takes a memo of neighbour lists, `x_with_tbx_memo`). The
+// calling thread is the default because the pool gained at most 17 ms per batch (AP027131, 6 x
+// 220,702 aa) and cost memory: a memo for each group built at once (kept for the next builds), and
+// tables allocated in the pool threads' arenas and freed by the search thread (+17 MiB on a
+// 50-batch run at 8 threads).
 /// The groups `build_groups` would filter out of the full table of `q`, built directly. None
 /// when a lookup location does not lie inside one group.
 fn lut_direct_groups(
@@ -4952,8 +4953,8 @@ mod tests {
     // ```c
     // TBlastThreads the_threads(GetNumberOfThreads());
     // ```
-    // The groups built on a search pool (every thread with its own neighbour-list memo) are the
-    // groups built in order on one thread.
+    // The groups built on a search pool (each build on a memo of neighbour lists of
+    // `X_TBX_MEMOS`) are the groups built in order on one thread.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     #[test]
     fn direct_groups_on_a_search_pool_equal_build_groups() {
@@ -4974,12 +4975,44 @@ mod tests {
         crate::utils::threading::with_search_pool(4, "tblastx", |pool| {
             assert!(pool.enabled());
             for threshold in [0, 11, 13] {
-                // The second round reads the lists the threads memoised in the first.
+                // The second round reads the lists memoised in the first.
                 for _round in 0..2 {
                     assert_eq!(lut_check(&one, threshold, pool).0, 6);
                     let (groups, _) = lut_check(&many, threshold, pool);
                     assert!((2..=X_MAX_GROUPS).contains(&groups), "groups {groups}");
                 }
+            }
+            Ok(())
+        })
+        .expect("search pool");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
+    // ```c
+    // TBlastThreads the_threads(GetNumberOfThreads());
+    // ```
+    // Builds of two keys side by side (two searches in one process) each take a memo of
+    // `X_TBX_MEMOS` and give it back; a memo kept for the other key is replaced, never read.
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[test]
+    fn direct_groups_of_two_keys_at_once_equal_build_groups() {
+        let mut rng = Rng(0x9005_9006_9007_9008);
+        let alphabet = aa("ACDEFGHIKLMNPQRSTVWY");
+        let many: Vec<Vec<QueryFrame>> = (0..4)
+            .map(|_| {
+                FRAMES
+                    .iter()
+                    .map(|&f| random_masked_frame(&mut rng, f, 400, &alphabet))
+                    .collect()
+            })
+            .collect();
+        crate::utils::threading::with_search_pool(4, "tblastx", |pool| {
+            for _round in 0..3 {
+                let (a, b) = pool.install(|| {
+                    rayon::join(|| lut_check(&many, 11, pool), || lut_check(&many, 13, pool))
+                });
+                assert!((2..=X_MAX_GROUPS).contains(&a.0), "groups {}", a.0);
+                assert!((2..=X_MAX_GROUPS).contains(&b.0), "groups {}", b.0);
             }
             Ok(())
         })

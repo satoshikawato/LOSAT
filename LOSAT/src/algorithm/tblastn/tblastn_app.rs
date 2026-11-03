@@ -934,7 +934,7 @@ fn search(
     } else {
         0
     };
-    app::check_unsupported_environment("TBLASTN")?;
+    app::check_search_environment("TBLASTN", database.is_none(), outputs.only_archive())?;
     app::check_old_fsc("TBLASTN")?;
     app::check_query_split_environment("TBLASTN", false)??;
     let subjects = subject_records;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { SourceRace, type RaceStanding } from '../../src/application/source-race';
-import { accessionLines, RACE_RECORDS, servingSources, sourceList, unserved } from '../../src/domain/accession';
+import { groupSite, SourceRace, type RaceStanding } from '../../src/application/source-race';
+import { accessionLines, fetchGroups, RACE_RECORDS, servingSources, sourceList, unserved } from '../../src/domain/accession';
 import { BrowserAccessionFetcher, fetchUrl } from '../../src/infra/browser/accession-fetcher';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 
@@ -46,6 +46,30 @@ describe('accessionLines', () => {
     expect(sourceList(['cncb'])).toBe('CNCB');
     expect(sourceList(['ncbi', 'cncb'])).toBe('NCBI or CNCB');
     expect(sourceList(['ncbi', 'ebi', 'cncb'], 'and')).toBe('NCBI, EBI and CNCB');
+  });
+
+  it('groups a box by the sites that serve each accession, in the order of the box (line WF-5)', () => {
+    expect(fetchGroups('protein', ['P12345', 'C_AA004835.1', 'Q9Y261', 'C_AA000002.1'])).toEqual([
+      { sources: ['ncbi', 'ebi'], accessions: ['P12345', 'Q9Y261'], lines: [0, 2] },
+      { sources: ['cncb'], accessions: ['C_AA004835.1', 'C_AA000002.1'], lines: [1, 3] },
+    ]);
+    // EBI (ENA) is left out for RefSeq nucleotides.
+    expect(fetchGroups('nucleotide', ['C_AA004835.1', 'NR_074540.1', 'AB000001.1'])).toEqual([
+      { sources: ['cncb'], accessions: ['C_AA004835.1'], lines: [0] },
+      { sources: ['ncbi', 'cncb'], accessions: ['NR_074540.1'], lines: [1] },
+      { sources: ['ncbi', 'ebi', 'cncb'], accessions: ['AB000001.1'], lines: [2] },
+    ]);
+  });
+
+  it('starts a group at the site chosen by hand if it serves the group, else at the race, else at the first site', () => {
+    const standing: RaceStanding = { answered: [{ source: 'ebi', ms: 900 }], failed: [] };
+    expect(groupSite(['ncbi', 'ebi'], 'fastest', undefined)).toBe('ncbi');
+    expect(groupSite(['ncbi', 'ebi'], 'fastest', standing)).toBe('ebi');
+    // A race still running that has not reached the group's sites: the first of them.
+    expect(groupSite(['ncbi', 'cncb'], 'fastest', standing)).toBe('ncbi');
+    expect(groupSite(['ncbi', 'ebi'], 'ncbi', standing)).toBe('ncbi');
+    expect(groupSite(['ncbi', 'ebi'], 'cncb', standing)).toBe('ebi');
+    expect(groupSite(['cncb'], 'ebi', standing)).toBe('cncb');
   });
 
   it('races with records that every source serves, of the kind raced', () => {

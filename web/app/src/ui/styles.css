@@ -636,6 +636,23 @@ input[type='radio'] {
   margin-top: 6px;
 }
 
+/* A box that no one site serves: one Fetch per group of accessions (line WF-5). */
+.fetch-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fetch-groups li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
 .entry-paste > .muted,
 .entry-paste > .error {
   margin: 4px 0 0;

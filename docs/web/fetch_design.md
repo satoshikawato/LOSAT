@@ -189,7 +189,8 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    間の別の Fetch は同じ競走を待つ。accession は、その全部を扱える取得先のうち最初に答えた所へ、その答えが来た時点で送る。扱えない所は
    問い合わせずに外す（§8 の 5 の EBI に加え、2026-11-03 の実測で：CNCB は UniProt の accession に空の本文を返す、GenBase の `C_…` は
    NCBI も ENA も持たない）。扱える所が 1 つなら競走しない（`C_…` は CNCB へ直に）。どこも全部は扱えない欄は何も送らず
-   「No one site has all of these accessions: C_AA004835.1 only from CNCB, P12345 only from NCBI or EBI.」で止まる。他の答えは
+   「No one site has all of these accessions: C_AA004835.1 only from CNCB, P12345 only from NCBI or EBI.」で止まる（WF-5 で §11 の
+   組ごとのボタンに変わった）。他の答えは
    後ろで届いて順位を埋める。失敗した所は外し、扱える所のどれも答えなければその最初（ふつう NCBI）へ送る（失敗はその取得が名乗る）。どこも答えなかった競走は残さない（次の Fetch でもう一度、
    たとえばオフラインから戻った後）。順位はタブの間（メモリ）だけ保ち、読み込み直すとまた測る。手で選んだ取得先は §8 の 1 のとおり保つ
    （`web/app/src/application/source-race.ts`）。
@@ -211,3 +212,29 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    次の Fetch は競走しないことを数える（`tests/e2e/fetch.spec.ts`）。フォルダの picker は動かせないので、Chromium では OPFS のフォルダを
    返す picker に置き換えて書いた中身を読み、Firefox では download を受けて中身を比べる（`tests/e2e/examples.spec.ts`）。
 
+## 11. WF-5 の実装：どこも全部は扱えない欄の組ごとのボタン（2026-11-03）
+
+保守者（2026-11-03 21:5x）：どこも全部は扱えない欄は止めずに、取得先ごとのボタンを出す。押すとその組の accession だけを、その取得先
+だけへ送る（1 回の操作で 1 か所。1 回の押しで欄を分けて送る #771 は退けた、web-fetch-20261103/DECISIONS.md の 26）。欄は全部の組が
+届いてから一度に書く。細部は保守者の常設の指示（2026-09-29、2026-10-07 に再掲）により推奨の案を採った（同 DECISIONS.md の 28〜32）。
+
+1. **組**：どこか 1 か所が全部を扱える欄はこれまでどおり 1 つの「Fetch」（§8、§10）。どこも全部は扱えない欄だけを、各 accession を
+   扱える取得先の組（`servingSources`）で分ける：GenBase の `C_…` は CNCB だけ、UniProt のタンパク質は NCBI と EBI、RefSeq の核酸は
+   EBI を除く。組の並びは欄の中の最初の accession の順（`domain/accession.ts` の `fetchGroups`）。
+2. **送り先**：取得先が 1 つの組はそこ。いくつかある組はその取得先だけの選択（「Fastest」は無い：ボタンは送る先を 1 つ名乗る）を持ち、
+   初めは手で選んだ取得先（その組を扱えるなら）、無ければこのタブの競走の順の最初（走っている競走にも従う）、それも無ければ NCBI、EBI、
+   CNCB の順の最初（`application/source-race.ts` の `groupSite`）。組は競走を始めない（読み込み、Run、組のボタンのどれでも）。
+3. **手で選んだ取得先**：ボタンは選択に関わらず、どこも全部は扱えない欄に出る（手で選んだ所で止めると、その文が名指す所も別の
+   accession で止まる）。1 か所が全部を扱えるのに選んだ所が扱えない欄は §8 のとおり要求の前に断る（利用者が取得先を名指した）。
+4. **届いた組**：全部が届くまで draft のメモリ（`RoleDraft.fetched`、欄の行ごと）に持ち、最後の組が届いたら欄の行の順（組の順ではない）
+   で一度に書く。欄の編集、mode を別の kind に変えること、欄全体の Fetch で捨てる。1 つの欄で取得は 1 組ずつ（他のボタンは待つ）。
+   失敗した組は取得先と accession を名乗り（文に accession が無ければ前に付ける：「P12345: NCBI could not be reached (offline).」）、
+   届いた組は残すので、そのボタンでその組だけをもう一度取れる。§8 の大きさと数の上限は欄全体で数える。欄が書かれるまで Run は
+   「Fetch the subject accessions first.」で止まる。
+5. **画面**：行は「No one site has all of these accessions」（dev のまま）と組ごとの行：「[Fetch C_AA004835.1] from CNCB」、
+   「[Fetch 2 accessions] from [NCBI ▾]」（1 つの Fetch の行「Fetch from [Fastest ▾]」と同じ読み方。ボタンの名前は
+   「Fetch C_AA004835.1 from CNCB」まで）。届いた組は押せない「Fetched C_AA004835.1」。取得中は §8 の「Fetching 1 of 2 from CNCB…」。
+   その場の一文は足さず、「?」は §10 のまま（送るのは accession だけ、ここで選んだ所へ）。
+6. **e2e**：blastp の subject に「C_AA004835.1 / P12345 / P99999」を入れ、CNCB の組は CNCB へ `C_` だけ、NCBI の組は NCBI へ 2 つ
+   （P99999 で失敗、CNCB の組は残る）、EBI を選んで UniProt へ、最後に欄が欄の順で書かれること、競走の要求が出ないことを数える
+   （`tests/e2e/fetch.spec.ts`）。

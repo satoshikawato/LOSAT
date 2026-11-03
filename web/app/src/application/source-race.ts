@@ -5,7 +5,7 @@
 // the order in the background. A source that has not answered within RACE_DEADLINE_MS counts as
 // failed. The order is kept for the tab, so later fetches of the kind ask one source only. A
 // race in which no source answered is not kept: the next Fetch races again.
-import { FETCH_SOURCES, RACE_RECORDS, type FetchSourceId } from '../domain/accession';
+import { FETCH_SOURCES, RACE_RECORDS, type FetchChoice, type FetchSourceId } from '../domain/accession';
 import type { SequenceKind } from '../domain/programs';
 import type { AccessionFetcher } from '../ports/fetch';
 
@@ -31,6 +31,20 @@ export function raceChoice(standing: RaceStanding | undefined, eligible: readonl
   const first = standing?.answered.find((entry) => eligible.includes(entry.source))?.source;
   if (first !== undefined || standing === undefined) return first;
   return eligible.every((source) => standing.failed.includes(source)) ? eligible[0] : undefined;
+}
+
+/**
+ * Where a group of a box that no one source serves starts (line WF-5): the source chosen by hand
+ * if it serves the group, else the race's choice among the group's sources, else the first of
+ * them. A group never starts a race.
+ */
+export function groupSite(
+  sources: readonly FetchSourceId[],
+  choice: FetchChoice,
+  standing: RaceStanding | undefined,
+): FetchSourceId {
+  if (choice !== 'fastest' && sources.includes(choice)) return choice;
+  return raceChoice(standing, sources) ?? sources[0]!;
 }
 
 interface Race {

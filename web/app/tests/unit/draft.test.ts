@@ -479,6 +479,118 @@ describe('SearchDraft accessions from the fastest source (line WF-3)', () => {
   });
 });
 
+describe('SearchDraft accessions by groups, one site a press (line WF-5)', () => {
+  const C1 = '>C_AA004835.1 SARS-CoV-2\nMESLVPGFNE\n';
+  const C2 = '>C_AA000002.1 other\nMKTAYIAKQR\n';
+  const P = '>sp|P12345|AATM_RABIT\nMALLHS\n';
+  const records = { 'C_AA004835.1': C1, 'C_AA000002.1': C2, P12345: P };
+  const asked = (fetcher: FakeAccessionFetcher) => fetcher.requests.map((r) => [r.source, r.accession]);
+
+  it('sends each group only to the site pressed, holds what came, and writes the box in its order once all have come', async () => {
+    const fetcher = new FakeAccessionFetcher(records);
+    const { draft } = setup({ fetcher });
+    draft.setProgram('blastp');
+    draft.setPaste('query', '>q\nMALLHS\n');
+    draft.setPaste('subject', 'C_AA004835.1\nP12345\nC_AA000002.1');
+    draft.fetchGroup('subject', 0, 'cncb');
+    await draft.idle();
+    expect(asked(fetcher)).toEqual([
+      ['cncb', 'C_AA004835.1'],
+      ['cncb', 'C_AA000002.1'],
+    ]);
+    expect(draft.state.get().subject.fetched).toEqual({ 0: C1, 2: C2 });
+    expect(draft.state.get().subject.paste).toBe('C_AA004835.1\nP12345\nC_AA000002.1');
+    expect(draft.readiness()).toBe('Fetch the subject accessions first.');
+    // A site that does not serve the group is not asked.
+    draft.fetchGroup('subject', 1, 'cncb');
+    await draft.idle();
+    expect(fetcher.requests).toHaveLength(2);
+    fetcher.hold('ebi');
+    draft.fetchGroup('subject', 1, 'ebi');
+    await Promise.resolve();
+    expect(draft.state.get().subject.fetch).toEqual({ state: 'fetching', source: 'ebi', done: 0, total: 1 });
+    expect(draft.readiness()).toBe('The subject accessions are still being fetched.');
+    fetcher.release();
+    await draft.idle();
+    await draft.raceIdle();
+    expect(asked(fetcher).slice(2)).toEqual([['ebi', 'P12345']]);
+    expect(draft.state.get().subject.paste).toBe(C1 + P + C2);
+    expect(draft.state.get().subject.fetched).toBeUndefined();
+    expect(draft.state.get().subject.fetch).toBeUndefined();
+    expect(sourceOf(draft, 'subject').base?.records.map((r) => r.id)).toEqual(['C_AA004835.1', 'sp|P12345|AATM_RABIT', 'C_AA000002.1']);
+    // No race: a group goes to the site pressed.
+    expect(fetcher.requests.filter((r) => r.fresh === true)).toHaveLength(0);
+    expect(draft.state.get().race).toEqual({});
+  });
+
+  it('names the site and the accession of a failed group, keeps the groups that came, and fetches that group again alone', async () => {
+    const fetcher = new FakeAccessionFetcher({
+      ...records,
+      'ncbi:P12345': { ok: false, reason: 'unreachable', detail: 'offline' },
+    });
+    const { draft } = setup({ fetcher });
+    draft.setProgram('blastp');
+    draft.setPaste('query', 'C_AA004835.1\nP12345');
+    draft.fetchGroup('query', 0, 'cncb');
+    await draft.idle();
+    draft.fetchGroup('query', 1, 'ncbi');
+    await draft.idle();
+    expect(draft.state.get().query.fetch).toEqual({ state: 'failed', message: 'P12345: NCBI could not be reached (offline).' });
+    expect(draft.state.get().query.fetched).toEqual({ 0: C1 });
+    // Another choice clears the message, not what came.
+    draft.setFetchSource('ebi');
+    expect(draft.state.get().query.fetch).toBeUndefined();
+    expect(draft.state.get().query.fetched).toEqual({ 0: C1 });
+    draft.fetchGroup('query', 1, 'ebi');
+    await draft.idle();
+    expect(asked(fetcher)).toEqual([
+      ['cncb', 'C_AA004835.1'],
+      ['ncbi', 'P12345'],
+      ['ebi', 'P12345'],
+    ]);
+    expect(draft.state.get().query.paste).toBe(C1 + P);
+  });
+
+  it('drops what came when the box is edited or the mode reads the other kind, and counts the whole box against the limit', async () => {
+    const fetcher = new FakeAccessionFetcher({ ...records, 'C_AA000003.1': `>C_AA000003.1\n${'M'.repeat(10_000_000 - C1.length)}\n` });
+    const { draft } = setup({ fetcher });
+    draft.setProgram('blastp');
+    draft.setPaste('subject', 'C_AA004835.1\nP12345');
+    draft.fetchGroup('subject', 0, 'cncb');
+    await draft.idle();
+    draft.setPaste('subject', 'C_AA004835.1\nP12345\n');
+    expect(draft.state.get().subject.fetched).toBeUndefined();
+    draft.fetchGroup('subject', 0, 'cncb');
+    await draft.idle();
+    expect(draft.state.get().subject.fetched).toEqual({ 0: C1 });
+    // BLASTN's subject is nucleotide: there CNCB serves both, and the box has no groups.
+    draft.setProgram('blastn');
+    expect(draft.state.get().subject.fetched).toBeUndefined();
+    draft.fetchGroup('subject', 0, 'cncb');
+    await draft.idle();
+    expect(fetcher.requests).toHaveLength(2);
+
+    draft.setProgram('blastp');
+    draft.setPaste('subject', 'C_AA004835.1\nP12345\nC_AA000003.1');
+    draft.fetchGroup('subject', 1, 'ncbi');
+    await draft.idle();
+    draft.fetchGroup('subject', 0, 'cncb');
+    await draft.idle();
+    expect(draft.state.get().subject.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10 MB') });
+    expect(draft.state.get().subject.fetched).toEqual({ 1: P });
+  });
+
+  it('fetches a box that one site serves whole with the one Fetch, not by groups', async () => {
+    const fetcher = new FakeAccessionFetcher(records);
+    const { draft } = setup({ fetcher });
+    draft.setProgram('blastp');
+    draft.setPaste('subject', 'C_AA004835.1\nC_AA000002.1');
+    draft.fetchGroup('subject', 0, 'cncb');
+    await draft.idle();
+    expect(fetcher.requests).toHaveLength(0);
+  });
+});
+
 describe('SearchDraft submit', () => {
   it('refuses to queue without inputs, with every record excluded, or with a refused input', async () => {
     const { draft, requests } = setup();

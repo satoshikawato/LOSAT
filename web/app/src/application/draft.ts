@@ -13,7 +13,8 @@
 // `register`), shown with its message. Several sources of a role are one combined search
 // input, or separate searches (one run per source, started as a group). A box of accessions
 // only is fetched when the user asks (fetchAccessions, line WF-1) and becomes a pasted text;
-// with "Fastest" (line WF-3), the first fetch of a kind races the sources (source-race.ts).
+// with "Fastest" (line WF-3), the first fetch of a kind races the sources (source-race.ts); a
+// box that no one source serves is fetched by groups, one source a press (fetchGroup, WF-5).
 // An Example (useExample, line WF-2) replaces both roles: its query becomes the query box's
 // text and its subject set the only subject source.
 import {
@@ -21,11 +22,13 @@ import {
   FETCH_ACCESSION_LIMIT,
   FETCH_BYTE_LIMIT,
   FETCH_SOURCES,
+  fetchGroups,
   servingSources,
   sourceLabel,
   sourceList,
   unserved,
   type FetchChoice,
+  type FetchGroup,
   type FetchSourceId,
 } from '../domain/accession';
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES, splitOptions } from '../domain/argv';
@@ -104,6 +107,11 @@ export interface RoleDraft {
    */
   readonly paste: string;
   readonly fetch?: FetchState;
+  /**
+   * The FASTA that the groups of a box that no one source serves have brought (fetchGroup), by
+   * line of the box; the box is written once every line has come.
+   */
+  readonly fetched?: Readonly<Record<number, string>>;
   /** The paste source first, then the files in the order they were added. */
   readonly sources: readonly DraftSource[];
   readonly mode: InputMode;
@@ -498,10 +506,78 @@ export class SearchDraft {
     this.setPaste(role, texts.join(''));
   }
 
+  /**
+   * Fetches one group of a box that no one source serves (fetchGroups, line WF-5) from `source`,
+   * one of the group's: only that group's accessions are sent, only there, and no race runs. The
+   * FASTA is held until every group has come, then written into the box in the box's order. A
+   * failure keeps the groups that have come, so that this group can be fetched again alone.
+   */
+  fetchGroup(role: InputRole, group: number, source: FetchSourceId): void {
+    const accessions = this.accessions(role);
+    if (accessions === undefined) return;
+    const kind = sequenceKind(programById(this.state.get().program), role);
+    if (servingSources(kind, accessions).length > 0) return;
+    const target = fetchGroups(kind, accessions)[group];
+    if (target === undefined || !target.sources.includes(source)) return;
+    this.fetches.get(role)?.abort();
+    const controller = new AbortController();
+    this.fetches.set(role, controller);
+    this.track(this.fetchPart(role, accessions, target, source, kind, controller.signal));
+  }
+
+  private async fetchPart(
+    role: InputRole,
+    accessions: readonly string[],
+    group: FetchGroup,
+    source: FetchSourceId,
+    kind: SequenceKind,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const fail = (message: string) => {
+      if (!signal.aborted) this.updateRole(role, (draft) => ({ ...draft, fetch: { state: 'failed', message } }));
+    };
+    if (accessions.length > FETCH_ACCESSION_LIMIT) {
+      fail(`Fetch takes up to ${FETCH_ACCESSION_LIMIT} accessions at a time.`);
+      return;
+    }
+    // The limit counts the whole box: the groups that have come, then this one.
+    let bytes = 0;
+    for (const text of Object.values(this.role(role).fetched ?? {})) bytes += new TextEncoder().encode(text).byteLength;
+    const texts: string[] = [];
+    for (const [done, accession] of group.accessions.entries()) {
+      this.updateRole(role, (draft) => ({ ...draft, fetch: { state: 'fetching', source, done, total: group.accessions.length } }));
+      let result: FetchResult;
+      try {
+        result = await this.deps.fetcher.fetch({ source, kind, accession, maxBytes: FETCH_BYTE_LIMIT - bytes }, signal);
+      } catch (error) {
+        fail(`${accession} could not be fetched from ${sourceLabel(source)}: ${messageOf(error)}`);
+        return;
+      }
+      if (signal.aborted) return;
+      if (!result.ok) {
+        const problem = fetchProblem(result, source, kind, accession);
+        fail(problem.includes(accession) ? problem : `${accession}: ${problem}`);
+        return;
+      }
+      texts.push(result.fasta);
+      bytes += new TextEncoder().encode(result.fasta).byteLength;
+    }
+    this.fetches.delete(role);
+    const fetched = { ...this.role(role).fetched };
+    for (const [index, line] of group.lines.entries()) fetched[line] = texts[index]!;
+    if (accessions.every((_, line) => fetched[line] !== undefined)) {
+      this.setPaste(role, accessions.map((_, line) => fetched[line]).join(''));
+    } else {
+      this.updateRole(role, (draft) => ({ ...withoutFetch(draft), fetched }));
+    }
+  }
+
+  /** Stops the role's fetch, and drops the groups that have come (fetchGroup). */
   private cancelFetch(role: InputRole): void {
     this.fetches.get(role)?.abort();
     this.fetches.delete(role);
-    if (this.role(role).fetch !== undefined) this.updateRole(role, withoutFetch);
+    const draft = this.role(role);
+    if (draft.fetch !== undefined || draft.fetched !== undefined) this.updateRole(role, (next) => withoutFetch(next, true));
   }
 
   /** Removes a source; the paste box keeps its text. */
@@ -1049,9 +1125,11 @@ export class SearchDraft {
   }
 }
 
-function withoutFetch(draft: RoleDraft): RoleDraft {
+/** The draft without its fetch's state, and with `groups` also without the groups that have come. */
+function withoutFetch(draft: RoleDraft, groups = false): RoleDraft {
   const next = { ...draft };
   delete (next as { fetch?: unknown }).fetch;
+  if (groups) delete (next as { fetched?: unknown }).fetched;
   return next;
 }
 

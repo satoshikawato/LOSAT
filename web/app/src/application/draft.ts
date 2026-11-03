@@ -367,14 +367,17 @@ export class SearchDraft {
       fail(`Fetch takes up to ${FETCH_ACCESSION_LIMIT} accessions at a time.`);
       return;
     }
-    const texts: string[] = [];
-    let bytes = 0;
-    for (const [done, accession] of accessions.entries()) {
+    // Before any request: an accession the source cannot serve stops the fetch without sending the others.
+    for (const accession of accessions) {
       const reason = unserved(source, kind, accession);
       if (reason !== undefined) {
         fail(`${reason}: fetch ${accession} from NCBI or CNCB.`);
         return;
       }
+    }
+    const texts: string[] = [];
+    let bytes = 0;
+    for (const [done, accession] of accessions.entries()) {
       this.updateRole(role, (draft) => ({ ...draft, fetch: { state: 'fetching', source, done, total: accessions.length } }));
       let result: FetchResult;
       try {
@@ -534,6 +537,11 @@ export class SearchDraft {
   }
 
   private async prepareAndEnqueue(): Promise<EnqueueAllResult> {
+    // Run never fetches, nor waits for a fetch that is running (fetchAccessions).
+    for (const role of ROLES) {
+      const problem = this.accessionProblem(role);
+      if (problem !== undefined) return { ok: false, message: problem };
+    }
     await this.idle();
     const { program, threads, title } = this.state.get();
     for (const role of ROLES) {
@@ -580,15 +588,23 @@ export class SearchDraft {
     return undefined;
   }
 
+  /** A box of accessions only, fetched or not yet: it is not searched. */
+  private accessionProblem(role: InputRole): string | undefined {
+    const accessions = accessionLines(this.role(role).paste);
+    if (accessions === undefined) return undefined;
+    const title = role === 'query' ? 'query' : 'subject';
+    const noun = accessions.length === 1 ? 'accession' : 'accessions';
+    return this.role(role).fetch?.state === 'fetching'
+      ? `The ${title} ${noun} ${accessions.length === 1 ? 'is' : 'are'} still being fetched.`
+      : `Fetch the ${title} ${noun} first.`;
+  }
+
   private problemOf(role: InputRole): { readonly message: string; readonly short: string } | undefined {
     const draft = this.role(role);
     const title = role === 'query' ? 'query' : 'subject';
     const label = role === 'query' ? 'Query' : 'Subject';
-    const accessions = accessionLines(draft.paste);
-    if (accessions !== undefined) {
-      const message = `Fetch the ${title} ${accessions.length === 1 ? 'accession' : 'accessions'} first.`;
-      return { message, short: message };
-    }
+    const accessions = this.accessionProblem(role);
+    if (accessions !== undefined) return { message: accessions, short: accessions };
     if (draft.sources.length === 0) {
       const message = `Add the ${title} sequences: paste them or open FASTA files.`;
       return { message, short: message };

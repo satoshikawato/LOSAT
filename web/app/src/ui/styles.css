@@ -493,6 +493,8 @@ input[type='radio'] {
 
 /* Line WF-1: "Fetch from NCBI" under a box of accessions. */
 .fetch-row {
+  /* The "?" help floats under the row (.help-tip .help). */
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;

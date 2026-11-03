@@ -96,11 +96,17 @@ CNCB の GenBase は取れる（2026-11-03 17:3x 実測）ので取得先に入�
    4〜6 文字）、RefSeq（`NR_`、`NZ_CP…`）、GenBase（`C_AA…`）、UniProt（`P12345`、`Q9Y261`、`A0A023GPI8`）、末尾の版は任意。大文字小文字は
    問わず、大文字にして送る。数字の無い行（配列）と数字だけの行（gi）は当たらない（`web/app/src/domain/accession.ts`）。
 3. **accession だけの欄は source を作らない**：読めない入力の誤りと「Add the line ">pasted_query"」の案内を出さない。Run は取得せず
-   「Fetch the query accession first.」で止まる（ページを開いた・Run を押しただけでは通信しない）。欄を書き換えると走っている取得は捨てる。
+   「Fetch the query accession first.」で止まる（ページを開いた・Run を押しただけでは通信しない）。取得中の Run も待たずに
+   「The query accession is still being fetched.」で止まる。欄を書き換えると走っている取得は捨てる。取得中は取得先の選択を止め、
+   「Fetching 1 of 2 from NCBI…」と送り先を出す。
 4. **1 accession に 1 要求、順に**。NCBI は 340 ms 以上空ける（鍵無し 3 req/s）。1 回に 100 個まで、合計 10 MB まで（超えたら
    「Open FASTA files…」で開く案内）。全部取れたときだけ欄に写し、失敗は欄をそのままにして取得先と accession を名乗る。
+   取得先が扱えない accession（5）が 1 つでもあれば、どれも送らずに断る。時間切れ（60 s）は応答の見出しまで（本文の読み込みは
+   欄の書き換えで止まる）。
 5. **EBI は核酸 = ENA、タンパク質 = UniProt**（ENA の browser API はタンパク質の id に CDS の核酸を返す、2026-11-03 実測）。ENA に RefSeq、
-   UniProt に UniProt 以外の accession は送らずに断る。CNCB は両方（`NP_414542.1` が返る）。
+   UniProt に UniProt 以外の accession は送らずに断る。CNCB は両方（`NP_414542.1` が返る）だが、種類を指定する引数が無く、記録の
+   種類のまま返す（タンパク質の欄に核酸が入り得る）。そのときは欄の入力の既存の注「1 record looks like nucleotide sequences, but
+   BLASTP reads the subject as protein」が出る。
 6. **要求は accession だけ**：cookie と referrer を付けない（`credentials: 'omit'`、`Referrer-Policy: no-referrer`）。NCBI の `tool`・`email`
    も付けない。
 7. **e2e は Playwright の route で実アドレスを stub**（`web/app/tests/e2e/fetch.spec.ts`）。localhost の stub サーバでは配備の CSP の

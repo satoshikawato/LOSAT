@@ -243,6 +243,31 @@ describe('SearchDraft accessions (line WF-1)', () => {
     ]);
   });
 
+  it('asks EBI nothing when one accession of the box is not for it', async () => {
+    const fetcher = new FakeAccessionFetcher({ 'AB000001.1': AB });
+    const { draft } = setup({ fetcher });
+    draft.setFetchSource('ebi');
+    draft.setPaste('query', 'AB000001.1\nNR_074540.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(fetcher.requests).toHaveLength(0);
+    expect(draft.state.get().query.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('NR_074540.1') });
+  });
+
+  it('runs no search of accessions: Run neither fetches nor waits for a running fetch', async () => {
+    const fetcher = new FakeAccessionFetcher({ 'NR_074540.1': NR });
+    const { draft, requests } = setup({ fetcher });
+    draft.setPaste('subject', '>s\nACGT\n');
+    fetcher.hold();
+    draft.setPaste('query', 'NR_074540.1');
+    draft.fetchAccessions('query');
+    expect(await draft.submit()).toEqual({ ok: false, message: 'The query accession is still being fetched.' });
+    fetcher.release();
+    await draft.idle();
+    expect(requests).toHaveLength(0);
+    expect(draft.state.get().query.paste).toBe(NR);
+  });
+
   it('drops a running fetch when the box is edited, and limits the fetched text', async () => {
     const fetcher = new FakeAccessionFetcher({ 'NR_074540.1': NR, 'NC_000001.11': `>NC_000001.11\n${'A'.repeat(10_000_001)}\n` });
     const { draft } = setup({ fetcher });

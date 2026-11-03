@@ -25,7 +25,8 @@ const fileInput = ref<HTMLInputElement>();
 /** The box's accessions, when it holds accessions only: "Fetch" brings their FASTA into it. */
 const accessions = computed(() => accessionLines(roleState.value.paste));
 const fetchState = computed(() => roleState.value.fetch);
-const fetchSource = computed(() => FETCH_SOURCES.find((source) => source.id === props.state.fetchSource)!.label);
+const sourceLabel = (id: FetchSourceId) => FETCH_SOURCES.find((source) => source.id === id)!.label;
+const fetchSource = computed(() => sourceLabel(props.state.fetchSource));
 
 const readySources = computed(() => roleState.value.sources.filter((source) => source.status === 'ready'));
 const regionRecord = computed(() => {
@@ -107,7 +108,12 @@ function onDrop(event: DragEvent): void {
           </button>
           <label>
             from
-            <select :value="state.fetchSource" :data-testid="`${role}-fetch-source`" @change="onFetchSource">
+            <select
+              :value="state.fetchSource"
+              :disabled="fetchState?.state === 'fetching'"
+              :data-testid="`${role}-fetch-source`"
+              @change="onFetchSource"
+            >
               <option v-for="source in FETCH_SOURCES" :key="source.id" :value="source.id">{{ source.label }}</option>
             </select>
           </label>
@@ -126,7 +132,7 @@ function onDrop(event: DragEvent): void {
           role="status"
           :data-testid="`${role}-fetch-status`"
         >
-          Fetching {{ fetchState.done + 1 }} of {{ fetchState.total }}…
+          Fetching {{ fetchState.done + 1 }} of {{ fetchState.total }} from {{ sourceLabel(fetchState.source) }}…
         </p>
         <p v-else-if="fetchState?.state === 'failed'" class="error" role="alert" :data-testid="`${role}-fetch-error`">
           {{ fetchState.message }}

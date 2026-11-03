@@ -10,6 +10,7 @@ import type { AccessionFetcher, FetchRequest, FetchResult } from '../../ports/fe
 
 /** NCBI takes 3 requests a second without an API key (E-utilities usage guidelines). */
 const NCBI_INTERVAL_MS = 340;
+/** Milliseconds to the answer's headers; the body (up to FETCH_BYTE_LIMIT) may take longer. */
 const TIMEOUT_MS = 60_000;
 
 export function fetchUrl(source: FetchSourceId, kind: SequenceKind, accession: string): string {
@@ -40,14 +41,22 @@ export class BrowserAccessionFetcher implements AccessionFetcher {
 
   async fetch(request: FetchRequest, signal: AbortSignal): Promise<FetchResult> {
     if (request.source === 'ncbi') await this.ncbiTurn(signal);
-    const timeout = AbortSignal.timeout(this.options.timeoutMs ?? TIMEOUT_MS);
-    const both = AbortSignal.any([signal, timeout]);
+    signal.throwIfAborted();
+    const timeout = new AbortController();
+    const onAbort = () => timeout.abort(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      timeout.abort(new DOMException('no answer in time', 'TimeoutError'));
+    }, this.options.timeoutMs ?? TIMEOUT_MS);
     try {
       const response = await (this.options.fetch ?? fetch)(fetchUrl(request.source, request.kind, request.accession), {
-        signal: both,
+        signal: timeout.signal,
         credentials: 'omit',
         referrerPolicy: 'no-referrer',
       });
+      clearTimeout(timer);
       if (response.status === 400 || response.status === 404) return { ok: false, reason: 'not-found' };
       if (!response.ok) return { ok: false, reason: 'refused', status: response.status };
       const text = await readText(response, request.maxBytes);
@@ -57,7 +66,10 @@ export class BrowserAccessionFetcher implements AccessionFetcher {
       return { ok: true, fasta: text.endsWith('\n') ? text : `${text}\n` };
     } catch (error) {
       if (signal.aborted) throw error;
-      return { ok: false, reason: 'unreachable', detail: timeout.aborted ? 'no answer in time' : messageOf(error) };
+      return { ok: false, reason: 'unreachable', detail: timedOut ? 'no answer in time' : messageOf(error) };
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
     }
   }
 

@@ -85,6 +85,19 @@ describe('BrowserAccessionFetcher', () => {
     await expect(failing.fetch(request, controller.signal)).rejects.toThrow();
   });
 
+  it('gives up when no answer comes in time', async () => {
+    const fetcher = new BrowserAccessionFetcher({
+      timeoutMs: 10,
+      fetch: (_url, init) =>
+        new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal!.reason))),
+    });
+    expect(await fetcher.fetch({ ...request, source: 'cncb' }, new AbortController().signal)).toEqual({
+      ok: false,
+      reason: 'unreachable',
+      detail: 'no answer in time',
+    });
+  });
+
   it('starts NCBI requests at least 340 ms apart', async () => {
     let clock = 0;
     const starts: number[] = [];

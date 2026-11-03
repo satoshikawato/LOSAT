@@ -22,7 +22,12 @@ export class FakeAccessionFetcher implements AccessionFetcher {
   async fetch(request: FetchRequest, signal: AbortSignal): Promise<FetchResult> {
     this.requests.push(request);
     const held = this.held;
-    await (held === undefined ? Promise.resolve() : new Promise<void>((resolve) => held.push(resolve)));
+    await (held === undefined
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+          held.push(resolve);
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        }));
     signal.throwIfAborted();
     const record = this.records[request.accession];
     if (record === undefined) return { ok: false, reason: 'not-found' };

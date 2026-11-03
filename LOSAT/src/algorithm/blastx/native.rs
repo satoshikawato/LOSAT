@@ -44,7 +44,7 @@ use std::{
     //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
     // }
     // ```
-    io::{self, BufWriter, Write},
+    io::{self, BufWriter, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -351,8 +351,7 @@ fn run_inner(
     let subject_file = match (&args.db, subject_path) {
         (Some(_), _) => None,
         (None, Some(path)) => Some(
-            File::open(path)
-                .map_err(|_| inaccessible("subject", path))
+            crate::blastinput::input_files::open_file_input(path, "subject")
                 .map_err(early_archive_error)?,
         ),
         (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
@@ -671,12 +670,22 @@ fn run_inner(
                 choice.number
             );
         }
-        let query_file = File::open(&args.query).map_err(|_| inaccessible("query", &args.query))?;
+        // The read before the search goes through a second handle on the open file (a `.gz`
+        // query is an unnamed inflated file, `input_files::open_file_input`, which no path
+        // reaches); the handles share one position, put back where it was.
+        let start = (&query_file)
+            .stream_position()
+            .map_err(|_| inaccessible("query", &args.query))?;
         let messages_may_be_refused = super::blast_xml::prescan_queries(
-            query_file,
+            query_file
+                .try_clone()
+                .map_err(|_| inaccessible("query", &args.query))?,
             args.lcase_masking,
             query_range.as_ref(),
         )?;
+        (&query_file)
+            .seek(SeekFrom::Start(start))
+            .map_err(|_| inaccessible("query", &args.query))?;
         // The documents of a `-db` search with a taxonomy database on the search path: a later
         // batch can still refuse the scientific name of a taxid (XML2 and JSON), or the damaged
         // database (`read_reported_taxids`, which needs the batch's hits; outfmt 5 looks the
@@ -725,9 +734,20 @@ fn run_inner(
     //
     // 	return false;
     // ```
-    // The prescan of the titles of outfmt 11 (below) reads the query file a second time: whether it
-    // is a regular file is decided here, on the handle already open, before any second open.
+    // The prescan of the titles of outfmt 11 (below) reads the query file a second time, through a
+    // second handle on the open file (a `.gz` query is an unnamed inflated file that no path
+    // reaches): whether it is a regular file is decided here, on the handle already open, and the
+    // handle for that read is taken before the file goes into the stream.
     let query_is_regular = args.query.as_os_str() != "-" && archive::query_is_regular(&query_file);
+    let query_prescan = if archive.is_some() && query_is_regular {
+        Some(
+            query_file
+                .try_clone()
+                .map_err(|_| inaccessible("query", &args.query))?,
+        )
+    } else {
+        None
+    };
     let mut query_stream = FastaStream::from_file(query_file);
     query_stream.parse_deflines = args.parse_deflines;
     query_stream.id_scope = id_scope.clone();
@@ -770,7 +790,9 @@ fn run_inner(
             archive::refuse_irregular_query()?;
         }
         archive::prescan_query_titles(
-            &args.query,
+            query_prescan
+                .as_ref()
+                .expect("the second handle of a regular query"),
             args.lcase_masking,
             batch_size,
             query_range.as_ref(),

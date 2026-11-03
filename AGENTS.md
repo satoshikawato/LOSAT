@@ -64,7 +64,9 @@ authoritative, current guidance for agent behavior in LOSAT.
      a standard output closed at the start (`>&-`), where NCBI's first write
      fails (outfmt 0 exit 6, outfmt 6/7 abort), is the `/dev/null` that the
      Rust runtime opens before `main`, so LOSAT discards the report and exits
-     as the search ends. Errors raised after argument parsing, the outfmt 0 write
+     as the search ends; a `-query` or `-subject` whose name ends in `.gz` is
+     inflated through gzip before it is read (NCBI reads the file as text and
+     stops at its first line; exception 8). Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
      every search result must still match NCBI. Non-UTF-8
      file names, `.ncbirc` keys that change output, and NCBI C++ Toolkit

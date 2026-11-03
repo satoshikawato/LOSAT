@@ -10127,8 +10127,9 @@ fn write_reports_untimed(
         }
     }
     // A database: the reported sequences, named by rank from here on, with their stored
-    // titles, and their stored letters where a report shows them (outfmt 0 and the hit
-    // records; `database::reported_subjects`).
+    // titles, and their stored data where a report shows letters (outfmt 0, the hit records,
+    // the XML2 and JSON formats and the tabular fields of the alignment rows, such as `sseq`;
+    // `database::reported_subjects`).
     let reported = match subjects.source {
         SubjectSource::Prepared(_) => None,
         SubjectSource::Database(database) => {
@@ -10159,7 +10160,7 @@ fn write_reports_untimed(
         _ => None,
     };
     let subject_letters = match (&reported, subjects.source) {
-        (Some(reported), _) => SubjectLetters::new(&reported.records, None),
+        (Some(reported), _) => SubjectLetters::new(&reported.records, reported.stores.as_deref()),
         (None, SubjectSource::Prepared(prepared)) => prepared.letters(),
         (None, SubjectSource::Database(_)) => SubjectLetters::new(&[], None),
     };

@@ -3,6 +3,7 @@ import {
   includedRecords,
   normalizeExclusion,
   recordMismatch,
+  recordName,
   type DatasetRecord,
   type DatasetRevision,
 } from '../../src/domain/dataset';
@@ -23,7 +24,7 @@ describe('dataset revisions', () => {
   const revision: DatasetRevision = {
     revisionId: 'r',
     sourceId: 's',
-    parser: 0,
+    parser: 1,
     records: [record(0, 'a'), record(1, 'b'), record(2, 'c')],
     excluded: [1],
   };
@@ -37,6 +38,14 @@ describe('dataset revisions', () => {
     expect(() => normalizeExclusion([3], 3)).toThrow(RangeError);
     expect(() => normalizeExclusion([-1], 3)).toThrow(RangeError);
     expect(() => normalizeExclusion([0.5], 3)).toThrow(RangeError);
+  });
+});
+
+describe('record names in the results', () => {
+  it("names a record without a title as NCBI's tabular outputs do", () => {
+    expect(recordName('q1', 'query', 0)).toBe('q1');
+    expect(recordName('', 'query', 0)).toBe('Query_1');
+    expect(recordName('', 'subject', 1)).toBe('Subject_2');
   });
 });
 

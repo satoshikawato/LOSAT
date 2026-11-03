@@ -52,13 +52,11 @@ for (const size of SIZES) {
     await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', /^(ok|invalid)$/, { timeout: 60_000 });
     await shoot(page, browserName, size.name, '01-empty');
 
-    // Inputs: a query with a duplicate ID, a protein-like record and a record that the engine refuses
-    // (a gap line, which LOSAT Web does not support); one subject record with a region.
+    // Inputs: a query with a duplicate ID and a protein-like record; one subject record with a region.
     await page.getByTestId('query-input').fill(
       '>contig_1 assembled contig\nACGTACGTTTGACCATGGCATGCATGCATTTAGGCCAAGTACGATCGATCG\n' +
         '>contig_1 second copy\nACGTTGCAACGTTGCAACGTTGCAAGGT\n' +
-        '>gene_x\nMKLVVLAAGGHHKLMKLVVLAAGG\n' +
-        '>?10\nACGT\n',
+        '>gene_x\nMKLVVLAAGGHHKLMKLVVLAAGG\n',
     );
     await page.getByTestId('subject-files').setInputFiles({
       name: 'LC738884.fasta',
@@ -75,15 +73,11 @@ for (const size of SIZES) {
     await task(page, 'blastn');
     await page.getByTestId('job-title').fill('Contigs against LC738884');
     await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
-    await shoot(page, browserName, size.name, '02-inputs-refused-region');
+    await shoot(page, browserName, size.name, '02-inputs-region');
 
-    // Exclude the refused record (the engine's message names no record: from the record list) and
-    // start a group of separate searches behind a running one.
+    // Exclude the protein-like record from the record list and start a group of separate searches
+    // behind a running one.
     await showRecords(page, 'query');
-    await page.getByTestId('query-source-0-record-3').uncheck();
-    // The protein-like record too: the record table (the scan's reader) counts its 24 letters, the
-    // engine's NCBI reader keeps 19, and the run fails on the difference (line SX STATE 2026-11-03,
-    // reported to the maintainer and line WR).
     await page.getByTestId('query-source-0-record-2').uncheck();
     await ready(page, 'query');
     await page.getByTestId('run-losat').click();

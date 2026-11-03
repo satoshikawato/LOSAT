@@ -3,9 +3,9 @@
 // extract original records later. The search itself always reads its input with the
 // program's own parser, and the engine checks the table at `register`.
 //
-// The real implementation is the adapter's serial reactor inside the Data worker (S09).
-// Until then the development build and the tests use the FakeScanner. Every
-// implementation must pass tests/contract/record-scanner.contract.ts.
+// The real implementation is the adapter's serial reactor inside the Data worker (S09);
+// the development build and the tests use the FakeScanner. Every implementation must pass
+// tests/contract/record-scanner.contract.ts.
 import type { FastaParserKind, IndexedRecord } from '../domain/dataset';
 
 /** The ABI v2 *scan* response. */
@@ -15,8 +15,8 @@ export interface ScanResponse {
 
 export interface RecordScanner {
   /**
-   * Scans one input, given as chunks of any size in order. Rejects with the parser's
-   * error message (for example "Expected > at record start.").
+   * Scans one input, given as chunks of any size in order. Rejects with the reader's
+   * error message or LOSAT Web's rejection (for example of a gap line).
    */
   scan(parser: FastaParserKind, chunks: AsyncIterable<Uint8Array>): Promise<ScanResponse>;
 }

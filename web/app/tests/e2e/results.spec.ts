@@ -1408,8 +1408,8 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   const full = '0,60,0,180';
   await expect(canvas).toHaveAttribute('data-view', full);
 
-  // The canvas is drawn: pixels of the HSPs' colours.
-  expect(await colouredPixels(canvas)).toBeGreaterThan(20);
+  // The canvas is drawn (in an animation frame, after the attributes): pixels of the HSPs' colours.
+  await expect.poll(() => colouredPixels(canvas)).toBeGreaterThan(20);
 
   // Zoom in, in again, out, and back to the whole sequences.
   const span = async () => {

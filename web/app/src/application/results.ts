@@ -4,7 +4,7 @@
 // rank), never by a row number of a table, and a detail that arrives after the selection
 // moved on is dropped. Values shown come from the stored outputs and the HSP records
 // (docs/web/results_columns.md); the domain functions group, sort and filter them.
-import type { RecordKey } from '../domain/dataset';
+import { recordName, type RecordKey } from '../domain/dataset';
 import { optionValue } from '../domain/argv';
 import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan } from '../domain/hsp-table';
 import { splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
@@ -501,7 +501,7 @@ export class ResultsBrowser {
     }
     const subjectRecords = loaded.run.snapshot.subject.records;
     const filtered = filterQuery(query, state.filters, table, (subject) => [
-      subjectRecords[subject.sIdx]?.id ?? '',
+      recordName(subjectRecords[subject.sIdx]?.id ?? '', 'subject', subject.sIdx),
       this.row(subject.rows[0]!).sseqid,
     ]);
     const order = new Map(query.subjects.map((subject, i) => [subject.sIdx, i + 1]));
@@ -598,8 +598,9 @@ export class ResultsBrowser {
     loaded.run.snapshot.query.records.forEach((record, qIdx) => {
       const group = loaded.index.queries.get(qIdx);
       if (filters.queriesWithHitsOnly && group === undefined) return;
-      if (text !== '' && !record.id.toLowerCase().includes(text)) return;
-      entries.push({ qIdx, id: record.id, length: record.length, subjects: group?.subjects.length ?? 0, hsps: group?.hspCount ?? 0 });
+      const id = recordName(record.id, 'query', qIdx);
+      if (text !== '' && !id.toLowerCase().includes(text)) return;
+      entries.push({ qIdx, id, length: record.length, subjects: group?.subjects.length ?? 0, hsps: group?.hspCount ?? 0 });
     });
     return entries;
   }

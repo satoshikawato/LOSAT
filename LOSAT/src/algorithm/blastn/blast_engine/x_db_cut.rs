@@ -58,12 +58,12 @@
 //! order.
 //!
 //! EXPERIMENT (LOSAT_X_BNDBSMALL, a switch of the strict set: on unless it is `0`): the cut's largest
-//! block is `X_BNDBSMALL_BLOCK_BYTES` (256 KiB) instead of `BLOCK_BYTES`. A thread holds the block it
+//! block is `X_BNDBSMALL_BLOCK_BYTES` (128 KiB) instead of `BLOCK_BYTES`. A thread holds the block it
 //! reads and the results of the blocks that wait for the owner, and those go on its arena when the
 //! search starts, before the owner has handed anything over. Where most sequences hit most queries,
 //! 1 MiB of 16S genes gave about 1 MiB of preliminary HSPs (`v4-D12/STATE.md`, s29). The reports do not
 //! change, for the reasons above, which hold for any cut. The window keeps its bytes
-//! (`x_db_stream.rs` `x_wide_blocks_per_thread`): 16 blocks per thread of 256 KiB are shorter than a
+//! (`x_db_stream.rs` `x_wide_blocks_per_thread`): 16 blocks per thread of 128 KiB are shorter than a
 //! slow block, and core_nt took x1.16 at 128 KiB without that. The blocks are listed with the index
 //! read in runs (`x_db_stream.rs` `blocks_of`, `SeqDb::x_next_blocks`): listed one at a time on one
 //! thread while the others waited, four times as many blocks made ref_prok_rep_genomes x1.003-1.011
@@ -116,7 +116,7 @@ pub(super) fn x_bn_db_small() -> bool {
 /// SILVA at 16 threads, peak anonymous memory: 94 MiB with 1 MiB, 32 with 256 KiB, 27 with 128 KiB;
 /// 128 KiB took x1.03 on ref_prok_rep_genomes at 32 threads and x1.009 on core_nt with the blocks
 /// listed one at a time (module documentation).
-const X_BNDBSMALL_BLOCK_BYTES: u64 = 256 << 10;
+const X_BNDBSMALL_BLOCK_BYTES: u64 = 128 << 10;
 
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
 /// The block size of a search with `threads` threads of a database of `sequence_bytes`:
@@ -342,7 +342,8 @@ mod tests {
         let small = X_BNDBSMALL_BLOCK_BYTES;
         assert_eq!(x_cut_block_bytes(u64::MAX, 1, small), BLOCK_BYTES);
         assert_eq!(x_cut_block_bytes(344_000_000, 16, small), small);
-        assert_eq!(x_cut_block_bytes(10_300_000, 16, small), 160_937);
+        assert_eq!(x_cut_block_bytes(10_300_000, 16, small), small);
+        assert_eq!(x_cut_block_bytes(10_300_000, 32, small), 80_468);
         assert_eq!(x_cut_block_bytes(0, 2, small), X_MIN_BLOCK_BYTES);
     }
 }

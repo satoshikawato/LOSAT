@@ -287,8 +287,8 @@ fn reports_with_the_wide_window_are_the_reports_with_the_narrow_one() {
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 
-// `LOSAT_X_BNDBSMALL` (a largest block of 256 KiB) changes no report. Pieces of two genomes, about
-// 2.5 MiB of sequence file: above 256 KiB per block at 2 threads (its own side), below it at 4 (its
+// `LOSAT_X_BNDBSMALL` (a largest block of 128 KiB) changes no report. Pieces of two genomes, about
+// 2.5 MiB of sequence file: above 128 KiB per block at 2 threads (its own side), below it at 8 (its
 // reference side), and at one thread the blocks are those of 1 MiB.
 #[test]
 fn reports_with_small_blocks_are_the_reports_with_large_ones() {
@@ -320,7 +320,7 @@ fn reports_with_small_blocks_are_the_reports_with_large_ones() {
     assert!(output.status.success(), "makeblastdb failed");
     let one_thread = blastn("megablast", &db, 1, &[], "6");
     assert!(!one_thread.stdout.is_empty());
-    for (threads, sides) in [(2u32, (true, false)), (4, (false, true))] {
+    for (threads, sides) in [(2u32, (true, false)), (8, (false, true))] {
         let what = format!("threads {threads}");
         let off = blastn("megablast", &db, threads, &[SMALL_OFF], "6");
         assert!(off.stdout == one_thread.stdout, "{what}: off differs");

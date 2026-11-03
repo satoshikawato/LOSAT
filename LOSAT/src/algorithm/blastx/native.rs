@@ -290,6 +290,18 @@ fn run_inner(
     use crate::blastinput::app::{self, Program};
     let choice = app::parse_formatting_string(&args.outfmt)?;
     let format = app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
+    // No NCBI counterpart: the reports of `-query_loc` and `-subject_loc` are those of the
+    // pairwise and tabular formats for now (line SX, session SXd1); the other formats come with
+    // SXd2. SAM (17), AIRR (19) and FASTA (21) are NCBI's errors of BLASTX's formatting handler,
+    // after the ranges.
+    if (args.query_loc.is_some() || args.subject_loc.is_some())
+        && !matches!(choice.number, 0 | 6 | 7 | 10 | 17 | 19 | 20 | 21)
+    {
+        bail!(
+            "-query_loc and -subject_loc with -outfmt {} are not supported by LOSAT's BLASTX yet (outfmt 0, 6, 7, 10 and 20 are)",
+            choice.number
+        );
+    }
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
     // before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -399,7 +411,31 @@ fn run_inner(
     // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
     // counterpart.
     let x_t_read_fasta = crate::utils::xtiming::clock();
-    let subjects = match subject_file {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2540-2556
+    // ```c++
+    //         TSeqRange subj_range;
+    //         if (args.Exist(kArgSubjectLocation) && args[kArgSubjectLocation]) {
+    //             subj_range =
+    //                 ParseSequenceRange(args[kArgSubjectLocation].AsString(),
+    //                             "Invalid specification of subject location");
+    //         }
+    // ...
+    //         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
+    //                                        subj_range, parse_deflines,
+    //                                        use_lcase_masks, subjects, m_IsMapper);
+    // ```
+    // The handler of the database arguments reads `-subject_loc` after it opened the subject
+    // file, and then the subjects, one record at a time: a record whose interval starts more
+    // than one letter past its end stops the reading there (`seq_range::record_cut`), so the
+    // reader hands over each record as it closes (a batch of 0 letters) and no warning of a
+    // later record is written.
+    let subject_range = crate::blastinput::seq_range::parse_optional_range(
+        args.subject_loc.as_deref(),
+        crate::blastinput::seq_range::RangeRole::Subject,
+        "BLASTX",
+    )
+    .map_err(early_archive_error)?;
+    let mut subjects = match subject_file {
         Some(subject_file) => parse_fasta_stream_keeping(
             &mut {
                 let mut stream = FastaStream::from_file(subject_file);
@@ -409,15 +445,36 @@ fn run_inner(
             },
             true,
             args.lcase_masking,
-            usize::MAX,
+            if subject_range.is_some() {
+                0
+            } else {
+                usize::MAX
+            },
             archive.is_some(),
-            &mut |_| Ok(()),
+            None,
+            &mut |records| {
+                if let Some(range) = &subject_range {
+                    for record in records {
+                        crate::blastinput::seq_range::record_cut(range, record.sequence.len())?;
+                    }
+                }
+                Ok(())
+            },
             &mut |warning| reader_warning(warning, &mut stderr),
         )
         .map_err(input_error)
         .map_err(early_archive_error)?,
         None => Vec::new(),
     };
+    // The subjects as NCBI searches them: each cut to its interval (an interval without letters
+    // leaves a record without letters, `write_empty_subject_warnings`).
+    if let Some(range) = &subject_range {
+        for record in &mut subjects {
+            let (from, to_exclusive) =
+                crate::blastinput::seq_range::record_cut(range, record.sequence.len())?;
+            record.cut_in_place(from, to_exclusive);
+        }
+    }
     // LOSAT's refusal of a title the archive cannot write, before its first byte.
     if archive.is_some() {
         archive::check_titles(&subjects, "subject")?;
@@ -496,6 +553,22 @@ fn run_inner(
     // The formatting handler raises NCBI's errors for the formats of other programs (SAM,
     // AIRR rearrangement, FASTA) before its warning. The deferred errors of `resolve` are
     // those of the composition-based statistics handler and of `Validate`, which come later.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
+    // ```c++
+    //     // set the sequence range
+    //     if (args.Exist(kArgQueryLocation) && args[kArgQueryLocation]) {
+    //         m_Range = ParseSequenceRange(args[kArgQueryLocation].AsString(),
+    //                                      "Invalid specification of query location");
+    //     }
+    // ```
+    // The query options handler comes before the genetic code and formatting handlers
+    // (blastx_args.cpp:104-115). LOSAT's own refusals of option values come earlier (clap's
+    // value parsers, `resolve`).
+    let query_range = crate::blastinput::seq_range::parse_optional_range(
+        args.query_loc.as_deref(),
+        crate::blastinput::seq_range::RangeRole::Query,
+        "BLASTX",
+    )?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
@@ -508,6 +581,7 @@ fn run_inner(
     //         exit_code = BLAST_INPUT_ERROR;                                      \
     // ```
     let mut options = resolution.map_err(options_error)?;
+    options.query_range = query_range;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-200
     // ```c++
     //         /*** Initialize the database/subject ***/
@@ -1063,6 +1137,7 @@ fn run_inner(
                 args.lcase_masking,
                 batch_size,
                 archive.is_some(),
+                query_range.as_ref(),
                 deliver,
                 &mut |warning| {
                     let mut bytes = Vec::new();

@@ -1980,12 +1980,11 @@ fn blastx_takes_a_database_and_its_size() {
             "{words:?}: {error}"
         );
     }
-    // `-subject_loc` stays outside BLASTX's scope, with `-db` too.
+    // `-db` excludes `-subject_loc` (blast_args.cpp:2377-2381), as for `-subject`.
     let error = blastx(&["-db", "d", "-subject_loc", "1-10"]).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("unsupported BLASTX option '-subject_loc'"),
+    assert_eq!(
+        error.kind(),
+        clap::error::ErrorKind::ArgumentConflict,
         "{error}"
     );
 }

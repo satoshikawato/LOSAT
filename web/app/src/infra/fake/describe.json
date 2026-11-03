@@ -850,6 +850,11 @@
     "takes_value": true
    },
    {
+    "flag": "-subject_loc",
+    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
+   },
+   {
     "flag": "-db",
     "help": "BLAST database name (a protein database, with or without parsed Seq-ids)",
     "takes_value": true
@@ -1034,6 +1039,11 @@
      "plus",
      "minus"
     ]
+   },
+   {
+    "flag": "-query_loc",
+    "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
    },
    {
     "flag": "-query_gencode",

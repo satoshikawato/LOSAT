@@ -13,6 +13,11 @@ use std::{
     path::Path,
 };
 
+use crate::blastinput::fasta_reader::RecordSource;
+use crate::blastinput::seq_range::{
+    record_interval, RecordInterval, RecordPlacement, SequenceRange,
+};
+
 #[derive(Debug, Clone)]
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:619-631
 // ```c++
@@ -81,6 +86,54 @@ impl FastaRecord {
             Some(ids) => crate::report::seqid::SeqId::Db(&ids.best),
             None => crate::report::seqid::SeqId::Local(&self.internal_id),
         }
+    }
+
+    /// Where the letters lie in the record: the start of the `-query_loc` / `-subject_loc`
+    /// interval that `cut_in_place` cut the record to, and the record's length (0 and the
+    /// letters' length for a record searched whole).
+    pub fn placement(&self) -> RecordPlacement {
+        match self.source.as_deref() {
+            Some(RecordSource {
+                cut_from,
+                uncut_length,
+                ..
+            }) if *uncut_length > 0 => RecordPlacement {
+                offset: *cut_from,
+                length: *uncut_length,
+            },
+            _ => RecordPlacement {
+                offset: 0,
+                length: self.sequence.len(),
+            },
+        }
+    }
+
+    /// Cuts the record to its letters `[from, to_exclusive)` in place, as NCBI searches a record
+    /// with a range (`seq_range::record_cut`): the lower-case masks are clipped to the letters
+    /// and moved with them, and the source keeps where they lie in the record (`placement`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1041-1046
+    /// ```c
+    ///    for (seqloc = *mask; seqloc; seqloc = next_loc) {
+    ///       next_loc = seqloc->next;
+    ///       seqloc->ssr->left = MAX(0, seqloc->ssr->left - from);
+    ///       seqloc->ssr->right = MIN(seqloc->ssr->right, to) - from;
+    ///       /* If this mask location does not intersect the [from,to] interval,
+    ///          do not add it to the newly constructed list and free its contents. */
+    /// ```
+    pub fn cut_in_place(&mut self, from: usize, to_exclusive: usize) {
+        let length = self.sequence.len();
+        let source = self.source.get_or_insert_with(Default::default);
+        source.uncut_length = length;
+        source.cut_from = from;
+        self.sequence.truncate(to_exclusive);
+        self.sequence.drain(..from);
+        let (from, last) = (from as i32, to_exclusive as i32 - 1);
+        self.lowercase_masks.retain_mut(|(left, right)| {
+            *left = (*left - from).max(0);
+            *right = (*right).min(last) - from;
+            *left <= *right
+        });
     }
 }
 #[derive(Debug, Clone)]
@@ -380,6 +433,7 @@ pub(crate) fn parse_fasta_batches_with_warnings(
         batch_size,
         false,
         None,
+        None,
         deliver,
         warn,
     )
@@ -420,14 +474,17 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     batch_size: usize,
     keep_defline: bool,
     parse_deflines: Option<BelievedRead<'_>>,
+    range: Option<&SequenceRange>,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<Vec<FastaRecord>> {
     let mut believed_keys = std::collections::HashSet::new();
     let mut believed_generated = 0;
     let mut believed_molecule = None;
-    let mut batch_start = 0;
-    let mut batch_length = 0;
+    let mut batch = ReaderBatch {
+        range,
+        ..ReaderBatch::default()
+    };
 
     let mut records = Vec::new();
     let mut current: Option<FastaRecord> = None;
@@ -547,8 +604,9 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                     .and_then(|s| s.parse::<u32>().ok())
                     .is_some_and(|n| n > 0)
             {
-                let record = current
-                    .get_or_insert_with(|| new_record(records.len(), protein, String::new()));
+                let record = current.get_or_insert_with(|| {
+                    new_record(records.len() + batch.skipped, protein, String::new())
+                });
                 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1387-1394
                 // ```c++
                 //         // Encountered >? lines; substitute runs of Ns or Xs as appropriate.
@@ -625,13 +683,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         if is_header {
             if let Some(record) = current.take() {
                 finish_record(record, &mut records, pending_title_warning.take())?;
-                emit_fasta_batch(
-                    &records,
-                    batch_size,
-                    &mut batch_start,
-                    &mut batch_length,
-                    deliver,
-                )?;
+                emit_fasta_batch(&mut records, batch_size, &mut batch, deliver)?;
             }
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:353-359
             // ```c++
@@ -752,7 +804,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             if let Some(warning) = &pending_title_warning {
                 warn(warning)?;
             }
-            let mut record = new_record(records.len(), protein, title);
+            let mut record = new_record(records.len() + batch.skipped, protein, title);
             believed_molecule = None;
             if keep_defline || believed.is_some() {
                 record.source = Some(Box::new(crate::blastinput::fasta_reader::RecordSource {
@@ -764,6 +816,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                     uncut: None,
                     believed: believed.as_ref().map(|defline| defline.ids.clone()),
                     cut_from: 0,
+                    uncut_length: 0,
                 }));
             }
             if let Some(defline) = believed {
@@ -781,8 +834,9 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             ))
             .into());
         }
-        let record =
-            current.get_or_insert_with(|| new_record(records.len(), protein, String::new()));
+        let record = current.get_or_insert_with(|| {
+            new_record(records.len() + batch.skipped, protein, String::new())
+        });
         if raw_residues == 0 {
             check_data_line(line, line_index + 1)?;
         }
@@ -866,16 +920,12 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     }
     if let Some(record) = current {
         finish_record(record, &mut records, pending_title_warning.take())?;
-        emit_fasta_batch(
-            &records,
-            batch_size,
-            &mut batch_start,
-            &mut batch_length,
-            deliver,
-        )?;
+        emit_fasta_batch(&mut records, batch_size, &mut batch, deliver)?;
     }
-    if batch_start < records.len() {
-        deliver(&records[batch_start..])?;
+    // A last batch of records that the range skipped is delivered empty (NCBI's query factory
+    // then refuses it).
+    if batch.read > 0 {
+        deliver(&records[batch.start..])?;
     }
     Ok(records)
 }
@@ -1267,24 +1317,56 @@ mod tests {
 //         retval->AddQuery(q);
 //     }
 // ```
+///
+/// With a range (`-query_loc`) the batch counts the length of the whole record and cuts the record
+/// to its interval; a record whose interval starts more than one letter past its end adds nothing
+/// and is not kept (it keeps its number: `ReaderBatch::skipped`).
 fn emit_fasta_batch(
-    records: &[FastaRecord],
+    records: &mut Vec<FastaRecord>,
     batch_size: usize,
-    start: &mut usize,
-    length: &mut usize,
+    batch: &mut ReaderBatch<'_>,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
 ) -> Result<()> {
-    *length += records
-        .last()
-        .expect("completed FASTA record")
-        .sequence
-        .len();
-    if *length >= batch_size {
-        deliver(&records[*start..])?;
-        *start = records.len();
-        *length = 0;
+    let record = records.last_mut().expect("completed FASTA record");
+    let length = record.sequence.len();
+    batch.read += 1;
+    match batch.range.map(|range| record_interval(range, length)) {
+        None => batch.length += length,
+        Some(RecordInterval::Letters { from, to }) => {
+            record.cut_in_place(from, to + 1);
+            batch.length += length;
+        }
+        Some(RecordInterval::Empty) => {
+            record.cut_in_place(length, length);
+            batch.length += length;
+        }
+        Some(RecordInterval::PastEnd) => {
+            records.pop();
+            batch.skipped += 1;
+        }
+    }
+    if batch.length >= batch_size {
+        deliver(&records[batch.start..])?;
+        batch.start = records.len();
+        batch.length = 0;
+        batch.read = 0;
     }
     Ok(())
+}
+
+/// The reader batch that `emit_fasta_batch` fills.
+#[derive(Default)]
+struct ReaderBatch<'r> {
+    /// The range that cuts each record (`-query_loc`), if any.
+    range: Option<&'r SequenceRange>,
+    /// The first kept record of the batch.
+    start: usize,
+    /// The letters the batch has read (`size_read`).
+    length: usize,
+    /// The records the batch has read, kept or not.
+    read: usize,
+    /// The records the range skipped so far: NCBI's reader numbers them (`Query_<n>`).
+    skipped: usize,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:310-313
@@ -2240,10 +2322,13 @@ pub(crate) fn parse_fasta_stream_with_warnings<R: Read>(
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<Vec<FastaRecord>> {
-    parse_fasta_stream_keeping(stream, protein, lowercase, batch_size, false, deliver, warn)
+    parse_fasta_stream_keeping(
+        stream, protein, lowercase, batch_size, false, None, deliver, warn,
+    )
 }
 /// `parse_fasta_stream_with_warnings`, keeping each record's defline line (`keep_defline`: the
-/// BLAST archive, outfmt 11, writes it).
+/// BLAST archive, outfmt 11, writes it) and cutting each record to `range` (`-query_loc`,
+/// `emit_fasta_batch`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn parse_fasta_stream_keeping<R: Read>(
     stream: &mut FastaStream<R>,
@@ -2251,6 +2336,7 @@ pub(crate) fn parse_fasta_stream_keeping<R: Read>(
     lowercase: bool,
     batch_size: usize,
     keep_defline: bool,
+    range: Option<&SequenceRange>,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<Vec<FastaRecord>> {
@@ -2262,6 +2348,9 @@ pub(crate) fn parse_fasta_stream_keeping<R: Read>(
         strand: stream.strand,
         id_scope: id_scope.as_deref(),
     });
+    // A file without records gives one empty batch; one whose records a range skipped gave it
+    // already.
+    let mut delivered = false;
     let records = parse_fasta_lines(
         stream,
         protein,
@@ -2269,10 +2358,14 @@ pub(crate) fn parse_fasta_stream_keeping<R: Read>(
         batch_size,
         keep_defline,
         parse_deflines,
-        deliver,
+        range,
+        &mut |records| {
+            delivered = true;
+            deliver(records)
+        },
         warn,
     )?;
-    if records.is_empty() {
+    if !delivered {
         deliver(&[])?;
     }
     Ok(records)
@@ -2725,5 +2818,135 @@ mod stream_tests {
                 assert_eq!(lines, expected, "{} lines error={error}", fields[0]);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    /// The batches a query file of `data` gives with `range` and `batch_size`: for each, the ids,
+    /// letters and placements of its records; and the records the reader keeps.
+    fn batches(
+        data: &[u8],
+        range: &SequenceRange,
+        batch_size: usize,
+    ) -> (
+        Vec<Vec<(String, Vec<u8>, RecordPlacement)>>,
+        Vec<FastaRecord>,
+    ) {
+        let mut delivered = Vec::new();
+        let kept = parse_fasta_stream_keeping(
+            &mut FastaStream::new(Cursor::new(data.to_vec())),
+            false,
+            true,
+            batch_size,
+            false,
+            Some(range),
+            &mut |records| {
+                delivered.push(
+                    records
+                        .iter()
+                        .map(|record| {
+                            (
+                                record.internal_id.clone(),
+                                record.sequence.clone(),
+                                record.placement(),
+                            )
+                        })
+                        .collect(),
+                );
+                Ok(())
+            },
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+        (delivered, kept)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:144-168
+    // ```c++
+    //         catch (const exception&) {
+    //             continue; //SB-2307. ignore well formed, not found accession
+    //         }
+    //
+    //         CConstRef<CSeq_loc> loc = q->GetQuerySeqLoc();
+    //
+    //         if (loc->IsInt()) {
+    //             size_read += sequence::GetLength(loc->GetInt().GetId(),
+    //                                              q->GetScope());
+    // ```
+    // A batch counts the whole length of each searched record; a skipped record (its interval
+    // starts more than one letter past its end) counts nothing, is not delivered and keeps its
+    // number; the letters delivered are the interval's.
+    #[test]
+    fn a_range_cuts_the_records_and_skips_the_short_ones() {
+        let range = SequenceRange { from: 4, to: 7 };
+        let data = b">a\nACGTACGTAC\n>b\nACG\n>c\nTTTTGGGG\n>d\nACGT\n>e\nACGTA\n";
+        let (delivered, kept) = batches(data, &range, 15);
+        let place = |offset, length| RecordPlacement { offset, length };
+        assert_eq!(
+            delivered,
+            vec![
+                vec![
+                    ("Query_1".to_string(), b"ACGT".to_vec(), place(4, 10)),
+                    ("Query_3".to_string(), b"GGGG".to_vec(), place(4, 8)),
+                ],
+                // `d` starts just past its end: an interval without letters; `e` keeps one letter.
+                vec![
+                    ("Query_4".to_string(), Vec::new(), place(4, 4)),
+                    ("Query_5".to_string(), b"A".to_vec(), place(4, 5)),
+                ],
+            ]
+        );
+        assert_eq!(kept.len(), 4);
+    }
+
+    // A batch of skipped records alone is delivered empty (NCBI's query factory refuses it), also
+    // at the end of the file.
+    #[test]
+    fn a_last_batch_of_skipped_records_is_delivered_empty() {
+        let range = SequenceRange { from: 4, to: 7 };
+        let (delivered, _) = batches(b">a\nACGTACGTAC\n>b\nACG\n>c\nA\n", &range, 10);
+        assert_eq!(delivered.len(), 2);
+        assert_eq!(delivered[0].len(), 1);
+        assert!(delivered[1].is_empty());
+        let (delivered, kept) = batches(b">a\nACG\n", &range, 10);
+        assert!(kept.is_empty());
+        assert_eq!(delivered, vec![Vec::new()]);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1041-1046
+    // ```c
+    //       seqloc->ssr->left = MAX(0, seqloc->ssr->left - from);
+    //       seqloc->ssr->right = MIN(seqloc->ssr->right, to) - from;
+    //       /* If this mask location does not intersect the [from,to] interval,
+    //          do not add it to the newly constructed list and free its contents. */
+    // ```
+    #[test]
+    fn a_cut_clips_and_moves_the_lower_case_masks() {
+        let mut record = parse_fasta(b">q\nacgTTTTaaaCCgg\n", false, true)
+            .unwrap()
+            .remove(0);
+        assert_eq!(record.lowercase_masks, vec![(0, 2), (7, 9), (12, 13)]);
+        record.cut_in_place(2, 9);
+        assert_eq!(record.sequence, b"GTTTTAA");
+        assert_eq!(record.lowercase_masks, vec![(0, 0), (5, 6)]);
+        assert_eq!(
+            record.placement(),
+            RecordPlacement {
+                offset: 2,
+                length: 14
+            }
+        );
+        let whole = parse_fasta(b">q\nACGT\n", false, true).unwrap().remove(0);
+        assert_eq!(
+            whole.placement(),
+            RecordPlacement {
+                offset: 0,
+                length: 4
+            }
+        );
     }
 }

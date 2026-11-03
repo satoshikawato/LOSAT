@@ -168,7 +168,8 @@ without hits come from seeded generators):
   back-translated protein of 150 residues planted 200 bases before each of 3000, 5997, 6000, 9705, 10001, 12000,
   15000, 19410 and 20000 (the chunk borders of several `CHUNK_SIZE` values), and short lower-case runs at those
   points; `bxchunk.faa`: the nine planted proteins with a quarter of their residues changed, for the database
-  `bxchunk` (rows `db.bxchunk.*`: BLASTX `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE`).
+  `bxchunk` (rows `db.bxchunk.*`: BLASTX `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE`). `bxchunk_empty.fna`: a record of a
+  defline only (NCBI reports the query splitter's errors before the empty query's `Sequence contains no data`).
 - `bnophr.pin` and `bnophr.psq` are copies of `bslice.pin` and `.psq`: the database without its header file, used
   with the query without hits (with a hit NCBI fails with exit 2).
 

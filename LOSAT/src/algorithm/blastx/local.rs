@@ -186,7 +186,9 @@ pub fn run_local(
     // The errors of a `-subject` search (`native::run_inner`).
     let search_error = |error: anyhow::Error| -> anyhow::Error {
         // LOSAT's refusal, not an error of NCBI's engine.
-        if error.is::<super::parameters::SearchSpaceOverflow>() {
+        if error.is::<super::parameters::SearchSpaceOverflow>()
+            || error.is::<super::split::QuerySplitRefusal>()
+        {
             error
         } else {
             engine(error)

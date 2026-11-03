@@ -95,22 +95,21 @@ fn refusal(message: impl Into<String>) -> anyhow::Error {
 //
 //     size_t overlap_size = SplitQuery_GetOverlapChunkSize(program);
 // ```
-/// The chunk size and overlap of the query batch of `records` (prepared as `full`), in
-/// nucleotides, as NCBI's query splitter reads them for each batch before the batch's queries
-/// are set up:
+/// The chunk size and overlap, in nucleotides, of a query batch of `query_count` queries, as
+/// NCBI's query splitter reads them for each batch before the batch's queries are set up:
 /// `CHUNK_SIZE` always, `OVERLAP_CHUNK_SIZE` only when the batch has one query
 /// (`SplitQuery_ShouldSplit`), also for an ungapped search, which is not split. The `int`
 /// becomes NCBI's 64-bit `size_t`, so -1 passes the check of 3 and -2 does not. A chunk size
 /// not divisible by 3 is NCBI's engine error; a value NCBI cannot convert is LOSAT's refusal
 /// (NCBI stops with a `CStringException` that names its build's source files).
-pub fn split_sizes(records: &[FastaRecord], full: &PreparedQueryBatch) -> Result<SplitSizes> {
+pub fn split_sizes(query_count: usize) -> Result<SplitSizes> {
     let read = |variable: &str| {
         crate::blastinput::app::read_query_split_variable("BLASTX", variable)
             .map_err(|error| refusal(error.to_string()))
     };
     let chunk_size = read("CHUNK_SIZE")?.map_or(CHUNK_SIZE as u64, |value| i64::from(value) as u64);
     validate_chunk_size(chunk_size)?;
-    let overlap = match batch_query_count(records, full) > 1 {
+    let overlap = match query_count > 1 {
         true => OVERLAP_NT as u64,
         false => {
             read("OVERLAP_CHUNK_SIZE")?.map_or(OVERLAP_NT as u64, |value| i64::from(value) as u64)

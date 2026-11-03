@@ -560,6 +560,22 @@ pub(crate) fn search_core(
     // it does not change any value NCBI computes.
     let x_containment = diagnostics || sink.x_wants_containment();
     use super::x_timing::Batch as XBatch;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:138-150
+    // ```c++
+    //     CRef<SBlastSetupData> retval(new SBlastSetupData(qf, options));
+    //     ...
+    //     // 1. Initialize the query data (borrow it from the factory)
+    //     CRef<ILocalQueryData> query_data(qf->MakeLocalQueryData(&*options));
+    // ```
+    // NCBI's query splitter reads its sizes (`SBlastSetupData`, `CQuerySplitter`) before the
+    // batch's queries are set up, so their errors come before the setup's (an empty query's
+    // `Sequence contains no data`), also for a batch that is not searched. `records` are one
+    // query batch, or one prepared unit of it (`prep`, whose shape counts the batch's queries).
+    let sizes = split_sizes(
+        prep.as_ref()
+            .and_then(|prep| prep.prepared.reader_shape.as_deref())
+            .map_or(records.len(), |shape| shape.query_count),
+    )?;
     let ranges = batch_ranges(records, BATCH_SIZE);
     // The units of a reader batch (`records`) are prepared first, together, and the values NCBI
     // takes of the whole query batch are reduced (`reader_batch.rs`); each unit is then searched
@@ -593,18 +609,6 @@ pub(crate) fn search_core(
             }
         };
         super::x_timing::batch(XBatch::QuerySetup, x_t);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:138-150
-        // ```c++
-        //     CRef<SBlastSetupData> retval(new SBlastSetupData(qf, options));
-        //     ...
-        //     // 1. Initialize the query data (borrow it from the factory)
-        //     CRef<ILocalQueryData> query_data(qf->MakeLocalQueryData(&*options));
-        // ```
-        // NCBI's query splitter reads its sizes (`SBlastSetupData`, `CQuerySplitter`) before the
-        // batch's queries are set up, so their errors come also for a batch that is not searched.
-        // Here they are read after the setup, which needs the batch's shape for its query count;
-        // the setup of a batch that has queries does not fail (`prepare_queries`).
-        let sizes = split_sizes(queries, &full)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
         // ```c++
         //

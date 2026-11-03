@@ -470,6 +470,15 @@ pub(super) fn run(
 ) -> Result<usize> {
     let bounds = XTasks::new(k, subjects);
     let tasks = bounds.count();
+    // A helper for each task but the first at most: the owner searches a task itself when no helper
+    // has taken it, and a helper with no task to take only wakes a thread of the pool (each spawn
+    // wakes a sleeping one), which then takes other work and keeps its tables and its glibc arena
+    // for the rest of the run: 800 cDNAs x 2 yeast proteins `-subject` has 2 tasks a batch, and at
+    // 64 threads all 64 searched subjects and kept a diagonal table each.
+    let helper_tables: Vec<_> = helper_tables
+        .into_iter()
+        .take(tasks.saturating_sub(1))
+        .collect();
     // The fused loop's choice for the lookup table, worked out here once for every helper (a
     // helper's thread may have searched another table's tasks in between).
     let x_ratio =

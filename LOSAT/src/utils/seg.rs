@@ -439,33 +439,83 @@ fn entropy_from_state_vector(state: &[i32]) -> f64 {
         classes += 1;
     }
     if packable {
-        return X_ENTROPY_MEMO.with(|memo| {
-            let mut memo = memo.borrow_mut();
-            let mask = memo.len() - 1;
-            let mut slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as usize & mask;
-            loop {
-                let (stored_key, bits) = memo[slot];
-                if stored_key == key {
-                    return f64::from_bits(bits);
-                }
-                if stored_key == u64::MAX {
-                    let value = entropy_from_state_vector_reference(state);
-                    memo[slot] = (key, value.to_bits());
-                    return value;
-                }
-                slot = (slot + 1) & mask;
-            }
-        });
+        if let Some(value) = x_memo_get(x_state_entropies(), key) {
+            return value;
+        }
     }
     entropy_from_state_vector_reference(state)
 }
 
-thread_local! {
-    // No NCBI counterpart: memo table of entropy values per state vector (`s_Entropy` is a pure function of the vector); it does not change any value NCBI computes.
-    // Open-addressing table. Only state vectors summing to at most 15 are
-    // stored, and there are fewer than 700 of those, so it never fills.
-    static X_ENTROPY_MEMO: std::cell::RefCell<Vec<(u64, u64)>> =
-        std::cell::RefCell::new(vec![(u64::MAX, 0); 4096]);
+// No NCBI counterpart: the windows of at most 15 letters, as the count vectors NCBI's state
+// vector holds for them: every non-increasing list of positive counts summing to at most 15 (684
+// lists, the empty one among them), each passed to `visit`.
+fn x_each_count_list(visit: &mut impl FnMut(&[i32])) {
+    fn more(list: &mut Vec<i32>, left: i32, most: i32, visit: &mut impl FnMut(&[i32])) {
+        visit(list);
+        for count in (1..=most.min(left)).rev() {
+            list.push(count);
+            more(list, left - count, count, visit);
+            list.pop();
+        }
+    }
+    more(&mut Vec::new(), 15, 15, visit);
+}
+
+// No NCBI counterpart: an open-addressing table of `slots` (key, entropy bits) pairs, one for each
+// count list of `x_each_count_list`, keyed by `key` and valued by `value`.
+fn x_entropy_table(
+    slots: usize,
+    key: impl Fn(&[i32]) -> u64,
+    value: impl Fn(&[i32], u64) -> f64,
+) -> Box<[(u64, u64)]> {
+    let mut table = vec![(u64::MAX, 0); slots].into_boxed_slice();
+    let mask = slots - 1;
+    x_each_count_list(&mut |counts| {
+        let key = key(counts);
+        let mut slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as usize & mask;
+        while table[slot].0 != u64::MAX {
+            slot = (slot + 1) & mask;
+        }
+        table[slot] = (key, value(counts, key).to_bits());
+    });
+    table
+}
+
+// No NCBI counterpart: the entropy stored for `key` in a table of `x_entropy_table`, if any.
+#[inline]
+fn x_memo_get(table: &[(u64, u64)], key: u64) -> Option<f64> {
+    let mask = table.len() - 1;
+    let mut slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as usize & mask;
+    loop {
+        let (stored, bits) = table[slot];
+        if stored == key {
+            return Some(f64::from_bits(bits));
+        }
+        if stored == u64::MAX {
+            return None;
+        }
+        slot = (slot + 1) & mask;
+    }
+}
+
+// No NCBI counterpart: memo table of entropy values per state vector (`s_Entropy` is a pure
+// function of the vector); it does not change any value NCBI computes. Fewer than 700 state
+// vectors sum to at most 15, so the table holds each of them, as NCBI keeps the vector (counts in
+// non-increasing order), computed once for the process and read by every thread. A vector not in
+// it is computed by the port.
+fn x_state_entropies() -> &'static [(u64, u64)] {
+    static TABLE: std::sync::OnceLock<Box<[(u64, u64)]>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        x_entropy_table(
+            4096,
+            |counts| {
+                counts.iter().enumerate().fold(0, |key, (class, &count)| {
+                    key | ((count as u64) << (4 * class))
+                })
+            },
+            |counts, _| entropy_from_state_vector_reference(counts),
+        )
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1598-1606,1616-1621
@@ -1056,24 +1106,36 @@ impl SegMasker {
 /// Longest segment handled by the count histogram of `x_trim_segment`.
 pub(crate) const X_TRIM_MAX: usize = 127;
 
-thread_local! {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1593-1593,1599-1602,1621-1623
-    // ```c
-    // s_Entropy(Int4* sv)
-    // ...
-    //    for (i=0; sv[i]!=0; i++)
-    //      {
-    //       total += sv[i];
-    //      }
-    // ...
-    //    ent = fabs(ent/(double)total);
-    //    return(ent);
-    // ```
-    // No NCBI counterpart: memo table of `s_Entropy` values per count histogram. The entropy depends only on the
-    // counts, so reusing it changes no value.
-    // Entropy by count histogram (4 bits per count value, windows up to 15).
-    static X_ENTROPY_BY_HISTOGRAM: std::cell::RefCell<Vec<(u64, u64)>> =
-        std::cell::RefCell::new(vec![(u64::MAX, 0); 2048]);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1593-1593,1599-1602,1621-1623
+// ```c
+// s_Entropy(Int4* sv)
+// ...
+//    for (i=0; sv[i]!=0; i++)
+//      {
+//       total += sv[i];
+//      }
+// ...
+//    ent = fabs(ent/(double)total);
+//    return(ent);
+// ```
+// No NCBI counterpart: memo table of `s_Entropy` values per count histogram. The entropy depends only on the
+// counts, so reusing it changes no value.
+// Entropy by count histogram (4 bits per count value, windows up to 15): the table holds every
+// histogram of a window of at most 15 letters (fewer than 700), computed once for the process
+// and read by every thread. A histogram not in it is computed by the port.
+fn x_histogram_entropies() -> &'static [(u64, u64)] {
+    static TABLE: std::sync::OnceLock<Box<[(u64, u64)]>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        x_entropy_table(
+            2048,
+            |counts| {
+                counts
+                    .iter()
+                    .fold(0, |key, &count| key + (1u64 << (4 * (count - 1))))
+            },
+            |_, key| x_entropy_of_histogram(key),
+        )
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1598-1603,1616-1621
@@ -1327,58 +1389,38 @@ impl SegMasker {
         //    return(ent);
         // ```
         // The entropy of a window depends only on its count histogram, so the value for a seen histogram is reused.
-        X_ENTROPY_BY_HISTOGRAM.with(|memo| {
-            let mut memo = memo.borrow_mut();
-            let slots = memo.len() - 1;
-            let mut filled = 0usize;
-            for start in 0..windows {
-                h[first + start] = if bogus > maxbogus {
-                    -1.0
+        let memo = x_histogram_entropies();
+        for start in 0..windows {
+            h[first + start] = if bogus > maxbogus {
+                -1.0
+            } else {
+                x_memo_get(memo, key).unwrap_or_else(|| x_entropy_of_histogram(key))
+            };
+            if start + window < len {
+                let outgoing = index[seq[start] as usize];
+                if outgoing == 255 {
+                    bogus -= 1;
                 } else {
-                    let mut slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as usize & slots;
-                    loop {
-                        let (stored, bits) = memo[slot];
-                        if stored == key {
-                            break f64::from_bits(bits);
-                        }
-                        if stored == u64::MAX {
-                            let value = x_entropy_of_histogram(key);
-                            // Fewer than 700 histograms exist for windows up to
-                            // 15 letters; the table is never close to full.
-                            memo[slot] = (key, value.to_bits());
-                            filled += 1;
-                            debug_assert!(filled < slots);
-                            break value;
-                        }
-                        slot = (slot + 1) & slots;
+                    let count = counts[outgoing as usize];
+                    key -= 1u64 << (4 * (count - 1));
+                    if count > 1 {
+                        key += 1u64 << (4 * (count - 2));
                     }
-                };
-                if start + window < len {
-                    let outgoing = index[seq[start] as usize];
-                    if outgoing == 255 {
-                        bogus -= 1;
-                    } else {
-                        let count = counts[outgoing as usize];
+                    counts[outgoing as usize] = count - 1;
+                }
+                let incoming = index[seq[start + window] as usize];
+                if incoming == 255 {
+                    bogus += 1;
+                } else {
+                    let count = counts[incoming as usize];
+                    if count > 0 {
                         key -= 1u64 << (4 * (count - 1));
-                        if count > 1 {
-                            key += 1u64 << (4 * (count - 2));
-                        }
-                        counts[outgoing as usize] = count - 1;
                     }
-                    let incoming = index[seq[start + window] as usize];
-                    if incoming == 255 {
-                        bogus += 1;
-                    } else {
-                        let count = counts[incoming as usize];
-                        if count > 0 {
-                            key -= 1u64 << (4 * (count - 1));
-                        }
-                        key += 1u64 << (4 * count);
-                        counts[incoming as usize] = count + 1;
-                    }
+                    key += 1u64 << (4 * count);
+                    counts[incoming as usize] = count + 1;
                 }
             }
-        });
+        }
         h
     }
 

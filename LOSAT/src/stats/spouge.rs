@@ -184,8 +184,11 @@ fn erfc_ncbi(z: f64) -> f64 {
     // `z`; ErfC reads nothing else, so this is reuse only.
     let key = z.to_bits();
     X_ERFC_MEMO.with(|memo| {
-        let mut memo = memo.borrow_mut();
-        let slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 52) as usize;
+        let (memo, used) = &mut *memo.borrow_mut();
+        if memo.is_empty() {
+            *memo = vec![(u64::MAX, 0); X_ERFC_FIRST];
+        }
+        let slot = x_erfc_slot(key, memo.len());
         let (stored, value) = memo[slot];
         if stored == key {
             return f64::from_bits(value);
@@ -194,7 +197,20 @@ fn erfc_ncbi(z: f64) -> f64 {
         // A key of all ones marks an empty slot; that argument (a NaN) is
         // simply never stored.
         if key != u64::MAX {
+            *used += usize::from(stored == u64::MAX);
             memo[slot] = (key, result.to_bits());
+            if 2 * *used > memo.len() && memo.len() < X_ERFC_MOST {
+                // Twice the slots, the results moved to their slots there (a result whose slot
+                // another took is dropped, as a store over it drops it).
+                let mut grown = vec![(u64::MAX, 0); 2 * memo.len()];
+                *used = 0;
+                for &(stored, value) in memo.iter().filter(|(stored, _)| *stored != u64::MAX) {
+                    let slot = x_erfc_slot(stored, grown.len());
+                    *used += usize::from(grown[slot].0 == u64::MAX);
+                    grown[slot] = (stored, value);
+                }
+                *memo = grown;
+            }
         }
         result
     })
@@ -210,10 +226,24 @@ fn erfc_ncbi(z: f64) -> f64 {
 //             e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
 // ```
 // No NCBI counterpart: a per-thread table of (argument bits, result bits) for `erfc_ncbi`.
-// It holds earlier ErfC results of the loop above and changes no value.
+// It holds earlier ErfC results of the loop above and changes no value. It starts at
+// `X_ERFC_FIRST` slots and doubles while more than half of its slots hold a result, up to
+// `X_ERFC_MOST`, so that a thread that computes a few values holds a few slots (with 64 threads
+// every thread of a search computes some, and a table of the largest size each was 4 MiB).
 thread_local! {
-    static X_ERFC_MEMO: std::cell::RefCell<Vec<(u64, u64)>> =
-        std::cell::RefCell::new(vec![(u64::MAX, 0); 4096]);
+    static X_ERFC_MEMO: std::cell::RefCell<(Vec<(u64, u64)>, usize)> =
+        const { std::cell::RefCell::new((Vec::new(), 0)) };
+}
+
+// No NCBI counterpart: the first and the largest number of slots of `X_ERFC_MEMO`.
+const X_ERFC_FIRST: usize = 64;
+const X_ERFC_MOST: usize = 4096;
+
+// No NCBI counterpart: the slot of `key` in a table of `slots` slots (a power of two): the top
+// bits of the hash.
+#[inline]
+fn x_erfc_slot(key: u64, slots: usize) -> usize {
+    (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> (64 - slots.trailing_zeros())) as usize
 }
 
 // NCBI c++/src/algo/blast/core/boost_erf.c:52-244:

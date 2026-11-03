@@ -57,7 +57,16 @@
 //!   is left, at least one subject and at most the size without the cap (64 for the batch flow's
 //!   subject flow, 16 for the chunk waves; a set keeps that size from 64 x f x ceil(threads / K)
 //!   subjects, 512 at 16 threads), and the cap holds wherever there are more threads than K
-//!   (`unit_cap`; without the fill it also needs K units with a task for every thread). And the
+//!   (`unit_cap`; without the fill it also needs K units with a task for every thread). A batch
+//!   whose subjects the subject flow without the cap searches as one task (64 subjects or fewer,
+//!   `one_task`), which had no subject flow at all without the fill, is left at most
+//!   `ONE_TASK_SHARE` = 2 threads instead (its own and one helper, and its table's build in two
+//!   parts): the share of a unit at 16 threads, where the fill was measured. Past that, such a
+//!   batch's search is short beside its preparation and the reader, and every thread that took one
+//!   of its tasks kept a diagonal table and grew its glibc arena for the rest of the run, so the
+//!   memory rose with the threads and the time did not fall (ws, 800 cDNAs x 2, 8 or 50 yeast
+//!   proteins `-subject`, 64 threads: MEASURE). A chunk of a split query's waves keeps
+//!   `ceil(threads / K)`, as its threads come from the K chunks. And the
 //!   capped batch flow prepares each query batch of at most two search units' letters
 //!   (translation, filtering, Karlin blocks: `reader_batch::prepare_lone_unit`, which
 //!   `search::search_core` runs when a batch prepares itself) as a task of its own when the reader
@@ -183,26 +192,46 @@ fn cap_fill() -> Option<usize> {
     *F.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXCAPFILL", 2..=64, CAP_FILL))
 }
 
+/// No NCBI counterpart: the most threads `LOSAT_X_BXCAPFILL` leaves a capped batch of one task
+/// (`one_task`): the batch's own thread and one helper, the share of a unit at 16 threads with the
+/// built-in K = 8.
+const ONE_TASK_SHARE: usize = 2;
+
+/// No NCBI counterpart (scheduling only, `LOSAT_X_BXCAPFILL`): whether a batch of the capped batch
+/// flow with `subjects` subjects is one the subject flow without the cap searches as one task (at
+/// most `x_subject_flow::subjects_per_task`, 64: no flow then, `x_subject_flow::fits`; the tasks
+/// `LOSAT_X_BXTASKRES` cuts by residues are never fewer subjects than the mean length allows, so
+/// that many subjects are one task there too). The fill spreads such a batch over the threads the
+/// cap leaves it (module comment).
+fn one_task(subjects: usize) -> bool {
+    cap_fill().is_some()
+        && super::x_subject_flow::subjects_per_task().is_some_and(|most| subjects <= most)
+}
+
+/// No NCBI counterpart (scheduling only): the threads a unit searched under the cap K with
+/// `threads` threads is left: `ceil(threads / K)`, and at most `ONE_TASK_SHARE` for a batch of one
+/// task (`one_task`, `LOSAT_X_BXCAPFILL`).
+fn unit_share(threads: usize, k: usize, one_task: bool) -> usize {
+    let share = threads.div_ceil(k.max(1));
+    if one_task {
+        share.min(ONE_TASK_SHARE)
+    } else {
+        share
+    }
+}
+
 /// No NCBI counterpart (scheduling only, `LOSAT_X_BXCAPFILL`): subjects per task of a unit searched
-/// under the cap K with `threads` threads: `most` (the size without the cap) when the switch is
-/// off; otherwise few enough that the unit has f tasks for each of the `ceil(threads / K)` threads
-/// it is left, at least one subject and at most `most`.
-fn capped_subjects_per_task(threads: usize, k: usize, subjects: usize, most: usize) -> usize {
-    cap_fill().map_or(most, |f| {
-        filled_subjects_per_task(f, threads, k, subjects, most)
-    })
+/// with `share` threads (`unit_share`): `most` (the size without the cap) when the switch is off;
+/// otherwise few enough that the unit has f tasks for each of its threads, at least one subject
+/// and at most `most`.
+fn capped_subjects_per_task(share: usize, subjects: usize, most: usize) -> usize {
+    cap_fill().map_or(most, |f| filled_subjects_per_task(f, share, subjects, most))
 }
 
 /// No NCBI counterpart: `capped_subjects_per_task` with f tasks per thread.
-fn filled_subjects_per_task(
-    f: usize,
-    threads: usize,
-    k: usize,
-    subjects: usize,
-    most: usize,
-) -> usize {
+fn filled_subjects_per_task(f: usize, share: usize, subjects: usize, most: usize) -> usize {
     subjects
-        .div_ceil(f.saturating_mul(threads.div_ceil(k.max(1))).max(1))
+        .div_ceil(f.saturating_mul(share).max(1))
         .clamp(1, most.max(1))
 }
 
@@ -248,9 +277,10 @@ pub(crate) fn flow_unit_cap(
     subjects: Subjects<'_>,
 ) -> Option<usize> {
     let threads = pool.threads();
+    let share = |cap| unit_share(threads, cap, one_task(subjects.len()));
     let cap = unit_cap(threads, options, subjects, |cap| {
         super::x_subject_flow::subjects_per_task()
-            .map(|most| capped_subjects_per_task(threads, cap, subjects.len(), most))
+            .map(|most| capped_subjects_per_task(share(cap), subjects.len(), most))
             .filter(|&k| super::x_subject_flow::fits(k, pool, false, options, subjects))
             .map_or(0, |k| subjects.len().div_ceil(k))
     });
@@ -267,10 +297,28 @@ pub(crate) fn flow_subjects_per_task(
     most: usize,
 ) -> usize {
     match search_cap_k(pool.threads(), options, subjects) {
-        Some((k, _)) if in_capped_batch(pool) => {
-            capped_subjects_per_task(pool.threads(), k, subjects, most)
-        }
+        Some((k, _)) if in_capped_batch(pool) => capped_subjects_per_task(
+            unit_share(pool.threads(), k, one_task(subjects)),
+            subjects,
+            most,
+        ),
         _ => most,
+    }
+}
+
+/// No NCBI counterpart (scheduling only, `LOSAT_X_BXCAPFILL`): the threads the subject flow of a
+/// batch searched on `pool` takes (its own and the helpers): the pool's, and for a batch of one task
+/// of the capped batch flow (`one_task`) the threads the cap leaves it.
+pub(crate) fn flow_threads(
+    pool: &crate::utils::threading::SearchPool<'_>,
+    options: &ResolvedOptions,
+    subjects: usize,
+) -> usize {
+    match search_cap_k(pool.threads(), options, subjects) {
+        Some((k, _)) if in_capped_batch(pool) && one_task(subjects) => {
+            unit_share(pool.threads(), k, true)
+        }
+        _ => pool.threads(),
     }
 }
 
@@ -283,8 +331,13 @@ pub(crate) fn chunk_unit_cap(
     subjects: Subjects<'_>,
 ) -> Option<(usize, usize)> {
     let threads = pool.threads();
-    let per_task =
-        |k| capped_subjects_per_task(threads, k, subjects.len(), UNIT_CAP_SUBJECTS_PER_TASK);
+    let per_task = |k| {
+        capped_subjects_per_task(
+            unit_share(threads, k, false),
+            subjects.len(),
+            UNIT_CAP_SUBJECTS_PER_TASK,
+        )
+    };
     let k = unit_cap(threads, options, subjects, |k| {
         subjects.len().div_ceil(per_task(k))
     })?;
@@ -304,15 +357,23 @@ fn build_par_on() -> bool {
 }
 
 /// No NCBI counterpart (scheduling only, `LOSAT_X_BXBUILDPAR`): the parts of the lookup table of
-/// a unit of `pool`'s search: `ceil(threads / K)` (the threads a unit is left) for a unit the cap K
-/// holds (`capped`: a chunk of the capped chunk waves, or any chunk inside the capped batch flow),
-/// else 1 (the build on one thread).
-pub(crate) fn build_parts(pool: &crate::utils::threading::SearchPool<'_>, capped: bool) -> usize {
+/// a unit of `pool`'s search: the threads a unit is left (`unit_share`:
+/// `ceil(threads / K)`, at most `ONE_TASK_SHARE` for a batch of one task) for a unit the cap K holds
+/// (`capped`: a chunk of the capped chunk waves, or any chunk inside the capped batch flow), else 1
+/// (the build on one thread). `batch_subjects`: the subjects of a unit that is a whole batch
+/// (`None`: a chunk of a split query's waves).
+pub(crate) fn build_parts(
+    pool: &crate::utils::threading::SearchPool<'_>,
+    capped: bool,
+    batch_subjects: Option<usize>,
+) -> usize {
     if !build_par_on() {
         return 1;
     }
     let k = cap_k().filter(|_| capped || in_capped_batch(pool));
-    let parts = k.map_or(1, |k| pool.threads().div_ceil(k));
+    let parts = k.map_or(1, |k| {
+        unit_share(pool.threads(), k, batch_subjects.is_some_and(one_task))
+    });
     crate::utils::xreach::x_reach!("LOSAT_X_BXBUILDPAR", parts > 1);
     parts
 }
@@ -466,7 +527,12 @@ impl XDiagSlot {
             let kept = X_DIAG.with(|kept| kept.borrow_mut().take());
             self.table = Some(match kept {
                 Some(table) if table.x_fits(self.length, self.window) => table,
-                _ => Diagonals::new(self.length, self.window)?,
+                // A table of another length is made again in its own allocation.
+                Some(mut table) => {
+                    table.x_remake(self.length, self.window)?;
+                    table
+                }
+                None => Diagonals::new(self.length, self.window)?,
             });
         }
         Ok(self.table.as_mut().expect("set above"))
@@ -585,29 +651,43 @@ mod tests {
     // No NCBI counterpart (scheduling only): the capped units' task sizes of LOSAT_X_BXCAPFILL.
     #[test]
     fn capped_units_have_f_tasks_for_each_thread_they_are_left() {
-        use super::filled_subjects_per_task as size;
+        use super::{filled_subjects_per_task as size, unit_share as share};
         // 50 subjects, K = 8: 16 threads leave each unit 2, so 8 tasks of 7; 64 threads 8, so 32
-        // tasks of 2; 6,600 subjects keep the size without the cap.
-        assert_eq!(size(4, 16, 8, 50, 64), 7);
-        assert_eq!(size(4, 64, 8, 50, 64), 2);
-        assert_eq!(size(4, 16, 8, 6_600, 64), 64);
-        assert_eq!(size(4, 16, 8, 6_600, 16), 16);
-        // K units then hold a task for every thread (the rule `unit_cap` keeps without the fill)
-        // wherever K units
-        // of one subject each would.
+        // tasks of 2, but a batch of one task 2 again; 6,600 subjects keep the size without the cap.
+        assert_eq!(size(4, share(16, 8, false), 50, 64), 7);
+        assert_eq!(size(4, share(64, 8, false), 50, 64), 2);
+        assert_eq!(size(4, share(64, 8, true), 50, 64), 7);
+        assert_eq!(size(4, share(16, 8, false), 6_600, 64), 64);
+        assert_eq!(size(4, share(16, 8, false), 6_600, 16), 16);
+        // A batch of one task is left the share of 16 threads at K = 8, and never more than others.
         for threads in [9, 16, 17, 32, 48, 64, 128] {
-            for subjects in [2, 10, 50, 200, 543, 6_600] {
-                let per_task = size(4, threads, 8, subjects, 64);
-                let tasks = subjects.div_ceil(per_task);
-                assert!(
-                    8 * tasks >= threads || 8 * subjects < threads,
-                    "{threads} threads, {subjects} subjects: {per_task} per task"
-                );
+            for k in [2, 4, 8] {
+                assert_eq!(share(threads, k, true), share(threads, k, false).min(2));
+            }
+        }
+        // K units then hold a task for every thread they are left, and without the bound of a
+        // batch of one task a task for every thread (the rule `unit_cap` keeps without the fill),
+        // wherever K units of one subject each would.
+        for threads in [9, 16, 17, 32, 48, 64, 128] {
+            for one_task in [false, true] {
+                for subjects in [2, 10, 50, 200, 543, 6_600] {
+                    let left = share(threads, 8, one_task);
+                    let per_task = size(4, left, subjects, 64);
+                    let tasks = subjects.div_ceil(per_task);
+                    assert!(
+                        tasks >= left || subjects < left,
+                        "{threads} threads, {subjects} subjects: {per_task} per task"
+                    );
+                    assert!(
+                        one_task || 8 * tasks >= threads || 8 * subjects < threads,
+                        "{threads} threads, {subjects} subjects: {per_task} per task"
+                    );
+                }
             }
         }
         // One subject at least, also for no subjects.
-        assert_eq!(size(4, 16, 8, 0, 64), 1);
-        assert_eq!(size(64, 4_096, 2, 1, 16), 1);
+        assert_eq!(size(4, share(16, 8, false), 0, 64), 1);
+        assert_eq!(size(64, share(4_096, 2, false), 1, 16), 1);
     }
 
     // No NCBI counterpart (scheduling only). The counts are the run's own (attached to its pool),

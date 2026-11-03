@@ -116,6 +116,14 @@ impl Diagonals {
     //         }
     // ```
     pub fn new(query_length: usize, window: i32) -> Result<Self> {
+        Ok(Self {
+            entries: vec![DiagStruct::default(); Self::array_length(query_length, window)?],
+            offset: window,
+            window,
+        })
+    }
+    /// `diag_array_length` above: the power of two just at least `qlen + window_size`.
+    fn array_length(query_length: usize, window: i32) -> Result<usize> {
         let n = query_length
             .checked_add(usize::try_from(window)?)
             .and_then(|n| n.max(1).checked_next_power_of_two())
@@ -124,11 +132,23 @@ impl Diagonals {
             n <= i32::MAX as usize,
             "BLASTX diagonal length exceeds Int4"
         );
-        Ok(Self {
-            entries: vec![DiagStruct::default(); n],
-            offset: window,
-            window,
-        })
+        Ok(n)
+    }
+    // No NCBI counterpart: buffer reuse only (LOSAT_X_BXDIAGKEEP, blastx/x_bx_mem.rs). The entries,
+    // offset and window `new(query_length, window)` gives, in this table's own allocation, which
+    // grows by a reallocation of its own where it is short (`x_lut_direct::x_zeroed`: a free of a
+    // mapped table would raise glibc's mmap and trim thresholds). A thread that searches batches
+    // of two lengths keeps one table instead of freeing one and making the other in turn.
+    /// Makes this table the one `new(query_length, window)` makes.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn x_remake(&mut self, query_length: usize, window: i32) -> Result<()> {
+        let n = Self::array_length(query_length, window)?;
+        self.entries.clear();
+        self.entries.reserve_exact(n);
+        self.entries.resize(n, DiagStruct::default());
+        self.offset = window;
+        self.window = window;
+        Ok(())
     }
     // No NCBI counterpart: buffer reuse only (LOSAT_X_BXDIAGKEEP, blastx/x_bx_mem.rs). The same
     // window and the same power-of-two length give the same mask, so the table's diagonals collide
@@ -136,11 +156,8 @@ impl Diagonals {
     /// Whether this table has the length and window `new(query_length, window)` gives.
     #[cfg(feature = "parallel")]
     pub(crate) fn x_fits(&self, query_length: usize, window: i32) -> bool {
-        let n = usize::try_from(window)
-            .ok()
-            .and_then(|w| query_length.checked_add(w))
-            .and_then(|n| n.max(1).checked_next_power_of_two());
-        self.window == window && n == Some(self.entries.len())
+        self.window == window
+            && Self::array_length(query_length, window).ok() == Some(self.entries.len())
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
     // ```c++

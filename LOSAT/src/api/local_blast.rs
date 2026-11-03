@@ -311,7 +311,8 @@ pub struct ReportOutputs<'a> {
 impl ReportOutputs<'_> {
     /// Whether every requested format is the BLAST archive (outfmt 11), which NCBI's apps but
     /// psiblast write without fetching the report's sequences ahead
-    /// (`blastinput::app::check_search_environment`).
+    /// (`blastinput::app::check_search_environment`); a call without formats (hit records
+    /// only) is not.
     pub(crate) fn only_archive(&self) -> bool {
         use crate::blastinput::app::{parse_formatting_string, ReportFormat};
         !self.formats.is_empty()

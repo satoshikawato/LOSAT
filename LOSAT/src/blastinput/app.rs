@@ -952,7 +952,9 @@ pub fn protein_query_split_sizes(
 /// ```
 /// The archive is written without the prefetch, so NCBI never converts the value there;
 /// blastp, tblastn, tblastx and blastn write it so too (blastp_app.cpp:280-285,
-/// tblastn_app.cpp:294-299 and 330-335, tblastx_app.cpp:197-202, blastn_app.cpp:304-309).
+/// tblastn_app.cpp:294-299 and 330-335, tblastx_app.cpp:197-202, blastn_app.cpp:304-309),
+/// and so do the nodes of a search split by queries (blastp_node.cpp:178-182,
+/// blastx_node.cpp:182-186, tblastn_node.cpp:206-210 and 243-247, blastn_node.cpp:204-208).
 /// psiblast's iterations fetch ahead before they choose the archive, so PSIBLAST passes
 /// `archive` false.
 ///
@@ -969,9 +971,12 @@ pub fn protein_query_split_sizes(
 /// NCBI raises in the first batch's search before its prefetch (a query record without
 /// letters, `-query_loc` past every record: `BLAST engine error`, exit status 3) is this
 /// refusal here, and so is a `-subject` search with `BL2SEQ_LEGACY` whose report would not
-/// change (no hits). With `-mt_mode 1` and `-db` (blastp, blastx, tblastn, blastn), NCBI's
-/// split-by-queries nodes catch the exception: NCBI writes nothing to standard output and
-/// exits 0.
+/// change (no hits, or one subject record in outfmt 5, 6 or 10: NCBI 2.17.0 writes the same
+/// bytes as without the variable there). When NCBI splits a `-db` search by queries (blastp,
+/// blastx, tblastn, blastn: `-mt_mode 1`, or the automatic choice at `-num_threads` 2 or more
+/// for a query file over the program's size and a database under its length,
+/// `s_GetMT1Cutoffs`), its nodes catch the exception: NCBI writes nothing to standard output
+/// and exits 0.
 pub fn check_search_environment(
     program: &str,
     fasta_subjects: bool,

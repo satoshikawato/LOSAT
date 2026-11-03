@@ -210,8 +210,8 @@ impl ReaderBatchShape {
 // contexts, and the unit's cutoff minima with the batch's average length, which the layout of the
 // records gives), reduces the batch's values, and hands each unit its preparation with the shape
 // attached; phase 2 searches the units as before, from these. A batch with no valid context is
-// not searched, and subjects that cannot be read end the search before they are used, so the
-// minima are not taken then.
+// not searched, and a database refused before its sequences are read (`Subjects::Unreadable`)
+// ends the search before they are used, so the minima are not taken then.
 /// Phase 1 for one unit (`queries`) of a reader batch of `layout`. The unit's preparation has
 /// the layout attached; `attach` replaces it with the reduced shape.
 pub(crate) fn prepare_unit(

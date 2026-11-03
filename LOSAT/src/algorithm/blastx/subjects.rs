@@ -26,8 +26,10 @@ pub(crate) enum Subjects<'a> {
     Fasta(&'a [FastaRecord]),
     /// `-db` read in blocks (`x_db_stream.rs`), with the block of the current pass or task.
     Stream(XStream<'a>),
-    /// `-db` whose sequences could not be read (`database::BlastxDatabase::x_check_stores`):
-    /// a query batch without a valid context is reported as NCBI reports it (not
+    /// `-db` refused before its sequences are read (`database::BlastxDatabase::x_open_stream`: a
+    /// database without sequences, or a longest sequence above `MAX_DBSEQ_LEN` with the check's
+    /// error; the search's reads raise the other errors): a query batch without a valid context
+    /// is reported as NCBI reports it (not
     /// searched); the first batch with one fails with `UnreadableSubjects`, which the
     /// caller replaces by the reader's error (decision 112).
     Unreadable,

@@ -905,15 +905,18 @@ fn run_inner(
             return database_error(kept);
         }
         // A read or a check of the database that failed during the search, reported as the
-        // check's error (the first sequence in ordinal order that fails, whichever the search's
-        // threads read first; the search's own where the check finds none).
+        // check's error while the reads have not checked every sequence (the first sequence in
+        // ordinal order that fails, whichever the search's threads read first; the search's own
+        // where the check finds none), and as its own after that (a file changed during the run).
         match error.downcast::<super::x_db_stream::XReadError>() {
-            Ok(super::x_db_stream::XReadError(kept)) => database_error(
-                database
-                    .as_ref()
-                    .and_then(|database| database.x_check_stores().err())
-                    .unwrap_or(kept),
-            ),
+            Ok(super::x_db_stream::XReadError(kept)) => {
+                database_error(match (&database, &x_stream) {
+                    (Some(database), Some(stream)) if !stream.x_checked() => {
+                        database.x_check_stores().err().unwrap_or(kept)
+                    }
+                    _ => kept,
+                })
+            }
             Err(error) => engine(error),
         }
     };

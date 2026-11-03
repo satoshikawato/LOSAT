@@ -4,13 +4,14 @@
 //!
 //! What differs from the search of a FASTA subject set (`-subject`):
 //!
-//! - the subjects are the stored bytes of the database, checked once before the query batches
-//!   (`BlastxDatabase::x_check_stores`, `common::database::x_check_protein_stores`) and read in
-//!   blocks where they are searched (`x_db_stream.rs`, through `subjects::Subjects::Stream`),
-//!   by ordinal id; the set-level numbers are the index's (total, count) and 10 for the
-//!   shortest sequence (D1);
+//! - the subjects are the stored bytes of the database, read in blocks where they are searched
+//!   (`x_db_stream.rs`, through `subjects::Subjects::Stream`) by ordinal id and checked where
+//!   they are first read (`XStreamDb::x_check`, the checks of `BlastxDatabase::x_check_stores`);
+//!   the set-level numbers are the index's (total, count, longest) and 10 for the shortest
+//!   sequence (D1);
 //! - a database that cannot be read fails the first query batch with a valid context, after
-//!   the reports of the batches before it (NCBI does not search a batch without one);
+//!   the reports of the batches before it (NCBI does not search a batch without one), with the
+//!   check's first error in ordinal order;
 //! - after each batch's search, the titles of its reported sequences are read in NCBI's
 //!   order and the batch's hit lists are renamed to ranks over records of those sequences
 //!   (`ReportedSubjects::for_batch`), so the report writers keep indexing by subject;

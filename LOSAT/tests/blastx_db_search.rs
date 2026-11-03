@@ -309,6 +309,32 @@ fn a_refused_database_sequence_is_named_in_ordinal_order_at_every_thread_count()
             "{threads}: {stderr}"
         );
     }
+    // A first batch without a valid context (a query of N alone, longer than a batch) is
+    // reported before the batch that reads the database fails.
+    let all_n = dir.join("nn.fna");
+    let mut both = format!(">nn all N\n{}\n", "N".repeat(10_005)).into_bytes();
+    both.extend_from_slice(&std::fs::read(&query).unwrap());
+    std::fs::write(&all_n, both).unwrap();
+    for threads in ["1", "4"] {
+        let output = losat()
+            .arg("blastx")
+            .arg("-query")
+            .arg(&all_n)
+            .args(["-db", &db, "-num_threads", threads])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{threads}: {stderr}");
+        let report = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            report.contains("Query= nn all N") && report.matches("Query= ").count() == 1,
+            "{threads}: {report}"
+        );
+        assert!(
+            stderr.contains("database sequence 40 holds a byte"),
+            "{threads}: {stderr}"
+        );
+    }
     let long = dir.join("long.faa");
     std::fs::write(
         &long,
@@ -319,22 +345,39 @@ fn a_refused_database_sequence_is_named_in_ordinal_order_at_every_thread_count()
     )
     .unwrap();
     let db = makedb(&dir, &long, "long");
-    let output = losat()
-        .arg("blastx")
-        .arg("-query")
-        .arg(&query)
-        .args(["-db", &db, "-outfmt", "6"])
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(1), "{stderr}");
-    assert!(
-        stderr.ends_with(
-            "database sequence 1 has 5000001 residues; a subject longer than 5000000 residues, \
-             which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX\n"
-        ),
-        "{stderr}"
-    );
+    let refused = |db: &str| {
+        let output = losat()
+            .arg("blastx")
+            .arg("-query")
+            .arg(&query)
+            .args(["-db", db, "-outfmt", "6"])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert_eq!(output.status.code(), Some(1), "{stderr}");
+        assert!(
+            stderr.ends_with(
+                "database sequence 1 has 5000001 residues; a subject longer than 5000000 \
+                 residues, which NCBI BLAST+ searches in overlapping parts, is not supported by \
+                 LOSAT's BLASTX\n"
+            ),
+            "{stderr}"
+        );
+    };
+    // The index's longest (before the search) ...
+    refused(&db);
+    // ... and, with an index header that says 1,000 (big-endian, after the total length), the
+    // search's read of the sequence.
+    let pin = format!("{db}.pin");
+    let mut index = std::fs::read(&pin).unwrap();
+    let longest = 5_000_001u32.to_be_bytes();
+    let at: Vec<usize> = (0..index.len() - 3)
+        .filter(|&i| index[i..i + 4] == longest)
+        .collect();
+    assert_eq!(at.len(), 1, "one longest length in the index");
+    index[at[0]..at[0] + 4].copy_from_slice(&1_000u32.to_be_bytes());
+    std::fs::write(&pin, index).unwrap();
+    refused(&db);
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

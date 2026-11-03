@@ -37,9 +37,14 @@
 //!
 //! A read or a check that fails during the search (a damaged database, an error of the file system)
 //! gives the error that the check gives for the same read (`XReadError` holds `search_read_error`'s
-//! or the check's), and the run reports the check's first error in ordinal order, whichever
-//! sequence the threads read first (`native::search_error`: NCBI's engine error, or LOSAT's
-//! refusal), so the text and the query batch it fails are those of the check before the search.
+//! or the check's). Until the reads have checked every sequence, the run reports the check's first
+//! error in ordinal order, whichever sequence the threads read first (`native::search_error`:
+//! NCBI's engine error, or LOSAT's refusal), so the text and the query batch it fails are those of
+//! the check that read the database before the first query batch, except that the batch's own
+//! refusals of its setup (a search space or a diagonal length past NCBI's integers, a query split
+//! past its chunks), which come before its first read, as NCBI sets up a batch before it reads
+//! the database, now come before the database's error. After that, a read that fails (a file
+//! changed during the run) gives its own error.
 //!
 //! The stored bytes are the same in every read (the sentinel before and after the residues is the
 //! file's byte, which the check requires to be 0, as the copy held), so every stage computes the
@@ -72,9 +77,9 @@ const LENGTH_WINDOW: usize = 16_384;
 /// files. The size changes nothing but the number of reads.
 const BLOCK_BYTES: u64 = 256 * 1024;
 
-/// A read of the database that failed during the search: the error of the check for the same read
-/// (`search_read_error`: NCBI's `PreliminaryReadError`, or LOSAT's refusal), which the run reports
-/// as the check's (`native::search_error`).
+/// A read or a check of the database that failed during the search: the error of the check for
+/// the same read (`search_read_error`: NCBI's `PreliminaryReadError`, or LOSAT's refusal of the
+/// sequence, `x_check`), which the run reports as the check's (`native::search_error`).
 #[derive(Debug)]
 pub(crate) struct XReadError(pub(crate) anyhow::Error);
 
@@ -193,6 +198,11 @@ impl<'a> XStreamDb<'a> {
 
     pub(crate) fn longest(&self) -> usize {
         self.longest
+    }
+
+    /// Whether the reads have checked every sequence (`x_check`).
+    pub(crate) fn x_checked(&self) -> bool {
+        self.x_checked.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// The scanned shortest length with a list (`SeqDb::min_length`), `None` for a whole database.
@@ -374,8 +384,8 @@ impl<'a> XStream<'a> {
         }
     }
 
-    /// The length of `oid`: from the block, or the index anywhere else (the sink reads it from
-    /// its `XCursor`).
+    /// The length of `oid`: from the block, or a read of the database anywhere else (no stage
+    /// does: the sink reads the lengths from its `XCursor`).
     pub(crate) fn length(&self, oid: usize) -> usize {
         match self.block {
             Some(block) if block.contains(oid) => block.residues_with_sentinel(oid).len() - 1,

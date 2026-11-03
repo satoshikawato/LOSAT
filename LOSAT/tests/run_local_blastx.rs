@@ -771,6 +771,29 @@ fn check_options_fails_as_a_run_does() {
     assert_eq!(failed, 13);
 }
 
+/// A query whose first batch ends on its first record only when the batch counts the whole record:
+/// 10,050 letters (9,950 in the range `101-20000`), then 200 (100 in the range) and 50 (skipped).
+/// Counting the cut letters would put the first two in one batch and leave the third alone, an
+/// empty last batch.
+fn whole_record_batch_query() -> PathBuf {
+    let genome = fixture_sequence("MjeNMV.fasta");
+    let mut query = Vec::new();
+    for (name, letters) in [
+        ("long", &genome[0..10_050]),
+        ("middle", &genome[20_000..20_200]),
+        ("short", &genome[30_000..30_050]),
+    ] {
+        query.extend_from_slice(format!(">{name}\n").as_bytes());
+        for line in letters.chunks(70) {
+            query.extend_from_slice(line);
+            query.push(b'\n');
+        }
+    }
+    let path = temp_path("blastx_whole_record_batch.fna");
+    std::fs::write(&path, query).expect("write query");
+    path
+}
+
 /// A subject file of records with the reader's warnings (`batch_late_warn.prot.faa`) and a record
 /// of 10 letters between them, after the first warning.
 fn short_subject_between_warnings() -> PathBuf {
@@ -805,7 +828,14 @@ fn short_subject_between_warnings() -> PathBuf {
 #[test]
 fn ranges_cut_the_records_as_the_command_line_does() {
     let batches = Batches::new();
+    let whole_record_batch = whole_record_batch_query();
     let bslice = || Inputs::new("tests/db_search/bslice_q.fna", "tests/db_search/bslice.faa");
+    let lowercase_subjects = || {
+        Inputs::new(
+            "tests/fasta/outfmt0/sml_bx_subj_q.fna",
+            "tests/fasta/outfmt0/sml_bx_subj_s.faa",
+        )
+    };
     // (inputs, ranges and options, whether they have hits)
     let cases = [
         (bslice(), &["-query_loc", "1001-3000"][..], true),
@@ -837,6 +867,29 @@ fn ranges_cut_the_records_as_the_command_line_does() {
         // Several reader batches: the records without letters and the short query are skipped,
         // the batch counts the long record whole.
         (batches.inputs(), &["-query_loc", "50-10050"][..], true),
+        // The batch counts the whole record: the first record fills the first batch.
+        (
+            Inputs::new(&whole_record_batch, "tests/fasta/MjeNMV.faa"),
+            &["-query_loc", "101-20000"][..],
+            true,
+        ),
+        // Lower-case runs in the subjects, cut by the subject range.
+        (
+            lowercase_subjects(),
+            &["-lcase_masking", "-subject_loc", "50-150"][..],
+            true,
+        ),
+        (
+            lowercase_subjects(),
+            &[
+                "-lcase_masking",
+                "-subject_loc",
+                "100-300",
+                "-query_loc",
+                "1-900",
+            ][..],
+            true,
+        ),
         (
             batches.inputs(),
             &["-query_loc", "50-10050", "-lcase_masking"][..],
@@ -850,6 +903,7 @@ fn ranges_cut_the_records_as_the_command_line_does() {
             assert_matches_cli(inputs, &extra, *hits, &context);
         }
     }
+    let _ = std::fs::remove_file(&whole_record_batch);
 }
 
 /// The errors of the ranges and the records come where the command line's come, after the same

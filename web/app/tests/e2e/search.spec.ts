@@ -768,6 +768,13 @@ test("NCBI's selects of pairs follow the scores and the matrix; Other shows the 
   // Megablast's Linear (0 0) is its default.
   await expect(gaps).toHaveValue('0 0');
   await expect(gaps.locator('option:checked')).toHaveText('Linear');
+  // "Other" with nothing typed stays while other state changes (review of SURVEY #13, 3).
+  await gaps.selectOption('other');
+  await page.getByTestId('job-title').fill('pairs');
+  await expect(page.getByTestId('param-gapopen')).toHaveValue('0');
+  await gaps.selectOption('0 0');
+  await expect(page.getByTestId('param-gapopen')).toHaveCount(0);
+  await page.getByTestId('job-title').fill('');
   await task(page, 'blastn');
   await expect(gaps).toHaveValue('5 2');
   // 4,-5 has its own list, whose default NCBI chooses (BLAST stops with 5 2 there).

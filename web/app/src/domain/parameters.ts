@@ -209,14 +209,24 @@ export interface PairRow {
   readonly flags: readonly [string, string];
 }
 
-/** The rows of a program that have NCBI's select of their two fields. */
+const PAIR_ROWS = new WeakMap<ProgramDescriptor, readonly PairRow[]>();
+
+/**
+ * The rows of a program that have NCBI's select of their two fields, the same objects for each
+ * call (a component's state that follows its row must not follow every render).
+ */
 export function pairRows(program: ProgramDescriptor): readonly PairRow[] {
-  return program.sections.flatMap((section) =>
-    Object.entries(section.pairs ?? {}).flatMap(([row, select]) => {
-      const [first, second, ...more] = section.fields.filter((field) => field.row === row);
-      return first === undefined || second === undefined || more.length > 0 ? [] : [{ row, select, flags: [first.flag, second.flag] as const }];
-    }),
-  );
+  let rows = PAIR_ROWS.get(program);
+  if (rows === undefined) {
+    rows = program.sections.flatMap((section) =>
+      Object.entries(section.pairs ?? {}).flatMap(([row, select]) => {
+        const [first, second, ...more] = section.fields.filter((field) => field.row === row);
+        return first === undefined || second === undefined || more.length > 0 ? [] : [{ row, select, flags: [first.flag, second.flag] as const }];
+      }),
+    );
+    PAIR_ROWS.set(program, rows);
+  }
+  return rows;
 }
 
 /** The value that the search uses for a field: the value set (trimmed), or else its known default. */
@@ -262,8 +272,10 @@ export function pairValue(program: ProgramDescriptor, pair: PairRow, values: For
 }
 
 /**
- * The field values that choosing a pair writes: each of its two values, or '' where a value is
- * the field's default (the field follows the task again, as a default chosen in a select does).
+ * The field values that choosing a pair writes: its two values, so that the pair stays the one
+ * chosen when another task has other defaults (megablast's 1,-4 does not become blastn's 2,-4),
+ * or '' for both where the pair is the default (the fields follow the task again, as a default
+ * chosen in a select does).
  */
 export function pairEntries(
   program: ProgramDescriptor,
@@ -273,19 +285,20 @@ export function pairEntries(
   options: readonly EngineOption[] | undefined,
 ): Array<readonly [string, FieldValue]> {
   const parts = value.split(pair.select.separator);
-  return pair.flags.map((flag, i) => {
-    const part = parts[i] ?? '';
+  const isDefault = pair.flags.every((flag, i) => {
     const known = knownDefault(program, flag, values, options);
-    return [flag, known?.given !== true && part === known?.defaultValue ? '' : part] as const;
+    return known?.given !== true && parts[i] === known?.defaultValue;
   });
+  return pair.flags.map((flag, i) => [flag, isDefault ? '' : (parts[i] ?? '')] as const);
 }
 
 /**
  * Sets fields and clears the fields that a new value excludes. A pair row whose list the new
  * values change (the task, the scores or the matrix) takes the new list's default, as on NCBI's
  * page, where the gap costs follow the scores and the matrix: a pair that the list does not hold
- * is one that BLAST may not read (4,-5 with BLASTN's 5 2 stops the search). A pair row whose own
- * fields are set here keeps them.
+ * is one that BLAST may not read (4,-5 with BLASTN's 5 2 stops the search). So does a row whose
+ * pair in use leaves its list while the list stays (scores 1,-1 with megablast's default 0 0).
+ * A pair row whose own fields are set here keeps them.
  */
 export function setFields(
   program: ProgramDescriptor,
@@ -304,7 +317,11 @@ export function setFields(
   }
   for (const pair of pairRows(program)) {
     if (entries.some(([flag]) => pair.flags.includes(flag))) continue;
-    if (pairList(program, pair, values, options).join('|') === pairList(program, pair, next, options).join('|')) continue;
+    const list = pairList(program, pair, next, options);
+    const used = pairValue(program, pair, next, options);
+    const listChanged = pairList(program, pair, values, options).join('|') !== list.join('|');
+    const leftList = used !== pairValue(program, pair, values, options) && list.length > 0 && !list.includes(used);
+    if (!listChanged && !leftList) continue;
     const chosen = pairListDefault(program, pair, next, options);
     if (chosen === undefined) continue;
     for (const [flag, value] of pairEntries(program, pair, chosen, next, options)) {

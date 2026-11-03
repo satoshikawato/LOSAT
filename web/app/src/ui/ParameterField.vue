@@ -138,21 +138,22 @@ function onList(next: string): void {
           <span v-if="changed" class="visually-hidden">, changed from the default</span>
         </label>
         <!-- The filter's arguments (the CLI's value), as NCBI's "Species-specific repeats" has its select after the box. -->
-        <input
-          v-if="filterOn || filterEditing"
-          :id="`${id}-value`"
-          type="text"
-          autocomplete="off"
-          spellcheck="false"
-          :value="value === undefined ? (fallback ?? '') : text"
-          :placeholder="fallback === 'no' ? '' : (fallback ?? '')"
-          :aria-labelledby="`${id}-label ${id}-value-name`"
-          :data-testid="`${id}-value`"
-          @input="set(($event.target as HTMLInputElement).value)"
-          @focus="filterEditing = true"
-          @blur="filterEditing = false"
-        />
-        <span :id="`${id}-value-name`" class="visually-hidden">arguments</span>
+        <template v-if="filterOn || filterEditing">
+          <input
+            :id="`${id}-value`"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            :value="value === undefined ? (fallback ?? '') : text"
+            :placeholder="fallback === 'no' ? '' : (fallback ?? '')"
+            :aria-labelledby="`${id}-label ${id}-value-name`"
+            :data-testid="`${id}-value`"
+            @input="set(($event.target as HTMLInputElement).value)"
+            @focus="filterEditing = true"
+            @blur="filterEditing = false"
+          />
+          <span :id="`${id}-value-name`" class="visually-hidden">arguments</span>
+        </template>
       </template>
       <template v-else-if="asCheckbox">
         <input

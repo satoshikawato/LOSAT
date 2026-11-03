@@ -488,18 +488,47 @@ describe("NCBI's pair selects: Match/Mismatch Scores and Gap Costs", () => {
     }
   });
 
-  it('write the two values of a pair chosen, and leave out a value that is the default', () => {
+  it('write both values of a pair chosen, and neither for the default pair', () => {
     expect(pairEntries(blastn, scores!, '1,-2', {}, bn)).toEqual([
       ['-reward', ''],
       ['-penalty', ''],
     ]);
+    // Both, so that the pair stays 1,-3 under a task whose default reward is 2 (the argv still omits -reward 1 here).
     expect(pairEntries(blastn, scores!, '1,-3', {}, bn)).toEqual([
-      ['-reward', ''],
+      ['-reward', '1'],
       ['-penalty', '-3'],
     ]);
+    expect(formParameters(blastn, setFields(blastn, {}, pairEntries(blastn, scores!, '1,-3', {}, bn), bn), bn)).toEqual([['-penalty', '-3']]);
     expect(pairEntries(blastp, proteinGaps, '10 1', {}, bp)).toEqual([
       ['-gapopen', '10'],
-      ['-gapextend', ''],
+      ['-gapextend', '1'],
+    ]);
+  });
+
+  it('keep the pair chosen when the task changes the defaults (review of SURVEY #13, 1)', () => {
+    const oneFour = setFields(blastn, {}, pairEntries(blastn, scores!, '1,-4', {}, bn), bn);
+    const blastnTask = setField(blastn, oneFour, '-task', 'blastn', bn);
+    expect(pairValue(blastn, scores!, blastnTask, bn)).toBe('1,-4');
+    expect(formParameters(blastn, blastnTask, bn)).toEqual([
+      ['-task', 'blastn'],
+      ['-reward', '1'],
+      ['-penalty', '-4'],
+    ]);
+  });
+
+  it("give the gap costs the list's default when the pair in use leaves an unchanged list (review of SURVEY #13, 2)", () => {
+    // 1,-1 has the same list for every task; megablast's default 0 0 is not in it (BLAST stops).
+    const oneOne = setFields(blastn, { '-task': 'blastn' }, pairEntries(blastn, scores!, '1,-1', { '-task': 'blastn' }, bn), bn);
+    expect(formParameters(blastn, oneOne, bn)).toEqual([
+      ['-task', 'blastn'],
+      ['-reward', '1'],
+      ['-penalty', '-1'],
+    ]);
+    const megablast = setField(blastn, oneOne, '-task', 'megablast', bn);
+    expect(pairValue(blastn, gaps!, megablast, bn)).toBe('5 2');
+    expect(formParameters(blastn, megablast, bn).slice(-2)).toEqual([
+      ['-gapopen', '5'],
+      ['-gapextend', '2'],
     ]);
   });
 

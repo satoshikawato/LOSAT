@@ -130,7 +130,7 @@ pub fn ncbistdaa_to_blosum62(ncbi: u8) -> u8 {
 /// 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*','O','J'};
 /// ```
 #[inline(always)]
-pub fn aa_char_to_ncbistdaa(aa: u8) -> u8 {
+pub const fn aa_char_to_ncbistdaa(aa: u8) -> u8 {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:110-121
     // ```c
     // ... AMINOACID_TO_NCBISTDAA ...

@@ -291,16 +291,38 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
     Ok(stores)
 }
 
-/// The checks of `read_nucleotide_stores` without the copy (TBLASTN's `-db` search, which reads
-/// its subjects where it searches them, `x_read_nucleotide_store`). The
+/// What `x_check_nucleotide_stores` keeps of the lengths it reads: the number of sequences and
+/// the lengths of the first, of the longest and of all of them, not a length per sequence (a
+/// `u32` each was 529 MB on core_nt, held through the search).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct XChecked {
+    pub(crate) count: usize,
+    pub(crate) first: u32,
+    pub(crate) longest: u32,
+    pub(crate) total: u64,
+}
+
+impl XChecked {
+    fn add(&mut self, length: u32) {
+        if self.count == 0 {
+            self.first = length;
+        }
+        self.count += 1;
+        self.longest = self.longest.max(length);
+        self.total += u64::from(length);
+    }
+}
+
+/// The checks of `read_nucleotide_stores` without the copy (the `-db` searches of TBLASTN and
+/// TBLASTX, which read their subjects where they search them, `x_read_nucleotide_store`). The
 /// database is read in the same blocks, and every sequence's length and ambiguity runs are read
-/// with the same errors in the same order; only the lengths are kept, by ordinal id (a length
-/// that does not fit a signed 32-bit integer is an error of the read). The search
+/// with the same errors in the same order (a length that does not fit a signed 32-bit integer is
+/// an error of the read); the lengths are summed up (`XChecked`), not kept. The search
 /// fails the query batch that the copy would fail, with the same text. A block of one sequence (one longer than
 /// a block, or the last of its volume) is checked without its 2-bit data
 /// (`SeqDb::x_nucleotide_check`): a human chromosome is not read here only to be dropped.
-pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<u32>> {
-    let mut lengths = Vec::with_capacity(db.num_seqs() as usize);
+pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<XChecked> {
+    let mut checked = XChecked::default();
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, STORE_BLOCK_BYTES) {
         if range.len() == 1 {
@@ -317,7 +339,7 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
                     program,
                 )
             })?;
-            lengths.push(length as u32);
+            checked.add(length as u32);
             next_ordinal = range.end_ordinal();
             continue;
         }
@@ -326,11 +348,33 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
             let (length, _) = stored_parts(&block, i, range.first_ordinal + i as u32, program)?;
-            lengths.push(length as u32);
+            checked.add(length as u32);
         }
         next_ordinal = range.end_ordinal();
     }
-    Ok(lengths)
+    Ok(checked)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:312-322
+// ```c++
+//     int whole_bytes = int(end_offset - start_offset - 1);
+//
+//     // The last byte is partially full; the last two bits of
+//     // the last byte store the number of nucleotides in the
+//     // last byte (0 to 3).
+//
+//     char amb_char = 0;
+//     m_Seq->ReadBytes(& amb_char, end_offset - 1, end_offset);
+//
+//     int remainder = amb_char & 3;
+//     return (whole_bytes * 4) + remainder;
+// ```
+/// The length of nucleotide `ordinal` of `db`, read from the index and the last byte of its 2-bit
+/// data (`SeqDb::nucleotide_length`), as NCBI reads the length of a sequence it does not fetch:
+/// the length of the sequence's store, with the error of its read (`search_read_error`).
+pub(crate) fn x_nucleotide_length(db: &SeqDb, ordinal: u32, program: &str) -> Result<usize> {
+    db.nucleotide_length(ordinal)
+        .map_err(|error| search_read_error(error, program))
 }
 
 /// Sequence `ordinal` of `db` as `read_nucleotide_stores` packs

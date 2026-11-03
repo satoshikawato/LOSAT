@@ -870,7 +870,10 @@ pub fn check_query_split_environment(
 ///     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
 ///         retval = NStr::StringToInt(chunk_sz_str);
 /// ```
-fn read_query_split_variable(program: &str, variable: &str) -> anyhow::Result<Option<i32>> {
+pub(crate) fn read_query_split_variable(
+    program: &str,
+    variable: &str,
+) -> anyhow::Result<Option<i32>> {
     match std::env::var_os(variable) {
         Some(value) if !crate::blastinput::input_files::is_blank(value.as_encoded_bytes()) => {
             match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
@@ -910,7 +913,18 @@ pub fn protein_query_split_sizes(
 }
 
 /// The environment that changes NCBI's blastp, tblastn or tblastx in a way that LOSAT does
-/// not reproduce.
+/// not reproduce, refused wherever it is set: a superset of NCBI, which reads `BL2SEQ_LEGACY`
+/// only for `-subject` and converts `PRE_FETCH_SEQS_LIMIT` only for formats other than 11
+/// (`check_search_environment`, BLASTX's check).
+pub fn check_unsupported_environment(program: &str) -> anyhow::Result<()> {
+    check_search_environment(program, true, false)
+}
+
+/// The environment that changes NCBI's search or report in a way that LOSAT does not
+/// reproduce, where NCBI reads it: `BL2SEQ_LEGACY` in a search of `-subject` sequences
+/// (`fasta_subjects`; NCBI searches each subject on its own and writes another report, a
+/// `-db` search ignores it), and a `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless
+/// the report is the BLAST archive (`archive`).
 ///
 /// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:206-210
 /// ```c
@@ -934,13 +948,35 @@ pub fn protein_query_split_sizes(
 /// that `NStr::StringToInt` cannot convert (an empty one too) stops NCBI before the report
 /// of each query batch with a `CStringException` that names its build's source files (as
 /// BLASTN's `check_unsupported_environment`).
-pub fn check_unsupported_environment(program: &str) -> anyhow::Result<()> {
-    if std::env::var_os("BL2SEQ_LEGACY").is_some() {
+///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blastx_app.cpp:283-288
+/// ```c
+///             if (fmt_args->ArchiveFormatRequested(args)) {
+///                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+///                 m_Bah.ResetMessages();
+///             } else {
+///                 BlastFormatter_PreFetchSequenceData(*results, scope,
+///                 		                            fmt_args->GetFormattedOutputChoice());
+/// ```
+/// The archive is written without the prefetch, so NCBI never converts the value there.
+///
+/// LOSAT refuses before the search, so the refusal is wider than NCBI's stop: an error that
+/// NCBI raises in the first batch's search before its prefetch (a query record without
+/// letters, `-query_loc` past every record: `BLAST engine error`, exit status 3) is this
+/// refusal here, and so is a `-subject` search with `BL2SEQ_LEGACY` whose report would not
+/// change (no hits). With `-mt_mode 1` and `-db`, NCBI's split-by-queries nodes catch the
+/// exception: NCBI writes nothing to standard output and exits 0.
+pub fn check_search_environment(
+    program: &str,
+    fasta_subjects: bool,
+    archive: bool,
+) -> anyhow::Result<()> {
+    if fasta_subjects && std::env::var_os("BL2SEQ_LEGACY").is_some() {
         anyhow::bail!(
             "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's {program}"
         );
     }
-    if let Some(value) = std::env::var_os("PRE_FETCH_SEQS_LIMIT") {
+    if let Some(value) = std::env::var_os("PRE_FETCH_SEQS_LIMIT").filter(|_| !archive) {
         if crate::blastinput::query_batch::ncbi_string_to_int(&value).is_none() {
             anyhow::bail!(
                 "the environment variable PRE_FETCH_SEQS_LIMIT has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's {program}",

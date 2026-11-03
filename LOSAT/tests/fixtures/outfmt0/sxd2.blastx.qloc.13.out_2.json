@@ -1,0 +1,219 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "m_mix MelaMJNV 56001-61600",
+            "query_len": 2000,
+            "query_masking": [
+              {
+                "from": 1024,
+                "to": 1060
+              },
+              {
+                "from": 1084,
+                "to": 1120
+              },
+              {
+                "from": 1162,
+                "to": 1216
+              },
+              {
+                "from": 2290,
+                "to": 2323
+              },
+              {
+                "from": 1028,
+                "to": 1118
+              },
+              {
+                "from": 1889,
+                "to": 1928
+              },
+              {
+                "from": 1964,
+                "to": 2009
+              },
+              {
+                "from": 2123,
+                "to": 2153
+              },
+              {
+                "from": 2687,
+                "to": 2726
+              },
+              {
+                "from": 1026,
+                "to": 1065
+              },
+              {
+                "from": 1074,
+                "to": 1116
+              },
+              {
+                "from": 1149,
+                "to": 1203
+              },
+              {
+                "from": 2274,
+                "to": 2322
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT61861.1",
+                    "title": "BDT61861.1 wsv206-like protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 234,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 186.037,
+                    "score": 471,
+                    "evalue": 2.55211e-57,
+                    "identity": 92,
+                    "positive": 121,
+                    "query_from": 1370,
+                    "query_to": 1885,
+                    "query_frame": 2,
+                    "hit_from": 20,
+                    "hit_to": 196,
+                    "align_len": 178,
+                    "gaps": 7,
+                    "qseq": "YQLIDGDIFDLTFRKPNVCICQQCNCVALKTHGLSKDIADMFGLYANSYARRKGKHT--NIADPQSRGVPGSLEFCKGTPCVANLFSQYMYGKPG--QYNVSVK--DDDLMKGITLDTYDTREEYMRTCLDNLLEILANNHADIDTVVFPYKIGCGLAGGNWTRYVEMINNFADKFMK",
+                    "hseq": "YHIIEGDIFADRFRKKNICICQQCNCITLKPHGLSADIVKHFGEYANSYGRRRAKPNTINTATLETRAEPGTVDFCEGTPCVANLFAQFFYGSSSNVQY-LSRKYLDPHIRKGVDNDTAEKRLMYFRSCLNNLMFDLRNKYTYIDTVVFPHRIGCGMAGGSWADYQNVLLQFADRLSE",
+                    "midline": "Y +I+GDIF   FRK N+CICQQCNC+ LK HGLS DI   FG YANSY RR+ K    N A  ++R  PG+++FC+GTPCVANLF+Q+ YG     QY +S K  D  + KG+  DT + R  Y R+CL+NL+  L N +  IDTVVFP++IGCG+AGG+W  Y  ++  FAD+  +"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "BDT61865.1",
+                    "title": "BDT61865.1 hypothetical protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 215,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 25.0238,
+                    "score": 53,
+                    "evalue": 0.186488,
+                    "identity": 14,
+                    "positive": 19,
+                    "query_from": 2769,
+                    "query_to": 2888,
+                    "query_frame": -1,
+                    "hit_from": 166,
+                    "hit_to": 205,
+                    "align_len": 40,
+                    "gaps": 0,
+                    "qseq": "IMGLLASLEYRIGNLREKKKEINQYGMSIKCGLGKLEQNL",
+                    "hseq": "ICGILGKLEYHLSELCPKIRAITTYSNHFSKELEKLKDNM",
+                    "midline": "I G+L  LEY +  L  K + I  Y       L KL+ N+"
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "BDT61900.1",
+                    "title": "BDT61900.1 wsv303-like protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 851,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 20.4014,
+                    "score": 41,
+                    "evalue": 5.93037,
+                    "identity": 7,
+                    "positive": 12,
+                    "query_from": 1430,
+                    "query_to": 1489,
+                    "query_frame": 2,
+                    "hit_from": 387,
+                    "hit_to": 406,
+                    "align_len": 20,
+                    "gaps": 0,
+                    "qseq": "CQQCNCVALKTHGLSKDIAD",
+                    "hseq": "TQQCYRRLLRLHNLTREIGE",
+                    "midline": " QQC    L+ H L+++I +"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 59,
+              "eff_space": 7481882,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+}

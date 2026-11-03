@@ -119,6 +119,12 @@ export function vbrCases(): VbrCase[] {
     manifestCase('tblastx.multi', ['tblastx.multi.0', 'tblastx.multi.7']),
     // BLASTX's frozen NCBI rows of the three formats are those of blastx-fast (-subject, DW-36).
     manifestCase('bxfast.def', ['bxfast.def.0', 'bxfast.def.6', 'bxfast.def.7']),
+    // BLASTX's ranges (line SX, DW-39): a query range in both records, a subject range, both,
+    // and 12 queries over several batches, some skipped by the range.
+    manifestCase('sxd.blastx.qloc', ['sxd.blastx.qloc.0', 'sxd.blastx.qloc.6', 'sxd.blastx.qloc.7']),
+    manifestCase('sxd.blastx.sloc', ['sxd.blastx.sloc.0']),
+    manifestCase('sxd.blastx.qsloc', ['sxd.blastx.qsloc.7']),
+    manifestCase('sxd.blastx.qmany', ['sxd.blastx.qmany.0', 'sxd.blastx.qmany.7']),
     {
       // A genome of 306,008 nt against its 111 proteins: BLASTX reads the query in 31 batches
       // of up to 10,002 letters and, at 2 threads or more, searches the batches with the flow of

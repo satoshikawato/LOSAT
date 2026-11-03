@@ -54,6 +54,8 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
     makeblastdb -in tests/db_search/vol2.faa -dbtype prot -out tests/db_search/vol2_nophr \
         -title "two volumes, the second without its header file" -blastdb_version 4 -max_file_sz 128B
     rm tests/db_search/vol2_nophr.01.phr
+    makeblastdb -in tests/db_search/bxchunk.faa -dbtype prot -out tests/db_search/bxchunk \
+        -title "proteins planted in bxchunk_q.fna" -blastdb_version 4
 
 `wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
 `LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:
@@ -162,6 +164,12 @@ without hits come from seeded generators):
 - `bslice_nohit.fna`: 300 random bases with no hit in `bslice` (candidate 25 of 40 from `random.Random(20261019)`;
   the others all have weak hits at the default E value). `bslice_alln.fna`: 300 N (NCBI warns that it cannot
   calculate Karlin-Altschul parameters).
+- `bxchunk_q.fna`: one query of 25,001 random bases (`random.Random(5)`, as the review of #702 made it) with a
+  back-translated protein of 150 residues planted 200 bases before each of 3000, 5997, 6000, 9705, 10001, 12000,
+  15000, 19410 and 20000 (the chunk borders of several `CHUNK_SIZE` values), and short lower-case runs at those
+  points; `bxchunk.faa`: the nine planted proteins with a quarter of their residues changed, for the database
+  `bxchunk` (rows `db.bxchunk.*`: BLASTX `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE`). `bxchunk_empty.fna`: a record of a
+  defline only (NCBI reports the query splitter's errors before the empty query's `Sequence contains no data`).
 - `bnophr.pin` and `bnophr.psq` are copies of `bslice.pin` and `.psq`: the database without its header file, used
   with the query without hits (with a hit NCBI fails with exit 2).
 
@@ -616,3 +624,17 @@ without the accession table (`bn.mixed.6`: NCBI stops at the first hit of a pars
 volume of another name (`bn.aliasdup.0`), and of a negative seqid list (`multidb/sl_negpartial.txt`, FBtr0083245 of the
 second volume) on `taxfilter/tfn.00`, the first of the two volumes of one LMDB file (`bn.negpartial.6`: NCBI clears bit -1 of
 its OID mask and crashes).
+
+## The environment around BLASTX's search and report (line DBID, N2d)
+
+Rows `db.bxenv.*` search `bslice` with `bslice_q.fna` (BLASTX) with an environment variable in `extra_args`. NCBI converts
+`PRE_FETCH_SEQS_LIMIT` with `NStr::StringToInt` before the report of each query batch (`blast_app_util.cpp:732-737`) and
+stops with a `CStringException` (exit 255; with `-mt_mode 1` its nodes catch it, so NCBI writes nothing and exits 0) on a
+value it cannot convert, an empty one too; the archive of outfmt 11 is written without that call (`blastx_app.cpp:283-288`).
+`BL2SEQ_LEGACY` makes the subjects of `-subject` a search of each subject on its own (`blast_app_util.cpp:206-210`); a `-db`
+search ignores it. LOSAT refuses before the search: an error that NCBI raises in the first batch's search before the
+prefetch (a query record without letters, `-query_loc` past every record: `BLAST engine error`, exit 3) and a `-subject`
+search with `BL2SEQ_LEGACY` whose report would not change (no hits) are refused too. The three `losat-rejection` rows are `abc` in outfmt 6
+and 16 and an empty value in outfmt 0; the ncbi rows are `abc` in outfmt 11, the integer 5 in outfmt 6, and `BL2SEQ_LEGACY=1`
+in outfmt 0 and 6. The `-subject` cases are `environment_that_ncbi_reads_around_the_report_is_rejected_where_it_reads_it`
+in `tests/run_local_blastx.rs`.

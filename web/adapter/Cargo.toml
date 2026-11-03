@@ -16,7 +16,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 LOSAT = { path = "../../LOSAT", default-features = false }
-bio = "1.6"
 clap = { version = "4.5", features = ["derive"] }
 
 [features]

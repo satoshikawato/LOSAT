@@ -1913,7 +1913,7 @@ mod tests {
             query_idx: 0,
             query_frame: 1,
             query_context_offset: 0,
-            seed_q_off: index,
+            seed_q_off: index as u32,
             seed_s_off: 0,
             qs: 0,
             qe: 0,
@@ -1977,11 +1977,11 @@ mod tests {
                 );
             }
             order.sort_unstable();
-            let mut want: Vec<usize> = before.iter().map(|h| h.seed_q_off).collect();
+            let mut want: Vec<usize> = before.iter().map(|h| h.seed_q_off as usize).collect();
             want.extend(
                 order
                     .iter()
-                    .map(|&(_, p, j)| states[p as usize].hits[j as usize].seed_q_off),
+                    .map(|&(_, p, j)| states[p as usize].hits[j as usize].seed_q_off as usize),
             );
             for pool in &pools {
                 for ranges in [1, 2, 7, strips, 4 * strips] {
@@ -1990,7 +1990,7 @@ mod tests {
                         hits_by_strips_on_pool(&mut hits, &states, strips, ranges);
                         hits
                     });
-                    let got: Vec<usize> = got.iter().map(|h| h.seed_q_off).collect();
+                    let got: Vec<usize> = got.iter().map(|h| h.seed_q_off as usize).collect();
                     assert_eq!(
                         got,
                         want,
@@ -2001,7 +2001,7 @@ mod tests {
             }
             let mut hits = before.clone();
             hits_by_strips_here(&mut hits, &states, strips, &mut runs);
-            let got: Vec<usize> = hits.iter().map(|h| h.seed_q_off).collect();
+            let got: Vec<usize> = hits.iter().map(|h| h.seed_q_off as usize).collect();
             assert_eq!(
                 got, want,
                 "round {round}: {parts} partitions, {strips} strips, this thread"
@@ -2256,7 +2256,11 @@ mod tests {
                 false,
             );
             let folders = lock(&folders).len();
-            (hits.iter().map(|h| h.seed_q_off).collect(), stats, folders)
+            (
+                hits.iter().map(|h| h.seed_q_off as usize).collect(),
+                stats,
+                folders,
+            )
         })
     }
 

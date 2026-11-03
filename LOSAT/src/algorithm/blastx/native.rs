@@ -1469,14 +1469,14 @@ pub(super) fn run_query_batches(
                                 search_subjects,
                                 options,
                                 pool,
-                                unit.take_prep(),
+                                unit.take_prep(options, search_subjects)?,
                             )
                         } else {
                             super::runtime::x_search_unit_serial(
                                 queries,
                                 search_subjects,
                                 options,
-                                unit.take_prep(),
+                                unit.take_prep(options, search_subjects)?,
                             )
                         }
                     },
@@ -1537,7 +1537,7 @@ pub(super) fn run_query_batches(
                                     search_subjects,
                                     options,
                                     pool,
-                                    unit.take_prep(),
+                                    unit.take_prep(options, search_subjects)?,
                                 )
                             })
                             .collect::<Vec<_>>()
@@ -1558,14 +1558,14 @@ pub(super) fn run_query_batches(
                                             search_subjects,
                                             options,
                                             pool,
-                                            unit.take_prep(),
+                                            unit.take_prep(options, search_subjects)?,
                                         )
                                     } else {
                                         super::runtime::x_search_unit_serial(
                                             queries,
                                             search_subjects,
                                             options,
-                                            unit.take_prep(),
+                                            unit.take_prep(options, search_subjects)?,
                                         )
                                     };
                                     super::x_timing::run(XRun::WaveBusy, x_t);
@@ -1985,9 +1985,10 @@ struct XReaderPrep {
     /// shape (`reader_batch::prepare_lone_unit`).
     layout: Option<std::sync::Arc<ReaderBatchShape>>,
     /// The units' preparations, from the end of phase 1 until each unit's search takes its own.
-    /// All `None` if phase 1 failed: each unit then prepares itself when it is searched, and the
-    /// one whose queries fail raises the error there (a reader batch with a search error writes
-    /// nothing, so the values of the units before it are not used).
+    /// All `None` if phase 1 failed: each unit is then prepared again when it is searched
+    /// (`XUnit::take_prep`), and the first one whose preparation fails raises the error there (a
+    /// reader batch with a search error writes nothing, so the values of the units before it
+    /// are not used).
     slots: Vec<std::sync::Mutex<Option<UnitPrep>>>,
     /// The flow's tasks of phase 1 not yet ended, and whether one failed.
     remaining: std::sync::atomic::AtomicUsize,
@@ -2136,14 +2137,30 @@ impl XUnit {
         None
     }
 
-    /// The unit's phase 1 preparation, once.
-    fn take_prep(&self) -> Option<UnitPrep> {
-        self.prep.as_ref().and_then(|(prep, position)| {
-            prep.slots[*position]
-                .lock()
-                .expect("a unit's preparation")
-                .take()
-        })
+    /// The unit's phase 1 preparation, once. If phase 1 failed, the unit of a batch of several is
+    /// prepared again as phase 1 prepares it, after the split sizes that NCBI reads before the
+    /// setup (with the reader batch's query count): the error is the reader batch's, as with one
+    /// thread (`search::search_core`).
+    fn take_prep(
+        &self,
+        options: &super::args::ResolvedOptions,
+        subjects: Subjects<'_>,
+    ) -> Result<Option<UnitPrep>> {
+        let Some((prep, position)) = self.prep.as_ref() else {
+            return Ok(None);
+        };
+        let taken = prep.slots[*position]
+            .lock()
+            .expect("a unit's preparation")
+            .take();
+        match (taken, &prep.layout) {
+            (Some(unit), _) => Ok(Some(unit)),
+            (None, Some(layout)) => {
+                super::split::split_sizes(layout.query_count)?;
+                prepare_unit(self.queries(), layout, options, subjects).map(Some)
+            }
+            (None, None) => Ok(None),
+        }
     }
 
     fn queries(&self) -> &[FastaRecord] {
@@ -2584,6 +2601,33 @@ mod reader_batch_tests {
         let small = XUnit::split(&batch[..3], &options, false);
         assert_eq!(small.len(), 1);
         assert!(small[0].last);
+    }
+
+    /// A unit whose phase 1 did not end with a preparation (it failed) is prepared again with
+    /// the reader batch's layout, so its error is the batch's: here a batch without a valid
+    /// context, whose two empty records are in different units.
+    #[test]
+    fn a_unit_without_its_phase_1_fails_as_its_reader_batch() {
+        let batch: Vec<_> = [0]
+            .into_iter()
+            .chain([2; 5001])
+            .chain([0])
+            .map(record)
+            .collect();
+        let options = super::super::stage_c_tests::options();
+        let units = XUnit::split(&batch, &options, false);
+        assert_eq!(units.len(), 2);
+        let subjects: Subjects<'_> = (&batch[1..2]).into();
+        for unit in &units {
+            let error = unit
+                .take_prep(&options, subjects)
+                .err()
+                .expect("a reader batch without a valid context");
+            assert_eq!(
+                error.to_string(),
+                "Warning: Sequence contains no data ".repeat(2)
+            );
+        }
     }
 
     /// The results of the units become the reader batch's at its last unit: ordinals count from

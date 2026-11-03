@@ -9,17 +9,25 @@ import { BrowserFileDownloader } from '../../src/infra/browser/example-downloade
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
-import { FakeFileDownloader, MemoryExampleStore } from '../../src/infra/fake/fake-examples';
+import { FakeDeletionChannel, FakeFileDownloader, MemoryExampleStore } from '../../src/infra/fake/fake-examples';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
-import type { DownloadProgress, DownloadResult } from '../../src/ports/example';
+import type { DownloadProgress, DownloadResult, ExampleDeletions, ExampleStore } from '../../src/ports/example';
 
 const SIXTEEN_S = exampleById('refseq-16s-bacteria');
 const UNIPROT = exampleById('uniprot-ecoli-k12');
 const SET_16S = '>NR_102783.2 Bacillus subtilis 16S\nACGTACGTAC\n>NR_114042.1 Escherichia coli 16S\nACGTTCGTAC\n';
 
-function setup(options: { files?: Record<string, string | DownloadResult>; persistent?: boolean } = {}) {
+function setup(
+  options: {
+    files?: Record<string, string | DownloadResult>;
+    persistent?: boolean;
+    store?: MemoryExampleStore;
+    deletions?: ExampleDeletions;
+    wrapStore?: (store: MemoryExampleStore) => ExampleStore;
+  } = {},
+) {
   let token = 0;
   const data = new DataService({
     store: new MemoryBlockStore(),
@@ -39,8 +47,13 @@ function setup(options: { files?: Record<string, string | DownloadResult>; persi
     debounceMs: 0,
   });
   const downloader = new FakeFileDownloader(options.files ?? { [SIXTEEN_S.url]: SET_16S });
-  const store = new MemoryExampleStore({ persistent: options.persistent ?? true, now: () => Date.UTC(2026, 10, 3) });
-  const examples = new ExampleLoader({ downloader, store, draft });
+  const store = options.store ?? new MemoryExampleStore({ persistent: options.persistent ?? true, now: () => Date.UTC(2026, 10, 3) });
+  const examples = new ExampleLoader({
+    downloader,
+    store: options.wrapStore?.(store) ?? store,
+    draft,
+    ...(options.deletions === undefined ? {} : { deletions: options.deletions }),
+  });
   const settle = async () => {
     await examples.idle();
     await draft.idle();
@@ -95,7 +108,7 @@ describe('ExampleLoader', () => {
     const { draft, examples, downloader, store, settle } = setup();
     draft.setPaste('query', '>old\nACGT\n');
     draft.addFiles('subject', [new File(['>s\nACGT\n'], 'mine.fa')]);
-    examples.lookUp();
+    examples.refresh();
     await settle();
     expect(downloader.requests).toEqual([]);
     expect(examples.state.get().saved).toEqual({ 'refseq-16s-bacteria': null, 'refseq-its-fungi': null });
@@ -204,6 +217,102 @@ describe('ExampleLoader', () => {
     examples.load('uniprot-ecoli-k12');
     await settle();
     expect(draft.state.get().query.paste).toBe(UNIPROT.queries.protein);
+  });
+
+  it('ends a load when the mode has no button for its set, and never fills another mode with it', async () => {
+    const { draft, examples, downloader, settle } = setup();
+    downloader.hold();
+    examples.load('refseq-16s-bacteria');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    draft.setProgram('blastp');
+    draft.setPaste('query', '>mine\nMKV\n');
+    examples.refresh();
+    expect(examples.state.get().load).toBeUndefined();
+    downloader.release();
+    await settle();
+    expect(draft.state.get().query.paste).toBe('>mine\nMKV\n');
+    expect(draft.state.get().subject.sources).toEqual([]);
+
+    // Without the refresh (the line did not follow the mode), the set is saved but the draft is not touched.
+    downloader.hold();
+    draft.setProgram('blastn');
+    examples.load('refseq-16s-bacteria');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    draft.setProgram('blastp');
+    downloader.release();
+    await settle();
+    expect(draft.state.get().query.paste).toBe('>mine\nMKV\n');
+    expect(examples.state.get().saved['refseq-16s-bacteria']).not.toBeNull();
+    expect(examples.state.get().load).toBeUndefined();
+  });
+
+  it('takes the query of the mode chosen when the set arrives (BLASTP to BLASTX during the download)', async () => {
+    const { draft, examples, downloader, settle } = setup({ files: { [UNIPROT.url]: '>sp|P0A7G6|RECA_ECOLI\nMAIDENKQ\n' } });
+    draft.setProgram('blastp');
+    downloader.hold();
+    examples.load('uniprot-ecoli-k12');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    draft.setProgram('blastx');
+    examples.refresh();
+    downloader.release();
+    await settle();
+    expect(draft.state.get().query.paste).toBe(UNIPROT.queries.nucleotide);
+  });
+
+  it('keeps an answer that is not FASTA out of the store', async () => {
+    const { draft, examples, store, settle } = setup({ files: { [SIXTEEN_S.url]: '<html><body>Not here</body></html>' } });
+    examples.load('refseq-16s-bacteria');
+    await settle();
+    expect(examples.state.get().load?.progress).toEqual({
+      state: 'failed',
+      message: 'The file from ftp.ncbi.nlm.nih.gov is not FASTA.',
+    });
+    expect(store.copies.size).toBe(0);
+    expect(draft.state.get().subject.sources).toEqual([]);
+  });
+
+  it('says a copy is saved when the load was cancelled while it was being saved', async () => {
+    let resume = () => {};
+    const gate = new Promise<void>((resolve) => (resume = resolve));
+    const { draft, examples, settle } = setup({
+      wrapStore: (store) => ({
+        readExample: (id, url) => store.readExample(id, url),
+        saveExample: async (copy, data) => {
+          await gate;
+          return store.saveExample(copy, data);
+        },
+        deleteExample: (id) => store.deleteExample(id),
+      }),
+    });
+    examples.load('refseq-16s-bacteria');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(examples.state.get().load?.progress).toEqual({ state: 'saving' });
+    examples.cancel();
+    resume();
+    await settle();
+    expect(examples.state.get().saved['refseq-16s-bacteria']).toMatchObject({ bytes: SET_16S.length });
+    expect(draft.state.get().subject.sources).toEqual([]);
+  });
+
+  it('a load waits for a deletion of the same set, and other tabs drop the sources of a deleted copy', async () => {
+    const channel = new FakeDeletionChannel();
+    const store = new MemoryExampleStore();
+    const a = setup({ store, deletions: channel.tab() });
+    const b = setup({ store, deletions: channel.tab() });
+    a.examples.load('refseq-16s-bacteria');
+    await a.settle();
+    expect(a.draft.state.get().subject.sources.map((s) => s.example)).toEqual(['refseq-16s-bacteria']);
+
+    // Tab B deletes, and loads again at once: the load does not get the copy being deleted.
+    const deletion = b.examples.delete('refseq-16s-bacteria');
+    b.examples.load('refseq-16s-bacteria');
+    await deletion;
+    await b.settle();
+    expect(b.downloader.requests).toHaveLength(1);
+    expect(b.draft.state.get().subject.sources.map((s) => s.example)).toEqual(['refseq-16s-bacteria']);
+    // Tab A heard the deletion: its source of the deleted copy is gone.
+    expect(a.draft.state.get().subject.sources).toEqual([]);
+    expect(a.examples.state.get().saved['refseq-16s-bacteria']).toBeNull();
   });
 
   it('Delete removes the saved copy and the subject source made from it', async () => {

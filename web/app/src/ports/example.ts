@@ -70,3 +70,13 @@ export interface ExampleStore {
   /** Removes the saved copy of the set, if there is one. */
   deleteExample(id: ExampleId): Promise<void>;
 }
+
+/**
+ * Deletions of saved copies between the tabs of the site: a tab that deletes a copy says so, and
+ * the others drop the sources made from it (their File can no longer be read).
+ */
+export interface ExampleDeletions {
+  announce(id: ExampleId): void;
+  /** Calls `listener` with each id that another tab deleted; returns the function that stops it. */
+  subscribe(listener: (id: string) => void): () => void;
+}

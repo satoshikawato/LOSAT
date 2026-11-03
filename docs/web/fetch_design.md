@@ -116,7 +116,7 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
 
 ## 9. WF-2 の実装（2026-11-03、Owner-delegated）
 
-保守者の常設の指示（2026-09-29、2026-10-07 に再掲）により、推奨の案を採って記録する。作業記録は web-fetch-20261103/DECISIONS.md の 15〜18、
+保守者の常設の指示（2026-09-29、2026-10-07 に再掲）により、推奨の案を採って記録する。作業記録は web-fetch-20261103/DECISIONS.md の 15〜19、
 実測は同 NOTES.md「WF-2 facts」。
 
 1. **表**（`web/app/src/domain/examples.ts`）。mode のタブの下の「Example」の行に、その mode の組をボタンで並べる。
@@ -146,8 +146,8 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    ブラウザは展開しない。本文が gzip の magic で始まるときだけ `DecompressionStream('gzip')` に通す（途中で展開済みの本文はそのまま）。
    展開した部分は約 8 MiB ごとの Blob にまとめ、メモリの山は保存の大きさほどに留める。展開後 256 MiB を超える本文は止める。
    時間切れは 60 s（応答の見出しまで）。進捗は「Downloading 3.1 of 8.0 MB from ftp.ncbi.nlm.nih.gov…」（Content-Length の無い
-   UniProt は全体を言わない）と「Cancel」。失敗は host と理由の一文（HTTP の状態、届かない、gzip が壊れている、大きすぎる）で、
-   欄はそのまま。
+   UniProt は全体を言わない）と「Cancel」。失敗は host と理由の一文（HTTP の状態、届かない、gzip が壊れている、大きすぎる、
+   FASTA でない：`>` で始まらない 200 の答え（空や HTML）は写しにしない）で、欄はそのまま。
 5. **保存**（`infra/data/example-store.ts`、Data worker）。OPFS の `examples/<id>/` に `data`、最後に `meta.json`（meta の無い
    ディレクトリは書きかけで、次の保存が消す）。書き込みは block store と同じ同期 access handle、保存と削除は Web Lock
    `losat-web:example:<id>` の下（2 つのタブが 1 つの写しを同時に書かない。保存中に他のタブが同じ URL を保存していれば、それを使う）。
@@ -157,8 +157,12 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
 6. **画面**（`ui/ExampleLine.vue`）。ボタンの横のその場の一文が、押すと何を送るか（「Downloads 8.0 MB from ftp.ncbi.nlm.nih.gov」）、
    保存した写し（「Saved in this browser (2026-10-27, 41.8 MB)」と「Delete」）、取得中の進捗と「Cancel」を言う。設計の「Temporary
    storage の表示に載せる」（§5）は、その表示が stop-describing-ui で外れた（`ncbi_ui_mapping.md` §4）ので、Example の行に置く。
-   「Delete」は写しと、それから作った subject の source を外す（File が読めなくなる）。他の説明は「?」の後ろ。
+   「Delete」は写しと、それから作った subject の source を外す（File が読めなくなる）。他のタブにも BroadcastChannel
+   `losat-web:examples` で知らせ（中身は表の id だけ）、そのタブも同じ source を外す。削除の途中に同じ組を押すと、読み込みは削除の
+   後に始まる（消える写しを draft に渡さない）。保存中に Cancel しても写しは残るので、行は「Saved in this browser」になる。
+   他の説明は「?」の後ろ。
 7. **Example は両方の欄を置き換える**（EBI の「Use example sequence」と同じ）：query の欄に表の query、subject は組の写しだけ。
-   他の source と範囲（subrange）は外れる。読み込みは 1 つずつで、別のボタン、Cancel、失敗で終わる。
+   他の source と範囲（subrange）は外れる。読み込みは 1 つずつで、別のボタン、Cancel、その組の無い mode への切り替え、失敗で
+   終わる。query は組が届いたときの mode のもの（BLASTP から BLASTX へ移れば CDS）。
 8. **e2e**（`tests/e2e/examples.spec.ts`）は WF-1 と同じく Playwright の route で実アドレスを stub し、配備の CSP のまま、ページから
    出た要求を数える。読み込み直しの後は要求が増えないこと、Delete で写しと source が消えることを OPFS のブラウザで見る。

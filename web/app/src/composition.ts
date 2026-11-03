@@ -9,6 +9,7 @@ import { ResultsBrowser } from './application/results';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
 import { BrowserAccessionFetcher } from './infra/browser/accession-fetcher';
+import { browserExampleDeletions } from './infra/browser/example-deletions';
 import { BrowserFileDownloader } from './infra/browser/example-downloader';
 import { browserPage } from './infra/browser/page';
 import { browserDownloader } from './infra/browser/platform';
@@ -66,7 +67,12 @@ export function createApp(options: AppOptions = {}): App {
     fetcher: new BrowserAccessionFetcher(),
     now: () => performance.now(),
   });
-  const examples = new ExampleLoader({ downloader: new BrowserFileDownloader(), store: data, draft });
+  const examples = new ExampleLoader({
+    downloader: new BrowserFileDownloader(),
+    store: data,
+    draft,
+    deletions: browserExampleDeletions(),
+  });
   const results = new ResultsBrowser({
     data,
     describe: (program) => engine.describe(program),

@@ -94,3 +94,19 @@ test('a failed download names the site and the status and leaves the boxes as th
   await expect(page.getByTestId('subject-source-0')).toHaveCount(0);
   expect(away).toEqual([exampleById('uniprot-ecoli-k12').url]);
 });
+
+test('Delete in one tab removes the subject source made from the copy in another tab', async ({ context }) => {
+  const a = await context.newPage();
+  const b = await context.newPage();
+  await stubHosts(a);
+  await stubHosts(b);
+  await openSearch(a);
+  test.skip((await a.getByTestId('storage-status').getAttribute('data-backend')) !== 'opfs', 'nothing is saved without OPFS');
+  await a.getByTestId('example-refseq-16s-bacteria').click();
+  await settled(a, 'subject');
+  await openSearch(b);
+  await expect(b.getByTestId('example-refseq-16s-bacteria-note')).toHaveText('Saved in this browser (2026-10-27, 111 bytes)');
+  await b.getByTestId('example-refseq-16s-bacteria-delete').click();
+  await expect(a.getByTestId('subject-source-0')).toHaveCount(0);
+  await expect(a.getByTestId('example-refseq-16s-bacteria-note')).toHaveText('Downloads 8.0 MB from ftp.ncbi.nlm.nih.gov');
+});

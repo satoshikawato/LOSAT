@@ -2,11 +2,27 @@
 // query box and its public subject set in the subject list. The set comes from the copy saved in
 // this browser when there is one (no request: it works offline), else it is downloaded, only
 // now that the user asked, from the host that the in-place sentence names, and saved for the
-// next time. One set loads at a time; another click, Cancel, or a failure ends the load, and a
-// failure names the site and leaves the draft as it was. Delete removes the saved copy and the
-// subject source made from it.
-import { EXAMPLE_BYTE_LIMIT, exampleById, exampleHost, exampleQuery, examplesFor, type ExampleId, type ExampleSet } from '../domain/examples';
-import type { DownloadResult, ExampleCopy, ExampleStore, FileDownloader, SavedExample } from '../ports/example';
+// next time. One set loads at a time; another click, Cancel, a mode without the set, or a
+// failure ends the load, and a failure names the site and leaves the draft as it was. Delete
+// removes the saved copy and the subject sources made from it, in this tab and in the others.
+import {
+  EXAMPLE_BYTE_LIMIT,
+  EXAMPLE_SETS,
+  exampleById,
+  exampleHost,
+  exampleQuery,
+  examplesFor,
+  type ExampleId,
+  type ExampleSet,
+} from '../domain/examples';
+import type {
+  DownloadResult,
+  ExampleCopy,
+  ExampleDeletions,
+  ExampleStore,
+  FileDownloader,
+  SavedExample,
+} from '../ports/example';
 import type { DraftState, SearchDraft } from './draft';
 import { Store } from './store';
 
@@ -30,18 +46,36 @@ export interface ExamplesDeps {
   readonly downloader: FileDownloader;
   readonly store: ExampleStore;
   readonly draft: Pick<SearchDraft, 'useExample' | 'dropExample'> & { readonly state: Pick<Store<DraftState>, 'get'> };
+  /** Deletions between tabs; without it, a tab hears only its own. */
+  readonly deletions?: ExampleDeletions;
 }
 
 export class ExampleLoader {
   readonly state = new Store<ExamplesState>({ saved: {} });
   private running: AbortController | undefined;
   private readonly pending = new Set<Promise<unknown>>();
+  /** Deletions in progress; a load of the same set waits for its deletion. */
+  private readonly deleting = new Map<ExampleId, Promise<void>>();
 
-  constructor(private readonly deps: ExamplesDeps) {}
+  constructor(private readonly deps: ExamplesDeps) {
+    deps.deletions?.subscribe((id) => {
+      const set = EXAMPLE_SETS.find((candidate) => candidate.id === id);
+      if (set === undefined) return;
+      this.deps.draft.dropExample(set.id);
+      this.setSaved(set.id, null);
+    });
+  }
 
-  /** Looks up the saved copies of the mode's sets that were not looked up yet (storage only, no request). */
-  lookUp(): void {
-    for (const set of examplesFor(this.deps.draft.state.get().program)) {
+  /**
+   * Follows the mode: ends the load of a set that the mode has no button for (running or
+   * failed), and looks up the saved copies of the mode's sets that were not looked up yet
+   * (storage only, no request).
+   */
+  refresh(): void {
+    const sets = examplesFor(this.deps.draft.state.get().program);
+    const load = this.state.get().load;
+    if (load !== undefined && !sets.some((set) => set.id === load.id)) this.cancel();
+    for (const set of sets) {
       if (this.state.get().saved[set.id] !== undefined) continue;
       this.track(
         this.deps.store.readExample(set.id, set.url).then(
@@ -68,16 +102,28 @@ export class ExampleLoader {
     if (load !== undefined) this.update({ load: undefined });
   }
 
-  /** Removes the saved copy of a set, and the subject source made from it. */
+  /** Removes the saved copy of a set, and the subject sources made from it, here and in the other tabs. */
   async delete(id: ExampleId): Promise<void> {
     if (this.state.get().load?.id === id) this.cancel();
     this.deps.draft.dropExample(id);
+    const deletion = this.deleteCopy(id);
+    this.deleting.set(id, deletion);
+    try {
+      await deletion;
+    } finally {
+      if (this.deleting.get(id) === deletion) this.deleting.delete(id);
+    }
+  }
+
+  private async deleteCopy(id: ExampleId): Promise<void> {
+    await this.deleting.get(id);
     try {
       await this.deps.store.deleteExample(id);
     } catch (error) {
       this.update({ note: { id, text: `The saved copy could not be removed: ${messageOf(error)}` } });
       return;
     }
+    this.deps.deletions?.announce(id);
     this.setSaved(id, null);
     if (this.state.get().note?.id === id) this.update({ note: undefined });
   }
@@ -88,18 +134,18 @@ export class ExampleLoader {
   }
 
   private async loadSet(set: ExampleSet, signal: AbortSignal): Promise<void> {
-    const program = this.deps.draft.state.get().program;
-    const query = exampleQuery(set, program);
     const progress = (next: ExampleLoad) => {
       if (!signal.aborted) this.update({ load: { id: set.id, progress: next } });
     };
     const fail = (message: string) => progress({ state: 'failed', message });
     this.update({ note: undefined });
     progress({ state: 'reading' });
+    // A copy being deleted is gone first, so that the draft never gets a file that is about to go.
+    await this.deleting.get(set.id);
     const kept = await this.deps.store.readExample(set.id, set.url).catch(() => undefined);
     if (signal.aborted) return;
     if (kept !== undefined) {
-      this.finish(set, query, kept.file, kept.copy);
+      this.finish(set, kept.file, kept.copy);
       return;
     }
     progress({ state: 'downloading', bytes: 0 });
@@ -119,8 +165,15 @@ export class ExampleLoader {
       fail(downloadProblem(result, set));
       return;
     }
-    progress({ state: 'saving' });
     const { data, downloadedBytes, version } = result;
+    // An answer that is not the file (an empty or HTML page) is not kept as the set.
+    const head = (await data.slice(0, 256).text()).trimStart();
+    if (signal.aborted) return;
+    if (!head.startsWith('>')) {
+      fail(`The file from ${exampleHost(set)} is not FASTA.`);
+      return;
+    }
+    progress({ state: 'saving' });
     let saved: SavedExample | undefined;
     let note: string | undefined;
     try {
@@ -131,18 +184,24 @@ export class ExampleLoader {
     } catch (error) {
       note = `Not kept for the next time: ${messageOf(error)}`;
     }
+    // The copy is kept although the load was cancelled meanwhile: the line says so.
+    if (saved !== undefined) this.setSaved(set.id, saved.copy);
     if (signal.aborted) return;
     if (saved === undefined) {
-      this.finish(set, query, data, null);
+      this.finish(set, data, null);
       if (note !== undefined) this.update({ note: { id: set.id, text: note } });
     } else {
-      this.finish(set, query, saved.file, saved.copy);
+      this.finish(set, saved.file, saved.copy);
     }
   }
 
-  private finish(set: ExampleSet, query: string, data: Blob, copy: ExampleCopy | null): void {
+  /** Puts the set into the draft with the query of the mode chosen now, if the mode has the set. */
+  private finish(set: ExampleSet, data: Blob, copy: ExampleCopy | null): void {
     this.running = undefined;
-    this.deps.draft.useExample(set.id, query, new File([data], set.fileName, { type: 'text/plain' }));
+    const program = this.deps.draft.state.get().program;
+    if (set.programs.includes(program)) {
+      this.deps.draft.useExample(set.id, exampleQuery(set, program), new File([data], set.fileName, { type: 'text/plain' }));
+    }
     this.setSaved(set.id, copy);
     this.update({ load: undefined });
   }

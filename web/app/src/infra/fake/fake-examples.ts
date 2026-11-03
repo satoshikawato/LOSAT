@@ -1,12 +1,14 @@
 // Example set doubles for the tests (ports/example.ts): a downloader that answers from a table
-// of texts by URL, keeps the requests and can hold its answers until `release`, and a store
-// that keeps saved copies in memory (or keeps nothing, as a browser without OPFS does).
+// of texts by URL, keeps the requests and can hold its answers until `release`, a store that
+// keeps saved copies in memory (or keeps nothing, as a browser without OPFS does), and the
+// deletions between tabs (each `tab()` hears the others, as a BroadcastChannel).
 import type { ExampleId } from '../../domain/examples';
 import type {
   DownloadProgress,
   DownloadRequest,
   DownloadResult,
   ExampleCopy,
+  ExampleDeletions,
   ExampleStore,
   FileDownloader,
   SavedExample,
@@ -80,5 +82,24 @@ export class MemoryExampleStore implements ExampleStore {
 
   async deleteExample(id: ExampleId): Promise<void> {
     this.copies.delete(id);
+  }
+}
+
+export class FakeDeletionChannel {
+  private readonly listeners = new Set<{ readonly tab: number; readonly listener: (id: string) => void }>();
+  private tabs = 0;
+
+  tab(): ExampleDeletions {
+    const tab = ++this.tabs;
+    return {
+      announce: (id) => {
+        for (const entry of this.listeners) if (entry.tab !== tab) entry.listener(id);
+      },
+      subscribe: (listener) => {
+        const entry = { tab, listener };
+        this.listeners.add(entry);
+        return () => this.listeners.delete(entry);
+      },
+    };
   }
 }

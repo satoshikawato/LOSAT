@@ -15,10 +15,12 @@ const props = defineProps<{ examples: ExampleLoader; program: ProgramId }>();
 const state = useStore(props.examples.state);
 const sets = computed(() => examplesFor(props.program));
 const load = computed(() => state.value.load);
+/** A note on a set of this mode. */
+const note = computed(() => (sets.value.some((set) => set.id === state.value.note?.id) ? state.value.note : undefined));
 
 watch(
   () => props.program,
-  () => props.examples.lookUp(),
+  () => props.examples.refresh(),
   { immediate: true },
 );
 
@@ -36,6 +38,7 @@ function sentence(set: ExampleSet): string {
     case 'reading':
       return 'Opening the saved copy…';
     case 'downloading':
+      if (progress.bytes === 0 && progress.total === undefined) return `Downloading from ${exampleHost(set)}…`;
       return `Downloading ${formatBytes(progress.bytes)}${progress.total === undefined ? '' : ` of ${formatBytes(progress.total)}`} from ${exampleHost(set)}…`;
     case 'saving':
       return 'Saving in this browser…';
@@ -87,6 +90,6 @@ const busy = (set: ExampleSet) => {
     <p v-if="load?.progress.state === 'failed'" class="error" role="alert" data-testid="example-error">
       {{ load.progress.message }}
     </p>
-    <p v-if="state.note" class="muted" data-testid="example-note">{{ state.note.text }}</p>
+    <p v-if="note" class="muted" data-testid="example-note">{{ note.text }}</p>
   </div>
 </template>

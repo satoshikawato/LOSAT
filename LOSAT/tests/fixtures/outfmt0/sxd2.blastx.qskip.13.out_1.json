@@ -1,0 +1,303 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "m_mix MelaMJNV 56001-61600",
+            "query_len": 401,
+            "query_masking": [
+              {
+                "from": 5364,
+                "to": 5445
+              },
+              {
+                "from": 5553,
+                "to": 5595
+              },
+              {
+                "from": 5464,
+                "to": 5527
+              },
+              {
+                "from": 5351,
+                "to": 5420
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT61866.1",
+                    "title": "BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 731,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 141.354,
+                    "score": 355,
+                    "evalue": 7.60322e-43,
+                    "identity": 71,
+                    "positive": 86,
+                    "query_from": 5211,
+                    "query_to": 5525,
+                    "query_frame": -1,
+                    "hit_from": 19,
+                    "hit_to": 122,
+                    "align_len": 105,
+                    "gaps": 1,
+                    "qseq": "SISVFEEAVKNISIYLLEEAERGSWGDEQSVESKNGLNERPKASDREKDMENKNLGLYVPAEINLDAWRVGDPLQIFKDAYTARLIVNITFHHNKIAEIIYMLIS",
+                    "hseq": "SIAAFEEAVKNISIYLLEEAERGSWGDDQN-KLKDLYDGKSEADGLEEDTENKNLGLYVPAGIDMRAWRAGDALGDYKNAYAARLIVNITFHHNKIAEILYTLIA",
+                    "midline": "SI+ FEEAVKNISIYLLEEAERGSWGD+Q+ + K+  + + +A   E+D ENKNLGLYVPA I++ AWR GD L  +K+AY ARLIVNITFHHNKIAEI+Y LI+"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "BDT61877.1",
+                    "title": "BDT61877.1 hypothetical protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 162,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 24.6386,
+                    "score": 52,
+                    "evalue": 0.0224984,
+                    "identity": 8,
+                    "positive": 10,
+                    "query_from": 5277,
+                    "query_to": 5333,
+                    "query_frame": -1,
+                    "hit_from": 38,
+                    "hit_to": 56,
+                    "align_len": 19,
+                    "gaps": 0,
+                    "qseq": "LDAWRVGDPLQIFKDAYTA",
+                    "hseq": "LDGWKTGGPLNRFRRKNTG",
+                    "midline": "LD W+ G PL  F+   T "
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "BDT61963.1",
+                    "title": "BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 728,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 21.9422,
+                    "score": 45,
+                    "evalue": 0.297268,
+                    "identity": 18,
+                    "positive": 29,
+                    "query_from": 5310,
+                    "query_to": 5474,
+                    "query_frame": -1,
+                    "hit_from": 223,
+                    "hit_to": 288,
+                    "align_len": 66,
+                    "gaps": 11,
+                    "qseq": "EEAERGSWGDE---QSVESKNGLNERPKASDREKDM--------ENKNLGLYVPAEINLDAWRVGD",
+                    "hseq": "EGRSRGASGEEDGGDSRESENDSSSRISAGNILSEMGIESYSGPEHENFVTPISRKYTYDDWPLGD",
+                    "midline": "E   RG+ G+E    S ES+N  + R  A +   +M        E++N    +  +   D W +GD"
+                  }
+                ]
+              },
+              {
+                "num": 4,
+                "description": [
+                  {
+                    "id": "BDT61956.1",
+                    "title": "BDT61956.1 hypothetical protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 353,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 19.2458,
+                    "score": 38,
+                    "evalue": 2.18332,
+                    "identity": 6,
+                    "positive": 9,
+                    "query_from": 5448,
+                    "query_to": 5483,
+                    "query_frame": 3,
+                    "hit_from": 192,
+                    "hit_to": 203,
+                    "align_len": 12,
+                    "gaps": 0,
+                    "qseq": "TPTTSLCFFQKI",
+                    "hseq": "SPTDSLCLSKEI",
+                    "midline": "+PT SLC  ++I"
+                  }
+                ]
+              },
+              {
+                "num": 5,
+                "description": [
+                  {
+                    "id": "BDT61897.1",
+                    "title": "BDT61897.1 wsv427-like protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 639,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 17.705,
+                    "score": 34,
+                    "evalue": 6.33785,
+                    "identity": 8,
+                    "positive": 8,
+                    "query_from": 5491,
+                    "query_to": 5526,
+                    "query_frame": 1,
+                    "hit_from": 603,
+                    "hit_to": 614,
+                    "align_len": 12,
+                    "gaps": 0,
+                    "qseq": "IFFTASSKTDIL",
+                    "hseq": "IFITASIDDDIL",
+                    "midline": "IF TAS   DIL"
+                  }
+                ]
+              },
+              {
+                "num": 6,
+                "description": [
+                  {
+                    "id": "BDT61960.1",
+                    "title": "BDT61960.1 hypothetical protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 492,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 17.3198,
+                    "score": 33,
+                    "evalue": 8.03659,
+                    "identity": 4,
+                    "positive": 8,
+                    "query_from": 5460,
+                    "query_to": 5486,
+                    "query_frame": 3,
+                    "hit_from": 150,
+                    "hit_to": 158,
+                    "align_len": 9,
+                    "gaps": 0,
+                    "qseq": "SLCFFQKIY",
+                    "hseq": "NMCYFNKLY",
+                    "midline": "++C+F K+Y"
+                  }
+                ]
+              },
+              {
+                "num": 7,
+                "description": [
+                  {
+                    "id": "BDT61889.1",
+                    "title": "BDT61889.1 hypothetical protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 504,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 17.3198,
+                    "score": 33,
+                    "evalue": 9.73353,
+                    "identity": 8,
+                    "positive": 15,
+                    "query_from": 5325,
+                    "query_to": 5396,
+                    "query_frame": -1,
+                    "hit_from": 192,
+                    "hit_to": 215,
+                    "align_len": 24,
+                    "gaps": 0,
+                    "qseq": "SDREKDMENKNLGLYVPAEINLDA",
+                    "hseq": "SSDEKDEKHKDVYIYALNFQNVDS",
+                    "midline": "S  EKD ++K++ +Y     N+D+"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 46,
+              "eff_space": 1111947,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+}

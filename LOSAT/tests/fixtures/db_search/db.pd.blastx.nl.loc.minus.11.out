@@ -1,0 +1,451 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries seq-loc-list {
+        int {
+          from 4,
+          to 199,
+          strand minus,
+          id gi 42
+        },
+        int {
+          from 4,
+          to 199,
+          strand minus,
+          id other {
+            accession "NC_000913",
+            version 3
+          }
+        }
+      },
+      subject database "tests/db_search/bslice",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 0
+        }
+      },
+      program-options {
+        {
+          name "RequiredStart",
+          value integer 4
+        },
+        {
+          name "RequiredEnd",
+          value integer 199
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 102
+          },
+          {
+            id str "blast_score",
+            value int 102
+          },
+          {
+            id str "e_value",
+            value real { 854810393626853, 10, -24 }
+          },
+          {
+            id str "bit_score",
+            value real { 43898589023614, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 22
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 32
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 620384615384615, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              gi 42,
+              general {
+                db "BL_ORD_ID",
+                tag id 30
+              }
+            },
+            loc {
+              int {
+                from 150,
+                to 191,
+                strand minus,
+                id gi 42
+              },
+              int {
+                from 22,
+                to 35,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag id 30
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              gi 42,
+              general {
+                db "BL_ORD_ID",
+                tag id 30
+              }
+            },
+            loc {
+              empty gi 42,
+              int {
+                from 36,
+                to 36,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag id 30
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              gi 42,
+              general {
+                db "BL_ORD_ID",
+                tag id 30
+              }
+            },
+            loc {
+              int {
+                from 72,
+                to 149,
+                strand minus,
+                id gi 42
+              },
+              int {
+                from 37,
+                to 62,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag id 30
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 33
+          },
+          {
+            id str "blast_score",
+            value int 33
+          },
+          {
+            id str "e_value",
+            value real { 312170991518504, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 173198182853167, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 8
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 14
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 358846153846154, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              gi 42,
+              general {
+                db "BL_ORD_ID",
+                tag id 22
+              }
+            },
+            loc {
+              int {
+                from 60,
+                to 128,
+                strand minus,
+                id gi 42
+              },
+              int {
+                from 417,
+                to 439,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag id 22
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 29
+          },
+          {
+            id str "blast_score",
+            value int 29
+          },
+          {
+            id str "e_value",
+            value real { 940552446813084, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 157790199816472, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 5
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 7
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 112692307692308, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              gi 42,
+              general {
+                db "BL_ORD_ID",
+                tag id 22
+              }
+            },
+            loc {
+              int {
+                from 14,
+                to 34,
+                strand minus,
+                id gi 42
+              },
+              int {
+                from 79,
+                to 85,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag id 22
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 119,
+              to 169,
+              id gi 42
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 164,
+              to 196,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 68,
+              to 100,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 145,
+              to 195,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 19,
+              to 93,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 135,
+              to 179,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 84,
+              to 119,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            }
+          }
+        },
+        frame minus3
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 352647",
+      "Effective search space used: 352647",
+      "Length adjustment: 38"
+    }
+  }
+}

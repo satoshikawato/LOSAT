@@ -841,18 +841,13 @@ fn shown_query_masks(
     query_length: usize,
     offset: usize,
 ) -> Vec<(i8, Vec<(i32, i32)>)> {
-    let target = (offset as i32, (offset + query_length) as i32 - 1);
     masks
         .into_iter()
         .map(|(frame, ranges)| {
             let shown = ranges
                 .into_iter()
                 .filter_map(|(from, to)| {
-                    if from > to || from > target.1 || from + target.0 > target.1 {
-                        return None;
-                    }
-                    let mapped = (target.0 + from, (target.0 + to).min(target.1));
-                    (mapped != target).then_some(mapped)
+                    crate::blastinput::seq_range::record_mask(from, to, query_length, offset)
                 })
                 .collect();
             (frame, shown)

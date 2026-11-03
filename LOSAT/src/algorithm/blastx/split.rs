@@ -711,7 +711,11 @@ fn x_chunk_masks(whole: &FastaRecord, start: usize, end: usize) -> Vec<(i32, i32
     //                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
     // ```
     // Each run is one letter longer inside a chunk, and a run that starts on the chunk's last
-    // letter is dropped (`restrict_masks`).
+    // letter is dropped (`restrict_masks`). With `-query_loc` NCBI restricts the record's runs by
+    // the chunk in the searched letters' coordinates, so a run survives only in
+    // `[start + offset, end - 1]` of the record (E2d AUTHORITY §E.1, as BLASTN's and TBLASTN's
+    // split queries): the preliminary search of a chunk sees the runs of its last `offset` letters
+    // unmasked, which the traceback of the whole query masks again.
     let runs: Vec<MaskedInterval> = whole
         .lowercase_masks
         .iter()
@@ -722,7 +726,7 @@ fn x_chunk_masks(whole: &FastaRecord, start: usize, end: usize) -> Vec<(i32, i32
         from: start,
         to: end,
     };
-    restrict_masks(&runs, &part, 0)
+    restrict_masks(&runs, &part, whole.placement().offset)
         .into_iter()
         .map(|mask| (mask.start as i32, mask.end as i32 - 1))
         .collect()
@@ -739,7 +743,11 @@ fn x_chunk_record(whole: &FastaRecord, start: usize, end: usize) -> FastaRecord 
         sequence: whole.sequence[start..end].to_vec(),
         lowercase_masks: x_chunk_masks(whole, start, end),
         warnings: whole.warnings.clone(),
-        source: whole.source.clone(),
+        // Not the whole letters of a record cut to `-query_loc` for outfmt 11: one copy per chunk.
+        source: whole
+            .source
+            .as_deref()
+            .map(crate::blastinput::fasta_reader::RecordSource::without_uncut),
     }
 }
 
@@ -748,6 +756,10 @@ fn x_chunk_record_from_copy(whole: &FastaRecord, start: usize, end: usize) -> Fa
     let mut record = whole.clone();
     record.sequence = record.sequence[start..end].to_vec();
     record.lowercase_masks = x_chunk_masks(whole, start, end);
+    record.source = whole
+        .source
+        .as_deref()
+        .map(crate::blastinput::fasta_reader::RecordSource::without_uncut);
     record
 }
 
@@ -1187,6 +1199,39 @@ mod x_chunk_record_tests {
                 "{start}..{end}"
             );
             assert_eq!(new.lookup_segments, old.lookup_segments, "{start}..{end}");
+        }
+    }
+
+    // `-query_loc`: a record cut 2,500 letters into its record keeps a run in a chunk only in
+    // `[start + 2,500, end - 1]` of the record (the run in the last chunk's last letters is
+    // dropped, those inside stay), and no chunk copies the record's whole letters.
+    #[test]
+    fn a_cut_records_chunks_restrict_the_runs_in_the_record() {
+        let mut whole = whole();
+        let plain: Vec<_> = [(9_705, 19_707), (29_000, 30_000)]
+            .iter()
+            .map(|&(start, end)| x_chunk_record(&whole, start, end).lowercase_masks)
+            .collect();
+        let source = whole.source.as_deref_mut().unwrap();
+        source.cut_from = 2_500;
+        source.uncut_length = 32_500;
+        source.uncut = Some(vec![b'a'; 32_500]);
+        let inside = x_chunk_record(&whole, 9_705, 19_707);
+        assert_eq!(inside.lowercase_masks, plain[0]);
+        assert!(!plain[1].is_empty());
+        let last = x_chunk_record(&whole, 29_000, 30_000);
+        assert!(last.lowercase_masks.is_empty());
+        for chunk in [inside, last] {
+            let source = chunk.source.as_deref().unwrap();
+            assert!(source.uncut.is_none());
+            assert_eq!(
+                (
+                    source.cut_from,
+                    source.uncut_length,
+                    chunk.placement().offset
+                ),
+                (2_500, 32_500, 2_500)
+            );
         }
     }
 }

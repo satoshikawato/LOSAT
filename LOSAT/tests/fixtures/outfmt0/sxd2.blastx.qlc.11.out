@@ -1,0 +1,4156 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">m_fam_lc MelaMJNV 26001-29000, 301-700 and
+ 1501-1800 in lower case"
+                  }
+                }
+              },
+              title "m_fam_lc MelaMJNV 26001-29000, 301-700 and 1501-1800 in
+ lower case"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 3000,
+              seq-data ncbi2na '0C902BC311E3E4FF4E432340E2010FF4D30F2C4E394BF4
+C33CD448B397EF7D0830C0F3451DE3CF4CEBF38C0231DEDDF36FFCCD7AC44DFCD000C21FCCBCB3
+8D3332EFE13FC00008348B6FF5DD0CF3E7708008348B6FF5DD0CF3E7708008348B6FF5DD0CF3E7
+70007F22AC3C90CDE630ED6305A7DCDB18373310C6BA028CD3A97F0D76D7F1FD8E30D8DD0ECD16
+C22CFBBFC7E8CE8CF7FD453CE0CD3E1BF130DD632C33EDFFFB11DD55F18CB3CFF46BFADC3F73DC
+164A00FCB2B0D24F23F1D0BF12F315FF73430D70E64B30EF010225DF68E4EA10CD1D4F345338A3
+D0CF377FC80ADBFF63360C149F7BCB93D0405553E3830CCCFD4CF774FBF2C07FF0C5CFCFCDDF0F
+3F4CB3C3FC4C733BFC21CCEEE3CF11370EF40CCFCDC37F8F028400CFC723E3020303F0CCCCFE3C
+EE000033DC4D0CC1D07F3CC3BC4397214313333330040CCFF3300F3C7FCC4F0FC031342330CADC
+144C3E337FD840EA108750A422C435D1090D33BB11A02C4711B9F6F1D3131FC4CE637D313BBD3B
+8FBFC88EC86DDA4F7F9F6AC0C8FDF88EE0AFD6CF379F6AC43F7EE3B88BF533CDE7DAB02FFF88CC
+B3EDAC57712CB23823921D9F32300B8FD3DFD1F1C0EDE38F8EBAFEA0C3DC12B77F0CD3FAFCED0B
+133AF731F233A505ADD2C13BFFE20C4FC934F0E8315CC7C73137843350F53C3035374D038F4CCB
+BBFDE33FD2F83BCD0C03FF17FFC233232F93BE8C33FE4EF4E51ACCD3F7754BF00C517D12C804A4
+13AD1F214430C03527DA6237EEBFFB108CF4A50DFC0A39CB7FFD03B346FC05812180CF33D00316
+330DC302B8FFB7BFE8AFCCF4EE10FDD803BDF7D1A6A8CF13BFCD557C40A64D4A809BBF3BFF77C7
+33454FD022150CF5C4402111304E37EFFF400300D4D249C3D8CA22100D3BA52DA40EFDC3639E74
+CCF02EDDE933F8E02DF3B3F8AE9F12C7CF08DF42A0CC0FFB90131152A71DF7EE0D3CC334DE3BDC
+2ADF44D0DEC3F10402427344DFFF4EC020D49FE94305EC3A3AB21FDB433FDFE0F8FCC0EDD0771B
+EF423833BF2840DD1DD744ECBEFB213CC1EB3E3FB3FFC0301F'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61857.1 innexin [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61857.1 innexin [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 378,
+            seq-data ncbieaa "MASLGLLSTLRGILQGKRNADIENLISKLHYRVTTTTVFCFCLLVTTN
+TLVGDPISCVYDSGHPKLNDKVVNTYCWIHTTFTLPNRPYRDMSAISSPGIGTHNLSDPVTYHAYYQWVPFMLFIQGL
+LFYAPHYIWKTWEGGRMQSITADLSVPILNKEDQRKRVNQLADYLQNSLWNNNTYALKYLFCQCLSLVNCIVNMVLMN
+KFLNGKFLTYGADVFSYSEAVDQESRTDPMIEVFPRVTKCSMSMFGSSGTLQKHDFLCVLAVNVINEKIYLAMWLWFI
+LLISLSILVFFFHLAVFAVPVIRRLYLVYLLGSGDKARIVARTFNQMGDVFLLYLLKKNVECQSLNLLLTELCREPIT
+GDDESKKYQKYLRRESEV"
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61858.1 wsv026-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61858.1 wsv026-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 1472,
+            seq-data ncbieaa "MIEKDRIKWQKDSLPLLFPSEETAKAIGSNTFAVPSFEVYESKALLEV
+GRCESLTRGGMDDCWVDGYVQPRFLLRPMSLITLQGEAVRLFSVQYYKHRGNLGQGDAKSKNAYGGGFIIGDGTGVGK
+SREIAGMIVTAILVEQYLYRKSESHKPPLVIWLTCSELLFANCKRAFAEVLTLANASKYSLRSMNDNGLTTIDLEGND
+LFIHFTTLKNFLADTNDTCDYPLPQPTVLFLTYNGLMANFEDLMEIFDKGIILPTAVFCDEFHKTKNISDKMKWVIQS
+RSERYDGDDSDHNSPSLFVAMRNTFCRNKRNKLQLTVADSVKLFVDHLKNTTFFVMSSATPFQNNQDLHMIDHIIRNI
+APRYHLLDQYNGTPTGMNSSEYSTLFLESIIKLLYNNGIYVSRTISMKGIRCAIVQKPISAANMYMINEISSYLAEMK
+CLAKTAHSDVKVLGKKIDQIIKSKKWESPSALMSRLEEFGEAVNTGKCGEVAIRTGYRLVFAEWNSAWQYLYDGRRRK
+TTYSNDDDDDDDDDDDDDIFSKRKKIKMDPTIQESLSSSSPPPPPPHQTEKGDTIDSDIISMSKVFSTRSCRLLSGQL
+KVNLAACCVAINKNILLSLKNKSVLKYIETVRKQKEPQKMVITVDQTGDSYYSHITDELIKIPLLESGAKKKKKGKKK
+KNAISVNRLSVFDKAPASHFIGNAYKTLLKIILLDTTYRITSLEKERVCFLLLPRLPPPAPLALLEENFLDSIEVGVG
+EGRYIEVTKRKYSGRLMSEGTLEIIPINTSAKNTTRDFQLFKHSKSVDVAIVGRSGNTGFDFHDSKDNITRARRIHII
+ADLPHDAISFLQSIGRTHRNNQRSLPRYCLFLTNIPTEKRFVDTLESRVRDSKAGTYGDRYCQNTISLKKEGKGVDGK
+IIASTTDGDSVFAGSGTDDNDDTAATAIAAVTNSVTSTITTTANTTSVIETKRPTNKDITTCTDSSHDDLSKQNKCID
+KIDFLENDFVMKVLGILLQLLAGEYNPLDIFLQIAKSGYRDGSLFIPLEGLGDSKIYLSIVEFAFECAAALLYESKIK
+CASQSFRISKVARATVSKIDRDKKRKTLDEILERLCYFYDSSIMDIGLRGNIVEEKREIKNLVSVAIQFWKTFSPLKM
+TKFSHLLVAVKDIQRGNNISVNSISKSSSNSSGNNYAASRQRKMSIRDIFRRSAVLVFGYTVRDNIQLPPPTDVLTVS
+IHDGTMKLIMNGVVSNIPMVAACNLLDALREKTPSLLLDLVNEITPYKKENSDDVESCLLTLSKLLVNKGLTYKQFRN
+YFMTIPLSEQDMLQSLFSKVQEWLSTEERFSRMCMMRRSNCISAEYTNVIACPSDVSRLYARVDDNDVTNITCDSNFA
+IDCRLSLCNDNEGPARRSTLTNTTTTTTTTTTTTSTSTGVTTAARGDINIRLTPENTIFINNLFNTLLLTNARSDMVK
+FKFWNSEIVGLPSVALVRYQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_3"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61861.1 wsv206-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61861.1 wsv206-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 234,
+            seq-data ncbieaa "MTEYSSRWENRIFREDVKNYHIIEGDIFADRFRKKNICICQQCNCITL
+KPHGLSADIVKHFGEYANSYGRRRAKPNTINTATLETRAEPGTVDFCEGTPCVANLFAQFFYGSSSNVQYLSRKYLDP
+HIRKGVDNDTAEKRLMYFRSCLNNLMFDLRNKYTYIDTVVFPHRIGCGMAGGSWADYQNVLLQFADRLSEDNITVFEV
+RNDAAIEATKRYHSRPVEGRWREREGITTD"
+          }
+        },
+        {
+          id {
+            local str "Subject_4"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61864.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61864.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 154,
+            seq-data ncbieaa "MPSLLAGLEDPSTPSEGTTVEQPLMSSGGAEGEEVERGEKMDPDNLSS
+PSVENNEADQRSQPQPQSKLSPMPELKPLPRTRYQSPQISQCQSLQMTQTLSLKAIHSPTIRVFLKEDAQPIILQDSL
+PWLDGRILEPEYDVFVRLTRRDNRPNPM"
+          }
+        },
+        {
+          id {
+            local str "Subject_5"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61865.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61865.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 215,
+            seq-data ncbieaa "MEEYSSESTESSMGSPVVTINRKRRRMKNPEKEYSVDKRKKCQMSKND
+PRRNEVGRSNSSDDTHSHNDDDDDDDDDDQGPYSRLSEDEATSPADVHHIDSDETDIEIYDDNNIENNNSNDYDDDNN
+DNNNNNNNNDDGNIVHYRFRPFTAEAALAQQILSNTAGNICGILGKLEYHLSELCPKIRAITTYSNHFSKELEKLKDN
+MEKDLENSSST"
+          }
+        },
+        {
+          id {
+            local str "Subject_6"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61866.1 wsv220-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 731,
+            seq-data ncbieaa "MSNKMTILYSELMSARENSIAAFEEAVKNISIYLLEEAERGSWGDDQN
+KLKDLYDGKSEADGLEEDTENKNLGLYVPAGIDMRAWRAGDALGDYKNAYAARLIVNITFHHNKIAEILYTLIAELLL
+LLEDNINDDGKTQLQEYGRLKPASVNETVKSLENVIREKNIEVDLKRFREIVLRLENDSRNFDRESRLSDWLLDNIQE
+RYPAGGGTTTTTTTSNNEYLCTIDDTTPLSTDTILSTLPSARRERPVRNIVGESSSAPPDRPWEDEREQTGYSIFSFR
+SVWMSEYGDYPINLVNAIIERLLLRYVVPLRDVFHVCFHLKAHLTCARNVNATWYENATFAYGLPPVYSMRDTWLELE
+NLLNVYACVAKLFLNMYDLLSSSSHGFHQSDLTRTKEAYINTIELLECMPMYLFDSKWMDENFYSWPYTRRGVRQLPV
+RNYLSENYLLRTVLVIPPNGIHPITKRKNNSGILMRLKVKAVEYITHLRTDMREIFDDGFVTIVKDNLQKTTNTTPRS
+DSRNINGMNDFEARILCDSTFENNPYVVHPLYHLKIAHRPSNWSGKGLASIEEWDARYHLASESGTLSSSVTNKNNNN
+NNNNNNNNNNNRSSWFWRSLPLFKPSLLKDSSSDSLPYKFWEAALRHIHSHQEFDRPMMNYSKNTEALEIMIKMVEVT
+EASTEKKKKSDIEDILVQDKQLESYEKQEERRLRNVERSIFLTILCKNMLTTLMNVGGI"
+          }
+        },
+        {
+          id {
+            local str "Subject_7"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61867.1 wsv216-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61867.1 wsv216-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 918,
+            seq-data ncbieaa "MEGYEIFSFISVRLVVIVLLLLSLLLYPIIRMISDYKKQTDEIVSPKV
+DSFVNTEISHIVKDIDDKEHANYIASKIRNRVYDCCNVYDNDDDDNERSDNVEDDYSSSKDTLLSIKQVRIRMSEKGE
+NNRIVSLSALYFLKASILRGRLPVSVRITFYRKDRPLCYMDTIIQSLGKPIVLKEISKCLIYGEIYRVRIESRRTVFF
+DDFVLIDSPFPEMVPVLICQDAILLKCNYKTQTATPFKAVEYNSKLFSGVYLTDFPKLLPTAGVQTGRDNILEPIPGK
+TSGHCLLYAKDPIRFDGSLSFFSDESDGTTNADLTLIKSSANPIEYYVLLKRDSPQPTRRTHANIKGWVINYRSSEGA
+EYKQIFSLSASIEKYYPRSQIEIRPNEKLRDITPEDTVTVWNTDEKIGVDKPETGTATAAETITVNGSKLFSRNAKDK
+GISFPKDSSFFQRDPHIVLDRETGECVMVTLGFHEDVALNPRWASSPCHFTSRDKLLVINPQRKHHLSPFVTSVRIYR
+GIPGGRSFTSQQGEALCSSVIVDRGDNLPSLHLPTISLPEERQRFCVHIQHKEPGTSRYSLIEHFPRSLPLETPLDVS
+SDRIYRIYTRIPSSGIASPTTANQTYANVGVINETDRPYSDLANILDDDAEGDGDDRAKHRERRTCTIFAIGLVNTYS
+DGTSIPDTIVKAIRSSLPEVVSITDINGTEVVRSKNIIVNNSSVLIILKNIQIDGSSQRWISSTPFGLGPCKTSGRCG
+ILGNWVPLYTVDHVLPICKVFSYRYADDSTARGFTVYLSNTCANGRSVSESGISEIVALYLSPEIQGKRIVLNAVAIN
+CNANGKDSNNSTDSKRTKIFSIPSKESIGGGAEGATSIIILDRVVYALMAVVITKDVERERRHFARNGLFTARSVTLS
+EEFVRRHRNVMN"
+          }
+        },
+        {
+          id {
+            local str "Subject_8"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61868.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61868.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 76,
+            seq-data ncbieaa "MFKEKIRINKQSTVILFSFYSLKIHASTYLYKIILKETIIFLLTIIED
+RGVHIDPIILLPFLSSFLETSWVTEIMI"
+          }
+        },
+        {
+          id {
+            local str "Subject_9"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61874.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61874.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 741,
+            seq-data ncbieaa "MSDKQLLEVERVLLGASSTTDPQKGLNVITKGAIRQLLSDRERKLKEW
+SPVPKPTPSTSSSTSIESAILSATKSNRADTNVADYKTCKDNSIEDNMKYIDDEFSDSDIDIMTYKVTKDMIMEEGKR
+RCSYNNDDNNINNTTAATTSSNNDNDNIISDSNNFTGYQKRIDDEASGISNINITTYTGSLLKNLLETDKRYTIVSSR
+QTLRDTPNDPHAQQQTPTGDQEQSVEQQIIRDKNTTAQQQQQIHIIQDTDQKPIRIYHLQKNSSAIALPLKPVTESSI
+SSSFSSAAATPPPPPPLPPPVPIETPAPALPLLLPPFPPPPITKPASAPVSAPALAPTSAPASALASVLLQPPPPPPP
+TPPPPPSQPMNDADSDVNVVDLTRSTSPLPPPPPPPLAHPNNSTQASSNTPQIPEFQPAAGSLFAVPYTFLIHSNYPI
+PLYLPYGSCYYHNSQYAPYNYSFRYLDNFYLPPPPPPPPPLPLPITPPFYSYRNPYSYPYFHSNHCHYCHRRTPMNID
+RQQYDLNYYRDHHHHHNYHHHHHYHYNQEGKQEVEEGNEEIARERTEIPEEMEREEVNEQDEQQFQQQQYYHHHHHHQ
+HQQQQQQQQQYRHRQYNNESEPRHGEYQYYGYNHYQQQRRSALPQRQRQRYFRNRSIPPYVNSYNYNYNNNDDNVGGW
+YIDSNTSTMREKRSGSVFEHDINNMREKRIKHQNNNSNSNSNNNTNNSSSNNNNKNNNSDDNNNTANKK"
+          }
+        },
+        {
+          id {
+            local str "Subject_10"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61876.1 baculoviral IAP repeat-containing
+ protein [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61876.1 baculoviral IAP repeat-containing protein
+ [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 181,
+            seq-data ncbieaa "MQNIFICARLRAQATLSASAIYIERSLAMPVSHFLKTECRFIDTQYNS
+HIRPTHLLLTNVYFYITVLIILGSKHFPNPIHQEYVMHQRRLETFRWWPKETAQSPHKLAEAGFVSSGLGDTVYCFHC
+GVYLEQWEKNDMPWKEHAKWSPRCRYVKMVKGDKFIIRWGPLDIDSVDIYDTIER"
+          }
+        },
+        {
+          id {
+            local str "Subject_11"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61877.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61877.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 162,
+            seq-data ncbieaa "MLSKCNRSRNRKNNKIKKKRNVTIERMDLDNELRRWLLDGWKTGGPLN
+RFRRKNTGSTNNEAPTTSQGKSKQNISSVNNTTNNTTNNSNNKKVNDFSDNSNSCSNISNSSYSSSSSSSSSSSSSSG
+SNSGNVSSSSSSRRSGNNRTIVKTNDEKKIGLNNYY"
+          }
+        },
+        {
+          id {
+            local str "Subject_12"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61886.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61886.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 233,
+            seq-data ncbieaa "MVAPHNSGIATRSFVRISGSGPCSAAGTVYMDFSRVCGAAAIVAARHR
+PPQAVMQAQHRRLSNSMDAAFLRKMAAIEDSFAESARVEIGGSEARRARREVSNLRAGARAGGGASARPAAGEGRGVP
+ARKRTSALPARDRSPDGGQRKRLRSHPSEENGKAIAPPQAKAPKTIYIVVGMKGDDARLRTVAAGQPFLLSAESLRRL
+MDQTNRLLQENQALSQRVRAYQLNESVLR"
+          }
+        },
+        {
+          id {
+            local str "Subject_13"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61889.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61889.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 504,
+            seq-data ncbieaa "PLASVHIEHTLLGFLFKMLARNIVLLLIACQWLTSHPHRHRVFGYPIE
+DTSSPFILKSPWTIRFPSAEKLDFICGICSSSSNSSSSTVEYGLTVSTNVYMYQYPIRLQRSQNCKALSITFNPIAET
+GLINVRLTEQNKNKDSNTTTSSSINSSSSSSSSSSSSSSRSRSTRSNIINNNIEVVEGADIPYSISSDEKDEKHKDVY
+IYALNFQNVDSRIRLLGSAADGFATVAEDYWSYGISGITCIFRSFPLSTDDDKSLPDEQTEITTNDNTDSVNLLQPLG
+TPSSTLPITALAALGTFSSTSPPAPTIPVSLTAIELVPSPPVEPSVLSSSTVAPPNNEREKENTTNDYFYEYYIYDDD
+DNETRGRLSTVSPRTTTVAAENAADDDYGNVEDDYNDGEEDPENKDRDRPSASSATTTTTNTTTTTNTTTTTTTSKRT
+TTTVLEGIGDNESGNRVDPVITETEKEYIVGDIGDDRVMLIMLILIVVMLVLELCIIATGLCILGY"
+          }
+        },
+        {
+          id {
+            local str "Subject_14"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61891.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61891.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 82,
+            seq-data ncbieaa "MGNLRIPVIRSTDDYDRDEYVDDGNNIVDDNNNNDVNTNDDDDDDDNN
+NDDDDDDDDDNDNNNNNSDDDDDDDKLDTIMQPK"
+          }
+        },
+        {
+          id {
+            local str "Subject_15"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61892.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61892.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 137,
+            seq-data ncbieaa "MAASPIMFIRHVLLIWMFTNSIPFLRQADGHRHTFIKLAPTTIHRLKI
+KTILDDNKVIAIWGFCDRPPVCEVCHDPPLCKHRNNAWTGSYRLDGYTQVPCDPSTQDPCNSSTRLHFHEGETLCGRS
+LGRKARGAAAR"
+          }
+        },
+        {
+          id {
+            local str "Subject_16"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61894.1 dUTPase [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61894.1 dUTPase [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 146,
+            seq-data ncbieaa "MSELNNVLKFKKLTEHAFTPSKGSKLAAGFDLYSAYDLTIPANGKSLV
+KTDIQIELPEGCYGRIAPRSGLSWKHHLDVGAGVIDRDYRGDIGVILFNHAKSDYKVKKGDRIAQLICEKIIYPDIEQ
+VEELTKTERGEGGYGSTGKQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_17"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61897.1 wsv427-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61897.1 wsv427-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 639,
+            seq-data ncbieaa "MFNNRIDTYTNRARDLLAEINNLEYVLMNNPSLLPSKEKLHTPKDEES
+QLDETHESYDESVASSSSSSSSSIFYKPECDLSLANVPLSEMVNHLTPLRTTIGARVREYVDCYGYLKKGIKINDALK
+NIWRDIIDFSFTASDNIVKETVTNRLVNVWKDTLKGVQDHQDVFSNITEKRRSSVLILLRVIERIIDANMQYSQHFVK
+DALLCRLIRGATYSLNVKNTGVLPTVMRYIPLCTETSLQPPPPPPPLSSSSSSSSSSSSASSSSLSTSTIPETDTTLE
+YRIKGVYGYGEFHPRCEDDHKIALRDICSDYFLKLLFEFLLSPHIHSTWRETYLIVFISSALKLIRNHEPFILALGKK
+KYQQEQQEQEEEQEQQQQNTLDEQQTEYNCKKYFDDNIDFTMRNPITAAGCHPFVFLPTATDFWSFCKNGQPIYNVRN
+VLVNARPSSFPPICGGPAGISQGKQLAWERYCQRQGVCDHGCECIACNRRNFLVDRVRQRIGQISGEARVTDVTKWHQ
+GTILMITFYAFTGLLAHRNYARDMDDKADFFKNLITAIEKSHYMRSKDKLITSGGGESDTSNILHTITFGVEEEFRQK
+LKSPQKKPIFITASIDDDILEGDNISRVQLTALRNRRVSEFNCWF"
+          }
+        },
+        {
+          id {
+            local str "Subject_18"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61900.1 wsv303-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61900.1 wsv303-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 851,
+            seq-data ncbieaa "MNKRLEKIAHNTYTRDNLCIGISLDFGKNKNNVSFLPKNKKPRLIDKT
+IMVKSLNETSQKQFTALRLREEFPPCSILIFSMGSVIIVGLRKLGLTPLSVLQAVSAIADTQEHPITISNVEIVNVVS
+TFNLFRLNMQSLKEFFKENKIAYTHVPDSFPGLFFKVLVPIRHLKRGETIGGYYTRAAREREAGDADAVKKNFRGKTV
+LVFQVGKCTILGACGGDDIHVIFKMLFGFFWYFIDDTVHLSAEELECGNRTYHIPPLSWYLMIDFFLRTVPGYQLKPN
+VALADLAVEDKPSVVNRRGASDLLDAFDRLSITKDRMLRRTPRENHGAWFINCLEVQPSTEGRRGRGGGGVSASAQKR
+QNLFEKELGQLKTVQEKSTANQWGVTTQQCYRRLLRLHNLTREIGEETPTPIHAPVSHTARCIFEGFEGYLPYTEEEL
+SHPERIRIEMPPKDARVTKFHQRRPLFSKESKAREVRSNHRMKIRQLDQLEEIYDLVGKAANEGRCDEIAAFLGVQPY
+IISGLLNRDISVPLQESSVFGRDYTHMTPAQIFFNKNLYKEYSNAEVANENRRGVLDFMINKDANTESIKQDHNNFNN
+IKEEAEQEQENEEEMEVEIDIDDDGNDFKDDDIYDDTSNDDDDDDDDDDDDDINNHDGDDDDDDDDNRDNDTEIYLDI
+HGMEKFLEEQVQHGMIFAPLSNYRTQHHQSLQTRLILEDLKRKTNMNMLQQQQFKQQQQQQQQQQKLNSTMLNVKSLY
+KKKESFLHKECCECKYKNKYESNFNFNTVTIPYTNVNTTTSFTTTTTSTSTTSSTTTTTTTEKLKLKRSKCITNSDIT
+ENKRQKYTLPKWKRQEHTLPQKE"
+          }
+        },
+        {
+          id {
+            local str "Subject_19"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61901.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61901.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 325,
+            seq-data ncbieaa "MPDRYIIPQRRKRRGGGGRGERRRSTSTYKDEQIKNDYHISQGIIHHT
+YRNDEINNIRNRDNWRLLKSQYNDNNNNNNHRHDHHHHQHPHHRHGWQQLIDDHRVYRNFRKCNKAKSWSNASDEHEG
+VVEMISYLNSNNEHIQKQQQQRISLYDTVTVSTETTEKEICNSVATVLTLPMSSLSQPPLLPSLLPPPLLSSSFSSSS
+SFSSSSPSYFSNIPEEGIVKVFSLSSRDNNLFATVARNVKTFSYHRDHILYLAVVAFIFLRESSLVLTPTDMKSMFNS
+PVVESLLKKLIIILQYENKTVETCMIIYNVERVAYDVICDYYN"
+          }
+        },
+        {
+          id {
+            local str "Subject_20"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61913.1 wsv136-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61913.1 wsv136-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 139,
+            seq-data ncbieaa "MCRVKNEFSKRLENFLKTQETYKFFLLLFLITAVCLCASHFIYYEIVY
+NSAHKPLEYLHQLSTSLPRVNPRKAAILIYGLQDDDHSSSSSLLLSSVDLLPPKMMDNLRKTLIDPRSFLMTSYGTHL
+GRSDYVDAPVYMS"
+          }
+        },
+        {
+          id {
+            local str "Subject_21"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61930.1 semaphorin-1A-like protein [Penaeus
+ monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61930.1 semaphorin-1A-like protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 575,
+            seq-data ncbieaa "MLPYGKEDVRLSCFKTCFLEYLITTLSIFKEAICLNNIKTVDSKSNSK
+SITDSDSDNQHFLKFKKINFSHSTSERRICLNMYIERDDQFCMEYVVYVLLAIDMFISMLDKTDDKHNNNNDNDDNDA
+NRDNYDGKKTRRSLIDISYINRDVLLAEDCKSCENSLYGFAAALLENRVKPFSFLFLSRNKKNFNDYYAGDPTSVFFT
+ADEIKSISRRIKTSRKNERIKIILSKYRKKIKDDSTKTENGLVLRARATNILIRCDDDNDIFMDVCVHIVDKESYVWI
+KTIEKQTKQLNKSLIDYLDALVKIDDSVCPDRLRVVNDVIAFKERMTDNTHKYFPTFKFSGSRKYAAISRAIETLANE
+CEPHASTPQYHHTTIKEHCSYVKDNYGSFEPFMNTILPLLINETITNIWFNRLFLLNTQREVATNNDIRSTGFLSFLK
+GVEREADKTKVMDVLRKFSNVCVTLRRNRLPFPLREYDRPTKRQKNTAVADNRYNESQPLRDIQYIQTLSKGTVNVKS
+LSSHRTPKISGDIVVGKYGADDIVNETDNNSNTSRRLANIDAGQFLQYFTPIAKGLFAQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_22"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61932.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61932.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 118,
+            seq-data ncbieaa "MSSKACRSFFFFDVKISTIIPAQHSRSVQFLSALAFCGSTSFQQQNTI
+SRANETFTRHLEHDGDFLDRLFFDIKISTIRPAQHSRSLSGSVQILLSHYHFFFCMNKTMFYFVSVYSIL"
+          }
+        },
+        {
+          id {
+            local str "Subject_23"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61938.1 wsv308-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61938.1 wsv308-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 592,
+            seq-data ncbieaa "MFPMKRKRIQGDYTRGQSRHTSTTVIPARDDYLKDSLLFETRLESFIK
+RMIERQAALSIQNAMDISDIISPNVGVDKDVLKMQAVYSTCDPDTYIENLLDFLKGEFAGNLIENNIILRNMKERRLK
+SLETIRRCLLEDAMCGDFTYDIFRSCVTLSDKREGSINADNNIVSNNPYRYRYQHQHCTPVIDAHEAFIVTMDEQNKS
+NRSIDPSHSGNDEYNKESVPLDSDDDDDDVVDDDDDDDNDDSVDYKNDDTDKLERESKGDTETDIINNVVRMLNAILY
+DEESTRGEIGKRNDPCYIYNHVKNIFKKSQDILQTGECLSCNHQPIEKFLFTLDHNSSTRSMEDLLAQLEGVINFTFP
+KGESQLSSIEEITVLRIFFKNILLLKTATLVNRYRLFLSFVVTYSISHNLNHNIRVYFQKNRAYNTHCMMDRTVNPNV
+DQRVVDKFLLSKLSSEESVFILSLLAHFLGPCLETFLCPANLYDAAINYIDSANSEWGKRYVDVSLSSKIKRILDQIA
+TRETFLKERRKRKSINTVIAYMTENRDSDTLLNPLHCIISDIGNVVEIITDGFRDLFIRTTSALNIISTLISPRNK"
+          }
+        },
+        {
+          id {
+            local str "Subject_24"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61939.1 wsv306-like protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61939.1 wsv306-like protein [Penaeus monodon majanivirus
+ A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 426,
+            seq-data ncbieaa "MHTAHIKPNCSAVDIFCTDDRDCHVQCGSSALSVSSHTIIPEKDDYSV
+VTIYLCNKSTKRCEPNTVLKGFYDMAMHDLKGLLKRKSTLSRGLHSYLQMYDGKYFILARARFYESLSLHLHDNENLE
+MAIRNIRSEHQRKRRTYLYEKIKYLEHEGAVTDKDEVKKMMDWLSTPALTSQNPIAENTTITMDVYKQQLFGHRMPHP
+PRDTTVLTRAEEYDDRRGEYVQNVTAVLPRQHDRHRRGEHLLKPTTTTTTLERHEELSSNLQTKSPSRELQFHCNEEM
+GAGIMMAAFRDGDGIILPVCICTHPLYLTGPTCKHRTYDSVIDYELWEKSGIPEFLTDPFNDYTKANDICKRTTLNTT
+AVFDEREGVFRCQPLAAHIGQSLQFRGPYEPALILDRDYIDTFNANHQQGFKINVDYIDLLGKFWQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_25"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61945.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61945.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 251,
+            seq-data ncbieaa "MSKSYSVIGIMNKLAKKENRDISSSFIYKNTRDEDVYIGKEKQDEDEK
+DDDDTSSNVVVMQELKRVQTQRDKNDDMPSSDKVHEDDDDDDDHTPSRDNEHKDTRVVKVHDDERRECNEDDGRNENV
+NVFDLQKATNTTNTNTITVTNIKIDDNDTTNLHDQDAFKIERRLYFINSLKRVLARRKNKPANIFSIHRKKEKDDVTY
+ISAEDFAINNTKEKERTDCHKCLIHVFNRLVDCFELLIKLKTRSSVL"
+          }
+        },
+        {
+          id {
+            local str "Subject_26"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61950.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61950.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 224,
+            seq-data ncbieaa "MCNFINSIASTSIIENGKDFLRTDESNTVIIILSEDLIRNNSSASITE
+QQRLIEKTCVSTLLSTIVQKKYINKALCNLSFYIQNKMRTKREYCIVIKNPRHIEIYSYKSVMCSCDRDDEYGTDTEE
+EYICEWTTKRCINVPYIPPNYKKKIKPPYVFIFTGRHIPSILRNFSDDICAPLFVKIIYITRDDEFANVGLDDLLEHL
+PYKNCTMKVLIQRLKSNNRS"
+          }
+        },
+        {
+          id {
+            local str "Subject_27"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61954.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61954.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 284,
+            seq-data ncbieaa "MNKQGEGISPSLIFKSNSGDIKRPIDLQYWLGIINARPSKIAKQSFPG
+DDKYWQNEENLKNFLVNEKTVDRVYHFVRSEFDLNEFRLLLRTYYDRRPLYVEAVFFIHLMDGRLIHTLSNLMTLTFN
+VQHFICSVVGIYKDRCAILKFIKDDELDARATWNTALPLQHLCYRAAAKLWENGRTTLCKIPPPRIWETIKATVAIRK
+IEEGYERRICMAEHLVYPVDRAAVRERGEHSTIAYSPREVYLNINYFREDDYDSEEENSDEYYNSLVKRRPPTNNTYR
+VL"
+          }
+        },
+        {
+          id {
+            local str "Subject_28"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61955.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61955.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 266,
+            seq-data ncbieaa "MNRAIDFKCYTNLLNGVDSSVAENVEKAIEWINTRLYRNGKVYIFPDE
+AKDWKDEEVTKIAFDKDRVDRVYYFMGFMFDPTTFHIAFRTHYKSRLLYVEFVTLNLDCHDETMLILTYNAQRFVDTA
+VRSLHKDRDTVLQHMLDDRVNVCRSWRNISPLKQLCSRTITDQKIDFLSENIPKCIKDTLIKDEEISKIESKRARLIE
+EVYGNIRHCWLPGNYRVTHFAENHMWDDDNSDDEPGEYRYHEHDRRTIDTFKREILEILDII"
+          }
+        },
+        {
+          id {
+            local str "Subject_29"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61956.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61956.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 353,
+            seq-data ncbieaa "MDIDGGKGGGLFVWKPETRILDSDFELLTSGSPPKKICASRNDYSGIY
+NAINMNPNKGENNRGLLSSVTPVASALYRRRTSSKAGSPHKLLKTPPKPLTKFILDGTTISDGDMSTEQNQNSPVGEG
+RPGGTKRTSIRPDVTIRSILSAEPDRPIGSHRTSSQSECETIHPLGKINSPTDADDSERESKSNNSPTDSLCLSKEIE
+ETLTGIENRVEMDRGGRAEFEADRHVRSRRTFVPGPDQLNGLAELTFDDIYISEEDDDDDDDHETNHPLEMANSITRV
+ETDRGGRAEFEADRHVRSRRTFVPGPDQLNGLAELTFDDIYISEEDDDDDDHETNHPLEMANSITHGIVDG"
+          }
+        },
+        {
+          id {
+            local str "Subject_30"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61959.1 baculoviral IAP repeat-containing
+ protein [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61959.1 baculoviral IAP repeat-containing protein
+ [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 261,
+            seq-data ncbieaa "MNSYSVKCKSLRYESERLLTFINWPFGSLAKSLAWNGFYRKCPDDLVC
+YFCGICINVEDYSSLIEKGSGYINMKNIHYRSCPFIYGNSSMNVTREQEILISEMMRRYCKRYAKRTRTLYKTPKKRF
+LSFTNFPNRYCNVNRMAESGFYFTGELDAVRCFSCQIDIYGWQHNDDPISVHAQWSPDCEYIQAIVDDNFIDSVRDKR
+YDTLIDPNVYQTLKDCGIPDYIIRHAHRKHIIQSGELFTDAVQCLSVIEKLYNFKDK"
+          }
+        },
+        {
+          id {
+            local str "Subject_31"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61960.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61960.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 492,
+            seq-data ncbieaa "MYDYIDYKLLFFGEDVIHRILQIRNQALFVINGIKKVQEHDNLLFSKE
+KIYTVNNVMELASCTASDDDADADTNNPILMDIIGVLIYGILNEGWSESTMRCIENELVDKCLVHKYITEEEYRYCRK
+KYNNSDNDKSKNDNIPYIIDFLWNMCYFNKLYRDRYLNKNMTLRLIEKSTSSMSRNALIKHDLSFFHLPTAAGIAIYE
+YLTHRDTNLRLVKEAAKTLVAEEKYLRYSRNIRNTIEDDTTNKKKNIRLAYVNKRSKTSCALLLCKSASKINYSKKDT
+KSKLFNLQWLFNVTDIQNQKFKKCLGVIYDSIDVGDMLPNTSLSQKSKPLDWYYRFMNTGIVPFDQHNGCSEFRQYHR
+EEGNEEKEHIYHNIDEENTYVIMNINTNTIDRVTPTTLSNTDVNTVQIHNKSMKHYNTLPVDKKKNRTHRTETFTPTV
+PSSSMMMSSSVSVYDIPKKATTSIYNCKSLMIQCHKCQRYNISPYVVKCNRCRC"
+          }
+        },
+        {
+          id {
+            local str "Subject_32"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61961.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+                }
+              }
+            },
+            title "BDT61961.1 hypothetical protein [Penaeus monodon
+ majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 207,
+            seq-data ncbieaa "MREYGKIYYSSMVGLLNALTEAGYPISIHDLSDRDGIKSSYRDDGVII
+THASEEALCLTLYCALGLLMEKGITVNLKRSNAAEYLLHFPTVKVEVRPNCETNTIVRGRIQRNDDRVAIGEEPVNTS
+DIYNGGKAYVYQNKALYSHSSGHLKTVIIESKGRGHTANDTLSTVLYIDSYDRSRLPDIIEDIAKYPLKFFRAIILRG
+KLL"
+          }
+        },
+        {
+          id {
+            local str "Subject_33"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61962.1 baculoviral IAP repeat-containing
+ protein [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61962.1 baculoviral IAP repeat-containing protein
+ [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 577,
+            seq-data ncbieaa "MDISHPNSFLQQEEYRLTTFSEHETSPIDTTRVYRNMPFVSYDCLRYE
+EKRLGTFIDWPHEWLKPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQ
+GNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSPDETGLYQHSGPKRSDFTTLDSRLKSYVEGWPIL
+GLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTAST
+TIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLEDVIHR
+MSVTENRVADNCSESTEREPSYGGTDISSSIFQQQAPIFPSTSETMGNRVASIQSLPSESTEVELLSQQQQVSILPST
+PEIIRQQASIFPTAPLNTTLSSSSSSSERENTETEANHILQIVEEIISQVSEEEKEGYEEKEGYEEKEEFKSRQSYEQ
+LKEELERMREDRTCKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDIKHVCRAIVS"
+          }
+        },
+        {
+          id {
+            local str "Subject_34"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61963.1 baculoviral IAP repeat-containing
+ protein [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61963.1 baculoviral IAP repeat-containing protein
+ [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 728,
+            seq-data ncbieaa "MSDSGNMDNATDIDRDLTRMCEETHRANTYGDYDQYVHHPKIMAKAGF
+YELDKRLICFRCGLNIDIDDIGKTDDIVEVHQTKRPSCVFARNLPSLPRSRLVVASDLRYETKRLETFIDWPLGEVIE
+ARDLAAAGFFYSRRNVECICFCCKVRISFKPCTRHGCCARHASTSQYITEKHLNSAYCDFAMEKVTGNVPIRINKIIS
+KIIGHQETDNEKNSCGNNEGRSRGASGEEDGGDSRESENDSSSRISAGNILSEMGIESYSGPEHENFVTPISRKYTYD
+DWPLGDIMLPKKLIAAGFFYSGYGDHVNCFHCGVGIRNWEKGDDPWTQHAMWNPECHYVRTLMGQTFIDTAKTVKNVL
+FRKPTRERTYSVTDEDWNAVMGLDITKDLLISLFPVAAVRDCVREQILVHKIPFITKHEGLYYVREKIAAYGNMDITL
+AKKISRMSTEYIQNYHAVYSVMYFLMDLKRIFIMNQDVDRNVSIDLFKPDQSLFLFRQPSYNPAATPMYQYRLSFTIP
+HPSHNSDFKFQQEYRIALEQLNRGLPVHVTNLYFRERDSISLFDIWNHLIRLSIIINDNNRSSGSSINSSNNNNNNNN
+NNNNNNNSSSSSSSSSSSSNNNNNNNNNNNNNNNNNNDDDDDDDDDDDKNSYDVFSVIREHHQRQEDEERSSEIKEAP
+DSVIGDRYLCKICLNSCVKTVTLPCRHMSCCGNCIVTQTKCPICRKKIKYTLEPYL"
+          }
+        },
+        {
+          id {
+            local str "Subject_35"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT61964.1 baculoviral IAP repeat-containing
+ protein [Penaeus monodon majanivirus A]"
+                }
+              }
+            },
+            title "BDT61964.1 baculoviral IAP repeat-containing protein
+ [Penaeus monodon majanivirus A]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 719,
+            seq-data ncbieaa "MSQNIPLHIDDQQYHVDFSGMTSEYNRRMTFGHESSSYVINPKILAKA
+GFMRCGLSSKQYIVCVDCHLYIDIDTIMPWDDIVKIHKDKNPLCLLARNLPPLPRSKIFENRFDPATGLPADLRYEIK
+RLETFIDWPNKVVQAKDLAAAGFFYTRDTTCCICFSCHKYMNFSYDKPIVIRDMHLKKSPNCKFAQGKSVGNIPIRMS
+NILNSIVNQKRVAVTSATATATATATVDQEDLIKTRYEYAGPLHDYYKTTQSRLESFLNWPHRHRQKIEALVEAGFYY
+LGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSRIPMWRHSSSTSQDTSEHDWNI
+LLGLDYTKRLILVQGFPVVAVRDALCEQILQTGIPFSREVDCTSAVRKKIESYEEKNNNKLLTAERIANYRTVYAVMR
+FIQMVMGKSYNRSYPTGCIENSVYLYKQSAFNDSGDPNIPMYRHEISFNLPYPDHTYTGYHIESEYRMTLDRLNSYEI
+TSRISSILDQEQSASLTAIWGYLVRQTTTTKKTNTSASNVDRGDITNALDSVGEAAAAAAAAVDEEEELEVEEEEEEL
+EVEEEEEDIVVSELENQSAIGITIAPVPTMTPIPTVHTNGRDLIFHTRLYIISNANSRRVVPYQNFNSIIRGEPDIQH
+RQFNNRDEEAESKLSRSTGIEEGSMVNQTRTSIKTRGISVRSAWMPK"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 8677446
+        }
+      },
+      program-options {
+        {
+          name "RequiredStart",
+          value integer 500
+        },
+        {
+          name "RequiredEnd",
+          value integer 2799
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 300,
+                  to 699,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame plus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 300,
+                  to 699,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame minus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 1500,
+                  to 1799,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame plus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 1500,
+                  to 1799,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame minus1
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 588
+          },
+          {
+            id str "blast_score",
+            value int 588
+          },
+          {
+            id str "e_value",
+            value real { 200609464606919, 10, -83 }
+          },
+          {
+            id str "bit_score",
+            value real { 231105582919448, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 128
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 198
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 399255874673629, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              int {
+                from 2635,
+                to 2706,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 3,
+                to 26,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 27,
+                to 30,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              int {
+                from 2311,
+                to 2634,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 31,
+                to 138,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 139,
+                to 163,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              int {
+                from 2290,
+                to 2310,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 164,
+                to 170,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              int {
+                from 2284,
+                to 2289,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_33"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              int {
+                from 2257,
+                to 2283,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 171,
+                to 179,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              int {
+                from 2254,
+                to 2256,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_33"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              int {
+                from 2203,
+                to 2253,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 180,
+                to 196,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 197,
+                to 197,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              int {
+                from 2191,
+                to 2202,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 198,
+                to 201,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              int {
+                from 2188,
+                to 2190,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_33"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              int {
+                from 1984,
+                to 2187,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 202,
+                to 269,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 270,
+                to 275,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              int {
+                from 1945,
+                to 1983,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 276,
+                to 288,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 289,
+                to 307,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              int {
+                from 1801,
+                to 1944,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 308,
+                to 355,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 186
+          },
+          {
+            id str "blast_score",
+            value int 186
+          },
+          {
+            id str "e_value",
+            value real { 385634068301337, 10, -31 }
+          },
+          {
+            id str "bit_score",
+            value real { 762553534006717, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 30
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 43
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 781070496083551, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_33"
+            },
+            loc {
+              int {
+                from 1324,
+                to 1491,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 521,
+                to 576,
+                strand unknown,
+                id local str "Subject_33"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 445
+          },
+          {
+            id str "blast_score",
+            value int 445
+          },
+          {
+            id str "e_value",
+            value real { 421314407679794, 10, -63 }
+          },
+          {
+            id str "bit_score",
+            value real { 176022043563266, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 110
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 186
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 426671018276762, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 2674,
+                to 2796,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 57,
+                to 97,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 2641,
+                to 2673,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_35"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 2596,
+                to 2640,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 98,
+                to 112,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 113,
+                to 119,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 2449,
+                to 2595,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 120,
+                to 168,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 169,
+                to 169,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 2260,
+                to 2448,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 170,
+                to 232,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 233,
+                to 233,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 2233,
+                to 2259,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 234,
+                to 242,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 243,
+                to 250,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 1954,
+                to 2232,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 251,
+                to 343,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 344,
+                to 352,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 1912,
+                to 1953,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 353,
+                to 366,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 367,
+                to 367,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 1828,
+                to 1911,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 368,
+                to 395,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 60
+          },
+          {
+            id str "blast_score",
+            value int 60
+          },
+          {
+            id str "e_value",
+            value real { 387402388614454, 10, -16 }
+          },
+          {
+            id str "bit_score",
+            value real { 277202068350852, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 22
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 34
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 846344647519582, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 2266,
+                to 2286,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 15,
+                to 21,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 22,
+                to 22,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 2257,
+                to 2265,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 23,
+                to 25,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 2239,
+                to 2256,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_35"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 2203,
+                to 2238,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 26,
+                to 37,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 2182,
+                to 2202,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_35"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 2125,
+                to 2181,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 38,
+                to 56,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 57,
+                to 58,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_35"
+            },
+            loc {
+              int {
+                from 2104,
+                to 2124,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 59,
+                to 65,
+                strand unknown,
+                id local str "Subject_35"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 324
+          },
+          {
+            id str "blast_score",
+            value int 324
+          },
+          {
+            id str "e_value",
+            value real { 795733155599525, 10, -48 }
+          },
+          {
+            id str "bit_score",
+            value real { 129412894877266, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 98
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 176
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 425365535248042, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2674,
+                to 2787,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 54,
+                to 91,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2638,
+                to 2673,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_34"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2599,
+                to 2637,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 92,
+                to 104,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2596,
+                to 2598,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_34"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2551,
+                to 2595,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 105,
+                to 119,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 120,
+                to 120,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2476,
+                to 2550,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 121,
+                to 145,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2473,
+                to 2475,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_34"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2443,
+                to 2472,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 146,
+                to 155,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 156,
+                to 168,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2407,
+                to 2442,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 169,
+                to 180,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2404,
+                to 2406,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_34"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2329,
+                to 2403,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 181,
+                to 205,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 206,
+                to 239,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2257,
+                to 2328,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 240,
+                to 263,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2254,
+                to 2256,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_34"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 1981,
+                to 2253,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 264,
+                to 354,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 355,
+                to 361,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 1942,
+                to 1980,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 362,
+                to 374,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 375,
+                to 375,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 1822,
+                to 1941,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 376,
+                to 415,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 126
+          },
+          {
+            id str "blast_score",
+            value int 126
+          },
+          {
+            id str "e_value",
+            value real { 702455278561944, 10, -24 }
+          },
+          {
+            id str "bit_score",
+            value real { 531433788456305, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 44
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 76
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 216488250652742, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2491,
+                to 2586,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 22,
+                to 53,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2485,
+                to 2490,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_34"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2437,
+                to 2484,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 54,
+                to 69,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 70,
+                to 71,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2383,
+                to 2436,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 72,
+                to 89,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2368,
+                to 2382,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_34"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2338,
+                to 2367,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 90,
+                to 99,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2263,
+                to 2337,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_34"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2236,
+                to 2262,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 100,
+                to 108,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2224,
+                to 2235,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_34"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 2101,
+                to 2223,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 109,
+                to 149,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 121
+          },
+          {
+            id str "blast_score",
+            value int 121
+          },
+          {
+            id str "e_value",
+            value real { 238782519777221, 10, -23 }
+          },
+          {
+            id str "bit_score",
+            value real { 512173809660437, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 19
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 33
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 650522193211488, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_34"
+            },
+            loc {
+              int {
+                from 1333,
+                to 1470,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 680,
+                to 725,
+                strand unknown,
+                id local str "Subject_34"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 298
+          },
+          {
+            id str "blast_score",
+            value int 298
+          },
+          {
+            id str "e_value",
+            value real { 199472894561354, 10, -47 }
+          },
+          {
+            id str "bit_score",
+            value real { 119397705903415, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 74
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 87
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 12902088772846, 10, -12 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_32"
+            },
+            loc {
+              int {
+                from 745,
+                to 984,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 79,
+                strand unknown,
+                id local str "Subject_32"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_32"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 80,
+                to 80,
+                strand unknown,
+                id local str "Subject_32"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_32"
+            },
+            loc {
+              int {
+                from 700,
+                to 744,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 81,
+                to 95,
+                strand unknown,
+                id local str "Subject_32"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 215
+          },
+          {
+            id str "blast_score",
+            value int 215
+          },
+          {
+            id str "e_value",
+            value real { 122274903790554, 10, -36 }
+          },
+          {
+            id str "bit_score",
+            value real { 87426141102275, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 37
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 54
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 104216710182768, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_10"
+            },
+            loc {
+              int {
+                from 1996,
+                to 2223,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 86,
+                to 161,
+                strand unknown,
+                id local str "Subject_10"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 98
+          },
+          {
+            id str "blast_score",
+            value int 98
+          },
+          {
+            id str "e_value",
+            value real { 350762333578339, 10, -21 }
+          },
+          {
+            id str "bit_score",
+            value real { 423577907199446, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 31
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 45
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 121187989556136, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_10"
+            },
+            loc {
+              int {
+                from 2602,
+                to 2640,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 75,
+                to 87,
+                strand unknown,
+                id local str "Subject_10"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_10"
+            },
+            loc {
+              int {
+                from 2578,
+                to 2601,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_10"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_10"
+            },
+            loc {
+              int {
+                from 2539,
+                to 2577,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 88,
+                to 100,
+                strand unknown,
+                id local str "Subject_10"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_10"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 101,
+                to 101,
+                strand unknown,
+                id local str "Subject_10"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_10"
+            },
+            loc {
+              int {
+                from 2389,
+                to 2538,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 102,
+                to 151,
+                strand unknown,
+                id local str "Subject_10"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_10"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 152,
+                to 154,
+                strand unknown,
+                id local str "Subject_10"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_10"
+            },
+            loc {
+              int {
+                from 2374,
+                to 2388,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 155,
+                to 159,
+                strand unknown,
+                id local str "Subject_10"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 210
+          },
+          {
+            id str "blast_score",
+            value int 210
+          },
+          {
+            id str "e_value",
+            value real { 328778247717559, 10, -35 }
+          },
+          {
+            id str "bit_score",
+            value real { 855001432226882, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 69
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 129
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 336592689295039, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2533,
+                to 2598,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 9,
+                to 30,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2530,
+                to 2532,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_30"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2506,
+                to 2529,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 31,
+                to 38,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2503,
+                to 2505,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_30"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2467,
+                to 2502,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 39,
+                to 50,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2464,
+                to 2466,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_30"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2455,
+                to 2463,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 51,
+                to 53,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 54,
+                to 60,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2317,
+                to 2454,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 61,
+                to 106,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 107,
+                to 108,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2287,
+                to 2316,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 109,
+                to 118,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2233,
+                to 2286,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_30"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2167,
+                to 2232,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 119,
+                to 140,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2164,
+                to 2166,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_30"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 1978,
+                to 2163,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 141,
+                to 202,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 1945,
+                to 1977,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_30"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 1837,
+                to 1944,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 203,
+                to 238,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 90
+          },
+          {
+            id str "blast_score",
+            value int 90
+          },
+          {
+            id str "e_value",
+            value real { 659696965914919, 10, -20 }
+          },
+          {
+            id str "bit_score",
+            value real { 392761941126058, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 26
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 57
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 153825065274151, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2641,
+                to 2721,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 82,
+                to 108,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2623,
+                to 2640,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_30"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2380,
+                to 2622,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 109,
+                to 189,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 72
+          },
+          {
+            id str "blast_score",
+            value int 72
+          },
+          {
+            id str "e_value",
+            value real { 103243257793052, 10, -17 }
+          },
+          {
+            id str "bit_score",
+            value real { 323426017460934, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 15
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 24
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 572193211488251, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2770,
+                to 2793,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 153,
+                to 160,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2764,
+                to 2769,
+                strand minus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_30"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_30"
+            },
+            loc {
+              int {
+                from 2674,
+                to 2763,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 161,
+                to 190,
+                strand unknown,
+                id local str "Subject_30"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 46
+          },
+          {
+            id str "blast_score",
+            value int 46
+          },
+          {
+            id str "e_value",
+            value real { 190542607578897, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 223274127722423, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 8
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 15
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 389425587467363, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_2"
+            },
+            loc {
+              int {
+                from 1402,
+                to 1479,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 1322,
+                to 1347,
+                strand unknown,
+                id local str "Subject_2"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 42
+          },
+          {
+            id str "blast_score",
+            value int 42
+          },
+          {
+            id str "e_value",
+            value real { 583082582020456, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 207866144685728, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 9
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 13
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 337206266318538, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_21"
+            },
+            loc {
+              int {
+                from 2316,
+                to 2381,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 369,
+                to 390,
+                strand unknown,
+                id local str "Subject_21"
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 500,
+              to 698,
+              id local str "Query_1"
+            },
+            {
+              from 998,
+              to 1082,
+              id local str "Query_1"
+            },
+            {
+              from 1250,
+              to 1319,
+              id local str "Query_1"
+            },
+            {
+              from 1499,
+              to 1799,
+              id local str "Query_1"
+            },
+            {
+              from 1916,
+              to 1961,
+              id local str "Query_1"
+            },
+            {
+              from 2714,
+              to 2732,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 501,
+              to 699,
+              id local str "Query_1"
+            },
+            {
+              from 1044,
+              to 1086,
+              id local str "Query_1"
+            },
+            {
+              from 1275,
+              to 1332,
+              id local str "Query_1"
+            },
+            {
+              from 1500,
+              to 1797,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 502,
+              to 697,
+              id local str "Query_1"
+            },
+            {
+              from 952,
+              to 973,
+              id local str "Query_1"
+            },
+            {
+              from 1147,
+              to 1180,
+              id local str "Query_1"
+            },
+            {
+              from 1498,
+              to 1798,
+              id local str "Query_1"
+            },
+            {
+              from 1987,
+              to 2029,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1501,
+              to 1800,
+              id local str "Query_1"
+            },
+            {
+              from 1252,
+              to 1308,
+              id local str "Query_1"
+            },
+            {
+              from 787,
+              to 822,
+              id local str "Query_1"
+            },
+            {
+              from 505,
+              to 699,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2520,
+              to 2543,
+              id local str "Query_1"
+            },
+            {
+              from 1995,
+              to 2021,
+              id local str "Query_1"
+            },
+            {
+              from 1503,
+              to 1799,
+              id local str "Query_1"
+            },
+            {
+              from 1437,
+              to 1469,
+              id local str "Query_1"
+            },
+            {
+              from 1389,
+              to 1424,
+              id local str "Query_1"
+            },
+            {
+              from 1257,
+              to 1298,
+              id local str "Query_1"
+            },
+            {
+              from 1152,
+              to 1199,
+              id local str "Query_1"
+            },
+            {
+              from 504,
+              to 701,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2288,
+              to 2332,
+              id local str "Query_1"
+            },
+            {
+              from 1922,
+              to 1954,
+              id local str "Query_1"
+            },
+            {
+              from 1502,
+              to 1801,
+              id local str "Query_1"
+            },
+            {
+              from 1127,
+              to 1162,
+              id local str "Query_1"
+            },
+            {
+              from 503,
+              to 700,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus3
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 8677446",
+      "Effective search space used: 8677446",
+      "Length adjustment: 60"
+    }
+  }
+}

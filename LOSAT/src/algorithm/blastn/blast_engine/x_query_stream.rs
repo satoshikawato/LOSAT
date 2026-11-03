@@ -87,7 +87,7 @@
 //! Where the switch does not act (`Off`; the records are read before the search as without it):
 //! where the reports are written after the loop (LOSAT_X_RPTSTREAM off, or one of its reasons that
 //! the search shows before the reading: several formats or a file sink, verbose or debug output,
-//! BLAST XML, the custom tabular reports, `x_rpt_stream::refused_before_reading`; every record is
+//! BLAST XML, `x_rpt_stream::refused_before_reading`; every record is
 //! then read by a writer after the search, so the records would all be held anyway and the second
 //! reading would only cost time), standard input (`-query -`, also with `-subject -`), a query
 //! that is not a regular file (a named pipe, a character device such as `/dev/stdin`, a socket:

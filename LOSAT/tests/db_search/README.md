@@ -17,6 +17,9 @@ FASTA files:
   reads the stored O (26), which is not the X the query holds for its own O, so `q_o` against `s_o` is not
   "near identical", the subject is SEG-filtered and scores 266 bits; against `s_x` it scores 307 (and
   `-subject` gives 307 for both).
+- `o_stored_bx_q.fna`: `s_x` back-translated with its twelve X as `NNN` codons, the BLASTX query of `db.o_stored.bx.8`
+  (BLASTX reads the stored O of `s_o` as stored, 154 identities; `-subject o_stored.faa` reads it as X, 166, row
+  `pyl.blastx.ostored.8` of `outfmt0_manifest.tsv`).
 - `p3.faa`: records p01, p03 and p08 of `LOSAT/tests/seqdb/prot.faa`, in that order.
 - `d1_q.faa`: D1, a hit that `-db` keeps and `-subject` drops. Two proteins of `LOSAT/tests/fasta/WSSV.faa`
   (YP_009220551.1 and YP_009220614.1: for each, NCBI `blastp -db paja -outfmt 6` prints 2 rows and
@@ -402,7 +405,7 @@ formatters do not find again) and the two volumes `ids/njoined_a` and `ids/njoin
 `ids/njoined.nal` (`gb|AF000040|` and `gb|AF000040.1|`, whose hits NCBI's XML and outfmt 0 join). Queries:
 `LOSAT/tests/seqid/fasta/qnucl.fa` (BLASTN, TBLASTX) and `qprot.fa` (TBLASTN); the second query of each has
 no hit. TBLASTN and TBLASTX run with `-max_hsps 1` to keep the frozen files small. `ids/nambig_v4` (from
-`ids/nambig.fna`: a record with ambiguity data) has no row; the unit test of blastn's report stream reads it.
+`ids/nambig.fna`: a record with ambiguity data) has no row; `tests/blastn_report_stream.rs` searches it.
 Rows `db.id.blastn.stream.q25.*` (line DBID, blastn's report stream of these databases): the 25 records of
 `ids/nucl.fna` as queries in batches of `BATCH_SIZE=1500`, each batch with hits.
 
@@ -419,6 +422,17 @@ do not compare equal, so NCBI finds no sequence); `gb|DDD00004|` before `gb|DDD0
 `pdb|2XYZ|AA` each find their own. LOSAT refuses such a sequence in the formats that read its Bioseq, unless the
 sequence found holds the same definition lines and letters (`pdup_ab`); `-negative_seqidlist
 seqidlist/sl_pfound_neg.txt` leaves `gb|AAA00001.1|` out of the search, and NCBI's lookup with it.
+
+The same record with other taxids (line DBID N1b; rows `db.id.*.found.taxid.*`): `make_ids.py --copytaxid-only`
+writes `ids/pdup_t` (`pdup.faa` with taxid 9606), `ids/pdup_u` (without one), `ids/pdup_n` and `ids/pdup_o` (both
+with taxid 99990, the last entry of the taxonomy databases of `../seqdb/taxdb`), `ids/ndup_a` and `ids/ndup_t`
+(`ndup.fna`, the back-translation of `pdup.faa`, without a taxid and with 9606), `ids/pdupe_a` and `ids/pdupe_t`
+(`pdupe.faa`, without a title, without a taxid and with 9606), and the aliases `ids/pdup_at.pal`, `ids/pdup_tu.pal`,
+`ids/pdup_no.pal`, `ids/pdupe_at.pal` and `ids/ndup_at.nal` (queries `pdup_q.faa` and `ndup_q.fna`). NCBI shows for
+both copies the one its lookup gives first, with its taxids: the same rows where no report writes taxids, which
+LOSAT writes; LOSAT refuses the sequence in the formats of taxids and their names, for `pdupe_at` with the
+taxonomy database (a title made from the taxids), and with a taxonomy database on `BLASTDB` whose texts depend on
+the copy NCBI fetches (`bad_magic` for `pdup_at`, `offset_last_past_end` for the copies of 99990 in `pdup_no`).
 
 Sequences whose only Seq-id is `gnl|BL_ORD_ID|n` (line DBID N2a; rows `db.id.*.ord.*`): `make_ids.py` writes, from
 the FASTA of `ids/make_ord_fasta.py`, `ids/pord_v5` and `ids/pord_v4` from `ids/pord.faa` (two accessions, then

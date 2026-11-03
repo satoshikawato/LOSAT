@@ -100,6 +100,15 @@ pub enum FoundInstead {
     /// database, by ordinal id, that holds an id NCBI's scope takes for the Seq-align id: where
     /// both are reported, NCBI's formatters can show that one for it.
     AlsoHeld(u32),
+    /// Another sequence of the database, by ordinal id, with the same definition lines but for
+    /// their taxids and the same letters (the same record in two databases made with other
+    /// taxids), that the lookup gives first or that also holds the Seq-align id: NCBI's
+    /// formatters can show it for the subject, which only the reports that write the subject's
+    /// taxids show apart (`fetched`).
+    OtherTaxids(u32),
+    /// Such a sequence, also with the same taxids in another volume, that every report that
+    /// reads the Bioseq can show apart, for the reason given.
+    CopyApart(u32, CopyApart),
     /// Where NCBI's formatters may read the reported sequences one by one
     /// (`PRE_FETCH_SEQS_LIMIT`), another sequence of the database, by ordinal id, that holds an id
     /// the Seq-align id matches weakly (`seqid::id_scope::weak_keys`): where that one is read
@@ -113,6 +122,17 @@ pub enum FoundInstead {
     /// The lookup fails on a file of the database or on the id, with this message: NCBI's
     /// formatters stop with an exception.
     Failed(String),
+}
+
+/// Why the reports can show apart a copy of a subject with the same definition lines but for
+/// their taxids (`FoundInstead::CopyApart`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyApart {
+    /// A title can be made from the taxids (`ParsedSubject::title_reads_source`).
+    Title,
+    /// The taxonomy database writes a text at a lookup that the volume of the copy makes for
+    /// its taxids.
+    TaxonomyTexts,
 }
 
 /// One `HitDescr` of the XML2 and JSON formats (`s_SeqAlignToXMLHit`).
@@ -391,11 +411,27 @@ impl ParsedSubject {
     /// `Err` for a subject whose sequence NCBI's formatters cannot find by its Seq-align id
     /// (see `new` and `found_instead`): the formats that read the subject's Bioseq (outfmt 0, 5,
     /// 6, 7, 10, 13 to 16 and SAM, 17) refuse it; the Seq-annots and the archive (8, 9, 11, 12)
-    /// write the Seq-align id alone.
-    pub fn fetched(&self) -> Result<(), String> {
+    /// write the Seq-align id alone. `taxonomy`: whether a report writes the subject's taxids
+    /// or their names (outfmt 13 to 16, the tabular `staxid`, `staxids` and the names), which
+    /// alone refuse a sequence found as the same record with other taxids
+    /// (`FoundInstead::OtherTaxids`).
+    pub fn fetched(&self, taxonomy: bool) -> Result<(), String> {
         let id = || String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
         match (self.unfetchable, &self.found_instead) {
             (false, None) => Ok(()),
+            (false, Some(FoundInstead::OtherTaxids(_))) if !taxonomy => Ok(()),
+            (false, Some(FoundInstead::OtherTaxids(ordinal))) => Err(format!(
+                "has the Seq-align id {}, which database sequence {ordinal} also holds with the same definition lines and letters but other taxids (NCBI BLAST+ 2.17.0 can write that sequence's taxids and their names for it)",
+                id()
+            )),
+            (false, Some(FoundInstead::CopyApart(ordinal, CopyApart::Title))) => Err(format!(
+                "has the Seq-align id {}, which database sequence {ordinal} also holds with the same definition lines and letters but other taxids, from which NCBI BLAST+ 2.17.0 can make that sequence's title for it (a title made from the taxids with the taxonomy database, or the end of a protein title rewritten)",
+                id()
+            )),
+            (false, Some(FoundInstead::CopyApart(ordinal, CopyApart::TaxonomyTexts))) => Err(format!(
+                "has the Seq-align id {}, which database sequence {ordinal} also holds with the same definition lines and letters: where NCBI BLAST+ 2.17.0 shows that sequence for it, the volume of that sequence looks its taxids up, and the taxonomy database writes a text at such a lookup",
+                id()
+            )),
             (false, Some(FoundInstead::Sequence(ordinal))) => Err(format!(
                 "has the Seq-align id {}, by which NCBI BLAST+'s lookup gives database sequence {ordinal} first (NCBI BLAST+ 2.17.0 writes that sequence's names and letters, or stops)",
                 id()
@@ -553,11 +589,37 @@ impl ParsedSubject {
     /// subject Bioseq's title (`x_AdjustProteinTitleSuffix`, which LOSAT does not port): a
     /// protein whose Bioseq has a source and whose title ends in `]`.
     pub fn title_suffix_adjusted(&self, protein: bool) -> bool {
+        protein && self.has_source() && self.title_ends_in_bracket()
+    }
+
+    /// Whether the subject Bioseq's title ends in `]` before NCBI's trimmed end
+    /// (`title_suffix_adjusted`).
+    fn title_ends_in_bracket(&self) -> bool {
         let title = self.target().title.as_deref().unwrap_or_default();
         let end = title
             .iter()
             .rposition(|byte| !b".,;~ ".contains(byte) && !byte.is_ascii_whitespace());
-        protein && self.has_source() && end.is_some_and(|end| title[end] == b']')
+        end.is_some_and(|end| title[end] == b']')
+    }
+
+    /// Whether a title that the reports write of the subject can depend on its Bioseq's
+    /// source, the taxids of its definition lines, whatever they are (`title_from_taxonomy`,
+    /// `title_suffix_adjusted`): a title made from the source where `taxdb.bti` is found
+    /// (`taxdb_found`; without it NCBI 2.17.0 writes the title of a Bioseq without a source,
+    /// probe of line DBID N1b, `blastdb-ids-20261021/R/copytaxid/p1`), and a protein title ending
+    /// in `]` where a report shows the generated title without `fLeavePrefixSuffix` (the outfmt 0
+    /// heading of a set with a definition line without a title, the tabular word of an id that
+    /// `seq_id_list` replaces).
+    pub fn title_reads_source(&self, protein: bool, taxdb_found: bool) -> bool {
+        let title = self.target().title.as_deref().unwrap_or_default();
+        let replaced =
+            self.set.deflines.iter().any(|defline| {
+                matches!(seq_id_list(&defline.ids, b"x"), std::borrow::Cow::Owned(_))
+            });
+        (taxdb_found && bioseq_title_from_source(title, &self.bioseq_ids()))
+            || (protein
+                && self.title_ends_in_bracket()
+                && (self.heading_generates_title() || replaced))
     }
 
     /// Whether the outfmt 0 alignment heading shows the subject Bioseq's generated title: some
@@ -1413,6 +1475,37 @@ mod tests {
             .collect()
     }
 
+    // Line DBID N1b: the titles whose bytes the taxids of the record can change, whatever the
+    // record's taxids are (`title_reads_source`).
+    #[test]
+    fn a_title_reads_the_source_where_it_is_made_from_it_or_its_end_is_rewritten() {
+        let titled = |titles: &[&str]| {
+            let deflines = titles
+                .iter()
+                .enumerate()
+                .map(|(line, title)| BlastDefline {
+                    title: Some(title.as_bytes().to_vec()),
+                    ids: vec![gb(&format!("AF00000{line}"), 1)],
+                    ..BlastDefline::default()
+                })
+                .collect();
+            ParsedSubject::new(DeflineSet { deflines }).unwrap()
+        };
+        // A title made from the source names its organism with the taxonomy database only.
+        let empty = titled(&[""]);
+        assert!(empty.title_reads_source(true, true));
+        assert!(empty.title_reads_source(false, true));
+        assert!(!empty.title_reads_source(true, false));
+        // A protein title ending in ']' where the heading generates the title (another line
+        // without a title), with or without the taxonomy database; not for a nucleotide one.
+        let bracket = titled(&["alpha, partial [Homo sapiens]"]);
+        assert!(!bracket.title_reads_source(true, true));
+        let generated = titled(&["alpha, partial [Homo sapiens]", ""]);
+        assert!(generated.title_reads_source(true, false));
+        assert!(!generated.title_reads_source(false, false));
+        assert!(!titled(&["alpha", ""]).title_reads_source(true, true));
+    }
+
     // Probes G01, G05 of line DI-8 (`GetFilteredRedundantSeqids`, `x_FillAlnDispParams`).
     #[test]
     fn a_positive_list_names_the_text_ids_or_the_gis() {
@@ -1485,7 +1578,7 @@ mod tests {
         ] {
             let subject = ParsedSubject::new(one_defline(vec![id])).unwrap();
             assert!(!subject.unfetchable(), "{subject:?}");
-            assert!(subject.fetched().is_ok());
+            assert!(subject.fetched(false).is_ok());
         }
         // A local id that alone decides the definition line of the Bioseq: no lookup finds it.
         let shown = lines(vec![
@@ -1493,14 +1586,14 @@ mod tests {
             vec![ParsedSeqId::Gi(777)],
         ]);
         assert!(shown.unfetchable());
-        let error = shown.fetched().unwrap_err();
+        let error = shown.fetched(false).unwrap_err();
         assert!(
             error.contains("Seq-align id gi|777, by which NCBI BLAST+'s formatters do not find"),
             "{error}"
         );
         // A GI in the set makes the GI the Seq-align id.
         let with_gi = one_defline(vec![ParsedSeqId::Gibbsq(123), ParsedSeqId::Gi(7)]);
-        assert!(ParsedSubject::new(with_gi).unwrap().fetched().is_ok());
+        assert!(ParsedSubject::new(with_gi).unwrap().fetched(false).is_ok());
         let replaced = DeflineSet {
             deflines: vec![BlastDefline {
                 ids: vec![ParsedSeqId::Gi(7)],
@@ -1515,11 +1608,11 @@ mod tests {
     #[test]
     fn a_seq_align_id_by_which_ncbi_finds_another_sequence_or_none() {
         let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
-        assert!(subject.clone().found_instead(None).fetched().is_ok());
+        assert!(subject.clone().found_instead(None).fetched(false).is_ok());
         let error = subject
             .clone()
             .found_instead(Some(FoundInstead::Sequence(4)))
-            .fetched()
+            .fetched(false)
             .unwrap_err();
         assert!(
             error.contains("lookup gives database sequence 4 first"),
@@ -1528,14 +1621,14 @@ mod tests {
         let error = subject
             .clone()
             .found_instead(Some(FoundInstead::Nothing))
-            .fetched()
+            .fetched(false)
             .unwrap_err();
         assert!(error.contains("do not find the sequence"), "{error}");
         let error = subject
             .found_instead(Some(FoundInstead::Failed(
                 "DB contains no accession info.".into(),
             )))
-            .fetched()
+            .fetched(false)
             .unwrap_err();
         assert!(
             error.contains("whose lookup in the database fails (DB contains no accession info.;"),

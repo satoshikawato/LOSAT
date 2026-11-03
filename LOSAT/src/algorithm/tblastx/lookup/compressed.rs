@@ -1562,8 +1562,10 @@ fn compressed_table_fills_banks(
 /// positions after the current one by their row maxima, which a word reaches, so its neighbors
 /// are exactly the compressed words whose score reaches the threshold. Neither their number nor
 /// the word's own score depends on the order of its letters, so a count is kept per set of
-/// letters (`counts`, keyed by the number of each letter) and the letters of a proteome take a
-/// few tens of thousands of enumerations.
+/// letters (`counts`, at the set's rank among the sets of `word_length` letters that have a
+/// compressed letter) and the letters of a proteome take a few tens of thousands of enumerations.
+/// The kept counts are shared: threads that count words with one counter keep them for each other
+/// (two threads may count a set both; they keep the same count).
 pub(crate) struct CompressedWordCount {
     threshold: i32,
     word_length: usize,
@@ -1571,42 +1573,99 @@ pub(crate) struct CompressedWordCount {
     compress_table: [u8; BLASTAA_SIZE],
     matrix: CompressedScoreMatrix,
     info: CompressedNeighborInfo,
-    counts: rustc_hash::FxHashMap<u128, u64>,
+    /// Each residue's index among the residues that have a compressed letter; `u8::MAX` for the
+    /// others.
+    letter_index: [u8; BLASTAA_SIZE],
+    /// `binomial[n][k]` is C(n, k), for n below the residues with a compressed letter plus
+    /// `word_length` and k up to `word_length`.
+    binomial: Vec<[u32; X_MOST_WORD_LETTERS + 1]>,
+    /// Per rank of a set of letters, its count plus 1; 0 while it is not counted.
+    counts: Box<[std::sync::atomic::AtomicU32]>,
 }
+
+// No NCBI counterpart: the longest word of `compressed_lookup_parameters`.
+const X_MOST_WORD_LETTERS: usize = 7;
 
 impl CompressedWordCount {
     /// The counts of the table of `build_blosum62_compressed_lookup` with a threshold in NCBI's
     /// matrix units (as `try_build_blosum62_compressed_lookup` takes it).
     pub(crate) fn new(word_size: usize, scaled_threshold: i32) -> Option<Self> {
         let (compressed_alphabet_size, _) = compressed_lookup_parameters(word_size)?;
+        if word_size > X_MOST_WORD_LETTERS {
+            return None;
+        }
         let matrix = build_blosum62_compressed_score_matrix(compressed_alphabet_size)?;
+        let compress_table = build_compressed_translation(compressed_alphabet_size)?;
+        let mut letter_index = [u8::MAX; BLASTAA_SIZE];
+        let mut letters = 0usize;
+        for (index, &compressed) in letter_index.iter_mut().zip(&compress_table) {
+            if usize::from(compressed) < compressed_alphabet_size {
+                *index = letters as u8;
+                letters += 1;
+            }
+        }
+        // A set of `word_size` of the `letters` letters, sorted, a_0 <= ... <= a_{w-1}, has the
+        // rank sum C(a_i + i, i + 1) (the combinatorial number system of the increasing a_i + i,
+        // below letters + w - 1), one of C(letters + w - 1, w).
+        let mut binomial = vec![[0u32; X_MOST_WORD_LETTERS + 1]; letters + word_size];
+        for n in 0..binomial.len() {
+            binomial[n][0] = 1;
+            for k in 1..=word_size.min(n) {
+                binomial[n][k] = binomial[n - 1][k - 1] + binomial[n - 1][k];
+            }
+        }
+        let sets = binomial[letters + word_size - 1][word_size] as usize;
         Some(Self {
             threshold: scaled_threshold,
             word_length: word_size,
             compressed_alphabet_size,
-            compress_table: build_compressed_translation(compressed_alphabet_size)?,
+            compress_table,
             info: CompressedNeighborInfo::new(&matrix, compressed_alphabet_size),
             matrix,
-            counts: rustc_hash::FxHashMap::default(),
+            letter_index,
+            binomial,
+            counts: (0..sets)
+                .map(|_| std::sync::atomic::AtomicU32::new(0))
+                .collect(),
         })
     }
 
-    /// The words that `add_word_hits` adds for `word` (NCBISTDAA letters, `word_length` of them).
-    fn words(&mut self, word: &[u8]) -> u64 {
-        let mut letters = 0u128;
-        for &residue in word {
-            let compressed = self.compress_table.get(usize::from(residue));
-            if compressed.is_none_or(|&c| usize::from(c) >= self.compressed_alphabet_size) {
-                return 0;
+    /// The rank of the set of `word`'s letters; `None` when a letter has no compressed letter.
+    fn rank(&self, word: &[u8]) -> Option<usize> {
+        let mut sorted = [0u8; X_MOST_WORD_LETTERS];
+        for (index, &residue) in sorted.iter_mut().zip(word) {
+            *index = *self.letter_index.get(usize::from(residue))?;
+            if *index == u8::MAX {
+                return None;
             }
-            // 3 bits per letter (BLASTAA_SIZE of them) take the up to 7 letters of a word.
-            letters += 1u128 << (3 * u32::from(residue));
         }
-        if let Some(&words) = self.counts.get(&letters) {
-            return words;
+        let sorted = &mut sorted[..self.word_length];
+        sorted.sort_unstable();
+        Some(
+            sorted
+                .iter()
+                .enumerate()
+                .map(|(i, &index)| self.binomial[usize::from(index) + i][i + 1] as usize)
+                .sum(),
+        )
+    }
+
+    /// The words that `add_word_hits` adds for `word` (NCBISTDAA letters, `word_length` of them).
+    fn words(&self, word: &[u8]) -> u64 {
+        use std::sync::atomic::Ordering;
+        let Some(rank) = self.rank(word) else {
+            return 0;
+        };
+        let kept = &self.counts[rank];
+        match kept.load(Ordering::Relaxed) {
+            0 => {}
+            words_and_one => return u64::from(words_and_one - 1),
         }
         let words = self.count(word);
-        self.counts.insert(letters, words);
+        // At most 10^7 + 1 words (15 letters up to word size 6, 10 at 7).
+        if let Some(words_and_one) = u32::try_from(words).ok().and_then(|w| w.checked_add(1)) {
+            kept.store(words_and_one, Ordering::Relaxed);
+        }
         words
     }
 
@@ -1653,7 +1712,7 @@ impl CompressedWordCount {
     /// (`try_build_blosum62_compressed_lookup_with_capacity`), so such a table takes at most a
     /// quarter of the queries' words. Stops counting once they are more than that.
     fn fits(
-        &mut self,
+        &self,
         queries: &mut dyn Iterator<Item = &[u8]>,
         overflow_cell_capacity: usize,
     ) -> bool {
@@ -1675,7 +1734,7 @@ impl CompressedWordCount {
     /// overflow banks: a query batch's table, or the table of one of its query chunks (whose
     /// parts are pieces of the batch's queries). `false` when their words are more than four
     /// times the banks' cells, though the table might still fit.
-    pub(crate) fn fits_banks(&mut self, queries: &mut dyn Iterator<Item = &[u8]>) -> bool {
+    pub(crate) fn fits_banks(&self, queries: &mut dyn Iterator<Item = &[u8]>) -> bool {
         self.fits(queries, NCBI_OVERFLOW_CELL_CAPACITY)
     }
 }
@@ -2190,7 +2249,7 @@ mod tests {
         let matrix = build_blosum62_compressed_score_matrix(15).expect("compressed matrix");
         let info = CompressedNeighborInfo::new(&matrix, 15);
         for threshold in [0, 1100, 1600, 1930, 2000, 2400] {
-            let mut counter = CompressedWordCount::new(5, threshold).expect("word size 5");
+            let counter = CompressedWordCount::new(5, threshold).expect("word size 5");
             let mut table = BlastCompressedAaLookupTable::new(5, 0.0).expect("compressed lookup");
             table.threshold = threshold;
             table.overflow_cell_capacity = usize::MAX;
@@ -2219,6 +2278,44 @@ mod tests {
         }
     }
 
+    // (d2) Each set of 5 letters that have a compressed letter has its own rank
+    // (`CompressedWordCount::rank`), below the kept counts' length, whatever the order of the
+    // word's letters; a word with a letter that has none has no rank.
+    #[test]
+    fn compressed_word_count_ranks_each_set_of_letters_once() {
+        let counter = CompressedWordCount::new(5, 1100).expect("word size 5");
+        let letters: Vec<u8> = (0..BLASTAA_SIZE as u8)
+            .filter(|&residue| counter.letter_index[usize::from(residue)] != u8::MAX)
+            .collect();
+        assert_eq!(letters.len(), 23);
+        let mut ranked = vec![false; counter.counts.len()];
+        let n = letters.len();
+        for a in 0..n {
+            for b in a..n {
+                for c in b..n {
+                    for d in c..n {
+                        for e in d..n {
+                            let word = [a, b, c, d, e].map(|i| letters[i]);
+                            let rank = counter.rank(&word).expect("a rank");
+                            assert!(!ranked[rank], "{word:?}");
+                            ranked[rank] = true;
+                            let reordered = [word[3], word[0], word[4], word[2], word[1]];
+                            assert_eq!(counter.rank(&reordered), Some(rank));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(ranked.iter().all(|&r| r));
+        for residue in 0..BLASTAA_SIZE as u8 {
+            if counter.letter_index[usize::from(residue)] == u8::MAX {
+                let word = [letters[0], residue, letters[1], letters[2], letters[3]];
+                assert_eq!(counter.rank(&word), None);
+                assert_eq!(counter.words(&word), 0);
+            }
+        }
+    }
+
     // (e) The count clears a table exactly when a quarter of its words fits the capacity, and a
     // table it clears is not refused (`try_build_blosum62_compressed_lookup_with_capacity`).
     #[test]
@@ -2229,7 +2326,7 @@ mod tests {
             .iter()
             .map(|&(left, right)| &query[left as usize..=right as usize])
             .collect();
-        let mut counter = CompressedWordCount::new(5, LOW_THRESHOLD).expect("word size 5");
+        let counter = CompressedWordCount::new(5, LOW_THRESHOLD).expect("word size 5");
         let words: u64 = queries
             .iter()
             .flat_map(|query| query.windows(5))

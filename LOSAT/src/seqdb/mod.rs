@@ -1503,14 +1503,6 @@ impl SeqDb {
         self.volumes[volume].x_read_block_mapped(first, first + 1, ordinal)
     }
 
-    /// Whether the ambiguity data of nucleotide `ordinal` decode
-    /// (`Volume::check_ambiguity`: `SequenceBlock::ambiguity_runs`' error,
-    /// read without the letters).
-    pub fn check_ambiguity(&self, ordinal: u32) -> Result<(), SeqDbError> {
-        let (volume, oid) = self.find_volume(ordinal)?;
-        self.volumes[volume].check_ambiguity(oid, ordinal)
-    }
-
     /// The length in bases of nucleotide `ordinal`, read from the index and the last byte of
     /// its packed bases (no letters).
     pub fn nucleotide_length(&self, ordinal: u32) -> Result<usize, SeqDbError> {
@@ -1722,8 +1714,7 @@ impl SeqDb {
     /// EXPERIMENT (LOSAT_X_DBIDXREAD): the ordinal ids of the database cut
     /// into ranges of at most `max_seqs` sequences (at least one) inside one
     /// volume each, in order: the ranges that a check of every sequence's
-    /// header or ambiguity data reads one at a time
-    /// ([`SeqDb::visit_deflines`], [`SeqDb::visit_ambiguity`]).
+    /// header reads one at a time ([`SeqDb::visit_deflines`]).
     ///
     /// With a taxid list (`restrict_taxids`) a range is still `max_seqs` OIDs of a volume:
     /// the visits skip the OIDs that the list excludes, `first_ordinal` is the ordinal id of
@@ -1943,34 +1934,6 @@ impl SeqDb {
                 Some(ordinal) => {
                     visit(ordinal, self.sequence_header(range.volume, ordinal, header))
                 }
-                None => true,
-            },
-        )
-    }
-
-    /// EXPERIMENT (LOSAT_X_DBIDXREAD): calls `visit(ordinal, self.check_ambiguity(ordinal))`
-    /// for the sequences of `range` in order until `visit` returns false; returns whether every
-    /// call returned true. The offsets of the range are read at once
-    /// (`Volume::visit_ambiguity`).
-    pub fn visit_ambiguity(
-        &self,
-        range: BlockRange,
-        mut visit: impl FnMut(u32, Result<(), SeqDbError>) -> bool,
-    ) -> bool {
-        let Some(vol) = self.volumes.get(range.volume) else {
-            return range.is_empty().then_some(true).unwrap_or_else(|| {
-                visit(range.first_ordinal, Err(volume_range_error(range, self)))
-            });
-        };
-        if self.excludes_all(range) {
-            return true;
-        }
-        vol.visit_ambiguity(
-            range.first,
-            range.end,
-            range.first_ordinal,
-            &mut |oid, result| match self.range_ordinal(range, oid) {
-                Some(ordinal) => visit(ordinal, result),
                 None => true,
             },
         )

@@ -6,6 +6,7 @@ import { duplicateIds } from '../domain/dataset';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
 import { looksLikeOtherKind } from '../domain/sequence-kind';
 import { formatBytes, formatCount } from './format';
+import LosatLoader from './LosatLoader.vue';
 import RecordList from './RecordList.vue';
 
 const props = defineProps<{
@@ -54,7 +55,7 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
       </button>
     </div>
 
-    <p v-if="source.status === 'indexing'" class="muted">Reading the records…</p>
+    <p v-if="source.status === 'indexing'" class="muted"><LosatLoader />Reading the records…</p>
     <template v-else-if="source.status === 'failed'">
       <p class="error" :data-testid="`${testid}-error`">This input cannot be read: {{ source.error }}</p>
       <p v-if="needsDefline" class="hint">
@@ -76,7 +77,7 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
         :data-testid="`${testid}-check`"
         data-check="pending"
       >
-        Checking…
+        <LosatLoader />Checking…
       </p>
       <p v-else-if="source.check?.state === 'ok'" class="ok" :data-testid="`${testid}-check`" data-check="ok">
         <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7" /></svg>

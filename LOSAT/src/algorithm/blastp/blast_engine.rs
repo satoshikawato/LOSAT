@@ -6542,8 +6542,8 @@ fn x_block_search_refuses_nothing(
 // cells, and a batch's tables have no more words than the batch's offsets add
 // (`CompressedWordCount`): a batch whose words are at most four times the banks' cells cannot fill
 // them; a batch with more leaves the search to the reference path, which tests the batch exactly.
-// The batches are tested one by one, in groups on the pool's threads when it has more than one
-// (each group with its own counter); the outcome is whether all pass.
+// The batches are tested one by one, on the pool's threads when it has more than one, with one
+// counter whose kept counts serve them all; the outcome is whether all pass.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 fn x_block_words_fit(
     args: &ResolvedBlastpArgs,
@@ -6557,15 +6557,15 @@ fn x_block_words_fit(
         return true;
     }
     // The threshold as the table is built (`run_resolved_in_pool`).
-    let counter = || {
-        CompressedWordCount::new(
-            args.word_size,
-            crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
-        )
+    let Some(words) = CompressedWordCount::new(
+        args.word_size,
+        crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
+    ) else {
+        return false;
     };
     // The letters of the lookup query (`encode_protein_query_frame_with_seg`) where SEG does
     // not mask them; a lookup segment holds only those (`build_lookup_segments_for_context`).
-    let fits = |words: &mut CompressedWordCount, searched: &std::ops::Range<usize>| {
+    let fits = |searched: &std::ops::Range<usize>| {
         let encoded: Vec<EncodedProtein> = queries[searched.clone()]
             .iter()
             .map(|record| encode_protein_sequence(record.seq()))
@@ -6586,27 +6586,12 @@ fn x_block_words_fit(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     if pool.enabled() && pool.threads() > 1 {
-        // One group of consecutive batches per thread, each with its counter (whose kept counts
-        // serve the group's batches).
-        let group = searched_batches.len().div_ceil(pool.threads()).max(1);
-        return pool.install(|| {
-            searched_batches
-                .par_chunks(group)
-                .map(|batches| {
-                    counter().is_some_and(|mut words| {
-                        batches.iter().all(|searched| fits(&mut words, searched))
-                    })
-                })
-                .all(|fit| fit)
-        });
+        // The batches on the pool's threads, with the one counter (whose kept counts serve all
+        // batches).
+        return pool.install(|| searched_batches.par_iter().all(fits));
     }
     let _ = pool;
-    let Some(mut words) = counter() else {
-        return false;
-    };
-    searched_batches
-        .iter()
-        .all(|searched| fits(&mut words, searched))
+    searched_batches.iter().all(fits)
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the outfmt 0 report of the search of all queries refuses a
@@ -11139,7 +11124,8 @@ fn run_resolved_in_pool(
         titles.check_reported_titles(&hit_lists)?;
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
         // (the formats that read a subject's Bioseq need its sequence found by its Seq-align
-        // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids).
+        // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids; 13 to 16 and
+        // the tables of taxonomy fields write their taxids).
         titles.check_parsed_reports(
             &hit_lists,
             format_plans
@@ -11152,6 +11138,11 @@ fn run_resolved_in_pool(
                         | BlastpReport::Xml
                         | BlastpReport::Xml2(_)
                 )
+            }),
+            format_plans.iter().any(|outfmt| match outfmt {
+                BlastpReport::Xml2(_) => true,
+                BlastpReport::CustomTabular(spec) => spec.needs().taxonomy,
+                _ => false,
             }),
         )?;
     }

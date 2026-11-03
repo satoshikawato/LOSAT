@@ -428,25 +428,30 @@ pub(super) fn reported_subjects(
             warnings: Vec::new(),
             source: Default::default(),
         });
-        lengths.push(match stores {
-            SubjectLetters::Stream(stream) => stream.length(ordinal as usize),
-            SubjectLetters::Packed(stores) => stores
-                .get(ordinal as usize)
-                .with_context(|| format!("database sequence {ordinal} was not read"))?
-                .len(),
-            SubjectLetters::Records(_) | SubjectLetters::Lengths(_) => {
+        // The length of a sequence the reports read is its store's; of another, read from the
+        // index and its last byte (`XDbStream::read_length`, NCBI's `GetSeqLength`).
+        let stored = || {
+            let SubjectLetters::Packed(stores) = stores else {
                 unreachable!("a -db search holds its sequences")
+            };
+            stores
+                .get(ordinal as usize)
+                .with_context(|| format!("database sequence {ordinal} was not read"))
+        };
+        lengths.push(if letters {
+            let store = match stores {
+                SubjectLetters::Stream(stream) => stream.read(ordinal as usize)?,
+                _ => stored()?.clone(),
+            };
+            let length = store.len();
+            kept.push(store);
+            length
+        } else {
+            match stores {
+                SubjectLetters::Stream(stream) => stream.read_length(ordinal as usize)?,
+                _ => stored()?.len(),
             }
         });
-        if letters {
-            kept.push(match stores {
-                SubjectLetters::Stream(stream) => stream.read(ordinal as usize)?,
-                SubjectLetters::Packed(stores) => stores[ordinal as usize].clone(),
-                SubjectLetters::Records(_) | SubjectLetters::Lengths(_) => {
-                    unreachable!("a -db search holds its sequences")
-                }
-            });
-        }
     }
     if shown.joined && !parsed.is_empty() {
         for (query, hitlist) in hitlists.iter().enumerate() {
@@ -600,7 +605,10 @@ mod tests {
             )
             .unwrap()
         };
-        let whole = [stream.length(0), stream.length(1)];
+        let whole = [
+            stream.read_length(0).unwrap(),
+            stream.read_length(1).unwrap(),
+        ];
         let reported = of(false);
         assert_eq!(reported.lengths, whole);
         assert!(reported.stores.is_empty());

@@ -1635,11 +1635,11 @@ Rebuilding less:
   sequences, five volumes) with a 133 MB buffer of the largest volume while it is checked. The arrays are checked as
   before when the volume is opened (ascending offsets, the protein sentinel bytes, the nucleotide ambiguity offsets
   inside their sequence's data, the arrays inside the file), in one pass that reads 1 MiB at a time, with the same
-  errors in the same order. The checks of every title that the block search of `LOSAT_X_BPQBLOCK` and the report
-  streaming of `LOSAT_X_RPTSTREAM` (blastn) run before they start read the headers in ranges of 1,024 sequences (one read
-  of the index file and one read of the header file per MiB, `SeqDb::visit_deflines`) instead of two reads per sequence,
-  and blastn's ambiguity check reads the offsets of the same ranges at once (`SeqDb::visit_ambiguity`), the ambiguity
-  data of the sequences that have any as before. Every value read is the one of the held arrays, so blocks, reports and
+  errors in the same order. The checks of every title that the block search of `LOSAT_X_BPQBLOCK` runs before it
+  starts (and, until 2026-11-03, the report streaming of `LOSAT_X_RPTSTREAM` of blastn) read the headers in ranges of
+  1,024 sequences (one read of the index file and one read of the header file per MiB, `SeqDb::visit_deflines`) instead
+  of two reads per sequence (blastn's check also read the ambiguity data of every sequence in such ranges until
+  2026-11-03, when the check and its readers `SeqDb::check_ambiguity` and `visit_ambiguity` were removed). Every value read is the one of the held arrays, so blocks, reports and
   errors do not change; a read of the index file that fails after the volume was opened is a LOSAT error of the read of
   the block (or title) that needs it. After the open, every range of the arrays read again must keep the order the open
   checked (the header and sequence offsets ascending, each ambiguity offset inside its sequence's data): an index file
@@ -4678,26 +4678,41 @@ Scheduling (each value computed by one thread with the original function; order 
   counts the queries of every batch (NCBI's `m_QueriesFormatted`; `write_output_blastn_hitlists_to_writer`
   takes the count). NCBI's errors of a later batch (reader errors, an `eEOF` batch, a batch of queries
   without letters, `ErrorAfterInvalidBatches`, a header file that cannot be read) come after the reports of
-  the batches before in both paths. LOSAT's own refusals come before every report without the switch, so
-  with two or more batches the switch acts only where none can come after the first batch, and a subject
-  set's tabular ids, outfmt 0 titles and `-lcase_masking` masks are then made once; with one batch (the
-  first batch takes every query record) nothing is checked or made ahead (no refusal can follow its
-  batch). Otherwise the reports stay after the loop, and `off=` names why: `custom_tabular` (a tabular
-  field list or delimiter, or outfmt 10 or 20: `BlastnOutputFormat::CustomTabular`, whose refusals of
-  taxonomy names and stored data come in its one report call), `outputs` (hit records, a format
+  the batches before in both paths. LOSAT's own refusals of a reported subject come before every report
+  without the switch and, since 2026-11-03 (NCMEM1, drop-in DECISIONS 44), after the reports and query
+  warnings of the batches before with it, with the same text and exit status: nothing is read before the
+  search for them (until then one pass over a `-db`'s sequences, `x_streaming_refusal`, kept the reports
+  after the loop where one could come, and cost 0.63 s for the 225,777 sequences of mlst's database); as
+  NCBI reads them, a batch's report call (or its traceback, or its prefetch) checks the sequences it
+  reports before it writes a byte: a definition line that does not read as the reports read it, holds a
+  byte outside ' ' ..= '~' or gives no tabular id, a parsed Seq-id header that the reports refuse or two
+  sequences that outfmt 0 would join, ambiguity data that the traceback cannot decode, a taxid or a lookup
+  of the taxonomy database that the prefetch refuses, what a custom tabular report reads (the taxonomy
+  fields, the names, `sall*`), a subject set's tabular id and with `-parse_deflines` its parsed ids
+  (without `sall*` refused while the rows are made, after the rows of the queries before in both paths:
+  the same bytes). Where several sequences are refused, the one named is the refused batch's first, not
+  the search's. An error of NCBI's of the taxonomy database or of reading the database that a later
+  batch's prefetch or report meets likewise comes after the reports of the batches before, as NCBI's
+  loop writes them (without the switch after none). Any other input that LOSAT does not refuse gives the
+  same bytes either way; outfmt 17 writes its document only at the end, so a refused run writes none in
+  both. ABI v1 callers, which are streamed, get the reports of the batches before a refusal, then the
+  error. With two or more batches the switch still keeps the
+  reports after the loop where a refusal of the options or the query lengths could come after the first
+  batch, and a subject set's tabular ids (where LOSAT refuses none), outfmt 0 titles and `-lcase_masking`
+  masks are made once; with one batch (the first batch takes every query record) nothing is checked or made
+  ahead. Otherwise the reports stay after the loop, and `off=` names why: `outputs` (hit records, a format
   observer, a file sink, or two or more formats, which the library API allows on one stream and the batch
   writes would interleave: the Web adapter; the command line and ABI v1 are streamed), `debug` (`-verbose`,
   `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, `LOSAT_DEBUG_COORDS[_START]`, the blastn trace,
-  `LOSAT_WASI_THREADS_DEBUG`: `run.rs` `x_debug_output`), `scoring`
+  `LOSAT_WASI_THREADS_DEBUG`: `run.rs` `x_debug_output`), `xml` (outfmt 5, 15 and 16), `scoring`
   (no Karlin-Altschul values, or greedy gap costs LOSAT refuses), `chunk_size` (a negative `CHUNK_SIZE`),
-  `search_space` (`(db + n (2 q + 1)) (2 q + 1)` above 2^63 - 1, q the longest query: the overflow refusal
-  of the effective search space), `subject_ids` (a subject whose tabular id LOSAT refuses), and with
-  `-db`, which the switch reads in one pass over the database's sequences before the search, in the pool
-  (`database::x_streaming_refusal`): `titles` (a definition line that does not read as the reports read
-  it, holds a byte outside ' ' ..= '~' or gives no tabular id, as blastp's block search checks) and
-  `ambiguity` (a sequence whose ambiguity data the traceback cannot decode; the preliminary stage reads
-  only the 2-bit letters, so the traceback of the batch whose lists name the sequence decodes them first;
-  `SeqDb::check_ambiguity` reads only those bytes). With `LOSAT_TIMING` the `[TIMING]` blocks are printed
+  `ungapped_cutoff` (`-ungapped` with a query of 2^30 letters or more) and `search_space`
+  (`(db + n (2 q + 1)) (2 q + 1)` above 2^63 - 1, q the longest query: the overflow refusal of the
+  effective search space); the reasons `subject_ids`, `titles`, `joined`, `large_parsed`, `ambiguity` and
+  `taxonomy` are gone. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
+  streamed too (since 2026-11-03, NCMEM1; before, `off=custom_tabular`). Outfmt 20's line of the field names
+  comes with the first batch's
+  report (or, where an error of NCBI's stops the first batch, from the call of the off path). With `LOSAT_TIMING` the `[TIMING]` blocks are printed
   when the loop takes a batch, as before, so with the switch a block comes after the query warnings of the
   batches before it (the same lines in another order). Memory: a batch's lists, flags, masks, blocks,
   search spaces and its queries' warnings are dropped after its write; kept for the whole search, as without
@@ -4706,7 +4721,7 @@ Scheduling (each value computed by one thread with the original function; order 
   times the hit list size). With
   `LOSAT_X_STATS` and the switch, `[X_STATS] RPTSTREAM batches= queries= off= one_batch= check_s=`
   (`batches` written by the loop, `off` why the switch did not act or `none`, `one_batch` 1 where nothing was
-  checked, `check_s` the seconds of the checks, the `-db` pass included).
+  checked, `check_s` the seconds of the checks).
   Measured on the workstation (2x Xeon Gold 6338, powersave, node 1 CPUs 32-47 with the siblings idle,
   `numactl --membind`; `-outfmt 6 -out FILE`; both arms with `LOSAT_X_PAIRPARDISC`, `QBATCHPAR` (removed on 2026-10-28),
   `DIAGLV`, `PAIRPARFOLD`, `QDUSTPAR` and `DISCLUTPAR`, one binary, the arms alternating with the order
@@ -4731,16 +4746,16 @@ Scheduling (each value computed by one thread with the original function; order 
   batches, 2,201 rows), 16 threads: the checks 0.106-0.121 s (0.8 % of the 13.9 s search), wall 13.83 ->
   13.91 s (1.007, 0.990..1.031), max RSS 179 -> 173 MiB. Tests: the unit tests of `x_rpt_stream.rs` (a
   batch's part of the query input, every `off=` reason of `check` and the one-batch
-  case) and of `database.rs` (`streaming_needs_every_title_and_every_ambiguity_record_to_read`: a missing
-  header file and a refused title byte, and a raised ambiguity count in the old and the new format, whose
-  error equals the traceback's), `LOSAT/tests/blastn_report_stream.rs` (off / on equal in exit
+  case), `LOSAT/tests/blastn_report_stream.rs` (off / on equal in exit
   status, report or `-out` file, and standard error, with `BATCH_SIZE` 4,000: the three tasks x outfmt 0,
   6, 7 x 1 and 4 threads; `-out` files;
   `-query_loc`, `-subject_loc -lcase_masking` with lower case subject runs, `-max_target_seqs -max_hsps
   -subject_besthit`; a reader error and a batch of queries without letters after earlier batches; `-db`,
-  intact and with a refused title or a raised ambiguity count of a sequence that only the last batches hit
-  (`titles`, `ambiguity`: the refusal, no row); and the `subject_ids`, `search_space`, `scoring`,
-  `chunk_size` and `debug` cases) and `LOSAT/tests/blastn_report_stream_api.rs` (`run_local` with hit
+  intact and with a refused title or a raised ambiguity count of a sequence that only the last batches hit,
+  and a subject set with a refused id that only they hit (the refusal after the rows of the batches before,
+  which begin the rows of the same search not refused; the off bytes for queries that do not reach it);
+  parsed Seq-id databases refused in the first or the third batch; custom tabular reports; and the
+  `search_space`, `scoring`, `chunk_size` and `debug` cases) and `LOSAT/tests/blastn_report_stream_api.rs` (`run_local` with hit
   records and an observer, one and three formats: the formats, hits and observer ranges of one batch).
   Default ON since 2026-10-17 (perf/perfmb-default-bundle; workstation, perf-mb `logs/rptstream_report.md`,
   alternating rounds): blastn of 31,168 cDNAs against 3 Mb max RSS 502 -> 157 MiB at one thread (x1.006 wall), 638 ->
@@ -4812,7 +4827,7 @@ Scheduling (each value computed by one thread with the original function; order 
   part per thread is read (the size mixer's first batches are smaller than a part), and the records after the batch
   wait for the next batches. The switch also does not act (`off=reports`) where `LOSAT_X_RPTSTREAM` keeps the reports
   after the loop for a reason the search shows before the reading (several formats or a file sink, verbose or debug
-  output, BLAST XML, the custom tabular reports: `x_rpt_stream::refused_before_reading`): every record would be kept
+  output, BLAST XML: `x_rpt_stream::refused_before_reading`): every record would be kept
   for those reports, so reading twice would only cost time. A file changed between the readings so that a part no longer starts
   at a record start, ends elsewhere or has other lines is LOSAT's error at the batch that needs the part's first
   record. Without it the second reading ran on the loop's thread between the batches while the search's threads

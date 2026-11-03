@@ -291,16 +291,38 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
     Ok(stores)
 }
 
-/// The checks of `read_nucleotide_stores` without the copy (TBLASTN's `-db` search, which reads
-/// its subjects where it searches them, `x_read_nucleotide_store`). The
+/// What `x_check_nucleotide_stores` keeps of the lengths it reads: the number of sequences and
+/// the lengths of the first, of the longest and of all of them, not a length per sequence (a
+/// `u32` each was 529 MB on core_nt, held through the search).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct XChecked {
+    pub(crate) count: usize,
+    pub(crate) first: u32,
+    pub(crate) longest: u32,
+    pub(crate) total: u64,
+}
+
+impl XChecked {
+    fn add(&mut self, length: u32) {
+        if self.count == 0 {
+            self.first = length;
+        }
+        self.count += 1;
+        self.longest = self.longest.max(length);
+        self.total += u64::from(length);
+    }
+}
+
+/// The checks of `read_nucleotide_stores` without the copy (the `-db` searches of TBLASTN and
+/// TBLASTX, which read their subjects where they search them, `x_read_nucleotide_store`). The
 /// database is read in the same blocks, and every sequence's length and ambiguity runs are read
-/// with the same errors in the same order; only the lengths are kept, by ordinal id (a length
-/// that does not fit a signed 32-bit integer is an error of the read). The search
+/// with the same errors in the same order (a length that does not fit a signed 32-bit integer is
+/// an error of the read); the lengths are summed up (`XChecked`), not kept. The search
 /// fails the query batch that the copy would fail, with the same text. A block of one sequence (one longer than
 /// a block, or the last of its volume) is checked without its 2-bit data
 /// (`SeqDb::x_nucleotide_check`): a human chromosome is not read here only to be dropped.
-pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<u32>> {
-    let mut lengths = Vec::with_capacity(db.num_seqs() as usize);
+pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<XChecked> {
+    let mut checked = XChecked::default();
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, STORE_BLOCK_BYTES) {
         if range.len() == 1 {
@@ -317,7 +339,7 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
                     program,
                 )
             })?;
-            lengths.push(length as u32);
+            checked.add(length as u32);
             next_ordinal = range.end_ordinal();
             continue;
         }
@@ -326,11 +348,33 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
             let (length, _) = stored_parts(&block, i, range.first_ordinal + i as u32, program)?;
-            lengths.push(length as u32);
+            checked.add(length as u32);
         }
         next_ordinal = range.end_ordinal();
     }
-    Ok(lengths)
+    Ok(checked)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:312-322
+// ```c++
+//     int whole_bytes = int(end_offset - start_offset - 1);
+//
+//     // The last byte is partially full; the last two bits of
+//     // the last byte store the number of nucleotides in the
+//     // last byte (0 to 3).
+//
+//     char amb_char = 0;
+//     m_Seq->ReadBytes(& amb_char, end_offset - 1, end_offset);
+//
+//     int remainder = amb_char & 3;
+//     return (whole_bytes * 4) + remainder;
+// ```
+/// The length of nucleotide `ordinal` of `db`, read from the index and the last byte of its 2-bit
+/// data (`SeqDb::nucleotide_length`), as NCBI reads the length of a sequence it does not fetch:
+/// the length of the sequence's store, with the error of its read (`search_read_error`).
+pub(crate) fn x_nucleotide_length(db: &SeqDb, ordinal: u32, program: &str) -> Result<usize> {
+    db.nucleotide_length(ordinal)
+        .map_err(|error| search_read_error(error, program))
 }
 
 /// Sequence `ordinal` of `db` as `read_nucleotide_stores` packs
@@ -565,6 +609,95 @@ pub(crate) struct HeaderReader<'a> {
     /// Whether NCBI's formatters may read the reported sequences one by one
     /// (`prefetch_may_be_off`).
     prefetch_off: bool,
+    /// `SeqDb::taxdb_found`, asked at the first record found with other taxids (`copy_of`).
+    taxdb_found: std::cell::OnceCell<bool>,
+    /// `LookupTexts::of`, asked at the first record found with other taxids or in another
+    /// volume (`copy_of`).
+    lookup_texts: std::cell::OnceCell<LookupTexts>,
+}
+
+/// How a sequence of a database differs from another as the reports show them
+/// (`HeaderReader::copy_of`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecordCopy {
+    /// NCBI's formatters show the one as the other.
+    Same,
+    /// The same but where a report writes the taxids or their names.
+    OtherTaxids,
+    /// The same definition lines but for their taxids, and letters, that a report can still
+    /// show apart (`FoundInstead::CopyApart`).
+    Apart(crate::report::db_subject::CopyApart),
+    /// A report can show the one apart.
+    Differs,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:216-220
+// ```c++
+// bool CSeqDBTaxInfo::GetTaxNames(TTaxId           tax_id,
+//                                 SSeqDBTaxInfo  & info )
+// {
+// 	static CTaxDBFileInfo t;
+//     if (t.IsMissingTaxInfo()) return false;
+// ```
+/// What the lookups of the taxonomy database of the search path of a database write
+/// (`TaxdbRun`): the texts of opening it, once at the run's first lookup (the static
+/// `CTaxDBFileInfo`), and the offset error of its last entry at each volume's lookup of that
+/// taxid. Nothing without `taxdb.bti` on the path.
+#[derive(Clone, Copy, Debug, Default)]
+struct LookupTexts {
+    /// The database writes texts of opening.
+    open: bool,
+    /// The taxid whose lookup writes the offset error (`TaxDb::offset_error_taxid`).
+    offset_error_taxid: Option<i32>,
+    /// The database does not open or read: taken to write a text at any lookup.
+    unknown: bool,
+}
+
+impl LookupTexts {
+    /// The texts of the lookups of the taxonomy database of `db`.
+    fn of(db: &SeqDb) -> Self {
+        if !db.taxdb_found() {
+            return Self::default();
+        }
+        let Some(search_path) = db.search_path() else {
+            return Self::default();
+        };
+        let unknown = Self {
+            unknown: true,
+            ..Self::default()
+        };
+        let Ok(taxdb) = crate::seqdb::taxdb::TaxDb::open(search_path) else {
+            return unknown;
+        };
+        let Ok(offset_error_taxid) = taxdb.offset_error_taxid() else {
+            return unknown;
+        };
+        Self {
+            open: !taxdb.open_messages().is_empty(),
+            offset_error_taxid,
+            unknown: false,
+        }
+    }
+
+    /// Whether the texts depend on which of two copies NCBI fetches, the one with the taxids
+    /// `taxids` looked up by its volume or the other with `other` by another volume (each
+    /// `ParsedSubject::volume_taxids`): the offset error where either holds its taxid, the texts
+    /// of opening where only one of them looks a taxid up (the run's first lookup can move).
+    fn differ(self, taxids: &[i32], other: &[i32]) -> bool {
+        (self.open && taxids.is_empty() != other.is_empty())
+            || self.per_volume(taxids)
+            || self.per_volume(other)
+    }
+
+    /// Whether a volume's lookups of the taxids `taxids` can write a text that another volume's
+    /// lookups of them write again: the offset error.
+    fn per_volume(self, taxids: &[i32]) -> bool {
+        !taxids.is_empty()
+            && (self.unknown
+                || self
+                    .offset_error_taxid
+                    .is_some_and(|taxid| taxids.contains(&taxid)))
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753
@@ -617,6 +750,8 @@ impl<'a> HeaderReader<'a> {
             db,
             lookup: std::cell::OnceCell::new(),
             prefetch_off: prefetch_may_be_off(),
+            taxdb_found: std::cell::OnceCell::new(),
+            lookup_texts: std::cell::OnceCell::new(),
         }
     }
 
@@ -659,7 +794,9 @@ impl<'a> HeaderReader<'a> {
     /// (`SeqidLookup::seqid_to_oids`), and its scope can show another sequence that holds an id it
     /// takes for the Seq-align id (`defline_set::scope_keys`) where both are reported. Another
     /// sequence that holds the same definition lines and letters is shown as the subject itself
-    /// (the same record in two volumes or two databases of an alias). Where NCBI may read the
+    /// (the same record in two volumes or two databases of an alias), one that differs only in
+    /// their taxids as the subject but by the reports that write taxids
+    /// (`FoundInstead::OtherTaxids`, `copy_of`). Where NCBI may read the
     /// reported sequences one by one (`prefetch_off`), also another sequence that holds an id the
     /// Seq-align id matches weakly (`weakly_held`). A lookup that fails is kept for the formats
     /// that read the Bioseq; the others never look the id up. A subject whose Bioseq NCBI's
@@ -697,10 +834,15 @@ impl<'a> HeaderReader<'a> {
         let Some(&first) = oids.first() else {
             return Some(FoundInstead::Nothing);
         };
+        // The first other sequence found that only the reports of taxids show apart.
+        let mut other_taxids = None;
         if first != own {
             let other = self.db.ordinal_of(first);
-            if !self.same_record(ordinal, other) {
-                return Some(FoundInstead::Sequence(other));
+            match self.copy_of(subject, ordinal, other) {
+                RecordCopy::Same => {}
+                RecordCopy::OtherTaxids => other_taxids = Some(other),
+                RecordCopy::Apart(cause) => return Some(FoundInstead::CopyApart(other, cause)),
+                RecordCopy::Differs => return Some(FoundInstead::Sequence(other)),
             }
         }
         let folded = match lookup.case_folded_oids(id) {
@@ -709,23 +851,32 @@ impl<'a> HeaderReader<'a> {
         };
         let mut keys = Vec::new();
         crate::report::db_subject::scope_keys(subject, &mut keys);
-        let also_held = oids
+        for other in oids
             .iter()
             .chain(&folded)
             .filter(|&&oid| oid != own)
             .map(|&oid| self.db.ordinal_of(oid))
-            .find(|&other| {
-                self.holds_key(other, &keys, crate::seqid::defline_set::scope_keys)
-                    && !self.same_record(ordinal, other)
-            });
-        if let Some(other) = also_held {
-            return Some(FoundInstead::AlsoHeld(other));
+        {
+            if !self.holds_key(other, &keys, crate::seqid::defline_set::scope_keys) {
+                continue;
+            }
+            match self.copy_of(subject, ordinal, other) {
+                RecordCopy::Same => {}
+                RecordCopy::OtherTaxids => {
+                    other_taxids.get_or_insert(other);
+                }
+                RecordCopy::Apart(cause) => return Some(FoundInstead::CopyApart(other, cause)),
+                RecordCopy::Differs => return Some(FoundInstead::AlsoHeld(other)),
+            }
         }
-        if !self.prefetch_off {
-            return None;
+        if self.prefetch_off {
+            match self.weakly_held(lookup, subject, ordinal, &oids) {
+                Ok(None) => {}
+                Ok(found) => return found,
+                Err(error) => return failed(error),
+            }
         }
-        self.weakly_held(lookup, id, ordinal, &oids)
-            .unwrap_or_else(failed)
+        other_taxids.map(FoundInstead::OtherTaxids)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:128-135
@@ -756,11 +907,12 @@ impl<'a> HeaderReader<'a> {
     fn weakly_held(
         &self,
         lookup: &crate::seqdb::lookup::SeqidLookup<'_>,
-        id: &crate::seqid::model::ParsedSeqId,
+        subject: &crate::report::db_subject::ParsedSubject,
         ordinal: u32,
         oids: &[u32],
     ) -> Result<Option<crate::report::db_subject::FoundInstead>, SeqDbError> {
         use crate::report::db_subject::FoundInstead;
+        let id = subject.alignment_id();
         let Some(text) = id.textseq() else {
             return Ok(None);
         };
@@ -799,7 +951,7 @@ impl<'a> HeaderReader<'a> {
             .map(|&oid| self.db.ordinal_of(oid))
             .find(|&other| {
                 self.holds_key(other, &keys, crate::seqid::id_scope::kind_keys)
-                    && !self.same_record(ordinal, other)
+                    && self.copy_of(subject, ordinal, other) == RecordCopy::Differs
             })
             .map(FoundInstead::WeaklyHeld))
     }
@@ -827,26 +979,111 @@ impl<'a> HeaderReader<'a> {
             })
     }
 
-    /// Whether the sequences `a` and `b` hold the same definition lines, as the reports read
-    /// them, and the same letters: NCBI's formatters then show `b` for `a` as `a` itself.
-    fn same_record(&self, a: u32, b: u32) -> bool {
-        let (Ok(header_a), Ok(header_b)) = (self.db.read_header(a), self.db.read_header(b)) else {
-            return false;
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1130-1139
+    // ```c++
+    //     for(TBDLLConstIter iter = dl.begin(); iter != dl.end(); iter ++) {
+    //         TTaxId taxid = ZERO_TAX_ID;
+    //
+    //         if ((*iter)->CanGetTaxid()) {
+    //             taxid = (*iter)->GetTaxid();
+    //         }
+    //         if (taxid <= ZERO_TAX_ID) {
+    //             continue;
+    //         }
+    // ```
+    // NCBI's formatters show for the subject the sequence that its lookup or its scope gives
+    // (`found_instead`): with the same definition lines and letters, they write the subject's
+    // names, and the taxids of that sequence, which its volume looks up in the taxonomy database
+    // when it fetches the sequence (`CSeqDBVol::x_GetTaxonomy`, the sources of its Bioseq). Of the
+    // same record in two databases with other taxids, NCBI 2.17.0 writes the first database's
+    // taxids in both rows (outfmt 6 `staxids`, `sscinames`, 15, 16) and the same bytes as for one
+    // taxid in outfmt 0, 5, 6, 7 and 10, but the outfmt 0 title of an empty one made from the
+    // source with the taxonomy database (probe of line DBID N1b, `blastdb-ids-20261021/R/copytaxid/p1`).
+    /// How the sequence `b` differs from the sequence `a`, `subject`, as NCBI's formatters show
+    /// one for the other: the same where both hold the same definition lines, as the reports
+    /// read them, and letters; also where only the taxids of the definition lines differ
+    /// (`RecordCopy::OtherTaxids`, which the reports of taxids and their names alone show apart).
+    /// Shown apart by every report that reads the Bioseq (`RecordCopy::Apart`): where a title can
+    /// depend on the Bioseq's source (`ParsedSubject::title_reads_source`) and the sources differ,
+    /// and where the taxonomy database's texts depend on which copy NCBI fetches, whose volume
+    /// looks its taxids up (`LookupTexts::differ`; for the same taxids in another volume, the
+    /// offset error, `LookupTexts::per_volume`).
+    fn copy_of(
+        &self,
+        subject: &crate::report::db_subject::ParsedSubject,
+        a: u32,
+        b: u32,
+    ) -> RecordCopy {
+        let (
+            Ok(crate::seqdb::SequenceHeader::Parsed(set_a)),
+            Ok(crate::seqdb::SequenceHeader::Parsed(set_b)),
+        ) = (self.db.read_header(a), self.db.read_header(b))
+        else {
+            return RecordCopy::Differs;
         };
-        if header_a != header_b {
-            return false;
-        }
+        let without_taxids = |set: &crate::seqid::DeflineSet| -> Vec<crate::seqid::BlastDefline> {
+            set.deflines
+                .iter()
+                .map(|defline| crate::seqid::BlastDefline {
+                    taxid: None,
+                    ..defline.clone()
+                })
+                .collect()
+        };
+        let copy = if set_a == set_b {
+            RecordCopy::Same
+        } else if without_taxids(&set_a) == without_taxids(&set_b) {
+            RecordCopy::OtherTaxids
+        } else {
+            return RecordCopy::Differs;
+        };
         let (Ok(block_a), Ok(block_b)) = (self.db.read_sequence(a), self.db.read_sequence(b))
         else {
-            return false;
+            return RecordCopy::Differs;
         };
-        if self.db.seqtype() == SeqType::Protein {
-            return block_a.protein(0) == block_b.protein(0);
+        let protein = self.db.seqtype() == SeqType::Protein;
+        let same_letters = if protein {
+            block_a.protein(0) == block_b.protein(0)
+        } else {
+            matches!(
+                (block_a.nucleotide_iupac(0), block_b.nucleotide_iupac(0)),
+                (Ok(letters_a), Ok(letters_b)) if letters_a == letters_b
+            )
+        };
+        if !same_letters {
+            return RecordCopy::Differs;
         }
-        matches!(
-            (block_a.nucleotide_iupac(0), block_b.nucleotide_iupac(0)),
-            (Ok(letters_a), Ok(letters_b)) if letters_a == letters_b
-        )
+        use crate::report::db_subject::CopyApart;
+        let texts = || *self.lookup_texts.get_or_init(|| LookupTexts::of(self.db));
+        let taxids = subject.volume_taxids();
+        match copy {
+            RecordCopy::Same => {
+                let other_volume = !matches!(
+                    (self.db.volume_index(a), self.db.volume_index(b)),
+                    (Ok(volume_a), Ok(volume_b)) if volume_a == volume_b
+                );
+                // The same taxids look the same up first: of the texts only the offset error
+                // comes per volume.
+                if other_volume && texts().per_volume(&taxids) {
+                    return RecordCopy::Apart(CopyApart::TaxonomyTexts);
+                }
+                RecordCopy::Same
+            }
+            _ => {
+                let Ok(copy) = crate::report::db_subject::ParsedSubject::new(set_b) else {
+                    return RecordCopy::Differs;
+                };
+                let other = copy.volume_taxids();
+                let taxdb_found = *self.taxdb_found.get_or_init(|| self.db.taxdb_found());
+                if other != taxids && subject.title_reads_source(protein, taxdb_found) {
+                    return RecordCopy::Apart(CopyApart::Title);
+                }
+                if texts().differ(&taxids, &other) {
+                    return RecordCopy::Apart(CopyApart::TaxonomyTexts);
+                }
+                RecordCopy::OtherTaxids
+            }
+        }
     }
 }
 
@@ -1140,6 +1377,9 @@ pub(crate) struct ParsedShown {
     pub(crate) joined: bool,
     /// SAM (outfmt 17), which names a subject by an id of its Bioseq (`ParsedSubject::sam_id`).
     pub(crate) sam: bool,
+    /// The formats that write the subjects' taxids or their names: outfmt 13 to 16 and the
+    /// tabular `staxid`, `staxids` and the names (`ParsedSubject::fetched`).
+    pub(crate) taxonomy: bool,
 }
 
 impl ParsedShown {
@@ -1147,7 +1387,7 @@ impl ParsedShown {
     /// Seq-align id (`ParsedSubject::fetched`); the Seq-annots and the archive write the
     /// Seq-align id alone.
     pub(crate) fn reads_bioseq(self) -> bool {
-        self.tabular || self.pairwise || self.joined || self.sam
+        self.tabular || self.pairwise || self.joined || self.sam || self.taxonomy
     }
 }
 
@@ -1167,7 +1407,7 @@ pub(crate) fn check_reported_parsed(
 ) -> Result<()> {
     if shown.reads_bioseq() {
         subject
-            .fetched()
+            .fetched(shown.taxonomy)
             .map_err(|reason| parsed_refusal(ordinal, &reason, program))?;
     }
     if shown.pairwise {
@@ -1219,8 +1459,8 @@ pub(crate) fn tabular_subject_ids(
 
 // No NCBI counterpart: bounds LOSAT's own check before the search (`reports_may_refuse`).
 /// The most sequences of a database with parsed Seq-ids whose headers a program's check before
-/// the search reads with `reports_may_refuse` (blastn's `x_parsed_refusal`, tblastx's
-/// `report_stream::check`). The check decodes each header (2.3-5.6 us at one thread with
+/// the search reads with `reports_may_refuse` (tblastx's `report_stream::check`; blastn's
+/// report stream read none before the search since 2026-11-03). The check decodes each header (2.3-5.6 us at one thread with
 /// tblastx's 18S, line DBID ID4t fix 2b) and keeps 16 bytes per join key with outfmt 0, so this
 /// bounds the pass to a few seconds and some tens of MiB; a larger database (NCBI's `nt` and
 /// `core_nt`) keeps its reports after the batch loop, as before the stream took databases with
@@ -2123,7 +2363,13 @@ pub(crate) fn tabular_names<'t>(
         program,
     )
     .map_err(|error| taxdb_error(error, program))?;
-    // The texts of opening of an open by the rows of an earlier batch ([`TaxdbRun::open_for_rows`]).
+    // No NCBI counterpart: NCBI writes these texts where its first lookup opens the taxonomy
+    // database; LOSAT's report calls are per query batch. The texts of opening of an open by the
+    // rows of an earlier batch ([`TaxdbRun::open_for_rows`]), which the first row that looks a
+    // name up writes: a report without such a row leaves them for the next report of the run.
+    if !names.looks_up() {
+        return Ok(Some(names));
+    }
     let opened = std::mem::take(&mut *run.rows_open.lock().expect("the texts of opening"));
     Ok(Some(names.opened_before(opened)))
 }
@@ -2671,10 +2917,95 @@ mod taxdb_prepass_tests {
             else {
                 panic!("{name}: a sequence with parsed Seq-ids");
             };
-            match (subject.fetched(), want) {
+            match (subject.fetched(false), want) {
                 (Ok(()), None) => {}
                 (Err(error), Some(text)) => assert!(error.contains(text), "{name}: {error}"),
                 (got, _) => panic!("{name}: {got:?}"),
+            }
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    #[test]
+    fn the_same_record_with_other_taxids_is_shown_apart_by_the_reports_of_taxids_only() {
+        // tests/db_search/ids/make_ids.py (line DBID N1b): `pdup_at` holds `gb|EEE00005.1|`
+        // without a taxid then with taxid 9606, `pdup_tu` the other way, `pdup_no` twice with
+        // taxid 99990 (the last entry of every variant of tests/seqdb/taxdb, whose lookup writes
+        // the offset error of `offset_last_past_end`), `pdupe_at` an empty title without a taxid
+        // then with 9606; `taxdb`, the variant on BLASTDB. `without`, `with`: the refusal without
+        // the reports of taxids (`fetched(false)`) and with them.
+        let cwd = empty_cwd("other_taxids");
+        let first = |n: u32| format!("lookup gives database sequence {n} first");
+        let taxids = |n: u32| {
+            format!("database sequence {n} also holds with the same definition lines and letters but other taxids (")
+        };
+        let title = |n: u32| {
+            format!("database sequence {n} also holds with the same definition lines and letters but other taxids, from which")
+        };
+        let texts = |n: u32| {
+            format!("database sequence {n} also holds with the same definition lines and letters: where")
+        };
+        let both = |text: String| (Some(text.clone()), Some(text));
+        for (name, taxdb, ordinal, (without, with)) in [
+            ("ids/pdup_at", None, 0, (None, Some(taxids(1)))),
+            ("ids/pdup_at", None, 1, (None, Some(taxids(0)))),
+            ("ids/pdup_tu", None, 0, (None, Some(taxids(1)))),
+            ("ids/pdup_tu", None, 1, (None, Some(taxids(0)))),
+            ("ids/pdup_at", Some("good"), 1, (None, Some(taxids(0)))),
+            // Texts of opening at the run's first lookup, which only the copy with a taxid makes.
+            ("ids/pdup_at", Some("bad_magic"), 0, both(texts(1))),
+            ("ids/pdup_at", Some("bad_magic"), 1, both(texts(0))),
+            ("ids/pdup_tu", Some("count_larger"), 1, both(texts(0))),
+            // The offset error of a taxid that neither copy holds.
+            (
+                "ids/pdup_at",
+                Some("offset_last_past_end"),
+                1,
+                (None, Some(taxids(0))),
+            ),
+            // The same taxids: the texts of opening come at the same lookup, the offset error
+            // once per volume.
+            ("ids/pdup_no", None, 1, (None, None)),
+            ("ids/pdup_no", Some("good"), 1, (None, None)),
+            ("ids/pdup_no", Some("bad_magic"), 1, (None, None)),
+            ("ids/pdup_no", Some("count_larger"), 0, (None, None)),
+            (
+                "ids/pdup_no",
+                Some("offset_last_past_end"),
+                1,
+                both(texts(0)),
+            ),
+            (
+                "ids/pdup_no",
+                Some("offset_last_past_end"),
+                0,
+                both(texts(1)),
+            ),
+            // The same record without taxids looks nothing up.
+            ("ids/pdup_ab", Some("offset_last_past_end"), 1, (None, None)),
+            // An empty title made from the taxids where the taxonomy database is found.
+            ("ids/pdupe_at", None, 0, (None, Some(taxids(1)))),
+            ("ids/pdupe_at", Some("good"), 0, both(title(1))),
+            ("ids/pdupe_at", Some("good"), 1, both(title(0))),
+            // Another title is another record whatever the taxids.
+            ("ids/pdup_ac", None, 1, both(first(0))),
+        ] {
+            let taxdb = taxdb.map(|variant| root().join("seqdb/taxdb").join(variant));
+            let db = db_search(name, taxdb.as_deref(), &cwd);
+            let headers = HeaderReader::new(&db);
+            let ReportedHeader::Parsed(subject) =
+                read_header(&headers, ordinal, 0, "BLASTP").unwrap()
+            else {
+                panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
+            };
+            for (taxonomy, want) in [(false, &without), (true, &with)] {
+                match (subject.fetched(taxonomy), want) {
+                    (Ok(()), None) => {}
+                    (Err(error), Some(text)) => {
+                        assert!(error.contains(text.as_str()), "{name} {ordinal}: {error}")
+                    }
+                    (got, _) => panic!("{name} {ordinal} {taxdb:?} {taxonomy}: {got:?}"),
+                }
             }
         }
         std::fs::remove_dir_all(&cwd).unwrap();
@@ -2738,7 +3069,7 @@ mod taxdb_prepass_tests {
                 panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
             };
             assert!(!subject.unfetchable(), "{name} {ordinal}");
-            match (subject.fetched(), want) {
+            match (subject.fetched(false), want) {
                 (Ok(()), None) => {}
                 (Err(error), Some(text)) => {
                     assert!(error.contains(&text), "{name} {ordinal}: {error}")
@@ -2781,16 +3112,15 @@ mod taxdb_prepass_tests {
             let db = db_search(name, None, &cwd);
             for prefetch_off in [false, true] {
                 let headers = HeaderReader {
-                    db: &db,
-                    lookup: std::cell::OnceCell::new(),
                     prefetch_off,
+                    ..HeaderReader::new(&db)
                 };
                 let ReportedHeader::Parsed(subject) =
                     read_header(&headers, ordinal, 0, "BLASTP").unwrap()
                 else {
                     panic!("{name} {ordinal}: no parsed Seq-ids");
                 };
-                match (subject.fetched(), want.filter(|_| prefetch_off)) {
+                match (subject.fetched(false), want.filter(|_| prefetch_off)) {
                     (Ok(()), None) => {}
                     (Err(error), Some(Some(other))) => assert!(
                         error.contains(&format!("match an id of database sequence {other} weakly")),
@@ -2836,10 +3166,10 @@ mod taxdb_prepass_tests {
             match (read_header(&headers, ordinal, 0, "BLASTP").unwrap(), want) {
                 (ReportedHeader::Stored(_), Ok(true)) => {}
                 (ReportedHeader::Parsed(subject), Ok(false)) => {
-                    assert!(subject.fetched().is_ok(), "{name} {ordinal}")
+                    assert!(subject.fetched(false).is_ok(), "{name} {ordinal}")
                 }
                 (ReportedHeader::Parsed(subject), Err(id)) => {
-                    let error = subject.fetched().unwrap_err();
+                    let error = subject.fetched(false).unwrap_err();
                     assert!(
                         error.contains(&format!("the Seq-align id {id},")),
                         "{name} {ordinal}: {error}"

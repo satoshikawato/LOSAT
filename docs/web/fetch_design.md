@@ -32,9 +32,11 @@
 DDBJ は DDBJ 側のヘッダ追加（依頼）があるまで取得先に入れない。それまで DDBJ 利用者は NCBI / EBI / CNCB から取るか、DDBJ から手で落として「Open FASTA files…」で開く。
 CNCB の GenBase は取れる（2026-11-03 17:3x 実測）ので取得先に入れる（保守者 17:4x「取得先に足す」、§7 の 3）。
 「一番アクセスしやすい所」= 候補（NCBI、EBI、CNCB）へ同時に Range 要求を出し、先に応えた方を取る。選んだ先はそのセッション中は固定し、
-取得元の名前を画面に出す（手で NCBI / EBI / CNCB を選べる）。
+取得元の名前を画面に出す（手で NCBI / EBI / CNCB を選べる）。WF-3 では Range 要求ではなく固定の公開レコードで測り、accession の取得だけに使う（§10）。
 
 ## 3. Example セット（mode ごと、各 50 MB 以下、固定 URL、SHA-256 を表に持つ）
+
+WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない。TBLASTN / TBLASTX は E. coli K-12 のゲノム）。下は設計の時点の案。
 
 | mode | subject | 大きさ（gz） | query の例 |
 |---|---|---|---|
@@ -60,10 +62,11 @@ CNCB の GenBase は取れる（2026-11-03 17:3x 実測）ので取得先に入�
 ## 5. データの持ち方
 
 - 取得した FASTA は既存の source の経路に乗せる：小さい accession は貼り付けと同じ bytes、Example セットは Data worker の
-  OPFS block store（`infra/data/opfs-block-store.ts`）に **キャッシュ**（URL + SHA-256 を鍵に）。次回は取得せずに読む。
+  OPFS block store（`infra/data/opfs-block-store.ts`）に **キャッシュ**（URL + SHA-256 を鍵に。WF-2 では URL が鍵、§9）。次回は取得せずに読む。
   OPFS は origin 専用で、サイトデータの消去で消える。使用量と「Delete」は既存の Temporary storage の表示に載せる。
 - 「任意のフォルダに保存」= File System Access API（`showDirectoryPicker`）。Chromium / Edge だけ。Firefox / Safari は
-  「Download」で落として次回「Open FASTA files…」から開く（ファイル参照なので大きくても速い）。
+  「Download」で落として次回「Open FASTA files…」から開く（ファイル参照なので大きくても速い）。WF-3 では Example が読むのは
+  OPFS の写しのまま、フォルダの写しは利用者のファイルで LOSAT は読み戻さない（§10）。
 - 展開：`.gz` は `DecompressionStream('gzip')`（3 ブラウザとも可）で OPFS に書く。
 
 ## 6. 進め方（PR の切り方）
@@ -84,3 +87,127 @@ CNCB の GenBase は取れる（2026-11-03 17:3x 実測）ので取得先に入�
 3. **取得先 = NCBI、EBI、CNCB**：15:3x は「NCBI と EBI だけ、CNCB は API を確認してから」。17:3x に GenBase の REST が CORS 付きで INSDC / RefSeq の accession も返すと分かり、17:4x「取得先に足す」。DDBJ は CORS が無いので入れない。
 4. **文言 = その場の一文だけ**：取得の行に「Sends the accession to NCBI」「Downloads 8 MB from ftp.ncbi.nlm.nih.gov」。約束の文は
    "?" の後ろ。見出しは「LOSAT」と一文のまま。
+
+## 8. WF-1 の実装（2026-11-03、Owner-delegated）
+
+保守者の常設の指示（2026-09-29、2026-10-07 に再掲）により、推奨の案を採って記録する。作業記録は web-fetch-20261103/DECISIONS.md の 7〜13。
+
+1. **取得先は手で選ぶ**（NCBI が既定、選んだ先はセッション中保ち、query と subject で共通。WF-3 で既定は「Fastest」になった、§10 の 3）。§2 の競走は §6 のとおり WF-3。利用者の
+   accession を 3 か所へ同時に送る競走はしない（その場の一文「Sends the accession to NCBI」と食い違う）。WF-3 の競走は固定の公開
+   accession か Range 要求で測る。
+2. **accession の形**は §4 の `^[A-Z]{1,2}_?\d+(\.\d+)?$` を広げる：INSDC（1〜2 文字 + 5〜8 桁、タンパク質の 3 文字 + 5〜7 桁、WGS の
+   4〜6 文字）、RefSeq（`NR_`、`NZ_CP…`）、GenBase（`C_AA…`）、UniProt（`P12345`、`Q9Y261`、`A0A023GPI8`）、末尾の版は任意。大文字小文字は
+   問わず、大文字にして送る。数字の無い行（配列）と数字だけの行（gi）は当たらない（`web/app/src/domain/accession.ts`）。
+3. **accession だけの欄は source を作らない**：読めない入力の誤りと「Add the line ">pasted_query"」の案内を出さない。Run は取得せず
+   「Fetch the query accession first.」で止まる（ページを開いた・Run を押しただけでは通信しない）。取得中の Run も待たずに
+   「The query accession is still being fetched.」で止まる。欄を書き換えると走っている取得は捨てる。取得中は取得先の選択を止め、
+   「Fetching 1 of 2 from NCBI…」と送り先を出す。
+4. **1 accession に 1 要求、順に**。NCBI は 340 ms 以上空ける（鍵無し 3 req/s）。1 回に 100 個まで、合計 10 MB まで（超えたら
+   「Open FASTA files…」で開く案内）。全部取れたときだけ欄に写し、失敗は欄をそのままにして取得先と accession を名乗る。
+   取得先が扱えない accession（5）が 1 つでもあれば、どれも送らずに断る。時間切れ（60 s）は応答の見出しまで（本文の読み込みは
+   欄の書き換えで止まる）。
+5. **EBI は核酸 = ENA、タンパク質 = UniProt**（ENA の browser API はタンパク質の id に CDS の核酸を返す、2026-11-03 実測）。ENA に RefSeq、
+   UniProt に UniProt 以外の accession は送らずに断る。CNCB は両方（`NP_414542.1` が返る）だが、種類を指定する引数が無く、記録の
+   種類のまま返す（タンパク質の欄に核酸が入り得る）。そのときは欄の入力の既存の注「1 record looks like nucleotide sequences, but
+   BLASTP reads the subject as protein」が出る。
+6. **要求は accession だけ**：cookie と referrer を付けない（`credentials: 'omit'`、`Referrer-Policy: no-referrer`）。NCBI の `tool`・`email`
+   も付けない。
+7. **e2e は Playwright の route で実アドレスを stub**（`web/app/tests/e2e/fetch.spec.ts`）。localhost の stub サーバでは配備の CSP の
+   `connect-src` に例外が要る。route なら配備の CSP のまま試せ、ページから出た要求を全部数えられる。
+
+## 9. WF-2 の実装（2026-11-03、Owner-delegated）
+
+保守者の常設の指示（2026-09-29、2026-10-07 に再掲）により、推奨の案を採って記録する。作業記録は web-fetch-20261103/DECISIONS.md の 15〜19、
+実測は同 NOTES.md「WF-2 facts」。
+
+1. **表**（`web/app/src/domain/examples.ts`）。mode のタブの下の「Example」の行に、その mode の組をボタンで並べる。
+
+   | mode | 組（ボタン） | 取得先（gz の大きさ、2026-11-03） | 展開後 | query（表に持つ） |
+   |---|---|---|---|---|
+   | BLASTN | 16S rRNA (bacteria) | NCBI FTP `refseq/TargetedLoci/Bacteria/bacteria.16SrRNA.fna.gz`（8.0 MB） | 41.8 MB、26,888 本 | NR_102783.2（B. subtilis 168 の 16S） |
+   | BLASTN | ITS (fungi) | NCBI FTP `refseq/TargetedLoci/Fungi/fungi.ITS.fna.gz`（3.0 MB） | 13.9 MB、20,390 本 | NR_111007.1（S. cerevisiae の ITS） |
+   | BLASTP / BLASTX | E. coli K-12 proteins (UniProt reviewed) | UniProt REST `uniprotkb/stream?query=reviewed:true+AND+organism_id:83333&format=fasta&compressed=true`（0.98 MB） | 1.9 MB、4,531 本 | P16971（B. subtilis RecA）/ その CDS AL009126.3:1764645-1765691 |
+   | BLASTP / BLASTX | PDB proteins (pdbaa) | NCBI FTP `blast/db/FASTA/pdbaa.gz`（36.8 MB） | 101 MB、156,894 本 | 同上 |
+   | TBLASTN / TBLASTX | E. coli K-12 genome | NCBI FTP `genomes/all/GCF/000/005/845/GCF_000005845.2_ASM584v2/…_genomic.fna.gz`（1.4 MB） | 4.7 MB、1 本 | 同上（TBLASTN は RecA、TBLASTX は CDS） |
+
+   query は表に埋め込む（数百 B〜1.6 kB）。1 回の操作で送る要求は 1 つで、その場の一文が名乗る host だけになる。§3 のファージ（efetch）は
+   accession を 3 つ eutils へ送り、Content-Length も無いので、固定の版の E. coli K-12 のゲノムにした。話は 1 本：B. subtilis 168 の
+   16S・RecA を RefSeq と E. coli K-12 に当てる（RecA の CDS の翻訳は P16971 と一致、単体試験で確かめる）。
+2. **SHA-256 は表に持たない**。RefSeq Targeted Loci は release ごとに変わり（Last-Modified 2026-10-27）、UniProt も release ごとに
+   変わる（2026_03）ので、固定した hash は次の release で Example を壊す。表は URL、その場の一文の大きさ（「Downloads 8.0 MB from
+   ftp.ncbi.nlm.nih.gov」、実測の値）、ファイル名、出典と利用条件だけ。保存した写しが来たものを記録する：URL、版（FTP は
+   Last-Modified の日付、UniProt は X-UniProt-Release）、取得と保存の大きさ、日時。鍵は表の id と URL（URL が変われば別物）。
+   検索の入力は今までどおり SHA-256 で識別される（RunInput.sha256 とレコードごとの hash）。写しはそのまま使う（要求しない、
+   オフラインで動く）。新しい release は「Delete」の後に取り直す。
+3. **UniProt の stream の構文**は 11-03 の記録どおりで正しい。500 は UniProt 側の間欠的なもの（同じ URL が 500 を 3 回の後 12/12 回
+   200、他の分類群も初回 500 の後 200）。失敗は「rest.uniprot.org answered HTTP 500: try again in a moment.」と出し、ボタンを
+   残す。自動の再試行はしない（1 回の操作に 1 要求）。
+4. **取得と展開**（`infra/browser/example-downloader.ts`）。ページ（main thread）が配備の CSP の下で取得する（`credentials: 'omit'`、
+   referrer 無し。WF-1 と同じ）。NCBI の .gz は `application/x-gzip`、UniProt の `compressed=true` は Content-Encoding 無しで来るので
+   ブラウザは展開しない。本文が gzip の magic で始まるときだけ `DecompressionStream('gzip')` に通す（途中で展開済みの本文はそのまま）。
+   展開した部分は約 8 MiB ごとの Blob にまとめ、メモリの山は保存の大きさほどに留める。展開後 256 MiB を超える本文は止める。
+   時間切れは 60 s（応答の見出しまで）。進捗は「Downloading 3.1 of 8.0 MB from ftp.ncbi.nlm.nih.gov…」（Content-Length の無い
+   UniProt は全体を言わない）と「Cancel」。失敗は host と理由の一文（HTTP の状態、届かない、gzip が壊れている、大きすぎる、
+   FASTA でない：`>` で始まらない 200 の答え（空や HTML）は写しにしない）で、欄はそのまま。
+5. **保存**（`infra/data/example-store.ts`、Data worker）。OPFS の `examples/<id>/` に `data`、最後に `meta.json`（meta の無い
+   ディレクトリは書きかけで、次の保存が消す）。書き込みは block store と同じ同期 access handle、保存と削除は Web Lock
+   `losat-web:example:<id>` の下（2 つのタブが 1 つの写しを同時に書かない。保存中に他のタブが同じ URL を保存していれば、それを使う）。
+   `tmp/`（作業セッション）の外なので、起動時の掃除は触れない。subject の source になるのは OPFS のファイルの File で、メモリの
+   写しは捨てる。OPFS か Web Locks の無いブラウザ（結果をメモリに置くタブ）では何も残さず、そのタブでだけ使う。保存を断られた
+   （容量が一杯）ときもそのタブでは使い、「Not kept for the next time: …」と出す。
+6. **画面**（`ui/ExampleLine.vue`）。ボタンの横のその場の一文が、押すと何を送るか（「Downloads 8.0 MB from ftp.ncbi.nlm.nih.gov」）、
+   保存した写し（「Saved in this browser (2026-10-27, 41.8 MB)」と「Delete」）、取得中の進捗と「Cancel」を言う。設計の「Temporary
+   storage の表示に載せる」（§5）は、その表示が stop-describing-ui で外れた（`ncbi_ui_mapping.md` §4）ので、Example の行に置く。
+   「Delete」は写しと、それから作った subject の source を外す（File が読めなくなる）。他のタブにも BroadcastChannel
+   `losat-web:examples` で知らせ（中身は表の id だけ）、そのタブも同じ source を外す。削除の途中に同じ組を押すと、読み込みは削除の
+   後に始まる（消える写しを draft に渡さない）。保存中に Cancel しても写しは残るので、行は「Saved in this browser」になる。
+   他の説明は「?」の後ろ。
+7. **Example は両方の欄を置き換える**（EBI の「Use example sequence」と同じ）：query の欄に表の query、subject は組の写しだけ。
+   他の source と範囲（subrange）は外れる。読み込みは 1 つずつで、別のボタン、Cancel、その組の無い mode への切り替え、失敗で
+   終わる。query は組が届いたときの mode のもの（BLASTP から BLASTX へ移れば CDS）。
+8. **e2e**（`tests/e2e/examples.spec.ts`）は WF-1 と同じく Playwright の route で実アドレスを stub し、配備の CSP のまま、ページから
+   出た要求を数える。読み込み直しの後は要求が増えないこと、Delete で写しと source が消えることを OPFS のブラウザで見る。
+
+## 10. WF-3 の実装（2026-11-03、Owner-delegated）
+
+保守者の常設の指示（2026-09-29、2026-10-07 に再掲）により、推奨の案を採って記録する。作業記録は web-fetch-20261103/DECISIONS.md の 20〜22、
+実測は同 NOTES.md「WF-3 facts」。
+
+1. **競走は accession の取得だけ**。Example の組はどれも CORS のある host が 1 つ（NCBI の FTP、rest.uniprot.org）で、ENA と GenBase は
+   レコードを返すが RefSeq Targeted Loci・pdbaa・assembly のファイルを持たない。Example はその host とその場の一文のまま。
+2. **測るもの**：取得先と kind ごとに、取得が使う accession の入口（efetch、ENA browser API / UniProt REST、GenBase）へ固定の公開
+   レコードを 1 つ求め、答えの全体が届くまでの時間。§2 の Range 要求は使わない（入口は API でファイルではなく、FTP の Range の時間は
+   efetch の速さを言わない）。レコードは核酸が MH011443.1（TP53 の exon 5、192 B、3 か所とも）、タンパク質が大腸菌の thr operon leader
+   peptide（NCBI と CNCB は NP_414542.1、UniProt は P0AD86。CNCB は UniProt の accession に空の本文を返す）。利用者の accession は
+   送らない。要求は取得と同じ（`credentials: 'omit'`、referrer 無し、NCBI は 340 ms 空ける）に `cache: 'no-store'`（UniProt は
+   `max-age=43200` を返し、ブラウザの写しの速さは何も測らない）。時間は要求が出た時から測る（NCBI の 340 ms の待ちは数えない、
+   `FetchRequest.onStart`）。10 s 以内に答えない所は失敗と数える（ENA は 20〜25 s かかったことがある）。EBI の host は kind で
+   違う（ENA / UniProt）ので kind ごとに測る。
+   2026-11-03 の実測（日本から）：ENA は同じレコードに 20.1 s、25.6 s、1.3 s。アプリからの競走では 3 ブラウザとも NCBI が先（0.3〜0.6 s）。
+3. **いつ走るか**：取得先の選択の既定を「Fastest」にする（保守者の 6「一番アクセスしやすい DB」、§2）。kind の最初の「Fetch」のときだけ
+   走り、ページを開いた・mode を変えた・Run を押した・取得先を手で選んでいるときは走らない。1 つのタブで kind ごとに 1 回で、走っている
+   間の別の Fetch は同じ競走を待つ。accession は、その全部を扱える取得先のうち最初に答えた所へ、その答えが来た時点で送る。扱えない所は
+   問い合わせずに外す（§8 の 5 の EBI に加え、2026-11-03 の実測で：CNCB は UniProt の accession に空の本文を返す、GenBase の `C_…` は
+   NCBI も ENA も持たない）。扱える所が 1 つなら競走しない（`C_…` は CNCB へ直に）。どこも全部は扱えない欄は何も送らず
+   「No one site has all of these accessions: C_AA004835.1 only from CNCB, P12345 only from NCBI or EBI.」で止まる。他の答えは
+   後ろで届いて順位を埋める。失敗した所は外し、扱える所のどれも答えなければその最初（ふつう NCBI）へ送る（失敗はその取得が名乗る）。どこも答えなかった競走は残さない（次の Fetch でもう一度、
+   たとえばオフラインから戻った後）。順位はタブの間（メモリ）だけ保ち、読み込み直すとまた測る。手で選んだ取得先は §8 の 1 のとおり保つ
+   （`web/app/src/application/source-race.ts`）。
+4. **画面**：選択は「Fastest」「NCBI」「EBI」「CNCB」。競走の後は「Fastest (NCBI)」（その欄の accession を扱える最初の所）。その場の一文は
+   競走の前は「Sends the accession to the fastest of NCBI, EBI and CNCB」（扱える所だけを並べる）、後は「Sends the accession to NCBI」。
+   競走の間は「Finding the fastest site…」で、Run は「The query accession is still being fetched.」で止まる。選択は query と subject で
+   共通なので、どちらかが取得している間は両方の欄で止める（取得中の欄の一文が送り先と食い違わないように）。「?」に競走が各取得先へ
+   送るレコードの名前を足した。
+5. **保存先**：Example が読むのは OPFS の写し（§9 の 5）のまま（確認の窓が出ない、オフラインで動く、3 ブラウザ）。保存した写しの横に
+   「Save to folder…」（`showDirectoryPicker` のある Chromium / Edge。`mode: 'readwrite'`、`id: 'losat-examples'` で前回のフォルダから
+   開く）を置き、選んだフォルダへ写しを `fileName`（展開した FASTA、subject の source と同じ名前なので、後で「Open FASTA files…」で
+   開けば入力の名前も同じ）として OPFS のファイルから流して書く。同じ名前のファイルは置き換える（`createWritable` は閉じたときに
+   入れ替わる。新しく作ったファイルは、写しに失敗したら消す：空のファイルを残さない）。API の無いブラウザ（Firefox、Safari、Android の Chromium）は「Download」（OPFS の File の object URL。メモリに
+   写さない）。LOSAT はフォルダの handle を持たず、フォルダを自分では読まない：handle は site のデータに置くしかなく、それは OPFS の
+   写しと一緒に消える（サイトデータの消去、容量不足の追い出し）。フォルダの写しが要るのはまさにそのときなので、「Open FASTA files…」で
+   開く（3 ブラウザ）。メモリだけの経路（OPFS の無いタブ）には出さない。要求は出さない（ファイルはこのブラウザのもの）
+   （`web/app/src/ports/download.ts` の `FileSaver`、`infra/browser/platform.ts`）。
+6. **e2e**：競走は route の遅れで EBI を先にし（NCBI 1.5 s、CNCB 1.0 s）、最初の Fetch で 3 か所へ MH011443.1 だけ、accession は EBI へ、
+   次の Fetch は競走しないことを数える（`tests/e2e/fetch.spec.ts`）。フォルダの picker は動かせないので、Chromium では OPFS のフォルダを
+   返す picker に置き換えて書いた中身を読み、Firefox では download を受けて中身を比べる（`tests/e2e/examples.spec.ts`）。
+

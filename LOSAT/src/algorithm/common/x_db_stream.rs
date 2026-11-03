@@ -9,12 +9,16 @@
 //! The stream:
 //!
 //! - `XDbStream::new` reads the database once in blocks of `STORE_BLOCK_BYTES`, with the checks
-//!   of the copy in its order (`common::database::x_check_nucleotide_stores`), and keeps the
-//!   length of every sequence. A block of one sequence (a long one) is checked without its 2-bit
-//!   data: its last 2-bit byte and its ambiguity data only (`SeqDb::x_nucleotide_check`). Its
-//!   error is the error that the copy gave, which fails the same query batch with the same text.
-//!   The check keeps no more than a `u32` per sequence, with the longest sequence and the sum of
-//!   the lengths, so that a search does not walk the lengths for them.
+//!   of the copy in its order (`common::database::x_check_nucleotide_stores`). A block of one
+//!   sequence (a long one) is checked without its 2-bit data: its last 2-bit byte and its
+//!   ambiguity data only (`SeqDb::x_nucleotide_check`). Its error is the error that the copy
+//!   gave, which fails the same query batch with the same text. The check keeps the number of
+//!   sequences, the longest, the sum of the lengths and the first length (`XChecked`), not a
+//!   length per sequence (a `u32` each was 529 MB on core_nt, held through the search; NCBI maps
+//!   the index): a search reads the length of a sequence where it reads the sequence
+//!   (`XDbStream::length`), a report from the index and the sequence's last byte
+//!   (`XDbStream::read_length`), and TBLASTN's chunks of subjects are cut from the index's
+//!   approximate lengths (`XDbStream::x_approx_lengths`).
 //! - The blocks of 256 KiB of the sequence file are fixed once, from the index alone
 //!   (`x_block_grid`), since `SeqDb::next_block` starts a block at the sequence asked for and
 //!   threads that ask for different sequences would cut different blocks. The search of a short
@@ -168,12 +172,8 @@ pub(crate) struct XDbStream<'a> {
     program: &'static str,
     /// A number of its own in the process (`XPlanBlock::stream`).
     id: u64,
-    /// The length of every sequence, by ordinal id (`x_check_nucleotide_stores`).
-    lengths: Vec<u32>,
-    /// The largest of `lengths`.
-    longest: u32,
-    /// The sum of `lengths`.
-    total: u64,
+    /// The number of sequences and their lengths summed up (`x_check_nucleotide_stores`).
+    checked: shared::XChecked,
     /// The ordinal ids that the blocks start at, and the number of sequences (`x_block_grid`).
     grid: Vec<u32>,
     /// Whether a sequence is read into a buffer that glibc maps (`x_read_nucleotide_store`): with
@@ -185,6 +185,8 @@ pub(crate) struct XDbStream<'a> {
     stores: XSharedReads<PackedNucleotide>,
     /// The blocks that something holds or a thread reads, by their number in `grid` (`with_block`).
     blocks: XSharedReads<SequenceBlock>,
+    /// The cuts made of the sequences, by their key (`x_kept_cut`).
+    cuts: Mutex<Vec<(u64, Arc<[u32]>)>>,
     /// The blocks read (`with_block`).
     #[cfg(test)]
     block_reads: AtomicUsize,
@@ -194,27 +196,23 @@ pub(crate) struct XDbStream<'a> {
 }
 
 impl<'a> XDbStream<'a> {
-    /// Checks `db` as the copy of the database was read (`common::database::x_check_nucleotide_stores`),
-    /// keeps the lengths and fixes the blocks (`x_block_grid`). The errors name `program`.
+    /// Checks `db` as the copy of the database was read (`common::database::x_check_nucleotide_stores`)
+    /// and fixes the blocks (`x_block_grid`). The errors name `program`.
     pub(crate) fn new(db: &'a SeqDb, threads: usize, program: &'static str) -> Result<Self> {
         static STREAMS: AtomicU64 = AtomicU64::new(0);
-        let lengths = shared::x_check_nucleotide_stores(db, program)?;
-        let (longest, total) = lengths.iter().fold((0, 0), |(longest, total), &length| {
-            (u32::max(longest, length), total + u64::from(length))
-        });
+        let checked = shared::x_check_nucleotide_stores(db, program)?;
         let grid = x_block_grid(db, PLAN_BLOCK_BYTES);
         X_OPEN_STREAMS.fetch_add(1, Ordering::Relaxed);
         Ok(Self {
             db,
             program,
             id: STREAMS.fetch_add(1, Ordering::Relaxed),
-            lengths,
-            longest,
-            total,
+            checked,
             grid,
             mapped: threads > 1,
             stores: XSharedReads::new(),
             blocks: XSharedReads::new(),
+            cuts: Mutex::new(Vec::new()),
             #[cfg(test)]
             block_reads: AtomicUsize::new(0),
             #[cfg(test)]
@@ -224,17 +222,93 @@ impl<'a> XDbStream<'a> {
 
     /// The number of sequences.
     pub(crate) fn count(&self) -> usize {
-        self.lengths.len()
-    }
-
-    /// The number of bases of sequence `oid`.
-    pub(crate) fn length(&self, oid: usize) -> usize {
-        self.lengths[oid] as usize
+        self.checked.count
     }
 
     /// The number of bases of the longest sequence and of all the sequences.
     pub(crate) fn longest_and_total(&self) -> (usize, u64) {
-        (self.longest as usize, self.total)
+        (self.checked.longest as usize, self.checked.total)
+    }
+
+    /// The number of bases of the first sequence (none without one), from the check.
+    pub(crate) fn first_length(&self) -> usize {
+        self.checked.first as usize
+    }
+
+    /// The number of bases of sequence `oid`, read where the search reads the sequence: a short
+    /// one's from its block, which this thread keeps for the `with_block` that follows; a long
+    /// one's (a block of its own) from the index and its last byte (`read_length`), without its
+    /// sequence. A read that fails is an `XReadError` with the error of the sequence's read
+    /// (`with_block`, `read`). Only the length is read of the block: no ambiguity data.
+    pub(crate) fn length(&self, oid: usize) -> Result<usize> {
+        self.with_grid_block(oid, |held| match held {
+            None => self.read_length(oid),
+            Some((block, i)) => block
+                .nucleotide_len(i)
+                .map_err(|error| XReadError(shared::search_read_error(error, self.program)).into()),
+        })
+    }
+
+    /// The number of bases of sequence `oid` read from the index and the last byte of its 2-bit
+    /// data (`common::database::x_nucleotide_length`, NCBI's `GetSeqLength`), without a block or
+    /// the sequence: the length of the sequence's store, for the reports that read no letters.
+    /// A read that fails is an `XReadError`.
+    pub(crate) fn read_length(&self, oid: usize) -> Result<usize> {
+        let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
+        #[cfg(test)]
+        self.x_failed(oid..oid + 1)?;
+        shared::x_nucleotide_length(self.db, ordinal, self.program)
+            .map_err(|error| XReadError(error).into())
+    }
+
+    /// Calls `visit` with the length of every sequence in ordinal order as the index gives it
+    /// without a read of the sequence file (`SeqDb::x_approx_lengths`: NCBI's approximate
+    /// length, at most 3 bases off the stored one, the low bits of the OID for the last byte's).
+    /// When the index cannot be read (it changed after the check), the sequences from there on
+    /// are given by the blocks of the grid: the first of a block with the bases of a whole block
+    /// and the others with none. For a cut of the sequences that is scheduling only
+    /// (`x_kept_cut`).
+    pub(crate) fn x_approx_lengths(&self, mut visit: impl FnMut(u32)) {
+        let count = u32::try_from(self.count()).expect("a database ordinal id fits Uint4");
+        let mut visited = 0u32;
+        let _ = self.db.x_approx_lengths(|length| {
+            if visited < count {
+                visit(length);
+                visited += 1;
+            }
+        });
+        self.x_grid_lengths(visited, visit);
+    }
+
+    /// `x_approx_lengths` of the sequences from ordinal id `from` on that the index did not give:
+    /// a block of the grid as its first sequence with the bases of a whole block and the others
+    /// with none.
+    fn x_grid_lengths(&self, from: u32, mut visit: impl FnMut(u32)) {
+        let count = u32::try_from(self.count()).expect("a database ordinal id fits Uint4");
+        let whole = u32::try_from(PLAN_BLOCK_BYTES * 4).unwrap_or(u32::MAX);
+        let mut next = self.grid.partition_point(|&first| first < from);
+        for ordinal in from..count {
+            let starts = self.grid.get(next) == Some(&ordinal);
+            next += usize::from(starts);
+            visit(if starts { whole } else { 0 });
+        }
+    }
+
+    /// The cut of the sequences that `make` gives for `key` (the ends of TBLASTN's chunks of
+    /// subjects for their bases, from `x_approx_lengths`), made by the first caller with `key`
+    /// and kept for the run: every query batch of the search and every pool (each `key`) cuts
+    /// the same sequences, which on core_nt read 1 GB of the index.
+    pub(crate) fn x_kept_cut(&self, key: u64, make: impl FnOnce() -> Vec<u32>) -> Arc<[u32]> {
+        let mut cuts = self
+            .cuts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((_, cut)) = cuts.iter().find(|(kept, _)| *kept == key) {
+            return Arc::clone(cut);
+        }
+        let cut: Arc<[u32]> = make().into();
+        cuts.push((key, Arc::clone(&cut)));
+        cut
     }
 
     /// Sequence `oid`, packed as the copy of the database packed it, with one read (`XReadError` if it fails).
@@ -266,21 +340,42 @@ impl<'a> XDbStream<'a> {
         oid: usize,
         make: impl FnOnce(XSequence<'_>) -> Result<R>,
     ) -> Result<R> {
+        self.with_grid_block(oid, |held| match held {
+            None => make(XSequence::Store(&self.read_shared(oid)?)),
+            Some((block, i)) => {
+                let (length, runs) = self.parts_in(block, i, oid)?;
+                make(XSequence::Block {
+                    block,
+                    i,
+                    length,
+                    runs,
+                })
+            }
+        })
+    }
+
+    /// `f(None)` when sequence `oid` is a block of its own (a long one), else `f` of its block
+    /// and its place in the block, with the block kept by this thread as `with_block` keeps it:
+    /// out of the thread's cell while `f` runs, and back in it after.
+    fn with_grid_block<R>(
+        &self,
+        oid: usize,
+        f: impl FnOnce(Option<(&Arc<SequenceBlock>, usize)>) -> Result<R>,
+    ) -> Result<R> {
         let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
         let mut kept = X_PLAN_BLOCK.with(std::cell::Cell::take);
-        let held = |kept: &Option<XPlanBlock>| {
+        let holds = |kept: &Option<XPlanBlock>| {
             kept.as_ref().is_some_and(|kept| {
                 kept.stream == self.id
                     && (kept.first..kept.first + kept.block.len() as u32).contains(&ordinal)
             })
         };
-        if !held(&kept) {
+        if !holds(&kept) {
             kept = None;
             let number = self.grid.partition_point(|&first| first <= ordinal) - 1;
             let (first, end) = (self.grid[number], self.grid[number + 1]);
             if end - first == 1 {
-                let store = self.read_shared(oid)?;
-                return make(XSequence::Store(&store));
+                return f(None);
             }
             // LOSAT_X_TBNPLANCUT: the block goes with this thread's chunk.
             crate::utils::xreach::x_reach!(
@@ -296,17 +391,7 @@ impl<'a> XDbStream<'a> {
             });
         }
         let block = kept.as_ref().expect("a block holds the sequence");
-        let i = (ordinal - block.first) as usize;
-        let made = self
-            .parts_in(&block.block, i, oid)
-            .and_then(|(length, runs)| {
-                make(XSequence::Block {
-                    block: &block.block,
-                    i,
-                    length,
-                    runs,
-                })
-            });
+        let made = f(Some((&block.block, (ordinal - block.first) as usize)));
         X_PLAN_BLOCK.with(|cell| cell.set(kept));
         made
     }
@@ -682,7 +767,8 @@ mod tests {
                     .chain((0..count).step_by(3));
                 for oid in oids {
                     let (packed, length) = stored(&stream, oid);
-                    assert_eq!(length, stream.length(oid));
+                    assert_eq!(length, stream.length(oid).unwrap(), "{oid}");
+                    assert_eq!(length, stream.read_length(oid).unwrap(), "{oid}");
                     stream
                         .with_block(oid, |sequence| {
                             assert_eq!(sequence.len(), length, "{oid}");
@@ -847,11 +933,21 @@ mod tests {
 
     #[test]
     fn the_stream_holds_the_longest_length_and_their_sum() {
-        for db in [nucleotides("nucl_mv"), listed()] {
+        for db in [
+            nucleotides("nucl_v4"),
+            nucleotides("nucl_v5"),
+            nucleotides("nucl_mv"),
+            listed(),
+            volumes_and_list(),
+        ] {
             let stream = XDbStream::new(&db, 1, "TBLASTN").unwrap();
-            let lengths: Vec<usize> = (0..stream.count())
-                .map(|oid| stored(&stream, oid).1)
+            let lengths: Vec<usize> = shared::read_nucleotide_stores(&db, "TBLASTN")
+                .unwrap()
+                .iter()
+                .map(PackedNucleotide::len)
                 .collect();
+            assert_eq!(stream.count(), lengths.len());
+            assert_eq!(stream.first_length(), lengths[0]);
             assert_eq!(
                 stream.longest_and_total(),
                 (
@@ -859,6 +955,94 @@ mod tests {
                     lengths.iter().map(|&length| length as u64).sum()
                 )
             );
+        }
+    }
+
+    /// The index's lengths (`x_approx_lengths`) are those of NCBI's scan: one per sequence in
+    /// ordinal order (a list's included ones: a seqid list and OIDs kept as a taxid list keeps
+    /// them, `SeqDb::x_keep_oids`), at most 3 bases off the stored length, exact in the bits
+    /// above the last byte's. When the index cannot be read, the sequences from there on
+    /// are given by the blocks of the grid.
+    #[test]
+    fn the_index_gives_a_length_near_the_stored_one_for_every_sequence() {
+        for db in [
+            nucleotides("nucl_v4"),
+            nucleotides("nucl_v5"),
+            nucleotides("nucl_mv"),
+            listed(),
+            volumes_and_list(),
+        ] {
+            let stream = XDbStream::new(&db, 1, "TBLASTN").unwrap();
+            let mut approx = Vec::new();
+            stream.x_approx_lengths(|length| approx.push(length as usize));
+            assert_eq!(approx.len(), stream.count());
+            for (oid, &length) in approx.iter().enumerate() {
+                let stored = stream.read_length(oid).unwrap();
+                assert_eq!(length / 4, stored / 4, "{oid}: {length} for {stored}");
+            }
+            let mut given = Vec::new();
+            db.x_approx_lengths(|length| given.push(length as usize))
+                .unwrap();
+            assert_eq!(approx, given);
+        }
+        // An index read that fails after `visited` sequences: the grid's blocks give the rest,
+        // a whole block's bases at the first sequence of each.
+        let db = nucleotides("nucl_mv");
+        let whole = (PLAN_BLOCK_BYTES * 4) as u32;
+        for max_bytes in [0, 64, u64::MAX] {
+            let stream = stream_of(&db, 1, max_bytes);
+            let count = stream.count() as u32;
+            for visited in 0..=count {
+                let mut lengths = Vec::new();
+                stream.x_grid_lengths(visited, |length| lengths.push(length));
+                assert_eq!(lengths.len() as u32, count - visited, "{visited}");
+                assert!(lengths.iter().all(|&length| length == whole || length == 0));
+                let starts: Vec<u32> = stream.grid[..stream.grid.len() - 1]
+                    .iter()
+                    .copied()
+                    .filter(|&first| first >= visited)
+                    .collect();
+                let given: Vec<u32> = (visited..count)
+                    .filter(|ordinal| lengths[(ordinal - visited) as usize] == whole)
+                    .collect();
+                assert_eq!(given, starts, "{max_bytes} {visited}");
+            }
+        }
+    }
+
+    /// A cut is made once for its key and kept; another key makes its own.
+    #[test]
+    fn a_cut_is_made_once_for_its_key() {
+        let db = nucleotides("nucl_v4");
+        let stream = XDbStream::new(&db, 1, "TBLASTN").unwrap();
+        let first = stream.x_kept_cut(7, || vec![1, 2]);
+        let again = stream.x_kept_cut(7, || panic!("made again"));
+        assert!(Arc::ptr_eq(&first, &again));
+        assert_eq!(&*stream.x_kept_cut(8, || vec![3]), [3]);
+        assert_eq!(&*stream.x_kept_cut(7, || panic!("made again")), [1, 2]);
+    }
+
+    /// A short sequence's length is read with its block, which the `with_block` that follows
+    /// uses: the lengths add no read of a block; a long one's is read from the index.
+    #[test]
+    fn a_length_reads_the_block_that_its_sequence_reads() {
+        for db in [
+            nucleotides("nucl_v4"),
+            nucleotides("nucl_mv"),
+            volumes_and_list(),
+        ] {
+            for max_bytes in [64, 256, u64::MAX] {
+                let stream = stream_of(&db, 1, max_bytes);
+                for oid in 0..stream.count() {
+                    stream.length(oid).unwrap();
+                    stream.with_block(oid, |_| Ok(())).unwrap();
+                }
+                assert_eq!(
+                    stream.block_reads.load(Ordering::Relaxed),
+                    read_blocks(&stream),
+                    "{max_bytes}"
+                );
+            }
         }
     }
 

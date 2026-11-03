@@ -550,8 +550,7 @@ input[type='radio'] {
 }
 
 /* The "?" sits beside the control; the help it opens takes the row under both. */
-.param-control > .help,
-.param-control > datalist {
+.param-control > .help {
   grid-column: 1 / -1;
 }
 
@@ -590,7 +589,7 @@ input[type='radio'] {
   color: var(--muted);
 }
 
-/* W4b search: a row of several fields (Match/Mismatch Scores, Gap Costs, NCBI's "Mask"). */
+/* W4b search: a row of several fields (Match/Mismatch Scores, Gap Costs, NCBI's "Filter" and "Mask"). */
 .param-group {
   display: flex;
   flex-wrap: wrap;

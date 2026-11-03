@@ -3,16 +3,25 @@
 // Parameters, Filters and Masking, Discontiguous Word Options, and LOSAT's Other Parameters),
 // whose rows share one label column, as on NCBI's form:
 // the sections and labels of the program's descriptor, with the engine's defaults, choices
-// and help (`describe`). The task and the genetic codes are shown elsewhere (SearchPanel,
-// InputPanel).
+// and help (`describe`); a row of two fields with NCBI's select of their pairs is a
+// ParameterPair. The task and the genetic codes are shown elsewhere (SearchPanel, InputPanel).
 import { computed } from 'vue';
 import type { DraftState, SearchDraft } from '../application/draft';
-import { fieldRows, sectionShown, sectionsAt } from '../domain/parameters';
-import { programById } from '../domain/programs';
+import { fieldRows, sectionShown, sectionsAt, type PairRow } from '../domain/parameters';
+import { programById, type ParameterField as Field, type ParameterSection } from '../domain/programs';
 import ParameterField from './ParameterField.vue';
+import ParameterPair from './ParameterPair.vue';
 
 const props = defineProps<{ draft: SearchDraft; state: DraftState }>();
 const sectionId = (title: string) => `parameters-${title.toLowerCase().replace(/[^a-z]+/g, '-')}`;
+/** The row's NCBI select of pairs, where the section has one for it and the engine describes both fields. */
+function pairOf(section: ParameterSection, row: string | undefined, fields: readonly Field[]): PairRow | undefined {
+  const select = row === undefined ? undefined : section.pairs?.[row];
+  const [first, second] = fields;
+  return select === undefined || first === undefined || second === undefined || fields.length !== 2
+    ? undefined
+    : { row: row!, select, flags: [first.flag, second.flag] };
+}
 const sections = computed(() => {
   const options = props.state.description?.parameters;
   const values = props.state.values[props.state.program];
@@ -37,6 +46,13 @@ const sections = computed(() => {
       <div :id="sectionId(section.title)" class="section-legend">{{ section.title }}</div>
       <template v-for="row in fieldRows(section.fields)" :key="row.fields[0]!.flag">
         <ParameterField v-if="row.row === undefined" :draft="draft" :state="state" :field="row.fields[0]!" />
+        <ParameterPair
+          v-else-if="pairOf(section, row.row, row.fields)"
+          :draft="draft"
+          :state="state"
+          :pair="pairOf(section, row.row, row.fields)!"
+          :fields="row.fields"
+        />
         <div v-else class="param-row param-row-group">
           <span class="param-label">{{ row.row }}</span>
           <div class="param-control param-group">

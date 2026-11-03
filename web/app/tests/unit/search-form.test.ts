@@ -11,10 +11,15 @@ import {
   fieldRows,
   formParameters,
   knownDefault,
+  pairEntries,
+  pairList,
+  pairRows,
+  pairValue,
   placementFlags,
   sectionShown,
   sectionsAt,
   setField,
+  setFields,
   writtenValue,
   type EngineOption,
   type FormValues,
@@ -178,31 +183,33 @@ describe('formParameters', () => {
 
 describe('setField', () => {
   const templates: FormValues = { '-task': 'dc-megablast', '-template_type': 'coding', '-template_length': '18', '-evalue': '1' };
+  const blastn = programById('blastn');
+  const setField3 = (values: FormValues, flag: string, value: string | boolean) => setField(blastn, values, flag, value, undefined);
 
   it.each(['blastn', 'blastn-short'])('removes the template fields when the task is %s', (task) => {
-    const next = setField(templates, '-task', task);
+    const next = setField3(templates, '-task', task);
     expect(next).toEqual({ '-task': task, '-evalue': '1' });
     expect('-template_type' in next).toBe(false);
     expect('-template_length' in next).toBe(false);
   });
 
   it.each(['dc-megablast', 'megablast'])('keeps the template fields when the task is %s', (task) => {
-    expect(setField(templates, '-task', task)).toEqual({ ...templates, '-task': task });
+    expect(setField3(templates, '-task', task)).toEqual({ ...templates, '-task': task });
   });
 
   it('does not clear the templates when another field is set', () => {
-    expect(setField(templates, '-evalue', '5')).toEqual({ ...templates, '-evalue': '5' });
+    expect(setField3(templates, '-evalue', '5')).toEqual({ ...templates, '-evalue': '5' });
   });
 
   it('returns a frozen object and leaves the input unchanged', () => {
     const before = { ...templates };
-    expect(Object.isFrozen(setField(templates, '-evalue', '5'))).toBe(true);
-    expect(Object.isFrozen(setField(templates, '-task', 'blastn'))).toBe(true);
+    expect(Object.isFrozen(setField3(templates, '-evalue', '5'))).toBe(true);
+    expect(Object.isFrozen(setField3(templates, '-task', 'blastn'))).toBe(true);
     expect(templates).toEqual(before);
   });
 
   it('sets a flag value', () => {
-    expect(setField({}, '-lcase_masking', true)).toEqual({ '-lcase_masking': true });
+    expect(setField3({}, '-lcase_masking', true)).toEqual({ '-lcase_masking': true });
   });
 });
 
@@ -424,6 +431,130 @@ describe('sections by place, and the Discontiguous Word Options', () => {
     expect(placementFlags(programById('tblastn'), 'algorithm')).toContain('-evalue');
     expect(sectionsAt(programById('blastx'), undefined, 'query').flatMap((s) => s.fields.map((f) => f.flag))).toEqual(['-query_gencode']);
     expect(sectionsAt(programById('blastx'), undefined, 'subject')).toEqual([]);
+  });
+});
+
+describe("NCBI's pair selects: Match/Mismatch Scores and Gap Costs", () => {
+  const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+  const optionsOf = (id: ProgramId) => toProgramDescription(described[id]).parameters;
+  const blastn = programById('blastn');
+  const blastp = programById('blastp');
+  const bn = optionsOf('blastn');
+  const bp = optionsOf('blastp');
+  const [scores, gaps] = pairRows(blastn);
+  const proteinGaps = pairRows(blastp)[0]!;
+
+  it('are the rows of two fields that NCBI shows as one select', () => {
+    expect(pairRows(blastn).map((pair) => [pair.row, pair.select.id, pair.flags])).toEqual([
+      ['Match/Mismatch Scores', 'matchscores', ['-reward', '-penalty']],
+      ['Gap Costs', 'gapcosts', ['-gapopen', '-gapextend']],
+    ]);
+    for (const id of ['blastp', 'blastx', 'tblastn'] as const) {
+      expect(pairRows(programById(id)).map((pair) => [pair.row, pair.flags])).toEqual([['Gap Costs', ['-gapopen', '-gapextend']]]);
+    }
+    expect(pairRows(programById('tblastx'))).toEqual([]);
+  });
+
+  it("show the pair that the search uses, from the task's defaults", () => {
+    expect(pairValue(blastn, scores!, {}, bn)).toBe('1,-2');
+    expect(pairValue(blastn, gaps!, {}, bn)).toBe('0 0');
+    expect(pairValue(blastn, scores!, { '-task': 'blastn' }, bn)).toBe('2,-3');
+    expect(pairValue(blastn, gaps!, { '-task': 'blastn' }, bn)).toBe('5 2');
+    expect(pairValue(blastn, gaps!, { '-task': 'blastn', '-gapopen': ' 4 ' }, bn)).toBe('4 2');
+    expect(pairValue(blastp, proteinGaps, { '-matrix': 'PAM30' }, bp)).toBe('9 1');
+    expect(pairValue(blastn, gaps!, {}, undefined)).toBe('');
+  });
+
+  it("list NCBI's gap costs of the scores, with megablast's Linear for megablast only", () => {
+    expect(pairList(blastn, scores!, {}, bn)).toEqual(['1,-2', '1,-3', '1,-4', '2,-3', '4,-5', '1,-1']);
+    expect(pairList(blastn, gaps!, {}, bn)).toEqual(['0 0', '5 2', '2 2', '1 2', '0 2', '3 1', '2 1', '1 1']);
+    expect(pairList(blastn, gaps!, { '-task': 'dc-megablast' }, bn)).toEqual(['4 4', '2 4', '0 4', '3 3', '6 2', '5 2', '4 2', '2 2']);
+    expect(pairList(blastn, gaps!, { '-reward': '1', '-penalty': '-1' }, bn)).not.toContain('0 0');
+    // Scores outside NCBI's list have no list of gap costs: the two fields show.
+    expect(pairList(blastn, gaps!, { '-reward': '3', '-penalty': '-3' }, bn)).toEqual([]);
+    expect(pairList(blastp, proteinGaps, { '-matrix': 'BLOSUM45' }, bp)).toContain('14 2');
+    expect(pairList(blastp, proteinGaps, { '-matrix': 'IDENTITY' }, bp)).toEqual([]);
+    expect(pairList(programById('blastx'), pairRows(programById('blastx'))[0]!, {}, optionsOf('blastx'))).toEqual(['11 1']);
+  });
+
+  it("give each matrix's list NCBI's default, which is the engine's default for that matrix", () => {
+    for (const id of ['blastp', 'tblastn'] as const) {
+      const program = programById(id);
+      const pair = pairRows(program)[0]!;
+      for (const [matrix, value] of Object.entries(pair.select.defaults ?? {})) {
+        expect(pairValue(program, pair, { '-matrix': matrix }, optionsOf(id)), `${id} ${matrix}`).toBe(value);
+        expect(pair.select.lists[matrix], `${id} ${matrix}`).toContain(value);
+      }
+    }
+  });
+
+  it('write the two values of a pair chosen, and leave out a value that is the default', () => {
+    expect(pairEntries(blastn, scores!, '1,-2', {}, bn)).toEqual([
+      ['-reward', ''],
+      ['-penalty', ''],
+    ]);
+    expect(pairEntries(blastn, scores!, '1,-3', {}, bn)).toEqual([
+      ['-reward', ''],
+      ['-penalty', '-3'],
+    ]);
+    expect(pairEntries(blastp, proteinGaps, '10 1', {}, bp)).toEqual([
+      ['-gapopen', '10'],
+      ['-gapextend', ''],
+    ]);
+  });
+
+  it("give the gap costs the new list's default when the scores change it, as NCBI's page does", () => {
+    const choose = (values: FormValues, pair: string) => setFields(blastn, values, pairEntries(blastn, scores!, pair, values, bn), bn);
+    // 4,-5 does not take BLASTN's 5 2 (BLAST stops: "Gap existence and extension values 5 and 2 are not supported").
+    expect(formParameters(blastn, choose({ '-task': 'blastn' }, '4,-5'), bn)).toEqual([
+      ['-task', 'blastn'],
+      ['-reward', '4'],
+      ['-penalty', '-5'],
+      ['-gapopen', '12'],
+      ['-gapextend', '8'],
+    ]);
+    // Megablast's Linear is the default of the lists that hold it; 1,-1 has none (BLAST refuses 0 0 there).
+    expect(formParameters(blastn, choose({}, '4,-5'), bn)).toEqual([
+      ['-reward', '4'],
+      ['-penalty', '-5'],
+    ]);
+    expect(formParameters(blastn, choose({ '-gapopen': '2', '-gapextend': '1' }, '1,-3'), bn)).toEqual([['-penalty', '-3']]);
+    expect(formParameters(blastn, choose({}, '1,-1'), bn)).toEqual([
+      ['-penalty', '-1'],
+      ['-gapopen', '5'],
+      ['-gapextend', '2'],
+    ]);
+  });
+
+  it('give the gap costs the new default when the task or the matrix changes their list, and keep them otherwise', () => {
+    const fourFive = setFields(blastn, {}, pairEntries(blastn, scores!, '4,-5', {}, bn), bn);
+    const blastnTask = setField(blastn, fourFive, '-task', 'blastn', bn);
+    expect(formParameters(blastn, blastnTask, bn).slice(-2)).toEqual([
+      ['-gapopen', '12'],
+      ['-gapextend', '8'],
+    ]);
+    // Back to megablast (the default task, not written): Linear again.
+    expect(formParameters(blastn, setField(blastn, blastnTask, '-task', 'megablast', bn), bn)).toEqual([
+      ['-reward', '4'],
+      ['-penalty', '-5'],
+    ]);
+    const set: FormValues = { '-gapopen': '10', '-gapextend': '2' };
+    expect(formParameters(blastp, setField(blastp, set, '-matrix', 'PAM30', bp), bp)).toEqual([['-matrix', 'PAM30']]);
+    // The same list: the costs set stay (blastp-fast scores as blastp does).
+    expect(setField(blastp, set, '-task', 'blastp-fast', bp)).toEqual({ ...set, '-task': 'blastp-fast' });
+    // A matrix that NCBI does not list (typed after "Other"): no list, the costs stay.
+    expect(setField(blastp, set, '-matrix', 'IDENTITY', bp)).toEqual({ ...set, '-matrix': 'IDENTITY' });
+    // The row's own fields set here are kept.
+    expect(setFields(blastp, {}, [['-matrix', 'PAM30'], ['-gapopen', '8']], bp)).toEqual({ '-matrix': 'PAM30', '-gapopen': '8' });
+    // Scores typed in the two fields: a pair without a list leaves the costs.
+    expect(setField(blastn, { '-gapopen': '2', '-gapextend': '1' }, '-reward', '3', bn)).toEqual({ '-gapopen': '2', '-gapextend': '1', '-reward': '3' });
+  });
+
+  it("put the low complexity filters in NCBI's Filter row as checkboxes", () => {
+    for (const program of PROGRAMS) {
+      const filter = program.sections.flatMap((section) => section.fields).find((field) => field.flag === '-dust' || field.flag === '-seg');
+      expect(filter, program.id).toMatchObject({ label: 'Low complexity regions', kind: 'filter', row: 'Filter' });
+    }
   });
 });
 

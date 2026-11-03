@@ -300,7 +300,7 @@ function checkSurface(reactor, native) {
   assert.equal(reactor.call("losat_web2_release", headless.status).status, 0);
   const gap = reactor.call("losat_web2_register", "blastn", 1, Buffer.from(">s\nACGT\n>?10\nACGT\n"));
   assert.equal(gap.status, -1);
-  assert.match(gap.error, /^line 3 is a gap line .*not supported by LOSAT Web$/);
+  assert.match(gap.error, /^line 3 is a gap line .*not supported in the browser$/);
 }
 
 async function main() {

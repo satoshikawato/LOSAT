@@ -33,7 +33,7 @@ impl Program {
             "blastn" => Ok(Self::Blastn),
             "tblastx" => Ok(Self::Tblastx),
             "blastx" => Ok(Self::Blastx),
-            "psiblast" => Err("psiblast is not available in LOSAT Web ABI v2".into()),
+            "psiblast" => Err("psiblast is not available in the browser (ABI v2)".into()),
             other => Err(format!("unknown program '{other}'")),
         }
     }
@@ -72,7 +72,7 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
         // (`store::register`), so their ids could not be parsed: the run would write the report
         // of a search without the option.
         if matches!(key, "-parse_deflines" | "--parse_deflines") {
-            return Err(format!("{key} is not supported by LOSAT Web yet"));
+            return Err(format!("{key} is not supported in the browser yet"));
         }
     }
     // The formats come from `Program::formats`, and every program accepts the CLI's
@@ -1022,7 +1022,7 @@ mod tests {
     fn parse_deflines_is_rejected() {
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             let words = [program, "-query", "q", "-subject", "s", "-parse_deflines"];
-            let expected = "-parse_deflines is not supported by LOSAT Web yet";
+            let expected = "-parse_deflines is not supported in the browser yet";
             assert_eq!(validate(&words).unwrap_err(), expected);
             assert_eq!(run(&words, &[], &[]).unwrap_err(), expected);
         }
@@ -1035,14 +1035,14 @@ mod tests {
         let error = validate(&words).unwrap_err();
         assert_eq!(
             error,
-            "-db (a database search) is not supported by LOSAT Web yet"
+            "-db (a database search) is not supported in the browser yet"
         );
         let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
         let query = [FastaRecord::new("Query_1", b"q", protein)];
         let subject = [FastaRecord::new("Subject_1", b"s", protein)];
         assert_eq!(
             run(&words, &query, &subject).unwrap_err(),
-            "-db (a database search) is not supported by LOSAT Web yet"
+            "-db (a database search) is not supported in the browser yet"
         );
         // `-db` with `-subject` is the parser's conflict, as on the command line.
         let both = ["blastp", "-query", "q", "-subject", "s", "-db", "swissprot"];

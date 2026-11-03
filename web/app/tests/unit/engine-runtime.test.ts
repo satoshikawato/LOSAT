@@ -446,10 +446,10 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
     // What register still refuses: a first line that NCBI may read as a Seq-id and a gap line.
     const seqId = await checker.check('blastn', 'query', new TextEncoder().encode('AB123456\nACGT\n'));
     expect(seqId.ok).toBe(false);
-    expect(!seqId.ok && seqId.message).toMatch(/not supported by LOSAT Web/);
+    expect(!seqId.ok && seqId.message).toMatch(/not supported in the browser/);
     const gap = await checker.check('blastp', 'subject', new TextEncoder().encode('>p\nMK\n>?10\nMK\n'));
     expect(gap.ok).toBe(false);
-    expect(!gap.ok && gap.message).toMatch(/not supported by LOSAT Web/);
+    expect(!gap.ok && gap.message).toMatch(/not supported in the browser/);
   });
 });
 

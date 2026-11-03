@@ -34,7 +34,7 @@
 //! stored residues upper-cased (`U` is `T` for kind 1, as the reader stores it).
 //!
 //! The scan fails with the reader's error (`CheckDataLine`) and rejects explicitly, with
-//! `not supported by LOSAT Web`:
+//! `not supported in the browser`:
 //! - a first line that NCBI's data loaders would read as a Seq-id (the engine's test);
 //! - a `>?` gap line (maintainer decision 3: gap residues have no bytes to index);
 //! - a record longer than 2147483647 letters (the engine's limit);
@@ -1001,7 +1001,7 @@ impl Builder {
         // ```
         if self.length > MAX_LETTERS {
             return Err(format!(
-                "a record longer than {MAX_LETTERS} letters is not supported by LOSAT Web"
+                "a record longer than {MAX_LETTERS} letters is not supported in the browser"
             ));
         }
         Ok(())
@@ -1030,7 +1030,7 @@ impl Builder {
             }
         } else {
             return Err(format!(
-                "record {} ({id:?}): NCBI BLAST+ reads two of its lines as one (a CR line end in a file of LF line ends, or an LF in a file of CR line ends), so LOSAT Web's index cannot locate its residues; such input is not supported by LOSAT Web (use one kind of line end)",
+                "record {} ({id:?}): NCBI BLAST+ reads two of its lines as one (a CR line end in a file of LF line ends, or an LF in a file of CR line ends), so LOSAT's index cannot locate its residues; such input is not supported in the browser (use one kind of line end)",
                 index + 1
             ));
         };
@@ -1372,7 +1372,7 @@ impl Records {
     fn gap(&mut self) {
         let line = self.line_number;
         self.fail(format!(
-            "line {line} is a gap line ('>?'), whose residues have no bytes in the input for LOSAT Web's index to locate; gap lines are not supported by LOSAT Web"
+            "line {line} is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser"
         ));
     }
 
@@ -1423,7 +1423,7 @@ impl Records {
             if seq_id_line(&line, self.protein) {
                 let line = String::from_utf8_lossy(&line);
                 self.fail(format!(
-                    "the first line ({:?}) is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT Web (start the input with a '>' defline)",
+                    "the first line ({:?}) is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported in the browser (start the input with a '>' defline)",
                     line.trim_end()
                 ));
                 return;
@@ -1501,7 +1501,7 @@ fn seq_id_line(line: &[u8], protein: bool) -> bool {
     bytes.extend_from_slice(line);
     bytes.push(b'\n');
     let mut source =
-        FastaInputSource::from_bytes(&bytes, ReaderConfig::query("LOSAT Web", protein, true));
+        FastaInputSource::from_bytes(&bytes, ReaderConfig::query("LOSAT", protein, true));
     matches!(
         source.next_sequence(&mut |_| Ok(())),
         Err(ReadError::Unsupported(_))

@@ -35,7 +35,7 @@ export function buildArgv(input: ArgvInput): readonly string[] {
   const argv = [input.program, '-query', input.queryName, '-subject', input.subjectName];
   for (const [flag, value] of input.parameters) {
     if (!flag.startsWith('-')) throw new Error(`parameter must start with "-": ${flag}`);
-    if (RESERVED_FLAGS.includes(flag)) throw new Error(`${flag} is managed by LOSAT Web`);
+    if (RESERVED_FLAGS.includes(flag)) throw new Error(`${flag} is managed by LOSAT`);
     argv.push(flag);
     if (value !== true) argv.push(value);
   }

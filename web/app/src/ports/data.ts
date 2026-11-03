@@ -30,7 +30,8 @@ export interface RunInput {
 export interface DatasetStore {
   /**
    * Keeps a reference to `file`. Its bytes are read with `File.slice` when needed and are
-   * never copied into storage (design §6.1).
+   * never copied into storage (design §6.1). A File named `.gz` is inflated first and kept
+   * under its name without `.gz`; its ref carries that name and the inflated size.
    */
   addSource(file: File): Promise<SourceRef>;
   /**

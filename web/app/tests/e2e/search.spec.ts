@@ -3,6 +3,7 @@
 // (LOSAT_WEB_REACTORS); what only the engine can show (its messages, the kept subject, a
 // search long enough to edit or cancel while it runs) is checked in the engine build.
 import { expect, test, type Page } from '@playwright/test';
+import { gzipSync } from 'node:zlib';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import {
   chooseRun,
@@ -80,6 +81,16 @@ test('a file is summarized with its records, not put in the paste box; files can
 // engine's register reads with the index scan's reader kind (DW-38), so it refuses no record that
 // the index read; NCBI's reader skips the '!', and the record is left out with its checkbox.
 const REFUSED_RECORD = '>bad\nACGT!ACGT\n';
+
+test('a file named .gz is inflated when it is opened and shows its plain name', async ({ page }) => {
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta.gz', text: gzipSync(fasta('LC738884.fasta')) }]);
+  await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('subject-source-0').locator('.source-name')).toHaveText('LC738884.fasta');
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta', text: fasta('LC738884.fasta') }]);
+  const summary = await page.getByTestId('subject-source-0-summary').textContent();
+  expect(summary).toMatch(/record/);
+  await expect(page.getByTestId('subject-source-1-summary')).toHaveText(summary!.trim());
+});
 
 test('records: duplicate IDs by number, a record that the input check refuses (FakeEngine), exclusion, and a run after exclusion', async ({ page }) => {
   await program(page, 'blastn');

@@ -1,3 +1,4 @@
+import { gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { SearchDraft, type DraftSource } from '../../src/application/draft';
@@ -520,6 +521,14 @@ describe('SearchDraft submit', () => {
     draft.setRegion('query', { start: '2', stop: '10' });
     expect(await draft.submit()).toMatchObject({ ok: true });
     expect(requests.at(-1)![0]!).toMatchObject({ program: 'blastx', parameters: [['-query_loc', '2-10']] });
+  });
+
+  it('opens a file named .gz under its plain name and inflated size', async () => {
+    const { draft } = setup();
+    draft.addFiles('subject', [new File([gzipSync('>a\nACGT\n')], 'x.fa.gz')]);
+    await draft.idle();
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', name: 'x.fa', size: 8 });
+    expect(draft.inputName('subject')).toBe('x.fa');
   });
 
   it('queues one combined search of all files, named as plan §5.3 says', async () => {

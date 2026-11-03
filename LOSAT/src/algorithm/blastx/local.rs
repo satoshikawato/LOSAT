@@ -17,6 +17,9 @@ use super::{
 use crate::api::local_blast::{FormatProbe, ReportOutputs};
 use crate::blastinput::app::{self, Program};
 use crate::blastinput::fasta_reader;
+use crate::blastinput::seq_range::{
+    parse_optional_range, record_cut, record_interval, RangeRole, RecordInterval, SequenceRange,
+};
 use anyhow::{bail, ensure, Context, Result};
 use std::io::{self, Write};
 
@@ -41,7 +44,8 @@ use std::io::{self, Write};
 /// of the subjects come in the command line's order, before the search. The `-query` and
 /// `-subject` values of `args` are used only as display names. LOSAT Web writes outfmt 0, 6 and 7
 /// (without a custom field list or delimiter); the other formats, `-db` and `-parse_deflines` are
-/// refused.
+/// refused. `-subject_loc` and `-query_loc` cut the records as the command line cuts them: each
+/// subject as it is read, each query as its batch is read (`native::run_inner`).
 ///
 /// The records are those of NCBI's reader (`fasta_reader`): the queries as its nucleotide reader
 /// reads them, the subjects as its protein reader reads them (`blastx_record`). Their messages are
@@ -66,11 +70,19 @@ pub fn run_local(
         hits: hits_sink,
         observer,
     } = outputs;
-    // NCBI reads the subjects before the queries, each record's messages as it is read.
+    let subject_range = parse_subject_range(&args)?;
+    // NCBI reads the subjects before the queries, each record's messages as it is read, and cuts
+    // each to its `-subject_loc` interval: a record whose interval starts more than one letter
+    // past its end stops the reading after its messages (`native::run_inner`).
     let mut subjects = Vec::with_capacity(subject_records.len());
     for record in subject_records {
-        subjects.push(blastx_record(record, args.lcase_masking).map_err(input_error)?);
+        let mut subject = blastx_record(record, args.lcase_masking).map_err(input_error)?;
         diagnostics.write_all(&record.warnings)?;
+        if let Some(range) = &subject_range {
+            let (from, to_exclusive) = record_cut(range, subject.sequence.len())?;
+            subject.cut_in_place(from, to_exclusive);
+        }
+        subjects.push(subject);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
     // ```c++
@@ -84,7 +96,11 @@ pub fn run_local(
     if subjects.is_empty() {
         return Err(engine("Empty CBlastQueryVector"));
     }
-    let resolved = check_resolutions(&args, &choices, resolutions, &mut **diagnostics)?;
+    let query_range = parse_query_range(&args)?;
+    let mut resolved = check_resolutions(&args, &choices, resolutions, &mut **diagnostics)?;
+    for options in &mut resolved {
+        options.query_range = query_range;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:213-217
     // ```c++
     //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
@@ -132,26 +148,37 @@ pub fn run_local(
     let lowercase = args.lcase_masking;
     // The reader batches as BLASTX's reader makes them (`input::emit_fasta_batch`): a record's
     // messages, then the record, and the batch once it holds `batch_size` letters or more; the
-    // rest at the end. Only the batch being read is kept.
+    // rest at the end. With `-query_loc` a record is cut to its interval and the batch counts the
+    // whole record; a record whose interval starts more than one letter past its end is not
+    // searched and adds nothing, so the last batch can hold none (NCBI's `Empty
+    // CBlastQueryVector`). Only the batch being read is kept.
     let mut batch = Vec::new();
     let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
                     warn: &mut dyn FnMut(&[u8]) -> Result<()>|
      -> Result<Vec<FastaRecord>> {
-        let mut letters = 0;
+        let (mut letters, mut records_read) = (0, 0);
         for record in query_records {
-            let query = blastx_record(record, lowercase)?;
+            let mut query = blastx_record(record, lowercase)?;
             if !record.warnings.is_empty() {
                 warn(&record.warnings)?;
             }
-            letters += query.sequence.len();
+            let length = query.sequence.len();
+            records_read += 1;
+            match query_range.map(|range| record_interval(&range, length)) {
+                None => {}
+                Some(RecordInterval::Letters { from, to }) => query.cut_in_place(from, to + 1),
+                Some(RecordInterval::Empty) => query.cut_in_place(length, length),
+                Some(RecordInterval::PastEnd) => continue,
+            }
+            letters += length;
             batch.push(query);
             if letters >= batch_size {
                 deliver(&batch)?;
                 batch.clear();
-                letters = 0;
+                (letters, records_read) = (0, 0);
             }
         }
-        if !batch.is_empty() {
+        if records_read > 0 {
             deliver(&batch)?;
         }
         Ok(Vec::new())
@@ -265,13 +292,44 @@ pub fn run_local(
 
 /// The checks of the options alone, without the records (the `validate` of web ABI v2), for the
 /// output formats `outfmts` of one `run_local` call: `run_local`'s refusals and LOSAT's, the
-/// thread count, then NCBI's errors of the options, with the messages of a run. A run reports
-/// NCBI's errors after the subjects are read, so for an argv and records that both fail the run
-/// reports the records' error.
+/// thread count, the syntax of `-subject_loc` and `-query_loc`, then NCBI's errors of the
+/// options, with the messages of a run. A run reports NCBI's errors after the subjects are read,
+/// so for an argv and records that both fail the run reports the records' error.
 pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
     let (choices, resolutions) = read_options(args, outfmts)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
+    parse_subject_range(args)?;
+    parse_query_range(args)?;
     check_resolutions(args, &choices, resolutions, &mut io::sink()).map(|_| ())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2540-2545
+// ```c++
+//         TSeqRange subj_range;
+//         if (args.Exist(kArgSubjectLocation) && args[kArgSubjectLocation]) {
+//             subj_range =
+//                 ParseSequenceRange(args[kArgSubjectLocation].AsString(),
+//                             "Invalid specification of subject location");
+//         }
+// ```
+/// `-subject_loc`, which the command line reads after it opened the subject file and before it
+/// reads the subjects (`native::run_inner`).
+fn parse_subject_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
+    parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTX")
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
+// ```c++
+//     // set the sequence range
+//     if (args.Exist(kArgQueryLocation) && args[kArgQueryLocation]) {
+//         m_Range = ParseSequenceRange(args[kArgQueryLocation].AsString(),
+//                                      "Invalid specification of query location");
+//     }
+// ```
+/// `-query_loc`, which the command line reads after the subjects, with the query options and
+/// before the formatting handler (`native::run_inner`).
+fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
+    parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTX")
 }
 
 /// The output formats `outfmts` as `run_local` reads them and the options of each, before the
@@ -310,10 +368,6 @@ fn read_options(
     // the options).
     if args.parse_deflines {
         bail!("-parse_deflines is not supported by LOSAT Web yet");
-    }
-    // The command line's ranges come to LOSAT Web with line SX's session SXd3.
-    if args.query_loc.is_some() || args.subject_loc.is_some() {
-        bail!("-query_loc and -subject_loc are not supported by LOSAT Web's BLASTX yet");
     }
     // The options of each format: LOSAT's refusals now, NCBI's errors of the options after the
     // subjects are read (`native::run_inner`).

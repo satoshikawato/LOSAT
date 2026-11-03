@@ -51,6 +51,7 @@ import { join } from 'node:path';
 import { expect, test, type CDPSession, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NO_ENGINE_REASON } from './support/engine';
+import { navigate } from './support/navigate';
 import { program, runMessage, settled, submit } from './support/search';
 import { manyQueries, queryId, repeats } from './support/synthetic';
 
@@ -570,7 +571,7 @@ for (const count of COUNTS) {
     const record: Record<string, unknown> = { count };
     records.queries.push(record);
     try {
-      await page.goto('/');
+      await navigate(page, '/');
       const inputs = manyQueries(count);
       Object.assign(record, {
         queryBytes: inputs.queries.length,
@@ -835,7 +836,7 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
 
 test('many HSPs in one query-subject pair: the dot plot and the HSP list', async ({ page, browserName }) => {
   browser = browserName;
-  await page.goto('/');
+  await navigate(page, '/');
   // Run 1 is a small search to change runs with; the repeats are run 2, 3, ...
   const small = manyQueries(20);
   const first = await search(

@@ -6,6 +6,7 @@ import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
+import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import type { EnginePrepareHint, ValidationResult } from '../../src/ports/engine';
 
@@ -14,6 +15,7 @@ function setup(
     validate?: (argv: readonly string[]) => ValidationResult;
     useCoordinator?: boolean;
     checkInput?: DataService['checkInput'];
+    fetcher?: FakeAccessionFetcher;
   } = {},
 ) {
   let token = 0;
@@ -58,6 +60,7 @@ function setup(
       requests.push([...batch]);
       return options.useCoordinator ? coordinator.enqueueAll(batch) : { ok: true, runIds: batch.map((_, i) => `r${i}`) };
     },
+    fetcher: options.fetcher ?? new FakeAccessionFetcher(),
     now: () => 0,
     debounceMs: 0,
   });
@@ -168,6 +171,95 @@ describe('SearchDraft inputs', () => {
     await draft.idle();
     expect(kinds).toEqual([2]);
     expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 2 });
+  });
+});
+
+describe('SearchDraft accessions (line WF-1)', () => {
+  const NR = '>NR_074540.1 Bacillus cereus 16S\nACGTACGT\n';
+  const AB = '>AB000001.1 Rhizoctonia solani\nGGCCAATT\n';
+
+  it('keeps a box of accessions without a source until it is fetched, then reads the FASTA written into it', async () => {
+    const fetcher = new FakeAccessionFetcher({ 'NR_074540.1': NR, 'AB000001.1': AB });
+    const { draft } = setup({ fetcher });
+    draft.setPaste('query', 'nr_074540.1\n\nAB000001.1\n');
+    await draft.idle();
+    expect(draft.state.get().query.sources).toHaveLength(0);
+    expect(draft.accessions('query')).toEqual(['NR_074540.1', 'AB000001.1']);
+    expect(draft.readiness()).toBe('Fetch the query accessions first.');
+    expect(fetcher.requests).toHaveLength(0);
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(fetcher.requests.map((r) => [r.source, r.kind, r.accession])).toEqual([
+      ['ncbi', 'nucleotide', 'NR_074540.1'],
+      ['ncbi', 'nucleotide', 'AB000001.1'],
+    ]);
+    expect(draft.state.get().query.paste).toBe(NR + AB);
+    expect(draft.state.get().query.fetch).toBeUndefined();
+    expect(sourceOf(draft, 'query').base?.records.map((r) => r.id)).toEqual(['NR_074540.1', 'AB000001.1']);
+  });
+
+  it('asks the chosen source for the kind the program reads, and keeps the choice', async () => {
+    const fetcher = new FakeAccessionFetcher({ P12345: '>sp|P12345|AATM_RABIT\nMALLHS\n' });
+    const { draft } = setup({ fetcher });
+    draft.setProgram('blastp');
+    draft.setFetchSource('ebi');
+    draft.setPaste('subject', 'P12345');
+    draft.fetchAccessions('subject');
+    await draft.idle();
+    expect(fetcher.requests.map((r) => [r.source, r.kind, r.accession])).toEqual([['ebi', 'protein', 'P12345']]);
+    expect(draft.state.get().fetchSource).toBe('ebi');
+    expect(draft.state.get().subject.paste).toBe('>sp|P12345|AATM_RABIT\nMALLHS\n');
+  });
+
+  it('says why a fetch failed, leaves the box as it was, and asks EBI nothing it cannot serve', async () => {
+    const fetcher = new FakeAccessionFetcher({ 'AB000001.1': AB, 'ZZ000001.1': { ok: false, reason: 'refused', status: 429 } });
+    const { draft } = setup({ fetcher });
+    draft.setPaste('query', 'AB000001.1\nAB999999.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(draft.state.get().query.fetch).toEqual({ state: 'failed', message: 'NCBI has no nucleotide record AB999999.1.' });
+    expect(draft.state.get().query.paste).toBe('AB000001.1\nAB999999.1');
+    draft.setFetchSource('ebi');
+    expect(draft.state.get().query.fetch).toBeUndefined();
+    draft.setPaste('query', 'NR_074540.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(draft.state.get().query.fetch).toEqual({
+      state: 'failed',
+      message: 'EBI (ENA) has no RefSeq records: fetch NR_074540.1 from NCBI or CNCB.',
+    });
+    draft.setFetchSource('cncb');
+    draft.setPaste('query', 'ZZ000001.1');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(draft.state.get().query.fetch).toEqual({
+      state: 'failed',
+      message: 'CNCB asks to wait (too many requests): fetch again in a moment.',
+    });
+    expect(fetcher.requests.map((r) => [r.source, r.accession])).toEqual([
+      ['ncbi', 'AB000001.1'],
+      ['ncbi', 'AB999999.1'],
+      ['cncb', 'ZZ000001.1'],
+    ]);
+  });
+
+  it('drops a running fetch when the box is edited, and limits the fetched text', async () => {
+    const fetcher = new FakeAccessionFetcher({ 'NR_074540.1': NR, 'NC_000001.11': `>NC_000001.11\n${'A'.repeat(10_000_001)}\n` });
+    const { draft } = setup({ fetcher });
+    fetcher.hold();
+    draft.setPaste('query', 'NR_074540.1');
+    draft.fetchAccessions('query');
+    await Promise.resolve();
+    expect(draft.state.get().query.fetch).toEqual({ state: 'fetching', source: 'ncbi', done: 0, total: 1 });
+    draft.setPaste('query', '>mine\nACGT\n');
+    fetcher.release();
+    await draft.idle();
+    expect(draft.state.get().query.paste).toBe('>mine\nACGT\n');
+    expect(draft.state.get().query.fetch).toBeUndefined();
+    draft.setPaste('query', 'NC_000001.11');
+    draft.fetchAccessions('query');
+    await draft.idle();
+    expect(draft.state.get().query.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10 MB') });
   });
 });
 

@@ -1,0 +1,58 @@
+// Accessions typed in a paste box (line WF-1, docs/web/fetch_design.md §4): NCBI's box takes
+// "accession number(s) … or FASTA sequence(s)"; LOSAT fetches an accession's FASTA only when the
+// user asks (ports/fetch.ts) and writes it into the box.
+import type { SequenceKind } from './programs';
+
+export type FetchSourceId = 'ncbi' | 'ebi' | 'cncb';
+
+/**
+ * The sources, in the order of the choice ("Fetch from NCBI / EBI / CNCB"; NCBI, the first, is
+ * the default). EBI is ENA for nucleotides and UniProt for proteins. DDBJ sends no CORS header
+ * (fetch_design.md §2).
+ */
+export const FETCH_SOURCES: ReadonlyArray<{ readonly id: FetchSourceId; readonly label: string }> = [
+  { id: 'ncbi', label: 'NCBI' },
+  { id: 'ebi', label: 'EBI' },
+  { id: 'cncb', label: 'CNCB' },
+];
+
+/** Bytes of FASTA that one fetch writes into a paste box at most. */
+export const FETCH_BYTE_LIMIT = 10_000_000;
+
+/** Accessions that one fetch takes at most (NCBI answers 3 requests a second without a key). */
+export const FETCH_ACCESSION_LIMIT = 100;
+
+/**
+ * INSDC (A12345, AB123456, AAA12345, WGS AAAA01000001), RefSeq (NR_074540, NZ_CP006932,
+ * WP_000001), CNCB GenBase (C_AA004835) and UniProt (P12345, Q9Y261, A0A023GPI8) accessions,
+ * each with an optional version. A sequence line has no digits, so it never matches.
+ */
+const ACCESSION =
+  /^(?:[A-Z]{1,6}\d{5,}|[A-Z]{1,2}_[A-Z]{0,6}\d{5,}|[OPQ]\d[A-Z\d]{3}\d|[A-NR-Z]\d(?:[A-Z][A-Z\d]{2}\d){1,2})(?:\.\d+)?$/;
+/** RefSeq accessions (two letters and "_"), which ENA does not serve. */
+const REFSEQ = /^[A-Z]{2}_/;
+/** UniProt accessions (uniprot.org/help/accession_numbers), the only ones UniProt's REST serves. */
+const UNIPROT = /^(?:[OPQ]\d[A-Z\d]{3}\d|[A-NR-Z]\d(?:[A-Z][A-Z\d]{2}\d){1,2})(?:\.\d+)?$/;
+
+/**
+ * The accessions of a text that has only accessions, one per line (blank lines aside), in
+ * upper case; undefined for any other text (FASTA, a bare sequence, an empty box).
+ */
+export function accessionLines(text: string): readonly string[] | undefined {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim().toUpperCase())
+    .filter((line) => line !== '');
+  return lines.length > 0 && lines.every((line) => ACCESSION.test(line)) ? lines : undefined;
+}
+
+/**
+ * Why a source cannot serve an accession of a kind, without asking it, or undefined: ENA has no
+ * RefSeq records, and UniProt has only its own accessions.
+ */
+export function unserved(source: FetchSourceId, kind: SequenceKind, accession: string): string | undefined {
+  if (source !== 'ebi') return undefined;
+  if (kind === 'nucleotide' && REFSEQ.test(accession)) return 'EBI (ENA) has no RefSeq records';
+  if (kind === 'protein' && !UNIPROT.test(accession)) return 'EBI (UniProt) has UniProt accessions only';
+  return undefined;
+}

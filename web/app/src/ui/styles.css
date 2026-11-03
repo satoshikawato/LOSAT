@@ -491,6 +491,20 @@ input[type='radio'] {
   font-size: 0.9em;
 }
 
+/* Line WF-1: "Fetch from NCBI" under a box of accessions. */
+.fetch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 6px;
+}
+
+.entry-paste > .muted,
+.entry-paste > .error {
+  margin: 4px 0 0;
+}
+
 .subrange-title,
 .region > legend {
   font-weight: 600;

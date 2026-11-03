@@ -84,3 +84,25 @@ CNCB の GenBase は取れる（2026-11-03 17:3x 実測）ので取得先に入�
 3. **取得先 = NCBI、EBI、CNCB**：15:3x は「NCBI と EBI だけ、CNCB は API を確認してから」。17:3x に GenBase の REST が CORS 付きで INSDC / RefSeq の accession も返すと分かり、17:4x「取得先に足す」。DDBJ は CORS が無いので入れない。
 4. **文言 = その場の一文だけ**：取得の行に「Sends the accession to NCBI」「Downloads 8 MB from ftp.ncbi.nlm.nih.gov」。約束の文は
    "?" の後ろ。見出しは「LOSAT」と一文のまま。
+
+## 8. WF-1 の実装（2026-11-03、Owner-delegated）
+
+保守者の常設の指示（2026-09-29、2026-10-07 に再掲）により、推奨の案を採って記録する。作業記録は web-fetch-20261103/DECISIONS.md の 7〜13。
+
+1. **取得先は手で選ぶ**（NCBI が既定、選んだ先はセッション中保ち、query と subject で共通）。§2 の競走は §6 のとおり WF-3。利用者の
+   accession を 3 か所へ同時に送る競走はしない（その場の一文「Sends the accession to NCBI」と食い違う）。WF-3 の競走は固定の公開
+   accession か Range 要求で測る。
+2. **accession の形**は §4 の `^[A-Z]{1,2}_?\d+(\.\d+)?$` を広げる：INSDC（1〜2 文字 + 5〜8 桁、タンパク質の 3 文字 + 5〜7 桁、WGS の
+   4〜6 文字）、RefSeq（`NR_`、`NZ_CP…`）、GenBase（`C_AA…`）、UniProt（`P12345`、`Q9Y261`、`A0A023GPI8`）、末尾の版は任意。大文字小文字は
+   問わず、大文字にして送る。数字の無い行（配列）と数字だけの行（gi）は当たらない（`web/app/src/domain/accession.ts`）。
+3. **accession だけの欄は source を作らない**：読めない入力の誤りと「Add the line ">pasted_query"」の案内を出さない。Run は取得せず
+   「Fetch the query accession first.」で止まる（ページを開いた・Run を押しただけでは通信しない）。欄を書き換えると走っている取得は捨てる。
+4. **1 accession に 1 要求、順に**。NCBI は 340 ms 以上空ける（鍵無し 3 req/s）。1 回に 100 個まで、合計 10 MB まで（超えたら
+   「Open FASTA files…」で開く案内）。全部取れたときだけ欄に写し、失敗は欄をそのままにして取得先と accession を名乗る。
+5. **EBI は核酸 = ENA、タンパク質 = UniProt**（ENA の browser API はタンパク質の id に CDS の核酸を返す、2026-11-03 実測）。ENA に RefSeq、
+   UniProt に UniProt 以外の accession は送らずに断る。CNCB は両方（`NP_414542.1` が返る）。
+6. **要求は accession だけ**：cookie と referrer を付けない（`credentials: 'omit'`、`Referrer-Policy: no-referrer`）。NCBI の `tool`・`email`
+   も付けない。
+7. **e2e は Playwright の route で実アドレスを stub**（`web/app/tests/e2e/fetch.spec.ts`）。localhost の stub サーバでは配備の CSP の
+   `connect-src` に例外が要る。route なら配備の CSP のまま試せ、ページから出た要求を全部数えられる。
+

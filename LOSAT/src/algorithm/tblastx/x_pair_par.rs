@@ -1233,7 +1233,8 @@ fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
 // lookup locations of its contexts (`XPairLutQuery::x_build_group`). Scheduling only: the groups
 // are independent. They are built in order on the calling thread; with `on_pool` (the tuning knob
 // LOSAT_X_PAIRLUT_POOL, `lut_on_pool`) and a search pool they are built on the pool (an indexed
-// map, results in group order; the threads share one memo of neighbour lists). The calling thread
+// map, results in group order; each build takes a memo of neighbour lists the builds before it gave
+// back, `x_with_group_memo`). The calling thread
 // is the default because the pool gained at most 17 ms per batch (AP027131, 6 x 220,702 aa) and
 // cost memory: tables allocated in the pool threads' arenas and freed by the search thread
 // (+17 MiB on a 50-batch run at 8 threads, measured when every pool thread kept its own memo).
@@ -4952,8 +4953,8 @@ mod tests {
     // ```c
     // TBlastThreads the_threads(GetNumberOfThreads());
     // ```
-    // The groups built on a search pool (the threads sharing the neighbour lists) are the groups
-    // built in order on one thread.
+    // The groups built on a search pool (each build on a memo of neighbour lists the builds before
+    // it gave back) are the groups built in order on one thread.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     #[test]
     fn direct_groups_on_a_search_pool_equal_build_groups() {
@@ -4980,6 +4981,38 @@ mod tests {
                     let (groups, _) = lut_check(&many, threshold, pool);
                     assert!((2..=X_MAX_GROUPS).contains(&groups), "groups {groups}");
                 }
+            }
+            Ok(())
+        })
+        .expect("search pool");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
+    // ```c
+    // TBlastThreads the_threads(GetNumberOfThreads());
+    // ```
+    // Builds of two keys at once (two searches in one process) each take a memo of
+    // `X_GROUP_MEMOS` and give it back; a memo kept for the other key is dropped, never read.
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[test]
+    fn direct_groups_of_two_keys_at_once_equal_build_groups() {
+        let mut rng = Rng(0x9005_9006_9007_9008);
+        let alphabet = aa("ACDEFGHIKLMNPQRSTVWY");
+        let many: Vec<Vec<QueryFrame>> = (0..4)
+            .map(|_| {
+                FRAMES
+                    .iter()
+                    .map(|&f| random_masked_frame(&mut rng, f, 400, &alphabet))
+                    .collect()
+            })
+            .collect();
+        crate::utils::threading::with_search_pool(4, "tblastx", |pool| {
+            for _round in 0..3 {
+                let (a, b) = pool.install(|| {
+                    rayon::join(|| lut_check(&many, 11, pool), || lut_check(&many, 13, pool))
+                });
+                assert!((2..=X_MAX_GROUPS).contains(&a.0), "groups {}", a.0);
+                assert!((2..=X_MAX_GROUPS).contains(&b.0), "groups {}", b.0);
             }
             Ok(())
         })

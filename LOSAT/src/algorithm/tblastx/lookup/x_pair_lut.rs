@@ -4,7 +4,7 @@
 //!
 //! This file is a child module of `x_lut_direct.rs` (declared there with `#[path]`, as that file
 //! is for `backbone.rs`), so it uses the neighbour lists of the in-place builder (`x_target_list`,
-//! the memo shared by threads) and the reference builder pieces of `backbone.rs` (`prepare_lookup_query`,
+//! its memo) and the reference builder pieces of `backbone.rs` (`prepare_lookup_query`,
 //! `blast_lookup_index_query_exact_matches`) without changing them.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:92-94,105-115
@@ -177,6 +177,34 @@ fn x_group_zeroed(elements: usize, mapped: bool) -> Vec<u32> {
     let mut zeroed = vec![0u32; x_group_capacity::<u32>(elements, mapped)];
     zeroed.truncate(elements);
     zeroed
+}
+
+// No NCBI counterpart (memoised neighbour lists, as `X_MEMO` keeps them for a thread's builds): the
+// memos of the group builds, as many as builds ran at once. A batch's groups
+// are built on whichever pool thread starts the batch (TBXPIPE), so a memo per thread made the
+// lists again in each thread's first build (16 of 40 builds at 16 threads, 22-33 ms against
+// 7-10). A build takes a memo the builds before it gave back, or a new one, and gives it back.
+static X_GROUP_MEMOS: std::sync::Mutex<Vec<XNeighborMemo>> = std::sync::Mutex::new(Vec::new());
+
+// No NCBI counterpart: `f` on the lists of a memo of `X_GROUP_MEMOS` for `key` (a new memo where
+// none is kept; one kept for another key is dropped), then the memo back into the pool.
+fn x_with_group_memo<R>(
+    key: (ScoringMatrix, i32, usize, usize),
+    backbone_size: usize,
+    f: impl FnOnce(&mut Vec<Option<Box<[u16]>>>) -> R,
+) -> R {
+    let kept = x_pool_lock(&X_GROUP_MEMOS).pop();
+    let mut memo = kept
+        .filter(|m| m.key == key && m.lists.len() == backbone_size)
+        .unwrap_or_else(|| XNeighborMemo {
+            key,
+            lists: std::iter::repeat_with(|| None)
+                .take(backbone_size)
+                .collect(),
+        });
+    let result = f(&mut memo.lists);
+    x_pool_lock(&X_GROUP_MEMOS).push(memo);
+    result
 }
 
 impl XPairLutQuery {
@@ -355,8 +383,7 @@ impl XPairLutQuery {
     // ```
     // The count, layout and fill passes of `x_lut_direct.rs::x_build_direct` on the reference
     // exact backbone of `locations` (one group's lookup locations), reading the prepared query in
-    // place. The neighbour lists come from the memo all threads share (`x_shared_memo`), as in a
-    // pooled BLASTX build.
+    // place. The neighbour lists come from a memo of `X_GROUP_MEMOS` (`x_with_group_memo`).
     /// The lookup table of one group: the table `build_groups` filters out of the full table for
     /// the group whose lookup locations are `locations` (module comment).
     /// `mapped`: the build's large blocks take `x_group_capacity`'s mapped capacity.
@@ -383,152 +410,148 @@ impl XPairLutQuery {
             &mut skipped_invalid_residue,
         );
 
-        // A batch's groups are built on whichever pool thread starts the batch: a memo per thread
-        // made the lists again in each thread's first build.
-        let shared = x_shared_memo(
-            (matrix, threshold, word_length, alphabet_size),
-            backbone_size,
-        );
-        let lists = &shared.lists;
-
-        // Count pass: count[w] = number of appends the reference makes to cell w from the
-        // source words of this group. The bounds of the entries are taken on the way: every
-        // offset of a source word with a target is an entry of the table.
-        let mut counts: Vec<u32> = x_group_zeroed(backbone_size, mapped);
-        let mut q_min = u32::MAX;
-        let mut q_max = 0u32;
-        for idx in 0..backbone_size {
-            let Some(offset_list) = exact_backbone[idx].as_deref() else {
-                continue;
-            };
-            let k = lookup_chain_num_used(offset_list) as u32;
-            let list = lists[idx].get_or_init(|| {
-                // blast_aalookup.c:490: w = query + offset_list[2];
-                let first =
-                    usize::try_from(offset_list[2]).expect("NCBI BLAST query offset must fit");
-                x_target_list(
-                    &concat_query[first..],
-                    alphabet_size,
-                    word_length,
-                    charsize,
-                    row_max,
-                    threshold,
-                    matrix,
-                )
-            });
-            for &w in list.iter() {
-                counts[w as usize] += k;
-            }
-            if !list.is_empty() {
-                for &q in lookup_chain_entries(offset_list) {
-                    q_min = q_min.min(q as u32);
-                    q_max = q_max.max(q as u32);
+        let key = (matrix, threshold, word_length, alphabet_size);
+        x_with_group_memo(key, backbone_size, |lists| {
+            // Count pass: count[w] = number of appends the reference makes to cell w from the
+            // source words of this group. The bounds of the entries are taken on the way: every
+            // offset of a source word with a target is an entry of the table.
+            let mut counts: Vec<u32> = x_group_zeroed(backbone_size, mapped);
+            let mut q_min = u32::MAX;
+            let mut q_max = 0u32;
+            for idx in 0..backbone_size {
+                let Some(offset_list) = exact_backbone[idx].as_deref() else {
+                    continue;
+                };
+                let k = lookup_chain_num_used(offset_list) as u32;
+                let list = lists[idx].get_or_insert_with(|| {
+                    // blast_aalookup.c:490: w = query + offset_list[2];
+                    let first =
+                        usize::try_from(offset_list[2]).expect("NCBI BLAST query offset must fit");
+                    x_target_list(
+                        &concat_query[first..],
+                        alphabet_size,
+                        word_length,
+                        charsize,
+                        row_max,
+                        threshold,
+                        matrix,
+                    )
+                });
+                for &w in list.iter() {
+                    counts[w as usize] += k;
+                }
+                if !list.is_empty() {
+                    for &q in lookup_chain_entries(offset_list) {
+                        q_min = q_min.min(q as u32);
+                        q_max = q_max.max(q as u32);
+                    }
                 }
             }
-        }
 
-        // Layout: BlastAaLookupFinalize's rule applied to the counts. A table the branch-free
-        // scan takes (`x_scan_bf_takes`, as `XGroup::new` decides for a table of the full
-        // backbone) is laid out compacted (`x_scan_bf::x_compact`): its backbone holds the cells
-        // with entries in index order, cell w at `slot[w]`; the entries, the overflow array and
-        // the presence vector are those of the full layout.
-        let used = counts.iter().filter(|&&count| count > 0).count();
-        let compact = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_takes(used, backbone_size);
-        let backbone_len = if compact { used } else { backbone_size };
-        let mut backbone: Vec<BackboneCell> =
-            Vec::with_capacity(x_group_capacity::<BackboneCell>(backbone_len, mapped));
-        backbone.resize(backbone_len, BackboneCell::default());
-        let mut slot: Vec<u32> = if compact {
-            x_group_zeroed(backbone_size, mapped)
-        } else {
-            Vec::new()
-        };
-        let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
-        let mut pv: Vec<u32> = vec![0u32; pv_size];
-        let mut overflow_size = 0usize;
-        let mut longest_chain: i32 = 0;
-        for &count in &counts {
-            if count as usize > AA_HITS_PER_CELL {
-                overflow_size += count as usize;
-            }
-            if (count as i32) > longest_chain {
-                longest_chain = count as i32;
-            }
-        }
-        let mut overflow: Vec<i32> =
-            Vec::with_capacity(x_group_capacity::<i32>(overflow_size, mapped));
-        overflow.resize(overflow_size, 0);
-        // Where the fill pass writes each cell's next offset: 0 in the cell, the start of its
-        // run in the overflow array.
-        let mut next: Vec<u32> = x_group_zeroed(backbone_size, mapped);
-        let mut overflow_cursor = 0usize;
-        let mut kept = 0usize;
-        for (idx, &count) in counts.iter().enumerate() {
-            if count == 0 {
-                continue;
-            }
-            pv_set(&mut pv, idx);
-            let at = if compact {
-                slot[idx] = kept as u32;
-                kept += 1;
-                kept - 1
+            // Layout: BlastAaLookupFinalize's rule applied to the counts. A table the branch-free
+            // scan takes (`x_scan_bf_takes`, as `XGroup::new` decides for a table of the full
+            // backbone) is laid out compacted (`x_scan_bf::x_compact`): its backbone holds the cells
+            // with entries in index order, cell w at `slot[w]`; the entries, the overflow array and
+            // the presence vector are those of the full layout.
+            let used = counts.iter().filter(|&&count| count > 0).count();
+            let compact =
+                crate::algorithm::tblastx::x_scan_bf::x_scan_bf_takes(used, backbone_size);
+            let backbone_len = if compact { used } else { backbone_size };
+            let mut backbone: Vec<BackboneCell> =
+                Vec::with_capacity(x_group_capacity::<BackboneCell>(backbone_len, mapped));
+            backbone.resize(backbone_len, BackboneCell::default());
+            let mut slot: Vec<u32> = if compact {
+                x_group_zeroed(backbone_size, mapped)
             } else {
-                idx
+                Vec::new()
             };
-            backbone[at].num_used = count as i32;
-            if count as usize > AA_HITS_PER_CELL {
-                backbone[at].entries[0] = overflow_cursor as i32;
-                next[idx] = overflow_cursor as u32;
-                overflow_cursor += count as usize;
-            }
-        }
-
-        // Fill pass: the reference's appends of this group, in the reference's order.
-        for idx in 0..backbone_size {
-            let Some(offset_list) = exact_backbone[idx].as_deref() else {
-                continue;
-            };
-            // query_bias is 0 here (build_lookup_from_prepared passes 0).
-            let offsets = lookup_chain_entries(offset_list);
-            let list = lists[idx].get().expect("listed in the count pass");
-            for &w in list {
-                let w = w as usize;
-                let at = next[w] as usize;
-                if counts[w] as usize <= AA_HITS_PER_CELL {
-                    let cell = if compact { slot[w] as usize } else { w };
-                    backbone[cell].entries[at..at + offsets.len()].copy_from_slice(offsets);
-                } else {
-                    overflow[at..at + offsets.len()].copy_from_slice(offsets);
+            let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
+            let mut pv: Vec<u32> = vec![0u32; pv_size];
+            let mut overflow_size = 0usize;
+            let mut longest_chain: i32 = 0;
+            for &count in &counts {
+                if count as usize > AA_HITS_PER_CELL {
+                    overflow_size += count as usize;
                 }
-                next[w] += offsets.len() as u32;
+                if (count as i32) > longest_chain {
+                    longest_chain = count as i32;
+                }
             }
-        }
+            let mut overflow: Vec<i32> =
+                Vec::with_capacity(x_group_capacity::<i32>(overflow_size, mapped));
+            overflow.resize(overflow_size, 0);
+            // Where the fill pass writes each cell's next offset: 0 in the cell, the start of its
+            // run in the overflow array.
+            let mut next: Vec<u32> = x_group_zeroed(backbone_size, mapped);
+            let mut overflow_cursor = 0usize;
+            let mut kept = 0usize;
+            for (idx, &count) in counts.iter().enumerate() {
+                if count == 0 {
+                    continue;
+                }
+                pv_set(&mut pv, idx);
+                let at = if compact {
+                    slot[idx] = kept as u32;
+                    kept += 1;
+                    kept - 1
+                } else {
+                    idx
+                };
+                backbone[at].num_used = count as i32;
+                if count as usize > AA_HITS_PER_CELL {
+                    backbone[at].entries[0] = overflow_cursor as i32;
+                    next[idx] = overflow_cursor as u32;
+                    overflow_cursor += count as usize;
+                }
+            }
 
-        let rank = if compact {
-            crate::algorithm::tblastx::x_scan_bf::x_rank(&pv)
-        } else {
-            Vec::new()
-        };
-        XPairLutGroup {
-            q_min: if longest_chain > 0 { q_min } else { 0 },
-            q_max,
-            rank,
-            table: BlastAaLookupTable {
-                backbone,
-                overflow,
-                pv,
-                frame_bases: self.prepared.frame_bases.clone(),
-                num_contexts: self.prepared.contexts.len(),
-                query_length: self.query_length,
-                word_length: word_length as i32,
-                alphabet_size: alphabet_size as i32,
-                charsize: charsize as i32,
-                mask: mask as i32,
-                longest_chain,
-                threshold,
-                row_max: row_max.clone(),
-            },
-        }
+            // Fill pass: the reference's appends of this group, in the reference's order.
+            for idx in 0..backbone_size {
+                let Some(offset_list) = exact_backbone[idx].as_deref() else {
+                    continue;
+                };
+                // query_bias is 0 here (build_lookup_from_prepared passes 0).
+                let offsets = lookup_chain_entries(offset_list);
+                let list = lists[idx].as_deref().expect("listed in the count pass");
+                for &w in list {
+                    let w = w as usize;
+                    let at = next[w] as usize;
+                    if counts[w] as usize <= AA_HITS_PER_CELL {
+                        let cell = if compact { slot[w] as usize } else { w };
+                        backbone[cell].entries[at..at + offsets.len()].copy_from_slice(offsets);
+                    } else {
+                        overflow[at..at + offsets.len()].copy_from_slice(offsets);
+                    }
+                    next[w] += offsets.len() as u32;
+                }
+            }
+
+            let rank = if compact {
+                crate::algorithm::tblastx::x_scan_bf::x_rank(&pv)
+            } else {
+                Vec::new()
+            };
+            XPairLutGroup {
+                q_min: if longest_chain > 0 { q_min } else { 0 },
+                q_max,
+                rank,
+                table: BlastAaLookupTable {
+                    backbone,
+                    overflow,
+                    pv,
+                    frame_bases: self.prepared.frame_bases.clone(),
+                    num_contexts: self.prepared.contexts.len(),
+                    query_length: self.query_length,
+                    word_length: word_length as i32,
+                    alphabet_size: alphabet_size as i32,
+                    charsize: charsize as i32,
+                    mask: mask as i32,
+                    longest_chain,
+                    threshold,
+                    row_max: row_max.clone(),
+                },
+            }
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266

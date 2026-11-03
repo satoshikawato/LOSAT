@@ -66,7 +66,7 @@ use std::cell::RefCell;
 
 // EXPERIMENT (PAIRLUT): the per-group tables of the TBLASTX unit
 // path built by this file's count, layout and fill passes on the lookup locations of one group; a
-// child module so that it uses `x_target_list` and the memo below unchanged (see x_pair_lut.rs).
+// child module so that it uses `x_target_list` and the memo type below unchanged (see x_pair_lut.rs).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467
 // ```c

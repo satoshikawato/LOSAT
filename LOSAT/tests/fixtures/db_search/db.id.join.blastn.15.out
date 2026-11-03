@@ -1,0 +1,272 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "db": "tests/db_search/ids/njoin_abc"
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "L;m;"
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "njq query of the joined records",
+          "query_len": 600,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gb|JHA00001.1|",
+                  "accession": "JHA00001",
+                  "title": "joined record one"
+                }
+              ],
+              "len": 600,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 1109.11,
+                  "score": 600,
+                  "evalue": 0,
+                  "identity": 600,
+                  "query_from": 1,
+                  "query_to": 600,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 600,
+                  "hit_strand": "Plus",
+                  "align_len": 600,
+                  "gaps": 0,
+                  "qseq": "ATGGACTTCGGTGGTCACTACTACTTCTGTACAAAAACGACAGAAGGGCGACATATGACGGGGATGATGCGGATGAGACACATCACGGAAGCCGATCTGCATACATCTATAGAACCGAACTGCGATTCATTCCATTGGCTCAAATGCTGGGAGATGCATCAAATATCGGCGTGGTCAGGGTGTTTCACTGAACCGGAGACCGAGTATAATTTTGGAATGTGCTGTCATGGGACGCAATGTAACAAGTGGATAATGTGGCGTTCATGGAATCAAATATCTGACGTAGAGGAAGTATGGTTACCCTGCATGAACAATGTCTGGCTGTACGTCATGAGCGAAAAAACCAAATTCGCAAATAACGTAAACATTGGGAAGGGCATGCAAAGGTGCCATGCACAGCACACACGGGGTAACTATTGCTCCATCCAAGATTGGCCCCACCCGCCTTATGATTACGTCCCTCAAGGCGAAGTTGATACTAGTGAACTCACGGGACCGAGCTCCACTTGCTTAACCTGGGTGGACATTAGATTACTGCAGGTCTGCGAGGCATGTGTAAGGTGGGGCGAATACTTATTTAACAACTGGATGGACGACGAC",
+                  "hseq": "ATGGACTTCGGTGGTCACTACTACTTCTGTACAAAAACGACAGAAGGGCGACATATGACGGGGATGATGCGGATGAGACACATCACGGAAGCCGATCTGCATACATCTATAGAACCGAACTGCGATTCATTCCATTGGCTCAAATGCTGGGAGATGCATCAAATATCGGCGTGGTCAGGGTGTTTCACTGAACCGGAGACCGAGTATAATTTTGGAATGTGCTGTCATGGGACGCAATGTAACAAGTGGATAATGTGGCGTTCATGGAATCAAATATCTGACGTAGAGGAAGTATGGTTACCCTGCATGAACAATGTCTGGCTGTACGTCATGAGCGAAAAAACCAAATTCGCAAATAACGTAAACATTGGGAAGGGCATGCAAAGGTGCCATGCACAGCACACACGGGGTAACTATTGCTCCATCCAAGATTGGCCCCACCCGCCTTATGATTACGTCCCTCAAGGCGAAGTTGATACTAGTGAACTCACGGGACCGAGCTCCACTTGCTTAACCTGGGTGGACATTAGATTACTGCAGGTCTGCGAGGCATGTGTAAGGTGGGGCGAATACTTATTTAACAACTGGATGGACGACGAC",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gb|JHA00006.1|",
+                  "accession": "JHA00006",
+                  "title": "twin of record one"
+                }
+              ],
+              "len": 600,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 1109.11,
+                  "score": 600,
+                  "evalue": 0,
+                  "identity": 600,
+                  "query_from": 1,
+                  "query_to": 600,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 600,
+                  "hit_strand": "Plus",
+                  "align_len": 600,
+                  "gaps": 0,
+                  "qseq": "ATGGACTTCGGTGGTCACTACTACTTCTGTACAAAAACGACAGAAGGGCGACATATGACGGGGATGATGCGGATGAGACACATCACGGAAGCCGATCTGCATACATCTATAGAACCGAACTGCGATTCATTCCATTGGCTCAAATGCTGGGAGATGCATCAAATATCGGCGTGGTCAGGGTGTTTCACTGAACCGGAGACCGAGTATAATTTTGGAATGTGCTGTCATGGGACGCAATGTAACAAGTGGATAATGTGGCGTTCATGGAATCAAATATCTGACGTAGAGGAAGTATGGTTACCCTGCATGAACAATGTCTGGCTGTACGTCATGAGCGAAAAAACCAAATTCGCAAATAACGTAAACATTGGGAAGGGCATGCAAAGGTGCCATGCACAGCACACACGGGGTAACTATTGCTCCATCCAAGATTGGCCCCACCCGCCTTATGATTACGTCCCTCAAGGCGAAGTTGATACTAGTGAACTCACGGGACCGAGCTCCACTTGCTTAACCTGGGTGGACATTAGATTACTGCAGGTCTGCGAGGCATGTGTAAGGTGGGGCGAATACTTATTTAACAACTGGATGGACGACGAC",
+                  "hseq": "ATGGACTTCGGTGGTCACTACTACTTCTGTACAAAAACGACAGAAGGGCGACATATGACGGGGATGATGCGGATGAGACACATCACGGAAGCCGATCTGCATACATCTATAGAACCGAACTGCGATTCATTCCATTGGCTCAAATGCTGGGAGATGCATCAAATATCGGCGTGGTCAGGGTGTTTCACTGAACCGGAGACCGAGTATAATTTTGGAATGTGCTGTCATGGGACGCAATGTAACAAGTGGATAATGTGGCGTTCATGGAATCAAATATCTGACGTAGAGGAAGTATGGTTACCCTGCATGAACAATGTCTGGCTGTACGTCATGAGCGAAAAAACCAAATTCGCAAATAACGTAAACATTGGGAAGGGCATGCAAAGGTGCCATGCACAGCACACACGGGGTAACTATTGCTCCATCCAAGATTGGCCCCACCCGCCTTATGATTACGTCCCTCAAGGCGAAGTTGATACTAGTGAACTCACGGGACCGAGCTCCACTTGCTTAACCTGGGTGGACATTAGATTACTGCAGGTCTGCGAGGCATGTGTAAGGTGGGGCGAATACTTATTTAACAACTGGATGGACGACGAC",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gb|JHA00001.1|",
+                  "accession": "JHA00001",
+                  "title": "joined record one"
+                }
+              ],
+              "len": 600,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 1109.11,
+                  "score": 600,
+                  "evalue": 0,
+                  "identity": 600,
+                  "query_from": 1,
+                  "query_to": 600,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 600,
+                  "hit_strand": "Plus",
+                  "align_len": 600,
+                  "gaps": 0,
+                  "qseq": "ATGGACTTCGGTGGTCACTACTACTTCTGTACAAAAACGACAGAAGGGCGACATATGACGGGGATGATGCGGATGAGACACATCACGGAAGCCGATCTGCATACATCTATAGAACCGAACTGCGATTCATTCCATTGGCTCAAATGCTGGGAGATGCATCAAATATCGGCGTGGTCAGGGTGTTTCACTGAACCGGAGACCGAGTATAATTTTGGAATGTGCTGTCATGGGACGCAATGTAACAAGTGGATAATGTGGCGTTCATGGAATCAAATATCTGACGTAGAGGAAGTATGGTTACCCTGCATGAACAATGTCTGGCTGTACGTCATGAGCGAAAAAACCAAATTCGCAAATAACGTAAACATTGGGAAGGGCATGCAAAGGTGCCATGCACAGCACACACGGGGTAACTATTGCTCCATCCAAGATTGGCCCCACCCGCCTTATGATTACGTCCCTCAAGGCGAAGTTGATACTAGTGAACTCACGGGACCGAGCTCCACTTGCTTAACCTGGGTGGACATTAGATTACTGCAGGTCTGCGAGGCATGTGTAAGGTGGGGCGAATACTTATTTAACAACTGGATGGACGACGAC",
+                  "hseq": "ATGGACTTCGGTGGTCACTACTACTTCTGTACAAAAACGACAGAAGGGCGACATATGACGGGGATGATGCGGATGAGACACATCACGGAAGCCGATCTGCATACATCTATAGAACCGAACTGCGATTCATTCCATTGGCTCAAATGCTGGGAGATGCATCAAATATCGGCGTGGTCAGGGTGTTTCACTGAACCGGAGACCGAGTATAATTTTGGAATGTGCTGTCATGGGACGCAATGTAACAAGTGGATAATGTGGCGTTCATGGAATCAAATATCTGACGTAGAGGAAGTATGGTTACCCTGCATGAACAATGTCTGGCTGTACGTCATGAGCGAAAAAACCAAATTCGCAAATAACGTAAACATTGGGAAGGGCATGCAAAGGTGCCATGCACAGCACACACGGGGTAACTATTGCTCCATCCAAGATTGGCCCCACCCGCCTTATGATTACGTCCCTCAAGGCGAAGTTGATACTAGTGAACTCACGGGACCGAGCTCCACTTGCTTAACCTGGGTGGACATTAGATTACTGCAGGTCTGCGAGGCATGTGTAAGGTGGGGCGAATACTTATTTAACAACTGGATGGACGACGAC",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 1109.11,
+                  "score": 600,
+                  "evalue": 0,
+                  "identity": 600,
+                  "query_from": 1,
+                  "query_to": 600,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 600,
+                  "hit_strand": "Plus",
+                  "align_len": 600,
+                  "gaps": 0,
+                  "qseq": "ATGGACTTCGGTGGTCACTACTACTTCTGTACAAAAACGACAGAAGGGCGACATATGACGGGGATGATGCGGATGAGACACATCACGGAAGCCGATCTGCATACATCTATAGAACCGAACTGCGATTCATTCCATTGGCTCAAATGCTGGGAGATGCATCAAATATCGGCGTGGTCAGGGTGTTTCACTGAACCGGAGACCGAGTATAATTTTGGAATGTGCTGTCATGGGACGCAATGTAACAAGTGGATAATGTGGCGTTCATGGAATCAAATATCTGACGTAGAGGAAGTATGGTTACCCTGCATGAACAATGTCTGGCTGTACGTCATGAGCGAAAAAACCAAATTCGCAAATAACGTAAACATTGGGAAGGGCATGCAAAGGTGCCATGCACAGCACACACGGGGTAACTATTGCTCCATCCAAGATTGGCCCCACCCGCCTTATGATTACGTCCCTCAAGGCGAAGTTGATACTAGTGAACTCACGGGACCGAGCTCCACTTGCTTAACCTGGGTGGACATTAGATTACTGCAGGTCTGCGAGGCATGTGTAAGGTGGGGCGAATACTTATTTAACAACTGGATGGACGACGAC",
+                  "hseq": "ATGGACTTCGGTGGTCACTACTACTTCTGTACAAAAACGACAGAAGGGCGACATATGACGGGGATGATGCGGATGAGACACATCACGGAAGCCGATCTGCATACATCTATAGAACCGAACTGCGATTCATTCCATTGGCTCAAATGCTGGGAGATGCATCAAATATCGGCGTGGTCAGGGTGTTTCACTGAACCGGAGACCGAGTATAATTTTGGAATGTGCTGTCATGGGACGCAATGTAACAAGTGGATAATGTGGCGTTCATGGAATCAAATATCTGACGTAGAGGAAGTATGGTTACCCTGCATGAACAATGTCTGGCTGTACGTCATGAGCGAAAAAACCAAATTCGCAAATAACGTAAACATTGGGAAGGGCATGCAAAGGTGCCATGCACAGCACACACGGGGTAACTATTGCTCCATCCAAGATTGGCCCCACCCGCCTTATGATTACGTCCCTCAAGGCGAAGTTGATACTAGTGAACTCACGGGACCGAGCTCCACTTGCTTAACCTGGGTGGACATTAGATTACTGCAGGTCTGCGAGGCATGTGTAAGGTGGGGCGAATACTTATTTAACAACTGGATGGACGACGAC",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "gb|JHA00002.1|",
+                  "accession": "JHA00002",
+                  "title": "other record two"
+                }
+              ],
+              "len": 600,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 665.914,
+                  "score": 360,
+                  "evalue": 0,
+                  "identity": 520,
+                  "query_from": 1,
+                  "query_to": 600,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 600,
+                  "hit_strand": "Plus",
+                  "align_len": 600,
+                  "gaps": 0,
+                  "qseq": "ATGGACTTCGGTGGTCACTACTACTTCTGTACAAAAACGACAGAAGGGCGACATATGACGGGGATGATGCGGATGAGACACATCACGGAAGCCGATCTGCATACATCTATAGAACCGAACTGCGATTCATTCCATTGGCTCAAATGCTGGGAGATGCATCAAATATCGGCGTGGTCAGGGTGTTTCACTGAACCGGAGACCGAGTATAATTTTGGAATGTGCTGTCATGGGACGCAATGTAACAAGTGGATAATGTGGCGTTCATGGAATCAAATATCTGACGTAGAGGAAGTATGGTTACCCTGCATGAACAATGTCTGGCTGTACGTCATGAGCGAAAAAACCAAATTCGCAAATAACGTAAACATTGGGAAGGGCATGCAAAGGTGCCATGCACAGCACACACGGGGTAACTATTGCTCCATCCAAGATTGGCCCCACCCGCCTTATGATTACGTCCCTCAAGGCGAAGTTGATACTAGTGAACTCACGGGACCGAGCTCCACTTGCTTAACCTGGGTGGACATTAGATTACTGCAGGTCTGCGAGGCATGTGTAAGGTGGGGCGAATACTTATTTAACAACTGGATGGACGACGAC",
+                  "hseq": "ATGGACTTCGGTCGTCACTGATACTTCTGTACAAAGACGACAGACGGGCGACATATGACCGGGATCCTGCGGATTAGACACTTCACGGAAGCCGATCTGCATACATCTATATACCCGAACTGCGTTTCATTCCTTCGGGTCAAATGGTGGGAGCTGCTTCAAGTATCGACGCGGTCGGGGTGTTCCACTGACCCCGAGACCGGGTCTACTTTTGGAATGTGCTGTCATGGGAGGCAATGTAACACGTGGATAATGCGTCGTTCATGGAATCGAATATATGCTGTAGAGGAAGTATGAATACCCTGCATGACCAATGTCTGGTTGTACGTCATGAGCGAAAGAACTAAATTAGCAATTACCGTAAACATTGGGACGGGCACACAAAGGTGCCATGCACAGCACACAGGCGGCAACTATTGCTCCATCCATGATTGGCCCCACCCGCTTTGTGGTTAGGTCCCTCAAGGCGAAGTTGATACTAGTGTACTCACGGGAACAAGCTCAACTAGCTTAATCTAGCTGGACCCTAGCTTACTACAGGTCTGCGTGCCCTGTGTAAGATGGGGCGCATACTTACTTAAGCACTGGAAGGGCGTCGAC",
+                  "midline": "|||||||||||| ||||||  |||||||||||||| |||||||| |||||||||||||| |||||  ||||||| |||||| ||||||||||||||||||||||||||||| | |||||||||| |||||||| | || ||||||| |||||| ||| |||| ||||| || |||| ||||||| |||||| || ||||||| || || ||||||||||||||||||||||| ||||||||||| |||||||||| | ||||||||||||| ||||| ||  ||||||||||||||  |||||||||||| |||||||||| |||||||||||||||||| ||| ||||| |||| || |||||||||||||| |||||  |||||||||||||||||||||||| | || ||||||||||||||||| |||||||||||||||| || || ||| |||||||||||||||||||||||||||| |||||||||| | ||||| ||| |||||| || | |||||  ||| ||||| |||||||||| | | |||||||| ||||||| ||||||| ||||  |||||| || || ||||"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "gb|JHA00003.1|",
+                  "accession": "JHA00003",
+                  "title": "two-piece record three"
+                },
+                {
+                  "id": "ref|XP_900003.1|",
+                  "accession": "XP_900003",
+                  "title": "merged definition line of three"
+                }
+              ],
+              "len": 900,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 499.716,
+                  "score": 270,
+                  "evalue": 1.15285e-144,
+                  "identity": 270,
+                  "query_from": 1,
+                  "query_to": 270,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 270,
+                  "hit_strand": "Plus",
+                  "align_len": 270,
+                  "gaps": 0,
+                  "qseq": "ATGGACTTCGGTGGTCACTACTACTTCTGTACAAAAACGACAGAAGGGCGACATATGACGGGGATGATGCGGATGAGACACATCACGGAAGCCGATCTGCATACATCTATAGAACCGAACTGCGATTCATTCCATTGGCTCAAATGCTGGGAGATGCATCAAATATCGGCGTGGTCAGGGTGTTTCACTGAACCGGAGACCGAGTATAATTTTGGAATGTGCTGTCATGGGACGCAATGTAACAAGTGGATAATGTGGCGTTCATGGAAT",
+                  "hseq": "ATGGACTTCGGTGGTCACTACTACTTCTGTACAAAAACGACAGAAGGGCGACATATGACGGGGATGATGCGGATGAGACACATCACGGAAGCCGATCTGCATACATCTATAGAACCGAACTGCGATTCATTCCATTGGCTCAAATGCTGGGAGATGCATCAAATATCGGCGTGGTCAGGGTGTTTCACTGAACCGGAGACCGAGTATAATTTTGGAATGTGCTGTCATGGGACGCAATGTAACAAGTGGATAATGTGGCGTTCATGGAAT",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 499.716,
+                  "score": 270,
+                  "evalue": 1.15285e-144,
+                  "identity": 270,
+                  "query_from": 331,
+                  "query_to": 600,
+                  "query_strand": "Plus",
+                  "hit_from": 631,
+                  "hit_to": 900,
+                  "hit_strand": "Plus",
+                  "align_len": 270,
+                  "gaps": 0,
+                  "qseq": "ATGAGCGAAAAAACCAAATTCGCAAATAACGTAAACATTGGGAAGGGCATGCAAAGGTGCCATGCACAGCACACACGGGGTAACTATTGCTCCATCCAAGATTGGCCCCACCCGCCTTATGATTACGTCCCTCAAGGCGAAGTTGATACTAGTGAACTCACGGGACCGAGCTCCACTTGCTTAACCTGGGTGGACATTAGATTACTGCAGGTCTGCGAGGCATGTGTAAGGTGGGGCGAATACTTATTTAACAACTGGATGGACGACGAC",
+                  "hseq": "ATGAGCGAAAAAACCAAATTCGCAAATAACGTAAACATTGGGAAGGGCATGCAAAGGTGCCATGCACAGCACACACGGGGTAACTATTGCTCCATCCAAGATTGGCCCCACCCGCCTTATGATTACGTCCCTCAAGGCGAAGTTGATACTAGTGAACTCACGGGACCGAGCTCCACTTGCTTAACCTGGGTGGACATTAGATTACTGCAGGTCTGCGAGGCATGTGTAAGGTGGGGCGAATACTTATTTAACAACTGGATGGACGACGAC",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 499.716,
+                  "score": 270,
+                  "evalue": 1.15285e-144,
+                  "identity": 270,
+                  "query_from": 1,
+                  "query_to": 270,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 270,
+                  "hit_strand": "Plus",
+                  "align_len": 270,
+                  "gaps": 0,
+                  "qseq": "ATGGACTTCGGTGGTCACTACTACTTCTGTACAAAAACGACAGAAGGGCGACATATGACGGGGATGATGCGGATGAGACACATCACGGAAGCCGATCTGCATACATCTATAGAACCGAACTGCGATTCATTCCATTGGCTCAAATGCTGGGAGATGCATCAAATATCGGCGTGGTCAGGGTGTTTCACTGAACCGGAGACCGAGTATAATTTTGGAATGTGCTGTCATGGGACGCAATGTAACAAGTGGATAATGTGGCGTTCATGGAAT",
+                  "hseq": "ATGGACTTCGGTGGTCACTACTACTTCTGTACAAAAACGACAGAAGGGCGACATATGACGGGGATGATGCGGATGAGACACATCACGGAAGCCGATCTGCATACATCTATAGAACCGAACTGCGATTCATTCCATTGGCTCAAATGCTGGGAGATGCATCAAATATCGGCGTGGTCAGGGTGTTTCACTGAACCGGAGACCGAGTATAATTTTGGAATGTGCTGTCATGGGACGCAATGTAACAAGTGGATAATGTGGCGTTCATGGAAT",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 499.716,
+                  "score": 270,
+                  "evalue": 1.15285e-144,
+                  "identity": 270,
+                  "query_from": 331,
+                  "query_to": 600,
+                  "query_strand": "Plus",
+                  "hit_from": 631,
+                  "hit_to": 900,
+                  "hit_strand": "Plus",
+                  "align_len": 270,
+                  "gaps": 0,
+                  "qseq": "ATGAGCGAAAAAACCAAATTCGCAAATAACGTAAACATTGGGAAGGGCATGCAAAGGTGCCATGCACAGCACACACGGGGTAACTATTGCTCCATCCAAGATTGGCCCCACCCGCCTTATGATTACGTCCCTCAAGGCGAAGTTGATACTAGTGAACTCACGGGACCGAGCTCCACTTGCTTAACCTGGGTGGACATTAGATTACTGCAGGTCTGCGAGGCATGTGTAAGGTGGGGCGAATACTTATTTAACAACTGGATGGACGACGAC",
+                  "hseq": "ATGAGCGAAAAAACCAAATTCGCAAATAACGTAAACATTGGGAAGGGCATGCAAAGGTGCCATGCACAGCACACACGGGGTAACTATTGCTCCATCCAAGATTGGCCCCACCCGCCTTATGATTACGTCCCTCAAGGCGAAGTTGATACTAGTGAACTCACGGGACCGAGCTCCACTTGCTTAACCTGGGTGGACATTAGATTACTGCAGGTCTGCGAGGCATGTGTAAGGTGGGGCGAATACTTATTTAACAACTGGATGGACGACGAC",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 8,
+            "db_len": 5400,
+            "hsp_len": 14,
+            "eff_space": 3098768,
+            "kappa": 0.46,
+            "lambda": 1.28,
+            "entropy": 0.85
+          }
+        }
+      }
+    }
+  }
+]
+}

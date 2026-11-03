@@ -57,7 +57,7 @@ use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names::{self, QueryText};
 use crate::report::blast_xml::subjects::SubjectNames;
 use crate::report::blast_xml::{
-    filter, QueryMask, StructuredXml, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
+    filter, hit_ranges, QueryMask, StructuredXml, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
     REFERENCE_GAPPED_BLAST,
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
@@ -115,6 +115,10 @@ pub(super) struct PreparedXml {
     subject_names: Vec<Option<SubjectNames>>,
     /// By subject index: `Hit_len`, the length of the subject's record.
     subject_lengths: Vec<i32>,
+    /// By rank: the reported database sequences with parsed Seq-ids (empty for `-subject` and
+    /// without them), whose copies of one record are shown in one `Hit`
+    /// (`db_subject::joins_as_copy`).
+    parsed: Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>>,
     /// By query: whether NCBI searched the query's batch (it has a valid context in it).
     /// Only XML2 shows it.
     searched: Vec<bool>,
@@ -338,6 +342,10 @@ pub(super) fn prepare(
         stats,
         subject_names,
         subject_lengths,
+        parsed: match shown {
+            ShownSubjects::Fasta { .. } => Vec::new(),
+            ShownSubjects::Database { reported, .. } => reported.parsed.clone(),
+        },
         searched: query_batch_skipped
             .iter()
             .map(|&skipped| !skipped)
@@ -474,91 +482,111 @@ impl PreparedXml {
                 masks: &masks,
             };
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
-                for list in hitlist.lists() {
-                    if list.hsps.hsps.is_empty() {
-                        continue;
-                    }
-                    let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
-                    ensure!(
-                        list.payloads.len() == list.hsps.hsps.len(),
-                        "TBLASTN report payload count mismatch"
-                    );
-                    let names = self.subject_names[oid]
+                let lists = hitlist.lists();
+                ensure!(
+                    lists
+                        .iter()
+                        .all(|list| list.hsps.hsps.is_empty() || list.oid >= 0),
+                    "negative TBLASTN subject OID"
+                );
+                // A copy of one record that follows another is shown in its `Hit`.
+                let hits = hit_ranges(
+                    lists,
+                    |list| (!list.hsps.hsps.is_empty()).then_some(list.oid as usize),
+                    |previous, rank| {
+                        crate::report::db_subject::rank_joins_as_copy(&self.parsed, previous, rank)
+                    },
+                );
+                for range in hits {
+                    let first = usize::try_from(lists[range.start].oid)
+                        .context("negative TBLASTN subject OID")?;
+                    let names = self.subject_names[first]
                         .as_ref()
                         .context("names of a subject with hits")?;
-                    let record_length = self.subject_lengths[oid];
-                    let hit = XmlHit::of(names, record_length);
-                    let subject_seq = subject_letters.nt(oid);
-                    let mut translation = TargetTranslation::of(subject_seq, &code);
+                    let hit = XmlHit::of(names, self.subject_lengths[first]);
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time (nothing for the other formats).
                     if let Some(warnings) = warnings.as_deref_mut() {
-                        taxdb_printer.at_names(oid, names, &mut *warnings.sink)?;
+                        taxdb_printer.at_names(first, names, &mut *warnings.sink)?;
                     }
                     sink.hit(&hit, |hsps| {
-                        for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
-                            let hsp = &linked.hsp;
-                            let frame = i32::from(hsp.frame);
-                            // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105:
-                            // translated coordinates use three nucleotide letters per
-                            // residue and reverse strand endpoints run in descending order.
-                            let subject_len = i32::try_from(subject_seq.len())?;
-                            let (s_start, s_end) = if frame > 0 {
-                                (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
-                            } else {
-                                (
-                                    subject_len - 3 * hsp.s_start + frame + 1,
-                                    subject_len - 3 * hsp.s_end + frame + 2,
-                                )
-                            };
-                            // The rows, without the lower case of the masks.
-                            aligned_sequences_into(
-                                query_letters,
-                                subject_seq,
-                                &mut x_window,
-                                &code,
-                                &mut translation,
-                                hsp.frame,
-                                hsp.q_start,
-                                hsp.s_start,
-                                hsp.s_end,
-                                &payload.edit_script,
-                                &[],
-                                &mut qrow,
-                                &mut srow,
-                            )?;
-                            // The coordinates in the searched letters, moved into the records.
-                            let (q_start, q_end, s_start, s_end) = record_coordinates(
-                                ranges,
-                                q_idx,
-                                oid,
-                                (hsp.q_start + 1, hsp.q_end, s_start, s_end),
-                            )?;
-                            // The Seq-align's endpoints, lower first: the minus frame's
-                            // outfmt 6 order is not the XML's.
-                            let (hit_from, hit_to) = (s_start.min(s_end), s_start.max(s_end));
-                            hsps.hsp(&XmlHsp {
-                                score: hsp.score,
-                                bit_score: payload.bit_score,
-                                evalue: seqalign_evalue(linked.evalue),
-                                query_from: q_start,
-                                query_to: q_end,
-                                hit_from,
-                                hit_to,
-                                query_frame: 0,
-                                hit_frame: translation_frame(
-                                    frame > 0,
+                        for list in &lists[range] {
+                            if list.hsps.hsps.is_empty() {
+                                continue;
+                            }
+                            let oid = usize::try_from(list.oid)
+                                .context("negative TBLASTN subject OID")?;
+                            ensure!(
+                                list.payloads.len() == list.hsps.hsps.len(),
+                                "TBLASTN report payload count mismatch"
+                            );
+                            let record_length = self.subject_lengths[oid];
+                            let subject_seq = subject_letters.nt(oid);
+                            let mut translation = TargetTranslation::of(subject_seq, &code);
+                            for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+                                let hsp = &linked.hsp;
+                                let frame = i32::from(hsp.frame);
+                                // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105:
+                                // translated coordinates use three nucleotide letters per
+                                // residue and reverse strand endpoints run in descending order.
+                                let subject_len = i32::try_from(subject_seq.len())?;
+                                let (s_start, s_end) = if frame > 0 {
+                                    (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
+                                } else {
+                                    (
+                                        subject_len - 3 * hsp.s_start + frame + 1,
+                                        subject_len - 3 * hsp.s_end + frame + 2,
+                                    )
+                                };
+                                // The rows, without the lower case of the masks.
+                                aligned_sequences_into(
+                                    query_letters,
+                                    subject_seq,
+                                    &mut x_window,
+                                    &code,
+                                    &mut translation,
+                                    hsp.frame,
+                                    hsp.q_start,
+                                    hsp.s_start,
+                                    hsp.s_end,
+                                    &payload.edit_script,
+                                    &[],
+                                    &mut qrow,
+                                    &mut srow,
+                                )?;
+                                // The coordinates in the searched letters, moved into the records.
+                                let (q_start, q_end, s_start, s_end) = record_coordinates(
+                                    ranges,
+                                    q_idx,
+                                    oid,
+                                    (hsp.q_start + 1, hsp.q_end, s_start, s_end),
+                                )?;
+                                // The Seq-align's endpoints, lower first: the minus frame's
+                                // outfmt 6 order is not the XML's.
+                                let (hit_from, hit_to) = (s_start.min(s_end), s_start.max(s_end));
+                                hsps.hsp(&XmlHsp {
+                                    score: hsp.score,
+                                    bit_score: payload.bit_score,
+                                    evalue: seqalign_evalue(linked.evalue),
+                                    query_from: q_start,
+                                    query_to: q_end,
                                     hit_from,
                                     hit_to,
-                                    record_length,
-                                ),
-                                qrow: qrow.as_bytes(),
-                                srow: srow.as_bytes(),
-                                ops: Some(&payload.edit_script),
-                                query_first: q_start - 1,
-                                query_step: 1,
-                            })?;
+                                    query_frame: 0,
+                                    hit_frame: translation_frame(
+                                        frame > 0,
+                                        hit_from,
+                                        hit_to,
+                                        record_length,
+                                    ),
+                                    qrow: qrow.as_bytes(),
+                                    srow: srow.as_bytes(),
+                                    ops: Some(&payload.edit_script),
+                                    query_first: q_start - 1,
+                                    query_step: 1,
+                                })?;
+                            }
                         }
                         Ok(())
                     })?;

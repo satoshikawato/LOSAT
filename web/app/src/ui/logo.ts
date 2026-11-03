@@ -1,6 +1,8 @@
 // The LOSAT logo (the Owner's drawing 2026-11-03_losat_logo.svg of 20:12, DW-43): Inter Bold outlines
 // of "LOSAT" whose A is two straight legs on a flat base that reaches past the right leg. The paths
 // keep the drawing's own coordinates and ids; its path43 is left out, as the legs already cover it.
+// public/favicon.svg (the A) and the README's docs/assets/losat-logo*.svg repeat these paths
+// (tests/unit/logo.test.ts); scripts/icons.mjs draws the PNG icons from favicon.svg (DW-44).
 
 /** The letters L, O, S and T (path41, path39, path40, path44). */
 export const LOGO_LETTERS: readonly string[] = [

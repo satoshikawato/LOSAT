@@ -33,8 +33,8 @@ use anyhow::{bail, Context, Result};
 use super::hsp::BlastpHitList;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
-    XmlSubjects,
+    hit_ranges, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun,
+    XmlStats, XmlSubjects,
 };
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
@@ -140,11 +140,16 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             let Some(hit_list) = hit_list else {
                 return Ok(());
             };
-            for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
-                let Some(first) = hsp_list.hsps.first() else {
-                    continue;
-                };
-                let s_idx = first.s_idx as usize;
+            let lists =
+                &hit_list.hsplist_array[..hit_list.hsplist_count.min(hit_list.hsplist_array.len())];
+            // A copy of one record that follows another is shown in its `Hit`.
+            let ranges = hit_ranges(
+                lists,
+                |hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize),
+                |previous, s_idx| xml.subjects.joins(previous, s_idx),
+            );
+            for range in ranges {
+                let s_idx = lists[range.start].hsps[0].s_idx as usize;
                 let subject = subjects.get(s_idx, program)?;
                 let hit = XmlHit::of(subject, xml.subjects.length(s_idx));
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
@@ -153,7 +158,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                     taxdb_printer.at_names(s_idx, subject, &mut *warnings.sink)?;
                 }
                 sink.hit(&hit, |hsps| {
-                    for hsp in &hsp_list.hsps {
+                    for hsp in lists[range].iter().flat_map(|hsp_list| &hsp_list.hsps) {
                         let row = hit_rows
                             .get(next_row)
                             .context("BLASTP report rows do not cover the hit list")?;

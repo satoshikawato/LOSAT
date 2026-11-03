@@ -8,8 +8,9 @@ import { siteHeaders } from '../../../build/headers';
 import { findReactors, losatEngine, type Reactors } from '../../../build/reactors';
 import { losatVerification } from '../../../build/verification';
 import { SESSION_LOCK_PREFIX, TMP_DIRECTORY } from '../../../src/infra/data/session';
+import { navigate } from './navigate';
 import { E2E_ORIGIN } from './origin';
-import { showOutput } from './search';
+import { described, paste, showOutput, submit } from './search';
 
 export const ORIGIN = E2E_ORIGIN;
 
@@ -29,7 +30,7 @@ export async function openProbe(context: BrowserContext): Promise<Page> {
     route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>probe</title>' }),
   );
   const probe = await context.newPage();
-  await probe.goto('/__probe');
+  await navigate(probe, '/__probe');
   return probe;
 }
 
@@ -108,17 +109,24 @@ export async function setQuota(page: Page, bytes: number | null): Promise<void> 
 /** Opens the application and waits until its start-up cleanup has finished. */
 export async function openApp(context: BrowserContext): Promise<Page> {
   const page = await context.newPage();
-  await page.goto('/');
+  await navigate(page, '/');
   await expect(page.getByTestId('storage-status')).toHaveAttribute('data-cleanup', 'done');
   return page;
 }
 
-/** Pastes a query and a subject and starts a BLASTN search. */
+/**
+ * Pastes a query and a subject and starts a BLASTN search, once the form no longer moves: the
+ * describe that comes after the page opens puts "Task Selection" above "Run LOSAT", and each
+ * source read grows its card. A click while the button moves is lost (WF1): on CI the press
+ * came before the describe and the release after it, in Chromium too, and run 1 never came
+ * (storage tests, losat-baselines/web-flaky-20261103/runs).
+ */
 export async function startSearch(page: Page): Promise<void> {
   await page.getByTestId('tab-search').click();
-  await page.getByTestId('query-input').fill('>q1\nACGTACGTACGT\n');
-  await page.getByTestId('subject-input').fill('>s1\nACGTACGTACGT\n');
-  await page.getByTestId('run-losat').click();
+  await described(page);
+  await paste(page, 'query', '>q1\nACGTACGTACGT\n');
+  await paste(page, 'subject', '>s1\nACGTACGTACGT\n');
+  await submit(page);
 }
 
 /** Starts a search and waits until it, run `number`, completes. */

@@ -1452,6 +1452,12 @@ impl TblastxOutputFormat {
         }
     }
 
+    /// Whether the format is a table that counts following subjects whose Seq-align ids match as
+    /// one (`TabularNeeds::joins_subjects`: `qcovs`, `qcovus`).
+    pub(crate) fn tabular_joins_subjects(self) -> bool {
+        matches!(self, Self::CustomTabular(spec) if spec.needs().joins_subjects())
+    }
+
     /// Whether the format writes a query's own warnings to standard error
     /// (`ReportFormat::writes_query_warnings`: not the structured formats).
     pub(crate) fn writes_query_warnings(self) -> bool {

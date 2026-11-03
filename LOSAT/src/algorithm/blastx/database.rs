@@ -40,7 +40,7 @@ use crate::seqdb::{SeqDb, SeqType};
 const PROGRAM: &str = "BLASTX";
 
 /// The longest subject BLASTX searches in one piece (NCBI's `MAX_DBSEQ_LEN`).
-const MAX_DBSEQ_LEN: usize = 5_000_000;
+pub(super) const MAX_DBSEQ_LEN: usize = 5_000_000;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-119
 // ```c
@@ -160,11 +160,32 @@ impl BlastxDatabase {
     // sequence): NCBI opens it, writes the outfmt 0 prolog, reads the first query batch and
     // fails in that batch's preliminary search, where its reader cannot map the sequence
     // file (BLASTP's `-db`, fixture `LOSAT/tests/seqdb/db/empty`).
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:128-136 (quoted
+    // at `SeqDb::max_length`): the longest length is the volumes' index headers', not a scan.
+    /// What the search needs of the database before the first query batch, without reading its
+    /// sequences: the residues of the longest sequence (`SeqDb::max_length`, which the check would
+    /// count: makeblastdb writes it in the index, a list scans its OIDs). The empty database's
+    /// error, and, where the longest is above `MAX_DBSEQ_LEN`, the check's (`x_check_stores`),
+    /// belong to the first query batch with a valid context, which the caller fails with it. The
+    /// search checks each sequence where it first reads it (`XStreamDb::x_check`).
+    pub(crate) fn x_open_stream(&self) -> Result<usize> {
+        if self.db.printed_num_seqs() == 0 {
+            return Err(PreliminaryReadError("Database memory map file error").into());
+        }
+        let longest = self.db.max_length() as usize;
+        if longest > MAX_DBSEQ_LEN {
+            return self.x_check_stores();
+        }
+        Ok(longest)
+    }
+
     /// Reads every sequence of the database once, in blocks (`x_check_protein_stores`), and keeps
     /// nothing but the residues of the longest sequence. The error (a reader error of NCBI's
-    /// preliminary search, LOSAT's refusal of a sequence, or the empty database's) belongs to the
-    /// first query batch with a valid context, which the caller fails with it. The sequences are
-    /// read again where they are searched (`x_db_stream.rs`).
+    /// preliminary search, LOSAT's refusal of a sequence, or the empty database's) is that of the
+    /// first sequence in ordinal order: the error of a database whose longest is above
+    /// `MAX_DBSEQ_LEN` (`x_open_stream`), and the error the run reports for a read or a check
+    /// that fails during the search (`native::search_error`), whichever sequence the search's
+    /// threads read first.
     pub(crate) fn x_check_stores(&self) -> Result<usize> {
         if self.db.printed_num_seqs() == 0 {
             return Err(PreliminaryReadError("Database memory map file error").into());
@@ -199,7 +220,7 @@ impl BlastxDatabase {
 
 /// LOSAT's refusal of database sequence `ordinal` of `length` residues, longer than
 /// `MAX_DBSEQ_LEN`.
-fn too_long(ordinal: usize, length: usize) -> anyhow::Error {
+pub(super) fn too_long(ordinal: usize, length: usize) -> anyhow::Error {
     anyhow::anyhow!(
         "database sequence {ordinal} has {length} residues; a subject longer than {MAX_DBSEQ_LEN} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX"
     )

@@ -10,11 +10,13 @@
 //!
 //! The stream:
 //!
-//! - `BlastxDatabase::x_check_stores` reads the database once in blocks of
-//!   `PROTEIN_STORE_BLOCK_BYTES`, with the checks of the copy in its order (the empty database,
-//!   `check_protein_sequence`, the 5,000,000-residue limit), and keeps nothing but the length of the
-//!   longest sequence. Its error is the error that the copy gave, which fails the same query batch
-//!   with the same text.
+//! - Before the first query batch the run reads no sequence (`BlastxDatabase::x_open_stream`): the
+//!   length of the longest sequence is the index's (`SeqDb::max_length`), and the empty database
+//!   and a longest above 5,000,000 residues give the error of the check (`x_check_stores`, which
+//!   reads the database once in blocks of `PROTEIN_STORE_BLOCK_BYTES` with the checks of the copy
+//!   in its order: the empty database, `check_protein_sequence`, the 5,000,000-residue limit), which
+//!   fails the first query batch with a valid context. The reads of the search check each block
+//!   they read the same way (`XStreamDb::x_check`) until they have checked every sequence once.
 //! - The preliminary search reads the sequences of each pass over the database in ascending order
 //!   (`XPass`): a serial pass and a query chunk (chunks searched side by side at 2+ threads) read
 //!   blocks of `block_bytes` (`SeqDb::next_block`) and drop each block before the next. A task of
@@ -33,10 +35,11 @@
 //!   `SeqDb::read_sequence` (`Subjects::read_encoded`), after the preliminary search of the batch,
 //!   as NCBI fetches the sequences of its hit lists.
 //!
-//! A read that fails during the search (a database changed or damaged after the check, an error of
-//! the file system) gives the error that the check gives for the same read (`XReadError` holds
-//! `search_read_error`'s), which the run reports as it reports the check's (`native::search_error`:
-//! NCBI's engine error, or LOSAT's refusal).
+//! A read or a check that fails during the search (a damaged database, an error of the file system)
+//! gives the error that the check gives for the same read (`XReadError` holds `search_read_error`'s
+//! or the check's), and the run reports the check's first error in ordinal order, whichever
+//! sequence the threads read first (`native::search_error`: NCBI's engine error, or LOSAT's
+//! refusal), so the text and the query batch it fails are those of the check before the search.
 //!
 //! The stored bytes are the same in every read (the sentinel before and after the residues is the
 //! file's byte, which the check requires to be 0, as the copy held), so every stage computes the
@@ -54,8 +57,10 @@ use std::borrow::Cow;
 
 use anyhow::{anyhow, Result};
 
-use crate::algorithm::common::database::search_read_error;
+use crate::algorithm::common::database::{check_protein_sequence, search_read_error};
 use crate::seqdb::{SeqDb, SequenceBlock};
+
+use super::database::{too_long, MAX_DBSEQ_LEN};
 
 /// The program that the reader's errors name (`database::PROGRAM`).
 const PROGRAM: &str = "BLASTX";
@@ -91,17 +96,21 @@ pub(crate) struct XStreamDb<'a> {
     db: &'a SeqDb,
     count: usize,
     total_length: u64,
-    /// The residues of the longest sequence (from the check).
+    /// The residues of the longest sequence (`BlastxDatabase::x_open_stream`).
     longest: usize,
     block_bytes: u64,
+    /// Whether the reads have checked every sequence (`x_check`).
+    x_checked: std::sync::atomic::AtomicBool,
+    /// The ordinal ranges the reads have checked, merged, until they cover the database.
+    x_covered: std::sync::Mutex<Vec<(usize, usize)>>,
     /// EXPERIMENT (LOSAT_X_BXTASKRES): the subject flow's task bounds by tasks' `k`, made once
     /// (`x_task_starts`).
     x_task_starts: std::sync::Mutex<Vec<(usize, std::sync::Arc<[u32]>)>>,
 }
 
 impl<'a> XStreamDb<'a> {
-    /// The database `db` after its check (`BlastxDatabase::x_check_stores`, which counted
-    /// `longest`).
+    /// The database `db` with the longest of `BlastxDatabase::x_open_stream` (or of the check,
+    /// `x_check_stores`).
     pub(crate) fn new(db: &'a SeqDb, longest: usize) -> Self {
         Self::with_block_bytes(db, longest, BLOCK_BYTES)
     }
@@ -114,7 +123,63 @@ impl<'a> XStreamDb<'a> {
             total_length: db.statistics_numbers().0,
             longest,
             block_bytes,
+            x_checked: std::sync::atomic::AtomicBool::new(false),
+            x_covered: std::sync::Mutex::new(Vec::new()),
             x_task_starts: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    // No NCBI counterpart: LOSAT's check of the stored bytes (NCBI searches them as they are; the
+    // check is the one `x_check_stores` makes of the whole database). A read of the whole database
+    // before the first query batch made it once: 0.85 s for UniRef50's uniref50.03 volume (3 GB of
+    // residues) at every thread count, on one thread while the others waited (0.84 of 2.22 s for
+    // one query at 16 threads), and the search then read every sequence again.
+    /// Checks the sequences of `part`, just read, as `x_check_stores` checks them
+    /// (`check_protein_sequence`, `MAX_DBSEQ_LEN`) until the reads have checked every sequence of
+    /// the database; after that, nothing (the bytes are those already checked). A sequence that
+    /// fails is an `XReadError`, which the run reports as the check's first error
+    /// (`native::search_error`).
+    fn x_check(&self, part: &SequenceBlock) -> Result<()> {
+        if self.x_checked.load(std::sync::atomic::Ordering::Acquire) {
+            return Ok(());
+        }
+        let first = part.first_ordinal() as usize;
+        for i in 0..part.len() {
+            let with_sentinels = part.protein_with_sentinels(i);
+            let ordinal = first + i;
+            check_protein_sequence(with_sentinels, ordinal as u64, PROGRAM).map_err(XReadError)?;
+            let length = with_sentinels.len() - 2;
+            if length > MAX_DBSEQ_LEN {
+                return Err(XReadError(too_long(ordinal, length)).into());
+            }
+        }
+        self.x_cover(first, first + part.len());
+        Ok(())
+    }
+
+    // No NCBI counterpart: the bookkeeping of `x_check`.
+    /// Adds the checked ordinals `first..end` to `x_covered`; once the ranges cover the database,
+    /// sets `x_checked` and drops them.
+    fn x_cover(&self, first: usize, end: usize) {
+        let mut covered = self
+            .x_covered
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut at = covered.partition_point(|&(start, _)| start < first);
+        covered.insert(at, (first, end));
+        if at > 0 && covered[at - 1].1 >= first {
+            covered[at - 1].1 = covered[at - 1].1.max(end);
+            covered.remove(at);
+            at -= 1;
+        }
+        while at + 1 < covered.len() && covered[at + 1].0 <= covered[at].1 {
+            covered[at].1 = covered[at].1.max(covered[at + 1].1);
+            covered.remove(at + 1);
+        }
+        if covered.len() == 1 && covered[0] == (0, self.count) {
+            self.x_checked
+                .store(true, std::sync::atomic::Ordering::Release);
+            *covered = Vec::new();
         }
     }
 
@@ -143,6 +208,7 @@ impl<'a> XStreamDb<'a> {
             .and_then(|first| self.db.next_block(first, self.block_bytes))
             .ok_or_else(|| anyhow!("BLASTX database ordinal id {oid} is past the database"))?;
         let part = self.db.read_block(range).map_err(read_error)?;
+        self.x_check(&part)?;
         Ok(XBlock {
             first: oid,
             end: range.end_ordinal() as usize,
@@ -159,7 +225,9 @@ impl<'a> XStreamDb<'a> {
             let range = self.db.x_block_range(at, end32).ok_or_else(|| {
                 anyhow!("BLASTX database ordinal ids {first}..{end} are past the database")
             })?;
-            parts.push(self.db.read_block(range).map_err(read_error)?);
+            let part = self.db.read_block(range).map_err(read_error)?;
+            self.x_check(&part)?;
+            parts.push(part);
             at = range.end_ordinal();
         }
         Ok(XBlock { first, end, parts })
@@ -208,6 +276,7 @@ impl<'a> XStreamDb<'a> {
             .db
             .read_sequence(u32::try_from(oid)?)
             .map_err(read_error)?;
+        self.x_check(&block)?;
         Ok(block.protein(0).to_vec())
     }
 
@@ -417,6 +486,7 @@ mod tests {
                 residues.iter().map(Vec::len).max().unwrap(),
                 "{name}"
             );
+            assert_eq!(database.x_open_stream().unwrap(), longest, "{name}");
             let with_sentinel = |oid: usize| [&residues[oid][..], &[0u8][..]].concat();
             // The same bytes with the sentinel before them.
             let with_sentinels = |oid: usize| [&[0u8][..], &with_sentinel(oid)[..]].concat();
@@ -506,11 +576,118 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// A copy of fixture `name` (`tests/seqdb/db`) in a directory of its own, and its path.
+    fn copy_of(name: &str, tag: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db");
+        let dir = std::env::temp_dir().join(format!(
+            "losat-bxdbstream-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for extension in ["pdb", "phr", "pin", "psq"] {
+            let file = format!("{name}.{extension}");
+            std::fs::copy(fixtures.join(&file), dir.join(&file)).unwrap();
+        }
+        let path = dir.join(name);
+        (dir, path)
+    }
+
+    /// Writes `byte` over the first residue of sequence `ordinal` in the sequence file `psq` (a
+    /// volume of one sequence file: the residues follow the `ordinal + 1`-th NUL byte).
+    fn damage(psq: &std::path::Path, ordinal: usize, byte: u8) {
+        let mut bytes = std::fs::read(psq).unwrap();
+        let at = bytes
+            .iter()
+            .enumerate()
+            .filter(|&(_, &b)| b == 0)
+            .nth(ordinal)
+            .unwrap()
+            .0
+            + 1;
+        assert_ne!(bytes[at], 0, "sequence {ordinal} has residues");
+        bytes[at] = byte;
+        std::fs::write(psq, bytes).unwrap();
+    }
+
+    // No NCBI counterpart: LOSAT's check of the stored bytes. The head of the run reads no
+    // sequence: without its sequence file the database opens and gives the longest that the
+    // check counts, and the first read fails.
+    #[test]
+    fn the_head_of_the_stream_reads_no_sequence() {
+        let (dir, path) = copy_of("prot_v5", "head");
+        let longest = open("prot_v5").x_check_stores().unwrap();
+        std::fs::remove_file(dir.join("prot_v5.psq")).unwrap();
+        let database =
+            BlastxDatabase::open(path.to_str().unwrap(), &ApplicationSettings::default()).unwrap();
+        assert_eq!(database.x_open_stream().unwrap(), longest);
+        let stream = XStreamDb::new(database.x_seqdb(), longest);
+        let error = XPass::new(&stream).view(0).map(|_| ()).unwrap_err();
+        let XReadError(kept) = error.downcast::<XReadError>().unwrap();
+        assert_eq!(
+            kept.to_string(),
+            database.x_check_stores().unwrap_err().to_string()
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // No NCBI counterpart: LOSAT's check of the stored bytes. A sequence with a byte that is no
+    // NCBIstdaa residue fails the read of every block that holds it, in a pass, a range or a
+    // read of its own, with the check's error, until the reads have checked every sequence; a
+    // read after that checks nothing (the bytes of a sequence file changed after the reads are
+    // not checked again, as they were not after the check of the whole database).
+    #[test]
+    fn the_reads_check_the_sequences_until_every_one_is_checked() {
+        let (dir, path) = copy_of("prot_v5", "check");
+        let database =
+            BlastxDatabase::open(path.to_str().unwrap(), &ApplicationSettings::default()).unwrap();
+        let longest = database.x_open_stream().unwrap();
+        let n = database.x_seqdb().num_seqs() as usize;
+        damage(&dir.join("prot_v5.psq"), 6, 200);
+        let want = database.x_check_stores().unwrap_err().to_string();
+        assert!(want.contains("database sequence 6 holds a byte"), "{want}");
+        let read_error =
+            |error: anyhow::Error| error.downcast::<XReadError>().unwrap().0.to_string();
+        for block_bytes in [1, 200, 1 << 20] {
+            let stream = XStreamDb::with_block_bytes(database.x_seqdb(), longest, block_bytes);
+            let mut pass = XPass::new(&stream);
+            let failed = (0..n).find_map(|oid| pass.view(oid).err().map(|e| (oid, e)));
+            let (oid, error) = failed.expect("the pass reads sequence 6");
+            assert!(oid <= 6, "{block_bytes}: {oid}");
+            assert_eq!(read_error(error), want, "{block_bytes}");
+            assert_eq!(
+                read_error(stream.read_range(5, 8).map(|_| ()).unwrap_err()),
+                want
+            );
+            assert_eq!(
+                read_error(stream.read_one(6).map(|_| ()).unwrap_err()),
+                want
+            );
+            assert!(stream.read_range(7, n).is_ok() && stream.read_one(5).is_ok());
+            assert!(!stream.x_checked.load(std::sync::atomic::Ordering::Acquire));
+        }
+        // Sequence 6 a residue again: the reads check 7 to the end in a pass, then 0..7 in a
+        // range, and the database is checked; sequence 6 damaged after that is read as it is.
+        damage(&dir.join("prot_v5.psq"), 6, 20);
+        let stream = XStreamDb::with_block_bytes(database.x_seqdb(), longest, 200);
+        let mut pass = XPass::new(&stream);
+        for oid in 7..n {
+            pass.view(oid).unwrap();
+        }
+        assert!(!stream.x_checked.load(std::sync::atomic::Ordering::Acquire));
+        stream.read_range(0, 7).unwrap();
+        assert!(stream.x_checked.load(std::sync::atomic::Ordering::Acquire));
+        damage(&dir.join("prot_v5.psq"), 6, 200);
+        assert!(stream.read_one(6).is_ok());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     // The error of the first batch with a valid context for a database without sequences is NCBI's
     // (`blastx_db_search.rs`): the reader's, not LOSAT's.
     #[test]
     fn the_check_of_an_empty_database_fails_as_ncbis_preliminary_search() {
-        let error = open("empty").x_check_stores().unwrap_err();
+        let error = open("empty").x_open_stream().unwrap_err();
         let error = error
             .downcast::<crate::algorithm::common::database::PreliminaryReadError>()
             .expect("NCBI's error of the preliminary search");

@@ -266,6 +266,78 @@ fn the_sequence_file_is_read_by_the_first_batch_with_a_valid_context() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+// No NCBI counterpart: LOSAT's refusals of database sequences that it cannot search as NCBI does
+// (a byte that is no NCBIstdaa residue, which indexes NCBI's matrix past its rows; a subject
+// longer than NCBI's `MAX_DBSEQ_LEN`, which NCBI searches in overlapping parts). The search
+// checks each sequence where it first reads it, the threads in any order, and the run names the
+// first refused sequence in ordinal order, at every thread count, as the check of the whole
+// database before the search did; the longest length is the index's, read before the search.
+#[test]
+fn a_refused_database_sequence_is_named_in_ordinal_order_at_every_thread_count() {
+    let dir = temp_dir("refused");
+    let db = makedb(&dir, &fasta("PemoMJNVA.faa"), "pemo");
+    let psq = format!("{db}.psq");
+    let mut bytes = std::fs::read(&psq).unwrap();
+    // The residues of sequence i follow the (i + 1)-th NUL byte of the sequence file.
+    let starts: Vec<usize> = bytes
+        .iter()
+        .enumerate()
+        .filter(|&(_, &byte)| byte == 0)
+        .map(|(at, _)| at + 1)
+        .collect();
+    for ordinal in [40, 90] {
+        bytes[starts[ordinal]] = 200;
+    }
+    std::fs::write(&psq, bytes).unwrap();
+    let query = genome_slice(&dir, 30_000);
+    for threads in ["1", "4"] {
+        let output = losat()
+            .arg("blastx")
+            .arg("-query")
+            .arg(&query)
+            .args(["-db", &db, "-outfmt", "6", "-num_threads", threads])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{threads}: {stderr}");
+        assert!(output.stdout.is_empty(), "{threads}");
+        assert!(
+            stderr.ends_with(
+                "database sequence 40 holds a byte that is no NCBIstdaa residue at position 1, \
+                 which is not supported by LOSAT's BLASTX\n"
+            ),
+            "{threads}: {stderr}"
+        );
+    }
+    let long = dir.join("long.faa");
+    std::fs::write(
+        &long,
+        format!(
+            ">short\nMKVLAAGIVGLLLAAPAMA\n>long\n{}\n",
+            "A".repeat(5_000_001)
+        ),
+    )
+    .unwrap();
+    let db = makedb(&dir, &long, "long");
+    let output = losat()
+        .arg("blastx")
+        .arg("-query")
+        .arg(&query)
+        .args(["-db", &db, "-outfmt", "6"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.ends_with(
+            "database sequence 1 has 5000001 residues; a subject longer than 5000000 residues, \
+             which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX\n"
+        ),
+        "{stderr}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 // blast_args.cpp:2364-2381: `-db` excludes `-subject` (LOSAT's parser reports it);
 // blast_args.cpp:2558-2562: neither is NCBI's options error; blast_app_util.hpp:185-203: a
 // database that is not found is NCBI's `BLAST Database error`, exit status 2.

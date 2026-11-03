@@ -862,13 +862,13 @@ fn run_inner(
     writer.flush().map_err(output_error)?;
     super::x_timing::run(XRun::Prolog, x_t);
     let x_t = super::x_timing::lap();
-    // The database's sequences, checked once here and read in blocks where they are searched
-    // (`x_db_stream.rs`); an error belongs to the first batch with a valid context
-    // (`Subjects::Unreadable`, `search_error`). No NCBI counterpart for the blocks: NCBI maps the
-    // volume files.
+    // The database's sequences, read in blocks where they are searched and checked where they are
+    // first read (`x_db_stream.rs`); the empty database's error belongs to the first batch with a
+    // valid context (`Subjects::Unreadable`, `search_error`). No NCBI counterpart for the blocks:
+    // NCBI maps the volume files.
     let (x_longest, unreadable) = match &database {
         None => (None, None),
-        Some(database) => match database.x_check_stores() {
+        Some(database) => match database.x_open_stream() {
             Ok(longest) => (Some(longest), None),
             Err(error) => (None, Some(error)),
         },
@@ -904,10 +904,16 @@ fn run_inner(
                 .expect("the database's error, raised once");
             return database_error(kept);
         }
-        // A read of the database that failed during the search,
-        // reported as the check's error for the same read.
+        // A read or a check of the database that failed during the search, reported as the
+        // check's error (the first sequence in ordinal order that fails, whichever the search's
+        // threads read first; the search's own where the check finds none).
         match error.downcast::<super::x_db_stream::XReadError>() {
-            Ok(super::x_db_stream::XReadError(kept)) => database_error(kept),
+            Ok(super::x_db_stream::XReadError(kept)) => database_error(
+                database
+                    .as_ref()
+                    .and_then(|database| database.x_check_stores().err())
+                    .unwrap_or(kept),
+            ),
             Err(error) => engine(error),
         }
     };

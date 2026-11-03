@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { LOADER_LENGTH, LOADER_PENS } from '../../src/ui/logo';
+import { LOADER_LENGTH, LOADER_PENS, LOGO_A, LOGO_LETTERS, LOGO_VIEWBOX } from '../../src/ui/logo';
 
 // styles.css repeats the loader pens' numbers (the markup carries no style attributes, which the CSP refuses).
 const css = readFileSync(resolve(import.meta.dirname, '../../src/ui/styles.css'), 'utf8');
@@ -35,5 +35,29 @@ describe('the loader (DW-43)', () => {
       .filter((value) => value !== 0);
     expect(ends.length).toBeGreaterThan(0);
     expect(new Set(ends)).toEqual(new Set([LOADER_LENGTH]));
+  });
+});
+
+/** The `d` of every path in an SVG file, in order. */
+function paths(file: string): string[] {
+  return [...readFileSync(file, 'utf8').matchAll(/<path d="([^"]+)"/g)].map((m) => m[1]!);
+}
+
+describe('the logo outside the app (DW-44)', () => {
+  it("the README's logos and the tab icon carry logo.ts's paths", () => {
+    for (const name of ['losat-logo.svg', 'losat-logo-white.svg']) {
+      const file = resolve(import.meta.dirname, '../../../../docs/assets', name);
+      expect(paths(file), name).toEqual([...LOGO_LETTERS, ...LOGO_A]);
+      expect(readFileSync(file, 'utf8'), name).toContain(`viewBox="${LOGO_VIEWBOX}"`);
+    }
+    expect(paths(resolve(import.meta.dirname, '../../public/favicon.svg'))).toEqual([...LOGO_A]);
+  });
+
+  it('the PNG icons have their sizes (scripts/icons.mjs draws them from favicon.svg)', () => {
+    for (const [name, size] of [['favicon-32.png', 32], ['apple-touch-icon.png', 180]] as const) {
+      const png = readFileSync(resolve(import.meta.dirname, '../../public', name));
+      // IHDR: the width and the height follow the signature (8 bytes) and the chunk's length and type.
+      expect([png.readUInt32BE(16), png.readUInt32BE(20)], name).toEqual([size, size]);
+    }
   });
 });

@@ -1,17 +1,26 @@
-// DW-43: the logo in the header, the tab's icon, and the loader (the logo's A drawn in one stroke)
+// DW-43: the logo in the header, the tab's icon (PNG icons DW-44), and the loader (the logo's A drawn in one stroke)
 // before the words of a state in progress. An accession fetch whose answer is held keeps one such
 // state on the page.
 import { expect, test } from '@playwright/test';
 import { openSearch } from './support/search';
 
-test('the header shows the logo, and the tab icon is served', async ({ page }) => {
+test('the header shows the logo, and the tab and home-screen icons are served', async ({ page }) => {
   await openSearch(page);
   await expect(page.getByTestId('losat-logo')).toBeVisible();
   await expect(page.getByRole('heading', { level: 1 })).toHaveAccessibleName('LOSAT');
-  const href = await page.locator('link[rel="icon"]').getAttribute('href');
-  const icon = await page.request.get(new URL(href!, page.url()).href);
-  expect(icon.ok()).toBe(true);
-  expect(icon.headers()['content-type']).toContain('image/svg+xml');
+  const links = await page
+    .locator('link[rel="icon"], link[rel="apple-touch-icon"]')
+    .evaluateAll((els) => els.map((el) => [el.getAttribute('rel'), el.getAttribute('href')] as const));
+  expect(links).toEqual([
+    ['icon', '/favicon-32.png'],
+    ['icon', '/favicon.svg'],
+    ['apple-touch-icon', '/apple-touch-icon.png'],
+  ]);
+  for (const [, href] of links) {
+    const icon = await page.request.get(new URL(href!, page.url()).href);
+    expect(icon.ok(), href!).toBe(true);
+    expect(icon.headers()['content-type'], href!).toContain(href!.endsWith('.svg') ? 'image/svg+xml' : 'image/png');
+  }
 });
 
 test('a state in progress shows the loader; it draws, and stands still when the system asks for less motion', async ({ page }) => {

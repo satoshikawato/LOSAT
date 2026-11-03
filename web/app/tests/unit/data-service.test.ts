@@ -285,6 +285,18 @@ describe('DataService sources named .gz', () => {
     await expect(data.addSource(new File([], 'empty.fa.gz'))).rejects.toThrow('empty.fa.gz is named .gz but is not gzip data (');
   });
 
+  it('inflates a file read in several slices', async () => {
+    // 9 MiB of plain text: more than one 8 MiB slice of the file and more than one Blob part.
+    const line = '>r\n' + 'ACGT'.repeat(15) + '\n';
+    const text = line.repeat(Math.ceil((9 * 1024 * 1024) / line.length));
+    const { data } = service();
+    const gz = new File([gzipSync(text)], 'big.fa.gz');
+    const source = await data.addSource(gz);
+    expect(source).toMatchObject({ name: 'big.fa', size: text.length });
+    const head = decoder.decode(await data.previewSource(source.sourceId, line.length * 2));
+    expect(head).toBe(line + line);
+  });
+
   it('names the plain file', () => {
     expect([isGzipName('a.gz'), isGzipName('a.GZ'), isGzipName('q.gzip'), isGzipName('-')]).toEqual([true, true, false, false]);
     expect([plainName('a.fa.gz'), plainName('a.FA.Gz'), plainName('.gz'), plainName('a.fa')]).toEqual(['a.fa', 'a.FA', 'input', 'a.fa']);

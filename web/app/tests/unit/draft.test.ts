@@ -97,11 +97,12 @@ describe('SearchDraft inputs', () => {
     expect(draft.state.get().subject.sources).toHaveLength(0);
   });
 
-  it('reports the index scan error of a text without a defline, and adds one on request', async () => {
+  it('reads a text without a defline as one record without a title, and adds a defline on request', async () => {
     const { draft } = setup();
     draft.setPaste('query', 'ACGTACGT\n');
     await draft.idle();
-    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', error: 'Expected > at record start.' });
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 1 });
+    expect(sourceOf(draft, 'query').base?.records.map((r) => [r.id, r.header_offset, r.sequence_offset, r.length])).toEqual([['', 0, 0, 8]]);
     draft.addDefline('query');
     await draft.idle();
     expect(draft.state.get().query.paste).toBe('>pasted_query\nACGTACGT\n');
@@ -110,7 +111,7 @@ describe('SearchDraft inputs', () => {
 
   it('shows the engine refusal of a record and maps it to the record table; excluding it passes the check', async () => {
     const { draft } = setup();
-    draft.setPaste('query', '>a\nACGT\n>b\nAC!GT\n>c\nACGT\n');
+    draft.setPaste('query', '>a\nACGT\n>b\nACGT!ACGT\n>c\nACGT\n');
     await draft.idle();
     const refused = sourceOf(draft, 'query').check;
     expect(refused).toMatchObject({ state: 'refused', record: 1 });
@@ -122,7 +123,7 @@ describe('SearchDraft inputs', () => {
 
   it('maps a refused record among the included records only', async () => {
     const { draft } = setup();
-    draft.setPaste('query', '>a\nACGT\n>b\nACGT\n>c\nAC!GT\n');
+    draft.setPaste('query', '>a\nACGT\n>b\nACGT\n>c\nACGT!ACGT\n');
     await draft.idle();
     draft.setIncluded('query', 'paste', [0], false);
     await draft.idle();
@@ -130,17 +131,43 @@ describe('SearchDraft inputs', () => {
     expect(sourceOf(draft, 'query').check).toMatchObject({ state: 'refused', record: 2 });
   });
 
-  it('checks the inputs again for another program', async () => {
+  it('checks the inputs again for another program, and reads them again when it reads the role with another kind', async () => {
     const { draft, checks } = setup();
-    draft.setPaste('query', '>a\nACGT\n');
+    draft.setPaste('query', '>a\nMKLV\n');
+    draft.setPaste('subject', '>s\n$$$$\n');
     await draft.idle();
     const revision = sourceOf(draft, 'query').base!.revisionId;
+    expect(sourceOf(draft, 'query').base!.records[0]!.length).toBe(3);
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'failed', parser: 1 });
+    // BLASTX reads its query as BLASTN does (kind 1): the query is checked again, not read again.
+    // Its subject is protein (kind 2): the subject is read again, the failed one too.
     draft.setProgram('blastx');
     await draft.idle();
-    // Every program indexes with the same reader: the input is checked again, not read again.
     expect(sourceOf(draft, 'query').base!.revisionId).toBe(revision);
     expect(sourceOf(draft, 'query').check).toEqual({ state: 'ok', records: 1 });
     expect(checks.at(-1)).toMatch(/^blastx\|query\|/);
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'failed', parser: 2 });
+    // BLASTP reads its query with the protein flags (kind 2): read again.
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 2 });
+    expect(sourceOf(draft, 'query').base!.revisionId).not.toBe(revision);
+    expect(sourceOf(draft, 'query').base!.records[0]!.length).toBe(4);
+  });
+
+  it('reads a text pasted just before a program change once, with the new kind', async () => {
+    const { draft, data } = setup();
+    const kinds: number[] = [];
+    const indexSource = data.indexSource.bind(data);
+    data.indexSource = async (sourceId, parser) => {
+      kinds.push(parser);
+      return indexSource(sourceId, parser);
+    };
+    draft.setPaste('query', '>a\nMKLV\n>b\nMKLV\n');
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(kinds).toEqual([2]);
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 2 });
   });
 });
 
@@ -149,7 +176,7 @@ describe('SearchDraft submit', () => {
     const { draft, requests } = setup();
     expect(await draft.submit()).toEqual({ ok: false, message: 'Add the query sequences: paste them or open FASTA files.' });
     draft.setPaste('query', '>q\nACGT\n');
-    draft.setPaste('subject', '>s\nAC!GT\n');
+    draft.setPaste('subject', '>s\nACGT!ACGT\n');
     await draft.idle();
     const refused = await draft.submit();
     expect(refused.ok).toBe(false);
@@ -409,10 +436,28 @@ describe('SearchDraft submit', () => {
     expect(draft.state.get()).toMatchObject({ submitting: false, message: { kind: 'error' } });
   });
 
+  it('refuses to combine a source that starts without a defline after another source', async () => {
+    const { draft } = setup();
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', 'ACGTACGT\n');
+    draft.addFiles('subject', [new File(['>s\nACGT\n'], 's.fa')]);
+    await draft.idle();
+    // The pasted subject comes first: its sequence without a defline is the input's first record.
+    expect(draft.readiness()).toBeUndefined();
+    draft.setPaste('subject', '');
+    draft.addFiles('subject', [new File(['GGCC\n'], 'bare.fa')]);
+    await draft.idle();
+    expect(draft.readiness()).toBe(
+      'Subject (file bare.fa) starts with a sequence without a defline (">"), which cannot follow another input.',
+    );
+    draft.setMode('subject', 'separate');
+    expect(draft.readiness()).toBeUndefined();
+  });
+
   it("maps a subject record that the engine refuses, and reports it in short above the button", async () => {
     const { draft } = setup();
     draft.setPaste('query', '>q\nACGT\n');
-    draft.setPaste('subject', '>s1\nACGT\n>s2\nAC!GT\n');
+    draft.setPaste('subject', '>s1\nACGT\n>s2\nACGT!ACGT\n');
     await draft.idle();
     expect(sourceOf(draft, 'subject').check).toMatchObject({ state: 'refused', record: 1 });
     expect(draft.readiness()).toBe(

@@ -20,6 +20,7 @@ import {
   type FormValues,
 } from '../../src/domain/parameters';
 import {
+  fastaParser,
   PROGRAMS,
   programById,
   residueUnit,
@@ -616,8 +617,14 @@ describe('program descriptors', () => {
     for (const program of PROGRAMS) expect(programById(program.id)).toBe(program);
   });
 
-  it('reads every input with the same FASTA reader, and gives BLASTX no subrange (DW-11)', () => {
-    expect(PROGRAMS.map((p) => p.fastaParser)).toEqual(PROGRAMS.map(() => 0));
+  it("reads each input with NCBI's reader kind of its sequence kind (DW-38), and gives BLASTX no subrange (DW-11)", () => {
+    expect(Object.fromEntries(PROGRAMS.map((p) => [p.id, [fastaParser(p, 'query'), fastaParser(p, 'subject')]]))).toEqual({
+      blastn: [1, 1],
+      blastp: [2, 2],
+      tblastn: [2, 1],
+      tblastx: [1, 1],
+      blastx: [1, 2],
+    });
     expect(PROGRAMS.filter((p) => p.subrange === false).map((p) => p.id)).toEqual(['blastx']);
   });
 

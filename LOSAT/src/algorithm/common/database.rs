@@ -562,6 +562,51 @@ impl ReportedHeader {
 pub(crate) struct HeaderReader<'a> {
     db: &'a SeqDb,
     lookup: std::cell::OnceCell<crate::seqdb::lookup::SeqidLookup<'a>>,
+    /// Whether NCBI's formatters may read the reported sequences one by one
+    /// (`prefetch_may_be_off`).
+    prefetch_off: bool,
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753
+// ```c++
+// static bool
+// s_PreFetchSeqs(const blast::CSearchResultSet& results,
+// 		       blast::CFormattingArgs::EOutputFormat format_type)
+// {
+// 	{
+// 		char * pre_fetch_limit_str = getenv("PRE_FETCH_SEQS_LIMIT");
+// 		if (pre_fetch_limit_str) {
+// 			int pre_fetch_limit = NStr::StringToInt(pre_fetch_limit_str);
+// 			if(pre_fetch_limit == 0) {
+// 				return false;
+// 			}
+// 			if(pre_fetch_limit == INT_MAX){
+// 				return true;
+// 			}
+// 			int num_of_seqs = 0;
+// 			for(unsigned int i=0; i < results.GetNumResults(); i++) {
+// 				if(results[i].HasAlignments()) {
+// 					num_of_seqs += results[i].GetSeqAlign()->Size();
+// 				}
+// 			}
+// 			if(num_of_seqs > pre_fetch_limit) {
+// 				return false;
+// 			}
+// 		}
+// 	}
+//
+// 	return s_IsPrefetchFormat(format_type);
+// }
+// ```
+/// Whether NCBI's formatters may read a batch's reported sequences one by one, not all at once
+/// before its report: `PRE_FETCH_SEQS_LIMIT` is an integer other than `INT_MAX` (0, or one below
+/// the batch's number of Seq-aligns, which LOSAT does not count, turns NCBI's prefetch off).
+/// A value that is no integer stops NCBI before its report; LOSAT refuses it in
+/// `blastinput::app::check_unsupported_environment`, which BLASTX does not call.
+fn prefetch_may_be_off() -> bool {
+    std::env::var_os("PRE_FETCH_SEQS_LIMIT")
+        .and_then(|value| crate::blastinput::query_batch::ncbi_string_to_int(&value))
+        .is_some_and(|limit| limit != i32::MAX)
 }
 
 impl<'a> HeaderReader<'a> {
@@ -570,6 +615,7 @@ impl<'a> HeaderReader<'a> {
         Self {
             db,
             lookup: std::cell::OnceCell::new(),
+            prefetch_off: prefetch_may_be_off(),
         }
     }
 
@@ -600,20 +646,23 @@ impl<'a> HeaderReader<'a> {
     // identities of that sequence, as its prefetch reads them: `gb|X.1|` with `lcl|555` in its
     // second definition line for `lcl|555`, also for the hit of another query, and with `lcl|ABC`
     // for `lcl|abc` (reviews 1 and 2 of line DBID N2b, `blastdb-ids-20261021/R/unfetch_review1`,
-    // `unfetch_review2`), and `gb|X.1|` for a later `emb|X.1|` (line DBID N1). Without its
-    // prefetch (`PRE_FETCH_SEQS_LIMIT`) it also matches ids weakly (`GetMatchingHandles`, an
-    // unversioned accession to its versions), which LOSAT does not model (a known difference of
-    // PD-LOSAT-DATABASE-SEARCH).
+    // `unfetch_review2`), and `gb|X.1|` for a later `emb|X.1|` (line DBID N1). Where no sequence it
+    // holds has the Seq-align id, it also takes one that holds an id the Seq-align id matches
+    // weakly (`x_GetSeqMatch`, scope_info.cpp:865-882; `seqid::id_scope::weak_keys`), which its
+    // prefetch never leaves to it but a scope that reads the reported sequences one by one
+    // (`PRE_FETCH_SEQS_LIMIT`) does: `sp|P00001.1|NAME_B` read before for a later `sp||NAME_B`
+    // (probe of line DBID N2c, `blastdb-ids-20261021/R/weak/p1.out`).
     /// What NCBI's lookup of the Seq-align id of the sequence `ordinal`, `subject`, finds in the
     /// database where that is not the sequence (`ParsedSubject::found_instead`): NCBI's
     /// formatters look it up in the search's own database, list included
     /// (`SeqidLookup::seqid_to_oids`), and its scope can show another sequence that holds an id it
     /// takes for the Seq-align id (`defline_set::scope_keys`) where both are reported. Another
     /// sequence that holds the same definition lines and letters is shown as the subject itself
-    /// (the same record in two volumes or two databases of an alias). A lookup that fails is
-    /// kept for the formats that read the Bioseq; the others never look the id up. A subject
-    /// whose Bioseq NCBI's formatters do not find whatever the lookup gives (`unfetchable`) is
-    /// not looked up.
+    /// (the same record in two volumes or two databases of an alias). Where NCBI may read the
+    /// reported sequences one by one (`prefetch_off`), also another sequence that holds an id the
+    /// Seq-align id matches weakly (`weakly_held`). A lookup that fails is kept for the formats
+    /// that read the Bioseq; the others never look the id up. A subject whose Bioseq NCBI's
+    /// formatters do not find whatever the lookup gives (`unfetchable`) is not looked up.
     fn found_instead(
         &self,
         subject: &crate::report::db_subject::ParsedSubject,
@@ -659,17 +708,110 @@ impl<'a> HeaderReader<'a> {
         };
         let mut keys = Vec::new();
         crate::report::db_subject::scope_keys(subject, &mut keys);
-        oids.iter()
+        let also_held = oids
+            .iter()
             .chain(&folded)
             .filter(|&&oid| oid != own)
             .map(|&oid| self.db.ordinal_of(oid))
-            .find(|&other| self.holds_scope_key(other, &keys) && !self.same_record(ordinal, other))
-            .map(FoundInstead::AlsoHeld)
+            .find(|&other| {
+                self.holds_key(other, &keys, crate::seqid::defline_set::scope_keys)
+                    && !self.same_record(ordinal, other)
+            });
+        if let Some(other) = also_held {
+            return Some(FoundInstead::AlsoHeld(other));
+        }
+        if !self.prefetch_off {
+            return None;
+        }
+        self.weakly_held(lookup, id, ordinal, &oids)
+            .unwrap_or_else(failed)
     }
 
-    /// Whether a Seq-id of the sequence `ordinal` has one of the scope keys `keys`
-    /// (`defline_set::scope_keys`): NCBI's scope can show it for a Seq-align id of those keys.
-    fn holds_scope_key(&self, ordinal: u32, keys: &[u64]) -> bool {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:128-135
+    // ```c++
+    //     if(seqid->IsPir() || seqid->IsPrf()) {
+    //     	SKeyValuePair kv_pir;
+    //     	kv_pir.id = seqid->AsFastaString();
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:160-163
+    // ```c++
+    //     if(seqid->GetTextseq_Id() != NULL) {
+    //     	SKeyValuePair kv;
+    //     	kv.id = seqid->GetSeqIdString(false);
+    // ```
+    // A version 5 database keys a text Seq-id as written, in its letter case, with no key for the
+    // name of an id with an accession, and a `pir` or `prf` id by its FASTA text; the scope matches
+    // names without case and across the alternatives (`CSeq_id_Mapper::GetMatchingHandles`), so the
+    // lookup cannot list the holders of a name (review 1 of line DBID N2c,
+    // `blastdb-ids-20261021/R/weak/REVIEW_weak_1.md` H1). A version 4 database's ISAM keys are in
+    // lower case without the alternative.
+    /// For `found_instead` where NCBI's formatters may read the reported sequences one by one:
+    /// another sequence of the database, by ordinal id, that holds an id the Seq-align id `id` of
+    /// the sequence `ordinal` matches weakly (`seqid::id_scope::weak_keys`), found among the
+    /// sequences that NCBI's lookup gives for `id` (`oids`: in both versions an accession without a
+    /// version gives its versions, in version 4 a name its holders) and for its name alone. In
+    /// version 5 a Seq-align id with a name, or a `pir` or `prf` one, with weak keys is refused
+    /// whatever the database holds (`FoundInstead::WeakUnlisted`).
+    fn weakly_held(
+        &self,
+        lookup: &crate::seqdb::lookup::SeqidLookup<'_>,
+        id: &crate::seqid::model::ParsedSeqId,
+        ordinal: u32,
+        oids: &[u32],
+    ) -> Result<Option<crate::report::db_subject::FoundInstead>, SeqDbError> {
+        use crate::report::db_subject::FoundInstead;
+        let Some(text) = id.textseq() else {
+            return Ok(None);
+        };
+        let mut keys = Vec::new();
+        crate::seqid::id_scope::weak_keys(id, &mut keys);
+        if keys.is_empty() {
+            return Ok(None);
+        }
+        let pir_or_prf = matches!(
+            id,
+            crate::seqid::model::ParsedSeqId::Pir(_) | crate::seqid::model::ParsedSeqId::Prf(_)
+        );
+        if self.db.is_version5() && (text.name.is_some() || pir_or_prf) {
+            return Ok(Some(FoundInstead::WeakUnlisted));
+        }
+        let mut found = oids.to_vec();
+        let name = match (&text.name, pir_or_prf) {
+            (Some(name), _) => Some(name),
+            (None, true) => text.accession.as_ref(),
+            (None, false) => None,
+        };
+        if let Some(name) = name {
+            let mut name_alone = id.clone();
+            *name_alone.textseq_mut().expect("a text Seq-id") = crate::seqid::model::TextseqId {
+                name: Some(name.clone()),
+                accession: None,
+                release: None,
+                version: None,
+            };
+            found.extend(lookup.seqid_to_oids(&name_alone, true)?);
+        }
+        let own = self.db.oid(ordinal);
+        Ok(found
+            .iter()
+            .filter(|&&oid| oid != own)
+            .map(|&oid| self.db.ordinal_of(oid))
+            .find(|&other| {
+                self.holds_key(other, &keys, crate::seqid::id_scope::kind_keys)
+                    && !self.same_record(ordinal, other)
+            })
+            .map(FoundInstead::WeaklyHeld))
+    }
+
+    /// Whether a Seq-id of the sequence `ordinal` has one of the keys `keys` that `key_of` gives
+    /// (`defline_set::scope_keys`: NCBI's scope can show it for a Seq-align id of those keys;
+    /// `id_scope::kind_keys`: for a Seq-align id whose `weak_keys` they are).
+    fn holds_key(
+        &self,
+        ordinal: u32,
+        keys: &[u64],
+        key_of: fn(&crate::seqid::model::ParsedSeqId, &mut Vec<u64>),
+    ) -> bool {
         let Ok(crate::seqdb::SequenceHeader::Parsed(set)) = self.db.read_header(ordinal) else {
             return false;
         };
@@ -679,7 +821,7 @@ impl<'a> HeaderReader<'a> {
             .flat_map(|defline| &defline.ids)
             .any(|id| {
                 held.clear();
-                crate::seqid::defline_set::scope_keys(id, &mut held);
+                key_of(id, &mut held);
                 held.iter().any(|key| keys.contains(key))
             })
     }
@@ -778,6 +920,21 @@ fn refuse_id_of_a_query(
             ordinal,
             "has the Seq-id of a query read with -parse_deflines (NCBI BLAST+ shows the query \
              for it)",
+            program,
+        ));
+    }
+    keys.clear();
+    crate::seqid::id_scope::weak_keys(subject.alignment_id(), &mut keys);
+    if id_scope.query_has_key(&keys) {
+        return Err(parsed_refusal(
+            ordinal,
+            &format!(
+                "has the Seq-align id {}, which NCBI BLAST+'s scope can match weakly to the id \
+                 of a query read with -parse_deflines (an accession with a version for one \
+                 without, a name with or without an accession, a pir or prf accession as a \
+                 name; NCBI BLAST+ then shows the query for it)",
+                String::from_utf8_lossy(&subject.alignment_fasta())
+            ),
             program,
         ));
     }
@@ -2586,6 +2743,66 @@ mod taxdb_prepass_tests {
                     assert!(error.contains(&text), "{name} {ordinal}: {error}")
                 }
                 (got, _) => panic!("{name} {ordinal}: {got:?}"),
+            }
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    #[test]
+    fn a_weak_match_is_refused_where_ncbi_may_read_the_reported_sequences_one_by_one() {
+        // tests/db_search/ids/make_ids.py (line DBID N2c): `pweak_v5` and `pweak_v4` 0
+        // `sp|P00041.1|NAMEW`, 1 `gb|FFF00040|`, 2 `pir|PIRW1|`, 3 `sp||NAMEX`, 4 `gb|FFF00041.1|`,
+        // 5 `sp||NAMEY`, 6 `sp|P00042.1|NAMEY`, 7 `gb|FFF00043|`, 8 `gb|FFF00043.1|`, 9
+        // `sp|P00044.1|NAMEZ`, 10 `sp||NAMEZ`. With the prefetch on, NCBI writes each sequence's
+        // own report (in version 4 the lookup of 10 gives 9 first: refused either way, not listed).
+        let cwd = empty_cwd("weak_match");
+        // `None`: fetched; `Some(Some(n))`: another sequence n matches weakly; `Some(None)`: weak
+        // keys that version 5 does not look up.
+        let unlisted = Some(None);
+        for (name, ordinal, want) in [
+            ("ids/pweak_v5", 0, unlisted),
+            ("ids/pweak_v5", 1, None),
+            ("ids/pweak_v5", 2, unlisted),
+            ("ids/pweak_v5", 3, unlisted),
+            ("ids/pweak_v5", 4, None),
+            ("ids/pweak_v5", 6, unlisted),
+            ("ids/pweak_v5", 7, Some(Some(8))),
+            ("ids/pweak_v5", 8, None),
+            ("ids/pweak_v4", 0, None),
+            ("ids/pweak_v4", 1, None),
+            ("ids/pweak_v4", 2, None),
+            ("ids/pweak_v4", 3, None),
+            ("ids/pweak_v4", 5, Some(Some(6))),
+            ("ids/pweak_v4", 6, Some(Some(5))),
+            ("ids/pweak_v4", 7, Some(Some(8))),
+            ("ids/pweak_v4", 9, Some(Some(10))),
+        ] {
+            let db = db_search(name, None, &cwd);
+            for prefetch_off in [false, true] {
+                let headers = HeaderReader {
+                    db: &db,
+                    lookup: std::cell::OnceCell::new(),
+                    prefetch_off,
+                };
+                let ReportedHeader::Parsed(subject) =
+                    read_header(&headers, ordinal, 0, "BLASTP").unwrap()
+                else {
+                    panic!("{name} {ordinal}: no parsed Seq-ids");
+                };
+                match (subject.fetched(), want.filter(|_| prefetch_off)) {
+                    (Ok(()), None) => {}
+                    (Err(error), Some(Some(other))) => assert!(
+                        error.contains(&format!("match an id of database sequence {other} weakly")),
+                        "{name} {ordinal}: {error}"
+                    ),
+                    (Err(error), Some(None)) => assert!(
+                        error.contains("a version 5 database does not look up"),
+                        "{name} {ordinal}: {error}"
+                    ),
+                    (got, want) => {
+                        panic!("{name} {ordinal} {prefetch_off}: {got:?}, want {want:?}")
+                    }
+                }
             }
         }
         std::fs::remove_dir_all(&cwd).unwrap();

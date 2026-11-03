@@ -1623,8 +1623,21 @@ fn compute_subject(
     // seeds (not the diagnostic stages), the seed loop reads the scanner's per-thread buffer in
     // place (x_seed_scan.rs; LOSAT_X_BXDIAG, chosen inside `x_word_finder_scan`, reads the lookup
     // cells in place instead, x_seed_diag.rs); otherwise the reference word finder below runs and
-    // collects the seeds.
-    let initial = if !diagnostics {
+    // collects the seeds. A `-subject` with lower-case letters (`-lcase_masking`) is scanned over
+    // its scan ranges by the reference word finder (x_soft_subject.rs).
+    let initial = if let Some(ranges) = super::x_soft_subject::x_subject_scan_ranges(subjects, oid)
+    {
+        super::x_soft_subject::x_word_finder(
+            batch,
+            params,
+            options,
+            encoded,
+            lookup,
+            diagonals,
+            &ranges,
+            diagnostics.then_some(&mut seeds),
+        )?
+    } else if !diagnostics {
         let x_sent = if x_lead {
             super::seed::x_ungap_sent::XSent::new(&batch.sequence_start, &x_buffer)
         } else {

@@ -36,7 +36,7 @@ describe('DataService sources and record tables', () => {
     const file = new File([THREE], 'three.fa');
     const source = await data.addSource(file);
     expect(source).toEqual({ sourceId: 'token-1', name: 'three.fa', size: file.size });
-    const revision = await data.indexSource(source.sourceId, 0);
+    const revision = await data.indexSource(source.sourceId, 1);
     expect(Object.isFrozen(revision)).toBe(true);
     expect(revision.excluded).toEqual([]);
     expect(revision.records.map((r) => [r.id, r.length])).toEqual([
@@ -53,13 +53,14 @@ describe('DataService sources and record tables', () => {
     const { data } = service();
     const text = '>dup First Header\nacgtACGT\n>dup second\nGGCC\n';
     const source = await data.addSource(new File([text], 'dup.fa'));
-    const revision = await data.indexSource(source.sourceId, 0);
+    const revision = await data.indexSource(source.sourceId, 1);
     expect(revision.records.map((r) => [r.index, r.id, r.length])).toEqual([
       [0, 'dup', 8],
       [1, 'dup', 4],
     ]);
     expect(revision.records[0]!.sha256).not.toBe(revision.records[1]!.sha256);
-    expect(revision.records[0]!.residue_counts).toEqual({ a: 1, c: 1, g: 1, t: 1, A: 1, C: 1, G: 1, T: 1 });
+    // The reader stores residues upper case; the extracted record keeps the original bytes.
+    expect(revision.records[0]!.residue_counts).toEqual({ A: 2, C: 2, G: 2, T: 2 });
     const second = await data.reviseDataset(revision.revisionId, [0]);
     const input = await data.buildRunInput([second.revisionId]);
     expect(decoder.decode(input.bytes)).toBe('>dup second\nGGCC\n');
@@ -70,7 +71,7 @@ describe('DataService sources and record tables', () => {
     const count = 150_000;
     const text = Array.from({ length: count }, (_, i) => `>r${i}\nA\n`).join('');
     const source = await data.addSource(new File([text], 'many.fa'));
-    const revision = await data.indexSource(source.sourceId, 0);
+    const revision = await data.indexSource(source.sourceId, 1);
     const excluded = await data.reviseDataset(revision.revisionId, [0]);
     const input = await data.buildRunInput([excluded.revisionId]);
     expect(input.records).toHaveLength(count - 1);
@@ -78,10 +79,10 @@ describe('DataService sources and record tables', () => {
     expect(await data.checkInput('blastn', 'query', [excluded.revisionId])).toMatchObject({ ok: true });
   }, 60_000);
 
-  it('rejects a source that the parser cannot read', async () => {
+  it('rejects a source that the reader cannot read', async () => {
     const { data } = service();
-    const source = await data.addSource(new File(['ACGT\n'], 'plain.txt'));
-    await expect(data.indexSource(source.sourceId, 0)).rejects.toThrow('Expected > at record start.');
+    const source = await data.addSource(new File(['>a\n$$$$\nACGT\n'], 'plain.txt'));
+    await expect(data.indexSource(source.sourceId, 1)).rejects.toThrow("Near line 2, there's a line that doesn't look like plausible data");
   });
 
   it('rejects a record table whose offsets are not ordered inside the source', async () => {
@@ -102,13 +103,13 @@ describe('DataService sources and record tables', () => {
     };
     const { data } = service({ scanner: broken });
     const source = await data.addSource(new File(['>x\nA\n'], 'x.fa'));
-    await expect(data.indexSource(source.sourceId, 0)).rejects.toThrow('invalid record table');
+    await expect(data.indexSource(source.sourceId, 1)).rejects.toThrow('invalid record table');
   });
 
   it('makes a new revision for a new selection and refuses unknown records', async () => {
     const { data } = service();
     const source = await data.addSource(new File([THREE], 'three.fa'));
-    const base = await data.indexSource(source.sourceId, 0);
+    const base = await data.indexSource(source.sourceId, 1);
     const revised = await data.reviseDataset(base.revisionId, [2, 0, 2]);
     expect(revised.revisionId).not.toBe(base.revisionId);
     expect(revised.excluded).toEqual([0, 2]);
@@ -120,7 +121,7 @@ describe('DataService sources and record tables', () => {
     const { data } = service();
     const text = `${THREE}\n\n`;
     const source = await data.addSource(new File([text], 'three.fa'));
-    const revision = await data.indexSource(source.sourceId, 0);
+    const revision = await data.indexSource(source.sourceId, 1);
     const input = await data.buildRunInput([revision.revisionId]);
     expect(decoder.decode(input.bytes)).toBe(text);
     expect(input.sha256).toBe(sha256(text));
@@ -134,7 +135,7 @@ describe('DataService sources and record tables', () => {
   it('gives the included original records in order when records are left out', async () => {
     const { data } = service();
     const source = await data.addSource(new File([THREE], 'three.fa'));
-    const revision = await data.reviseDataset((await data.indexSource(source.sourceId, 0)).revisionId, [1]);
+    const revision = await data.reviseDataset((await data.indexSource(source.sourceId, 1)).revisionId, [1]);
     const input = await data.buildRunInput([revision.revisionId]);
     expect(decoder.decode(input.bytes)).toBe('>a one\nACGT\nAC\n>c three\nTTT');
     expect(input.records).toEqual([
@@ -145,8 +146,8 @@ describe('DataService sources and record tables', () => {
 
   it('adds one newline after a source without a final newline when another follows', async () => {
     const { data } = service();
-    const first = await data.indexSource((await data.addSource(new File(['>x\nAC'], 'x.fa'))).sourceId, 0);
-    const second = await data.indexSource((await data.addSource(new File(['>y\nGG\n'], 'y.fa'))).sourceId, 0);
+    const first = await data.indexSource((await data.addSource(new File(['>x\nAC'], 'x.fa'))).sourceId, 1);
+    const second = await data.indexSource((await data.addSource(new File(['>y\nGG\n'], 'y.fa'))).sourceId, 1);
     const input = await data.buildRunInput([first.revisionId, second.revisionId, first.revisionId]);
     expect(decoder.decode(input.bytes)).toBe('>x\nAC\n>y\nGG\n>x\nAC');
     expect(input.records.map((r) => r.id)).toEqual(['x', 'y', 'x']);

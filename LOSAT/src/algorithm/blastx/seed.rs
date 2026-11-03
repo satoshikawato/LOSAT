@@ -791,120 +791,144 @@ pub fn word_finder(
     subject: &[u8],
     lookup: &Lookup,
     diagonals: &mut Diagonals,
+    trace: impl FnMut(&[(i32, i32)]),
+) -> Result<Vec<InitHsp>> {
+    word_finder_over(
+        batch, parameters, options, subject, lookup, diagonals, None, trace,
+    )
+}
+
+/// [`word_finder`] over `ranges`, the scan ranges of a `-subject` with lower-case letters
+/// (`-lcase_masking`, `x_soft_subject.rs`), or over the whole subject (`None`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn word_finder_over(
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &Lookup,
+    diagonals: &mut Diagonals,
+    ranges: Option<&[(i32, i32)]>,
     mut trace: impl FnMut(&[(i32, i32)]),
 ) -> Result<Vec<InitHsp>> {
     let query = &batch.sequence_start[1..];
     let word = options.word_size;
     let mask = diagonals.entries.len() as i32 - 1;
     let mut hits = Vec::new();
-    lookup.scan(
-        subject,
-        subject.len().saturating_sub(1),
-        options.window_size,
-        |seeds| {
-            trace(seeds);
-            for &(q, s) in seeds {
-                // The context of a seed is only needed once the diagonal tests let it through (the
-                // lookup has no side effect).
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,783-784
-                // ```c
-                //                 curr_context = BSearchContextInfo(query_offset, query_info);
-                // ...
-                //                 Int4 curr_context = BSearchContextInfo(query_offset,
-                //                                                        query_info);
-                // ```
-                // The two-hit path looks up the context (BSearchContextInfo) only after the
-                // diagonal tests have let the pair through, and the one-hit path only when diff >=
-                // 0. The same here.
-                let context_of = |q: i32| {
-                    batch
-                        .contexts
-                        .partition_point(|c| c.offset as i32 <= q)
-                        .saturating_sub(1)
-                };
-                let context;
-                let index = if options.window_size == 0 {
-                    (s - q) & mask
-                } else {
-                    (q - s) & mask
-                } as usize;
-                let entry = &mut diagonals.entries[index];
-                let (u, end, extended) = if options.window_size == 0 {
-                    if s.wrapping_sub(entry.last_hit().wrapping_sub(diagonals.offset)) < 0 {
-                        continue;
-                    }
-                    context = context_of(q);
-                    let p = &parameters[context];
-                    let Some(result) = extend_one_hit_blosum62(
-                        query,
-                        subject,
-                        q as usize,
-                        s as usize,
-                        p.word_xdrop,
-                        word as usize,
-                    ) else {
-                        continue;
-                    };
-                    (result.ungapped_data, result.s_last_off, true)
-                } else {
-                    if entry.flag() != 0 {
-                        if s.wrapping_add(diagonals.offset) < entry.last_hit() {
-                            continue;
-                        }
-                        entry.set_last_hit(s.wrapping_add(diagonals.offset));
-                        entry.set_flag(0);
-                        continue;
-                    }
-                    let previous = entry.last_hit().wrapping_sub(diagonals.offset);
-                    let diff = s.wrapping_sub(previous);
-                    if diff >= options.window_size {
-                        entry.set_last_hit(s.wrapping_add(diagonals.offset));
-                        continue;
-                    }
-                    if diff < word {
-                        continue;
-                    }
-                    context = context_of(q);
-                    let p = &parameters[context];
-                    if q - diff < batch.contexts[context].offset as i32 {
-                        entry.set_last_hit(s.wrapping_add(diagonals.offset));
-                        continue;
-                    }
-                    let Some(result) = extend_two_hit_blosum62(
-                        query,
-                        subject,
-                        (previous + word) as usize,
-                        s as usize,
-                        q as usize,
-                        p.word_xdrop,
-                        word as usize,
-                    ) else {
-                        continue;
-                    };
-                    (result.ungapped_data, result.s_last_off, result.right_extend)
-                };
+    let mut each = |seeds: &[(i32, i32)]| {
+        trace(seeds);
+        for &(q, s) in seeds {
+            // The context of a seed is only needed once the diagonal tests let it through (the
+            // lookup has no side effect).
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,783-784
+            // ```c
+            //                 curr_context = BSearchContextInfo(query_offset, query_info);
+            // ...
+            //                 Int4 curr_context = BSearchContextInfo(query_offset,
+            //                                                        query_info);
+            // ```
+            // The two-hit path looks up the context (BSearchContextInfo) only after the
+            // diagonal tests have let the pair through, and the one-hit path only when diff >=
+            // 0. The same here.
+            let context_of = |q: i32| {
+                batch
+                    .contexts
+                    .partition_point(|c| c.offset as i32 <= q)
+                    .saturating_sub(1)
+            };
+            let context;
+            let index = if options.window_size == 0 {
+                (s - q) & mask
+            } else {
+                (q - s) & mask
+            } as usize;
+            let entry = &mut diagonals.entries[index];
+            let (u, end, extended) = if options.window_size == 0 {
+                if s.wrapping_sub(entry.last_hit().wrapping_sub(diagonals.offset)) < 0 {
+                    continue;
+                }
+                context = context_of(q);
                 let p = &parameters[context];
-                if u.score >= p.word_cutoff {
-                    hits.push(InitHsp {
-                        q_seed: q,
-                        s_seed: s,
-                        q_start: u.q_start,
-                        s_start: u.s_start,
-                        length: u.length,
-                        score: u.score,
-                    });
-                }
-                if options.window_size == 0 {
-                    entry.set_last_hit((end - (word - 1)).wrapping_add(diagonals.offset));
-                } else if extended {
-                    entry.set_flag(1);
-                    entry.set_last_hit((end - (word - 1)).wrapping_add(diagonals.offset));
-                } else {
+                let Some(result) = extend_one_hit_blosum62(
+                    query,
+                    subject,
+                    q as usize,
+                    s as usize,
+                    p.word_xdrop,
+                    word as usize,
+                ) else {
+                    continue;
+                };
+                (result.ungapped_data, result.s_last_off, true)
+            } else {
+                if entry.flag() != 0 {
+                    if s.wrapping_add(diagonals.offset) < entry.last_hit() {
+                        continue;
+                    }
                     entry.set_last_hit(s.wrapping_add(diagonals.offset));
+                    entry.set_flag(0);
+                    continue;
                 }
+                let previous = entry.last_hit().wrapping_sub(diagonals.offset);
+                let diff = s.wrapping_sub(previous);
+                if diff >= options.window_size {
+                    entry.set_last_hit(s.wrapping_add(diagonals.offset));
+                    continue;
+                }
+                if diff < word {
+                    continue;
+                }
+                context = context_of(q);
+                let p = &parameters[context];
+                if q - diff < batch.contexts[context].offset as i32 {
+                    entry.set_last_hit(s.wrapping_add(diagonals.offset));
+                    continue;
+                }
+                let Some(result) = extend_two_hit_blosum62(
+                    query,
+                    subject,
+                    (previous + word) as usize,
+                    s as usize,
+                    q as usize,
+                    p.word_xdrop,
+                    word as usize,
+                ) else {
+                    continue;
+                };
+                (result.ungapped_data, result.s_last_off, result.right_extend)
+            };
+            let p = &parameters[context];
+            if u.score >= p.word_cutoff {
+                hits.push(InitHsp {
+                    q_seed: q,
+                    s_seed: s,
+                    q_start: u.q_start,
+                    s_start: u.s_start,
+                    length: u.length,
+                    score: u.score,
+                });
             }
-        },
-    );
+            if options.window_size == 0 {
+                entry.set_last_hit((end - (word - 1)).wrapping_add(diagonals.offset));
+            } else if extended {
+                entry.set_flag(1);
+                entry.set_last_hit((end - (word - 1)).wrapping_add(diagonals.offset));
+            } else {
+                entry.set_last_hit(s.wrapping_add(diagonals.offset));
+            }
+        }
+    };
+    match ranges {
+        None => lookup.scan(
+            subject,
+            subject.len().saturating_sub(1),
+            options.window_size,
+            &mut each,
+        ),
+        Some(ranges) => {
+            super::x_soft_subject::x_scan(lookup, subject, ranges, options.window_size, &mut each)
+        }
+    }
     diagonals.finish_subject(subject.len().saturating_sub(1))?;
     hits.sort_by(|a, b| {
         b.score

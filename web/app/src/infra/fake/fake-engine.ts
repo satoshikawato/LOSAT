@@ -79,7 +79,7 @@ export class FakeEngine implements EngineGateway {
   private register(request: EngineRunRequest): void {
     for (const role of ['query', 'subject'] as const) {
       const input = request[role];
-      const mismatch = recordMismatch(input.records, fakeRecordKeys(input.bytes));
+      const mismatch = recordMismatch(input.records, fakeRecordKeys(input.bytes, programOf(request), role));
       if (mismatch !== undefined) throw new InputMismatchError(role, mismatch);
     }
   }
@@ -94,8 +94,8 @@ export class FakeEngine implements EngineGateway {
   private writeOutputs(request: EngineRunRequest, writer: RunOutputWriter): void {
     const encoder = new TextEncoder();
     const program = request.argv[0] ?? '';
-    const queries = fakeRecordKeys(request.query.bytes).slice(0, 200);
-    const subjects = fakeRecordKeys(request.subject.bytes).slice(0, 3);
+    const queries = fakeRecordKeys(request.query.bytes, programOf(request), 'query').slice(0, 200);
+    const subjects = fakeRecordKeys(request.subject.bytes, programOf(request), 'subject').slice(0, 3);
     const nucleotide = { query: ['blastn', 'blastx', 'tblastx'].includes(program), subject: ['blastn', 'tblastn', 'tblastx'].includes(program) };
     const translated = { query: program === 'blastx' || program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
     let out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;
@@ -171,4 +171,9 @@ export class FakeEngine implements EngineGateway {
   private pause(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, this.phaseDelayMs));
   }
+}
+
+/** The program of a run: the first word of its argv. */
+function programOf(request: EngineRunRequest): ProgramId {
+  return request.argv[0] as ProgramId;
 }

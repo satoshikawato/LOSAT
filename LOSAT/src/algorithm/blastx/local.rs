@@ -311,6 +311,10 @@ fn read_options(
     if args.parse_deflines {
         bail!("-parse_deflines is not supported by LOSAT Web yet");
     }
+    // The command line's ranges come to LOSAT Web with line SX's session SXd3.
+    if args.query_loc.is_some() || args.subject_loc.is_some() {
+        bail!("-query_loc and -subject_loc are not supported by LOSAT Web's BLASTX yet");
+    }
     // The options of each format: LOSAT's refusals now, NCBI's errors of the options after the
     // subjects are read (`native::run_inner`).
     let mut resolutions = Vec::with_capacity(choices.len());

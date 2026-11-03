@@ -260,8 +260,8 @@ losat psiblast \
 
 | Flag | Type | Default | Description |
 |:---|:---|:---|:---|
-| `-query <file>` | File path | *(Required)* | Input query sequence file (FASTA) |
-| `-subject <file>` | File path | *(Required unless `-db`)* | Input subject sequence file (FASTA) |
+| `-query <file>` | File path | *(Required)* | Input query sequence file (FASTA; a name ending in `.gz` is read through gzip, see below) |
+| `-subject <file>` | File path | *(Required unless `-db`)* | Input subject sequence file (FASTA; `.gz` as for `-query`) |
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX, PSIBLAST; section 6) |
 | `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp` or `blastp-fast` (for `blastp`); `blastx` or `blastx-fast` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`). `blastp-short` is not supported |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
@@ -278,6 +278,8 @@ losat psiblast \
 | `-lcase_masking` | Flag | off | Lower-case letters of the query join the filtering locations, and those of a `-subject` are not scanned for words (all five programs) |
 | `-query_gencode <int>` | Integer | `1` | Genetic code for query translation (BLASTX/TBLASTX) |
 | `-db_gencode <int>` | Integer | `1` | Genetic code for subject translation (TBLASTX/TBLASTN) |
+
+A `-query`, `-subject` or `makeblastdb -in` file whose name ends in `.gz` (in any case) is read through gzip, concatenated members (the output of `bgzip`) included; the name alone decides, as it does in NCBI's makeblastdb, and `-` (standard input) is read as it comes (`zcat reads.fa.gz | losat blastn -query - ...`). NCBI BLAST+ inflates `.gz` only in makeblastdb: its search programs read such a file as text and stop at its first line. A search program inflates the file into an unnamed temporary file (`TMPDIR`) before reading it, so the run needs that room; a `.gz` that is not gzip data is refused before the search (`-query: 'x.fa.gz' is named .gz but is not gzip data (...)`, exit status 1). `makeblastdb -in` names ending in `.bz2` or `.zst`, which NCBI's makeblastdb also inflates, are refused.
 
 ---
 

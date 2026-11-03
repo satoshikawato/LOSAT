@@ -1,13 +1,15 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.5
+- Version: 1.6
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
   C++ Toolkit words in an option's value, Session S08+b, plan DW-19); 1.5 2026-10-25
   (exception 7, a failed write to a side file of outfmt 13 or 14, recorded for the v0.2.0 release;
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07); 1.6 2026-11-03
+  (exception 8, a `-query` or `-subject` named `.gz`; the Owner asked for `.gz` inputs on
+  2026-11-03, the form is Owner-delegated)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -102,6 +104,23 @@ BLAST+.
    `-outfmt 13` or `14` cannot be written, LOSAT stops with `BLAST failed to write output`
    (exit status 6), where NCBI BLAST+ 2.17.0 reports it on standard error and continues with
    exit status 0.
+
+8. **A `-query` or `-subject` whose name ends in `.gz`** (version 1.6, 2026-11-03; line GZ,
+   DECISIONS 1, 3 and 5). LOSAT inflates the file through gzip before reading it (into an
+   unnamed temporary file under `TMPDIR`, which it then reads exactly as it reads the plain
+   file: the same records, messages and line numbers), concatenated members (bgzip) included;
+   the name alone decides, in any case, as it does for NCBI's `makeblastdb -in`
+   (`makeblastdb.cpp:1037`), and `-` is read as it comes. NCBI's search programs open the
+   file as text (`CNcbiIfstream`) and stop at its first line:
+   `BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like
+   plausible data, but it's not marked as defline or comment.`, exit code 1. A `.gz` that is
+   not gzip data, or is cut short, stops LOSAT before the search, with
+   `Error: -query: 'x.fa.gz' is named .gz but is not gzip data (...); LOSAT reads a file named
+   .gz through gzip` (exit code 1; outfmt 11 writes the error archive it writes for a file
+   that does not open). A plain file, or a `.gz` read through `-query -`, is unchanged, so no
+   search result that NCBI can produce differs. Tests: `LOSAT/tests/cli_smoke.rs`
+   (`gzip_query_and_subject_read_as_the_plain_files` and the tests after it) and
+   `LOSAT/src/blastinput/input_files.rs`.
 
 ## Decided handling that is not an exception
 

@@ -279,13 +279,28 @@ input[type='radio'] {
 .losat-logo {
   display: block;
   height: 24px;
-  width: calc(24px * 39.08 / 10.72);
+  width: calc(24px * 38.96 / 10.72);
   fill: currentColor;
 }
 
-/* The loader (DW-43), after gbdraw's .gbdraw-loader: the pen in the mask runs along the A in
-   pathLength 100. Loop 2.22 s: draw 0.9 s, hold 0.26 s, erase 0.9 s from the start, rest 0.16 s.
+/* The loader (DW-43), after gbdraw's .gbdraw-loader: white pens in a mask reveal the filled A.
+   --losat-loader-from and --losat-loader-to run along the drawing (0-24.472, logo.ts LOADER_LENGTH);
+   each pen shows the part of that interval it covers: pen a 0-23.517 (the left leg, the apex, the
+   right leg, the base to the right), pen b from 20.471 for 4.001 (the base to the left, from where the
+   stroke lands). Loop 2.22 s: draw 0.9 s, hold 0.26 s, erase 0.9 s from the start, rest 0.16 s.
    In the accent colour, or the text colour on a filled button. */
+@property --losat-loader-from {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --losat-loader-to {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 24.472;
+}
+
 .losat-loader {
   display: inline-block;
   flex: none;
@@ -295,48 +310,68 @@ input[type='radio'] {
   vertical-align: -0.15em;
   color: var(--accent);
   fill: currentColor;
+  --losat-loader-from: 0;
+  --losat-loader-to: 24.472;
+  animation: losat-loader-stroke 2.22s infinite;
 }
 
 .primary-action .losat-loader {
   color: inherit;
 }
 
-/* The pen is the mask's white, also in forced colours. */
+/* The pens are the mask's white, also in forced colours. */
 .losat-loader-pen {
   forced-color-adjust: none;
   fill: none;
   stroke: #fff;
   stroke-width: 2.6;
-  stroke-dasharray: 100 100;
-  animation: losat-loader-stroke 2.22s infinite;
+  --pen-from: clamp(0, var(--losat-loader-from) - var(--pen-start), var(--pen-length));
+  --pen-to: clamp(0, var(--losat-loader-to) - var(--pen-start), var(--pen-length));
+  stroke-dasharray: 0 calc(var(--pen-from) * 1px) calc((var(--pen-to) - var(--pen-from)) * 1px) calc((var(--pen-length) + 1) * 1px);
+}
+
+.losat-loader-pen-a {
+  --pen-start: 0;
+  --pen-length: 23.517;
+}
+
+.losat-loader-pen-b {
+  --pen-start: 20.471;
+  --pen-length: 4.001;
 }
 
 @keyframes losat-loader-stroke {
   0% {
-    stroke-dashoffset: 100;
+    --losat-loader-from: 0;
+    --losat-loader-to: 0;
     animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
   }
   40.5405% {
-    stroke-dashoffset: 0;
+    --losat-loader-from: 0;
+    --losat-loader-to: 24.472;
     animation-timing-function: linear;
   }
   52.2523% {
-    stroke-dashoffset: 0;
+    --losat-loader-from: 0;
+    --losat-loader-to: 24.472;
     animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
   }
   92.7928%,
   100% {
-    stroke-dashoffset: -100;
+    --losat-loader-from: 24.472;
+    --losat-loader-to: 24.472;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .losat-loader-pen {
+  .losat-loader {
     animation: none;
+  }
+
+  .losat-loader-pen {
     stroke-dasharray: none;
   }
 }
-
 
 .hint,
 .help {

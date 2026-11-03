@@ -6,7 +6,6 @@ import { LOGO_A, LOGO_LETTERS, LOGO_VIEWBOX } from './logo';
 
 <template>
   <svg class="losat-logo" :viewBox="LOGO_VIEWBOX" aria-hidden="true" focusable="false" data-testid="losat-logo">
-    <path v-for="(d, i) in LOGO_LETTERS" :key="i" :d="d" />
-    <path :d="LOGO_A" />
+    <path v-for="(d, i) in [...LOGO_LETTERS, ...LOGO_A]" :key="i" :d="d" />
   </svg>
 </template>

@@ -34,19 +34,19 @@ test('a state in progress shows the loader; it draws, and stands still when the 
   await expect(status).toHaveText('Fetching 1 of 1 from NCBI…');
   const loader = status.getByTestId('losat-loader');
   await expect(loader).toBeVisible();
-  // The pen's mask is the loader's own (each loader has one).
+  // The pens' mask is the loader's own (each loader has one).
   const mask = await loader.locator('mask').getAttribute('id');
-  await expect(loader.locator('path[mask]')).toHaveAttribute('mask', `url(#${mask})`);
-  const pen = loader.locator('.losat-loader-pen');
-  expect(await pen.evaluate((el) => el.getAnimations().map((a) => (a as CSSAnimation).animationName))).toEqual(['losat-loader-stroke']);
-  // It moves: no part of the loop holds one dash offset for 0.3 s.
-  const offset = () => pen.evaluate((el) => getComputedStyle(el).strokeDashoffset);
-  const first = await offset();
-  await expect.poll(offset, { intervals: [300] }).not.toBe(first);
+  await expect(loader.locator('g[mask]')).toHaveAttribute('mask', `url(#${mask})`);
+  expect(await loader.evaluate((el) => el.getAnimations().map((a) => (a as CSSAnimation).animationName))).toEqual(['losat-loader-stroke']);
+  // It moves: no part of the loop holds the first pen's dashes for 0.3 s.
+  const pen = loader.locator('.losat-loader-pen-a');
+  const dashes = () => pen.evaluate((el) => getComputedStyle(el).strokeDasharray);
+  const first = await dashes();
+  await expect.poll(dashes, { intervals: [300] }).not.toBe(first);
 
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  expect(await pen.evaluate((el) => el.getAnimations().length)).toBe(0);
-  expect(await pen.evaluate((el) => getComputedStyle(el).strokeDasharray)).toBe('none');
+  expect(await loader.evaluate((el) => el.getAnimations().length)).toBe(0);
+  expect(await loader.locator('.losat-loader-pen').evaluateAll((els) => els.map((el) => getComputedStyle(el).strokeDasharray))).toEqual(['none', 'none']);
 
   release();
   await expect(status).toHaveCount(0);

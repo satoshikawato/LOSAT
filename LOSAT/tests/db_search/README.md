@@ -634,7 +634,20 @@ value it cannot convert, an empty one too; the archive of outfmt 11 is written w
 `BL2SEQ_LEGACY` makes the subjects of `-subject` a search of each subject on its own (`blast_app_util.cpp:206-210`); a `-db`
 search ignores it. LOSAT refuses before the search: an error that NCBI raises in the first batch's search before the
 prefetch (a query record without letters, `-query_loc` past every record: `BLAST engine error`, exit 3) and a `-subject`
-search with `BL2SEQ_LEGACY` whose report would not change (no hits) are refused too. The three `losat-rejection` rows are `abc` in outfmt 6
+search with `BL2SEQ_LEGACY` whose report would not change (no hits, or one subject record in outfmt 5, 6 or 10) are
+refused too. The three `losat-rejection` rows are `abc` in outfmt 6
 and 16 and an empty value in outfmt 0; the ncbi rows are `abc` in outfmt 11, the integer 5 in outfmt 6, and `BL2SEQ_LEGACY=1`
 in outfmt 0 and 6. The `-subject` cases are `environment_that_ncbi_reads_around_the_report_is_rejected_where_it_reads_it`
 in `tests/run_local_blastx.rs`.
+
+## The same environment in the other programs (line DBID, N2e)
+
+Rows `db.envshared.*` search `arch_sprot` (BLASTP, PSIBLAST), `arch_tbn_snucl` (TBLASTN), `arch_tbx_snucl` (TBLASTX) and
+`arch_snucl` (BLASTN) with the queries of `tests/fasta/outfmt11/` and the environment of the section above. BLASTP, TBLASTN,
+TBLASTX and BLASTN write the archive of outfmt 11 without the prefetch too (`blastp_app.cpp:280-285`,
+`tblastn_app.cpp:294-299`, `tblastx_app.cpp:197-202`, `blastn_app.cpp:304-309`), so a value that NCBI cannot convert leaves it
+as without the variable; psiblast's iterations fetch ahead before they write an archive (`psiblast_app.cpp:262-266`), which
+LOSAT's PSIBLAST does not write. A `-db` search of each of them ignores `BL2SEQ_LEGACY`. NCBI's automatic split of a `-db`
+search by queries (`-num_threads` 2 or more, a large query file, a small database) catches the exception as `-mt_mode 1` does. The ncbi rows are `abc` (BLASTN: an
+empty value) in outfmt 11 and `BL2SEQ_LEGACY=1` in outfmt 6 (TBLASTN: 0); the `losat-rejection` row is BLASTN's `abc` in
+outfmt 6. The `-subject` cases of the five programs are `tests/search_environment.rs`.

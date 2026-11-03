@@ -22,7 +22,7 @@ defineEmits<{ dismiss: [] }>();
     <p v-if="report.dataWorker === 'checking'" class="muted" data-testid="resume-data">Checking the stored results…</p>
     <p v-else-if="report.dataWorker === 'responding'" class="muted" data-testid="resume-data">The stored results are available.</p>
     <p v-else class="error" data-testid="resume-data">
-      The part of LOSAT Web that keeps the results did not answer. If results cannot be opened, reload the page; the
+      The part of LOSAT that keeps the results did not answer. If results cannot be opened, reload the page; the
       results of this session are then lost.
     </p>
     <button type="button" data-testid="resume-dismiss" @click="$emit('dismiss')">Dismiss</button>

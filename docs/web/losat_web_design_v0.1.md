@@ -448,6 +448,8 @@ R20の「初／保」は、直前の設問順にNCBI比較コマンド＝初、M
 
 「研究データを送信しない」と「ネットワーク要求が一切ない」は異なる。アプリ資産取得、GA4、将来採用を判断する任意の外部機能を分けて説明する。
 
+利用者が明示に頼んだ取得（accession の配列、mode ごとの Example data）のときだけ、その識別子と公開ファイルの URL を取得先（NCBI、EBI、CNCB）へ送る。ページを開く・検索を始めるだけでは送らない。詳細は §13.4。
+
 ### 13.2 推奨する計測配置
 
 **GA4は採用するが、研究データを扱う文書へGoogleのスクリプトを直接読み込まない構成を第一候補にする。** 別originの計測専用文書にGA4を閉じ込め、承認した固定イベントだけを渡す設計案である。解析画面を隠す大きなランディングページを必須にする意図ではない。
@@ -464,11 +466,15 @@ GA4がブロック・未同意・オフラインでも、検索・結果・抽�
 
 ### 13.3 配信・入力・通信試験
 
-解析用JS・Wasm・フォント・例題は自分の静的資産として配る。研究データをURL、クエリ文字列、document.title、DOM属性を介した計測値、ログ送信へ入れない。入力ヘッダーをHTMLとして実行しない。診断ログはローカル出力を基本とし、アプリからの送信は保留のまま。
+解析用JS・Wasm・フォント・小さな例題（query）は自分の静的資産として配る。大きな例題（Example の subject セット）は §13.4 の取得先から取る。研究データをURL、クエリ文字列、document.title、DOM属性を介した計測値、ログ送信へ入れない。入力ヘッダーをHTMLとして実行しない。診断ログはローカル出力を基本とし、アプリからの送信は保留のまま。
 
 CSPは画面とWorkerの双方で検討する。Workerは文書とは別にCSP適用を考慮する必要がある。[W12] connect-srcを自originに限定しただけで、自サーバーへの研究データ送信が防げると判断しない。使用する全通信経路を列挙し、許可する資産取得と計測のpayloadを検査する。
 
 固有の試験文字列を配列・ヘッダー・ファイル名・メモ・不正入力へ入れ、正常・取消・失敗・書き出し・再読込・更新・GA4経路を確認する。試験に通ったことをあらゆる未知の脅威への絶対保証とはせず、依存資産・配信設定・実装レビューと併せて検証根拠にする。
+
+### 13.4 利用者が頼む取得（accession、Example data）
+
+保守者の決定（2026-11-03）で、約束は「研究データは送らない。明示に頼んだ取得のときだけ、その識別子と公開ファイルの URL を取得先へ送る」とする。取得先は NCBI（E-utilities efetch、FTP の RefSeq Targeted Loci・`blast/db/FASTA`）と EBI（ENA browser API、UniProt REST）。どちらも `Access-Control-Allow-Origin: *` を返す（2026-11-03 実測）。CNCB（GenBase REST `api/file/fasta?acc=`）も CORS ヘッダ付きで FASTA を返し、取得先に入れる（保守者 2026-11-03）。DDBJ は直接は取れない（getentry と公開ファイルに CORS ヘッダが無く、DDBJ Search の API は塩基配列のレコードを持たない）。DDBJ 側がヘッダを足せば取得先に加える。取得は「Fetch from NCBI / EBI / CNCB」「Example」の操作だけで起き、取得の行にその場で「Sends the accession to NCBI」「Downloads 8 MB from ftp.ncbi.nlm.nih.gov」と出す。取得した FASTA は欄に写すか（accession）、OPFS にキャッシュする（Example の subject セット、URL と SHA-256 が鍵）。CSP の `connect-src` は自 origin とこれらの host に限る。オフラインでは取得だけが使えず、他は今までどおり動く。設計の詳細と段階（WF-0〜3）は `docs/web/fetch_design.md`。
 
 ## 14. オフラインと明示更新
 

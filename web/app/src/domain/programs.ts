@@ -135,6 +135,8 @@ const maxTargetSeqs: ParameterField = {
 };
 const evalue: ParameterField = { flag: '-evalue', label: 'Expect threshold', ...decimal };
 const wordSize: ParameterField = { flag: '-word_size', label: 'Word size', ...integer, list: PROTEIN_WORD_SIZES };
+// NCBI's "Max matches in a query range" (HSP_RANGE_MAX) is BLAST+'s -culling_limit.
+const cullingLimit: ParameterField = { flag: '-culling_limit', label: 'Max matches in a query range', ...integer };
 // Scoring Parameters: NCBI's "Gap Costs" select writes the two costs of its row.
 const matrix: ParameterField = { flag: '-matrix', label: 'Matrix', kind: 'text', list: MATRICES };
 const gapOpen: ParameterField = { flag: '-gapopen', label: 'Existence', row: 'Gap Costs', ...integer };
@@ -270,6 +272,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
               'blastn-short': ['7', '11', '15'],
             },
           },
+          cullingLimit,
         ],
       },
       {
@@ -339,7 +342,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           },
         ],
       },
-      { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize] },
+      { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize, cullingLimit] },
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats], ...PROTEIN_SCORING },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
       { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize, maxHsps] },
@@ -364,7 +367,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           maxTargetSeqs,
           evalue,
           { ...wordSize, list: ['3', '5'] },
-          { flag: '-culling_limit', label: 'Max matches in a query range', ...integer },
+          cullingLimit,
         ],
       },
       // LOSAT's BLASTX scores with BLOSUM62 and gap costs 11/1 only, and adjusts with modes 0 and 2.
@@ -401,7 +404,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     sections: [
       { title: 'Task Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
       { title: 'Genetic code', placement: 'subject', fields: [{ flag: '-db_gencode', label: 'Genetic code', kind: 'gencode' }] },
-      { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize] },
+      { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize, cullingLimit] },
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats], ...PROTEIN_SCORING },
       {
         title: 'Filters and Masking',
@@ -437,12 +440,11 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: 'General Parameters',
         placement: 'algorithm',
-        // NCBI's "Max matches in a query range" (HSP_RANGE_MAX) is BLAST+'s -culling_limit.
         fields: [
           maxTargetSeqs,
           evalue,
           { ...wordSize, list: ['2', '3'] },
-          { flag: '-culling_limit', label: 'Max matches in a query range', ...integer },
+          cullingLimit,
         ],
       },
       // TBLASTX is ungapped: NCBI's page has the matrix and no gap costs.

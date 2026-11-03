@@ -10,6 +10,7 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import type { HspId, ResultsBrowser } from '../application/results';
+import { shellWords } from '../domain/argv';
 import { recordName } from '../domain/dataset';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal } from '../domain/run';
@@ -83,10 +84,13 @@ function runLabel(run: RunView): string {
   return `Run ${number} · ${programById(program).label} · ${query.name} vs ${subject.name}${status}`;
 }
 
-/** The options of the run's argv: the words after the program and the two inputs (plan §5.3). */
+/**
+ * The options of the run's argv: the words after the program and the two inputs (plan §5.3),
+ * quoted as on a command line, so that they can be typed again ("Additional options").
+ */
 function options(run: RunView): string {
   const words = run.snapshot.argv.slice(5);
-  return words.length === 0 ? 'defaults' : words.join(' ');
+  return words.length === 0 ? 'defaults' : shellWords(words);
 }
 
 /** The program and the task that the search used (the argv's, or the engine's default once the run is read). */

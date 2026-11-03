@@ -21,6 +21,7 @@ import DotPlot from './DotPlot.vue';
 import { formatCount } from './format';
 import GraphicSummary from './GraphicSummary.vue';
 import HspTable from './HspTable.vue';
+import LosatLoader from './LosatLoader.vue';
 import OutputsView from './OutputsView.vue';
 import QueryPicker from './QueryPicker.vue';
 import ResultFilters from './ResultFilters.vue';
@@ -191,7 +192,7 @@ async function toAlignments(id: HspId): Promise<void> {
         <ResultFilters v-if="state.phase === 'ready' && loaded" :results="results" :filters="state.filters" />
       </div>
 
-      <p v-if="state.phase === 'loading'" class="muted" data-testid="results-status" data-phase="loading">Reading the results…</p>
+      <p v-if="state.phase === 'loading'" class="muted" data-testid="results-status" data-phase="loading"><LosatLoader />Reading the results…</p>
       <RunStatus v-else-if="state.phase === 'unavailable' && active && selected" :coordinator="coordinator" :run="selected" :runs="runs" />
       <p
         v-else-if="state.phase === 'unavailable' || state.phase === 'failed'"

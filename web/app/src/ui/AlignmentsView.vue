@@ -14,6 +14,7 @@ import { sameHsp, type HspId, type RangeEntry, type ResultsBrowser, type Results
 import { flagGiven, windowAround } from '../domain/result-index';
 import { formatCount } from './format';
 import HspTable from './HspTable.vue';
+import LosatLoader from './LosatLoader.vue';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
 
@@ -296,7 +297,7 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
           </p>
           <p v-if="detail.state === 'failed'" class="error" data-testid="detail-error">The HSP could not be read: {{ detail.error }}</p>
           <template v-if="range.inOutfmt0">
-            <p v-if="detail.state === 'loading'" class="muted">Reading the alignment…</p>
+            <p v-if="detail.state === 'loading'" class="muted"><LosatLoader />Reading the alignment…</p>
             <pre v-if="detail.section !== undefined" class="output range-text" data-testid="detail-section">{{ detail.section }}</pre>
           </template>
           <p v-else-if="outfmt0Failed" class="notice" data-testid="detail-not-in-outfmt0">

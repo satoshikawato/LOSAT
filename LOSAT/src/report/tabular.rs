@@ -681,6 +681,12 @@ impl TabularNames {
         Ok(names)
     }
 
+    /// Whether a row of the report looks a name up (a taxid was asked for): only then are the
+    /// texts of opening written (`row_messages`).
+    pub fn looks_up(&self) -> bool {
+        !self.answers.is_empty()
+    }
+
     /// These lookups with `texts`, the texts of an open of the database by the rows before them
     /// (an earlier query batch's), written before the texts of their own open.
     pub fn opened_before(mut self, mut texts: Vec<String>) -> Self {

@@ -6,6 +6,7 @@ import type { SearchDraft } from '../application/draft';
 import type { ExampleLoader } from '../application/examples';
 import type { ResultsBrowser } from '../application/results';
 import { useStore } from './useStore';
+import LosatLogo from './LosatLogo.vue';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
@@ -55,7 +56,7 @@ onUnmounted(() => {
 
 <template>
   <header class="app-header">
-    <h1>LOSAT</h1>
+    <h1><LosatLogo /><span class="visually-hidden">LOSAT</span></h1>
     <span class="tagline">A miniaturized reimplementation of NCBI BLAST algorithm</span>
   </header>
   <p v-if="usesFakeEngine" class="banner" data-testid="fake-engine-banner">

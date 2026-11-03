@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ResumeReport } from '../application/attention';
 import { formatDuration } from './format';
+import LosatLoader from './LosatLoader.vue';
 
 defineProps<{ report: ResumeReport }>();
 defineEmits<{ dismiss: [] }>();
@@ -19,7 +20,7 @@ defineEmits<{ dismiss: [] }>();
         </template>
       </li>
     </ul>
-    <p v-if="report.dataWorker === 'checking'" class="muted" data-testid="resume-data">Checking the stored results…</p>
+    <p v-if="report.dataWorker === 'checking'" class="muted" data-testid="resume-data"><LosatLoader />Checking the stored results…</p>
     <p v-else-if="report.dataWorker === 'responding'" class="muted" data-testid="resume-data">The stored results are available.</p>
     <p v-else class="error" data-testid="resume-data">
       The part of LOSAT that keeps the results did not answer. If results cannot be opened, reload the page; the

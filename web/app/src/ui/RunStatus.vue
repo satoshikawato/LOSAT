@@ -7,6 +7,7 @@ import { computed, onUnmounted, ref, watchEffect } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { isTerminal, type RunStatus } from '../domain/run';
 import { formatDuration } from './format';
+import LosatLoader from './LosatLoader.vue';
 
 const props = defineProps<{ coordinator: Coordinator; run: RunView; runs: readonly RunView[] }>();
 
@@ -66,7 +67,7 @@ const phaseTimes = computed(() => {
   <div class="run-status" :data-status="run.status" data-testid="run-status" :data-run="run.snapshot.number">
     <p class="run-status-line">
       <span class="muted">Status:</span>
-      <span class="phase" data-testid="run-status-phase">{{ ahead ? `Waiting for run ${ahead.snapshot.number}` : PHASE_LABELS[run.status] }}</span>
+      <span class="phase" data-testid="run-status-phase"><LosatLoader v-if="!isTerminal(run.status)" />{{ ahead ? `Waiting for run ${ahead.snapshot.number}` : PHASE_LABELS[run.status] }}</span>
       <span v-if="elapsed" class="elapsed muted" data-testid="run-status-elapsed">{{ elapsed }}</span>
       <span class="run-status-actions">
         <button v-if="groupCancellable" type="button" class="link" data-testid="run-status-cancel-group" @click="coordinator.cancelGroup(run.snapshot.group!.groupId)">

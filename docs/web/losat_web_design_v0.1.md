@@ -448,7 +448,7 @@ R20の「初／保」は、直前の設問順にNCBI比較コマンド＝初、M
 
 「研究データを送信しない」と「ネットワーク要求が一切ない」は異なる。アプリ資産取得、GA4、将来採用を判断する任意の外部機能を分けて説明する。
 
-利用者が明示に頼んだ取得（accession の配列、mode ごとの Example data）のときだけ、その識別子と公開ファイルの URL を取得先（NCBI、EBI）へ送る。ページを開く・検索を始めるだけでは送らない。詳細は §13.4。
+利用者が明示に頼んだ取得（accession の配列、mode ごとの Example data）のときだけ、その識別子と公開ファイルの URL を取得先（NCBI、EBI、CNCB）へ送る。ページを開く・検索を始めるだけでは送らない。詳細は §13.4。
 
 ### 13.2 推奨する計測配置
 
@@ -474,7 +474,7 @@ CSPは画面とWorkerの双方で検討する。Workerは文書とは別にCSP�
 
 ### 13.4 利用者が頼む取得（accession、Example data）
 
-保守者の決定（2026-11-03）で、約束は「研究データは送らない。明示に頼んだ取得のときだけ、その識別子と公開ファイルの URL を取得先へ送る」とする。取得先は NCBI（E-utilities efetch、FTP の RefSeq Targeted Loci・`blast/db/FASTA`）と EBI（ENA browser API、UniProt REST）。どちらも `Access-Control-Allow-Origin: *` を返す（2026-11-03 実測）。CNCB の GenBase REST も CORS ヘッダ付きで FASTA を返す（取得先に入れるかは保守者の判断）。DDBJ は直接は取れない（getentry と公開ファイルに CORS ヘッダが無く、DDBJ Search の API は塩基配列のレコードを持たない）。DDBJ 側がヘッダを足せば取得先に加える。取得は「Fetch from NCBI / EBI」「Example」の操作だけで起き、取得の行にその場で「Sends the accession to NCBI」「Downloads 8 MB from ftp.ncbi.nlm.nih.gov」と出す。取得した FASTA は欄に写すか（accession）、OPFS にキャッシュする（Example の subject セット、URL と SHA-256 が鍵）。CSP の `connect-src` は自 origin とこれらの host に限る。オフラインでは取得だけが使えず、他は今までどおり動く。設計の詳細と段階（WF-0〜3）は `docs/web/fetch_design.md`。
+保守者の決定（2026-11-03）で、約束は「研究データは送らない。明示に頼んだ取得のときだけ、その識別子と公開ファイルの URL を取得先へ送る」とする。取得先は NCBI（E-utilities efetch、FTP の RefSeq Targeted Loci・`blast/db/FASTA`）と EBI（ENA browser API、UniProt REST）。どちらも `Access-Control-Allow-Origin: *` を返す（2026-11-03 実測）。CNCB（GenBase REST `api/file/fasta?acc=`）も CORS ヘッダ付きで FASTA を返し、取得先に入れる（保守者 2026-11-03）。DDBJ は直接は取れない（getentry と公開ファイルに CORS ヘッダが無く、DDBJ Search の API は塩基配列のレコードを持たない）。DDBJ 側がヘッダを足せば取得先に加える。取得は「Fetch from NCBI / EBI / CNCB」「Example」の操作だけで起き、取得の行にその場で「Sends the accession to NCBI」「Downloads 8 MB from ftp.ncbi.nlm.nih.gov」と出す。取得した FASTA は欄に写すか（accession）、OPFS にキャッシュする（Example の subject セット、URL と SHA-256 が鍵）。CSP の `connect-src` は自 origin とこれらの host に限る。オフラインでは取得だけが使えず、他は今までどおり動く。設計の詳細と段階（WF-0〜3）は `docs/web/fetch_design.md`。
 
 ## 14. オフラインと明示更新
 

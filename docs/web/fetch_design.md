@@ -15,7 +15,7 @@
   その場で言う。
 
 **方針案**：約束を「研究データは送らない。利用者が明示に頼んだ取得（accession、Example）のときだけ、その識別子と公開ファイルの URL
-を取得先へ送る」に書き直す。ページを開いただけ・Run を押しただけでは通信しない。オフラインは今までどおり動く。
+を取得先（NCBI、EBI、CNCB）へ送る」に書き直す。ページを開いただけ・Run を押しただけでは通信しない。オフラインは今までどおり動く。
 
 ## 2. 取得先（ブラウザから直接。2026-11-03 実測、FETCH_NOTES.md）
 
@@ -29,10 +29,10 @@
 | DDBJ getentry | 無し | — | CORS ヘッダ無し（curl には本文も空）。DDBJ Search の API は CORS を返すが、索引は BioProject / BioSample / DRA / GEA などで塩基配列のレコードを持たない（`/search/api/entries/nucleotide/…` は「Unknown database type」）。公開ファイル（`public/ddbj_database/16S/16S.fasta.gz`、222 MB）も CORS 無し。DDBJ が getentry に `Access-Control-Allow-Origin: *` を付ければ取得先に足せる |
 | CNCB GenBase REST `https://ngdc.cncb.ac.cn/genbase/api/file/fasta?acc=ACC` | 返す（origin をそのまま。`restapihelp` に記載） | accession → FASTA（全長。範囲指定の引数は無い） | GenBase の `C_AA…` に加え INSDC（MH011443.1、AB000001.1）と RefSeq（NR_074540.1）も返った。日本から 1.3〜2.6 s。`api/file/gbf` で GBF も |
 
-DDBJ は DDBJ 側のヘッダ追加（依頼）があるまで取得先に入れない。それまで DDBJ 利用者は NCBI / EBI から取るか、DDBJ から手で落として「Open FASTA files…」で開く。
-CNCB の GenBase は取れる（2026-11-03 17:3x 実測）。保守者の決定 3（NCBI と EBI だけ）のまま、表に足すかは保守者の判断。
-「一番アクセスしやすい所」= 候補（NCBI、EBI）へ同時に Range 要求を出し、先に応えた方を取る。選んだ先はそのセッション中は固定し、
-取得元の名前を画面に出す（手で NCBI / EBI を選べる）。
+DDBJ は DDBJ 側のヘッダ追加（依頼）があるまで取得先に入れない。それまで DDBJ 利用者は NCBI / EBI / CNCB から取るか、DDBJ から手で落として「Open FASTA files…」で開く。
+CNCB の GenBase は取れる（2026-11-03 17:3x 実測）ので取得先に入れる（保守者 17:4x「取得先に足す」、§7 の 3）。
+「一番アクセスしやすい所」= 候補（NCBI、EBI、CNCB）へ同時に Range 要求を出し、先に応えた方を取る。選んだ先はそのセッション中は固定し、
+取得元の名前を画面に出す（手で NCBI / EBI / CNCB を選べる）。
 
 ## 3. Example セット（mode ごと、各 50 MB 以下、固定 URL、SHA-256 を表に持つ）
 
@@ -70,10 +70,10 @@ CNCB の GenBase は取れる（2026-11-03 17:3x 実測）。保守者の決定 
 
 1. **WF-0 設計**：このメモを `docs/web/` に入れ、設計書 §13 と `web/AGENTS.md` 規則 4、`ncbi_ui_mapping.md` §1 の accession の行を
    書き換える。CSP `connect-src` に取得先を足す。
-2. **WF-1 accession**：欄の accession 判定、「Fetch from NCBI / EBI」、efetch と ENA の port（`ports/fetch.ts`）と fake、
+2. **WF-1 accession**：欄の accession 判定、「Fetch from NCBI / EBI / CNCB」、efetch と GenBase と ENA の port（`ports/fetch.ts`）と fake、
    e2e はローカルの stub サーバ。
 3. **WF-2 Example**：静的表、OPFS キャッシュ、gz 展開、進捗と失敗の表示、mode ごとの 1 行。
-4. **WF-3 保存先と mirror**：「Save to folder…」（Chromium）、NCBI / EBI の競走、取得元の選択。
+4. **WF-3 保存先と mirror**：「Save to folder…」（Chromium）、NCBI / EBI / CNCB の競走、取得元の選択。
 
 ## 7. 決定（保守者、2026-11-03 15:3x）
 
@@ -81,6 +81,6 @@ CNCB の GenBase は取れる（2026-11-03 17:3x 実測）。保守者の決定 
    `connect-src`）→ WF-1 accession → WF-2 Example とキャッシュ → WF-3 保存先と mirror の順。
 2. **タンパク質の Example = 両方**：既定は UniProt の reviewed の分類群セット（数 MB。REST の stream 構文を再確認してから表に入れる）、
    pdbaa.gz（36.8 MB）も表に入れて選べる。
-3. **取得先 = NCBI と EBI だけ**：CNCB は API を確認してから取得先の表に足せる形にしておく。DDBJ は CORS が無いので入れない。
+3. **取得先 = NCBI、EBI、CNCB**：15:3x は「NCBI と EBI だけ、CNCB は API を確認してから」。17:3x に GenBase の REST が CORS 付きで INSDC / RefSeq の accession も返すと分かり、17:4x「取得先に足す」。DDBJ は CORS が無いので入れない。
 4. **文言 = その場の一文だけ**：取得の行に「Sends the accession to NCBI」「Downloads 8 MB from ftp.ncbi.nlm.nih.gov」。約束の文は
    "?" の後ろ。見出しは「LOSAT」と一文のまま。

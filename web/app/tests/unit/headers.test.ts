@@ -15,7 +15,7 @@ describe('_headers', () => {
       "default-src 'self'",
       "script-src 'self' 'wasm-unsafe-eval'",
       "worker-src 'self'",
-      "connect-src 'self' https://eutils.ncbi.nlm.nih.gov https://ftp.ncbi.nlm.nih.gov https://www.ebi.ac.uk https://rest.uniprot.org",
+      "connect-src 'self' https://eutils.ncbi.nlm.nih.gov https://ftp.ncbi.nlm.nih.gov https://www.ebi.ac.uk https://rest.uniprot.org https://ngdc.cncb.ac.cn",
       "object-src 'none'",
     ]) {
       expect(csp).toContain(directive);

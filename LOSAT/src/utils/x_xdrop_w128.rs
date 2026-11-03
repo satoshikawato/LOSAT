@@ -137,8 +137,8 @@
 //!    running best is formed as the inclusive one moved up by a lane (the same values), so that no
 //!    shift is applied to a shifted vector, a pair the compiler merges into one general shuffle.
 //!
-//! Unchanged: the 8 / 16-bit choice (`fits_8bit`), the per-row `sc.ensure`, the rebase test, the
-//! traceback walk (`finish` of the 128-bit kernels) and the cell count.
+//! Unchanged: the 8 / 16-bit choice (`fits_8bit`), the row-start `sc.fits` / `x_room`, the rebase
+//! test, the traceback walk (`finish` of the 128-bit kernels) and the cell count.
 
 #![allow(clippy::too_many_arguments)]
 
@@ -818,7 +818,7 @@ pub(super) unsafe fn fill_cols(
     ncols: usize,
     check_fence: bool,
 ) {
-    // `sb` lane k + 1 holds column k + sh (band window, `XdropScratch::x_shift`)
+    // `sb` lane k + 1 holds column k + sh (rows over the band, `XdropScratch::x_room`)
     let sh = sc.x_sh;
     let mut k = sc.sb_filled;
     if ncols > 0 && (s.step == 1 || s.step == -1) {
@@ -1207,21 +1207,17 @@ unsafe fn body16_rows<const TB: bool, const NIB: bool>(
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize; // buffer holding the previous row
 
-    // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
-    // `sc.x_sh`
-    let win_at = sc.x_win_at;
+    // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
     let mut len2 = len2;
     for a in 1..=len1 {
-        if first >= win_at {
-            let d = (first - 64) & !63;
-            sc.x_shift(d, true);
+        if !sc.fits(b_size + num_extra + 64) {
+            let d = sc.x_room(first, b_size + num_extra + 64, true);
             first -= d;
             b_size -= d;
             len2 -= d;
             wend[0] = wend[0].saturating_sub(d);
             wend[1] = wend[1].saturating_sub(d);
         }
-        sc.ensure(b_size + num_extra + 64);
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
         }
@@ -1725,21 +1721,17 @@ unsafe fn body8_rows<const TB: bool, const NIB: bool>(
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize;
 
-    // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
-    // `sc.x_sh`
-    let win_at = sc.x_win_at;
+    // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
     let mut len2 = len2;
     for a in 1..=len1 {
-        if first >= win_at {
-            let d = (first - 64) & !63;
-            sc.x_shift(d, false);
+        if !sc.fits(b_size + num_extra + 64) {
+            let d = sc.x_room(first, b_size + num_extra + 64, false);
             first -= d;
             b_size -= d;
             len2 -= d;
             wend[0] = wend[0].saturating_sub(d);
             wend[1] = wend[1].saturating_sub(d);
         }
-        sc.ensure(b_size + num_extra + 64);
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
         }
@@ -2234,9 +2226,10 @@ mod tests {
         // calls whose rows were moved: [width 8 / 16][128-bit / w128]
         let mut moved = [[0usize; 2]; 2];
         for case in 0..cases {
-            // band window (LOSAT_X_DPWINDOW): rows moved from band start 128 or 320 on, or never
-            let win_at = [128, 320, usize::MAX][case % 3];
-            (sc128.x_win_at, scw.x_win_at) = (win_at, win_at);
+            // rows over the band (`x_room`): 128 or 320 lanes to start with, or every column
+            let lanes = [Some(128), Some(320), None][case % 3];
+            sc128.x_test_rows(lanes);
+            scw.x_test_rows(lanes);
             // trace layout (LOSAT_X_DPNIBBLE): four-bit codes or one byte per cell
             let nib = case % 2 == 0;
             (sc128.x_nib, scw.x_nib) = (nib, nib);

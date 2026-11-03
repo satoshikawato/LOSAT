@@ -90,13 +90,13 @@
 //! 4. Column residues and row tables: the 128-bit NEON `fill_cols` and `build_row` of
 //!    `x_xdrop_w128.rs` (16 columns at a time; the same bytes as the AVX2 file's 32 at a time).
 //!
-//! 5. Band window (`LOSAT_X_DPWINDOW`, No NCBI counterpart): as in the AVX2 file, a kernel whose
-//!    band start `first` reaches `XdropScratch::x_win_at` moves its rows down (`x_shift`: by a
+//! 5. Rows over the band (No NCBI counterpart): as in the AVX2 file, a kernel whose rows do not
+//!    hold the band's end calls `XdropScratch::x_room`, which moves its rows down (by a
 //!    multiple of 64 lanes, so every lane keeps its place within the 64-byte-aligned rows; the
 //!    blocks start at `first` in every row either way, and at least 64 lanes stay below `first`)
 //!    and lowers `first`, `b_size`, `len2` and the buffers' write ends by
 //!    the same amount; the best cell and the traceback rows add `x_sh` back, so they keep absolute
-//!    columns, and the result is the same with the window on and off.
+//!    columns, and the result is the same as with rows that hold every column.
 //!
 //! Index bytes of 32 and up (the fence sentinel, letters the kernel declines, columns past the
 //! band) give 0 through `tbl`; they reach only lanes the kernels mask or do not read, as in the
@@ -716,21 +716,17 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize; // buffer holding the previous row
 
-    // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
-    // `sc.x_sh`
-    let win_at = sc.x_win_at;
+    // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
     let mut len2 = len2;
     for a in 1..=len1 {
-        if first >= win_at {
-            let d = (first - 64) & !63;
-            sc.x_shift(d, true);
+        if !sc.fits(b_size + num_extra + 64) {
+            let d = sc.x_room(first, b_size + num_extra + 64, true);
             first -= d;
             b_size -= d;
             len2 -= d;
             wend[0] = wend[0].saturating_sub(d);
             wend[1] = wend[1].saturating_sub(d);
         }
-        sc.ensure(b_size + num_extra + 64);
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
         }
@@ -1218,21 +1214,17 @@ unsafe fn align8<const TB: bool, const NIB: bool>(
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize;
 
-    // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
-    // `sc.x_sh`
-    let win_at = sc.x_win_at;
+    // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
     let mut len2 = len2;
     for a in 1..=len1 {
-        if first >= win_at {
-            let d = (first - 64) & !63;
-            sc.x_shift(d, false);
+        if !sc.fits(b_size + num_extra + 64) {
+            let d = sc.x_room(first, b_size + num_extra + 64, false);
             first -= d;
             b_size -= d;
             len2 -= d;
             wend[0] = wend[0].saturating_sub(d);
             wend[1] = wend[1].saturating_sub(d);
         }
-        sc.ensure(b_size + num_extra + 64);
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
         }
@@ -1428,10 +1420,10 @@ unsafe fn align8<const TB: bool, const NIB: bool>(
 mod tests {
     //! The two-register kernels against the scalar transliteration of the NCBI loops and against
     //! the 128-bit NEON kernels of `xdrop_simd.rs` (random problems: forward and reversed rows and
-    //! columns, both lane widths, traceback and score-only, fences, scale 1 and 32, bands wider than
-    //! 256 cells, gap costs at both row-gap preconditions; each problem with the rows moved from
-    //! band start 128 / 320 or held, the NEON2 result equal to a scratch that never moves), and the
-    //! pair helpers against scalar models of their lanes.
+    //! columns, both lane widths, traceback and score-only, fences, scale 1 and 32, bands wider
+    //! than 256 cells, gap costs at both row-gap preconditions; each problem with rows of 128 / 320
+    //! lanes to start with that move with the band, or held, the NEON2 result equal to a scratch
+    //! that never moves), and the pair helpers against scalar models of their lanes.
     use super::super::kernel;
     use super::super::tests::{random_problem, reference, Problem, Rng};
     use super::super::FENCE_SENTRY;
@@ -1662,7 +1654,8 @@ mod tests {
     // pass them for the left extension), on 16-bit lanes and, where the problem fits, 8-bit lanes,
     // with and without traceback. Offsets, score, fence flag, edit script and cell count must be
     // equal; a call these kernels decline must be one that fails a row-gap precondition. The
-    // rows are moved from band start 128 / 320 or held, and the result is equal either way.
+    // rows start at 128 / 320 lanes and move with the band, or are held, and the result is equal
+    // either way.
     // `LOSAT_FUZZ_CASES` sets the number of problems.
     #[test]
     fn neon2_kernels_match_scalar_loops_on_random_problems() {
@@ -1672,9 +1665,9 @@ mod tests {
             .unwrap_or(600);
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
         let (mut sc128, mut sc2) = (XdropScratch::new(), XdropScratch::new());
-        // the same kernels with every column held, for the band window comparison
+        // the same kernels with every column held, for the comparison of the rows over the band
         let mut sc2_off = XdropScratch::new();
-        sc2_off.x_win_at = usize::MAX;
+        sc2_off.x_test_rows(None);
         // calls whose rows were moved: [width 8 / 16][so / tb][128-bit / neon2]
         let mut moved = [[[0usize; 2]; 2]; 2];
         // [width 8 / 16][tb][reverse]
@@ -1685,9 +1678,10 @@ mod tests {
         // kernel); 16-bit with gap_extend >= 1000 handled
         let (mut edge_in, mut edge_out, mut big_ge) = (0usize, 0usize, 0usize);
         for case in 0..cases {
-            // band window (LOSAT_X_DPWINDOW): rows moved from band start 128 or 320 on, or never
-            let win_at = [128, 320, usize::MAX][case % 3];
-            (sc128.x_win_at, sc2.x_win_at) = (win_at, win_at);
+            // rows over the band (`x_room`): 128 or 320 lanes to start with, or every column
+            let lanes = [Some(128), Some(320), None][case % 3];
+            sc128.x_test_rows(lanes);
+            sc2.x_test_rows(lanes);
             // trace layout (LOSAT_X_DPNIBBLE): four-bit codes or one byte per cell
             let nib = case % 2 == 0;
             (sc128.x_nib, sc2.x_nib) = (nib, nib);
@@ -1864,9 +1858,10 @@ mod tests {
                             )
                         };
                         // rows moved or held give the same offsets, score, fence flag, cells and
-                        // edit script (`sc2_off` never moves; `sc2.x_sh` is 0 when `win_at` is off)
-                        assert_eq!(r2, r2_off, "{tag}: neon2 window {win_at} vs every column");
-                        assert_eq!(sc2.ops, sc2_off.ops, "{tag}: neon2 window ops");
+                        // edit script (`sc2_off` never moves; `sc2.x_sh` is 0 when its rows hold
+                        // every column)
+                        assert_eq!(r2, r2_off, "{tag}: neon2 rows {lanes:?} vs every column");
+                        assert_eq!(sc2.ops, sc2_off.ops, "{tag}: neon2 moved rows ops");
                         assert_eq!(sc2_off.x_sh, 0, "{tag}: neon2 off moved");
                         let edge = if wide8 {
                             32 * ge - (go + ge)
@@ -1949,7 +1944,7 @@ mod tests {
     }
 
     /// Two similar sequences of about `len` letters (a few substitutions and indels), so the
-    /// band follows a diagonal for the whole length and its start passes the window bound.
+    /// band follows a diagonal for the whole length and its start passes the rows' first length.
     fn similar_problem(rng: &mut Rng, n: usize, len: usize) -> Problem {
         let mut p = random_problem(rng, n, 1, len);
         let letters = (n - 1) as u64;
@@ -1976,11 +1971,11 @@ mod tests {
         p
     }
 
-    // No NCBI counterpart: the band window of the NEON2 kernels (`XdropScratch::x_shift`,
-    // `LOSAT_X_DPWINDOW`). Long similar problems (gap costs (5, 2, 110) on 16-bit lanes and
-    // (11, 1, 38) on 8-bit and 16-bit lanes, forward and reversed columns, score-only and
-    // traceback) run `align16` and `align8` with the rows moved from band start 128 on and with
-    // every column held: offsets, score, fence flag, cell count and edit script are equal to each
+    // No NCBI counterpart: the rows over the band of the NEON2 kernels (`XdropScratch::x_room`).
+    // Long similar problems (gap costs (5, 2, 110) on 16-bit lanes and (11, 1, 38) on 8-bit and
+    // 16-bit lanes, forward and reversed columns, score-only and traceback) run `align16` and
+    // `align8` with rows of 128 lanes to start with that move with the band and with every column
+    // held: offsets, score, fence flag, cell count and edit script are equal to each
     // other, to the 128-bit kernel and to the scalar loops, and the moved rows stay short (they
     // would hold every column up to the band's end, 1500 or more lanes, if they were not moved).
     // Every call is inside the preconditions of the kernels, so none may be declined.
@@ -1992,11 +1987,14 @@ mod tests {
             XdropScratch::new(),
             XdropScratch::new(),
         );
-        (on.x_win_at, off.x_win_at, sc128.x_win_at) = (128, usize::MAX, 128);
         // [width 8 / 16][so / tb]: calls handled and calls whose rows were moved
         let mut handled = [[0usize; 2]; 2];
         let mut shifted = [[0usize; 2]; 2];
         for case in 0..48 {
+            let lanes = Some(128);
+            on.x_test_rows(lanes);
+            off.x_test_rows(None);
+            sc128.x_test_rows(lanes);
             let n = if case % 2 == 0 { 16 } else { 28 };
             let len = 1500 + rng.below(2500) as usize;
             let p = similar_problem(&mut rng, n, len);
@@ -2075,7 +2073,7 @@ mod tests {
                         };
                         let (Some(a), Some(b), Some(c)) = (a, b, c) else {
                             panic!(
-                                "{tag}: declined (window {} / every column {} / 128-bit {})",
+                                "{tag}: declined (moved {} / every column {} / 128-bit {})",
                                 a.is_some(),
                                 b.is_some(),
                                 c.is_some()
@@ -2083,11 +2081,11 @@ mod tests {
                         };
                         let w = usize::from(m.is_none());
                         handled[w][usize::from(tb)] += 1;
-                        assert_eq!(a, b, "{tag}: window vs every column");
-                        assert_eq!(a, c, "{tag}: neon2 window vs the 128-bit kernel");
-                        assert_eq!(on.ops, off.ops, "{tag}: traceback, window vs every column");
+                        assert_eq!(a, b, "{tag}: moved rows vs every column");
+                        assert_eq!(a, c, "{tag}: neon2 moved rows vs the 128-bit kernel");
+                        assert_eq!(on.ops, off.ops, "{tag}: traceback, moved vs every column");
                         assert_eq!(on.ops, sc128.ops, "{tag}: traceback, 128-bit kernel");
-                        assert_eq!(off.x_sh, 0, "{tag}: rows moved with the window off");
+                        assert_eq!(off.x_sh, 0, "{tag}: held rows moved");
                         assert_eq!(
                             (a.a_offset, a.b_offset, a.score, a.fence_hit),
                             (expected.0, expected.1, expected.2, expected.3),
@@ -2096,8 +2094,9 @@ mod tests {
                         assert_eq!(on.ops, expected.4, "{tag}: scalar traceback");
                         if on.x_sh > 0 {
                             shifted[w][usize::from(tb)] += 1;
-                            // the rows start at 1024 lanes and must not grow: with the window at
-                            // 128 the band, its extra lanes and the padding take about 500
+                            // the rows start at 128 lanes and grow only where the band needs it
+                            // (`x_room`): within a few times the band, its extra lanes and the
+                            // padding, not the 1500 or more columns they would hold unmoved
                             let rows_len = on.ha.len().max(on.h8a.len());
                             assert!(
                                 rows_len <= 1024,
@@ -2109,7 +2108,7 @@ mod tests {
                 }
             }
         }
-        eprintln!("neon2 window: handled[w8/w16][so/tb]={handled:?} moved={shifted:?}");
+        eprintln!("neon2 moved rows: handled[w8/w16][so/tb]={handled:?} moved={shifted:?}");
         // 48 cases, both column directions each: 24 with (5, 2, 110) on 16-bit lanes, 24 with
         // (11, 1, 38) on 8-bit and on 16-bit lanes
         assert_eq!(

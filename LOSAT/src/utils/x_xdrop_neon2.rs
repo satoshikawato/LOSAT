@@ -2095,8 +2095,8 @@ mod tests {
                         if on.x_sh > 0 {
                             shifted[w][usize::from(tb)] += 1;
                             // the rows start at 128 lanes and grow only where the band needs it
-                            // (`x_room`): within twice the band, its extra lanes and the padding,
-                            // not the 1500 or more columns they would hold unmoved
+                            // (`x_room`): within a few times the band, its extra lanes and the
+                            // padding, not the 1500 or more columns they would hold unmoved
                             let rows_len = on.ha.len().max(on.h8a.len());
                             assert!(
                                 rows_len <= 1024,

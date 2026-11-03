@@ -743,8 +743,8 @@ Same values, faster computation:
   do not hold the band's end, `XdropScratch::fits`), a kernel calls `XdropScratch::x_room` at the start of the
   row: when half the rows or more lie below the band start `first`, the rows move down (`x_shift`, by
   `(first - 64) & !63` lanes), otherwise they grow as before. There is no band start constant, the rows stay
-  within about twice the band and its margins, and each move copies about as many lanes as the band crossed
-  since the last; the kernels test once per row (`fits`) instead of twice. There is no way back to rows that
+  within a few times the band and its margins (about four times just after they double), and each move copies
+  at most as many lanes as the band crossed since the last; the kernels test once per row (`fits`) instead of twice. There is no way back to rows that
   hold every column except the test-only `x_test_rows(None)`. Measured with the fold: <<NUMBERS>>. History of
   the switch:) the vector kernels
   (`utils/xdrop_simd.rs`, `x_xdrop_avx2.rs`, `x_xdrop_w128.rs`) kept their DP rows (`H` and `E` on 8- and

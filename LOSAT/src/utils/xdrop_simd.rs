@@ -770,8 +770,9 @@ impl XdropScratch {
     // start of a row with its band start `first`. When half the rows or more lie below `first`,
     // the lanes from `d` on move down to lane 0 (`x_shift`, `d` a multiple of 64 with at least 64
     // lanes left below `first`) and the kernel lowers every column it keeps by the `d` returned;
-    // otherwise (`d` = 0) the rows grow, as NCBI's do. So the rows stay within twice the band and
-    // its margins, and each move copies about as many lanes as the band crossed since the last.
+    // otherwise (`d` = 0) the rows grow, as NCBI's do. So the rows stay within a few times the band
+    // and its margins (about four times just after they double), and each move copies at most as
+    // many lanes as the band crossed since the last.
     // `wide`: the 16-bit rows (`ha`, `hb`, `e`), else the 8-bit ones (`h8a`, `h8b`, `e8`).
     #[cold]
     #[inline(never)]

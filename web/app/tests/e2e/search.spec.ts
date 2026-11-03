@@ -558,7 +558,12 @@ test('the header, and the "?" help that shows on hover or keyboard focus and sta
   await expect(help).toBeVisible();
   await page.getByTestId('program-summary').click();
   await expect(help).toHaveCount(0);
-  // Clicked again: Escape closes it.
+  // Clicked again: the next click closes it, although the pointer is still over the "?".
+  await toggle.click();
+  await expect(help).toHaveAttribute('data-pinned', 'true');
+  await toggle.click();
+  await expect(help).toHaveCount(0);
+  // Escape closes it too.
   await toggle.click();
   await expect(help).toBeVisible();
   await page.keyboard.press('Escape');

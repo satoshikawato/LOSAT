@@ -26,7 +26,7 @@ class FakePage implements PagePort {
   leaveGuards: boolean[] = [];
   locks: FakeLock[] = [];
   nextRequestError: Error | undefined;
-  readonly handheld = false;
+  handheld = false;
   requestWakeLock = vi.fn(async (): Promise<WakeLockHandle> => {
     if (this.nextRequestError !== undefined) throw this.nextRequestError;
     const lock = new FakeLock();
@@ -67,6 +67,7 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 function setup(
   options: {
     supported?: boolean;
+    handheld?: boolean;
     /** The initial choice; the default (on) unless given. */
     keepAwake?: boolean;
     runs?: RunView[];
@@ -76,6 +77,7 @@ function setup(
   } = {},
 ) {
   const page = new FakePage(options.supported ?? true);
+  page.handheld = options.handheld ?? false;
   const runs = new Store<AppState>({ runs: options.runs ?? [] });
   const clock = { now: 1_000 };
   const attention = new Attention({
@@ -136,6 +138,11 @@ describe('wake lock', () => {
     await flush();
     expect(state()).toMatchObject({ keepAwake: true, wakeLock: 'held', handheld: false });
     expect(page.requestWakeLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a handheld device (where the choice is shown) from the page', () => {
+    expect(setup({ handheld: true }).state().handheld).toBe(true);
+    expect(setup({ handheld: true, supported: false }).state()).toMatchObject({ handheld: true, wakeLock: 'unsupported' });
   });
 
   it('is off, and not requested, while keepAwake is false', async () => {

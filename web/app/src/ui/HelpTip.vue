@@ -29,6 +29,11 @@ const focused = (event: FocusEvent) => {
     pointed.value = false;
   }
 };
+/** A click pins the help; the next click closes it, although the pointer is still over the "?". */
+const toggle = () => {
+  if (pinned.value) close();
+  else pinned.value = true;
+};
 const close = () => {
   pinned.value = false;
   pointed.value = false;
@@ -46,7 +51,10 @@ watch(shown, async (on) => {
   if (!on) return;
   await nextTick();
   const rect = box.value?.getBoundingClientRect();
-  if (rect !== undefined) shift.value = Math.max(0, Math.ceil(rect.right - (window.innerWidth - 16)));
+  if (rect !== undefined) {
+    const over = Math.ceil(rect.right - (window.innerWidth - 16));
+    shift.value = Math.min(Math.max(0, over), Math.max(0, Math.floor(rect.left - 16)));
+  }
 });
 onUnmounted(() => document.removeEventListener('pointerdown', outside, true));
 </script>
@@ -57,10 +65,11 @@ onUnmounted(() => document.removeEventListener('pointerdown', outside, true));
       type="button"
       class="help-toggle"
       :aria-expanded="shown"
-      :aria-controls="`${props.id}-help`"
+      :aria-controls="shown ? `${props.id}-help` : undefined"
+      :aria-describedby="shown ? `${props.id}-help` : undefined"
       :aria-label="props.label"
       :data-testid="`${props.id}-help-toggle`"
-      @click="pinned = !pinned"
+      @click="toggle"
       @pointerenter="point($event, true)"
       @pointerleave="point($event, false)"
       @focus="focused"

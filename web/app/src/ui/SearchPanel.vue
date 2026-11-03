@@ -162,10 +162,10 @@ function onThreads(event: Event): void {
             label="About keeping the search going"
             text="Keeps the screen on until the search ends. A phone or tablet ends the search when its screen turns off; switching to another app can end it too."
           />
+          <span v-if="attentionState.wakeLock === 'failed'" class="warning" data-testid="wake-lock-failed">
+            The browser did not keep the screen on: {{ attentionState.wakeLockError }}
+          </span>
         </template>
-        <span v-if="attentionState.wakeLock === 'failed'" class="warning" data-testid="wake-lock-failed">
-          The browser did not keep the screen on: {{ attentionState.wakeLockError }}
-        </span>
       </div>
       <!-- The engine's verdict on the options: only a refusal is shown (stop-describing-ui rule 7). -->
       <p class="validation" :data-state="state.validation.state" data-testid="argv-validation" aria-live="polite">

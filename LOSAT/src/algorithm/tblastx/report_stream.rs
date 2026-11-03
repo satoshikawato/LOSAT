@@ -280,7 +280,7 @@ fn database_check(
     let shown = crate::algorithm::common::database::ParsedShown {
         tabular: format.is_tabular(),
         pairwise,
-        joined: pairwise,
+        joined: pairwise || format.tabular_joins_subjects(),
         sam: false,
         taxonomy: format.writes_taxonomy(),
     };

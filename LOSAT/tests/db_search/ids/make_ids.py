@@ -91,8 +91,10 @@ last entry of `tests/seqdb/taxdb/*`, whose lookup writes the offset error of `of
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
 through `pjoin_abc.pal` and `njoin_abc.nal`; `pjoin_bt.*` and `njoin_bt.*` from `pjoin_b.faa` and `njoin_b.fna` with
-taxid 9606, read in place of the b databases through `pjoin_abt.pal` and `njoin_abt.nal` (copies with other taxids).
-`--join-only` builds only these.
+taxid 9606, read in place of the b databases through `pjoin_abt.pal` and `njoin_abt.nal` (copies with other taxids);
+`pjoin_x.*` and `njoin_x.*` from the FASTA of the same names (the definition lines of r1 and r3 with other letters),
+read after `pjoin_a` and `njoin_a` through `pjoin_ax.pal` and `njoin_ax.nal`; `njoin_ta.*` and `njoin_tb.*` from
+`njoin_t.fna` with taxid 9606, through `njoin_tab.nal`. `--join-only` builds only these.
 """
 import argparse
 import subprocess
@@ -147,7 +149,9 @@ def build_join(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("pjoin_a", "pjoin_a.faa", "prot", None), ("pjoin_b", "pjoin_b.faa", "prot", None),
                                        ("pjoin_c", "pjoin_c.faa", "prot", None), ("pjoin_bt", "pjoin_b.faa", "prot", "9606"),
                                        ("njoin_a", "njoin_a.fna", "nucl", None), ("njoin_b", "njoin_b.fna", "nucl", None),
-                                       ("njoin_c", "njoin_c.fna", "nucl", None), ("njoin_bt", "njoin_b.fna", "nucl", "9606")):
+                                       ("njoin_c", "njoin_c.fna", "nucl", None), ("njoin_bt", "njoin_b.fna", "nucl", "9606"),
+                                       ("pjoin_x", "pjoin_x.faa", "prot", None), ("njoin_x", "njoin_x.fna", "nucl", None),
+                                       ("njoin_ta", "njoin_t.fna", "nucl", "9606"), ("njoin_tb", "njoin_t.fna", "nucl", "9606")):
         subprocess.run(
             [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", dbtype, "-parse_seqids",
              "-blastdb_version", "5", "-title", name, "-out", str(args.out / name)]
@@ -156,9 +160,12 @@ def build_join(args: argparse.Namespace) -> None:
     for alias, names, extension in (("pjoin_abc", "pjoin_a pjoin_b pjoin_c", "pal"),
                                     ("pjoin_abt", "pjoin_a pjoin_bt pjoin_c", "pal"),
                                     ("njoin_abc", "njoin_a njoin_b njoin_c", "nal"),
-                                    ("njoin_abt", "njoin_a njoin_bt njoin_c", "nal")):
+                                    ("njoin_abt", "njoin_a njoin_bt njoin_c", "nal"),
+                                    ("pjoin_ax", "pjoin_a pjoin_x", "pal"), ("njoin_ax", "njoin_a njoin_x", "nal"),
+                                    ("njoin_tab", "njoin_ta njoin_tb", "nal")):
+        count = {2: "two", 3: "three"}[len(names.split())]
         (args.out / f"{alias}.{extension}").write_text(
-            f"#\n# Alias file of line DBID, N3\n#\nTITLE {alias} (three databases, parsed Seq-ids)\n"
+            f"#\n# Alias file of line DBID, N3\n#\nTITLE {alias} ({count} databases, parsed Seq-ids)\n"
             f"DBLIST {names}\n")
 
 

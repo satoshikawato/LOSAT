@@ -341,7 +341,8 @@ impl XmlSubjects<'_> {
 // (XML2 and JSON: blastxml2_format.cpp:480-497, the same.)
 /// The HSP lists of a query's hit list `lists` that the XML, XML2 and JSON reports show as one
 /// `Hit` each, in order: ranges of the lists, each of a subject and the copies that follow it
-/// (`joins`, `XmlSubjects::joins`). `subject_of` gives the subject of a list, `None` for a list
+/// (`joins`, `XmlSubjects::joins`; a list of the same subject as the one before goes on its
+/// `Hit`, as an id matches itself). `subject_of` gives the subject of a list, `None` for a list
 /// without HSPs, which shows nothing (it can lie inside a range).
 pub fn hit_ranges<T>(
     lists: &[T],
@@ -355,7 +356,9 @@ pub fn hit_ranges<T>(
             continue;
         };
         match (ranges.last_mut(), previous) {
-            (Some(range), Some(previous)) if joins(previous, s_idx) => range.end = index + 1,
+            (Some(range), Some(previous)) if previous == s_idx || joins(previous, s_idx) => {
+                range.end = index + 1
+            }
             _ => ranges.push(index..index + 1),
         }
         previous = Some(s_idx);
@@ -395,8 +398,8 @@ impl<'s, 'a> SubjectNameCache<'s, 'a> {
 mod tests {
     use super::*;
 
-    // Line DBID N3: following lists of joined subjects make one `Hit`; a list without HSPs shows
-    // nothing and does not part them.
+    // Line DBID N3: following lists of joined subjects, or of one subject, make one `Hit`; a list
+    // without HSPs shows nothing and does not part them.
     #[test]
     fn lists_of_joined_subjects_make_one_hit() {
         let lists = [
@@ -410,11 +413,11 @@ mod tests {
             Some(5),
         ];
         let joins = |previous: usize, s_idx: usize| matches!((previous, s_idx), (4, 9) | (3, 5));
+        assert_eq!(hit_ranges(&lists, |list| *list, joins), [0..4, 4..5, 6..8]);
         assert_eq!(
-            hit_ranges(&lists, |list| *list, joins),
-            [0..1, 1..4, 4..5, 6..8]
+            hit_ranges(&lists, |list| *list, |_, _| false),
+            [0..2, 3..4, 4..5, 6..7, 7..8]
         );
-        assert_eq!(hit_ranges(&lists, |list| *list, |_, _| false).len(), 6);
         assert!(hit_ranges(&[None::<usize>], |list| *list, joins).is_empty());
     }
 }

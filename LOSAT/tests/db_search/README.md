@@ -439,7 +439,11 @@ records with taxid 9606), and the aliases `ids/pjoin_abc.pal`, `ids/pjoin_abt.pa
 `ids/njoin_abt.nal` (queries `pjoin_q.faa`, `njoin_q.fna` and `njoin_q2.fna`, the last with two records for two
 query batches). NCBI orders tied hits by the later ordinal id first: r1 of c, r6, then r1 of b and a, which outfmt 0,
 5 and 13 to 16 show in one hit (r3 of b and a too), as LOSAT does; `-num_descriptions`, `-num_alignments` and
-psiblast's cut to `-max_target_seqs` count them as one subject.
+psiblast's cut to `-max_target_seqs` count them as one subject, the tabular `qcovs` and `qcovus` take the group's
+coverage. `ids/pjoin_x` and `ids/njoin_x` hold the definition lines of r1 and r3 with other letters (no copies,
+refused; aliases `ids/pjoin_ax.pal`, `ids/njoin_ax.nal`); `ids/njoin_ta` and `ids/njoin_tb` (alias `ids/njoin_tab.nal`)
+hold r10 with taxid 9606 and a second definition line `lcl|loc10`, which the outfmt 0 heading under `-taxids 9606
+-no_taxid_expansion` hides where each copy has one HSP.
 
 Sequences whose only Seq-id is `gnl|BL_ORD_ID|n` (line DBID N2a; rows `db.id.*.ord.*`): `make_ids.py` writes, from
 the FASTA of `ids/make_ord_fasta.py`, `ids/pord_v5` and `ids/pord_v4` from `ids/pord.faa` (two accessions, then

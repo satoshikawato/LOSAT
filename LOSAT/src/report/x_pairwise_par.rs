@@ -126,23 +126,26 @@ impl<'h> QueryGroup<'h> {
         let mut subject_hits: HashMap<u32, Vec<&PairwiseHit>> = HashMap::new();
         let mut subject_hit_indices: HashMap<u32, Vec<HspIndex>> = HashMap::new();
         let mut subject_order: Vec<u32> = Vec::new();
-        // The subject whose hit shows each subject's hits.
+        // The subject whose hit shows each subject's hits, asked where the subject changes.
         let mut shown_in: HashMap<u32, u32> = HashMap::new();
-        let mut previous: Option<u32> = None;
+        let mut previous: Option<(u32, u32)> = None;
         for &(hsp_index, hit) in query_hits {
             let s_idx = hit.hit.s_idx;
-            let shown = match shown_in.get(&s_idx) {
-                Some(&shown) => shown,
-                None => {
-                    let shown = match previous {
-                        Some(previous) if joins(previous, s_idx) => shown_in[&previous],
-                        _ => s_idx,
-                    };
-                    shown_in.insert(s_idx, shown);
-                    shown
-                }
+            let shown = match previous {
+                Some((same, shown)) if same == s_idx => shown,
+                _ => match shown_in.get(&s_idx) {
+                    Some(&shown) => shown,
+                    None => {
+                        let shown = match previous {
+                            Some((before, shown)) if joins(before, s_idx) => shown,
+                            _ => s_idx,
+                        };
+                        shown_in.insert(s_idx, shown);
+                        shown
+                    }
+                },
             };
-            previous = Some(s_idx);
+            previous = Some((s_idx, shown));
             if !subject_hits.contains_key(&shown) {
                 subject_order.push(shown);
             }

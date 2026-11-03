@@ -13,6 +13,9 @@ in `pjoin_a.faa`, `pjoin_b.faa`, `pjoin_c.faa` and the nucleotide records of the
   r4 gb|JHA00004.1|  in b: about 40 % / 25 % substitutions
   r6 gb|JHA00006.1|  in b: the letters of r1 under another id; it ties with r1's copies and comes between the copy
                      in c and those in a and b (NCBI orders ties by the ordinal id, the later first)
+`pjoin_x.faa` and `njoin_x.fna` hold the definition lines of r1 and r3 with other letters: r1 with four substitutions,
+r3 with ten more letters at its end (no copies, though the definition lines are the same). `njoin_t.fna` holds r10,
+gb|JHA00010.1| with a second definition line lcl|loc10, with the letters of N1, for two databases with taxid 9606.
 
 usage: make_join_fasta.py [--out LOSAT/tests/db_search/ids]
 """
@@ -72,6 +75,18 @@ def main() -> int:
         for kind, seqs, extension in (("pjoin", prot, "faa"), ("njoin", nucl, "fna")):
             (out / f"{kind}_{db}.{extension}").write_text(
                 "".join(f">{TITLES[name]}\n{wrap(seqs[name])}" for name in names))
+    def substituted(seq: str, alphabet: str) -> str:
+        letters = list(seq)
+        for position in (20, 60, 100, 140):
+            letters[position] = next(a for a in alphabet if a != letters[position])
+        return "".join(letters)
+
+    (out / "pjoin_x.faa").write_text(
+        f">{TITLES['r1']}\n{wrap(substituted(p1, AA))}>{TITLES['r3']}\n{wrap(prot['r3'] + 'ACDEFGHIKL')}")
+    (out / "njoin_x.fna").write_text(
+        f">{TITLES['r1']}\n{wrap(substituted(n1, 'ACGT'))}>{TITLES['r3']}\n{wrap(nucl['r3'] + 'ACGTACGTAC')}")
+    (out / "njoin_t.fna").write_text(
+        f">gb|JHA00010.1| first title of ten\x01lcl|loc10 second title of ten\n{wrap(n1)}")
     (out / "pjoin_q.faa").write_text(f">pjq query of the joined records\n{wrap(p1)}")
     (out / "njoin_q.fna").write_text(f">njq query of the joined records\n{wrap(n1)}")
     (out / "njoin_q2.fna").write_text(

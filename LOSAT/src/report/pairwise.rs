@@ -2242,11 +2242,13 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
     }
 
     fn joins(&self, previous: u32, s_idx: u32) -> bool {
-        crate::report::db_subject::rank_joins_as_copy(
-            self.parsed_subjects,
-            previous as usize,
-            s_idx as usize,
-        )
+        // `-subject` records with one id are refused before any report.
+        self.database.is_some()
+            && crate::report::db_subject::rank_joins_as_copy(
+                self.parsed_subjects,
+                previous as usize,
+                s_idx as usize,
+            )
     }
 
     fn head<W: Write>(
@@ -3084,11 +3086,13 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
     }
 
     fn joins(&self, previous: u32, s_idx: u32) -> bool {
-        crate::report::db_subject::rank_joins_as_copy(
-            &self.report.parsed_subjects,
-            previous as usize,
-            s_idx as usize,
-        )
+        // `-subject` records with one id are refused before any report.
+        self.report.database.is_some()
+            && crate::report::db_subject::rank_joins_as_copy(
+                &self.report.parsed_subjects,
+                previous as usize,
+                s_idx as usize,
+            )
     }
 
     fn head<W: Write>(
@@ -3749,11 +3753,13 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
     }
 
     fn joins(&self, previous: u32, s_idx: u32) -> bool {
-        crate::report::db_subject::rank_joins_as_copy(
-            &self.report.parsed_subjects,
-            previous as usize,
-            s_idx as usize,
-        )
+        // `-subject` records with one id are refused before any report.
+        self.database.is_some()
+            && crate::report::db_subject::rank_joins_as_copy(
+                &self.report.parsed_subjects,
+                previous as usize,
+                s_idx as usize,
+            )
     }
 
     fn head<W: Write>(
@@ -4668,11 +4674,13 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             query_hits,
             subject_titles,
             |previous, s_idx| {
-                crate::report::db_subject::rank_joins_as_copy(
-                    parsed_subjects,
-                    previous as usize,
-                    s_idx as usize,
-                )
+                // `-subject` records with one id are refused before any report.
+                database.is_some()
+                    && crate::report::db_subject::rank_joins_as_copy(
+                        parsed_subjects,
+                        previous as usize,
+                        s_idx as usize,
+                    )
             },
         )
         .expect("a query with hits has a group");

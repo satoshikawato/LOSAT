@@ -1226,7 +1226,8 @@ pub(crate) fn check_seqids(
 /// LOSAT's refusal of two parsed subjects that follow each other in the hit list of query
 /// `query`, whose Seq-align ids match (`report::db_subject::joined_in_reports`) and that are not
 /// copies of one record (`joins_as_copy`): NCBI's XML, XML2, JSON and outfmt 0 reports show
-/// their alignments as one hit, which LOSAT does only for copies. `subjects` gives the ordinal
+/// their alignments as one hit, and its tabular `qcovs` and `qcovus` the coverage of both on the
+/// first row (`N/A` on the other), which LOSAT does only for copies. `subjects` gives the ordinal
 /// id and the parsed subject of each HSP list of the hit list, in its order (`None` for a
 /// sequence without parsed Seq-ids).
 pub(crate) fn refuse_joined_hits<'a>(
@@ -1238,7 +1239,7 @@ pub(crate) fn refuse_joined_hits<'a>(
     for subject in subjects {
         if let Some((before, ordinal)) = joined_apart(previous, subject) {
             return Err(anyhow::Error::new(ParsedRefusal(format!(
-                "database sequences {before} and {ordinal} follow each other in the hits of query {} and have Seq-align ids that NCBI BLAST+ takes for one sequence (its XML and outfmt 0 reports show their alignments as one hit) but are no copies of one record; this is not supported by LOSAT's {program}",
+                "database sequences {before} and {ordinal} follow each other in the hits of query {} and have Seq-align ids that NCBI BLAST+ takes for one sequence (its XML and outfmt 0 reports show their alignments as one hit, its tabular qcovs and qcovus count them as one) but are not copies of one record; this is not supported by LOSAT's {program}",
                 query + 1
             ))));
         }
@@ -1277,7 +1278,7 @@ pub(crate) fn joined_cut<'a>(
     for subject in subjects {
         if let Some((before, ordinal)) = joined_apart(previous, subject) {
             return Err(anyhow::Error::new(ParsedRefusal(format!(
-                "database sequences {before} and {ordinal} follow each other in the hits of query {} that the cut to -max_target_seqs {max_target_seqs} counts and have Seq-align ids that NCBI BLAST+ takes for one sequence but are no copies of one record (it counts them as one sequence and keeps one more); this is not supported by LOSAT's {program}",
+                "database sequences {before} and {ordinal} follow each other in the hits of query {} that the cut to -max_target_seqs {max_target_seqs} counts and have Seq-align ids that NCBI BLAST+ takes for one sequence but are not copies of one record (it counts them as one sequence and keeps one more); this is not supported by LOSAT's {program}",
                 query + 1
             ))));
         }
@@ -1395,7 +1396,8 @@ pub(crate) struct ParsedShown {
     /// Outfmt 0 (`check_shown_parsed_subject`).
     pub(crate) pairwise: bool,
     /// The formats that show the alignments of following hits whose Seq-align ids match as one
-    /// hit: outfmt 0, 5 and 13 to 16 (`refuse_joined_hits`).
+    /// hit, outfmt 0, 5 and 13 to 16, and the tabular formats that count their coverage as one,
+    /// with `qcovs` or `qcovus` (`TabularNeeds::joins_subjects`; `refuse_joined_hits`).
     pub(crate) joined: bool,
     /// SAM (outfmt 17), which names a subject by an id of its Bioseq (`ParsedSubject::sam_id`).
     pub(crate) sam: bool,
@@ -1496,7 +1498,7 @@ pub(crate) enum ReportRefusal {
     /// A header that does not read, or a sequence whose stored title, tabular id or parsed
     /// Seq-ids the reports refuse.
     Headers,
-    /// Two sequences whose Seq-align ids NCBI takes for one and that are no copies of one record
+    /// Two sequences whose Seq-align ids NCBI takes for one and that are not copies of one record
     /// (`refuse_joined_hits`).
     Joined,
     /// A taxid that does not decode, or a lookup of the taxonomy database that could be refused,
@@ -1868,8 +1870,42 @@ mod tests {
             .collect()
     }
 
+    // Line DBID N3 review 1 M1: the joined copies' letters are the same because `copy_of` reads
+    // them: the definition lines of r1 and r3 with other letters (pjoin_x: four substitutions, ten
+    // more letters) are no copies, those with other taxids (pjoin_abt) are.
+    #[test]
+    fn a_copy_has_the_same_letters_and_definition_lines_but_for_taxids() {
+        let open = |name: &str| {
+            let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/ids")
+                .join(name);
+            SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap()
+        };
+        let copy = |db: &SeqDb, a: u32, b: u32| {
+            let subject = match db.read_header(a).unwrap() {
+                crate::seqdb::SequenceHeader::Parsed(set) => {
+                    crate::report::db_subject::ParsedSubject::new(set).unwrap()
+                }
+                _ => panic!("parsed Seq-ids"),
+            };
+            HeaderReader::new(db).copy_of(&subject, a, b)
+        };
+        // pjoin_ax: a (r1 0, r2 1, r3 2), x (r1 3, r3 4).
+        let ax = open("pjoin_ax");
+        assert_eq!(copy(&ax, 0, 3), RecordCopy::Differs);
+        assert_eq!(copy(&ax, 2, 4), RecordCopy::Differs);
+        // pjoin_abc / pjoin_abt: a (r1 0, r2 1, r3 2), b (r1 3, r3 4, r4 5, r6 6), c (r1 7).
+        let abc = open("pjoin_abc");
+        assert_eq!(copy(&abc, 0, 3), RecordCopy::Same);
+        assert_eq!(copy(&abc, 2, 4), RecordCopy::Same);
+        assert_eq!(copy(&abc, 0, 6), RecordCopy::Differs);
+        let abt = open("pjoin_abt");
+        assert_eq!(copy(&abt, 0, 3), RecordCopy::OtherTaxids);
+        assert_eq!(copy(&abt, 0, 7), RecordCopy::Same);
+    }
+
     // Line DBID N3: in NCBI's order of pjoin_abc's hits (r1 of c, r6, r1 of b and a, r2, r4,
-    // r3 of a and b; `make_join_fasta.py`) the cut to N subjects keeps the copies that follow a
+    // r3 of b and a; `make_join_fasta.py`) the cut to N subjects keeps the copies that follow a
     // kept subject (psiblast, `PruneSeqalign`), and the hits show them in one hit; pfound_v5's
     // pair 4 (gb|DDD00004| then gb|DDD00004.1|) is refused where the count reaches it.
     #[test]
@@ -1904,7 +1940,10 @@ mod tests {
         let error = refuse_joined_hits(1, pair.clone(), "BLASTP")
             .unwrap_err()
             .to_string();
-        assert!(error.contains("but are no copies of one record"), "{error}");
+        assert!(
+            error.contains("but are not copies of one record"),
+            "{error}"
+        );
         // The cut to one subject reaches the second of the pair: NCBI would keep both.
         let error = joined_cut(1, 1, pair.clone(), "PSIBLAST")
             .unwrap_err()

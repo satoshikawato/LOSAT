@@ -483,14 +483,16 @@ impl PreparedXml {
             };
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 let lists = hitlist.lists();
+                ensure!(
+                    lists
+                        .iter()
+                        .all(|list| list.hsps.hsps.is_empty() || list.oid >= 0),
+                    "negative TBLASTN subject OID"
+                );
                 // A copy of one record that follows another is shown in its `Hit`.
                 let hits = hit_ranges(
                     lists,
-                    |list| {
-                        (!list.hsps.hsps.is_empty())
-                            .then(|| usize::try_from(list.oid).ok())
-                            .flatten()
-                    },
+                    |list| (!list.hsps.hsps.is_empty()).then_some(list.oid as usize),
                     |previous, rank| {
                         crate::report::db_subject::rank_joins_as_copy(&self.parsed, previous, rank)
                     },

@@ -1197,9 +1197,12 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
         tabular: output_formats.iter().any(|format| format.is_tabular()),
         pairwise,
         joined: pairwise
-            || output_formats
-                .iter()
-                .any(|format| format.is_structured_xml()),
+            || output_formats.iter().any(|format| {
+                format.is_structured_xml()
+                    || format
+                        .tabular_spec()
+                        .is_some_and(|spec| spec.needs().joins_subjects())
+            }),
         sam: output_formats
             .iter()
             .any(|format| matches!(format, BlastnOutputFormat::Sam(_))),

@@ -11156,13 +11156,12 @@ fn run_resolved_in_pool(
             format_plans
                 .iter()
                 .any(|outfmt| !matches!(outfmt, BlastpReport::Seqalign(_) | BlastpReport::Archive)),
-            format_plans.iter().any(|outfmt| {
-                matches!(
-                    outfmt,
-                    BlastpReport::Text(OutputFormat::Pairwise)
-                        | BlastpReport::Xml
-                        | BlastpReport::Xml2(_)
-                )
+            format_plans.iter().any(|outfmt| match outfmt {
+                BlastpReport::Text(OutputFormat::Pairwise)
+                | BlastpReport::Xml
+                | BlastpReport::Xml2(_) => true,
+                BlastpReport::CustomTabular(spec) => spec.needs().joins_subjects(),
+                _ => false,
             }),
             format_plans.iter().any(|outfmt| match outfmt {
                 BlastpReport::Xml2(_) => true,

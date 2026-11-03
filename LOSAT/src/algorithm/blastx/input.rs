@@ -108,9 +108,65 @@ impl FastaRecord {
         }
     }
 
+    /// The letters of the record as the archive's Bioseq holds them: the whole record even when
+    /// a range cut it (`cut_in_place`).
+    pub fn archive_letters(&self) -> &[u8] {
+        self.source
+            .as_deref()
+            .and_then(|source| source.uncut.as_deref())
+            .unwrap_or(&self.sequence)
+    }
+
+    /// The record's lower-case runs `[left, right]` as the reader found them, in the whole
+    /// record: those of `archive_letters` for a record a range cut, else `lowercase_masks`.
+    pub fn archive_lowercase_runs(&self) -> Vec<(i32, i32)> {
+        let Some(uncut) = self
+            .source
+            .as_deref()
+            .and_then(|source| source.uncut.as_deref())
+        else {
+            return self.lowercase_masks.clone();
+        };
+        let mut runs: Vec<(i32, i32)> = Vec::new();
+        for (offset, letter) in uncut.iter().enumerate() {
+            if !letter.is_ascii_lowercase() {
+                continue;
+            }
+            let offset = offset as i32;
+            match runs.last_mut().filter(|run| run.1 + 1 == offset) {
+                Some(run) => run.1 = offset,
+                None => runs.push((offset, offset)),
+            }
+        }
+        runs
+    }
+
+    /// Whether the whole record has lower-case runs (`archive_lowercase_runs`).
+    pub fn has_lowercase_runs(&self) -> bool {
+        match self
+            .source
+            .as_deref()
+            .and_then(|source| source.uncut.as_deref())
+        {
+            Some(uncut) => uncut.iter().any(u8::is_ascii_lowercase),
+            None => !self.lowercase_masks.is_empty(),
+        }
+    }
+
+    /// The record as the Seq-loc of the archive's `seq-loc-list` (`-parse_deflines`, an id that is
+    /// not local): the searched interval (`fasta_reader::FastaRecord::archive_seq_loc`).
+    pub fn archive_seq_loc(&self) -> Option<crate::report::archive::bioseq::QuerySeqLoc<'_>> {
+        let from = self.placement().offset as i32;
+        self.believed()?
+            .seq_loc(from, from + self.sequence.len() as i32 - 1)
+    }
+
     /// Cuts the record to its letters `[from, to_exclusive)` in place, as NCBI searches a record
     /// with a range (`seq_range::record_cut`): the lower-case masks are clipped to the letters
     /// and moved with them, and the source keeps where they lie in the record (`placement`).
+    /// `keep_whole`: the source keeps the record's whole letters too (`archive_letters`,
+    /// `archive_lowercase_runs`), for the archive's Bioseq (outfmt 11) and the lower case of the
+    /// whole record that outfmt 0 shows on a `-subject_loc` subject's rows.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1041-1046
     /// ```c
@@ -121,11 +177,20 @@ impl FastaRecord {
     ///       /* If this mask location does not intersect the [from,to] interval,
     ///          do not add it to the newly constructed list and free its contents. */
     /// ```
-    pub fn cut_in_place(&mut self, from: usize, to_exclusive: usize) {
+    pub fn cut_in_place(&mut self, from: usize, to_exclusive: usize, keep_whole: bool) {
         let length = self.sequence.len();
         let source = self.source.get_or_insert_with(Default::default);
         source.uncut_length = length;
         source.cut_from = from;
+        if keep_whole {
+            // As the shared reader keeps them: lower case where the lower-case masks lie, which
+            // the archive's `LCaseMask` reads back (`archive_lowercase_runs`).
+            let mut uncut = self.sequence.clone();
+            for &(left, right) in &self.lowercase_masks {
+                uncut[left as usize..=right as usize].make_ascii_lowercase();
+            }
+            source.uncut = Some(uncut);
+        }
         self.sequence.truncate(to_exclusive);
         self.sequence.drain(..from);
         let (from, last) = (from as i32, to_exclusive as i32 - 1);
@@ -483,6 +548,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     let mut believed_molecule = None;
     let mut batch = ReaderBatch {
         range,
+        keep_whole: keep_defline,
         ..ReaderBatch::default()
     };
 
@@ -1333,11 +1399,11 @@ fn emit_fasta_batch(
     match batch.range.map(|range| record_interval(range, length)) {
         None => batch.length += length,
         Some(RecordInterval::Letters { from, to }) => {
-            record.cut_in_place(from, to + 1);
+            record.cut_in_place(from, to + 1, batch.keep_whole);
             batch.length += length;
         }
         Some(RecordInterval::Empty) => {
-            record.cut_in_place(length, length);
+            record.cut_in_place(length, length, batch.keep_whole);
             batch.length += length;
         }
         Some(RecordInterval::PastEnd) => {
@@ -1359,6 +1425,8 @@ fn emit_fasta_batch(
 struct ReaderBatch<'r> {
     /// The range that cuts each record (`-query_loc`), if any.
     range: Option<&'r SequenceRange>,
+    /// Whether a cut record keeps its whole letters (the archive, `FastaRecord::cut_in_place`).
+    keep_whole: bool,
     /// The first kept record of the batch.
     start: usize,
     /// The letters the batch has read (`size_read`).
@@ -2930,7 +2998,8 @@ mod range_tests {
             .unwrap()
             .remove(0);
         assert_eq!(record.lowercase_masks, vec![(0, 2), (7, 9), (12, 13)]);
-        record.cut_in_place(2, 9);
+        let mut kept = record.clone();
+        record.cut_in_place(2, 9, false);
         assert_eq!(record.sequence, b"GTTTTAA");
         assert_eq!(record.lowercase_masks, vec![(0, 0), (5, 6)]);
         assert_eq!(
@@ -2939,6 +3008,18 @@ mod range_tests {
                 offset: 2,
                 length: 14
             }
+        );
+        // Only a record that keeps its whole letters has them (and its own runs) after the cut.
+        assert_eq!(record.archive_letters(), b"GTTTTAA");
+        assert_eq!(record.archive_lowercase_runs(), vec![(0, 0), (5, 6)]);
+        kept.cut_in_place(2, 9, true);
+        assert_eq!(kept.sequence, record.sequence);
+        assert_eq!(kept.lowercase_masks, record.lowercase_masks);
+        assert_eq!(kept.placement(), record.placement());
+        assert_eq!(kept.archive_letters(), b"acgTTTTaaaCCgg");
+        assert_eq!(
+            kept.archive_lowercase_runs(),
+            vec![(0, 2), (7, 9), (12, 13)]
         );
         let whole = parse_fasta(b">q\nACGT\n", false, true).unwrap().remove(0);
         assert_eq!(

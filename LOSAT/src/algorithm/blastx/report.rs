@@ -1887,10 +1887,9 @@ pub(super) fn pairwise_hits(
     }
     // `-lcase_masking`: the subject rows show their records' lower case too (x_soft_subject.rs), in
     // outfmt 0 and in the hits that LOSAT Web's `run_local` hands out, as the query rows do.
-    if subjects
-        .iter()
-        .any(|subject| !subject.lowercase_masks.is_empty())
-    {
+    // A `-subject_loc` subject can show runs of its record outside the interval
+    // (`FastaRecord::archive_lowercase_runs`).
+    if subjects.iter().any(FastaRecord::has_lowercase_runs) {
         super::x_soft_subject::x_masked_subject_rows(&mut hits, subjects);
     }
     Ok(hits)

@@ -27,9 +27,10 @@
 | NCBI FTP `refseq/TargetedLoci/*` | `*` | Example の subject セット | 下の表 |
 | NCBI FTP `blast/db/FASTA/pdbaa.gz` | `*` | タンパク質の Example 候補 | 36.8 MB gz（境界） |
 | DDBJ getentry | 無し | — | CORS ヘッダ無し（curl には本文も空）。DDBJ Search の API は CORS を返すが、索引は BioProject / BioSample / DRA / GEA などで塩基配列のレコードを持たない（`/search/api/entries/nucleotide/…` は「Unknown database type」）。公開ファイル（`public/ddbj_database/16S/16S.fasta.gz`、222 MB）も CORS 無し。DDBJ が getentry に `Access-Control-Allow-Origin: *` を付ければ取得先に足せる |
-| CNCB GenBase | header は返す | — | API の URL 未確認 |
+| CNCB GenBase REST `https://ngdc.cncb.ac.cn/genbase/api/file/fasta?acc=ACC` | 返す（origin をそのまま。`restapihelp` に記載） | accession → FASTA（全長。範囲指定の引数は無い） | GenBase の `C_AA…` に加え INSDC（MH011443.1、AB000001.1）と RefSeq（NR_074540.1）も返った。日本から 1.3〜2.6 s。`api/file/gbf` で GBF も |
 
 DDBJ は DDBJ 側のヘッダ追加（依頼）があるまで取得先に入れない。それまで DDBJ 利用者は NCBI / EBI から取るか、DDBJ から手で落として「Open FASTA files…」で開く。
+CNCB の GenBase は取れる（2026-11-03 17:3x 実測）。保守者の決定 3（NCBI と EBI だけ）のまま、表に足すかは保守者の判断。
 「一番アクセスしやすい所」= 候補（NCBI、EBI）へ同時に Range 要求を出し、先に応えた方を取る。選んだ先はそのセッション中は固定し、
 取得元の名前を画面に出す（手で NCBI / EBI を選べる）。
 

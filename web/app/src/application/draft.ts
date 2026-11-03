@@ -14,7 +14,7 @@
 // input, or separate searches (one run per source, started as a group).
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
-import { formParameters, setField, type FieldValue, type FormValues } from '../domain/parameters';
+import { formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
 import { fastaParser, PROGRAMS, programById, type InputRole, type ProgramId } from '../domain/programs';
 import { REGION_FLAG, regionProblem, regionValue, type RegionText } from '../domain/region';
 import type { DataGateway } from '../ports/data';
@@ -179,8 +179,14 @@ export class SearchDraft {
   }
 
   setField(flag: string, value: FieldValue): void {
-    const { program, values } = this.state.get();
-    this.set({ values: { ...values, [program]: setField(values[program], flag, value) }, message: undefined });
+    this.setFields([[flag, value]]);
+  }
+
+  /** Sets several fields at once (NCBI's select of a pair: -reward and -penalty, or the gap costs). */
+  setFields(entries: ReadonlyArray<readonly [string, FieldValue]>): void {
+    const { program, values, description } = this.state.get();
+    const next = setFields(programById(program), values[program], entries, description?.parameters);
+    this.set({ values: { ...values, [program]: next }, message: undefined });
     this.scheduleValidation();
   }
 

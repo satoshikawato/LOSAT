@@ -2,7 +2,7 @@
 // One option of the search form, with its default, choices and help (`describe`, with the
 // defaults that the engine resolves): a row (its label left, its control right, as on NCBI's page),
 // or one field of a row of several (`inline`, such as "Match" in "Match/Mismatch Scores", or a
-// checkbox of NCBI's "Mask" row). The control shows the default while the field is empty, as
+// checkbox of NCBI's "Filter" and "Mask" rows). The control shows the default while the field is empty, as
 // NCBI's form shows its values. A field whose value is written to the argv differs from the
 // default, and is marked as NCBI marks it (yellow and "♦"), with words for screen readers.
 import { computed, nextTick, ref, watchEffect } from 'vue';
@@ -10,6 +10,7 @@ import type { DraftState, SearchDraft } from '../application/draft';
 import { geneticCodeLabel } from '../domain/genetic-codes';
 import { effectiveValue, fieldChoices, fieldList, knownDefault, writtenValue } from '../domain/parameters';
 import { programById, type ParameterField } from '../domain/programs';
+import { optionHelp } from './format';
 
 const props = defineProps<{ draft: SearchDraft; state: DraftState; field: ParameterField; inline?: boolean }>();
 
@@ -35,6 +36,12 @@ const shown = computed(() => (text.value.trim() !== '' ? text.value.trim() : (fa
 /** A true/false option with a known default is a checkbox (NCBI's "Mask for lookup table only"). */
 const asCheckbox = computed(() => props.field.kind === 'flag' || (props.field.kind === 'boolean' && (fallback.value === 'true' || fallback.value === 'false')));
 const boxChecked = computed(() => (props.field.kind === 'flag' ? value.value === true : shown.value === 'true'));
+/** A low complexity filter is on unless the search uses `no` (NCBI's "Low complexity regions" checkbox). */
+const filterOn = computed(() => shown.value !== '' && shown.value !== 'no');
+/** The filter's text box stays while it has the focus, also when emptying it turns the filter off. */
+const filterEditing = ref(false);
+/** A checkbox of a row carries its name after the box, as NCBI's checkboxes of a row do. */
+const boxInRow = computed(() => props.inline === true && (asCheckbox.value || props.field.kind === 'filter'));
 /** A choice whose default is one of its choices shows it; otherwise "Default" stands for it. */
 const defaultChosen = computed(() => fallback.value !== undefined && choices.value.includes(fallback.value));
 
@@ -51,12 +58,7 @@ const choiceLabel = (choice: string) => props.field.choiceLabels?.[choice] ?? ch
 /** The engine's help, opened with the "?" button (stop-describing-ui: the control shows, the help waits). */
 const showHelp = ref(false);
 
-/** The first paragraph of the engine's help, without the references to NCBI's sources. */
-const help = computed(() => {
-  const raw = option.value?.help ?? '';
-  const paragraph = raw.split(/\n\s*\n/)[0] ?? '';
-  return paragraph.replace(/\s*(?:NCBI reference|Reference):.*$/s, '').trim();
-});
+const help = computed(() => optionHelp(option.value?.help));
 
 const defaultLabel = computed(() => {
   const engineDefault = option.value?.defaultValue;
@@ -79,6 +81,13 @@ function choose(next: string): void {
   set(next === fallback.value ? '' : next);
 }
 
+/** Turning a filter on gives it its default arguments, or `yes` where the default is `no`; off is `no`. */
+function toggleFilter(on: boolean): void {
+  const filters = fallback.value !== undefined && fallback.value !== 'no';
+  if (on) set(filters ? '' : 'yes');
+  else set(filters ? 'no' : '');
+}
+
 function onList(next: string): void {
   if (next === OTHER) {
     other.value = true;
@@ -92,13 +101,13 @@ function onList(next: string): void {
 
 <template>
   <div
-    :class="[inline ? 'param-inline' : 'param-row', { changed, 'param-check': inline && asCheckbox }]"
+    :class="[inline ? 'param-inline' : 'param-row', { changed, 'param-check': boxInRow }]"
     :data-kind="field.kind"
     :data-testid="`${id}-field`"
   >
     <component
       :is="field.kind === 'radio' ? 'span' : 'label'"
-      v-if="!(inline && asCheckbox)"
+      v-if="!boxInRow"
       :id="`${id}-label`"
       class="param-label"
       :for="field.kind === 'radio' ? undefined : id"
@@ -121,6 +130,31 @@ function onList(next: string): void {
           {{ choiceLabel(choice) }}
         </label>
       </div>
+      <template v-else-if="field.kind === 'filter'">
+        <input :id="id" type="checkbox" :checked="filterOn" :data-testid="id" @change="toggleFilter(($event.target as HTMLInputElement).checked)" />
+        <label v-if="inline" :id="`${id}-label`" class="param-label" :for="id">
+          <span v-if="changed" class="changed-mark" aria-hidden="true">♦</span>
+          {{ field.label }} <span class="flag">{{ field.flag }}</span>
+          <span v-if="changed" class="visually-hidden">, changed from the default</span>
+        </label>
+        <!-- The filter's arguments (the CLI's value), as NCBI's "Species-specific repeats" has its select after the box. -->
+        <template v-if="filterOn || filterEditing">
+          <input
+            :id="`${id}-value`"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            :value="value === undefined ? (fallback ?? '') : text"
+            :placeholder="fallback === 'no' ? '' : (fallback ?? '')"
+            :aria-labelledby="`${id}-label ${id}-value-name`"
+            :data-testid="`${id}-value`"
+            @input="set(($event.target as HTMLInputElement).value)"
+            @focus="filterEditing = true"
+            @blur="filterEditing = false"
+          />
+          <span :id="`${id}-value-name`" class="visually-hidden">arguments</span>
+        </template>
+      </template>
       <template v-else-if="asCheckbox">
         <input
           :id="id"
@@ -172,13 +206,9 @@ function onList(next: string): void {
           spellcheck="false"
           :value="value === undefined ? (fallback ?? '') : text"
           :placeholder="fallback ?? ''"
-          :list="field.suggestions ? `${id}-list` : undefined"
           :data-testid="id"
           @input="set(($event.target as HTMLInputElement).value)"
         />
-        <datalist v-if="field.suggestions" :id="`${id}-list`">
-          <option v-for="s in field.suggestions" :key="s" :value="s" />
-        </datalist>
       </template>
       <!-- WebKit draws a select's chosen label at its whole length beyond the select's box, which
            made a phone's page wider than its screen (S13 screen review H2): the span clips it. -->

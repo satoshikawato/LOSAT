@@ -1301,12 +1301,15 @@ impl ListedTitles<'_> {
     /// cannot find by its Seq-align id where a format reads its Bioseq (`fetched`: outfmt 0, 5,
     /// 6, 7, 13 to 16; `ParsedSubject::fetched`), two of them that follow each
     /// other in a hit list with matching Seq-align ids where outfmt 0, 5 or 13 to 16 is written
-    /// (`joined`, `shared::refuse_joined_hits`). `hit_lists` are in the order of the reports.
+    /// (`joined`, `shared::refuse_joined_hits`). `taxonomy`: whether a format writes the
+    /// subjects' taxids or their names (13 to 16, a table of taxonomy fields). `hit_lists` are
+    /// in the order of the reports.
     pub(super) fn check_parsed_reports(
         &self,
         hit_lists: &[Option<BlastpHitList>],
         fetched: bool,
         joined: bool,
+        taxonomy: bool,
     ) -> Result<()> {
         if self.parsed.is_empty() {
             return Ok(());
@@ -1314,7 +1317,7 @@ impl ListedTitles<'_> {
         if fetched {
             for rank in Self::reported(hit_lists) {
                 if let Some(subject) = self.parsed_subject(rank) {
-                    subject.fetched().map_err(|reason| {
+                    subject.fetched(taxonomy).map_err(|reason| {
                         shared::parsed_refusal(self.listed.ordinals[rank], &reason, self.program)
                     })?;
                 }

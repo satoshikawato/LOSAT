@@ -1189,7 +1189,8 @@ pub(super) fn read_titles(
 }
 
 /// What the reports `output_formats` show of a reported sequence with parsed Seq-ids
-/// (`reported_subjects`, `x_streaming_refusal`).
+/// (`reported_subjects`, `x_streaming_refusal`); outfmt 13 to 16 and the tabular reports of
+/// taxonomy fields write its taxids.
 pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown {
     let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
     ParsedShown {
@@ -1202,6 +1203,12 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
         sam: output_formats
             .iter()
             .any(|format| matches!(format, BlastnOutputFormat::Sam(_))),
+        taxonomy: output_formats.iter().any(|format| {
+            format.xml2_kind().is_some()
+                || format
+                    .tabular_spec()
+                    .is_some_and(|spec| spec.needs().taxonomy)
+        }),
     }
 }
 

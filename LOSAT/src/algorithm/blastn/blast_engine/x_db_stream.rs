@@ -81,7 +81,7 @@ use crate::seqdb::{BlockRange, SeqDb};
 use crate::utils::threading::SearchPool;
 
 use super::super::x_bnstream::{search_in_order_bounded, WaitingBound};
-use super::{block_subject, search_read_error, BlastnSubjectRef, XWaitingBytes};
+use super::{block_subject, search_read_error, BlastnSubjectRef, XWaitingBytes, BLOCK_BYTES};
 
 /// No NCBI counterpart (scheduling only): whether LOSAT_X_BNDBSTREAM is on (a strict-set switch:
 /// on unless it is `0`).
@@ -109,6 +109,16 @@ const X_BNDBSTREAM_BLOCKS_PER_THREAD: usize = 2;
 const X_BNDBWIDE_BLOCKS_PER_THREAD: usize = 16;
 
 // No NCBI counterpart (scheduling only): as the window.
+/// Blocks per thread of the window with LOSAT_X_BNDBWIDE: as many bytes of the sequence file as
+/// `X_BNDBWIDE_BLOCKS_PER_THREAD` blocks of `BLOCK_BYTES`, so that smaller blocks
+/// (LOSAT_X_BNDBSMALL) do not bring back a window shorter than a slow block. `Window::new` holds
+/// it to the list's length.
+fn x_wide_blocks_per_thread(block_bytes: u64) -> usize {
+    let blocks = (BLOCK_BYTES / block_bytes.max(1)).max(1);
+    X_BNDBWIDE_BLOCKS_PER_THREAD.saturating_mul(usize::try_from(blocks).unwrap_or(usize::MAX))
+}
+
+// No NCBI counterpart (scheduling only): as the window.
 /// Bytes of waiting results per thread above which LOSAT_X_BNDBWIDE's window narrows to
 /// `X_BNDBSTREAM_BLOCKS_PER_THREAD`.
 const X_BNDBWIDE_WAITING_BYTES_PER_THREAD: usize = 1 << 20;
@@ -128,8 +138,13 @@ const X_SEGMENT_BLOCKS: usize = 1 << 16;
 // No NCBI counterpart (scheduling only): `SeqDb::next_block`'s blocks, which follow each other in
 // ordinal order (the rounds list them alike).
 /// Up to `max` blocks of at most `block_bytes` of `db` from ordinal id `first_ordinal` on, in
-/// ordinal order.
+/// ordinal order. With LOSAT_X_BNDBSMALL they are listed by `SeqDb::x_next_blocks` (the same
+/// blocks), which reads the index in runs: the list is made on one thread while the others wait,
+/// and smaller blocks make it longer.
 fn blocks_of(db: &SeqDb, first_ordinal: u32, block_bytes: u64, max: usize) -> Vec<BlockRange> {
+    if super::x_db_cut::x_bn_db_small() {
+        return db.x_next_blocks(first_ordinal, block_bytes, max);
+    }
     let mut blocks = Vec::new();
     let mut next_ordinal = first_ordinal;
     while blocks.len() < max {
@@ -178,7 +193,7 @@ where
             return Ok(());
         };
         next_ordinal = last.end_ordinal();
-        search_window(db, pool, &blocks, new_scratch, search, merge)?;
+        search_window(db, pool, &blocks, block_bytes, new_scratch, search, merge)?;
     }
 }
 
@@ -218,6 +233,7 @@ fn search_window<T, R, I, K, M>(
     db: &SeqDb,
     pool: &SearchPool<'_>,
     blocks: &[BlockRange],
+    block_bytes: u64,
     new_scratch: &I,
     search: &K,
     merge: &mut M,
@@ -251,7 +267,7 @@ where
     let floor = threads.saturating_mul(X_BNDBSTREAM_BLOCKS_PER_THREAD);
     let wide = x_bn_db_wide();
     let window = if wide {
-        threads.saturating_mul(X_BNDBWIDE_BLOCKS_PER_THREAD)
+        threads.saturating_mul(x_wide_blocks_per_thread(block_bytes))
     } else {
         floor
     };
@@ -321,6 +337,16 @@ mod tests {
             &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
         )
         .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+    }
+
+    // LOSAT_X_BNDBSMALL: the window keeps its bytes.
+    #[test]
+    fn the_wide_window_keeps_its_bytes() {
+        assert_eq!(x_wide_blocks_per_thread(BLOCK_BYTES), 16);
+        assert_eq!(x_wide_blocks_per_thread(BLOCK_BYTES - 1), 16);
+        assert_eq!(x_wide_blocks_per_thread(256 << 10), 64);
+        assert_eq!(x_wide_blocks_per_thread(1), 16 << 20);
+        assert_eq!(x_wide_blocks_per_thread(0), 16 << 20);
     }
 
     // Uneven work per sequence, so that the blocks end out of order.

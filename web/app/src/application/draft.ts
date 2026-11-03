@@ -940,6 +940,9 @@ export class SearchDraft {
       if (!current()) return;
       this.updateSource(role, key, (source) => ({
         ...source,
+        // A file named .gz is inflated by addSource: the card shows its plain name and inflated size.
+        name: ref.name,
+        size: ref.size,
         status: 'ready',
         base,
         excluded: [],

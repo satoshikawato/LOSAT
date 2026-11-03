@@ -136,9 +136,10 @@ impl Diagonals {
     }
     // No NCBI counterpart: buffer reuse only (LOSAT_X_BXDIAGKEEP, blastx/x_bx_mem.rs). The entries,
     // offset and window `new(query_length, window)` gives, in this table's own allocation, which
-    // grows by a reallocation of its own where it is short (`x_lut_direct::x_zeroed`: a free of a
-    // mapped table would raise glibc's mmap and trim thresholds). A thread that searches batches
-    // of two lengths keeps one table instead of freeing one and making the other in turn.
+    // `reserve_exact` grows where it is short (a reallocation, as `x_lut_direct::x_zeroed` grows
+    // its vectors: a free of a mapped table would raise glibc's mmap and trim thresholds). A
+    // thread that searches batches of two lengths keeps one table instead of freeing one and
+    // making the other in turn.
     /// Makes this table the one `new(query_length, window)` makes.
     #[cfg(feature = "parallel")]
     pub(crate) fn x_remake(&mut self, query_length: usize, window: i32) -> Result<()> {
@@ -1096,6 +1097,29 @@ mod session_f_diagonal_boundary_tests {
             assert_eq!(d.offset, window);
         }
         assert!(Diagonals::new(1, -1).is_err());
+    }
+
+    // No NCBI counterpart (buffer reuse, LOSAT_X_BXDIAGKEEP): a used table of another length or
+    // window, made again by `x_remake`, is the table `new` makes.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn a_remade_table_is_the_new_one() {
+        for (from, to) in [
+            ((100, 40), (30, 40)),
+            ((30, 40), (100, 40)),
+            ((70, 40), (70, 8)),
+        ] {
+            let mut table = Diagonals::new(from.0, from.1).unwrap();
+            table.entries.fill(flagged(12_345));
+            table.offset = 99;
+            assert!(!table.x_fits(to.0, to.1));
+            table.x_remake(to.0, to.1).unwrap();
+            let new = Diagonals::new(to.0, to.1).unwrap();
+            assert!(table.x_fits(to.0, to.1));
+            assert_eq!(table.entries, new.entries);
+            assert_eq!((table.offset, table.window), (new.offset, new.window));
+        }
+        assert!(Diagonals::new(8, 8).unwrap().x_remake(1, -1).is_err());
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:167-174

@@ -2477,4 +2477,36 @@ mod tests {
             assert_eq!(intervals, parse(fields[3]), "{}", fields[0]);
         }
     }
+
+    // No NCBI counterpart (reuse only): the two process-wide tables hold every window of at most
+    // 15 letters (684 count lists), and each gives the port's bits for it.
+    #[test]
+    fn x_entropy_tables_hold_every_short_window_with_the_ports_bits() {
+        let mut lists = 0;
+        x_each_count_list(&mut |counts| {
+            lists += 1;
+            let reference = entropy_from_state_vector_reference(counts).to_bits();
+            let state = counts
+                .iter()
+                .enumerate()
+                .fold(0u64, |key, (class, &count)| {
+                    key | ((count as u64) << (4 * class))
+                });
+            assert_eq!(
+                x_memo_get(x_state_entropies(), state).map(f64::to_bits),
+                Some(reference),
+                "{counts:?}"
+            );
+            assert_eq!(entropy_from_state_vector(counts).to_bits(), reference);
+            let histogram = counts
+                .iter()
+                .fold(0u64, |key, &count| key + (1u64 << (4 * (count - 1))));
+            assert_eq!(
+                x_memo_get(x_histogram_entropies(), histogram).map(f64::to_bits),
+                Some(reference),
+                "{counts:?}"
+            );
+        });
+        assert_eq!(lists, 684);
+    }
 }

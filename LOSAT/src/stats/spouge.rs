@@ -751,6 +751,22 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn x_erfc_memo_keeps_the_reference_bits_as_it_grows() {
+        // No NCBI counterpart (reuse only): `X_ERFC_MEMO` grows from 64 to 4,096 slots as this
+        // thread fills it; every value, computed or read back after the growth, is ErfC's.
+        let zs: Vec<f64> = (0..6_000).map(|i| -5.9 + f64::from(i) * 1.9e-3).collect();
+        for _ in 0..2 {
+            for &z in &zs {
+                assert_eq!(
+                    erfc_ncbi(z).to_bits(),
+                    erf_impl_ncbi(z, true).to_bits(),
+                    "z={z:e}"
+                );
+            }
+        }
+    }
+
     // LOSAT_X_ERFABSORB (graduated 2026-10-26): the reference ErfC is 2.0 for every z < -6, and
     // `erfc_ncbi`, which does not call it there, has the reference's bits everywhere.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59

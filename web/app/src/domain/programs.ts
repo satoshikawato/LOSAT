@@ -84,11 +84,6 @@ export interface ProgramDescriptor {
   readonly query: SequenceKind;
   readonly subject: SequenceKind;
   /**
-   * False when the engine takes no -query_loc / -subject_loc for the program: the form shows
-   * no subrange and writes none (DW-9).
-   */
-  readonly subrange?: false;
-  /**
    * The search form. The order of the sections and fields is the order of the argv: the
    * task first, as on a command line, then the genetic codes and the algorithm parameters
    * in the order of the page.
@@ -279,8 +274,6 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     queryNote: 'translated nucleotide query',
     query: 'nucleotide',
     subject: 'protein',
-    // The engine refuses -query_loc and -subject_loc for BLASTX (line SX, DW-11).
-    subrange: false,
     sections: [
       { title: 'Task Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
       { title: 'Genetic code', placement: 'query', fields: [{ flag: '-query_gencode', label: 'Genetic code', kind: 'gencode' }] },

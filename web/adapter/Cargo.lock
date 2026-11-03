@@ -556,7 +556,6 @@ name = "losat-web-adapter"
 version = "0.1.0"
 dependencies = [
  "LOSAT",
- "bio",
  "clap",
 ]
 

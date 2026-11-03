@@ -419,7 +419,7 @@ test('a query without a defline runs; the engine names it as NCBI does', async (
   if (BUILD_HAS_ENGINE) expect((await result(page, 1, 6)).output).toMatch(/^Query_1\ts1\t/m);
 });
 
-test('empty inputs, every record excluded, a sequence without a defline, and BLASTX without a subrange', async ({ page }) => {
+test('empty inputs, every record excluded, a sequence without a defline, and the subrange of BLASTX', async ({ page }) => {
   await program(page, 'blastn');
   await submit(page);
   await expect(page.getByTestId('search-message')).toHaveText('Add the query sequences: paste them or open FASTA files.');
@@ -449,11 +449,11 @@ test('empty inputs, every record excluded, a sequence without a defline, and BLA
   await expect(page.getByTestId('search-message')).toHaveText('Every subject record is excluded.');
   await expect(page.getByTestId('run-1-option')).toHaveCount(0);
 
-  // BLASTX takes no -query_loc (DW-11): the query's only record shows no subrange.
+  // BLASTX takes -query_loc (DW-39): the query's only record shows its subrange.
   await expect(page.getByTestId('query-region')).toBeVisible();
   await program(page, 'blastx');
   await expect(page.getByTestId('param-query_gencode')).toBeVisible();
-  await expect(page.getByTestId('query-region')).toHaveCount(0);
+  await expect(page.getByTestId('query-region')).toBeVisible();
   await expect(page.getByTestId('run-losat')).toBeEnabled();
 });
 

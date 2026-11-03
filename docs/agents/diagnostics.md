@@ -745,7 +745,7 @@ Same values, faster computation:
   `(first - 64) & !63` lanes), otherwise they grow as before. There is no band start constant, the rows stay
   within a few times the band and its margins (about four times just after they double), and each move copies
   at most as many lanes as the band crossed since the last; the kernels test once per row (`fits`) instead of twice. There is no way back to rows that
-  hold every column except the test-only `x_test_rows(None)`. Measured with the fold: <<NUMBERS>>. History of
+  hold every column except the test-only `x_test_rows(None)`. Measured with the fold: Sakai x EDL933 `-subject` at 16 threads, blastn and dc-megablast x0.993 and x0.995 the time and x1.015 and x1.005 the max RSS (rounds 0.93-1.12, as dev's own spread); one-thread instructions x0.994-0.999. A band of more than about 1,000 lanes can keep up to twice the rows the 1,024 start kept (about 40 KiB more per scratch for a 2,000-lane band); a narrow band keeps 1,024 lanes where the old rows grew to 2,048. History of
   the switch:) the vector kernels
   (`utils/xdrop_simd.rs`, `x_xdrop_avx2.rs`, `x_xdrop_w128.rs`) kept their DP rows (`H` and `E` on 8- and
   16-bit lanes and the column letters, 10 bytes per column) indexed by column, as NCBI's `score_array` is,
@@ -776,8 +776,8 @@ Same values, faster computation:
   pull request that added it, 2026-10-24; since 2026-11-03 (the fold of line SF S3 family dp-trace) it also
   governs the pool of long traces, folded from `LOSAT_X_DPTRACEPOOL` (entry below): a trace past the four-bit
   rows of one NCBI chunk (`CHUNKSIZE` 2,097,152 cells, `blast_gapalign.c:61`, 1 MiB) comes from a pool the
-  scratches on a Rayon pool thread share, and the pool keeps one idle pair; `=0` returns to one byte per cell
-  and every scratch keeps its own trace. Measured with the fold: <<NUMBERS>>) the
+  scratches on a Rayon pool thread share, and the pool keeps two idle pairs; `=0` returns to one byte per cell
+  and every scratch keeps its own trace. Measured with the fold: Sakai x EDL933 `-subject` at 16 threads, blastn and dc-megablast x0.993 and x0.995 the time and x1.015 and x1.005 the max RSS (rounds 0.93-1.12, as dev's own spread), at 4 threads x0.998 / x0.997 and x1.007 / x1.008; one-thread instructions x0.994-0.999; outputs equal to dev's and NCBI's) the
   traceback rows of the vector kernels (`XdropScratch::trace`, NCBI's `edit_script`) held one byte of
   `SCRIPT_*` bits per DP cell of the band, so a long gapped alignment kept one byte per cell: up to 36 MiB
   for one Sakai x EDL933 traceback, and each worker keeps its largest. Now the kernels store a code of
@@ -806,9 +806,10 @@ Same values, faster computation:
 - `LOSAT_X_DPTRACEPOOL=1` (every program's vector X-drop traceback, memory; folded into `LOSAT_X_DPNIBBLE` on
   2026-11-03, line SF S3 family dp-trace: no variable any more, the pool follows `LOSAT_X_DPNIBBLE`'s rule
   (a scratch on a Rayon pool thread) and `LOSAT_X_DPNIBBLE=0` gives every scratch its own trace; the pool keeps
-  one idle pair instead of two (what the one scratch of a one-thread search keeps), and its size is written as
-  the four-bit rows of one NCBI chunk (`CHUNKSIZE` 2,097,152 cells), the same 1 MiB. Measured with the fold:
-  <<NUMBERS>>. History of the switch: in the strict set from the pull
+  two idle pairs as before (one was measured: dc-megablast Sakai x EDL933 `-subject` 1.046x the time at 16
+  threads and 1.16x the max RSS at 4, a trace given back to a full pool was freed and made again), and its size
+  is written as the four-bit rows of one NCBI chunk (`CHUNKSIZE` 2,097,152 cells), the same 1 MiB. Measured
+  with the fold: Sakai x EDL933 `-subject` at 16 threads, blastn and dc-megablast x0.993 and x0.995 the time and x1.015 and x1.005 the max RSS (rounds 0.93-1.12, as dev's own spread), at 4 threads x0.998 / x0.997 and x1.007 / x1.008; one-thread instructions x0.994-0.999; outputs equal to dev's and NCBI's. History of the switch: in the strict set from the pull
   request that added it, 2026-10-26; `=0` returned to one trace per scratch) each scratch of a search
   (`XdropScratch`, one per worker and look-ahead helper) kept the largest traceback rows it ever held
   (`trace` and `rows`, NCBI's `edit_script` and `edit_start_offset`), so on 16 threads every worker ended

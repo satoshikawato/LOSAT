@@ -879,9 +879,11 @@ fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
 // keeps its own trace. Placement of memory only: the kernels write and the walk reads the same
 // rows either way.
 const X_POOL_FROM: usize = 2_097_152 / 2;
-// No NCBI counterpart: how many idle trace + rows pairs the pool keeps: one, what the one scratch
-// of a one-thread search keeps.
-const X_POOL_IDLE: usize = 1;
+// No NCBI counterpart: how many idle trace + rows pairs the pool keeps. One was measured on the
+// workstation (2026-11-03, Sakai x EDL933 `-subject`): a trace given back to a pool that held one
+// was freed and the next long traceback made it again, dc-megablast 1.046x the time at 16 threads
+// (sys +6 %) and 1.16x the max RSS at 4; two ran as before.
+const X_POOL_IDLE: usize = 2;
 
 // No NCBI counterpart: one trace + rows pair of the pool (`XdropScratch::trace`, `rows`).
 type XTracePair = (Vec<u8>, Vec<(u32, u32, u32)>);

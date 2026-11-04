@@ -21,8 +21,9 @@ pub(crate) fn x_bnstore() -> bool {
 }
 
 /// The records of a FASTA subject set and their letters, by subject index: the records' own, or
-/// (EXPERIMENT, `LOSAT_X_BNSTORE`) the packed subjects of records that keep none. Every read gives
-/// the bytes the records' letters give (the comparison tests of `packed_subject.rs`).
+/// (EXPERIMENT, `LOSAT_X_BNSTORE`) the packed subjects of records that keep none; with `-db`, the
+/// reported sequences' records and their stored data (`database::reported_subjects`). Every read
+/// gives the bytes the records' letters give (the comparison tests of `packed_subject.rs`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
 /// ```c
@@ -39,13 +40,14 @@ pub(crate) fn x_bnstore() -> bool {
 #[derive(Clone, Copy)]
 pub(crate) struct SubjectLetters<'a> {
     records: &'a [FastaRecord],
-    /// EXPERIMENT (LOSAT_X_BNSTORE): the letters of every record, packed (the records keep none).
+    /// The letters of every record, packed (the records keep none): EXPERIMENT (LOSAT_X_BNSTORE)
+    /// for a subject set, and a database's reported sequences.
     stores: Option<&'a [PackedNucleotide]>,
 }
 
 impl<'a> SubjectLetters<'a> {
-    /// The letters of `records`: their own, or with `stores` (EXPERIMENT, LOSAT_X_BNSTORE) those
-    /// of their packed subjects, one per record.
+    /// The letters of `records`: their own, or with `stores` those of their packed subjects, one
+    /// per record.
     pub(crate) fn new(records: &'a [FastaRecord], stores: Option<&'a [PackedNucleotide]>) -> Self {
         if let Some(stores) = stores {
             assert_eq!(records.len(), stores.len(), "one packed subject per record");
@@ -58,7 +60,7 @@ impl<'a> SubjectLetters<'a> {
         self.records
     }
 
-    /// EXPERIMENT (LOSAT_X_BNSTORE): the packed subjects, when the records keep no letters.
+    /// The packed subjects, when the records keep no letters.
     pub(crate) fn stores(&self) -> Option<&'a [PackedNucleotide]> {
         self.stores
     }
@@ -172,7 +174,8 @@ static STORED_SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static STORED_BYTES: AtomicU64 = AtomicU64::new(0);
 /// The times the blastna letters of a packed subject were made (its traceback).
 static BLASTNA_MADE: AtomicU64 = AtomicU64::new(0);
-/// The report rows whose subject letters were made from a packed subject.
+/// The report rows whose subject letters were made from a packed subject (with `-db`, the reported
+/// sequences' stored data).
 static ROWS_MADE: AtomicU64 = AtomicU64::new(0);
 
 /// The summary line (printed by `main` at exit) with LOSAT_X_STATS: the subjects held packed, the

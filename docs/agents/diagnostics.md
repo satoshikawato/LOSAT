@@ -2984,8 +2984,9 @@ Rebuilding less:
   are cut before the search), and so does a set with a byte that has no ncbi4na code (the CLI reader admits
   none); the library entry `run_local` (and LOSAT Web) reads the caller's records. With `LOSAT_X_STATS=1` a
   `[X_STATS] BNSTORE subjects= stored_bytes= blastna_made= rows_made=` line gives the subjects held packed, the
-  bytes of their packed forms, the times the traceback made blastna letters and the report rows made from them;
-  `LOSAT/tests/blastn_subject_store.rs` compares reports and messages with and without the switch and reads it.
+  bytes of their packed forms, the times the traceback made blastna letters and the report rows made from them
+  (with `-db`, `rows_made` also counts the rows made from the reported sequences' stored data, which the reports
+  hold in the same packed form; `subjects` stays 0); `LOSAT/tests/blastn_subject_store.rs` compares reports and messages with and without the switch and reads it.
   Measured 2026-10-15 on the WSL machine (megablast against 28,036 16S subjects, 40.6 Mb; max RSS, one run each
   in one series, the same output in every run): one thread, one query 68.0 -> 30.5 MiB (NCBI BLAST+ 2.17.0 `-db`
   42.0), a query without hits 67.2 -> 29.4 (34.6), 100 queries 135.3 -> 97.7 (95.8); 8 threads, one query 81.1 ->

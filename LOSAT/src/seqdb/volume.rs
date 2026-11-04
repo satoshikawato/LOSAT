@@ -1577,16 +1577,13 @@ impl SequenceBlock {
     /// byte's four bases at once.
     pub fn nucleotide_iupac(&self, i: usize) -> Result<Vec<u8>, SeqDbError> {
         let packed = self.nucleotide_packed(i);
-        let base_length = self.nucleotide_len(i)?;
-        if base_length < 1 {
-            return Err(self.format(i, "Error: could not get sequence or range."));
-        }
+        let (base_length, runs) = self.nucleotide_stored(i)?;
         let mut letters = vec![0u8; base_length];
         for (bases, &byte) in letters.chunks_mut(4).zip(packed) {
             bases.copy_from_slice(&PACKED_TO_IUPAC[usize::from(byte)][..bases.len()]);
         }
         let region_end = base_length as i64;
-        for run in self.ambiguity_runs(i)? {
+        for run in runs {
             let mut position = i64::from(run.offset as i32);
             let row_len = i64::from(run.length);
             if position + row_len <= 0 {
@@ -1604,6 +1601,20 @@ impl SequenceBlock {
             }
         }
         Ok(letters)
+    }
+
+    // NCBI reference: the checks of `x_GetSequence` quoted above `nucleotide_blastna`
+    // (seqdbvol.cpp:1619-1707: `base_length < 1` is "Error: could not get sequence or range.").
+    /// The length of nucleotide `i` and its ambiguity runs in stored order, as
+    /// [`Self::nucleotide_iupac`] reads them before it makes the letters (the same errors in the
+    /// same order: the length, a sequence without bases, the ambiguity data), for a store of the
+    /// stored data (`PackedNucleotide::from_stored`) that gives the same letters.
+    pub fn nucleotide_stored(&self, i: usize) -> Result<(usize, Vec<AmbiguityRun>), SeqDbError> {
+        let base_length = self.nucleotide_len(i)?;
+        if base_length < 1 {
+            return Err(self.format(i, "Error: could not get sequence or range."));
+        }
+        Ok((base_length, self.ambiguity_runs(i)?))
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `nucleotide_blastna` in a buffer taken from or sized

@@ -1041,6 +1041,24 @@ mod tests {
                     let mut out = Vec::new();
                     store.blastna_into(&mut out);
                     assert_eq!(out, &blastna[1..=length], "{name} {i}: blastna");
+                    // The letters of BLASTN's reported sequences (`reported_store`): those of
+                    // `nucleotide_iupac`, whole and in any range.
+                    assert_eq!(
+                        block.nucleotide_stored(i).unwrap(),
+                        (length, runs.clone()),
+                        "{name} {i}"
+                    );
+                    let iupac = block.nucleotide_iupac(i).unwrap();
+                    store.letters_into(0, length, &mut out);
+                    assert_eq!(out, iupac, "{name} {i}: IUPAC");
+                    for (from, to) in [
+                        (0, 1),
+                        (length / 3, length - length / 4),
+                        (length - 1, length),
+                    ] {
+                        store.letters_into(from, to, &mut out);
+                        assert_eq!(out, &iupac[from..to], "{name} {i}: IUPAC {from}..{to}");
+                    }
                     let codes = ncbi_letters(packed, length, &runs);
                     assert_stored_forms(&store, packed, &codes, &format!("{name} {i}"));
                     // The store of the sequence read alone, in

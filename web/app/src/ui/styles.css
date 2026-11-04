@@ -1598,6 +1598,35 @@ label.inline {
   gap: 4px 12px;
 }
 
+/* "Download All": its list of the outputs, in the flow under the run's line. */
+.download-list {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.download-list button {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--accent);
+  font-weight: 600;
+  text-align: left;
+}
+
+.download-list button:hover {
+  background: var(--band);
+  color: var(--accent-hover);
+}
+
 .results-summary .run-inputs {
   font-size: 1em;
 }

@@ -575,11 +575,39 @@ for (const c of PROGRAM_CASES) {
       await expect(page.getByTestId('results-subject-id')).toHaveCount(0);
       await expect(page.getByTestId('results-subjects')).toHaveText(`${basename(c.subject)}, ${plural(subjects.length, 'record')}`);
     }
-    // "Download All" opens the Outputs.
+    // "Download All" lists the run's outputs, as NCBI's lists its formats, and saves the one chosen as
+    // one file: the bytes that the Outputs view shows, named with the run, the task and the time (WA-RS-05).
+    const task = /\(task (.+)\)$/.exec(await text(page.getByTestId('results-program')))?.[1];
+    for (const format of FORMATS) {
+      await page.getByTestId('results-download-all').click();
+      const menu = page.getByTestId('results-download-menu');
+      await expect(menu.getByRole('button')).toHaveText(['Pairwise (outfmt 0)', 'Tabular (outfmt 6)', 'Tabular with comment lines (outfmt 7)']);
+      const [download] = await Promise.all([page.waitForEvent('download'), menu.getByTestId(`results-download-${format}`).click()]);
+      expect(download.suggestedFilename()).toMatch(new RegExp(`^losat-run1-${c.id}${task === undefined ? '' : `-${literal(task)}`}-\\d{8}T\\d{6}Z\\.outfmt${format}\\.txt$`));
+      expect(readFileSync((await download.path())!, 'utf8'), `outfmt ${format} saved`).toBe(outputs.text[format]);
+      await expect(menu).toHaveCount(0);
+      await expect(page.getByTestId('results-download-all')).toBeFocused();
+      await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
+    }
+    // Escape closes the list, and the focus is on the button again.
     await page.getByTestId('results-download-all').click();
-    await expect(page.getByTestId(TABS.outputs)).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByTestId('results-outputs')).toBeVisible();
-    await show(page, 'hits');
+    await expect(page.getByTestId('results-download-all')).toHaveAttribute('aria-expanded', 'true');
+    await page.getByTestId('results-download-0').focus();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('results-download-menu')).toHaveCount(0);
+    await expect(page.getByTestId('results-download-all')).toBeFocused();
+    await expect(page.getByTestId('results-download-all')).toHaveAttribute('aria-expanded', 'false');
+    // Other changes of the results (a view filter applied from the keyboard) leave the list open.
+    await page.getByTestId('results-download-all').click();
+    await page.getByTestId('filter-subject').fill('no-such-subject');
+    await page.getByTestId('filter-subject').press('Enter');
+    await expect(page.locator('[data-testid="results-notice"][data-kind="filtered-out"]')).toHaveCount(1);
+    await page.getByTestId('filter-subject').fill('');
+    await page.getByTestId('filter-subject').press('Enter');
+    await expect(page.locator('[data-testid="results-notice"][data-kind="filtered-out"]')).toHaveCount(0);
+    await expect(page.getByTestId('results-download-menu')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('results-download-menu')).toHaveCount(0);
 
     // The Descriptions: NCBI's heading and order of columns, the Subject ID last.
     await expect(page.getByTestId('subject-table').locator('.tool-band h3')).toContainText('Sequences producing significant alignments');
@@ -1293,6 +1321,11 @@ test('many queries; view filters change the view, not the search; the notices te
   expect(await noticeKinds(page)).toEqual(['no-hits']);
   await expect(page.getByTestId('alignments')).toHaveCount(0);
   await expect(page.getByTestId(TABS.hits)).toBeVisible();
+  // The Dot Plot tab says so too, in place of a plot (WA-RS-04).
+  await show(page, 'dotplot');
+  await expect(page.getByTestId('dotplot')).toHaveCount(0);
+  await expect(page.getByTestId('results-dotplot-empty')).toHaveText('No significant similarity found for this query.');
+  await expect(page.getByTestId('results-dotplot-empty')).toHaveAttribute('data-kind', 'no-hits');
   await show(page, 'hits');
   await expect(page.getByTestId('subject-table')).toHaveCount(0);
   await show(page, 'hits');
@@ -1339,8 +1372,10 @@ test('many queries; view filters change the view, not the search; the notices te
   );
   expect(await noticeKinds(page)).toEqual(['filtered-out']);
   await expect(page.getByTestId('subject-table')).toHaveCount(0);
-  await show(page, 'hits');
+  await show(page, 'dotplot');
   await expect(page.getByTestId('hsp-table')).toHaveCount(0);
+  await expect(page.getByTestId('results-dotplot-empty')).toHaveText('No HSPs of this query match the view filters.');
+  await expect(page.getByTestId('results-dotplot-empty')).toHaveAttribute('data-kind', 'filtered-out');
   await show(page, 'hits');
   await page.getByTestId('results-notice-clear').click();
   await expect(filteredOut).toHaveCount(0);
@@ -1544,14 +1579,10 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await expect(page.getByTestId('dotplot-selected')).toContainText(`query ${firstQuery} nt`);
   const popup = page.getByTestId('dotplot-popup');
   await expect(popup).toHaveAttribute('data-hsp', firstId);
-  // Beside the line, off one of its ends: it does not cover the line's midpoint (W4b screen review L10).
-  await expect(popup).toHaveAttribute('data-place', 'beside');
-  const covers = async (point: { x: number; y: number }) => {
-    const [at, plot] = [(await popup.boundingBox())!, (await canvas.boundingBox())!];
-    const [x, y] = [plot.x + point.x, plot.y + point.y];
-    return x >= at.x && x <= at.x + at.width && y >= at.y && y <= at.y + at.height;
-  };
-  expect(await covers(target)).toBe(false);
+  // Right of the plot, which is narrow (the query is a third of the subject): it covers no part of
+  // the plot, so every line can still be clicked (WA-RS-02).
+  await expect(popup).toHaveAttribute('data-place', 'right');
+  await expect.poll(() => coversPlot(popup, canvas)).toBe(false);
   const fields = rows.filter((row) => row[0] === 'q2')[Number(firstId.split(':')[1])]!;
   const value = (name: string) => popup.locator(`dd[data-field="${name}"]`);
   await expect(value('bitscore')).toHaveText(fields[11]!);
@@ -1572,7 +1603,7 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await page.keyboard.press('Enter');
   await expect(popup).toHaveAttribute('data-hsp', secondId);
   await expect(popup).toBeFocused();
-  expect(await covers(targets.find((t) => t.hsp === secondId)!)).toBe(false);
+  await expect.poll(() => coversPlot(popup, canvas)).toBe(false);
   await expect(page.getByRole('dialog', { name: `HSP ${Number(secondId.split(':')[1]) + 1}` })).toHaveAttribute('data-testid', 'dotplot-popup');
   await page.keyboard.press('Escape');
   await expect(popup).toHaveCount(0);
@@ -1597,6 +1628,100 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
 
 // --- the phone size (S13 screen review) ------------------------------------------------------------
 
+
+/** Whether the popup's box overlaps the canvas's on the page. */
+async function coversPlot(popup: Locator, canvas: Locator): Promise<boolean> {
+  const [at, plot] = [(await popup.boundingBox())!, (await canvas.boundingBox())!];
+  return at.x < plot.x + plot.width && at.x + at.width > plot.x && at.y < plot.y + plot.height && at.y + at.height > plot.y;
+}
+
+/** The distance from a point to a line from (ax, ay) to (bx, by). */
+function distanceToLine(x: number, y: number, [ax, ay, bx, by]: readonly number[]): number {
+  const [dx, dy] = [bx! - ax!, by! - ay!];
+  const t = dx === 0 && dy === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax!) * dx + (y - ay!) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(x - (ax! + t * dx), y - (ay! + t * dy));
+}
+
+test('the dot plot: the HSP popup is outside the plot, so a click on any line selects it while the popup is open', async ({ page }) => {
+  // One record of six copies of a unit against itself: a diagonal for each offset between the
+  // copies, over the whole plot (the FakeEngine writes one HSP).
+  const record = repeats(300, 6).toString();
+  await program(page, 'blastn');
+  await paste(page, 'query', record);
+  await paste(page, 'subject', record);
+  await run(page, 1);
+  await openRun(page, 1);
+  await show(page, 'dotplot');
+  const canvas = page.getByTestId('dotplot-canvas');
+  const popup = page.getByTestId('dotplot-popup');
+  const targets = JSON.parse((await canvas.getAttribute('data-targets'))!) as { hsp: string; x: number; y: number; ends: number[] }[];
+  expect(targets.length).toBeGreaterThan(BUILD_HAS_ENGINE ? 6 : 0);
+  // The midpoints that no other line passes near, so that a click there picks that line.
+  const clear = targets.filter((t) => targets.every((other) => other === t || distanceToLine(t.x, t.y, other.ends) > 12));
+  expect(clear.length).toBeGreaterThan(BUILD_HAS_ENGINE ? 4 : 0);
+  for (const target of [...clear, ...clear.slice().reverse()]) {
+    // The point in view, clicked where it is on the screen: on whatever is drawn there.
+    await canvas.evaluate((element, y) => window.scrollBy(0, element.getBoundingClientRect().top + y - window.innerHeight / 2), target.y);
+    const plot = (await canvas.boundingBox())!;
+    await page.mouse.click(plot.x + target.x, plot.y + target.y);
+    // The frame that the click asked for places the popup and scrolls it into view: it comes no later
+    // than a frame asked for after the click.
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(canvas).toHaveAttribute('data-selected', target.hsp);
+    await expect(popup).toHaveAttribute('data-hsp', target.hsp);
+    await expect(page.getByTestId(TABS.dotplot)).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(() => coversPlot(popup, canvas), `the popup of ${target.hsp} covers the plot`).toBe(false);
+  }
+  await expectNoSideScroll(page, 'dot plot popup');
+});
+
+test('the dot plot: a popup taller than a short plot is under it, and stays there', async ({ page }) => {
+  // A wide stage and a plot of a long query against a short subject: room on the right, but the
+  // canvas is shorter than the popup.
+  await page.setViewportSize({ width: 1800, height: 900 });
+  const query = dna(41, 2400);
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q\n${query}\n`);
+  await paste(page, 'subject', `>s\n${query.slice(1000, 1200)}\n`);
+  await run(page, 1);
+  await openRun(page, 1);
+  await show(page, 'dotplot');
+  const canvas = page.getByTestId('dotplot-canvas');
+  await canvas.focus();
+  await page.keyboard.press('Enter');
+  const popup = page.getByTestId('dotplot-popup');
+  await expect(popup).toHaveAttribute('data-place', 'below');
+  // Under the plot for its height: the stage has room on the right.
+  const [stage, plot] = [(await page.locator('.plot-stage').boundingBox())!, (await canvas.boundingBox())!];
+  expect(stage.width - plot.width).toBeGreaterThan(400);
+  expect((await popup.boundingBox())!.height).toBeGreaterThan(plot.height);
+  await expect.poll(() => coversPlot(popup, canvas)).toBe(false);
+  // Frames later (a scroll bar may have come with it), it is still there.
+  await page.waitForTimeout(500);
+  await expect(popup).toHaveAttribute('data-place', 'below');
+  await expectNoSideScroll(page, 'dot plot popup under a short plot');
+});
+
+test('the E value filter compares the values that the lists show: an E value written 0.0 passes "E value ≤ 0"', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, 'NCBI writes an E value below 1e-180 as 0.0; the FakeEngine writes FAKE');
+  // 450 identical letters: an E value of about 1e-240, not 0 (1,200 letters underflow to 0), written 0.0.
+  const sequence = dna(31, 450);
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q\n${sequence}\n`);
+  await paste(page, 'subject', `>s\n${sequence}\n>t\n${sequence.slice(0, 200)}\n`);
+  await run(page, 1);
+  await openRun(page, 1);
+  const rows = outfmt6Rows((await readOutputs(page, 1)).text[6]);
+  const zero = rows.filter((row) => row[10] === '0.0');
+  expect(zero.map((row) => row[1])).toEqual(['s']);
+  expect(rows.find((row) => row[1] === 't')![10]).not.toBe('0.0');
+  await show(page, 'hits');
+  await page.getByTestId('filter-evalue').fill('0');
+  await page.getByTestId('filter-apply').click();
+  await expect(subjectRows(page)).toHaveCount(1);
+  await expect(subjectRows(page).locator('[data-field="sseqid"]')).toHaveText('s');
+  await expect(subjectRows(page).locator('[data-field="evalue"]')).toHaveText('0.0');
+});
 
 test('the dot plot: its Subject list chooses the plotted subject, the same selection as a Descriptions row', async ({ page }) => {
   // The Owner (2026-11-02): chosen only by a Descriptions row on another tab, the plotted pair was

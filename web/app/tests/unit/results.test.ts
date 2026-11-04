@@ -7,7 +7,7 @@ import { ResultsBrowser, type ResultsDeps } from '../../src/application/results'
 import { Store } from '../../src/application/store';
 import { hspTable, out0Range, out6Range, frame, subjectSpan } from '../../src/domain/hsp-table';
 import { headingTitle } from '../../src/domain/outfmt0';
-import { splitOutfmt6Row } from '../../src/domain/outfmt6';
+import { shownScores, splitOutfmt6Row } from '../../src/domain/outfmt6';
 import {
   buildResultIndex,
   filterQuery,
@@ -40,6 +40,8 @@ interface Spec {
   readonly coords: readonly [number, number, number, number];
   readonly shown?: boolean;
   readonly frames?: readonly [number | null, number | null];
+  /** The outfmt 6 texts of the E value and the bit score, where they are not the numbers as JavaScript writes them. */
+  readonly text?: { readonly e?: string; readonly bits?: string };
 }
 
 const SPECS: readonly Spec[] = [
@@ -57,7 +59,7 @@ function makeRun(specs: readonly Spec[] = SPECS) {
   const headings = new Map<string, [number, number]>();
   specs.forEach((spec, index) => {
     const [qs, qe, ss, se] = spec.coords;
-    const row = [`q${spec.q}`, `s${spec.s}`, '99.000', '50', '0', '0', qs, qe, ss, se, String(spec.e), String(spec.bits)].join('\t') + '\n';
+    const row = [`q${spec.q}`, `s${spec.s}`, '99.000', '50', '0', '0', qs, qe, ss, se, spec.text?.e ?? String(spec.e), spec.text?.bits ?? String(spec.bits)].join('\t') + '\n';
     const out6Start = out6.length;
     out6 += row;
     const shown = spec.shown ?? true;
@@ -101,6 +103,31 @@ describe('outfmt 6 rows and outfmt 0 headings', () => {
     const row = splitOutfmt6Row('q1\ts1\t98.684\t76\t1\t0\t1\t76\t1\t76\t2.37e-38\t138\n');
     expect(row).toMatchObject({ qseqid: 'q1', sseqid: 's1', pident: '98.684', evalue: '2.37e-38', bitscore: '138', send: '76' });
     expect(() => splitOutfmt6Row('q1\ts1\t1\n')).toThrow(/12 fields, this one 3/);
+  });
+
+  it('reads the E value and bit score that each row shows, and keeps the record value where there is no row', () => {
+    const rows = ['q\ts\t100.000\t9\t0\t0\t1\t9\t1\t9\t0.0\t400\n', 'q\ts\t99.0\t9\t0\t0\t1\t9\t1\t9\t2e-50\t 45.4\r\n'];
+    const out6 = new TextEncoder().encode(rows.join(''));
+    const record = (index: number, e: number, bits: number, range: readonly [number, number] | null): HspRecord => ({
+      ...{ index, q_idx: 0, s_idx: 0, rank: index, raw_score: 1, bit_score: bits, e_value: e },
+      ...{ q_start: 1, q_end: 9, s_start: 1, s_end: 9, query_frame: null, subject_frame: null, subject_length: 9 },
+      ...{ query_aligned: null, subject_aligned: null, out6: range, out0: null, out0_subject: null },
+    });
+    const table = hspTable([
+      record(0, 3e-200, 400.4, [0, rows[0]!.length]),
+      // A range that ends past the stored output reads what there is.
+      record(1, 2.4e-50, 45.42, [rows[0]!.length, out6.length + 10]),
+      record(2, 0.5, 20.1, null),
+    ]);
+    const scores = shownScores(table, out6);
+    expect([...scores.eValue]).toEqual([0, 2e-50, 0.5]);
+    expect([...scores.bitScore]).toEqual([400, 45.4, 20.1]);
+    // A field that is empty or not a number (the FakeEngine writes FAKE) keeps the record value.
+    const odd = new TextEncoder().encode('q\ts\t1\t9\t0\t0\t1\t9\t1\t9\tFAKE\t\n');
+    const kept = shownScores(hspTable([record(0, 1e-5, 33.3, [0, odd.length])]), odd);
+    expect([...kept.eValue, ...kept.bitScore]).toEqual([1e-5, 33.3]);
+    // The record's values stay as they are.
+    expect([...table.eValue]).toEqual([3e-200, 2.4e-50, 0.5]);
   });
 
   it('takes the title of a subject heading as written', () => {
@@ -485,6 +512,33 @@ describe('ResultsBrowser', () => {
     expect(hsp).toEqual({ runId: 'r1', qIdx: 0, rank: 2 });
     expect(detail!.id).toEqual(hsp);
     expect(detail!.section).toBe(' Score = 70 bits\n\nQuery  5  ACGT  45\n');
+  });
+
+  it('filters by the E value and bit score that the lists show: 0.0 is 0, 123 is 123 (WA-RS-01)', async () => {
+    // NCBI writes an E value below 1e-180 as 0.0, and a bit score of 100 or more without decimals.
+    const specs: readonly Spec[] = [
+      { q: 0, s: 0, bits: 400.4, e: 3e-200, coords: [1, 50, 1, 50], text: { e: '0.0', bits: '400' } },
+      { q: 0, s: 1, bits: 122.6, e: 2.4e-50, coords: [1, 50, 1, 50], text: { e: '2e-50', bits: '123' } },
+      { q: 0, s: 2, bits: 40.2, e: 1e-5, coords: [1, 50, 1, 50], text: { e: '1e-05', bits: '40.2' } },
+    ];
+    const { results } = setup({ specs });
+    await results.open('r1');
+    const shown = () => results.state.get().subjects.map((s) => [s.sIdx, s.first.evalue, s.first.bitscore]);
+    results.setFilters({ maxEValue: 0 });
+    expect(shown()).toEqual([[0, '0.0', '400']]);
+    results.setFilters({ maxEValue: 2e-50 });
+    expect(shown()).toEqual([
+      [0, '0.0', '400'],
+      [1, '2e-50', '123'],
+    ]);
+    results.setFilters({ minBitScore: 123 });
+    expect(shown()).toEqual([
+      [0, '0.0', '400'],
+      [1, '2e-50', '123'],
+    ]);
+    results.setFilters({ minBitScore: 400.4 });
+    expect(shown()).toEqual([]);
+    expect(results.state.get().hidden).toEqual({ subjects: 3, hsps: 3 });
   });
 
   it('keeps the selected HSP through a filter that shows it, and moves off one that hides it', async () => {

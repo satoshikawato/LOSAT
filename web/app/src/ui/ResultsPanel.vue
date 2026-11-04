@@ -7,10 +7,11 @@
 // Dot Plot and LOSAT's Run details and Outputs are tabs beside the hits. A run that has not
 // finished shows its status here (RunStatus) until it completes. Every view follows one
 // selection, held by the HSP's identity (application/results.ts).
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
-import type { HspId, ResultsBrowser } from '../application/results';
+import { noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
+import type { OutputFormat } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal } from '../domain/run';
 import { useStore } from './useStore';
@@ -21,6 +22,7 @@ import { formatCount } from './format';
 import GraphicSummary from './GraphicSummary.vue';
 import HspTable from './HspTable.vue';
 import LosatLoader from './LosatLoader.vue';
+import { NO_HSP_TEXT } from './no-hsp-text';
 import OutputsView from './OutputsView.vue';
 import QueryPicker from './QueryPicker.vue';
 import ResultFilters from './ResultFilters.vue';
@@ -52,6 +54,54 @@ const TABS: readonly { readonly view: ResultsView; readonly label: string; reado
   { view: 'outputs', label: 'Outputs', testid: 'results-view-outputs' },
 ];
 
+const emptyPlot = computed(() => (state.value.hsps.length > 0 ? undefined : noHspReason(state.value)));
+
+/**
+ * "Download All" lists the outputs of the run, as NCBI's lists its formats, by BLAST+'s names of
+ * them (its -outfmt help); the one chosen is saved as one file (WA-RS-05). The list opens in the
+ * page's flow, under the run's line, so that it fits a phone's width.
+ */
+const DOWNLOADS: readonly { readonly format: OutputFormat; readonly label: string }[] = [
+  { format: 0, label: 'Pairwise (outfmt 0)' },
+  { format: 6, label: 'Tabular (outfmt 6)' },
+  { format: 7, label: 'Tabular with comment lines (outfmt 7)' },
+];
+const downloadsOpen = ref(false);
+const downloadsId = useId();
+const downloadsButton = ref<HTMLButtonElement>();
+const downloadsList = ref<HTMLElement>();
+
+function download(format: OutputFormat): void {
+  downloadsOpen.value = false;
+  // The chosen item leaves the page with the list; the focus stays on "Download All".
+  downloadsButton.value?.focus();
+  const run = loaded.value?.run;
+  if (run !== undefined) void props.coordinator.exportOutput(run.snapshot.runId, format);
+}
+
+/** Escape closes the list, and the focus goes back to its button (Safari does not focus a clicked button). */
+function onDownloadsKey(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || !downloadsOpen.value || event.defaultPrevented) return;
+  event.preventDefault();
+  downloadsOpen.value = false;
+  downloadsButton.value?.focus();
+}
+
+/** A press outside the list and its button closes the list. */
+function onPointerDown(event: PointerEvent): void {
+  const target = event.target as Node | null;
+  if (!downloadsOpen.value || downloadsList.value?.contains(target) || downloadsButton.value?.contains(target)) return;
+  downloadsOpen.value = false;
+}
+onMounted(() => {
+  document.addEventListener('pointerdown', onPointerDown);
+  document.addEventListener('keydown', onDownloadsKey);
+});
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', onPointerDown);
+  document.removeEventListener('keydown', onDownloadsKey);
+});
+
 /**
  * Brings the panel's heading into view and moves the focus to it (a search just started).
  * The scroll is instant: Firefox ended a smooth one early while the run was read.
@@ -68,6 +118,9 @@ const selected = computed(() => props.runs.find((run) => run.snapshot.runId === 
 const loaded = computed(() => state.value.loaded);
 /** The selected run waits or searches: its status is shown in place of its results. */
 const active = computed(() => selected.value !== undefined && !isTerminal(selected.value.status));
+
+// Another run, or the same run read again, starts with the list closed.
+watch([() => state.value.runId, () => state.value.phase], () => (downloadsOpen.value = false));
 
 // With no run chosen, show the newest completed one.
 watch(
@@ -150,9 +203,23 @@ async function toAlignments(id: HspId): Promise<void> {
                 </option>
               </select>
             </label>
-            <button v-if="state.phase === 'ready'" type="button" class="link" data-testid="results-download-all" @click="view = 'outputs'">
+            <button
+              v-if="state.phase === 'ready'"
+              ref="downloadsButton"
+              type="button"
+              class="link"
+              data-testid="results-download-all"
+              :aria-expanded="downloadsOpen"
+              :aria-controls="downloadsId"
+              @click="downloadsOpen = !downloadsOpen"
+            >
               Download All
             </button>
+            <ul v-if="state.phase === 'ready' && downloadsOpen" :id="downloadsId" ref="downloadsList" class="download-list" data-testid="results-download-menu">
+              <li v-for="item in DOWNLOADS" :key="item.format">
+                <button type="button" :data-testid="`results-download-${item.format}`" @click="download(item.format)">{{ item.label }}</button>
+              </li>
+            </ul>
           </dd>
           <template v-if="selected">
             <dt>Mode</dt>
@@ -243,6 +310,9 @@ async function toAlignments(id: HspId): Promise<void> {
           <DotPlot :results="results" :state="state" @show-alignment="toAlignments" />
           <HspTable :results="results" :state="state" />
         </div>
+        <p v-else-if="view === 'dotplot' && emptyPlot" class="results-message" data-testid="results-dotplot-empty" :data-kind="emptyPlot">
+          {{ NO_HSP_TEXT[emptyPlot] }}
+        </p>
         <div v-if="view === 'details'" class="results-group">
           <RunDetails :run="loaded.run" :loaded="loaded" />
         </div>

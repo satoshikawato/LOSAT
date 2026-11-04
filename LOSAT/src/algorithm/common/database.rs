@@ -741,14 +741,31 @@ impl LookupTexts {
 // ```
 /// Whether NCBI's formatters may read a batch's reported sequences one by one, not all at once
 /// before its report: `PRE_FETCH_SEQS_LIMIT` is an integer other than `INT_MAX` (0, or one below
-/// the batch's number of Seq-aligns, which LOSAT does not count, turns NCBI's prefetch off).
-/// A value that is no integer stops NCBI before its report; LOSAT refuses it in
-/// `blastinput::app::check_search_environment` (not for outfmt 11, whose archive NCBI writes
-/// without the prefetch).
+/// the batch's number of Seq-aligns, which the readers of the headers do not count, turns NCBI's
+/// prefetch off, [`prefetch_off`]). A value that is no integer stops NCBI before its report;
+/// LOSAT refuses it in `blastinput::app::check_search_environment` (not for outfmt 11, whose
+/// archive NCBI writes without the prefetch).
 fn prefetch_may_be_off() -> bool {
+    prefetch_seqs_limit().is_some_and(|limit| limit != i32::MAX)
+}
+
+/// Whether NCBI's prefetch is off for a query batch whose results hold `seq_aligns` Seq-aligns
+/// (one for each HSP of its hit lists, the count of outfmt 7's `# N hits found`):
+/// `PRE_FETCH_SEQS_LIMIT` is an integer other than `INT_MAX` that is 0 or below `seq_aligns`.
+/// Its formatters then fetch the sequences that each query's report shows, after the query's
+/// own warnings.
+pub(crate) fn prefetch_off(seq_aligns: usize) -> bool {
+    prefetch_seqs_limit().is_some_and(|limit| {
+        limit != i32::MAX
+            && (limit == 0 || i64::try_from(seq_aligns).unwrap_or(i64::MAX) > i64::from(limit))
+    })
+}
+
+/// `PRE_FETCH_SEQS_LIMIT` as `NStr::StringToInt` reads it; `None` when it is not set or is no
+/// integer.
+fn prefetch_seqs_limit() -> Option<i32> {
     std::env::var_os("PRE_FETCH_SEQS_LIMIT")
         .and_then(|value| crate::blastinput::query_batch::ncbi_string_to_int(&value))
-        .is_some_and(|limit| limit != i32::MAX)
 }
 
 impl<'a> HeaderReader<'a> {

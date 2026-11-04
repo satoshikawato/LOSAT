@@ -6039,21 +6039,20 @@ fn search(
                     super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
                 }
-                // BLASTP's outfmt 0, 5, 6 and 7 prefetch the subjects of each batch, which with
-                // `taxdb.bti` on the search path reads their taxids and looks them up in the
-                // taxonomy database (`ListedTitles::prefetch_messages`); a refusal there would come
-                // in a later block, so their checks then also read every sequence's taxid and ask
-                // whether any lookup can be refused (`shared::taxdb_may_refuse`, without the
-                // scientific names, which the prefetch does not ask for). The refusal of NCBI's
-                // taxonomy cache (`shared::TaxdbRun::cache_collision`) comes at the run's first
-                // prefetch, in block 0 before any row.
+                // Outfmt 0, 5, 6 and 7 (psiblast's 0, 6 and 7) prefetch the subjects of each
+                // batch, which with `taxdb.bti` on the search path reads their taxids and looks
+                // them up in the taxonomy database (`ListedTitles::prefetch_messages`); a refusal
+                // there would come in a later block, so their checks then also read every
+                // sequence's taxid and ask whether any lookup can be refused
+                // (`shared::taxdb_may_refuse`, without the scientific names, which the prefetch
+                // does not ask for). The refusal of NCBI's taxonomy cache
+                // (`shared::TaxdbRun::cache_collision`) comes at the run's first prefetch, in
+                // block 0 before any row.
                 let x_prefetch_taxids = |x_kind: XBlockReport| {
-                    args.app == BlastpApp::Blastp
-                        && matches!(
-                            x_kind,
-                            XBlockReport::Tabular | XBlockReport::Pairwise | XBlockReport::Xml
-                        )
-                        && database.is_some_and(|database| database.taxdb_found())
+                    matches!(
+                        x_kind,
+                        XBlockReport::Tabular | XBlockReport::Pairwise | XBlockReport::Xml
+                    ) && database.is_some_and(|database| database.taxdb_found())
                 };
                 let titles_allowed = |x_kind: XBlockReport| match (database, x_kind) {
                     // Outfmt 5 whose batches read the taxids: the check of outfmt 15 and 16.
@@ -10907,6 +10906,33 @@ fn run_resolved_in_pool(
         }
         _ => None,
     };
+    // Whether the batches' prefetch looks the subjects' taxids up (`prefetch_messages`, below).
+    let prefetch_taxids = listed_titles.is_some()
+        && requested_formats
+            .first()
+            .is_some_and(|outfmt| outfmt.prefetches_subjects())
+        && database.is_some_and(|database| database.taxdb_found());
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:673-678
+    // ```c++
+    //     ITERATE(blast::CSearchResultSet, result, results) {
+    //         if ( !(*result)->HasAlignments() ) {
+    //             continue;
+    //         }
+    //         ITERATE(CSeq_align_set::Tdata, aln, (*result)->GetSeqAlign()->Get()) {
+    //             CConstRef<CSeq_id> subj(&(*aln)->GetSeq_id(kSubjRow));
+    // ```
+    // NCBI's prefetch reads the subject of every Seq-align of a batch's results, which are
+    // psiblast's before its formatter's cut: the subjects of the traceback hit lists, also those
+    // beyond `max_target_seqs` that no report shows. Their ranks, by query, for the prefetch.
+    let psiblast_prefetched: Option<Vec<Vec<usize>>> =
+        (args.app == BlastpApp::Psiblast && prefetch_taxids).then(|| {
+            hit_lists
+                .iter()
+                .map(|hit_list| {
+                    database::ListedTitles::reported_ranks(std::slice::from_ref(hit_list)).collect()
+                })
+                .collect()
+        });
     let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
         hit_lists
             .iter_mut()
@@ -11183,15 +11209,20 @@ fn run_resolved_in_pool(
     // before the warnings of its first query. They go with the warnings, where the first format
     // is outfmt 0, 5, 6 or 7 (`BlastpReport::prefetches_subjects`). They are read here, after
     // the subjects' refusals and before any format is written, so a taxonomy database that LOSAT
-    // cannot read is refused before any byte; without `taxdb.bti` nothing is read. psiblast's
-    // batches prefetch too (psiblast_app.cpp:256-263, 369-370); its reports stay as they were.
+    // cannot read is refused before any byte; without `taxdb.bti` nothing is read.
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:262-264
+    // ```c++
+    //                    results = psiblast->Run();
+    //                    BlastFormatter_PreFetchSequenceData(*results, scope,
+    //                 		   m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice());
+    // ```
+    // psiblast's batches, of one query each (`read_psiblast_query_batches`), prefetch the same
+    // way, the subjects of the traceback hit lists (`psiblast_prefetched`).
+    // Where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off (`s_PreFetchSeqs`, quoted at
+    // `shared::prefetch_may_be_off`), each query's report fetches the subjects it shows, after
+    // the query's own warnings: those of its final hit list, psiblast's after the cut.
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
-        if args.app == BlastpApp::Blastp
-            && format_plans
-                .first()
-                .is_some_and(|outfmt| outfmt.prefetches_subjects())
-            && database.taxdb_found()
-        {
+        if prefetch_taxids {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
             // too, which the prefetch does not: the rows of a batch with hits may open the
             // taxonomy database before a later batch's prefetch (`TaxdbRun::open_for_rows`).
@@ -11199,9 +11230,7 @@ fn run_resolved_in_pool(
                 format_plans.first(),
                 Some(BlastpReport::CustomTabular(spec)) if spec.checks_taxdb()
             );
-            for batch in &query_batches {
-                let lists = &hit_lists[batch.searched.clone()];
-                let messages = titles.prefetch_messages(database, lists)?;
+            let open_for_rows = |lists: &[Option<BlastpHitList>]| -> Result<()> {
                 if plural_names
                     && lists
                         .iter()
@@ -11210,6 +11239,38 @@ fn run_resolved_in_pool(
                 {
                     database.open_for_tabular_rows(args.app.name())?;
                 }
+                Ok(())
+            };
+            for batch in &query_batches {
+                let lists = &hit_lists[batch.searched.clone()];
+                // The batch's Seq-aligns, one for each HSP of its results.
+                let seq_aligns = match psiblast_hits_found.as_ref() {
+                    Some(found) => found[batch.searched.clone()].iter().sum(),
+                    None => blastp_hit_list_hsp_count(lists),
+                };
+                if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                    for query in batch.searched.clone() {
+                        let shown = std::slice::from_ref(&hit_lists[query]);
+                        let messages = titles.prefetch_messages(
+                            database,
+                            database::ListedTitles::reported_ranks(shown),
+                        )?;
+                        query_warning_lines[query].extend(messages);
+                        open_for_rows(shown)?;
+                    }
+                    continue;
+                }
+                let messages = match psiblast_prefetched.as_ref() {
+                    Some(ranks) => titles.prefetch_messages(
+                        database,
+                        ranks[batch.searched.clone()].iter().flatten().copied(),
+                    )?,
+                    None => titles.prefetch_messages(
+                        database,
+                        database::ListedTitles::reported_ranks(lists),
+                    )?,
+                };
+                open_for_rows(lists)?;
                 if messages.is_empty() {
                     continue;
                 }

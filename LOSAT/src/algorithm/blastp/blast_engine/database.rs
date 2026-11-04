@@ -1182,20 +1182,22 @@ impl ListedTitles<'_> {
         )
     }
 
-    /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
-    /// are `hit_lists` prefetches the subjects it reports (`shared::prefetch_messages`): the
-    /// subjects with rows in them, the ones `read_taxids` reads. Empty, and nothing read,
-    /// without `taxdb.bti` on the search path. A taxonomy database that LOSAT cannot read as
-    /// NCBI does, and a header whose taxid does not decode, are refused.
+    /// NCBI's messages about the taxonomy database when a query batch prefetches the subjects of
+    /// its Seq-aligns, of ranks `ranks` (`shared::prefetch_messages`): BLASTP's are the subjects
+    /// with rows in the batch's final hit lists (`reported_ranks`), the ones `read_taxids` reads;
+    /// psiblast's those of its traceback hit lists, before its formatter's cut. Empty, and
+    /// nothing read, without `taxdb.bti` on the search path. A taxonomy database that LOSAT
+    /// cannot read as NCBI does, and a header whose taxid does not decode, are refused.
     pub(super) fn prefetch_messages(
         &self,
         database: &BlastpDatabase,
-        hit_lists: &[Option<BlastpHitList>],
+        ranks: impl IntoIterator<Item = usize>,
     ) -> Result<Vec<u8>> {
         shared::prefetch_messages(
             &database.db,
             &database.taxdb,
-            Self::reported_ranks(hit_lists)
+            ranks
+                .into_iter()
                 .map(|rank| (self.listed.ordinals[rank], self.parsed_subject(rank))),
             self.program,
         )
@@ -1207,7 +1209,9 @@ impl ListedTitles<'_> {
     }
 
     /// The rank of the subject of each row of `hit_lists`, in the order of the lists.
-    fn reported_ranks(hit_lists: &[Option<BlastpHitList>]) -> impl Iterator<Item = usize> + '_ {
+    pub(super) fn reported_ranks(
+        hit_lists: &[Option<BlastpHitList>],
+    ) -> impl Iterator<Item = usize> + '_ {
         hit_lists.iter().flatten().flat_map(|hit_list| {
             let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
             hit_list.hsplist_array[..count]

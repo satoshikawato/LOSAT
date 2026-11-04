@@ -803,6 +803,9 @@ describe('swappedRegion', () => {
     expect(swap('500', '100')).toBeUndefined();
     expect(swap('300', '0')).toBeUndefined();
     expect(swap('3a', '1')).toBeUndefined();
+    // Not whole numbers: the problem says so, and a swap would not mend it.
+    expect(swap('300.0', '100')).toBeUndefined();
+    expect(swap('1e3', '100')).toBeUndefined();
     expect(swap('', '1')).toBeUndefined();
   });
 });

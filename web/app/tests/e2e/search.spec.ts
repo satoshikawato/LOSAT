@@ -322,6 +322,7 @@ test('the region of a role with one record: the drag, the fields, the limits and
   // The form offers the swap (Owner, 2026-11-04); outside the record it offers none.
   await expect(page.getByTestId('subject-region-swap')).toHaveText('Swap to 5–60');
   await page.getByTestId('subject-region-swap').click();
+  await expect(page.getByTestId('subject-region-start')).toBeFocused();
   await expect(page.getByTestId('subject-region-start')).toHaveValue('5');
   await expect(page.getByTestId('subject-region-stop')).toHaveValue('60');
   await expect(page.getByTestId('subject-region-problem')).toHaveCount(0);

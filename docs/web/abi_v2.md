@@ -191,11 +191,16 @@ the WASI imports.
   field uses to separate its entries). A format that the CLI writes and a run does not (5, 10 and
   the others but 0, 6 and 7) is refused with `-outfmt N: the browser writes outfmt 0, 6 and 7 (6
   and 7 with any fields); other formats need the CLI`. The value 0, 6 or 7 without words after the
-  number adds nothing: the run writes those formats anyway. 6 and 7 with words after the number
+  number adds nothing: the run writes those formats anyway; nor does 0 with words (`0 qseqid`), which
+  the CLI reads as 0. 6 and 7 with words after the number
   (after NCBI's white space around the value is removed, a space follows the number: fields,
   `-field`, `std`, `delim=`) add stream 4, written by the tabular search (the first search, below)
   as its first format, so that it is the CLI's output for the same argv and adds no search (its hit
-  list size is that of 6 and 7). The rule reads the words, not the fields that they give, so that a
+  list size is that of 6 and 7). NCBI's formatting handler checks its custom delimiter where the CLI
+  does, after the ranges and the query options (in `validate` after the program's checks of the
+  options for BLASTP, TBLASTN and TBLASTX, so an argv with an error of both may report the other);
+  the formats that the handler rejects (SAM of another program, 19, 21) are rejected with the
+  handler's message as the argv is parsed, before the ranges. The rule reads the words, not the fields that they give, so that a
   host reads it from the argv without the table of fields: `6 std` adds a stream 4 with the bytes of
   stream 6. The engine is given the run's formats, and the checks of the options read them as
   without `-outfmt`: streams 0, 6, 7 and 1 are those of the argv without `-outfmt` (session W10).

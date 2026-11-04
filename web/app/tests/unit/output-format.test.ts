@@ -62,3 +62,10 @@ describe('outputFileName', () => {
     expect(outputFileName({ ...run, argv: argv('-outfmt', '7 std') }, 7)).toBe('losat-run3-blastn-megablast-20251104T111640Z.outfmt7.txt');
   });
 });
+
+describe('outfmtOption', () => {
+  it('reads the names of the inputs as values', () => {
+    expect(outfmtOption(['blastn', '-query', '-outfmt=7 x.fa', '-subject', 's.fa'])).toBeUndefined();
+    expect(customOutfmt(['blastn', '-query', 'q.fa', '-subject', '-outfmt=6 x.fa'])).toBeUndefined();
+  });
+});

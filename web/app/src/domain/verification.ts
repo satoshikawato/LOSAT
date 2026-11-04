@@ -66,6 +66,11 @@ export function optionKey(words: readonly string[], grammar: OptionGrammar): str
   while (i < words.length) {
     const flag = words[i]!;
     if (!flag.startsWith('-')) return undefined;
+    // `-outfmt=6 qseqid` is the command line's form of `-outfmt '6 qseqid'`.
+    if (NOT_OPTIONS.has(flag.split('=', 1)[0]!) && flag.includes('=')) {
+      i++;
+      continue;
+    }
     const takesValue = NOT_OPTIONS.has(flag) || grammar.takesValue(flag);
     if (takesValue && i + 1 >= words.length) return undefined;
     const value = takesValue ? words[i + 1]! : '';

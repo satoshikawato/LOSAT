@@ -201,7 +201,7 @@ export class DataService implements DataGateway {
     if (this.runs.has(runId)) throw new Error(`run ${runId} already exists`);
     const token = this.deps.newToken();
     const writers = new Map<OutputStream, BlockWriter>();
-    const streams: readonly OutputStream[] = [...outputs, HITS_STREAM, DIAGNOSTICS_STREAM];
+    const streams: readonly OutputStream[] = [...new Set([...OUTPUT_FORMATS, ...outputs]), HITS_STREAM, DIAGNOSTICS_STREAM];
     try {
       for (const stream of streams) writers.set(stream, await this.deps.store.create(blockPath(token, stream)));
     } catch (error) {

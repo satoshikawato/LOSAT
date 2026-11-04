@@ -433,8 +433,12 @@ input[type='radio'] {
   color: var(--tab-fg);
 }
 
-/* The output of the run's -outfmt is named by its fields, which can be longer than a phone's width. */
-.tabs button.custom-output {
+/* The output of the run's -outfmt is named by its fields, which can be longer than a phone's
+   width (one token too, a delim= value): its tab, its command, Export and its "Download All" item. */
+.tabs button.custom-output,
+.outputs-view .command,
+.outputs-view > button,
+.download-list button {
   overflow-wrap: anywhere;
 }
 

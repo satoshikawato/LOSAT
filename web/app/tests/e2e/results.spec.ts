@@ -2137,3 +2137,30 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
   await page.getByTestId('results-download-all').click();
   await expect(page.getByTestId('results-download-menu').getByRole('button')).toHaveCount(3);
 });
+
+// On a phone's width, the output of a long -outfmt (fields, and one long delim= token) wraps in its tab, its command,
+// Export and "Download All": no horizontal scrolling (W10).
+test("the output of a long -outfmt fits a phone's width", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const outfmt = `7 delim=${'|'.repeat(60)} qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos btop`;
+  await openParameters(page);
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${A}\n`);
+  await paste(page, 'subject', `>s1\n${S1}\n`);
+  await page.getByTestId('param-extra').fill(`-outfmt '${outfmt}'`);
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  await page.getByTestId('results-view-outputs').click();
+  await page.getByTestId('format-custom').click();
+  await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:4');
+  await page.getByTestId('results-download-all').click();
+  await expect(page.getByTestId('results-download-custom')).toBeVisible();
+  const wide = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+  expect(wide[0], 'the page is wider than the window').toBeLessThanOrEqual(wide[1]!);
+  for (const id of ['format-custom', 'export-output', 'results-download-custom', 'result-command']) {
+    const box = (await page.getByTestId(id).boundingBox())!;
+    expect(box.x + box.width, id).toBeLessThanOrEqual(390);
+  }
+});

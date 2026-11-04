@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shlex
 import sys
 from pathlib import Path
@@ -54,7 +55,7 @@ def custom_outfmt(outfmt: str) -> bool:
     with words after the number."""
     value = outfmt.strip(NCBI_SPACE)
     number, space, _ = value.partition(" ")
-    return bool(space) and number.lstrip("+").lstrip("0") in ("6", "7")
+    return bool(space) and re.fullmatch(r"\+?0*[67]", number) is not None
 
 
 def split(command: list[str]) -> tuple[str | None, list[str]]:

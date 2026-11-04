@@ -167,18 +167,20 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
     let outfmt = std::mem::replace(outfmt_of(&mut command), "0".to_string());
     let choice = LOSAT::blastinput::app::parse_formatting_string(&outfmt)
         .map_err(|error| format!("{error:#}"))?;
-    // What the CLI rejects, with its message: a format that LOSAT's program does not write, NCBI's
-    // formatting handler's errors (another program's format, a custom delimiter that a field
-    // uses). The CLI is taken with `-out`, which the formats 13 and 14 need there.
-    LOSAT::blastinput::app::report_format(
-        &choice,
-        engine_program(program),
-        Some(std::path::Path::new("out")),
-    )
-    .and_then(|_| {
-        LOSAT::blastinput::app::formatting_handler_check(&choice, engine_program(program))
-    })
-    .map_err(|error| format!("{error:#}"))?;
+    // What the CLI rejects, with its message: a format that LOSAT's program does not write, and the
+    // formats that NCBI's formatting handler rejects (`report_format` gives none: SAM of another
+    // program, AIRR, FASTA), which a run never gives the engine; the CLI rejects those after the
+    // ranges and the query options, so for an argv with an error of both the CLI reports the
+    // other. The CLI is taken with `-out`, which the formats 13 and 14 need there. The handler's
+    // check of a custom delimiter is the engine's, where the CLI makes it (`run_local`, and
+    // `custom_handler_check` in `validate`).
+    let engine = engine_program(program);
+    LOSAT::blastinput::app::report_format(&choice, engine, Some(std::path::Path::new("out")))
+        .and_then(|format| match format {
+            Some(_) => Ok(()),
+            None => LOSAT::blastinput::app::formatting_handler_check(&choice, engine),
+        })
+        .map_err(|error| format!("{error:#}"))?;
     if !u32::try_from(choice.number).is_ok_and(|number| program.formats().contains(&number)) {
         return Err(format!(
             "-outfmt {}: the browser writes outfmt 0, 6 and 7 (6 and 7 with any fields); other formats need the CLI",
@@ -214,6 +216,7 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
     };
     let (program, command, custom) = parse_run(words)?;
     let groups = search_groups(&outputs(program, custom.as_deref()), &command);
+    let custom_check = || custom_handler_check(program, custom.as_deref());
     match command {
         Commands::Blastn(mut args) => subject_range(args.subject_loc.as_deref(), "BLASTN")
             .and_then(|()| args.resolve_dust())
@@ -222,6 +225,8 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
                     .map(|_| ())
             })
             .map_err(|error| format!("{error:#}"))
+            // The formatting handler comes after the query options (`process_options`).
+            .and_then(|()| custom_check())
             .and_then(|()| {
                 let mut first_error = None;
                 for group in &groups {
@@ -234,15 +239,22 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
                 }
                 first_error.map_or(Ok(()), Err)
             })?,
+        // The checks of the options read the formats as without `-outfmt` (`parse_run`), and the
+        // output of the argv's `-outfmt` is checked after them: the CLI checks it among them
+        // (after the query range), so for an argv with an error of both the CLI may report the
+        // delimiter's.
         Commands::Tblastx(args) => subject_range(args.subject_loc.as_deref(), "TBLASTX")
             .and_then(|()| LOSAT::algorithm::tblastx::blast_engine::check_options(&args))
-            .map_err(|error| format!("{error:#}"))?,
+            .map_err(|error| format!("{error:#}"))
+            .and_then(|()| custom_check())?,
         Commands::Blastp(args) => subject_range(args.subject_loc.as_deref(), "BLASTP")
             .and_then(|()| LOSAT::algorithm::blastp::blast_engine::check_options(&args))
-            .map_err(|error| format!("{error:#}"))?,
+            .map_err(|error| format!("{error:#}"))
+            .and_then(|()| custom_check())?,
         Commands::Tblastn(args) => subject_range(args.subject_loc.as_deref(), "TBLASTN")
             .and_then(|()| LOSAT::algorithm::tblastn::check_options(&args))
-            .map_err(|error| format!("{error:#}"))?,
+            .map_err(|error| format!("{error:#}"))
+            .and_then(|()| custom_check())?,
         // The checks of each search's formats, as for BLASTN: BLASTX resolves its options for
         // each format (the hit list size). Its ranges are read among them, where its run reads
         // them: after LOSAT's limits of the options (`blastx::check_options`).
@@ -263,6 +275,21 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         _ => {}
     }
     Ok(())
+}
+
+/// NCBI's formatting handler's check of the argv's own `-outfmt` (a custom delimiter that a field
+/// uses to separate its entries), with the CLI's message; `validate` makes it where each program's
+/// CLI does, or after the checks of the options (BLASTX's `check_options` makes it, with the
+/// formats of each search). A run's engine makes it (`run_local`).
+fn custom_handler_check(program: Program, custom: Option<&str>) -> Result<(), String> {
+    let Some(outfmt) = custom else {
+        return Ok(());
+    };
+    LOSAT::blastinput::app::parse_formatting_string(outfmt)
+        .and_then(|choice| {
+            LOSAT::blastinput::app::formatting_handler_check(&choice, engine_program(program))
+        })
+        .map_err(|error| format!("{error:#}"))
 }
 
 /// BLASTN's checks of the options for the search of the output formats `group`, whose hit list
@@ -1513,7 +1540,7 @@ mod tests {
             }
             // What the CLI rejects, with its message.
             let engine = engine_program(Program::parse(program).unwrap());
-            for outfmt in ["abc", "99", "1", "6\tqseqid", "6 delim=; qseqid staxids"] {
+            for outfmt in ["abc", "99", "1", "6\tqseqid"] {
                 let cli = LOSAT::blastinput::app::parse_formatting_string(outfmt)
                     .and_then(|choice| {
                         LOSAT::blastinput::app::report_format(&choice, engine, None)?;
@@ -1526,9 +1553,34 @@ mod tests {
                     "{program} {outfmt:?}"
                 );
             }
-            assert!(custom(program, "6 delim=; qseqid staxids")
+            // The formatting handler's check of a custom delimiter comes where the CLI makes it:
+            // after the ranges (and BLASTN's query options), in validate and in the engine's run.
+            let conflict = "6 delim=; qseqid staxids";
+            assert_eq!(custom(program, conflict), Ok(Some(conflict.to_string())));
+            let words = [program, "-query", "q", "-subject", "s", "-outfmt", conflict];
+            let handler = LOSAT::blastinput::app::parse_formatting_string(conflict)
+                .and_then(|choice| {
+                    LOSAT::blastinput::app::formatting_handler_check(&choice, engine)
+                })
+                .unwrap_err();
+            assert_eq!(validate(&words), Err(format!("{handler:#}")), "{program}");
+            assert!(validate(&words)
                 .unwrap_err()
                 .contains("Your custom record separator (;)"));
+            let ranged = [&words[..], &["-subject_loc", "5-2"]].concat();
+            assert!(
+                validate(&ranged)
+                    .unwrap_err()
+                    .starts_with("BLAST engine error: Invalid specification of subject location"),
+                "{program}: {:?}",
+                validate(&ranged)
+            );
+            let query = [FastaRecord::new("q", b"q", b"ACGTACGTACGT")];
+            assert_eq!(
+                run(&words, &query, &query),
+                Err(format!("{handler:#}")),
+                "{program}"
+            );
             let twice = [
                 program, "-query", "q", "-subject", "s", "-outfmt", "6", "-outfmt", "7",
             ];

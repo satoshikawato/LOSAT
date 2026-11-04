@@ -18,11 +18,16 @@ const NCBI_SPACE = /^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g;
 
 /**
  * Where an argv gives -outfmt, as `-outfmt value` or `-outfmt=value` (the CLI takes it once), and
- * its value; undefined where it does not.
+ * its value; undefined where it does not. The names of the inputs (file names) are values, not
+ * options.
  */
 export function outfmtOption(argv: readonly string[]): { readonly at: number; readonly words: 1 | 2; readonly value: string } | undefined {
   for (let i = 1; i < argv.length; i++) {
     const word = argv[i]!;
+    if (word === '-query' || word === '-subject') {
+      i++;
+      continue;
+    }
     if (word === OUTFMT_FLAG && i + 1 < argv.length) return { at: i, words: 2, value: argv[i + 1]! };
     if (word.startsWith(`${OUTFMT_FLAG}=`)) return { at: i, words: 1, value: word.slice(OUTFMT_FLAG.length + 1) };
   }

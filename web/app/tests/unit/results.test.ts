@@ -356,8 +356,9 @@ describe('verificationBadge', () => {
       'These options were compared with NCBI BLAST+ 2.17.0 for outfmt 0, 6 and 7, not for outfmt 6 qseqid sseqid.',
       'The browser runtime was not checked for outfmt 6 qseqid sseqid.',
     ]);
-    // -outfmt itself is not an option of the profile: the same options without it are supported.
+    // -outfmt itself is not an option of the profile: the same options without it are supported, in either form.
     expect(verificationBadge({ ...input, argv: [...input.argv, '-outfmt', '7'] }, table).level).toBe('certified');
+    expect(verificationBadge({ ...input, argv: [...input.argv, '-outfmt=7'] }, table).level).toBe('certified');
   });
 
   it('supports a thread count only when it was checked in the browser (WA-RS-03)', () => {

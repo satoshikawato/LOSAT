@@ -85,7 +85,7 @@ export interface StoredResultsCheck {
 export interface RunStore {
   /**
    * Stages a run that writes `outputs` (`runOutputs` of its argv; the formats that every run
-   * writes by default) and returns the port that its engine writes to. An output that the run
+   * writes always) and returns the port that its engine writes to. An output that the run
    * does not write fails it at the commit.
    */
   openRun(runId: string, outputs?: readonly RunOutput[]): Promise<MessagePort>;

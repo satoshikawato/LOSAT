@@ -176,6 +176,12 @@ impl BlastpDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// Whether the run's prefetch is refused for NCBI's taxonomy cache
+    /// (`shared::TaxdbRun::prefetch_refused`), which comes at the first batch that prefetches.
+    pub(super) fn prefetch_refused(&self) -> bool {
+        self.taxdb.prefetch_refused(&self.db)
+    }
+
     /// The number of sequences (`CSeqDB::GetNumSeqs`).
     pub(super) fn num_sequences(&self) -> u32 {
         self.db.num_seqs()
@@ -1208,10 +1214,10 @@ impl ListedTitles<'_> {
     /// it finds as themselves; one that it finds nowhere is left out (the prefetch reads
     /// nothing for it). A lookup that fails is refused (NCBI's prefetch writes its warning and
     /// reads no other subject of the batch). With `taxids` (`taxdb.bti` on the search path), one
-    /// for which the prefetch can read another sequence is left out where neither that sequence
-    /// nor, where the prefetch can read it instead, the subject has a positive taxid (no lookup
-    /// either way), and refused otherwise. The subjects that the reports show were refused before
-    /// for all of these (`check_parsed_reports`).
+    /// for which the prefetch can read another sequence (`Prefetched::Another`) is refused where
+    /// the taxonomy database's texts can differ between what it can read
+    /// (`shared::lookup_texts_differ`), and else kept as itself or left out. The subjects that
+    /// the reports show were refused before for all of these (`check_parsed_reports`).
     pub(super) fn prefetched_ranks(
         &self,
         database: &BlastpDatabase,
@@ -1241,28 +1247,49 @@ impl ListedTitles<'_> {
                 Prefetched::Failed(reason) => return Err(refused(&reason)),
                 Prefetched::Another { .. } if !taxids => {}
                 Prefetched::Another {
-                    other,
+                    other: None,
+                    reason,
+                    ..
+                } => return Err(refused(&reason)),
+                Prefetched::Another {
+                    other: Some(other),
                     or_itself,
                     reason,
                 } => {
-                    let looks_up = |other: u32| -> Result<bool> {
-                        let set = database
-                            .db
-                            .defline_set(other)
-                            .map_err(|error| shared::database_error(error, self.program))?;
-                        Ok(set
-                            .deflines
-                            .iter()
-                            .any(|defline| defline.taxid.is_some_and(|taxid| taxid > 0)))
-                    };
-                    let none = match other {
-                        Some(other) => {
-                            !looks_up(other)? && !(or_itself && !subject.volume_taxids().is_empty())
+                    let set = database
+                        .db
+                        .defline_set(other)
+                        .map_err(|error| shared::database_error(error, self.program))?;
+                    let mut other_taxids: Vec<i32> = Vec::new();
+                    for defline in &set.deflines {
+                        if let Some(taxid) = defline.taxid.filter(|&taxid| taxid > 0) {
+                            if !other_taxids.contains(&taxid) {
+                                other_taxids.push(taxid);
+                            }
                         }
-                        None => false,
+                    }
+                    let own = subject.volume_taxids();
+                    let (choices, keep): (Vec<&[i32]>, bool) = if or_itself {
+                        (vec![&own, &other_taxids], true)
+                    } else {
+                        // `x_GetOid` keeps the OID only where one of its ids compares equal to
+                        // the Seq-align id (bdbloader.cpp), else the prefetch reads nothing.
+                        let equal =
+                            set.deflines
+                                .iter()
+                                .flat_map(|defline| &defline.ids)
+                                .any(|id| {
+                                    crate::seqid::defline_set::compare(id, subject.alignment_id())
+                                        == crate::seqid::defline_set::Sic::Yes
+                                });
+                        let read: &[i32] = if equal { &other_taxids } else { &[] };
+                        (vec![read, &[]], false)
                     };
-                    if !none {
+                    if shared::lookup_texts_differ(&database.db, &choices) {
                         return Err(refused(&reason));
+                    }
+                    if keep {
+                        kept.push(rank);
                     }
                 }
             }

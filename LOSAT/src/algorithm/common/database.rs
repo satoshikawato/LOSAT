@@ -708,6 +708,20 @@ impl LookupTexts {
     }
 }
 
+/// Whether the lookups of the taxonomy database of `db` can write other texts for two of the
+/// taxid lists `choices`, each what a prefetch can read for one subject (a sequence's positive
+/// taxids, `ParsedSubject::volume_taxids`; empty for reading nothing): `LookupTexts::differ`.
+/// `false` without `taxdb.bti` on the search path and for a taxonomy database whose lookups
+/// write nothing.
+pub(crate) fn lookup_texts_differ(db: &SeqDb, choices: &[&[i32]]) -> bool {
+    let texts = LookupTexts::of(db);
+    choices.iter().enumerate().any(|(index, taxids)| {
+        choices[index + 1..]
+            .iter()
+            .any(|other| texts.differ(taxids, other))
+    })
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753
 // ```c++
 // static bool

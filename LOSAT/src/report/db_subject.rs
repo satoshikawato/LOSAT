@@ -138,9 +138,10 @@ pub enum Prefetched {
     /// No sequence: the prefetch reads nothing for it.
     Nothing,
     /// Another sequence, by ordinal id where LOSAT knows it, whose taxids the prefetch can look up
-    /// instead: `FoundInstead::Sequence` (that sequence or none), `AlsoHeld` (`or_itself`: the
-    /// subject or that sequence), the same record whose lookups write other texts and a subject
-    /// whose Bioseq the lookup does not decide (`None`); `reason` as `fetched` gives it.
+    /// instead: `FoundInstead::Sequence` (that sequence where one of its ids compares equal to
+    /// the Seq-align id, else none), `AlsoHeld` (`or_itself`: the subject or that sequence, as
+    /// the ids of the blobs read before in the run decide, `CBlastDbDataLoader::m_Ids`), and the
+    /// same record whose lookups write other texts (`None`); `reason` as `fetched` gives it.
     Another {
         other: Option<u32>,
         or_itself: bool,
@@ -561,12 +562,11 @@ impl ParsedSubject {
     /// What NCBI's prefetch reads for this subject where no report shows it (`Prefetched`).
     pub fn prefetched(&self) -> Prefetched {
         let reason = || self.fetched(false).err().unwrap_or_default();
+        // The loader reads the blob of a subject whose definition line the formatters do not
+        // find (`unfetchable`) and looks its taxids up (review 2 of DBID P1: `lcl|777` before
+        // `gi|777`, `bad_magic`).
         if self.unfetchable {
-            return Prefetched::Another {
-                other: None,
-                or_itself: false,
-                reason: reason(),
-            };
+            return Prefetched::Itself;
         }
         match &self.found_instead {
             None

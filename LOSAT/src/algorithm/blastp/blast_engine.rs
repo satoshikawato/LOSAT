@@ -6046,8 +6046,9 @@ fn search(
                 // sequence's taxid and ask whether any lookup can be refused
                 // (`shared::taxdb_may_refuse`, without the scientific names, which the prefetch
                 // does not ask for). The refusal of NCBI's taxonomy cache
-                // (`shared::TaxdbRun::cache_collision`) comes at the run's first prefetch, in
-                // block 0 before any row.
+                // (`shared::TaxdbRun::cache_collision`) comes at the first batch that prefetches,
+                // which with `PRE_FETCH_SEQS_LIMIT` can be in a later block: such a run takes the
+                // search of all queries, which refuses before any row.
                 let x_prefetch_taxids = |x_kind: XBlockReport| {
                     matches!(
                         x_kind,
@@ -6055,6 +6056,11 @@ fn search(
                     ) && database.is_some_and(|database| database.taxdb_found())
                 };
                 let titles_allowed = |x_kind: XBlockReport| match (database, x_kind) {
+                    (Some(database), _)
+                        if x_prefetch_taxids(x_kind) && database.prefetch_refused() =>
+                    {
+                        false
+                    }
                     // Outfmt 5 whose batches read the taxids: the check of outfmt 15 and 16.
                     // The prefetch asks for no scientific name.
                     (Some(database), XBlockReport::Xml) if x_prefetch_taxids(x_kind) => {

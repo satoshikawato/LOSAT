@@ -598,6 +598,11 @@ warnings (where a tabular report has a field that reads them: not `6 qseqid eval
       makeblastdb -in tm_psi_rhx.faa -dbtype prot -parse_seqids -taxid 99990 -blastdb_version 5 -title tm_psi_rhx \
           -out tm_psi_rhx
       makeblastdb -in tm_psi_rhy.faa -dbtype prot -parse_seqids -blastdb_version 5 -title tm_psi_rhy0 -out tm_psi_rhy0
+- Review 2 of P1: `tm_psi_c150`, one volume without parsed Seq-ids holding the taxids 99990, 150, 99990 (`st1` to `st3` of
+  `tm_cache.faa`) and 9606 (`tm_psi_ra.faa`), made from four volumes of one taxid each (`makeblastdb -taxid`, version 5,
+  `cn1` to `cn4`, not kept) listed in an alias `cnx` with `makeblastdb -in cnx -input_type blastdb -dbtype prot
+  -blastdb_version 5 -out tm_psi_c150 -title tm_psi_c150`; `tm_psi_qbig.faa`: 365 copies of the letters of `tm_cache_q.faa`
+  (`qp0` to `qp364`, more than one block of 50,000 letters), then `q1` of `tm_psi_rq.faa`.
 
 ## Taxid filtering (DI-8a)
 

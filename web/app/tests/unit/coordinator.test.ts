@@ -335,7 +335,7 @@ describe('Coordinator', () => {
 
   it('drops the sources that it makes of text and files once the snapshots have their inputs (SURVEY #15)', async () => {
     const { coordinator, data } = setup();
-    const inner = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown>; };
+    const inner = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown> };
     const runId = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, runId, 'completed');
     expect([inner.sources.size, inner.revisions.size]).toEqual([0, 0]);

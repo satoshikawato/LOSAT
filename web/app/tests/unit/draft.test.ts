@@ -90,6 +90,19 @@ const datasetOf = (request: SearchRequest, role: InputRole) => {
   return input.dataset;
 };
 
+/** Resolves when the run has completed. */
+function completed(coordinator: Coordinator, runId: string): Promise<void> {
+  return new Promise((resolve) => {
+    const check = () => {
+      if (coordinator.state.get().runs.find((run) => run.snapshot.runId === runId)?.status !== 'completed') return;
+      unsubscribe();
+      resolve();
+    };
+    const unsubscribe = coordinator.state.subscribe(check);
+    check();
+  });
+}
+
 describe('SearchDraft inputs', () => {
   it('indexes pasted text and checks it with the engine', async () => {
     const { draft } = setup();
@@ -430,11 +443,7 @@ describe('SearchDraft gives the data layer back the sources it no longer shows (
     const run = coordinator.state.get().runs[0]!;
     expect(new TextDecoder().decode(run.snapshot.subject.bytes)).toBe('>s\nACGTACGT\n');
     expect(run.snapshot.subject.records).toEqual([{ id: 's', length: 8 }]);
-    await new Promise<void>((resolve) => {
-      const done = () => coordinator.state.get().runs[0]!.status === 'completed' && (unsubscribe(), resolve());
-      const unsubscribe = coordinator.state.subscribe(() => void done());
-      void done();
-    });
+    await completed(coordinator, run.snapshot.runId);
     expect(await coordinator.readOutput(run.snapshot.runId, 6)).toContain('q\ts\t');
   });
 

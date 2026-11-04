@@ -83,7 +83,11 @@ export class Coordinator {
   readonly state = new Store<AppState>({ runs: [] });
   private readonly queue: string[] = [];
   private readonly cancelRequested = new Set<string>();
-  /** Run inputs of dataset revisions, by the revisions (snapshotInput). */
+  /**
+   * Run inputs of dataset revisions, by the revisions (snapshotInput). An entry outlives the
+   * sources of its revisions and shares its bytes with the snapshots that use it; an operation
+   * that removes runs must remove the entries that no run uses.
+   */
   private readonly runInputs = new Map<string, Promise<RunInput>>();
   private active: string | undefined;
   private nextNumber = 1;
@@ -105,7 +109,7 @@ export class Coordinator {
    */
   async enqueueAll(requests: readonly SearchRequest[]): Promise<EnqueueAllResult> {
     if (requests.length === 0) return { ok: false, message: 'There is nothing to search.' };
-    const prepared: Array<{ request: SearchRequest; argv: readonly string[]; queryName: string; subjectName: string }> = [];
+    const prepared: Prepared[] = [];
     for (const request of requests) {
       const queryName = inputName(request.query, PASTED_NAMES.query);
       const subjectName = inputName(request.subject, PASTED_NAMES.subject);
@@ -127,21 +131,18 @@ export class Coordinator {
 
     // The snapshots hold what the runs need: the sources made here from text and files are
     // dropped once they are read (SURVEY #15), and a request that fails caches nothing.
-    const made = { sources: [] as string[], runInputs: [] as string[] };
-    let queued = false;
+    const made: Made = { sources: [], runInputs: [] };
+    let result: EnqueueAllResult | undefined;
     try {
-      return await this.freeze(prepared, made, () => (queued = true));
+      result = await this.freeze(prepared, made);
+      return result;
     } finally {
       for (const sourceId of made.sources) void this.deps.data.dropSource(sourceId).catch(() => undefined);
-      if (!queued) for (const key of made.runInputs) this.runInputs.delete(key);
+      if (result?.ok !== true) for (const key of made.runInputs) this.runInputs.delete(key);
     }
   }
 
-  private async freeze(
-    prepared: ReadonlyArray<{ request: SearchRequest; argv: readonly string[]; queryName: string; subjectName: string }>,
-    made: { readonly sources: string[]; readonly runInputs: string[] },
-    onQueued: () => void,
-  ): Promise<EnqueueAllResult> {
+  private async freeze(prepared: readonly Prepared[], made: Made): Promise<EnqueueAllResult> {
     const snapshots: RunSnapshot[] = [];
     const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
     for (const [index, { request, argv, queryName, subjectName }] of prepared.entries()) {
@@ -177,7 +178,6 @@ export class Coordinator {
       ...numbered.map((snapshot): RunView => ({ snapshot, status: 'queued', record: {} })),
     ]);
     for (const snapshot of numbered) this.queue.push(snapshot.runId);
-    onQueued();
     this.pump();
     return { ok: true, runIds: numbered.map((snapshot) => snapshot.runId) };
   }
@@ -258,7 +258,7 @@ export class Coordinator {
     input: SequenceInput,
     name: string,
     parser: FastaParserKind,
-    made: { readonly sources: string[]; readonly runInputs: string[] },
+    made: Made,
   ): Promise<InputSnapshot> {
     try {
       let runInput: Promise<RunInput>;
@@ -378,6 +378,20 @@ export class Coordinator {
   private setRuns(runs: readonly RunView[]): void {
     this.state.set({ ...this.state.get(), runs: Object.freeze([...runs]) });
   }
+}
+
+/** A request that the engine validated, with its argv and the names of its inputs. */
+interface Prepared {
+  readonly request: SearchRequest;
+  readonly argv: readonly string[];
+  readonly queryName: string;
+  readonly subjectName: string;
+}
+
+/** What one enqueueAll made: sources of text and files, and the cached run inputs of dataset revisions. */
+interface Made {
+  readonly sources: string[];
+  readonly runInputs: string[];
 }
 
 function inputName(input: SequenceInput, pastedName: string): string {

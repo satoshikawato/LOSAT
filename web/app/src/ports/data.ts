@@ -5,7 +5,7 @@
 // (ports/run-output.ts), not through these methods.
 import type { DatasetRevision, FastaParserKind, RecordKey } from '../domain/dataset';
 import type { HspTable } from '../domain/hsp-table';
-import type { OutputFormat } from '../domain/output-format';
+import type { CUSTOM_OUTPUT, OutputFormat, RunOutput } from '../domain/output-format';
 import type { InputRole, ProgramId } from '../domain/programs';
 import type { HspRecord } from './engine';
 import type { InputCheck } from './input-check';
@@ -65,7 +65,8 @@ export interface DatasetStore {
 
 export interface ResultSetRef {
   readonly runId: string;
-  readonly byteLengths: Readonly<Record<OutputFormat, number>>;
+  /** The bytes of each output of the run: the formats that every run writes, and the output of its -outfmt where it has one. */
+  readonly byteLengths: Readonly<Record<OutputFormat, number> & Partial<Record<typeof CUSTOM_OUTPUT, number>>>;
   readonly hitCount: number;
 }
 
@@ -82,8 +83,12 @@ export interface StoredResultsCheck {
  * can be read. A staged run that is discarded (cancel, failure) leaves nothing behind.
  */
 export interface RunStore {
-  /** Stages a run and returns the port that its engine writes to. */
-  openRun(runId: string): Promise<MessagePort>;
+  /**
+   * Stages a run that writes `outputs` (`runOutputs` of its argv; the formats that every run
+   * writes always) and returns the port that its engine writes to. An output that the run
+   * does not write fails it at the commit.
+   */
+  openRun(runId: string, outputs?: readonly RunOutput[]): Promise<MessagePort>;
   /**
    * Waits for the `end` of the run's output and commits it. Rejects, and discards the run,
    * if the output is incomplete or the storage ran out (the error then says so).
@@ -91,9 +96,9 @@ export interface RunStore {
   commitRun(runId: string): Promise<ResultSetRef>;
   /** Drops a staged run. Committed and unknown runs are left alone. */
   discardRun(runId: string): Promise<void>;
-  readOutput(runId: string, format: OutputFormat): Promise<Uint8Array>;
+  readOutput(runId: string, output: RunOutput): Promise<Uint8Array>;
   /** Bytes [start, end) of one output of a committed run (an HSP's row or section). */
-  readOutputRange(runId: string, format: OutputFormat, start: number, end: number): Promise<Uint8Array>;
+  readOutputRange(runId: string, output: RunOutput, start: number, end: number): Promise<Uint8Array>;
   readHits(runId: string): Promise<readonly HspRecord[]>;
   /**
    * The HSP records of a committed run as columns, without the aligned sequences

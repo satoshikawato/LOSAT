@@ -12,7 +12,9 @@ use crate::json;
 use crate::run::Program;
 
 /// Options that the adapter or the host sets itself or refuses (`run::parse`): the output
-/// file and format (a run writes every format of the program) and the thread count, and the
+/// file and format (a run writes every format of the program; a host passes the words of a
+/// `-outfmt` of its own, whose 6 or 7 with fields adds an output, `run::parse_run`) and the
+/// thread count, and the
 /// options of NCBI's command line that the application has no control for (`-mt_mode`,
 /// which needs `-num_threads` and has no effect; `-use_index`, whose only value is false;
 /// `-parse_deflines`, since a record is read before the options of a run are known).

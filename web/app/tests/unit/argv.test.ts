@@ -12,6 +12,7 @@ import {
   splitOptions,
   toShellCommand,
 } from '../../src/domain/argv';
+import { CUSTOM_OUTPUT } from '../../src/domain/output-format';
 import { PROGRAMS, type ProgramId } from '../../src/domain/programs';
 import { toProgramDescription } from '../../src/infra/reactor/control';
 
@@ -54,10 +55,31 @@ describe('buildArgv', () => {
     expect(argv).toEqual(['blastn', '-query', 'q.fa', '-subject', 's.fa', '-evalue', '1e-5', '-ungapped', '-dust', '20 64 1', '-qcov_hsp_perc=50']);
   });
 
-  it.each(RESERVED_FLAGS.flatMap((flag) => [flag, `${flag}=x`]))('rejects the application-managed %s among the words of Additional options', (word) => {
+  it.each(RESERVED_FLAGS.filter((flag) => flag !== '-num_threads').flatMap((flag) => [flag, `${flag}=x`]))(
+    'rejects the application-managed %s among the words of Additional options',
+    (word) => {
+      expect(() =>
+        buildArgv({ program: 'blastp', queryName: 'q.fa', subjectName: 's.fa', parameters: [], extra: ['-evalue', '1', word] }),
+      ).toThrow(`${word.split('=')[0]} is managed by LOSAT`);
+    },
+  );
+
+  it.each(['-num_threads', '-num_threads=2'])('names the control of the threads for %s in Additional options (W5 OP)', (word) => {
     expect(() =>
-      buildArgv({ program: 'blastp', queryName: 'q.fa', subjectName: 's.fa', parameters: [], extra: ['-evalue', '1', word] }),
-    ).toThrow(`${word.split('=')[0]} is managed by LOSAT`);
+      buildArgv({ program: 'blastn', queryName: 'q.fa', subjectName: 's.fa', parameters: [], extra: [word, '2'] }),
+    ).toThrow('-num_threads is set in the form: Threads');
+  });
+
+  // The engine reads -outfmt as the CLI does, and adds the output of 6 and 7 with fields (WA2-OP-03):
+  // the application passes its words on, and the engine refuses what a run does not write.
+  it.each([
+    [['-outfmt', '6 qseqid sseqid pident']],
+    [['-outfmt=7 std qcovs']],
+    [['-outfmt', '5']],
+    [['-outfmt', '6']],
+  ])('passes %j of Additional options to the engine as they are', (words) => {
+    const argv = buildArgv({ program: 'blastp', queryName: 'q.fa', subjectName: 's.fa', parameters: [], extra: words });
+    expect(argv).toEqual(['blastp', '-query', 'q.fa', '-subject', 's.fa', ...words]);
   });
 
   // The engine's validation drops a last empty word of its NUL-separated argv, and a run adds
@@ -123,6 +145,8 @@ describe('optionNames (WA-FM-07)', () => {
   it('reads the options that the application manages as taking a value (the command of an output format)', () => {
     const parts = optionNames(commandWords(['blastn', '-query', '-q.fa', '-subject', 's.fa'], 6), takesValue);
     expect(parts.filter((part) => part.name).map((part) => part.text)).toEqual(['-query', '-subject', '-outfmt']);
+    const custom = optionNames(commandWords(['blastn', '-query', 'q.fa', '-outfmt', '-6 qseqid', '-subject', 's.fa'], CUSTOM_OUTPUT), takesValue);
+    expect(custom.filter((part) => part.name).map((part) => part.text)).toEqual(['-query', '-outfmt', '-subject']);
   });
 
   it("names every word that starts with '-' while the grammar is unknown", () => {
@@ -171,6 +195,20 @@ describe('toShellCommand', () => {
     expect(toShellCommand(['blastn', '-query', 'my query.fa', '-subject', "it's.fa"], 6)).toBe(
       "losat blastn -query 'my query.fa' -subject 'it'\\''s.fa' -outfmt 6",
     );
+  });
+
+  // The argv's own -outfmt (WA2-OP-03): the command of a format that every run writes has that
+  // format's -outfmt in its place; the command of the output of the argv's -outfmt is the argv.
+  it("writes the format's -outfmt for the formats of every run, and the argv's own once for its output", () => {
+    const argv = ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-outfmt', '6 qseqid sseqid pident', '-evalue', '1'];
+    expect(toShellCommand(argv, 0)).toBe('losat blastn -query q.fa -subject s.fa -evalue 1 -outfmt 0');
+    expect(toShellCommand(argv, 7)).toBe('losat blastn -query q.fa -subject s.fa -evalue 1 -outfmt 7');
+    expect(toShellCommand(argv, CUSTOM_OUTPUT)).toBe("losat blastn -query q.fa -subject s.fa -outfmt '6 qseqid sseqid pident' -evalue 1");
+    const joined = ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-outfmt=7 std qcovs'];
+    expect(commandWords(joined, 6)).toEqual(['losat', 'blastn', '-query', 'q.fa', '-subject', 's.fa', '-outfmt', '6']);
+    expect(commandWords(joined, CUSTOM_OUTPUT)).toEqual(['losat', ...joined]);
+    // -outfmt 6 adds no output, and the commands of the formats leave it out too.
+    expect(commandWords(['blastp', '-outfmt', '6'], 0)).toEqual(['losat', 'blastp', '-outfmt', '0']);
   });
 });
 

@@ -16,7 +16,8 @@ adapter crate `web/adapter`, which links the engine crate `LOSAT/` as a library.
 
 - Search conditions are one CLI argv, parsed by the same clap parser as the CLI.
 - One run writes every output format the program supports (listed by `describe`),
-  the HSP records and the diagnostics from the same search result (§7).
+  the HSP records and the diagnostics from the same search result (§7), and the output of
+  the argv's own `-outfmt` when it is 6 or 7 with fields (§5, §7).
 - All BLAST-defined values and all compatibility text come from the engine.
 
 ABI v1 (`losat_web_*` in `LOSAT/src/web_api.rs`, used by gbdraw) stays in the same
@@ -84,7 +85,8 @@ CLI's wording: argv errors are the message of the engine's parser
 `: ` (as ABI v1 reports them). The adapter parses the argv exactly as the command line
 (every program accepts the CLI's default `-outfmt 0`), so an argv error of `validate`, an
 unknown program's included, is the CLI's message (session S08). Only the adapter's own
-rules give other messages: `-out` and `-outfmt` are not accepted (§7). `run` finds the
+rules give other messages: `-out` is not accepted, and an `-outfmt` of a format other than 0, 6
+and 7 is refused (§7). `run` finds the
 handles of the argv's program before it parses the argv, so it reports an unknown program
 as `unknown program '<name>'`; a host validates the argv first.
 
@@ -97,7 +99,7 @@ as `unknown program '<name>'`; a host validates the argv first.
 | `losat_web2_register(program_ptr, program_len, role, bytes_ptr, bytes_len)` | role `0` query, `1` subject; original FASTA bytes | handle ≥ 1; emits a *register* JSON on stream 2. A handle belongs to the program that registered it. The records are those of the program's own reader, the engine's port of NCBI BLAST+'s `CBlastFastaInputSource` (session SF): nucleotide flags for BLASTN, TBLASTX, the TBLASTN subject and the BLASTX query, protein flags for BLASTP, the TBLASTN query and the BLASTX subject, the bytes read as a file, the data loaders on (as the CLI without `.ncbirc` or `DATA_LOADERS`). Every record that the reader returns is registered, records without residues and a first record without a defline included; the reader's warnings stay with the records and come on stream 3 of a run, where the CLI writes them. `register` first scans the bytes with the program's scan kind (1 or 2, §9) and fails with the scan's error: LOSAT Web's rejections (`not supported in the browser`: a `>?` gap line, which the CLI reads; a first line that NCBI's data loaders would fetch as a Seq-id; a record whose residues two joined lines hide from the index; a record over 2147483647 letters) and the reader's own error with the CLI's text (`BLAST query error: CFastaReader: Near line N, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.`). A query with blank and comment lines only (`!`, `#`, `;`) fails with NCBI's `BLAST engine error: Empty CBlastQueryVector`, which every run of it ends with. A query of white space only has no record: a run gives NCBI's `Query is Empty!` warning. A subject without records is registered: a run gives NCBI's `BLAST engine error: Empty CBlastQueryVector`. `register` then checks that the scan found the reader's records (§9). `register` judges one input alone, in the order the host calls it, and never looks at the other role's input. The CLI reads the subjects while it processes its arguments, before it reads any query: a subject that fails to read, and a subject without records (`BLAST engine error: Empty CBlastQueryVector`, exit 3), end the CLI before the query is read, in BLASTN, BLASTP, TBLASTN and TBLASTX (checked with NCBI BLAST+ 2.17.0; audit finding D-1 of session SFc), and in LOSAT's BLASTX (its command line and `run_local`). So for a query and a subject that both fail, the CLI reports the subject's error, while a host that registers the query first sees the query's. A host that wants the CLI's first error registers the subject first, stops at its error, and takes a subject registered without records as the run's `BLAST engine error: Empty CBlastQueryVector` before it registers the query |
 | `losat_web2_release(handle)` | handle | `0` |
 | `losat_web2_scan_begin(parser)` / `losat_web2_scan_chunk(scanner, ptr, len)` / `losat_web2_scan_end(scanner)` | parser kind: `1` NCBI BLAST+'s reader with nucleotide flags (BLASTN, TBLASTX, the TBLASTN subject, the BLASTX query), `2` with protein flags (BLASTP, the TBLASTN query, the BLASTX subject) (kind `0`, the `bio::io::fasta` 1.6.0 reader of the four programs before session SF, was removed after the application switched to kinds 1 and 2, plan DW-38); FASTA bytes in chunks of any size | `scan_begin` returns a scanner handle (`unknown or unavailable FASTA parser kind N` for another kind); `scan_end` emits a *scan* JSON on stream 2 (§9), or fails with the reader's error or LOSAT Web's rejection |
-| `losat_web2_run(argv_ptr, argv_len, query_handle, subject_handle)` | argv, handles registered for the argv's program | emits the program's supported format streams (0, 6, 7), stream 1 (§8) and stream 3; returns after the run ends. It searches once for each distinct hit list size of the formats (§7): one search, or two when `-num_descriptions` / `-num_alignments` give format 0 another size than formats 6 and 7. The registered records enter the engine's `run_local` as the reader's records, so a run reads them as the CLI reads the same file: the subjects' warnings first, then the query batches with their warnings; a first batch that fails (for example a batch of queries without residues only, NCBI's `BLAST engine error: Warning: Sequence contains no data ...`) fails the run after the CLI would have written the outfmt 0 prolog to its file, and the host discards what it received (§5). Subject titles are written by the report layer ported in E2h (`NStr::HtmlDecode`, `GuessEncoding`, `x_CleanAndCompress`), so a title that NCBI decodes no longer fails a run (BLASTN, TBLASTX and TBLASTN outfmt 0/6 byte-identical to NCBI 2.17.0, SFc 2026-10-10); a run fails as the CLI does only for the CLI's explicit rejections that happen after the search starts (`docs/evidence/losat_web_e2h/AUTHORITY.md` §J: RP-20 in the tabular formats, BLASTP's punctuation-only subject titles in outfmt 0) and for NCBI's own errors (for example `The average subject length is too short` when every subject is without residues) |
+| `losat_web2_run(argv_ptr, argv_len, query_handle, subject_handle)` | argv, handles registered for the argv's program | emits the program's supported format streams (0, 6, 7), stream 4 when the argv's `-outfmt` is 6 or 7 with fields (§7), stream 1 (§8) and stream 3; returns after the run ends. It searches once for each distinct hit list size of the formats (§7): one search, or two when `-num_descriptions` / `-num_alignments` give format 0 another size than formats 6 and 7. The registered records enter the engine's `run_local` as the reader's records, so a run reads them as the CLI reads the same file: the subjects' warnings first, then the query batches with their warnings; a first batch that fails (for example a batch of queries without residues only, NCBI's `BLAST engine error: Warning: Sequence contains no data ...`) fails the run after the CLI would have written the outfmt 0 prolog to its file, and the host discards what it received (§5). Subject titles are written by the report layer ported in E2h (`NStr::HtmlDecode`, `GuessEncoding`, `x_CleanAndCompress`), so a title that NCBI decodes no longer fails a run (BLASTN, TBLASTX and TBLASTN outfmt 0/6 byte-identical to NCBI 2.17.0, SFc 2026-10-10); a run fails as the CLI does only for the CLI's explicit rejections that happen after the search starts (`docs/evidence/losat_web_e2h/AUTHORITY.md` §J: RP-20 in the tabular formats, BLASTP's punctuation-only subject titles in outfmt 0) and for NCBI's own errors (for example `The average subject length is too short` when every subject is without residues) |
 | `losat_web2_last_error_ptr()` / `losat_web2_last_error_len()` | — | last error message |
 
 `validate` has no query, so it does not check the Karlin-Altschul tables of BLASTN (scores and gap costs without a row,
@@ -147,9 +149,10 @@ which runs slot zero of the search's thread pool (`LOSAT/src/utils/threading.rs`
 | `0` | outfmt 0 text (only for programs that support outfmt 0) |
 | `6` | outfmt 6 text |
 | `7` | outfmt 7 text (only for programs that support outfmt 7) |
+| `4` | the output of the argv's `-outfmt` when it is 6 or 7 with words after the number (fields, `delim=`, §7): the CLI's output for the same argv. Only such a run writes it. An output without bytes (outfmt 6 of a search without hits) comes as no chunk at all, so a host tells from the argv, as the adapter does, whether the run has this output |
 | `1` | HSP records as JSON Lines, one object per HSP (§8); every program |
 | `2` | JSON response of `describe`, `register` or `scan_end` |
-| `3` | diagnostics that the CLI writes to stderr (warnings), UTF-8, each written once: the CLI's standard error for `-outfmt 6` (that of `-outfmt 7` is the same, and that of `-outfmt 0` has the same lines without the formatting handler's `-num_descriptions` and `Examining 5 or more matches` lines, which `-num_descriptions` / `-num_alignments` can make differ). In a run of two searches in which one failed before it wrote anything (§7), it is that standard error followed by the CLI's standard error for `-outfmt 0`, error included |
+| `3` | diagnostics that the CLI writes to stderr (warnings), UTF-8, each written once: the CLI's standard error for `-outfmt 6` (that of `-outfmt 7` is the same, and that of `-outfmt 0` has the same lines without the formatting handler's `-num_descriptions` and `Examining 5 or more matches` lines, which `-num_descriptions` / `-num_alignments` can make differ). With stream 4 it is the CLI's standard error for the argv's `-outfmt` instead: the same lines, and the warnings of the fields' writer (NCBI's `Taxonomy name lookup from taxid requires installation of taxdb database`), as the CLI writes them. In a run of two searches in which one failed before it wrote anything (§7), it is that standard error followed by the CLI's standard error for `-outfmt 0`, error included |
 
 The adapter sends each output stream in chunks of 1 MiB as they fill, and the rest when
 the run ends, so an output never has to fit in linear memory as a whole. Stream 2 is
@@ -179,8 +182,33 @@ the WASI imports.
 - `-query <name>` and `-subject <name>` are required. The names are used only in
   output text (for example the `# Database:` line of outfmt 7); the sequences come from
   the handles.
-- `-out` and `-outfmt` are rejected: the adapter writes every format the program supports
-  (`describe` lists them).
+- `-out` is rejected: the adapter writes every format the program supports (`describe` lists
+  them).
+- `-outfmt` (once, as on the command line; `-outfmt=value` too) is read as the CLI reads it, with
+  the CLI's messages: a value that is not a format (`'abc' is not a valid output format`,
+  `Formatting choice is out of range`), a format that LOSAT's program does not write, NCBI's
+  formatting handler's errors (another program's format such as SAM, a custom delimiter that a
+  field uses to separate its entries). A format that the CLI writes and a run does not (5, 10 and
+  the others but 0, 6 and 7) is refused with `-outfmt N: the browser writes outfmt 0, 6 and 7 (6
+  and 7 with any fields); other formats need the CLI`. The value 0, 6 or 7 without words after the
+  number adds nothing: the run writes those formats anyway; nor does 0 with words (`0 qseqid`), which
+  the CLI reads as 0. 6 and 7 with words after the number
+  (after NCBI's white space around the value is removed, a space follows the number: fields,
+  `-field`, `std`, `delim=`) add stream 4, written by the tabular search (the first search, below)
+  as its first format, so that it is the CLI's output for the same argv and adds no search (its hit
+  list size is that of 6 and 7). A custom delimiter that a field uses to separate its entries
+  (`6 delim=; qseqid staxids`) is NCBI's formatting handler's error, which the CLI makes after the
+  ranges and the query options: `validate` reports the error of the CLI's own checks of the argv
+  with that `-outfmt` (a `-subject_loc` of bad syntax first), whatever the hit list sizes of the
+  searches, and `run` fails with it, never tolerating the failure of the tabular search (below).
+  TBLASTN's and TBLASTX's engine reads every format of a run before the ranges and the option
+  checks that come before the handler (`-seg`, `-query_loc`), so their `run` of an argv with both
+  errors reports the delimiter's, where the CLI and `validate` report the other.
+  The formats that the handler rejects (SAM of another program, 19, 21) are rejected with the
+  handler's message as the argv is parsed, before the ranges. The rule reads the words, not the fields that they give, so that a
+  host reads it from the argv without the table of fields: `6 std` adds a stream 4 with the bytes of
+  stream 6. The engine is given the run's formats, and the checks of the options read them as
+  without `-outfmt`: streams 0, 6, 7 and 1 are those of the argv without `-outfmt` (session W10).
 - `-num_descriptions` and `-num_alignments` are accepted (every program; `-max_target_seqs` excludes both, as on
   the command line) and described (§9). NCBI derives the hit list size of a format from them
   (`blast_args.cpp:2894-2973`): format 0 keeps the larger of `-num_descriptions` (500) and `-num_alignments` (250) where
@@ -261,7 +289,7 @@ formatted from the raw values (plan §4.4).
 
 ## 9. JSON responses (stream 2)
 
-- *describe*: `{ "program", "formats": [0, 6, 7], "parameters": [{ "flag", "help", "takes_value", "default"?, "choices"? }], "query_gencodes"?, "subject_gencodes"? }`, generated from the clap definitions (without `-out`, `-outfmt` and `-num_threads`, which the adapter and the host set or refuse; `-num_descriptions` and `-num_alignments` are listed with the CLI's help text, which carries the defaults 500 and 250), the program's supported output formats and the genetic codes that the engine's parser accepts for `-query_gencode` and `-db_gencode`, and `"defaults"`.
+- *describe*: `{ "program", "formats": [0, 6, 7], "parameters": [{ "flag", "help", "takes_value", "default"?, "choices"? }], "query_gencodes"?, "subject_gencodes"? }`, generated from the clap definitions (without `-out`, `-outfmt` and `-num_threads`, which the adapter and the host set or refuse, or read from the argv's words as the CLI does: `-outfmt`, §7; `-num_descriptions` and `-num_alignments` are listed with the CLI's help text, which carries the defaults 500 and 250), the program's supported output formats and the genetic codes that the engine's parser accepts for `-query_gencode` and `-db_gencode`, and `"defaults"`.
   - `"defaults": { "tasks": { "<task>": { "<flag>": "<value>" } }, "by": { "<flag>": { "<value>": { "<task>": { "<flag>": "<value>" } } } }, "unless": { "<flag>": ["<flag>"] }, "given": ["<flag>"] }` are the values that the engine resolves for the options a search leaves out (`web/adapter/src/defaults.rs`), from the engine's own resolution of an argv (BLASTP's, TBLASTN's and BLASTX's `resolve`, BLASTN's `coordination` functions, TBLASTX's getters), printed as the CLI's help prints them (`"10"`, `"19.3"`, `"20 64 1"`, `"no"`, `"true"`). `tasks`: each task's values with no other option given (the key `""` for TBLASTX, which has no `-task`). `by`: for `-matrix` and `-word_size`, for each value that the engine resolves (the nine matrices of `ScoringMatrix::ALL`, word sizes 1-32), the values by task of the options that some value changes (a matrix's gap costs, threshold and window; the threshold of a given word size); a program lists only the options that change something (BLASTN neither, BLASTX the word size). `unless`: an option's default holds only while none of these options is given (`-max_target_seqs` excludes `-num_descriptions` and `-num_alignments`, §7). `given`: the options that BLAST+ tells given from not given, with the tasks where it does, so that a host writes one that is set even at its default: the hit list options in every task (§7), and each option that, given at the value shown for it (the task's, or the table's value for a given `-matrix` or `-word_size`), resolves another search (the word size of blastp-fast, tblastn-fast and blastx-fast, whose given 5 sets NCBI's threshold 19.3 where the task's own 5 keeps 20). The response of each program is computed once (some hundred probe argvs) and kept. An option without an entry has the clap `default` of `parameters`, or no default.
 - *register*: `{ "handle", "records": [{ "index", "id", "length" }] }`, from the records of the program's own reader (§4). `id` is the record's title up to its first space (0x20), empty when the record has no title (never NCBI's `Query_N` or `Subject_N`); bytes that are not UTF-8 become U+FFFD in the JSON only (the output streams keep the title's bytes). `length` is the number of residues the reader stores. `register` also scans the same bytes with the program's kind (1 or 2) and fails if the records, IDs, lengths or residue counts differ.
 - *scan*: `{ "records": [{ "index", "id", "header_offset", "sequence_offset", "end_offset", "length", "line_layout", "residue_counts" }] }`. Offsets are byte offsets in the scanned input and may exceed 2³²; they are encoded as JSON numbers and stay below 2⁵³. `line_layout` is `{ "kind": "uniform", "width", "eol" }` when residue `i` is at `sequence_offset + floor(i / width) * (width + eol) + i mod width`, or `{ "kind": "checkpoints", "every": 65536, "offsets": [...] }`, where `offsets[k]` is the byte offset of residue `k * 65536` and the residues are read forward from there under the kind's rules (below). `residue_counts` maps each byte value of the stored residues to its count: the bytes 0x21-0x7E as the character itself, every other byte (including the space) as `"0xNN"`.
@@ -280,3 +308,8 @@ formatted from the raw values (plan §4.4).
 `losat_web2_abi_version` returns `2`. Any incompatible change to a signature, a stream,
 or a JSON field increments the version, and the application refuses a module whose
 version it does not know.
+
+Stream 4 and the `-outfmt` of §7 (session W10, 2026-11-05) kept version 2: a host that does not
+know them never sends `-outfmt` (an earlier adapter refused it) and drops a stream it does not
+know, and a host that sends `-outfmt` to an earlier adapter gets its refusal
+(`-outfmt is not accepted`), not other outputs.

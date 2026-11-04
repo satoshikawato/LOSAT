@@ -42,9 +42,9 @@ use std::io::{self, Write};
 ///
 /// Each requested `-outfmt` is read as on the command line, and NCBI's checks of the options and
 /// of the subjects come in the command line's order, before the search. The `-query` and
-/// `-subject` values of `args` are used only as display names. LOSAT Web writes outfmt 0, 6 and 7
-/// (without a custom field list or delimiter); the other formats, `-db` and `-parse_deflines` are
-/// refused. `-subject_loc` and `-query_loc` cut the records as the command line cuts them: each
+/// `-subject` values of `args` are used only as display names. LOSAT Web writes outfmt 0, 6 and 7,
+/// 6 and 7 with a custom field list or delimiter too (the command line's writer of them,
+/// `report::render_queries`); the other formats, `-db` and `-parse_deflines` are refused. `-subject_loc` and `-query_loc` cut the records as the command line cuts them: each
 /// subject as it is read, each query as its batch is read (`native::run_inner`).
 ///
 /// The records are those of NCBI's reader (`fasta_reader`): the queries as its nucleotide reader
@@ -367,11 +367,6 @@ fn read_options(
             bail!(
                 "output format {} is not supported in the browser for BLASTX",
                 choice.number
-            );
-        }
-        if choice.custom() {
-            bail!(
-                "a custom output format specification (fields or a delimiter) is not supported in the browser for BLASTX"
             );
         }
         choices.push(choice);

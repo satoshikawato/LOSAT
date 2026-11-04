@@ -2,7 +2,7 @@
 // engine wrote it, and its export. The stored results can go while they are shown (the browser
 // clears the site's data): a read or an export that fails says why where the output is, and once
 // the read of the format chosen has failed, the text of the format shown before goes (WA2-BR-01).
-import type { OutputFormat } from '../domain/output-format';
+import type { RunOutput } from '../domain/output-format';
 import type { Coordinator, RunView } from './coordinator';
 import { unreadableResults } from './results';
 import { Store } from './store';
@@ -29,7 +29,7 @@ export class OutputSaver {
   constructor(private readonly outputs: Pick<OutputPort, 'exportOutput'>) {}
 
   /** Saves one output of a completed run. The reason shown stays until this save ends; a later save or a reset wins. */
-  async save(run: RunView, format: OutputFormat): Promise<void> {
+  async save(run: RunView, format: RunOutput): Promise<void> {
     const save = ++this.saves;
     const problem = await saveOutput(this.outputs, run, format);
     if (save === this.saves) this.set(problem);
@@ -59,7 +59,7 @@ export class OutputReader {
   }
 
   /** Reads one output of a completed run. What is shown stays until it is read; an export of the output before says no more. */
-  async show(run: RunView, format: OutputFormat): Promise<void> {
+  async show(run: RunView, format: RunOutput): Promise<void> {
     const read = ++this.reads;
     this.saver.reset();
     this.publish({ shown: '' });
@@ -79,7 +79,7 @@ export class OutputReader {
   }
 
   /** Saves an output as a file; one that is not saved says why, until the next export or choice. */
-  export(run: RunView, format: OutputFormat): Promise<void> {
+  export(run: RunView, format: RunOutput): Promise<void> {
     return this.saver.save(run, format);
   }
 
@@ -89,7 +89,7 @@ export class OutputReader {
 }
 
 /** Saves one output of a completed run as a file: '' when it is saved, else why it is not (as an Example's copy says it). */
-export async function saveOutput(outputs: Pick<OutputPort, 'exportOutput'>, run: RunView, format: OutputFormat): Promise<string> {
+export async function saveOutput(outputs: Pick<OutputPort, 'exportOutput'>, run: RunView, format: RunOutput): Promise<string> {
   try {
     await outputs.exportOutput(run.snapshot.runId, format);
     return '';

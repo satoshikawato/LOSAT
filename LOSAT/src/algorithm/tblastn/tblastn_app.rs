@@ -56,8 +56,40 @@ impl TblastnArgs {
         self,
         settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     ) -> Result<()> {
+        self.run_io(settings, RunIo::Files)
+    }
+
+    /// `run` over the inputs of web ABI v1 (`web_api::v1_tblastn`): the query and the subjects
+    /// are the call's bytes, read as the regular files with the same bytes, and the report is
+    /// returned instead of written to standard output. The `query` and `subject` of `self` are
+    /// only the names the report shows for the inputs; `out` is `None`. The diagnostics go to
+    /// standard error, as the command line's.
+    pub(crate) fn run_in_memory(
+        self,
+        settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+        query: &[u8],
+        subject: &[u8],
+    ) -> Result<Vec<u8>> {
+        let report = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        self.run_io(
+            settings,
+            RunIo::Memory {
+                query,
+                subject,
+                report: report.clone(),
+            },
+        )?;
+        let bytes = std::mem::take(&mut *report.lock().expect("report mutex poisoned"));
+        Ok(bytes)
+    }
+
+    fn run_io(
+        self,
+        settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+        io: RunIo<'_>,
+    ) -> Result<()> {
         use crate::blastinput::app;
-        use crate::blastinput::fasta_reader::{read_subjects, FastaInputSource, ReaderConfig};
+        use crate::blastinput::fasta_reader::{FastaInputSource, ReaderConfig};
         use crate::blastinput::input_files;
         use crate::blastinput::seq_range;
         let mut args = self;
@@ -104,7 +136,7 @@ impl TblastnArgs {
             Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
                 Ok(list) => list,
                 Err(error) => {
-                    write_run_error_archive(&args, archive.as_ref(), &error);
+                    write_run_error_archive(&args, &io, archive.as_ref(), &error);
                     return Err(error);
                 }
             },
@@ -139,8 +171,14 @@ impl TblastnArgs {
             let Some(subject_path) = args.subject.clone() else {
                 return Err(app::missing_subject_error());
             };
-            input_files::check_utf8_file_name(&subject_path, "subject", "TBLASTN")?;
-            let subject_file = input_files::open_input(&subject_path, "subject", "TBLASTN")?;
+            // Web ABI v1's subjects are the call's bytes: no file to name or open.
+            let subject_input = match &io {
+                RunIo::Files => {
+                    input_files::check_utf8_file_name(&subject_path, "subject", "TBLASTN")?;
+                    Input::File(input_files::open_input(&subject_path, "subject", "TBLASTN")?)
+                }
+                RunIo::Memory { subject, .. } => Input::Bytes(subject),
+            };
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
             // ```c++
             //             subj_input_stream = &args[kArgSubject].AsInputFile();
@@ -192,14 +230,9 @@ impl TblastnArgs {
             // (`read_subjects`). Records without residues (and intervals without letters) are
             // read without a message and reported when the formatter sets up the subjects
             // (`before_prolog`).
-            let mut subject_source = FastaInputSource::from_argument(
-                &subject_path,
-                subject_file,
-                ReaderConfig::subject("TBLASTN", false, settings.data_loaders)
-                    .with_defline(archive.is_some())
-                    .with_parse_deflines(args.parse_deflines),
-            );
-            subject_source.set_id_scope(args.id_scope.clone());
+            let config = ReaderConfig::subject("TBLASTN", false, settings.data_loaders)
+                .with_defline(archive.is_some())
+                .with_parse_deflines(args.parse_deflines);
             // EXPERIMENT (LOSAT_X_TBNSTORE): each record's letters packed as it is read
             // (`x_read_subject_stores`), with a subject range after the record is cut to its
             // interval (the record `cut_subjects` makes).
@@ -226,25 +259,25 @@ impl TblastnArgs {
                 // batch, which the packed stores do not keep (they hold the interval of a
                 // `-subject_loc` and no letters), so a run that writes it reads the records
                 // as the switch's `=0` side does.
-                if super::x_subject_store::x_tbn_store() && archive.is_none() {
-                    let (records, stores, placements) =
-                        super::x_subject_store::x_read_subject_stores(
-                            &mut subject_source,
-                            subject_range.as_ref(),
-                            &mut warn,
-                            args.num_threads,
-                        )?;
-                    (records, stores, Some(placements))
-                } else {
-                    (
-                        read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?,
-                        None,
-                        None,
-                    )
+                let x_packed = super::x_subject_store::x_tbn_store() && archive.is_none();
+                match subject_input {
+                    Input::File(file) => read_subject_input(
+                        FastaInputSource::from_argument(&subject_path, file, config),
+                        &args,
+                        subject_range.as_ref(),
+                        x_packed,
+                        &mut warn,
+                    )?,
+                    Input::Bytes(bytes) => read_subject_input(
+                        FastaInputSource::from_bytes(bytes, config),
+                        &args,
+                        subject_range.as_ref(),
+                        x_packed,
+                        &mut warn,
+                    )?,
                 }
             };
             crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
-            drop(subject_source);
             let (subjects, subject_placements) = match x_placements {
                 Some(placements) => (read_subject_records, placements),
                 None => {
@@ -276,7 +309,7 @@ impl TblastnArgs {
             Err(error) => {
                 // NCBI reads the `-subject` file inside `Run`, after the diagnostics handler
                 // that saves the messages is set: an error archive follows the error.
-                write_run_error_archive(&args, archive.as_ref(), &error);
+                write_run_error_archive(&args, &io, archive.as_ref(), &error);
                 return Err(error);
             }
         };
@@ -298,18 +331,23 @@ impl TblastnArgs {
         //     }
         // ```
         // The query is opened and the output file created before the options are checked;
-        // `-` is standard input and standard output.
-        input_files::check_utf8_file_name(&args.query, "query", "TBLASTN")?;
-        // NCBI opens the query file inside `Run` too: its error is saved and an error archive
-        // follows.
-        let query_file = match input_files::open_input(&args.query, "query", "TBLASTN") {
-            Ok(file) => file,
-            Err(error) => {
-                write_run_error_archive(&args, archive.as_ref(), &error);
-                return Err(error);
+        // `-` is standard input and standard output. Web ABI v1's query is the call's bytes.
+        let query_input = match &io {
+            RunIo::Files => {
+                input_files::check_utf8_file_name(&args.query, "query", "TBLASTN")?;
+                // NCBI opens the query file inside `Run` too: its error is saved and an error
+                // archive follows.
+                match input_files::open_input(&args.query, "query", "TBLASTN") {
+                    Ok(file) => Input::File(file),
+                    Err(error) => {
+                        write_run_error_archive(&args, &io, archive.as_ref(), &error);
+                        return Err(error);
+                    }
+                }
             }
+            RunIo::Memory { query, .. } => Input::Bytes(query),
         };
-        let out_file = open_out_file(&args)?;
+        let mut stream = report_stream(&args, &io)?;
         let pairwise = format == Some(app::ReportFormat::Pairwise);
         // The format as the reports read it: the number and the custom fields, or the value as
         // given when it has a delimiter, which `normalized` drops and the custom tabular report
@@ -319,14 +357,13 @@ impl TblastnArgs {
         } else {
             args.outfmt.clone()
         };
-        let mut stream = cli_report_stream(out_file);
         let result = {
             let mut outputs =
                 ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
             search_cli(
                 args,
                 list,
-                query_file,
+                query_input,
                 &subjects,
                 &subject_placements,
                 x_subject_stores.as_deref(),
@@ -379,11 +416,85 @@ impl TblastnArgs {
     }
 }
 
+/// Where `run` reads its inputs and writes its report.
+enum RunIo<'a> {
+    /// The command line: the files of `-query` and `-subject` (`-`: standard input), and the
+    /// `-out` file or standard output.
+    Files,
+    /// Web ABI v1 (`run_in_memory`): the call's bytes, and the report kept in memory.
+    Memory {
+        query: &'a [u8],
+        subject: &'a [u8],
+        report: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    },
+}
+
+/// An input of `run`: the opened file of `-query` or `-subject`, or web ABI v1's bytes.
+enum Input<'a> {
+    File(std::fs::File),
+    Bytes(&'a [u8]),
+}
+
+/// The reader of `search_cli`'s queries over an `Input`.
+enum QuerySource<'a> {
+    File(crate::blastinput::fasta_reader::FastaInputSource<std::fs::File>),
+    Bytes(crate::blastinput::fasta_reader::FastaInputSource<&'a [u8]>),
+}
+
+/// The report kept in memory (`RunIo::Memory`) as the report's stream.
+struct MemoryReport(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl Write for MemoryReport {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .expect("report mutex poisoned")
+            .extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The subjects of `source` as `run` reads them (`read_subjects`), or with LOSAT_X_TBNSTORE's
+/// packed stores (`packed`, see `run`), with the reader's messages to `warn`.
+fn read_subject_input<R: std::io::Read>(
+    mut source: crate::blastinput::fasta_reader::FastaInputSource<R>,
+    args: &TblastnArgs,
+    range: Option<&crate::blastinput::seq_range::SequenceRange>,
+    packed: bool,
+    warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
+) -> Result<(
+    Vec<FastaRecord>,
+    Option<Vec<crate::sequence::packed_subject::PackedNucleotide>>,
+    Option<crate::blastinput::seq_range::Placements>,
+)> {
+    source.set_id_scope(args.id_scope.clone());
+    if packed {
+        let (records, stores, placements) = super::x_subject_store::x_read_subject_stores(
+            &mut source,
+            range,
+            warn,
+            args.num_threads,
+        )?;
+        Ok((records, stores, Some(placements)))
+    } else {
+        Ok((
+            crate::blastinput::fasta_reader::read_subjects(&mut source, range, warn)?,
+            None,
+            None,
+        ))
+    }
+}
+
 /// The error archive of a run that stopped in `Run` with `error` before its search wrote
 /// anything, when NCBI writes one (`PrintErrorArchive`): into `-out`, or nothing when that
 /// cannot be opened (NCBI's call swallows that).
 fn write_run_error_archive(
     args: &TblastnArgs,
+    io: &RunIo<'_>,
     archive: Option<&crate::report::archive::ArchiveHandle>,
     error: &anyhow::Error,
 ) {
@@ -397,11 +508,22 @@ fn write_run_error_archive(
     let Some(lines) = super::archive::error_lines(error, true) else {
         return;
     };
-    if let Ok(out_file) = open_out_file(args) {
-        let mut report = cli_report_stream(out_file);
+    if let Ok(mut report) = report_stream(args, io) {
         let _ = crate::report::archive::write_error_archive(handle, &lines, &mut report);
         let _ = std::io::Write::flush(&mut report);
     }
+}
+
+/// The report stream of a run: the `-out` file (created) or standard output, or the report
+/// in memory (`RunIo::Memory`).
+fn report_stream(args: &TblastnArgs, io: &RunIo<'_>) -> Result<crate::cli::ReportStream> {
+    Ok(match io {
+        RunIo::Files => cli_report_stream(open_out_file(args)?),
+        RunIo::Memory { report, .. } => crate::cli::ReportStream {
+            inner: Box::new(MemoryReport(report.clone())),
+            failed: false,
+        },
+    })
 }
 
 /// The `-out` file, created (`-`: standard output).
@@ -439,7 +561,7 @@ fn cli_report_stream(
 fn search_cli(
     mut args: TblastnArgs,
     list: Option<crate::seqdb::DbList>,
-    query_file: std::fs::File,
+    query_input: Input<'_>,
     subjects: &[FastaRecord],
     subject_placements: &crate::blastinput::seq_range::Placements,
     // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects' letters, packed (the records keep none).
@@ -565,20 +687,33 @@ fn search_cli(
     // opened file, before it is read (`stream_is_empty`). When the subjects were read from
     // standard input too, `cin` has reached its end (a failed stream), so NCBI gets no
     // position for the query either, and its reader is at its end: no query batch is read.
-    let shared_standard_input = args.query.as_os_str() == "-"
-        && args
-            .subject
-            .as_deref()
-            .is_some_and(|path| path.as_os_str() == "-");
-    let mut query_source = FastaInputSource::from_argument(
-        &args.query,
-        query_file,
-        ReaderConfig::query("TBLASTN", true, settings.data_loaders)
-            .with_defline(args.archive.is_some())
-            .with_parse_deflines(args.parse_deflines),
-    );
-    query_source.set_id_scope(args.id_scope.clone());
-    if !shared_standard_input && query_source.stream_is_empty() {
+    let config = ReaderConfig::query("TBLASTN", true, settings.data_loaders)
+        .with_defline(args.archive.is_some())
+        .with_parse_deflines(args.parse_deflines);
+    let (mut query_source, query_empty) = match query_input {
+        Input::File(query_file) => {
+            let shared_standard_input = args.query.as_os_str() == "-"
+                && args
+                    .subject
+                    .as_deref()
+                    .is_some_and(|path| path.as_os_str() == "-");
+            let mut source = FastaInputSource::from_argument(&args.query, query_file, config);
+            source.set_id_scope(args.id_scope.clone());
+            let empty = !shared_standard_input && source.stream_is_empty();
+            (QuerySource::File(source), empty)
+        }
+        // Web ABI v1's bytes, read as the regular file with the same bytes: `stream_is_empty`
+        // finds such a file empty when it holds white space only.
+        Input::Bytes(bytes) => {
+            let mut source = FastaInputSource::from_bytes(bytes, config);
+            source.set_id_scope(args.id_scope.clone());
+            let empty = bytes
+                .iter()
+                .all(|&byte| crate::blastinput::fasta_reader::stream::input_space(byte));
+            (QuerySource::Bytes(source), empty)
+        }
+    };
+    if query_empty {
         outputs
             .diagnostics
             .write_all(b"Warning: [tblastn] Query is Empty!\n")?;
@@ -612,7 +747,10 @@ fn search_cli(
     // Diagnostic (LOSAT_TIMING): the query FASTA for the common line (utils/xtiming.rs). No NCBI
     // counterpart.
     let t_read_fasta = crate::utils::xtiming::clock();
-    let QueryRecords { records, end } = read_queries(&mut query_source);
+    let QueryRecords { records, end } = match &mut query_source {
+        QuerySource::File(source) => read_queries(source),
+        QuerySource::Bytes(source) => read_queries(source),
+    };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
     let reading = match end {

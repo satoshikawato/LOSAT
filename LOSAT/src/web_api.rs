@@ -20,7 +20,7 @@ use crate::algorithm::blastp::args::{BlastpCompBasedStats, BlastpCompositionMode
 //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
 //                 results = lcl_blast.Run();
 // ```
-use crate::algorithm::{blastn, blastp, blastx, tblastx};
+use crate::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
 
 static LAST_RESULT: OnceLock<Mutex<Vec<u8>>> = OnceLock::new();
 static LAST_ERROR: OnceLock<Mutex<Vec<u8>>> = OnceLock::new();
@@ -838,6 +838,26 @@ fn run_pair(
             subject_fasta,
         )
         .map_err(engine_error),
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:213-219
+        // ```c++
+        //             if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
+        //                	ERR_POST(Warning << "Query is Empty!");
+        //                	return BLAST_EXIT_SUCCESS;
+        //             }
+        //             fasta.Reset(new CBlastFastaInputSource(
+        //                                          m_CmdLineArgs->GetInputStream(),
+        //                                          iconfig));
+        // ```
+        // Added to ABI v1 on the Owner's request (2026-11-04): the CLI's parser and run over
+        // the call's bytes (`tblastn::web`).
+        "tblastn" => tblastn::web::run_pair(
+            tblastn::web::parse_args(&extra).map_err(engine_error)?,
+            query_fasta.as_bytes(),
+            subject_fasta.as_bytes(),
+            "query",
+            "subject",
+        )
+        .map_err(engine_error),
         other => return Err(format!("unsupported LOSAT program: {other}")),
     }
 }
@@ -920,6 +940,29 @@ fn run_pair_handles(
                 )?,
                 &query.records,
                 &subject.records,
+                &query.label,
+                &subject.label,
+            )
+            .map_err(engine_error)
+        }
+        // The stored bytes, read by the CLI's reader of each role (`tblastn::web`); the labels
+        // are the names the report shows for the inputs.
+        "tblastn" => {
+            let store = fasta_store()
+                .lock()
+                .map_err(|_| "FASTA store mutex poisoned".to_string())?;
+            let query = store
+                .entries
+                .get(&query_handle)
+                .ok_or_else(|| format!("unknown query FASTA handle: {query_handle}"))?;
+            let subject = store
+                .entries
+                .get(&subject_handle)
+                .ok_or_else(|| format!("unknown subject FASTA handle: {subject_handle}"))?;
+            tblastn::web::run_pair(
+                tblastn::web::parse_args(&extra).map_err(engine_error)?,
+                &query.bytes,
+                &subject.bytes,
                 &query.label,
                 &subject.label,
             )
@@ -1283,6 +1326,112 @@ mod tests {
         assert!(error.contains("expected a number"), "{error}");
         assert!(v1_blastn::run_web_pair(with(&["-evalue", "+inf"]), fasta, fasta).is_ok());
         assert!(v1_blastn::run_web_pair(with(&["-evalue=+nan"]), fasta, fasta).is_ok());
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:213-219
+    // ```c++
+    //             if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
+    //                	ERR_POST(Warning << "Query is Empty!");
+    //                	return BLAST_EXIT_SUCCESS;
+    //             }
+    //             fasta.Reset(new CBlastFastaInputSource(
+    //                                          m_CmdLineArgs->GetInputStream(),
+    //                                          iconfig));
+    // ```
+    // TBLASTN (added on the Owner's request, 2026-11-04): both exports return the bytes of the
+    // shared vector (`tblastn::web::vector`), which `tests/web_v1_tblastn.rs` holds to the CLI.
+    #[test]
+    fn tblastn_web_pair_and_handles_return_the_cli_bytes_of_the_shared_vector() {
+        use crate::algorithm::tblastn::web::vector;
+        let stored = |file: &str, label: &str| {
+            let bytes = vector::read(file);
+            fasta_store()
+                .lock()
+                .expect("store")
+                .insert(
+                    // The store takes only inputs that `bio` reads as one record or more.
+                    parse_fasta_records(&bytes, "stored FASTA").unwrap_or_default(),
+                    label.to_string(),
+                    bytes,
+                )
+                .ok()
+        };
+        for case in vector::cases() {
+            let extra = case.extra.join("\0");
+            let expected = case
+                .expected
+                .map_err(|message| String::from_utf8(message).expect("UTF-8 message"));
+            // `run_pair` names the subject `subject`.
+            if case.label == "subject" {
+                let (query, subject) = (vector::read(&case.query), vector::read(&case.subject));
+                assert_eq!(
+                    run_pair(
+                        "tblastn",
+                        std::str::from_utf8(&query).expect("UTF-8 query"),
+                        std::str::from_utf8(&subject).expect("UTF-8 subject"),
+                        &case.outfmt,
+                        &extra
+                    ),
+                    expected,
+                    "{} (run_pair)",
+                    case.name
+                );
+            }
+            // The handles of the inputs that the store takes (not the blank ones).
+            let handles = (
+                stored(&case.query, "query"),
+                stored(&case.subject, &case.label),
+            );
+            if let (Some(query_handle), Some(subject_handle)) = handles {
+                assert_eq!(
+                    run_pair_handles(
+                        "tblastn",
+                        query_handle,
+                        subject_handle,
+                        &case.outfmt,
+                        &extra
+                    ),
+                    expected,
+                    "{} (run_pair_handles)",
+                    case.name
+                );
+            }
+            let mut store = fasta_store().lock().expect("store");
+            for handle in [handles.0, handles.1].into_iter().flatten() {
+                store.release(handle).expect("release");
+            }
+        }
+        let query = vector::read("query.faa");
+        let subject = vector::read("subject.fna");
+        let (query_text, subject_text) = (
+            std::str::from_utf8(&query).expect("UTF-8 query"),
+            std::str::from_utf8(&subject).expect("UTF-8 subject"),
+        );
+        // An empty `outfmt` is 6 (`web_outfmt_or_default`), as for the other programs.
+        let fmt6 = vector::read("fmt6.out");
+        assert_eq!(
+            run_pair("tblastn", query_text, subject_text, " ", ""),
+            Ok(fmt6)
+        );
+        // The words that name files or a database are refused before the search.
+        assert_eq!(
+            run_pair("tblastn", query_text, subject_text, "6", "-db\0nt"),
+            Err("-db (a database search) is not supported in the browser yet".to_string())
+        );
+        assert_eq!(
+            run_pair("tblastn", query_text, subject_text, "6", "-out\0x"),
+            Err("file/help arguments are unsupported for the TBLASTN web API".to_string())
+        );
+        // The serial module has no threads to give (as the CLI built without them).
+        #[cfg(not(feature = "parallel"))]
+        assert!(run_pair(
+            "tblastn",
+            query_text,
+            subject_text,
+            "6",
+            "-num_threads\x002"
+        )
+        .is_err());
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427

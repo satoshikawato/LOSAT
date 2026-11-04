@@ -9,6 +9,7 @@
 // selection, held by the HSP's identity (application/results.ts).
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
+import { OutputSaver } from '../application/outputs';
 import { noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
@@ -59,7 +60,8 @@ const emptyPlot = computed(() => (state.value.hsps.length > 0 ? undefined : noHs
 /**
  * "Download All" lists the outputs of the run, as NCBI's lists its formats, by BLAST+'s names of
  * them (its -outfmt help); the one chosen is saved as one file (WA-RS-05). The list opens in the
- * page's flow, under the run's line, so that it fits a phone's width.
+ * page's flow, under the run's line, so that it fits a phone's width; an output that is not saved
+ * says why there, until the next download or another run (WA2-BR-01).
  */
 const DOWNLOADS: readonly { readonly format: OutputFormat; readonly label: string }[] = [
   { format: 0, label: 'Pairwise (outfmt 0)' },
@@ -70,13 +72,15 @@ const downloadsOpen = ref(false);
 const downloadsId = useId();
 const downloadsButton = ref<HTMLButtonElement>();
 const downloadsList = ref<HTMLElement>();
+const saver = new OutputSaver(props.coordinator);
+const downloadProblem = useStore(saver.problem);
 
 function download(format: OutputFormat): void {
   downloadsOpen.value = false;
   // The chosen item leaves the page with the list; the focus stays on "Download All".
   downloadsButton.value?.focus();
   const run = loaded.value?.run;
-  if (run !== undefined) void props.coordinator.exportOutput(run.snapshot.runId, format);
+  if (run !== undefined) void saver.save(run, format);
 }
 
 /** Escape closes the list, and the focus goes back to its button (Safari does not focus a clicked button). */
@@ -119,8 +123,11 @@ const loaded = computed(() => state.value.loaded);
 /** The selected run waits or searches: its status is shown in place of its results. */
 const active = computed(() => selected.value !== undefined && !isTerminal(selected.value.status));
 
-// Another run, or the same run read again, starts with the list closed.
-watch([() => state.value.runId, () => state.value.phase], () => (downloadsOpen.value = false));
+// Another run, or the same run read again, starts with the list closed and without the reason of a download.
+watch([() => state.value.runId, () => state.value.phase], () => {
+  downloadsOpen.value = false;
+  saver.reset();
+});
 
 // With no run chosen, show the newest completed one.
 watch(
@@ -220,6 +227,9 @@ async function toAlignments(id: HspId): Promise<void> {
                 <button type="button" :data-testid="`results-download-${item.format}`" @click="download(item.format)">{{ item.label }}</button>
               </li>
             </ul>
+            <p v-if="state.phase === 'ready' && downloadProblem" class="results-message error" role="alert" data-testid="results-download-problem">
+              {{ downloadProblem }}
+            </p>
           </dd>
           <template v-if="selected">
             <dt>Mode</dt>

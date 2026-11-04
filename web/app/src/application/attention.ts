@@ -4,9 +4,7 @@
 // - holds the screen wake lock while runs are active or queued, unless the user turned that off
 //   ("Keep searching while you're away", on by default, Owner 2026-11-03; the choice is shown on
 //   handheld devices, whose screens turn off by themselves and end the search), not released and
-//   requested again between the runs of a queue; a lock that the browser refused is not requested
-//   again until runs start again, the page is shown again or the choice is turned on again, so that
-//   each change of the runs does not ask again and the refusal is not shown on and off;
+//   requested again between the runs of a queue;
 // - asks the browser to warn before the page is left while runs are active or queued;
 // - when the page becomes visible again after being hidden with runs in progress, reports
 //   how long it was hidden, what became of those runs, and whether the Data worker (which
@@ -62,7 +60,8 @@ export class Attention {
   private lock: WakeLockHandle | undefined;
   /**
    * Counts the occasions to ask again after a refusal: runs starting after none were in progress, the
-   * page shown again, the choice turned on. A refusal holds until the next one.
+   * page shown again, the choice turned on. A refusal holds until the next one, so that each change
+   * of the runs does not ask again and the refusal is not shown on and off (WA-RN-04).
    */
   private occasion = 0;
   /** The occasion at whose request the browser last refused the lock. */

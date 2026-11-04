@@ -68,7 +68,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | Word size | megablast 16、20、24、28、32、48、64／dc-megablast 11、12／blastn と blastn-short 7、11、15／TBLASTN 2、3、5、6／BLASTP と BLASTX 3、5（LOSAT の BLASTP・BLASTX が読む値だけ、DW-36、WA-FM-02）／TBLASTX 3（NCBI は 2、3。LOSAT の TBLASTX は 3 だけ） |
 | Matrix | PAM30、PAM70、BLOSUM90、BLOSUM80、BLOSUM62、BLOSUM50、BLOSUM45、PAM250（NCBI の順）／BLASTP と BLASTX は BLOSUM62 だけ（LOSAT の BLASTP・BLASTX が読む行列。Gap Costs も 11 / 1 だけ、Compositional adjustments は 0 と 2 だけ、DW-36、WA-FM-02）／TBLASTN は word size 5〜7（tblastn-fast の既定 5）で BLOSUM62 だけ（compressed lookup table が読む行列。`listBy`） |
 
-一覧が LOSAT の読む値に絞ってある欄（BLASTP・BLASTX・TBLASTX・TBLASTN の上の値）も、「Other」で他の値を書ける（エンジンが CLI と同じ文で拒む）。エンジンが読む値を増やす PR は一覧も広げる：エンジンの e2e（`search.spec.ts`「the selects of the protein modes offer NCBI's values that the engine reads, and no other」）が、NCBI の値のそれぞれで「一覧にある ⇔ エンジンが読む」を確かめる。
+一覧が LOSAT の読む値に絞ってある欄のうち Matrix・Word size・Gap Costs は、「Other」で他の値を書ける（エンジンが CLI と同じ文で拒む）。Compositional adjustments（BLASTP・BLASTX の 0 と 2）は「Other」の無い選択なので、1 と 3 は書けない（どちらの CLI も必ず拒む）。エンジンが読む値を増やす PR は一覧も広げる：エンジンの e2e（`search.spec.ts`「the selects of the protein modes offer NCBI's values that the engine reads, and no other」）が、NCBI の値のそれぞれで「一覧にある ⇔ エンジンが読む」を確かめる（Compositional adjustments は同じ commit の native CLI で）。
 
 **組の select**（line WR の SURVEY #13、DW-40）：Match/Mismatch Scores と Gap Costs は NCBI の画面の組の select（`domain/programs.ts` の `PairSelect`、節の `pairs`）。値は 2 つの欄（`-reward`・`-penalty`、`-gapopen`・`-gapextend`）に入り、argv の作り方は変わらない（既定と同じ値は書かない）。
 

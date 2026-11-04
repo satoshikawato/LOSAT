@@ -287,7 +287,8 @@ function listKey(program: ProgramDescriptor, select: PairSelect, values: FormVal
  */
 export function pairList(program: ProgramDescriptor, pair: PairRow, values: FormValues, options: readonly EngineOption[] | undefined): readonly string[] {
   const key = listKey(program, pair.select, values, options);
-  const list = key === undefined ? undefined : pair.select.lists[key];
+  // A key typed after "Other" (a matrix named `constructor`) is not one of the lists'.
+  const list = key === undefined || !Object.hasOwn(pair.select.lists, key) ? undefined : pair.select.lists[key];
   if (list === undefined) return [];
   const only = pair.select.only;
   if (only === undefined) return list;
@@ -300,7 +301,7 @@ function pairListDefault(program: ProgramDescriptor, pair: PairRow, values: Form
   const own = pairList(program, pair, values, options).find((value) => pair.select.only?.values.includes(value));
   if (own !== undefined) return own;
   const key = listKey(program, pair.select, values, options);
-  return key === undefined ? undefined : pair.select.defaults?.[key];
+  return key === undefined || pair.select.defaults === undefined || !Object.hasOwn(pair.select.defaults, key) ? undefined : pair.select.defaults[key];
 }
 
 /** The pair that the search uses ("1,-2", "11 1"), or '' while one of its values is unknown. */

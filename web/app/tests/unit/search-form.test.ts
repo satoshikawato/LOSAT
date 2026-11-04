@@ -411,9 +411,8 @@ describe("the selects of the protein modes: NCBI's values that LOSAT reads", () 
       expect(list('blastp', '-word_size', values)).toEqual(['3', '5']);
     }
     expect(fieldChoices(field('blastp', '-comp_based_stats'), optionsOf('blastp').find((o) => o.flag === '-comp_based_stats'))).toEqual(['0', '2']);
-    expect(MATRICES).toContain('BLOSUM62');
-    expect(PROTEIN_WORD_SIZES).toEqual(expect.arrayContaining(['3', '5']));
-    expect(COMPOSITION_MODES).toEqual(['0', '1', '2', '3']);
+    // TBLASTN keeps NCBI's four: its engine reads modes 1 and 3 with -matrix IDENTITY (resetting them to 0).
+    expect(fieldChoices(field('tblastn', '-comp_based_stats'), optionsOf('tblastn').find((o) => o.flag === '-comp_based_stats'))).toEqual(COMPOSITION_MODES);
   });
 
   it('gives TBLASTX word size 3', () => {
@@ -566,6 +565,8 @@ describe("NCBI's pair selects: Match/Mismatch Scores and Gap Costs", () => {
     expect(pairList(blastn, gaps!, { '-reward': '3', '-penalty': '-3' }, bn)).toEqual([]);
     expect(pairList(tblastn, tblastnGaps, { '-matrix': 'BLOSUM45' }, tn)).toContain('14 2');
     expect(pairList(tblastn, tblastnGaps, { '-matrix': 'IDENTITY' }, tn)).toEqual([]);
+    expect(pairList(tblastn, tblastnGaps, { '-matrix': 'constructor' }, tn)).toEqual([]);
+    expect(setField(tblastn, {}, '-matrix', '__proto__', tn)).toEqual({ '-matrix': '__proto__' });
     expect(pairList(blastp, proteinGaps, {}, bp)).toEqual(['11 1']);
     expect(pairList(blastp, proteinGaps, { '-matrix': 'BLOSUM45' }, bp)).toEqual(['11 1']);
     expect(pairList(programById('blastx'), pairRows(programById('blastx'))[0]!, {}, optionsOf('blastx'))).toEqual(['11 1']);

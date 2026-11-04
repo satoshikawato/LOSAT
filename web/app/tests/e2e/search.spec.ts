@@ -3,9 +3,12 @@
 // (LOSAT_WEB_REACTORS); what only the engine can show (its messages, the kept subject, a
 // search long enough to edit or cancel while it runs) is checked in the engine build.
 import { expect, test, type Page } from '@playwright/test';
+import { spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { gzipSync, zstdCompressSync } from 'node:zlib';
-import { MATRICES, PROTEIN_GAP_COSTS, PROTEIN_WORD_SIZES } from '../../src/domain/programs';
+import { COMPOSITION_MODES, MATRICES, PROTEIN_GAP_COSTS, PROTEIN_WORD_SIZES } from '../../src/domain/programs';
 import { BUILD_HAS_ENGINE } from './support/browser';
+import { NATIVE } from './support/native';
 import {
   chooseRun,
   fasta,
@@ -454,12 +457,11 @@ test('BLASTN scores without a table row: the form accepts them and the run gives
   expect(await runMessage(page, 2)).toContain('Substitution scores 7 and -3 are not supported');
 });
 
-// The index scan reads with the program's reader (SURVEY #3): NCBI's nucleotide reader stores 19 of
-// these 24 letters (not E F I L P Q), so the record table and the engine's register agree on 19.
 // WA-FM-02: a select offers the values of NCBI's page that LOSAT's engine reads, and no other;
-// "Other" takes the rest, which the engine refuses. A change of the engine that reads more of
-// them fails here until the select offers them.
-test("the selects of the protein modes offer NCBI's values that the engine reads, and no other", async ({ page }) => {
+// "Other" takes the rest of a matrix, word size or gap costs, which the engine refuses. A change
+// of the engine that reads more of them fails here until the select offers them. Compositional
+// adjustments has no "Other", so the native CLI of the same commit tells which modes it reads.
+test("the selects of the protein modes offer NCBI's values that the engine reads, and no other", async ({ page }, testInfo) => {
   test.skip(!BUILD_HAS_ENGINE, "the engine's checks need the engine build");
   test.setTimeout(600_000);
   await openParameters(page);
@@ -488,8 +490,7 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
   const check = async (id: string, values: readonly string[], back: string) => {
     for (const value of values) {
       const offered = await choose(id, value);
-      if (offered) expect(await read(), `${id} ${value} offered`).toBe(true);
-      else await expect(validation, `${id} ${value} not offered`).toHaveAttribute('data-state', 'invalid');
+      expect(await read(), `${id} ${value} ${offered ? 'offered' : 'not offered'}`).toBe(offered);
       await page.getByTestId(`param-${id}`).selectOption(back);
       await expect(validation).toHaveAttribute('data-state', 'ok');
     }
@@ -500,22 +501,31 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
       await task(page, name);
       await check('matrix', MATRICES, 'BLOSUM62');
       await check('word_size', PROTEIN_WORD_SIZES, name.endsWith('-fast') ? '5' : '3');
-    }
-    await task(page, tasks[0]);
-    const gaps = page.getByTestId('param-gapcosts');
-    for (const pair of PROTEIN_GAP_COSTS.lists.BLOSUM62!) {
-      const offered = (await gaps.locator(`option[value="${pair}"]`).count()) > 0;
-      if (offered) await gaps.selectOption(pair);
-      else {
-        const [open, extend] = pair.split(' ');
-        await gaps.selectOption('other');
-        await page.getByTestId('param-gapopen').fill(open!);
-        await page.getByTestId('param-gapextend').fill(extend!);
+      const gaps = page.getByTestId('param-gapcosts');
+      for (const pair of PROTEIN_GAP_COSTS.lists.BLOSUM62!) {
+        const offered = (await gaps.locator(`option[value="${pair}"]`).count()) > 0;
+        if (offered) await gaps.selectOption(pair);
+        else {
+          const [open, extend] = pair.split(' ');
+          await gaps.selectOption('other');
+          await page.getByTestId('param-gapopen').fill(open!);
+          await page.getByTestId('param-gapextend').fill(extend!);
+        }
+        expect(await read(), `${name} gap costs ${pair} ${offered ? 'offered' : 'not offered'}`).toBe(offered);
+        await gaps.selectOption('11 1');
+        await expect(validation).toHaveAttribute('data-state', 'ok');
       }
-      if (offered) expect(await read(), `${id} gap costs ${pair} offered`).toBe(true);
-      else await expect(validation, `${id} gap costs ${pair} not offered`).toHaveAttribute('data-state', 'invalid');
-      await gaps.selectOption('11 1');
-      await expect(validation).toHaveAttribute('data-state', 'ok');
+    }
+    if (NATIVE !== undefined) {
+      const query = testInfo.outputPath(`${id}-query.fa`);
+      const subject = testInfo.outputPath(`${id}-subject.fa`);
+      writeFileSync(query, id === 'blastp' ? '>q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n' : '>q\nATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCAT\n');
+      writeFileSync(subject, '>s\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n');
+      const offered = await page.getByTestId('param-comp_based_stats').locator('option').evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));
+      for (const mode of COMPOSITION_MODES) {
+        const run = spawnSync(NATIVE, [id, '-query', query, '-subject', subject, '-comp_based_stats', mode, '-outfmt', '6', '-num_threads', '1']);
+        expect(run.status === 0, `${id} -comp_based_stats ${mode}: ${String(run.stderr)}`).toBe(offered.includes(mode));
+      }
     }
   }
   await program(page, 'tblastx');
@@ -526,6 +536,9 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
   await check('matrix', ['BLOSUM62', 'BLOSUM45', 'PAM30'], 'BLOSUM62');
   await page.getByTestId('param-word_size').selectOption('3');
   await check('matrix', ['BLOSUM45', 'PAM30'], 'BLOSUM62');
+  await task(page, 'tblastn');
+  await page.getByTestId('param-word_size').selectOption('6');
+  await check('matrix', ['BLOSUM62', 'BLOSUM45'], 'BLOSUM62');
 });
 
 // WA-FM-03: BLAST+ reads the template length only with its type, and the type with its length.
@@ -566,6 +579,8 @@ test("a negative value is shown as the option's value in the run's options and c
   await expect(names('run-command-6')).toHaveText(['-query', '-subject', '-penalty', '-outfmt']);
 });
 
+// The index scan reads with the program's reader (SURVEY #3): NCBI's nucleotide reader stores 19 of
+// these 24 letters (not E F I L P Q), so the record table and the engine's register agree on 19.
 test('a protein-like record in a nucleotide input: the record table counts the letters the reader stores; the run completes', async ({ page }) => {
   await program(page, 'blastn');
   await paste(page, 'query', '>gene_x\nMKLVVLAAGGHHKLMKLVVLAAGG\n>q\nACGTACGTACGTAAACCCGGGTTT\n');

@@ -209,7 +209,8 @@ export const PROTEIN_GAP_COSTS: PairSelect = {
 const PROTEIN_SCORING: Pick<ParameterSection, 'pairs'> = { pairs: { 'Gap Costs': PROTEIN_GAP_COSTS } };
 // LOSAT's BLASTP and BLASTX score with BLOSUM62 and gap costs 11/1 only, and adjust with modes 0
 // and 2: their lists keep these of NCBI's values ("Other" still takes any matrix and costs, which
-// the engine refuses with its message). A series that makes the engine read more widens them.
+// the engine refuses with its message; Compositional adjustments has no "Other"). A series that
+// makes the engine read more widens them (the engine's e2e of the selects fails until then).
 const BLOSUM62_ONLY: Pick<ParameterSection, 'pairs'> = {
   pairs: { 'Gap Costs': { id: 'gapcosts', separator: ' ', lists: { '': ['11 1'] }, labels: gapCostsLabel } },
 };

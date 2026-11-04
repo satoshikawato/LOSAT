@@ -86,7 +86,7 @@ function runLabel(run: RunView): string {
 
 /**
  * The options of the run's argv: the words after the program and the two inputs (plan §5.3),
- * quoted as on a command line, so that they can be typed again ("Additional options").
+ * which CommandText quotes as on a command line, so that they can be typed again ("Additional options").
  */
 function options(run: RunView): readonly string[] {
   return run.snapshot.argv.slice(5);

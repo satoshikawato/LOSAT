@@ -13340,6 +13340,7 @@ mod tests {
             (11, 1),
             (10, 1),
             (9, 1),
+            (32767, 32767),
         ] {
             let mut args = make_blastp_args();
             args.gap_open = Some(gap_open);

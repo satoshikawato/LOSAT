@@ -22,15 +22,23 @@ import {
   type HspRecord,
   type ValidationResult,
 } from '../ports/engine';
+import { SourceRefs } from './source-refs';
 import { Store } from './store';
 
 /**
  * One input of a search: dataset revisions of the data layer (the search form's sources,
- * already indexed, plan §5.4) with the name passed as -query / -subject; or pasted text or
- * a file, which the coordinator indexes itself.
+ * already indexed, plan §5.4) with the name passed as -query / -subject and the sources of the
+ * revisions, which the run holds (source-refs.ts); or pasted text or a file, which the
+ * coordinator indexes itself.
  */
 export type SequenceInput =
-  | { readonly dataset: { readonly name: string; readonly revisionIds: readonly string[] } }
+  | {
+      readonly dataset: {
+        readonly name: string;
+        readonly revisionIds: readonly string[];
+        readonly sourceIds: readonly string[];
+      };
+    }
   | { readonly text: string }
   | { readonly file: File };
 
@@ -65,6 +73,8 @@ export interface CoordinatorDeps {
   readonly downloader: Downloader;
   readonly now: () => number;
   readonly newRunId: () => string;
+  /** Who uses the data layer's sources, shared with the search draft: each run holds the sources it was made of. */
+  readonly refs?: SourceRefs;
 }
 
 export type EnqueueResult = ValidationResult & { readonly runId?: string };
@@ -86,8 +96,11 @@ export class Coordinator {
   private readonly runInputs = new Map<string, Promise<RunInput>>();
   private active: string | undefined;
   private nextNumber = 1;
+  private nextEnqueue = 1;
+  private readonly refs: SourceRefs;
 
   constructor(private readonly deps: CoordinatorDeps) {
+    this.refs = deps.refs ?? new SourceRefs((sourceId) => void deps.data.dropSource(sourceId).catch(() => undefined));
     void this.refreshStorage();
   }
 
@@ -124,43 +137,60 @@ export class Coordinator {
       prepared.push({ request, argv, queryName, subjectName });
     }
 
-    const snapshots: RunSnapshot[] = [];
-    const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
-    for (const [index, { request, argv, queryName, subjectName }] of prepared.entries()) {
-      const program = programById(request.program);
-      let query: InputSnapshot;
-      let subject: InputSnapshot;
-      try {
-        query = await this.snapshotInput('Query', request.query, queryName, fastaParser(program, 'query'));
-        subject = await this.snapshotInput('Subject', request.subject, subjectName, fastaParser(program, 'subject'));
-      } catch (error) {
-        return { ok: false, message: errorMessage(error) };
+    // The sources made here from text and files are held until the runs hold them; a request that fails lets them go.
+    const holder = `enqueue:${this.nextEnqueue++}`;
+    const made: string[] = [];
+    const hold = (sourceId: string) => {
+      made.push(sourceId);
+      this.refs.set(holder, made);
+    };
+    try {
+      const snapshots: Array<{ readonly snapshot: RunSnapshot; readonly sourceIds: readonly string[] }> = [];
+      const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
+      for (const [index, { request, argv, queryName, subjectName }] of prepared.entries()) {
+        const program = programById(request.program);
+        let query: SnapshotOf;
+        let subject: SnapshotOf;
+        try {
+          query = await this.snapshotInput('Query', request.query, queryName, fastaParser(program, 'query'), hold);
+          subject = await this.snapshotInput('Subject', request.subject, subjectName, fastaParser(program, 'subject'), hold);
+        } catch (error) {
+          return { ok: false, message: errorMessage(error) };
+        }
+        const title = request.title?.trim();
+        snapshots.push({
+          snapshot: Object.freeze({
+            runId: this.deps.newRunId(),
+            number: 0,
+            program: request.program,
+            ...(title ? { title } : {}),
+            argv,
+            query: query.snapshot,
+            subject: subject.snapshot,
+            requestedThreads: request.requestedThreads,
+            queuedAt: this.deps.now(),
+            ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: prepared.length }) }),
+          }),
+          sourceIds: [...query.sourceIds, ...subject.sourceIds],
+        });
       }
-      const title = request.title?.trim();
-      snapshots.push(
-        Object.freeze({
-          runId: this.deps.newRunId(),
-          number: 0,
-          program: request.program,
-          ...(title ? { title } : {}),
-          argv,
-          query,
-          subject,
-          requestedThreads: request.requestedThreads,
-          queuedAt: this.deps.now(),
-          ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: prepared.length }) }),
-        }),
-      );
+      // Numbers are given only now, so that a request that fails leaves no gap.
+      const numbered = snapshots.map(({ snapshot, sourceIds }) => ({
+        snapshot: Object.freeze({ ...snapshot, number: this.nextNumber++ }),
+        sourceIds,
+      }));
+      // A run keeps the sources it was made of for as long as it is kept (source-refs.ts).
+      for (const { snapshot, sourceIds } of numbered) this.refs.set(`run:${snapshot.runId}`, sourceIds);
+      this.setRuns([
+        ...this.state.get().runs,
+        ...numbered.map(({ snapshot }): RunView => ({ snapshot, status: 'queued', record: {} })),
+      ]);
+      for (const { snapshot } of numbered) this.queue.push(snapshot.runId);
+      this.pump();
+      return { ok: true, runIds: numbered.map(({ snapshot }) => snapshot.runId) };
+    } finally {
+      this.refs.release(holder);
     }
-    // Numbers are given only now, so that a request that fails leaves no gap.
-    const numbered = snapshots.map((snapshot) => Object.freeze({ ...snapshot, number: this.nextNumber++ }));
-    this.setRuns([
-      ...this.state.get().runs,
-      ...numbered.map((snapshot): RunView => ({ snapshot, status: 'queued', record: {} })),
-    ]);
-    for (const snapshot of numbered) this.queue.push(snapshot.runId);
-    this.pump();
-    return { ok: true, runIds: numbered.map((snapshot) => snapshot.runId) };
   }
 
   /**
@@ -238,16 +268,21 @@ export class Coordinator {
     input: SequenceInput,
     name: string,
     parser: FastaParserKind,
-  ): Promise<InputSnapshot> {
+    hold: (sourceId: string) => void,
+  ): Promise<SnapshotOf> {
     try {
       let revisionIds: readonly string[];
+      let sourceIds: readonly string[];
       if ('dataset' in input) {
         revisionIds = Object.freeze([...input.dataset.revisionIds]);
+        sourceIds = input.dataset.sourceIds;
       } else {
         const file = 'file' in input ? input.file : new File([input.text], name, { type: 'text/plain' });
         const source = await this.deps.data.addSource(file);
+        hold(source.sourceId);
         const revision = await this.deps.data.indexSource(source.sourceId, parser);
         revisionIds = Object.freeze([revision.revisionId]);
+        sourceIds = [source.sourceId];
       }
       const key = JSON.stringify(revisionIds);
       let runInput = this.runInputs.get(key);
@@ -257,7 +292,7 @@ export class Coordinator {
         runInput.catch(() => this.runInputs.delete(key));
       }
       const { bytes, sha256, records } = await runInput;
-      return Object.freeze({ name, bytes, sha256, revisionIds, records });
+      return { snapshot: Object.freeze({ name, bytes, sha256, revisionIds, records }), sourceIds };
     } catch (error) {
       throw new Error(`${role} FASTA: ${errorMessage(error)}`, { cause: error });
     }
@@ -351,6 +386,12 @@ export class Coordinator {
   private setRuns(runs: readonly RunView[]): void {
     this.state.set({ ...this.state.get(), runs: Object.freeze([...runs]) });
   }
+}
+
+/** The snapshot of an input, and the sources that it was made of. */
+interface SnapshotOf {
+  readonly snapshot: InputSnapshot;
+  readonly sourceIds: readonly string[];
 }
 
 function inputName(input: SequenceInput, pastedName: string): string {

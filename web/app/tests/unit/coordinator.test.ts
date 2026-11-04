@@ -337,15 +337,15 @@ describe('Coordinator', () => {
     const { coordinator, data } = setup();
     const add = async (name: string, text: string) => {
       const source = await data.addSource(new File([text], name));
-      return (await data.indexSource(source.sourceId, 1)).revisionId;
+      return [(await data.indexSource(source.sourceId, 1)).revisionId, source.sourceId] as const;
     };
-    const subject = await add('s.fa', '>s1\nACGT\n>s2\nGGCC\n');
-    const query = await add('q.fa', '>q\nACGT\n');
+    const [subject, subjectSource] = await add('s.fa', '>s1\nACGT\n>s2\nGGCC\n');
+    const [query, querySource] = await add('q.fa', '>q\nACGT\n');
     const revised = (await data.reviseDataset(subject, [0])).revisionId;
     const result = await coordinator.enqueueAll([
-      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject] } } },
-      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject] } } },
-      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { dataset: { name: 's2.fa', revisionIds: [revised] } } },
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query], sourceIds: [querySource] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject], sourceIds: [subjectSource] } } },
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query], sourceIds: [querySource] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject], sourceIds: [subjectSource] } } },
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query], sourceIds: [querySource] } }, subject: { dataset: { name: 's2.fa', revisionIds: [revised], sourceIds: [subjectSource] } } },
     ]);
     const [a, b, c] = result.runIds!.map((id) => viewOf(coordinator, id)!.snapshot);
     expect(a!.argv).toEqual(['blastn', '-query', 'q.fa', '-subject', 's.fa']);

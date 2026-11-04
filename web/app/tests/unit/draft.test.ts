@@ -2,6 +2,7 @@ import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { SearchDraft, type DraftSource } from '../../src/application/draft';
+import { SourceRefs } from '../../src/application/source-refs';
 import type { InputRole } from '../../src/domain/programs';
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
@@ -45,6 +46,11 @@ function setup(
     },
     prepare: (hint: EnginePrepareHint) => void prepared.push(hint),
   };
+  const dropped: string[] = [];
+  const refs = new SourceRefs((sourceId) => {
+    dropped.push(sourceId);
+    void data.dropSource(sourceId);
+  });
   let id = 0;
   const coordinator = new Coordinator({
     engine: { ...engine, run: fake.run.bind(fake), cancel: fake.cancel.bind(fake) },
@@ -52,6 +58,7 @@ function setup(
     downloader: { save: () => undefined },
     now: () => 0,
     newRunId: () => `run-${++id}`,
+    refs,
   });
   const requests: SearchRequest[][] = [];
   const draft = new SearchDraft({
@@ -64,8 +71,17 @@ function setup(
     fetcher: options.fetcher ?? new FakeAccessionFetcher(),
     now: () => 0,
     debounceMs: 0,
+    refs,
   });
-  return { draft, data, requests, validated, prepared, coordinator, checks };
+  /** What the data layer holds: its sources, and the sources of its revisions. */
+  const held = () => {
+    const inner = data as unknown as { sources: Map<string, File>; revisions: Map<string, { sourceId: string }> };
+    return {
+      sources: [...inner.sources.keys()].sort(),
+      revisionSources: [...new Set([...inner.revisions.values()].map((revision) => revision.sourceId))].sort(),
+    };
+  };
+  return { draft, data, requests, validated, prepared, coordinator, checks, dropped, held };
 }
 
 const file = (name: string, text: string) => new File([text], name, { type: 'text/plain' });
@@ -327,6 +343,119 @@ describe('SearchDraft inputs', () => {
     await draft.idle();
     expect(kinds).toEqual([2]);
     expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 2 });
+  });
+});
+
+describe('SearchDraft gives the data layer back the sources it no longer shows (SURVEY #15)', () => {
+  /** The data layer's sources of the form's cards (a source that cannot be read keeps none). */
+  const shown = (draft: SearchDraft) =>
+    (['query', 'subject'] as const)
+      .flatMap((role) => draft.state.get()[role].sources.flatMap((source) => (source.sourceId === undefined ? [] : [source.sourceId])))
+      .sort();
+  const internals = (draft: SearchDraft) =>
+    draft as unknown as { verdicts: Map<string, unknown>; revisions: Map<string, unknown>; sourceRevisions: Map<string, unknown> };
+
+  it('drops a removed file, a cleared paste and a replaced paste, with their record tables and the draft caches', async () => {
+    const { draft, held, dropped } = setup();
+    draft.setPaste('query', '>q1\nACGT\n>q2\nACGT\n');
+    draft.addFiles('subject', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [1], false);
+    await draft.idle();
+    expect(held()).toEqual({ sources: shown(draft), revisionSources: shown(draft) });
+    expect(internals(draft).verdicts.size).toBeGreaterThan(0);
+    const [paste, a] = [sourceOf(draft, 'query').sourceId!, sourceOf(draft, 'subject', 0).sourceId!];
+
+    draft.removeSource('subject', 'file-1');
+    draft.setPaste('query', '>q3\nACGT\n');
+    await draft.idle();
+    expect(dropped).toEqual([a, paste]);
+    expect(held()).toEqual({ sources: shown(draft), revisionSources: shown(draft) });
+
+    draft.setPaste('query', '');
+    draft.removeSource('subject', 'file-2');
+    await draft.idle();
+    expect(held()).toEqual({ sources: [], revisionSources: [] });
+    expect([internals(draft).verdicts.size, internals(draft).revisions.size, internals(draft).sourceRevisions.size]).toEqual([0, 0, 0]);
+  });
+
+  it('drops the sources of indexes that a newer text superseded, and of a source that cannot be read', async () => {
+    const { draft, held } = setup({});
+    // Each pause in typing indexes the text; the older indexes are still running.
+    draft.setPaste('query', '>q\nA\n');
+    await draft.idle();
+    for (const text of ['>q\nAC\n', '>q\nACG\n', '>q\nACGT\n']) draft.setPaste('query', text);
+    await draft.idle();
+    draft.addFiles('subject', [file('bad.fa', '\uFEFF>s\nACGT\n')]);
+    await draft.idle();
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'failed' });
+    expect(held()).toEqual({ sources: shown(draft), revisionSources: shown(draft) });
+    expect(shown(draft)).toHaveLength(1);
+  });
+
+  it('keeps a source through modes that read it with the other kind, both of its tables', async () => {
+    const { draft, held, dropped } = setup();
+    draft.setPaste('query', '>q\nACGT\n');
+    await draft.idle();
+    const sourceId = sourceOf(draft, 'query').sourceId;
+    draft.setProgram('blastp');
+    await draft.idle();
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ sourceId, status: 'ready', parser: 1 });
+    expect(dropped).toEqual([]);
+    expect(held().sources).toEqual([sourceId]);
+  });
+
+  it('keeps the sources of a run after the form lets them go, also when it does so while the run is started', async () => {
+    const { draft, held, dropped, coordinator, data } = setup({ useCoordinator: true });
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.addFiles('subject', [file('s.fa', '>s\nACGTACGT\n')]);
+    await draft.idle();
+    const query = sourceOf(draft, 'query').sourceId!;
+    const subject = sourceOf(draft, 'subject').sourceId!;
+    // Removed while the search is started, between the snapshots of the query and of the subject.
+    const build = data.buildRunInput.bind(data);
+    let calls = 0;
+    data.buildRunInput = async (revisionIds) => {
+      if (++calls === 1) draft.removeSource('subject', 'file-1');
+      return build(revisionIds);
+    };
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    expect(calls).toBe(2);
+    expect(draft.state.get().subject.sources).toHaveLength(0);
+    draft.setPaste('query', '');
+    await draft.idle();
+    expect(dropped).toEqual([]);
+    expect(held().sources).toEqual([query, subject].sort());
+    const run = coordinator.state.get().runs[0]!;
+    expect(run.snapshot.subject.revisionIds).toHaveLength(1);
+    expect(await data.buildRunInput(run.snapshot.subject.revisionIds)).toMatchObject({ bytes: new TextEncoder().encode('>s\nACGTACGT\n') });
+  });
+
+  it('reads a file again after its source was dropped', async () => {
+    const { draft, held } = setup();
+    const same = file('s.fa', '>s\nACGT\n');
+    draft.addFiles('subject', [same]);
+    await draft.idle();
+    draft.removeSource('subject', 'file-1');
+    await draft.idle();
+    expect(held().sources).toEqual([]);
+    draft.addFiles('subject', [same]);
+    await draft.idle();
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', check: { state: 'ok', records: 1 } });
+    expect(held().sources).toEqual(shown(draft));
+  });
+
+  it('drops the sources that an Example replaces', async () => {
+    const { draft, held } = setup();
+    draft.addFiles('subject', [file('s.fa', '>s\nACGT\n')]);
+    draft.setPaste('query', '>q\nACGT\n');
+    await draft.idle();
+    draft.useExample('refseq-16s-bacteria' as never, '>e\nACGT\n', file('bacteria.fna', '>b\nACGT\n'));
+    await draft.idle();
+    expect(held()).toEqual({ sources: shown(draft), revisionSources: shown(draft) });
+    expect(shown(draft)).toHaveLength(2);
   });
 });
 
@@ -855,6 +984,7 @@ describe('SearchDraft submit', () => {
     expect(datasetOf(request!, 'subject')).toEqual({
       name: 'combined_subject.fa',
       revisionIds: [sourceOf(draft, 'subject', 0).base!.revisionId, sourceOf(draft, 'subject', 1).base!.revisionId],
+      sourceIds: [sourceOf(draft, 'subject', 0).sourceId, sourceOf(draft, 'subject', 1).sourceId],
     });
     expect(draft.state.get().message).toBeUndefined();
   });

@@ -6,6 +6,7 @@ import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
 import { ExampleLoader } from './application/examples';
 import { ResultsBrowser } from './application/results';
+import { SourceRefs } from './application/source-refs';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
 import { BrowserAccessionFetcher } from './infra/browser/accession-fetcher';
@@ -53,16 +54,20 @@ export function createApp(options: AppOptions = {}): App {
           control: data,
           ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
         });
+  // The form and the runs share who uses the Data worker's sources: one that no one uses is dropped.
+  const refs = new SourceRefs((sourceId) => void data.dropSource(sourceId).catch(() => undefined));
   const coordinator = new Coordinator({
     engine,
     data,
     downloader: options.downloader ?? browserDownloader,
     now: () => Date.now(),
     newRunId: () => crypto.randomUUID(),
+    refs,
   });
   const draft = new SearchDraft({
     engine,
     data,
+    refs,
     enqueueAll: (requests) => coordinator.enqueueAll(requests),
     fetcher: new BrowserAccessionFetcher(),
     now: () => performance.now(),

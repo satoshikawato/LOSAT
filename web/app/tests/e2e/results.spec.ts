@@ -1947,3 +1947,71 @@ test('the Outputs view lays out blocks of lines near the view, and shows, finds 
   });
   expect(selected).toEqual({ marked: selected.blocks, blocks: selected.blocks, hasLast: true });
 });
+
+// The browser can remove the stored results under an open tab (clearing the site's data). The Outputs then show no
+// text of another format: reading an output, Export and "Download All" say why, as the Results do when they are opened
+// again (WA2-BR-01). WebKit's build of Playwright has no OPFS, and keeps results in memory.
+test('after the browser removed the stored results, the Outputs, Export and Download All say why, and show no other format', async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${A}\n`);
+  await paste(page, 'subject', `>s1\n${S1}\n`);
+  test.skip((await page.getByTestId('storage-status').getAttribute('data-backend')) !== 'opfs', 'this browser keeps results in memory');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await showOutput(page, 1, 6);
+  const output = page.getByTestId('result-output');
+  const problem = page.getByTestId('outputs-problem');
+  await expect(output).not.toHaveText('');
+  await expect(problem).toHaveCount(0);
+  // A synchronous access handle holds its file for a moment after it is closed: the removal is tried again.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async () => {
+          try {
+            await (await navigator.storage.getDirectory()).removeEntry('tmp', { recursive: true });
+            return 'removed';
+          } catch (error) {
+            return (error as Error).name;
+          }
+        }),
+      { timeout: 10_000 },
+    )
+    .toBe('removed');
+  const removed = 'The browser removed the stored results of this run, probably because the site data was cleared. Run it again.';
+  const downloads: string[] = [];
+  page.on('download', (download) => downloads.push(download.suggestedFilename()));
+
+  // Another format: its command, the reason, and no text of the format shown before.
+  await page.getByTestId('format-0').click();
+  await expect(problem).toHaveText(`The results of run 1 could not be read: ${removed}`);
+  await expect(output).toHaveCount(0);
+  await expect(page.getByTestId('format-0')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('result-command')).toHaveText('losat blastn -query query.fa -subject subject.fa -outfmt 0');
+  // Export saves nothing and says why, in the same place.
+  await page.getByTestId('export-output').click();
+  await expect(problem).toHaveText(`Not saved: ${removed}`);
+  await expect(output).toHaveCount(0);
+  // The format shown before cannot be read either.
+  await page.getByTestId('format-6').click();
+  await expect(problem).toHaveText(`The results of run 1 could not be read: ${removed}`);
+  await expect(output).toHaveCount(0);
+  // "Download All" says why under the run's line, where its list was.
+  await page.getByTestId('results-download-all').click();
+  await page.getByTestId('results-download-menu').getByTestId('results-download-7').click();
+  await expect(page.getByTestId('results-download-problem')).toHaveText(`Not saved: ${removed}`);
+  await expect(page.getByTestId('results-download-all')).toBeFocused();
+  expect(downloads).toEqual([]);
+  // The message stays on the run's line in the other tabs, and goes with another run, whose outputs are read and saved.
+  await page.getByTestId('results-view-hits').click();
+  await expect(page.getByTestId('results-download-problem')).toHaveText(`Not saved: ${removed}`);
+  await page.getByTestId('tab-search').click();
+  await submit(page);
+  await waitStatus(page, 2, 'completed');
+  await showOutput(page, 2, 0);
+  await expect(problem).toHaveCount(0);
+  await expect(page.getByTestId('results-download-problem')).toHaveCount(0);
+  await page.getByTestId('export-output').click();
+  await expect.poll(() => downloads).toEqual([expect.stringMatching(/^losat-run2-blastn-.*\.outfmt0\.txt$/)]);
+  await expect(problem).toHaveCount(0);
+});

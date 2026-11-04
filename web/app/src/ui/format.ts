@@ -49,6 +49,24 @@ export function formatCounted(count: number, noun: string): string {
   return `${formatCount(count)} ${count === 1 ? noun : `${noun}s`}`;
 }
 
+/**
+ * Run numbers as words, in order: "run 2", "runs 1 and 3", "runs 1–4", "runs 1, 3 and 5–7". Three or more
+ * runs in a row are written as a range, so that hundreds of runs stay short.
+ */
+export function formatRuns(numbers: readonly number[]): string {
+  const sorted = [...new Set(numbers)].sort((a, b) => a - b);
+  const parts: string[] = [];
+  for (let first = 0; first < sorted.length; ) {
+    let last = first;
+    while (last + 1 < sorted.length && sorted[last + 1] === sorted[last]! + 1) last++;
+    if (last - first >= 2) parts.push(`${sorted[first]}–${sorted[last]}`);
+    else parts.push(...sorted.slice(first, last + 1).map(String));
+    first = last + 1;
+  }
+  const list = parts.length < 2 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+  return `${sorted.length === 1 ? 'run' : 'runs'} ${list}`;
+}
+
 /** The frames of an HSP of a translated search: the translated sequences' only (results.ts hspEntry). */
 export interface Frames {
   readonly queryFrame?: number;

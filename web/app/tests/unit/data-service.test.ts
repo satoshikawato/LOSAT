@@ -3,7 +3,7 @@ import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { IndexedRecord } from '../../src/domain/dataset';
 import { sha256Hex } from '../../src/infra/browser/platform';
-import { MEMORY_FULL_MESSAGE } from '../../src/infra/data/block-store';
+import { MEMORY_FULL_MESSAGE, RESULTS_REMOVED_MESSAGE, StorageRemovedError } from '../../src/infra/data/block-store';
 import { DataService, type DataServiceDeps } from '../../src/infra/data/data-service';
 import { compressionOfName, plainName } from '../../src/infra/data/inflate';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
@@ -288,6 +288,67 @@ describe('DataService runs and storage status', () => {
     writer.write(0, encoder.encode('123456789'));
     writer.end();
     await expect(data.commitRun('run-1')).rejects.toMatchObject({ name: 'StorageFullError', message: MEMORY_FULL_MESSAGE });
+  });
+});
+
+// WA2-SC-05: the browser removed the stored results of every run under a tab hidden for half an hour, and
+// the check after the tab came back said they were available. The check reads a byte of each block.
+describe('DataService checkStoredResults', () => {
+  async function committed(data: DataService, runId: string, out6: string): Promise<void> {
+    const writer = new RunOutputWriter(await data.openRun(runId));
+    writer.write(6, encoder.encode(out6));
+    writer.write(1, encoder.encode('{"index":0}\n'));
+    writer.end();
+    await data.commitRun(runId);
+  }
+
+  /** A memory store whose blocks under `runs/<token>/` fail to read as the browser fails for a removed or broken file. */
+  function failingStore() {
+    const store = new MemoryBlockStore();
+    const read = store.read.bind(store);
+    const reads: Array<{ path: string; length: number }> = [];
+    const failures = new Map<string, () => Error>();
+    store.read = async (path, offset, length) => {
+      reads.push({ path, length });
+      const failure = failures.get(path.split('/')[1]!);
+      if (failure !== undefined) throw failure();
+      return read(path, offset, length);
+    };
+    return { store, reads, failures };
+  }
+
+  it('finds the committed runs whose blocks the browser removed or could not read, in the order of the runs', async () => {
+    const { store, reads, failures } = failingStore();
+    const { data } = service({ store });
+    await committed(data, 'run-1', 'one\n');
+    await committed(data, 'run-2', 'two\n');
+    await committed(data, 'run-3', 'three\n');
+    await committed(data, 'run-4', 'four\n');
+    await data.openRun('run-5'); // staged: nothing stored to check yet
+    expect(await data.checkStoredResults()).toEqual({ removed: [], unreadable: [] });
+    // Tokens are given in order: run-1 has token-1, run-2 token-2, ...
+    failures.set('token-3', () => new DOMException('A requested file or directory could not be found', 'NotFoundError'));
+    failures.set('token-1', () => new StorageRemovedError(RESULTS_REMOVED_MESSAGE));
+    failures.set('token-4', () => new DOMException('fault', 'NotReadableError'));
+    expect(await data.checkStoredResults()).toEqual({ removed: ['run-1', 'run-3'], unreadable: ['run-4'] });
+    // The outputs are not read: one byte of each block, none of an empty one; the staged run is not read.
+    expect(reads.every(({ length }) => length <= 1)).toBe(true);
+    expect(reads.some(({ length }) => length === 0)).toBe(true);
+    expect(reads.some(({ path }) => path.startsWith('runs/token-5/'))).toBe(false);
+    expect(new Set(reads.map(({ path }) => path.split('/')[2])).size).toBe(5);
+  });
+
+  it('does not report a run deleted while it was checked', async () => {
+    const { store, failures } = failingStore();
+    const { data } = service({ store });
+    await committed(data, 'run-1', 'one\n');
+    await committed(data, 'run-2', 'two\n');
+    failures.set('token-1', () => {
+      void data.deleteRun('run-1');
+      return new DOMException('gone', 'NotFoundError');
+    });
+    failures.set('token-2', () => new DOMException('gone', 'NotFoundError'));
+    expect(await data.checkStoredResults()).toEqual({ removed: ['run-2'], unreadable: [] });
   });
 });
 

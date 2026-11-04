@@ -45,9 +45,12 @@ export class StorageFullError extends Error {
 export const STORAGE_REMOVED_MESSAGE =
   "The browser's storage for this tab was removed, probably because the site data was cleared. Reload the page.";
 
-/** A stored block is gone: the browser removed the storage that held it. */
-export const RESULTS_REMOVED_MESSAGE =
-  'The browser removed the stored results of this run, probably because the site data was cleared. Run it again.';
+/**
+ * A stored block is gone: the browser removed the storage that held it. Clearing the site data does, and so did
+ * Chromium by itself in a private (off-the-record) context whose tab was hidden for half an hour (WA2-SC-05),
+ * so the message names no cause.
+ */
+export const RESULTS_REMOVED_MESSAGE = 'The browser removed the stored results of this run. Run it again.';
 
 export class StorageRemovedError extends Error {
   constructor(message = STORAGE_REMOVED_MESSAGE, cause?: unknown) {

@@ -1,10 +1,22 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { ResumeReport } from '../application/attention';
-import { formatDuration } from './format';
+import { formatDuration, formatRuns } from './format';
 import LosatLoader from './LosatLoader.vue';
 
-defineProps<{ report: ResumeReport }>();
+const props = defineProps<{ report: ResumeReport }>();
 defineEmits<{ dismiss: [] }>();
+
+/** What became of the stored results that the Data worker could not read back (WA2-SC-05); empty if none. */
+const lost = computed(() => {
+  const { removed, unreadable } = props.report;
+  const sentences = [
+    ...(removed.length > 0 ? [`The browser removed the stored results of ${formatRuns(removed)}.`] : []),
+    ...(unreadable.length > 0 ? [`The stored results of ${formatRuns(unreadable)} could not be read.`] : []),
+  ];
+  if (sentences.length === 0) return '';
+  return `${sentences.join(' ')} Run ${removed.length + unreadable.length === 1 ? 'it' : 'them'} again.`;
+});
 </script>
 
 <template>
@@ -21,6 +33,7 @@ defineEmits<{ dismiss: [] }>();
       </li>
     </ul>
     <p v-if="report.dataWorker === 'checking'" class="muted" data-testid="resume-data"><LosatLoader />Checking the stored results…</p>
+    <p v-else-if="report.dataWorker === 'responding' && lost !== ''" class="error" data-testid="resume-data">{{ lost }}</p>
     <p v-else-if="report.dataWorker === 'responding'" class="muted" data-testid="resume-data">The stored results are available.</p>
     <p v-else class="error" data-testid="resume-data">
       The part of LOSAT that keeps the results did not answer. If results cannot be opened, reload the page; the

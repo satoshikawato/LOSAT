@@ -9,8 +9,10 @@
 //   while the search form holds inputs or a run has results: LOSAT Web keeps nothing for the
 //   next visit (REQ-20) and sends nothing to a server, so a reload loses them for good (WA-IN-06);
 // - when the page becomes visible again after being hidden with runs in progress, reports
-//   how long it was hidden, what became of those runs, and whether the Data worker (which
-//   keeps the results) still answers.
+//   how long it was hidden, what became of those runs, whether the Data worker (which
+//   keeps the results) still answers, and which completed runs lost their stored results: the
+//   browser can remove them while the tab is hidden (WA2-SC-05).
+import type { StoredResultsCheck } from '../ports/data';
 import type { PagePort, WakeLockHandle } from '../ports/page';
 import type { RunStatus } from '../domain/run';
 import type { AppState } from './coordinator';
@@ -26,6 +28,10 @@ export interface ResumeReport {
   readonly runs: ReadonlyArray<{ readonly number: number; readonly before: RunStatus; readonly now: RunStatus }>;
   /** Whether the Data worker answered after the page came back. */
   readonly dataWorker: 'checking' | 'responding' | 'not-responding';
+  /** The completed runs whose stored results the browser removed, by number, as the Data worker answered. */
+  readonly removed: readonly number[];
+  /** The completed runs whose stored results could not be read for another reason, by number. */
+  readonly unreadable: readonly number[];
 }
 
 export interface AttentionState {
@@ -49,8 +55,8 @@ export interface AttentionDeps {
   readonly runs: Store<AppState>;
   /** The search form, whose inputs a reload would lose. */
   readonly draft?: Store<DraftState>;
-  /** A call that the Data worker answers (its storage status). */
-  readonly probe: () => Promise<unknown>;
+  /** Asks the Data worker whether the stored results of the completed runs are still there (RunStore.checkStoredResults). */
+  readonly probe: () => Promise<StoredResultsCheck>;
   readonly now: () => number;
   /** How long the Data worker may take to answer after the page comes back. */
   readonly probeTimeoutMs?: number;
@@ -181,11 +187,18 @@ export class Attention {
       before: before.status,
       now: current.get(runId) ?? before.status,
     }));
-    this.set({ resume: { hiddenMs: this.deps.now() - hidden.at, runs, dataWorker: 'checking' } });
+    this.set({ resume: { hiddenMs: this.deps.now() - hidden.at, runs, dataWorker: 'checking', removed: [], unreadable: [] } });
     const generation = ++this.probeGeneration;
-    const report = (dataWorker: ResumeReport['dataWorker']) => {
+    const report = (dataWorker: ResumeReport['dataWorker'], check?: StoredResultsCheck) => {
       const resume = this.state.get().resume;
-      if (generation === this.probeGeneration && resume !== undefined) this.set({ resume: { ...resume, dataWorker } });
+      if (generation !== this.probeGeneration || resume === undefined) return;
+      this.set({
+        resume: {
+          ...resume,
+          dataWorker,
+          ...(check === undefined ? {} : { removed: this.numbers(check.removed), unreadable: this.numbers(check.unreadable) }),
+        },
+      });
     };
     let answered = false;
     const timer = setTimeout(() => {
@@ -193,10 +206,10 @@ export class Attention {
     }, this.deps.probeTimeoutMs ?? 10_000);
     // A late answer still corrects the report.
     this.deps.probe().then(
-      () => {
+      (check) => {
         answered = true;
         clearTimeout(timer);
-        report('responding');
+        report('responding', check);
       },
       () => {
         answered = true;
@@ -204,6 +217,16 @@ export class Attention {
         report('not-responding');
       },
     );
+  }
+
+  /** The numbers of the runs, in order; a run no longer in the list is left out. */
+  private numbers(runIds: readonly string[]): number[] {
+    const ids = new Set(runIds);
+    return this.deps.runs
+      .get()
+      .runs.filter((run) => ids.has(run.snapshot.runId))
+      .map((run) => run.snapshot.number)
+      .sort((a, b) => a - b);
   }
 
   private set(change: { readonly [K in keyof AttentionState]?: AttentionState[K] | undefined }): void {

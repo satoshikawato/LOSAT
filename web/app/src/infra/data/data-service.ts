@@ -25,6 +25,7 @@ import type {
   RunInput,
   SourceRef,
   StorageInfo,
+  StoredResultsCheck,
 } from '../../ports/data';
 import type { HspRecord } from '../../ports/engine';
 import type { InputCheck, InputChecker } from '../../ports/input-check';
@@ -32,7 +33,7 @@ import { DIAGNOSTICS_STREAM, HITS_STREAM, OUTPUT_STREAMS, type OutputStream } fr
 import type { RecordScanner } from '../../ports/scan';
 import { RunOutputReceiver } from '../run-output/receiver';
 import { concatBytes } from '../bytes';
-import { asStorageFull, isStorageFull, type BlockStore, type BlockWriter } from './block-store';
+import { asStorageFull, isStorageFull, isStorageRemoved, type BlockStore, type BlockWriter } from './block-store';
 import { compressionOfName, inflateFile, refusedCompressionOfName } from './inflate';
 
 export interface DataServiceDeps {
@@ -64,6 +65,9 @@ const LF = 0x0a;
 const NEWLINE = new Uint8Array([LF]);
 
 type Lengths = Record<OutputStream, number>;
+
+/** What `checkStoredResults` found for a run. */
+type StoredOutcome = 'kept' | 'removed' | 'unreadable';
 
 interface StagedRun {
   readonly state: 'staged';
@@ -278,6 +282,31 @@ export class DataService implements DataGateway {
   async deleteRun(runId: string): Promise<void> {
     const run = this.runs.get(runId);
     if (run !== undefined) await this.drop(runId, run);
+  }
+
+  async checkStoredResults(): Promise<StoredResultsCheck> {
+    const runs = [...this.runs];
+    const outcomes = await Promise.all(runs.map(([runId, run]) => this.checkStored(runId, run)));
+    const of = (outcome: StoredOutcome) => runs.filter((_, i) => outcomes[i] === outcome).map(([runId]) => runId);
+    return { removed: of('removed'), unreadable: of('unreadable') };
+  }
+
+  /** Opens each block of a committed run and reads its first byte (none of an empty block). */
+  private async checkStored(runId: string, run: StagedRun | CommittedRun): Promise<StoredOutcome> {
+    if (run.state !== 'committed') return 'kept';
+    const errors = await Promise.all(
+      OUTPUT_STREAMS.map((stream) =>
+        this.deps.store.read(blockPath(run.token, stream), 0, Math.min(1, run.lengths[stream])).then(
+          () => undefined,
+          (error: unknown) => ({ error }),
+        ),
+      ),
+    );
+    // A run deleted while it was checked is not reported.
+    if (this.runs.get(runId) !== run) return 'kept';
+    const failed = errors.filter((failure) => failure !== undefined);
+    if (failed.length === 0) return 'kept';
+    return failed.some(({ error }) => isStorageRemoved(error)) ? 'removed' : 'unreadable';
   }
 
   async storageInfo(): Promise<StorageInfo> {

@@ -165,3 +165,11 @@ describe('OpfsBlockStore with a directory that is still there', () => {
     expect(await writer.seal()).toBe(1);
   });
 });
+
+// WA2-SC-05: Chromium also removed them by itself (a private context whose tab was hidden for half an hour), and the
+// message blamed a cleared site data that the user had not cleared. The e2e tests read this constant.
+describe('RESULTS_REMOVED_MESSAGE', () => {
+  it('says that the browser removed the stored results, and names no cause', () => {
+    expect(RESULTS_REMOVED_MESSAGE).toBe('The browser removed the stored results of this run. Run it again.');
+  });
+});

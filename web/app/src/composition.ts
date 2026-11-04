@@ -84,7 +84,7 @@ export function createApp(options: AppOptions = {}): App {
     page: browserPage,
     runs: coordinator.state,
     draft: draft.state,
-    probe: () => data.storageInfo(),
+    probe: () => data.checkStoredResults(),
     now: () => Date.now(),
   });
   return { coordinator, draft, examples, results, attention, usesFakeEngine: ENGINE_ASSETS === null };

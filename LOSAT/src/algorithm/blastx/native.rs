@@ -997,6 +997,7 @@ fn run_inner(
                                 false,
                                 false,
                                 crate::report::tabular::PrintedIds::default(),
+                                false,
                             )
                             .map_err(|error| match error.downcast::<HeaderReadError>() {
                                 Ok(header) => header.error,
@@ -1064,6 +1065,9 @@ fn run_inner(
                             } else {
                                 crate::report::tabular::PrintedIds::default()
                             },
+                            crate::algorithm::common::database::seq_annots_prefetch(Some(
+                                i32::from(options.outfmt),
+                            )),
                         );
                         super::x_timing::run(XRun::Titles, x_t);
                         let reported = reported
@@ -1106,7 +1110,8 @@ fn run_inner(
                         // taxid once per run): after the reader's messages of the reader batch,
                         // which every batch loop writes before it calls this, and before the
                         // warnings of its first query (`report::render_queries`). Outfmt 0, 5, 6
-                        // and 7 (`database::prefetches_subjects`); XML2 and JSON write theirs at
+                        // and 7, and with `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 and 12
+                        // (`database::prefetches_subjects`); XML2 and JSON write theirs at
                         // each `Hit` (`TaxdbPrinter`). Without `taxdb.bti` nothing is read. A
                         // refusal comes after the reports of the batches before, as the refusals
                         // of the batch's titles above (line DBID, DECISIONS 9 (9)); a refusal of

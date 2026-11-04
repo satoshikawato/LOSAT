@@ -11,11 +11,14 @@
 // Every program that LOSAT Web runs is covered: BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX.
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
+import { test } from './support/test';
 import { generateVerificationTable } from '../../build/verification';
 import type { OutputFormat } from '../../src/domain/output-format';
 import { optionKey } from '../../src/domain/verification';
-import { BUILD_HAS_ENGINE } from './support/browser';
+import { RESULTS_REMOVED_MESSAGE } from '../../src/infra/data/block-store';
+import { TMP_DIRECTORY } from '../../src/infra/data/session';
+import { BUILD_HAS_ENGINE, sessionDirectories, sessionFiles } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { chooseRun, fasta, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
 import { repeats } from './support/synthetic';
@@ -1946,4 +1949,97 @@ test('the Outputs view lays out blocks of lines near the view, and shows, finds 
     return { marked: element.querySelectorAll('.output-chunk-selected').length, blocks: element.children.length, hasLast: document.getSelection()!.toString().includes(last) };
   });
   expect(selected).toEqual({ marked: selected.blocks, blocks: selected.blocks, hasLast: true });
+});
+
+// The browser can remove the stored results under an open tab (clearing the site's data, or some of the files). The
+// Outputs then show no text of another format: reading an output, Export and "Download All" say why, as the Results do
+// when they are opened again (WA2-BR-01). WebKit's build of Playwright has no OPFS, and keeps results in memory.
+test('after the browser removed the stored results, the Outputs, Export and Download All say why, and show no other format', async ({ page }) => {
+  // A failure that reaches no message reaches the page as an uncaught error.
+  const uncaught: string[] = [];
+  page.on('pageerror', (error) => uncaught.push(String(error)));
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${A}\n`);
+  await paste(page, 'subject', `>s1\n${S1}\n`);
+  test.skip((await page.getByTestId('storage-status').getAttribute('data-backend')) !== 'opfs', 'this browser keeps results in memory');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  const [session] = await sessionDirectories(page);
+  const runDirectory = (files: readonly string[]) => [...new Set(files.filter((f) => f.startsWith('runs/')).map((f) => f.split('/')[1]!))];
+  const [first] = runDirectory(await sessionFiles(page, session!));
+  await page.getByTestId('tab-search').click();
+  await submit(page);
+  await waitStatus(page, 2, 'completed');
+  expect(runDirectory(await sessionFiles(page, session!))).toHaveLength(2);
+  await showOutput(page, 1, 6);
+  const output = page.getByTestId('result-output');
+  const problem = page.getByTestId('outputs-problem');
+  await expect(output).not.toHaveText('');
+  await expect(problem).toHaveCount(0);
+  // The stored results of run 1 go; run 2's stay. A synchronous access handle holds its file for a moment after it is
+  // closed: the removal is tried again.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          async ({ tmp, session, run }) => {
+            try {
+              const runs = await (await (await navigator.storage.getDirectory()).getDirectoryHandle(tmp)).getDirectoryHandle(session);
+              await (await runs.getDirectoryHandle('runs')).removeEntry(run, { recursive: true });
+              return 'removed';
+            } catch (error) {
+              return (error as Error).name;
+            }
+          },
+          { tmp: TMP_DIRECTORY, session: session!, run: first! },
+        ),
+      { timeout: 10_000 },
+    )
+    .toBe('removed');
+  const removed = RESULTS_REMOVED_MESSAGE;
+  const downloads: string[] = [];
+  page.on('download', (download) => downloads.push(download.suggestedFilename()));
+
+  // Export of the output shown says why next to its button, under the text, which stays.
+  await page.getByTestId('export-output').click();
+  await expect(problem).toHaveText(`Not saved: ${removed}`);
+  await expect(output).toHaveAttribute('data-shown', '1:6');
+  const box = async (testid: string) => (await page.getByTestId(testid).boundingBox())!;
+  expect((await box('outputs-problem')).y).toBeGreaterThanOrEqual((await box('result-output')).y + (await box('result-output')).height);
+  expect((await box('outputs-problem')).y + (await box('outputs-problem')).height).toBeLessThanOrEqual((await box('export-output')).y);
+
+  // Another format: its command, the reason, and no text of the format shown before.
+  await page.getByTestId('format-0').click();
+  await expect(problem).toHaveAttribute('data-failed', '1:0');
+  await expect(problem).toHaveText(`The results of run 1 could not be read: ${removed}`);
+  await expect(output).toHaveCount(0);
+  await expect(page.getByTestId('format-0')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('result-command')).toHaveText('losat blastn -query query.fa -subject subject.fa -outfmt 0');
+  // Export saves nothing and says why, in the same place.
+  await page.getByTestId('export-output').click();
+  await expect(problem).toHaveText(`Not saved: ${removed}`);
+  await expect(output).toHaveCount(0);
+  // The format shown before cannot be read either.
+  await page.getByTestId('format-6').click();
+  await expect(problem).toHaveAttribute('data-failed', '1:6');
+  await expect(problem).toHaveText(`The results of run 1 could not be read: ${removed}`);
+  await expect(output).toHaveCount(0);
+  // "Download All" says why under the run's line, where its list was.
+  await page.getByTestId('results-download-all').click();
+  await page.getByTestId('results-download-menu').getByTestId('results-download-7').click();
+  await expect(page.getByTestId('results-download-problem')).toHaveText(`Not saved: ${removed}`);
+  await expect(page.getByTestId('results-download-all')).toBeFocused();
+  expect(downloads).toEqual([]);
+  // The message stays on the run's line in the other tabs, and goes when the run picker shows another run, whose
+  // outputs are read and saved.
+  await page.getByTestId('results-view-hits').click();
+  await expect(page.getByTestId('results-download-problem')).toHaveText(`Not saved: ${removed}`);
+  await chooseRun(page, 2);
+  await expect(page.getByTestId('results-download-problem')).toHaveCount(0);
+  await showOutput(page, 2, 0, false);
+  await expect(problem).toHaveCount(0);
+  await page.getByTestId('export-output').click();
+  await expect.poll(() => downloads).toEqual([expect.stringMatching(/^losat-run2-blastn-.*\.outfmt0\.txt$/)]);
+  await expect(problem).toHaveCount(0);
+  expect(uncaught).toEqual([]);
 });

@@ -11,7 +11,8 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { chromium, expect, test, type BrowserContext } from '@playwright/test';
+import { chromium, expect, type BrowserContext } from '@playwright/test';
+import { test } from './support/test';
 import type { Reactors } from '../../build/reactors';
 import type { SearchCase, TimedRun } from './harness/engine';
 import { buildHarness } from './support/browser';

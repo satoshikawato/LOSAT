@@ -23,6 +23,7 @@ export const DATA_GATEWAY_METHODS = [
   'readDiagnostics',
   'deleteRun',
   'storageInfo',
+  'checkStoredResults',
 ] as const satisfies readonly (keyof DataGateway)[];
 
 export const EXAMPLE_STORE_METHODS = ['readExample', 'saveExample', 'deleteExample'] as const satisfies readonly (keyof ExampleStore)[];

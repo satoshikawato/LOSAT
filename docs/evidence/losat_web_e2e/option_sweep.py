@@ -165,6 +165,10 @@ def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, l
     if program == "tblastn":
         sets["task"] = [["-task", task] for task in ("tblastn", "tblastn-fast", "TBLASTN", "tblastx")]
         sets["task"] += [["-task", "tblastn-fast", "-word_size", value] for value in ("3", "5", "6")]
+        # The compressed lookup table (tblastn-fast, word sizes 5 to 7) with every matrix but
+        # IDENTITY, on which NCBI's tblastn crashes (series SC, SC11).
+        sets["task"] += [["-task", "tblastn-fast", "-matrix", matrix] for matrix in ("PAM30", "BLOSUM80", "pam250", "IDENTITY")]
+        sets["task"] += [["-matrix", matrix, "-word_size", "7"] for matrix in ("BLOSUM50", "PAM70", "IDENTITY")]
         sets["gencode"] = [["-db_gencode", code] for code in GENCODES]
         sets["intron"] = [["-max_intron_length", value] for value in ("0", "1", "50", "100", "1000", "-1", "0x10")]
         sets["intron"] += [["-max_intron_length", "100", "-sum_stats", "false"]]

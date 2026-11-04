@@ -8,7 +8,7 @@ use super::{
     preliminary::{gapped, purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
     query_setup::{batch_ranges, PreparedQueryBatch, BATCH_SIZE},
     reader_batch::{prepare_reader_batch, UnitPrep},
-    seed::{word_finder, Diagonals, InitHsp, Lookup},
+    seed::{word_finder_bx, BxLookup, Diagonals, InitHsp},
     split::{adjust_chunk_hsps, merge_chunk_hsps, split_queries, split_sizes, QueryChunk},
     subjects::Subjects,
 };
@@ -881,7 +881,7 @@ fn x_search_core(
                         if !params.iter().any(|p| p.valid) {
                             return Ok(None);
                         }
-                        let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
+                        let lookup = BxLookup::x_new_in_parts(batch, &params, options, x_parts)?;
                         let last = batch.contexts.last().expect("BLASTX contexts");
                         let length = last.offset + last.length;
                         let table = Diagonals::new(length, options.window_size)?;
@@ -1013,7 +1013,7 @@ fn x_search_core(
             let x_parts = x_bx_mem::build_parts(pool, false, Some(subjects.len()));
             #[cfg(not(feature = "parallel"))]
             let x_parts = 1;
-            let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
+            let lookup = BxLookup::x_new_in_parts(batch, &params, options, x_parts)?;
             let last = batch.contexts.last().expect("BLASTX contexts");
             let xdrop = subject_parameters(
                 batch,
@@ -1493,7 +1493,7 @@ fn x_compute_chunk(
     if !params.iter().any(|p| p.valid) {
         return Ok(None);
     }
-    let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
+    let lookup = BxLookup::x_new_in_parts(batch, &params, options, x_parts)?;
     let last = batch.contexts.last().expect("BLASTX contexts");
     if let Some(per_task) = x_par {
         let xdrop = subject_parameters(
@@ -1612,7 +1612,7 @@ fn compute_subject(
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
     options: &ResolvedOptions,
-    lookup: &Lookup,
+    lookup: &BxLookup,
     diagonals: &mut Diagonals,
     xdrop: i32,
     diagnostics: bool,
@@ -1730,7 +1730,7 @@ fn compute_subject(
             batch, params, options, encoded, lookup, diagonals, x_sent,
         )?
     } else {
-        word_finder(
+        word_finder_bx(
             batch,
             params,
             options,

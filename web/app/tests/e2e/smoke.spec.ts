@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { navigate } from './support/navigate';
 import { chooseRun, openSearch, paste, program, waitStatus } from './support/search';

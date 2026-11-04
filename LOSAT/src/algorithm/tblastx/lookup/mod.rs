@@ -45,8 +45,9 @@ pub use backbone::{
 pub use backbone::x_tbn_lut_print_summary;
 pub(crate) use backbone::{
     build_ncbi_lookup_for_profile, ideal_karlin_params_of,
-    prepare_blosum62_lookup_query_for_word_size, x_lookup_contexts_for_profile,
-    x_lookup_query_for_profile, x_lookup_table_for_profile, x_lookup_table_for_profile_in,
+    prepare_blosum62_lookup_query_for_word_size, x_compressed_contexts_for_profile,
+    x_lookup_contexts_for_profile, x_lookup_query_for_profile, x_lookup_table_for_profile,
+    x_lookup_table_for_profile_in,
 };
 
 use crate::stats::KarlinParams;
@@ -244,8 +245,11 @@ pub(crate) use backbone::{XAaSpares, XBpLookup};
 #[cfg(test)]
 pub(crate) use backbone::{x_assert_same_table_as, x_same_table};
 // The BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
-// by searches of two threads or more; x_lut_direct.rs).
-pub(crate) use backbone::{x_bx_pooled_for, x_give_back_pooled};
+// by searches of two threads or more; x_lut_direct.rs), and the table of either width a BLASTX
+// build returns.
+pub(crate) use backbone::{
+    x_bx_pooled_for, x_give_back_pooled, x_give_back_pooled16, x_hits_per_cell_hundredths, XBxTable,
+};
 
 // EXPERIMENT (LOSAT_X_TBXLUT): TBLASTX's full table built in place
 // (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export itself.

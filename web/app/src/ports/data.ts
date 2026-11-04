@@ -69,6 +69,14 @@ export interface ResultSetRef {
   readonly hitCount: number;
 }
 
+/** The committed runs whose stored outputs cannot be read back (`RunStore.checkStoredResults`), in the order of the runs. */
+export interface StoredResultsCheck {
+  /** The browser removed their stored outputs: it answers that they are not found. */
+  readonly removed: readonly string[];
+  /** Their stored outputs failed to read for another reason. */
+  readonly unreadable: readonly string[];
+}
+
 /**
  * Outputs of runs. A run is staged from `openRun` until `commitRun`; only committed runs
  * can be read. A staged run that is discarded (cancel, failure) leaves nothing behind.
@@ -95,6 +103,13 @@ export interface RunStore {
   readHitTable(runId: string): Promise<HspTable>;
   readDiagnostics(runId: string): Promise<string>;
   deleteRun(runId: string): Promise<void>;
+  /**
+   * Whether the stored outputs of every committed run are still there: it opens the HSP records
+   * of each run (the first block that opening the run asks for) and reads its first byte, a few
+   * runs at a time, so it stays quick for hundreds of runs. The browser can remove them under an
+   * open tab (WA2-SC-05); the check after the page was hidden (application/attention.ts) asks.
+   */
+  checkStoredResults(): Promise<StoredResultsCheck>;
 }
 
 export type StorageBackend = 'opfs' | 'memory';

@@ -322,7 +322,9 @@ impl ReportedSubjects {
     /// (with `joined`: outfmt 0, 5 and 13 to 16) and of `ParsedSubject::tabular_ids` (with
     /// `tabular`, and `ParsedSubject::check_printed_word` of the ids it prints, `words`).
     /// `taxonomy`: whether the report writes the sequences' taxids or their names (13 to 16, a
-    /// table of taxonomy fields; `ParsedSubject::fetched`).
+    /// table of taxonomy fields; `ParsedSubject::fetched`). `prefetched`: whether the batch's
+    /// prefetch reads the subjects though the report writes their Seq-align ids alone (the
+    /// Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, `shared::check_prefetched_parsed`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -335,6 +337,7 @@ impl ReportedSubjects {
         joined: bool,
         taxonomy: bool,
         words: crate::report::tabular::PrintedIds,
+        prefetched: bool,
     ) -> Result<Self> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
@@ -413,6 +416,8 @@ impl ReportedSubjects {
                     subject
                         .fetched(taxonomy)
                         .map_err(|reason| shared::parsed_refusal(ordinal, &reason, PROGRAM))?;
+                } else if prefetched {
+                    shared::check_prefetched_parsed(&database.db, subject, ordinal, PROGRAM)?;
                 }
                 if pairwise {
                     shared::check_shown_parsed_subject(
@@ -936,6 +941,7 @@ mod tests {
                 false,
                 false,
                 crate::report::tabular::PrintedIds::default(),
+                false,
             )
             .unwrap();
             let messages = reported.prefetch_messages(database, &batches, true);
@@ -996,6 +1002,7 @@ mod tests {
                 false,
                 false,
                 crate::report::tabular::PrintedIds::default(),
+                false,
             )
             .unwrap();
             reported

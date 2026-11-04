@@ -36,7 +36,9 @@ pub(crate) use x_lut_direct::XBpLookup;
 pub(crate) use x_lut_direct::{x_assert_same_table_as, x_same_table};
 // The BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
 // by searches of two threads or more).
-pub(crate) use x_lut_direct::{x_bx_pooled_for, x_give_back_pooled};
+pub(crate) use x_lut_direct::{
+    x_bx_pooled_for, x_give_back_pooled, x_give_back_pooled16, x_hits_per_cell_hundredths, XBxTable,
+};
 // EXPERIMENT (PAIRLUT): the direct builder of the TBLASTX unit
 // path's group tables (x_pair_lut.rs, a child module of x_lut_direct.rs), used by
 // tblastx/x_pair_par.rs.
@@ -139,6 +141,22 @@ pub trait XHit: Copy + Default + Send + Sync + 'static {
     /// offset above 65,535.
     fn x_store(dst: &mut [Self], src: &[i32]);
 
+    /// `q` stored at `dst` without a check (a `u16` hit is checked in debug builds): the store of
+    /// the partitioned build's fill (`x_lut_direct.rs` `XDisjointOut::put`), whose offsets were
+    /// checked against the query's length when the width was chosen.
+    ///
+    /// # Safety
+    /// `dst` must point to a hit that nothing else reads or writes meanwhile, and a `u16` hit's `q`
+    /// must be at most 65,535.
+    unsafe fn x_write(dst: *mut Self, q: i32);
+
+    /// `src` stored at `dst` without a check, as [`Self::x_write`] stores one offset (a `memcpy`
+    /// for `i32`).
+    ///
+    /// # Safety
+    /// As [`Self::x_write`], for the `src.len()` hits from `dst`.
+    unsafe fn x_copy(dst: *mut Self, src: &[i32]);
+
     /// The hit at `p` read with one volatile load (not taken out of a vector register by the
     /// compiler, `x_cell_avx2_defer_masked`).
     ///
@@ -181,6 +199,18 @@ impl XHit for i32 {
     }
 
     #[inline(always)]
+    unsafe fn x_write(dst: *mut Self, q: i32) {
+        // SAFETY: (caller) `dst` points to a hit nothing else touches.
+        unsafe { dst.write(q) }
+    }
+
+    #[inline(always)]
+    unsafe fn x_copy(dst: *mut Self, src: &[i32]) {
+        // SAFETY: (caller) `dst..dst + src.len()` are hits nothing else touches.
+        unsafe { std::ptr::copy_nonoverlapping(src.as_ptr(), dst, src.len()) }
+    }
+
+    #[inline(always)]
     unsafe fn x_read_volatile(p: *const Self) -> i32 {
         // SAFETY: (caller) `p` points to a hit.
         unsafe { std::ptr::read_volatile(p) }
@@ -215,6 +245,24 @@ impl XHit for u16 {
     fn x_store(dst: &mut [Self], src: &[i32]) {
         for (d, &s) in dst.iter_mut().zip(src) {
             *d = u16::try_from(s).expect("a query offset of a u16 lookup table fits 16 bits");
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn x_write(dst: *mut Self, q: i32) {
+        debug_assert!(
+            u16::try_from(q).is_ok(),
+            "a query offset of a u16 lookup table fits 16 bits: {q}"
+        );
+        // SAFETY: (caller) `dst` points to a hit nothing else touches.
+        unsafe { dst.write(q as u16) }
+    }
+
+    #[inline(always)]
+    unsafe fn x_copy(dst: *mut Self, src: &[i32]) {
+        for (k, &q) in src.iter().enumerate() {
+            // SAFETY: (caller) `dst..dst + src.len()` are hits nothing else touches.
+            unsafe { Self::x_write(dst.add(k), q) };
         }
     }
 
@@ -291,6 +339,13 @@ pub trait XCell: Copy + Default + Send + Sync + 'static {
 
     /// The cell's own entries (a cell with at most `AA_HITS_PER_CELL` hits is written here).
     fn entries_mut(&mut self) -> &mut [Self::Hit];
+
+    /// The first of the cell's own entries, as a pointer taken without making a reference to the
+    /// cell (the partitioned build's tasks write different cells' entries through it).
+    ///
+    /// # Safety
+    /// `cell` must point to a cell of a backbone.
+    unsafe fn x_entries_ptr(cell: *mut Self) -> *mut Self::Hit;
 }
 
 impl XCell for BackboneCell {
@@ -341,6 +396,12 @@ impl XCell for BackboneCell {
     fn entries_mut(&mut self) -> &mut [i32] {
         &mut self.entries
     }
+
+    #[inline(always)]
+    unsafe fn x_entries_ptr(cell: *mut Self) -> *mut i32 {
+        // SAFETY: (caller) `cell` points to a cell.
+        unsafe { std::ptr::addr_of_mut!((*cell).entries) }.cast::<i32>()
+    }
 }
 
 /// EXPERIMENT (LOSAT_X_BPLK16): the cell of the lookup table of a blastp block whose lookup
@@ -358,12 +419,16 @@ const _: () = assert!(std::mem::size_of::<BackboneCell16>() == 8);
 
 impl XCell for BackboneCell16 {
     type Hit = u16;
-    // A 16-byte load at a cell's entries (2 bytes into the cell) ends 10 bytes past the cell's
-    // end at most.
-    const PAD_CELLS: usize = 2;
-    // A 16-byte load at the start of an overflow hit list of at least one hit ends 7 hits past
-    // its end at most.
-    const PAD_HITS: usize = 8;
+    // The farthest read past a list is BLASTX's cross staging (`x_cross_cell`,
+    // blastp/x_seed_fused.rs): three 16-byte loads (`XHit::x_load_tail`) at the list's start and
+    // 16 and 32 bytes on from it, which end 48 bytes from the start whatever the list's length.
+    // For a cell's own entries (2 bytes into the cell) that is 50 bytes from the cell's start, 42
+    // past its end: 6 cells of 8 bytes.
+    const PAD_CELLS: usize = 6;
+    // A list in the overflow array is staged in pieces of 24 hits from its start, and its last
+    // piece (1 to 24 hits left) reads up to 23 hits past its end: 24 hits. Every other cell test
+    // reads 8 hits at most.
+    const PAD_HITS: usize = 24;
 
     #[inline(always)]
     fn count(&self) -> usize {
@@ -397,6 +462,12 @@ impl XCell for BackboneCell16 {
     #[inline(always)]
     fn entries_mut(&mut self) -> &mut [u16] {
         &mut self.entries
+    }
+
+    #[inline(always)]
+    unsafe fn x_entries_ptr(cell: *mut Self) -> *mut u16 {
+        // SAFETY: (caller) `cell` points to a cell.
+        unsafe { std::ptr::addr_of_mut!((*cell).entries) }.cast::<u16>()
     }
 }
 
@@ -1073,6 +1144,39 @@ pub(crate) fn x_lookup_contexts_for_profile(
         )
         .contexts,
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797 (see
+// `x_lookup_contexts_for_profile`)
+// ```c
+// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+// ```
+/// `x_lookup_contexts_for_profile`'s contexts when the diagnostics are on: those of the compressed
+/// lookup table (word sizes 5 to 7), which the diagnostics, counting the standard table's words,
+/// do not build. Cold, so that `x_lookup_contexts_for_profile` keeps its code.
+#[cold]
+#[inline(never)]
+pub(crate) fn x_compressed_contexts_for_profile(
+    queries: &[Vec<QueryFrame>],
+    check_ideal: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> Vec<QueryContext> {
+    let bounds = if matrix == ScoringMatrix::Blosum62 {
+        (-4, 11)
+    } else {
+        matrix_score_bounds(matrix)
+    };
+    prepare_lookup_query(
+        queries,
+        ideal_karlin_params_for_matrix(matrix, bounds),
+        &compute_std_aa_composition(),
+        word_length,
+        check_ideal,
+        matrix,
+        bounds,
+    )
+    .contexts
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (cited at
@@ -2063,6 +2167,11 @@ pub(crate) fn build_ncbi_lookup_for_profile(
 // ```
 /// BLASTX's lookup table of a prepared query; `parts` above 1: a pooled build's passes on that many tasks of the pool it runs on
 /// (`LOSAT_X_BXBUILDPAR`, `x_lut_direct.rs` `x_partitioned_passes`); the table is the same.
+///
+/// With `narrow_cutoff` (`Some` where the fused loop scans the table, `blastx/x_seed_diag.rs`
+/// `x_narrow_cutoff`) the in-place builder stores the hits in 16 bits (`BackboneCell16`) for a table
+/// whose lookup query is at most 65,535 letters and whose hits per used backbone cell, in
+/// hundredths, are at least the cutoff; the table holds the same cells otherwise.
 pub(crate) fn build_ncbi_lookup_from_prepared(
     concat_query: Vec<u8>,
     lookup_locations: Vec<(i32, i32)>,
@@ -2070,7 +2179,8 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     threshold: i32,
     pooled: bool,
     parts: usize,
-) -> BlastAaLookupTable {
+    narrow_cutoff: Option<u64>,
+) -> XBxTable {
     let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
     let prepared = PreparedLookupQuery {
         concat_query,
@@ -2093,18 +2203,31 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines (diagnostics
     // mode, or a backbone index wider than 16 bits) the reference builder below runs. With `pooled`
     // (the pooled build, chosen by the caller for its search, LOSAT_X_BXPOOLN1) the build takes
-    // kept vectors; the caller gives them back (`x_give_back_pooled`) when it drops the table, or
-    // the pool goes without them (a missed reuse only).
+    // kept vectors; the caller gives them back (`x_give_back_pooled`, `x_give_back_pooled16`) when
+    // it drops the table, or the pool goes without them (a missed reuse only).
     let built = if pooled {
-        x_lut_direct::x_build_direct_pooled(prepared, threshold, ScoringMatrix::Blosum62, 3, parts)
+        x_lut_direct::x_build_direct_pooled(
+            prepared,
+            threshold,
+            ScoringMatrix::Blosum62,
+            3,
+            parts,
+            narrow_cutoff,
+        )
     } else {
-        x_lut_direct::x_build_direct(prepared, threshold, ScoringMatrix::Blosum62, 3)
+        x_lut_direct::x_bx_build_direct(
+            prepared,
+            threshold,
+            ScoringMatrix::Blosum62,
+            3,
+            narrow_cutoff,
+        )
     };
     let prepared = match built {
         Ok(table) => return table,
         Err(prepared) => prepared,
     };
-    build_lookup_from_prepared(prepared, threshold, ScoringMatrix::Blosum62, 3).0
+    XBxTable::Wide(build_lookup_from_prepared(prepared, threshold, ScoringMatrix::Blosum62, 3).0)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245

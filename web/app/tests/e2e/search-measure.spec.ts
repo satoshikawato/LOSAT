@@ -11,7 +11,8 @@
 // engine's validate). One warm-up and three measured repetitions, each in a new page.
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './support/test';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
 import { navigate } from './support/navigate';
 

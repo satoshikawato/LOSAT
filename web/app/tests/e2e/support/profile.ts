@@ -2,8 +2,9 @@
 // incognito: their OPFS lives in memory and ignores the quota that CDP sets, unlike a
 // user's browser profile. A persistent context keeps OPFS on disk, as users have it.
 import { readdirSync, readFileSync } from 'node:fs';
-import { test as base, type BrowserContext } from '@playwright/test';
+import type { BrowserContext } from '@playwright/test';
 import { ORIGIN } from './browser';
+import { test as base } from './test';
 
 export interface Profile {
   readonly context: BrowserContext;

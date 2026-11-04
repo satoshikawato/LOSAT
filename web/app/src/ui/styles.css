@@ -280,14 +280,14 @@ input[type='radio'] {
 .losat-logo {
   display: block;
   height: 24px;
-  width: calc(24px * 38.96 / 10.72);
+  width: calc(24px * 38.72 / 10.72);
   fill: currentColor;
 }
 
 /* The loader (DW-43), after gbdraw's .gbdraw-loader: white pens in a mask reveal the filled A.
-   --losat-loader-from and --losat-loader-to run along the drawing (0-24.472, logo.ts LOADER_LENGTH);
-   each pen shows the part of that interval it covers: pen a 0-23.517 (the left leg, the apex, the
-   right leg, the base to the right), pen b from 20.471 for 4.001 (the base to the left, from where the
+   --losat-loader-from and --losat-loader-to run along the drawing (0-24.578, logo.ts LOADER_LENGTH);
+   each pen shows the part of that interval it covers: pen a 0-24.118 (the left leg, the apex, the
+   right leg, the base to the right), pen b from 20.808 for 3.77 (the base to the left, from where the
    stroke lands). Loop 2.22 s: draw 0.9 s, hold 0.26 s, erase 0.9 s from the start, rest 0.16 s.
    In the accent colour, or the text colour on a filled button. */
 @property --losat-loader-from {
@@ -299,7 +299,7 @@ input[type='radio'] {
 @property --losat-loader-to {
   syntax: '<number>';
   inherits: true;
-  initial-value: 24.472;
+  initial-value: 24.578;
 }
 
 .losat-loader {
@@ -312,7 +312,7 @@ input[type='radio'] {
   color: var(--accent);
   fill: currentColor;
   --losat-loader-from: 0;
-  --losat-loader-to: 24.472;
+  --losat-loader-to: 24.578;
   animation: losat-loader-stroke 2.22s infinite;
 }
 
@@ -333,12 +333,12 @@ input[type='radio'] {
 
 .losat-loader-pen-a {
   --pen-start: 0;
-  --pen-length: 23.517;
+  --pen-length: 24.118;
 }
 
 .losat-loader-pen-b {
-  --pen-start: 20.471;
-  --pen-length: 4.001;
+  --pen-start: 20.808;
+  --pen-length: 3.77;
 }
 
 @keyframes losat-loader-stroke {
@@ -349,18 +349,18 @@ input[type='radio'] {
   }
   40.5405% {
     --losat-loader-from: 0;
-    --losat-loader-to: 24.472;
+    --losat-loader-to: 24.578;
     animation-timing-function: linear;
   }
   52.2523% {
     --losat-loader-from: 0;
-    --losat-loader-to: 24.472;
+    --losat-loader-to: 24.578;
     animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
   }
   92.7928%,
   100% {
-    --losat-loader-from: 24.472;
-    --losat-loader-to: 24.472;
+    --losat-loader-from: 24.578;
+    --losat-loader-to: 24.578;
   }
 }
 
@@ -1607,6 +1607,12 @@ label.inline {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--bg);
+}
+
+/* Why the output chosen there was not saved: in the same place as the list. */
+.results-run > .results-message {
+  flex-basis: 100%;
+  margin: 2px 0 0;
 }
 
 .download-list button {

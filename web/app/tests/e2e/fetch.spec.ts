@@ -5,7 +5,8 @@
 // (§11): a box that no one source serves has a Fetch per group of accessions, one source each. The
 // sources are stubbed with routes at their real addresses, so the page runs under the deployed
 // CSP (public/_headers connect-src); the tests also count every request that leaves the site.
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './support/test';
 import { E2E_ORIGIN } from './support/origin';
 import { openSearch, paste, program, settled, submit } from './support/search';
 

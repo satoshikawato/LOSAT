@@ -69,6 +69,16 @@
 //! `tables_fused=` and `tables_other=` (the choices made) and
 //! `hits_per_cell=LEAST-MOST` (hundredths).
 //!
+//! The hits of a table the fused loop scans are stored in 16 bits (`BxLookup::Narrow`,
+//! `BackboneCell16`: 8-byte cells and a `u16` overflow array, half the bytes of the 16-byte cells
+//! and `Int4` overflow): the builder chooses the width after its count pass, from the same
+//! hits-per-used-cell test as the choice of the loop ([`x_narrow_cutoff`]) and the length of the
+//! lookup query (at most 65,535 letters, so every query offset and every cell's count fits). The
+//! fused loop is generic over the table's cell, and widens each hit to an `i32` before any
+//! arithmetic (`(q - s) & mask`, `q - diff`), so the tables, calls and reports are those of the
+//! table of `Int4` hits. Every other table (the direct loop's, `-window_size 0`, the shadow mode,
+//! a longer query batch, the compressed table of `-task blastx-fast`) keeps `Int4` hits.
+//!
 //! EXPERIMENT (LOSAT_X_BXCROSS): the AVX2 batch is `XCellTest::Cross`:
 //! the subject's hits staged and tested in windows of eight cut across the cells' borders, a
 //! window with a repeated entry in parts cut before each hit that repeats an entry of its part, the
@@ -110,6 +120,7 @@ use super::*;
 use crate::algorithm::blastp::x_seed_fused::{
     x_cell_test, x_scan_two_hit_with, XCellTest, XContextTable,
 };
+use crate::algorithm::tblastx::lookup::{x_hits_per_cell_hundredths, XCell};
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::OnceLock;
@@ -274,19 +285,26 @@ fn x_min_hits_per_cell() -> u64 {
     })
 }
 
+// No NCBI counterpart: chooses the width of the standard table's hits (tblastx/lookup/backbone.rs
+// `BackboneCell16`); it does not change any value NCBI computes.
+/// The cutoff for the width of the standard table's hits: `Some(LOSAT_X_BXDIAGMIN)` where the fused
+/// loop scans the tables of this search, `None` elsewhere. The build stores the hits in 16 bits
+/// when the lookup query fits and the table's hits per used cell reach the cutoff, which is the
+/// test [`x_fused_pays`] makes of the finished table: a `BxLookup::Narrow` table is one the fused
+/// loop scans (the fused loop is the one for `-window_size` above 0 when `x_bxdiag_mode()` is 1,
+/// [`x_word_finder_diag`]); the direct loop scans the tables with fewer hits per cell, the one-hit
+/// stage, and `LOSAT_X_BXDIAGSHADOW`'s (mode 2) every table, all with `Int4` hits.
+pub(crate) fn x_narrow_cutoff(options: &ResolvedOptions) -> Option<u64> {
+    (x_bxdiag_mode() == 1 && options.window_size > 0).then(x_min_hits_per_cell)
+}
+
 // No NCBI counterpart: a property of the lookup table that chooses LOSAT's loop; it does not
 // change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN): the table's hits per used cell, in hundredths (0 for a table
 /// without hits).
-fn x_hits_per_cell(table: &BlastAaLookupTable) -> u64 {
-    let (mut hits, mut used) = (0u64, 0u64);
-    for cell in &table.backbone {
-        if cell.num_used > 0 {
-            hits += cell.num_used as u64;
-            used += 1;
-        }
-    }
-    (hits * 100).checked_div(used).unwrap_or(0)
+fn x_hits_per_cell<K: XCell>(table: &BlastAaLookupTable<K>) -> u64 {
+    let (hits, used) = K::x_hits_and_used(&table.backbone);
+    x_hits_per_cell_hundredths(hits, used)
 }
 
 // No NCBI counterpart: a property of the lookup table that chooses LOSAT's loop; it does not
@@ -294,7 +312,7 @@ fn x_hits_per_cell(table: &BlastAaLookupTable) -> u64 {
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN): `table`'s hits per used cell
 /// ([`x_hits_per_cell`]), worked out once per table and thread (`build` = the table's build number
 /// identifies it), and whether this call worked it out.
-fn x_table_ratio(table: &BlastAaLookupTable, build: u64) -> (u64, bool) {
+fn x_table_ratio<K: XCell>(table: &BlastAaLookupTable<K>, build: u64) -> (u64, bool) {
     X_CHOICE.with(|choice| {
         let (last, ratio) = choice.get();
         if last == build {
@@ -310,7 +328,7 @@ fn x_table_ratio(table: &BlastAaLookupTable, build: u64) -> (u64, bool) {
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN): whether the fused loop scans the subjects of `table`'s query
 /// batch: its hits per used cell are at least [`x_min_hits_per_cell`]. Counted for the timing line
 /// once per table and thread.
-fn x_fused_pays(table: &BlastAaLookupTable, build: u64) -> bool {
+fn x_fused_pays<K: XCell>(table: &BlastAaLookupTable<K>, build: u64) -> bool {
     let (ratio, first) = x_table_ratio(table, build);
     if first {
         x_count_choice(ratio);
@@ -337,14 +355,16 @@ fn x_count_choice(ratio: u64) {
 /// thread that takes tasks of several tables in turn would otherwise work it out again at each
 /// change of table (its cache holds one).
 #[cfg(feature = "parallel")]
-pub(crate) fn x_shared_table_ratio(lookup: &Lookup, options: &ResolvedOptions) -> Option<u64> {
-    let Lookup::Standard(table, kept) = lookup else {
-        return None;
+pub(crate) fn x_shared_table_ratio(lookup: &BxLookup, options: &ResolvedOptions) -> Option<u64> {
+    let (ratio, first) = match lookup {
+        BxLookup::Wide(Lookup::Standard(table, kept)) => {
+            x_table_ratio_if_fused(table, kept, options)?
+        }
+        BxLookup::Narrow(NarrowLookup { table, kept }) => {
+            x_table_ratio_if_fused(table, kept, options)?
+        }
+        BxLookup::Wide(Lookup::Compressed(_)) => return None,
     };
-    if x_bxdiag_mode() != 1 || options.window_size <= 0 {
-        return None;
-    }
-    let (ratio, first) = x_table_ratio(table, kept.build);
     if first {
         x_count_choice(ratio);
     }
@@ -355,10 +375,29 @@ pub(crate) fn x_shared_table_ratio(lookup: &Lookup, options: &ResolvedOptions) -
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN): makes `ratio` (from [`x_shared_table_ratio`] for `lookup`) this
 /// thread's choice for `lookup`'s table, so that the thread does not work it out again.
 #[cfg(feature = "parallel")]
-pub(crate) fn x_take_table_ratio(lookup: &Lookup, ratio: Option<u64>) {
-    if let (Lookup::Standard(_, kept), Some(ratio)) = (lookup, ratio) {
+pub(crate) fn x_take_table_ratio(lookup: &BxLookup, ratio: Option<u64>) {
+    let kept = match lookup {
+        BxLookup::Wide(Lookup::Standard(_, kept)) => kept,
+        BxLookup::Narrow(NarrowLookup { kept, .. }) => kept,
+        BxLookup::Wide(Lookup::Compressed(_)) => return,
+    };
+    if let Some(ratio) = ratio {
         X_CHOICE.with(|choice| choice.set((kept.build, ratio)));
     }
+}
+
+// No NCBI counterpart: see `x_shared_table_ratio` (speed only).
+/// [`x_table_ratio`] of a standard table where the fused loop may scan its subjects, else `None`.
+#[cfg(feature = "parallel")]
+fn x_table_ratio_if_fused<K: XCell>(
+    table: &BlastAaLookupTable<K>,
+    kept: &XKeptPresence,
+    options: &ResolvedOptions,
+) -> Option<(u64, bool)> {
+    if x_bxdiag_mode() != 1 || options.window_size <= 0 {
+        return None;
+    }
+    Some(x_table_ratio(table, kept.build))
 }
 
 // No NCBI counterpart: counters of the timing line and of the shadow summary.
@@ -532,6 +571,54 @@ pub(crate) fn x_word_finder_diag(
     Ok(Some(fused))
 }
 
+/// EXPERIMENT (LOSAT_X_BXDIAG): the fused loop for one subject on the table of 16-bit hits
+/// (`x_word_finder_diag` for a [`NarrowLookup`]). The table was built to be fused (the build's
+/// test is [`x_fused_pays`]'s on the finished table, and [`x_narrow_cutoff`] its options'), so it
+/// is never handed to the direct loop; where the fused loop does not act (`-window_size 0` or
+/// another `LOSAT_X_BXDIAG` mode, which no table of 16-bit hits is built for) the reference word
+/// finder scans it.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606 (as in
+// `x_word_finder_diag`)
+pub(crate) fn x_word_finder_narrow(
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &NarrowLookup,
+    diagonals: &mut Diagonals,
+    sent: Option<XSent<'_>>,
+) -> Result<Vec<InitHsp>> {
+    let NarrowLookup { table, kept } = lookup;
+    if options.window_size <= 0 || x_bxdiag_mode() != 1 {
+        return word_finder_narrow(
+            batch,
+            parameters,
+            options,
+            subject,
+            lookup,
+            diagonals,
+            |_| {},
+        );
+    }
+    // The choice is counted for the timing line (`tables_fused=`) as the direct loop's tables are.
+    let pays = x_fused_pays(table, kept.build);
+    debug_assert!(pays, "a table of 16-bit hits is built to be fused");
+    crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", true);
+    let (hits, counts) = x_word_finder_fused_or_sent(
+        x_cell_mode(),
+        batch,
+        parameters,
+        options,
+        subject,
+        table,
+        kept,
+        diagonals,
+        sent,
+    )?;
+    x_add_counts(counts);
+    Ok(hits)
+}
+
 // No NCBI counterpart: adds one subject's counts to the timing line's totals.
 /// EXPERIMENT (LOSAT_X_BXDIAG): one subject's counts of [`x_word_finder_fused`] (the cells, their
 /// hits, the candidates, and LOSAT_X_BXCROSS's windows tested in parts) added to the totals.
@@ -552,13 +639,13 @@ fn x_add_counts(counts: [u64; 4]) {
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): [`x_word_finder_fused`], or with `sent` its instance with the
 /// sentinel walks, [`x_word_finder_fused_sent`].
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_fused_or_sent(
+fn x_word_finder_fused_or_sent<K: XCell>(
     mode: XCellTest,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
-    table: &BlastAaLookupTable,
+    table: &BlastAaLookupTable<K>,
     kept: &XKeptPresence,
     diagonals: &mut Diagonals,
     sent: Option<XSent<'_>>,
@@ -596,13 +683,13 @@ fn x_word_finder_fused_or_sent(
 //                                   offset_pairs, array_size, scan_range);
 // ```
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_fused(
+fn x_word_finder_fused<K: XCell>(
     mode: XCellTest,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
-    table: &BlastAaLookupTable,
+    table: &BlastAaLookupTable<K>,
     kept: &XKeptPresence,
     diagonals: &mut Diagonals,
 ) -> Result<(Vec<InitHsp>, [u64; 4])> {
@@ -740,13 +827,13 @@ fn x_word_finder_fused(
 // `x_word_finder_fused`).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_fused_sent(
+fn x_word_finder_fused_sent<K: XCell>(
     mode: XCellTest,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
-    table: &BlastAaLookupTable,
+    table: &BlastAaLookupTable<K>,
     kept: &XKeptPresence,
     diagonals: &mut Diagonals,
     sent: XSent<'_>,
@@ -862,16 +949,18 @@ mod tests {
     }
 
     /// A search of `query` (nucleotide FASTA) with `-window_size window` (default options
-    /// otherwise), its statistics set for subjects of `subject_length` residues.
+    /// otherwise), its statistics set for subjects of `subject_length` residues; its standard table
+    /// has `Int4` hits, or with `narrow` 16-bit hits.
     fn search(
         query: &[u8],
         window: i32,
         subject_length: usize,
+        narrow: bool,
     ) -> (
         PreparedQueryBatch,
         Vec<ContextParameters>,
         ResolvedOptions,
-        Lookup,
+        BxLookup,
     ) {
         let q = parse_fasta(query, false, false).unwrap();
         let window = window.to_string();
@@ -904,7 +993,8 @@ mod tests {
             None,
         )
         .unwrap();
-        let lookup = Lookup::new(&batch, &params, &options).unwrap();
+        let lookup = Lookup::x_new_as(&batch, &params, &options, 1, narrow.then_some(0)).unwrap();
+        assert_eq!(matches!(lookup, BxLookup::Narrow(_)), narrow);
         parameters::subject_parameters(
             &batch,
             &mut params,
@@ -941,19 +1031,41 @@ mod tests {
     /// `start(table)`, and compares the hit lists and the tables after each subject; returns the
     /// hits and the counts of the fused loop.
     fn compare(
-        (batch, params, options, lookup): &(
+        search: &(
             PreparedQueryBatch,
             Vec<ContextParameters>,
             ResolvedOptions,
-            Lookup,
+            BxLookup,
         ),
         subjects: &[Vec<u8>],
         mode: XCellTest,
         start: impl Fn(&mut Diagonals),
     ) -> (usize, [u64; 4]) {
-        let Lookup::Standard(table, kept) = lookup else {
-            panic!("the standard lookup table")
-        };
+        match &search.3 {
+            BxLookup::Wide(Lookup::Standard(table, kept)) => {
+                compare_on(search, table, kept, subjects, mode, start)
+            }
+            BxLookup::Narrow(NarrowLookup { table, kept }) => {
+                compare_on(search, table, kept, subjects, mode, start)
+            }
+            BxLookup::Wide(Lookup::Compressed(_)) => panic!("the standard lookup table"),
+        }
+    }
+
+    /// [`compare`] for the standard table `table` of the search's lookup, of either width.
+    fn compare_on<K: XCell>(
+        (batch, params, options, lookup): &(
+            PreparedQueryBatch,
+            Vec<ContextParameters>,
+            ResolvedOptions,
+            BxLookup,
+        ),
+        table: &BlastAaLookupTable<K>,
+        kept: &XKeptPresence,
+        subjects: &[Vec<u8>],
+        mode: XCellTest,
+        start: impl Fn(&mut Diagonals),
+    ) -> (usize, [u64; 4]) {
         let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
         let mut reference = Diagonals::new(length, options.window_size).unwrap();
         let mut fused = Diagonals::new(length, options.window_size).unwrap();
@@ -968,7 +1080,7 @@ mod tests {
         sent.iter_mut().for_each(&start);
         let (mut hits, mut counts) = (0, [0u64; 4]);
         for (i, subject) in subjects.iter().enumerate() {
-            let expected = word_finder(
+            let expected = word_finder_bx(
                 batch,
                 params,
                 options,
@@ -1027,8 +1139,11 @@ mod tests {
         let query = std::fs::read(dir.join("query.fna")).unwrap();
         let subject = subjects(&std::fs::read(dir.join("subject.faa")).unwrap());
         let length = subject[0].len() - 1;
-        for window in [1, 39, 40, 41] {
-            let s = search(&query, window, length);
+        for (window, narrow) in [1, 39, 40, 41]
+            .into_iter()
+            .flat_map(|window| [(window, false), (window, true)])
+        {
+            let s = search(&query, window, length, narrow);
             let flagged = |last_hit: i32| {
                 let mut entry = DiagStruct::default();
                 entry.set_last_hit(last_hit);
@@ -1092,8 +1207,8 @@ mod tests {
                 query.extend_from_slice(&letters[i * 50_000..i * 50_000 + n]);
                 query.push(b'\n');
             }
-            let (batch, _, _, lookup) = search(&query, 40, 500);
-            let Lookup::Standard(_, kept) = &lookup else {
+            let (batch, _, _, lookup) = search(&query, 40, 500, false);
+            let BxLookup::Wide(Lookup::Standard(_, kept)) = &lookup else {
                 panic!("a standard table");
             };
             let span = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
@@ -1140,13 +1255,19 @@ mod tests {
         let all = subjects(&std::fs::read(fasta.join("AP027131.faa")).unwrap());
         let subjects = &all[..60];
         let mean = subjects.iter().map(|s| s.len() - 1).sum::<usize>() / subjects.len();
-        for window in [40, 400] {
-            let s = search(&query, window, mean);
+        for (window, narrow) in [(40, false), (40, true), (400, false), (400, true)] {
+            let s = search(&query, window, mean, narrow);
             // The lookup has cells of a full batch (eight hits) and more.
-            let Lookup::Standard(table, _) = &s.3 else {
-                panic!("the standard lookup table")
+            let cells: Vec<usize> = match &s.3 {
+                BxLookup::Wide(Lookup::Standard(table, _)) => {
+                    table.backbone.iter().map(|c| c.count()).collect()
+                }
+                BxLookup::Narrow(NarrowLookup { table, .. }) => {
+                    table.backbone.iter().map(|c| c.count()).collect()
+                }
+                BxLookup::Wide(Lookup::Compressed(_)) => panic!("the standard lookup table"),
             };
-            assert!(table.backbone.iter().any(|cell| cell.num_used >= 16));
+            assert!(cells.iter().any(|&n| n >= 16));
             for mode in modes() {
                 let (hits, counts) = compare(&s, subjects, mode, |_| {});
                 assert!(hits > 0, "window={window} {mode:?}: no hit");
@@ -1164,14 +1285,87 @@ mod tests {
         }
     }
 
+    // No NCBI counterpart (speed only): the table of 16-bit hits is the table of 32-bit hits of the
+    // same query in every property that chooses the loop (its hits per used cell are the build's
+    // choice of the width, `x_narrow_cutoff`), and the entry point of the seed stage scans it, with
+    // the fused loop or (where that does not act) the reference scan, to the reference's hits and
+    // diagonal table.
+    #[test]
+    fn a_table_of_16_bit_hits_is_scanned_to_the_reference_hits_by_the_seed_stage() {
+        let fasta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
+        let genome = parse_fasta(
+            &std::fs::read(fasta.join("AP027131.fasta")).unwrap(),
+            false,
+            false,
+        )
+        .unwrap();
+        let piece = String::from_utf8(genome[0].sequence[200_000..206_000].to_vec()).unwrap();
+        let query = format!(">piece\n{piece}\n").into_bytes();
+        let all = subjects(&std::fs::read(fasta.join("AP027131.faa")).unwrap());
+        let subjects = &all[..40];
+        let mean = subjects.iter().map(|s| s.len() - 1).sum::<usize>() / subjects.len();
+        let wide = search(&query, 40, mean, false);
+        let narrow = search(&query, 40, mean, true);
+        let (
+            BxLookup::Wide(Lookup::Standard(wide_table, _)),
+            BxLookup::Narrow(NarrowLookup {
+                table: narrow_table,
+                ..
+            }),
+        ) = (&wide.3, &narrow.3)
+        else {
+            panic!("the tables of the two widths");
+        };
+        let ratio = x_hits_per_cell(wide_table);
+        assert!(ratio > 0);
+        assert_eq!(x_hits_per_cell(narrow_table), ratio);
+        // The build's choice at the table's own ratio and one hundredth above it.
+        for (cutoff, narrower) in [(ratio, true), (ratio + 1, false)] {
+            let (batch, params, options, _) = &narrow;
+            let query_batch = Lookup::x_new_as(batch, params, options, 1, Some(cutoff)).unwrap();
+            assert_eq!(matches!(query_batch, BxLookup::Narrow(_)), narrower);
+        }
+        let (batch, params, options, lookup) = &narrow;
+        let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
+        let mut reference = Diagonals::new(length, options.window_size).unwrap();
+        let mut scanned = Diagonals::new(length, options.window_size).unwrap();
+        let mut hits = 0;
+        for subject in subjects {
+            let expected = word_finder_bx(
+                batch,
+                params,
+                options,
+                subject,
+                lookup,
+                &mut reference,
+                |_| {},
+            )
+            .unwrap();
+            let actual = crate::algorithm::blastx::seed::x_seed_scan::x_word_finder_scan(
+                batch,
+                params,
+                options,
+                subject,
+                lookup,
+                &mut scanned,
+                None,
+            )
+            .unwrap();
+            assert_eq!(actual, expected);
+            assert!(scanned.offset == reference.offset && scanned.entries == reference.entries);
+            hits += actual.len();
+        }
+        assert!(hits > 0);
+    }
+
     // No NCBI counterpart (speed only): the choice of the loop names a table by its build number,
     // so a table at the address and with the vectors of the one before it is worked out again.
     #[test]
     fn the_loop_choice_is_worked_out_again_for_each_table_build() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/blastx_f_diagonal");
         let query = std::fs::read(dir.join("query.fna")).unwrap();
-        let (_, _, _, lookup) = search(&query, 40, 500);
-        let Lookup::Standard(table, kept) = &lookup else {
+        let (_, _, _, lookup) = search(&query, 40, 500, false);
+        let BxLookup::Wide(Lookup::Standard(table, kept)) = &lookup else {
             panic!("a standard table");
         };
         let next = crate::algorithm::blastx::seed::x_seed_scan::XKeptPresence::new();

@@ -113,7 +113,7 @@ use crate::algorithm::blastx::{
     args::ResolvedOptions,
     parameters::ContextParameters,
     query_setup::PreparedQueryBatch,
-    seed::{Diagonals, Lookup},
+    seed::{BxLookup, Diagonals},
     subjects::Subjects,
 };
 use anyhow::Result;
@@ -593,7 +593,7 @@ pub(super) fn chunk_subjects_on_pool(
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
     options: &ResolvedOptions,
-    lookup: &Lookup,
+    lookup: &BxLookup,
     xdrop: i32,
     db_length: i64,
     x_containment: bool,

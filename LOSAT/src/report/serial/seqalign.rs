@@ -87,6 +87,15 @@ impl SerialFormat {
             _ => None,
         }
     }
+
+    /// The `-outfmt` number of the format: 8, 9 or 12.
+    pub fn outfmt(self) -> i32 {
+        match self {
+            SerialFormat::AsnText => 8,
+            SerialFormat::AsnBinary => 9,
+            SerialFormat::Json => 12,
+        }
+    }
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:61-71

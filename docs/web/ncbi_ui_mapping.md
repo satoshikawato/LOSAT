@@ -232,6 +232,8 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 
 - **2026-11-04（保守者「範囲の逆順は『ひっくり返しますか？』って聞いてあげれば？」）**：subrange で start > stop（両方とも record の中）の時は、欄の下の「The start cannot be larger than the stop.」の横にボタン「Swap to 100–300」（入れ替えた後の範囲を名乗る、規則 1・8）。押すと From と To が入れ替わる。入れ替えても範囲にならない時（範囲の外）は出さない。逆順を -strand の意味には読まない（strand は Strand の欄）。
 
+- **2026-11-05（線 WA の W5、WA2-BR-01）**：保存した結果が開いたまま消えた時（site data の削除）、Outputs は前の format の本文を残さず、本文を出さずに Results を開き直した時と同じ「The results of run 1 could not be read: 」と store の `RESULTS_REMOVED_MESSAGE`（`infra/data/block-store.ts`）を Export の上（本文があればその下）に出す（`results-message error`）。Export の失敗も同じ所（押したボタンの上）に、「Download All」の失敗は run の行の下（一覧の出た所）に、Example の写しの保存と同じ「Not saved: …」と理由を出す。新しい文は作らない（Owner-delegated）。
+
 ## 5. 見た目
 
 保守者の指示（2026-11-02）「色とかボタンを gbdraw の GUI っぽく」「フォントも Inter で」。配置・節の順・言葉は NCBI のまま（§1〜§4）、色・字・部品の形は gbdraw の Web GUI（`gbdraw/web/index.html` の `--ui-*` と `css/tailwind.input.css` の `.btn` `.card` `.form-input`）に合わせる（`web/app/src/ui/styles.css` の `:root`）。

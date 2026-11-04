@@ -116,7 +116,7 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
             .and_then(|()| {
                 let mut first_error = None;
                 for group in &groups {
-                    match blastn_group_check(&args, group) {
+                    match blastn_group_check(&mut args, group) {
                         Ok(()) => return Ok(()),
                         Err(error) => {
                             first_error.get_or_insert(error);
@@ -156,15 +156,42 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
-/// BLASTN's checks (`check_scoring_for_formats`) for the search of the output formats `group`,
-/// whose hit list size is the one the CLI derives for them. `validate` runs it for each search
-/// of a run, and `run` asks it which search is rejected (`group_rejected`).
+/// BLASTN's checks of the options for the search of the output formats `group`, whose hit list
+/// size is the one the CLI derives for them: the checks that `run_local` makes before it reads
+/// a query (`process_options`: the counts of the report, `check_scoring_options`; then
+/// `check_losat_limits`). `validate` runs it for each search of a run, and `run` asks it which
+/// search is rejected (`group_rejected`).
+///
+/// It does not check the Karlin-Altschul tables (scores and gap costs without a row, NCBI's
+/// `Error: Substitution scores ...`) nor LOSAT's limit of greedy gap costs: a CLI run meets them
+/// only when some query context has an ungapped Karlin-Altschul block (`context_blocks`,
+/// `any_valid_context` in `blast_engine/run.rs`), which depends on the query's letters (a query
+/// of N only has none, and the same scores give rc 0 with a warning). `validate` has no query,
+/// so `run` makes these checks and stops with the CLI's message and exit code.
+/// `check_scoring_for_formats` makes them for a query of any letters, which rejects what the CLI
+/// accepts (WA-FM-01).
 fn blastn_group_check(
-    args: &LOSAT::algorithm::blastn::BlastnArgs,
+    args: &mut LOSAT::algorithm::blastn::BlastnArgs,
     group: &[u32],
 ) -> Result<(), String> {
+    use LOSAT::algorithm::blastn::scoring::{check_losat_limits, check_scoring_options};
+    // The host has no database files (`check_scoring_for_formats`).
+    if args.db.is_some() {
+        return Err("-db (a database search) is not supported in the browser yet".to_string());
+    }
     let outfmts: Vec<i32> = group.iter().map(|&format| format as i32).collect();
-    LOSAT::algorithm::blastn::scoring::check_scoring_for_formats(args, &outfmts)
+    // `process_options` sets the counts that the checks read.
+    let (counts, _) = LOSAT::blastinput::report_counts::run_report_counts(
+        "blastn",
+        &outfmts,
+        args.max_target_seqs,
+        args.num_descriptions,
+        args.num_alignments,
+    )
+    .map_err(|error| format!("{error:#}"))?;
+    args.report_counts = counts;
+    check_scoring_options(args)
+        .and_then(|()| check_losat_limits(args))
         .map_err(|error| format!("{error:#}"))
 }
 
@@ -188,7 +215,7 @@ fn blastx_group_check(
 /// themselves as the predicate, a search that fails them for another reason than its hit list
 /// (for example `-evalue 0`) is rejected as the other search is, so `run` fails with the
 /// tabular search's error, which `validate` reports.
-fn group_rejected(command: &Commands, group: &[u32]) -> bool {
+fn group_rejected(command: &mut Commands, group: &[u32]) -> bool {
     match command {
         Commands::Blastn(args) => blastn_group_check(args, group).is_err(),
         Commands::Blastx(args) => blastx_group_check(args, group).is_err(),
@@ -673,14 +700,14 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
     // the next pool starts, so each pool of its own needed thread workers of its own.
     LOSAT::api::local_blast::with_run_pool(threads, program.name(), || -> Result<(), String> {
         for group in &groups {
-            let command = match command.take() {
+            let mut command = match command.take() {
                 Some(command) => command,
                 None => parse(words)?.1,
             };
             let mut scratch = Vec::new();
             // Whether the options' checks reject this search, found before `search` takes the
             // command.
-            let rejected = group_rejected(&command, group);
+            let rejected = group_rejected(&mut command, group);
             // The warnings of the first search include the reader's and the queries' warnings
             // that the next searches repeat; the CLI writes them once.
             let result = if outcomes.is_empty() {
@@ -891,7 +918,16 @@ mod tests {
             error.starts_with("BLAST query/options error: Greedy extension"),
             "{error}"
         );
-        let error = validate(&unsupported).unwrap_err();
+        // The tables depend on the query's letters, so `run` checks them (WA-FM-01,
+        // `blastn_scores_without_table_row_are_left_to_the_run`).
+        assert!(validate(&unsupported).is_ok());
+        let letters = b"ACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA";
+        let error = run(
+            &unsupported,
+            &[FastaRecord::new("Query_1", b"q", letters)],
+            &[FastaRecord::new("Subject_1", b"s", letters)],
+        )
+        .unwrap_err();
         assert!(
             error.starts_with("BLAST engine error: Error: Substitution scores 1 and -6"),
             "{error}"
@@ -999,6 +1035,119 @@ mod tests {
                 "{words:?}"
             );
         }
+    }
+
+    /// The text a run wrote on `stream`.
+    fn emitted(stream: u32) -> String {
+        let bytes = crate::emit::EMITTED.with(|emitted| {
+            emitted
+                .borrow()
+                .iter()
+                .filter(|(number, _)| *number == stream)
+                .flat_map(|(_, bytes)| bytes.clone())
+                .collect::<Vec<u8>>()
+        });
+        String::from_utf8(bytes).unwrap()
+    }
+
+    // WA-FM-01. The CLI meets the Karlin-Altschul tables (scores and gap costs without a row,
+    // LOSAT's limit of greedy gap costs) only when some query context has an ungapped
+    // Karlin-Altschul block (`context_blocks`), which depends on the query's letters: a query
+    // of N only has none, and the same scores give a warning and rc 0. `validate` has no query,
+    // so it makes the checks of the options only, and `run` rejects with the CLI's message and
+    // exit code (`validate` accepts a subset of what the CLI accepts).
+    #[test]
+    fn blastn_scores_without_table_row_are_left_to_the_run() {
+        let megablast = ["blastn", "-query", "q", "-subject", "s"];
+        let blastn = [&megablast[..], &["-task", "blastn"]].concat();
+        let with = |base: &[&str], extra: &[&str]| validate(&[base, extra].concat());
+        // The scores of the symptom: no table row, and a pair that the CLI rejects for some
+        // queries.
+        for base in [&megablast[..], &blastn[..]] {
+            for pair in [
+                &["-reward", "7"][..],
+                &["-reward", "7", "-penalty", "-2"],
+                &["-reward", "3", "-penalty", "-1"],
+                &["-reward", "4", "-penalty", "-1"],
+                &["-reward", "5", "-penalty", "-1"],
+                &["-reward", "2", "-penalty", "-1"],
+            ] {
+                assert_eq!(with(base, pair), Ok(()), "{base:?} {pair:?}");
+            }
+        }
+        // The checks of the options stand: NCBI's and LOSAT's refusals.
+        let error = with(&megablast, &["-reward", "7", "-evalue", "0"]).unwrap_err();
+        assert!(
+            error.starts_with("BLAST query/options error: expect value"),
+            "{error}"
+        );
+        let gaps = [
+            "-reward",
+            "3",
+            "-penalty",
+            "-1",
+            "-gapopen",
+            "5",
+            "-gapextend",
+            "0",
+        ];
+        let error = with(&blastn, &gaps).unwrap_err();
+        assert!(
+            error.contains("gap extension penalty cannot be 0"),
+            "{error}"
+        );
+        let error = with(&megablast, &["-reward", "0"]).unwrap_err();
+        assert!(error.contains("a reward of 0"), "{error}");
+
+        // `run` meets the tables with the query's letters, as the CLI does.
+        let search = |base: &[&str], extra: &[&str], letters: &[u8]| {
+            crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
+            let query = [FastaRecord::new("Query_1", b"mq1 query", letters)];
+            let subject = [FastaRecord::new("Subject_1", b"ms1", ACGT)];
+            let result = run(&[base, extra].concat(), &query, &subject);
+            (
+                result,
+                emitted(crate::emit::STREAM_DIAGNOSTICS),
+                emitted(crate::emit::STREAM_HITS),
+            )
+        };
+        const ACGT: &[u8] = b"ACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA";
+        const NNNN: &[u8] = b"NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN";
+        const WARNING: &str =
+            "Warning: [blastn] Query_1 mq1 query: Could not calculate ungapped Karlin-Altschul";
+        // An expected score that is not negative (no block for ACGT): a warning, no hit.
+        for base in [&megablast[..], &blastn[..]] {
+            for pair in [
+                &["-reward", "3", "-penalty", "-1"][..],
+                &["-reward", "5", "-penalty", "-1"],
+            ] {
+                let (result, diagnostics, hits) = search(base, pair, ACGT);
+                assert_eq!(result, Ok(()), "{base:?} {pair:?}");
+                assert!(diagnostics.starts_with(WARNING), "{diagnostics}");
+                assert_eq!(hits, "");
+            }
+        }
+        let (result, diagnostics, _) = search(&megablast, &["-reward", "7"], ACGT);
+        assert_eq!(result, Ok(()));
+        assert!(diagnostics.starts_with(WARNING), "{diagnostics}");
+        // A query of N only has no block for any scores: `-task blastn -reward 7` is a warning.
+        let (result, diagnostics, hits) = search(&blastn, &["-reward", "7"], NNNN);
+        assert_eq!(result, Ok(()));
+        assert!(diagnostics.starts_with(WARNING), "{diagnostics}");
+        assert_eq!(hits, "");
+        // A query of A, C, G and T has a block for 7 and -3, which has no row: the CLI's error.
+        let (result, _, _) = search(&blastn, &["-reward", "7"], ACGT);
+        let error = result.unwrap_err();
+        assert_eq!(
+            error.trim_end(),
+            "BLAST engine error: Error: Substitution scores 7 and -3 are not supported"
+        );
+        // Letters of ambiguity put a block under scores whose expected score is 0: (3, -1) with
+        // a B (LOSAT's own limit of the gap costs, or NCBI's table error, as the CLI).
+        let mut ambiguous = ACGT.to_vec();
+        ambiguous.extend_from_slice(b"B");
+        let (result, _, _) = search(&megablast, &["-reward", "3", "-penalty", "-1"], &ambiguous);
+        assert!(result.is_err());
     }
 
     fn recorder() -> RangeRecorder {
@@ -1397,16 +1546,16 @@ mod tests {
             .concat();
             parse(&words).unwrap().1
         };
-        let rejected = |extra: &[&str], group: &[u32]| group_rejected(&command(extra), group);
+        let rejected = |extra: &[&str], group: &[u32]| group_rejected(&mut command(extra), group);
         assert!(rejected(&["-num_alignments", "0"], &[6, 7]));
         assert!(!rejected(&["-num_alignments", "0"], &[0]));
         assert!(rejected(&["-num_descriptions", "2147483598"], &[0]));
         assert!(!rejected(&["-num_descriptions", "2147483597"], &[0]));
         assert!(!rejected(&["-num_descriptions", "1073741824"], &[0]));
         assert!(!rejected(&[], &[6, 7, 0]));
-        let blastp = parse(&["blastp", "-num_alignments", "0"]).unwrap().1;
-        assert!(group_rejected(&blastp, &[6]));
-        assert!(!group_rejected(&blastp, &[0]));
+        let mut blastp = parse(&["blastp", "-num_alignments", "0"]).unwrap().1;
+        assert!(group_rejected(&mut blastp, &[6]));
+        assert!(!group_rejected(&mut blastp, &[0]));
     }
 
     // A coding sequence of the protein of `q_idx_is_the_registered_index`.
@@ -1460,8 +1609,8 @@ mod tests {
         let error = run(&both, &query, &subject).unwrap_err();
         assert!(error.contains("No hits are being saved"), "{error}");
         assert_eq!(validate(&both).unwrap_err(), error);
-        let format0 = parse(&both).unwrap().1;
-        assert!(group_rejected(&format0, &[0]) && group_rejected(&format0, &[6, 7]));
+        let mut format0 = parse(&both).unwrap().1;
+        assert!(group_rejected(&mut format0, &[0]) && group_rejected(&mut format0, &[6, 7]));
     }
 
     // BLASTX reads -query_loc and -subject_loc as the CLI does (DW-39): the rows give record

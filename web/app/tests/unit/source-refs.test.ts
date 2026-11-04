@@ -10,13 +10,11 @@ describe('SourceRefs', () => {
   it('drops a source when its last holder lets it go, not before', () => {
     const { refs: r, dropped } = refs();
     r.set('draft', ['a', 'b']);
-    r.set('run:1', ['a']);
+    r.set('submit', ['a']);
     r.set('draft', ['b']);
     expect(dropped).toEqual([]);
-    expect(r.holds('a')).toBe(true);
-    r.release('run:1');
+    r.release('submit');
     expect(dropped).toEqual(['a']);
-    expect(r.holds('a')).toBe(false);
     r.release('draft');
     expect(dropped).toEqual(['a', 'b']);
   });
@@ -38,9 +36,9 @@ describe('SourceRefs', () => {
     const { refs: r, dropped } = refs();
     r.set('draft', ['a']);
     r.release('draft');
-    r.set('run:2', ['a']);
-    expect(r.holds('a')).toBe(true);
-    r.release('run:2');
+    r.set('submit', ['a']);
+    expect(dropped).toEqual(['a']);
+    r.release('submit');
     expect(dropped).toEqual(['a', 'a']);
   });
 });

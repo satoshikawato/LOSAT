@@ -333,19 +333,44 @@ describe('Coordinator', () => {
     expect(viewOf(coordinator, runId)!.snapshot.group).toBeUndefined();
   });
 
+  it('drops the sources that it makes of text and files once the snapshots have their inputs (SURVEY #15)', async () => {
+    const { coordinator, data } = setup();
+    const inner = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown>; };
+    const runId = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, runId, 'completed');
+    expect([inner.sources.size, inner.revisions.size]).toEqual([0, 0]);
+    expect(new TextDecoder().decode(viewOf(coordinator, runId)!.snapshot.query.bytes)).toBe('>q\nACGT\n');
+    expect(await coordinator.readOutput(runId, 6)).toContain('q\ts\t');
+  });
+
+  it('keeps nothing of a request whose input cannot be read: no source and no cached run input', async () => {
+    const { coordinator, data } = setup();
+    const inner = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown> };
+    const runInputs = (coordinator as unknown as { runInputs: Map<string, unknown> }).runInputs;
+    const source = await data.addSource(new File(['>q\nACGT\n'], 'q.fa'));
+    const query = (await data.indexSource(source.sourceId, 1)).revisionId;
+    const result = await coordinator.enqueueAll([
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { text: '$$$$\n' } },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(runInputs.size).toBe(0);
+    // Only the caller's source is left: the subject's is dropped.
+    expect([...inner.sources.keys()]).toEqual([source.sourceId]);
+  });
+
   it('runs dataset inputs as the revisions say, and shares the bytes of the same revisions', async () => {
     const { coordinator, data } = setup();
     const add = async (name: string, text: string) => {
       const source = await data.addSource(new File([text], name));
-      return [(await data.indexSource(source.sourceId, 1)).revisionId, source.sourceId] as const;
+      return (await data.indexSource(source.sourceId, 1)).revisionId;
     };
-    const [subject, subjectSource] = await add('s.fa', '>s1\nACGT\n>s2\nGGCC\n');
-    const [query, querySource] = await add('q.fa', '>q\nACGT\n');
+    const subject = await add('s.fa', '>s1\nACGT\n>s2\nGGCC\n');
+    const query = await add('q.fa', '>q\nACGT\n');
     const revised = (await data.reviseDataset(subject, [0])).revisionId;
     const result = await coordinator.enqueueAll([
-      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query], sourceIds: [querySource] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject], sourceIds: [subjectSource] } } },
-      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query], sourceIds: [querySource] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject], sourceIds: [subjectSource] } } },
-      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query], sourceIds: [querySource] } }, subject: { dataset: { name: 's2.fa', revisionIds: [revised], sourceIds: [subjectSource] } } },
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject] } } },
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject] } } },
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { dataset: { name: 's2.fa', revisionIds: [revised] } } },
     ]);
     const [a, b, c] = result.runIds!.map((id) => viewOf(coordinator, id)!.snapshot);
     expect(a!.argv).toEqual(['blastn', '-query', 'q.fa', '-subject', 's.fa']);

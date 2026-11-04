@@ -1,12 +1,11 @@
-// Which sources of the data layer are still in use (SURVEY #15). The Data worker keeps a
-// source (its File: a pasted text, or the inflated bytes of a .gz or .zst, are held in
+// Which sources of the data layer the search draft still uses (SURVEY #15). The Data worker
+// keeps a source (its File: a pasted text, or the inflated bytes of a .gz or .zst, are held in
 // memory) and every record table made of it until it is told to drop them. The holders:
-// - the search form: the sources that its cards show (both FASTA reader kinds of a source
-//   share its id), and an index that is still running;
-// - a "Run LOSAT" being started, from the draft's revisions until its runs exist;
-// - each run made of the source (`run:<runId>`): a run keeps what it was made of, also for
-//   later uses of its inputs (design D08). A tab keeps every run, so these holds last as long as
-//   the tab; an operation that removes a run releases its hold.
+// - the form: the sources that its cards show (both FASTA reader kinds of a source share its id);
+// - an index that is still running, until its card shows the source;
+// - a "Run LOSAT" being started, until the runs have their inputs.
+// A run does not hold its sources: its snapshot keeps the bytes and the records of its inputs
+// (coordinator.ts), its outputs are read by its id, and nothing reads its revisions again.
 // When the last holder lets a source go, the data layer drops the source and its tables.
 // Sources never reach OPFS (the run outputs and the saved Example sets do, and have their own
 // lifetimes), so dropping one frees memory only.
@@ -44,10 +43,5 @@ export class SourceRefs {
 
   release(holder: string): void {
     this.set(holder, []);
-  }
-
-  /** Whether anyone holds the source. */
-  holds(sourceId: string): boolean {
-    return this.holders.has(sourceId);
   }
 }

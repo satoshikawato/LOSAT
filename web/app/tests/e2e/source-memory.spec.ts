@@ -3,8 +3,11 @@
 // and again made the tab grow without end. The test opens a FASTA of 100,000 records (32 MB)
 // and removes it ten times, and compares the JavaScript heap of the page and of the Data worker
 // (Chrome DevTools Protocol, after a garbage collection) after the first round and after the
-// last: the growth must stay below what one source takes. The same file opens again each round,
-// as a removed source is brought back. Chromium only (the protocol).
+// last: over the nine rounds, the page and the Data worker each grow by less than a tenth of
+// what one source takes (before the fix: one source a round, the Data worker's table and the
+// draft's cached checks). The same file opens again each round, as a removed source is brought
+// back. The V8 heap does not count the bytes of a Blob (a pasted text, an inflated .gz), so a
+// File kept by mistake is not seen here; the unit tests see it. Chromium only (the protocol).
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
@@ -109,6 +112,7 @@ test('adding and removing a large source ten times does not make the tab grow', 
   const last = rounds.at(-1)!;
   const table = first.held.total - first.removed.total;
   const growth = last.removed.total - first.removed.total;
+  const workerGrowth = last.removed.dataWorker - first.removed.dataWorker;
   const summary = {
     records: RECORDS,
     bytes: fasta.length,
@@ -121,10 +125,11 @@ test('adding and removing a large source ten times does not make the tab grow', 
     })),
     oneSourceMB: mb(table),
     growthMB: mb(growth),
-    dataWorkerGrowthMB: mb(last.removed.dataWorker - first.removed.dataWorker),
+    dataWorkerGrowthMB: mb(workerGrowth),
   };
   console.log(JSON.stringify(summary));
   if (EVIDENCE !== undefined) writeFileSync(join(EVIDENCE, 'source-memory-chromium.json'), `${JSON.stringify(summary, null, 2)}\n`);
   expect(table).toBeGreaterThan(5e6);
-  expect(growth).toBeLessThan(table);
+  expect(growth).toBeLessThan(table / ROUNDS);
+  expect(workerGrowth).toBeLessThan(first.held.dataWorker / ROUNDS);
 });

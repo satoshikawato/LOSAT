@@ -174,11 +174,6 @@ export interface DraftDeps {
     DataGateway,
     'addSource' | 'indexSource' | 'reviseDataset' | 'checkInput' | 'previewSource' | 'dropSource'
   >;
-  /**
-   * Who uses the data layer's sources, shared with the coordinator, whose runs hold theirs; a
-   * draft without it drops a source once the draft is done with it.
-   */
-  readonly refs?: SourceRefs;
   readonly enqueueAll: (requests: readonly SearchRequest[]) => Promise<EnqueueAllResult>;
   readonly fetcher: AccessionFetcher;
   readonly now: () => number;
@@ -206,11 +201,12 @@ export class SearchDraft {
   private readonly verdicts = new Map<string, Promise<InputCheck>>();
   /** Revisions of a selection, by base revision and excluded records (revisionFor). */
   private readonly revisions = new Map<string, Promise<string>>();
-  /** The data layer's sources that the form shows, which the draft holds (SourceRefs). */
+  /** Who uses the data layer's sources: one that the form, an index and "Run LOSAT" no longer use is dropped. */
+  private readonly refs: SourceRefs;
+  /** The data layer's sources that the form shows. */
   private formSources: ReadonlySet<string> = new Set();
   /** The revisions of each of those sources, whose cached verdicts and selections go with the source. */
   private readonly sourceRevisions = new Map<string, Set<string>>();
-  private readonly refs: SourceRefs;
   /** The latest request of each asynchronous task; older results are dropped. */
   private readonly generations = new Map<string, number>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -224,7 +220,7 @@ export class SearchDraft {
   private nextKey = 1;
 
   constructor(private readonly deps: DraftDeps) {
-    this.refs = deps.refs ?? new SourceRefs((sourceId) => void deps.data.dropSource(sourceId).catch(() => undefined));
+    this.refs = new SourceRefs((sourceId) => void deps.data.dropSource(sourceId).catch(() => undefined));
     this.race = new SourceRace({
       fetcher: deps.fetcher,
       now: deps.now,
@@ -787,7 +783,7 @@ export class SearchDraft {
     }
     // Everything from one state, before any wait.
     const groups = { query: this.inputGroups('query'), subject: this.inputGroups('subject') };
-    // Their sources stay until the runs hold them, also when the form lets them go meanwhile.
+    // Their sources stay until the runs have their inputs, also when the form lets them go meanwhile.
     this.refs.set(
       'submit',
       [...groups.query, ...groups.subject].flatMap((group) => group.sources.map((source) => source.sourceId!)),
@@ -924,7 +920,7 @@ export class SearchDraft {
 
   private async resolveGroup(group: { readonly name: string; readonly sources: readonly DraftSource[] }) {
     const revisionIds = await Promise.all(group.sources.map((source) => this.revisionFor(source)));
-    return { name: group.name, revisionIds, sourceIds: group.sources.map((source) => source.base!.sourceId) };
+    return { name: group.name, revisionIds };
   }
 
   // --- asynchronous work ------------------------------------------------------------------
@@ -1198,8 +1194,9 @@ export class SearchDraft {
     for (const key of Object.keys(change) as Array<keyof DraftState>) {
       if (change[key] === undefined) delete next[key];
     }
-    this.state.set(next as DraftState);
+    // Before the listeners, which may change the state again.
     this.holdFormSources(next as DraftState);
+    this.state.set(next as DraftState);
   }
 
   /** Holds the sources that the form shows; one it no longer shows goes, with the draft's caches of it. */

@@ -22,23 +22,16 @@ import {
   type HspRecord,
   type ValidationResult,
 } from '../ports/engine';
-import { SourceRefs } from './source-refs';
 import { Store } from './store';
 
 /**
  * One input of a search: dataset revisions of the data layer (the search form's sources,
- * already indexed, plan §5.4) with the name passed as -query / -subject and the sources of the
- * revisions, which the run holds (source-refs.ts); or pasted text or a file, which the
- * coordinator indexes itself.
+ * already indexed, plan §5.4) with the name passed as -query / -subject, whose sources the
+ * caller keeps until enqueueAll returns; or pasted text or a file, which the coordinator
+ * indexes itself. A run keeps its input in its snapshot (bytes and records), not its sources.
  */
 export type SequenceInput =
-  | {
-      readonly dataset: {
-        readonly name: string;
-        readonly revisionIds: readonly string[];
-        readonly sourceIds: readonly string[];
-      };
-    }
+  | { readonly dataset: { readonly name: string; readonly revisionIds: readonly string[] } }
   | { readonly text: string }
   | { readonly file: File };
 
@@ -73,8 +66,6 @@ export interface CoordinatorDeps {
   readonly downloader: Downloader;
   readonly now: () => number;
   readonly newRunId: () => string;
-  /** Who uses the data layer's sources, shared with the search draft: each run holds the sources it was made of. */
-  readonly refs?: SourceRefs;
 }
 
 export type EnqueueResult = ValidationResult & { readonly runId?: string };
@@ -92,15 +83,12 @@ export class Coordinator {
   readonly state = new Store<AppState>({ runs: [] });
   private readonly queue: string[] = [];
   private readonly cancelRequested = new Set<string>();
-  /** Run inputs by their revisions (snapshotInput). */
+  /** Run inputs of dataset revisions, by the revisions (snapshotInput). */
   private readonly runInputs = new Map<string, Promise<RunInput>>();
   private active: string | undefined;
   private nextNumber = 1;
-  private nextEnqueue = 1;
-  private readonly refs: SourceRefs;
 
   constructor(private readonly deps: CoordinatorDeps) {
-    this.refs = deps.refs ?? new SourceRefs((sourceId) => void deps.data.dropSource(sourceId).catch(() => undefined));
     void this.refreshStorage();
   }
 
@@ -137,60 +125,61 @@ export class Coordinator {
       prepared.push({ request, argv, queryName, subjectName });
     }
 
-    // The sources made here from text and files are held until the runs hold them; a request that fails lets them go.
-    const holder = `enqueue:${this.nextEnqueue++}`;
-    const made: string[] = [];
-    const hold = (sourceId: string) => {
-      made.push(sourceId);
-      this.refs.set(holder, made);
-    };
+    // The snapshots hold what the runs need: the sources made here from text and files are
+    // dropped once they are read (SURVEY #15), and a request that fails caches nothing.
+    const made = { sources: [] as string[], runInputs: [] as string[] };
+    let queued = false;
     try {
-      const snapshots: Array<{ readonly snapshot: RunSnapshot; readonly sourceIds: readonly string[] }> = [];
-      const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
-      for (const [index, { request, argv, queryName, subjectName }] of prepared.entries()) {
-        const program = programById(request.program);
-        let query: SnapshotOf;
-        let subject: SnapshotOf;
-        try {
-          query = await this.snapshotInput('Query', request.query, queryName, fastaParser(program, 'query'), hold);
-          subject = await this.snapshotInput('Subject', request.subject, subjectName, fastaParser(program, 'subject'), hold);
-        } catch (error) {
-          return { ok: false, message: errorMessage(error) };
-        }
-        const title = request.title?.trim();
-        snapshots.push({
-          snapshot: Object.freeze({
-            runId: this.deps.newRunId(),
-            number: 0,
-            program: request.program,
-            ...(title ? { title } : {}),
-            argv,
-            query: query.snapshot,
-            subject: subject.snapshot,
-            requestedThreads: request.requestedThreads,
-            queuedAt: this.deps.now(),
-            ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: prepared.length }) }),
-          }),
-          sourceIds: [...query.sourceIds, ...subject.sourceIds],
-        });
-      }
-      // Numbers are given only now, so that a request that fails leaves no gap.
-      const numbered = snapshots.map(({ snapshot, sourceIds }) => ({
-        snapshot: Object.freeze({ ...snapshot, number: this.nextNumber++ }),
-        sourceIds,
-      }));
-      // A run keeps the sources it was made of for as long as it is kept (source-refs.ts).
-      for (const { snapshot, sourceIds } of numbered) this.refs.set(`run:${snapshot.runId}`, sourceIds);
-      this.setRuns([
-        ...this.state.get().runs,
-        ...numbered.map(({ snapshot }): RunView => ({ snapshot, status: 'queued', record: {} })),
-      ]);
-      for (const { snapshot } of numbered) this.queue.push(snapshot.runId);
-      this.pump();
-      return { ok: true, runIds: numbered.map(({ snapshot }) => snapshot.runId) };
+      return await this.freeze(prepared, made, () => (queued = true));
     } finally {
-      this.refs.release(holder);
+      for (const sourceId of made.sources) void this.deps.data.dropSource(sourceId).catch(() => undefined);
+      if (!queued) for (const key of made.runInputs) this.runInputs.delete(key);
     }
+  }
+
+  private async freeze(
+    prepared: ReadonlyArray<{ request: SearchRequest; argv: readonly string[]; queryName: string; subjectName: string }>,
+    made: { readonly sources: string[]; readonly runInputs: string[] },
+    onQueued: () => void,
+  ): Promise<EnqueueAllResult> {
+    const snapshots: RunSnapshot[] = [];
+    const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
+    for (const [index, { request, argv, queryName, subjectName }] of prepared.entries()) {
+      const program = programById(request.program);
+      let query: InputSnapshot;
+      let subject: InputSnapshot;
+      try {
+        query = await this.snapshotInput('Query', request.query, queryName, fastaParser(program, 'query'), made);
+        subject = await this.snapshotInput('Subject', request.subject, subjectName, fastaParser(program, 'subject'), made);
+      } catch (error) {
+        return { ok: false, message: errorMessage(error) };
+      }
+      const title = request.title?.trim();
+      snapshots.push(
+        Object.freeze({
+          runId: this.deps.newRunId(),
+          number: 0,
+          program: request.program,
+          ...(title ? { title } : {}),
+          argv,
+          query,
+          subject,
+          requestedThreads: request.requestedThreads,
+          queuedAt: this.deps.now(),
+          ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: prepared.length }) }),
+        }),
+      );
+    }
+    // Numbers are given only now, so that a request that fails leaves no gap.
+    const numbered = snapshots.map((snapshot) => Object.freeze({ ...snapshot, number: this.nextNumber++ }));
+    this.setRuns([
+      ...this.state.get().runs,
+      ...numbered.map((snapshot): RunView => ({ snapshot, status: 'queued', record: {} })),
+    ]);
+    for (const snapshot of numbered) this.queue.push(snapshot.runId);
+    onQueued();
+    this.pump();
+    return { ok: true, runIds: numbered.map((snapshot) => snapshot.runId) };
   }
 
   /**
@@ -259,40 +248,43 @@ export class Coordinator {
 
   /**
    * Freezes the run input of an input. Dataset inputs use the revisions as they are; text
-   * and files first become a source with a record table. The run input of the same
-   * revisions is built once and shared by the snapshots that use it (a subject kept for
-   * many searches is held once).
+   * and files first become a source with a record table, which `made` lists to be dropped. The
+   * run input of the same dataset revisions is built once and shared by the snapshots that
+   * use it (a subject kept for many searches is held once); the revisions of text and files
+   * are never used again.
    */
   private async snapshotInput(
     role: string,
     input: SequenceInput,
     name: string,
     parser: FastaParserKind,
-    hold: (sourceId: string) => void,
-  ): Promise<SnapshotOf> {
+    made: { readonly sources: string[]; readonly runInputs: string[] },
+  ): Promise<InputSnapshot> {
     try {
+      let runInput: Promise<RunInput>;
       let revisionIds: readonly string[];
-      let sourceIds: readonly string[];
       if ('dataset' in input) {
         revisionIds = Object.freeze([...input.dataset.revisionIds]);
-        sourceIds = input.dataset.sourceIds;
+        const key = JSON.stringify(revisionIds);
+        const cached = this.runInputs.get(key);
+        if (cached === undefined) {
+          runInput = this.deps.data.buildRunInput(revisionIds);
+          this.runInputs.set(key, runInput);
+          made.runInputs.push(key);
+          runInput.catch(() => this.runInputs.delete(key));
+        } else {
+          runInput = cached;
+        }
       } else {
         const file = 'file' in input ? input.file : new File([input.text], name, { type: 'text/plain' });
         const source = await this.deps.data.addSource(file);
-        hold(source.sourceId);
+        made.sources.push(source.sourceId);
         const revision = await this.deps.data.indexSource(source.sourceId, parser);
         revisionIds = Object.freeze([revision.revisionId]);
-        sourceIds = [source.sourceId];
-      }
-      const key = JSON.stringify(revisionIds);
-      let runInput = this.runInputs.get(key);
-      if (runInput === undefined) {
         runInput = this.deps.data.buildRunInput(revisionIds);
-        this.runInputs.set(key, runInput);
-        runInput.catch(() => this.runInputs.delete(key));
       }
       const { bytes, sha256, records } = await runInput;
-      return { snapshot: Object.freeze({ name, bytes, sha256, revisionIds, records }), sourceIds };
+      return Object.freeze({ name, bytes, sha256, revisionIds, records });
     } catch (error) {
       throw new Error(`${role} FASTA: ${errorMessage(error)}`, { cause: error });
     }
@@ -386,12 +378,6 @@ export class Coordinator {
   private setRuns(runs: readonly RunView[]): void {
     this.state.set({ ...this.state.get(), runs: Object.freeze([...runs]) });
   }
-}
-
-/** The snapshot of an input, and the sources that it was made of. */
-interface SnapshotOf {
-  readonly snapshot: InputSnapshot;
-  readonly sourceIds: readonly string[];
 }
 
 function inputName(input: SequenceInput, pastedName: string): string {

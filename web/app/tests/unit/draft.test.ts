@@ -2,7 +2,6 @@ import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { SearchDraft, type DraftSource } from '../../src/application/draft';
-import { SourceRefs } from '../../src/application/source-refs';
 import type { InputRole } from '../../src/domain/programs';
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
@@ -47,10 +46,11 @@ function setup(
     prepare: (hint: EnginePrepareHint) => void prepared.push(hint),
   };
   const dropped: string[] = [];
-  const refs = new SourceRefs((sourceId) => {
+  const dropSource = data.dropSource.bind(data);
+  data.dropSource = async (sourceId) => {
     dropped.push(sourceId);
-    void data.dropSource(sourceId);
-  });
+    return dropSource(sourceId);
+  };
   let id = 0;
   const coordinator = new Coordinator({
     engine: { ...engine, run: fake.run.bind(fake), cancel: fake.cancel.bind(fake) },
@@ -58,7 +58,6 @@ function setup(
     downloader: { save: () => undefined },
     now: () => 0,
     newRunId: () => `run-${++id}`,
-    refs,
   });
   const requests: SearchRequest[][] = [];
   const draft = new SearchDraft({
@@ -71,7 +70,6 @@ function setup(
     fetcher: options.fetcher ?? new FakeAccessionFetcher(),
     now: () => 0,
     debounceMs: 0,
-    refs,
   });
   /** What the data layer holds: its sources, and the sources of its revisions. */
   const held = () => {
@@ -407,7 +405,7 @@ describe('SearchDraft gives the data layer back the sources it no longer shows (
     expect(held().sources).toEqual([sourceId]);
   });
 
-  it('keeps the sources of a run after the form lets them go, also when it does so while the run is started', async () => {
+  it('lets a run keep its inputs in its snapshot: the sources go with the form, also one removed while the run is started', async () => {
     const { draft, held, dropped, coordinator, data } = setup({ useCoordinator: true });
     draft.setPaste('query', '>q\nACGT\n');
     draft.addFiles('subject', [file('s.fa', '>s\nACGTACGT\n')]);
@@ -423,14 +421,21 @@ describe('SearchDraft gives the data layer back the sources it no longer shows (
     };
     expect(await draft.submit()).toMatchObject({ ok: true });
     expect(calls).toBe(2);
-    expect(draft.state.get().subject.sources).toHaveLength(0);
+    // "Run LOSAT" held the removed subject until the run had its input.
+    expect(dropped).toEqual([subject]);
     draft.setPaste('query', '');
     await draft.idle();
-    expect(dropped).toEqual([]);
-    expect(held().sources).toEqual([query, subject].sort());
+    expect(dropped).toEqual([subject, query]);
+    expect(held()).toEqual({ sources: [], revisionSources: [] });
     const run = coordinator.state.get().runs[0]!;
-    expect(run.snapshot.subject.revisionIds).toHaveLength(1);
-    expect(await data.buildRunInput(run.snapshot.subject.revisionIds)).toMatchObject({ bytes: new TextEncoder().encode('>s\nACGTACGT\n') });
+    expect(new TextDecoder().decode(run.snapshot.subject.bytes)).toBe('>s\nACGTACGT\n');
+    expect(run.snapshot.subject.records).toEqual([{ id: 's', length: 8 }]);
+    await new Promise<void>((resolve) => {
+      const done = () => coordinator.state.get().runs[0]!.status === 'completed' && (unsubscribe(), resolve());
+      const unsubscribe = coordinator.state.subscribe(() => void done());
+      void done();
+    });
+    expect(await coordinator.readOutput(run.snapshot.runId, 6)).toContain('q\ts\t');
   });
 
   it('reads a file again after its source was dropped', async () => {
@@ -984,7 +989,6 @@ describe('SearchDraft submit', () => {
     expect(datasetOf(request!, 'subject')).toEqual({
       name: 'combined_subject.fa',
       revisionIds: [sourceOf(draft, 'subject', 0).base!.revisionId, sourceOf(draft, 'subject', 1).base!.revisionId],
-      sourceIds: [sourceOf(draft, 'subject', 0).sourceId, sourceOf(draft, 'subject', 1).sourceId],
     });
     expect(draft.state.get().message).toBeUndefined();
   });

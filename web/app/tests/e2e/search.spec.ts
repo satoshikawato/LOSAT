@@ -15,6 +15,7 @@ import {
   pickRun,
   program,
   result,
+  runMessage,
   settled,
   showRecords,
   submit,
@@ -422,6 +423,33 @@ test("the engine's refusals of option values are shown as the engine writes them
   await page.getByTestId('param-comp_based_stats').selectOption('2');
   await page.getByTestId('param-evalue').fill('0');
   await expect(page.getByTestId('argv-validation')).toContainText('BLAST query/options error:');
+});
+
+// WA-FM-01: scores without a Karlin-Altschul table row are not refused by the form's check. The CLI
+// meets the tables only when a query has an ungapped block, so the run gives the CLI's result: a
+// warning and no hit for 3,-1, and the table's error for `-task blastn -reward 7` (penalty -3).
+test('BLASTN scores without a table row: the form accepts them and the run gives the engine result', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, "the engine's checks need the engine build");
+  await program(page, 'blastn');
+  await openParameters(page);
+  const validation = page.getByTestId('argv-validation');
+  await page.getByTestId('param-matchscores').selectOption('other');
+  await page.getByTestId('param-reward').fill('3');
+  await page.getByTestId('param-penalty').fill('-1');
+  await expect(validation).toHaveAttribute('data-state', 'ok');
+  await paste(page, 'query', '>q\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await paste(page, 'subject', '>s\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await backToSearch(page);
+  await task(page, 'blastn');
+  await page.getByTestId('param-matchscores').selectOption('other');
+  await page.getByTestId('param-reward').fill('7');
+  await page.getByTestId('param-penalty').fill('-3');
+  await expect(validation).toHaveAttribute('data-state', 'ok');
+  await submit(page);
+  await waitStatus(page, 2, 'failed');
+  expect(await runMessage(page, 2)).toContain('Substitution scores 7 and -3 are not supported');
 });
 
 // The index scan reads with the program's reader (SURVEY #3): NCBI's nucleotide reader stores 19 of

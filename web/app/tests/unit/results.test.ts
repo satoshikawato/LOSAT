@@ -326,6 +326,16 @@ describe('verificationBadge', () => {
     expect(level({ threads: undefined })).toBe('outside');
   });
 
+  it('says the thread counts checked as ranges, for the path of the run', () => {
+    const every = Array.from({ length: 32 }, (_, i) => i + 1);
+    const wide: VerificationTable = { ...table, programs: { blastn: { ...table.programs.blastn!, browser: { ...table.programs.blastn!.browser!, threads: every } } } };
+    const details = (change: Partial<BadgeInput>) => verificationBadge({ ...input, ...change }, wide).details.join(' ');
+    expect(details({ threads: 6 })).toMatch(/threaded runtime in the browser was checked against the native engine with 2 to 32 threads in/);
+    expect(details({ runtimePath: 'serial', threads: 1 })).toMatch(/serial runtime in the browser was checked against the native engine with 1 thread in/);
+    expect(details({ threads: 40 })).toMatch(/used 40 threads; the browser runtime was checked with 1 to 32 threads\./);
+    expect(details({ threads: 4 })).not.toMatch(/\b3, 4\b/);
+  });
+
   it('names the approved exceptions of a non-default subject genetic code', () => {
     expect(approvedExceptions('tblastn', ['tblastn', '-db_gencode', '4'])[0]).toMatch(/PD-TLOSAN-LOCAL-GENCODE-32.*-db_gencode 4/);
     expect(approvedExceptions('tblastx', ['tblastx', '-db_gencode', '11'])).toHaveLength(1);

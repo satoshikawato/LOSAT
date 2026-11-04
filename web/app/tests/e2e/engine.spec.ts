@@ -30,8 +30,11 @@ const FORMATS: readonly OutputFormat[] = [0, 6, 7];
  */
 const VBR_THREADS: readonly number[] = [1, 2, 4, 8, 16, 32];
 const OTHER_THREADS: readonly number[] = Array.from({ length: 32 }, (_, i) => i + 1).filter((n) => !VBR_THREADS.includes(n));
-/** The case of each program that runs at OTHER_THREADS: its default options where a case has them. */
-const EVERY_COUNT_CASES: readonly string[] = ['multi.megablast', 'width.blastp', 'pyl.blastx', 'width.tblastn', 'tblastx.multi'];
+/**
+ * The case of each program that runs at OTHER_THREADS: one whose work the thread count divides
+ * (several records, query batches, the threaded module's own reducer).
+ */
+const EVERY_COUNT_CASES: readonly string[] = ['multi.megablast', 'e2e.blastp.fast', 'blastx.batches', 'tblastn.batches', 'tblastx.threaded-direct'];
 
 let harness: HarnessFiles;
 let isolated: HarnessServer;

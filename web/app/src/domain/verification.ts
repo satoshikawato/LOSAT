@@ -132,17 +132,20 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
     if (input.threads === undefined || !browser.threads.includes(input.threads)) {
       outside.push(
         `This run used ${input.threads ?? 'an unknown number of'} ${input.threads === 1 ? 'thread' : 'threads'}; ` +
-          `the browser runtime was checked with ${list(browser.threads)} threads.`,
+          `the browser runtime was checked with ${counts(browser.threads)} threads.`,
       );
     }
   }
   if (outside.length > 0) return { level: 'outside', label: NOT_SUPPORTED_LABEL, details: outside, exceptions };
+  // The counts of the run's path: the serial module runs one thread, the threaded module two or more.
+  const pathThreads = browser!.threads.filter((n) => (input.runtimePath === 'serial' ? n === 1 : n > 1));
   return {
     level: 'certified',
     label: SUPPORTED_LABEL,
     details: [
       `The program and these options were compared byte for byte with NCBI BLAST+ ${table.ncbi} for outfmt ${list(input.formats)} on LOSAT's test fixtures.`,
-      `The ${input.runtimePath} runtime in the browser was checked against the native engine with ${list(browser!.threads)} threads in ${list(browser!.browsers)}.`,
+      `The ${input.runtimePath} runtime in the browser was checked against the native engine with ${counts(pathThreads)} ` +
+        `${pathThreads.length === 1 && pathThreads[0] === 1 ? 'thread' : 'threads'} in ${list(browser!.browsers)}.`,
       'This is a statement about the engine build and the options, not a comparison of your inputs with NCBI.',
     ],
     exceptions,
@@ -162,6 +165,19 @@ export function approvedExceptions(program: ProgramId, argv: readonly string[]):
     `Approved exception${decision}: LOSAT translates the local subjects with -db_gencode ${code}. NCBI BLAST+ ` +
       'treats -db_gencode differently for local -subject sequences, so its results can differ for this genetic code.',
   ];
+}
+
+/** Thread counts in words, a run of three or more consecutive counts as a range: "1, 2 and 4", "2 to 32". */
+function counts(numbers: readonly number[]): string {
+  const words: string[] = [];
+  for (let i = 0; i < numbers.length; ) {
+    let j = i;
+    while (j + 1 < numbers.length && numbers[j + 1] === numbers[j]! + 1) j++;
+    if (j - i >= 2) words.push(`${numbers[i]} to ${numbers[j]}`);
+    else for (let k = i; k <= j; k++) words.push(String(numbers[k]));
+    i = j + 1;
+  }
+  return list(words);
 }
 
 function list(items: readonly (string | number)[]): string {

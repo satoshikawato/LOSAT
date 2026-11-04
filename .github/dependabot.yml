@@ -3,18 +3,21 @@
 # main: main and dev carry the same file. Security updates are a repository setting and keep
 # targeting main.
 #
-# - cargo: LOSAT and web/adapter in one pull request per dependency (group-by: dependency-name).
-#   web/adapter/tools/check_build_identity.py (web.yml, job `adapter`) requires both Cargo.lock
-#   files to hold the same version of every dependency they share.
+# - cargo: LOSAT, one pull request per dependency. web/adapter/tools/check_build_identity.py
+#   (web.yml, job `adapter`) requires web/adapter/Cargo.lock to hold the same version of every
+#   package it shares with LOSAT/Cargo.lock, and Dependabot updates only the direct dependencies
+#   of a directory (web/adapter's are LOSAT and clap). So before merging, add a commit that moves
+#   web/adapter's lock file to the same versions, for each package that changed:
+#     cargo update --manifest-path web/adapter/Cargo.toml -p <package>@<old> --precise <new>
+#   (`@<old>` picks one when the lock file holds two versions of the package), and raise
+#   web/adapter/Cargo.toml's own requirement when clap moves to a new major.
 # - npm: minor and patch updates of web/app in one pull request; each major update in its own.
 # - auto-merge.yml does not turn on auto-merge for these pull requests: a person merges each one.
 # - cooldown: a release is considered 7 days after it was published.
 version: 2
 updates:
   - package-ecosystem: cargo
-    directories:
-      - /LOSAT
-      - /web/adapter
+    directory: /LOSAT
     target-branch: dev
     schedule:
       interval: weekly
@@ -24,9 +27,6 @@ updates:
     open-pull-requests-limit: 3
     cooldown:
       default-days: 7
-    groups:
-      cargo:
-        group-by: dependency-name
 
   - package-ecosystem: npm
     directory: /web/app

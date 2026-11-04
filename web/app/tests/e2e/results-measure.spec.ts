@@ -48,7 +48,8 @@
 // after the test starts looking, so these times include Playwright's round trip (upper bounds).
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type CDPSession, type Page } from '@playwright/test';
+import { expect, type CDPSession, type Page } from '@playwright/test';
+import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NO_ENGINE_REASON } from './support/engine';
 import { navigate } from './support/navigate';

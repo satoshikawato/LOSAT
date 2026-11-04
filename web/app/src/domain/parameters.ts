@@ -214,22 +214,10 @@ export function writtenValue(field: ParameterField, value: FieldValue | undefine
   return text === '' || (known?.given !== true && text === known?.defaultValue) ? undefined : text;
 }
 
-/**
- * The values of a field's select (`list`), for the task the search uses, or the list that
- * another option's value chooses (`listBy`); empty without one.
- */
-export function fieldList(
-  program: ProgramDescriptor,
-  field: ParameterField,
-  values: FormValues,
-  options: readonly EngineOption[] | undefined,
-): readonly string[] {
+/** The values of a field's select (`list`), for the task the search uses; empty without one. */
+export function fieldList(field: ParameterField, values: FormValues, options: readonly EngineOption[] | undefined): readonly string[] {
   const list = field.list;
   if (list === undefined) return [];
-  if (field.listBy !== undefined) {
-    const used = usedValue(program, field.listBy.flag, values, options);
-    if (used !== undefined && Object.hasOwn(field.listBy.lists, used)) return field.listBy.lists[used]!;
-  }
   if (Array.isArray(list)) return list as readonly string[];
   const task = effectiveValue('-task', values, options);
   return (task === undefined ? undefined : (list as Readonly<Record<string, readonly string[]>>)[task]) ?? [];

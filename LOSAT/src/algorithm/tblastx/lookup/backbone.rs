@@ -1146,6 +1146,39 @@ pub(crate) fn x_lookup_contexts_for_profile(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797 (see
+// `x_lookup_contexts_for_profile`)
+// ```c
+// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+// ```
+/// `x_lookup_contexts_for_profile`'s contexts when the diagnostics are on: those of the compressed
+/// lookup table (word sizes 5 to 7), which the diagnostics, counting the standard table's words,
+/// do not build. Cold, so that `x_lookup_contexts_for_profile` keeps its code.
+#[cold]
+#[inline(never)]
+pub(crate) fn x_compressed_contexts_for_profile(
+    queries: &[Vec<QueryFrame>],
+    check_ideal: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> Vec<QueryContext> {
+    let bounds = if matrix == ScoringMatrix::Blosum62 {
+        (-4, 11)
+    } else {
+        matrix_score_bounds(matrix)
+    };
+    prepare_lookup_query(
+        queries,
+        ideal_karlin_params_for_matrix(matrix, bounds),
+        &compute_std_aa_composition(),
+        word_length,
+        check_ideal,
+        matrix,
+        bounds,
+    )
+    .contexts
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (cited at
 // `x_context_karlin`)
 // NCBI computes the contexts' Karlin blocks one after the other; each reads only its own context's

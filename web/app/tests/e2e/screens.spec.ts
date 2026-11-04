@@ -347,6 +347,18 @@ for (const size of SIZES) {
     await expect(canvas).toHaveAttribute('data-segments', /^[1-9]/);
     await expect(page.getByTestId('dotplot-selected')).toContainText('subject frame');
     await shoot(page, browserName, size.name, '23-results-tblastn-dotplot');
+    // Its popup: right of the plot where the stage has room, else under it (WA-RS-02).
+    await canvas.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('dotplot-popup')).toBeVisible();
+    await shoot(page, browserName, size.name, '24-results-tblastn-dotplot-popup');
+    await page.keyboard.press('Escape');
+
+    // "Download All" opened: the outputs of the run (WA-RS-05).
+    await page.getByTestId('results-download-all').click();
+    await expect(page.getByTestId('results-download-menu')).toBeVisible();
+    await shoot(page, browserName, size.name, '25-results-download-all');
+    await page.keyboard.press('Escape');
 
     // Runs: finished ones in the run picker, a search in progress, one cancelled before it started,
     // and one waiting (started after the cancel). BLASTP of a bacterial proteome against itself

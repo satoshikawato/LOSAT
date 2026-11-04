@@ -152,13 +152,15 @@ export interface FilteredQuery {
 }
 
 /**
- * Applies the HSP filters to one query. `subjectIds(sIdx)` gives the texts that the text
- * filter searches: the subject's ID in the record table and its outfmt 6 `sseqid`.
+ * Applies the HSP filters to one query. `scores` are the E values and bit scores that the
+ * filters compare: the ones that the rows show (shownScores). `subjectIds(sIdx)` gives the
+ * texts that the text filter searches: the subject's ID in the record table and its outfmt 6
+ * `sseqid`.
  */
 export function filterQuery(
   query: QueryGroup,
   filters: ViewFilters,
-  table: HspTable,
+  scores: Pick<HspTable, 'eValue' | 'bitScore'>,
   subjectIds: (subject: SubjectGroup) => readonly string[],
 ): FilteredQuery {
   if (!hasHspFilters(filters)) return { subjects: query.subjects, hiddenSubjects: 0, hiddenHsps: 0 };
@@ -172,8 +174,8 @@ export function filterQuery(
     }
     const rows = subject.rows.filter(
       (row) =>
-        (filters.maxEValue === undefined || table.eValue[row]! <= filters.maxEValue) &&
-        (filters.minBitScore === undefined || table.bitScore[row]! >= filters.minBitScore),
+        (filters.maxEValue === undefined || scores.eValue[row]! <= filters.maxEValue) &&
+        (filters.minBitScore === undefined || scores.bitScore[row]! >= filters.minBitScore),
     );
     hiddenHsps += subject.rows.length - rows.length;
     if (rows.length > 0) subjects.push(rows.length === subject.rows.length ? subject : { sIdx: subject.sIdx, rows });

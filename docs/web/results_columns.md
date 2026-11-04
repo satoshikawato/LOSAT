@@ -1,6 +1,6 @@
 # LOSAT Web 結果画面の列定義表
 
-設計書 §11.2 の対応表のうち、結果画面（W4、Session S13）の列とフィルターを定める。計画 §4.4・§5.7 と `PD-LOSAT-WEB-APP-BOUNDARY` の不変条件 2.3 に従い、表に出す BLAST の値は outfmt 6 の該当行（HSP レコードの `out6` の範囲）か outfmt 0 の原文から取り、並べ替えとフィルターにはエンジンの原値（HSP レコードの数値）を使う。`web/` で BLAST の値を計算・整形しない。
+設計書 §11.2 の対応表のうち、結果画面（W4、Session S13）の列とフィルターを定める。計画 §4.4・§5.7 と `PD-LOSAT-WEB-APP-BOUNDARY` の不変条件 2.3 に従い、表に出す BLAST の値は outfmt 6 の該当行（HSP レコードの `out6` の範囲）か outfmt 0 の原文から取り、並べ替えにはエンジンの原値（HSP レコードの数値）を使う。E value と bit score のフィルターは、表に出した値（outfmt 6 の行の文字列が表す数）で比べる（下の「表示用のフィルター」）。`web/` で BLAST の値を計算・整形しない。
 
 - 作成：2026-10-06（S13）。状態の「採用」は S13 で画面に出すもの、「採用・エンジン待ち」は採用を決めたがエンジンが値を出すまで画面に出さないもの（設計書 §11.2「未対応項目は通常画面に出さず」）。
 - 採否は保守者の確認待ち（S13 は推奨の案で進めた。[W4 のゲート記録](../evidence/losat_web_w4/README.md)の判断 1）。
@@ -60,18 +60,20 @@ ViewState は表示だけを変え、検索をやり直さない（設計書 §1
 
 | フィルター | 比べる値 | 状態 |
 |---|---|---|
-| E value ≤ x | HSP レコードの `e_value`（原値） | 採用 |
-| Bit score ≥ x | HSP レコードの `bit_score`（原値） | 採用 |
+| E value ≤ x | outfmt 6 の `evalue` の文字列が表す数（表に出した値）。outfmt 6 の行が無い HSP は HSP レコードの `e_value` | 採用 |
+| Bit score ≥ x | outfmt 6 の `bitscore` の文字列が表す数（表に出した値）。outfmt 6 の行が無い HSP は HSP レコードの `bit_score` | 採用 |
 | Subject ID を含む | Run の subject のレコードの ID と、outfmt 6 の `sseqid`（原文） | 採用 |
 | Query ID を含む、Queries with hits only | Run の query のレコードの ID、その query の HSP レコードの有無 | 採用 |
 | Identity ≥ x | outfmt 6 の `pident` は丸めた文字列で、レコードに原値が無い | 不採用（原値が無い） |
+
+E value と bit score のフィルターが表に出した値で比べるのは、画面の値とフィルターの結果を食い違わせないためである（WA-RS-01、2026-11-04）。NCBI は E 値が 1e-180 未満なら 0.0 と書き、bit score は 100 以上なら小数を書かない（例 122.6 を 123）。原値で比べると、0.0 と表示した行が「E value ≤ 0」で隠れ、123 と表示した行が「Bit score ≥ 123」で隠れた。NCBI の丸めを TS に写すことはしない（不変条件 2.3）。エンジンが書いた文字列を数として読むだけである（`src/domain/outfmt6.ts` の `shownScores`、run ごとに 1 回）。並べ替えは原値のまま。丸めは単調なので、原値の順は表示した値の順と食い違わない（表示が同じ行は原値の順）。
 
 ## 状態の区別（設計書 §11.2）
 
 | 状態 | 条件 | 表示 |
 |---|---|---|
 | 表示 0 件 | HSP はあるが、フィルターがすべてを隠した | 「No HSPs of this query match the view filters」と、隠した数、フィルターを外す操作 |
-| ヒット無し | Run は完了し、その query の HSP レコードが無い | 「No significant similarity found for this query.」（NCBI の結果画面の帯の言葉。outfmt 0 の「No hits found」と同じ事実。値は作らない。W4b でタブは残す） |
+| ヒット無し | Run は完了し、その query の HSP レコードが無い | 「No significant similarity found for this query.」（NCBI の結果画面の帯の言葉。outfmt 0 の「No hits found」と同じ事実。値は作らない。W4b でタブは残す。Dot Plot のタブは図の代わりに同じ文を出す（WA-RS-04）。表示 0 件・空の query・`-num_alignments 0` でも、Dot Plot のタブは上の notice の最初の文を出す） |
 | 未完了・取消・失敗 | Run の状態 | 結果を出さず、状態と失敗の文言（RunRecord の `error`） |
 | 結果数の上限に達した可能性 | その query の subject の数が hit list の上限（argv の `-max_target_seqs`、無ければ `describe` の help の「default: N」）と同じ。または subject の HSP の数が `-max_hsps` と同じ | 上限に達したことと、より大きい `-max_target_seqs` で検索すれば示されることだけを示す。取れなかったヒットがあるとは言わない |
 | outfmt 0 にアラインメントが無い | `out0` が null（outfmt 0 は query ごとに先頭の `num_alignments` 個の subject だけアラインメントを示す。既定は 250（`format_flags.cpp:221`）、`-max_target_seqs` を与えるとその値（`blast_args.cpp:2909-2928`）。`-num_descriptions` / `-num_alignments` を与えた run で outfmt 0 の hit list の大きさが outfmt 6 / 7 と違うときは検索を 2 回行い、outfmt 0 が同じ HSP を示した (query, subject) の組だけ `out0` を持つ（`docs/web/abi_v2.md` §7、§8）） | 詳細に理由と、outfmt 6 の行を示す |

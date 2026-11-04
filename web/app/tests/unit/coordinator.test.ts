@@ -193,6 +193,34 @@ describe('Coordinator', () => {
     expect(store.usage()).toBe(0);
   });
 
+  it('cancels a run while its outputs are being staged, before the engine starts it (WA-RN-01)', async () => {
+    // ManualEngine ignores a cancel of a run that it has not started, as the Wasm engine does.
+    const engine = new ManualEngine();
+    let release!: () => void;
+    const staged = new Promise<void>((resolve) => (release = resolve));
+    const { coordinator, data, store } = setup(engine, (inner) => {
+      const gateway = Object.create(inner) as DataGateway;
+      gateway.openRun = async (runId) => {
+        const port = await inner.openRun(runId);
+        await staged;
+        return port;
+      };
+      return gateway;
+    });
+    const runId = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, runId, 'preparing');
+    coordinator.cancel(runId);
+    release();
+    await waitFor(coordinator, runId, 'cancelled');
+    expect(engine.started).toEqual([]);
+    await expect(data.readOutput(runId, 6)).rejects.toThrow();
+    expect(store.usage()).toBe(0);
+    // The next run starts.
+    const next = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, next, 'running');
+    expect(engine.started).toEqual([next]);
+  });
+
   it('cancels a FakeEngine run between phases', async () => {
     const { coordinator, data } = setup(new FakeEngine({ phaseDelayMs: 20 }));
     const runId = (await coordinator.enqueue(request)).runId!;
@@ -276,14 +304,25 @@ describe('Coordinator', () => {
     expect(coordinator.state.get().runs).toHaveLength(0);
   });
 
-  it('exports a completed output byte for byte under a descriptive name', async () => {
-    const { coordinator, saved } = setup();
+  it('exports a completed output byte for byte under a name with the task and the time of the run (WA-RS-05)', async () => {
+    const { coordinator, data, saved } = setup();
     const runId = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, runId, 'completed');
     await coordinator.exportOutput(runId, 7);
     expect(saved).toHaveLength(1);
-    expect(saved[0]!.fileName).toBe('losat-run1-blastn.outfmt7.txt');
+    // The engine's default task, and the UTC time of "Run LOSAT" (now() is 1000 ms).
+    expect(saved[0]!.fileName).toBe('losat-run1-blastn-megablast-19700101T000001Z.outfmt7.txt');
+    expect(saved[0]!.text).toBe(new TextDecoder().decode(await data.readOutput(runId, 7)));
     expect(saved[0]!.text).toContain(FAKE_MARKER);
+    const short = (await coordinator.enqueue({ ...request, parameters: [['-task', 'blastn-short']] })).runId!;
+    await waitFor(coordinator, short, 'completed');
+    await coordinator.exportOutput(short, 0);
+    expect(saved[1]!.fileName).toBe('losat-run2-blastn-blastn-short-19700101T000001Z.outfmt0.txt');
+    // A program without tasks.
+    const tblastx = (await coordinator.enqueue({ ...request, program: 'tblastx' })).runId!;
+    await waitFor(coordinator, tblastx, 'completed');
+    await coordinator.exportOutput(tblastx, 6);
+    expect(saved[2]!.fileName).toBe('losat-run3-tblastx-19700101T000001Z.outfmt6.txt');
   });
 
   it('queues a group in order, numbered without gaps, and cancels the group together', async () => {

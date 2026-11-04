@@ -3,9 +3,10 @@
 // hidden by the view filters, a hit list that reached its limit (more subjects may match;
 // it is not said that they do), and subjects whose alignments outfmt 0 does not show.
 import { computed } from 'vue';
-import type { ResultsState } from '../application/results';
+import { noHspReason, type ResultsState } from '../application/results';
 import { flagGiven } from '../domain/result-index';
 import { formatCount } from './format';
+import { NO_HSP_TEXT } from './no-hsp-text';
 
 const props = defineProps<{ state: ResultsState }>();
 defineEmits<{ clear: [] }>();
@@ -19,8 +20,8 @@ const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.arg
 const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
 /** Outfmt 0's own search failed: stream 0 is empty next to the tabular records (its error is in the diagnostics). */
 const outfmt0Failed = computed(() => props.state.loaded?.outfmt0Failed === true);
-/** The run searched no query sequence at all (an empty input), which no query filter explains. */
-const queryEmpty = computed(() => props.state.loaded?.run.snapshot.query.records.length === 0);
+/** Why the selected query shows no HSP (the Dot Plot tab says the same in place of its plot). */
+const reason = computed(() => noHspReason(props.state));
 /** What the engine wrote to the warnings (BLAST+'s "Query is Empty!"), as it wrote it. */
 const engineWarnings = computed(() => props.state.loaded?.diagnostics.trim() ?? '');
 const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(count)} ${count === 1 ? one : many}`;
@@ -28,22 +29,22 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
 
 <template>
   <div class="result-notices" aria-live="polite">
-    <div v-if="queryEmpty" class="notice" data-testid="results-notice" data-kind="empty-query">
-      <p>The query has no sequences.</p>
+    <div v-if="reason === 'empty-query'" class="notice" data-testid="results-notice" data-kind="empty-query">
+      <p>{{ NO_HSP_TEXT['empty-query'] }}</p>
       <pre v-if="engineWarnings !== ''" class="output" data-testid="results-notice-engine">{{ engineWarnings }}</pre>
     </div>
-    <p v-else-if="limit === 0" class="notice" data-testid="results-notice" data-kind="no-tabular-hits">
+    <p v-else-if="reason === 'no-tabular-hits'" class="notice" data-testid="results-notice" data-kind="no-tabular-hits">
       <span class="option-name">-num_alignments</span> 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved" error,
       in the diagnostics), so this run has no HSP records; outfmt 0 is written as BLAST+ writes it.
     </p>
-    <p v-else-if="state.queries.length === 0" class="notice" data-testid="results-notice" data-kind="no-queries">
-      No queries match the query filters.
+    <p v-else-if="reason === 'no-queries'" class="notice" data-testid="results-notice" data-kind="no-queries">
+      {{ NO_HSP_TEXT['no-queries'] }}
     </p>
     <template v-else-if="totals">
-      <p v-if="totals.hsps === 0" class="notice" data-testid="results-notice" data-kind="no-hits">
-        No significant similarity found for this query.
+      <p v-if="reason === 'no-hits'" class="notice" data-testid="results-notice" data-kind="no-hits">
+        {{ NO_HSP_TEXT['no-hits'] }}
       </p>
-      <p v-else-if="state.subjects.length === 0" class="notice warn" data-testid="results-notice" data-kind="filtered-out">
+      <p v-else-if="reason === 'filtered-out'" class="notice warn" data-testid="results-notice" data-kind="filtered-out">
         No HSPs of this query match the view filters ({{ plural(state.hidden.hsps, 'HSP') }} on
         {{ plural(state.hidden.subjects, 'subject') }} hidden).
         <button type="button" class="link" data-testid="results-notice-clear" @click="$emit('clear')">Clear the filters</button>

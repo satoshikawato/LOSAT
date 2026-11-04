@@ -63,6 +63,14 @@ const ACTIVE: ReadonlySet<RunStatus> = new Set(['preparing', 'running', 'finaliz
 export class Attention {
   readonly state: Store<AttentionState>;
   private lock: WakeLockHandle | undefined;
+  /**
+   * Counts the occasions to ask again after a refusal: runs starting after none were in progress, the
+   * page shown again, the choice turned on. A refusal holds until the next one, so that each change
+   * of the runs does not ask again and the refusal is not shown on and off (WA-RN-04).
+   */
+  private occasion = 0;
+  /** The occasion at whose request the browser last refused the lock. */
+  private refusedAt: number | undefined;
   private hidden: { readonly at: number; readonly runs: ReadonlyMap<string, { number: number; status: RunStatus }> } | undefined;
   private probeGeneration = 0;
   private leaveGuard: boolean | undefined;
@@ -82,6 +90,7 @@ export class Attention {
   }
 
   setKeepAwake(keepAwake: boolean): void {
+    if (keepAwake) this.occasion++;
     this.set({ keepAwake });
     this.update();
   }
@@ -95,6 +104,7 @@ export class Attention {
     const active = runs.some((run) => ACTIVE.has(run.status));
     const busy = active || runs.some((run) => run.status === 'queued');
     const state = this.state.get();
+    if (busy && !state.busy) this.occasion++;
     if (state.active !== active || state.busy !== busy) this.set({ active, busy });
     this.updateLeaveGuard();
     this.updateWakeLock();
@@ -117,7 +127,8 @@ export class Attention {
     const { keepAwake, busy, wakeLock } = this.state.get();
     if (wakeLock === 'unsupported') return;
     const wanted = keepAwake && busy && this.deps.page.isVisible();
-    if (wanted && (wakeLock === 'off' || wakeLock === 'failed')) {
+    if (wanted && (wakeLock === 'off' || (wakeLock === 'failed' && this.refusedAt !== this.occasion))) {
+      const occasion = this.occasion;
       this.set({ wakeLock: 'requesting', wakeLockError: undefined });
       this.deps.page.requestWakeLock().then(
         (lock) => {
@@ -133,7 +144,12 @@ export class Attention {
           // The search may have ended, or the choice changed, while the lock was requested.
           this.updateWakeLock();
         },
-        (error: unknown) => this.set({ wakeLock: 'failed', wakeLockError: error instanceof Error ? error.message : String(error) }),
+        (error: unknown) => {
+          this.refusedAt = occasion;
+          this.set({ wakeLock: 'failed', wakeLockError: error instanceof Error ? error.message : String(error) });
+          // An occasion came while the request was made (the page was shown again): ask once more.
+          if (occasion !== this.occasion) this.updateWakeLock();
+        },
       );
     } else if (!wanted && wakeLock === 'held' && this.lock !== undefined) {
       const lock = this.lock;
@@ -156,6 +172,7 @@ export class Attention {
   private shown(): void {
     const hidden = this.hidden;
     this.hidden = undefined;
+    this.occasion++;
     this.updateWakeLock();
     if (hidden === undefined || this.deps.now() - hidden.at < (this.deps.minHiddenMs ?? 1000)) return;
     const current = new Map(this.deps.runs.get().runs.map((run) => [run.snapshot.runId, run.status]));

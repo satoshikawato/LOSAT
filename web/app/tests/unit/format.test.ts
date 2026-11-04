@@ -1,6 +1,15 @@
 // The UI's display helpers (src/ui/format.ts).
 import { describe, expect, it } from 'vitest';
-import { formatCounted, formatDateTime, framesLabel, framesPhrase, framesText, optionHelp } from '../../src/ui/format';
+import {
+  formatCounted,
+  formatDateTime,
+  formatRuns,
+  framesLabel,
+  framesPhrase,
+  framesText,
+  lostResultsText,
+  optionHelp,
+} from '../../src/ui/format';
 
 describe('formatDateTime', () => {
   it('writes a local time in ISO 8601 form, day and month never swapped', () => {
@@ -28,6 +37,44 @@ describe('formatCounted', () => {
     expect(formatCounted(1, 'HSP')).toBe('1 HSP');
     expect(formatCounted(12345, 'HSP')).toBe('12,345 HSPs');
     expect(formatCounted(0, 'HSP')).toBe('0 HSPs');
+  });
+});
+
+describe('formatRuns', () => {
+  it('names one run, two runs, and a list with "and"', () => {
+    expect(formatRuns([2])).toBe('run 2');
+    expect(formatRuns([3, 1])).toBe('runs 1 and 3');
+    expect(formatRuns([1, 2])).toBe('runs 1 and 2');
+    expect(formatRuns([5, 1, 3])).toBe('runs 1, 3 and 5');
+  });
+
+  it('writes three or more runs in a row as a range, so that hundreds of runs stay short', () => {
+    expect(formatRuns([1, 2, 3])).toBe('runs 1–3');
+    expect(formatRuns([1, 2, 3, 5])).toBe('runs 1–3 and 5');
+    expect(formatRuns([7, 1, 3, 5, 6, 3])).toBe('runs 1, 3 and 5–7');
+    expect(formatRuns(Array.from({ length: 300 }, (_, i) => i + 1))).toBe('runs 1–300');
+  });
+});
+
+describe('lostResultsText', () => {
+  it('is empty when every stored result is there', () => {
+    expect(lostResultsText([], [])).toBe('');
+  });
+
+  it('names the runs the browser removed the stored results of, with "it" for one run and "them" for more', () => {
+    expect(lostResultsText([1], [])).toBe('The browser removed the stored results of run 1. Run it again.');
+    expect(lostResultsText([1, 2, 3], [])).toBe('The browser removed the stored results of runs 1–3. Run them again.');
+  });
+
+  it('names the runs whose stored results could not be read otherwise', () => {
+    expect(lostResultsText([], [4])).toBe('The stored results of run 4 could not be read. Run it again.');
+    expect(lostResultsText([], [4, 6])).toBe('The stored results of runs 4 and 6 could not be read. Run them again.');
+  });
+
+  it('says both, removed first, and "them" for one run of each', () => {
+    expect(lostResultsText([2], [4])).toBe(
+      'The browser removed the stored results of run 2. The stored results of run 4 could not be read. Run them again.',
+    );
   });
 });
 

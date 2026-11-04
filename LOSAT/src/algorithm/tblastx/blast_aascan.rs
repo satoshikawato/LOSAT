@@ -5,7 +5,9 @@
 //! This module contains the subject scanning functions that iterate through
 //! subject sequences and find k-mer hits against the lookup table.
 
-use super::lookup::{BlastAaLookupTable, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK};
+use super::lookup::{
+    BlastAaLookupTable, XCell, XHit, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK,
+};
 use super::scan::OffsetPair;
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
@@ -175,6 +177,57 @@ pub fn s_blast_aa_scan_subject(
         s_range[1] = s as i32;
     }
 
+    totalhits
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:60-127 (quoted at
+// `s_blast_aa_scan_subject` and `s_blast_aa_scan_subject_one_range`)
+// No NCBI counterpart for the form: the scan of `s_blast_aa_scan_subject` over a lookup table of
+// either cell width, with checked reads. BLASTX's table of 16-bit hits (`BackboneCell16`, built
+// where the fused loop scans it) is read by the reference scan only in the diagnostic stages and
+// for a `-subject` with lower-case letters; the table of `Int4` hits keeps the functions above.
+/// The pairs of `s_blast_aa_scan_subject` for a table of cells `C`: the same scan ranges, the same
+/// pairs in the same order, the same early return when `offset_pairs` is full.
+pub(crate) fn x_blast_aa_scan_subject_cells<C: XCell>(
+    lookup: &BlastAaLookupTable<C>,
+    subject: &[u8],
+    seq_ranges: &[(i32, i32)],
+    offset_pairs: &mut [OffsetPair],
+    array_size: i32,
+    s_range: &mut [i32; 3],
+) -> i32 {
+    let mut totalhits: i32 = 0;
+    let word_length = lookup.word_length as usize;
+    let charsize = lookup.charsize as usize;
+    let mask = lookup.mask as usize;
+    while determine_scanning_offsets(seq_ranges, lookup.word_length, lookup.word_length, s_range) {
+        let (s_first, s_last) = (s_range[1] as usize, s_range[2] as usize);
+        let mut index: usize = 0;
+        for &ch in &subject[s_first..s_first + word_length - 1] {
+            index = (index << charsize) | ch as usize;
+        }
+        let mut s = s_first;
+        while s <= s_last {
+            index = ((index << charsize) | subject[s + word_length - 1] as usize) & mask;
+            if lookup.pv[index >> PV_ARRAY_BTS] & (1u32 << (index & PV_ARRAY_MASK)) != 0 {
+                let cell = &lookup.backbone[index];
+                let numhits = cell.count() as i32;
+                if numhits > array_size - totalhits {
+                    s_range[1] = s as i32;
+                    return totalhits;
+                }
+                for (i, hit) in cell.hits(&lookup.overflow).iter().enumerate() {
+                    offset_pairs[totalhits as usize + i] = OffsetPair {
+                        q_off: hit.q() as u32,
+                        s_off: s as u32,
+                    };
+                }
+                totalhits += numhits;
+            }
+            s += 1;
+        }
+        s_range[1] = s as i32;
+    }
     totalhits
 }
 

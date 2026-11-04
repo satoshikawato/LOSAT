@@ -46,6 +46,7 @@ use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::report::tabular::PrintedIds;
 use crate::seqdb::{BlockRange, NucleotideAmbiguity, SeqDb, SeqDbError, SeqType, SequenceBlock};
+use crate::sequence::packed_subject::PackedNucleotide;
 use crate::utils::threading::SearchPool;
 
 use super::BlastnSubjectRef;
@@ -1218,10 +1219,13 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
 pub(super) struct ReportedSubjects {
     /// The ordinal id of each rank, ascending.
     pub(super) ordinals: Vec<u32>,
-    /// The record of each rank: the id `gnl|BL_ORD_ID|n`, the stored title (a sequence with
-    /// parsed Seq-ids: the title of its first definition line), and the stored letters (empty
-    /// when the reports do not show them).
+    /// The record of each rank: the id `gnl|BL_ORD_ID|n` and the stored title (a sequence with
+    /// parsed Seq-ids: the title of its first definition line), without letters.
     pub(super) records: Vec<FastaRecord>,
+    /// When the reports show letters, the stored data of each rank (`reported_store`): its
+    /// 2-bit data and ambiguity runs, from which a report makes the letters of the ranges it
+    /// shows (`SubjectLetters`), not the letters of the whole sequence.
+    pub(super) stores: Option<Vec<PackedNucleotide>>,
     /// The sequences with parsed Seq-ids by rank (empty when none is reported): their ids and
     /// titles come from their definition lines (`report::db_subject`).
     pub(super) parsed: Vec<Option<Arc<ParsedSubject>>>,
@@ -1248,14 +1252,15 @@ pub(super) struct ReportedSubjects {
 // ```
 // The formatter reads a database sequence from its Bioseq: the stored 2-bit data, or with
 // ambiguity codes their NCBI4na values (`x_GetAmbigSeq`'s letters before their mapping to
-// BLASTNA; `SequenceBlock::nucleotide_iupac` writes `NCBI4NA_TO_IUPACNA` of each).
-// Upper case: a database has no lowercase letters.
+// BLASTNA). LOSAT keeps the stored 2-bit data and ambiguity runs (`reported_store`), and a
+// report writes `NCBI4NA_TO_IUPACNA` of each letter of the ranges it shows (the letters of
+// `SequenceBlock::nucleotide_iupac` there). Upper case: a database has no lowercase letters.
 /// The reported database sequences of `hit_lists` (the final hit lists of all query
 /// batches, after their HSPs of score 0 were dropped): the hit lists name them by rank
 /// from here on (the rank grows with the ordinal id, so every comparison that breaks a tie
 /// by the ordinal id gives the same order), and their records are made for the reports
-/// from `titles`, with their stored letters when `letters` (outfmt 0 and the hit records
-/// read them; the tabular formats do not). A reported sequence whose stored title LOSAT
+/// from `titles`, with their stored data when `letters` (outfmt 0, the hit records and the
+/// formats with letters read them; `reported_store`). A reported sequence whose stored title LOSAT
 /// does not report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the
 /// reports `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`; `first_query`: the index of the query of `hit_lists[0]`).
@@ -1298,7 +1303,7 @@ pub(super) fn reported_subjects(
     // Seq-ids that outfmt 0 shows.
     let taxdb_found = std::sync::OnceLock::new();
     let db = &database.db;
-    let record = |&ordinal: &u32| -> Result<(FastaRecord, Option<Arc<ParsedSubject>>)> {
+    let record = |&ordinal: &u32| -> Result<Reported> {
         let header = titles
             .get(&ordinal)
             .with_context(|| format!("database sequence {ordinal} has no title read"))?;
@@ -1316,30 +1321,31 @@ pub(super) fn reported_subjects(
                 (subject.first_title().to_vec(), Some(Arc::clone(subject)))
             }
         };
-        let sequence = if letters {
-            let block = x_read_sequence(db, ordinal).map_err(database_error)?;
-            let letters = block.nucleotide_iupac(0).map_err(database_error)?;
-            x_done_block(block);
-            letters
+        let store = if letters {
+            Some(reported_store(db, ordinal)?)
         } else {
-            Vec::new()
+            None
         };
         let record = FastaRecord {
             // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
             // (line DI-8).
             local_id: format!("gnl|BL_ORD_ID|{}", db.oid(ordinal)),
             title,
-            sequence,
+            sequence: Vec::new(),
             warnings: Vec::new(),
             source: Default::default(),
         };
-        Ok((record, subject))
+        Ok((record, store, subject))
     };
     let made = x_reported_records(&ordinals, pool, &record)?;
     let mut records = Vec::with_capacity(ordinals.len());
+    let mut stores = letters.then(|| Vec::with_capacity(ordinals.len()));
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
-    for (rank, (record, subject)) in made.into_iter().enumerate() {
+    for (rank, (record, store, subject)) in made.into_iter().enumerate() {
         records.push(record);
+        if let (Some(stores), Some(store)) = (stores.as_mut(), store) {
+            stores.push(store);
+        }
         if let Some(subject) = subject {
             if parsed.is_empty() {
                 parsed = vec![None; ordinals.len()];
@@ -1369,23 +1375,52 @@ pub(super) fn reported_subjects(
     Ok(ReportedSubjects {
         ordinals,
         records,
+        stores,
         parsed,
     })
 }
 
+// No NCBI counterpart: NCBI's formatter reads the Bioseq of its scope (the references above
+// `reported_subjects`); this is the form in which LOSAT holds a reported sequence's data.
+/// The stored data of database sequence `ordinal` that a report reads its letters from: its
+/// 2-bit data and ambiguity runs (`PackedNucleotide::from_stored`, whose letters are those of
+/// `SequenceBlock::nucleotide_iupac`), with the errors of `nucleotide_iupac` in the same order
+/// (`SequenceBlock::nucleotide_stored`). The store is the read's buffer cut to the 2-bit data, a
+/// quarter of a byte per letter, as `common::database::x_read_nucleotide_store` keeps it: with
+/// LOSAT_X_BNMAPPED a buffer of 1 MiB or more is mapped and leaves at the store's drop (it is not
+/// given back to `x_mapped::X_BYTES`), and no copy is made in the heap.
+fn reported_store(db: &SeqDb, ordinal: u32) -> Result<PackedNucleotide> {
+    let block = x_read_sequence(db, ordinal).map_err(database_error)?;
+    let (length, runs) = block.nucleotide_stored(0).map_err(database_error)?;
+    let packed = block.x_into_nucleotide_packed();
+    if crate::utils::x_mapped::x_is_mapped(packed.capacity()) {
+        crate::utils::x_mapped::X_BYTES.x_disown(&packed);
+    }
+    Ok(PackedNucleotide::x_from_stored_buffer(
+        packed, length, &runs,
+    ))
+}
+
+/// A reported sequence's record, its stored data (`reported_store`, when the reports show
+/// letters) and its parsed Seq-ids (`reported_subjects`).
+type Reported = (
+    FastaRecord,
+    Option<PackedNucleotide>,
+    Option<Arc<ParsedSubject>>,
+);
+
 // No NCBI counterpart: NCBI's formatters read the sequence of each alignment when they write it.
-/// The sequences of a report that one read and decode at a time cost more than a task of the pool.
+/// The sequences of a report that one read at a time cost more than a task of the pool.
 const X_REPORTED_RECORDS_MIN: usize = 64;
 
 /// `record` of each of `ordinals`, in their order, on `pool` while the search's threads wait
 /// between the query batches (each batch's report reads its own reported sequences with
 /// LOSAT_X_RPTSTREAM); the error of the first one in that order that has one.
-#[allow(clippy::type_complexity)]
 fn x_reported_records(
     ordinals: &[u32],
     pool: Option<&SearchPool<'_>>,
-    record: &(dyn Fn(&u32) -> Result<(FastaRecord, Option<Arc<ParsedSubject>>)> + Sync),
-) -> Result<Vec<(FastaRecord, Option<Arc<ParsedSubject>>)>> {
+    record: &(dyn Fn(&u32) -> Result<Reported> + Sync),
+) -> Result<Vec<Reported>> {
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1943,9 +1978,10 @@ mod tests {
     }
 
     // The reports name the reported sequences by rank (the order of the ordinal ids), with
-    // the stored title, the id `gnl|BL_ORD_ID|n` and the stored letters in upper case with
-    // their ambiguity codes (seqdbvol.cpp:1406-1414, blast_encoding.c:80-83), and the
-    // tabular ids are the first words of the titles.
+    // the stored title, the id `gnl|BL_ORD_ID|n` and the stored data, whose letters are the
+    // stored letters in upper case with their ambiguity codes (seqdbvol.cpp:1406-1414,
+    // blast_encoding.c:80-83), whole and in any range, and the tabular ids are the first
+    // words of the titles.
     #[test]
     fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         let database = open("nucl_mv");
@@ -1981,15 +2017,25 @@ mod tests {
         };
         assert_eq!(ranks(&hit_lists[0]), [(1, vec![1]), (0, vec![0])]);
         assert_eq!(ranks(&hit_lists[2]), [(0, vec![0]), (11, vec![])]);
+        let letters = crate::algorithm::blastn::x_subject_store::SubjectLetters::new(
+            &reported.records,
+            reported.stores.as_deref(),
+        );
         for (rank, &ordinal) in reported.ordinals.iter().enumerate() {
             let record = &reported.records[rank];
             assert_eq!(record.local_id, format!("gnl|BL_ORD_ID|{ordinal}"));
             assert_eq!(record.title, entries[ordinal as usize].2.as_bytes());
-            assert_eq!(record.seq(), entries[ordinal as usize].1.as_bytes());
+            assert!(record.seq().is_empty(), "the records keep no letters");
+            let stored = entries[ordinal as usize].1.as_bytes();
+            assert_eq!(letters.len(rank), stored.len());
+            assert_eq!(letters.upper_letters(rank, 0, stored.len()), stored);
+            let (from, to) = (stored.len() / 3, stored.len() - stored.len() / 4);
+            assert_eq!(letters.upper_letters(rank, from, to), &stored[from..to]);
+            assert!(letters.lowercase_masks(rank).is_empty());
         }
         // n10 was stored from lower case letters: the database has upper case only.
-        assert!(reported.records[1]
-            .seq()
+        assert!(letters
+            .upper_letters(1, 0, letters.len(1))
             .iter()
             .all(|letter| !letter.is_ascii_lowercase()));
         assert_eq!(
@@ -2001,7 +2047,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             [&b"n06"[..], b"n10"]
         );
-        // Without the letters (the tabular formats only): the records are empty.
+        // Without the letters (the tabular formats without alignment rows): no stored data.
         let mut hit_lists = vec![hit_list(vec![(9, 1e-9)], 1)];
         let reported = reported_subjects(
             &database,
@@ -2014,6 +2060,7 @@ mod tests {
         )
         .unwrap();
         assert!(reported.records[0].seq().is_empty());
+        assert!(reported.stores.is_none());
     }
 
     // NCBI writes an error message for a stored title byte outside ' ' ..= '~' each time
@@ -2078,7 +2125,7 @@ mod tests {
     #[test]
     fn reported_records_on_a_pool_are_the_serial_ones() {
         let ordinals: Vec<u32> = (0..500).collect();
-        let record = |&ordinal: &u32| -> Result<(FastaRecord, Option<Arc<ParsedSubject>>)> {
+        let record = |&ordinal: &u32| -> Result<Reported> {
             if ordinal >= 300 && ordinal % 2 == 0 {
                 anyhow::bail!("refused {ordinal}");
             }
@@ -2089,11 +2136,11 @@ mod tests {
                 warnings: Vec::new(),
                 source: Default::default(),
             };
-            Ok((record, None))
+            Ok((record, None, None))
         };
-        let ids = |made: Vec<(FastaRecord, Option<Arc<ParsedSubject>>)>| -> Vec<String> {
+        let ids = |made: Vec<Reported>| -> Vec<String> {
             made.into_iter()
-                .map(|(record, _)| record.local_id)
+                .map(|(record, _, _)| record.local_id)
                 .collect()
         };
         let serial = x_reported_records(&ordinals[..300], None, &record).unwrap();

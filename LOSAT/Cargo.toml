@@ -71,9 +71,14 @@ rayon = { version = "1.11", optional = true }
 libm = "0.2.15"
 indicatif = "0.18"
 rustc-hash = "1.1"
-# gzip input (`-query`, `-subject`, `makeblastdb -in` named `.gz`): the pure-Rust backend
-# (miniz_oxide), as the pure-Rust runtime boundary requires; no `links` metadata.
+# Compressed input (`-query`, `-subject`, `makeblastdb -in` named `.gz`, `.bz2` or `.zst`), with
+# pure-Rust decoders only, as the pure-Rust runtime boundary requires (no C library, no `links`
+# metadata): flate2's miniz_oxide backend, bzip2's libbz2-rs-sys backend (not bzip2-sys), and
+# ruzstd (a decoder; LOSAT never compresses). bzip2 0.6 builds libbz2-rs-sys by default; its `bzip2-sys`
+# feature (the C library) is never enabled.
 flate2 = "1.1"
+bzip2 = "0.6"
+ruzstd = "0.9"
 
 # NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
 # ```c++

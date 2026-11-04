@@ -173,9 +173,9 @@ pub fn run_local(
             match query_range.map(|range| record_interval(&range, length)) {
                 None => {}
                 Some(RecordInterval::Letters { from, to }) => {
-                    // The whole letters of a record with lower-case runs, for the chunks of a
-                    // split query (`split::x_chunk_masks`).
-                    let keep_whole = !query.lowercase_masks.is_empty();
+                    // The whole letters of a record whose letter before the interval is lower
+                    // case, for the chunks of a split query (`split::x_chunk_masks`).
+                    let keep_whole = query.lower_case_before(from);
                     query.cut_in_place(from, to + 1, keep_whole)
                 }
                 Some(RecordInterval::Empty) => query.cut_in_place(length, length, false),

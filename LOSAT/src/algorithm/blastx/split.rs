@@ -729,13 +729,15 @@ fn x_chunk_masks(whole: &FastaRecord, start: usize, end: usize) -> Vec<(i32, i32
         .as_deref()
         .and_then(|source| source.uncut.as_deref())
     {
-        // NCBI's masks are the runs of the whole record (`m_UserSpecifiedMasks`), so a run that
-        // ends on the letter before the interval masks the first chunk's first letter, which the
-        // runs cut to the interval (`lowercase_masks`) no longer hold. A record cut to its
-        // interval keeps its whole letters when it has runs (`input::emit_fasta_batch`). The
-        // restriction keeps a run only where it reaches `[start + offset, end - 1]` of the
-        // record, so the runs are read from the chunk's letters in the record and the one before
-        // them: a run cut at either end of these is restricted to the same letters.
+        // NCBI's masks are the runs of the whole record (`m_UserSpecifiedMasks`). The runs cut to
+        // the interval (`lowercase_masks`) restrict to the same masks but for one letter: the run
+        // that holds the letter before the interval masks the first chunk's first letter, when it
+        // ends there and the chunk is longer than `offset`, or when it goes on into the interval
+        // and the chunk is `offset + 1` letters long. A record cut to its interval keeps its
+        // whole letters when that letter is lower case (`FastaRecord::lower_case_before`), or for
+        // the archive. The restriction keeps a run only where it reaches `[start + offset,
+        // end - 1]` of the record, so the runs are read from the chunk's letters in the record and
+        // the one before them: a run cut at either end of these is restricted to the same letters.
         Some(uncut) => {
             let from = (start + offset).saturating_sub(1);
             let to = (end + offset).min(uncut.len());

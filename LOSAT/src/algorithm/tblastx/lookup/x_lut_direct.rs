@@ -217,7 +217,8 @@ impl XLists<'_> {
 
 /// No NCBI counterpart: a build's temporary vectors, kept between pooled builds (`cells`, `starts`
 /// and `offsets`: the present source cells of a partitioned build, `x_counted_sources`, which keeps
-/// its cursors in `base`; the build's `counts` holds its ranges' counts, `x_partitioned_passes`).
+/// its cursors in `counts` before the vector holds the build's ranges' counts,
+/// `x_partitioned_passes`).
 #[derive(Default)]
 struct XBuildTemps {
     counts: Vec<u32>,
@@ -258,11 +259,68 @@ fn x_pool_lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 // arenas held 47 MiB at the peak, 23 MiB of it free.
 fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
     vector.clear();
-    if vector.capacity() < n {
-        vector.reserve_exact(if slack { n + n / 4 } else { n });
-    }
+    x_fit(&mut vector, n, slack);
     vector.resize(n, T::default());
     vector
+}
+
+// No NCBI counterpart: the capacity of a pooled vector taken for `n` entries (`slack`: `n + n / 4`,
+// see `x_zeroed`): grown when short of `n`, and given back down to that when above it, so that a
+// kept vector holds the pages of the table it is taken for, not those of the largest table it
+// held (NCBI callocs each table and frees it with its search). glibc maps the vector from its first
+// allocation (`x_unthresholded_capacity`) and resizes a mapped allocation with `mremap`, both ways:
+// the pages past a shrunk vector go back to the system, and no mapped vector is freed (which
+// would raise glibc's mmap threshold, see `x_zeroed`). Elsewhere the allocator's `realloc` shrinks
+// it. At 64 threads, 800 cDNAs x 50 yeast proteins `-subject` kept eight tables' overflow
+// vectors of 2.1-4.2 MiB of pages (22.8 MiB) for tables of 1.82 MiB on average.
+fn x_fit<T>(vector: &mut Vec<T>, n: usize, slack: bool) {
+    let want = if slack { n + n / 4 } else { n };
+    if vector.capacity() == 0 && want > 0 {
+        *vector = Vec::with_capacity(crate::utils::x_mapped::x_unthresholded_capacity(
+            want,
+            std::mem::size_of::<T>(),
+        ));
+    } else if vector.capacity() < n {
+        vector.clear();
+        vector.reserve_exact(want);
+    }
+    if vector.capacity() > want {
+        vector.truncate(n);
+        // At least one entry: a vector shrunk to nothing would be freed.
+        vector.shrink_to(want.max(1));
+    }
+}
+
+// No NCBI counterpart (buffer reuse only): the overflow vector for a table of `n` hits: `own` (that
+// of the kept vectors the build took) or, where it fits `n` better, the overflow vector of another
+// kept set, the two swapped: the smallest capacity of at least `n`, else the largest (the least to
+// grow). The tables of a search differ in size (800 cDNAs `-subject`: overflow 1.2-4.2 MiB, median
+// 1.74), and the vector on top of the pool was the last one given back: taken that way, about every
+// other build grew its vector and the next one shrank it again (`x_fit`, 110-128 resizes for 184
+// tables at 64 threads, and their pages faulted again); taken by size, the large vectors serve
+// the large tables (43-58 resizes, no more faults than vectors never shrunk).
+fn x_fitting_overflow<C: XVec>(own: &mut Vec<C::Hit>, n: usize) {
+    let fits_better = |a: usize, b: usize| {
+        if (a >= n) != (b >= n) {
+            a >= n
+        } else if a >= n {
+            a < b
+        } else {
+            a > b
+        }
+    };
+    let mut kept = x_pool_lock(&X_BX_TABLES);
+    let mut best: Option<&mut Vec<C::Hit>> = None;
+    for vectors in kept.iter_mut() {
+        let (_, overflow) = C::vectors(vectors);
+        let held = best.as_ref().map_or(own.capacity(), |best| best.capacity());
+        if fits_better(overflow.capacity(), held) {
+            best = Some(overflow);
+        }
+    }
+    if let Some(best) = best {
+        std::mem::swap(best, own);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 (see
@@ -1519,8 +1577,9 @@ fn x_build_direct_in<C: XVec>(
         None if pooled => {
             let mut kept = x_pool_lock(&X_BX_TABLES).pop().unwrap_or_default();
             let (kept_backbone, kept_overflow) = C::vectors(&mut kept);
-            let (kept_backbone, kept_overflow) =
+            let (kept_backbone, mut kept_overflow) =
                 (std::mem::take(kept_backbone), std::mem::take(kept_overflow));
+            x_fitting_overflow::<C>(&mut kept_overflow, overflow_size + C::PAD_HITS);
             (
                 x_zeroed(kept_backbone, backbone_size + C::PAD_CELLS, false),
                 x_zeroed(kept.pv, pv_size, false),
@@ -1981,12 +2040,9 @@ fn x_claimed<T: Send, R: Send>(parts: Vec<T>, f: &(dyn Fn(T) -> R + Sync)) -> Ve
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 fn x_sized<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
-    if vector.capacity() < n {
-        // Grown in its own allocation, as `x_zeroed` grows (no vector of the pool is freed).
-        vector.clear();
-        vector.reserve_exact(if slack { n + n / 4 } else { n });
-    }
     vector.truncate(n);
+    // Grown or shrunk in its own allocation, as `x_zeroed` (no vector of the pool is freed).
+    x_fit(&mut vector, n, slack);
     vector.resize(n, T::default());
     vector
 }
@@ -2181,7 +2237,7 @@ fn x_counted_sources(
     backbone_size: usize,
     temps: &mut XBuildTemps,
 ) {
-    let mut at = x_zeroed(std::mem::take(&mut temps.base), backbone_size, false);
+    let mut at = x_zeroed(std::mem::take(&mut temps.counts), backbone_size, false);
     let mut words = 0usize;
     x_for_each_exact_word(query, locations, word_length, charsize, |idx, _| {
         at[idx] += 1;
@@ -2206,7 +2262,7 @@ fn x_counted_sources(
             i32::try_from(offset).expect("NCBI BLAST query offset must fit Int4");
         at[idx] += 1;
     });
-    temps.base = at;
+    temps.counts = at;
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 and 283-358 (cited
@@ -2382,7 +2438,9 @@ fn x_partitioned_passes(
         }
     });
     // (d) The appends.
-    let mut overflow = x_sized(kept.overflow, overflow_size, true);
+    let mut overflow = kept.overflow;
+    x_fitting_overflow::<BackboneCell>(&mut overflow, overflow_size);
+    let mut overflow = x_sized(overflow, overflow_size, true);
     let out = XDisjointOut {
         backbone: backbone.as_mut_ptr(),
         overflow: overflow.as_mut_ptr(),

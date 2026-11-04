@@ -361,8 +361,11 @@ const MAX_GREEDY_GAP_COST: i32 = 32767;
 ///         m_Severity < rhs.m_Severity ||
 ///         m_Message < rhs.m_Message) {
 /// ```
-/// The error's id (`kBlastMessageNoContext`, -1) is below the warning's, so the sort puts
-/// the error first (TBLASTX's unknown matrix has the same order, `run_impl.rs`).
+/// `operator<` is no order: the error is below the warning by id (`kBlastMessageNoContext`,
+/// -1, against the query's index) and the warning below the error by severity. Of two
+/// messages, libstdc++'s insertion sort moves the second one (the error, added after the
+/// set-up warning) to the front, so the error comes first (TBLASTX's unknown matrix has the
+/// same order, `run_impl.rs`).
 /// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:170-184
 /// ```c
 ///     Blast_Message2TSearchMessages(blast_msg.Get(), query_info, search_messages);

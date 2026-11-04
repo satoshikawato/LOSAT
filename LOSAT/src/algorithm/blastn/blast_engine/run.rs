@@ -11278,7 +11278,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                     batching.batch_size
                 );
             }
-            // A query without letters keeps its warning in the error (`karlin_error`).
+            // A query without letters (also a `-query_loc` interval that holds none) keeps its
+            // warning in the error (`karlin_error`).
             let empty_queries = query_lengths.iter().map(|&length| length == 0);
             // A batch after the first: every batch before it had only invalid queries (one
             // with a valid query would have raised the error), and NCBI has written their

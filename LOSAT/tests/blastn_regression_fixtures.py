@@ -510,6 +510,8 @@ _CASES = [
     ("kaempty.first_batch", f"{KE} -reward 1 -penalty -6 -outfmt 6", ""),
     ("kaempty.first_batch_fmt0", f"{KE} -reward 1 -penalty -6 -outfmt 0", ""),
     ("kaempty.gaps_fmt11", f"{KE} -no_greedy -gapopen 5 -gapextend 2 -reward 4 -penalty -5 -outfmt 11", ""),
+    # (ka_a has 159 letters: its -query_loc interval holds none, as the records without letters.)
+    ("kaempty.qloc", f"{KE} -query_loc 160-200 -reward 1 -penalty -6 -outfmt 6", ""),
     ("kaempty.later_batch", f"{KEB} -reward 1 -penalty -6 -outfmt 6", "", "BATCH_SIZE=1"),
     ("kaempty.later_batch_fmt0", f"{KEB} -reward 1 -penalty -6 -outfmt 0", "", "BATCH_SIZE=1"),
 ]

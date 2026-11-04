@@ -250,9 +250,10 @@ fn x_pool_lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-// No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them); one
-// short of room grows to `n` entries, or with `slack` (the overflow, whose length changes from
-// table to table) `n + n / 4`, not the doubling of `resize`. It grows by a reallocation of its own
+// No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them), with
+// the room of `x_fit`: one short of room grows to `n` entries, or with `slack` (the overflow, whose
+// length changes from table to table) `n + n / 4`, not the doubling of `resize`, and one with more
+// room than that is shrunk to it. It grows by a reallocation of its own
 // allocation (`reserve_exact`), never a new allocation and a free of the old one: glibc moves a
 // mapped allocation with `mremap`, so the pool never frees a mapped vector, and a free of one
 // raises glibc's dynamic mmap threshold to its size and the trim threshold of every arena to
@@ -273,13 +274,13 @@ fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Ve
 // held (NCBI callocs each table and frees it with its search). A vector that grows to
 // `X_MAPPED_FROM` bytes is mapped (`x_mapped_capacity`, then given its room), and glibc resizes a
 // mapped allocation with `mremap`, both ways: the pages past a shrunk vector go back to the system,
-// and no mapped vector is freed (which would raise glibc's mmap threshold, see `x_zeroed`). A
-// smaller vector stays where the allocator puts it, as before: mapping every vector from its first
-// allocation gave the 111 KiB vectors of a build on one thread pages of their own (the default path
-// at 8 threads read +0.2-0.4 MiB against dev in 10 runs). Elsewhere the allocator's `realloc`
-// resizes it. At 64 threads, 800 cDNAs x 50 yeast proteins
-// `-subject` kept eight tables' overflow vectors of 2.1-4.2 MiB of pages (22.8 MiB) for tables of
-// 1.82 MiB on average.
+// and no mapped vector is freed (which would raise glibc's mmap threshold, see `x_zeroed`); other
+// allocators resize it with `realloc`. A smaller vector stays where the allocator puts it, as
+// before: mapping every vector from its first allocation gave the 112 KiB vectors of a build on
+// one thread pages of their own (the default path at 8 threads read +0.2-0.4 MiB against dev in 10
+// runs). At 64 threads, 800 cDNAs x 50 yeast proteins `-subject` kept eight tables' overflow
+// vectors of 2.1-4.2 MiB of pages (22.8 MiB) for tables of 1.82 MiB on average (the run's 184
+// tables, median 1.74 MiB).
 fn x_fit<T>(vector: &mut Vec<T>, n: usize, slack: bool) {
     let want = if slack { n + n / 4 } else { n };
     if vector.capacity() < n {
@@ -302,8 +303,8 @@ fn x_fit<T>(vector: &mut Vec<T>, n: usize, slack: bool) {
 // No NCBI counterpart (buffer reuse only): the overflow vector for a table of `n` hits: `own` (that
 // of the kept vectors the build took) or, where it fits `n` better, the overflow vector of another
 // kept set, the two swapped: the smallest capacity of at least `n`, else the largest (the least to
-// grow). The tables of a search differ in size (800 cDNAs `-subject`: overflow 1.2-4.2 MiB, median
-// 1.74), and the vector on top of the pool was the last one given back: taken that way, about every
+// grow). The tables of a search differ in size (800 cDNAs `-subject`, 184 tables: overflow 1.2-4.2
+// MiB, median 1.74), and the vector on top of the pool was the last one given back: taken that way, about every
 // other build grew its vector and the next one shrank it again (`x_fit`, 110-128 resizes for 184
 // tables at 64 threads, and their pages faulted again); taken by size, the large vectors serve
 // the large tables (43-58 resizes, no more faults than vectors never shrunk).
@@ -2046,8 +2047,8 @@ fn x_claimed<T: Send, R: Send>(parts: Vec<T>, f: &(dyn Fn(T) -> R + Sync)) -> Ve
 }
 
 // No NCBI counterpart: `vector` with `n` entries for a build that writes every entry itself: the
-// entries kept are not cleared (new ones are zero), and one short of room is replaced as by
-// `x_zeroed`.
+// entries kept are not cleared (new ones are zero), and the room is that of `x_zeroed` (`x_fit`:
+// grown when short, shrunk when above it).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -3109,11 +3110,13 @@ mod tests {
         let vector = x_zeroed(vector, 3_000, true);
         assert!((3_000..=3_750).contains(&vector.capacity()));
         let vector = x_zeroed(vector, 500, false);
-        assert_eq!((vector.len(), vector.capacity()), (500, 500));
+        assert_eq!(vector.len(), 500);
+        assert!((500..1_000).contains(&vector.capacity()));
         let vector = x_zeroed(vector, 0, true);
-        assert!(vector.is_empty() && vector.capacity() == 1);
+        assert!(vector.is_empty() && (1..500).contains(&vector.capacity()));
         let vector = x_zeroed(Vec::<u32>::new(), 10, false);
-        assert_eq!((vector.len(), vector.capacity()), (10, 10));
+        assert_eq!(vector.len(), 10);
+        assert!((10..1_000).contains(&vector.capacity()));
 
         let with_room = |room: usize| Vec::<i32>::with_capacity(room);
         let mut kept: Vec<XAaVectors> = [100, 300, 200]

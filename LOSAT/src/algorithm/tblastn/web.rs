@@ -57,8 +57,9 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<TblastnArgs> {
 // ```
 /// One search of `query` (protein FASTA) against `subject` (nucleotide FASTA) with `args`
 /// (`parse_args`), as `losat tblastn` searches the files `query_label` and `subject_label` with
-/// the same bytes, without `.ncbirc` or NCBI's registry variables; the labels are only the
-/// names the report shows (outfmt 0 and 7: `Input: <subject_label>`).
+/// the same bytes, without NCBI's registry (`.ncbirc`, `tblastn.ini`, `NCBI_CONFIG__*`); the other
+/// variables the CLI reads are read alike. The labels are only the names of the inputs (outfmt 0
+/// and 7 show `Input: <subject_label>`; no TBLASTN report shows the query's).
 pub(crate) fn run_pair(
     mut args: TblastnArgs,
     query: &[u8],
@@ -68,6 +69,8 @@ pub(crate) fn run_pair(
 ) -> Result<Vec<u8>> {
     args.query = query_label.into();
     args.subject = Some(subject_label.into());
+    // The report is returned, never written to a file (`parse_args` refuses `-out`).
+    args.out = None;
     args.run_in_memory(Default::default(), query, subject)
 }
 
@@ -80,6 +83,11 @@ pub(crate) mod vector {
 
     pub(crate) struct Case {
         pub(crate) name: String,
+        /// The vector's files of the query and the subject.
+        pub(crate) query: String,
+        pub(crate) subject: String,
+        /// The subject's name (the CLI's `-subject` path, the handle's label).
+        pub(crate) label: String,
         pub(crate) outfmt: String,
         pub(crate) extra: Vec<String>,
         /// The report (`Ok`), or the error message (`Err`): the CLI's standard output or error.
@@ -100,12 +108,17 @@ pub(crate) mod vector {
             .lines()
             .filter(|line| !line.starts_with('#'))
             .map(|line| {
-                let [name, outfmt, extra, kind] = line.split('\t').collect::<Vec<_>>()[..] else {
-                    panic!("four columns: {line:?}");
+                let [name, query, subject, label, outfmt, extra, kind] =
+                    line.split('\t').collect::<Vec<_>>()[..]
+                else {
+                    panic!("seven columns: {line:?}");
                 };
                 let expected = read(&format!("{name}.{kind}"));
                 Case {
                     name: name.to_string(),
+                    query: query.to_string(),
+                    subject: subject.to_string(),
+                    label: label.to_string(),
                     outfmt: outfmt.to_string(),
                     extra: extra.split_whitespace().map(str::to_string).collect(),
                     expected: if kind == "out" {
@@ -125,14 +138,14 @@ mod tests {
 
     #[test]
     fn web_v1_run_pair_writes_the_cli_bytes_of_the_shared_vector() {
-        let (query, subject) = (vector::read("query.faa"), vector::read("subject.fna"));
         let cases = vector::cases();
-        assert_eq!(cases.len(), 6);
+        assert_eq!(cases.len(), 11);
         for case in cases {
+            let (query, subject) = (vector::read(&case.query), vector::read(&case.subject));
             let mut words: Vec<&str> = case.extra.iter().map(String::as_str).collect();
             words.extend(["-outfmt", case.outfmt.as_str()]);
             let result = parse_args(&words)
-                .and_then(|args| run_pair(args, &query, &subject, "query", "subject"))
+                .and_then(|args| run_pair(args, &query, &subject, "query", &case.label))
                 .map_err(|error| format!("{error:#}").into_bytes());
             let shown = |bytes: &Vec<u8>| String::from_utf8_lossy(bytes).into_owned();
             assert!(

@@ -1343,48 +1343,70 @@ mod tests {
     #[test]
     fn tblastn_web_pair_and_handles_return_the_cli_bytes_of_the_shared_vector() {
         use crate::algorithm::tblastn::web::vector;
-        let (query, subject) = (vector::read("query.faa"), vector::read("subject.fna"));
-        let (query_text, subject_text) = (
-            std::str::from_utf8(&query).expect("UTF-8 query"),
-            std::str::from_utf8(&subject).expect("UTF-8 subject"),
-        );
-        let stored = |bytes: &[u8], label: &str| {
+        let stored = |file: &str, label: &str| {
+            let bytes = vector::read(file);
             fasta_store()
                 .lock()
                 .expect("store")
                 .insert(
-                    parse_fasta_records(bytes, "stored FASTA").expect("records"),
+                    // The store takes only inputs that `bio` reads as one record or more.
+                    parse_fasta_records(&bytes, "stored FASTA").unwrap_or_default(),
                     label.to_string(),
-                    bytes.to_vec(),
+                    bytes,
                 )
-                .expect("handle")
+                .ok()
         };
-        // The labels are the names `run_pair` gives the inputs, so the reports are equal.
-        let (query_handle, subject_handle) = (stored(&query, "query"), stored(&subject, "subject"));
         for case in vector::cases() {
             let extra = case.extra.join("\0");
             let expected = case
                 .expected
                 .map_err(|message| String::from_utf8(message).expect("UTF-8 message"));
-            assert_eq!(
-                run_pair("tblastn", query_text, subject_text, &case.outfmt, &extra),
-                expected,
-                "{} (run_pair)",
-                case.name
+            // `run_pair` names the subject `subject`.
+            if case.label == "subject" {
+                let (query, subject) = (vector::read(&case.query), vector::read(&case.subject));
+                assert_eq!(
+                    run_pair(
+                        "tblastn",
+                        std::str::from_utf8(&query).expect("UTF-8 query"),
+                        std::str::from_utf8(&subject).expect("UTF-8 subject"),
+                        &case.outfmt,
+                        &extra
+                    ),
+                    expected,
+                    "{} (run_pair)",
+                    case.name
+                );
+            }
+            // The handles of the inputs that the store takes (not the blank ones).
+            let handles = (
+                stored(&case.query, "query"),
+                stored(&case.subject, &case.label),
             );
-            assert_eq!(
-                run_pair_handles(
-                    "tblastn",
-                    query_handle,
-                    subject_handle,
-                    &case.outfmt,
-                    &extra
-                ),
-                expected,
-                "{} (run_pair_handles)",
-                case.name
-            );
+            if let (Some(query_handle), Some(subject_handle)) = handles {
+                assert_eq!(
+                    run_pair_handles(
+                        "tblastn",
+                        query_handle,
+                        subject_handle,
+                        &case.outfmt,
+                        &extra
+                    ),
+                    expected,
+                    "{} (run_pair_handles)",
+                    case.name
+                );
+            }
+            let mut store = fasta_store().lock().expect("store");
+            for handle in [handles.0, handles.1].into_iter().flatten() {
+                store.release(handle).expect("release");
+            }
         }
+        let query = vector::read("query.faa");
+        let subject = vector::read("subject.fna");
+        let (query_text, subject_text) = (
+            std::str::from_utf8(&query).expect("UTF-8 query"),
+            std::str::from_utf8(&subject).expect("UTF-8 subject"),
+        );
         // An empty `outfmt` is 6 (`web_outfmt_or_default`), as for the other programs.
         let fmt6 = vector::read("fmt6.out");
         assert_eq!(
@@ -1410,9 +1432,6 @@ mod tests {
             "-num_threads\x002"
         )
         .is_err());
-        let mut store = fasta_store().lock().expect("store");
-        store.release(query_handle).expect("release query");
-        store.release(subject_handle).expect("release subject");
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427

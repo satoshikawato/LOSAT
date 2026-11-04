@@ -591,8 +591,8 @@ fn waves_child() {
 // ```
 // NCBI posts a record's title warning when it assembles the record, after the warnings of its
 // data lines. NCBI BLAST+ 2.17.0 (`blastx -query q.fna -subject s.faa -outfmt 6`, the inputs
-// below) wrote this standard error and the rows that LOSAT writes. BLASTX's own reader (the CLI)
-// writes the title warning first (line NP).
+// below) wrote this standard error and the rows that LOSAT writes, from LOSAT Web's records and on
+// the command line.
 #[test]
 fn a_records_title_warning_follows_its_data_warnings() {
     let query = temp_path("blastx_title_order.fna");
@@ -621,12 +621,7 @@ FASTA-Reader: Ignoring invalid residues at position(s): On line 2: 53
 FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
 ";
     assert_eq!(String::from_utf8_lossy(&run.diagnostics), ncbi);
-    // The CLI writes the same lines, each record's title warning first.
-    let mut cli_lines: Vec<&str> = std::str::from_utf8(&cli_stderr).unwrap().lines().collect();
-    let mut ncbi_lines: Vec<&str> = ncbi.lines().collect();
-    cli_lines.sort_unstable();
-    ncbi_lines.sort_unstable();
-    assert_eq!(cli_lines, ncbi_lines);
+    assert_eq!(String::from_utf8_lossy(&cli_stderr), ncbi);
 }
 
 /// Where BLASTX's reader (the CLI) and NCBI's reader (`fasta_reader`, LOSAT Web's records) read a

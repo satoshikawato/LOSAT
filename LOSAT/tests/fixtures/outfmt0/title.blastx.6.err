@@ -1,0 +1,31 @@
+CFastaReader: Hyphens are invalid and will be ignored around line 2
+FASTA-Reader: Ignoring invalid residues at position(s): On line 2: 54
+CFastaReader: Hyphens are invalid and will be ignored around line 3
+FASTA-Reader: Ignoring invalid residues at position(s): On line 3: 32
+FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?
+FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?
+CFastaReader: Hyphens are invalid and will be ignored around line 6
+FASTA-Reader: Ignoring invalid residues at position(s): On line 6: 32
+CFastaReader: Hyphens are invalid and will be ignored around line 9
+FASTA-Reader: Ignoring invalid residues at position(s): On line 9: 32
+CFastaReader: Hyphens are invalid and will be ignored around line 10
+FASTA-Reader: Ignoring invalid residues at position(s): On line 10: 54
+FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?
+Warning: [blastx] Subject_2 ts2 t ACDEFGHIKLMNPQRSTVWYACDEFGHIKLMNPQRSTVWYACDEFGHIKLMN: Subject sequence contains no data
+CFastaReader: Hyphens are invalid and will be ignored around line 2
+FASTA-Reader: Ignoring invalid residues at position(s): On line 2: 54
+CFastaReader: Hyphens are invalid and will be ignored around line 3
+FASTA-Reader: Ignoring invalid residues at position(s): On line 3: 32
+FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+CFastaReader: Hyphens are invalid and will be ignored around line 7
+FASTA-Reader: Ignoring invalid residues at position(s): On line 7: 54
+FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+CFastaReader: Hyphens are invalid and will be ignored around line 10
+FASTA-Reader: Ignoring invalid residues at position(s): On line 10: 32
+CFastaReader: Hyphens are invalid and will be ignored around line 13
+FASTA-Reader: Ignoring invalid residues at position(s): On line 13: 32
+CFastaReader: Hyphens are invalid and will be ignored around line 16
+FASTA-Reader: Ignoring invalid residues at position(s): On line 16: 54
+FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+Warning: [blastx] Query_2 tq2 x ACGTACGTACG.. : Sequence contains no data 

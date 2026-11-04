@@ -258,6 +258,51 @@ fn blastx_and_tblastn_refuse_one_record_as_a_query_and_a_subject() {
     }
 }
 
+// NCBI writes the messages of both records (each title warning after the warning of its data line)
+// before it stops (NCBI BLAST+ 2.17.0, these inputs, 2026-11-04); LOSAT refuses the query when it
+// closes the record, as NCBI's reader would, so its messages are NCBI's first lines.
+#[test]
+fn blastx_and_tblastn_refuse_one_id_after_the_records_messages() {
+    let hyphen = |letters: &str| format!("{}-{}", &letters[..21], &letters[21..]);
+    let (nucleotides, protein) = (hyphen(NUCLEOTIDES), hyphen(PROTEIN));
+    let nucleotide_title = "same1 x ACGTACGTACGTACGTACGTACGT";
+    let protein_title = "same1 t ACDEFGHIKLMNPQRSTVWYACDEFGHIKLMNPQRSTVWYACDEFGHIKLMN";
+    let hyphens = "CFastaReader: Hyphens are invalid and will be ignored around line 2\n";
+    let nucleotide_warning = "FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?\n";
+    let protein_warning = "FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?\n";
+    for (program, query, subject) in [
+        (
+            "blastx",
+            (&nucleotides, nucleotide_title, nucleotide_warning),
+            (&protein, protein_title, protein_warning),
+        ),
+        (
+            "tblastn",
+            (&protein, protein_title, protein_warning),
+            (&nucleotides, nucleotide_title, nucleotide_warning),
+        ),
+    ] {
+        let (status, stdout, stderr) = run(
+            "messages",
+            program,
+            query.0,
+            subject.0,
+            &[query.1],
+            &[subject.1],
+            "6",
+        );
+        assert_eq!(status, 1, "{program}: {stderr}");
+        assert!(stdout.is_empty(), "{program}");
+        let messages = format!("{hyphens}{}{hyphens}{}", subject.2, query.2);
+        assert!(
+            stderr.starts_with(&messages)
+                && stderr[messages.len()..]
+                    .starts_with("Error: a query and a subject record have the Seq-id lcl|same1"),
+            "{program}: {stderr}"
+        );
+    }
+}
+
 // DECISIONS 19 (b), (e): outfmt 0 is refused by the record's masks, not by the option: a run of one
 // letter for the default DUST and SEG, lower case in either copy for `-lcase_masking`. A record
 // without masks, and the other formats, are searched.

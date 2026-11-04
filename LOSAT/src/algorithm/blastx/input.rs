@@ -742,7 +742,14 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         }
         if is_header {
             if let Some(record) = current.take() {
-                finish_record(record, &mut records, pending_title_warning.take())?;
+                finish_record(
+                    record,
+                    &mut records,
+                    pending_title_warning.take(),
+                    protein,
+                    parse_deflines.and_then(|read| read.id_scope),
+                    warn,
+                )?;
                 emit_fasta_batch(&mut records, batch_size, &mut batch, deliver)?;
             }
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:353-359
@@ -861,9 +868,6 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 positions: Vec::new(),
                 text: Vec::new(),
             });
-            if let Some(warning) = &pending_title_warning {
-                warn(warning)?;
-            }
             let mut record = new_record(records.len() + batch.skipped, protein, title);
             believed_molecule = None;
             if keep_defline || believed.is_some() {
@@ -979,7 +983,14 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         }
     }
     if let Some(record) = current {
-        finish_record(record, &mut records, pending_title_warning.take())?;
+        finish_record(
+            record,
+            &mut records,
+            pending_title_warning.take(),
+            protein,
+            parse_deflines.and_then(|read| read.id_scope),
+            warn,
+        )?;
         emit_fasta_batch(&mut records, batch_size, &mut batch, deliver)?;
     }
     // A last batch of records that the range skipped is delivered empty (NCBI's query factory
@@ -1056,10 +1067,6 @@ fn read_believed_defline(
     if let Some(refusal) = duplicate_id(&ids, keys, role, "BLASTX") {
         return Err(refusal);
     }
-    // A nucleotide query and a protein subject are never one record (`RecordMark`).
-    if let Some(scope) = read.id_scope {
-        scope.add_record(&ids, None, role, "BLASTX")?;
-    }
     Ok(BelievedLine {
         title_search: parsed.title_search,
         ids: std::sync::Arc::new(BelievedIds::new(ids, read.strand)),
@@ -1111,13 +1118,27 @@ fn new_record(index: usize, protein: bool, title: String) -> FastaRecord {
 //         ParseTitle(*title_ci, pMessageListener);
 //     }
 // ```
+/// NCBI posts a record's title warning when it assembles the record, after the warnings of its
+/// data lines; a record whose data stops the reading posts none. Under `-parse_deflines` the
+/// record's ids then join the search's ids (`fasta_reader`'s `assemble_seq`, whose
+/// `add_to_id_scope` follows `parse_title`), so LOSAT's refusal of a record that a record of the
+/// other role names comes after the record's messages.
 fn finish_record(
     mut record: FastaRecord,
     records: &mut Vec<FastaRecord>,
     title_warning: Option<InputWarning>,
+    protein: bool,
+    id_scope: Option<&crate::seqid::id_scope::IdScope>,
+    warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<()> {
     if let Some(warning) = title_warning {
+        warn(&warning)?;
         record.warnings.push(warning);
+    }
+    // A nucleotide query and a protein subject are never one record (`RecordMark`).
+    if let (Some(scope), Some(believed)) = (id_scope, record.believed()) {
+        let role = if protein { "subject" } else { "query" };
+        scope.add_record(&believed.ids, None, role, "BLASTX")?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:334-340
     // ```c++

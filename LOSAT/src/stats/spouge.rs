@@ -200,9 +200,9 @@ fn erfc_ncbi(z: f64) -> f64 {
             *used += usize::from(stored == u64::MAX);
             memo[slot] = (key, result.to_bits());
             if 2 * *used > memo.len() && memo.len() < X_ERFC_MOST {
-                // Twice the slots, the results moved to their slots there (a result whose slot
+                // The largest size, the results moved to their slots there (a result whose slot
                 // another took is dropped, as a store over it drops it).
-                let mut grown = vec![(u64::MAX, 0); 2 * memo.len()];
+                let mut grown = vec![(u64::MAX, 0); X_ERFC_MOST];
                 *used = 0;
                 for &(stored, value) in memo.iter().filter(|(stored, _)| *stored != u64::MAX) {
                     let slot = x_erfc_slot(stored, grown.len());
@@ -227,9 +227,10 @@ fn erfc_ncbi(z: f64) -> f64 {
 // ```
 // No NCBI counterpart: a per-thread table of (argument bits, result bits) for `erfc_ncbi`.
 // It holds earlier ErfC results of the loop above and changes no value. It starts at
-// `X_ERFC_FIRST` slots and doubles while more than half of its slots hold a result, up to
-// `X_ERFC_MOST`, so that a thread that computes a few values holds a few slots (with 64 threads
-// every thread of a search computes some, and a table of the largest size each was 4 MiB).
+// `X_ERFC_FIRST` slots and takes `X_ERFC_MOST` once more than half of them hold a result, so that
+// a thread that computes a few values holds a few slots (with 64 threads every thread of a search
+// computes some, and a table of the largest size each was 4 MiB). One step, not doublings: the
+// tables a thread outgrew stayed in its heap (+60 KiB of RssAnon at one thread).
 thread_local! {
     static X_ERFC_MEMO: std::cell::RefCell<(Vec<(u64, u64)>, usize)> =
         const { std::cell::RefCell::new((Vec::new(), 0)) };

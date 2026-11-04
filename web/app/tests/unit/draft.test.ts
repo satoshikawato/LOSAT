@@ -159,6 +159,161 @@ describe('SearchDraft inputs', () => {
     expect(sourceOf(draft, 'query').base!.records[0]!.length).toBe(4);
   });
 
+  it('keeps the records left out and the region of a source through a mode that reads it with the other kind (WA-IN-01)', async () => {
+    const { draft, data } = setup();
+    const added: string[] = [];
+    const indexed: string[] = [];
+    const addSource = data.addSource.bind(data);
+    const indexSource = data.indexSource.bind(data);
+    data.addSource = async (f) => {
+      added.push(f.name);
+      return addSource(f);
+    };
+    data.indexSource = async (sourceId, parser) => {
+      indexed.push(`${sourceId}|${parser}`);
+      return indexSource(sourceId, parser);
+    };
+    draft.setPaste('query', '>a\nACGTACGTAC\n>b\nACGTACGTAC\n>c\nACGTACGTAC\n');
+    draft.addFiles('subject', [file('s.fa', '>s1\nACGTACGTACGTACGT\n>s2\nACGTACGTAC\n')]);
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [1], false);
+    draft.setIncluded('query', 'paste', [2], false);
+    await draft.idle();
+    draft.setRegion('query', { start: '2', stop: '8' });
+    draft.setIncluded('subject', sourceOf(draft, 'subject').key, [1], false);
+    await draft.idle();
+    const revision = sourceOf(draft, 'query').base!.revisionId;
+    expect(draft.parameters()).toEqual([['-query_loc', '2-8']]);
+    const readOnce = indexed.length;
+
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 2, excluded: [] });
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', parser: 2, excluded: [] });
+    // The other kind's table is not the region's record.
+    expect(draft.region('query')).toBeUndefined();
+
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 1, excluded: [1, 2] });
+    expect(sourceOf(draft, 'query').base!.revisionId).toBe(revision);
+    expect(sourceOf(draft, 'query').check).toEqual({ state: 'ok', records: 1 });
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', parser: 1, excluded: [1] });
+    expect(draft.region('query')).toEqual({ start: '2', stop: '8' });
+    expect(draft.parameters()).toEqual([['-query_loc', '2-8']]);
+    // Each source is added once and read once for each kind: the way back reads nothing.
+    expect([...added].sort()).toEqual(['query.fa', 's.fa']);
+    expect(indexed.length).toBe(readOnce + 2);
+
+    draft.setProgram('blastp');
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(indexed.length).toBe(readOnce + 2);
+    expect(sourceOf(draft, 'query').excluded).toEqual([1, 2]);
+  });
+
+  it('keeps the exclusions of each kind apart, and takes them back when the exclusions of the other kind change', async () => {
+    const { draft } = setup();
+    draft.setPaste('query', '>a\nMKLV\n>b\nMKLV\n>c\nMKLV\n');
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [0], false);
+    draft.setProgram('blastp');
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [2], false);
+    await draft.idle();
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').excluded).toEqual([0]);
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').excluded).toEqual([2]);
+    draft.setIncluded('query', 'paste', [1], false);
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').excluded).toEqual([0]);
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').excluded).toEqual([1, 2]);
+  });
+
+  it('does not let the read of a kind that was left replace the table that the way back restored', async () => {
+    const { draft } = setup();
+    draft.setPaste('query', '>a\nMKLV\n>b\nMKLV\n>c\nMKLV\n');
+    await draft.idle();
+    const revision = sourceOf(draft, 'query').base!.revisionId;
+    draft.setIncluded('query', 'paste', [0], false);
+    // BLASTP starts to read the source, and BLASTN is chosen again before that read ends.
+    draft.setProgram('blastp');
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 1, excluded: [0] });
+    expect(sourceOf(draft, 'query').base!.revisionId).toBe(revision);
+    expect(sourceOf(draft, 'query').base!.parser).toBe(1);
+  });
+
+  it('keeps each source of a role through the round trip, and a source removed on the way stays removed', async () => {
+    const { draft, requests } = setup();
+    draft.setPaste('query', '>q\nACGT\n>r\nACGT\n');
+    draft.addFiles('query', [file('a.fa', '>a1\nACGT\n>a2\nACGT\n'), file('b.fa', '>b1\nACGT\n>b2\nACGT\n>b3\nACGT\n')]);
+    draft.addFiles('subject', [file('s.fa', '>s\nACGTACGTACGT\n')]);
+    await draft.idle();
+    const [paste, a, b] = draft.state.get().query.sources;
+    draft.setIncluded('query', paste!.key, [0], false);
+    draft.setIncluded('query', a!.key, [1], false);
+    draft.setIncluded('query', b!.key, [0, 2], false);
+    await draft.idle();
+    const revisions = draft.state.get().query.sources.map((source) => source.base!.revisionId);
+
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(draft.state.get().query.sources.map((source) => source.excluded)).toEqual([[], [], []]);
+    draft.removeSource('query', a!.key);
+    await draft.idle();
+
+    draft.setProgram('blastn');
+    await draft.idle();
+    const back = draft.state.get().query.sources;
+    expect(back.map((source) => [source.key, source.status, source.excluded])).toEqual([
+      [paste!.key, 'ready', [0]],
+      [b!.key, 'ready', [0, 2]],
+    ]);
+    expect(back.map((source) => source.base!.revisionId)).toEqual([revisions[0], revisions[2]]);
+    // The sources are searched together, as they were left.
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    expect(datasetOf(requests[0]![0]!, 'query').revisionIds).toHaveLength(2);
+  });
+
+  it('keeps a region through a mode that reads the role with the other kind, also when a region was drawn there', async () => {
+    const { draft } = setup();
+    draft.setPaste('query', '>a\nACGTACGTACGTAC\n>b\nACGTACGTACGTAC\n>c\nACGTACGTACGTAC\n');
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [1, 2], false);
+    await draft.idle();
+    draft.setRegion('query', { start: '2', stop: '12' });
+
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(draft.region('query')).toBeUndefined();
+    // One record there as well (another table, so another record): its own region.
+    draft.setIncluded('query', 'paste', [1, 2], false);
+    await draft.idle();
+    draft.setRegion('query', { start: '3', stop: '9' });
+    expect(draft.parameters()).toEqual([['-query_loc', '3-9']]);
+
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(draft.region('query')).toEqual({ start: '2', stop: '12' });
+    expect(draft.parameters()).toEqual([['-query_loc', '2-12']]);
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(draft.region('query')).toEqual({ start: '3', stop: '9' });
+    // Cleared there, it stays set in the other kind.
+    draft.setRegion('query', undefined);
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(draft.region('query')).toEqual({ start: '2', stop: '12' });
+  });
+
   it('reads a text pasted just before a program change once, with the new kind', async () => {
     const { draft, data } = setup();
     const kinds: number[] = [];
@@ -665,6 +820,18 @@ describe('SearchDraft submit', () => {
     await draft.idle();
     expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', name: 'x.fa', size: 8 });
     expect(draft.inputName('subject')).toBe('x.fa');
+  });
+
+  it('runs an empty query, also from an empty .gz or .zst file, as the command line does', async () => {
+    for (const empty of [file('e.fa', ''), new File([gzipSync('')], 'e.fa.gz'), new File([zstdCompressSync('')], 'e.fa.zst')]) {
+      const { draft, requests } = setup();
+      draft.addFiles('query', [empty]);
+      draft.addFiles('subject', [file('s.fa', '>s\nACGTACGT\n')]);
+      await draft.idle();
+      expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', size: 0, check: { state: 'ok', records: 0 } });
+      expect(await draft.submit()).toMatchObject({ ok: true });
+      expect(requests).toHaveLength(1);
+    }
   });
 
   it('opens a file named .zst under its plain name and inflated size', async () => {

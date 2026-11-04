@@ -151,12 +151,27 @@ impl FastaRecord {
             .seq_loc(from, from + self.sequence.len() as i32 - 1)
     }
 
+    /// Whether the letter before `from` lies in a lower-case run. NCBI restricts the runs of the
+    /// whole record to each chunk of a split query (`split::x_chunk_masks`): of the letters
+    /// outside an interval that starts at `from`, only that one can reach a chunk's masks (the
+    /// first chunk's first letter), so a record cut there keeps its whole letters only then.
+    pub fn lower_case_before(&self, from: usize) -> bool {
+        let Some(letter) = from.checked_sub(1) else {
+            return false;
+        };
+        self.lowercase_masks
+            .iter()
+            .any(|&(left, right)| left as usize <= letter && letter <= right as usize)
+    }
+
     /// Cuts the record to its letters `[from, to_exclusive)` in place, as NCBI searches a record
     /// with a range (`seq_range::record_cut`): the lower-case masks are clipped to the letters
     /// and moved with them, and the source keeps where they lie in the record (`placement`).
     /// `keep_whole`: the source keeps the record's whole letters too (`archive_letters`,
-    /// `archive_lowercase_runs`), for the archive's Bioseq (outfmt 11) and the lower case of the
-    /// whole record that outfmt 0 shows on a `-subject_loc` subject's rows.
+    /// `archive_lowercase_runs`), for the archive's Bioseq (outfmt 11), the lower case of the
+    /// whole record that outfmt 0 shows on a `-subject_loc` subject's rows, and the run of the
+    /// letter before the interval that the chunks of a split query restrict
+    /// (`lower_case_before`, `split::x_chunk_masks`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1041-1046
     /// ```c
@@ -1414,7 +1429,10 @@ fn emit_fasta_batch(
     match batch.range.map(|range| record_interval(range, length)) {
         None => batch.length += length,
         Some(RecordInterval::Letters { from, to }) => {
-            record.cut_in_place(from, to + 1, batch.keep_whole);
+            // The letter before the interval is the only one outside it that a split query's
+            // chunks read (`split::x_chunk_masks`); a record keeps its whole letters for it.
+            let keep_whole = batch.keep_whole || record.lower_case_before(from);
+            record.cut_in_place(from, to + 1, keep_whole);
             batch.length += length;
         }
         Some(RecordInterval::Empty) => {
@@ -2998,6 +3016,26 @@ mod range_tests {
         let (delivered, kept) = batches(b">a\nACG\n", &range, 10);
         assert!(kept.is_empty());
         assert_eq!(delivered, vec![Vec::new()]);
+    }
+
+    // A record whose letter before the interval is lower case keeps its whole letters after the
+    // cut (that letter's run, which a split query's chunks restrict), whether the run ends there
+    // or goes on into the interval; a record with runs only elsewhere, or none, keeps only its
+    // interval.
+    #[test]
+    fn a_cut_record_keeps_its_whole_letters_for_a_lower_case_letter_before_it() {
+        let range = SequenceRange { from: 4, to: 7 };
+        let data = b">a\nACGtACGTAC\n>b\nAcgtaCGTAC\n>c\naCGTaCGTac\n>d\nACGTACGTAC\n";
+        let (_, kept) = batches(data, &range, 100);
+        assert_eq!(kept[0].sequence, b"ACGT");
+        assert!(kept[0].lowercase_masks.is_empty());
+        assert_eq!(kept[0].archive_letters(), b"ACGtACGTAC");
+        assert_eq!(kept[0].archive_lowercase_runs(), vec![(3, 3)]);
+        assert_eq!(kept[1].lowercase_masks, vec![(0, 0)]);
+        assert_eq!(kept[1].archive_letters(), b"AcgtaCGTAC");
+        assert_eq!(kept[2].lowercase_masks, vec![(0, 0)]);
+        assert_eq!(kept[2].archive_letters(), b"ACGT");
+        assert_eq!(kept[3].archive_letters(), b"ACGT");
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1041-1046

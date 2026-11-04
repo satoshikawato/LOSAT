@@ -91,7 +91,9 @@ last entry of `tests/seqdb/taxdb/*`, whose lookup writes the offset error of `of
 `nsubj.fna` (lcl|Subject_1, no title) and `nsubjg_t.*` from `nsubjg.fna` (lcl|Subject_3 beside gb|EEN00007.1|) with
 9606; `psubj_a.*`, `psubj_t.*` from `psubj.faa` (lcl|Subject_1, no title)
 and `psubjb_a.*`, `psubjb_t.*` from `psubjb.faa` (lcl|Subject_2, a title ending in ']'), through `psubj_at.pal` and
-`psubjb_at.pal`. `--titlesrc-only` builds only these.
+`psubjb_at.pal`. `--titlesrc-only` builds only these. Line DBID H3 (an empty title of a database without parsed
+Seq-ids, which NCBI's outfmt 0 makes from the taxid): `nbare_t.*` from `nbare.fna` and `pbare_t.*` from `pbare.faa`
+(`>` alone), without -parse_seqids, with taxid 9606. `--emptytitle-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
@@ -169,6 +171,14 @@ def build_titlesrc(args: argparse.Namespace) -> None:
             f"DBLIST {names}\n")
 
 
+def build_emptytitle(args: argparse.Namespace) -> None:
+    for name, fasta, dbtype in (("nbare_t", "nbare.fna", "nucl"), ("pbare_t", "pbare.faa", "prot")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", dbtype, "-blastdb_version", "5",
+             "-taxid", "9606", "-title", name, "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+
+
 def build_join(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("pjoin_a", "pjoin_a.faa", "prot", None), ("pjoin_b", "pjoin_b.faa", "prot", None),
                                        ("pjoin_c", "pjoin_c.faa", "prot", None), ("pjoin_bt", "pjoin_b.faa", "prot", "9606"),
@@ -201,6 +211,7 @@ def main() -> int:
     ap.add_argument("--copytaxid-only", action="store_true", help="build only the databases of line DBID N1b")
     ap.add_argument("--join-only", action="store_true", help="build only the databases of line DBID N3")
     ap.add_argument("--titlesrc-only", action="store_true", help="build only the databases of line DBID N1b L1")
+    ap.add_argument("--emptytitle-only", action="store_true", help="build only the databases of line DBID H3")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
@@ -213,6 +224,9 @@ def main() -> int:
         return 0
     if args.titlesrc_only:
         build_titlesrc(args)
+        return 0
+    if args.emptytitle_only:
+        build_emptytitle(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants
@@ -327,6 +341,7 @@ def main() -> int:
     build_copytaxid(args)
     build_join(args)
     build_titlesrc(args)
+    build_emptytitle(args)
     return 0
 
 

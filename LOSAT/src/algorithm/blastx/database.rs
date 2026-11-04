@@ -282,6 +282,10 @@ pub(crate) struct ReportedSubjects {
     /// What a custom tabular field list reads beyond the default report's ids
     /// (`read_tabular`; empty and `None` otherwise).
     tabular: ReportedTabular,
+    /// The taxonomy database's messages of each query's own fetches, by query ordinal, where
+    /// `PRE_FETCH_SEQS_LIMIT` turned the batch's prefetch off (`fetch_by_query`): the writers
+    /// write them after the query's warnings (`ShownSubjects::query_fetches`).
+    query_fetches: std::collections::BTreeMap<usize, Vec<u8>>,
 }
 
 /// The values of a custom tabular report's fields that read more of the reported sequences than
@@ -312,7 +316,7 @@ impl ReportedSubjects {
     /// query by query in hit-list order; NCBI's reader error stops the run at this batch
     /// (`HeaderReadError`), and a title LOSAT does not show as NCBI is its refusal
     /// (`check_reported_title`; with `tabular`, `tabular_subject_id`; with `pairwise`,
-    /// `check_shown_protein_title`). A sequence with parsed Seq-ids is read with every Seq-id
+    /// `check_shown_stored_title` and `check_shown_protein_title`). A sequence with parsed Seq-ids is read with every Seq-id
     /// (`shared::read_header`), with LOSAT's refusals of `ParsedSubject::fetched`, of
     /// `shared::check_shown_parsed_subject` (with `pairwise`), of `shared::refuse_joined_hits`
     /// (with `joined`: outfmt 0, 5 and 13 to 16) and of `ParsedSubject::tabular_ids` (with
@@ -359,6 +363,13 @@ impl ReportedSubjects {
                     )? {
                         shared::ReportedHeader::Stored(stored) => {
                             shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                            if pairwise {
+                                shared::check_shown_stored_title(
+                                    stored.taxonomy_title,
+                                    ordinal,
+                                    PROGRAM,
+                                )?;
+                            }
                             listed.insert(list.oid, Some(Arc::from(stored.title)));
                         }
                         shared::ReportedHeader::Parsed(subject) => {
@@ -526,6 +537,53 @@ impl ReportedSubjects {
             .filter(|list| super::report::reported(list, gapped))
             .map(|list| (self.ordinals[list.oid], self.parsed_subject(list.oid)));
         shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)
+    }
+
+    /// NCBI's messages about the taxonomy database where `PRE_FETCH_SEQS_LIMIT` turns the
+    /// prefetch of the query batch whose hit lists are `batches` off (`shared::prefetch_off`):
+    /// each query's report fetches the sequences it shows, where the first format reads their
+    /// Bioseqs (`fetches`, `TabularSpec::fetches_subject`), after the query's own warnings. The
+    /// messages are kept by query for the writers (`query_fetches`). Refusals as
+    /// `prefetch_messages`; a batch that fetches nothing still asks for the run's refusal of
+    /// NCBI's taxonomy cache (the caller does not call it where no batch of the run prefetches,
+    /// `shared::prefetch_always_off`).
+    pub(crate) fn fetch_by_query(
+        &mut self,
+        database: &BlastxDatabase,
+        batches: &[BatchResults],
+        gapped: bool,
+        fetches: bool,
+    ) -> Result<()> {
+        for batch in batches {
+            for (index, lists) in batch.queries.iter().enumerate() {
+                let subjects = lists
+                    .iter()
+                    .filter(|list| fetches && super::report::reported(list, gapped))
+                    .map(|list| (self.ordinals[list.oid], self.parsed_subject(list.oid)));
+                let messages =
+                    shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)?;
+                if !messages.is_empty() {
+                    self.query_fetches
+                        .insert(batch.query_ordinal + index, messages);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The messages of the query `ordinal`'s own fetches (`fetch_by_query`; empty where the
+    /// batch prefetched).
+    pub(crate) fn query_fetches(&self, ordinal: usize) -> &[u8] {
+        self.query_fetches.get(&ordinal).map_or(&[], Vec::as_slice)
+    }
+
+    /// The messages of every query's own fetches, in query order, for a format that writes no
+    /// query warning to standard error (outfmt 5 puts them in the Iteration's message).
+    pub(crate) fn take_query_fetches(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.query_fetches)
+            .into_values()
+            .flatten()
+            .collect()
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-857
@@ -900,6 +958,58 @@ mod tests {
         let database = open_with_taxdb("x16_taxid", None, &cwd);
         assert!(!database.taxdb_found());
         assert_eq!(text(&database, &[(0, 50), (1, 40)]), "");
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    // DBID P2: where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off, each query's report
+    // fetches the sequences it shows: the messages are kept by query ordinal (the writers write
+    // them after the query's warnings), once per volume and taxid over the run; a report whose
+    // fields read no subject fetches nothing. `x16_taxid_99990` with `offset_last_past_end`, as
+    // above; query 0 shows nothing (its HSP has no Seq-align), query 1 shows both sequences.
+    #[test]
+    fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-blastx-db-prefetch-off-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let fetched = |fetches: bool| -> [Vec<u8>; 3] {
+            let database = open_with_taxdb("x16_taxid_99990", Some("offset_last_past_end"), &cwd);
+            let longest = database.x_check_stores().unwrap();
+            let stream = super::super::x_db_stream::XStreamDb::new(&database.db, longest);
+            let mut batches = one_query(&[(0, 0)]);
+            let mut second = one_query(&[(1, 50), (0, 40)]);
+            second[0].query_ordinal = 1;
+            batches.append(&mut second);
+            let mut reported = ReportedSubjects::for_batch(
+                &database,
+                Subjects::Stream(super::super::x_db_stream::XStream {
+                    db: &stream,
+                    block: None,
+                }),
+                &mut batches,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                crate::report::tabular::PrintedIds::default(),
+            )
+            .unwrap();
+            reported
+                .fetch_by_query(&database, &batches, true, fetches)
+                .unwrap();
+            [
+                reported.query_fetches(0).to_vec(),
+                reported.query_fetches(1).to_vec(),
+                reported.take_query_fetches(),
+            ]
+        };
+        let offset = b"Error: [blastx] Error: Offset error at end of taxdb file.\n".to_vec();
+        assert_eq!(fetched(true), [Vec::new(), offset.clone(), offset]);
+        assert_eq!(fetched(false), [Vec::new(), Vec::new(), Vec::new()]);
         std::fs::remove_dir_all(&cwd).unwrap();
     }
 }

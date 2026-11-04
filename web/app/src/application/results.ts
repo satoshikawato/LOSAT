@@ -6,8 +6,8 @@
 // (docs/web/results_columns.md); the domain functions group, sort and filter them.
 import { recordName, type RecordKey } from '../domain/dataset';
 import { optionValue } from '../domain/argv';
-import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan } from '../domain/hsp-table';
-import { splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
+import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan, type HspTable } from '../domain/hsp-table';
+import { shownScores, splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
 import { programById, residueUnit, type ProgramId, type SequenceKind } from '../domain/programs';
 import {
   buildResultIndex,
@@ -191,6 +191,8 @@ export class ResultsBrowser {
    * up: a map of every HSP built at each opening cost about 20 ms for 150,000 HSPs (W4b F1).
    */
   private rowsByRank = new Map<number, Int32Array>();
+  /** The E values and bit scores that the outfmt 6 rows of the loaded run show, made at the first filter on them. */
+  private scores: Pick<HspTable, 'eValue' | 'bitScore'> | undefined;
   private loadToken = 0;
   /** Subjects of the loaded run whose heading waits to be read. */
   private readonly headingQueue: number[] = [];
@@ -228,6 +230,7 @@ export class ResultsBrowser {
     const run = this.deps.runs.get().runs.find((r) => r.snapshot.runId === runId);
     this.rows = new Map();
     this.rowsByRank = new Map();
+    this.scores = undefined;
     this.sections = new Map();
     this.headingReads = new Map();
     this.headingQueue.length = 0;
@@ -500,7 +503,9 @@ export class ResultsBrowser {
       return;
     }
     const subjectRecords = loaded.run.snapshot.subject.records;
-    const filtered = filterQuery(query, state.filters, table, (subject) => [
+    const byScore = state.filters.maxEValue !== undefined || state.filters.minBitScore !== undefined;
+    if (byScore) this.scores ??= shownScores(table, loaded.out6);
+    const filtered = filterQuery(query, state.filters, this.scores ?? table, (subject) => [
       recordName(subjectRecords[subject.sIdx]?.id ?? '', 'subject', subject.sIdx),
       this.row(subject.rows[0]!).sseqid,
     ]);
@@ -639,8 +644,23 @@ export class ResultsBrowser {
   }
 }
 
+/** Why the selected query shows no HSP, in the order of the notices of the results (ResultNotices). */
+export type NoHspReason = 'empty-query' | 'no-tabular-hits' | 'no-queries' | 'no-hits' | 'filtered-out';
+
+/** Why the loaded run's selected query shows no HSP; undefined while it shows some, or nothing is loaded. */
+export function noHspReason(state: ResultsState): NoHspReason | undefined {
+  const loaded = state.loaded;
+  if (loaded === undefined) return undefined;
+  if (loaded.run.snapshot.query.records.length === 0) return 'empty-query';
+  if (loaded.limits.maxTargetSeqs === 0) return 'no-tabular-hits';
+  if (state.queries.length === 0) return 'no-queries';
+  if (state.queryTotals === undefined) return undefined;
+  if (state.queryTotals.hsps === 0) return 'no-hits';
+  return state.subjects.length === 0 ? 'filtered-out' : undefined;
+}
+
 /** The task of a run: the argv's -task, else the default that the engine describes (none for a program without tasks). */
-function taskOf(argv: readonly string[], description: ProgramDescription): { task?: string } {
+export function taskOf(argv: readonly string[], description: ProgramDescription): { task?: string } {
   const task = optionValue(argv, '-task') ?? description.parameters.find((p) => p.flag === '-task')?.defaultValue;
   return task === undefined ? {} : { task };
 }
@@ -658,12 +678,18 @@ function unavailableMessage(run: RunView): string {
     case 'cancelled':
       return `Run ${n} was cancelled. A cancelled run keeps no results.`;
     case 'failed':
-      return `Run ${n} failed: ${run.record.error ?? 'no reason was recorded'}. A failed run keeps no results.`;
+      return `Run ${n} failed: ${endSentence(run.record.error?.trim() ? run.record.error : 'no reason was recorded')} A failed run keeps no results.`;
     case 'completed':
       return '';
     default:
       return `Run ${n} has not finished yet. Its results appear when it completes.`;
   }
+}
+
+/** A message as a sentence of its own: no trailing space or line break, and one full stop at most. */
+function endSentence(message: string): string {
+  const text = message.trimEnd();
+  return /[.!?]["')\]]*$/.test(text) ? text : `${text}.`;
 }
 
 function errorMessage(error: unknown): string {

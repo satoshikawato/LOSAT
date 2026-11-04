@@ -43,7 +43,7 @@ test(`paste, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' : 'the 
   const download = page.waitForEvent('download');
   await page.getByTestId('export-output').click();
   const file = await download;
-  expect(file.suggestedFilename()).toBe('losat-run1-tblastx.outfmt0.txt');
+  expect(file.suggestedFilename()).toMatch(/^losat-run1-tblastx-\d{8}T\d{6}Z\.outfmt0\.txt$/);
 });
 
 test('a BLASTN query of white space only has no record, and its run ends as the CLI\'s does', async ({ page }) => {

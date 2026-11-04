@@ -176,6 +176,12 @@ impl BlastpDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// Whether the run's prefetch is refused for NCBI's taxonomy cache
+    /// (`shared::TaxdbRun::prefetch_refused`), which comes at the first batch that prefetches.
+    pub(super) fn prefetch_refused(&self) -> bool {
+        self.taxdb.prefetch_refused(&self.db)
+    }
+
     /// The number of sequences (`CSeqDB::GetNumSeqs`).
     pub(super) fn num_sequences(&self) -> u32 {
         self.db.num_seqs()
@@ -922,7 +928,7 @@ impl ListedSubjects {
         database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
     ) -> Result<ListedTitles<'_>> {
-        let mut titles: Vec<Option<(Vec<u8>, bool)>> = vec![None; self.ordinals.len()];
+        let mut titles: Vec<Option<shared::StoredTitle>> = vec![None; self.ordinals.len()];
         let mut parsed = ParsedSubjects::default();
         let headers = shared::HeaderReader::new(&database.db);
         for (query, hit_list) in hit_lists.iter().enumerate() {
@@ -948,6 +954,7 @@ impl ListedSubjects {
         }
         let mut records = Vec::with_capacity(self.ordinals.len());
         let mut replaced_title_bytes = Vec::with_capacity(self.ordinals.len());
+        let mut taxonomy_titles = Vec::with_capacity(self.ordinals.len());
         for ((&ordinal, encoded), title) in self.ordinals.iter().zip(&self.encoded).zip(titles) {
             let letters: Vec<u8> = encoded.aa_seq[1..=encoded.aa_len]
                 .iter()
@@ -955,13 +962,14 @@ impl ListedSubjects {
                 .collect();
             // A subject that is in no final hit list keeps an empty title: no report
             // shows it.
-            let (title, replaced) = title.unwrap_or_default();
-            replaced_title_bytes.push(replaced);
+            let stored = title.unwrap_or_default();
+            replaced_title_bytes.push(stored.replaced_bytes);
+            taxonomy_titles.push(stored.taxonomy_title);
             records.push(FastaRecord::new(
                 // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the
                 // OID (line DI-8).
                 format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
-                &title,
+                &stored.title,
                 &letters,
             ));
         }
@@ -969,6 +977,7 @@ impl ListedSubjects {
             listed: self,
             shown: ListedShown::Records(records),
             replaced_title_bytes,
+            taxonomy_titles,
             parsed: parsed.by_rank,
             program: database.program,
         })
@@ -1048,6 +1057,10 @@ pub(super) struct ListedTitles<'a> {
     /// Whether the stored title of a subject holds a byte outside ' ' ..= '~' (read as
     /// '#'), by rank (`check_reported_titles`).
     replaced_title_bytes: Vec<bool>,
+    /// Whether NCBI makes the outfmt 0 title of a subject without parsed Seq-ids from its taxid
+    /// and the taxonomy database (`shared::StoredTitle::taxonomy_title`), by rank
+    /// (`check_shown_titles`).
+    taxonomy_titles: Vec<bool>,
     /// The subjects with parsed Seq-ids, by rank (empty when no reported subject has them;
     /// their entry of `shown` is the title of their first definition line).
     pub(super) parsed: Vec<Option<Arc<ParsedSubject>>>,
@@ -1064,8 +1077,8 @@ pub(super) struct ParsedSubjects {
 impl ParsedSubjects {
     /// Reads the header of the subject `ordinal` of rank `rank` (of `ranks`) of `database` with
     /// `headers` (its reader), where the hit list of query `query` reaches it
-    /// (`shared::read_header`): its stored title and whether it held a replaced byte, or for a
-    /// sequence with parsed Seq-ids, kept here, the title of its first definition line.
+    /// (`shared::read_header`): its stored title (`shared::StoredTitle`), or for a sequence with
+    /// parsed Seq-ids, kept here, the title of its first definition line.
     pub(super) fn read(
         &mut self,
         database: &BlastpDatabase,
@@ -1074,16 +1087,19 @@ impl ParsedSubjects {
         ordinal: u32,
         query: usize,
         ranks: usize,
-    ) -> Result<(Vec<u8>, bool)> {
+    ) -> Result<shared::StoredTitle> {
         match shared::read_header(headers, ordinal, query, database.program)? {
-            shared::ReportedHeader::Stored(stored) => Ok((stored.title, stored.replaced_bytes)),
+            shared::ReportedHeader::Stored(stored) => Ok(stored),
             shared::ReportedHeader::Parsed(subject) => {
                 let title = subject.first_title().to_vec();
                 if self.by_rank.is_empty() {
                     self.by_rank = vec![None; ranks];
                 }
                 self.by_rank[rank] = Some(subject);
-                Ok((title, false))
+                Ok(shared::StoredTitle {
+                    title,
+                    ..Default::default()
+                })
             }
         }
     }
@@ -1172,23 +1188,113 @@ impl ListedTitles<'_> {
         )
     }
 
-    /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
-    /// are `hit_lists` prefetches the subjects it reports (`shared::prefetch_messages`): the
-    /// subjects with rows in them, the ones `read_taxids` reads. Empty, and nothing read,
-    /// without `taxdb.bti` on the search path. A taxonomy database that LOSAT cannot read as
-    /// NCBI does, and a header whose taxid does not decode, are refused.
+    /// NCBI's messages about the taxonomy database when a query batch prefetches the subjects of
+    /// its Seq-aligns, of ranks `ranks` (`shared::prefetch_messages`): BLASTP's are the subjects
+    /// with rows in the batch's final hit lists (`reported_ranks`), the ones `read_taxids` reads;
+    /// psiblast's those of its traceback hit lists, before its formatter's cut. Empty, and
+    /// nothing read, without `taxdb.bti` on the search path. A taxonomy database that LOSAT
+    /// cannot read as NCBI does, and a header whose taxid does not decode, are refused.
     pub(super) fn prefetch_messages(
         &self,
         database: &BlastpDatabase,
-        hit_lists: &[Option<BlastpHitList>],
+        ranks: impl IntoIterator<Item = usize>,
     ) -> Result<Vec<u8>> {
         shared::prefetch_messages(
             &database.db,
             &database.taxdb,
-            Self::reported_ranks(hit_lists)
+            ranks
+                .into_iter()
                 .map(|rank| (self.listed.ordinals[rank], self.parsed_subject(rank))),
             self.program,
         )
+    }
+
+    /// The subjects of ranks `ranks` of psiblast's traceback hit lists as NCBI's prefetch reads
+    /// them by their Seq-align ids (`ParsedSubject::prefetched`), for `prefetch_messages`: those
+    /// it finds as themselves; one that it finds nowhere is left out (the prefetch reads
+    /// nothing for it). A lookup that fails is refused (NCBI's prefetch writes its warning and
+    /// reads no other subject of the batch). With `taxids` (`taxdb.bti` on the search path), one
+    /// for which the prefetch can read another sequence (`Prefetched::Another`) is refused where
+    /// the taxonomy database's texts can differ between what it can read
+    /// (`shared::lookup_texts_differ`), and else kept as itself or left out. The subjects that
+    /// the reports show were refused before for all of these (`check_parsed_reports`).
+    pub(super) fn prefetched_ranks(
+        &self,
+        database: &BlastpDatabase,
+        ranks: &[usize],
+        taxids: bool,
+    ) -> Result<Vec<usize>> {
+        use crate::report::db_subject::Prefetched;
+        let mut kept = Vec::with_capacity(ranks.len());
+        for &rank in ranks {
+            let Some(subject) = self.parsed_subject(rank) else {
+                kept.push(rank);
+                continue;
+            };
+            let ordinal = self.listed.ordinals[rank];
+            let refused = |reason: &str| {
+                shared::parsed_refusal(
+                    ordinal,
+                    &format!(
+                        "{reason}, and is in psiblast's traceback hit list beyond -max_target_seqs, which NCBI BLAST+ 2.17.0 prefetches"
+                    ),
+                    self.program,
+                )
+            };
+            match subject.prefetched() {
+                Prefetched::Itself => kept.push(rank),
+                Prefetched::Nothing => {}
+                Prefetched::Failed(reason) => return Err(refused(&reason)),
+                Prefetched::Another { .. } if !taxids => {}
+                Prefetched::Another {
+                    other: None,
+                    reason,
+                    ..
+                } => return Err(refused(&reason)),
+                Prefetched::Another {
+                    other: Some(other),
+                    or_itself,
+                    reason,
+                } => {
+                    let set = database
+                        .db
+                        .defline_set(other)
+                        .map_err(|error| shared::database_error(error, self.program))?;
+                    let mut other_taxids: Vec<i32> = Vec::new();
+                    for defline in &set.deflines {
+                        if let Some(taxid) = defline.taxid.filter(|&taxid| taxid > 0) {
+                            if !other_taxids.contains(&taxid) {
+                                other_taxids.push(taxid);
+                            }
+                        }
+                    }
+                    let own = subject.volume_taxids();
+                    let (choices, keep): (Vec<&[i32]>, bool) = if or_itself {
+                        (vec![&own, &other_taxids], true)
+                    } else {
+                        // `x_GetOid` keeps the OID only where one of its ids compares equal to
+                        // the Seq-align id (bdbloader.cpp), else the prefetch reads nothing.
+                        let equal =
+                            set.deflines
+                                .iter()
+                                .flat_map(|defline| &defline.ids)
+                                .any(|id| {
+                                    crate::seqid::defline_set::compare(id, subject.alignment_id())
+                                        == crate::seqid::defline_set::Sic::Yes
+                                });
+                        let read: &[i32] = if equal { &other_taxids } else { &[] };
+                        (vec![read, &[]], false)
+                    };
+                    if shared::lookup_texts_differ(&database.db, &choices) {
+                        return Err(refused(&reason));
+                    }
+                    if keep {
+                        kept.push(rank);
+                    }
+                }
+            }
+        }
+        Ok(kept)
     }
 
     /// The ranks of the subjects with rows in `hit_lists` (the final hit lists).
@@ -1197,7 +1303,9 @@ impl ListedTitles<'_> {
     }
 
     /// The rank of the subject of each row of `hit_lists`, in the order of the lists.
-    fn reported_ranks(hit_lists: &[Option<BlastpHitList>]) -> impl Iterator<Item = usize> + '_ {
+    pub(super) fn reported_ranks(
+        hit_lists: &[Option<BlastpHitList>],
+    ) -> impl Iterator<Item = usize> + '_ {
         hit_lists.iter().flatten().flat_map(|hit_list| {
             let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
             hit_list.hsplist_array[..count]
@@ -1404,7 +1512,8 @@ impl ListedTitles<'_> {
     /// subjects that the report shows (`shown`, by rank): a title of punctuation that
     /// NCBI's `x_CleanAndCompress` reads past the end of when it makes the title of the
     /// description table (NCBI BLAST+ 2.17.0 crashes there), as for the records of a
-    /// subject set (`check_shown_subject_titles`).
+    /// subject set (`check_shown_subject_titles`), and a title that NCBI makes from the
+    /// taxid and the taxonomy database (`shared::check_shown_stored_title`).
     pub(super) fn check_shown_titles(
         &self,
         database: &BlastpDatabase,
@@ -1420,7 +1529,14 @@ impl ListedTitles<'_> {
                     ordinal,
                     self.program,
                 )?,
-                None => shared::check_shown_protein_title(self.title(rank), ordinal, self.program)?,
+                None => {
+                    shared::check_shown_protein_title(self.title(rank), ordinal, self.program)?;
+                    shared::check_shown_stored_title(
+                        self.taxonomy_titles[rank],
+                        ordinal,
+                        self.program,
+                    )?;
+                }
             }
         }
         Ok(())
@@ -1474,7 +1590,7 @@ fn x_all_header_ranges(
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether every sequence of the database has one definition line
 /// that reads, holds no byte outside ' ' ..= '~' and gives a tabular subject id as NCBI writes
 /// it, or with `pairwise` (an outfmt 0 report, which writes no tabular id) a
-/// title that the outfmt 0 report writes as NCBI, and with `taxids` (the batches' prefetch reads
+/// title that the outfmt 0 report writes as NCBI and that is not empty, and with `taxids` (the batches' prefetch reads
 /// the taxonomy database) a taxid that decodes, where no lookup of the taxonomy database can be
 /// refused. Read in `pool` over the ordinal ids; a reader error is `false` (the search of all
 /// queries then reports it where NCBI does).
@@ -1500,7 +1616,12 @@ pub(super) fn x_titles_allow_blocks(
                 deflines.len() == 1
                     && deflines[0].replaced_title_bytes == 0
                     && if pairwise {
-                        shared::check_shown_protein_title(
+                        // An empty title, which NCBI makes from a named taxid
+                        // (`shared::check_shown_stored_title`; not looked up here).
+                        !crate::report::defline::bioseq_title_from_source(
+                            &deflines[0].title,
+                            &Default::default(),
+                        ) && shared::check_shown_protein_title(
                             &deflines[0].title,
                             ordinal,
                             database.program,
@@ -3543,7 +3664,28 @@ mod tests {
         .unwrap();
         assert_eq!(allowed(&punctuation), [false, false]);
         assert_eq!(read_allowed(&punctuation), [true, true]);
-        drop((missing, bad, punctuation));
+        // An empty title (line DBID H3), which outfmt 0 shows as NCBI makes it from a taxid that
+        // the taxonomy database names (`shared::check_shown_stored_title`; the taxid is not looked
+        // up here): the search of all queries refuses it where it is shown. Its tabular id is
+        // `unnamed`.
+        let bare = BlastpDatabase::open(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/ids/pbare_t")
+                .to_str()
+                .unwrap(),
+            &Default::default(),
+            "BLASTP",
+        )
+        .unwrap();
+        let pairwise_allowed = [1, 4].map(|threads| {
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                Ok(x_titles_allow_blocks(&bare, true, false, pool))
+            })
+            .unwrap()
+        });
+        assert_eq!(pairwise_allowed, [false, false]);
+        assert_eq!(allowed(&bare), [true, true]);
+        drop((missing, bad, punctuation, bare));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

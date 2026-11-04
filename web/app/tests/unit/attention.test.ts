@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Attention, type AttentionDeps } from '../../src/application/attention';
 import type { AppState, RunView } from '../../src/application/coordinator';
+import type { DraftSource, DraftState, RoleDraft } from '../../src/application/draft';
 import { Store } from '../../src/application/store';
 import type { RunStatus } from '../../src/domain/run';
 import type { PagePort, WakeLockHandle } from '../../src/ports/page';
@@ -74,6 +75,7 @@ function setup(
     probe?: AttentionDeps['probe'];
     probeTimeoutMs?: number;
     minHiddenMs?: number;
+    draft?: Store<DraftState>;
   } = {},
 ) {
   const page = new FakePage(options.supported ?? true);
@@ -83,6 +85,7 @@ function setup(
   const attention = new Attention({
     page,
     runs,
+    ...(options.draft === undefined ? {} : { draft: options.draft }),
     keepAwake: options.keepAwake,
     probe: options.probe ?? (() => Promise.resolve()),
     now: () => clock.now,
@@ -107,19 +110,48 @@ describe('leave guard', () => {
     expect(state().active).toBe(status !== 'queued');
   });
 
-  it('follows the runs: on while any run is in progress, off when all are terminal', () => {
+  it('follows the runs: on while any run is in progress, off when all have ended without results', () => {
     const { page, setRuns, state } = setup({ runs: [run('a', 1, 'running'), run('b', 2, 'queued')] });
     expect(page.guard).toBe(true);
-    setRuns([run('a', 1, 'completed'), run('b', 2, 'queued')]);
+    setRuns([run('a', 1, 'cancelled'), run('b', 2, 'queued')]);
     expect(page.guard).toBe(true);
     expect(state()).toMatchObject({ active: false, busy: true });
-    setRuns([run('a', 1, 'completed'), run('b', 2, 'running')]);
+    setRuns([run('a', 1, 'cancelled'), run('b', 2, 'running')]);
     expect(state()).toMatchObject({ active: true, busy: true });
-    setRuns([run('a', 1, 'completed'), run('b', 2, 'failed')]);
+    setRuns([run('a', 1, 'cancelled'), run('b', 2, 'failed')]);
     expect(page.guard).toBe(false);
     expect(state()).toMatchObject({ active: false, busy: false });
     setRuns([run('a', 1, 'cancelled')]);
     expect(page.guard).toBe(false);
+  });
+
+  // Nothing is kept for the next visit (REQ-20), so a reload loses results and inputs for good (WA-IN-06).
+  it('stays on while a run has results', () => {
+    const { page, setRuns, state } = setup({ runs: [run('a', 1, 'running')] });
+    setRuns([run('a', 1, 'completed')]);
+    expect(page.guard).toBe(true);
+    expect(state()).toMatchObject({ active: false, busy: false });
+  });
+
+  it('is on while the search form holds a pasted text or a source of either role', () => {
+    const role = (change: Partial<RoleDraft> = {}): RoleDraft => ({ paste: '', sources: [], mode: 'combined', ...change });
+    const form = (query: RoleDraft, subject: RoleDraft) => ({ query, subject }) as unknown as DraftState;
+    const draft = new Store<DraftState>(form(role(), role()));
+    const { page } = setup({ draft });
+    expect(page.guard).toBe(false);
+    draft.set(form(role({ paste: '>q\nACGT\n' }), role()));
+    expect(page.guard).toBe(true);
+    draft.set(form(role(), role()));
+    expect(page.guard).toBe(false);
+    draft.set(form(role(), role({ sources: [{ key: 'file-1' } as DraftSource] })));
+    expect(page.guard).toBe(true);
+    // A box of accessions only has no source until it is fetched; it is an input too.
+    draft.set(form(role({ paste: 'NC_045512.2' }), role()));
+    expect(page.guard).toBe(true);
+    // A form change that leaves the guard as it is does not set it again.
+    const calls = page.leaveGuards.length;
+    draft.set(form(role({ paste: 'NC_045512.3' }), role()));
+    expect(page.leaveGuards).toHaveLength(calls);
   });
 });
 
@@ -215,7 +247,32 @@ describe('wake lock', () => {
     expect(state()).toMatchObject({ wakeLock: 'failed', wakeLockError: 'refused' });
   });
 
-  it('is requested again after a failure, and the error is cleared', async () => {
+  it('is not requested again while the same runs go on after a failure, so the failure stays shown (WA-RN-04)', async () => {
+    const { page, setRuns, state } = setup();
+    page.nextRequestError = new Error('Wake Lock permission request denied');
+    setRuns([run('a', 1, 'queued'), run('b', 2, 'queued')]);
+    await flush();
+    const seen: string[] = [];
+    const record = () => seen.push(`${state().wakeLock}:${state().wakeLockError ?? ''}`);
+    record();
+    // Two runs one after the other: every phase changes the runs.
+    for (const next of [
+      [run('a', 1, 'preparing'), run('b', 2, 'queued')],
+      [run('a', 1, 'running'), run('b', 2, 'queued')],
+      [run('a', 1, 'finalizing'), run('b', 2, 'queued')],
+      [run('a', 1, 'completed'), run('b', 2, 'preparing')],
+      [run('a', 1, 'completed'), run('b', 2, 'running')],
+      [run('a', 1, 'completed'), run('b', 2, 'finalizing')],
+    ]) {
+      setRuns(next);
+      await flush();
+      record();
+    }
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(1);
+    expect(new Set(seen)).toEqual(new Set(['failed:Wake Lock permission request denied']));
+  });
+
+  it('is requested again after a failure when runs start again, and the error is cleared', async () => {
     const { page, attention, setRuns, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     page.nextRequestError = new Error('Battery is low');
     attention.setKeepAwake(true);
@@ -224,9 +281,47 @@ describe('wake lock', () => {
     page.nextRequestError = undefined;
     setRuns([run('a', 1, 'finalizing')]);
     await flush();
+    expect(state().wakeLock).toBe('failed');
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(1);
+    setRuns([run('a', 1, 'completed')]);
+    setRuns([run('a', 1, 'completed'), run('b', 2, 'running')]);
+    await flush();
     expect(state().wakeLock).toBe('held');
     expect(state().wakeLockError).toBeUndefined();
     expect(page.requestWakeLock).toHaveBeenCalledTimes(2);
+  });
+
+  it('is requested once more when the page was hidden and shown while a request that the browser refuses was made', async () => {
+    const { page, setRuns, state } = setup();
+    let refuse!: (error: Error) => void;
+    page.requestWakeLock.mockImplementationOnce(() => new Promise((_, reject) => (refuse = reject)));
+    setRuns([run('a', 1, 'running')]);
+    expect(state().wakeLock).toBe('requesting');
+    page.setVisible(false);
+    page.setVisible(true);
+    refuse(new Error('Battery is low'));
+    await flush();
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(2);
+    expect(state().wakeLock).toBe('held');
+  });
+
+  it('is requested again after a failure when the page is shown again, or the choice is turned on again', async () => {
+    const { page, attention, setRuns, state } = setup();
+    page.nextRequestError = new Error('Battery is low');
+    setRuns([run('a', 1, 'running')]);
+    await flush();
+    expect(state().wakeLock).toBe('failed');
+    page.setVisible(false);
+    page.setVisible(true);
+    await flush();
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(2);
+    expect(state().wakeLock).toBe('failed');
+    page.nextRequestError = undefined;
+    attention.setKeepAwake(false);
+    attention.setKeepAwake(true);
+    await flush();
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(3);
+    expect(state().wakeLock).toBe('held');
   });
 
   it('is requested again when the browser releases it while the run is active and the page visible', async () => {

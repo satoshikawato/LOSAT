@@ -473,6 +473,97 @@ impl TabularSpec {
         fields.iter().any(|field| self.has(*field))
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-837 and 973-980
+    // ```c++
+    //     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
+    //        x_IsFieldRequested(eSubjectStrand) || setSubjectId)
+    //     {
+    //         try {
+    //        		const CBioseq_Handle& subject_bh =
+    //     ...
+    //     if (x_IsFieldRequested(eQuerySeq) ||
+    //         x_IsFieldRequested(eSubjectSeq) ||
+    //         x_IsFieldRequested(ePositives) ||
+    //         x_IsFieldRequested(ePercentPositives) ||
+    //         x_IsFieldRequested(eBTOP) ||
+    //         (x_IsFieldRequested(eNumIdentical) && !kNoFetchSequence) ||
+    //         (x_IsFieldRequested(eMismatches) && !kNoFetchSequence) ||
+    //         (x_IsFieldRequested(ePercentIdentical) && !kNoFetchSequence)) {
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908,915,1078-1082
+    // ```c++
+    //     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
+    //         x_IsFieldRequested(eSubjectStart) || x_IsFieldRequested(eSubjectEnd) ||
+    //         x_IsFieldRequested(eAlignmentLength) || x_IsFieldRequested(eGaps) ||
+    //     ...
+    //         x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eBTOP) ||
+    //         x_IsFieldRequested(eSubjectStrand)) {
+    //     ...
+    //     const bool kTranslated = align.GetSegs().IsStd();
+    //     ...
+    //         if (x_IsFieldRequested(eSubjFrame) || x_IsFieldRequested(eFrames)) {
+    //             subject_frame = CAlignFormatUtil::
+    //                 GetFrame (s_start - 1, ds.GetSeqStrand(kSubjectRow),
+    //                           scope.GetBioseqHandle(align.GetSeq_id(1)));
+    // ```
+    /// Whether `program`'s rows read the subject's Bioseq in NCBI's formatter, which loads its
+    /// taxonomy where no prefetch loaded it before (`PRE_FETCH_SEQS_LIMIT`): the subject's ids,
+    /// taxonomy, titles and strand, and the alignment's letters, also for the identities unless
+    /// the formatter does not fetch sequences (BLASTN's, blast_format.cpp:791-792); in BLASTX,
+    /// TBLASTN and TBLASTX, whose alignments are Std-segs, also the subject's frame (`sframe`,
+    /// `frames`) where a field that enters that block is asked for (a coordinate, `length`,
+    /// `gaps`, `gapopen` or `qframe`; the block's other fields fetch on their own). `slen` is read
+    /// without the Bioseq (`sequence::GetLength`). NCBI enters the block for `nident` alone only
+    /// on a row with identities, which this per-report answer does not see (PD-LOSAT-DATABASE-SEARCH,
+    /// known differences).
+    pub fn fetches_subject(&self, program: crate::blastinput::app::Program) -> bool {
+        use crate::blastinput::app::Program;
+        let no_fetch = program == Program::Blastn;
+        let translated = matches!(
+            program,
+            Program::Blastx | Program::Tblastn | Program::Tblastx
+        );
+        self.has_any(&[
+            SubjectSeqId,
+            SubjectGi,
+            SubjectAccession,
+            SubjectAccessionVersion,
+            SubjectAllSeqIds,
+            SubjectAllGis,
+            SubjectAllAccessions,
+            SubjectTaxId,
+            SubjectSciName,
+            SubjectCommonName,
+            SubjectBlastName,
+            SubjectSuperKingdom,
+            SubjectTaxIds,
+            SubjectSciNames,
+            SubjectCommonNames,
+            SubjectBlastNames,
+            SubjectSuperKingdoms,
+            SubjectTitle,
+            SubjectAllTitles,
+            SubjectStrand,
+            QuerySeq,
+            SubjectSeq,
+            Positives,
+            PercentPositives,
+            Btop,
+        ]) || (!no_fetch && self.has_any(&[NumIdentical, Mismatches, PercentIdentical]))
+            || (translated
+                && self.has_any(&[SubjectFrame, Frames])
+                && self.has_any(&[
+                    QueryStart,
+                    QueryEnd,
+                    SubjectStart,
+                    SubjectEnd,
+                    AlignmentLength,
+                    Gaps,
+                    GapOpenings,
+                    QueryFrame,
+                ]))
+    }
+
     pub fn needs(&self) -> TabularNeeds {
         const NAMES: [TabularField; 8] = [
             SubjectSciName,
@@ -1457,6 +1548,68 @@ mod tests {
         for (index, (name, field, _)) in FIELDS.iter().enumerate() {
             assert_eq!(*field as usize, index);
             assert_eq!(TabularField::from_name(name), Some(*field));
+        }
+    }
+
+    // Line DBID P1: with NCBI's prefetch off, the rows read the subject's Bioseq (and look its
+    // taxids up) only for these fields (review 1 of P1, field by field against NCBI 2.17.0); P2
+    // (review 1): in the translated programs also for the subject's frame with a coordinate.
+    #[test]
+    fn rows_read_the_subject_for_its_ids_taxonomy_titles_strand_and_letters() {
+        use crate::blastinput::app::Program;
+        let spec = |fields: &str| TabularSpec {
+            kind: TabularKind::Tabular,
+            fields: parse_fields(fields),
+            delimiter: "\t".into(),
+        };
+        let fetches = |fields: &str, no_fetch: bool| {
+            spec(fields).fetches_subject(if no_fetch {
+                Program::Blastn
+            } else {
+                Program::Blastp
+            })
+        };
+        for (fields, translated) in [
+            ("qseqid sframe", false),
+            ("qseqid frames qcovs", false),
+            ("qseqid sstart sframe", true),
+            ("qseqid qframe frames", true),
+            ("qseqid length sframe", true),
+            ("qseqid qstart qframe slen", false),
+        ] {
+            for program in [Program::Blastx, Program::Tblastn, Program::Tblastx] {
+                assert_eq!(
+                    spec(fields).fetches_subject(program),
+                    translated,
+                    "{fields}"
+                );
+            }
+            assert!(!spec(fields).fetches_subject(Program::Blastp), "{fields}");
+            assert!(!spec(fields).fetches_subject(Program::Blastn), "{fields}");
+        }
+        for fields in [
+            "qseqid evalue",
+            "qseqid qacc qlen slen qstart qend sstart send evalue bitscore score length gaps gapopen",
+            "qseqid qframe sframe frames qcovs qcovhsp qcovus",
+        ] {
+            assert!(!fetches(fields, false), "{fields}");
+        }
+        for fields in [
+            "std",
+            "qseqid sseqid",
+            "qseqid sallacc",
+            "qseqid staxid",
+            "qseqid sskingdoms",
+            "qseqid salltitles",
+            "qseqid sstrand",
+            "qseqid sseq",
+            "qseqid btop",
+            "qseqid ppos",
+        ] {
+            assert!(fetches(fields, false) && fetches(fields, true), "{fields}");
+        }
+        for fields in ["qseqid nident", "qseqid mismatch", "qseqid pident"] {
+            assert!(fetches(fields, false) && !fetches(fields, true), "{fields}");
         }
     }
 

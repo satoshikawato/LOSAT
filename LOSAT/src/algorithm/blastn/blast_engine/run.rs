@@ -9437,6 +9437,9 @@ fn run_in_pool(
         // (`database::read_titles`), before the HSPs of score 0 are dropped. A header file
         // that NCBI cannot read fails this batch, after the reports of the batches before
         // and the messages of this batch's reading.
+        // The taxonomy database's messages of each query's own fetches, where the batch's
+        // prefetch is off (below), by query of the batch.
+        let mut query_fetches: Vec<Vec<u8>> = Vec::new();
         if let SubjectSource::Database(database) = source {
             let hitlist_size = args.report_counts.hitlist_size;
             for (q_idx, hit_list) in batch_hit_lists.iter_mut().enumerate() {
@@ -9543,21 +9546,77 @@ fn run_in_pool(
                 // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
                 // the taxonomy database before a later batch's prefetch
                 // (`TaxdbRun::open_for_rows`).
-                let rows_open = matches!(
+                let plural_names = matches!(
                     output_formats.first(),
                     Some(BlastnOutputFormat::CustomTabular(spec)) if spec.checks_taxdb()
-                ) && batch_hit_lists
+                );
+                let rows_open = |hit_lists: &[Option<BlastnHitList>]| -> Result<()> {
+                    if plural_names
+                        && hit_lists
+                            .iter()
+                            .flatten()
+                            .any(|hit_list| !hit_list.hsplist_array.is_empty())
+                    {
+                        database.open_for_tabular_rows()?;
+                    }
+                    Ok(())
+                };
+                let seq_aligns: usize = batch_hit_lists
                     .iter()
                     .flatten()
-                    .any(|hit_list| !hit_list.hsplist_array.is_empty());
-                let prefetch = database
-                    .prefetch_messages(&titles, &batch_hit_lists)
-                    .and_then(|messages| {
-                        if rows_open {
-                            database.open_for_tabular_rows()?;
+                    .flat_map(|hit_list| {
+                        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                        &hit_list.hsplist_array[..count]
+                    })
+                    .map(|hsp_list| {
+                        crate::algorithm::common::database::subject_seq_aligns(
+                            hsp_list.hsps.len(),
+                            !args.ungapped,
+                        )
+                    })
+                    .sum();
+                // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
+                // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
+                // after the query's own warnings (`query_fetches`, added after them below), where
+                // the first format reads their Bioseqs (`TabularSpec::fetches_subject`; BLASTN's
+                // formatter does not fetch for the identities). A batch that fetches nothing still
+                // asks for the run's refusal of NCBI's taxonomy cache before its first byte, unless
+                // no batch of the run prefetches (`shared::prefetch_always_off`).
+                let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                    let fetches = match output_formats.first() {
+                        Some(BlastnOutputFormat::CustomTabular(spec)) => {
+                            spec.fetches_subject(crate::blastinput::app::Program::Blastn)
                         }
-                        Ok(messages)
-                    });
+                        _ => true,
+                    };
+                    let asks =
+                        fetches || !crate::algorithm::common::database::prefetch_always_off();
+                    batch_hit_lists
+                        .iter()
+                        .map(|hit_list| {
+                            let shown = std::slice::from_ref(hit_list);
+                            let messages = if asks {
+                                database
+                                    .prefetch_messages(&titles, if fetches { shown } else { &[] })?
+                            } else {
+                                Vec::new()
+                            };
+                            rows_open(shown)?;
+                            Ok(messages)
+                        })
+                        .collect::<Result<Vec<_>>>()
+                        .map(|messages| {
+                            query_fetches = messages;
+                            Vec::new()
+                        })
+                } else {
+                    database
+                        .prefetch_messages(&titles, &batch_hit_lists)
+                        .and_then(|messages| {
+                            rows_open(&batch_hit_lists)?;
+                            Ok(messages)
+                        })
+                };
                 match prefetch {
                     Ok(messages) => warnings[start].extend(messages),
                     Err(error) => {
@@ -9634,6 +9693,9 @@ fn run_in_pool(
                 &batch_records.searched()[index],
                 &messages,
             ));
+        }
+        for (index, messages) in query_fetches.into_iter().enumerate() {
+            warnings[start + index].extend(messages);
         }
         context_karlin.extend(batch.context_karlin);
         query_eff_searchsp.extend(batch.query_eff_searchsp);
@@ -12264,10 +12326,11 @@ fn search_query_batch<const UNGAPPED: bool>(
         // ...
         //                          (Boolean) TRUE, FALSE, fence_hit);
         // ```
-        // No NCBI counterpart: the one-byte copy of this subject's packed sequence
-        // that the preliminary greedy alignment reads instead (made on first use, shared by every
-        // chunk and worker of this subject). Off unless the search uses the
-        // greedy aligner and this is the preliminary stage.
+        // No NCBI counterpart: this subject's packed sequence widened to one base per byte for
+        // the preliminary greedy alignment instead: a window around each call's ungapped hit, and
+        // the whole subject once a call reads past its window (made then, shared by every chunk
+        // and worker of this subject). Off unless the search uses the greedy aligner and this is
+        // the preliminary stage.
         let x_prelim_subject = x_greedy_prelim::XPrelimSubject::new(
             !use_dp && prelim_source.is_none(),
             s_seq_packed_full,
@@ -15513,24 +15576,6 @@ fn search_query_batch<const UNGAPPED: bool>(
                 .fetch_add(total_ungapped as u64, std::sync::atomic::Ordering::Relaxed);
             let gapped_start_time = std::time::Instant::now();
             let mut dbg_gapped_calls = 0usize;
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2786-2794
-            // ```c
-            //    if (!compressed_subject) {
-            //       s = subject + s_off;
-            //       rem = 4; /* Special value to indicate that sequence is already
-            //                   uncompressed */
-            //    } else {
-            //       s = subject + s_off/4;
-            //       rem = s_off % 4;
-            // ```
-            // No NCBI counterpart: the bases of `s_seq_packed` one per byte, for the
-            // greedy calls below; `None` where no score-only greedy call happens (no ungapped
-            // hits, or the dynamic-programming extension).
-            let x_prelim_s = if total_ungapped > 0 {
-                x_prelim_subject.chunk(chunk.offset)
-            } else {
-                None
-            };
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2959-2963,4012-4025,4041-4046
             // ```c
@@ -15595,12 +15640,11 @@ fn search_query_batch<const UNGAPPED: bool>(
                         let ungapped_len = uh.qe.saturating_sub(uh.qs) as usize;
                         let seed_qs = uh.qs as usize + ungapped_len / 2;
                         let seed_ss = uh.ss as usize + ungapped_len / 2;
-                        x_greedy_prelim::x_greedy_gapped_alignment_score_only(
-                            x_prelim_s.expect(
-                                "the one-byte copy exists wherever a score-only greedy call runs",
-                            ),
-                            q_seq_blastna,
+                        x_prelim_subject.score_only(
+                            chunk.offset,
                             s_len,
+                            (uh.ss as usize, uh.se as usize),
+                            q_seq_blastna,
                             seed_qs,
                             seed_ss,
                             reward,
@@ -15740,8 +15784,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                             // ```
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
                             // The dynamic-programming score-only call below reads the packed subject
-                            // (`s_seq_score`); the greedy one runs on the one-byte copy (`x_prelim_s`),
-                            // NCBI's `compressed_subject = FALSE` form.
+                            // (`s_seq_score`); the greedy one runs on the bases one per byte
+                            // (`x_prelim_subject`), NCBI's `compressed_subject = FALSE` form.
                             let s_seq_score = s_seq_packed;
 
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
@@ -15998,25 +16042,25 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 let seed_qs = uh.qs as usize + ungapped_len / 2;
                                 let seed_ss = uh.ss as usize + ungapped_len / 2;
 
-                                let prelim =
-                                    match x_greedy_prelim::x_greedy_gapped_alignment_score_only(
-                                        x_prelim_s.expect("the one-byte copy exists wherever a score-only greedy call runs"),
-                                        q_seq_blastna,
-                                        subject_len,
-                                        seed_qs,
-                                        seed_ss,
-                                        reward,
-                                        penalty,
-                                        gap_open,
-                                        gap_extend,
-                                        x_drop_gapped,
-                                        greedy_align_scratch,
-                                    ) {
-                                        Some(value) => value,
-                                        None => {
-                                            continue;
-                                        }
-                                    };
+                                let prelim = match x_prelim_subject.score_only(
+                                    chunk.offset,
+                                    subject_len,
+                                    (uh.ss as usize, uh.se as usize),
+                                    q_seq_blastna,
+                                    seed_qs,
+                                    seed_ss,
+                                    reward,
+                                    penalty,
+                                    gap_open,
+                                    gap_extend,
+                                    x_drop_gapped,
+                                    greedy_align_scratch,
+                                ) {
+                                    Some(value) => value,
+                                    None => {
+                                        continue;
+                                    }
+                                };
 
                                 let (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss) = prelim;
                                 (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)

@@ -34,6 +34,7 @@ import {
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES, splitOptions } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
 import type { ExampleId } from '../domain/examples';
+import { inputLead, type InputLead } from '../domain/input-format';
 import { formControlOf, formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
 import {
   fastaParser,
@@ -64,6 +65,13 @@ export type SourceCheck =
   /** The check could not run (not a verdict on the input). */
   | { readonly state: 'error'; readonly message: string };
 
+/** A record table of a source and the records that runs leave out of it. */
+export interface SourceTable {
+  readonly base: DatasetRevision;
+  readonly excluded: readonly number[];
+  readonly indexMs?: number;
+}
+
 export interface DraftSource {
   /** Identifies the source within the draft. */
   readonly key: string;
@@ -83,8 +91,18 @@ export interface DraftSource {
   readonly base?: DatasetRevision;
   /** Indices of the records that runs leave out, ascending. */
   readonly excluded: readonly number[];
+  /** The data layer's id of the source, once it is added (the other kind's index reads the same source). */
+  readonly sourceId?: string;
+  /**
+   * The record tables of the other FASTA reader kind (the one that `parser` is not), with the
+   * records left out of each: a program that reads the role with another kind puts the current
+   * table here, and another program that reads it with this kind takes it back.
+   */
+  readonly tables?: Readonly<Partial<Record<FastaParserKind, SourceTable>>>;
   /** The first lines of the source, as text, for its preview. */
   readonly head?: string;
+  /** What the first bytes say besides FASTA: a byte order mark, or another file format (WA-IN-04, WA-IN-05). */
+  readonly lead?: InputLead;
   readonly check?: SourceCheck;
   /** Milliseconds that the index (scan and record hashes) took. */
   readonly indexMs?: number;
@@ -116,11 +134,12 @@ export interface RoleDraft {
   readonly sources: readonly DraftSource[];
   readonly mode: InputMode;
   /**
-   * The region of the role's only record (DW-9), and that record (`regionIdentity`). It
-   * applies only while that record is still the role's only included record; another
-   * record, or another count of records, leaves it aside.
+   * The regions chosen on the role's only record (DW-9), by that record (`regionIdentity`). One
+   * applies only while its record is still the role's only included record; another record, or
+   * another count of records, leaves it aside, and it comes back with its record (a mode that
+   * reads the source with the other kind has other records, and has its own regions).
    */
-  readonly region?: { readonly text: RegionText; readonly record: string };
+  readonly regions?: Readonly<Record<string, RegionText>>;
 }
 
 export type Validation =
@@ -345,6 +364,12 @@ export class SearchDraft {
     this.setPaste(role, `>pasted_${role}\n${this.role(role).paste.trimStart()}`);
   }
 
+  /** Removes the byte order mark (U+FEFF) that a pasted text starts with, which NCBI's reader cannot read (WA-IN-05). */
+  removeByteOrderMark(role: InputRole): void {
+    const paste = this.role(role).paste;
+    if (paste.startsWith('\uFEFF')) this.setPaste(role, paste.slice(1));
+  }
+
   /** Adds files; each is indexed at once (S12 instructions). */
   addFiles(role: InputRole, files: readonly File[]): void {
     for (const file of files) this.addFile(role, file, undefined);
@@ -387,7 +412,11 @@ export class SearchDraft {
       for (const source of this.role(role).sources) {
         if (source.key !== PASTE_KEY) this.dropSource(role, source.key);
       }
-      this.setRegion(role, undefined);
+      this.updateRole(role, (draft) => {
+        const next = { ...draft };
+        delete next.regions;
+        return next;
+      });
     }
     this.setPaste('subject', '');
     this.setPaste('query', query);
@@ -614,11 +643,14 @@ export class SearchDraft {
 
   setRegion(role: InputRole, region: RegionText | undefined): void {
     const record = this.regionIdentity(role);
+    if (record === undefined) return;
     this.updateRole(role, (draft) => {
-      const next = { ...draft };
-      if (region === undefined || record === undefined) delete next.region;
-      else next.region = { text: region, record };
-      return next;
+      const regions: Record<string, RegionText> = { ...draft.regions };
+      if (region === undefined) delete regions[record];
+      else regions[record] = region;
+      const { regions: _before, ...rest } = draft;
+      void _before;
+      return Object.keys(regions).length === 0 ? rest : { ...rest, regions };
     });
     this.set({ message: undefined });
     this.scheduleValidation();
@@ -633,8 +665,8 @@ export class SearchDraft {
 
   /** The region of the role, if it was chosen on the record that `regionRecord` gives now. */
   region(role: InputRole): RegionText | undefined {
-    const region = this.role(role).region;
-    return region !== undefined && region.record === this.regionIdentity(role) ? region.text : undefined;
+    const record = this.regionIdentity(role);
+    return record === undefined ? undefined : this.role(role).regions?.[record];
   }
 
   private onlyRecord(role: InputRole): { readonly source: DraftSource; readonly record: DatasetRecord } | undefined {
@@ -918,42 +950,70 @@ export class SearchDraft {
     if (source === undefined) return;
     // A pending index of the pasted text would read it again after this one (and drop the exclusions made since).
     if (key === PASTE_KEY) this.cancelTask(`paste:${role}`);
+    // The table of the kind that the source leaves is kept, with its exclusions, for a program that reads it again.
+    const tables: Partial<Record<FastaParserKind, SourceTable>> = { ...source.tables };
+    if (source.base !== undefined) {
+      tables[source.parser] = { base: source.base, excluded: source.excluded, ...(source.indexMs === undefined ? {} : { indexMs: source.indexMs }) };
+    }
+    const kept = tables[parser];
+    delete tables[parser];
     this.updateSource(role, key, (s) => {
-      const next: DraftSource = { ...s, status: 'indexing', parser, excluded: [] };
-      delete (next as { base?: unknown }).base;
+      const next: DraftSource = { ...s, parser, tables, ...(kept === undefined ? { status: 'indexing', excluded: [] } : { status: 'ready', base: kept.base, excluded: kept.excluded }) };
+      if (kept === undefined) delete (next as { base?: unknown }).base;
       delete (next as { check?: unknown }).check;
       delete (next as { error?: unknown }).error;
+      delete (next as { indexMs?: unknown }).indexMs;
+      if (kept?.indexMs !== undefined) return { ...next, indexMs: kept.indexMs };
       return next;
     });
-    this.track(this.index(role, key, source.file, parser));
+    if (kept !== undefined) {
+      // An index of the kind that was left, still running, must not replace this table.
+      this.nextGeneration(`${role}:${key}`);
+      this.scheduleCheck(role, key, 0);
+      return;
+    }
+    this.track(this.index(role, key, source.file, parser, source.sourceId));
   }
 
-  private async index(role: InputRole, key: string, file: File, parser: FastaParserKind): Promise<void> {
+  private async index(role: InputRole, key: string, file: File, parser: FastaParserKind, known?: string): Promise<void> {
     const task = `${role}:${key}`;
     const generation = this.nextGeneration(task);
     const current = () => this.generations.get(task) === generation;
     const started = this.deps.now();
+    // Kept for a source that cannot be read too: a byte order mark says why.
+    let lead: InputLead | undefined;
     try {
-      const ref = await this.deps.data.addSource(file);
-      const head = await this.deps.data.previewSource(ref.sourceId, HEAD_BYTES).then(headText, () => undefined);
-      const base = await this.deps.data.indexSource(ref.sourceId, parser);
+      // The source is added once: its other kind's index reads the same data (no second inflation of a .gz).
+      const ref = known === undefined ? await this.deps.data.addSource(file) : undefined;
+      const sourceId = known ?? ref!.sourceId;
+      const preview =
+        ref === undefined ? undefined : await this.deps.data.previewSource(sourceId, HEAD_BYTES).catch(() => undefined);
+      const head = preview === undefined ? undefined : headText(preview);
+      lead = preview === undefined ? undefined : inputLead(preview, preview.length >= ref!.size);
+      const base = await this.deps.data.indexSource(sourceId, parser);
       if (!current()) return;
       this.updateSource(role, key, (source) => ({
         ...source,
         // A file named .gz is inflated by addSource: the card shows its plain name and inflated size.
-        name: ref.name,
-        size: ref.size,
+        ...(ref === undefined ? {} : { name: ref.name, size: ref.size }),
+        sourceId,
         status: 'ready',
         base,
         excluded: [],
         check: { state: 'pending' },
         indexMs: this.deps.now() - started,
         ...(head === undefined ? {} : { head }),
+        ...(lead === undefined ? {} : { lead }),
       }));
       this.scheduleCheck(role, key, 0);
     } catch (error) {
       if (!current()) return;
-      this.updateSource(role, key, (source) => ({ ...source, status: 'failed', error: messageOf(error) }));
+      this.updateSource(role, key, (source) => ({
+        ...source,
+        status: 'failed',
+        error: messageOf(error),
+        ...(lead === undefined ? {} : { lead }),
+      }));
     } finally {
       this.scheduleValidation();
     }
@@ -1154,6 +1214,11 @@ function fetchProblem(result: Exclude<FetchResult, { ok: true }>, source: FetchS
         ? `${label} asks to wait (too many requests): fetch again in a moment.`
         : `${label} answered HTTP ${result.status} for ${accession}.`;
   }
+}
+
+/** Whether the form holds inputs: a pasted text (accessions too) or a source of either role. */
+export function holdsInputs(state: DraftState): boolean {
+  return ROLES.some((role) => state[role].paste !== '' || state[role].sources.length > 0);
 }
 
 /** The included records of a ready source. */

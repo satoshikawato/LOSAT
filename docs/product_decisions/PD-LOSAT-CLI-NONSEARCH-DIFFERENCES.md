@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.7
+- Version: 1.8
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -10,7 +10,9 @@
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07); 1.6 2026-11-03
   (exception 8, a `-query` or `-subject` named `.gz`; the Owner asked for `.gz` inputs on
   2026-11-03, the form is Owner-delegated); 1.7 2026-11-04 (exception 8 also for `.bz2` and
-  `.zst`, the Owner's ask of 2026-11-04)
+  `.zst`, the Owner's ask of 2026-11-04); 1.8 2026-11-04 (exception 8: the inflated copy is
+  made beside the input, the Owner's ask of 2026-11-04; the fallback to `TMPDIR` is
+  Owner-delegated)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -107,10 +109,12 @@ BLAST+.
    exit status 0.
 
 8. **A `-query` or `-subject` whose name ends in `.gz`, `.bz2` or `.zst`** (version 1.6,
-   2026-11-03, `.gz`; version 1.7, 2026-11-04, `.bz2` and `.zst`; line GZ, DECISIONS 1, 3, 5, 8
-   and 9). LOSAT inflates the file through gzip, bzip2 or zstd before reading it (into an
-   unnamed temporary file under `TMPDIR`, which it then reads exactly as it reads the plain
-   file: the same records, messages and line numbers), concatenated members, streams and
+   2026-11-03, `.gz`; version 1.7, 2026-11-04, `.bz2` and `.zst`; version 1.8, 2026-11-04, the
+   copy beside the input; line GZ, DECISIONS 1, 3, 5, 8, 9 and 12). LOSAT inflates the file
+   through gzip, bzip2 or zstd before reading it (into an unnamed temporary file beside the
+   input, in its directory, or under `TMPDIR` when that directory refuses the file or has no
+   room for it; the copy is then read exactly as the plain file would be: the same records,
+   messages and line numbers), concatenated members, streams and
    frames (bgzip, pbzip2, pzstd) included; the name alone decides, in any case, as it does for
    NCBI's `makeblastdb -in` (`makeblastdb.cpp:1037-1039`), and `-` is read as it comes. NCBI's
    search programs open the file as text (`CNcbiIfstream`) and stop at its first line:

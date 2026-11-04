@@ -458,6 +458,13 @@ those two where the word is printed (`psubjb_at`, whose word is taken after NCBI
 for `nsubj_t` alone with the taxonomy database (NCBI's word is `Homo`, the organism's; not with `6 salltitles`, which
 prints no id).
 
+An empty title without parsed Seq-ids (line DBID H3; rows `db.id.bare.*`): `make_ids.py --emptytitle-only` writes
+`ids/nbare_t` and `ids/pbare_t` (`nbare.fna` and `pbare.faa`, the letters of `ndup.fna` and `pdup.faa` under `>` alone,
+without `-parse_seqids`, taxid 9606). The Bioseq that NCBI's formatters fetch has a source for the taxid, so outfmt 0
+makes the title from it where the taxonomy database names the taxid (`tests/seqdb/taxdb/good`: `unnamed protein
+product [Homo sapiens]`, `Homo sapiens`): LOSAT refuses that outfmt 0 and writes it without a taxonomy database or with
+`no_btd`, and the other formats (XML shows the stored title, the tabular id of a protein is `unnamed` either way).
+
 Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
 --join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and
 `ids/njoin_a`, `ids/njoin_b`, `ids/njoin_c` (version 5; r1 in all three, r3 with two definition lines and two
@@ -551,6 +558,51 @@ Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTD
   NCBI's 256-slot taxonomy cache of a volume (`CSeqDBVol::m_TaxCache`), so NCBI writes the offset error again after a fetch
   of 150, as often as its order of fetches makes it (twice for the row's query, once for the same query with a version 4
   database or an absolute `BLASTDB`); LOSAT refuses the run. `tm_cache151` (151 instead of 150) is the control: once.
+
+Rows `db.tm.psi.*` and `db.tm.bp.off0.*` (line DBID, item P1): psiblast's prefetch, and `PRE_FETCH_SEQS_LIMIT`, which turns
+NCBI's prefetch of a query batch off when it is 0 or below the batch's number of Seq-aligns (one per HSP; the count of
+outfmt 7's `# N hits found`): its formatters then fetch the subjects each query's report shows, after the query's own
+warnings (where a tabular report has a field that reads them: not `6 qseqid evalue`).
+
+- `tm_psi.faa` and `tm_psi.map`: eight proteins `gb|PTX00001.1|` to `gb|PTX00008.1|` (written by the line's probe script,
+  kept outside the repository), six of them copies of `q1` with more and more letters changed, with the taxids
+  9606, 10090, 99990, 562, 7777 and none, and two of `q2` (99990, 9606). With `-max_target_seqs 1` psiblast's traceback
+  hit list of `q1` still holds `PTX00003.1` (99990), whose lookup writes the offset error of `offset_last_past_end`.
+- `tm_psi_q.faa` (`q1`, `q2`, `q3` with weak hits only), `tm_psi_q1.faa` (`q1`), `tm_psi_qw.faa` (`q1` with an `O`
+  first, a warning of its own, then `q2` and `q1`), `tm_psi_qb.faa` (`q3`, then `q1`; `psiblast_taxdb_blocks.rs`).
+- The databases (version 5, every file makeblastdb writes; `tm_psi_u.faa` is `tm_psi.faa` with the titles
+  `subject PTX0000N.1`):
+
+      makeblastdb -in tm_psi.faa -dbtype prot -parse_seqids -taxid_map tm_psi.map -blastdb_version 5 \
+          -title "tm psi" -out tm_psi
+      makeblastdb -in tm_psi_u.faa -dbtype prot -taxid 9606 -blastdb_version 5 -title "tm psi u" -out tm_psi_u
+
+  `tm_psi_u`, without parsed Seq-ids, is searched in blocks of query batches (`LOSAT_X_BPQBLOCK`) by
+  `tests/psiblast_taxdb_blocks.rs`.
+- Review 1 of P1: a subject beyond `-max_target_seqs 1` whose Seq-align id NCBI's prefetch finds nowhere, whose lookup
+  fails, or that an earlier sequence holds. `tm_psi_rq.faa` (`q1`) is the query; `tm_psi_ra.faa` (`gb|PSX00001.1|`, the
+  top hit), `tm_psi_rpig.faa` (`gnl|PIG|124`), `tm_psi_rz.faa` (the top hit and `gnl|BL_ORD_ID|0` with a second
+  definition line, which makeblastdb stores with a text tag), `tm_psi_rhx.faa` (`gb|PSX00011.1|`, an unrelated holder of
+  `lcl|555` in a second definition line), `tm_psi_rhy.faa` (`lcl|555`, the second hit), with the aliases
+  `tm_psi_pig.pal` (`DBLIST tm_psi_ra0 tm_psi_rpig`), `tm_psi_held.pal` (`DBLIST tm_psi_rhx0 tm_psi_ra0 tm_psi_rhy`: the
+  holder without a taxid, the subject with 99990) and `tm_psi_held2.pal` (`DBLIST tm_psi_rhx tm_psi_ra0 tm_psi_rhy0`: the
+  holder with 99990, the subject without):
+
+      makeblastdb -in tm_psi_ra.faa -dbtype prot -parse_seqids -blastdb_version 5 -title tm_psi_ra0 -out tm_psi_ra0
+      makeblastdb -in tm_psi_rpig.faa -dbtype prot -parse_seqids -taxid 99990 -blastdb_version 5 -title tm_psi_rpig \
+          -out tm_psi_rpig
+      makeblastdb -in tm_psi_rz.faa -dbtype prot -parse_seqids -blastdb_version 5 -title tm_psi_rz -out tm_psi_rz
+      makeblastdb -in tm_psi_rhx.faa -dbtype prot -parse_seqids -blastdb_version 5 -title tm_psi_rhx0 -out tm_psi_rhx0
+      makeblastdb -in tm_psi_rhy.faa -dbtype prot -parse_seqids -taxid 99990 -blastdb_version 5 -title tm_psi_rhy \
+          -out tm_psi_rhy
+      makeblastdb -in tm_psi_rhx.faa -dbtype prot -parse_seqids -taxid 99990 -blastdb_version 5 -title tm_psi_rhx \
+          -out tm_psi_rhx
+      makeblastdb -in tm_psi_rhy.faa -dbtype prot -parse_seqids -blastdb_version 5 -title tm_psi_rhy0 -out tm_psi_rhy0
+- Review 2 of P1: `tm_psi_c150`, one volume without parsed Seq-ids holding the taxids 99990, 150, 99990 (`st1` to `st3` of
+  `tm_cache.faa`) and 9606 (`tm_psi_ra.faa`), made from four volumes of one taxid each (`makeblastdb -taxid`, version 5,
+  `cn1` to `cn4`, not kept) listed in an alias `cnx` with `makeblastdb -in cnx -input_type blastdb -dbtype prot
+  -blastdb_version 5 -out tm_psi_c150 -title tm_psi_c150`; `tm_psi_qbig.faa`: 365 copies of the letters of `tm_cache_q.faa`
+  (`qp0` to `qp364`, more than one block of 50,000 letters), then `q1` of `tm_psi_rq.faa`.
 
 ## Taxid filtering (DI-8a)
 
@@ -703,3 +755,52 @@ LOSAT's PSIBLAST does not write. A `-db` search of each of them ignores `BL2SEQ_
 search by queries (`-num_threads` 2 or more, a large query file, a small database) catches the exception as `-mt_mode 1` does. The ncbi rows are `abc` (BLASTN: an
 empty value) in outfmt 11 and `BL2SEQ_LEGACY=1` in outfmt 6 (TBLASTN: 0); the `losat-rejection` row is BLASTN's `abc` in
 outfmt 6. The `-subject` cases of the five programs are `tests/search_environment.rs`.
+
+## TBLASTN `-query_loc` and the chunk masks (line NP, series SM)
+
+Rows `db.tqloc.*` search `tqloc` with `tqloc_q.faa`, `-query_loc 5-3004 -lcase_masking` and
+`CHUNK_SIZE=1000 OVERLAP_CHUNK_SIZE=100`. NCBI restricts the lower-case runs of the whole record to each chunk
+(`split_query_cxx.cpp:278-281`), one letter longer, so a run that ends on the letter before the interval masks the
+interval's first letter in the first chunk's preliminary search. The inputs come from `random.Random(20261104)`:
+
+- `tqloc_q.faa`: `a` (`AC`, which the range skips), `p` (`MKVA` and 200 random residues) and `q` (`MKVa` and a random
+  protein Q of 3,000 residues that starts with W). `q` is the batch's second query and its part starts the first chunk.
+- `tqloc.fna`: `s14` and `s30`, the first 14 and 30 residues of Q between 50 random residues on each side,
+  back-translated with one codon per residue. At `-evalue 1e-7` NCBI reports `q` against `s30` only; with `MKVA` in
+  place of `MKVa` it reports `s14` too.
+
+The database (version 4, no `-parse_seqids`; only `.nin .nsq .nhr` are kept). Run from `LOSAT/`:
+
+    makeblastdb -in tests/db_search/tqloc.fna -dbtype nucl -out tests/db_search/tqloc \
+        -title "Q[0:14] and Q[0:30] of tqloc_q.faa between random letters, back-translated" -blastdb_version 4
+    rm tests/db_search/tqloc.njs
+
+The `-subject` rows `tqloc.tblastn.*` of `outfmt0_manifest.tsv` use `tests/fasta/outfmt0/tqloc_q.faa` (`MKVa`, the same
+Q and 37,000 more random residues: 40,000 searched letters, which NCBI splits at the default sizes) and
+`tests/fasta/outfmt0/tqloc_s.fna` (a copy of `tqloc.fna`), at `-evalue 1e-6`.
+
+## BLASTX `-query_loc` and the chunk masks (line NP, series SM)
+
+Rows `db.bxqloc.*` search `bxqloc` with `bxqloc_q.fna`, `-query_loc 10-9009 -lcase_masking` and
+`CHUNK_SIZE=1002 OVERLAP_CHUNK_SIZE=99` (a BLASTX chunk is a multiple of 3). NCBI restricts the lower-case runs of the
+whole record to each chunk (`split_query_cxx.cpp:278-281`), one letter longer, so a run that ends on the letter before
+the interval masks the interval's first letter in the first chunk's preliminary search. NCBI splits a BLASTX query
+batch only when it holds one query. The inputs come from `random.Random(20261104)` (Q and its back-translation, as in
+the `db.tqloc.*` rows) and `random.Random(20261105)`:
+
+- `bxqloc_q.fna`: `a` (`AC`, which the range skips), `p` (`ATGAAAGTT` and 600 random nucleotides) and `q`
+  (`ATGAAAGTt` and Q of 3,000 residues, which starts with W, back-translated with one codon per residue: 9,000
+  nucleotides). Without `BATCH_SIZE`, `p` and `q` share a query batch, which is not split (`db.bxqloc.two.6`: `s14` is
+  reported); with `BATCH_SIZE=100` `q` is alone in its batch and split (`db.bxqloc.b100.6`: at `-evalue 1e-7` NCBI
+  reports `q` against `s30` only; with `ATGAAAGTT` in place of `ATGAAAGTt` it reports `s14` too).
+- `bxqloc.faa`: `s14` and `s30`, the first 14 and 30 residues of Q between 50 random residues on each side.
+
+The database (version 4, no `-parse_seqids`; only `.pin .psq .phr` are kept). Run from `LOSAT/`:
+
+    makeblastdb -in tests/db_search/bxqloc.faa -dbtype prot -out tests/db_search/bxqloc \
+        -title "Q[0:14] and Q[0:30] of bxqloc_q.fna's q between random letters" -blastdb_version 4
+    rm tests/db_search/bxqloc.pjs
+
+The `-subject` rows `bxqloc.blastx.*` of `outfmt0_manifest.tsv` use `tests/fasta/outfmt0/bxqloc_q.fna` (`ATGAAAGTt`,
+the same 9,000 nucleotides and 11,000 more random ones: 20,000 searched nucleotides, which NCBI splits at the default
+sizes, 10,002 and 297) and `tests/fasta/outfmt0/bxqloc_s.faa` (a copy of `bxqloc.faa`), at `-evalue 2e-7`.

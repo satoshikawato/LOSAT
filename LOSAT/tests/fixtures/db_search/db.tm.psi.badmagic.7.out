@@ -1,0 +1,36 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: q1 query one
+# Database: tests/db_search/tm_psi
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+q1	PTX00001.1	96.818	220	7	0	1	220	1	220	2.10e-167	449
+q1	PTX00002.1	87.273	220	28	0	1	220	1	220	3.13e-147	399
+q1	PTX00003.1	79.909	219	44	0	1	219	1	219	1.62e-128	351
+q1	PTX00004.1	70.455	220	65	0	1	220	1	220	2.57e-108	300
+q1	PTX00005.1	67.273	220	72	0	1	220	1	220	6.66e-102	284
+q1	PTX00006.1	65.000	220	77	0	1	220	1	220	1.34e-93	263
+q1	PTX00008.1	33.333	27	16	1	8	32	29	55	0.59	18.5
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: q2 query two
+# Database: tests/db_search/tm_psi
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 8 hits found
+q2	PTX00007.1	87.222	180	23	0	1	180	1	180	3.26e-116	317
+q2	PTX00008.1	77.654	179	40	0	2	180	2	180	1.91e-102	282
+q2	PTX00003.1	28.000	25	18	0	98	122	113	137	0.22	19.6
+q2	PTX00003.1	37.500	16	10	0	94	109	205	220	1.1	17.3
+q2	PTX00005.1	35.294	17	11	0	115	131	94	110	1.1	17.3
+q2	PTX00005.1	57.143	7	3	0	90	96	89	95	8.9	14.6
+q2	PTX00002.1	46.154	13	7	0	80	92	38	50	3.5	15.8
+q2	PTX00002.1	37.500	16	10	0	165	180	167	182	8.7	14.6
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: q3 weak hits only
+# Database: tests/db_search/tm_psi
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+q3	PTX00006.1	42.857	7	4	0	16	22	17	23	5.8	14.6
+q3	PTX00002.1	42.857	7	4	0	17	23	39	45	9.9	13.9
+# BLAST processed 3 queries

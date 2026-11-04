@@ -1,0 +1,127 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: x16 ntaxid 9606
+           2 sequences; 965 total letters
+
+
+
+Query= qinv invalid letters
+
+Length=60
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= qempty
+
+Length=0
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= xq1 sn1 head
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sn1 alpha                                                             132     3e-36  1
+
+
+>sn1 alpha
+Length=488
+
+ Score = 132 bits (283),  Expect = 3e-36
+ Identities = 50/50 (100%), Positives = 50/50 (100%), Gaps = 0/50 (0%)
+ Frame = -1/-3
+
+Query  150  PALHCSHGPIPYFRVVHHFTKHGKNCF*HGVFHPHILLRMQLEILRQQQT  1
+            PALHCSHGPIPYFRVVHHFTKHGKNCF*HGVFHPHILLRMQLEILRQQQT
+Sbjct  150  PALHCSHGPIPYFRVVHHFTKHGKNCF*HGVFHPHILLRMQLEILRQQQT  1
+
+
+ Score = 123 bits (263),  Expect = 1e-33
+ Identities = 50/50 (100%), Positives = 50/50 (100%), Gaps = 0/50 (0%)
+ Frame = +1/+1
+
+Query  1    CLLLSQDFQLHS*KDMWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGW  150
+            CLLLSQDFQLHS*KDMWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGW
+Sbjct  1    CLLLSQDFQLHS*KDMWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGW  150
+
+
+ Score = 120 bits (257),  Expect = 1e-32
+ Identities = 49/49 (100%), Positives = 49/49 (100%), Gaps = 0/49 (0%)
+ Frame = -2/-1
+
+Query  149  QPFIAAMGPSRIFGSSITLRSTAKIASSTECSIHISFYECSWKSCDNSK  3
+            QPFIAAMGPSRIFGSSITLRSTAKIASSTECSIHISFYECSWKSCDNSK
+Sbjct  149  QPFIAAMGPSRIFGSSITLRSTAKIASSTECSIHISFYECSWKSCDNSK  3
+
+
+ Score = 96.8 bits (205),  Expect = 1e-25
+ Identities = 37/37 (100%), Positives = 37/37 (100%), Gaps = 0/37 (0%)
+ Frame = +3/+3
+
+Query  39   KGYVDGTLRARSNFCRAS*SDGRPENTGWAHGCNEGL  149
+            KGYVDGTLRARSNFCRAS*SDGRPENTGWAHGCNEGL
+Sbjct  39   KGYVDGTLRARSNFCRAS*SDGRPENTGWAHGCNEGL  149
+
+
+ Score = 93.2 bits (197),  Expect = 2e-24
+ Identities = 37/37 (100%), Positives = 37/37 (100%), Gaps = 0/37 (0%)
+ Frame = -3/-2
+
+Query  148  SPSLQPWAHPVFSGRPSLYEARQKLLLARSVPSTYPF  38
+            SPSLQPWAHPVFSGRPSLYEARQKLLLARSVPSTYPF
+Sbjct  148  SPSLQPWAHPVFSGRPSLYEARQKLLLARSVPSTYPF  38
+
+
+ Score = 89.5 bits (189),  Expect = 2e-23
+ Identities = 33/33 (100%), Positives = 33/33 (100%), Gaps = 0/33 (0%)
+ Frame = +2/+2
+
+Query  50   GWNTPC*KQFLPCFVK*WTTRKYGMGPWLQ*RA  148
+            GWNTPC*KQFLPCFVK*WTTRKYGMGPWLQ*RA
+Sbjct  50   GWNTPC*KQFLPCFVK*WTTRKYGMGPWLQ*RA  148
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 10548
+
+
+  Database: x16 ntaxid 9606
+    Posted date:  Oct 21, 2026  12:42 PM
+  Number of letters in database: 965
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

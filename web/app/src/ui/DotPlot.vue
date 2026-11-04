@@ -27,7 +27,6 @@ import {
   lineNearView,
   panView,
   pickLine,
-  placeBeside,
   plotSize,
   toPixelX,
   toPixelY,
@@ -55,8 +54,9 @@ const HALO = 'rgba(255, 196, 0, 0.75)';
 const FONT = '12px system-ui, sans-serif';
 const TITLE_FONT = '600 13px system-ui, sans-serif';
 const PICK_PX = 8;
-/** Below this width of the plot's stage (phones), the HSP popup is shown under the plot, not over it (W4b screen review L10). */
-const POPUP_BESIDE_MIN_PX = 600;
+/** The HSP popup's largest width (its CSS max-width, in rem) and its gap from the plot: it goes right of the plot where the stage has this room. */
+const POPUP_MAX_REM = 20;
+const POPUP_GAP_PX = 12;
 /** How far a line's stroke reaches beyond the line: half the 3 px dash of a short HSP (the 2 px line reaches 1 px). */
 const STROKE_REACH_PX = 1.5;
 // Each axis's band, from the outside in: its title, the tick labels, the ticks.
@@ -533,8 +533,7 @@ function onPointerUp(event: PointerEvent): void {
   }
   props.results.selectHsp(segments.value.list[i]!.id);
   popupOpen.value = true;
-  // Under the plot (phones), the popup may open below the screen's edge.
-  if (popupBelow.value) void nextTick(() => popup.value?.scrollIntoView({ block: 'nearest' }));
+  revealPopup = true;
 }
 function onPointerLeave(): void {
   pointer = undefined;
@@ -574,18 +573,33 @@ function onKey(event: KeyboardEvent): void {
 // --- the HSP popup -------------------------------------------------------------------------------
 
 const popupOpen = ref(false);
-const popupAt = ref({ left: 0, top: 0 });
-/** No room beside the selected HSP's line that leaves its midpoint uncovered (placePopup). */
-const noRoomBeside = ref(false);
-/** The popup is shown under the plot, in the page's flow: on phones, or where it has no room beside the line. */
-const popupBelow = computed(() => stageWidth.value < POPUP_BESIDE_MIN_PX || noRoomBeside.value);
+/** The popup's top right of the plot (placePopup); its left is always past the canvas. */
+const popupTop = ref(0);
+/**
+ * The popup's height when it was last placed right of the plot, for the pair shown: kept, so that a
+ * popup taller than the canvas stays under the plot whatever the scroll bar that this makes or ends
+ * does to the stage's width.
+ */
+const popupHeight = ref(0);
+const rootFontPx = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+/**
+ * The popup is never over the plot, where it covered other lines and took their clicks (WA-RS-02):
+ * it is right of the plot where the stage has room for it and the canvas is as tall as it, else under
+ * the plot in the page's flow (phones, plots as wide as the stage, and short plots).
+ */
+const popupBelow = computed(
+  () => popupHeight.value > canvasHeight.value || stageWidth.value - canvasWidth.value < POPUP_GAP_PX + POPUP_MAX_REM * rootFontPx,
+);
+/** The popup just opened: once placed, it is scrolled into view (a long plot may put it past the screen's edge). */
+let revealPopup = false;
 
 /** Opens the popup of the selected HSP; opened from the keyboard, the focus moves into it. */
 function openPopup(byKeyboard: boolean): void {
   if (selected.value === undefined) return;
   popupOpen.value = true;
+  revealPopup = true;
   schedule(false);
-  if (byKeyboard) void nextTick(() => popup.value?.focus());
+  if (byKeyboard) void nextTick(() => popup.value?.focus({ preventScroll: true }));
 }
 
 /** Closes the popup; closed from inside it, the focus goes back to the plot. */
@@ -614,22 +628,31 @@ function showAlignment(): void {
 }
 
 /**
- * Puts the popup beside the selected line as the frame shows it, off one of its ends, leaving its
- * midpoint uncovered, within the canvas's height and the stage's width (W4b screen review L10);
- * under the plot where there is no such place. On phones it is always under the plot.
+ * Puts the popup right of the plot level with the middle of the selected line's part in the frame
+ * (a line out of view counts as the point of the frame nearest to its middle), within the canvas's
+ * height; a popup taller than the canvas goes under the plot (popupBelow). A popup that just opened
+ * is then scrolled into view.
  */
 function placePopup(): void {
   const element = popup.value;
   const i = selectedIndex.value;
-  if (!popupOpen.value || element === undefined || i < 0 || stageWidth.value < POPUP_BESIDE_MIN_PX) return;
-  const [ax, ay, bx, by] = ends(i);
-  const b = box.value;
-  // The line's part in the frame; a line out of view counts as the point of the frame nearest to its middle.
-  const [cx, cy] = [Math.max(b.left, Math.min(b.left + b.width, (ax + bx) / 2)), Math.max(b.top, Math.min(b.top + b.height, (ay + by) / 2))];
-  const seen = clipToBox(ax, ay, bx, by, b) ?? [cx, cy, cx, cy];
-  const next = placeBeside(seen, { width: element.offsetWidth, height: element.offsetHeight }, { width: stageWidth.value, height: canvasHeight.value });
-  if (noRoomBeside.value !== (next === undefined)) noRoomBeside.value = next === undefined;
-  if (next !== undefined && (next.left !== popupAt.value.left || next.top !== popupAt.value.top)) popupAt.value = next;
+  if (!popupOpen.value || element === undefined || i < 0) return;
+  if (!popupBelow.value) {
+    const height = element.offsetHeight;
+    if (height !== popupHeight.value) popupHeight.value = height;
+    // Under the plot from the next frame on, which then scrolls it into view.
+    if (height > canvasHeight.value) return schedule(false);
+    const [ax, ay, bx, by] = ends(i);
+    const b = box.value;
+    const seen = clipToBox(ax, ay, bx, by, b);
+    const middle = seen === undefined ? Math.max(b.top, Math.min(b.top + b.height, (ay + by) / 2)) : (seen[1] + seen[3]) / 2;
+    const top = Math.round(Math.max(0, Math.min(canvasHeight.value - height, middle - height / 2)));
+    if (top !== popupTop.value) popupTop.value = top;
+  }
+  if (revealPopup) {
+    revealPopup = false;
+    element.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 // --- life cycle ----------------------------------------------------------------------------------
@@ -660,7 +683,7 @@ watch(pair, () => {
   view.value = fullView(extent.value);
   pendingView = undefined;
   popupOpen.value = false;
-  noRoomBeside.value = false;
+  popupHeight.value = 0;
   schedule(true);
 });
 watch([segments, box, canvasWidth, units, queryId, subjectId], () => {
@@ -749,13 +772,13 @@ function pickSubject(event: Event): void {
           ref="popup"
           open
           class="plot-popup"
-          :class="{ below: popupBelow }"
+          :class="popupBelow ? 'below' : 'right'"
           tabindex="-1"
           :aria-labelledby="popupTitle"
           data-testid="dotplot-popup"
           :data-hsp="`${selected.id.qIdx}:${selected.id.rank}`"
-          :data-place="popupBelow ? 'below' : 'beside'"
-          :style="popupBelow ? undefined : { left: `${popupAt.left}px`, top: `${popupAt.top}px` }"
+          :data-place="popupBelow ? 'below' : 'right'"
+          :style="popupBelow ? undefined : { left: `${canvasWidth + POPUP_GAP_PX}px`, top: `${popupTop}px` }"
           @keydown="onPopupKey"
         >
           <div aria-live="polite">

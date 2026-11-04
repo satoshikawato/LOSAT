@@ -1,0 +1,469 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "tblastn",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT63287.1 hypothetical protein [Armadillidium
+ vulgare clopovirus]"
+                  }
+                }
+              },
+              title "BDT63287.1 hypothetical protein [Armadillidium vulgare
+ clopovirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 329,
+              seq-data ncbieaa "MAAPFRIKNNSPIPLPSIRIYEGGQYINSKSIVGLRPILPKTNHQV
+QPPLKNVENFRSEQRFPPNNNLSQSKEKRFQIQSSPKVVSNKIKAKINSNLDSCNNNNNNNNIVDCKDQMKIGKEGAK
+RKFDCLRNEEKEEIATLNAKKSNNNHPSSNNNNNKNRQNIEILRKAKEYLVQENLVLMKKMMIVKEVLFNHCELSKFL
+KILKKANEIHDEGEKKIKFSLSIPTYQAILTLSSSSCHQERTTLIIEPTDKFEEINGALLLKFEKDFSEQSEDFLRRA
+NKCLQQHQCDFYLDYFLNETKVKYILDNFVKEVCRLGQKKKNNNCDCFK"
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT63290.1 hypothetical protein [Armadillidium
+ vulgare clopovirus]"
+                  }
+                }
+              },
+              title "BDT63290.1 hypothetical protein [Armadillidium vulgare
+ clopovirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 283,
+              seq-data ncbieaa "MYRNEYYFENQEFKADKSNISLSFKCQKNGTHSFAFVNETRKRFTL
+NIESLQQVLKLLKMFSSQKEERTFRLRVPIEENARNLAAGEKTNNEDDFEVNAAADKESLTPQRIYNGESKKKYIYLT
+MTKYQYGKGVDKLCLQDKGYKFYLDGRFVIQNIIDMESDVEKFILEFKNYQKILNHSEESFVKFYTNVRIEEGRVEEQ
+KRFLDTSDEDEEVYLGNFLRNKRMMNDFKFRLSNNISKTFSSSSEVRLGCIIYILTHRDHQFNKLKKMVSNNKKTIKK
+CVV"
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT63274.1 hypothetical protein [Armadillidium
+ vulgare clopovirus]"
+                  }
+                }
+              },
+              title "BDT63274.1 hypothetical protein [Armadillidium vulgare
+ clopovirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 1046,
+              seq-data ncbieaa "MKSKKKSRSDKISEKIIRLLEELNEKEKYKMFSKLKHYTKEINSSD
+EDSSHSSSSSGSSISNPSRGTTPSSPISKKNKNLFSNPSTQSDSEKEEVYCVDKEIGYYGGLKEEQFMGYNYYYKNPL
+QKSMMEYYFKIYSSKYTSSPQESESENVDESFKNKAIKCFFCSKVIHRSLKEHLNSKRHEDIDKDKKNMLIYCVQQVL
+FYTSEKNSVGVLCVRCNKIFNHMGNHIRLKHENLSNSERKDLKKDSPPVIGGRKKQTTSKSEESEARNKKDNDDDDDQ
+MVGTKQQQQRLKEESLHQKSEKELVTKYKIFLKENKILYEKDLFRFQNIEKNILDVFNALRNTTTLMPPSEKKIKITE
+TKFHFLGMEDFKDRKRYLNNLLGWLKATTLSPNTLVIKMDDFAKFIRKMINLGEIPKKKKANIKEFLSTEIPAFKNRV
+INSKAAYMQRKDKKDADKMFFAEDAGKVLTHKFFQLGFTKLVDGNLKSKTYTPAILRNIIIFLLLVATSGRAGVISNL
+TIEEYHNIQKIIKIKETKNPGEKKEEEEEEGDDDDDDDETVSSTTTMTTTTTTTTTTTTTTTNLTSTLVNDDENQNLY
+ALECQRHKTQHMYGDAKMILTHATKMGLDSYVTFIRPLFLEEAKRAAIADNVEEKESDDDDDDDEEDKTPKKSNSINP
+LNLLFLSSQGRPFTTQALNNAMGNLTKMCDLSKKFTSTTNRKGTTTETAIAQPELRRNVARFMYHHENTAEKYYNATL
+STISIANTFLQTKKGNLILQFSSNFKKDENNDDTKNDDDEEKREYGGKKFEDDYVQDKEDDGGEEGGGGGGVVIIEEE
+DDGDDDDRDVDDDYVDDDDVDEDNFDNEEENDDIQKDIRDIKEKESEELVEREEREFVENEQISSFNIVVSPSGKRKQ
+NDERECVKKKKVHFQSPAKQLQQSTSSPGGRTKYLGNESINETMEHVSCTPSFSLFEQNTLRERREIPEKNEDGETSK
+TSPPNLQTPSISTPNLSYCETPLFAPPHFLEAVENEYGEQQKIDDNLEGIYIYIYIYKIYKNYI"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">AvCLPV_120501_122200 LC738883.1 120501..122200"
+                }
+              }
+            },
+            title "AvCLPV_120501_122200 LC738883.1 120501..122200"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 1700,
+            seq-data ncbi2na '40B30C0000CCF046EB42F0013D80383030C0E383FF00034F
+0C3000E2B193037CC040F030CF000E78E3830200CC4C0DF30107F0FDD1F3C3030EE430D0FA043F
+3F0CF5FD3E0CCC8C2BF04CF0000000F37FBFF1F8043443CF3DF7DF785436101F7F440BCD40333F
+47F6FDBF000C352300364F8EFBE424FEFE77D8280D758F9D1C035FF60FF0C10E753F377D03F35B
+6BD8E38AB6F7F5E38420820808BC03E7E31BE83202A20FC3FFFF75F4DB83F4FA5FFD00DFC00FF8
+C3D10E3E0891F7FC434D3FDF4F00503FDFB188C77FE7FDD0CFD0CFFB73FF3CF3CF3E8A2A3AFBEF
+63F7C9BF2EF9CFDF7FF7D3F6404340FF7FF957DFF50FF4FE37F10DC433EFBEFBEFBEF108B72BF8
+3F3FC97F37CF20147F29821E0FE017FFDFC8F980AFBCF2AA806FBD23700F7713FF40A29E07EBAF
+EDF6820CADF0151CD8FF83F333E155F6C0F70D82B22836B83CFFC3DC0E892538FFCCCCCCCCCCCC
+CCCCCCF33B30113333333670431430D212307050CD8E79451740E398DDF1887707CCC555D08067
+67C6C13BD1BF008023F08FF33CFC0C300A00E30C30CCC8C348453710BA3DD03D85503200E737F6
+E37FC007FFC0FFC03CE0D9'H
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">AvCLPV_134001_135600 LC738883.1 134001..135600"
+                }
+              }
+            },
+            title "AvCLPV_134001_135600 LC738883.1 134001..135600"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 1600,
+            seq-data ncbi2na 'AA696F7FD7F3CF3CF3CF3CF514300331C42B8C7839919200
+AABADDFFCB62E50C01318AA38C8EAEBC7F83999902000EA6F5FF0047D695C574D3557755F0020F
+E3E2D84CFFCACC0C8A744DCC2248D1CC00F3DD060408A9A9A24F0474F3344083E040FC80000413
+B1601833CFD803420F4092303504DDFEDFD03B4000EA151D7D9BDB0380564267F1DE04C8B5F104
+2E78071E00EFF4D920208081FF6FC66F58C8200662037249A88801030E08E3FE2BC39659E3020D
+DD15748A3330E888B000033333744386031433AC2A2F8427F97D08C0A330BFC7C8E823FB0C4033
+0D84E80986D800FCFF20FC00F348033C0D3D62837FEF03FC4406E20C820A88B2081001AFFC8462
+E3823820BF3FA80FFF080C060E3818FF03D6FC2C30CC2C017FD76D8B82F6FCAB93CCC4FF064D88
+D143D0C0F0000EBF70C300018F000EEFBB03CFFB3FFFF7CF3CEF33CDFFC50FFFFDFF43F0FCF30F
+FC0D4F30FF0CFF8E0C30DCC30CF8E38EE0FFFF08E3B1DFFFC3C3FF00F3F3CF33F8FECF1FFFFFCF
+0EFF3F13FC3EFCCFC18C30C3130F0C0FBFEF760153CBF13CD3'H
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -5 }
+        },
+        {
+          name "DbGeneticCode",
+          value integer 1
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 13
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 299592
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 1529
+          },
+          {
+            id str "blast_score",
+            value int 1529
+          },
+          {
+            id str "e_value",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "bit_score",
+            value real { 593578383857677, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 299
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 299
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 0,
+                to 328,
+                strand unknown,
+                id local str "Query_1"
+              },
+              int {
+                from 327,
+                to 1313,
+                strand minus,
+                id local str "Subject_1"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 1414
+          },
+          {
+            id str "blast_score",
+            value int 1414
+          },
+          {
+            id str "e_value",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "bit_score",
+            value real { 549280432627182, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 271
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 271
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_2"
+            },
+            loc {
+              int {
+                from 0,
+                to 282,
+                strand unknown,
+                id local str "Query_2"
+              },
+              int {
+                from 406,
+                to 1254,
+                strand plus,
+                id local str "Subject_2"
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 100,
+              to 107,
+              id local str "Query_1"
+            },
+            {
+              from 141,
+              to 162,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame notset
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 234,
+              to 245,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame notset
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 27,
+              id local str "Query_3"
+            },
+            {
+              from 40,
+              to 63,
+              id local str "Query_3"
+            },
+            {
+              from 269,
+              to 278,
+              id local str "Query_3"
+            },
+            {
+              from 446,
+              to 460,
+              id local str "Query_3"
+            },
+            {
+              from 538,
+              to 580,
+              id local str "Query_3"
+            },
+            {
+              from 644,
+              to 659,
+              id local str "Query_3"
+            },
+            {
+              from 771,
+              to 791,
+              id local str "Query_3"
+            },
+            {
+              from 804,
+              to 859,
+              id local str "Query_3"
+            },
+            {
+              from 867,
+              to 886,
+              id local str "Query_3"
+            },
+            {
+              from 1031,
+              to 1045,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame notset
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 318005994500965, 10, -15 },
+        k { 134627953571332, 10, -15 },
+        h { 384082300667052, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 299592",
+      "Effective search space used: 299592",
+      "Length adjustment: 37"
+    }
+  }
+}

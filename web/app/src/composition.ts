@@ -83,6 +83,7 @@ export function createApp(options: AppOptions = {}): App {
   const attention = new Attention({
     page: browserPage,
     runs: coordinator.state,
+    draft: draft.state,
     probe: () => data.storageInfo(),
     now: () => Date.now(),
   });

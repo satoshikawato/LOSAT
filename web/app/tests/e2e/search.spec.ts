@@ -5,8 +5,10 @@
 import { expect, test, type Page } from '@playwright/test';
 import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { BUILD_HAS_ENGINE } from './support/browser';
+import { reload } from './support/navigate';
 import {
   chooseRun,
+  described,
   fasta,
   openFiles,
   openParameters,
@@ -15,6 +17,7 @@ import {
   pickRun,
   program,
   result,
+  runMessage,
   settled,
   showRecords,
   submit,
@@ -92,7 +95,7 @@ test('a file named .gz is inflated when it is opened and shows its plain name', 
   await expect(page.getByTestId('subject-source-1-summary')).toHaveText(summary!.trim());
 });
 
-test('files named .zst and .bz2 are inflated when they are opened and show their plain names', async ({ page }) => {
+test('a file named .zst is inflated when it is opened and shows its plain name', async ({ page }) => {
   await openFiles(page, 'subject', [{ name: 'LC738884.fasta.zst', text: zstdCompressSync(fasta('LC738884.fasta')) }]);
   await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'ready');
   await expect(page.getByTestId('subject-source-0').locator('.source-name')).toHaveText('LC738884.fasta');
@@ -100,13 +103,14 @@ test('files named .zst and .bz2 are inflated when they are opened and show their
   const summary = await page.getByTestId('subject-source-0-summary').textContent();
   expect(summary).toMatch(/record/);
   await expect(page.getByTestId('subject-source-1-summary')).toHaveText(summary!.trim());
-  // Two bzip2 streams, as pbzip2 writes them: both records are read.
-  const twoStreams =
-    'QlpoOTFBWSZTWSPZP5cAAAHPAEAQAAEogAQAIAAgADEMCBmqbRqZ1mPE/TlEyiZomF+LuSKcKEgR7J/LgEJaaDkxQVkmU1ko1BM1AAAFTwBAEAABKIAEABAAIAAxDAgSKejSTDSkzrBQomUTKJ73xdyRThQkCjUEzUA=';
-  await openFiles(page, 'subject', [{ name: 'two.fa.bz2', text: Buffer.from(twoStreams, 'base64') }]);
-  await expect(page.getByTestId('subject-source-2')).toHaveAttribute('data-status', 'ready');
-  await expect(page.getByTestId('subject-source-2').locator('.source-name')).toHaveText('two.fa');
-  await expect(page.getByTestId('subject-source-2-summary')).toContainText('2 records');
+});
+
+test('a file named .bz2 is refused when it is opened and shows the error on its card', async ({ page }) => {
+  await openFiles(page, 'subject', [{ name: 'two.fa.bz2', text: '>a\nACGT\n' }]);
+  await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'failed');
+  await expect(page.getByTestId('subject-source-0-error')).toHaveText(
+    "This input cannot be read: 'two.fa.bz2' is named .bz2; the web app reads .gz and .zst, not bzip2 (the command line does)",
+  );
 });
 
 test('records: duplicate IDs by number, a record that the input check refuses (FakeEngine), exclusion, and a run after exclusion', async ({ page }) => {
@@ -299,13 +303,18 @@ test('the region of a role with one record: the drag, the fields, the limits and
   await expect(page.getByTestId('search-message')).toHaveText(
     'Subject region: The stop must be between 1 and 100, the length of the record.',
   );
+  // A range of one letter and a start after the stop are NCBI's errors in every mode; the fields say so (WA-IN-07).
+  await page.getByTestId('subject-region-stop').fill('5');
+  await expect(page.getByTestId('subject-region-problem')).toHaveText('The stop must be larger than the start.');
+  await page.getByTestId('subject-region-start').fill('60');
+  await expect(page.getByTestId('subject-region-problem')).toHaveText('The start cannot be larger than the stop.');
+  await submit(page);
+  await expect(page.getByTestId('search-message')).toHaveText('Subject region: The start cannot be larger than the stop.');
   if (BUILD_HAS_ENGINE) {
-    // A range of one letter is NCBI's error, which the engine's validate gives.
-    await page.getByTestId('subject-region-stop').fill('5');
-    await expect(page.getByTestId('argv-validation')).toHaveText(
-      'BLAST engine error: Invalid specification of subject location (range cannot be empty)',
-    );
+    // The argv leaves the region out until it is one, so the engine's validate has nothing to refuse.
+    await expect(page.getByTestId('argv-validation')).not.toContainText('subject location');
   }
+  await page.getByTestId('subject-region-start').fill('5');
   await page.getByTestId('subject-region-stop').fill('060');
   await expect(page.getByTestId('subject-region-argument')).toHaveText('Positions in the results are those of the whole record.');
   // The query has one record once the other is excluded.
@@ -344,6 +353,17 @@ test("the options form: the engine's defaults are not written; tasks, templates 
   await submit(page);
   await waitStatus(page, 1, 'completed');
   expect((await result(page, 1, 7)).command).toBe('losat tblastx -query query.fa -subject subject.fa -db_gencode 11 -outfmt 7');
+  // The run's mark is one of its words; the approved exception is in the run's details and in
+  // the mark's title, not in the mark (the maintainer, 2026-11-04).
+  await chooseRun(page, 1);
+  const badge = page.getByTestId('results-summary').getByTestId('verification-badge');
+  await expect(badge).toHaveText(BUILD_HAS_ENGINE ? /^(Supported|Not yet supported)$/ : 'Development build');
+  if (BUILD_HAS_ENGINE) {
+    await expect(badge).toHaveAttribute('title', /Approved exception: LOSAT translates the local subjects with -db_gencode 11\./);
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('verification-exception')).toContainText('-db_gencode 11');
+  }
+  await page.getByTestId('tab-search').click();
 
   // TBLASTN's subject codes include 32 (the approved exception); its tasks (tblastn and
   // tblastn-fast) are radio buttons.
@@ -423,6 +443,33 @@ test("the engine's refusals of option values are shown as the engine writes them
   await expect(page.getByTestId('argv-validation')).toContainText('BLAST query/options error:');
 });
 
+// WA-FM-01: scores without a Karlin-Altschul table row are not refused by the form's check. The CLI
+// meets the tables only when a query has an ungapped block, so the run gives the CLI's result: a
+// warning and no hit for 3,-1, and the table's error for `-task blastn -reward 7` (penalty -3).
+test('BLASTN scores without a table row: the form accepts them and the run gives the engine result', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, "the engine's checks need the engine build");
+  await program(page, 'blastn');
+  await openParameters(page);
+  const validation = page.getByTestId('argv-validation');
+  await page.getByTestId('param-matchscores').selectOption('other');
+  await page.getByTestId('param-reward').fill('3');
+  await page.getByTestId('param-penalty').fill('-1');
+  await expect(validation).toHaveAttribute('data-state', 'ok');
+  await paste(page, 'query', '>q\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await paste(page, 'subject', '>s\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await backToSearch(page);
+  await task(page, 'blastn');
+  await page.getByTestId('param-matchscores').selectOption('other');
+  await page.getByTestId('param-reward').fill('7');
+  await page.getByTestId('param-penalty').fill('-3');
+  await expect(validation).toHaveAttribute('data-state', 'ok');
+  await submit(page);
+  await waitStatus(page, 2, 'failed');
+  expect(await runMessage(page, 2)).toContain('Substitution scores 7 and -3 are not supported');
+});
+
 // The index scan reads with the program's reader (SURVEY #3): NCBI's nucleotide reader stores 19 of
 // these 24 letters (not E F I L P Q), so the record table and the engine's register agree on 19.
 test('a protein-like record in a nucleotide input: the record table counts the letters the reader stores; the run completes', async ({ page }) => {
@@ -487,6 +534,170 @@ test('empty inputs, every record excluded, a sequence without a defline, and the
   await expect(page.getByTestId('param-query_gencode')).toBeVisible();
   await expect(page.getByTestId('query-region')).toBeVisible();
   await expect(page.getByTestId('run-losat')).toBeEnabled();
+});
+
+// A mode that reads a role with the other FASTA reader kind reads the source again; coming back to the mode that the
+// source was set up in shows its table as it was left (WA-IN-01).
+test("records left out and a subrange stay through a mode that reads the role with the other kind", async ({ page }) => {
+  await program(page, 'blastn');
+  const records = '>q1\nACGTACGTACGTAAACCCGGGTTT\n>q2\nACGTACGTACGTAAACCCGGGTTA\n>q3\nACGTACGTACGTAAACCCGGGTTC\n';
+  await paste(page, 'query', records);
+  await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await showRecords(page, 'query');
+  await page.getByTestId('query-source-0-record-1').uncheck();
+  await page.getByTestId('query-source-0-record-2').uncheck();
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('(1 included)');
+  await page.getByTestId('query-region-start').fill('2');
+  await page.getByTestId('query-region-stop').fill('12');
+
+  // BLASTP reads the query with the protein flags: another table, with nothing left out.
+  await program(page, 'blastp');
+  await settled(page, 'query');
+  await expect(page.getByTestId('query-source-0-summary')).not.toContainText('included');
+  await program(page, 'blastn');
+  await settled(page, 'query');
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('(1 included)');
+  await showRecords(page, 'query');
+  await expect(page.getByTestId('query-source-0-record-0')).toBeChecked();
+  await expect(page.getByTestId('query-source-0-record-1')).not.toBeChecked();
+  await expect(page.getByTestId('query-source-0-record-2')).not.toBeChecked();
+  await expect(page.getByTestId('query-region-start')).toHaveValue('2');
+  await expect(page.getByTestId('query-region-stop')).toHaveValue('12');
+  // The search takes both: the first record only, with its subrange.
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  await expect(page.getByTestId('results-run-options')).toContainText('-query_loc 2-12');
+  expect((await result(page, 1, 6)).command).toBe('losat blastn -query query.fa -subject subject.fa -query_loc 2-12 -outfmt 6');
+});
+
+// An input without a sequence is run as the command line runs it (rc 0 and a warning), and the results say
+// that the query has none, not that the query filters hid it (WA-IN-02).
+const EMPTY_QUERY_MODES = [
+  ['blastn', '  \n\n', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
+  ['blastp', '', '>s1\nMKVLAAGIVGLLLAQPSTEWMKVLAAGIVGLLL\n'],
+  ['blastx', '\n', '>s1\nMKVLAAGIVGLLLAQPSTEWMKVLAAGIVGLLL\n'],
+  ['tblastn', ' ', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
+  ['tblastx', '\n\n\n', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
+] as const;
+for (const [id, query, subject] of EMPTY_QUERY_MODES) {
+  test(`an empty query runs in ${id}; its results say that the query has no sequences, with the engine warning`, async ({ page }) => {
+    test.skip(id !== 'blastn' && !BUILD_HAS_ENGINE, 'the other modes are checked with the engine');
+    await program(page, id);
+    if (query === '') {
+      // An empty box has no source: an empty file does.
+      await openFiles(page, 'query', [{ name: 'empty.fa', text: '' }]);
+    } else {
+      await paste(page, 'query', query);
+    }
+    await paste(page, 'subject', subject);
+    await expect(page.locator('[data-testid^="query-source-"][data-status="ready"]')).toHaveCount(1);
+    await expect(page.getByTestId('query-source-0')).toContainText('0 records');
+    await submit(page);
+    await waitStatus(page, 1, 'completed');
+    await pickRun(page, 1);
+    const notice = page.locator('[data-testid="results-notice"][data-kind="empty-query"]');
+    await expect(notice).toContainText('The query has no sequences.');
+    await expect(page.locator('[data-testid="results-notice"][data-kind="no-queries"]')).toHaveCount(0);
+    if (BUILD_HAS_ENGINE) await expect(page.getByTestId('results-notice-engine')).toHaveText(/Warning: \[\w+\] Query is Empty!/);
+  });
+}
+
+// The browser can remove the origin's files under an open tab (clearing the site's data). The next run makes the tab's
+// directory again; if it cannot, it says what happened, not the browser's own words (WA-IN-03). WebKit's build of
+// Playwright has no OPFS, and keeps results in memory.
+test("a run after the browser removed the tab's storage still completes", async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', '>q1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  test.skip((await page.getByTestId('storage-status').getAttribute('data-backend')) !== 'opfs', 'this browser keeps results in memory');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  // A synchronous access handle holds its file for a moment after it is closed: the removal is tried again.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async () => {
+          try {
+            await (await navigator.storage.getDirectory()).removeEntry('tmp', { recursive: true });
+            return 'removed';
+          } catch (error) {
+            return (error as Error).name;
+          }
+        }),
+      { timeout: 10_000 },
+    )
+    .toBe('removed');
+  await backToSearch(page);
+  await submit(page);
+  await waitStatus(page, 2, 'completed');
+  await chooseRun(page, 2);
+  // What the removal took with it says so when it is opened.
+  await pickRun(page, 1);
+  await expect(page.getByTestId('results-status')).toContainText('The browser removed the stored results of this run');
+  await expect(page.getByTestId('results-status')).toContainText('Run it again.');
+});
+
+test('a GenBank, EMBL or FASTQ file is read as FASTA text, as the command line does, with a warning (WA-IN-04)', async ({ page }) => {
+  await program(page, 'blastn');
+  await openFiles(page, 'query', [
+    { name: 'x.gb', text: 'LOCUS       X 24 bp DNA linear\nORIGIN\n        1 acgtacgtac gtacgtacgt acgt\n//\n' },
+    { name: 'r.fastq', text: '@r1\nACGTACGTACGTACGTACGTACGT\n+\nIIIIIIIIIIIIIIIIIIIIIIII\n' },
+    { name: 'x.fa', text: '>x\nACGTACGTACGTACGTACGTACGT\n' },
+  ]);
+  await expect(page.getByTestId('query-source-0-format-warning')).toHaveText(
+    'This looks like a GenBank flat file. LOSAT reads it as FASTA, so its text becomes sequence. Convert it to FASTA first.',
+  );
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('1 record');
+  await expect(page.getByTestId('query-source-1-format-warning')).toContainText('This looks like a FASTQ file');
+  await expect(page.getByTestId('query-source-2-summary')).toBeVisible();
+  await expect(page.getByTestId('query-source-2-format-warning')).toHaveCount(0);
+  await paste(page, 'subject', 'ID   X56734; SV 1; linear; mRNA; STD; PLN; 24 BP.\nSQ   Sequence 24 BP;\n     acgtacgtac gtacgtacgt acgt 24\n//\n');
+  await expect(page.getByTestId('subject-source-0-format-warning')).toContainText('This looks like an EMBL or UniProt flat file');
+});
+
+test('an input that starts with a byte order mark says why it cannot be read (WA-IN-05)', async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', '\uFEFF>q1\nACGTACGTACGTACGTACGTACGT\n');
+  await expect(page.getByTestId('query-source-0-error')).toContainText("doesn't look like plausible data");
+  await expect(page.getByTestId('query-source-0-mark')).toContainText('The text starts with a byte order mark (U+FEFF).');
+  await page.getByTestId('query-source-0-remove-mark').click();
+  await expect(page.getByTestId('query-input')).toHaveValue('>q1\nACGTACGTACGTACGTACGTACGT\n');
+  await expect(page.getByTestId('query-source-0-summary')).toHaveText('1 record · 24 nt');
+  await expect(page.getByTestId('query-source-0-mark')).toHaveCount(0);
+
+  const utf16le = (text: string) => Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]);
+  const utf16be = (text: string) => Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(text, 'utf16le').swap16()]);
+  await openFiles(page, 'subject', [
+    { name: 'bom.fa', text: Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('>s1\nACGTACGTACGTACGTACGTACGT\n')]) },
+    { name: 'le.fa', text: utf16le('>s2\nACGT\n') },
+    { name: 'be.fa', text: utf16be('>s3\nACGT\n') },
+  ]);
+  await expect(page.getByTestId('subject-source-0-mark')).toHaveText(
+    'The file starts with a UTF-8 byte order mark. Save it as plain text without the mark (UTF-8 or ASCII).',
+  );
+  await expect(page.getByTestId('subject-source-0-remove-mark')).toHaveCount(0);
+  await expect(page.getByTestId('subject-source-1-mark')).toHaveText('The file is UTF-16 text. Save it as plain UTF-8 or ASCII text.');
+  await expect(page.getByTestId('subject-source-2-mark')).toHaveText('The file is UTF-16 text. Save it as plain UTF-8 or ASCII text.');
+});
+
+test('reloading the tab asks first while the form holds inputs, which no later visit restores (WA-IN-06)', async ({ page }) => {
+  const dialogs: string[] = [];
+  page.on('dialog', (dialog) => {
+    dialogs.push(dialog.type());
+    void dialog.accept();
+  });
+  // Browsers ask only on a page that the user has interacted with: the empty form is one.
+  await page.getByTestId('query-input').click();
+  await reload(page);
+  expect(dialogs).toEqual([]);
+  await described(page);
+  await page.getByTestId('query-input').click();
+  await paste(page, 'query', '>q1\nACGTACGTACGTACGTACGTACGT\n');
+  await reload(page);
+  expect(dialogs).toEqual(['beforeunload']);
+  await described(page);
+  await expect(page.getByTestId('query-input')).toHaveValue('');
 });
 
 test('the sequence kind warning is an estimate and does not change the program', async ({ page }) => {

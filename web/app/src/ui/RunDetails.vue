@@ -27,7 +27,7 @@ const inputs = computed(() => [
 
 <template>
   <div class="run-details" data-testid="run-details">
-    <h3>Verification</h3>
+    <h3>Support status</h3>
     <VerificationBadge :badge="loaded.badge" />
 
     <div class="details-grid">
@@ -92,7 +92,6 @@ const inputs = computed(() => [
         outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :text="toShellCommand(snapshot.argv, format)" /></code>
       </li>
     </ul>
-    <p v-for="(line, i) in loaded.badge.exceptions" :key="i" class="notice">{{ line }}</p>
 
     <h3>Warnings</h3>
     <pre v-if="loaded.diagnostics !== ''" class="output" data-testid="run-diagnostics">{{ loaded.diagnostics }}</pre>

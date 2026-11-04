@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "tm_psi_rhy0",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm_psi_rhy0",
+  "number-of-letters": 220,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-04T16:58:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49617,
+  "bytes-to-cache": 326,
+  "files": [
+    "tm_psi_rhy0.pdb",
+    "tm_psi_rhy0.phr",
+    "tm_psi_rhy0.pin",
+    "tm_psi_rhy0.pog",
+    "tm_psi_rhy0.pos",
+    "tm_psi_rhy0.pot",
+    "tm_psi_rhy0.psq",
+    "tm_psi_rhy0.ptf",
+    "tm_psi_rhy0.pto"
+  ]
+}

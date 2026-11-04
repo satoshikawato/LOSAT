@@ -7,7 +7,7 @@ import { ResultsBrowser, type ResultsDeps } from '../../src/application/results'
 import { Store } from '../../src/application/store';
 import { hspTable, out0Range, out6Range, frame, subjectSpan } from '../../src/domain/hsp-table';
 import { headingTitle } from '../../src/domain/outfmt0';
-import { splitOutfmt6Row } from '../../src/domain/outfmt6';
+import { shownScores, splitOutfmt6Row } from '../../src/domain/outfmt6';
 import {
   buildResultIndex,
   filterQuery,
@@ -40,6 +40,8 @@ interface Spec {
   readonly coords: readonly [number, number, number, number];
   readonly shown?: boolean;
   readonly frames?: readonly [number | null, number | null];
+  /** The outfmt 6 texts of the E value and the bit score, where they are not the numbers as JavaScript writes them. */
+  readonly text?: { readonly e?: string; readonly bits?: string };
 }
 
 const SPECS: readonly Spec[] = [
@@ -57,7 +59,7 @@ function makeRun(specs: readonly Spec[] = SPECS) {
   const headings = new Map<string, [number, number]>();
   specs.forEach((spec, index) => {
     const [qs, qe, ss, se] = spec.coords;
-    const row = [`q${spec.q}`, `s${spec.s}`, '99.000', '50', '0', '0', qs, qe, ss, se, String(spec.e), String(spec.bits)].join('\t') + '\n';
+    const row = [`q${spec.q}`, `s${spec.s}`, '99.000', '50', '0', '0', qs, qe, ss, se, spec.text?.e ?? String(spec.e), spec.text?.bits ?? String(spec.bits)].join('\t') + '\n';
     const out6Start = out6.length;
     out6 += row;
     const shown = spec.shown ?? true;
@@ -101,6 +103,31 @@ describe('outfmt 6 rows and outfmt 0 headings', () => {
     const row = splitOutfmt6Row('q1\ts1\t98.684\t76\t1\t0\t1\t76\t1\t76\t2.37e-38\t138\n');
     expect(row).toMatchObject({ qseqid: 'q1', sseqid: 's1', pident: '98.684', evalue: '2.37e-38', bitscore: '138', send: '76' });
     expect(() => splitOutfmt6Row('q1\ts1\t1\n')).toThrow(/12 fields, this one 3/);
+  });
+
+  it('reads the E value and bit score that each row shows, and keeps the record value where there is no row', () => {
+    const rows = ['q\ts\t100.000\t9\t0\t0\t1\t9\t1\t9\t0.0\t400\n', 'q\ts\t99.0\t9\t0\t0\t1\t9\t1\t9\t2e-50\t 45.4\r\n'];
+    const out6 = new TextEncoder().encode(rows.join(''));
+    const record = (index: number, e: number, bits: number, range: readonly [number, number] | null): HspRecord => ({
+      ...{ index, q_idx: 0, s_idx: 0, rank: index, raw_score: 1, bit_score: bits, e_value: e },
+      ...{ q_start: 1, q_end: 9, s_start: 1, s_end: 9, query_frame: null, subject_frame: null, subject_length: 9 },
+      ...{ query_aligned: null, subject_aligned: null, out6: range, out0: null, out0_subject: null },
+    });
+    const table = hspTable([
+      record(0, 3e-200, 400.4, [0, rows[0]!.length]),
+      // A range that ends past the stored output reads what there is.
+      record(1, 2.4e-50, 45.42, [rows[0]!.length, out6.length + 10]),
+      record(2, 0.5, 20.1, null),
+    ]);
+    const scores = shownScores(table, out6);
+    expect([...scores.eValue]).toEqual([0, 2e-50, 0.5]);
+    expect([...scores.bitScore]).toEqual([400, 45.4, 20.1]);
+    // A field that is empty or not a number (the FakeEngine writes FAKE) keeps the record value.
+    const odd = new TextEncoder().encode('q\ts\t1\t9\t0\t0\t1\t9\t1\t9\tFAKE\t\n');
+    const kept = shownScores(hspTable([record(0, 1e-5, 33.3, [0, odd.length])]), odd);
+    expect([...kept.eValue, ...kept.bitScore]).toEqual([1e-5, 33.3]);
+    // The record's values stay as they are.
+    expect([...table.eValue]).toEqual([3e-200, 2.4e-50, 0.5]);
   });
 
   it('takes the title of a subject heading as written', () => {
@@ -301,8 +328,9 @@ describe('verificationBadge', () => {
     expect(badge.level).toBe('certified');
     expect(badge.label).toBe('Supported');
     expect(badge.details.join(' ')).toMatch(/not a comparison of your inputs with NCBI/);
-    // No word of a certification (DW-36): the badge says that the run is supported.
-    expect(`${badge.label} ${badge.details.join(' ')}`).not.toMatch(/certif/i);
+    // No word of a certification or a verification (DW-36; the maintainer, 2026-11-04): the
+    // badge says that the run is supported.
+    expect(`${badge.label} ${badge.details.join(' ')}`).not.toMatch(/verif|certif/i);
   });
 
   it('says why a run is not supported', () => {
@@ -311,9 +339,31 @@ describe('verificationBadge', () => {
     expect(reasons({ argv: ['blastn', '-evalue', '2'] }).details.join(' ')).toMatch(/were not compared with NCBI BLAST\+ 2\.17\.0/);
     expect(reasons({ threads: 3 }).details.join(' ')).toMatch(/used 3 threads; the browser runtime was checked with 1, 2 and 4 threads/);
     expect(reasons({ program: 'tblastx', argv: ['tblastx'] }).details.join(' ')).toMatch(/browser runtime of tblastx was not checked/);
-    expect(reasons({ threads: 3 }).label).toBe('Not supported');
-    expect(reasons({ argv: ['blastn', '-evalue', '2'] }).details.join(' ')).not.toMatch(/certif/i);
+    expect(reasons({ threads: 3 }).label).toBe('Not yet supported');
+    for (const badge of [reasons({ argv: ['blastn', '-evalue', '1'] }), reasons({ argv: ['blastn', '-evalue', '2'] }), reasons({ threads: 3 }), reasons({ runtimePath: 'fake' })]) {
+      expect(`${badge.label} ${badge.details.join(' ')}`).not.toMatch(/verif|certif/i);
+    }
     expect(reasons({ runtimePath: 'fake' }).level).toBe('development');
+  });
+
+  it('supports a thread count only when it was checked in the browser (WA-RS-03)', () => {
+    // Auto picks a count from the user's processors; a count that V-BR did not run is not supported.
+    const level = (change: Partial<BadgeInput>) => verificationBadge({ ...input, ...change }, table).level;
+    expect(level({ threads: 2 })).toBe('certified');
+    expect(level({ runtimePath: 'serial', threads: 1 })).toBe('certified');
+    expect(level({ threads: 3 })).toBe('outside');
+    expect(level({ threads: 8 })).toBe('outside');
+    expect(level({ threads: undefined })).toBe('outside');
+  });
+
+  it('says the thread counts checked as ranges, for the path of the run', () => {
+    const every = Array.from({ length: 32 }, (_, i) => i + 1);
+    const wide: VerificationTable = { ...table, programs: { blastn: { ...table.programs.blastn!, browser: { ...table.programs.blastn!.browser!, threads: every } } } };
+    const details = (change: Partial<BadgeInput>) => verificationBadge({ ...input, ...change }, wide).details.join(' ');
+    expect(details({ threads: 6 })).toMatch(/threaded runtime in the browser was checked against the native engine with 2 to 32 threads in/);
+    expect(details({ runtimePath: 'serial', threads: 1 })).toMatch(/serial runtime in the browser was checked against the native engine with 1 thread in/);
+    expect(details({ threads: 40 })).toMatch(/used 40 threads; the browser runtime was checked with 1 to 32 threads\./);
+    expect(details({ threads: 4 })).not.toMatch(/\b3, 4\b/);
   });
 
   it('names the approved exceptions of a non-default subject genetic code', () => {
@@ -321,6 +371,7 @@ describe('verificationBadge', () => {
     expect(approvedExceptions('tblastx', ['tblastx', '-db_gencode', '11'])).toHaveLength(1);
     expect(approvedExceptions('tblastx', ['tblastx', '-db_gencode', '1'])).toEqual([]);
     expect(approvedExceptions('blastn', ['blastn', '-db_gencode', '4'])).toEqual([]);
+    expect(approvedExceptions('tblastn', ['tblastn', '-db_gencode', '4']).join(' ')).not.toMatch(/verif|certif/i);
   });
 });
 
@@ -347,12 +398,12 @@ function snapshot(runId: string, argv: readonly string[] = ['blastn', '-query', 
   return { runId, number: 1, program: 'blastn', argv, query: input(['q0', 'q1']), subject: input(['s0', 's1', 's2']), requestedThreads: 1, queuedAt: 0 };
 }
 
-function setup(options: { status?: RunView['status']; specs?: readonly Spec[]; argv?: readonly string[]; unreadable?: boolean } = {}) {
+function setup(options: { status?: RunView['status']; specs?: readonly Spec[]; argv?: readonly string[]; unreadable?: boolean; error?: string } = {}) {
   const run = makeRun(options.specs);
   const view: RunView = {
     snapshot: snapshot('r1', options.argv),
     status: options.status ?? 'completed',
-    record: { runtimePath: 'serial', threads: 1, ...(options.status === 'failed' ? { error: 'boom' } : {}) },
+    record: { runtimePath: 'serial', threads: 1, ...(options.status === 'failed' ? { error: options.error ?? 'boom' } : {}) },
   };
   const runs = new Store<AppState>({ runs: [view] });
   const pending: Array<() => void> = [];
@@ -463,6 +514,33 @@ describe('ResultsBrowser', () => {
     expect(detail!.section).toBe(' Score = 70 bits\n\nQuery  5  ACGT  45\n');
   });
 
+  it('filters by the E value and bit score that the lists show: 0.0 is 0, 123 is 123 (WA-RS-01)', async () => {
+    // NCBI writes an E value below 1e-180 as 0.0, and a bit score of 100 or more without decimals.
+    const specs: readonly Spec[] = [
+      { q: 0, s: 0, bits: 400.4, e: 3e-200, coords: [1, 50, 1, 50], text: { e: '0.0', bits: '400' } },
+      { q: 0, s: 1, bits: 122.6, e: 2.4e-50, coords: [1, 50, 1, 50], text: { e: '2e-50', bits: '123' } },
+      { q: 0, s: 2, bits: 40.2, e: 1e-5, coords: [1, 50, 1, 50], text: { e: '1e-05', bits: '40.2' } },
+    ];
+    const { results } = setup({ specs });
+    await results.open('r1');
+    const shown = () => results.state.get().subjects.map((s) => [s.sIdx, s.first.evalue, s.first.bitscore]);
+    results.setFilters({ maxEValue: 0 });
+    expect(shown()).toEqual([[0, '0.0', '400']]);
+    results.setFilters({ maxEValue: 2e-50 });
+    expect(shown()).toEqual([
+      [0, '0.0', '400'],
+      [1, '2e-50', '123'],
+    ]);
+    results.setFilters({ minBitScore: 123 });
+    expect(shown()).toEqual([
+      [0, '0.0', '400'],
+      [1, '2e-50', '123'],
+    ]);
+    results.setFilters({ minBitScore: 400.4 });
+    expect(shown()).toEqual([]);
+    expect(results.state.get().hidden).toEqual({ subjects: 3, hsps: 3 });
+  });
+
   it('keeps the selected HSP through a filter that shows it, and moves off one that hides it', async () => {
     const { results } = setup();
     await results.open('r1');
@@ -533,6 +611,19 @@ describe('ResultsBrowser', () => {
     const failed = setup({ status: 'failed' });
     await failed.results.open('r1');
     expect(failed.results.state.get()).toMatchObject({ phase: 'unavailable', message: 'Run 1 failed: boom. A failed run keeps no results.' });
+
+    // One full stop at the end of the reason, whatever it ends with (WA-RN-02).
+    for (const [error, said] of [
+      ['Earlier results are kept.', 'Earlier results are kept.'],
+      ['BLAST engine error: Warning: Sequence contains no data \n', 'BLAST engine error: Warning: Sequence contains no data.'],
+      ['Is it full?', 'Is it full?'],
+      ['The file (see the log.)', 'The file (see the log.)'],
+      ['', 'no reason was recorded.'],
+    ] as const) {
+      const run = setup({ status: 'failed', error });
+      await run.results.open('r1');
+      expect(run.results.state.get().message).toBe(`Run 1 failed: ${said} A failed run keeps no results.`);
+    }
 
     const running = setup({ status: 'running' });
     await running.results.open('r1');

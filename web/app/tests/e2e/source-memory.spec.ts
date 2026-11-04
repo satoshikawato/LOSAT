@@ -11,7 +11,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { openFiles, openSearch, program } from './support/search';
+import { openSearch, program } from './support/search';
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'the heap is read with the Chrome DevTools Protocol');
 test.setTimeout(600_000);
@@ -100,7 +100,9 @@ test('adding and removing a large source ten times does not make the tab grow', 
   const memory = await memoryProbe(page);
   const rounds: Array<{ round: number; held: Memory; removed: Memory }> = [];
   for (let round = 1; round <= ROUNDS; round++) {
-    await openFiles(page, 'query', [{ name: 'large.fa', text: fasta }]);
+    // Not openFiles: its 30 s wait for the index is too short for this file on a loaded machine.
+    await page.getByTestId('query-files').setInputFiles({ name: 'large.fa', mimeType: 'text/plain', buffer: fasta });
+    await expect(page.getByTestId('query-source-0')).toHaveAttribute('data-status', 'ready', { timeout: 120_000 });
     await expect(page.getByTestId('query-source-0-summary')).toHaveText('100,000 records · 30,000,000 nt');
     await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', 'ok', { timeout: 120_000 });
     const held = await memory();

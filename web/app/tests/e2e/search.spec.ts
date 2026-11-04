@@ -490,6 +490,95 @@ test('empty inputs, every record excluded, a sequence without a defline, and the
   await expect(page.getByTestId('run-losat')).toBeEnabled();
 });
 
+// A mode that reads a role with the other FASTA reader kind reads the source again; coming back to the mode that the
+// source was set up in shows its table as it was left (WA-IN-01).
+test("records left out and a subrange stay through a mode that reads the role with the other kind", async ({ page }) => {
+  await program(page, 'blastn');
+  const records = '>q1\nACGTACGTACGTAAACCCGGGTTT\n>q2\nACGTACGTACGTAAACCCGGGTTA\n>q3\nACGTACGTACGTAAACCCGGGTTC\n';
+  await paste(page, 'query', records);
+  await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await showRecords(page, 'query');
+  await page.getByTestId('query-source-0-record-1').uncheck();
+  await page.getByTestId('query-source-0-record-2').uncheck();
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('(1 included)');
+  await page.getByTestId('query-region-start').fill('2');
+  await page.getByTestId('query-region-stop').fill('12');
+
+  // BLASTP reads the query with the protein flags: another table, with nothing left out.
+  await program(page, 'blastp');
+  await settled(page, 'query');
+  await expect(page.getByTestId('query-source-0-summary')).not.toContainText('included');
+  await program(page, 'blastn');
+  await settled(page, 'query');
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('(1 included)');
+  await showRecords(page, 'query');
+  await expect(page.getByTestId('query-source-0-record-0')).toBeChecked();
+  await expect(page.getByTestId('query-source-0-record-1')).not.toBeChecked();
+  await expect(page.getByTestId('query-source-0-record-2')).not.toBeChecked();
+  await expect(page.getByTestId('query-region-start')).toHaveValue('2');
+  await expect(page.getByTestId('query-region-stop')).toHaveValue('12');
+  // The search takes both: the first record only, with its subrange.
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await expect(page.getByTestId('results-run-options')).toContainText('-query_loc 2-12');
+  expect((await result(page, 1, 6)).command).toBe('losat blastn -query query.fa -subject subject.fa -query_loc 2-12 -outfmt 6');
+});
+
+// An input without a sequence is run as the command line runs it (rc 0 and a warning), and the results say
+// that the query has none, not that the query filters hid it (WA-IN-02).
+test('an empty query runs; its results say that the query has no sequences, with the engine warning', async ({ page }) => {
+  const queries = [
+    ['blastn', '  \n\n', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
+    ['blastp', '', '>s1\nMKVLAAGIVGLLLAQPSTEWMKVLAAGIVGLLL\n'],
+    ['blastx', '\n', '>s1\nMKVLAAGIVGLLLAQPSTEWMKVLAAGIVGLLL\n'],
+    ['tblastn', ' ', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
+    ['tblastx', '\n\n\n', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
+  ] as const;
+  const modes = BUILD_HAS_ENGINE ? queries : queries.slice(0, 1);
+  for (const [index, [id, query, subject]] of modes.entries()) {
+    await program(page, id);
+    if (query === '') {
+      // An empty box has no source: an empty file does.
+      await openFiles(page, 'query', [{ name: 'empty.fa', text: '' }]);
+    } else {
+      await paste(page, 'query', query);
+    }
+    await paste(page, 'subject', subject);
+    await expect(page.locator('[data-testid^="query-source-"][data-status="ready"]').first()).toContainText('0 records');
+    await submit(page);
+    await waitStatus(page, index + 1, 'completed');
+    await pickRun(page, index + 1);
+    const notice = page.locator('[data-testid="results-notice"][data-kind="empty-query"]');
+    await expect(notice).toContainText('The query has no sequences.');
+    await expect(page.locator('[data-testid="results-notice"][data-kind="no-queries"]')).toHaveCount(0);
+    if (BUILD_HAS_ENGINE) await expect(page.getByTestId('results-notice-engine')).toHaveText(/Warning: \[\w+\] Query is Empty!/);
+    await backToSearch(page);
+  }
+});
+
+// The browser can remove the origin's files under an open tab (clearing the site's data). The next run makes the tab's
+// directory again; if it cannot, it says what happened, not the browser's own words (WA-IN-03). WebKit's build of
+// Playwright has no OPFS, and keeps results in memory.
+test("a run after the browser removed the tab's storage still completes", async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', '>q1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  test.skip((await page.getByTestId('storage-status').getAttribute('data-backend')) !== 'opfs', 'this browser keeps results in memory');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  const removed = await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry('tmp', { recursive: true });
+    return true;
+  });
+  expect(removed).toBe(true);
+  await backToSearch(page);
+  await submit(page);
+  await waitStatus(page, 2, 'completed');
+  await pickRun(page, 2);
+  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '2');
+});
+
 test('the sequence kind warning is an estimate and does not change the program', async ({ page }) => {
   await program(page, 'blastp');
   await paste(page, 'query', '>n\nACGTACGTACGTACGTACGTACGTACGTAC\n');

@@ -41,6 +41,32 @@ export class StorageFullError extends Error {
   }
 }
 
+/** The browser took the storage of the tab away (the site's data was cleared) and it could not be made again. */
+export const STORAGE_REMOVED_MESSAGE =
+  "The browser's storage for this tab was removed, probably because the site data was cleared. Reload the page.";
+
+/** A stored block is gone: the browser removed the storage that held it. */
+export const RESULTS_REMOVED_MESSAGE =
+  'The browser removed the stored results of this run, probably because the site data was cleared. Run it again.';
+
+export class StorageRemovedError extends Error {
+  constructor(message = STORAGE_REMOVED_MESSAGE) {
+    super(message);
+    this.name = 'StorageRemovedError';
+  }
+}
+
+/**
+ * True for the browser's errors of a file or directory that is not there any more: NotFoundError
+ * (Chromium for every operation, Firefox for a read) and UnknownError (Firefox, for the creation of an
+ * entry in a directory that was removed).
+ */
+export function isStorageRemoved(error: unknown): boolean {
+  if (error instanceof StorageRemovedError) return true;
+  const name = typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined;
+  return name === 'NotFoundError' || name === 'UnknownError';
+}
+
 /**
  * Results kept in memory (no OPFS) may take at most this many bytes in a tab (S09). Memory
  * is then the only copy of the results, so running out of it would end the tab and lose

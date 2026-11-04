@@ -159,6 +159,82 @@ describe('SearchDraft inputs', () => {
     expect(sourceOf(draft, 'query').base!.records[0]!.length).toBe(4);
   });
 
+  it('keeps the records left out and the region of a source through a mode that reads it with the other kind (WA-IN-01)', async () => {
+    const { draft, data } = setup();
+    const added: string[] = [];
+    const indexed: string[] = [];
+    const addSource = data.addSource.bind(data);
+    const indexSource = data.indexSource.bind(data);
+    data.addSource = async (f) => {
+      added.push(f.name);
+      return addSource(f);
+    };
+    data.indexSource = async (sourceId, parser) => {
+      indexed.push(`${sourceId}|${parser}`);
+      return indexSource(sourceId, parser);
+    };
+    draft.setPaste('query', '>a\nACGTACGTAC\n>b\nACGTACGTAC\n>c\nACGTACGTAC\n');
+    draft.addFiles('subject', [file('s.fa', '>s1\nACGTACGTACGTACGT\n>s2\nACGTACGTAC\n')]);
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [1], false);
+    draft.setIncluded('query', 'paste', [2], false);
+    await draft.idle();
+    draft.setRegion('query', { start: '2', stop: '8' });
+    draft.setIncluded('subject', sourceOf(draft, 'subject').key, [1], false);
+    await draft.idle();
+    const revision = sourceOf(draft, 'query').base!.revisionId;
+    expect(draft.parameters()).toEqual([['-query_loc', '2-8']]);
+    const readOnce = indexed.length;
+
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 2, excluded: [] });
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', parser: 2, excluded: [] });
+    // The other kind's table is not the region's record.
+    expect(draft.region('query')).toBeUndefined();
+
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 1, excluded: [1, 2] });
+    expect(sourceOf(draft, 'query').base!.revisionId).toBe(revision);
+    expect(sourceOf(draft, 'query').check).toEqual({ state: 'ok', records: 1 });
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', parser: 1, excluded: [1] });
+    expect(draft.region('query')).toEqual({ start: '2', stop: '8' });
+    expect(draft.parameters()).toEqual([['-query_loc', '2-8']]);
+    // Each source is added once and read once for each kind: the way back reads nothing.
+    expect([...added].sort()).toEqual(['query.fa', 's.fa']);
+    expect(indexed.length).toBe(readOnce + 2);
+
+    draft.setProgram('blastp');
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(indexed.length).toBe(readOnce + 2);
+    expect(sourceOf(draft, 'query').excluded).toEqual([1, 2]);
+  });
+
+  it('keeps the exclusions of each kind apart, and ignores a read of a kind that was left meanwhile', async () => {
+    const { draft } = setup();
+    draft.setPaste('query', '>a\nMKLV\n>b\nMKLV\n>c\nMKLV\n');
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [0], false);
+    draft.setProgram('blastp');
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [2], false);
+    await draft.idle();
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').excluded).toEqual([0]);
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').excluded).toEqual([2]);
+    // Back before the read of the other kind has ended: its table must not replace the kept one.
+    draft.setProgram('blastn');
+    draft.setProgram('blastp');
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 1, excluded: [0] });
+  });
+
   it('reads a text pasted just before a program change once, with the new kind', async () => {
     const { draft, data } = setup();
     const kinds: number[] = [];

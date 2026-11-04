@@ -19,12 +19,20 @@ const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.arg
 const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
 /** Outfmt 0's own search failed: stream 0 is empty next to the tabular records (its error is in the diagnostics). */
 const outfmt0Failed = computed(() => props.state.loaded?.outfmt0Failed === true);
+/** The run searched no query sequence at all (an empty input), which no query filter explains. */
+const queryEmpty = computed(() => props.state.loaded?.run.snapshot.query.records.length === 0);
+/** What the engine wrote to the warnings (BLAST+'s "Query is Empty!"), as it wrote it. */
+const engineWarnings = computed(() => props.state.loaded?.diagnostics.trim() ?? '');
 const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(count)} ${count === 1 ? one : many}`;
 </script>
 
 <template>
   <div class="result-notices" aria-live="polite">
-    <p v-if="limit === 0" class="notice" data-testid="results-notice" data-kind="no-tabular-hits">
+    <div v-if="queryEmpty" class="notice" data-testid="results-notice" data-kind="empty-query">
+      <p>The query has no sequences.</p>
+      <pre v-if="engineWarnings !== ''" class="output" data-testid="results-notice-engine">{{ engineWarnings }}</pre>
+    </div>
+    <p v-else-if="limit === 0" class="notice" data-testid="results-notice" data-kind="no-tabular-hits">
       <span class="option-name">-num_alignments</span> 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved" error,
       in the diagnostics), so this run has no HSP records; outfmt 0 is written as BLAST+ writes it.
     </p>

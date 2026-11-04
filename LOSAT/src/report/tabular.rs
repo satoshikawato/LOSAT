@@ -511,9 +511,11 @@ impl TabularSpec {
     /// taxonomy, titles and strand, and the alignment's letters, also for the identities unless
     /// the formatter does not fetch sequences (BLASTN's, blast_format.cpp:791-792); in BLASTX,
     /// TBLASTN and TBLASTX, whose alignments are Std-segs, also the subject's frame (`sframe`,
-    /// `frames`) where a field of the alignment's coordinates is asked for (the other fields of
-    /// that block fetch on their own). `slen` is read without the Bioseq
-    /// (`sequence::GetLength`).
+    /// `frames`) where a field that enters that block is asked for (a coordinate, `length`,
+    /// `gaps`, `gapopen` or `qframe`; the block's other fields fetch on their own). `slen` is read
+    /// without the Bioseq (`sequence::GetLength`). NCBI enters the block for `nident` alone only
+    /// on a row with identities, which this per-report answer does not see (PD-LOSAT-DATABASE-SEARCH,
+    /// known differences).
     pub fn fetches_subject(&self, program: crate::blastinput::app::Program) -> bool {
         use crate::blastinput::app::Program;
         let no_fetch = program == Program::Blastn;

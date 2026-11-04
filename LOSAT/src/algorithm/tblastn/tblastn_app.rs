@@ -1655,7 +1655,8 @@ fn search(
                 };
                 for span in &batch_spans {
                     let hitlists = &results[span.clone()];
-                    // The batch's Seq-aligns, one for each HSP (TBLASTN's search is gapped).
+                    // The batch's Seq-aligns, one for each HSP: TBLASTN's search is gapped (LOSAT
+                    // refuses `-ungapped`, whose Seq-aligns are one per subject).
                     let seq_aligns: usize = hitlists
                         .iter()
                         .flat_map(super::stage_d_results::KappaResultHitList::lists)

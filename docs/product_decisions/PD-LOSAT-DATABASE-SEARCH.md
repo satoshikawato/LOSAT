@@ -655,6 +655,11 @@ Known differences that remain:
 - With `PRE_FETCH_SEQS_LIMIT=2147483647`, NCBI's prefetch also runs for outfmt 8, 9 and 12 (its
   `s_PreFetchSeqs` returns before it tests the format) and writes the taxonomy database's messages;
   LOSAT writes none for these formats (all five programs).
+- With `PRE_FETCH_SEQS_LIMIT` turning NCBI's prefetch off, a tabular report whose only field of the
+  alignment block is `nident` (such as `6 qseqid nident`) reads a subject in NCBI only for a row with
+  at least one identity (tabular.cpp:904); LOSAT's BLASTP, PSIBLAST, TBLASTN, BLASTX and TBLASTX look
+  the subject up for every row, so a subject whose shown HSPs have no identity (possible with a low
+  `-threshold`) can get a taxonomy database message that NCBI does not write.
 
 ## Evidence
 

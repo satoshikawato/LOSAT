@@ -3535,13 +3535,9 @@ fn run_batch_loop(
                     let asks =
                         fetches || !crate::algorithm::common::database::prefetch_always_off();
                     for query in 0..(end - start) as u32 {
-                        let shown = if fetches {
-                            let from = ordered.partition_point(|hsp| hsp.hit.q_idx < query);
-                            let to = ordered.partition_point(|hsp| hsp.hit.q_idx <= query);
-                            &ordered[from..to]
-                        } else {
-                            &[]
-                        };
+                        let from = ordered.partition_point(|hsp| hsp.hit.q_idx < query);
+                        let to = ordered.partition_point(|hsp| hsp.hit.q_idx <= query);
+                        let shown = if fetches { &ordered[from..to] } else { &[] };
                         query_fetches.push(if asks {
                             super::super::database::prefetch_messages(
                                 database,
@@ -3551,7 +3547,7 @@ fn run_batch_loop(
                         } else {
                             Vec::new()
                         });
-                        if plural_names && ordered.iter().any(|hsp| hsp.hit.q_idx == query) {
+                        if plural_names && from < to {
                             database.open_for_tabular_rows()?;
                         }
                     }

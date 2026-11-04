@@ -559,6 +559,27 @@ Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTD
   of 150, as often as its order of fetches makes it (twice for the row's query, once for the same query with a version 4
   database or an absolute `BLASTDB`); LOSAT refuses the run. `tm_cache151` (151 instead of 150) is the control: once.
 
+Rows `db.tm.psi.*` and `db.tm.bp.off0.*` (line DBID, item P1): psiblast's prefetch, and `PRE_FETCH_SEQS_LIMIT`, which turns
+NCBI's prefetch of a query batch off when it is 0 or below the batch's number of Seq-aligns (one per HSP; the count of
+outfmt 7's `# N hits found`): its formatters then fetch the subjects each query's report shows, after the query's own
+warnings.
+
+- `tm_psi.faa` and `tm_psi.map`: eight proteins `gb|PTX00001.1|` to `gb|PTX00008.1|` (written by the line's probe script,
+  kept outside the repository), six of them copies of `q1` with more and more letters changed, with the taxids
+  9606, 10090, 99990, 562, 7777 and none, and two of `q2` (99990, 9606). With `-max_target_seqs 1` psiblast's traceback
+  hit list of `q1` still holds `PTX00003.1` (99990), whose lookup writes the offset error of `offset_last_past_end`.
+- `tm_psi_q.faa` (`q1`, `q2`, `q3` with weak hits only), `tm_psi_q1.faa` (`q1`), `tm_psi_qw.faa` (`q1` with an `O`
+  first, a warning of its own, then `q2` and `q1`), `tm_psi_qb.faa` (`q3`, then `q1`; `psiblast_taxdb_blocks.rs`).
+- The databases (version 5, every file makeblastdb writes; `tm_psi_u.faa` is `tm_psi.faa` with the titles
+  `subject PTX0000N.1`):
+
+      makeblastdb -in tm_psi.faa -dbtype prot -parse_seqids -taxid_map tm_psi.map -blastdb_version 5 \
+          -title "tm psi" -out tm_psi
+      makeblastdb -in tm_psi_u.faa -dbtype prot -taxid 9606 -blastdb_version 5 -title "tm psi u" -out tm_psi_u
+
+  `tm_psi_u`, without parsed Seq-ids, is searched in blocks of query batches (`LOSAT_X_BPQBLOCK`) by
+  `tests/psiblast_taxdb_blocks.rs`.
+
 ## Taxid filtering (DI-8a)
 
 Rows `db.tf.*`: `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and `-no_taxid_expansion` with `-db`, five

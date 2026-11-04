@@ -19,7 +19,8 @@
   listed as refusals wider than NCBI's failure, and refused the tabular id that NCBI takes from
   a nucleotide title made from the tax ids, and line DBID H3 refused the outfmt 0 of an empty
   title whose tax id the taxonomy database names in a database without parsed Seq-ids, which
-  LOSAT wrote without the organism)
+  LOSAT wrote without the organism, and line DBID P1 wrote psiblast's messages of the taxonomy
+  database's prefetch, which version 1.3 listed as a known difference)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -647,7 +648,10 @@ Known differences that remain:
     on the copy, also where the bytes do not change (the copy with a tax id fetched first, which
     makes the same first lookup).
 - A damaged LMDB file can stop NCBI and LOSAT with other exit statuses and texts.
-- `psiblast` does not write NCBI's taxdb prefetch messages for a damaged `taxdb`.
+- With `PRE_FETCH_SEQS_LIMIT` turning NCBI's prefetch of a query batch off (0, or below the batch's
+  number of alignments), BLASTN, TBLASTN, BLASTX and TBLASTX write the taxonomy database's messages
+  before the warnings of the batch's queries; NCBI writes them after the warnings of the query whose
+  report fetches the subject (BLASTP and PSIBLAST write them there).
 
 ## Evidence
 

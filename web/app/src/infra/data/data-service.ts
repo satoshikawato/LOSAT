@@ -25,6 +25,7 @@ import type {
   RunInput,
   SourceRef,
   StorageInfo,
+  StoredResultsCheck,
 } from '../../ports/data';
 import type { HspRecord } from '../../ports/engine';
 import type { InputCheck, InputChecker } from '../../ports/input-check';
@@ -32,7 +33,7 @@ import { DIAGNOSTICS_STREAM, HITS_STREAM, OUTPUT_STREAMS, type OutputStream } fr
 import type { RecordScanner } from '../../ports/scan';
 import { RunOutputReceiver } from '../run-output/receiver';
 import { concatBytes } from '../bytes';
-import { asStorageFull, isStorageFull, type BlockStore, type BlockWriter } from './block-store';
+import { asStorageFull, isStorageFull, isStorageRemoved, type BlockStore, type BlockWriter } from './block-store';
 import { compressionOfName, inflateFile, refusedCompressionOfName } from './inflate';
 
 export interface DataServiceDeps {
@@ -64,6 +65,12 @@ const LF = 0x0a;
 const NEWLINE = new Uint8Array([LF]);
 
 type Lengths = Record<OutputStream, number>;
+
+/** What `checkStoredResults` found for a run. */
+type StoredOutcome = 'kept' | 'removed' | 'unreadable';
+
+/** How many reads `checkStoredResults` makes at a time. */
+export const STORED_CHECK_READS = 16;
 
 interface StagedRun {
   readonly state: 'staged';
@@ -278,6 +285,37 @@ export class DataService implements DataGateway {
   async deleteRun(runId: string): Promise<void> {
     const run = this.runs.get(runId);
     if (run !== undefined) await this.drop(runId, run);
+  }
+
+  async checkStoredResults(): Promise<StoredResultsCheck> {
+    const runs = [...this.runs];
+    const outcomes: StoredOutcome[] = runs.map(() => 'kept');
+    let next = 0;
+    // At most STORED_CHECK_READS reads at a time, so that hundreds of runs do not flood the browser with requests.
+    const reader = async () => {
+      for (let i = next++; i < runs.length; i = next++) outcomes[i] = await this.checkStored(...runs[i]!);
+    };
+    await Promise.all(Array.from({ length: Math.min(STORED_CHECK_READS, runs.length) }, reader));
+    const of = (outcome: StoredOutcome) => runs.filter((_, i) => outcomes[i] === outcome).map(([runId]) => runId);
+    return { removed: of('removed'), unreadable: of('unreadable') };
+  }
+
+  /**
+   * Opens the HSP records of a committed run, the first block that opening its results asks for, and reads its
+   * first byte (none of an empty block). The other blocks of the run are in the same directory, which the
+   * application removes only as a whole.
+   */
+  private async checkStored(runId: string, run: StagedRun | CommittedRun): Promise<StoredOutcome> {
+    if (run.state !== 'committed') return 'kept';
+    let failure: { readonly error: unknown } | undefined;
+    try {
+      await this.deps.store.read(blockPath(run.token, HITS_STREAM), 0, Math.min(1, run.lengths[HITS_STREAM]));
+    } catch (error) {
+      failure = { error };
+    }
+    // A run deleted while it was checked is not reported.
+    if (failure === undefined || this.runs.get(runId) !== run) return 'kept';
+    return isStorageRemoved(failure.error) ? 'removed' : 'unreadable';
   }
 
   async storageInfo(): Promise<StorageInfo> {

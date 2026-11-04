@@ -4,6 +4,7 @@ use super::{
 };
 use crate::algorithm::blastp::extension::{extend_one_hit_blosum62, extend_two_hit_blosum62};
 use crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject_one_range;
+use crate::algorithm::tblastx::blast_aascan::x_blast_aa_scan_subject_cells;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
@@ -14,7 +15,7 @@ use crate::algorithm::tblastx::lookup::compressed::{
     x_compressed_scaled_threshold, BlastCompressedAaLookupTable,
 };
 use crate::algorithm::tblastx::lookup::{
-    build_ncbi_lookup_from_prepared, BlastAaLookupTable, QueryContext,
+    build_ncbi_lookup_from_prepared, BackboneCell16, BlastAaLookupTable, QueryContext, XBxTable,
 };
 use anyhow::{ensure, Result};
 
@@ -312,6 +313,96 @@ impl Drop for Lookup {
     }
 }
 
+// No NCBI counterpart: the BLASTX lookup table of a query batch, either width of the standard
+// table's hits. `Wide` is `Lookup` as before 16-bit hits (the table of `Int4` hits as NCBI's, or the
+// compressed table), which the direct loop and its scans read. `Narrow` is the standard table with
+// its hits stored in 16 bits (tblastx/lookup/backbone.rs `BackboneCell16`), built where the fused
+// loop scans the table (`x_seed_diag::x_narrow_cutoff`: the query batch fits 16 bits and the table
+// has at least LOSAT_X_BXDIAGMIN hits per used cell). It is a type of its own, so that no loop of
+// `Int4` hits can be given one: the fused loop is generic over the table's cell and scans either,
+// and the reference scan reads either.
+pub enum BxLookup {
+    Wide(Lookup),
+    Narrow(NarrowLookup),
+}
+
+/// The standard lookup table with 16-bit hits and its companion (`XKeptPresence`: the build
+/// number, the context table, whether the table goes back to the pool); see [`BxLookup`].
+pub struct NarrowLookup {
+    pub(crate) table: BlastAaLookupTable<BackboneCell16>,
+    pub(crate) kept: x_seed_scan::XKeptPresence,
+}
+
+impl BxLookup {
+    /// [`Lookup::x_new_as`] with the cutoff of the search's options (`x_seed_diag::x_narrow_cutoff`).
+    pub(crate) fn x_new_in_parts(
+        batch: &PreparedQueryBatch,
+        parameters: &[ContextParameters],
+        options: &ResolvedOptions,
+        parts: usize,
+    ) -> Result<Self> {
+        Lookup::x_new_as(
+            batch,
+            parameters,
+            options,
+            parts,
+            x_seed_diag::x_narrow_cutoff(options),
+        )
+    }
+}
+
+// No NCBI counterpart: buffer reuse only (as the drop of `Lookup`): the vectors of a table of
+// 16-bit hits go back to the pool when the table was built pooled and no panic unwinds.
+impl Drop for NarrowLookup {
+    fn drop(&mut self) {
+        if self.kept.pooled && !std::thread::panicking() {
+            crate::algorithm::tblastx::lookup::x_give_back_pooled16(&mut self.table);
+        }
+    }
+}
+
+impl NarrowLookup {
+    /// [`Lookup::scan`] for the table of 16-bit hits (the reference scan); `ranges` are the scan
+    /// ranges of a `-subject` with lower-case letters (`x_soft_subject.rs`), or the whole subject
+    /// (`None`).
+    pub(super) fn x_scan(
+        &self,
+        subject: &[u8],
+        length: usize,
+        ranges: Option<&[(i32, i32)]>,
+        window: i32,
+        mut visit: impl FnMut(&[(i32, i32)]),
+    ) {
+        let word = self.table.word_length;
+        let whole = [(0, length as i32)];
+        let ranges = ranges.unwrap_or(&whole);
+        let mut range = [0, ranges[0].0, ranges[0].1 - word];
+        if window > 0 && range[2] < range[1] {
+            range[2] = range[1];
+        }
+        let mut pad = Vec::new();
+        let subject = x_scan_bytes(subject, range[2], word, &mut pad);
+        let mut pairs = vec![OffsetPair::default(); 4096 + self.table.longest_chain as usize];
+        let capacity = pairs.len() as i32;
+        let mut seeds = Vec::new();
+        while range[1] <= range[2] {
+            seeds.clear();
+            let n = x_blast_aa_scan_subject_cells(
+                &self.table,
+                subject,
+                ranges,
+                &mut pairs,
+                capacity,
+                &mut range,
+            );
+            for pair in &pairs[..n as usize] {
+                seeds.push((pair.q_off as i32, pair.s_off as i32));
+            }
+            visit(&seeds);
+        }
+    }
+}
+
 // No NCBI counterpart: buffer reuse only (LOSAT_X_BXCLUTPOOL, tblastx/lookup/x_clut_direct.rs): a
 // dropped flat table's vectors are kept for the next build. Not inlined, so that a standard table's
 // drop keeps its code.
@@ -434,21 +525,28 @@ impl Lookup {
         parameters: &[ContextParameters],
         options: &ResolvedOptions,
     ) -> Result<Self> {
-        Self::x_new_in_parts(batch, parameters, options, 1)
+        match Self::x_new_as(batch, parameters, options, 1, None)? {
+            BxLookup::Wide(lookup) => Ok(lookup),
+            BxLookup::Narrow(_) => unreachable!("a build without a cutoff takes Int4 hits"),
+        }
     }
 
     /// EXPERIMENT (LOSAT_X_BXBUILDPAR): [`Lookup::new`] with a pooled standard table's passes on
     /// `parts` tasks of the pool it runs on (`tblastx/lookup/x_lut_direct.rs`
-    /// `x_partitioned_passes`); the table is the same.
-    pub(crate) fn x_new_in_parts(
+    /// `x_partitioned_passes`); the table is the same. The standard table takes 16-bit hits (a
+    /// [`NarrowLookup`]) where the lookup query fits and its hits per used cell, in hundredths,
+    /// reach `narrow_cutoff` (`None`: never).
+    pub(crate) fn x_new_as(
         batch: &PreparedQueryBatch,
         parameters: &[ContextParameters],
         options: &ResolvedOptions,
         parts: usize,
-    ) -> Result<Self> {
+        narrow_cutoff: Option<u64>,
+    ) -> Result<BxLookup> {
         let query = batch.sequence_start[1..].to_vec();
         if options.word_size == 5 {
-            return x_compressed_lookup(&query, &batch.lookup_segments, options.threshold);
+            return x_compressed_lookup(&query, &batch.lookup_segments, options.threshold)
+                .map(BxLookup::Wide);
         }
         ensure!(
             options.word_size == 3,
@@ -482,8 +580,9 @@ impl Lookup {
         let pooled = crate::algorithm::tblastx::lookup::x_bx_pooled_for(
             usize::try_from(options.num_threads).unwrap_or(1),
         );
-        Ok(Self::Standard(
-            build_ncbi_lookup_from_prepared(
+        let kept = x_seed_scan::XKeptPresence::x_built(pooled);
+        Ok(
+            match build_ncbi_lookup_from_prepared(
                 query,
                 batch.lookup_segments.clone(),
                 contexts,
@@ -492,9 +591,12 @@ impl Lookup {
                 crate::core::blast_util::ncbi_int4_from_double(options.threshold),
                 pooled,
                 parts,
-            ),
-            x_seed_scan::XKeptPresence::x_built(pooled),
-        ))
+                narrow_cutoff,
+            ) {
+                XBxTable::Wide(table) => BxLookup::Wide(Self::Standard(table, kept)),
+                XBxTable::Narrow(table) => BxLookup::Narrow(NarrowLookup { table, kept }),
+            },
+        )
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
     // ```c++
@@ -812,21 +914,82 @@ pub fn word_finder(
     trace: impl FnMut(&[(i32, i32)]),
 ) -> Result<Vec<InitHsp>> {
     word_finder_over(
-        batch, parameters, options, subject, lookup, diagonals, None, trace,
+        batch,
+        parameters,
+        options,
+        subject,
+        |each| {
+            lookup.scan(
+                subject,
+                subject.len().saturating_sub(1),
+                options.window_size,
+                each,
+            )
+        },
+        diagonals,
+        trace,
     )
 }
 
-/// [`word_finder`] over `ranges`, the scan ranges of a `-subject` with lower-case letters
-/// (`-lcase_masking`, `x_soft_subject.rs`), or over the whole subject (`None`).
-#[allow(clippy::too_many_arguments)]
+/// [`word_finder`] for a lookup table of either width ([`BxLookup`]).
+pub(super) fn word_finder_bx(
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    trace: impl FnMut(&[(i32, i32)]),
+) -> Result<Vec<InitHsp>> {
+    match lookup {
+        BxLookup::Wide(lookup) => word_finder(
+            batch, parameters, options, subject, lookup, diagonals, trace,
+        ),
+        BxLookup::Narrow(lookup) => word_finder_narrow(
+            batch, parameters, options, subject, lookup, diagonals, trace,
+        ),
+    }
+}
+
+/// [`word_finder`] for the table of 16-bit hits.
+pub(super) fn word_finder_narrow(
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &NarrowLookup,
+    diagonals: &mut Diagonals,
+    trace: impl FnMut(&[(i32, i32)]),
+) -> Result<Vec<InitHsp>> {
+    word_finder_over(
+        batch,
+        parameters,
+        options,
+        subject,
+        |each| {
+            lookup.x_scan(
+                subject,
+                subject.len().saturating_sub(1),
+                None,
+                options.window_size,
+                each,
+            )
+        },
+        diagonals,
+        trace,
+    )
+}
+
+/// [`word_finder`] with the scan of the subject given as `scan`, which calls its argument with each
+/// batch of the scanner's pairs: the whole subject (`Lookup::scan`), or the scan ranges of a
+/// `-subject` with lower-case letters (`-lcase_masking`, `x_soft_subject.rs`).
 pub(super) fn word_finder_over(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
-    lookup: &Lookup,
+    scan: impl FnOnce(&mut dyn FnMut(&[(i32, i32)])),
     diagonals: &mut Diagonals,
-    ranges: Option<&[(i32, i32)]>,
     mut trace: impl FnMut(&[(i32, i32)]),
 ) -> Result<Vec<InitHsp>> {
     let query = &batch.sequence_start[1..];
@@ -936,17 +1099,7 @@ pub(super) fn word_finder_over(
             }
         }
     };
-    match ranges {
-        None => lookup.scan(
-            subject,
-            subject.len().saturating_sub(1),
-            options.window_size,
-            &mut each,
-        ),
-        Some(ranges) => {
-            super::x_soft_subject::x_scan(lookup, subject, ranges, options.window_size, &mut each)
-        }
-    }
+    scan(&mut each);
     diagonals.finish_subject(subject.len().saturating_sub(1))?;
     hits.sort_by(|a, b| {
         b.score

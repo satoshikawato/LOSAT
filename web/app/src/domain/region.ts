@@ -36,6 +36,19 @@ export function regionProblem(region: RegionText, length: number): string | unde
   return undefined;
 }
 
+/**
+ * The region with its start and stop swapped, when that is all that keeps it from being one: both
+ * positions within the record and the start after the stop. A reversed range is not a strand
+ * (-strand chooses that), so the form offers the swap rather than reading it as one.
+ */
+export function swappedRegion(region: RegionText, length: number): RegionText | undefined {
+  const start = region.start.trim();
+  const stop = region.stop.trim();
+  if (!DIGITS.test(start) || !DIGITS.test(stop) || Number(start) <= Number(stop)) return undefined;
+  const swapped = { start: String(Number(stop)), stop: String(Number(start)) };
+  return regionProblem(swapped, length) === undefined ? swapped : undefined;
+}
+
 /** The option's value, `start-stop`, without white space or leading zeros. */
 export function regionValue(region: RegionText): string {
   return `${Number(region.start.trim())}-${Number(region.stop.trim())}`;

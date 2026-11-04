@@ -1212,6 +1212,12 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
             .fold(PrintedIds::default(), |words, format| {
                 words.or(PrintedIds::of(format.tabular_spec()))
             }),
+        prefetched: shared::seq_annots_prefetch(
+            output_formats
+                .first()
+                .and_then(|format| format.serial())
+                .map(|serial| serial.outfmt()),
+        ),
     }
 }
 
@@ -1283,6 +1289,20 @@ pub(super) fn reported_subjects(
         .collect();
     ordinals.sort_unstable();
     ordinals.dedup();
+    // Where only the batches' prefetch reads the subjects (`shown.prefetched`), those with an HSP
+    // on the query's minus strand, whose Seq-align is on the subject's plus strand
+    // (`shared::check_prefetched_strands`).
+    let flipped: std::collections::HashSet<u32> = if shown.prefetched {
+        hit_lists
+            .iter()
+            .flatten()
+            .flat_map(|hit_list| hit_list.hsplist_array.iter())
+            .filter(|hsp_list| hsp_list.hsps.iter().any(|hsp| hsp.query_frame < 0))
+            .map(|hsp_list| hsp_list.oid)
+            .collect()
+    } else {
+        Default::default()
+    };
     let rank = |ordinal: u32| -> u32 {
         ordinals
             .binary_search(&ordinal)
@@ -1317,7 +1337,14 @@ pub(super) fn reported_subjects(
             }
             ReportedHeader::Parsed(subject) => {
                 let taxdb = shown.pairwise && *taxdb_found.get_or_init(|| db.taxdb_found());
-                shared::check_reported_parsed(subject, shown, false, taxdb, ordinal, PROGRAM)?;
+                shared::check_reported_parsed(db, subject, shown, false, taxdb, ordinal, PROGRAM)?;
+                shared::check_prefetched_strands(
+                    db,
+                    subject,
+                    flipped.contains(&ordinal),
+                    ordinal,
+                    PROGRAM,
+                )?;
                 (subject.first_title().to_vec(), Some(Arc::clone(subject)))
             }
         };

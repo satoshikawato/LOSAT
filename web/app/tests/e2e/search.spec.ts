@@ -305,9 +305,7 @@ test('the region of a role with one record: the drag, the fields, the limits and
   );
   // A range of one letter and a start after the stop are NCBI's errors in every mode; the fields say so (WA-IN-07).
   await page.getByTestId('subject-region-stop').fill('5');
-  await expect(page.getByTestId('subject-region-problem')).toHaveText(
-    'The range cannot be empty: the stop must be larger than the start.',
-  );
+  await expect(page.getByTestId('subject-region-problem')).toHaveText('The stop must be larger than the start.');
   await page.getByTestId('subject-region-start').fill('60');
   await expect(page.getByTestId('subject-region-problem')).toHaveText('The start cannot be larger than the stop.');
   await submit(page);
@@ -648,7 +646,7 @@ test('a GenBank, EMBL or FASTQ file is read as FASTA text, as the command line d
     { name: 'x.fa', text: '>x\nACGTACGTACGTACGTACGTACGT\n' },
   ]);
   await expect(page.getByTestId('query-source-0-format-warning')).toHaveText(
-    'This looks like a GenBank flat file, which LOSAT reads as FASTA. Convert it to FASTA and use that instead.',
+    'This looks like a GenBank flat file. LOSAT reads it as FASTA, so its text becomes sequence. Convert it to FASTA first.',
   );
   await expect(page.getByTestId('query-source-0-summary')).toContainText('1 record');
   await expect(page.getByTestId('query-source-1-format-warning')).toContainText('This looks like a FASTQ file');
@@ -689,12 +687,13 @@ test('reloading the tab asks first while the form holds inputs, which no later v
     dialogs.push(dialog.type());
     void dialog.accept();
   });
+  // Browsers ask only on a page that the user has interacted with: the empty form is one.
+  await page.getByTestId('query-input').click();
   await reload(page);
   expect(dialogs).toEqual([]);
   await described(page);
-  await paste(page, 'query', '>q1\nACGTACGTACGTACGTACGTACGT\n');
-  // Browsers ask only on a page that the user has interacted with.
   await page.getByTestId('query-input').click();
+  await paste(page, 'query', '>q1\nACGTACGTACGTACGTACGTACGT\n');
   await reload(page);
   expect(dialogs).toEqual(['beforeunload']);
   await described(page);

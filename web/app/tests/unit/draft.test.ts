@@ -140,6 +140,13 @@ describe('SearchDraft inputs', () => {
     expect(sourceOf(draft, 'query')).toMatchObject({ parser: 1, status: 'ready', lead: { format: 'GenBank' } });
   });
 
+  it('names the format of a compressed file from its inflated bytes', async () => {
+    const { draft } = setup();
+    draft.addFiles('query', [new File([gzipSync('LOCUS       X 8 bp DNA\nORIGIN\n        1 acgtacgt\n//\n')], 'x.gb.gz')]);
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ name: 'x.gb', status: 'ready', lead: { format: 'GenBank' } });
+  });
+
   it('shows the engine refusal of a record and maps it to the record table; excluding it passes the check', async () => {
     const { draft } = setup();
     draft.setPaste('query', '>a\nACGT\n>b\nACGT!ACGT\n>c\nACGT\n');

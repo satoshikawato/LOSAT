@@ -9,11 +9,11 @@ describe('inputLead', () => {
     ['UTF-16', [0xff, 0xfe, 0x3e, 0x00]],
     ['UTF-16', [0xfe, 0xff, 0x00, 0x3e]],
   ] as const)('names a %s byte order mark', (mark, lead) => {
-    expect(inputLead(new Uint8Array(lead))).toEqual({ mark });
+    expect(inputLead(new Uint8Array(lead), true)).toEqual({ mark });
   });
 
   it('names the mark of a pasted text that starts with U+FEFF', () => {
-    expect(inputLead(bytes('﻿>q\nACGT\n'))).toEqual({ mark: 'UTF-8' });
+    expect(inputLead(bytes('\uFEFF>q\nACGT\n'), true)).toEqual({ mark: 'UTF-8' });
   });
 
   it.each([
@@ -23,10 +23,17 @@ describe('inputLead', () => {
     ['EMBL', 'ID   INS_HUMAN               Reviewed;         110 AA.\n'],
     ['FASTQ', '@r1 extra\nACGTN\n+\nIIII#\n@r2\nAC\n+r2\nII\n'],
     ['FASTQ', '@r1\r\nACGT\r\n+\r\nIIII\r\n'],
-    // A long read whose sequence line runs past the preview.
-    ['FASTQ', `@read/1\n${'ACGT'.repeat(600)}`],
   ] as const)('names a %s file', (format, text) => {
-    expect(inputLead(bytes(text))).toEqual({ format });
+    expect(inputLead(bytes(text), true)).toEqual({ format });
+  });
+
+  it('names a FASTQ file whose preview ends before the third line, but not a whole input of two lines', () => {
+    // A long read whose sequence line runs past the preview, and a preview that ends after the sequence line.
+    expect(inputLead(bytes(`@read/1\n${'ACGT'.repeat(600)}`), false)).toEqual({ format: 'FASTQ' });
+    expect(inputLead(bytes('@r1\nACGT\n'), false)).toEqual({ format: 'FASTQ' });
+    expect(inputLead(bytes('@r1\nACGT\n'), true)).toBeUndefined();
+    expect(inputLead(bytes('@r1\nACGT'), true)).toBeUndefined();
+    expect(inputLead(bytes('@r1'), false)).toBeUndefined();
   });
 
   it.each([
@@ -40,6 +47,6 @@ describe('inputLead', () => {
     ['@ with a third line that is not +', '@r1\nACGT\nACGT\n'],
     ['@ with a second line that is not a sequence', '@r1 x\n12 34\n+\n'],
   ])('names nothing for %s', (_, text) => {
-    expect(inputLead(bytes(text))).toBeUndefined();
+    expect(inputLead(bytes(text), true)).toBeUndefined();
   });
 });

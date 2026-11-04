@@ -30,10 +30,14 @@ const otherKind = computed(
 const otherKindName = computed(() => (kind.value === 'nucleotide' ? 'protein' : 'nucleotide'));
 const programLabel = computed(() => programById(props.state.program).label);
 const title = computed(() => (props.source.origin === 'paste' ? `Pasted sequences (${props.source.name})` : props.source.name));
-/** A pasted text that does not start with a defline and cannot be read (such as a first line that NCBI would fetch as a Seq-id). */
+/**
+ * A pasted text that does not start with a defline and cannot be read (such as a first line that NCBI would fetch as a
+ * Seq-id); a byte order mark has its own hint.
+ */
 const needsDefline = computed(() => {
   const text = props.state[props.role].paste.trimStart();
-  return props.source.origin === 'paste' && props.source.status === 'failed' && text !== '' && !text.startsWith('>');
+  const mark = props.source.lead !== undefined && 'mark' in props.source.lead;
+  return props.source.origin === 'paste' && props.source.status === 'failed' && !mark && text !== '' && !text.startsWith('>');
 });
 const refusedRecord = computed(() => (props.source.check?.state === 'refused' ? props.source.check.record : undefined));
 /** Why a source that starts with a byte order mark cannot be read (WA-IN-05); the engine's message is NCBI's. */
@@ -91,7 +95,7 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
         </button>
       </p>
       <p v-if="formatName" class="warning" :data-testid="`${testid}-format-warning`">
-        This looks like {{ formatName }}, which LOSAT reads as FASTA. Convert it to FASTA and use that instead.
+        This looks like {{ formatName }}. LOSAT reads it as FASTA, so its text becomes sequence. Convert it to FASTA first.
       </p>
     </template>
     <template v-else>
@@ -129,7 +133,7 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
       </p>
 
       <p v-if="formatName" class="warning" :data-testid="`${testid}-format-warning`">
-        This looks like {{ formatName }}, which LOSAT reads as FASTA. Convert it to FASTA and use that instead.
+        This looks like {{ formatName }}. LOSAT reads it as FASTA, so its text becomes sequence. Convert it to FASTA first.
       </p>
       <p v-if="otherKind > 0" class="warning" :data-testid="`${testid}-kind-warning`">
         {{ formatCount(otherKind) }} {{ otherKind === 1 ? 'record looks' : 'records look' }} like {{ otherKindName }}

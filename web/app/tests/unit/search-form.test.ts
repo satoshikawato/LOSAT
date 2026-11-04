@@ -685,11 +685,11 @@ describe('regionProblem', () => {
 
   // The engine refuses both, as NCBI does (WA-IN-07): `-query_loc 300-100` "start cannot be
   // larger than stop", `-query_loc 100-100` "range cannot be empty", in every mode and role.
-  it('refuses a start after the stop, and a range of one letter, with the meaning of the engine message', () => {
+  it('refuses a start after the stop, and a range of one letter, as the engine does', () => {
     expect(problem('80', '20')).toBe('The start cannot be larger than the stop.');
     expect(problem('0100', '99')).toBe('The start cannot be larger than the stop.');
-    expect(problem('50', '50')).toBe('The range cannot be empty: the stop must be larger than the start.');
-    expect(problem('007', '7')).toBe('The range cannot be empty: the stop must be larger than the start.');
+    expect(problem('50', '50')).toBe('The stop must be larger than the start.');
+    expect(problem('007', '7')).toBe('The stop must be larger than the start.');
   });
 
   it('names a position outside the record before the order', () => {

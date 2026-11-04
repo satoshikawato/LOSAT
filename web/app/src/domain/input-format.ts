@@ -10,8 +10,11 @@ export type InputLead =
   | { readonly mark: 'UTF-8' | 'UTF-16' }
   | { readonly format: 'GenBank' | 'EMBL' | 'FASTQ' };
 
-/** What the first bytes of an input (its preview) look like, or undefined for anything else. */
-export function inputLead(bytes: Uint8Array): InputLead | undefined {
+/**
+ * What the first bytes of an input (its preview) look like, or undefined for anything else.
+ * `whole` says that the bytes are the whole input, not its first part.
+ */
+export function inputLead(bytes: Uint8Array, whole: boolean): InputLead | undefined {
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return { mark: 'UTF-8' };
   if ((bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff)) return { mark: 'UTF-16' };
   const lines = new TextDecoder('latin1').decode(bytes).replace(/^\s+/, '').split(/\r?\n|\r/);
@@ -19,8 +22,11 @@ export function inputLead(bytes: Uint8Array): InputLead | undefined {
   if (/^LOCUS\s/.test(first)) return { format: 'GenBank' };
   if (/^ID {3}\S/.test(first)) return { format: 'EMBL' };
   // A FASTQ record is four lines: `@` title, sequence, `+` (title again or nothing), qualities.
-  // A long read's sequence line may run past the preview, so the third line is checked only when it is there.
-  if (/^@\S/.test(first) && /^[A-Za-z*.-]*$/.test(lines[1] ?? '') && (lines.length < 3 || lines[2]!.startsWith('+'))) {
+  // A long read's sequence line may run past a preview that is not the whole input: there the
+  // third line is checked only when it is there.
+  const third = lines[2];
+  const cut = !whole && (third === undefined || (third === '' && lines.length === 3));
+  if (/^@\S/.test(first) && lines.length >= 2 && /^[A-Za-z*.-]*$/.test(lines[1]!) && (cut || third?.startsWith('+') === true)) {
     return { format: 'FASTQ' };
   }
   return undefined;

@@ -989,7 +989,7 @@ export class SearchDraft {
       const preview =
         ref === undefined ? undefined : await this.deps.data.previewSource(sourceId, HEAD_BYTES).catch(() => undefined);
       const head = preview === undefined ? undefined : headText(preview);
-      lead = preview === undefined ? undefined : inputLead(preview);
+      lead = preview === undefined ? undefined : inputLead(preview, preview.length < HEAD_BYTES);
       const base = await this.deps.data.indexSource(sourceId, parser);
       if (!current()) return;
       this.updateSource(role, key, (source) => ({

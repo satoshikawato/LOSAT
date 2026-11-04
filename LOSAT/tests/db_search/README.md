@@ -832,3 +832,39 @@ The database (version 4, no `-parse_seqids`; only `.nin .nsq .nhr` are kept). Ru
     makeblastdb -in tests/db_search/bnqloc.fna -dbtype nucl -out tests/db_search/bnqloc \
         -title "B[0:11], B[0:24] and B[0:40] of bnqloc_q.fna's q between random letters" -blastdb_version 4
     rm tests/db_search/bnqloc.njs
+
+## `nident` alone and HSPs without identities (line DBID, L1)
+
+Rows `db.nz.*`: with `PRE_FETCH_SEQS_LIMIT` turning NCBI's prefetch off, a tabular report whose only field of the
+alignment block is `nident` (`6 qseqid nident`; in the translated programs also with `sframe` or `frames`) reads a
+subject only on a row whose HSP has identities (the Seq-align's `num_ident` above 0, tabular.cpp:904), so a subject whose
+shown HSPs have none is not looked up in the taxonomy database. The `pident` rows are the controls (every row reads the
+subject). `-threshold 9` lets the seeds of alignments without identities through (a word of three such pairs scores at
+most 9 in BLOSUM62).
+
+- `nz_p.faa` (protein) and `nz_n.fna` (its proteins as codons): `sZ` (`M`, then `VY` 30 times, `CC` and `VY` 10 times),
+  `sI` (`M` and B, 60 random residues), `sM` (`M`, `VY` 30 times, `W` 20 times and B) and `sN` (`M` and `VY` 20 times),
+  with the taxids 9606, 562, 10090 and 99990 (`nz_p.map`, `nz_n.map`): only `sN` has the taxid whose lookup writes the
+  offset error of `offset_last_past_end`. Queries `nz_q.faa` / `nz_q.fna`: `q1` (`IF` 30 times: aligned to the `VY`
+  parts without identities), `q2` (`q1`, `D` 20 times and B), `q3` (B), `q4` (B, `D` 20 times and `q1`); `nz_q1.*` and
+  `nz_q2.*` hold `q1` and `q2` alone. In BLASTX, TBLASTN and TBLASTX other frames align with identities too, hence
+  `-max_hsps 1` and lower e-values in some rows.
+- `nz_psi.faa`: psiblast's composition-based statistics drop the `IF`/`VY` alignments, so `sP` is `M` and `qP` (120
+  residues of `IFKELSD`) with I/V, F/Y, K/R, E/Q, L/M, S/T and D/N exchanged, `sQ` is `M` and `qP`, `sR` the first half
+  of `sP` and the second of `sQ`, with the taxids 99990, 9606 and 10090 (`nz_psi.map`); `nz_psi_q.faa` holds `qP`, its
+  first half `qPh` and its second half `qP2`.
+- `nz_pc.faa` / `nz_nc.fna` (`db.nz.*.c150.*`) are `nz_p` / `nz_n` with `sZ`'s taxid 150 (`nz_pc.map`, `nz_nc.map`),
+  which NCBI's taxonomy cache (256 slots, taxid & 255) puts in the slot of 99990, the damaged last entry of
+  `offset_last_past_end`: LOSAT refuses a run that may look both up (`TaxdbRun::cache_collision`), but not one whose
+  rows look nothing up (`q1` alone with `nident`, a positive `PRE_FETCH_SEQS_LIMIT` below the batch's Seq-aligns).
+  BLASTX writes each batch before it searches the next, so it refuses such a run at its first batch also where no row
+  looks a tax id up (`db.nz.bx.c150.*`, as before line L1).
+- The sequences come from the line's probe script (kept outside the repository). The databases (version 4, every file
+  makeblastdb writes; `nz_pc` and `nz_nc` alike with their maps), run from `LOSAT/`:
+
+      makeblastdb -in tests/db_search/nz_p.faa -dbtype prot -parse_seqids -taxid_map tests/db_search/nz_p.map \
+          -blastdb_version 4 -title "nz p" -out tests/db_search/nz_p
+      makeblastdb -in tests/db_search/nz_n.fna -dbtype nucl -parse_seqids -taxid_map tests/db_search/nz_n.map \
+          -blastdb_version 4 -title "nz n" -out tests/db_search/nz_n
+      makeblastdb -in tests/db_search/nz_psi.faa -dbtype prot -parse_seqids -taxid_map tests/db_search/nz_psi.map \
+          -blastdb_version 4 -title "nz psi" -out tests/db_search/nz_psi

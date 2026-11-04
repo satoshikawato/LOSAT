@@ -32,11 +32,12 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
+use crate::report::tabular::SubjectFetch;
 use crate::seqdb::{SeqDb, SeqType};
 use crate::sequence::packed_subject::PackedNucleotide;
 
 use super::stage_d_pipeline::DatabaseNumbers;
-use super::stage_d_results::KappaResultHitList;
+use super::stage_d_results::{KappaResultHitList, KappaResultList};
 
 /// The program that LOSAT's refusals name.
 const PROGRAM: &str = "TBLASTN";
@@ -239,18 +240,21 @@ impl TblastnDatabase {
     /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
     /// are `hitlists` (subjects named by rank, `reported_subjects`) prefetches the subjects it
     /// reports (`shared::prefetch_messages`): the sequences with HSPs in them, the ones
-    /// `read_taxids` reads, with the definition lines of those with parsed Seq-ids. Empty, and
-    /// nothing read, without `taxdb.bti` on the search path. A taxonomy database that LOSAT
-    /// cannot read as NCBI does, and a header whose taxid does not decode, are refused.
+    /// `read_taxids` reads, with the definition lines of those with parsed Seq-ids; where a
+    /// query's report fetches them (`PRE_FETCH_SEQS_LIMIT`), those with an HSP whose row reads
+    /// them (`rows`, by the engine's identities). Empty, and nothing read, without `taxdb.bti` on
+    /// the search path. A taxonomy database that LOSAT cannot read as NCBI does, and a header
+    /// whose taxid does not decode, are refused.
     pub(super) fn prefetch_messages(
         &self,
         reported: &ReportedSubjects,
         hitlists: &[KappaResultHitList],
+        rows: SubjectFetch,
     ) -> Result<Vec<u8>> {
         let subjects = hitlists
             .iter()
             .flat_map(KappaResultHitList::lists)
-            .filter(|list| !list.hsps.hsps.is_empty())
+            .filter(|list| reads_subject(list, rows))
             .map(|list| {
                 let rank = list.oid as usize;
                 (reported.ordinals[rank], reported.parsed_subject(rank))
@@ -262,6 +266,24 @@ impl TblastnDatabase {
     /// `common::database::x_check_nucleotide_stores` (`common/x_db_stream.rs`).
     pub(super) fn x_stream(&self, threads: usize) -> Result<XDbStream<'_>> {
         XDbStream::new(&self.db, threads, PROGRAM)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-904
+// ```c++
+//     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
+//     ...
+//         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
+// ```
+/// Whether the rows of the hit list `list` read its subject (`rows`, by each HSP's engine
+/// identities, the Seq-align's `num_ident`): for `SubjectFetch::Every` a list with HSPs.
+pub(super) fn reads_subject(list: &KappaResultList, rows: SubjectFetch) -> bool {
+    match rows {
+        SubjectFetch::Every => !list.hsps.hsps.is_empty(),
+        SubjectFetch::Never | SubjectFetch::WithIdentities => list
+            .payloads
+            .iter()
+            .any(|payload| rows.reads(usize::try_from(payload.num_ident).unwrap_or(0))),
     }
 }
 
@@ -669,7 +691,7 @@ mod tests {
                 ParsedShown::default(),
             )
             .unwrap();
-            let messages = database.prefetch_messages(&reported, &hitlists);
+            let messages = database.prefetch_messages(&reported, &hitlists, SubjectFetch::Every);
             String::from_utf8(messages.unwrap()).unwrap()
         };
         let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);

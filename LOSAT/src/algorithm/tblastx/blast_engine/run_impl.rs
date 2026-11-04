@@ -11,6 +11,7 @@ use crate::algorithm::tblastx::subjects::{
     SearchSpaceOverflow, SubjectSetNumbers, Subjects, SubjectsUnreadable,
 };
 use crate::blastinput::report_counts::ReportCounts;
+use crate::report::tabular::SubjectFetch;
 use std::sync::Arc;
 
 use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
@@ -3139,19 +3140,20 @@ fn run_batch_loop(
             report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
         )
     });
-    // Whether the first format's report reads the subjects' Bioseqs, which NCBI's formatters
-    // fetch one by one where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off: a custom
-    // tabular report only for fields that read them (`TabularSpec::fetches_subject`).
-    let fetches =
-        outputs
-            .formats
-            .first()
-            .is_none_or(|format| match report::output_format(format.outfmt) {
+    // Which rows of the first format's report read the subjects' Bioseqs, which NCBI's
+    // formatters fetch one by one where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off: a
+    // custom tabular report's only for fields that read them (`TabularSpec::subject_fetch`).
+    let rows = outputs
+        .formats
+        .first()
+        .map_or(SubjectFetch::Every, |format| {
+            match report::output_format(format.outfmt) {
                 report::TblastxOutputFormat::CustomTabular(spec) => {
-                    spec.fetches_subject(crate::blastinput::app::Program::Tblastx)
+                    spec.subject_fetch(crate::blastinput::app::Program::Tblastx)
                 }
-                _ => true,
-            });
+                _ => SubjectFetch::Every,
+            }
+        });
     // A batch is read from the input records (`input_start..input_end`); its searched
     // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
     // whole records, and a record whose range starts past its end is skipped
@@ -3529,18 +3531,61 @@ fn run_batch_loop(
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                 // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
                 // after the query's own warnings (`query_fetches`, added after them below), where
-                // the first format reads their Bioseqs (`fetches`). A batch that fetches nothing
-                // still asks for the run's refusal of NCBI's taxonomy cache before any byte, unless
-                // no batch of the run prefetches (`shared::prefetch_always_off`).
+                // the first format's rows read their Bioseqs (`rows`; for `nident` alone the rows
+                // of HSPs with the engine's identities, counted from the batch's stores, which a
+                // report with `nident` reads above). A batch that fetches nothing still asks for
+                // the run's refusal of NCBI's taxonomy cache before any byte, unless no batch of
+                // the run prefetches (`shared::prefetch_always_off`). A query whose rows read a
+                // subject only for its identities asks for it only where they read one, NCBI's
+                // lookup: a custom tabular report is written after the loop (no report stream),
+                // so a later batch that prefetches still refuses before any byte.
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                     debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
-                    let asks =
-                        fetches || !crate::algorithm::common::database::prefetch_always_off();
+                    let asks = match rows {
+                        SubjectFetch::Every => true,
+                        SubjectFetch::Never => {
+                            !crate::algorithm::common::database::prefetch_always_off()
+                        }
+                        SubjectFetch::WithIdentities => false,
+                    };
+                    let (query_code, db_code) = (
+                        crate::utils::genetic_code::GeneticCode::from_id(args.query_gencode),
+                        crate::utils::genetic_code::GeneticCode::from_id(args.db_gencode),
+                    );
+                    let stores = reports.stores.borrow();
+                    let mut window = Vec::new();
                     for query in 0..(end - start) as u32 {
                         let from = ordered.partition_point(|hsp| hsp.hit.q_idx < query);
                         let to = ordered.partition_point(|hsp| hsp.hit.q_idx <= query);
-                        let shown = if fetches { &ordered[from..to] } else { &[] };
-                        query_fetches.push(if asks {
+                        let query_letters = query_records[start + query as usize].seq();
+                        // The first HSP of each subject whose row reads it, in report order (a
+                        // subject's HSPs follow each other): the engine's identities are counted
+                        // only for `nident` alone, until one of the subject's rows reads it.
+                        let shown: Vec<&TblastxHsp> = match rows {
+                            SubjectFetch::Every => ordered[from..to].iter().collect(),
+                            SubjectFetch::Never => Vec::new(),
+                            SubjectFetch::WithIdentities => {
+                                let mut read = std::collections::HashSet::new();
+                                ordered[from..to]
+                                    .iter()
+                                    .filter(|hsp| {
+                                        !read.contains(&hsp.hit.s_idx)
+                                            && stores.get(&hsp.hit.s_idx).is_none_or(|store| {
+                                                report::stored_engine_identities(
+                                                    hsp,
+                                                    store,
+                                                    query_letters,
+                                                    &query_code,
+                                                    &db_code,
+                                                    &mut window,
+                                                ) > 0
+                                            })
+                                            && read.insert(hsp.hit.s_idx)
+                                    })
+                                    .collect()
+                            }
+                        };
+                        query_fetches.push(if asks || !shown.is_empty() {
                             super::super::database::prefetch_messages(
                                 database,
                                 shown,

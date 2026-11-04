@@ -11262,7 +11262,8 @@ fn run_resolved_in_pool(
     // Where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off (`s_PreFetchSeqs`, quoted at
     // `shared::prefetch_may_be_off`), each query's report fetches the subjects it shows, after
     // the query's own warnings: those of its final hit list, psiblast's after the cut, where the
-    // first format reads their Bioseqs (`TabularSpec::fetches_subject`).
+    // first format's rows read their Bioseqs (`TabularSpec::subject_fetch`; `nident` alone on
+    // rows with identities, `ListedTitles::fetched_ranks`).
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         if prefetch_taxids || psiblast_prefetched.is_some() || seq_annots_prefetch {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
@@ -11272,11 +11273,11 @@ fn run_resolved_in_pool(
                 format_plans.first(),
                 Some(BlastpReport::CustomTabular(spec)) if spec.checks_taxdb()
             );
-            let rows_fetch = match format_plans.first() {
+            let rows = match format_plans.first() {
                 Some(BlastpReport::CustomTabular(spec)) => {
-                    spec.fetches_subject(crate::blastinput::app::Program::Blastp)
+                    spec.subject_fetch(crate::blastinput::app::Program::Blastp)
                 }
-                _ => true,
+                _ => crate::report::tabular::SubjectFetch::Every,
             };
             let open_for_rows = |lists: &[Option<BlastpHitList>]| -> Result<()> {
                 if plural_names
@@ -11297,16 +11298,21 @@ fn run_resolved_in_pool(
                     None => blastp_hit_list_hsp_count(lists),
                 };
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    if !(prefetch_taxids && rows_fetch) {
+                    if !prefetch_taxids || rows == crate::report::tabular::SubjectFetch::Never {
                         continue;
                     }
                     for query in batch.searched.clone() {
                         let shown = std::slice::from_ref(&hit_lists[query]);
-                        let messages = titles.prefetch_messages(
-                            database,
-                            database::ListedTitles::reported_ranks(shown),
-                        )?;
-                        query_warning_lines[query].extend(messages);
+                        // Rows that read a subject only for its identities (`nident` alone) read
+                        // none of a query whose HSPs have none, which looks no taxid up.
+                        let mut fetched =
+                            database::ListedTitles::fetched_ranks(shown, rows).peekable();
+                        if rows == crate::report::tabular::SubjectFetch::Every
+                            || fetched.peek().is_some()
+                        {
+                            let messages = titles.prefetch_messages(database, fetched)?;
+                            query_warning_lines[query].extend(messages);
+                        }
                         open_for_rows(shown)?;
                     }
                     continue;

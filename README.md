@@ -1,7 +1,9 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/losat-logo-white.svg">
-  <img alt="LOSAT" src="docs/assets/losat-logo.svg" height="64">
-</picture>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/losat-logo-white.svg">
+    <img alt="LOSAT" src="docs/assets/losat-logo.svg" width="420">
+  </picture>
+</p>
 
 # LOSAT: LOcal Sequence Alignment Tool
 

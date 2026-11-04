@@ -270,22 +270,27 @@ fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Ve
 // No NCBI counterpart: the capacity of a pooled vector taken for `n` entries (`slack`: `n + n / 4`,
 // see `x_zeroed`): grown when short of `n`, and given back down to that when above it, so that a
 // kept vector holds the pages of the table it is taken for, not those of the largest table it
-// held (NCBI callocs each table and frees it with its search). glibc maps the vector from its first
-// allocation (`x_unthresholded_capacity`) and resizes a mapped allocation with `mremap`, both ways:
-// the pages past a shrunk vector go back to the system, and no mapped vector is freed (which
-// would raise glibc's mmap threshold, see `x_zeroed`). Elsewhere the allocator's `realloc` shrinks
-// it. At 64 threads, 800 cDNAs x 50 yeast proteins `-subject` kept eight tables' overflow
-// vectors of 2.1-4.2 MiB of pages (22.8 MiB) for tables of 1.82 MiB on average.
+// held (NCBI callocs each table and frees it with its search). A vector that grows to
+// `X_MAPPED_FROM` bytes is mapped (`x_mapped_capacity`, then given its room), and glibc resizes a
+// mapped allocation with `mremap`, both ways: the pages past a shrunk vector go back to the system,
+// and no mapped vector is freed (which would raise glibc's mmap threshold, see `x_zeroed`). A
+// smaller vector stays where the allocator puts it, as before: mapping every vector from its first
+// allocation gave the 111 KiB vectors of a build on one thread pages of their own (the default path
+// at 8 threads read +0.2-0.4 MiB against dev in 10 runs). Elsewhere the allocator's `realloc`
+// resizes it. At 64 threads, 800 cDNAs x 50 yeast proteins
+// `-subject` kept eight tables' overflow vectors of 2.1-4.2 MiB of pages (22.8 MiB) for tables of
+// 1.82 MiB on average.
 fn x_fit<T>(vector: &mut Vec<T>, n: usize, slack: bool) {
     let want = if slack { n + n / 4 } else { n };
-    if vector.capacity() == 0 && want > 0 {
-        *vector = Vec::with_capacity(crate::utils::x_mapped::x_unthresholded_capacity(
-            want,
-            std::mem::size_of::<T>(),
-        ));
-    } else if vector.capacity() < n {
+    if vector.capacity() < n {
+        let size = std::mem::size_of::<T>();
+        let room = if crate::utils::x_mapped::x_is_mapped(vector.capacity() * size) {
+            want
+        } else {
+            crate::utils::x_mapped::x_mapped_capacity(want, size)
+        };
         vector.clear();
-        vector.reserve_exact(want);
+        vector.reserve_exact(room);
     }
     if vector.capacity() > want {
         vector.truncate(n);

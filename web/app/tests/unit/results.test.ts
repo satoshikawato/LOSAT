@@ -301,8 +301,9 @@ describe('verificationBadge', () => {
     expect(badge.level).toBe('certified');
     expect(badge.label).toBe('Supported');
     expect(badge.details.join(' ')).toMatch(/not a comparison of your inputs with NCBI/);
-    // No word of a certification (DW-36): the badge says that the run is supported.
-    expect(`${badge.label} ${badge.details.join(' ')}`).not.toMatch(/certif/i);
+    // No word of a certification or a verification (DW-36; the maintainer, 2026-11-04): the
+    // badge says that the run is supported.
+    expect(`${badge.label} ${badge.details.join(' ')}`).not.toMatch(/verif|certif/i);
   });
 
   it('says why a run is not supported', () => {
@@ -311,8 +312,10 @@ describe('verificationBadge', () => {
     expect(reasons({ argv: ['blastn', '-evalue', '2'] }).details.join(' ')).toMatch(/were not compared with NCBI BLAST\+ 2\.17\.0/);
     expect(reasons({ threads: 3 }).details.join(' ')).toMatch(/used 3 threads; the browser runtime was checked with 1, 2 and 4 threads/);
     expect(reasons({ program: 'tblastx', argv: ['tblastx'] }).details.join(' ')).toMatch(/browser runtime of tblastx was not checked/);
-    expect(reasons({ threads: 3 }).label).toBe('Not supported');
-    expect(reasons({ argv: ['blastn', '-evalue', '2'] }).details.join(' ')).not.toMatch(/certif/i);
+    expect(reasons({ threads: 3 }).label).toBe('Not yet supported');
+    for (const badge of [reasons({ argv: ['blastn', '-evalue', '1'] }), reasons({ argv: ['blastn', '-evalue', '2'] }), reasons({ threads: 3 }), reasons({ runtimePath: 'fake' })]) {
+      expect(`${badge.label} ${badge.details.join(' ')}`).not.toMatch(/verif|certif/i);
+    }
     expect(reasons({ runtimePath: 'fake' }).level).toBe('development');
   });
 
@@ -321,6 +324,7 @@ describe('verificationBadge', () => {
     expect(approvedExceptions('tblastx', ['tblastx', '-db_gencode', '11'])).toHaveLength(1);
     expect(approvedExceptions('tblastx', ['tblastx', '-db_gencode', '1'])).toEqual([]);
     expect(approvedExceptions('blastn', ['blastn', '-db_gencode', '4'])).toEqual([]);
+    expect(approvedExceptions('tblastn', ['tblastn', '-db_gencode', '4']).join(' ')).not.toMatch(/verif|certif/i);
   });
 });
 

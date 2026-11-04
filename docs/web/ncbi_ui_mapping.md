@@ -224,6 +224,8 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 
 - **2026-11-03（線 WF-1、accession の取得、`fetch_design.md` §8）**：欄の見出しは NCBI の「Enter accession number(s), gi(s), or FASTA sequence(s)」から gi を除いた「Enter accession number(s) or FASTA sequence(s)」。欄が accession だけのときの行は「Fetch」（操作を名乗る、規則 1・2）「from [NCBI]」と、保守者の決定のその場の一文「Sends the accession to NCBI」（複数なら accessions、選んだ先の名前）。約束は「?」の後ろ：「Fetch sends only the accessions, to the site chosen here, and writes the FASTA it gets into the box. Sequences, files and results stay in this browser. EBI answers from ENA for nucleotides and from UniProt for proteins, CNCB from GenBase.」。取得中は「Fetching 1 of 2…」、失敗は取得先と accession を名乗る一文（「NCBI has no nucleotide record AB999999.1.」「EBI (ENA) has no RefSeq records: fetch NR_074540.1 from NCBI or CNCB.」など）。
 
+- **2026-11-04（線 WA W1、保守者「verificationっていう表現なくそうよ。前も言ったけど。Readmeも含め。Supported かNot yet supportedだけでしょ。」）**：利用者が読む文（画面の文字、title、aria-label、notice、README.md、web の README）に「verification」「verify」「verified」「certified」「certification」を使わない。バッジは「Supported」と「Not yet supported」の 2 語（「Not supported」はやめた）。FakeEngine の「Development build」は製品の build に出ないので残す。Run details の見出し「Verification」は「Support status」。バッジの後ろの「· approved exception」は外し、承認済みの差の文は Run details の notice と、バッジの title に置く。エンジンが書く NCBI の文（「Please verify the query sequence(s)…」）はそのまま。内部の名前（`verification.ts`、`verification_cells.tsv`、`data-testid`、CSS class）は変えない（web-audit-20261104 DECISIONS 7.3、7.4）。
+
 ## 5. 見た目
 
 保守者の指示（2026-11-02）「色とかボタンを gbdraw の GUI っぽく」「フォントも Inter で」。配置・節の順・言葉は NCBI のまま（§1〜§4）、色・字・部品の形は gbdraw の Web GUI（`gbdraw/web/index.html` の `--ui-*` と `css/tailwind.input.css` の `.btn` `.card` `.form-input`）に合わせる（`web/app/src/ui/styles.css` の `:root`）。

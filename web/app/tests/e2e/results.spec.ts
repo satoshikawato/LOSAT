@@ -450,6 +450,23 @@ async function expectNoSideScroll(page: Page, state: string): Promise<void> {
   expect(scrollWidth, `${state}: the page is wider than the window (${beyond.join(', ')})`).toBeLessThanOrEqual(innerWidth);
 }
 
+/**
+ * The application's own words on the page (its text, titles and ARIA labels), without what the
+ * engine wrote (every `pre.output`: the outputs, the Alignments' outfmt 0 text and the warnings
+ * keep NCBI's words, "Please verify the query ...", and the inputs' titles). None of them says
+ * "verified" or "certified" (the maintainer, 2026-11-04).
+ */
+async function expectNoVerificationWords(page: Page, state: string): Promise<void> {
+  const words = await page.evaluate(() => {
+    const body = document.body.cloneNode(true) as HTMLElement;
+    for (const engine of body.querySelectorAll('pre.output')) engine.remove();
+    const names = ['title', 'aria-label', 'placeholder', 'alt'];
+    const attributes = [...body.querySelectorAll('*')].flatMap((element) => names.map((name) => element.getAttribute(name) ?? ''));
+    return [body.textContent ?? '', ...attributes].join('\n');
+  });
+  expect(words.match(/[^\n]{0,40}(verif|certif)[^\n]{0,40}/gi) ?? [], state).toEqual([]);
+}
+
 /** The columns of a table whose headers are inside the table's box, from left to right. */
 function columnsInView(page: Page, table: string): Promise<string[]> {
   return page
@@ -838,10 +855,13 @@ for (const c of PROGRAM_CASES) {
       const [, path, threads] = /^\s*(serial|threaded), (\d+) threads?\s*$/.exec(await text(page.getByTestId('run-record').locator('[data-detail="path"]')))!;
       const level = tableLevel(c.id, argv, path!, Number(threads));
       await expect(badge).toHaveAttribute('data-level', level);
-      await expect(badge).toHaveText(level === 'certified' ? 'Supported' : 'Not supported');
+      await expect(badge).toHaveText(level === 'certified' ? 'Supported' : 'Not yet supported');
       test.info().annotations.push({ type: 'verification', description: `${c.id} ${argv.slice(5).join(' ') || 'defaults'}, ${path} ${threads}: ${level}` });
     }
     await expect(page.getByTestId('verification-details')).toHaveAttribute('data-level', (await badge.getAttribute('data-level'))!);
+    await expectNoVerificationWords(page, `${c.id}: Run details`);
+    await show(page, 'hits');
+    await expectNoVerificationWords(page, `${c.id}: Hits`);
   });
 }
 

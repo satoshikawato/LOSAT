@@ -186,7 +186,9 @@ fn erfc_ncbi(z: f64) -> f64 {
     X_ERFC_MEMO.with(|memo| {
         let (memo, used) = &mut *memo.borrow_mut();
         if memo.is_empty() {
-            *memo = vec![(u64::MAX, 0); X_ERFC_FIRST];
+            // The allocation of the largest size, of which the slots in use are touched.
+            *memo = Vec::with_capacity(X_ERFC_MOST);
+            memo.resize(X_ERFC_FIRST, (u64::MAX, 0));
         }
         let slot = x_erfc_slot(key, memo.len());
         let (stored, value) = memo[slot];
@@ -200,16 +202,17 @@ fn erfc_ncbi(z: f64) -> f64 {
             *used += usize::from(stored == u64::MAX);
             memo[slot] = (key, result.to_bits());
             if 2 * *used > memo.len() && memo.len() < X_ERFC_MOST {
-                // The largest size, the results moved to their slots there (a result whose slot
-                // another took is dropped, as a store over it drops it).
-                let mut grown = vec![(u64::MAX, 0); X_ERFC_MOST];
-                *used = 0;
-                for &(stored, value) in memo.iter().filter(|(stored, _)| *stored != u64::MAX) {
-                    let slot = x_erfc_slot(stored, grown.len());
-                    *used += usize::from(grown[slot].0 == u64::MAX);
-                    grown[slot] = (stored, value);
+                // Twice the slots in the same allocation: the result in slot s moves to slot 2s
+                // or 2s + 1 (the next bit of its hash), taken from the last slot down, so that
+                // each lands on a slot already emptied or new.
+                let half = memo.len();
+                memo.resize(2 * half, (u64::MAX, 0));
+                for slot in (0..half).rev() {
+                    let (stored, value) = std::mem::replace(&mut memo[slot], (u64::MAX, 0));
+                    if stored != u64::MAX {
+                        memo[x_erfc_slot(stored, 2 * half)] = (stored, value);
+                    }
                 }
-                *memo = grown;
             }
         }
         result
@@ -226,11 +229,13 @@ fn erfc_ncbi(z: f64) -> f64 {
 //             e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
 // ```
 // No NCBI counterpart: a per-thread table of (argument bits, result bits) for `erfc_ncbi`.
-// It holds earlier ErfC results of the loop above and changes no value. It starts at
-// `X_ERFC_FIRST` slots and takes `X_ERFC_MOST` once more than half of them hold a result, so that
-// a thread that computes a few values holds a few slots (with 64 threads every thread of a search
-// computes some, and a table of the largest size each was 4 MiB). One step, not doublings: the
-// tables a thread outgrew stayed in its heap (+60 KiB of RssAnon at one thread).
+// It holds earlier ErfC results of the loop above and changes no value. It uses `X_ERFC_FIRST`
+// slots and doubles them while more than half hold a result, up to `X_ERFC_MOST`, in one
+// allocation of `X_ERFC_MOST` slots of which only the slots in use are written, so that a thread
+// that computes a few values touches a few pages (with 64 threads every thread of a search
+// computes some, and a table of the largest size each was 4 MiB). A new table for each doubling
+// left the outgrown ones in the thread's heap (+60 KiB of RssAnon at one thread), and one step
+// from 64 to 4,096 slots touched 64 KiB in threads that needed fewer (+1-3 MiB at 48 threads).
 thread_local! {
     static X_ERFC_MEMO: std::cell::RefCell<(Vec<(u64, u64)>, usize)> =
         const { std::cell::RefCell::new((Vec::new(), 0)) };

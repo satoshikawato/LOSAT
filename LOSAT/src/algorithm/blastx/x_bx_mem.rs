@@ -65,8 +65,11 @@
 //!   batch's search is short beside its preparation and the reader, and every thread that took one
 //!   of its tasks kept a diagonal table and grew its glibc arena for the rest of the run, so the
 //!   memory rose with the threads and the time did not fall (ws, 800 cDNAs x 2, 8 or 50 yeast
-//!   proteins `-subject`, 64 threads: MEASURE). A chunk of a split query's waves keeps
-//!   `ceil(threads / K)`, as its threads come from the K chunks. And the
+//!   proteins `-subject`, 64 threads: peak 95-107 MiB before, 75-81 MiB with the bound, NCBI's
+//!   `-subject` at one thread 80-81 MiB; wall 0.97). A chunk of a split query's waves keeps
+//!   `ceil(threads / K)`, as its threads come from the K chunks: the same bound on the chunks'
+//!   tasks took the 50-protein case to 74 MiB (three of the cDNAs are split) but one 650 kb
+//!   genome x 50 proteins to 1.12 of the time at 64 threads. And the
 //!   capped batch flow prepares each query batch of at most two search units' letters
 //!   (translation, filtering, Karlin blocks: `reader_batch::prepare_lone_unit`, which
 //!   `search::search_core` runs when a batch prepares itself) as a task of its own when the reader

@@ -56,7 +56,11 @@
 //! the margins is widened once per worker). The scans test the sentry where a
 //! slide stops (greedy_align.c), so a call that does not meet it read only bases of the window,
 //! the same bytes as the whole copy holds, at the same offsets less the window's start, and its
-//! result is the whole copy's. A call that meets it returns no result (as NCBI's traceback drops
+//! result is the whole copy's. No state of the scans starts past a sentry without one meeting
+//! it: a slide that starts at the sentry reads it, and an affine deletion run, which passes
+//! subject bases without reading them, reaches the sentry's offset or beyond only in states the
+//! X-drop test drops (each further base lowers the run's score by the extension cost while the
+//! best score does not fall); with no sentry on a side, that side's length is the whole copy's. A call that meets it returns no result (as NCBI's traceback drops
 //! the HSP) and runs again on the one-byte copy of the whole subject, made on the first such
 //! call and shared by every chunk and worker of that subject, from the `max_dist` it started
 //! with (the fenced call may have doubled it). `max_dist` is sized by the chunk's length in both
@@ -80,7 +84,9 @@ static X_LAST_SUBJECT: AtomicU64 = AtomicU64::new(0);
 /// No NCBI counterpart: a worker's window (`XPrelimSubject::score_only`): bases `from..to` of the
 /// chunk that starts at base `chunk_offset` of subject number `subject` (0: none), one per byte,
 /// at `bytes[lead..lead + to - from]`, between fence sentries; `len` bytes in all. `bytes` only
-/// grows; bytes past `len` are left from earlier windows.
+/// grows; bytes past `len` are left from earlier windows. The subject and the chunk's offset fix
+/// the chunk's length (both callers pass the chunk's `length`), so they fix where the sentries
+/// stand.
 #[derive(Default)]
 pub(crate) struct XPrelimWindow {
     bytes: Vec<u8>,
@@ -357,9 +363,9 @@ pub fn x_greedy_gapped_alignment_score_only(
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2539-2569
 /// (s_BlastGreedyGapAlignStructFill: query_start/stop, subject_start/stop, score)
 /// The result of a score-only call whose subject bytes start `shift` bases into the chunk (a
-/// window's start less its sentry, 0 for the whole copy), in offsets of the chunk. A window that
-/// did not meet a fence holds every subject base the call read, so a negative start is negative
-/// in both offsets.
+/// window's start less its sentry, 0 for the whole copy), in offsets of the chunk. A window call
+/// that did not meet a fence starts at or after the window's first base, so the shift never
+/// turns a negative start into a valid one.
 fn x_score_only_result(
     core: Option<super::greedy::GreedyGappedCore>,
     shift: usize,

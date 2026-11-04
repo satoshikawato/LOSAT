@@ -1,0 +1,1 @@
+- `blastx` holds less memory in a search that scans with the two-hit fused loop (the default for tables with 6.7 or more hits per used cell): the lookup tables keep their hits in 16 bits (8-byte cells and a 16-bit overflow array) when a query batch has at most 65,535 letters, which halves the overflow array and the backbone of each table that threads hold. Reports do not change.

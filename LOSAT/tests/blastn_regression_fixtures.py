@@ -74,6 +74,8 @@ RP = f"-query {I}/rep_query.fa -subject {I}/rep_subject.fa"
 PL = f"-query {I}/pal_query.fa -subject {I}/pal_subject.fa"
 WM = f"-query {I}/wm_query.fa -subject {I}/s60k.fa"
 WM3 = f"-query {I}/wm_query3.fa -subject {I}/s60k.fa"
+KE = f"-query {I}/kaempty_query.fa -subject {I}/s60k.fa"
+KEB = f"-query {I}/kaempty_batch_query.fa -subject {I}/s60k.fa"
 WMC = "tests/winmask/counts/mg1655_u9.obinary"
 WMB = "tests/winmask/counts/dm2L_u9.binary"
 AB = f"-query {I}/culling_abricate_query.fa -subject {I}/culling_abricate_genes.fa -task blastn -dust no" \
@@ -502,6 +504,16 @@ _CASES = [
     ("wm.hard_fmt5", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 5", ""),
     ("wm.hard_fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 11", ""),
     ("wm.hard_fmt15", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 15", ""),
+    # Line NP, series SM: in the Karlin-Altschul table error of a batch, a query without letters keeps its
+    # set-up warning after the error ("Error: ... Warning: Sequence contains no data "), first, in the middle
+    # and last; in a first batch and in a later one (BATCH_SIZE=1 gives the query of N only its own batch).
+    ("kaempty.first_batch", f"{KE} -reward 1 -penalty -6 -outfmt 6", ""),
+    ("kaempty.first_batch_fmt0", f"{KE} -reward 1 -penalty -6 -outfmt 0", ""),
+    ("kaempty.gaps_fmt11", f"{KE} -no_greedy -gapopen 5 -gapextend 2 -reward 4 -penalty -5 -outfmt 11", ""),
+    # (ka_a has 159 letters: its -query_loc interval holds none, as the records without letters.)
+    ("kaempty.qloc", f"{KE} -query_loc 160-200 -reward 1 -penalty -6 -outfmt 6", ""),
+    ("kaempty.later_batch", f"{KEB} -reward 1 -penalty -6 -outfmt 6", "", "BATCH_SIZE=1"),
+    ("kaempty.later_batch_fmt0", f"{KEB} -reward 1 -penalty -6 -outfmt 0", "", "BATCH_SIZE=1"),
 ]
 
 
@@ -651,6 +663,7 @@ def command_generate(_args) -> int:
     generate_qctx_inputs()
     generate_wm_inputs()
     generate_ungapped_inputs()
+    generate_kaempty_inputs()
     return 0
 
 
@@ -736,6 +749,23 @@ def generate_ungapped_inputs() -> None:
     write_fasta(INPUTS / "mix_s.fa", [("smix first", s2),
                                       ("smix2 second", revcomp(q2[300:600]) + random_seq(80) + q2[600:800])])
     write_fasta(INPUTS / "ungapped_alln_query.fa", [("alln1 all N", "N" * 24), ("alln2 all N", "N" * 40)])
+
+
+def generate_kaempty_inputs() -> None:
+    """Inputs added for line NP series SM (the kaempty.* cases): two records of mq.fa between records without
+    letters; and, after a query of N only, a record without letters and one of mq.fa."""
+    records = {}
+    for line in (INPUTS / "mq.fa").read_text().splitlines():
+        if line.startswith(">"):
+            name = line[1:]
+            records[name] = ""
+        else:
+            records[name] += line
+    a, b = records["mq01 len159"], records["mq08 len524"]
+    (INPUTS / "kaempty_query.fa").write_text(
+        f">ka_e1 no letters\n>ka_a mq01\n{a}\n>ka_e2 no letters\n>ka_b mq08\n{b}\n>ka_e3 no letters\n")
+    (INPUTS / "kaempty_batch_query.fa").write_text(
+        ">ka_alln only N\n" + "N" * 50 + f"\n>ka_e1 no letters\n>ka_a mq01\n{a}\n")
 
 
 def generate_culling_inputs() -> None:

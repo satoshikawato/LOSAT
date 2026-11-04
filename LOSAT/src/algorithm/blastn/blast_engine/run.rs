@@ -11279,15 +11279,14 @@ fn search_query_batch<const UNGAPPED: bool>(
                     batching.batch_size
                 );
             }
+            // A query without letters (also a `-query_loc` interval that holds none) keeps its
+            // warning in the error (`karlin_error`).
+            let empty_queries = query_lengths.iter().map(|&length| length == 0);
             // A batch after the first: every batch before it had only invalid queries (one
             // with a valid query would have raised the error), and NCBI has written their
             // reports (`run_in_pool`).
             if !first_batch {
-                return Err(ErrorAfterInvalidBatches(karlin_error(
-                    &message,
-                    seq_data.queries.len(),
-                ))
-                .into());
+                return Err(ErrorAfterInvalidBatches(karlin_error(&message, empty_queries)).into());
             }
             // The prolog of a file sink (the others were written before the search).
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
@@ -11296,7 +11295,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     write_format_prolog(format, output_format, megablast, &shown)?;
                 }
             }
-            return Err(karlin_error(&message, seq_data.queries.len()));
+            return Err(karlin_error(&message, empty_queries));
         }
     };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:324-332

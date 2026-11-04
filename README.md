@@ -416,6 +416,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
   - Following hits whose ids NCBI takes for one sequence but that are not copies of one record (`pdb|1ABC|` and `pdb|1ABC|AA`, `gb|X|` and `gb|X.1|`), in outfmt 0, 5 and 13 to 16 and the tabular `qcovs` and `qcovus`, and in every format of `psiblast` when they reach its `-max_target_seqs` cut. Copies of one record (the same definition lines but for their tax ids) that follow each other are shown in one hit, as NCBI shows them.
   - Ids and titles that NCBI cannot write or that it rewrites from taxonomy data, such as an outfmt 0 description id of 65 bytes or more.
 - On such a database, the environment variables `SEQ_ID_PREFER_ACCESSION_OVER_GI` and `SEQ_ID_AVOID_GI`.
+- On a database built without `-parse_seqids`, with `-outfmt 0`, a shown sequence with an empty title and a tax id that the taxonomy database names: NCBI makes the title from it (`unnamed protein product [Homo sapiens]`, for a nucleotide `Homo sapiens`). All six programs.
 
 **Strategy files**
 - `-import_search_strategy` and `-export_search_strategy`: all five programs.

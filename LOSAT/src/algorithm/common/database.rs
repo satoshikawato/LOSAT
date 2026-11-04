@@ -512,6 +512,10 @@ pub(crate) struct StoredTitle {
     pub(crate) title: Vec<u8>,
     /// Whether the stored title held a byte outside ' ' ..= '~' (`check_reported_title`).
     pub(crate) replaced_bytes: bool,
+    /// Whether NCBI makes the title that outfmt 0 shows from the source of the sequence's
+    /// Bioseq, where the taxonomy database names the taxid of its definition line
+    /// (`HeaderReader::stored_taxonomy_title`, `check_shown_stored_title`).
+    pub(crate) taxonomy_title: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2310
@@ -563,6 +567,7 @@ pub(crate) fn stored_title(
     Ok(StoredTitle {
         title: defline.title,
         replaced_bytes: defline.replaced_title_bytes > 0,
+        taxonomy_title: false,
     })
 }
 
@@ -774,6 +779,36 @@ impl<'a> HeaderReader<'a> {
         let mut messages = Vec::new();
         taxdb.names(taxid, &mut messages).map_or(true, |names| {
             names.is_some_and(|names| !names.scientific_name.is_empty())
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
+    // ```c++
+    //     //get defline
+    //     sdl->defline = CDeflineGenerator().GenerateDefline(m_ScopeRef->GetBioseqHandle(*(sdl->id)), sequence::CDeflineGenerator::fLeavePrefixSuffix);
+    // ```
+    // The Bioseq of a sequence without parsed Seq-ids has its definition line's title and a
+    // source for its taxid as one with them has (`CSeqDBVol::x_GetTaxonomy`), so NCBI's outfmt 0
+    // makes an empty title from the source too: `Homo sapiens` for a nucleotide and `unnamed
+    // protein product [Homo sapiens]` for a protein with taxid 9606, in the description and the
+    // heading, where the taxonomy database names the taxid (review 1 of line DBID N1b L1,
+    // `blastdb-ids-20261021/R/titlesrc/review1/r2.tsv`, `E.tax.nne.blastn.t.f0`).
+    /// Whether NCBI makes the outfmt 0 title of the sequence `ordinal` without parsed Seq-ids,
+    /// whose stored title is `title`, from its Bioseq's source and the taxonomy database's name of
+    /// its definition line's taxid (`report::defline::bioseq_title_from_source`, `source_named`).
+    /// The taxid is read only for a title that the source replaces; one that does not read counts
+    /// as named, as a failed lookup does.
+    fn stored_taxonomy_title(&self, title: &[u8], ordinal: u32) -> bool {
+        if !crate::report::defline::bioseq_title_from_source(title, &Default::default()) {
+            return false;
+        }
+        self.db.defline_taxids(ordinal).map_or(true, |taxids| {
+            let first: Vec<i32> = taxids
+                .into_iter()
+                .filter(|&taxid| taxid > 0)
+                .take(1)
+                .collect();
+            self.source_named(&first)
         })
     }
 
@@ -1184,7 +1219,9 @@ fn reported_header(
                 })
         }
         Ok(crate::seqdb::SequenceHeader::Ordinal(deflines)) => {
-            stored_title(Ok(deflines), ordinal, query, program).map(ReportedHeader::Stored)
+            let mut stored = stored_title(Ok(deflines), ordinal, query, program)?;
+            stored.taxonomy_title = headers.stored_taxonomy_title(&stored.title, ordinal);
+            Ok(ReportedHeader::Stored(stored))
         }
         Err(error) => Err(header_read_error(error, query, program)),
     }
@@ -1572,8 +1609,8 @@ pub(crate) enum ReportRefusal {
 /// Whether a report that names any sequence of `db` could be refused by LOSAT, with the reports
 /// `shown`: every sequence's header is read as the reports read it (`read_header`) and checked as
 /// they check it (`check_reported_title`, `tabular_subject_id` for the tabular formats,
-/// `check_reported_parsed` with `taxdb_found` where outfmt 0 is shown, as `reported_subjects`
-/// asks). Where the reports join following hits (`shown.joined`), no two sequences with parsed
+/// `check_shown_stored_title` and `check_reported_parsed` with `taxdb_found` where outfmt 0 is
+/// shown, as `reported_subjects` asks). Where the reports join following hits (`shown.joined`), no two sequences with parsed
 /// Seq-ids may be joined but copies of one record (`refuse_joined_hits`): the sequences that share
 /// a key of their Seq-align ids (`db_subject::join_keys`; joined ones always share one) are read
 /// again and compared (`joined_in_reports`, `joins_as_copy`). With `prefetch` (the batches' prefetch of a search with `taxdb.bti` on
@@ -1615,6 +1652,10 @@ pub(crate) fn reports_may_refuse(
                     .map_err(|_| ReportRefusal::Headers)?;
                 if shown.tabular {
                     tabular_subject_id(&stored.title, ordinal, protein, program)
+                        .map_err(|_| ReportRefusal::Headers)?;
+                }
+                if shown.pairwise {
+                    check_shown_stored_title(stored.taxonomy_title, ordinal, program)
                         .map_err(|_| ReportRefusal::Headers)?;
                 }
                 if prefetch {
@@ -1785,6 +1826,22 @@ pub(crate) fn check_reported_title(
     if replaced_bytes {
         bail!(
             "database sequence {ordinal} has a stored title with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line); this is not supported by LOSAT's {program}"
+        );
+    }
+    Ok(())
+}
+
+/// LOSAT's refusal of the outfmt 0 title of the shown database sequence `ordinal` without parsed
+/// Seq-ids that NCBI makes from its taxid and the taxonomy database (`taxonomy_title`,
+/// `StoredTitle::taxonomy_title`), as for one with them (`refuse_parsed_taxonomy`).
+pub(crate) fn check_shown_stored_title(
+    taxonomy_title: bool,
+    ordinal: u32,
+    program: &str,
+) -> Result<()> {
+    if taxonomy_title {
+        bail!(
+            "database sequence {ordinal} has an empty title that NCBI BLAST+'s outfmt 0 makes from its taxid and the taxonomy database (which names its taxid); this is not supported by LOSAT's {program}"
         );
     }
     Ok(())
@@ -3398,6 +3455,63 @@ mod taxdb_prepass_tests {
                 db.read_header(1).unwrap(),
                 crate::seqdb::SequenceHeader::Ordinal(_)
             ));
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    #[test]
+    fn an_empty_stored_title_is_made_from_a_named_taxid_in_outfmt_0() {
+        // tests/db_search/ids/make_ids.py (line DBID H3): `pbare_t` and `nbare_t` hold one
+        // sequence without parsed Seq-ids, without a title, with taxid 9606, which the good
+        // taxonomy database names and `no_btd` and `bad_magic` do not;
+        // tests/fixtures/outfmt16/db/other_tax9606 has titles with that taxid.
+        let cwd = empty_cwd("stored_taxonomy");
+        for (name, seq_type, taxdb, want) in [
+            (
+                "db_search/ids/pbare_t",
+                SeqType::Protein,
+                Some("good"),
+                true,
+            ),
+            (
+                "db_search/ids/pbare_t",
+                SeqType::Protein,
+                Some("no_btd"),
+                false,
+            ),
+            ("db_search/ids/pbare_t", SeqType::Protein, None, false),
+            (
+                "db_search/ids/nbare_t",
+                SeqType::Nucleotide,
+                Some("good"),
+                true,
+            ),
+            (
+                "db_search/ids/nbare_t",
+                SeqType::Nucleotide,
+                Some("bad_magic"),
+                false,
+            ),
+            (
+                "fixtures/outfmt16/db/other_tax9606",
+                SeqType::Protein,
+                Some("good"),
+                false,
+            ),
+        ] {
+            let taxdb = taxdb.map(variant);
+            let search =
+                SearchPath::new(&cwd, taxdb.as_deref().map(Path::as_os_str), None).unwrap();
+            let path = root().join(name);
+            let db = SeqDb::open_in(path.to_str().unwrap(), seq_type, &search).unwrap();
+            let headers = HeaderReader::new(&db);
+            let ReportedHeader::Stored(stored) = read_header(&headers, 0, 0, "BLASTP").unwrap()
+            else {
+                panic!("{name}: a sequence without parsed Seq-ids");
+            };
+            assert_eq!(stored.taxonomy_title, want, "{name} {taxdb:?}");
+            let refused = check_shown_stored_title(stored.taxonomy_title, 0, "BLASTP");
+            assert_eq!(refused.is_err(), want, "{name} {taxdb:?}");
         }
         std::fs::remove_dir_all(&cwd).unwrap();
     }

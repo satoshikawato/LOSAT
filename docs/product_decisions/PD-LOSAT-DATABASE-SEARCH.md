@@ -17,7 +17,9 @@
   N1b L1 refused such copies for a title made from the tax ids only where a report shows that
   title and an empty title only where the taxonomy database names its tax id, which version 1.3
   listed as refusals wider than NCBI's failure, and refused the tabular id that NCBI takes from
-  a nucleotide title made from the tax ids)
+  a nucleotide title made from the tax ids, and line DBID H3 refused the outfmt 0 of an empty
+  title whose tax id the taxonomy database names in a database without parsed Seq-ids, which
+  LOSAT wrote without the organism)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -366,6 +368,7 @@ Rejected explicitly (NCBI runs these, or crashes, or LOSAT cannot reproduce what
 | A database sequence with a gap residue (`-`, stored by makeblastdb), a byte above the protein alphabet, or a sequence not between two NUL bytes | NCBI's `-db` never aligns a stored gap and its formatter counts it as a gap; not reproduced |
 | A database sequence without parsed Seq-ids with more or fewer than one definition line | makeblastdb without `-parse_seqids` writes one; a sequence with parsed Seq-ids may have several (version 1.3) |
 | A reported subject whose title gives no subject id (a title of spaces: NCBI shows `gnl|BL_ORD_ID|n`), or whose title NCBI's cleaner reads past (titles like `, ,`: NCBI crashes) | tabular formats, and outfmt 0 for the second |
+| In outfmt 0, a shown subject with an empty title and a tax id (makeblastdb `-taxid`) that the taxonomy database names (line DBID H3; all six programs) | NCBI makes the title from the tax id and the taxonomy database, as for a sequence with parsed Seq-ids: `unnamed protein product [Homo sapiens]`, for a nucleotide `Homo sapiens`. For a tax id that it does not name (not in it, no `taxdb.btd`, a database that does not open) NCBI writes the stored title, as LOSAT does; the other formats show the stored title or its first word |
 | A reported title with a raw byte outside ' '..'~' in the header file | NCBI prints `#` and a warning a number of times that depends on the format and the field |
 | `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
 | A database of more letters than the target's `usize` (32-bit targets) | |

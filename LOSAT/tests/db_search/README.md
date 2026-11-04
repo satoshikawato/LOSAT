@@ -451,6 +451,13 @@ those two where the word is printed (`psubjb_at`, whose word is taken after NCBI
 for `nsubj_t` alone with the taxonomy database (NCBI's word is `Homo`, the organism's; not with `6 salltitles`, which
 prints no id).
 
+An empty title without parsed Seq-ids (line DBID H3; rows `db.id.bare.*`): `make_ids.py --emptytitle-only` writes
+`ids/nbare_t` and `ids/pbare_t` (`nbare.fna` and `pbare.faa`, the letters of `ndup.fna` and `pdup.faa` under `>` alone,
+without `-parse_seqids`, taxid 9606). The Bioseq that NCBI's formatters fetch has a source for the taxid, so outfmt 0
+makes the title from it where the taxonomy database names the taxid (`tests/seqdb/taxdb/good`: `unnamed protein
+product [Homo sapiens]`, `Homo sapiens`): LOSAT refuses that outfmt 0 and writes it without a taxonomy database or with
+`no_btd`, and the other formats (XML shows the stored title, the tabular id of a protein is `unnamed` either way).
+
 Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
 --join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and
 `ids/njoin_a`, `ids/njoin_b`, `ids/njoin_c` (version 5; r1 in all three, r3 with two definition lines and two

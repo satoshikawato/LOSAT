@@ -309,21 +309,20 @@ describe('verificationBadge', () => {
     const reasons = (change: Partial<BadgeInput>) => verificationBadge({ ...input, ...change }, table);
     expect(reasons({ argv: ['blastn', '-evalue', '1'] }).details.join(' ')).toMatch(/for outfmt 0 and 6, not for outfmt 7/);
     expect(reasons({ argv: ['blastn', '-evalue', '2'] }).details.join(' ')).toMatch(/were not compared with NCBI BLAST\+ 2\.17\.0/);
-    expect(reasons({ threads: 5 }).details.join(' ')).toMatch(/used 5 threads; the browser runtime was checked with 1, 2 and 4 threads/);
+    expect(reasons({ threads: 3 }).details.join(' ')).toMatch(/used 3 threads; the browser runtime was checked with 1, 2 and 4 threads/);
     expect(reasons({ program: 'tblastx', argv: ['tblastx'] }).details.join(' ')).toMatch(/browser runtime of tblastx was not checked/);
-    expect(reasons({ threads: 5 }).label).toBe('Not supported');
+    expect(reasons({ threads: 3 }).label).toBe('Not supported');
     expect(reasons({ argv: ['blastn', '-evalue', '2'] }).details.join(' ')).not.toMatch(/certif/i);
     expect(reasons({ runtimePath: 'fake' }).level).toBe('development');
   });
 
-  it('supports any thread count up to the largest one checked in the browser (WA-RS-03)', () => {
-    // Auto picks half of the user's processors, so a run can use a count that V-BR did not run.
+  it('supports a thread count only when it was checked in the browser (WA-RS-03)', () => {
+    // Auto picks a count from the user's processors; a count that V-BR did not run is not supported.
     const level = (change: Partial<BadgeInput>) => verificationBadge({ ...input, ...change }, table).level;
-    expect(level({ threads: 3 })).toBe('certified');
+    expect(level({ threads: 2 })).toBe('certified');
     expect(level({ runtimePath: 'serial', threads: 1 })).toBe('certified');
-    expect(level({ threads: 5 })).toBe('outside');
-    expect(level({ threads: 0 })).toBe('outside');
-    expect(level({ threads: 2.5 })).toBe('outside');
+    expect(level({ threads: 3 })).toBe('outside');
+    expect(level({ threads: 8 })).toBe('outside');
     expect(level({ threads: undefined })).toBe('outside');
   });
 

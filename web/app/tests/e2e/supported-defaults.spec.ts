@@ -1,10 +1,10 @@
 // The mark of a run with the defaults (WA-RS-03): in the engine build, a run of every mode and
 // task with its default options is Supported, with one thread and with Auto. The defaults'
 // option set has NCBI's records in outfmt 0, 6 and 7 (build/verification.ts; the def7.* rows of
-// LOSAT/tests/outfmt0_manifest.tsv), and Auto's thread count, half of the processors up to 32,
-// is at most the largest count that V-BR checked in the browsers (engine.spec.ts,
-// domain/verification.ts). The inputs are larger than AUTO_SERIAL_BELOW_BYTES, so Auto runs the
-// threaded module wherever the browser reports four processors or more.
+// LOSAT/tests/outfmt0_manifest.tsv), and V-BR ran each program at every thread count that Auto
+// can choose (engine.spec.ts). Auto reads the processors from navigator.hardwareConcurrency in
+// the page (infra/engine-worker/gateway.ts), which the tests set, so that its count is the same
+// on every machine: 6 of 12 processors below 1 MB of input, 32 of 64 from 1 MB.
 import { expect, test, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { chooseRun, fasta, openFiles, openSearch, program, submit, task, waitStatus } from './support/search';
@@ -13,15 +13,17 @@ test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine build marks every run "Development 
 // Engine searches are slower in Firefox and WebKit than in Chromium (results.spec.ts).
 test.setTimeout(600_000);
 
-test.beforeEach(async ({ page }) => {
+/** Opens the search form in a page whose navigator reports `processors` logical processors. */
+async function openWithProcessors(page: Page, processors: number): Promise<void> {
+  await page.addInitScript((n) => Object.defineProperty(Navigator.prototype, 'hardwareConcurrency', { get: () => n }), processors);
   await openSearch(page);
-});
+}
 
 interface Mode {
   readonly id: 'blastn' | 'blastp' | 'blastx' | 'tblastn' | 'tblastx';
   /** The tasks of its Task Selection, the default first (none for TBLASTX). */
   readonly tasks: readonly string[];
-  /** Files of LOSAT/tests/fasta; together more than 20,000 bytes. */
+  /** Files of LOSAT/tests/fasta; together more than 20,000 bytes and less than 1 MB (Auto: half of the processors, at most 8). */
   readonly query: string;
   readonly subject: readonly string[];
 }
@@ -40,6 +42,7 @@ async function runAndMark(page: Page, run: number): Promise<{ mark: string; why:
   await waitStatus(page, run, 'completed');
   await chooseRun(page, run);
   const badge = page.getByTestId('results-summary').getByTestId('verification-badge');
+  await expect(badge).toHaveAttribute('data-level', /^(certified|outside)$/);
   const mark = ((await badge.textContent()) ?? '').trim();
   const why = (await badge.getAttribute('title')) ?? '';
   await page.getByTestId('results-view-details').click();
@@ -50,6 +53,7 @@ async function runAndMark(page: Page, run: number): Promise<{ mark: string; why:
 
 for (const mode of MODES) {
   test(`${mode.id}: a run with the defaults of each task is Supported with 1 thread and with Auto`, async ({ page }) => {
+    await openWithProcessors(page, 12);
     await program(page, mode.id);
     await openFiles(page, 'query', [{ name: mode.query.split('/').at(-1)!, text: fasta(mode.query) }]);
     await openFiles(page, 'subject', mode.subject.map((path) => ({ name: path, text: fasta(path) })));
@@ -61,22 +65,23 @@ for (const mode of MODES) {
         const { mark, why, engine } = await runAndMark(page, ++run);
         const name = `${mode.id}${value === undefined ? '' : ` -task ${value}`}, Threads ${threads} (${engine})`;
         expect(mark, `${name}: ${why}`).toBe('Supported');
-        if (threads === '1') expect(engine, name).toBe('serial, 1 thread');
-        else if ((await page.evaluate(() => navigator.hardwareConcurrency)) >= 4) expect(engine, name).toMatch(/^threaded, \d+ threads$/);
+        expect(engine, name).toBe(threads === '1' ? 'serial, 1 thread' : 'threaded, 6 threads');
         test.info().annotations.push({ type: 'mark', description: `${name}: ${mark}` });
       }
     }
   });
 }
 
-test('blastn: Auto with an input of 1 MB or more (up to 32 threads) is Supported', async ({ page }) => {
-  // Four genomes of about 300 kB: Auto's larger limit (AUTO_MANY_THREADS_FROM_BYTES).
+test('blastn: Auto with an input of 1 MB or more on 64 processors (32 threads) is Supported', async ({ page }) => {
+  // Four genomes of about 300 kB: Auto's larger limit (AUTO_MANY_THREADS_FROM_BYTES, AUTO_MAX_THREADS).
+  await openWithProcessors(page, 64);
   await program(page, 'blastn');
   await openFiles(page, 'query', [{ name: 'multi_query.fasta', text: fasta('outfmt0/multi_query.fasta') }]);
   const genomes = ['LC738868.fasta', 'LC738869.fasta', 'LC738870.fasta', 'LC738871.fasta'];
   await openFiles(page, 'subject', genomes.map((path) => ({ name: path, text: fasta(path) })));
   await page.getByTestId('threads').selectOption('auto');
   const { mark, why, engine } = await runAndMark(page, 1);
+  expect(engine).toBe('threaded, 32 threads');
   expect(mark, `${engine}: ${why}`).toBe('Supported');
   test.info().annotations.push({ type: 'mark', description: `blastn, 4 genomes, Threads auto (${engine}): ${mark}` });
 });

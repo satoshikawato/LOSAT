@@ -37,7 +37,8 @@ describe('verification table', () => {
       const browser = table.programs[program]?.browser;
       expect(browser?.formats, program).toEqual([0, 6, 7]);
       expect(browser?.paths, program).toEqual(['serial', 'threaded']);
-      expect(browser?.threads, program).toEqual([1, 2, 4, 8, 16, 32]);
+      // V-BR runs every count that Auto and the Threads list can choose (WA-RS-03).
+      expect(browser?.threads, program).toEqual(Array.from({ length: 32 }, (_, i) => i + 1));
       expect(browser?.browsers, program).toEqual(expect.arrayContaining(['Chromium', 'Firefox', 'WebKit']));
     }
   });

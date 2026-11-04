@@ -1,9 +1,10 @@
 // The verification badge of a run (plan §6.1, design §10.3, PD-LOSAT-WEB-APP-BOUNDARY
 // "Compatibility contract"). A run matches a certified profile only when its program and
 // options were compared byte for byte with NCBI BLAST+ for every output format, and its
-// runtime path in the browser was checked against the native engine with at least as many
-// threads as the run used. Auto's thread count depends on the user's processors (half of them,
-// up to 32), so no list of counts covers it; V-BR checks 1, 2, 4, 8, 16 and 32 (WA-RS-03).
+// runtime path in the browser was checked against the native engine with its thread count.
+// Auto's count depends on the user's processors (serial below 20,000 bytes of input, then half
+// of the processors, at most 8 below 1 MB and 32 from 1 MB), so V-BR runs every count from 1 to
+// 32 for each program (WA-RS-03).
 // The table that says what was compared is generated from docs/web/verification_cells.tsv
 // and the certification records at build time (build/verification.ts); nobody writes it
 // by hand. The badge speaks about the engine, the options and the runtime path, never
@@ -128,8 +129,7 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
     if (input.runtimePath === undefined || !browser.paths.includes(input.runtimePath)) {
       outside.push(`The ${input.runtimePath ?? 'unknown'} runtime path was not checked in the browser.`);
     }
-    const most = Math.max(0, ...browser.threads);
-    if (input.threads === undefined || !Number.isInteger(input.threads) || input.threads < 1 || input.threads > most) {
+    if (input.threads === undefined || !browser.threads.includes(input.threads)) {
       outside.push(
         `This run used ${input.threads ?? 'an unknown number of'} ${input.threads === 1 ? 'thread' : 'threads'}; ` +
           `the browser runtime was checked with ${list(browser.threads)} threads.`,

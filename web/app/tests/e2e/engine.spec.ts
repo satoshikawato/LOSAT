@@ -8,7 +8,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test, type BrowserContext } from '@playwright/test';
 import type { OutputFormat } from '../../src/domain/output-format';
 import type { RetentionResult, SearchCase, SearchResult } from './harness/engine';
 import { buildHarness, type HarnessFiles } from './support/browser';
@@ -23,11 +23,15 @@ test.setTimeout(900_000);
 const EVIDENCE = process.env['LOSAT_WEB_EVIDENCE'] || undefined;
 const FORMATS: readonly OutputFormat[] = [0, 6, 7];
 /**
- * The thread counts of V-BR: the serial path, then the threaded path up to 32, the most that
- * Auto (infra/engine-worker/policy.ts AUTO_MAX_THREADS) and the Threads list choose. A run's mark
- * is Supported up to the largest count checked (domain/verification.ts; WA-RS-03).
+ * The thread counts of V-BR (WA-RS-03). Auto (infra/engine-worker/policy.ts) and the Threads list
+ * choose any count from 1 to 32, and a run's mark is Supported only at a count that was checked
+ * (domain/verification.ts). Every case runs on the serial path and on the threaded path at 2, 4,
+ * 8, 16 and 32 threads; one case of each program also runs at every other count.
  */
-const VBR_THREADS = [1, 2, 4, 8, 16, 32] as const;
+const VBR_THREADS: readonly number[] = [1, 2, 4, 8, 16, 32];
+const OTHER_THREADS: readonly number[] = Array.from({ length: 32 }, (_, i) => i + 1).filter((n) => !VBR_THREADS.includes(n));
+/** The case of each program that runs at OTHER_THREADS: its default options where a case has them. */
+const EVERY_COUNT_CASES: readonly string[] = ['multi.megablast', 'width.blastp', 'pyl.blastx', 'width.tblastn', 'tblastx.multi'];
 
 let harness: HarnessFiles;
 let isolated: HarnessServer;
@@ -144,16 +148,14 @@ test('run output contract: the writer in the Engine worker, the real Data worker
   expect(withoutQuota).toHaveLength(10);
 });
 
-test('V-BR: searches through the application give the expected bytes at 1 to 32 threads', async ({ context, browserName }) => {
-  test.skip(NATIVE === undefined, NO_NATIVE_REASON);
+/** Runs V-BR searches (each case at each of its thread counts), checks them, and returns the record's rows. */
+async function vbrSearches(context: BrowserContext, runs: readonly (readonly [VbrCase, number])[]): Promise<unknown[]> {
   const page = await openHarness(context, isolated);
-  const cases = vbrCases();
-  const list: SearchCase[] = cases.flatMap((vbr) => VBR_THREADS.map((threads) => searchOf(vbr, threads)));
+  const list: SearchCase[] = runs.map(([vbr, threads]) => searchOf(vbr, threads));
   const results: SearchResult[] = await page.evaluate((searches) => window.losatHarness!.engine.searches(searches), list);
   const rows = [];
   for (const [i, result] of results.entries()) {
-    const vbr = cases[Math.floor(i / VBR_THREADS.length)]!;
-    const threads = list[i]!.threads as number;
+    const [vbr, threads] = runs[i]!;
     expect.soft(result.status, `${result.id}: ${result.record.error ?? ''}`).toBe('completed');
     if (result.status !== 'completed') continue;
     expect.soft(result.record.runtimePath, `${result.id} ${result.record.fallbackReason ?? ''}`).toBe(threads === 1 ? 'serial' : 'threaded');
@@ -174,7 +176,21 @@ test('V-BR: searches through the application give the expected bytes at 1 to 32 
       memory: result.record.memory,
     });
   }
-  record('v-br', browserName, rows);
+  return rows;
+}
+
+test('V-BR: searches through the application give the expected bytes at 1, 2, 4, 8, 16 and 32 threads', async ({ context, browserName }) => {
+  test.skip(NATIVE === undefined, NO_NATIVE_REASON);
+  const runs = vbrCases().flatMap((vbr) => VBR_THREADS.map((threads) => [vbr, threads] as const));
+  record('v-br', browserName, await vbrSearches(context, runs));
+});
+
+test('V-BR: one search of each program gives the expected bytes at every other thread count up to 32', async ({ context, browserName }) => {
+  test.skip(NATIVE === undefined, NO_NATIVE_REASON);
+  const cases = vbrCases().filter((vbr) => EVERY_COUNT_CASES.includes(vbr.id));
+  expect(cases.map((vbr) => vbr.program).sort()).toEqual(['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx']);
+  const runs = cases.flatMap((vbr) => OTHER_THREADS.map((threads) => [vbr, threads] as const));
+  record('v-br-counts', browserName, await vbrSearches(context, runs));
 });
 
 test('R1: searches of one subject with other queries and options reuse it and give the expected bytes', async ({ context, browserName }) => {

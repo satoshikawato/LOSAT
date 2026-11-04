@@ -489,9 +489,8 @@ const DESCRIBE = JSON.parse(readFileSync(join(REPOSITORY, 'web/app/src/infra/fak
 
 /**
  * The badge level that the table gives a run: certified only when its option set was compared
- * with NCBI for outfmt 0, 6 and 7, its runtime path was checked in the browser and its thread
- * count is at most the largest checked there (plan §6.1, WA-RS-03). It reads the table, not the
- * application's badge function.
+ * with NCBI for outfmt 0, 6 and 7 and its runtime path and thread count were checked in the
+ * browser (plan §6.1). It reads the table, not the application's badge function.
  */
 function tableLevel(programId: ProgramId, argv: readonly string[], path: string, threads: number): 'certified' | 'outside' {
   const parameters = DESCRIBE[programId]!.parameters;
@@ -505,8 +504,7 @@ function tableLevel(programId: ProgramId, argv: readonly string[], path: string,
     browser !== undefined &&
     FORMATS.every((format) => compared.includes(format) && browser.formats.includes(format)) &&
     (browser.paths as readonly string[]).includes(path) &&
-    threads >= 1 &&
-    threads <= Math.max(...browser.threads);
+    browser.threads.includes(threads);
   return checked ? 'certified' : 'outside';
 }
 

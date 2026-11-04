@@ -8,6 +8,7 @@
 
 // NCBI app/blast/blast_app_util.hpp and blastinput/blast_args.cpp: the application layer.
 pub mod app;
+pub mod compressed;
 // NCBI blastinput/blast_args.cpp (s_GetTaxIDList): the taxid options of a database search.
 pub mod db_filter;
 // NCBI blastinput/blast_fasta_input.cpp, objtools/readers/fasta.cpp, util/line_reader.cpp:

@@ -60,50 +60,44 @@ pub fn open_input(path: &std::path::Path, role: &str, program: &str) -> Result<s
 }
 
 /// Opens the file of a `-query` or `-subject` argument (`path` is not `-`): a file that does not
-/// open gets NCBI's error (`crate::cli::inaccessible`), and a file named `.gz` (`is_gzip_name`) is
-/// inflated into an unnamed temporary file first, which is returned in its place: the program then
-/// reads it exactly as it reads the plain file (the same lines and messages, the same readable-byte
-/// hint of `FastaStream::from_file`, the same second handle of blastn's query stream and second
-/// reads of BLASTX's query), while the inflater holds a 32 KiB window. Concatenated members (the
-/// output of bgzip, or of `cat a.gz b.gz`) are read whole. A `.gz` that is not gzip data, or is cut
-/// short, is refused here, before the search (line GZ, DECISIONS 3 and 5).
+/// open gets NCBI's error (`crate::cli::inaccessible`), and a file named `.gz`, `.bz2` or `.zst`
+/// (`compressed::compression_of_name`) is inflated into an unnamed temporary file first, which is
+/// returned in its place: the program then reads it exactly as it reads the plain file (the same
+/// lines and messages, the same readable-byte hint of `FastaStream::from_file`, the same second
+/// handle of blastn's query stream and second reads of BLASTX's query), while the decoder holds
+/// its window. Concatenated members, streams and frames (bgzip, pbzip2, pzstd, `cat a.gz b.gz`)
+/// are read whole. A file that is not what its name says, or is cut short, is refused here,
+/// before the search (line GZ, DECISIONS 3, 5 and 9).
 ///
-/// No NCBI counterpart: the NCBI search programs read a `.gz` as text and stop at its first line
-/// (`CFastaReader: Near line 1, there's a line that doesn't look like plausible data`); NCBI's
-/// makeblastdb reads `-in` names ending in `.gz` through a gzip stream (`writedb::makeblastdb`),
-/// and LOSAT applies the same rule, by the name alone, to the search inputs
-/// (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 8).
+/// No NCBI counterpart: the NCBI search programs read such a file as text and stop at its first
+/// line (`CFastaReader: Near line 1, there's a line that doesn't look like plausible data`);
+/// NCBI's makeblastdb reads `-in` names with these suffixes through a decompressing stream
+/// (`writedb::makeblastdb`), and LOSAT applies the same rule, by the name alone, to the search
+/// inputs (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 8).
 pub fn open_file_input(path: &std::path::Path, role: &str) -> Result<std::fs::File> {
     let file = std::fs::File::open(path).map_err(|_| crate::cli::inaccessible(role, path))?;
-    if !is_gzip_name(path) {
+    let Some(compression) = crate::blastinput::compressed::compression_of_name(path) else {
         return Ok(file);
-    }
-    inflate_to_temporary_file(file, role).map_err(|error| {
+    };
+    inflate_to_temporary_file(compression.decoder(file), role).map_err(|error| {
         anyhow::anyhow!(
-            "-{role}: '{}' is named .gz but is not gzip data ({error}); LOSAT reads a file named .gz through gzip",
-            path.display()
+            "-{role}: '{}' is named {suffix} but is not {format} data ({error}); LOSAT reads a file named {suffix} through {format}",
+            path.display(),
+            suffix = compression.suffix(),
+            format = compression.format(),
         )
     })
 }
 
-/// Whether a file name ends in `.gz`, in any case: the rule by which NCBI's makeblastdb reads an
-/// `-in` file through gzip (`makeblastdb.cpp:1037`, `NStr::EndsWith(seq_file, ".gz", NStr::eNocase)`).
-/// `-` and names without the suffix are plain.
-pub fn is_gzip_name(path: &std::path::Path) -> bool {
-    let bytes = path.as_os_str().as_encoded_bytes();
-    bytes.len() >= 3 && bytes[bytes.len() - 3..].eq_ignore_ascii_case(b".gz")
-}
-
-/// Inflates the gzip members of `compressed` into an unnamed temporary file
-/// (`unnamed_temporary_file`) and returns it, positioned at its start. An error names the gzip
-/// fault or the file system (`TMPDIR` without room, for instance).
+/// Copies the bytes of `inflater` (a decoder of `compressed::Compression`) into an unnamed
+/// temporary file (`unnamed_temporary_file`) and returns it, positioned at its start. An error
+/// names the fault of the compressed data or the file system (`TMPDIR` without room, for
+/// instance).
 fn inflate_to_temporary_file(
-    compressed: std::fs::File,
+    mut inflater: impl std::io::Read,
     role: &str,
 ) -> std::io::Result<std::fs::File> {
     use std::io::{Seek, Write};
-    let mut inflater =
-        flate2::read::MultiGzDecoder::new(std::io::BufReader::with_capacity(1 << 16, compressed));
     let mut temporary = unnamed_temporary_file(role)?;
     {
         let mut sink = std::io::BufWriter::with_capacity(1 << 16, &mut temporary);
@@ -329,20 +323,27 @@ pub fn write_empty_subject_warnings_by_length(
 
 #[cfg(test)]
 mod tests {
-    use super::{has_stream_position, is_gzip_name, open_file_input};
+    use super::{has_stream_position, open_file_input};
+    use crate::blastinput::compressed::test_data::{bzip2_streams, gzip_members, zstd_frames};
+    use crate::blastinput::compressed::Compression;
     use std::io::Read;
 
-    fn gzip(members: &[&[u8]]) -> Vec<u8> {
-        use std::io::Write;
-        let mut bytes = Vec::new();
-        for member in members {
-            let mut encoder = flate2::GzBuilder::new()
-                .extra(b"BC\x02\x00\x00\x00".to_vec())
-                .write(&mut bytes, flate2::Compression::default());
-            encoder.write_all(member).unwrap();
-            encoder.finish().unwrap();
+    #[cfg(unix)]
+    fn owned(reader: std::io::PipeReader) -> std::os::fd::OwnedFd {
+        reader.into()
+    }
+
+    #[cfg(windows)]
+    fn owned(reader: std::io::PipeReader) -> std::os::windows::io::OwnedHandle {
+        reader.into()
+    }
+
+    fn compressed(compression: Compression, parts: &[&[u8]]) -> Vec<u8> {
+        match compression {
+            Compression::Gzip => gzip_members(parts),
+            Compression::Bzip2 => bzip2_streams(parts),
+            Compression::Zstd => zstd_frames(parts),
         }
-        bytes
     }
 
     fn temporary(stem: &str, bytes: &[u8]) -> std::path::PathBuf {
@@ -380,61 +381,73 @@ mod tests {
             .collect()
     }
 
-    // NCBI reference: c++/src/app/blastdb/makeblastdb.cpp:1037 (`NStr::EndsWith(seq_file,
-    // ".gz", NStr::eNocase)`): the suffix in any case, nothing else.
+    // No NCBI counterpart (line GZ, DECISIONS 3, 4 and 9): a compressed input opens as the
+    // inflated bytes, every member / stream / frame of a concatenated file, as a regular file
+    // with a position, and leaves no name behind; a plain name opens as it is.
     #[test]
-    fn a_gz_name_is_the_suffix_in_any_case() {
-        for name in [".gz", "q.gz", "q.fa.GZ", "q.Gz", "dir.gz/q.fa.gz"] {
-            assert!(is_gzip_name(std::path::Path::new(name)), "{name}");
-        }
-        for name in ["-", "q.fa", "q.gzip", "q.gz.fa", "dir.gz/q.fa", "gz", ""] {
-            assert!(!is_gzip_name(std::path::Path::new(name)), "{name}");
-        }
-    }
-
-    // No NCBI counterpart (line GZ, DECISIONS 3 and 4): a `.gz` input opens as the inflated
-    // bytes, every member of a concatenated file (bgzip's extra field included), as a regular
-    // file with a position, and leaves no name behind.
-    #[test]
-    fn a_gz_input_opens_as_the_inflated_file_with_every_member() {
+    fn a_compressed_input_opens_as_the_inflated_file_with_every_part() {
         let plain = temporary("plain.fa", b">q1\nACGT\n>q2\nTTTT\n");
         assert_eq!(
             read_all(open_file_input(&plain, "query").unwrap()),
             b">q1\nACGT\n>q2\nTTTT\n"
         );
-        let path = temporary(
-            "members.fa.GZ",
-            &gzip(&[b">q1\nACGT\n", b">q2\nTTTT\n", b""]),
-        );
-        let file = open_file_input(&path, "query").unwrap();
-        assert!(has_stream_position(&file));
-        assert!(file.metadata().unwrap().is_file());
-        assert_eq!(read_all(file), b">q1\nACGT\n>q2\nTTTT\n");
+        std::fs::remove_file(&plain).unwrap();
+        for (compression, stem) in [
+            (Compression::Gzip, "members.fa.GZ"),
+            (Compression::Bzip2, "streams.fa.Bz2"),
+            (Compression::Zstd, "frames.fa.zst"),
+        ] {
+            let path = temporary(
+                stem,
+                &compressed(compression, &[b">q1\nACGT\n", b">q2\nTTTT\n", b""]),
+            );
+            let file = open_file_input(&path, "query").unwrap();
+            assert!(has_stream_position(&file), "{stem}");
+            assert!(file.metadata().unwrap().is_file(), "{stem}");
+            assert_eq!(read_all(file), b">q1\nACGT\n>q2\nTTTT\n", "{stem}");
+            std::fs::remove_file(&path).unwrap();
+        }
         #[cfg(unix)]
         assert_eq!(inflated_names(), Vec::<std::path::PathBuf>::new());
-        std::fs::remove_file(&plain).unwrap();
-        std::fs::remove_file(&path).unwrap();
     }
 
-    // No NCBI counterpart (line GZ, DECISIONS 5): a `.gz` that is not gzip data, or is cut short,
-    // is refused with the file's name; a file that does not open keeps NCBI's error.
+    // No NCBI counterpart (line GZ, DECISIONS 5): a compressed name whose bytes are not that
+    // format, or are cut short, is refused with the file's name and the format; a file that does
+    // not open keeps NCBI's error.
     #[test]
-    fn a_gz_name_without_gzip_data_is_refused() {
-        let plain = temporary("text.fa.gz", b">q1\nACGT\n");
-        let error = open_file_input(&plain, "query").unwrap_err().to_string();
-        assert!(error.starts_with("-query: '"), "{error}");
-        assert!(
-            error.contains("is named .gz but is not gzip data ("),
-            "{error}"
-        );
-        assert!(
-            error.ends_with("); LOSAT reads a file named .gz through gzip"),
-            "{error}"
-        );
-        let whole = gzip(&[b">q1\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n"]);
-        let cut = temporary("cut.fa.gz", &whole[..whole.len() - 12]);
-        let error = open_file_input(&cut, "subject").unwrap_err().to_string();
-        assert!(error.starts_with("-subject: '"), "{error}");
+    fn a_compressed_name_without_that_data_is_refused() {
+        for compression in Compression::ALL {
+            let stem = format!("text.fa{}", compression.suffix());
+            let plain = temporary(&stem, b">q1\nACGT\n");
+            let error = open_file_input(&plain, "query").unwrap_err().to_string();
+            assert!(error.starts_with("-query: '"), "{error}");
+            let expected = format!(
+                "' is named {suffix} but is not {format} data (",
+                suffix = compression.suffix(),
+                format = compression.format()
+            );
+            assert!(error.contains(&expected), "{error}");
+            assert!(
+                error.ends_with(&format!(
+                    "); LOSAT reads a file named {} through {}",
+                    compression.suffix(),
+                    compression.format()
+                )),
+                "{error}"
+            );
+            std::fs::remove_file(&plain).unwrap();
+            let whole = compressed(
+                compression,
+                &[b">q1\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n"],
+            );
+            let cut = temporary(
+                &format!("cut.fa{}", compression.suffix()),
+                &whole[..whole.len() - 12],
+            );
+            let error = open_file_input(&cut, "subject").unwrap_err().to_string();
+            assert!(error.starts_with("-subject: '"), "{error}");
+            std::fs::remove_file(&cut).unwrap();
+        }
         let missing = std::env::temp_dir().join("losat-input-files-missing.fa.gz");
         let error = open_file_input(&missing, "query").unwrap_err().to_string();
         assert!(
@@ -443,18 +456,6 @@ mod tests {
             ),
             "{error}"
         );
-        std::fs::remove_file(&plain).unwrap();
-        std::fs::remove_file(&cut).unwrap();
-    }
-
-    #[cfg(unix)]
-    fn owned(reader: std::io::PipeReader) -> std::os::fd::OwnedFd {
-        reader.into()
-    }
-
-    #[cfg(windows)]
-    fn owned(reader: std::io::PipeReader) -> std::os::windows::io::OwnedHandle {
-        reader.into()
     }
 
     // NCBI reference: c++/src/app/blast/blast_app_util.cpp:856-859 (`tellg() < 0` is piped

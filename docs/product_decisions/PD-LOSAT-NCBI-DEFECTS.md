@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.10
+- Version: 1.11
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -16,7 +16,9 @@
   not hold, rule 3, line DI-8f);
   1.10 2026-11-02 (the type of a `gb`, `emb` or `dbj` id, exception 2 for the tabular first
   word of an `lcl|Subject_N` id, and the reported sequences of a database with parsed Seq-ids
-  that are refused, line DBID)
+  that are refused, line DBID);
+  1.11 2026-11-04 (the makeblastdb exception: a `-in` file of several bzip2 streams or zstd
+  frames, line GZ; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -254,6 +256,22 @@ tabular id is the first word of the generated title, so BLASTN, TBLASTN and TBLA
 outfmt 6 as well as in outfmt 0 (SIGSEGV). LOSAT stops at the end of the string and writes `,`,
 which is what NCBI writes for the nearby record `lcl|Subject_N , x`. Other ids with such a title
 do not build it in the tabular formats, and NCBI and LOSAT agree there, as exception 2 says.
+
+## Approved exception (makeblastdb, a compressed `-in` file of several streams, version 1.11)
+
+7. **A `-in` file of several bzip2 streams or zstd frames.** makeblastdb reads an `-in` name
+   ending in `.gz`, `.bz2` or `.zst` through `CDecompressIStream` (`makeblastdb.cpp:1037-1050`).
+   Its gzip stream reads every member of a concatenated file (`fGZip` holds
+   `fAllowConcatenatedGZip`), but its bzip2 and zstd streams stop after the first stream or
+   frame and drop the rest without a message: `cat a.fa.bz2 b.fa.bz2` and `cat a.fa.zst
+   b.fa.zst` each build a database of the first file's sequence only (probe 2026-11-04,
+   `docs/evidence/compressed_input/README.md`; pbzip2 and pzstd write such files for any input
+   above their block size). A valid result exists and can be checked: the database makeblastdb
+   builds from the same bytes in one stream, or from the plain file. LOSAT reads every stream
+   and frame (`blastinput::compressed`), so `losat makeblastdb -in parts.fna.bz2` equals
+   `makeblastdb -in parts.fna`; a single-stream file builds the same files as makeblastdb
+   (`LOSAT/tests/cli_smoke.rs`, `makeblastdb_reads_compressed_inputs_as_makeblastdb_does`).
+   Line GZ, DECISIONS 9 (Owner-delegated).
 
 ## Reproduced as NCBI (rule 2)
 

@@ -15980,26 +15980,25 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 let seed_qs = uh.qs as usize + ungapped_len / 2;
                                 let seed_ss = uh.ss as usize + ungapped_len / 2;
 
-                                let prelim =
-                                    match x_prelim_subject.score_only(
-                                        chunk.offset,
-                                        subject_len,
-                                        (uh.ss as usize, uh.se as usize),
-                                        q_seq_blastna,
-                                        seed_qs,
-                                        seed_ss,
-                                        reward,
-                                        penalty,
-                                        gap_open,
-                                        gap_extend,
-                                        x_drop_gapped,
-                                        greedy_align_scratch,
-                                    ) {
-                                        Some(value) => value,
-                                        None => {
-                                            continue;
-                                        }
-                                    };
+                                let prelim = match x_prelim_subject.score_only(
+                                    chunk.offset,
+                                    subject_len,
+                                    (uh.ss as usize, uh.se as usize),
+                                    q_seq_blastna,
+                                    seed_qs,
+                                    seed_ss,
+                                    reward,
+                                    penalty,
+                                    gap_open,
+                                    gap_extend,
+                                    x_drop_gapped,
+                                    greedy_align_scratch,
+                                ) {
+                                    Some(value) => value,
+                                    None => {
+                                        continue;
+                                    }
+                                };
 
                                 let (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss) = prelim;
                                 (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)

@@ -498,7 +498,8 @@ mod tests {
                 [(1, -2, 0, 0, 20), (1, -3, 0, 0, 40), (2, -3, 5, 2, 30)]
             {
                 let subject = XPrelimSubject::new(true, &packed, SUBJECT_LEN);
-                let (mut windows, mut copy) = (GreedyAlignScratch::new(), GreedyAlignScratch::new());
+                let (mut windows, mut copy) =
+                    (GreedyAlignScratch::new(), GreedyAlignScratch::new());
                 for &(q_off, s_seed) in &seeds {
                     if s_seed < chunk_offset || s_seed >= chunk_offset + subject_len {
                         continue;

@@ -12,7 +12,9 @@
 // The searches come from web/adapter/tools/v_abi_cases.py; where a frozen SHA-256
 // exists (Gate A, the Stage G matrix, NCBI's fixtures) the match is recorded as well. A
 // search marked `"expect": "failure"` must fail in the CLI and in the ABI with the same
-// error.
+// error. A search with `"outfmt"` (6 or 7 with fields) runs with that -outfmt: its output,
+// stream 4, is compared with the CLI's run of the same argv, whose standard error is then
+// stream 3 (abi_v2.md §5, §7).
 //
 // Usage: node v_abi.js --native losat --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
@@ -32,6 +34,8 @@ const { createThreadHost } = require(path.join(ROOT, "LOSAT/tests/wasi_thread_ho
 const { unsignedWasiImports } = require(path.join(ROOT, "LOSAT/tests/wasi_artifact"));
 
 const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7], blastx: [0, 6, 7] };
+// The stream of the output of the argv's -outfmt.
+const CUSTOM_STREAM = 4;
 const WITH_HITS = new Set(["blastp", "tblastn", "blastn", "tblastx", "blastx"]);
 
 function sha256(bytes) {
@@ -162,6 +166,17 @@ function nativeOutputs(native, search, scratch) {
       for (const line of lines(format)) assert.ok(lines(6).includes(line), `outfmt ${format}: ${line} is in the warnings of outfmt 6`);
     }
   }
+  if (search.outfmt !== undefined) {
+    const out = path.join(scratch, "native.custom.out");
+    const argv = [...search.argv, "-outfmt", search.outfmt, "-num_threads", "1", "-out", out];
+    const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, maxBuffer: 1 << 30 });
+    if (result.status !== 0) throw new Error(`native ${argv.join(" ")} failed (exit ${result.status}): ${result.error ?? result.stderr}`);
+    outputs.set(CUSTOM_STREAM, fs.readFileSync(out));
+    fs.rmSync(out, { force: true });
+    // The warnings of outfmt 6, and those of the fields' writer (NCBI's taxdb warning).
+    for (const line of lines(6)) assert.ok(result.stderr.toString().split("\n").includes(line), `-outfmt ${search.outfmt}: ${line} is in its warnings`);
+    stderr = result.stderr;
+  }
   return { outputs, stderr, status };
 }
 
@@ -266,7 +281,21 @@ function checkSurface(reactor, native) {
     const cli = require("node:child_process").spawnSync(native, argv);
     assert.equal(validated.error, cli.stderr.toString(), `${argv.join(" ")}: the CLI's error`);
   }
-  assert.match(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-outfmt", "6"].join("\0")).error, /not accepted/);
+  // -outfmt (WA2-OP-03): the formats that every run writes and 6 and 7 with fields are valid, the CLI's errors
+  // have the CLI's words, and the formats that the CLI writes besides are refused.
+  for (const outfmt of ["6", "0", "6 qseqid sseqid pident", "7 std qcovs"]) {
+    assert.equal(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-outfmt", outfmt].join("\0")).status, 0, outfmt);
+  }
+  for (const outfmt of ["abc", "99", "6 delim=; qseqid staxids"]) {
+    const argv = ["blastn", "-query", "q", "-subject", "s", "-outfmt", outfmt];
+    const validated = reactor.call("losat_web2_validate", argv.join("\0"));
+    assert.equal(validated.status, -1, outfmt);
+    const cli = require("node:child_process").spawnSync(native, argv);
+    assert.equal(validated.error, cli.stderr.toString(), `-outfmt ${outfmt}: the CLI's message`);
+  }
+  assert.equal(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-outfmt", "5"].join("\0")).error,
+               "-outfmt 5: the browser writes outfmt 0, 6 and 7 (6 and 7 with any fields); other formats need the CLI");
+  assert.match(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-out", "x"].join("\0")).error, /not accepted/);
   // The tasks of Session SD and NCBI's option check of a template (blast_options.c:1247-1261).
   for (const task of ["dc-megablast", "blastn-short"]) {
     assert.equal(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", task].join("\0")).status, 0, task);
@@ -371,7 +400,8 @@ async function main() {
       assert.ok(q.status > 0, `register query: ${q.error}`);
       const queryIds = JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
       for (const threads of engine.threads) {
-        const argv = [...search.argv, "-num_threads", String(threads)].join("\0");
+        const custom = search.outfmt === undefined ? [] : ["-outfmt", search.outfmt];
+        const argv = [...search.argv, ...custom, "-num_threads", String(threads)].join("\0");
         const run = reactor.call("losat_web2_run", argv, q.status, subjects.get(subjectKey));
         if (waitForWorkers) await waitForWorkers();
         const label = `${engine.name} n${threads} ${search.cases.join(",")}`;
@@ -383,13 +413,21 @@ async function main() {
           continue;
         }
         assert.equal(run.status, 0, `${label}: ${run.error}`);
-        const row = { engine: engine.name, threads, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {} };
+        const row = { engine: engine.name, threads, program, cases: search.cases, argv: search.argv, outfmt: search.outfmt, formats: {}, frozen: {} };
         for (const format of FORMATS[program]) {
           const actual = run.streams.get(format) || Buffer.alloc(0);
           const want = expected.outputs.get(format);
           assert.equal(sha256(actual), sha256(want), `${label}: outfmt ${format}`);
           row.formats[format] = sha256(actual);
           if (search.frozen[format]) row.frozen[format] = sha256(actual) === search.frozen[format];
+        }
+        if (search.outfmt !== undefined) {
+          const actual = run.streams.get(CUSTOM_STREAM) || Buffer.alloc(0);
+          assert.equal(sha256(actual), sha256(expected.outputs.get(CUSTOM_STREAM)), `${label}: -outfmt ${search.outfmt}`);
+          row.formats.custom = sha256(actual);
+          if (search.frozen.custom) row.frozen.custom = sha256(actual) === search.frozen.custom;
+        } else {
+          assert.ok(!run.streams.has(CUSTOM_STREAM), `${label}: no stream ${CUSTOM_STREAM} without -outfmt`);
         }
         assert.equal(sha256(run.streams.get(3) || Buffer.alloc(0)), sha256(expected.stderr), `${label}: diagnostics`);
         row.diagnostics = sha256(expected.stderr);

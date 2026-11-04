@@ -3,7 +3,10 @@
 
 Every case is one search: a program, its argv without -outfmt, -out and -num_threads
 (the adapter writes every format, the host sets the threads), the working directory,
-and for each supported output format the frozen SHA-256 where one exists.
+and for each supported output format the frozen SHA-256 where one exists. A search with
+`"outfmt"` adds that -outfmt (6 or 7 with fields: abi_v2.md §7) to the argv; the output of
+it (stream 4) is compared with the CLI's for the same argv, and its frozen SHA-256 is
+`frozen["custom"]`.
 
 - full: the regression cases of docs/evidence/losat_web_e1a/capture_outputs.py (Gate A,
   the Stage G matrix, the BLASTP manifest in outfmt 0/6/7), grouped into searches.
@@ -42,6 +45,16 @@ import capture_outputs as capture  # noqa: E402  (the verified case builders)
 FORMATS = {"blastp": ["0", "6", "7"], "tblastn": ["0", "6", "7"], "blastn": ["0", "6", "7"], "tblastx": ["0", "6", "7"],
            "blastx": ["0", "6", "7"]}
 ADAPTER_OWNED = {"-outfmt", "-out", "-num_threads"}
+# NCBI's white space around an -outfmt value (`NStr::TruncateSpaces`).
+NCBI_SPACE = " \t\n\x0b\x0c\r"
+
+
+def custom_outfmt(outfmt: str) -> bool:
+    """Whether the -outfmt value adds an output of its own to a run (`run::parse_run`): 6 or 7
+    with words after the number."""
+    value = outfmt.strip(NCBI_SPACE)
+    number, space, _ = value.partition(" ")
+    return bool(space) and number.lstrip("+").lstrip("0") in ("6", "7")
 
 
 def split(command: list[str]) -> tuple[str | None, list[str]]:
@@ -110,12 +123,15 @@ def outfmt0_fixtures() -> list[dict]:
         if any(b">?" in (run_oracle.ENGINE / row[side]).read_bytes() for side in ("query", "subject")):
             continue
         assert argv[-2:] == ["-outfmt", outfmt], row["fixture_id"]
-        key = (row["program"], tuple(argv[:-2]))
+        # A row of -outfmt with fields is a search of its own, which writes that output besides.
+        custom = custom_outfmt(outfmt)
+        key = (row["program"], tuple(argv[:-2]), outfmt if custom else None)
         search = searches.setdefault(key, {"program": row["program"], "argv": [row["program"], *argv[:-2]],
-                                           "cwd": str(run_oracle.ENGINE), "cases": [], "frozen": {}})
+                                           "cwd": str(run_oracle.ENGINE), "cases": [], "frozen": {},
+                                           **({"outfmt": outfmt} if custom else {})})
         search["cases"].append(row["fixture_id"])
         if row.get("contract") != run_oracle.DEVIATION:
-            search["frozen"][outfmt] = row["stdout_sha256"]
+            search["frozen"]["custom" if custom else outfmt] = row["stdout_sha256"]
     return list(searches.values())
 
 

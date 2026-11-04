@@ -341,16 +341,18 @@ fn x_fitting_overflow<C: XVec>(kept: &mut [XAaVectors], own: &mut Vec<C::Hit>, n
 // ```
 /// [`x_build_direct`] with the shared neighbour lists and kept vectors (the pooled build); with
 /// `parts` above 1, its passes on that many tasks of the pool it runs on (`LOSAT_X_BXBUILDPAR`,
-/// [`x_partitioned_passes`]).
+/// [`x_partitioned_passes`]). With `narrow_cutoff` ([`XWidth::Choose`]) the table takes 16-bit
+/// hits where it fits and pays.
 pub(super) fn x_build_direct_pooled(
     prepared: PreparedLookupQuery,
     threshold: i32,
     matrix: ScoringMatrix,
     word_length: usize,
     parts: usize,
-) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+    narrow_cutoff: Option<u64>,
+) -> std::result::Result<XBxTable, PreparedLookupQuery> {
     let mut unused = None;
-    x_build_direct_in::<BackboneCell>(
+    x_build_direct_sel(
         prepared,
         threshold,
         matrix,
@@ -360,6 +362,7 @@ pub(super) fn x_build_direct_pooled(
         true,
         parts,
         false,
+        narrow_cutoff.map_or(XWidth::Wide, XWidth::Choose),
     )
     .map(|table| table.expect("pooled vectors grow to any table"))
 }
@@ -377,6 +380,41 @@ pub(crate) fn x_give_back_pooled(table: &mut BlastAaLookupTable) {
     };
     if !vectors.is_empty() {
         x_pool_lock(&X_BX_TABLES).push(vectors);
+    }
+}
+
+// No NCBI counterpart: buffer reuse (the pooled build); NCBI frees the vectors.
+/// [`x_give_back_pooled`] for a table of 16-bit hits (its padding goes with its vectors).
+pub(crate) fn x_give_back_pooled16(table: &mut BlastAaLookupTable<BackboneCell16>) {
+    let vectors = XAaVectors {
+        backbone16: std::mem::take(&mut table.backbone),
+        overflow16: std::mem::take(&mut table.overflow),
+        pv: std::mem::take(&mut table.pv),
+        grow: false,
+        ..XAaVectors::default()
+    };
+    if !vectors.is_empty() {
+        x_pool_lock(&X_BX_TABLES).push(vectors);
+    }
+}
+
+// No NCBI counterpart (buffer reuse only): the kept set a pooled build of width `C` takes, the
+// last one given back by a table of that width, or an empty one. A set holds the vectors of one
+// width (`x_give_back_pooled`, `x_give_back_pooled16`), and the build leaves the sets of the other
+// width in the pool: a free of one of their mapped vectors would raise glibc's mmap threshold
+// (`x_zeroed`).
+fn x_take_kept<C: XVec>() -> XAaVectors {
+    x_take_kept_from::<C>(&mut x_pool_lock(&X_BX_TABLES))
+}
+
+// No NCBI counterpart (buffer reuse only): [`x_take_kept`] from `pool`.
+fn x_take_kept_from<C: XVec>(pool: &mut Vec<XAaVectors>) -> XAaVectors {
+    match pool
+        .iter_mut()
+        .rposition(|vectors| C::vectors(vectors).0.capacity() > 0)
+    {
+        Some(at) => pool.remove(at),
+        None => XAaVectors::default(),
     }
 }
 
@@ -418,22 +456,22 @@ pub(crate) struct XAaVectors {
 /// EXPERIMENT (LOSAT_X_BPLK16): a cell width the in-place builder ([`x_build_direct_in`]) builds
 /// tables of, and the vectors of [`XAaVectors`] it builds on.
 trait XVec: XCell {
+    /// The width a build of this cell type is asked for ([`XWidth::Wide`], or `Narrow`).
+    const WIDTH: XWidth;
+
     /// The width's backbone and overflow vectors of `vectors`.
     fn vectors(vectors: &mut XAaVectors) -> (&mut Vec<Self>, &mut Vec<Self::Hit>);
 
     /// Drops the other width's backbone and overflow vectors.
     fn drop_other(vectors: &mut XAaVectors);
 
-    /// The table of a partitioned build (LOSAT_X_BXBUILDPAR: `Int4` hits only, BLASTX's pooled
-    /// build) as this width's table. The narrow width builds no partitioned table.
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    fn partitioned(table: BlastAaLookupTable) -> BlastAaLookupTable<Self>;
+    /// The table of a build asked for this width ([`Self::WIDTH`]) as this width's table.
+    fn built(table: XBxTable) -> BlastAaLookupTable<Self>;
 }
 
 impl XVec for BackboneCell {
+    const WIDTH: XWidth = XWidth::Wide;
+
     #[inline(always)]
     fn vectors(vectors: &mut XAaVectors) -> (&mut Vec<Self>, &mut Vec<i32>) {
         (&mut vectors.backbone, &mut vectors.overflow)
@@ -445,17 +483,18 @@ impl XVec for BackboneCell {
         vectors.overflow16 = Vec::new();
     }
 
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
     #[inline(always)]
-    fn partitioned(table: BlastAaLookupTable) -> BlastAaLookupTable {
-        table
+    fn built(table: XBxTable) -> BlastAaLookupTable {
+        match table {
+            XBxTable::Wide(table) => table,
+            XBxTable::Narrow(_) => unreachable!("a build asked for Int4 hits makes such a table"),
+        }
     }
 }
 
 impl XVec for BackboneCell16 {
+    const WIDTH: XWidth = XWidth::Narrow;
+
     fn vectors(vectors: &mut XAaVectors) -> (&mut Vec<Self>, &mut Vec<u16>) {
         (&mut vectors.backbone16, &mut vectors.overflow16)
     }
@@ -465,13 +504,40 @@ impl XVec for BackboneCell16 {
         vectors.overflow = Vec::new();
     }
 
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    fn partitioned(_table: BlastAaLookupTable) -> BlastAaLookupTable<Self> {
-        unreachable!("a partitioned build (pooled, parts above 1) makes tables of Int4 hits only")
+    fn built(table: XBxTable) -> BlastAaLookupTable<Self> {
+        match table {
+            XBxTable::Narrow(table) => table,
+            XBxTable::Wide(_) => unreachable!("a build asked for u16 hits makes such a table"),
+        }
     }
+}
+
+// No NCBI counterpart: chooses the width of a table's hits (LOSAT_X_BPLK16 for BLASTP's block
+// tables; BLASTX's standard tables below); it changes no value NCBI computes.
+/// The width of the hits of the table [`x_build_direct_sel`] builds: `Int4` hits, `u16` hits (the
+/// caller has checked that the lookup query fits, `x_bplk16_fits`), or, for BLASTX's tables, the
+/// choice made after the count pass: `u16` hits where the lookup query fits 16 bits and the
+/// table's hits per used backbone cell, in hundredths, are at least the cutoff (the fused loop
+/// scans such a table, `blastx/x_seed_diag.rs` `x_narrow_cutoff`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum XWidth {
+    Wide,
+    Narrow,
+    Choose(u64),
+}
+
+/// The table a build returns: `Int4` hits (every table before 16-bit hits) or `u16` hits.
+pub(crate) enum XBxTable {
+    Wide(BlastAaLookupTable),
+    Narrow(BlastAaLookupTable<BackboneCell16>),
+}
+
+// No NCBI counterpart: the property of a table that chooses LOSAT's loop (`blastx/x_seed_diag.rs`
+// `x_hits_per_cell`) and the build's choice of the width (`x_build_direct_sel`) both use it.
+/// A table's hits per used backbone cell in hundredths, from its hits and its used cells (0 for a
+/// table without hits).
+pub(crate) fn x_hits_per_cell_hundredths(hits: u64, used: u64) -> u64 {
+    (hits * 100).checked_div(used).unwrap_or(0)
 }
 
 impl XAaVectors {
@@ -1367,6 +1433,32 @@ pub(super) fn x_build_direct(
     })
 }
 
+/// [`x_build_direct`] for BLASTX's standard table: with `narrow_cutoff`, the table takes 16-bit hits
+/// where it fits and pays (`XWidth::Choose`); the build is `x_build_direct`'s otherwise.
+pub(super) fn x_bx_build_direct(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    narrow_cutoff: Option<u64>,
+) -> std::result::Result<XBxTable, PreparedLookupQuery> {
+    X_MEMO.with(|memo| {
+        x_build_direct_sel(
+            prepared,
+            threshold,
+            matrix,
+            word_length,
+            &mut memo.borrow_mut(),
+            None,
+            false,
+            1,
+            false,
+            narrow_cutoff.map_or(XWidth::Wide, XWidth::Choose),
+        )
+        .map(|table| table.expect("fresh vectors have the room for any table"))
+    })
+}
+
 /// EXPERIMENT (LOSAT_X_BPDBKEEP): [`x_build_direct`] for BLASTP, whose chains glibc maps and
 /// unmaps without raising its mmap threshold where the switch is on
 /// (`LookupBackboneChains::x_new_unthresholded`).
@@ -1400,9 +1492,9 @@ fn x_bp_build_direct(
 ///
 /// EXPERIMENT (LOSAT_X_BPLK16): the table has the cells of width `C`: `BackboneCell` (the table of
 /// every program before the switch) or `BackboneCell16`, whose caller has checked that the lookup
-/// query is at most 65,535 letters (`x_bplk16_fits`) and passes no `pooled` or `parts` above 1. A
-/// table of `u16` hits has `XCell::PAD_CELLS` zero cells after its `backbone_size` cells and
-/// `XCell::PAD_HITS` zero hits after its overflow; neither is in any count.
+/// query is at most 65,535 letters (`x_bplk16_fits`). A table of `u16` hits has `XCell::PAD_CELLS`
+/// zero cells after its `backbone_size` cells and `XCell::PAD_HITS` zero hits after its overflow;
+/// neither is in any count.
 #[allow(clippy::too_many_arguments)]
 fn x_build_direct_in<C: XVec>(
     prepared: PreparedLookupQuery,
@@ -1415,6 +1507,109 @@ fn x_build_direct_in<C: XVec>(
     parts: usize,
     x_unthresholded: bool,
 ) -> std::result::Result<Option<BlastAaLookupTable<C>>, PreparedLookupQuery> {
+    x_build_direct_sel(
+        prepared,
+        threshold,
+        matrix,
+        word_length,
+        memo,
+        room,
+        pooled,
+        parts,
+        x_unthresholded,
+        C::WIDTH,
+    )
+    .map(|table| table.map(C::built))
+}
+
+/// No NCBI counterpart: what a table has besides its backbone, overflow and pv (the fields
+/// `build_lookup_from_prepared` sets from the prepared query).
+struct XTableMeta {
+    frame_bases: Vec<i32>,
+    num_contexts: usize,
+    query_length: i32,
+    word_length: usize,
+    alphabet_size: usize,
+    charsize: usize,
+    mask: usize,
+    threshold: i32,
+    row_max: Vec<i32>,
+}
+
+/// No NCBI counterpart: the vectors of a table built in place.
+struct XVectors<C: XCell> {
+    backbone: Vec<C>,
+    pv: Vec<u32>,
+    overflow: Vec<C::Hit>,
+    longest_chain: i32,
+}
+
+/// No NCBI counterpart: the vectors of a build, of the width the build chose.
+enum XBuilt {
+    Wide(XVectors<BackboneCell>),
+    Narrow(XVectors<BackboneCell16>),
+}
+
+impl XTableMeta {
+    fn table<C: XCell>(self, vectors: XVectors<C>) -> BlastAaLookupTable<C> {
+        BlastAaLookupTable {
+            backbone: vectors.backbone,
+            overflow: vectors.overflow,
+            pv: vectors.pv,
+            frame_bases: self.frame_bases,
+            num_contexts: self.num_contexts,
+            query_length: self.query_length,
+            word_length: self.word_length as i32,
+            alphabet_size: self.alphabet_size as i32,
+            charsize: self.charsize as i32,
+            mask: self.mask as i32,
+            longest_chain: vectors.longest_chain,
+            threshold: self.threshold,
+            row_max: self.row_max,
+        }
+    }
+
+    fn built(self, built: XBuilt) -> XBxTable {
+        match built {
+            XBuilt::Wide(vectors) => XBxTable::Wide(self.table(vectors)),
+            XBuilt::Narrow(vectors) => XBxTable::Narrow(self.table(vectors)),
+        }
+    }
+}
+
+// No NCBI counterpart: chooses the width of a table's hits; it changes no value NCBI computes.
+/// Whether the table takes 16-bit hits: asked for (`Narrow`), or chosen (`Choose(cutoff)`) where
+/// every query offset (below `query_length`) and every cell's hit count (at most one hit per
+/// offset) fits 16 bits and the table's `hits` over its `used` backbone cells are at least `cutoff`
+/// hundredths per cell.
+fn x_is_narrow(width: XWidth, query_length: i32, hits: u64, used: u64) -> bool {
+    match width {
+        XWidth::Wide => false,
+        XWidth::Narrow => true,
+        XWidth::Choose(cutoff) => {
+            (0..=i32::from(u16::MAX)).contains(&query_length)
+                && x_hits_per_cell_hundredths(hits, used) >= cutoff
+        }
+    }
+}
+
+/// [`x_build_direct_in`] with the width of the table's hits asked for or chosen (`width`): the
+/// table, `Ok(None)` where `room` lacks the capacity. The width is chosen from the count pass,
+/// before the table's vectors are taken, so that a table that is not built narrow is built as it
+/// was before 16-bit hits.
+#[allow(clippy::too_many_arguments)]
+fn x_build_direct_sel(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    memo: &mut Option<XNeighborMemo>,
+    room: Option<&mut XAaVectors>,
+    pooled: bool,
+    parts: usize,
+    x_unthresholded: bool,
+    width: XWidth,
+) -> std::result::Result<Option<XBxTable>, PreparedLookupQuery> {
     let alphabet_size = LOOKUP_ALPHABET_SIZE;
     let charsize = ilog2(alphabet_size) + 1;
     if diagnostics_enabled() || word_length * charsize > 16 || word_length > 32 {
@@ -1443,6 +1638,17 @@ fn x_build_direct_in<C: XVec>(
                 .unwrap_or(i32::MIN)
         })
         .collect();
+    let meta = XTableMeta {
+        frame_bases,
+        num_contexts: contexts.len(),
+        query_length,
+        word_length,
+        alphabet_size,
+        charsize,
+        mask,
+        threshold,
+        row_max,
+    };
     let mut temps = if pooled {
         x_pool_lock(&X_BX_TEMPS).pop().unwrap_or_default()
     } else {
@@ -1468,7 +1674,7 @@ fn x_build_direct_in<C: XVec>(
             &mut temps,
         );
         let shared = x_shared_memo(key, backbone_size);
-        let (backbone, pv, overflow, longest_chain) = x_partitioned_passes(
+        let built = x_partitioned_passes(
             parts,
             backbone_size,
             &shared.lists,
@@ -1478,29 +1684,16 @@ fn x_build_direct_in<C: XVec>(
                     alphabet_size,
                     word_length,
                     charsize,
-                    &row_max,
+                    &meta.row_max,
                     threshold,
                     matrix,
                 )
             },
             &mut temps,
+            (width, query_length),
         );
         x_pool_lock(&X_BX_TEMPS).push(temps);
-        return Ok(Some(C::partitioned(BlastAaLookupTable {
-            backbone,
-            overflow,
-            pv,
-            frame_bases,
-            num_contexts: contexts.len(),
-            query_length,
-            word_length: word_length as i32,
-            alphabet_size: alphabet_size as i32,
-            charsize: charsize as i32,
-            mask: mask as i32,
-            longest_chain,
-            threshold,
-            row_max,
-        })));
+        return Ok(Some(meta.built(built)));
     }
     // The reference exact backbone (blast_aalookup.c:448-456).
     let mut exact_backbone = match temps.chains.take() {
@@ -1561,7 +1754,7 @@ fn x_build_direct_in<C: XVec>(
                 alphabet_size,
                 word_length,
                 charsize,
-                &row_max,
+                &meta.row_max,
                 threshold,
                 matrix,
             )
@@ -1575,6 +1768,7 @@ fn x_build_direct_in<C: XVec>(
     let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
     let mut overflow_size = 0usize;
     let mut longest_chain: i32 = 0;
+    let (mut hits, mut used) = (0u64, 0u64);
     for &count in &counts {
         if count as usize > AA_HITS_PER_CELL {
             overflow_size += count as usize;
@@ -1582,10 +1776,37 @@ fn x_build_direct_in<C: XVec>(
         if (count as i32) > longest_chain {
             longest_chain = count as i32;
         }
+        if count > 0 {
+            hits += u64::from(count);
+            used += 1;
+        }
     }
+    let sizes = (backbone_size, pv_size, overflow_size, longest_chain);
+    let built = if x_is_narrow(width, query_length, hits, used) {
+        x_laid_out::<BackboneCell16>(room, pooled, temps, exact_backbone, lists, counts, sizes)
+            .map(XBuilt::Narrow)
+    } else {
+        x_laid_out::<BackboneCell>(room, pooled, temps, exact_backbone, lists, counts, sizes)
+            .map(XBuilt::Wide)
+    };
+    Ok(built.map(|built| meta.built(built)))
+}
+
+/// The layout and fill passes of [`x_build_direct_sel`] for the cells of width `C`, after the count
+/// pass: the table's vectors, `None` where `room` lacks the capacity.
+#[allow(clippy::too_many_arguments)]
+fn x_laid_out<C: XVec>(
+    room: Option<&mut XAaVectors>,
+    pooled: bool,
+    mut temps: XBuildTemps,
+    exact_backbone: LookupBackboneChains,
+    lists: XLists<'_>,
+    counts: Vec<u32>,
+    (backbone_size, pv_size, overflow_size, longest_chain): (usize, usize, usize, i32),
+) -> Option<XVectors<C>> {
     let (mut backbone, mut pv, mut overflow): (Vec<C>, Vec<u32>, Vec<C::Hit>) = match room {
         None if pooled => {
-            let mut kept = x_pool_lock(&X_BX_TABLES).pop().unwrap_or_default();
+            let mut kept = x_take_kept::<C>();
             let (kept_backbone, kept_overflow) = C::vectors(&mut kept);
             let (kept_backbone, mut kept_overflow) =
                 (std::mem::take(kept_backbone), std::mem::take(kept_overflow));
@@ -1605,10 +1826,7 @@ fn x_build_direct_in<C: XVec>(
             vec![0u32; pv_size],
             vec![C::Hit::default(); overflow_size + C::PAD_HITS],
         ),
-        Some(room) => match room.x_take_zeroed::<C>(backbone_size, pv_size, overflow_size) {
-            Some(vectors) => vectors,
-            None => return Ok(None),
-        },
+        Some(room) => room.x_take_zeroed::<C>(backbone_size, pv_size, overflow_size)?,
     };
     let mut base: Vec<u32> = if pooled {
         x_zeroed(std::mem::take(&mut temps.base), backbone_size, false)
@@ -1665,21 +1883,12 @@ fn x_build_direct_in<C: XVec>(
         temps.chains = Some(exact_backbone);
         x_pool_lock(&X_BX_TEMPS).push(temps);
     }
-    Ok(Some(BlastAaLookupTable {
+    Some(XVectors {
         backbone,
-        overflow,
         pv,
-        frame_bases,
-        num_contexts: contexts.len(),
-        query_length,
-        word_length: word_length as i32,
-        alphabet_size: alphabet_size as i32,
-        charsize: charsize as i32,
-        mask: mask as i32,
+        overflow,
         longest_chain,
-        threshold,
-        row_max,
-    }))
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 and 283-358 (cited
@@ -2092,9 +2301,9 @@ const X_IN_OVERFLOW: u32 = 1 << 31;
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-struct XDisjointOut {
-    backbone: *mut BackboneCell,
-    overflow: *mut i32,
+struct XDisjointOut<C: XCell> {
+    backbone: *mut C,
+    overflow: *mut C::Hit,
     #[cfg(debug_assertions)]
     lens: (usize, usize),
 }
@@ -2105,13 +2314,13 @@ struct XDisjointOut {
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-unsafe impl Sync for XDisjointOut {}
+unsafe impl<C: XCell> Sync for XDisjointOut<C> {}
 
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-impl XDisjointOut {
+impl<C: XCell> XDisjointOut<C> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:74-76 (an append at the
     // chain's end, cited in the module comment); the copy of BlastAaLookupFinalize (blast_aalookup.c
     // 746-747, cited at `x_build_direct`) to the cell's entries or the overflow.
@@ -2128,9 +2337,7 @@ impl XDisjointOut {
             #[cfg(debug_assertions)]
             debug_assert!(w < self.lens.0 && at as usize + src.len() <= AA_HITS_PER_CELL);
             // SAFETY: (caller) `w` is a cell of the backbone; no reference to the cell is made.
-            unsafe { std::ptr::addr_of_mut!((*self.backbone.add(w)).entries) }
-                .cast::<i32>()
-                .wrapping_add(at as usize)
+            unsafe { C::x_entries_ptr(self.backbone.add(w)) }.wrapping_add(at as usize)
         } else {
             let at = (at & !X_IN_OVERFLOW) as usize;
             #[cfg(debug_assertions)]
@@ -2141,23 +2348,23 @@ impl XDisjointOut {
         // is written by this call alone.
         unsafe {
             match src {
-                [s0] => dst.write(*s0),
+                [s0] => C::Hit::x_write(dst, *s0),
                 [s0, s1] => {
-                    dst.write(*s0);
-                    dst.add(1).write(*s1);
+                    C::Hit::x_write(dst, *s0);
+                    C::Hit::x_write(dst.add(1), *s1);
                 }
                 [s0, s1, s2] => {
-                    dst.write(*s0);
-                    dst.add(1).write(*s1);
-                    dst.add(2).write(*s2);
+                    C::Hit::x_write(dst, *s0);
+                    C::Hit::x_write(dst.add(1), *s1);
+                    C::Hit::x_write(dst.add(2), *s2);
                 }
                 [s0, s1, s2, s3] => {
-                    dst.write(*s0);
-                    dst.add(1).write(*s1);
-                    dst.add(2).write(*s2);
-                    dst.add(3).write(*s3);
+                    C::Hit::x_write(dst, *s0);
+                    C::Hit::x_write(dst.add(1), *s1);
+                    C::Hit::x_write(dst.add(2), *s2);
+                    C::Hit::x_write(dst.add(3), *s3);
                 }
-                src => std::ptr::copy_nonoverlapping(src.as_ptr(), dst, src.len()),
+                src => C::Hit::x_copy(dst, src),
             }
         }
     }
@@ -2298,37 +2505,38 @@ fn x_counted_sources(
 //     w (making the neighbour lists not made yet; each is a function of its word alone, module
 //     comment).
 // (b) Each stripe of target cells (a multiple of 32 cells, so that no pv word is shared) sums them:
-//     count[w] = sum over p of c_p[w], the reference's count, from which it sets num_used and the
-//     pv bit of each of its cells, and its cells' overflow size and longest count.
+//     count[w] = sum over p of c_p[w], the reference's count, and its cells' overflow size,
+//     longest count, hits and used cells. The width of the table's hits is chosen from the totals.
 // (c) Each stripe, after the overflow of the stripes before it (their sizes summed in stripe order:
-//     BlastAaLookupFinalize assigns the overflow cursors in ascending cell order), gives its
-//     overflow cells their cursors and turns c_p[w] into the position of range p's first append to
-//     w: the cell's start (0 in its own entries, or its cursor in the overflow) plus the sum of
-//     c_q[w] over q < p.
+//     BlastAaLookupFinalize assigns the overflow cursors in ascending cell order), writes its cells
+//     (num_used, the pv bit and, for an overflow cell, the cursor) and turns c_p[w] into the
+//     position of range p's first append to w: the cell's start (0 in its own entries, or its
+//     cursor in the overflow) plus the sum of c_q[w] over q < p.
 // (d) Each range makes its appends, s ascending and w in T(s) in list order, at its position for w,
 //     advanced by the offsets written.
 // Every append to a cell from a range before p comes before range p's appends to it, and within a
 // range the appends are made in the reference's order, so each cell holds the reference's entries
 // in the reference's order; the ranges write disjoint positions, every position of a non-empty cell
 // once. Each source is walked once in (a) and once in (d). The backbone and the overflow are not
-// zero-filled first: (b) writes every cell whole (its unused entries zero, as after the C `calloc`)
+// zero-filled first: (c) writes every cell whole (its unused entries zero, as after the C `calloc`)
 // and (d) every overflow position.
 /// EXPERIMENT (LOSAT_X_BXBUILDPAR): the count pass, the layout and the fill pass of a pooled build
 /// (`x_build_direct_in`) on `parts` tasks of the pool it runs on (at most `X_MOST_PARTS`): the
-/// table's backbone, pv and overflow vectors (taken from the pool) and its `longest_chain`.
+/// table's backbone, pv and overflow vectors (taken from the pool) and its `longest_chain`. The
+/// width of the table's hits (`width`, with the lookup query's length `query_length`) is chosen
+/// once (b) has summed the counts, before the table's vectors are taken ([`x_partitioned_fill`]).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-#[allow(clippy::type_complexity)]
 fn x_partitioned_passes(
     parts: usize,
     backbone_size: usize,
     lists: &[std::sync::OnceLock<Box<[u16]>>],
     target_list: &(dyn Fn(usize) -> Box<[u16]> + Sync),
     temps: &mut XBuildTemps,
-) -> (Vec<BackboneCell>, Vec<u32>, Vec<i32>, i32) {
-    use crate::algorithm::tblastx::lookup::PV_ARRAY_MASK;
+    (width, query_length): (XWidth, i32),
+) -> XBuilt {
     let parts = parts.clamp(1, X_MOST_PARTS);
     // The present source cells (`x_counted_sources`) and the appends' weights.
     let (cells, starts, offsets) = (
@@ -2383,12 +2591,77 @@ fn x_partitioned_passes(
         },
     );
     let list = |i: usize| -> &[u16] { lists[cells[i] as usize].get().expect("made in (a)") };
-    // (b) The stripes' counts, num_used, pv bits, overflow sizes and longest counts.
+    // (b) The stripes' counts: their overflow sizes, longest counts, hits and used cells.
     let stripe = backbone_size.div_ceil(parts).next_multiple_of(32);
     let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
-    let kept = x_pool_lock(&X_BX_TABLES).pop().unwrap_or_default();
-    let mut backbone = x_sized(kept.backbone, backbone_size, false);
-    let mut pv = x_zeroed(kept.pv, pv_size, false);
+    let columns = x_stripe_columns(&mut per_range, backbone_size, stripe, parts);
+    let summed: Vec<_> = x_claimed(columns, &|column: Vec<&mut [u32]>| {
+        let (mut overflow_size, mut longest_chain) = (0usize, 0i32);
+        let (mut hits, mut used) = (0u64, 0u64);
+        for local in 0..column[0].len() {
+            let count: u32 = column.iter().map(|counts| counts[local]).sum();
+            if count == 0 {
+                continue;
+            }
+            hits += u64::from(count);
+            used += 1;
+            if count as usize > AA_HITS_PER_CELL {
+                overflow_size += count as usize;
+            }
+            longest_chain = longest_chain.max(count as i32);
+        }
+        (overflow_size, longest_chain, hits, used)
+    });
+    let overflow_size: usize = summed.iter().map(|part| part.0).sum();
+    let longest_chain = summed.iter().map(|part| part.1).max().unwrap_or(0);
+    let hits: u64 = summed.iter().map(|part| part.2).sum();
+    let used: u64 = summed.iter().map(|part| part.3).sum();
+    assert!(
+        overflow_size < X_IN_OVERFLOW as usize,
+        "BLASTX lookup overflow cursor must fit in Int4"
+    );
+    let laid: Vec<usize> = summed.iter().map(|part| part.0).collect();
+    let sizes = (backbone_size, pv_size, overflow_size, longest_chain);
+    let ranges = &bounds[..=parts];
+    let built = if x_is_narrow(width, query_length, hits, used) {
+        XBuilt::Narrow(x_partitioned_fill::<BackboneCell16, _, _>(
+            laid,
+            &mut per_range,
+            (stripe, sizes),
+            ranges,
+            &source,
+            &list,
+        ))
+    } else {
+        XBuilt::Wide(x_partitioned_fill::<BackboneCell, _, _>(
+            laid,
+            &mut per_range,
+            (stripe, sizes),
+            ranges,
+            &source,
+            &list,
+        ))
+    };
+    temps.ranges = per_range;
+    temps.cells = cells;
+    temps.starts = starts;
+    temps.offsets = offsets;
+    built
+}
+
+// No NCBI counterpart (scheduling only): the ranges' counts per target cell (`per_range`, the counts
+// of `parts` ranges one after the other) cut into the stripes of (b) and (c): stripe i's counts of
+// each range, range by range.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_stripe_columns(
+    per_range: &mut [u32],
+    backbone_size: usize,
+    stripe: usize,
+    parts: usize,
+) -> Vec<Vec<&mut [u32]>> {
     let mut columns: Vec<Vec<&mut [u32]>> = (0..backbone_size.div_ceil(stripe))
         .map(|_| Vec::with_capacity(parts))
         .collect();
@@ -2397,60 +2670,78 @@ fn x_partitioned_passes(
             column.push(part);
         }
     }
-    let laid: Vec<_> = x_claimed(
-        columns
-            .into_iter()
-            .zip(backbone.chunks_mut(stripe))
-            .zip(pv.chunks_mut(stripe >> PV_ARRAY_BTS))
-            .collect(),
-        &|((column, backbone), pv): ((Vec<&mut [u32]>, &mut [BackboneCell]), &mut [u32])| {
-            let (mut overflow_size, mut longest_chain) = (0usize, 0i32);
-            for (local, cell) in backbone.iter_mut().enumerate() {
-                let count: u32 = column.iter().map(|counts| counts[local]).sum();
-                *cell = BackboneCell {
-                    num_used: count as i32,
-                    entries: [0; AA_HITS_PER_CELL],
-                };
-                if count == 0 {
-                    continue;
-                }
-                // pv_set at the stripe's first cell + local, a multiple of 32.
-                pv[local >> PV_ARRAY_BTS] |= 1u32 << (local & PV_ARRAY_MASK);
-                if count as usize > AA_HITS_PER_CELL {
-                    overflow_size += count as usize;
-                }
-                longest_chain = longest_chain.max(count as i32);
-            }
-            (overflow_size, longest_chain, column, backbone)
-        },
-    );
-    let overflow_size: usize = laid.iter().map(|part| part.0).sum();
-    let longest_chain = laid.iter().map(|part| part.1).max().unwrap_or(0);
-    assert!(
-        overflow_size < X_IN_OVERFLOW as usize,
-        "BLASTX lookup overflow cursor must fit in Int4"
-    );
-    // (c) The overflow cursors and each range's first position per cell.
+    columns
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:300-358 (cited at
+// `x_build_direct`): the cells' counts, pv bits and overflow cursors, and the copy of the entries.
+// No NCBI counterpart for the parts (scheduling only): steps (c) and (d) of
+// `x_partitioned_passes` for the cells of width `C`.
+/// The table's vectors of a partitioned build for the cells of width `C`, after (b): the backbone
+/// and pv taken from the pool (the last set a table of this width gave back), (c) each stripe
+/// writes its cells (the count, the cursor of an overflow cell, the pv bits; every cell whole,
+/// the unused ones empty, as after the C `calloc`) and turns its cells' counts into the ranges'
+/// first positions, (d) the ranges make their appends. The `PAD_CELLS` cells after the backbone
+/// and the `PAD_HITS` hits after the overflow are zeroed (the vectors keep what the table they
+/// held had there).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_partitioned_fill<'a, C: XVec, S, L>(
+    laid: Vec<usize>,
+    per_range: &mut [u32],
+    (stripe, (backbone_size, pv_size, overflow_size, longest_chain)): (
+        usize,
+        (usize, usize, usize, i32),
+    ),
+    bounds: &[usize],
+    source: &S,
+    list: &L,
+) -> XVectors<C>
+where
+    S: Fn(usize) -> &'a [i32] + Sync,
+    L: Fn(usize) -> &'a [u16] + Sync,
+{
+    use crate::algorithm::tblastx::lookup::PV_ARRAY_MASK;
+    let mut kept = x_take_kept::<C>();
+    let (kept_backbone, kept_overflow) = C::vectors(&mut kept);
+    let (kept_backbone, kept_overflow) =
+        (std::mem::take(kept_backbone), std::mem::take(kept_overflow));
+    let mut backbone = x_sized(kept_backbone, backbone_size + C::PAD_CELLS, false);
+    backbone[backbone_size..].fill(C::default());
+    let mut pv = x_zeroed(kept.pv, pv_size, false);
+    // (c) The cells and the overflow cursors, and each range's first position per cell.
     let mut cursor = 0usize;
     let mut placed = Vec::with_capacity(laid.len());
-    for (size, _, column, backbone) in laid {
-        placed.push((cursor, column, backbone));
+    let columns = x_stripe_columns(per_range, backbone_size, stripe, bounds.len() - 1);
+    for ((size, column), (backbone, pv)) in laid.into_iter().zip(columns).zip(
+        backbone[..backbone_size]
+            .chunks_mut(stripe)
+            .zip(pv.chunks_mut(stripe >> PV_ARRAY_BTS)),
+    ) {
+        placed.push((cursor, column, backbone, pv));
         cursor += size;
     }
-    x_claimed(placed, &|(mut cursor, mut column, backbone): (
+    x_claimed(placed, &|(mut cursor, mut column, backbone, pv): (
         usize,
         Vec<&mut [u32]>,
-        &mut [BackboneCell],
+        &mut [C],
+        &mut [u32],
     )| {
         for (local, cell) in backbone.iter_mut().enumerate() {
-            let count = cell.num_used as usize;
+            *cell = C::default();
+            let count: u32 = column.iter().map(|counts| counts[local]).sum();
             if count == 0 {
                 continue;
             }
-            let mut at = if count > AA_HITS_PER_CELL {
-                cell.entries[0] = cursor as i32;
-                cursor += count;
-                (cursor - count) as u32 | X_IN_OVERFLOW
+            // pv_set at the stripe's first cell + local, a multiple of 32.
+            pv[local >> PV_ARRAY_BTS] |= 1u32 << (local & PV_ARRAY_MASK);
+            cell.set_count(count as usize);
+            let mut at = if count as usize > AA_HITS_PER_CELL {
+                cell.set_cursor(cursor);
+                cursor += count as usize;
+                (cursor - count as usize) as u32 | X_IN_OVERFLOW
             } else {
                 0
             };
@@ -2462,21 +2753,25 @@ fn x_partitioned_passes(
         }
     });
     // (d) The appends.
-    let mut overflow = kept.overflow;
-    x_fitting_overflow::<BackboneCell>(
+    let mut overflow = kept_overflow;
+    x_fitting_overflow::<C>(
         &mut x_pool_lock(&X_BX_TABLES),
         &mut overflow,
-        overflow_size,
+        overflow_size + C::PAD_HITS,
     );
-    let mut overflow = x_sized(overflow, overflow_size, true);
-    let out = XDisjointOut {
+    let mut overflow = x_sized(overflow, overflow_size + C::PAD_HITS, true);
+    overflow[overflow_size..].fill(C::Hit::default());
+    let out = XDisjointOut::<C> {
         backbone: backbone.as_mut_ptr(),
         overflow: overflow.as_mut_ptr(),
         #[cfg(debug_assertions)]
-        lens: (backbone.len(), overflow.len()),
+        lens: (backbone_size, overflow_size),
     };
     x_claimed(
-        per_range.chunks_mut(backbone_size).zip(ranges()).collect(),
+        per_range
+            .chunks_mut(backbone_size)
+            .zip(bounds.windows(2).map(|bound| bound[0]..bound[1]))
+            .collect(),
         &|(at, range): (&mut [u32], std::ops::Range<usize>)| {
             for i in range {
                 let offsets = source(i);
@@ -2487,18 +2782,20 @@ fn x_partitioned_passes(
                     // ranges before p and before the ranges after p; an overflow cell's count lies
                     // in the overflow from its cursor and the cursors give the cells disjoint parts.
                     // So no two tasks write a position, and the backbone and the overflow are read
-                    // or written by nothing else until the tasks end.
+                    // or written by nothing else until the tasks end. A narrow table's offsets are
+                    // below its lookup query's length, at most 65,535 (`x_is_narrow`).
                     unsafe { out.put(w, at[w], offsets) };
                     at[w] += offsets.len() as u32;
                 }
             }
         },
     );
-    temps.ranges = per_range;
-    temps.cells = cells;
-    temps.starts = starts;
-    temps.offsets = offsets;
-    (backbone, pv, overflow, longest_chain)
+    XVectors {
+        backbone,
+        pv,
+        overflow,
+        longest_chain,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469
@@ -2850,6 +3147,22 @@ mod tests {
         )
     }
 
+    /// [`x_build_direct_pooled`] asked for `Int4` hits (no cutoff): the table of every program
+    /// before 16-bit hits.
+    fn pooled_wide(
+        prepared: PreparedLookupQuery,
+        threshold: i32,
+        matrix: ScoringMatrix,
+        parts: usize,
+    ) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+        x_build_direct_pooled(prepared, threshold, matrix, 3, parts, None).map(
+            |table| match table {
+                XBxTable::Wide(table) => table,
+                XBxTable::Narrow(_) => panic!("a build without a cutoff takes Int4 hits"),
+            },
+        )
+    }
+
     fn same(queries: &[Vec<QueryFrame>], threshold: i32, matrix: ScoringMatrix) -> usize {
         let reference =
             build_lookup_from_prepared(prepared(queries, matrix), threshold, matrix, 3).0;
@@ -3070,11 +3383,10 @@ mod tests {
         let pooled = |queries: &[Vec<QueryFrame>], threshold: i32, matrix: ScoringMatrix| {
             let reference =
                 build_lookup_from_prepared(prepared(queries, matrix), threshold, matrix, 3).0;
-            let table =
-                match x_build_direct_pooled(prepared(queries, matrix), threshold, matrix, 3, 1) {
-                    Ok(table) => table,
-                    Err(_) => panic!("in-place builder declined"),
-                };
+            let table = match pooled_wide(prepared(queries, matrix), threshold, matrix, 1) {
+                Ok(table) => table,
+                Err(_) => panic!("in-place builder declined"),
+            };
             x_assert_same_table(&table, &reference);
             table
         };
@@ -3199,16 +3511,11 @@ mod tests {
                 let edge = std::ptr::eq(queries, &tiny) || std::ptr::eq(queries, &masked);
                 assert!(edge || threshold == 0 || !reference.overflow.is_empty());
                 for parts in [2, 3, 4, 7, 8, 1_000] {
-                    let mut table = match x_build_direct_pooled(
-                        prepared(queries, matrix),
-                        threshold,
-                        matrix,
-                        3,
-                        parts,
-                    ) {
-                        Ok(table) => table,
-                        Err(_) => panic!("in-place builder declined"),
-                    };
+                    let mut table =
+                        match pooled_wide(prepared(queries, matrix), threshold, matrix, parts) {
+                            Ok(table) => table,
+                            Err(_) => panic!("in-place builder declined"),
+                        };
                     x_assert_same_table(&table, &reference);
                     x_give_back_pooled(&mut table);
                 }
@@ -3778,5 +4085,264 @@ mod tests {
             .x_build_ahead(&blocks[0], 11, &params, false)
             .expect("the room made holds the table");
         x_assert_same_table(&table, &wide);
+    }
+
+    // The tests below give narrow tables back to the pool, which is shared by the tests of this
+    // module: they run one at a time, so that a test finds the narrow sets it left there (no other
+    // test builds a narrow table).
+    static NARROW_POOL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The parts of the partitioned build the tests try (0: not pooled; 1: pooled, serial).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    const PARTS: &[usize] = &[0, 1, 2, 3, 4, 7, 8, 1_000];
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    const PARTS: &[usize] = &[0, 1];
+
+    /// `f` on a pool of four threads (the partitioned build runs its passes on the pool it is
+    /// called on), or on this thread where the build has no pool.
+    fn in_pool(f: impl FnOnce() + Send) {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap()
+            .install(f);
+        #[cfg(not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )))]
+        f();
+    }
+
+    /// The reference builder's table for `queries`.
+    fn reference(
+        queries: &[Vec<QueryFrame>],
+        threshold: i32,
+        matrix: ScoringMatrix,
+    ) -> BlastAaLookupTable {
+        build_lookup_from_prepared(prepared(queries, matrix), threshold, matrix, 3).0
+    }
+
+    /// `table` equals the reference table of the same query, whatever its width.
+    fn assert_bx_table(what: &str, table: &XBxTable, reference: &BlastAaLookupTable) {
+        match table {
+            XBxTable::Wide(table) => x_assert_same_table(table, reference),
+            XBxTable::Narrow(table) => x_assert_narrow_same_as_wide(what, table, reference),
+        }
+    }
+
+    /// Gives `table`'s vectors back to the pool.
+    fn give_back(table: &mut XBxTable) {
+        match table {
+            XBxTable::Wide(table) => x_give_back_pooled(table),
+            XBxTable::Narrow(table) => x_give_back_pooled16(table),
+        }
+    }
+
+    /// The hits and used cells of `table`, and so its hits per used cell in hundredths.
+    fn hundredths(table: &BlastAaLookupTable) -> u64 {
+        let (hits, used) = BackboneCell::x_hits_and_used(&table.backbone);
+        x_hits_per_cell_hundredths(hits, used)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:283-358 (quoted at
+    // `x_build_direct`)
+    // BLASTX's table with 16-bit hits: the serial build (not pooled, and pooled) and the partitioned
+    // build (2-8 parts, and more parts than cells) give, cell by cell, the table of the reference
+    // builder (count, hit list in order, pv, `longest_chain`, the zero padding after the cells and
+    // the overflow), for tables with cells in the overflow array (its cursor over two entries) and
+    // several thresholds; the width is chosen from the table's hits per used cell, on both sides of
+    // the cutoff (`Choose(cutoff)` at the table's own ratio and one hundredth above it), and from
+    // the lookup query's length, at 65,535 letters (16 bits) and 65,536 (32 bits).
+    #[test]
+    fn bx_tables_of_u16_hits_equal_the_reference_tables() {
+        let _one_at_a_time = NARROW_POOL.lock().unwrap_or_else(|e| e.into_inner());
+        let mut seed = 18u64;
+        let mut low_complexity = vec![1u8; 400];
+        low_complexity.extend(residues(&mut seed, 60));
+        let small = vec![vec![frame(residues(&mut seed, 300), vec![], 1)]];
+        let large = vec![
+            vec![
+                frame(residues(&mut seed, 2_500), vec![(100, 140), (143, 200)], 1),
+                frame(low_complexity, vec![(350, 399)], -1),
+            ],
+            vec![frame(residues(&mut seed, 1_800), vec![], 2)],
+        ];
+        let tiny = vec![vec![frame(residues(&mut seed, 6), vec![], 1)]];
+        let masked = vec![vec![frame(residues(&mut seed, 50), vec![(0, 49)], 1)]];
+        let matrix = ScoringMatrix::Blosum62;
+        let build_with = |queries: &[Vec<QueryFrame>], threshold: i32, parts: usize, cutoff| {
+            let built = if parts == 0 {
+                x_bx_build_direct(prepared(queries, matrix), threshold, matrix, 3, cutoff)
+            } else {
+                x_build_direct_pooled(
+                    prepared(queries, matrix),
+                    threshold,
+                    matrix,
+                    3,
+                    parts,
+                    cutoff,
+                )
+            };
+            match built {
+                Ok(table) => table,
+                Err(_) => panic!("in-place builder declined"),
+            }
+        };
+        let mut overflow_seen = false;
+        let mut narrow_built = 0;
+        in_pool(|| {
+            for (queries, threshold) in [
+                (&large, 11),
+                (&small, 12),
+                (&large, 13),
+                (&large, 0),
+                (&tiny, 11),
+                (&masked, 11),
+            ] {
+                let reference = reference(queries, threshold, matrix);
+                overflow_seen |= !reference.overflow.is_empty();
+                let ratio = hundredths(&reference);
+                // `parts` 0: not pooled; 1: pooled, serial; above: partitioned.
+                for &parts in PARTS {
+                    // A cutoff of 0 chooses 16 bits wherever the query fits; none, 32 bits.
+                    for (cutoff, narrow) in [
+                        (Some(0), true),
+                        (Some(ratio), true),
+                        (Some(ratio + 1), false),
+                        (None, false),
+                    ] {
+                        let mut table = build_with(queries, threshold, parts, cutoff);
+                        let what =
+                            format!("threshold {threshold} parts {parts} cutoff {cutoff:?}:");
+                        assert_eq!(
+                            matches!(table, XBxTable::Narrow(_)),
+                            narrow,
+                            "{what} the width"
+                        );
+                        narrow_built += usize::from(narrow);
+                        assert_bx_table(&what, &table, &reference);
+                        if parts > 0 {
+                            give_back(&mut table);
+                        }
+                    }
+                }
+            }
+        });
+        assert!(overflow_seen, "the fixture must reach the overflow array");
+        assert!(narrow_built > 50, "{narrow_built} tables of 16-bit hits");
+        // The width at 65,535 letters of lookup query: its length is the last context's frame_base
+        // plus its aa_len.
+        let base = prepared(&[vec![frame(residues(&mut seed, 50), vec![], 1)]], matrix).contexts[0]
+            .frame_base as usize;
+        for (length, narrow) in [(65_535 - base, true), (65_536 - base, false)] {
+            let block = vec![vec![frame(residues(&mut seed, length), vec![], 1)]];
+            let reference = reference(&block, 13, matrix);
+            assert_eq!(reference.query_length, if narrow { 65_535 } else { 65_536 });
+            in_pool(|| {
+                for parts in [0, 1, 3] {
+                    let mut table = build_with(&block, 13, parts, Some(0));
+                    let what = format!("{length} letters, parts {parts}:");
+                    assert_eq!(matches!(table, XBxTable::Narrow(_)), narrow, "{what}");
+                    assert_bx_table(&what, &table, &reference);
+                    if parts > 0 {
+                        give_back(&mut table);
+                    }
+                }
+            });
+        }
+    }
+
+    // No NCBI counterpart (buffer reuse only): a pooled build takes the kept set of its own width,
+    // the last given back, and leaves the sets of the other width where they are (a free of one of
+    // their mapped vectors would raise glibc's mmap threshold, `x_zeroed`).
+    #[test]
+    fn kept_sets_are_taken_by_width() {
+        let set = |wide: usize, narrow: usize| XAaVectors {
+            backbone: Vec::with_capacity(wide),
+            backbone16: Vec::with_capacity(narrow),
+            pv: Vec::with_capacity(1),
+            ..XAaVectors::default()
+        };
+        let mut pool = vec![set(3, 0), set(0, 5), set(2, 0), set(0, 7)];
+        let taken = x_take_kept_from::<BackboneCell>(&mut pool);
+        assert_eq!(taken.backbone.capacity(), 2);
+        let taken = x_take_kept_from::<BackboneCell16>(&mut pool);
+        assert_eq!(taken.backbone16.capacity(), 7);
+        let taken = x_take_kept_from::<BackboneCell16>(&mut pool);
+        assert_eq!(taken.backbone16.capacity(), 5);
+        // No narrow set left: an empty one, and the wide set stays.
+        let taken = x_take_kept_from::<BackboneCell16>(&mut pool);
+        assert!(taken.is_empty());
+        assert_eq!(pool.len(), 1);
+        assert_eq!(pool[0].backbone.capacity(), 3);
+        let taken = x_take_kept_from::<BackboneCell>(&mut pool);
+        assert_eq!(taken.backbone.capacity(), 3);
+        assert!(pool.is_empty());
+    }
+
+    // No NCBI counterpart (buffer reuse only): the pool serves builds of both widths. A table of
+    // 16-bit hits given back is not taken, nor dropped, by a build of 32-bit hits, and serves the
+    // next build of 16 bits on its vectors (the same allocations); the tables are the reference's.
+    // (`kept_sets_are_taken_by_width` has the converse: a build of 16 bits leaves the sets of 32.)
+    #[test]
+    fn pools_serve_the_builds_of_both_widths() {
+        let _one_at_a_time = NARROW_POOL.lock().unwrap_or_else(|e| e.into_inner());
+        let mut seed = 19u64;
+        let queries = vec![vec![frame(residues(&mut seed, 1_500), vec![], 1)]];
+        let matrix = ScoringMatrix::Blosum62;
+        let reference = reference(&queries, 11, matrix);
+        let build = |cutoff| match x_build_direct_pooled(
+            prepared(&queries, matrix),
+            11,
+            matrix,
+            3,
+            1,
+            cutoff,
+        ) {
+            Ok(table) => table,
+            Err(_) => panic!("in-place builder declined"),
+        };
+        let narrow_sets = || {
+            x_pool_lock(&X_BX_TABLES)
+                .iter()
+                .filter(|vectors| vectors.backbone16.capacity() > 0)
+                .count()
+        };
+        let XBxTable::Narrow(mut first) = build(Some(0)) else {
+            panic!("a small query takes 16-bit hits");
+        };
+        x_assert_narrow_same_as_wide("first:", &first, &reference);
+        x_give_back_pooled16(&mut first);
+        let kept = narrow_sets();
+        assert!(kept >= 1);
+        // Builds of 32-bit hits, which give theirs back too, leave the narrow sets in the pool.
+        for _ in 0..3 {
+            let mut wide = build(None);
+            assert_bx_table("wide:", &wide, &reference);
+            give_back(&mut wide);
+        }
+        assert_eq!(
+            narrow_sets(),
+            kept,
+            "the sets of 16-bit vectors stay in the pool"
+        );
+        // A build of 16 bits takes one of them, built on its vectors.
+        let XBxTable::Narrow(mut second) = build(Some(0)) else {
+            panic!("a small query takes 16-bit hits");
+        };
+        assert_eq!(narrow_sets(), kept - 1, "built on a kept set");
+        x_assert_narrow_same_as_wide("second:", &second, &reference);
+        x_give_back_pooled16(&mut second);
+        assert_eq!(narrow_sets(), kept);
     }
 }

@@ -1,0 +1,13 @@
+# Code owners: GitHub requests their review on a pull request that changes these paths. The Owner
+# decided (2026-11-05) that only the ruleset "main CI", which the promotion of dev into main
+# meets, is to require that review, and "dev CI" never; the rulesets are the Owner's to change.
+#
+# - seqdb and writedb read and write BLAST databases: files that other programs read.
+# - .github: workflows, Dependabot, and this file.
+# - AGENTS.md and docs/product_decisions: the repository's rules and product decisions.
+
+/LOSAT/src/seqdb/           @satoshikawato
+/LOSAT/src/writedb/         @satoshikawato
+/.github/                   @satoshikawato
+/AGENTS.md                  @satoshikawato
+/docs/product_decisions/    @satoshikawato

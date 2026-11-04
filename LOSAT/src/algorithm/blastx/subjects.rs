@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use anyhow::{anyhow, Result};
 
 use super::input::FastaRecord;
-use super::x_db_stream::{XBlock, XCursor, XPass, XStream};
+use super::x_db_stream::{XBlock, XCursor, XPass, XPastHead, XStream};
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
@@ -26,8 +26,10 @@ pub(crate) enum Subjects<'a> {
     Fasta(&'a [FastaRecord]),
     /// `-db` read in blocks (`x_db_stream.rs`), with the block of the current pass or task.
     Stream(XStream<'a>),
-    /// `-db` whose sequences could not be read (`database::BlastxDatabase::x_check_stores`):
-    /// a query batch without a valid context is reported as NCBI reports it (not
+    /// `-db` refused before its sequences are read (`database::BlastxDatabase::x_open_stream`: a
+    /// database without sequences, or a longest sequence above `MAX_DBSEQ_LEN` with the check's
+    /// error; the search's reads raise the other errors): a query batch without a valid context
+    /// is reported as NCBI reports it (not
     /// searched); the first batch with one fails with `UnreadableSubjects`, which the
     /// caller replaces by the reader's error (decision 112).
     Unreadable,
@@ -79,6 +81,26 @@ impl<'a> Subjects<'a> {
     /// Whether the subjects are `Unreadable`.
     pub(crate) fn is_unreadable(&self) -> bool {
         matches!(self, Subjects::Unreadable)
+    }
+
+    /// `error`, raised by a search after the point where `Unreadable` subjects fail it
+    /// (`search::search_core`): an `XPastHead` where the subjects are a stream whose reads have
+    /// not checked every sequence, else `error` itself.
+    pub(crate) fn x_past_head(&self, error: anyhow::Error) -> anyhow::Error {
+        match self {
+            Subjects::Stream(stream) if !stream.db.x_checked() => XPastHead(error).into(),
+            _ => error,
+        }
+    }
+
+    /// Whether the subjects are a stream whose reads have not checked every sequence and whose
+    /// database fails the whole check (`XStreamDb::x_damaged`): such a database was refused before
+    /// the search (`Unreadable`) when it was read before the first batch.
+    pub(crate) fn x_damaged(&self) -> bool {
+        match self {
+            Subjects::Stream(stream) => !stream.db.x_checked() && stream.db.x_damaged(),
+            _ => false,
+        }
     }
 
     /// Whether there is no subject.

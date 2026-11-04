@@ -219,8 +219,8 @@ impl ReaderBatchShape {
 // contexts, and the unit's cutoff minima with the batch's average length, which the layout of the
 // records gives), reduces the batch's values, and hands each unit its preparation with the shape
 // attached; phase 2 searches the units as before, from these. A batch with no valid context is
-// not searched, and subjects that cannot be read end the search before they are used, so the
-// minima are not taken then.
+// not searched, and a database refused before its sequences are read (`Subjects::Unreadable`)
+// ends the search before they are used, so the minima are not taken then.
 /// Phase 1 for one unit (`queries`) of a reader batch of `layout`. The unit's preparation has
 /// the layout attached; `attach` replaces it with the reduced shape.
 pub(crate) fn prepare_unit(
@@ -241,20 +241,31 @@ pub(crate) fn prepare_unit(
         && !subjects.is_empty()
     {
         let mut minima = params.clone();
-        subject_parameters(
-            &prepared,
-            &mut minima,
-            options,
-            subjects.total_length()?,
-            i64::try_from(subjects.len())?,
-            subjects.shortest_length(),
-            None,
-        )?;
-        let valid = || minima.iter().filter(|p| p.valid);
-        word_cutoff_min = ungapped_link
-            .then(|| valid().map(|p| p.word_cutoff).min())
-            .flatten();
-        redo_cutoff_min = kappa.then(|| valid().map(|p| p.hit_cutoff).min()).flatten();
+        let computed = (|| {
+            subject_parameters(
+                &prepared,
+                &mut minima,
+                options,
+                subjects.total_length()?,
+                i64::try_from(subjects.len())?,
+                subjects.shortest_length(),
+                None,
+            )
+        })();
+        match computed {
+            Ok(_) => {
+                let valid = || minima.iter().filter(|p| p.valid);
+                word_cutoff_min = ungapped_link
+                    .then(|| valid().map(|p| p.word_cutoff).min())
+                    .flatten();
+                redo_cutoff_min = kappa.then(|| valid().map(|p| p.hit_cutoff).min()).flatten();
+            }
+            // A database that fails the whole check takes no minima, as when it was refused
+            // before the search: its error comes where the unit is searched
+            // (`search::search_core`, `XPastHead`).
+            Err(_) if subjects.x_damaged() => {}
+            Err(error) => return Err(error),
+        }
     }
     Ok(UnitPrep {
         prepared,

@@ -1886,9 +1886,9 @@ const PROTEIN_STORE_BLOCK_BYTES: u64 = 1 << 20;
 /// them: a reader error is NCBI's error of the preliminary search (`search_read_error`: NCBI
 /// reads every sequence there); a sequence `program` cannot search as NCBI does is LOSAT's
 /// refusal (`check_protein_sequence`). The number of residues of each sequence is handed to
-/// `each` (ordinal id, residues) and its bytes are dropped with its block. A search that reads
-/// the sequences again later (BLASTX's passes, `blastx/x_db_stream.rs`) knows from it that they
-/// read, and the length of the longest. NCBI searches the stored bytes in place
+/// `each` (ordinal id, residues) and its bytes are dropped with its block. BLASTX's passes
+/// (`blastx/x_db_stream.rs`) check the blocks they read the same way and take this order's first
+/// error where one fails (`BlastxDatabase::x_check_stores`). NCBI searches the stored bytes in place
 /// (blast_engine.c:1404, `eBlastEncodingProtein`) and its traceback and composition redo read
 /// them again; the passes read the bytes NCBI does.
 pub(crate) fn x_check_protein_stores(

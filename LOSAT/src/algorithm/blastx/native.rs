@@ -884,13 +884,13 @@ fn run_inner(
     writer.flush().map_err(output_error)?;
     super::x_timing::run(XRun::Prolog, x_t);
     let x_t = super::x_timing::lap();
-    // The database's sequences, checked once here and read in blocks where they are searched
-    // (`x_db_stream.rs`); an error belongs to the first batch with a valid context
-    // (`Subjects::Unreadable`, `search_error`). No NCBI counterpart for the blocks: NCBI maps the
-    // volume files.
+    // The database's sequences, read in blocks where they are searched and checked where they are
+    // first read (`x_db_stream.rs`); the empty database's error belongs to the first batch with a
+    // valid context (`Subjects::Unreadable`, `search_error`). No NCBI counterpart for the blocks:
+    // NCBI maps the volume files.
     let (x_longest, unreadable) = match &database {
         None => (None, None),
-        Some(database) => match database.x_check_stores() {
+        Some(database) => match database.x_open_stream() {
             Ok(longest) => (Some(longest), None),
             Err(error) => (None, Some(error)),
         },
@@ -913,6 +913,19 @@ fn run_inner(
         (Some(_), None) => Subjects::Unreadable,
     };
     let search_error = |error: anyhow::Error| -> anyhow::Error {
+        // An error the search raised after the point where a database refused before the search
+        // fails it: the database's first error comes before it (`search::search_core`).
+        let error = match error.downcast::<super::x_db_stream::XPastHead>() {
+            Ok(super::x_db_stream::XPastHead(error)) => {
+                if let Some(stream) = x_stream.as_ref().filter(|stream| !stream.x_checked()) {
+                    if let Some(first) = stream.x_first_error() {
+                        return database_error(first);
+                    }
+                }
+                error
+            }
+            Err(error) => error,
+        };
         // LOSAT's refusal, not an error of NCBI's engine.
         if error.is::<super::parameters::SearchSpaceOverflow>()
             || error.is::<super::split::QuerySplitRefusal>()
@@ -926,10 +939,15 @@ fn run_inner(
                 .expect("the database's error, raised once");
             return database_error(kept);
         }
-        // A read of the database that failed during the search,
-        // reported as the check's error for the same read.
+        // A read or a check of the database that failed during the search, reported as the
+        // check's error while the reads have not checked every sequence (the first sequence in
+        // ordinal order that fails, whichever the search's threads read first; the search's own
+        // where the check finds none), and as its own after that (a file changed during the run).
         match error.downcast::<super::x_db_stream::XReadError>() {
-            Ok(super::x_db_stream::XReadError(kept)) => database_error(kept),
+            Ok(super::x_db_stream::XReadError(kept)) => database_error(match &x_stream {
+                Some(stream) if !stream.x_checked() => stream.x_first_error().unwrap_or(kept),
+                _ => kept,
+            }),
             Err(error) => engine(error),
         }
     };

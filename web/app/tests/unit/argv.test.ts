@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { buildArgv, optionValue, RESERVED_FLAGS, shellWords, splitOptions, toShellCommand } from '../../src/domain/argv';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import {
+  buildArgv,
+  commandWords,
+  DATABASE_FLAGS,
+  optionNames,
+  optionValue,
+  RESERVED_FLAGS,
+  shellWords,
+  splitOptions,
+  toShellCommand,
+} from '../../src/domain/argv';
+import { PROGRAMS, type ProgramId } from '../../src/domain/programs';
+import { toProgramDescription } from '../../src/infra/reactor/control';
 
 describe('buildArgv', () => {
   it('puts the program and input names first, then parameters in the given order', () => {
@@ -56,6 +70,63 @@ describe('buildArgv', () => {
     expect(() =>
       buildArgv({ program: 'blastn', queryName: 'q.fa', subjectName: 's.fa', parameters: [], extra: ['-ungapped', word] }),
     ).toThrow(message);
+  });
+
+  // WA-FM-04 and WA-FM-05: the CLI prints its help for these words, and its message for the
+  // others names -subject or -num_threads, which the browser sets itself.
+  const extra = (program: ProgramId, words: readonly string[]) => () =>
+    buildArgv({ program, queryName: 'q.fa', subjectName: 's.fa', parameters: [], extra: words });
+  it.each(['-h', '-help', '--help'])('refuses %s, which asks the CLI for its help, in a few words', (word) => {
+    for (const program of PROGRAMS) expect(extra(program.id, ['-evalue', '1', word]), program.id).toThrow(`${word} is not available in the browser`);
+  });
+
+  it('refuses the database options, also written -flag=value, as the browser build cannot search a database', () => {
+    for (const program of PROGRAMS) {
+      expect(extra(program.id, ['-db', 'nt']), program.id).toThrow(/^-db \(a database search\) is not supported in the browser yet$/);
+      for (const flag of DATABASE_FLAGS.slice(1)) {
+        expect(extra(program.id, [`${flag}=x`]), `${program.id} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
+      }
+    }
+  });
+
+  it("lists the database options of every mode's engine (describe)", () => {
+    const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+    for (const program of PROGRAMS) {
+      const flags = toProgramDescription(described[program.id]).parameters.map((option) => option.flag);
+      expect(flags, program.id).toEqual(expect.arrayContaining([...DATABASE_FLAGS]));
+    }
+  });
+
+  it('refuses -mt_mode, which goes with the threads that LOSAT sets, where the CLI has it', () => {
+    for (const program of ['blastn', 'blastp', 'blastx', 'tblastn'] as const) {
+      expect(extra(program, ['-mt_mode', '1']), program).toThrow('-mt_mode is managed by LOSAT');
+    }
+    // TBLASTX's CLI has no -mt_mode: the engine's message says so.
+    expect(extra('tblastx', ['-mt_mode', '1'])()).toEqual(['tblastx', '-query', 'q.fa', '-subject', 's.fa', '-mt_mode', '1']);
+  });
+});
+
+describe('optionNames (WA-FM-07)', () => {
+  const valued = new Set(['-task', '-penalty', '-dust', '-strand', '-evalue']);
+  const takesValue = (flag: string) => valued.has(flag);
+
+  it("tells an option's name from a value that starts with '-', with the options that take a value", () => {
+    const words = ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-penalty', '-3', '-lcase_masking', '-dust', '20 64 1', '-strand=minus', '-evalue', '-1'];
+    const parts = optionNames(words, takesValue);
+    expect(parts.filter((part) => part.name).map((part) => part.text)).toEqual(['-query', '-subject', '-penalty', '-lcase_masking', '-dust', '-strand=minus', '-evalue']);
+    // The text is the command line's, so that a copy reads back as the same words.
+    const text = parts.map((part) => part.text).join(' ');
+    expect(text).toBe(shellWords(words));
+    expect(splitOptions(text)).toEqual(words);
+  });
+
+  it('reads the options that the application manages as taking a value (the command of an output format)', () => {
+    const parts = optionNames(commandWords(['blastn', '-query', '-q.fa', '-subject', 's.fa'], 6), takesValue);
+    expect(parts.filter((part) => part.name).map((part) => part.text)).toEqual(['-query', '-subject', '-outfmt']);
+  });
+
+  it("names every word that starts with '-' while the grammar is unknown", () => {
+    expect(optionNames(['-penalty', '-3'], undefined).map((part) => part.name)).toEqual([true, true]);
   });
 });
 

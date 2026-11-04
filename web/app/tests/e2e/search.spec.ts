@@ -4,6 +4,7 @@
 // search long enough to edit or cancel while it runs) is checked in the engine build.
 import { expect, test, type Page } from '@playwright/test';
 import { gzipSync, zstdCompressSync } from 'node:zlib';
+import { MATRICES, PROTEIN_GAP_COSTS, PROTEIN_WORD_SIZES } from '../../src/domain/programs';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import {
   chooseRun,
@@ -376,8 +377,8 @@ test("the options form: the engine's defaults are not written; tasks, templates 
   await expect(page.getByTestId('param-task-blastn')).toBeChecked();
   await expect(legends).toHaveText(sections);
   await task(page, 'dc-megablast');
-  await expect(page.getByTestId('param-template_type')).toHaveValue('');
-  await expect(page.getByTestId('param-template_length')).toHaveValue('');
+  await expect(page.getByTestId('param-template_type')).toHaveValue('coding');
+  await expect(page.getByTestId('param-template_length')).toHaveValue('18');
   if (BUILD_HAS_ENGINE) {
     await task(page, 'blastn');
     await page.getByTestId('param-word_size').selectOption('other');
@@ -387,9 +388,9 @@ test("the options form: the engine's defaults are not written; tasks, templates 
     );
     await page.getByTestId('param-word_size-other').fill('');
     // Templates with the megablast task (the default, not written): the section stays, and the engine refuses them.
+    // The type alone set writes the length shown with it (WA-FM-03).
     await task(page, 'dc-megablast');
-    await page.getByTestId('param-template_type').selectOption('coding');
-    await page.getByTestId('param-template_length').selectOption('18');
+    await page.getByTestId('param-template_type').selectOption('optimal');
     await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
     await task(page, 'megablast');
     await expect(page.getByTestId('argv-validation')).toContainText(
@@ -414,13 +415,14 @@ test("the engine's refusals of option values are shown as the engine writes them
     "error: the NCBI BLAST+ option -version is not supported by LOSAT's TBLASTX",
   );
   await expect(page.getByTestId('run-1-option')).toHaveCount(0);
-  // A value that LOSAT does not support, and one that NCBI refuses.
+  // A value that LOSAT does not support (typed after "Other"), and one that NCBI refuses.
   await program(page, 'blastp');
-  await page.getByTestId('param-comp_based_stats').selectOption('1');
+  await page.getByTestId('param-matrix').selectOption('other');
+  await page.getByTestId('param-matrix-other').fill('BLOSUM45');
   await expect(page.getByTestId('argv-validation')).toHaveText(
-    "-comp_based_stats 1 is not supported by LOSAT's BLASTP",
+    "the matrix BLOSUM45 with gap costs 14/2 is not supported by LOSAT's BLASTP",
   );
-  await page.getByTestId('param-comp_based_stats').selectOption('2');
+  await page.getByTestId('param-matrix').selectOption('BLOSUM62');
   await page.getByTestId('param-evalue').fill('0');
   await expect(page.getByTestId('argv-validation')).toContainText('BLAST query/options error:');
 });
@@ -454,6 +456,116 @@ test('BLASTN scores without a table row: the form accepts them and the run gives
 
 // The index scan reads with the program's reader (SURVEY #3): NCBI's nucleotide reader stores 19 of
 // these 24 letters (not E F I L P Q), so the record table and the engine's register agree on 19.
+// WA-FM-02: a select offers the values of NCBI's page that LOSAT's engine reads, and no other;
+// "Other" takes the rest, which the engine refuses. A change of the engine that reads more of
+// them fails here until the select offers them.
+test("the selects of the protein modes offer NCBI's values that the engine reads, and no other", async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, "the engine's checks need the engine build");
+  test.setTimeout(600_000);
+  await openParameters(page);
+  const validation = page.getByTestId('argv-validation');
+  const evalue = page.getByTestId('param-evalue');
+  /** Whether the engine reads the form's values: a fresh validation after a refused e-value. */
+  const read = async (): Promise<boolean> => {
+    await evalue.fill('x');
+    await expect(validation).toContainText("'x'");
+    await evalue.fill('');
+    await expect(validation).not.toContainText("'x'");
+    await expect(validation).not.toHaveAttribute('data-state', 'checking');
+    return (await validation.getAttribute('data-state')) === 'ok';
+  };
+  /** Chooses a value of a field's select, or types it after "Other". */
+  const choose = async (id: string, value: string): Promise<boolean> => {
+    const select = page.getByTestId(`param-${id}`);
+    const offered = (await select.locator(`option[value="${value}"]`).count()) > 0;
+    if (offered) await select.selectOption(value);
+    else {
+      await select.selectOption('other');
+      await page.getByTestId(`param-${id}-other`).fill(value);
+    }
+    return offered;
+  };
+  const check = async (id: string, values: readonly string[], back: string) => {
+    for (const value of values) {
+      const offered = await choose(id, value);
+      if (offered) expect(await read(), `${id} ${value} offered`).toBe(true);
+      else await expect(validation, `${id} ${value} not offered`).toHaveAttribute('data-state', 'invalid');
+      await page.getByTestId(`param-${id}`).selectOption(back);
+      await expect(validation).toHaveAttribute('data-state', 'ok');
+    }
+  };
+  for (const [id, tasks] of [['blastp', ['blastp', 'blastp-fast']], ['blastx', ['blastx', 'blastx-fast']]] as const) {
+    await program(page, id);
+    for (const name of tasks) {
+      await task(page, name);
+      await check('matrix', MATRICES, 'BLOSUM62');
+      await check('word_size', PROTEIN_WORD_SIZES, name.endsWith('-fast') ? '5' : '3');
+    }
+    await task(page, tasks[0]);
+    const gaps = page.getByTestId('param-gapcosts');
+    for (const pair of PROTEIN_GAP_COSTS.lists.BLOSUM62!) {
+      const offered = (await gaps.locator(`option[value="${pair}"]`).count()) > 0;
+      if (offered) await gaps.selectOption(pair);
+      else {
+        const [open, extend] = pair.split(' ');
+        await gaps.selectOption('other');
+        await page.getByTestId('param-gapopen').fill(open!);
+        await page.getByTestId('param-gapextend').fill(extend!);
+      }
+      if (offered) expect(await read(), `${id} gap costs ${pair} offered`).toBe(true);
+      else await expect(validation, `${id} gap costs ${pair} not offered`).toHaveAttribute('data-state', 'invalid');
+      await gaps.selectOption('11 1');
+      await expect(validation).toHaveAttribute('data-state', 'ok');
+    }
+  }
+  await program(page, 'tblastx');
+  await check('word_size', PROTEIN_WORD_SIZES.filter((size) => ['2', '3'].includes(size)), '3');
+  // TBLASTN's compressed lookup table (tblastn-fast, word sizes 5 to 7) reads BLOSUM62 only.
+  await program(page, 'tblastn');
+  await task(page, 'tblastn-fast');
+  await check('matrix', ['BLOSUM62', 'BLOSUM45', 'PAM30'], 'BLOSUM62');
+  await page.getByTestId('param-word_size').selectOption('3');
+  await check('matrix', ['BLOSUM45', 'PAM30'], 'BLOSUM62');
+});
+
+// WA-FM-03: BLAST+ reads the template length only with its type, and the type with its length.
+test("dc-megablast's template shows NCBI's values; one changed writes the other as shown", async ({ page }) => {
+  await program(page, 'blastn');
+  await openParameters(page);
+  await task(page, 'dc-megablast');
+  await expect(page.getByTestId('param-template_length')).toHaveValue('18');
+  await expect(page.getByTestId('param-template_type')).toHaveValue('coding');
+  await page.getByTestId('param-template_length').selectOption('21');
+  await expect(page.getByTestId('param-template_length-field')).toHaveClass(/\bchanged\b/);
+  await expect(page.getByTestId('param-template_type-field')).not.toHaveClass(/\bchanged\b/);
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await paste(page, 'query', '>q\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await paste(page, 'subject', '>s\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await submit(page);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task dc-megablast -template_length 21 -template_type coding');
+  await waitStatus(page, 1, 'completed');
+});
+
+// WA-FM-07: a value that starts with '-' is shown as a value, not as an option's name.
+test("a negative value is shown as the option's value in the run's options and command", async ({ page }) => {
+  await program(page, 'blastn');
+  await openParameters(page);
+  await page.getByTestId('param-matchscores').selectOption('1,-3');
+  await paste(page, 'query', '>q\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await paste(page, 'subject', '>s\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  const names = (testId: string) => page.getByTestId(testId).locator('.option-name');
+  await expect(page.getByTestId('results-run-options')).toHaveText('-penalty -3');
+  await expect(names('results-run-options')).toHaveText(['-penalty']);
+  await page.getByTestId('results-view-details').click();
+  await expect(page.getByTestId('run-argv')).toHaveText('blastn -query query.fa -subject subject.fa -penalty -3');
+  await expect(names('run-argv')).toHaveText(['-query', '-subject', '-penalty']);
+  await expect(page.getByTestId('run-command-6')).toHaveText('losat blastn -query query.fa -subject subject.fa -penalty -3 -outfmt 6');
+  await expect(names('run-command-6')).toHaveText(['-query', '-subject', '-penalty', '-outfmt']);
+});
+
 test('a protein-like record in a nucleotide input: the record table counts the letters the reader stores; the run completes', async ({ page }) => {
   await program(page, 'blastn');
   await paste(page, 'query', '>gene_x\nMKLVVLAAGGHHKLMKLVVLAAGG\n>q\nACGTACGTACGTAAACCCGGGTTT\n');
@@ -850,13 +962,20 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   // The select shows the engine's default as its value, as NCBI's does.
   const cbs = page.getByTestId('param-comp_based_stats');
   await expect(cbs).toHaveValue('2');
-  await expect(cbs.locator('option[value="2"]')).toHaveText('2: Conditional compositional score matrix adjustment');
-  await expect(cbs.locator('option[value="0"]')).toHaveText('0: No adjustment');
-  await expect(cbs.locator('option[value="3"]')).toHaveText('3: Universal compositional score matrix adjustment');
+  // LOSAT's BLASTP adjusts with modes 0 and 2 (WA-FM-02).
+  await expect(cbs.locator('option')).toHaveText(['0: No adjustment', '2: Conditional compositional score matrix adjustment']);
   await expect(page.getByTestId('param-seg-field')).toContainText('Low complexity regions');
   await expect(page.getByTestId('param-seg')).not.toBeChecked();
   await expect(page.getByTestId('param-seg-value')).toHaveCount(0);
   await expect(page.getByTestId('param-gapcosts')).toHaveValue('11 1');
+  // TBLASTN lists NCBI's four (its engine reads modes 1 and 3 with -matrix IDENTITY, resetting them to 0).
+  await program(page, 'tblastn');
+  await expect(cbs.locator('option')).toHaveText([
+    '0: No adjustment',
+    '1: Composition-based statistics',
+    '2: Conditional compositional score matrix adjustment',
+    '3: Universal compositional score matrix adjustment',
+  ]);
   await program(page, 'tblastx');
   await expect(page.getByTestId('param-culling_limit-field')).toContainText('Max matches in a query range');
   await expect(line).toHaveText(
@@ -1025,8 +1144,8 @@ test("NCBI's selects of pairs follow the scores and the matrix; Other shows the 
   await page.getByTestId('param-dust-value').fill('20 32 1');
   await expect(dust).toBeChecked();
 
-  // The protein programs' gap costs follow the matrix: its default, as NCBI's page and the engine have it.
-  await program(page, 'blastp');
+  // TBLASTN's gap costs follow the matrix: its default, as NCBI's page and the engine have it.
+  await program(page, 'tblastn');
   const matrix = page.getByTestId('param-matrix');
   await expect(gaps).toHaveValue('11 1');
   await gaps.selectOption('10 1');
@@ -1035,11 +1154,13 @@ test("NCBI's selects of pairs follow the scores and the matrix; Other shows the 
   await expect(gaps).toHaveValue('9 1');
   await expect(page.getByTestId('param-gapcosts-field')).not.toHaveClass(/\bchanged\b/);
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
+  // BLASTP's and BLASTX's lists hold the one pair that LOSAT's BLASTP and BLASTX read (WA-FM-02).
+  await program(page, 'blastp');
+  await expect(gaps.locator('option')).toHaveText(['Existence: 11 Extension: 1', 'Other']);
   const seg = page.getByTestId('param-seg');
   await seg.check();
   await expect(page.getByTestId('param-seg-value')).toHaveValue('yes');
-  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(2 changed)');
-  // BLASTX's list holds the one pair that LOSAT's BLASTX reads.
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
   await program(page, 'blastx');
   await expect(gaps.locator('option')).toHaveText(['Existence: 11 Extension: 1', 'Other']);
 });
@@ -1068,6 +1189,13 @@ test("Additional options: the command line's other options after the form's, mar
   await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is managed by LOSAT');
+  // The CLI's help, and the CLI's options that a search in the browser cannot have (WA-FM-04, WA-FM-05).
+  await extra.fill('-help');
+  await expect(validation).toHaveText('-help is not available in the browser');
+  await extra.fill('-db nt');
+  await expect(validation).toHaveText('-db (a database search) is not supported in the browser yet');
+  await extra.fill('-mt_mode 1');
+  await expect(validation).toHaveText('-mt_mode is managed by LOSAT');
   await extra.fill("-strand 'plus");
   await expect(validation).toHaveText("Additional options: a quote (') is not closed");
   // An option of the form is set there.

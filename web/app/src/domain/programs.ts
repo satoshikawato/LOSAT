@@ -42,6 +42,12 @@ export interface ParameterField {
    * task); its "Other" takes any other value in a text box, which the engine's parser reads.
    */
   readonly list?: readonly string[] | Readonly<Record<string, readonly string[]>>;
+  /**
+   * For `text` fields with a `list`: the lists that another option's value (as the search uses
+   * it) chooses instead, where LOSAT reads fewer of NCBI's values with that value (TBLASTN's
+   * matrices with the compressed lookup table of word sizes 5 to 7); `list` for other values.
+   */
+  readonly listBy?: { readonly flag: string; readonly lists: Readonly<Record<string, readonly string[]>> };
   /** NCBI's sentence beside the control ("Select the maximum number of aligned sequences to display"). */
   readonly hint?: string;
   /**
@@ -94,6 +100,13 @@ export interface ParameterSection {
   readonly shownFor?: { readonly flag: string; readonly values: readonly string[] };
   /** NCBI's selects of the section's rows of two fields, by row name. */
   readonly pairs?: Readonly<Record<string, PairSelect>>;
+  /**
+   * Options that BLAST reads only together (each requires the others: NCBI's "Discontiguous
+   * Word Options"), with the values of NCBI's page, which are the engine's for the task that
+   * shows the section: a value set in one writes the others too, at their values set or else
+   * these, so that the argv never holds one alone.
+   */
+  readonly together?: Readonly<Record<string, string>>;
 }
 
 export interface ProgramDescriptor {
@@ -121,9 +134,11 @@ export interface ProgramDescriptor {
 const integer = { kind: 'text', inputMode: 'numeric' } as const;
 const decimal = { kind: 'text', inputMode: 'decimal' } as const;
 /** NCBI's matrix select, in its order; "Other" takes the other names that the engine reads. */
-const MATRICES = ['PAM30', 'PAM70', 'BLOSUM90', 'BLOSUM80', 'BLOSUM62', 'BLOSUM50', 'BLOSUM45', 'PAM250'];
+export const MATRICES: readonly string[] = ['PAM30', 'PAM70', 'BLOSUM90', 'BLOSUM80', 'BLOSUM62', 'BLOSUM50', 'BLOSUM45', 'PAM250'];
 /** NCBI's word size selects of the protein programs. */
-const PROTEIN_WORD_SIZES = ['2', '3', '5', '6'];
+export const PROTEIN_WORD_SIZES: readonly string[] = ['2', '3', '5', '6'];
+/** NCBI's compositional adjustments. */
+export const COMPOSITION_MODES: readonly string[] = ['0', '1', '2', '3'];
 
 // General Parameters.
 const maxTargetSeqs: ParameterField = {
@@ -165,7 +180,7 @@ const NUCLEOTIDE_GAP_COSTS: PairSelect = {
   labels: gapCostsLabel,
 };
 // NCBI's lists of the protein programs' pages (the same on BLASTP's, TBLASTN's and TBLASTX's), by matrix.
-const PROTEIN_GAP_COSTS: PairSelect = {
+export const PROTEIN_GAP_COSTS: PairSelect = {
   id: 'gapcosts',
   separator: ' ',
   by: ['-matrix'],
@@ -192,12 +207,18 @@ const PROTEIN_GAP_COSTS: PairSelect = {
   labels: gapCostsLabel,
 };
 const PROTEIN_SCORING: Pick<ParameterSection, 'pairs'> = { pairs: { 'Gap Costs': PROTEIN_GAP_COSTS } };
+// LOSAT's BLASTP and BLASTX score with BLOSUM62 and gap costs 11/1 only, and adjust with modes 0
+// and 2: their lists keep these of NCBI's values ("Other" still takes any matrix and costs, which
+// the engine refuses with its message). A series that makes the engine read more widens them.
+const BLOSUM62_ONLY: Pick<ParameterSection, 'pairs'> = {
+  pairs: { 'Gap Costs': { id: 'gapcosts', separator: ' ', lists: { '': ['11 1'] }, labels: gapCostsLabel } },
+};
 // `describe` explains the values of -comp_based_stats only in its help text; the names are NCBI's.
 const compBasedStats: ParameterField = {
   flag: '-comp_based_stats',
   label: 'Compositional adjustments',
   kind: 'choice',
-  choices: ['0', '1', '2', '3'],
+  choices: COMPOSITION_MODES,
   choiceLabels: {
     '0': '0: No adjustment',
     '1': '1: Composition-based statistics',
@@ -299,6 +320,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         title: 'Discontiguous Word Options',
         placement: 'algorithm',
         shownFor: { flag: '-task', values: ['dc-megablast'] },
+        // BLAST+ requires the two together; dc-megablast's template is 18, coding.
+        together: { '-template_length': '18', '-template_type': 'coding' },
         // `describe` lists the template values only in its help text.
         fields: [
           { flag: '-template_length', label: 'Template length', kind: 'choice', choices: ['16', '18', '21'] },
@@ -342,8 +365,18 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           },
         ],
       },
-      { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize, cullingLimit] },
-      { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats], ...PROTEIN_SCORING },
+      // LOSAT's BLASTP reads word sizes 3 and 5 only.
+      {
+        title: 'General Parameters',
+        placement: 'algorithm',
+        fields: [maxTargetSeqs, evalue, { ...wordSize, list: ['3', '5'] }, cullingLimit],
+      },
+      {
+        title: 'Scoring Parameters',
+        placement: 'algorithm',
+        fields: [{ ...matrix, list: ['BLOSUM62'] }, gapOpen, gapExtend, { ...compBasedStats, choices: ['0', '2'] }],
+        ...BLOSUM62_ONLY,
+      },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
       { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize, maxHsps] },
     ],
@@ -370,12 +403,11 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           cullingLimit,
         ],
       },
-      // LOSAT's BLASTX scores with BLOSUM62 and gap costs 11/1 only, and adjusts with modes 0 and 2.
       {
         title: 'Scoring Parameters',
         placement: 'algorithm',
         fields: [{ ...matrix, list: ['BLOSUM62'] }, gapOpen, gapExtend, { ...compBasedStats, choices: ['0', '2'] }],
-        pairs: { 'Gap Costs': { id: 'gapcosts', separator: ' ', lists: { '': ['11 1'] }, labels: gapCostsLabel } },
+        ...BLOSUM62_ONLY,
       },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
       {
@@ -405,7 +437,13 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       { title: 'Task Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
       { title: 'Genetic code', placement: 'subject', fields: [{ flag: '-db_gencode', label: 'Genetic code', kind: 'gencode' }] },
       { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize, cullingLimit] },
-      { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats], ...PROTEIN_SCORING },
+      // The compressed lookup table (word sizes 5 to 7, tblastn-fast's 5) of LOSAT's TBLASTN reads BLOSUM62 only.
+      {
+        title: 'Scoring Parameters',
+        placement: 'algorithm',
+        fields: [{ ...matrix, listBy: { flag: '-word_size', lists: { '5': ['BLOSUM62'], '6': ['BLOSUM62'], '7': ['BLOSUM62'] } } }, gapOpen, gapExtend, compBasedStats],
+        ...PROTEIN_SCORING,
+      },
       {
         title: 'Filters and Masking',
         placement: 'algorithm',
@@ -440,10 +478,11 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: 'General Parameters',
         placement: 'algorithm',
+        // LOSAT's TBLASTX reads word size 3 only.
         fields: [
           maxTargetSeqs,
           evalue,
-          { ...wordSize, list: ['2', '3'] },
+          { ...wordSize, list: ['3'] },
           cullingLimit,
         ],
       },

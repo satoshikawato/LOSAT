@@ -5,8 +5,12 @@
 import {
   checkRange,
   isStorageFull,
+  isStorageRemoved,
+  mayBeStorageRemoved,
   pathNames,
+  RESULTS_REMOVED_MESSAGE,
   StorageFullError,
+  StorageRemovedError,
   type BlockStore,
   type BlockWriter,
 } from './block-store';
@@ -36,23 +40,61 @@ export class OpfsBlockStore implements BlockStore {
   private readonly removals = new Map<string, Promise<void>>();
   private used = 0;
 
-  constructor(private readonly root: FileSystemDirectoryHandle) {}
+  /**
+   * `session` is for the browser removing the directory under the store (the site's data was
+   * cleared): `removed` says whether the directory is gone, and `reopen` makes it again, so that a
+   * new block goes into a new directory instead of failing. Blocks that were in the removed
+   * directory stay lost. Without it, an error is the error.
+   */
+  constructor(
+    private root: FileSystemDirectoryHandle,
+    private readonly session?: {
+      removed(): Promise<boolean>;
+      reopen(): Promise<FileSystemDirectoryHandle>;
+    },
+  ) {}
 
   async create(path: string): Promise<BlockWriter> {
     const names = pathNames(path);
     const name = names[names.length - 1]!;
     if (this.blocks.has(path)) throw new Error(`block ${path} already exists`);
-    let directory: FileSystemDirectoryHandle;
-    let file: FileSystemFileHandle;
-    let handle: SyncAccessHandle;
-    try {
-      directory = await this.directory(names.slice(0, -1), true);
+    const open = async () => {
+      const directory = await this.directory(names.slice(0, -1), true);
       if (await hasEntry(directory, name)) throw new Error(`block ${path} already exists`);
-      file = await directory.getFileHandle(name, { create: true });
-      handle = await openSyncAccessHandle(file);
+      const file = await directory.getFileHandle(name, { create: true });
+      try {
+        return { directory, file, handle: await openSyncAccessHandle(file) };
+      } catch (error) {
+        // The file is this call's own (it did not exist): an empty one would make a retry see a block.
+        await removeEntry(directory, name, false).catch(() => undefined);
+        throw error;
+      }
+    };
+    let opened: Awaited<ReturnType<typeof open>>;
+    try {
+      try {
+        opened = await open();
+      } catch (error) {
+        // Only a directory that is not there any more is made again; any other error is the error.
+        if (this.session === undefined || !mayBeStorageRemoved(error) || !(await this.session.removed().catch(() => false))) {
+          throw error;
+        }
+        try {
+          this.root = await this.session.reopen();
+        } catch (reopenError) {
+          throw isStorageFull(reopenError) ? new StorageFullError() : new StorageRemovedError(undefined, reopenError);
+        }
+        try {
+          opened = await open();
+        } catch (again) {
+          if (isStorageFull(again)) throw new StorageFullError();
+          throw mayBeStorageRemoved(again) ? new StorageRemovedError(undefined, again) : again;
+        }
+      }
     } catch (error) {
       throw isStorageFull(error) ? new StorageFullError() : error;
     }
+    const { directory, file, handle } = opened;
     if (this.blocks.has(path)) {
       handle.close();
       throw new Error(`block ${path} already exists`);
@@ -106,8 +148,12 @@ export class OpfsBlockStore implements BlockStore {
   async read(path: string, offset: number, length: number): Promise<Uint8Array> {
     const block = this.sealed(path);
     checkRange(path, offset, length, block.length);
-    const file = await block.file.getFile();
-    return new Uint8Array(await file.slice(offset, offset + length).arrayBuffer());
+    try {
+      const file = await block.file.getFile();
+      return new Uint8Array(await file.slice(offset, offset + length).arrayBuffer());
+    } catch (error) {
+      throw isStorageRemoved(error) ? new StorageRemovedError(RESULTS_REMOVED_MESSAGE) : error;
+    }
   }
 
   async size(path: string): Promise<number> {
@@ -180,7 +226,10 @@ export const opfsAccess: OpfsAccess = {
    */
   async open(token) {
     const tmp = await tmpDirectory();
-    const store = new OpfsBlockStore(await tmp.getDirectoryHandle(token, { create: true }));
+    const store = new OpfsBlockStore(await tmp.getDirectoryHandle(token, { create: true }), {
+      removed: () => sessionRemoved(token),
+      reopen: async () => (await tmpDirectory()).getDirectoryHandle(token, { create: true }),
+    });
     try {
       await probe(store);
     } catch (error) {
@@ -197,6 +246,18 @@ async function tmpDirectory(): Promise<FileSystemDirectoryHandle> {
     throw new Error('this browser has no Origin Private File System');
   }
   return (await storage.getDirectory()).getDirectoryHandle(TMP_DIRECTORY, { create: true });
+}
+
+/** Whether tmp/<token>/ is not there (a lookup that does not make it). */
+async function sessionRemoved(token: string): Promise<boolean> {
+  try {
+    const root = await (globalThis.navigator as Navigator).storage.getDirectory();
+    await (await root.getDirectoryHandle(TMP_DIRECTORY)).getDirectoryHandle(token);
+    return false;
+  } catch (error) {
+    if ((error as { name?: unknown }).name === 'NotFoundError') return true;
+    throw error;
+  }
 }
 
 /** The session directories under tmp/ (session.ts). */

@@ -347,12 +347,12 @@ function snapshot(runId: string, argv: readonly string[] = ['blastn', '-query', 
   return { runId, number: 1, program: 'blastn', argv, query: input(['q0', 'q1']), subject: input(['s0', 's1', 's2']), requestedThreads: 1, queuedAt: 0 };
 }
 
-function setup(options: { status?: RunView['status']; specs?: readonly Spec[]; argv?: readonly string[]; unreadable?: boolean } = {}) {
+function setup(options: { status?: RunView['status']; specs?: readonly Spec[]; argv?: readonly string[]; unreadable?: boolean; error?: string } = {}) {
   const run = makeRun(options.specs);
   const view: RunView = {
     snapshot: snapshot('r1', options.argv),
     status: options.status ?? 'completed',
-    record: { runtimePath: 'serial', threads: 1, ...(options.status === 'failed' ? { error: 'boom' } : {}) },
+    record: { runtimePath: 'serial', threads: 1, ...(options.status === 'failed' ? { error: options.error ?? 'boom' } : {}) },
   };
   const runs = new Store<AppState>({ runs: [view] });
   const pending: Array<() => void> = [];
@@ -533,6 +533,19 @@ describe('ResultsBrowser', () => {
     const failed = setup({ status: 'failed' });
     await failed.results.open('r1');
     expect(failed.results.state.get()).toMatchObject({ phase: 'unavailable', message: 'Run 1 failed: boom. A failed run keeps no results.' });
+
+    // One full stop at the end of the reason, whatever it ends with (WA-RN-02).
+    for (const [error, said] of [
+      ['Earlier results are kept.', 'Earlier results are kept.'],
+      ['BLAST engine error: Warning: Sequence contains no data \n', 'BLAST engine error: Warning: Sequence contains no data.'],
+      ['Is it full?', 'Is it full?'],
+      ['The file (see the log.)', 'The file (see the log.)'],
+      ['', 'no reason was recorded.'],
+    ] as const) {
+      const run = setup({ status: 'failed', error });
+      await run.results.open('r1');
+      expect(run.results.state.get().message).toBe(`Run 1 failed: ${said} A failed run keeps no results.`);
+    }
 
     const running = setup({ status: 'running' });
     await running.results.open('r1');

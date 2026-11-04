@@ -274,6 +274,44 @@ function checkSurface(reactor, native) {
   assert.match(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast",
                                                     "-word_size", "13"].join("\0")).error,
                /^BLAST query\/options error: Invalid discontiguous template parameters: word size must be either 11 or 12/);
+  // BLASTN scores without a Karlin-Altschul table row (WA-FM-01). The CLI meets the tables only
+  // when some query context has an ungapped Karlin-Altschul block, which depends on the query's
+  // letters (a query of N only has none: a warning and rc 0). `validate` has no query, so it
+  // accepts these scores and `run` rejects them; whatever `validate` rejects, the CLI rejects
+  // with the same message.
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "losat-v-abi-scores-"));
+    const acgt = "ACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA";
+    fs.writeFileSync(path.join(dir, "acgt.fa"), `>mq1 query\n${acgt}\n`);
+    fs.writeFileSync(path.join(dir, "n.fa"), `>mq1 query\n${"N".repeat(60)}\n`);
+    fs.writeFileSync(path.join(dir, "b.fa"), `>mq1 query\n${acgt}B\n`);
+    fs.writeFileSync(path.join(dir, "s.fa"), `>ms1\n${acgt}\n`);
+    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("LOSAT_")));
+    const cases = [
+      // [query, extra options, the CLI's exit status]
+      ["acgt.fa", ["-reward", "7"], 0], ["acgt.fa", ["-reward", "3", "-penalty", "-1"], 0],
+      ["acgt.fa", ["-task", "blastn", "-reward", "5", "-penalty", "-1"], 0],
+      ["acgt.fa", ["-task", "blastn", "-reward", "7"], 3], ["n.fa", ["-task", "blastn", "-reward", "7"], 0],
+      ["b.fa", ["-reward", "3", "-penalty", "-1"], null], ["acgt.fa", ["-reward", "2", "-penalty", "-1"], 3],
+    ];
+    for (const [query, extra, status] of cases) {
+      const label = `${query} ${extra.join(" ")}`;
+      const argv = ["blastn", "-query", path.join(dir, query), "-subject", path.join(dir, "s.fa"), ...extra];
+      const cli = require("node:child_process").spawnSync(native, [...argv, "-outfmt", "6"], { env });
+      if (status === null) assert.notEqual(cli.status, 0, label);
+      else assert.equal(cli.status, status, label);
+      if (cli.status === 0) assert.match(cli.stderr.toString(), /^Warning: \[blastn\] Query_1 mq1 query: Could not calculate ungapped Karlin-Altschul/, label);
+      const validated = reactor.call("losat_web2_validate", argv.join("\0"));
+      assert.equal(validated.status, 0, `${label}: validate leaves the tables to run`);
+    }
+    // What validate rejects (the options' checks), the CLI rejects with the same message.
+    const options = ["blastn", "-query", path.join(dir, "acgt.fa"), "-subject", path.join(dir, "s.fa"), "-reward", "7", "-evalue", "0"];
+    const validated = reactor.call("losat_web2_validate", options.join("\0"));
+    assert.equal(validated.status, -1);
+    const cli = require("node:child_process").spawnSync(native, options, { env });
+    assert.equal(validated.error, cli.stderr.toString(), "the CLI's message");
+    fs.rmSync(dir, { recursive: true });
+  }
   // register and the scan of the program's kind (2: the TBLASTN query) agree on a
   // multi-record input, in chunks of any size.
   const input = fs.readFileSync(path.join(ROOT, "docs/evidence/tlosan_stage_c/multi_query_20260924/query.faa"));

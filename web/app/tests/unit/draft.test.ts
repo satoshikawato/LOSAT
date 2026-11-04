@@ -1,4 +1,4 @@
-import { gzipSync } from 'node:zlib';
+import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { SearchDraft, type DraftSource } from '../../src/application/draft';
@@ -662,6 +662,14 @@ describe('SearchDraft submit', () => {
   it('opens a file named .gz under its plain name and inflated size', async () => {
     const { draft } = setup();
     draft.addFiles('subject', [new File([gzipSync('>a\nACGT\n')], 'x.fa.gz')]);
+    await draft.idle();
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', name: 'x.fa', size: 8 });
+    expect(draft.inputName('subject')).toBe('x.fa');
+  });
+
+  it('opens a file named .zst under its plain name and inflated size', async () => {
+    const { draft } = setup();
+    draft.addFiles('subject', [new File([zstdCompressSync('>a\nACGT\n')], 'x.fa.zst')]);
     await draft.idle();
     expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', name: 'x.fa', size: 8 });
     expect(draft.inputName('subject')).toBe('x.fa');

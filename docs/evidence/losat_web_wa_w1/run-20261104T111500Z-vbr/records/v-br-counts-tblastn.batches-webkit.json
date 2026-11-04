@@ -1,0 +1,808 @@
+[
+  {
+    "id": "tblastn.batches n=3",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 3,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 2681,
+    "memory": {
+      "linearBytesBefore": 3211264,
+      "linearBytesAfter": 9175040,
+      "instanceRuns": 1
+    }
+  },
+  {
+    "id": "tblastn.batches n=5",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 5,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 202,
+    "memory": {
+      "linearBytesBefore": 9175040,
+      "linearBytesAfter": 12779520,
+      "instanceRuns": 2
+    }
+  },
+  {
+    "id": "tblastn.batches n=6",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 6,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 172,
+    "memory": {
+      "linearBytesBefore": 12779520,
+      "linearBytesAfter": 14286848,
+      "instanceRuns": 3
+    }
+  },
+  {
+    "id": "tblastn.batches n=7",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 7,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 314,
+    "memory": {
+      "linearBytesBefore": 14286848,
+      "linearBytesAfter": 15925248,
+      "instanceRuns": 4
+    }
+  },
+  {
+    "id": "tblastn.batches n=9",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 9,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 165,
+    "memory": {
+      "linearBytesBefore": 15925248,
+      "linearBytesAfter": 19464192,
+      "instanceRuns": 5
+    }
+  },
+  {
+    "id": "tblastn.batches n=10",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 10,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 209,
+    "memory": {
+      "linearBytesBefore": 19464192,
+      "linearBytesAfter": 21299200,
+      "instanceRuns": 6
+    }
+  },
+  {
+    "id": "tblastn.batches n=11",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 11,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 248,
+    "memory": {
+      "linearBytesBefore": 21299200,
+      "linearBytesAfter": 22544384,
+      "instanceRuns": 7
+    }
+  },
+  {
+    "id": "tblastn.batches n=12",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 12,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 146,
+    "memory": {
+      "linearBytesBefore": 22544384,
+      "linearBytesAfter": 24576000,
+      "instanceRuns": 8
+    }
+  },
+  {
+    "id": "tblastn.batches n=13",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 13,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 152,
+    "memory": {
+      "linearBytesBefore": 24576000,
+      "linearBytesAfter": 26214400,
+      "instanceRuns": 9
+    }
+  },
+  {
+    "id": "tblastn.batches n=14",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 14,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 161,
+    "memory": {
+      "linearBytesBefore": 26214400,
+      "linearBytesAfter": 27983872,
+      "instanceRuns": 10
+    }
+  },
+  {
+    "id": "tblastn.batches n=15",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 15,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 183,
+    "memory": {
+      "linearBytesBefore": 27983872,
+      "linearBytesAfter": 29294592,
+      "instanceRuns": 11
+    }
+  },
+  {
+    "id": "tblastn.batches n=17",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 17,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 167,
+    "memory": {
+      "linearBytesBefore": 29294592,
+      "linearBytesAfter": 32309248,
+      "instanceRuns": 12
+    }
+  },
+  {
+    "id": "tblastn.batches n=18",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 18,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 162,
+    "memory": {
+      "linearBytesBefore": 32309248,
+      "linearBytesAfter": 33947648,
+      "instanceRuns": 13
+    }
+  },
+  {
+    "id": "tblastn.batches n=19",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 19,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 164,
+    "memory": {
+      "linearBytesBefore": 33947648,
+      "linearBytesAfter": 35717120,
+      "instanceRuns": 14
+    }
+  },
+  {
+    "id": "tblastn.batches n=20",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 20,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 208,
+    "memory": {
+      "linearBytesBefore": 35717120,
+      "linearBytesAfter": 35979264,
+      "instanceRuns": 15
+    }
+  },
+  {
+    "id": "tblastn.batches n=21",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 21,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 462,
+    "memory": {
+      "linearBytesBefore": 35979264,
+      "linearBytesAfter": 35979264,
+      "instanceRuns": 16
+    }
+  },
+  {
+    "id": "tblastn.batches n=22",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 22,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 481,
+    "memory": {
+      "linearBytesBefore": 35979264,
+      "linearBytesAfter": 35979264,
+      "instanceRuns": 17
+    }
+  },
+  {
+    "id": "tblastn.batches n=23",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 23,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 520,
+    "memory": {
+      "linearBytesBefore": 35979264,
+      "linearBytesAfter": 35979264,
+      "instanceRuns": 18
+    }
+  },
+  {
+    "id": "tblastn.batches n=24",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 24,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 822,
+    "memory": {
+      "linearBytesBefore": 35979264,
+      "linearBytesAfter": 36372480,
+      "instanceRuns": 19
+    }
+  },
+  {
+    "id": "tblastn.batches n=25",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 25,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 825,
+    "memory": {
+      "linearBytesBefore": 36372480,
+      "linearBytesAfter": 36372480,
+      "instanceRuns": 20
+    }
+  },
+  {
+    "id": "tblastn.batches n=26",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 26,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 1312,
+    "memory": {
+      "linearBytesBefore": 36372480,
+      "linearBytesAfter": 38535168,
+      "instanceRuns": 21
+    }
+  },
+  {
+    "id": "tblastn.batches n=27",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 27,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 1164,
+    "memory": {
+      "linearBytesBefore": 38535168,
+      "linearBytesAfter": 40173568,
+      "instanceRuns": 22
+    }
+  },
+  {
+    "id": "tblastn.batches n=28",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 28,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 1081,
+    "memory": {
+      "linearBytesBefore": 40173568,
+      "linearBytesAfter": 40173568,
+      "instanceRuns": 23
+    }
+  },
+  {
+    "id": "tblastn.batches n=29",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 29,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 607,
+    "memory": {
+      "linearBytesBefore": 40173568,
+      "linearBytesAfter": 42008576,
+      "instanceRuns": 24
+    }
+  },
+  {
+    "id": "tblastn.batches n=30",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 30,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 700,
+    "memory": {
+      "linearBytesBefore": 42008576,
+      "linearBytesAfter": 46727168,
+      "instanceRuns": 25
+    }
+  },
+  {
+    "id": "tblastn.batches n=31",
+    "argv": [
+      "tblastn",
+      "-query",
+      "tests/fasta/SicyWSV.faa",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "runtimePath": "threaded",
+    "threads": 31,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "native": {
+      "0": "22f2d1f8cff9f69f339b12dad4fafe3016720971f503bc384b558f213626fdc3",
+      "6": "4b7f93aef6a3777dec97303ca803299bfcc70a9e5d314750e4d9e7a3ecf8544c",
+      "7": "12861963874a117b2e385f3379152e773bdffba2ad0fbe2ed9e2b949e5737df8"
+    },
+    "frozenMatch": {},
+    "hits": 314,
+    "elapsedMs": 553,
+    "memory": {
+      "linearBytesBefore": 46727168,
+      "linearBytesAfter": 46727168,
+      "instanceRuns": 26
+    }
+  }
+]

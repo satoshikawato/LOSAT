@@ -6,7 +6,7 @@ import { computed, ref } from 'vue';
 import type { SearchDraft } from '../application/draft';
 import type { DatasetRecord } from '../domain/dataset';
 import type { InputRole } from '../domain/programs';
-import { regionFromPositions, regionProblem, regionRange, type RegionText } from '../domain/region';
+import { regionFromPositions, regionProblem, regionRange, swappedRegion, type RegionText } from '../domain/region';
 import { formatCount } from './format';
 
 const props = defineProps<{
@@ -23,6 +23,8 @@ const bar = ref<HTMLElement>();
 const dragFrom = ref<number>();
 const testid = computed(() => `${props.role}-region`);
 const problem = computed(() => (props.region === undefined ? undefined : regionProblem(props.region, props.record.length)));
+/** A start after the stop: the swap, offered beside the problem (Owner, 2026-11-04). */
+const swapped = computed(() => (props.region === undefined ? undefined : swappedRegion(props.region, props.record.length)));
 const range = computed(() => (props.region === undefined ? undefined : regionRange(props.region, props.record.length)));
 const selection = computed(() => {
   const value = range.value;
@@ -110,7 +112,18 @@ function up(): void {
         Whole record
       </button>
     </div>
-    <p v-if="problem" class="error" :data-testid="`${testid}-problem`">{{ problem }}</p>
+    <p v-if="problem" class="error">
+      <!-- One line: the space between the two is kept. -->
+      <span :data-testid="`${testid}-problem`">{{ problem }}</span> <button
+        v-if="swapped"
+        type="button"
+        class="link"
+        :data-testid="`${testid}-swap`"
+        @click="draft.setRegion(role, swapped)"
+      >
+        Swap to {{ swapped.start }}–{{ swapped.stop }}
+      </button>
+    </p>
     <p v-else-if="region" class="hint" :data-testid="`${testid}-argument`">Positions in the results are those of the whole record.</p>
   </fieldset>
 </template>

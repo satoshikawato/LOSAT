@@ -57,6 +57,9 @@ const X_UNPACKED: [[u8; COMPRESSION_RATIO]; 256] = {
     table
 };
 
+// No NCBI counterpart: LOSAT's speed. The copy is written into its capacity, not into a zeroed
+// buffer: the loop writes every byte, and the zeroing of a copy of the whole subject was 1.1 % of
+// the user cycles of megablast `-db` (ref_prok_rep_genomes, 16 threads).
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_util.h:52-55
 /// ```c
 /// #define NCBI2NA_MASK 0x03
@@ -71,9 +74,6 @@ const X_UNPACKED: [[u8; COMPRESSION_RATIO]; 256] = {
 /// ```
 /// Byte `i` of the result is `NCBI2NA_UNPACK_BASE(packed[i / 4], 3 - i % 4)` for the first
 /// `len` bases (the remainder count in the last packed byte is not a base and is not copied).
-// No NCBI counterpart: LOSAT's speed. The copy is written into its capacity, not into a zeroed
-// buffer: the loop writes every byte, and the zeroing of a copy of the whole subject was 1.1 % of
-// the user cycles of megablast `-db` (ref_prok_rep_genomes, 16 threads).
 pub(crate) fn x_unpack_ncbi2na(packed: &[u8], len: usize) -> Vec<u8> {
     let bytes = len.div_ceil(COMPRESSION_RATIO);
     assert!(

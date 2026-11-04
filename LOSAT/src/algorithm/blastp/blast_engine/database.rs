@@ -1210,91 +1210,65 @@ impl ListedTitles<'_> {
     }
 
     /// The subjects of ranks `ranks` of psiblast's traceback hit lists as NCBI's prefetch reads
-    /// them by their Seq-align ids (`ParsedSubject::prefetched`), for `prefetch_messages`: those
-    /// it finds as themselves; one that it finds nowhere is left out (the prefetch reads
+    /// them by their Seq-align ids (`shared::prefetch_reads_itself`), for `prefetch_messages`:
+    /// those it finds as themselves; one that it finds nowhere is left out (the prefetch reads
     /// nothing for it). A lookup that fails is refused (NCBI's prefetch writes its warning and
-    /// reads no other subject of the batch). With `taxids` (`taxdb.bti` on the search path), one
-    /// for which the prefetch can read another sequence (`Prefetched::Another`) is refused where
-    /// the taxonomy database's texts can differ between what it can read
-    /// (`shared::lookup_texts_differ`), and else kept as itself or left out. The subjects that
-    /// the reports show were refused before for all of these (`check_parsed_reports`).
+    /// reads no other subject of the batch), and so is another sequence that NCBI can read for
+    /// one and whose definition lines do not hold its Seq-align id (NCBI stops). With `taxids`
+    /// (`taxdb.bti` on the search path), one for which the prefetch can read another sequence
+    /// (`Prefetched::Another`) is refused where the taxonomy database's texts can differ between
+    /// what it can read (`shared::lookup_texts_differ`), and else kept as itself or left out. The
+    /// subjects that the reports show were refused before for all of these
+    /// (`check_parsed_reports`).
     pub(super) fn prefetched_ranks(
         &self,
         database: &BlastpDatabase,
         ranks: &[usize],
         taxids: bool,
     ) -> Result<Vec<usize>> {
-        use crate::report::db_subject::Prefetched;
         let mut kept = Vec::with_capacity(ranks.len());
         for &rank in ranks {
             let Some(subject) = self.parsed_subject(rank) else {
                 kept.push(rank);
                 continue;
             };
-            let ordinal = self.listed.ordinals[rank];
-            let refused = |reason: &str| {
-                shared::parsed_refusal(
-                    ordinal,
-                    &format!(
-                        "{reason}, and is in psiblast's traceback hit list beyond -max_target_seqs, which NCBI BLAST+ 2.17.0 prefetches"
-                    ),
-                    self.program,
-                )
-            };
-            match subject.prefetched() {
-                Prefetched::Itself => kept.push(rank),
-                Prefetched::Nothing => {}
-                Prefetched::Failed(reason) => return Err(refused(&reason)),
-                Prefetched::Another { .. } if !taxids => {}
-                Prefetched::Another {
-                    other: None,
-                    reason,
-                    ..
-                } => return Err(refused(&reason)),
-                Prefetched::Another {
-                    other: Some(other),
-                    or_itself,
-                    reason,
-                } => {
-                    let set = database
-                        .db
-                        .defline_set(other)
-                        .map_err(|error| shared::database_error(error, self.program))?;
-                    let mut other_taxids: Vec<i32> = Vec::new();
-                    for defline in &set.deflines {
-                        if let Some(taxid) = defline.taxid.filter(|&taxid| taxid > 0) {
-                            if !other_taxids.contains(&taxid) {
-                                other_taxids.push(taxid);
-                            }
-                        }
-                    }
-                    let own = subject.volume_taxids();
-                    let (choices, keep): (Vec<&[i32]>, bool) = if or_itself {
-                        (vec![&own, &other_taxids], true)
-                    } else {
-                        // `x_GetOid` keeps the OID only where one of its ids compares equal to
-                        // the Seq-align id (bdbloader.cpp), else the prefetch reads nothing.
-                        let equal =
-                            set.deflines
-                                .iter()
-                                .flat_map(|defline| &defline.ids)
-                                .any(|id| {
-                                    crate::seqid::defline_set::compare(id, subject.alignment_id())
-                                        == crate::seqid::defline_set::Sic::Yes
-                                });
-                        let read: &[i32] = if equal { &other_taxids } else { &[] };
-                        (vec![read, &[]], false)
-                    };
-                    if shared::lookup_texts_differ(&database.db, &choices) {
-                        return Err(refused(&reason));
-                    }
-                    if keep {
-                        kept.push(rank);
-                    }
+            match shared::prefetch_reads_itself(&database.db, subject, taxids, self.program)? {
+                Ok(true) => kept.push(rank),
+                Ok(false) => {}
+                Err(reason) => {
+                    return Err(shared::parsed_refusal(
+                        self.listed.ordinals[rank],
+                        &format!(
+                            "{reason}, and is in psiblast's traceback hit list beyond -max_target_seqs, which NCBI BLAST+ 2.17.0 prefetches"
+                        ),
+                        self.program,
+                    ))
                 }
             }
         }
         Ok(kept)
+    }
+
+    /// LOSAT's refusals of the subjects of ranks `ranks` that a batch's prefetch reads though its
+    /// reports write their Seq-align ids alone (the Seq-annots with
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647`), without `taxdb.bti` on the search path
+    /// (`shared::check_prefetched_parsed`; with it, `prefetch_messages` refuses them too).
+    pub(super) fn check_prefetched(
+        &self,
+        database: &BlastpDatabase,
+        ranks: impl IntoIterator<Item = usize>,
+    ) -> Result<()> {
+        for rank in ranks {
+            if let Some(subject) = self.parsed_subject(rank) {
+                shared::check_prefetched_parsed(
+                    &database.db,
+                    subject,
+                    self.listed.ordinals[rank],
+                    self.program,
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// The ranks of the subjects with rows in `hit_lists` (the final hit lists).

@@ -3123,8 +3123,9 @@ fn run_batch_loop(
         .first()
         .is_none_or(|format| report::output_format(format.outfmt).writes_query_warnings());
     // Whether the batches' prefetch of a `-db` search writes the taxonomy database's messages
-    // with the query warnings: the first format is outfmt 0, 5, 6 or 7
-    // (`TblastxOutputFormat::prefetches_subjects`; see the batch's prefetch below).
+    // with the query warnings: the first format is outfmt 0, 5, 6 or 7, or with
+    // `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 or 12 (`TblastxOutputFormat::prefetches_subjects`;
+    // see the batch's prefetch below).
     let prefetches = outputs
         .formats
         .first()
@@ -3510,7 +3511,8 @@ fn run_batch_loop(
             // opening it at the run's first lookup, a volume's lookup of a taxid once per run):
             // after the reader's messages of the batch and before the warnings of its first
             // query, which are added below. They go with the warnings, where the first format is
-            // outfmt 0, 5, 6 or 7 (`prefetches`), so every writer of the reports writes them
+            // outfmt 0, 5, 6 or 7, or with `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 or 12, which write
+            // the reader's messages only (`prefetches`), so every writer of the reports writes them
             // there (the reports after the loop, the error paths that write the reports of the
             // batches before). Without `taxdb.bti` nothing is read. A refusal (a taxonomy
             // database or a taxid that LOSAT cannot read as NCBI does) stops the run before any
@@ -3777,6 +3779,9 @@ impl BatchReports<'_> {
                     words: formats.iter().fold(
                         crate::report::tabular::PrintedIds::default(),
                         |words, format| words.or(format.printed_ids()),
+                    ),
+                    prefetched: crate::algorithm::common::database::seq_annots_prefetch(
+                        formats.first().and_then(|format| format.serial_outfmt()),
                     ),
                 };
                 reported_subjects = super::super::database::reported_subjects(

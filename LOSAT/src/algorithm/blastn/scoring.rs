@@ -2,6 +2,7 @@
 //! Karlin-Altschul blocks of the queries.
 
 use super::args::BlastnArgs;
+use super::blast_engine::NO_DATA_MESSAGE;
 use super::coordination::determine_scoring_params;
 use super::ncbi_cutoffs::NCBIMATH_LN2;
 use super::pairwise::query_ungapped_karlin_blastna;
@@ -300,7 +301,9 @@ const DBSEQ_CHUNK_OVERLAP: usize = 100;
 const MAX_GREEDY_GAP_COST: i32 = 32767;
 
 /// NCBI's error for scores or gap costs without Karlin-Altschul values, raised when the
-/// first batch with a valid query is set up: every query of that batch gets the message.
+/// first batch with a valid query is set up: every query of that batch gets the message,
+/// and a query without letters (`true` in `empty_queries`, one item per query of the
+/// batch) keeps its set-up warning after it.
 ///
 /// NCBI reference: c++/src/algo/blast/api/blast_aux_priv.cpp:94-102
 /// ```c
@@ -332,6 +335,34 @@ const MAX_GREEDY_GAP_COST: i32 = 32767;
 ///     	if (withSeverity) {
 ///     		return GetSeverityString() + ": " + m_Message;
 /// ```
+/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640 (the query's
+/// warning, before the score block: its id is the query's index)
+/// ```c
+///         } catch (const CException& e) {
+///             ...
+///             CRef<CSearchMessage> m
+///                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
+///             messages[index].push_back(m);
+/// ```
+/// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:1042-1052 (after the error is
+/// added, blast_aux_priv.cpp:107-108)
+/// ```c
+/// TSearchMessages::RemoveDuplicates()
+/// {
+///     NON_CONST_ITERATE(TSearchMessages, sm, (*this)) {
+///         ...
+///         sort(sm->begin(), sm->end(), TQueryMessagesLessComparator());
+/// ```
+/// NCBI reference: c++/include/algo/blast/api/blast_types.hpp:294-303
+/// ```c
+/// CSearchMessage::operator<(const CSearchMessage& rhs) const
+/// {
+///     if (m_ErrorId < rhs.m_ErrorId ||
+///         m_Severity < rhs.m_Severity ||
+///         m_Message < rhs.m_Message) {
+/// ```
+/// The error's id (`kBlastMessageNoContext`, -1) is below the warning's, so the sort puts
+/// the error first (TBLASTX's unknown matrix has the same order, `run_impl.rs`).
 /// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:170-184
 /// ```c
 ///     Blast_Message2TSearchMessages(blast_msg.Get(), query_info, search_messages);
@@ -346,13 +377,25 @@ const MAX_GREEDY_GAP_COST: i32 = 32767;
 ///             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
 ///             exit_code = BLAST_ENGINE_ERROR;                                 \
 /// ```
-pub(crate) fn karlin_error(message: &str, batch_queries: usize) -> anyhow::Error {
+pub(crate) fn karlin_error(
+    message: &str,
+    empty_queries: impl IntoIterator<Item = bool>,
+) -> anyhow::Error {
+    let mut text = String::from("BLAST engine error: ");
+    for empty in empty_queries {
+        text.push_str("Error: ");
+        text.push_str(message);
+        text.push(' ');
+        if empty {
+            text.push_str("Warning: ");
+            text.push_str(NO_DATA_MESSAGE);
+            text.push(' ');
+        }
+    }
+    text.push('\n');
     NativeError {
         exit: 3,
-        message: format!(
-            "BLAST engine error: {}\n",
-            format!("Error: {message} ").repeat(batch_queries)
-        ),
+        message: text,
     }
     .into()
 }
@@ -421,7 +464,7 @@ pub(crate) fn check_scoring_for_formats_with(
     let spec = scoring_spec(args);
     NuclValues::new(spec.reward, spec.penalty)
         .and_then(|values| values.check_gaps(&spec))
-        .map_err(|message| karlin_error(&message, 1))?;
+        .map_err(|message| karlin_error(&message, [false]))?;
     check_greedy_gap_costs(args)
 }
 
@@ -898,10 +941,19 @@ mod tests {
 
     #[test]
     fn table_errors_repeat_for_each_query_of_the_batch() {
-        let error = karlin_error("Substitution scores 1 and -6 are not supported", 2);
+        let error = karlin_error("Substitution scores 1 and -6 are not supported", [false; 2]);
         assert_eq!(
             error.downcast::<NativeError>().unwrap().message,
             "BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported \n"
+        );
+        // A query without letters keeps its warning after the error (NCBI 2.17.0).
+        let error = karlin_error(
+            "Substitution scores 1 and -6 are not supported",
+            [true, false],
+        );
+        assert_eq!(
+            error.downcast::<NativeError>().unwrap().message,
+            "BLAST engine error: Error: Substitution scores 1 and -6 are not supported Warning: Sequence contains no data Error: Substitution scores 1 and -6 are not supported \n"
         );
         assert!(
             message(check_scoring(&args(&["-reward", "1", "-penalty", "-6"])))

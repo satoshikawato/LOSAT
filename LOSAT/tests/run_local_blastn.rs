@@ -896,6 +896,46 @@ fn a_batch_of_queries_without_residues_stops_after_the_prolog() {
     assert!(outputs[1].is_empty());
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_aux_priv.cpp:153-156
+// ```c
+//     // get any warning messages from instantiating the queries
+//     query_data->GetMessages(m);
+//     retval->m_Messages.resize(query_data->GetNumQueries());
+//     retval->m_Messages.Combine(m);
+// ```
+// With scores that have no Karlin-Altschul values, each query of the batch gets the error,
+// and a query without residues keeps its warning after it (`scoring::karlin_error`; NCBI
+// 2.17.0 with `-reward 1 -penalty -6`).
+#[test]
+fn a_query_without_residues_keeps_its_warning_in_a_table_error() {
+    let genome = fixture_sequence("LC738884.fasta");
+    let inputs = Inputs {
+        query: TempFasta::new(
+            "blastn_kaempty_query.fna",
+            &[("q1", b""), ("q2", &genome[0..500]), ("q3 three", b"")],
+        ),
+        subject: TempFasta::new("blastn_kaempty_subject.fna", &[("s1", &genome[0..5_000])]),
+    };
+    let (outputs, diagnostics, result) =
+        run_local_outputs(&inputs, &["0", "6"], &["-reward", "1", "-penalty", "-6"]);
+    let error = "Error: Substitution scores 1 and -6 are not supported ";
+    let warning = "Warning: Sequence contains no data ";
+    assert_eq!(
+        native_error(result),
+        (
+            3,
+            format!("BLAST engine error: {error}{warning}{error}{error}{warning}\n")
+        )
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let prolog = String::from_utf8_lossy(&outputs[0]);
+    assert!(
+        prolog.starts_with("BLASTN 2.17.0+") && !prolog.contains("Query="),
+        "{prolog}"
+    );
+    assert!(outputs[1].is_empty());
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:969-980
 // ```c
 //    if (sbp->gbp) {

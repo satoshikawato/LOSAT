@@ -744,7 +744,7 @@ pub(crate) fn search_core(
             let x_cap = x_bx_mem::chunk_unit_cap(pool, options, subjects);
             // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): a capped wave's chunks build
             // their tables on the threads the cap leaves each (x_bx_mem.rs).
-            let x_parts = x_bx_mem::build_parts(pool, x_cap.is_some(), subjects.len());
+            let x_parts = x_bx_mem::build_parts(pool, x_cap.is_some(), None);
             let mut x_next = 0;
             while x_next < chunks.len() {
                 let x_wave = x_cap.map(|(k, _)| x_bx_mem::chunk_wave(pool, k));
@@ -967,7 +967,7 @@ pub(crate) fn search_core(
             // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): a batch of the capped batch
             // flow builds its table on the threads the cap leaves it (x_bx_mem.rs).
             #[cfg(feature = "parallel")]
-            let x_parts = x_bx_mem::build_parts(pool, false, subjects.len());
+            let x_parts = x_bx_mem::build_parts(pool, false, Some(subjects.len()));
             #[cfg(not(feature = "parallel"))]
             let x_parts = 1;
             let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;

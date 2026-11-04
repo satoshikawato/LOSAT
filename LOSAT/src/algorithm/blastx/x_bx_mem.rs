@@ -57,16 +57,16 @@
 //!   is left, at least one subject and at most the size without the cap (64 for the batch flow's
 //!   subject flow, 16 for the chunk waves; a set keeps that size from 64 x f x ceil(threads / K)
 //!   subjects, 512 at 16 threads), and the cap holds wherever there are more threads than K
-//!   (`unit_cap`; without the fill it also needs K units with a task for every thread). A unit
+//!   (`unit_cap`; without the fill it also needs K units with a task for every thread). A batch
 //!   whose subjects the subject flow without the cap searches as one task (64 subjects or fewer,
-//!   `one_task`; a batch of them had no subject flow at all without the fill) is left at most
-//!   `ONE_TASK_SHARE` = 2 threads instead: the share of a unit at 16 threads, where the fill was
-//!   measured. A batch then has one helper, a chunk of a split query f x 2 tasks, and either
-//!   builds its table in two parts. Past 16 threads such a unit's search is short beside its
-//!   preparation and the reader, and every thread that took one of its tasks kept a diagonal
-//!   table and grew its glibc arena for the rest of the run, so the memory rose with the threads
-//!   and the time did not fall (ws, 800 cDNAs x 2, 8 or 50 yeast proteins `-subject`, 64 threads:
-//!   MEASURE). And the
+//!   `one_task`), which had no subject flow at all without the fill, is left at most
+//!   `ONE_TASK_SHARE` = 2 threads instead (its own and one helper, and its table's build in two
+//!   parts): the share of a unit at 16 threads, where the fill was measured. Past that, such a
+//!   batch's search is short beside its preparation and the reader, and every thread that took one
+//!   of its tasks kept a diagonal table and grew its glibc arena for the rest of the run, so the
+//!   memory rose with the threads and the time did not fall (ws, 800 cDNAs x 2, 8 or 50 yeast
+//!   proteins `-subject`, 64 threads: MEASURE). A chunk of a split query's waves keeps
+//!   `ceil(threads / K)`, as its threads come from the K chunks. And the
 //!   capped batch flow prepares each query batch of at most two search units' letters
 //!   (translation, filtering, Karlin blocks: `reader_batch::prepare_lone_unit`, which
 //!   `search::search_core` runs when a batch prepares itself) as a task of its own when the reader
@@ -192,24 +192,24 @@ fn cap_fill() -> Option<usize> {
     *F.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXCAPFILL", 2..=64, CAP_FILL))
 }
 
-/// No NCBI counterpart: the most threads `LOSAT_X_BXCAPFILL` leaves a capped unit of one task
-/// (`one_task`; a batch's own thread and one helper), the share of a unit at 16 threads with the
+/// No NCBI counterpart: the most threads `LOSAT_X_BXCAPFILL` leaves a capped batch of one task
+/// (`one_task`): the batch's own thread and one helper, the share of a unit at 16 threads with the
 /// built-in K = 8.
 const ONE_TASK_SHARE: usize = 2;
 
-/// No NCBI counterpart (scheduling only, `LOSAT_X_BXCAPFILL`): whether a capped unit (a batch, or a
-/// chunk of a split query) with `subjects` subjects has subjects the subject flow without the cap
-/// searches as one task (at most `x_subject_flow::subjects_per_task`, 64: no flow then,
-/// `x_subject_flow::fits`; the tasks `LOSAT_X_BXTASKRES` cuts by residues are never fewer subjects
-/// than the mean length allows, so that many subjects are one task there too). The fill spreads
-/// such a unit over the threads the cap leaves it (module comment).
+/// No NCBI counterpart (scheduling only, `LOSAT_X_BXCAPFILL`): whether a batch of the capped batch
+/// flow with `subjects` subjects is one the subject flow without the cap searches as one task (at
+/// most `x_subject_flow::subjects_per_task`, 64: no flow then, `x_subject_flow::fits`; the tasks
+/// `LOSAT_X_BXTASKRES` cuts by residues are never fewer subjects than the mean length allows, so
+/// that many subjects are one task there too). The fill spreads such a batch over the threads the
+/// cap leaves it (module comment).
 fn one_task(subjects: usize) -> bool {
     cap_fill().is_some()
         && super::x_subject_flow::subjects_per_task().is_some_and(|most| subjects <= most)
 }
 
 /// No NCBI counterpart (scheduling only): the threads a unit searched under the cap K with
-/// `threads` threads is left: `ceil(threads / K)`, and at most `ONE_TASK_SHARE` for a unit of one
+/// `threads` threads is left: `ceil(threads / K)`, and at most `ONE_TASK_SHARE` for a batch of one
 /// task (`one_task`, `LOSAT_X_BXCAPFILL`).
 fn unit_share(threads: usize, k: usize, one_task: bool) -> usize {
     let share = threads.div_ceil(k.max(1));
@@ -333,7 +333,7 @@ pub(crate) fn chunk_unit_cap(
     let threads = pool.threads();
     let per_task = |k| {
         capped_subjects_per_task(
-            unit_share(threads, k, one_task(subjects.len())),
+            unit_share(threads, k, false),
             subjects.len(),
             UNIT_CAP_SUBJECTS_PER_TASK,
         )
@@ -357,20 +357,23 @@ fn build_par_on() -> bool {
 }
 
 /// No NCBI counterpart (scheduling only, `LOSAT_X_BXBUILDPAR`): the parts of the lookup table of
-/// a unit with `subjects` subjects of `pool`'s search: the threads a unit is left (`unit_share`:
-/// `ceil(threads / K)`, at most `ONE_TASK_SHARE` for a unit of one task) for a unit the cap K holds
+/// a unit of `pool`'s search: the threads a unit is left (`unit_share`:
+/// `ceil(threads / K)`, at most `ONE_TASK_SHARE` for a batch of one task) for a unit the cap K holds
 /// (`capped`: a chunk of the capped chunk waves, or any chunk inside the capped batch flow), else 1
-/// (the build on one thread).
+/// (the build on one thread). `batch_subjects`: the subjects of a unit that is a whole batch
+/// (`None`: a chunk of a split query's waves).
 pub(crate) fn build_parts(
     pool: &crate::utils::threading::SearchPool<'_>,
     capped: bool,
-    subjects: usize,
+    batch_subjects: Option<usize>,
 ) -> usize {
     if !build_par_on() {
         return 1;
     }
     let k = cap_k().filter(|_| capped || in_capped_batch(pool));
-    let parts = k.map_or(1, |k| unit_share(pool.threads(), k, one_task(subjects)));
+    let parts = k.map_or(1, |k| {
+        unit_share(pool.threads(), k, batch_subjects.is_some_and(one_task))
+    });
     crate::utils::xreach::x_reach!("LOSAT_X_BXBUILDPAR", parts > 1);
     parts
 }
@@ -650,20 +653,20 @@ mod tests {
     fn capped_units_have_f_tasks_for_each_thread_they_are_left() {
         use super::{filled_subjects_per_task as size, unit_share as share};
         // 50 subjects, K = 8: 16 threads leave each unit 2, so 8 tasks of 7; 64 threads 8, so 32
-        // tasks of 2, but a unit of one task 2 again; 6,600 subjects keep the size without the cap.
+        // tasks of 2, but a batch of one task 2 again; 6,600 subjects keep the size without the cap.
         assert_eq!(size(4, share(16, 8, false), 50, 64), 7);
         assert_eq!(size(4, share(64, 8, false), 50, 64), 2);
         assert_eq!(size(4, share(64, 8, true), 50, 64), 7);
         assert_eq!(size(4, share(16, 8, false), 6_600, 64), 64);
         assert_eq!(size(4, share(16, 8, false), 6_600, 16), 16);
-        // A unit of one task is left the share of 16 threads at K = 8, and never more than others.
+        // A batch of one task is left the share of 16 threads at K = 8, and never more than others.
         for threads in [9, 16, 17, 32, 48, 64, 128] {
             for k in [2, 4, 8] {
                 assert_eq!(share(threads, k, true), share(threads, k, false).min(2));
             }
         }
         // K units then hold a task for every thread they are left, and without the bound of a
-        // unit of one task a task for every thread (the rule `unit_cap` keeps without the fill),
+        // batch of one task a task for every thread (the rule `unit_cap` keeps without the fill),
         // wherever K units of one subject each would.
         for threads in [9, 16, 17, 32, 48, 64, 128] {
             for one_task in [false, true] {

@@ -2237,7 +2237,8 @@ mod tests {
     // (d) `CompressedWordCount` gives the number of words that `add_word_hits` adds for each
     // offset, on random words of all NCBISTDAA letters (some without a compressed letter), with
     // and without a threshold, and the count of a word does not depend on the order of its
-    // letters (the counts are kept per set of letters).
+    // letters (the counts are kept per set of letters); at each word size of the table (6 and 7
+    // with shorter queries and higher thresholds, whose tables are larger).
     #[test]
     fn compressed_word_count_is_the_words_of_each_offset() {
         let mut rng = XorShift(0x0bad_cafe_1234_5678);
@@ -2246,72 +2247,91 @@ mod tests {
         for _ in 0..3 {
             letters.extend_from_slice(&standard);
         }
-        let matrix = build_blosum62_compressed_score_matrix(15).expect("compressed matrix");
-        let info = CompressedNeighborInfo::new(&matrix, 15);
-        for threshold in [0, 1100, 1600, 1930, 2000, 2400] {
-            let counter = CompressedWordCount::new(5, threshold).expect("word size 5");
-            let mut table = BlastCompressedAaLookupTable::new(5, 0.0).expect("compressed lookup");
-            table.threshold = threshold;
-            table.overflow_cell_capacity = usize::MAX;
-            let query: Vec<u8> = (0..40).map(|_| letters[rng.below(letters.len())]).collect();
-            let mut words_before = 0u64;
-            for offset in 0..=query.len() - 5 {
-                table.add_word_hits(&info, &matrix, &query, offset as i32);
-                let words_after: u64 = table.backbone.iter().map(|cell| cell.num_used as u64).sum();
-                let added = words_after - words_before;
-                words_before = words_after;
-                let word = &query[offset..offset + 5];
-                assert_eq!(
-                    counter.words(word),
-                    added,
-                    "threshold {threshold}, offset {offset}"
-                );
-                if word
-                    .iter()
-                    .all(|&residue| usize::from(table.compress_table[usize::from(residue)]) < 15)
-                {
-                    let mut reversed = word.to_vec();
-                    reversed.reverse();
-                    assert_eq!(counter.count(&reversed), added, "reversed, offset {offset}");
+        for (word_size, query_length, thresholds) in [
+            (5, 40, &[0, 1100, 1600, 1930, 2000, 2400][..]),
+            (6, 16, &[1600, 2100, 2400][..]),
+            (7, 16, &[1600, 2025, 2400][..]),
+        ] {
+            let (alphabet, _) = compressed_lookup_parameters(word_size).expect("word size");
+            let matrix =
+                build_blosum62_compressed_score_matrix(alphabet).expect("compressed matrix");
+            let info = CompressedNeighborInfo::new(&matrix, alphabet);
+            for &threshold in thresholds {
+                let counter = CompressedWordCount::new(word_size, threshold).expect("word size");
+                let mut table =
+                    BlastCompressedAaLookupTable::new(word_size, 0.0).expect("compressed lookup");
+                table.threshold = threshold;
+                table.overflow_cell_capacity = usize::MAX;
+                let query: Vec<u8> = (0..query_length)
+                    .map(|_| letters[rng.below(letters.len())])
+                    .collect();
+                let mut words_before = 0u64;
+                for offset in 0..=query.len() - word_size {
+                    table.add_word_hits(&info, &matrix, &query, offset as i32);
+                    let words_after: u64 =
+                        table.backbone.iter().map(|cell| cell.num_used as u64).sum();
+                    let added = words_after - words_before;
+                    words_before = words_after;
+                    let word = &query[offset..offset + word_size];
+                    assert_eq!(
+                        counter.words(word),
+                        added,
+                        "word size {word_size}, threshold {threshold}, offset {offset}"
+                    );
+                    if word.iter().all(|&residue| {
+                        usize::from(table.compress_table[usize::from(residue)]) < alphabet
+                    }) {
+                        let mut reversed = word.to_vec();
+                        reversed.reverse();
+                        assert_eq!(
+                            counter.count(&reversed),
+                            added,
+                            "word size {word_size}, reversed, offset {offset}"
+                        );
+                    }
                 }
             }
         }
     }
 
-    // (d2) Each set of 5 letters that have a compressed letter has its own rank
+    // (d2) Each set of `word_size` letters that have a compressed letter has its own rank
     // (`CompressedWordCount::rank`), below the kept counts' length, whatever the order of the
-    // word's letters; a word with a letter that has none has no rank.
+    // word's letters; a word with a letter that has none has no rank; at each word size of the
+    // table.
     #[test]
     fn compressed_word_count_ranks_each_set_of_letters_once() {
-        let counter = CompressedWordCount::new(5, 1100).expect("word size 5");
-        let letters: Vec<u8> = (0..BLASTAA_SIZE as u8)
-            .filter(|&residue| counter.letter_index[usize::from(residue)] != u8::MAX)
-            .collect();
-        assert_eq!(letters.len(), 23);
-        let mut ranked = vec![false; counter.counts.len()];
-        let n = letters.len();
-        for a in 0..n {
-            for b in a..n {
-                for c in b..n {
-                    for d in c..n {
-                        for e in d..n {
-                            let word = [a, b, c, d, e].map(|i| letters[i]);
-                            let rank = counter.rank(&word).expect("a rank");
-                            assert!(!ranked[rank], "{word:?}");
-                            ranked[rank] = true;
-                            let reordered = [word[3], word[0], word[4], word[2], word[1]];
-                            assert_eq!(counter.rank(&reordered), Some(rank));
-                        }
-                    }
-                }
+        for word_size in 5..=7 {
+            let counter = CompressedWordCount::new(word_size, 1100).expect("word size");
+            let letters: Vec<u8> = (0..BLASTAA_SIZE as u8)
+                .filter(|&residue| counter.letter_index[usize::from(residue)] != u8::MAX)
+                .collect();
+            assert_eq!(letters.len(), 23);
+            let mut ranked = vec![false; counter.counts.len()];
+            // Each multiset of letters as its sorted indices, in lexicographic order.
+            let mut set = vec![0usize; word_size];
+            loop {
+                let word: Vec<u8> = set.iter().map(|&i| letters[i]).collect();
+                let rank = counter.rank(&word).expect("a rank");
+                assert!(!ranked[rank], "word size {word_size}: {word:?}");
+                ranked[rank] = true;
+                let mut reordered = word.clone();
+                reordered.rotate_left(word_size / 2);
+                reordered.swap(0, word_size - 1);
+                assert_eq!(counter.rank(&reordered), Some(rank));
+                let Some(last) = set.iter().rposition(|&i| i + 1 < letters.len()) else {
+                    break;
+                };
+                let next = set[last] + 1;
+                set[last..].fill(next);
             }
-        }
-        assert!(ranked.iter().all(|&r| r));
-        for residue in 0..BLASTAA_SIZE as u8 {
-            if counter.letter_index[usize::from(residue)] == u8::MAX {
-                let word = [letters[0], residue, letters[1], letters[2], letters[3]];
-                assert_eq!(counter.rank(&word), None);
-                assert_eq!(counter.words(&word), 0);
+            assert!(ranked.iter().all(|&r| r), "word size {word_size}");
+            for residue in 0..BLASTAA_SIZE as u8 {
+                if counter.letter_index[usize::from(residue)] == u8::MAX {
+                    let mut word = letters[..word_size].to_vec();
+                    word[1] = residue;
+                    assert_eq!(counter.rank(&word), None);
+                    assert_eq!(counter.words(&word), 0);
+                }
             }
         }
     }

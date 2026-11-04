@@ -425,9 +425,9 @@ impl XCell for BackboneCell16 {
     // For a cell's own entries (2 bytes into the cell) that is 50 bytes from the cell's start, 42
     // past its end: 6 cells of 8 bytes.
     const PAD_CELLS: usize = 6;
-    // For a list in the overflow array (more than `AA_HITS_PER_CELL` = 3 hits, so at least 4)
-    // 24 hits from its start, 20 past its end at most: 24 hits. Every other cell test reads 8
-    // hits at most.
+    // A list in the overflow array is staged in pieces of 24 hits from its start, and its last
+    // piece (1 to 24 hits left) reads up to 23 hits past its end: 24 hits. Every other cell test
+    // reads 8 hits at most.
     const PAD_HITS: usize = 24;
 
     #[inline(always)]

@@ -257,7 +257,7 @@
 use crate::algorithm::tblastn::x_scan_bf::{x_block_candidates, X_BLOCK};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::{
-    BackboneCell16, BlastAaLookupTable, XCell, XHit, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK,
+    BlastAaLookupTable, XCell, XHit, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK,
 };
 use crate::utils::matrix::BLASTAA_SIZE;
 use std::mem::MaybeUninit;
@@ -1424,14 +1424,18 @@ const X_CROSS_SLACK: usize = 32;
 
 #[cfg(target_arch = "x86_64")]
 const _: () = assert!(X_CROSS_SLACK >= X_CROSS_PIECE + X_DIAG_LANES - 1);
-// The `u16` loads of `x_cross_cell` (three of `X_DIAG_LANES` hits, 16 bytes each, from a list's start)
-// end `X_CROSS_PIECE` hits from it: the padding of a table of 16-bit hits holds them, past a cell's
-// own entries (2 bytes into the 8-byte cell) and past an overflow list (of at least
-// `AA_HITS_PER_CELL + 1` hits).
-const _: () = assert!(
-    2 + 2 * X_CROSS_PIECE <= (1 + <BackboneCell16 as XCell>::PAD_CELLS) * 8
-        && X_CROSS_PIECE - (AA_HITS_PER_CELL + 1) <= <BackboneCell16 as XCell>::PAD_HITS
-);
+// The `u16` loads of `x_cross_cell` (three of `X_DIAG_LANES` hits, 16 bytes each, from the start of
+// a piece of a list) end `X_CROSS_PIECE` hits from it: the padding of a table of 16-bit hits holds
+// them, past a cell's own entries (2 bytes into the 8-byte cell, one piece) and past an overflow
+// list (its last piece has at least one hit left).
+#[cfg(target_arch = "x86_64")]
+const _: () = {
+    use crate::algorithm::tblastx::lookup::BackboneCell16;
+    assert!(
+        2 + 2 * X_CROSS_PIECE <= (1 + <BackboneCell16 as XCell>::PAD_CELLS) * 8
+            && X_CROSS_PIECE - 1 <= <BackboneCell16 as XCell>::PAD_HITS
+    )
+};
 
 #[cfg(target_arch = "x86_64")]
 thread_local! {

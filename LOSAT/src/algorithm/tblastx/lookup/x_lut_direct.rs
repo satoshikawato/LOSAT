@@ -4290,10 +4290,11 @@ mod tests {
         assert!(pool.is_empty());
     }
 
-    // No NCBI counterpart (buffer reuse only): the pool serves builds of both widths. A table of
-    // 16-bit hits given back is not taken, nor dropped, by a build of 32-bit hits, and serves the
-    // next build of 16 bits on its vectors (the same allocations); the tables are the reference's.
-    // (`kept_sets_are_taken_by_width` has the converse: a build of 16 bits leaves the sets of 32.)
+    // No NCBI counterpart (buffer reuse only): the pool serves builds of both widths in turn: a
+    // table of 16-bit hits given back, builds of 32-bit hits, then a build of 16 bits on the kept
+    // vectors, each table the reference's. The pool is the process's, which other tests' searches
+    // may use at the same time, so the sets it holds are not counted here
+    // (`kept_sets_are_taken_by_width` takes sets by width from a pool of its own).
     #[test]
     fn pools_serve_the_builds_of_both_widths() {
         let _one_at_a_time = NARROW_POOL.lock().unwrap_or_else(|e| e.into_inner());
@@ -4312,37 +4313,23 @@ mod tests {
             Ok(table) => table,
             Err(_) => panic!("in-place builder declined"),
         };
-        let narrow_sets = || {
-            x_pool_lock(&X_BX_TABLES)
-                .iter()
-                .filter(|vectors| vectors.backbone16.capacity() > 0)
-                .count()
-        };
         let XBxTable::Narrow(mut first) = build(Some(0)) else {
             panic!("a small query takes 16-bit hits");
         };
         x_assert_narrow_same_as_wide("first:", &first, &reference);
         x_give_back_pooled16(&mut first);
-        let kept = narrow_sets();
-        assert!(kept >= 1);
-        // Builds of 32-bit hits, which give theirs back too, leave the narrow sets in the pool.
+        // Builds of 32-bit hits, which give theirs back too.
         for _ in 0..3 {
             let mut wide = build(None);
             assert_bx_table("wide:", &wide, &reference);
             give_back(&mut wide);
         }
-        assert_eq!(
-            narrow_sets(),
-            kept,
-            "the sets of 16-bit vectors stay in the pool"
-        );
-        // A build of 16 bits takes one of them, built on its vectors.
+        // A build of 16 bits on a kept set (the one given back above, unless another test's
+        // search took it).
         let XBxTable::Narrow(mut second) = build(Some(0)) else {
             panic!("a small query takes 16-bit hits");
         };
-        assert_eq!(narrow_sets(), kept - 1, "built on a kept set");
         x_assert_narrow_same_as_wide("second:", &second, &reference);
         x_give_back_pooled16(&mut second);
-        assert_eq!(narrow_sets(), kept);
     }
 }

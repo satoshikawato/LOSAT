@@ -11,7 +11,7 @@ import { findReactors } from '../../build/reactors';
 import { OUTPUT_FORMATS } from '../../src/domain/output-format';
 import { ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports } from '../../src/infra/reactor/abi';
 import { instantiateSerial } from '../../src/infra/reactor/instance';
-import { candidateMaximums, createSharedMemory, STEP_DOWN_PAGES } from '../../src/infra/reactor/shared-memory';
+import { candidateMaximums, createSharedMemory, growToMaximum, STEP_DOWN_PAGES } from '../../src/infra/reactor/shared-memory';
 import { createWasi, unsignedImports } from '../../src/infra/reactor/wasi';
 
 const PAGE = 65_536;
@@ -98,6 +98,55 @@ describe('createSharedMemory', () => {
     expect(memory.buffer.byteLength).toBe(3 * PAGE);
     expect(memory.grow(5)).toBe(3);
     expect(() => memory.grow(1)).toThrow(RangeError);
+  });
+});
+
+describe('growToMaximum', () => {
+  /**
+   * A shared memory of `pages` (of at most `maximum`). Before each grow of the host, a thread
+   * grows it by the next of `meanwhile`; `refuses`: the browser cannot give more pages.
+   */
+  function memoryOf(pages: number, maximum: number, meanwhile: number[] = [], refuses = false) {
+    const grows: number[] = [];
+    const memory = {
+      get buffer() {
+        return { byteLength: pages * PAGE };
+      },
+      grow(delta: number) {
+        pages += meanwhile.shift() ?? 0;
+        if (refuses || pages + delta > maximum) throw new RangeError('WebAssembly.Memory.grow would exceed the maximum');
+        grows.push(delta);
+        pages += delta;
+        return pages - delta;
+      },
+    };
+    return { shared: { memory: memory as unknown as WebAssembly.Memory, maximumPages: maximum }, pages: () => pages, grows };
+  }
+
+  it('grows a memory to its maximum', () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 6, shared: true });
+    growToMaximum({ memory, maximumPages: 6 });
+    expect(memory.buffer.byteLength).toBe(6 * PAGE);
+    const fake = memoryOf(23, 65_535);
+    growToMaximum(fake.shared);
+    expect(fake.grows).toEqual([65_512]);
+    expect(fake.pages()).toBe(65_535);
+  });
+
+  it('reads the size again when a thread grew the memory meanwhile', () => {
+    const fake = memoryOf(23, 65_535, [5]);
+    growToMaximum(fake.shared);
+    expect(fake.grows).toEqual([65_507]);
+    expect(fake.pages()).toBe(65_535);
+  });
+
+  it('leaves a memory at its maximum, or one that the browser cannot grow, as it is', () => {
+    const full = memoryOf(65_535, 65_535);
+    growToMaximum(full.shared);
+    expect(full.grows).toEqual([]);
+    const refused = memoryOf(23, 65_535, [], true);
+    expect(() => growToMaximum(refused.shared)).not.toThrow();
+    expect(refused.pages()).toBe(23);
   });
 });
 

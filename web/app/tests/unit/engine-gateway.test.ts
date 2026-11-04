@@ -142,6 +142,37 @@ describe('WasmEngine', () => {
     expect(workers).toHaveLength(1);
   });
 
+  it('grows the shared memory of the threaded instance to its maximum before it ends the worker', async () => {
+    const { engine, workers } = setup();
+    const run = engine.run(request('r1', 4), output(), () => {});
+    const worker = await posted(() => workers[0], 1);
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 8, shared: true });
+    let pagesAtEnd = -1;
+    worker.terminate = () => {
+      pagesAtEnd = memory.buffer.byteLength / 65_536;
+      worker.terminated = true;
+    };
+    worker.send({ type: 'memory', generation: 1, memory, maximumPages: 8 });
+    engine.cancel('r1');
+    await expect(run).rejects.toBeInstanceOf(RunCancelledError);
+    expect(pagesAtEnd).toBe(8);
+
+    // The memory is held only while its search runs: a cancel after another search ended
+    // ends the worker without growing it.
+    const next = engine.run(request('r2', 4), output(), () => {});
+    const second = await posted(() => workers[1], 1);
+    const other = new WebAssembly.Memory({ initial: 1, maximum: 8, shared: true });
+    second.send({ type: 'memory', generation: 2, memory: other, maximumPages: 8 });
+    second.send({ type: 'done', generation: 2, runId: 'r2', ok: true, result: RESULT });
+    await next;
+    const third = engine.run(request('r3', 4), output(), () => {});
+    await posted(() => workers[1], 2);
+    engine.cancel('r3');
+    await expect(third).rejects.toBeInstanceOf(RunCancelledError);
+    expect(second.terminated).toBe(true);
+    expect(other.buffer.byteLength).toBe(65_536);
+  });
+
   it('cancels by ending the worker; the next search starts a new generation and late messages are dropped', async () => {
     const { engine, workers } = setup();
     const phases: string[] = [];

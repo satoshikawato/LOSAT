@@ -79,48 +79,106 @@ pub fn open_file_input(path: &std::path::Path, role: &str) -> Result<std::fs::Fi
     let Some(compression) = crate::blastinput::compressed::compression_of_name(path) else {
         return Ok(file);
     };
-    inflate_to_temporary_file(compression.decoder(file), role).map_err(|error| {
-        anyhow::anyhow!(
-            "-{role}: '{}' is named {suffix} but is not {format} data ({error}); LOSAT reads a file named {suffix} through {format}",
-            path.display(),
-            suffix = compression.suffix(),
-            format = compression.format(),
-        )
-    })
+    // The inflated copy goes beside the input, whose directory holds the data (`temp_dir()` is
+    // memory where `/tmp` is a tmpfs); when that directory refuses the file or has no room for
+    // it, the copy goes under `temp_dir()` (DECISIONS 12).
+    let mut source = Some(file);
+    let mut refusals = Vec::new();
+    for directory in inflation_directories(path) {
+        let input = match source.take() {
+            Some(file) => file,
+            None => std::fs::File::open(path).map_err(|_| crate::cli::inaccessible(role, path))?,
+        };
+        match inflate_to_temporary_file(compression.decoder(input), &directory, role) {
+            Ok(inflated) => return Ok(inflated),
+            Err(InflateFault::Data(error)) => {
+                return Err(anyhow::anyhow!(
+                    "-{role}: '{}' is named {suffix} but is not {format} data ({error}); LOSAT reads a file named {suffix} through {format}",
+                    path.display(),
+                    suffix = compression.suffix(),
+                    format = compression.format(),
+                ));
+            }
+            Err(InflateFault::Copy(error)) => {
+                refusals.push(format!("{error} in '{}'", directory.display()));
+            }
+        }
+    }
+    Err(anyhow::anyhow!(
+        "-{role}: no room for the inflated copy of '{}' ({})",
+        path.display(),
+        refusals.join("; ")
+    ))
+}
+
+/// Where the inflated copy of the input `path` may go: the input's own directory first, then
+/// `temp_dir()` when that is another directory.
+fn inflation_directories(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let beside = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => std::path::PathBuf::from("."),
+    };
+    let fallback = std::env::temp_dir();
+    if fallback == beside {
+        vec![beside]
+    } else {
+        vec![beside, fallback]
+    }
+}
+
+/// What stopped an inflation: the compressed data (`Data`: not that format, cut short, empty)
+/// or the copy (`Copy`: the directory refused the temporary file or ran out of room).
+enum InflateFault {
+    Data(std::io::Error),
+    Copy(std::io::Error),
 }
 
 /// Copies the bytes of `inflater` (a decoder of `compressed::Compression`) into an unnamed
-/// temporary file (`unnamed_temporary_file`) and returns it, positioned at its start. An error
-/// names the fault of the compressed data or the file system (`TMPDIR` without room, for
-/// instance).
+/// temporary file in `directory` (`unnamed_temporary_file`) and returns it, positioned at its
+/// start.
 fn inflate_to_temporary_file(
     mut inflater: impl std::io::Read,
+    directory: &std::path::Path,
     role: &str,
-) -> std::io::Result<std::fs::File> {
+) -> std::result::Result<std::fs::File, InflateFault> {
     use std::io::{Seek, Write};
-    let mut temporary = unnamed_temporary_file(role)?;
+    let mut temporary = unnamed_temporary_file(directory, role).map_err(InflateFault::Copy)?;
     {
         let mut sink = std::io::BufWriter::with_capacity(1 << 16, &mut temporary);
-        std::io::copy(&mut inflater, &mut sink)?;
-        sink.flush()?;
+        let mut buffer = vec![0u8; 1 << 16];
+        loop {
+            let read = match inflater.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => read,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(InflateFault::Data(error)),
+            };
+            sink.write_all(&buffer[..read])
+                .map_err(InflateFault::Copy)?;
+        }
+        sink.flush().map_err(InflateFault::Copy)?;
     }
-    temporary.seek(std::io::SeekFrom::Start(0))?;
+    temporary
+        .seek(std::io::SeekFrom::Start(0))
+        .map_err(InflateFault::Copy)?;
     Ok(temporary)
 }
 
-/// A new, empty file in the temporary directory (`TMPDIR`) that no name reaches: on Unix and WASI
-/// its name is removed as soon as it is open, on Windows it is deleted when its last handle closes
-/// (`FILE_FLAG_DELETE_ON_CLOSE`, shared for reading, writing and deletion so that `try_clone` and
-/// a second `open` of the handle keep working). It is readable and writable.
-fn unnamed_temporary_file(role: &str) -> std::io::Result<std::fs::File> {
-    let directory = std::env::temp_dir();
+/// A new, empty file in `directory` that no name reaches: on Unix and WASI its name is removed
+/// as soon as it is open, on Windows it is hidden and deleted when its last handle closes
+/// (`FILE_FLAG_DELETE_ON_CLOSE`, shared for reading, writing and deletion so that `try_clone`
+/// and a second `open` of the handle keep working). It is readable and writable.
+fn unnamed_temporary_file(
+    directory: &std::path::Path,
+    role: &str,
+) -> std::io::Result<std::fs::File> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|since| since.as_nanos())
         .unwrap_or(0);
     for attempt in 0u32..64 {
         let path = directory.join(format!(
-            "losat-{role}-{}-{stamp}-{attempt}.inflated",
+            ".losat-{role}-{}-{stamp}-{attempt}.inflated",
             std::process::id()
         ));
         let mut options = std::fs::OpenOptions::new();
@@ -129,12 +187,14 @@ fn unnamed_temporary_file(role: &str) -> std::io::Result<std::fs::File> {
         {
             use std::os::windows::fs::OpenOptionsExt;
             use windows_sys::Win32::Storage::FileSystem::{
-                FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_DELETE_ON_CLOSE, FILE_SHARE_DELETE,
-                FILE_SHARE_READ, FILE_SHARE_WRITE,
+                FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_DELETE_ON_CLOSE,
+                FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
             };
             options
                 .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-                .custom_flags(FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE);
+                .custom_flags(
+                    FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
+                );
         }
         match options.open(&path) {
             Ok(file) => {
@@ -366,11 +426,11 @@ mod tests {
         bytes
     }
 
-    /// Names left by this process's inflated inputs (`unnamed_temporary_file`): none on Unix,
-    /// where the name goes as soon as the file is open.
-    fn inflated_names() -> Vec<std::path::PathBuf> {
-        let prefix = format!("losat-query-{}-", std::process::id());
-        std::fs::read_dir(std::env::temp_dir())
+    /// Names left in `directory` by this process's inflated inputs (`unnamed_temporary_file`):
+    /// none on Unix, where the name goes as soon as the file is open.
+    fn inflated_names(directory: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let prefix = format!(".losat-query-{}-", std::process::id());
+        std::fs::read_dir(directory)
             .unwrap()
             .filter_map(|entry| entry.ok().map(|entry| entry.path()))
             .filter(|path| {
@@ -408,7 +468,86 @@ mod tests {
             std::fs::remove_file(&path).unwrap();
         }
         #[cfg(unix)]
-        assert_eq!(inflated_names(), Vec::<std::path::PathBuf>::new());
+        assert_eq!(
+            inflated_names(&std::env::temp_dir()),
+            Vec::<std::path::PathBuf>::new()
+        );
+    }
+
+    /// The directory of an open, unlinked file: `/proc/self/fd/N` reads
+    /// `<directory>/<name> (deleted)`.
+    #[cfg(target_os = "linux")]
+    fn directory_of_open_file(file: &std::fs::File) -> std::path::PathBuf {
+        use std::os::fd::AsRawFd;
+        std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf()
+    }
+
+    // No NCBI counterpart (DECISIONS 12): the inflated copy is made in the input's directory,
+    // where the data lives (`temp_dir()` may be memory), and under `temp_dir()` when that
+    // directory refuses it; either way no name is left behind.
+    #[cfg(unix)]
+    #[test]
+    fn the_inflated_copy_is_made_beside_the_input_or_else_under_temp_dir() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = std::env::temp_dir().join(format!(
+            "losat-input-files-{}-{}-beside",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("q.fa.gz");
+        std::fs::write(&path, gzip_members(&[b">q1\nACGT\n"])).unwrap();
+        let file = open_file_input(&path, "query").unwrap();
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            directory_of_open_file(&file),
+            std::fs::canonicalize(&directory).unwrap()
+        );
+        assert_eq!(inflated_names(&directory), Vec::<std::path::PathBuf>::new());
+        assert_eq!(read_all(file), b">q1\nACGT\n");
+
+        // The directory refuses the copy (read-only; not as root, which writes anyway): the
+        // copy is made under `temp_dir()`.
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let probe = directory.join(".probe");
+        if std::fs::File::create(&probe).is_ok() {
+            std::fs::remove_file(&probe).unwrap();
+        } else {
+            let file = open_file_input(&path, "query").unwrap();
+            #[cfg(target_os = "linux")]
+            assert_eq!(
+                directory_of_open_file(&file),
+                std::fs::canonicalize(std::env::temp_dir()).unwrap()
+            );
+            assert_eq!(read_all(file), b">q1\nACGT\n");
+        }
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn the_inflated_copy_goes_beside_the_input_first_and_then_under_temp_dir() {
+        let temp = std::env::temp_dir();
+        let nested = std::path::Path::new("data").join("q.fa.gz");
+        assert_eq!(
+            super::inflation_directories(&nested),
+            vec![std::path::PathBuf::from("data"), temp.clone()]
+        );
+        assert_eq!(
+            super::inflation_directories(std::path::Path::new("q.fa.gz")),
+            vec![std::path::PathBuf::from("."), temp.clone()]
+        );
+        assert_eq!(
+            super::inflation_directories(&temp.join("q.fa.gz")),
+            vec![temp]
+        );
     }
 
     // No NCBI counterpart (line GZ, DECISIONS 5): a compressed name whose bytes are not that

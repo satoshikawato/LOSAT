@@ -1010,8 +1010,58 @@ fn x_try_build_flat_with_capacity(
     overflow_cell_capacity: usize,
     count_chunk: usize,
 ) -> Option<XFlatBuild> {
+    x_flat_with_capacity_of(
+        Blosum62Compressed,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        overflow_cell_capacity,
+        count_chunk,
+    )
+}
+
+/// `x_try_build_flat_with_capacity` with the words of the search matrix `matrix`
+/// (`build_compressed_score_matrix`). `None` also for IDENTITY, whose table NCBI cannot build.
+#[allow(clippy::too_many_arguments)]
+fn x_try_build_flat_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+    count_chunk: usize,
+) -> Option<XFlatBuild> {
+    x_flat_with_capacity_of(
+        matrix,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        overflow_cell_capacity,
+        count_chunk,
+    )
+}
+
+// The body of both builders above, so that BLOSUM62's keeps its constant matrix.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn x_flat_with_capacity_of<S: CompressedScores>(
+    scores: S,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+    count_chunk: usize,
+) -> Option<XFlatBuild> {
     let header = XHeader::new(word_size)?;
-    let matrix = build_blosum62_compressed_score_matrix(header.alphabet)?;
+    let matrix = scores.score_matrix(header.alphabet)?;
     let info = CompressedNeighborInfo::new(&matrix, header.alphabet);
     let words = XWords::new(&header, scaled_threshold, &matrix, &info);
     let backbone_size = header.backbone_size;
@@ -1429,6 +1479,54 @@ fn x_buckets_on(
     overflow_cell_capacity: usize,
     pooled: bool,
 ) -> XBucketBuild {
+    x_buckets_with(
+        Blosum62Compressed,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        overflow_cell_capacity,
+        pooled,
+    )
+}
+
+/// `x_try_build_flat_by_buckets` with the words of the search matrix `matrix`
+/// (`build_compressed_score_matrix`), as `x_try_build_flat_of` builds them.
+fn x_buckets_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+) -> XBucketBuild {
+    x_buckets_with(
+        matrix,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        overflow_cell_capacity,
+        false,
+    )
+}
+
+// The body of both builders above, so that BLOSUM62's keeps its constant matrix.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn x_buckets_with<S: CompressedScores>(
+    scores: S,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+    pooled: bool,
+) -> XBucketBuild {
     if !x_bucket_packs(query.len()) {
         return XBucketBuild::Declined;
     }
@@ -1440,7 +1538,7 @@ fn x_buckets_on(
     if ilog2(backbone_size / (8 * X_TARGET_PV_BYTES)) != 0 {
         return XBucketBuild::Declined;
     }
-    let Some(matrix) = build_blosum62_compressed_score_matrix(header.alphabet) else {
+    let Some(matrix) = scores.score_matrix(header.alphabet) else {
         return XBucketBuild::Built(None);
     };
     let info = CompressedNeighborInfo::new(&matrix, header.alphabet);
@@ -2681,6 +2779,74 @@ pub(crate) fn x_tbn_build_compressed_lookup(
     x_build_compressed_on(word_size, scaled_threshold, query, locations, tables, false)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310,1352-1354
+// ```c
+//     new_alphabet = SCompressedAlphabetNew(sbp,
+//                                 lookup->compressed_alphabet_size,
+//                                 kMatrixScale);
+//     ...
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+// ```
+/// `x_tbn_build_compressed_lookup` with the words of the search matrix `matrix`, any but BLOSUM62
+/// (`build_compressed_score_matrix`): the same builders in the same order, the reference table with
+/// the switch off. Out of line, so that BLOSUM62's build keeps its code.
+#[inline(never)]
+pub(crate) fn x_tbn_build_compressed_lookup_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+) -> Option<Result<XCompressedLookup, ()>> {
+    let reference = || {
+        try_build_compressed_lookup(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+        )
+        .map(|built| built.map(XCompressedLookup::Reference))
+    };
+    if !x_bpclut_on() {
+        return reference();
+    }
+    let bucket = if x_bpffill_on() {
+        x_buckets_of(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+        )
+    } else {
+        XBucketBuild::Declined
+    };
+    let built = match bucket {
+        XBucketBuild::Built(built) => built,
+        XBucketBuild::Declined => x_try_build_flat_of(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+            X_COUNT_CHUNK,
+        ),
+    };
+    match built? {
+        XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
+        XFlatBuild::Refused => Some(Err(())),
+        XFlatBuild::TooLarge => reference(),
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
 // `x_tbn_build_compressed_lookup`)
 // ```c
@@ -3212,6 +3378,108 @@ mod tests {
         ));
         x_assert_same_compressed_table(&flat, &reference);
         assert!(flat.hits.is_empty() && flat.longest_chain == 0);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310
+    // ```c
+    //     new_alphabet = SCompressedAlphabetNew(sbp,
+    //                                 lookup->compressed_alphabet_size,
+    //                                 kMatrixScale);
+    // ```
+    // Every search matrix but IDENTITY at word size 5 (BLOSUM45 also at 6, PAM30 at 7), random queries
+    // with NCBI's tables and a split batch, the word sizes' thresholds and lower ones: the bucket fill (word size 5) and the
+    // count-and-fill builder of the matrix's words build the reference table of those words
+    // (`try_build_compressed_lookup`), or refuse where it refuses, and
+    // `x_tbn_build_compressed_lookup_of` takes them.
+    #[test]
+    fn flat_tables_of_each_matrix_are_its_reference_tables() {
+        let mut rng = XorShift(0x3c6e_f372_fe94_f82b);
+        let (mut built_seen, mut refused_seen) = (0, 0);
+        for matrix in ScoringMatrix::ALL {
+            if matrix == ScoringMatrix::Identity {
+                assert!(x_try_build_flat_of(matrix, 5, 1100, &[], &[], &[], 1, 1).is_none());
+                continue;
+            }
+            // Word sizes 6 and 7 (backbones of 15^6 and 10^7 cells) with two matrices only.
+            let larger: &[(usize, &[i32], usize)] = match matrix {
+                ScoringMatrix::Blosum45 => &[(6, &[2100, 1300], NCBI_OVERFLOW_CELL_CAPACITY)],
+                ScoringMatrix::Pam30 => &[(7, &[2025, 1200], NCBI_OVERFLOW_CELL_CAPACITY)],
+                _ => &[],
+            };
+            for &(word, thresholds, capacity) in [
+                (5usize, &[1930, 1100][..], NCBI_OVERFLOW_CELL_CAPACITY),
+                (5, &[1600, 0][..], 4),
+            ]
+            .iter()
+            .chain(larger)
+            {
+                for &threshold in thresholds {
+                    let lengths: Vec<usize> =
+                        (0..2 + rng.below(4)).map(|_| 8 + rng.below(250)).collect();
+                    let letters: &[u8] = if rng.below(2) == 0 {
+                        &FEW_LETTERS
+                    } else {
+                        &LETTERS
+                    };
+                    let (query, locations, first) = queries(&mut rng, &lengths, letters, 1);
+                    let tables = [first[0]..first[lengths.len() - 1]];
+                    let what = format!("{matrix:?} word {word} threshold {threshold}");
+                    let reference = try_build_compressed_lookup_with_capacity(
+                        matrix, word, threshold, &query, &locations, &tables, capacity,
+                    )
+                    .expect("word size");
+                    let counted = x_try_build_flat_of(
+                        matrix,
+                        word,
+                        threshold,
+                        &query,
+                        &locations,
+                        &tables,
+                        capacity,
+                        X_COUNT_CHUNK,
+                    )
+                    .expect("word size");
+                    match (&reference, counted) {
+                        (Err(()), XFlatBuild::Refused) => refused_seen += 1,
+                        (Ok(reference), XFlatBuild::Table(flat)) => {
+                            x_assert_same_compressed_table(&flat, reference);
+                            built_seen += 1;
+                        }
+                        (reference, _) => {
+                            panic!("{what}: reference refused {}", reference.is_err())
+                        }
+                    }
+                    match x_buckets_of(
+                        matrix, word, threshold, &query, &locations, &tables, capacity,
+                    ) {
+                        // Word sizes 6 and 7 and small capacities only (`x_try_build_flat_by_buckets`).
+                        XBucketBuild::Declined => assert!(
+                            word != 5 || capacity != NCBI_OVERFLOW_CELL_CAPACITY,
+                            "{what}: declined"
+                        ),
+                        XBucketBuild::Built(Some(XFlatBuild::Table(flat))) => {
+                            let reference = reference.as_ref().expect(&what);
+                            x_assert_same_compressed_table(&flat, reference);
+                        }
+                        XBucketBuild::Built(_) => panic!("{what}: buckets refused"),
+                    }
+                    if capacity == NCBI_OVERFLOW_CELL_CAPACITY && reference.is_ok() {
+                        let Some(Ok(XCompressedLookup::Flat(flat))) =
+                            x_tbn_build_compressed_lookup_of(
+                                matrix, word, threshold, &query, &locations, &tables,
+                            )
+                        else {
+                            panic!("{what}: no flat table")
+                        };
+                        x_assert_same_compressed_table(&flat, reference.as_ref().unwrap());
+                    }
+                }
+            }
+        }
+        assert!(
+            built_seen > 0 && refused_seen > 0,
+            "{built_seen} {refused_seen}"
+        );
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768

@@ -1637,14 +1637,12 @@ fn search(
                 // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
                 // the taxonomy database before a later batch's prefetch
                 // (`TaxdbRun::open_for_rows`).
-                let plural_names = outputs
+                let first_spec = outputs
                     .formats
                     .first()
-                    .and_then(|format| super::tabular::tabular_spec(format.outfmt))
-                    .is_some_and(|spec| spec.checks_taxdb());
-                for span in &batch_spans {
-                    let hitlists = &results[span.clone()];
-                    let messages = database.prefetch_messages(reported, hitlists)?;
+                    .and_then(|format| super::tabular::tabular_spec(format.outfmt));
+                let plural_names = first_spec.as_ref().is_some_and(|spec| spec.checks_taxdb());
+                let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
                     if plural_names
                         && hitlists
                             .iter()
@@ -1653,6 +1651,44 @@ fn search(
                     {
                         database.open_for_tabular_rows()?;
                     }
+                    Ok::<(), anyhow::Error>(())
+                };
+                for span in &batch_spans {
+                    let hitlists = &results[span.clone()];
+                    // The batch's Seq-aligns, one for each HSP: TBLASTN's search is gapped (LOSAT
+                    // refuses `-ungapped`, whose Seq-aligns are one per subject).
+                    let seq_aligns: usize = hitlists
+                        .iter()
+                        .flat_map(super::stage_d_results::KappaResultHitList::lists)
+                        .map(|list| list.hsps.hsps.len())
+                        .sum();
+                    // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
+                    // (`shared::prefetch_off`), each query's report fetches the subjects it
+                    // shows, after the query's own warnings, where the first format reads their
+                    // Bioseqs (`TabularSpec::fetches_subject`). A batch that fetches nothing still
+                    // asks for the run's refusal of NCBI's taxonomy cache before any byte, unless
+                    // no batch of the run prefetches (`shared::prefetch_always_off`).
+                    if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                        let fetches = first_spec.as_ref().is_none_or(|spec| {
+                            spec.fetches_subject(crate::blastinput::app::Program::Tblastn)
+                        });
+                        let asks =
+                            fetches || !crate::algorithm::common::database::prefetch_always_off();
+                        for (query, hitlist) in span.clone().zip(hitlists) {
+                            let shown = std::slice::from_ref(hitlist);
+                            if asks {
+                                let messages = database.prefetch_messages(
+                                    reported,
+                                    if fetches { shown } else { &[] },
+                                )?;
+                                query_warning_lines[query].extend(messages);
+                            }
+                            rows_open(shown)?;
+                        }
+                        continue;
+                    }
+                    let messages = database.prefetch_messages(reported, hitlists)?;
+                    rows_open(hitlists)?;
                     if messages.is_empty() {
                         continue;
                     }

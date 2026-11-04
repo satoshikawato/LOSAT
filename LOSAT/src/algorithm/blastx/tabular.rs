@@ -357,6 +357,7 @@ pub(super) fn write_blastx_tabular(
                 batch.search_skipped,
                 options.filtered_empty,
             ))?;
+            stderr.write_all(shown.query_fetches(batch.query_ordinal + qidx))?;
             // NCBI makes a formatter for each query's report, and it warns when the field list
             // asks for a plural name of the taxonomy database that it cannot find
             // (tabular.cpp:139-158, `x_CheckTaxDB`).

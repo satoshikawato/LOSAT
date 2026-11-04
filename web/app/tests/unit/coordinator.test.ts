@@ -372,6 +372,31 @@ describe('Coordinator', () => {
     expect(viewOf(coordinator, runId)!.snapshot.group).toBeUndefined();
   });
 
+  it('drops the sources that it makes of text and files once the snapshots have their inputs (SURVEY #15)', async () => {
+    const { coordinator, data } = setup();
+    const inner = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown> };
+    const runId = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, runId, 'completed');
+    expect([inner.sources.size, inner.revisions.size]).toEqual([0, 0]);
+    expect(new TextDecoder().decode(viewOf(coordinator, runId)!.snapshot.query.bytes)).toBe('>q\nACGT\n');
+    expect(await coordinator.readOutput(runId, 6)).toContain('q\ts\t');
+  });
+
+  it('keeps nothing of a request whose input cannot be read: no source and no cached run input', async () => {
+    const { coordinator, data } = setup();
+    const inner = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown> };
+    const runInputs = (coordinator as unknown as { runInputs: Map<string, unknown> }).runInputs;
+    const source = await data.addSource(new File(['>q\nACGT\n'], 'q.fa'));
+    const query = (await data.indexSource(source.sourceId, 1)).revisionId;
+    const result = await coordinator.enqueueAll([
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { text: '$$$$\n' } },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(runInputs.size).toBe(0);
+    // Only the caller's source is left: the subject's is dropped.
+    expect([...inner.sources.keys()]).toEqual([source.sourceId]);
+  });
+
   it('runs dataset inputs as the revisions say, and shares the bytes of the same revisions', async () => {
     const { coordinator, data } = setup();
     const add = async (name: string, text: string) => {

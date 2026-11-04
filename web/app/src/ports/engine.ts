@@ -90,7 +90,7 @@ export interface EngineInput {
   readonly bytes: Uint8Array;
   /** Lower-case hex SHA-256 of `bytes`. With `revisionIds`, it identifies a retained subject. */
   readonly sha256: string;
-  /** The dataset revisions whose records make up `bytes` (RunSnapshot). */
+  /** The dataset revisions whose records made up `bytes` (RunSnapshot): ids only, which the data layer may have dropped. */
   readonly revisionIds: readonly string[];
   /**
    * ID and length of each record in `bytes`, from the data layer's index scan. After

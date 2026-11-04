@@ -110,9 +110,11 @@ export interface KnownDefault {
 
 /**
  * The default of a field: the value that the engine resolves for the task (`describe`), the
- * value that a set -matrix or -word_size gives it, or else the clap default; undefined when
- * unknown (two of the options that change it are set, one of them at a value that the
- * engine's table does not hold, or an option that excludes it is set).
+ * value that a set -matrix or -word_size gives it, or else the clap default, or else the value
+ * of NCBI's page of an option read with others (a section's `together`, which the argv writes
+ * when another of them is written); undefined when unknown (two of the options that change it
+ * are set, one of them at a value that the engine's table does not hold, or an option that
+ * excludes it is set).
  */
 export function knownDefault(
   program: ProgramDescriptor,
@@ -123,7 +125,7 @@ export function knownDefault(
   const option = options?.find((o) => o.flag === flag);
   const resolved = option?.resolvedDefault;
   if (option === undefined || resolved === undefined) {
-    const described = option?.defaultValue;
+    const described = option?.defaultValue ?? togetherValue(program, flag);
     return described === undefined ? undefined : { defaultValue: described };
   }
   const task = effectiveValue('-task', values, options) ?? '';
@@ -138,6 +140,14 @@ export function knownDefault(
   if ((resolved.unless ?? []).some((other) => setValue(program, other, values, options) !== undefined)) value = undefined;
   if (resolved.given?.includes(task) === true) return value === undefined ? { given: true } : { defaultValue: value, given: true };
   return value === undefined ? undefined : { defaultValue: value };
+}
+
+/** The value of NCBI's page of an option that a section's `together` holds. */
+function togetherValue(program: ProgramDescriptor, flag: string): string | undefined {
+  for (const section of program.sections) {
+    if (section.together !== undefined && Object.hasOwn(section.together, flag)) return section.together[flag];
+  }
+  return undefined;
 }
 
 /** An option's default for a task alone: the engine's resolved value, or else the clap default. */
@@ -204,10 +214,22 @@ export function writtenValue(field: ParameterField, value: FieldValue | undefine
   return text === '' || (known?.given !== true && text === known?.defaultValue) ? undefined : text;
 }
 
-/** The values of a field's select (`list`), for the task the search uses; empty without one. */
-export function fieldList(field: ParameterField, values: FormValues, options: readonly EngineOption[] | undefined): readonly string[] {
+/**
+ * The values of a field's select (`list`), for the task the search uses, or the list that
+ * another option's value chooses (`listBy`); empty without one.
+ */
+export function fieldList(
+  program: ProgramDescriptor,
+  field: ParameterField,
+  values: FormValues,
+  options: readonly EngineOption[] | undefined,
+): readonly string[] {
   const list = field.list;
   if (list === undefined) return [];
+  if (field.listBy !== undefined) {
+    const used = usedValue(program, field.listBy.flag, values, options);
+    if (used !== undefined && Object.hasOwn(field.listBy.lists, used)) return field.listBy.lists[used]!;
+  }
   if (Array.isArray(list)) return list as readonly string[];
   const task = effectiveValue('-task', values, options);
   return (task === undefined ? undefined : (list as Readonly<Record<string, readonly string[]>>)[task]) ?? [];
@@ -265,7 +287,8 @@ function listKey(program: ProgramDescriptor, select: PairSelect, values: FormVal
  */
 export function pairList(program: ProgramDescriptor, pair: PairRow, values: FormValues, options: readonly EngineOption[] | undefined): readonly string[] {
   const key = listKey(program, pair.select, values, options);
-  const list = key === undefined ? undefined : pair.select.lists[key];
+  // A key typed after "Other" (a matrix named `constructor`) is not one of the lists'.
+  const list = key === undefined || !Object.hasOwn(pair.select.lists, key) ? undefined : pair.select.lists[key];
   if (list === undefined) return [];
   const only = pair.select.only;
   if (only === undefined) return list;
@@ -278,7 +301,7 @@ function pairListDefault(program: ProgramDescriptor, pair: PairRow, values: Form
   const own = pairList(program, pair, values, options).find((value) => pair.select.only?.values.includes(value));
   if (own !== undefined) return own;
   const key = listKey(program, pair.select, values, options);
-  return key === undefined ? undefined : pair.select.defaults?.[key];
+  return key === undefined || pair.select.defaults === undefined || !Object.hasOwn(pair.select.defaults, key) ? undefined : pair.select.defaults[key];
 }
 
 /** The pair that the search uses ("1,-2", "11 1"), or '' while one of its values is unknown. */
@@ -361,7 +384,9 @@ export function setField(
 
 /**
  * The parameters of the form, in the order of its fields: the values that `writtenValue`
- * writes. A placement limits them to the fields shown at that place.
+ * writes, and with one of a section's `together` options the others at the values that the
+ * search uses (WA-FM-03: BLAST+ refuses a template length without its type). A placement limits
+ * them to the fields shown at that place.
  */
 export function formParameters(
   program: ProgramDescriptor,
@@ -372,10 +397,25 @@ export function formParameters(
   const parameters: Array<readonly [string, string | true]> = [];
   for (const section of describedSections(program, options)) {
     if (placement !== undefined && section.placement !== placement) continue;
-    for (const field of section.fields) {
-      const written = writtenValue(field, values[field.flag], knownDefault(program, field.flag, values, options));
-      if (written !== undefined) parameters.push([field.flag, written]);
+    const written = section.fields.map((field) => [field.flag, writtenValue(field, values[field.flag], knownDefault(program, field.flag, values, options))] as const);
+    const together = section.together ?? {};
+    const partners = written.some(([flag, value]) => value !== undefined && Object.hasOwn(together, flag));
+    for (const [flag, value] of written) {
+      const used = value ?? (partners && Object.hasOwn(together, flag) ? usedValue(program, flag, values, options) : undefined);
+      if (used !== undefined) parameters.push([flag, used]);
     }
   }
   return parameters;
+}
+
+/**
+ * The fields of the form whose values differ from the defaults ("♦"), at one place of the
+ * screen ("(n changed)"): the parameters of the argv, without the `together` options written
+ * at their defaults.
+ */
+export function changedFields(program: ProgramDescriptor, values: FormValues, options: readonly EngineOption[] | undefined, placement: SectionPlacement): number {
+  return describedSections(program, options)
+    .filter((section) => section.placement === placement)
+    .flatMap((section) => section.fields)
+    .filter((field) => writtenValue(field, values[field.flag], knownDefault(program, field.flag, values, options)) !== undefined).length;
 }

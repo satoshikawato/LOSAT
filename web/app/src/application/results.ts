@@ -26,7 +26,7 @@ import {
   type SubjectSortKey,
   type ViewFilters,
 } from '../domain/result-index';
-import { verificationBadge, type Badge, type VerificationTable } from '../domain/verification';
+import { verificationBadge, type Badge, type OptionGrammar, type VerificationTable } from '../domain/verification';
 import type { RunStore } from '../ports/data';
 import type { ProgramDescription } from '../ports/engine';
 import type { AppState, RunView } from './coordinator';
@@ -133,6 +133,11 @@ export interface ResultsState {
   /** Why the run has no results to show (not completed, cancelled, failed, or a read error). */
   readonly message?: string;
   readonly loaded?: LoadedRun;
+  /**
+   * The options' grammar of the run's mode (`describe`: which options take a value), for its
+   * command; also for a run without results. Undefined until the engine has described it.
+   */
+  readonly grammar?: OptionGrammar;
   readonly filters: ViewFilters;
   readonly subjectSort: SortSpec<SubjectSortKey>;
   readonly hspSort: SortSpec<HspSortKey>;
@@ -202,6 +207,8 @@ export class ResultsBrowser {
   private sections = new Map<string, Promise<string | undefined>>();
   /** Outfmt 0 subject headings of the loaded run read or being read, by subject record index. */
   private headingReads = new Map<number, Promise<string | undefined>>();
+  /** The options' grammar of each mode that the engine has described (one engine build: it does not change). */
+  private readonly grammars = new Map<ProgramId, OptionGrammar>();
 
   /** The table the verification badges come from (generated at build time). */
   get verification(): VerificationTable {
@@ -236,11 +243,13 @@ export class ResultsBrowser {
     this.headingQueue.length = 0;
     if (run === undefined) return;
     const filters = this.state.get().runId === runId ? this.state.get().filters : NO_FILTERS;
+    const grammar = this.grammars.get(run.snapshot.program);
     if (run.status !== 'completed') {
-      this.state.set({ ...INITIAL, filters, runId, phase: 'unavailable', message: unavailableMessage(run) });
+      this.state.set({ ...INITIAL, filters, runId, phase: 'unavailable', message: unavailableMessage(run), ...(grammar === undefined ? {} : { grammar }) });
+      if (grammar === undefined) this.describeGrammar(token, run.snapshot.program);
       return;
     }
-    this.state.set({ ...INITIAL, filters, runId, phase: 'loading' });
+    this.state.set({ ...INITIAL, filters, runId, phase: 'loading', ...(grammar === undefined ? {} : { grammar }) });
     try {
       const [table, out6, description, diagnostics] = await Promise.all([
         this.deps.data.readHitTable(runId),
@@ -266,7 +275,7 @@ export class ResultsBrowser {
             formats: description.formats,
             runtimePath: run.record.runtimePath,
             threads: run.record.threads,
-            grammar: grammarOf(description),
+            grammar: this.grammarOf(run.snapshot.program, description),
           },
           this.deps.verification,
         ),
@@ -277,12 +286,35 @@ export class ResultsBrowser {
       };
       const queries = this.queryEntries(loaded, this.state.get().filters);
       const first = queries.find((q) => q.hsps > 0) ?? queries[0];
-      this.state.set({ ...this.state.get(), phase: 'ready', loaded, queries });
+      this.state.set({ ...this.state.get(), phase: 'ready', loaded, queries, grammar: this.grammarOf(run.snapshot.program, description) });
       if (first !== undefined) this.selectQuery(first.qIdx);
     } catch (error) {
       if (token !== this.loadToken) return;
       this.set({ phase: 'failed', message: `The results of run ${run.snapshot.number} could not be read: ${errorMessage(error)}` });
+      if (this.state.get().grammar === undefined) this.describeGrammar(token, run.snapshot.program);
     }
+  }
+
+  /** The grammar of a mode from its description, kept for the next run of the mode. */
+  private grammarOf(program: ProgramId, description: ProgramDescription): OptionGrammar {
+    let grammar = this.grammars.get(program);
+    if (grammar === undefined) {
+      grammar = optionGrammar(description);
+      this.grammars.set(program, grammar);
+    }
+    return grammar;
+  }
+
+  /** Sets the grammar of the mode of a run shown without results (`token`), once the engine describes it. */
+  private describeGrammar(token: number, program: ProgramId): void {
+    this.deps.describe(program).then(
+      (description) => {
+        const grammar = this.grammarOf(program, description);
+        if (token === this.loadToken) this.set({ grammar });
+      },
+      // The results report the engine's errors; the command keeps its words.
+      () => undefined,
+    );
   }
 
   selectQuery(qIdx: number): void {
@@ -665,8 +697,8 @@ export function taskOf(argv: readonly string[], description: ProgramDescription)
   return task === undefined ? {} : { task };
 }
 
-/** The option grammar of `describe` that the verification badge reads options with. */
-function grammarOf(description: ProgramDescription) {
+/** The option grammar of `describe` that the verification badge and the commands read options with. */
+export function optionGrammar(description: ProgramDescription): OptionGrammar {
   const valued = new Set(description.parameters.filter((p) => p.takesValue).map((p) => p.flag));
   const task = description.parameters.find((p) => p.flag === '-task')?.defaultValue;
   return { takesValue: (flag: string) => valued.has(flag), ...(task === undefined ? {} : { defaultTask: task }) };

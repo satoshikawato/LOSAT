@@ -2,6 +2,7 @@
 // worker (src/infra/data-worker/data-worker.ts), and directly in unit tests. It keeps:
 // - the sources: File references, read with `File.slice`, never copied into storage;
 // - the record tables (dataset revisions), built with the index scan port;
+//   both until `dropSource` (the application's SourceRefs says when no one uses a source);
 // - the run registry: staged runs, whose outputs arrive over a MessagePort from the
 //   engine, and committed runs. Staged and committed runs use the same blocks; the
 //   registry, not a move of files, says which runs are committed (plan §2.3).
@@ -171,6 +172,13 @@ export class DataService implements DataGateway {
   async checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck> {
     const { bytes } = await this.runInputBytes(revisionIds);
     return this.deps.checker.check(program, role, bytes);
+  }
+
+  async dropSource(sourceId: string): Promise<void> {
+    this.sources.delete(sourceId);
+    for (const [revisionId, revision] of this.revisions) {
+      if (revision.sourceId === sourceId) this.revisions.delete(revisionId);
+    }
   }
 
   async previewSource(sourceId: string, maxBytes: number): Promise<Uint8Array> {

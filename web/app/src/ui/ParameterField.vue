@@ -46,7 +46,7 @@ const boxInRow = computed(() => props.inline === true && (asCheckbox.value || pr
 /** A choice whose default is one of its choices shows it; otherwise "Default" stands for it. */
 const defaultChosen = computed(() => fallback.value !== undefined && choices.value.includes(fallback.value));
 
-const list = computed(() => (props.field.kind === 'text' ? fieldList(props.field, values.value, options.value) : []));
+const list = computed(() => (props.field.kind === 'text' ? fieldList(program.value, props.field, values.value, options.value) : []));
 /** The text box beside the select: chosen with "Other", or holding a value outside the list. */
 const other = ref(false);
 watchEffect(() => {

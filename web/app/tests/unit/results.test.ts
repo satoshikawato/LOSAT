@@ -634,6 +634,18 @@ describe('ResultsBrowser', () => {
     expect(running.results.state.get().phase).toBe('ready');
   });
 
+  // WA-FM-07: the command of a run without results is read with the grammar too.
+  it("gives the grammar of the run's mode, for its command, also for a run without results", async () => {
+    for (const options of [{ status: 'failed' }, { status: 'completed' }, { unreadable: true }] as const) {
+      const { results } = setup(options);
+      await results.open('r1');
+      await settle();
+      const grammar = results.state.get().grammar;
+      expect(grammar?.takesValue('-max_hsps'), JSON.stringify(options)).toBe(true);
+      expect(grammar?.takesValue('-lcase_masking'), JSON.stringify(options)).toBe(false);
+    }
+  });
+
   it('reads a run whose results could not be read once, not at each change of the runs', async () => {
     const { results, runs, view, tableReads } = setup({ unreadable: true });
     await results.open('r1');

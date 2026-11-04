@@ -4,8 +4,8 @@
 // output format, and the warnings that the CLI writes to standard error.
 import { computed } from 'vue';
 import type { RunView } from '../application/coordinator';
-import type { LoadedRun } from '../application/results';
-import { shellWords, toShellCommand } from '../domain/argv';
+import { optionGrammar, type LoadedRun } from '../application/results';
+import { commandWords } from '../domain/argv';
 import { programById } from '../domain/programs';
 import CommandText from './CommandText.vue';
 import { formatBytes, formatCount, formatDateTime, formatDuration } from './format';
@@ -14,6 +14,7 @@ import VerificationBadge from './VerificationBadge.vue';
 const props = defineProps<{ run: RunView; loaded: LoadedRun }>();
 const snapshot = computed(() => props.run.snapshot);
 const record = computed(() => props.run.record);
+const takesValue = computed(() => optionGrammar(props.loaded.description).takesValue);
 /** A time in ISO 8601 form, local time (S13 screen review L5: "09/10/2026" read either way). */
 const time = (ms: number | undefined) => (ms === undefined ? '' : formatDateTime(ms));
 const duration = computed(() =>
@@ -40,7 +41,7 @@ const inputs = computed(() => [
         <dt>Mode</dt>
         <dd>{{ programById(snapshot.program).label }}</dd>
         <dt>Arguments</dt>
-        <dd><code data-testid="run-argv"><CommandText :text="shellWords(snapshot.argv)" /></code></dd>
+        <dd><code data-testid="run-argv"><CommandText :words="snapshot.argv" :takes-value="takesValue" /></code></dd>
         <template v-for="{ role, input } in inputs" :key="role">
           <dt>{{ role }}</dt>
           <dd :data-testid="`run-input-${role.toLowerCase()}`">
@@ -89,7 +90,7 @@ const inputs = computed(() => [
     <h3>Command line</h3>
     <ul class="commands">
       <li v-for="format in loaded.description.formats" :key="format">
-        outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :text="toShellCommand(snapshot.argv, format)" /></code>
+        outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :words="commandWords(snapshot.argv, format)" :takes-value="takesValue" /></code>
       </li>
     </ul>
 

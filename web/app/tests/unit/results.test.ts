@@ -539,6 +539,8 @@ describe('ResultsBrowser', () => {
       ['Earlier results are kept.', 'Earlier results are kept.'],
       ['BLAST engine error: Warning: Sequence contains no data \n', 'BLAST engine error: Warning: Sequence contains no data.'],
       ['Is it full?', 'Is it full?'],
+      ['The file (see the log.)', 'The file (see the log.)'],
+      ['', 'no reason was recorded.'],
     ] as const) {
       const run = setup({ status: 'failed', error });
       await run.results.open('r1');

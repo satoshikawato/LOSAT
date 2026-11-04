@@ -50,21 +50,28 @@ export const RESULTS_REMOVED_MESSAGE =
   'The browser removed the stored results of this run, probably because the site data was cleared. Run it again.';
 
 export class StorageRemovedError extends Error {
-  constructor(message = STORAGE_REMOVED_MESSAGE) {
-    super(message);
+  constructor(message = STORAGE_REMOVED_MESSAGE, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause });
     this.name = 'StorageRemovedError';
   }
 }
 
-/**
- * True for the browser's errors of a file or directory that is not there any more: NotFoundError
- * (Chromium for every operation, Firefox for a read) and UnknownError (Firefox, for the creation of an
- * entry in a directory that was removed).
- */
+/** True for the browser's NotFoundError (and StorageRemovedError): a file or directory that is not there. */
 export function isStorageRemoved(error: unknown): boolean {
-  if (error instanceof StorageRemovedError) return true;
-  const name = typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined;
-  return name === 'NotFoundError' || name === 'UnknownError';
+  return error instanceof StorageRemovedError || errorName(error) === 'NotFoundError';
+}
+
+/**
+ * True for the errors that a browser gives when it creates an entry in a directory that was removed:
+ * NotFoundError (Chromium) and UnknownError (Firefox). UnknownError is also what a real fault looks like,
+ * so this only says that the directory should be looked at.
+ */
+export function mayBeStorageRemoved(error: unknown): boolean {
+  return isStorageRemoved(error) || errorName(error) === 'UnknownError';
+}
+
+function errorName(error: unknown): unknown {
+  return typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined;
 }
 
 /**

@@ -131,11 +131,12 @@ export interface RoleDraft {
   readonly sources: readonly DraftSource[];
   readonly mode: InputMode;
   /**
-   * The region of the role's only record (DW-9), and that record (`regionIdentity`). It
-   * applies only while that record is still the role's only included record; another
-   * record, or another count of records, leaves it aside.
+   * The regions chosen on the role's only record (DW-9), by that record (`regionIdentity`). One
+   * applies only while its record is still the role's only included record; another record, or
+   * another count of records, leaves it aside, and it comes back with its record (a mode that
+   * reads the source with the other kind has other records, and has its own regions).
    */
-  readonly region?: { readonly text: RegionText; readonly record: string };
+  readonly regions?: Readonly<Record<string, RegionText>>;
 }
 
 export type Validation =
@@ -402,7 +403,11 @@ export class SearchDraft {
       for (const source of this.role(role).sources) {
         if (source.key !== PASTE_KEY) this.dropSource(role, source.key);
       }
-      this.setRegion(role, undefined);
+      this.updateRole(role, (draft) => {
+        const next = { ...draft };
+        delete next.regions;
+        return next;
+      });
     }
     this.setPaste('subject', '');
     this.setPaste('query', query);
@@ -629,11 +634,14 @@ export class SearchDraft {
 
   setRegion(role: InputRole, region: RegionText | undefined): void {
     const record = this.regionIdentity(role);
+    if (record === undefined) return;
     this.updateRole(role, (draft) => {
-      const next = { ...draft };
-      if (region === undefined || record === undefined) delete next.region;
-      else next.region = { text: region, record };
-      return next;
+      const regions: Record<string, RegionText> = { ...draft.regions };
+      if (region === undefined) delete regions[record];
+      else regions[record] = region;
+      const { regions: _before, ...rest } = draft;
+      void _before;
+      return Object.keys(regions).length === 0 ? rest : { ...rest, regions };
     });
     this.set({ message: undefined });
     this.scheduleValidation();
@@ -648,8 +656,8 @@ export class SearchDraft {
 
   /** The region of the role, if it was chosen on the record that `regionRecord` gives now. */
   region(role: InputRole): RegionText | undefined {
-    const region = this.role(role).region;
-    return region !== undefined && region.record === this.regionIdentity(role) ? region.text : undefined;
+    const record = this.regionIdentity(role);
+    return record === undefined ? undefined : this.role(role).regions?.[record];
   }
 
   private onlyRecord(role: InputRole): { readonly source: DraftSource; readonly record: DatasetRecord } | undefined {

@@ -520,22 +520,23 @@ test("records left out and a subrange stay through a mode that reads the role wi
   // The search takes both: the first record only, with its subrange.
   await submit(page);
   await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
   await expect(page.getByTestId('results-run-options')).toContainText('-query_loc 2-12');
   expect((await result(page, 1, 6)).command).toBe('losat blastn -query query.fa -subject subject.fa -query_loc 2-12 -outfmt 6');
 });
 
 // An input without a sequence is run as the command line runs it (rc 0 and a warning), and the results say
 // that the query has none, not that the query filters hid it (WA-IN-02).
-test('an empty query runs; its results say that the query has no sequences, with the engine warning', async ({ page }) => {
-  const queries = [
-    ['blastn', '  \n\n', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
-    ['blastp', '', '>s1\nMKVLAAGIVGLLLAQPSTEWMKVLAAGIVGLLL\n'],
-    ['blastx', '\n', '>s1\nMKVLAAGIVGLLLAQPSTEWMKVLAAGIVGLLL\n'],
-    ['tblastn', ' ', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
-    ['tblastx', '\n\n\n', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
-  ] as const;
-  const modes = BUILD_HAS_ENGINE ? queries : queries.slice(0, 1);
-  for (const [index, [id, query, subject]] of modes.entries()) {
+const EMPTY_QUERY_MODES = [
+  ['blastn', '  \n\n', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
+  ['blastp', '', '>s1\nMKVLAAGIVGLLLAQPSTEWMKVLAAGIVGLLL\n'],
+  ['blastx', '\n', '>s1\nMKVLAAGIVGLLLAQPSTEWMKVLAAGIVGLLL\n'],
+  ['tblastn', ' ', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
+  ['tblastx', '\n\n\n', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
+] as const;
+for (const [id, query, subject] of EMPTY_QUERY_MODES) {
+  test(`an empty query runs in ${id}; its results say that the query has no sequences, with the engine warning`, async ({ page }) => {
+    test.skip(id !== 'blastn' && !BUILD_HAS_ENGINE, 'the other modes are checked with the engine');
     await program(page, id);
     if (query === '') {
       // An empty box has no source: an empty file does.
@@ -544,17 +545,17 @@ test('an empty query runs; its results say that the query has no sequences, with
       await paste(page, 'query', query);
     }
     await paste(page, 'subject', subject);
-    await expect(page.locator('[data-testid^="query-source-"][data-status="ready"]').first()).toContainText('0 records');
+    await expect(page.locator('[data-testid^="query-source-"][data-status="ready"]')).toHaveCount(1);
+    await expect(page.getByTestId('query-source-0')).toContainText('0 records');
     await submit(page);
-    await waitStatus(page, index + 1, 'completed');
-    await pickRun(page, index + 1);
+    await waitStatus(page, 1, 'completed');
+    await pickRun(page, 1);
     const notice = page.locator('[data-testid="results-notice"][data-kind="empty-query"]');
     await expect(notice).toContainText('The query has no sequences.');
     await expect(page.locator('[data-testid="results-notice"][data-kind="no-queries"]')).toHaveCount(0);
     if (BUILD_HAS_ENGINE) await expect(page.getByTestId('results-notice-engine')).toHaveText(/Warning: \[\w+\] Query is Empty!/);
-    await backToSearch(page);
-  }
-});
+  });
+}
 
 // The browser can remove the origin's files under an open tab (clearing the site's data). The next run makes the tab's
 // directory again; if it cannot, it says what happened, not the browser's own words (WA-IN-03). WebKit's build of
@@ -566,17 +567,29 @@ test("a run after the browser removed the tab's storage still completes", async 
   test.skip((await page.getByTestId('storage-status').getAttribute('data-backend')) !== 'opfs', 'this browser keeps results in memory');
   await submit(page);
   await waitStatus(page, 1, 'completed');
-  const removed = await page.evaluate(async () => {
-    const root = await navigator.storage.getDirectory();
-    await root.removeEntry('tmp', { recursive: true });
-    return true;
-  });
-  expect(removed).toBe(true);
+  // A synchronous access handle holds its file for a moment after it is closed: the removal is tried again.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async () => {
+          try {
+            await (await navigator.storage.getDirectory()).removeEntry('tmp', { recursive: true });
+            return 'removed';
+          } catch (error) {
+            return (error as Error).name;
+          }
+        }),
+      { timeout: 10_000 },
+    )
+    .toBe('removed');
   await backToSearch(page);
   await submit(page);
   await waitStatus(page, 2, 'completed');
-  await pickRun(page, 2);
-  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '2');
+  await chooseRun(page, 2);
+  // What the removal took with it says so when it is opened.
+  await pickRun(page, 1);
+  await expect(page.getByTestId('results-status')).toContainText('The browser removed the stored results of this run');
+  await expect(page.getByTestId('results-status')).toContainText('Run it again.');
 });
 
 test('the sequence kind warning is an estimate and does not change the program', async ({ page }) => {

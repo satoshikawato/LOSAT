@@ -658,7 +658,7 @@ function unavailableMessage(run: RunView): string {
     case 'cancelled':
       return `Run ${n} was cancelled. A cancelled run keeps no results.`;
     case 'failed':
-      return `Run ${n} failed: ${endSentence(run.record.error ?? 'no reason was recorded')} A failed run keeps no results.`;
+      return `Run ${n} failed: ${endSentence(run.record.error?.trim() ? run.record.error : 'no reason was recorded')} A failed run keeps no results.`;
     case 'completed':
       return '';
     default:
@@ -669,7 +669,7 @@ function unavailableMessage(run: RunView): string {
 /** A message as a sentence of its own: no trailing space or line break, and one full stop at most. */
 function endSentence(message: string): string {
   const text = message.trimEnd();
-  return /[.!?]$/.test(text) ? text : `${text}.`;
+  return /[.!?]["')\]]*$/.test(text) ? text : `${text}.`;
 }
 
 function errorMessage(error: unknown): string {

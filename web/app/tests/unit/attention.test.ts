@@ -4,6 +4,7 @@ import type { AppState, RunView } from '../../src/application/coordinator';
 import type { DraftSource, DraftState, RoleDraft } from '../../src/application/draft';
 import { Store } from '../../src/application/store';
 import type { RunStatus } from '../../src/domain/run';
+import type { StoredResultsCheck } from '../../src/ports/data';
 import type { PagePort, WakeLockHandle } from '../../src/ports/page';
 
 class FakeLock implements WakeLockHandle {
@@ -60,6 +61,9 @@ class FakePage implements PagePort {
 const run = (runId: string, number: number, status: RunStatus): RunView =>
   ({ snapshot: { runId, number }, status, record: {} }) as unknown as RunView;
 
+/** The Data worker's answer when every stored result is still there. */
+const KEPT: StoredResultsCheck = { removed: [], unreadable: [] };
+
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 5; i++) await Promise.resolve();
 };
@@ -73,6 +77,7 @@ function setup(
     keepAwake?: boolean;
     runs?: RunView[];
     probe?: AttentionDeps['probe'];
+    checkStored?: AttentionDeps['checkStored'];
     probeTimeoutMs?: number;
     minHiddenMs?: number;
     draft?: Store<DraftState>;
@@ -88,6 +93,7 @@ function setup(
     ...(options.draft === undefined ? {} : { draft: options.draft }),
     keepAwake: options.keepAwake,
     probe: options.probe ?? (() => Promise.resolve()),
+    checkStored: options.checkStored ?? (() => Promise.resolve(KEPT)),
     now: () => clock.now,
     probeTimeoutMs: options.probeTimeoutMs ?? 5_000,
     minHiddenMs: options.minHiddenMs ?? 0,
@@ -378,9 +384,13 @@ describe('resume report', () => {
         { number: 2, before: 'queued', now: 'running' },
       ],
       dataWorker: 'checking',
+      stored: 'checking',
+      removed: [],
+      unreadable: [],
     });
     await flush();
     expect(state().resume?.dataWorker).toBe('responding');
+    expect(state().resume).toMatchObject({ stored: 'checked', removed: [], unreadable: [] });
     expect(state().resume?.hiddenMs).toBe(42_000);
   });
 
@@ -393,7 +403,11 @@ describe('resume report', () => {
   });
 
   it("is 'not-responding' when the probe rejects", async () => {
-    const { page, state } = setup({ runs: [run('a', 1, 'running')], probe: () => Promise.reject(new Error('gone')) });
+    const { page, state } = setup({
+      runs: [run('a', 1, 'running')],
+      probe: () => Promise.reject(new Error('gone')),
+      checkStored: () => new Promise(() => undefined), // an answer of the check is an answer of the Data worker too
+    });
     page.setVisible(false);
     page.setVisible(true);
     expect(state().resume?.dataWorker).toBe('checking');
@@ -405,6 +419,7 @@ describe('resume report', () => {
     const { page, state } = setup({
       runs: [run('a', 1, 'running')],
       probe: () => new Promise(() => undefined),
+      checkStored: () => new Promise(() => undefined),
       probeTimeoutMs: 20,
     });
     page.setVisible(false);
@@ -418,12 +433,14 @@ describe('resume report', () => {
 
   it('is not made when no run was in progress as the page was hidden', async () => {
     const probe = vi.fn(() => Promise.resolve());
-    const { page, state } = setup({ runs: [run('a', 1, 'completed'), run('b', 2, 'failed')], probe });
+    const checkStored = vi.fn(() => Promise.resolve(KEPT));
+    const { page, state } = setup({ runs: [run('a', 1, 'completed'), run('b', 2, 'failed')], probe, checkStored });
     page.setVisible(false);
     page.setVisible(true);
     await flush();
     expect(state().resume).toBeUndefined();
     expect(probe).not.toHaveBeenCalled();
+    expect(checkStored).not.toHaveBeenCalled();
   });
 
   it('is not made when there are no runs, nor when the page is shown without having been hidden', async () => {
@@ -509,6 +526,7 @@ describe('resume report', () => {
     const { page, state } = setup({
       runs: [run('a', 1, 'running')],
       probe: () => new Promise<void>((resolve) => (answer = resolve)),
+      checkStored: () => new Promise(() => undefined),
       probeTimeoutMs: 20,
     });
     page.setVisible(false);
@@ -518,5 +536,121 @@ describe('resume report', () => {
     answer!();
     await flush();
     expect(state().resume?.dataWorker).toBe('responding');
+  });
+
+  // WA2-SC-05: after about half an hour hidden, the notice said "The stored results are available." while the
+  // browser had removed the results of every run; the Data worker had only answered.
+  describe('stored results', () => {
+    it('names the completed runs whose stored results the browser removed, or could not read, by number', async () => {
+      const checkStored = vi.fn(() =>
+        Promise.resolve<StoredResultsCheck>({ removed: ['c', 'a', 'gone', 'e'], unreadable: ['d'] }),
+      );
+      const { page, setRuns, state } = setup({
+        runs: [run('a', 1, 'completed'), run('b', 2, 'running'), run('c', 3, 'queued'), run('d', 4, 'completed')],
+        checkStored,
+      });
+      page.setVisible(false);
+      // Run 5's commit reached the Data worker, but its answer did not: it is failed here.
+      setRuns([
+        run('a', 1, 'completed'),
+        run('b', 2, 'completed'),
+        run('c', 3, 'completed'),
+        run('d', 4, 'completed'),
+        run('e', 5, 'failed'),
+      ]);
+      page.setVisible(true);
+      expect(checkStored).toHaveBeenCalledTimes(1);
+      expect(state().resume).toMatchObject({ stored: 'checking', removed: [], unreadable: [] });
+      await flush();
+      // A run that is no longer in the list ('gone') or not completed ('e') is left out.
+      expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked', removed: [1, 3], unreadable: [4] });
+    });
+
+    it('has no time limit: a slow check leaves the report checking, never "not-responding"', async () => {
+      vi.useFakeTimers();
+      try {
+        let answer: (check: StoredResultsCheck) => void = () => undefined;
+        const { page, state } = setup({
+          runs: [run('a', 1, 'completed'), run('b', 2, 'running')],
+          checkStored: () => new Promise<StoredResultsCheck>((resolve) => (answer = resolve)),
+          probeTimeoutMs: 10_000,
+        });
+        page.setVisible(false);
+        page.setVisible(true);
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checking' });
+        answer({ removed: ['a'], unreadable: [] });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked', removed: [1] });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('shows what the check found when it answers after the Data worker missed probeTimeoutMs', async () => {
+      vi.useFakeTimers();
+      try {
+        const { page, state } = setup({
+          runs: [run('a', 1, 'completed'), run('b', 2, 'running')],
+          // storageInfo waits for navigator.storage.estimate(), which can be slow.
+          probe: () => new Promise((resolve) => setTimeout(resolve, 20_000)),
+          checkStored: () => new Promise((resolve) => setTimeout(() => resolve({ removed: ['a'], unreadable: [] }), 15_000)),
+          probeTimeoutMs: 10_000,
+        });
+        page.setVisible(false);
+        page.setVisible(true);
+        await vi.advanceTimersByTimeAsync(10_001);
+        expect(state().resume).toMatchObject({ dataWorker: 'not-responding', stored: 'checking' });
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked', removed: [1] });
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked', removed: [1] });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps 'responding' when the Data worker answered the check and then refuses `probe`", async () => {
+      let refuse: (error: Error) => void = () => undefined;
+      const { page, state } = setup({
+        runs: [run('a', 1, 'running')],
+        probe: () => new Promise((_, reject) => (refuse = reject)),
+      });
+      page.setVisible(false);
+      page.setVisible(true);
+      await flush();
+      expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked' });
+      refuse(new Error('late'));
+      await flush();
+      expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked' });
+    });
+
+    it("is 'failed' when the Data worker refuses the check, and the Data worker's answer stays its own", async () => {
+      const { page, state } = setup({ runs: [run('a', 1, 'running')], checkStored: () => Promise.reject(new Error('gone')) });
+      page.setVisible(false);
+      page.setVisible(true);
+      await flush();
+      expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'failed', removed: [], unreadable: [] });
+    });
+
+    it('asks again at each show, and only the answer of the latest show counts', async () => {
+      const answers: Array<(check: StoredResultsCheck) => void> = [];
+      const { page, clock, state } = setup({
+        runs: [run('a', 1, 'completed'), run('b', 2, 'running')],
+        checkStored: () => new Promise<StoredResultsCheck>((resolve) => answers.push(resolve)),
+      });
+      page.setVisible(false);
+      page.setVisible(true);
+      clock.now += 10;
+      page.setVisible(false);
+      page.setVisible(true);
+      expect(answers).toHaveLength(2);
+      answers[1]!({ removed: ['a'], unreadable: [] });
+      await flush();
+      expect(state().resume).toMatchObject({ stored: 'checked', removed: [1] });
+      answers[0]!(KEPT);
+      await flush();
+      expect(state().resume).toMatchObject({ stored: 'checked', removed: [1] });
+    });
   });
 });

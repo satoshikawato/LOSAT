@@ -8751,8 +8751,9 @@ enum BatchStage<'a> {
     ///
     /// `query_masks` are the masks of the batch's queries when the loop has made them
     /// (`-window_masker_db`, whose errors stop the batch before its search); `None`: made here.
-    /// `lower_case_before`: whether the letter before each query's interval is lower case with
-    /// `-lcase_masking` (empty without a range), which the chunks restrict too.
+    /// `lower_case_before`: whether the letter before each query's interval is lower case, which
+    /// the chunks restrict too (empty without a range, without `-lcase_masking` and with
+    /// `-window_masker_db`).
     Search {
         query_offsets: &'a [usize],
         query_masks: Option<&'a [Vec<MaskedInterval>]>,

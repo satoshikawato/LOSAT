@@ -698,7 +698,10 @@ pub fn restrict_record_masks(
 /// whole record (`restrict_record_masks`); of the letters outside the interval only that one can
 /// reach a part, the first letter of the query's first part, whether its run ends there or goes
 /// on into the interval. The masks in the searched letters' coordinates are moved into the
-/// record's with that letter added.
+/// record's with that letter added. It masks the first letter of a part that starts the query and
+/// is longer than `offset` letters; `restrict_masks` misses that letter when the run ends on the
+/// letter before the interval, or goes on into the interval and the part is `offset + 1` letters
+/// long, and masks the same letters in every other part.
 pub fn restrict_masks_with_letter_before(
     masks: &[MaskedInterval],
     part: &ChunkQuery,

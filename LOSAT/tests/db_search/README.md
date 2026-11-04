@@ -810,9 +810,10 @@ sizes, 10,002 and 297) and `tests/fasta/outfmt0/bxqloc_s.faa` (a copy of `bxqloc
 Rows `db.bnqloc.*` search `bnqloc` with `bnqloc_q.fna`, `-query_loc 10-3009 -lcase_masking` and
 `CHUNK_SIZE=1001 OVERLAP_CHUNK_SIZE=100` (NCBI BLASTN stops at 1000/100 with `Empty CBlastQueryVector`: its batch size
 mixer's maximum is the chunk size less 1,000). NCBI restricts the lower-case runs of the whole record to each chunk
-(`split_query_cxx.cpp:278-281`), one letter longer, so a run that ends on the letter before the interval masks the
-interval's first letter in the preliminary search of the chunk that starts the query. Without `BATCH_SIZE` each record is
-a batch of its own; with `BATCH_SIZE=100000` `p` and `q` share a split batch and `q`'s first part starts the second
+(`split_query_cxx.cpp:278-281`), one letter longer, so a run that holds the letter before the interval masks the
+interval's first letter in the preliminary search of each chunk that holds it, when the query's part there is longer than
+the interval's start (here 9 letters). Without `BATCH_SIZE` each record is a batch of its own; with `BATCH_SIZE=100000`
+`p` and `q` share a split batch (four chunks of 1,126 letters) and `q`'s first letter lies 174 letters into the second
 chunk. The inputs come from `random.Random(20261105)`:
 
 - `bnqloc_q.fna`: `a` (`AC`, which the range skips), `p` (1,209 random nucleotides) and `q` (`ACGTACGTa` and B, 3,000

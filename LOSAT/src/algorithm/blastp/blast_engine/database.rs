@@ -3566,7 +3566,28 @@ mod tests {
         .unwrap();
         assert_eq!(allowed(&punctuation), [false, false]);
         assert_eq!(read_allowed(&punctuation), [true, true]);
-        drop((missing, bad, punctuation));
+        // An empty title (line DBID H3), which outfmt 0 shows as NCBI makes it from a taxid that
+        // the taxonomy database names (`shared::check_shown_stored_title`; the taxid is not looked
+        // up here): the search of all queries refuses it where it is shown. Its tabular id is
+        // `unnamed`.
+        let bare = BlastpDatabase::open(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/ids/pbare_t")
+                .to_str()
+                .unwrap(),
+            &Default::default(),
+            "BLASTP",
+        )
+        .unwrap();
+        let pairwise_allowed = [1, 4].map(|threads| {
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                Ok(x_titles_allow_blocks(&bare, true, false, pool))
+            })
+            .unwrap()
+        });
+        assert_eq!(pairwise_allowed, [false, false]);
+        assert_eq!(allowed(&bare), [true, true]);
+        drop((missing, bad, punctuation, bare));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

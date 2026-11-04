@@ -617,6 +617,8 @@ pub(crate) struct HeaderReader<'a> {
     /// The taxonomy database of the search path where `taxdb.bti` is found and it opens, opened
     /// at the first record whose title NCBI can make from its taxids (`source_named`).
     taxdb: std::cell::OnceCell<Option<crate::seqdb::taxdb::TaxDb>>,
+    /// `source_named` of the taxids of empty stored titles (`stored_taxonomy_title`), by taxid.
+    stored_named: std::cell::RefCell<std::collections::HashMap<i32, bool>>,
     /// `LookupTexts::of`, asked at the first record found with other taxids or in another
     /// volume (`copy_of`).
     lookup_texts: std::cell::OnceCell<LookupTexts>,
@@ -757,8 +759,19 @@ impl<'a> HeaderReader<'a> {
             lookup: std::cell::OnceCell::new(),
             prefetch_off: prefetch_may_be_off(),
             taxdb: std::cell::OnceCell::new(),
+            stored_named: Default::default(),
             lookup_texts: std::cell::OnceCell::new(),
         }
+    }
+
+    /// The taxonomy database of the search path (`taxdb`), opened at the first call.
+    fn taxdb(&self) -> Option<&crate::seqdb::taxdb::TaxDb> {
+        self.taxdb
+            .get_or_init(|| {
+                let path = self.db.search_path().filter(|_| self.db.taxdb_found())?;
+                crate::seqdb::taxdb::TaxDb::open(path).ok()
+            })
+            .as_ref()
     }
 
     /// Whether the taxonomy database gives a scientific name for the first of the taxids
@@ -769,11 +782,7 @@ impl<'a> HeaderReader<'a> {
         let Some(&taxid) = taxids.first() else {
             return false;
         };
-        let taxdb = self.taxdb.get_or_init(|| {
-            let path = self.db.search_path().filter(|_| self.db.taxdb_found())?;
-            crate::seqdb::taxdb::TaxDb::open(path).ok()
-        });
-        let Some(taxdb) = taxdb else {
+        let Some(taxdb) = self.taxdb() else {
             return false;
         };
         let mut messages = Vec::new();
@@ -796,20 +805,26 @@ impl<'a> HeaderReader<'a> {
     /// Whether NCBI makes the outfmt 0 title of the sequence `ordinal` without parsed Seq-ids,
     /// whose stored title is `title`, from its Bioseq's source and the taxonomy database's name of
     /// its definition line's taxid (`report::defline::bioseq_title_from_source`, `source_named`).
-    /// The taxid is read only for a title that the source replaces; one that does not read counts
-    /// as named, as a failed lookup does.
+    /// The taxid is read only for a title that the source replaces, where a taxonomy database
+    /// opens, and each taxid is looked up once; one that does not read counts as named, as a
+    /// failed lookup does.
     fn stored_taxonomy_title(&self, title: &[u8], ordinal: u32) -> bool {
-        if !crate::report::defline::bioseq_title_from_source(title, &Default::default()) {
+        if !crate::report::defline::bioseq_title_from_source(title, &Default::default())
+            || self.taxdb().is_none()
+        {
             return false;
         }
-        self.db.defline_taxids(ordinal).map_or(true, |taxids| {
-            let first: Vec<i32> = taxids
-                .into_iter()
-                .filter(|&taxid| taxid > 0)
-                .take(1)
-                .collect();
-            self.source_named(&first)
-        })
+        let Ok(taxids) = self.db.defline_taxids(ordinal) else {
+            return true;
+        };
+        let Some(taxid) = taxids.into_iter().find(|&taxid| taxid > 0) else {
+            return false;
+        };
+        *self
+            .stored_named
+            .borrow_mut()
+            .entry(taxid)
+            .or_insert_with(|| self.source_named(&[taxid]))
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:213-221
@@ -1841,7 +1856,7 @@ pub(crate) fn check_shown_stored_title(
 ) -> Result<()> {
     if taxonomy_title {
         bail!(
-            "database sequence {ordinal} has an empty title that NCBI BLAST+'s outfmt 0 makes from its taxid and the taxonomy database (which names its taxid); this is not supported by LOSAT's {program}"
+            "database sequence {ordinal} has an empty title that NCBI BLAST+'s outfmt 0 makes from its taxid and the taxonomy database (which names that taxid, or whose lookup of it fails); this is not supported by LOSAT's {program}"
         );
     }
     Ok(())
@@ -3512,6 +3527,25 @@ mod taxdb_prepass_tests {
             assert_eq!(stored.taxonomy_title, want, "{name} {taxdb:?}");
             let refused = check_shown_stored_title(stored.taxonomy_title, 0, "BLASTP");
             assert_eq!(refused.is_err(), want, "{name} {taxdb:?}");
+            // TBLASTX's check before the search (`report_stream`) for outfmt 0 and for a report
+            // that shows no title (outfmt 5 of a nucleotide database).
+            if seq_type == SeqType::Nucleotide {
+                let pool = crate::utils::threading::SearchPool::x_serial();
+                let shown = |pairwise| ParsedShown {
+                    pairwise,
+                    ..Default::default()
+                };
+                let found = db.taxdb_found();
+                let refusal = |pairwise| {
+                    reports_may_refuse(&db, shown(pairwise), false, found, false, &pool, "TBLASTX")
+                };
+                assert_eq!(
+                    refusal(true),
+                    want.then_some(ReportRefusal::Headers),
+                    "{taxdb:?}"
+                );
+                assert_eq!(refusal(false), None, "{taxdb:?}");
+            }
         }
         std::fs::remove_dir_all(&cwd).unwrap();
     }

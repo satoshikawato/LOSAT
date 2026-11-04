@@ -56,10 +56,9 @@ fn an_empty_title_with_a_named_taxid_is_refused_in_outfmt_0() {
         let stderr = String::from_utf8_lossy(&refused.stderr);
         assert!(!refused.status.success(), "{}: {stderr}", program.0);
         assert!(
-            stderr.contains(&format!(
-                "database sequence 0 has an empty title that NCBI BLAST+'s outfmt 0 makes from its taxid and the taxonomy database (which names its taxid); this is not supported by LOSAT's {}",
-                program.3
-            )),
+            stderr.contains(
+                "database sequence 0 has an empty title that NCBI BLAST+'s outfmt 0 makes from its taxid and the taxonomy database"
+            ) && stderr.contains(&format!("not supported by LOSAT's {}", program.3)),
             "{}: {stderr}",
             program.0
         );

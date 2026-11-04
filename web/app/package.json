@@ -19,7 +19,9 @@
   },
   "dependencies": {
     "@bjorn3/browser_wasi_shim": "0.4.2",
+    "bz2": "1.0.1",
     "fflate": "0.8.3",
+    "fzstd": "0.1.1",
     "vue": "3.5.43"
   },
   "devDependencies": {

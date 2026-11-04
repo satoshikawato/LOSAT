@@ -3,7 +3,7 @@
 // (LOSAT_WEB_REACTORS); what only the engine can show (its messages, the kept subject, a
 // search long enough to edit or cancel while it runs) is checked in the engine build.
 import { expect, test, type Page } from '@playwright/test';
-import { gzipSync } from 'node:zlib';
+import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import {
   chooseRun,
@@ -90,6 +90,23 @@ test('a file named .gz is inflated when it is opened and shows its plain name', 
   const summary = await page.getByTestId('subject-source-0-summary').textContent();
   expect(summary).toMatch(/record/);
   await expect(page.getByTestId('subject-source-1-summary')).toHaveText(summary!.trim());
+});
+
+test('files named .zst and .bz2 are inflated when they are opened and show their plain names', async ({ page }) => {
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta.zst', text: zstdCompressSync(fasta('LC738884.fasta')) }]);
+  await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('subject-source-0').locator('.source-name')).toHaveText('LC738884.fasta');
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta', text: fasta('LC738884.fasta') }]);
+  const summary = await page.getByTestId('subject-source-0-summary').textContent();
+  expect(summary).toMatch(/record/);
+  await expect(page.getByTestId('subject-source-1-summary')).toHaveText(summary!.trim());
+  // Two bzip2 streams, as pbzip2 writes them: both records are read.
+  const twoStreams =
+    'QlpoOTFBWSZTWSPZP5cAAAHPAEAQAAEogAQAIAAgADEMCBmqbRqZ1mPE/TlEyiZomF+LuSKcKEgR7J/LgEJaaDkxQVkmU1ko1BM1AAAFTwBAEAABKIAEABAAIAAxDAgSKejSTDSkzrBQomUTKJ73xdyRThQkCjUEzUA=';
+  await openFiles(page, 'subject', [{ name: 'two.fa.bz2', text: Buffer.from(twoStreams, 'base64') }]);
+  await expect(page.getByTestId('subject-source-2')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('subject-source-2').locator('.source-name')).toHaveText('two.fa');
+  await expect(page.getByTestId('subject-source-2-summary')).toContainText('2 records');
 });
 
 test('records: duplicate IDs by number, a record that the input check refuses (FakeEngine), exclusion, and a run after exclusion', async ({ page }) => {

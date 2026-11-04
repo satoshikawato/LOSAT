@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { gzipSync } from 'node:zlib';
+import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { IndexedRecord } from '../../src/domain/dataset';
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { MEMORY_FULL_MESSAGE } from '../../src/infra/data/block-store';
 import { DataService, type DataServiceDeps } from '../../src/infra/data/data-service';
-import { isGzipName, plainName } from '../../src/infra/data/gunzip';
+import { compressionOfName, plainName } from '../../src/infra/data/inflate';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { RunOutputWriter } from '../../src/infra/run-output/writer';
@@ -257,48 +257,131 @@ describe('DataService runs and storage status', () => {
   });
 });
 
-describe('DataService sources named .gz', () => {
+describe('DataService sources named .gz, .bz2 or .zst', () => {
   const A = '>a one\nACGT\n';
   const B = '>b two\nGGCC\nTT\n';
+  const RECORDS = [
+    ['a', 4],
+    ['b', 6],
+  ];
+  const bytes = (base64: string) => Buffer.from(base64, 'base64');
+  // One bzip2 stream of `>a\nACGT...TTT\n`, and two streams (that record, then `>b\nTTTT...\n`).
+  const BZ2_A =
+    'QlpoOTFBWSZTWSPZP5cAAAHPAEAQAAEogAQAIAAgADEMCBmqbRqZ1mPE/TlEyiZomF+LuSKcKEgR7J/LgA==';
+  const BZ2_AB =
+    'QlpoOTFBWSZTWSPZP5cAAAHPAEAQAAEogAQAIAAgADEMCBmqbRqZ1mPE/TlEyiZomF+LuSKcKEgR7J/LgEJaaDkxQVkmU1ko1BM1AAAFTwBAEAABKIAEABAAIAAxDAgSKejSTDSkzrBQomUTKJ73xdyRThQkCjUEzUA=';
+  const BZ2_A_TEXT = '>a\nACGTACGTACGTACGTACGTACGTAAAACCCGGGTTT\n';
+  const BZ2_AB_TEXT = BZ2_A_TEXT + '>b\nTTTTGGGGCCCCAAAATTTTGGGGCCCCAAAA\n';
+  // pzstd output: a skippable frame, then one frame.
+  const PZSTD =
+    'UCpNGAQAAAA/AAAAKLUv/QRYlQEAhAI+YQpBQ0dUQUFBQ0NDR0dHVFRUCj5iClRUVFRHR0dHQ0NDQ0FBQUEKAgCYibw/ZwTZFtvJ';
 
-  it('inflates every member of a concatenated gzip file and keeps the plain name', async () => {
-    const { data } = service({ readChunkBytes: 5 });
-    const gz = new File([Buffer.concat([gzipSync(A), gzipSync(B)])], 'two.fa.gz');
-    const source = await data.addSource(gz);
-    expect(source).toEqual({ sourceId: 'token-1', name: 'two.fa', size: (A + B).length });
-    const revision = await data.indexSource(source.sourceId, 1);
+  const formats = [
+    { suffix: 'gz', label: 'gzip', pack: (t: string) => gzipSync(t), two: () => Buffer.concat([gzipSync(A), gzipSync(B)]) },
+    { suffix: 'zst', label: 'zstd', pack: (t: string) => zstdCompressSync(t), two: () => Buffer.concat([zstdCompressSync(A), zstdCompressSync(B)]) },
+    { suffix: 'bz2', label: 'bzip2', pack: undefined, two: undefined },
+  ] as const;
+
+  for (const f of formats) {
+    if (f.pack !== undefined && f.two !== undefined) {
+      const { pack, two } = f;
+      it(`inflates every part of a concatenated .${f.suffix} file and keeps the plain name`, async () => {
+        const { data } = service({ readChunkBytes: 5 });
+        const source = await data.addSource(new File([two()], `two.fa.${f.suffix}`));
+        expect(source).toEqual({ sourceId: 'token-1', name: 'two.fa', size: (A + B).length });
+        const revision = await data.indexSource(source.sourceId, 1);
+        expect(revision.records.map((r) => [r.id, r.length])).toEqual(RECORDS);
+      });
+
+      it(`takes the .${f.suffix} suffix in any case`, async () => {
+        const { data } = service();
+        const source = await data.addSource(new File([pack(A)], `x.FA.${f.suffix.toUpperCase()}`));
+        expect(source).toMatchObject({ name: 'x.FA', size: A.length });
+      });
+    }
+
+    it(`refuses a file named .${f.suffix} that is not ${f.label} data`, async () => {
+      const { data } = service();
+      const message = `is named .${f.suffix} but is not ${f.label} data (`;
+      await expect(data.addSource(new File([A], `text.fa.${f.suffix}`))).rejects.toThrow(`text.fa.${f.suffix} ${message}`);
+      await expect(data.addSource(new File([], `empty.fa.${f.suffix}`))).rejects.toThrow(`empty.fa.${f.suffix} ${message}`);
+    });
+  }
+
+  it('inflates a bzip2 file of one stream and of two streams (pbzip2, cat)', async () => {
+    const { data } = service({ readChunkBytes: 7 });
+    const one = await data.addSource(new File([bytes(BZ2_A)], 'one.fa.bz2'));
+    expect(one).toMatchObject({ name: 'one.fa', size: BZ2_A_TEXT.length });
+    const two = await data.addSource(new File([bytes(BZ2_AB)], 'two.fa.bz2'));
+    expect(two).toMatchObject({ name: 'two.fa', size: BZ2_AB_TEXT.length });
+    const revision = await data.indexSource(two.sourceId, 1);
     expect(revision.records.map((r) => [r.id, r.length])).toEqual([
-      ['a', 4],
-      ['b', 6],
+      ['a', 37],
+      ['b', 32],
     ]);
+    expect(decoder.decode(await data.previewSource(two.sourceId, 1000))).toBe(BZ2_AB_TEXT);
   });
 
-  it('takes the suffix in any case', async () => {
+  it('takes the .bz2 suffix in any case', async () => {
     const { data } = service();
-    const source = await data.addSource(new File([gzipSync(A)], 'x.FA.GZ'));
-    expect(source).toMatchObject({ name: 'x.FA', size: A.length });
+    const source = await data.addSource(new File([bytes(BZ2_A)], 'x.FA.BZ2'));
+    expect(source).toMatchObject({ name: 'x.FA', size: BZ2_A_TEXT.length });
   });
 
-  it('refuses a file named .gz that is not gzip data', async () => {
+  it('refuses a bzip2 file that starts with other bytes or is cut short', async () => {
     const { data } = service();
-    await expect(data.addSource(new File([A], 'text.fa.gz'))).rejects.toThrow('text.fa.gz is named .gz but is not gzip data (');
-    await expect(data.addSource(new File([], 'empty.fa.gz'))).rejects.toThrow('empty.fa.gz is named .gz but is not gzip data (');
+    const good = bytes(BZ2_A);
+    await expect(data.addSource(new File([Buffer.concat([Buffer.from('xx'), good])], 'late.fa.bz2'))).rejects.toThrow('late.fa.bz2 is named .bz2 but is not bzip2 data (');
+    await expect(data.addSource(new File([good.subarray(0, 30)], 'cut.fa.bz2'))).rejects.toThrow('cut.fa.bz2 is named .bz2 but is not bzip2 data (');
   });
 
-  it('inflates a file read in several slices', async () => {
-    // 9 MiB of plain text: more than one 8 MiB slice of the file and more than one Blob part.
-    const line = '>r\n' + 'ACGT'.repeat(15) + '\n';
-    const text = line.repeat(Math.ceil((9 * 1024 * 1024) / line.length));
+  it('inflates a pzstd file: a skippable frame and then a frame', async () => {
     const { data } = service();
-    const gz = new File([gzipSync(text)], 'big.fa.gz');
-    const source = await data.addSource(gz);
-    expect(source).toMatchObject({ name: 'big.fa', size: text.length });
-    const head = decoder.decode(await data.previewSource(source.sourceId, line.length * 2));
-    expect(head).toBe(line + line);
+    const source = await data.addSource(new File([bytes(PZSTD)], 'p.fa.zst'));
+    expect(source).toMatchObject({ name: 'p.fa', size: BZ2_AB_TEXT.length });
+    expect(decoder.decode(await data.previewSource(source.sourceId, 1000))).toBe(BZ2_AB_TEXT);
   });
 
-  it('names the plain file', () => {
-    expect([isGzipName('a.gz'), isGzipName('a.GZ'), isGzipName('q.gzip'), isGzipName('-')]).toEqual([true, true, false, false]);
-    expect([plainName('a.fa.gz'), plainName('a.FA.Gz'), plainName('.gz'), plainName('a.fa')]).toEqual(['a.fa', 'a.FA', 'input', 'a.fa']);
+  const BIG_LINE = '>r\n' + 'ACGT'.repeat(15) + '\n';
+  // 9 MiB of plain text: more than one 8 MiB slice of the file and more than one Blob part.
+  const BIG_TEXT = BIG_LINE.repeat(Math.ceil((9 * 1024 * 1024) / BIG_LINE.length));
+
+  for (const [suffix, pack] of [
+    ['gz', gzipSync],
+    ['zst', zstdCompressSync],
+  ] as const) {
+    it(`inflates a .${suffix} file read in several slices`, async () => {
+      const { data } = service();
+      const source = await data.addSource(new File([pack(BIG_TEXT)], `big.fa.${suffix}`));
+      expect(source).toMatchObject({ name: 'big.fa', size: BIG_TEXT.length });
+      const head = decoder.decode(await data.previewSource(source.sourceId, BIG_LINE.length * 2));
+      expect(head).toBe(BIG_LINE + BIG_LINE);
+    });
+  }
+
+  it('names the compression and the plain file', () => {
+    expect(['a.gz', 'a.GZ', 'a.bz2', 'a.Bz2', 'a.zst', 'a.ZST', 'q.zstd', 'q.bz', 'q.gzip', '-'].map(compressionOfName)).toEqual([
+      'gzip',
+      'gzip',
+      'bzip2',
+      'bzip2',
+      'zstd',
+      'zstd',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(['a.fa.gz', 'a.FA.Gz', 'a.fa.bz2', 'a.fa.zst', '.gz', '.bz2', '.zst', 'a.fa', 'q.zstd'].map(plainName)).toEqual([
+      'a.fa',
+      'a.FA',
+      'a.fa',
+      'a.fa',
+      'input',
+      'input',
+      'input',
+      'a.fa',
+      'q.zstd',
+    ]);
   });
 });

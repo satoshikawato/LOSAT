@@ -446,6 +446,25 @@ pub(crate) fn reported_subjects(
     let mut ordinals: Vec<u32> = ordered.iter().map(|hsp| hsp.hit.s_idx).collect();
     ordinals.sort_unstable();
     ordinals.dedup();
+    // Where only the batches' prefetch reads the subjects (`shown.prefetched`), those with a
+    // Seq-align whose first Std-seg has a minus query frame and a plus subject frame
+    // (`shared::check_prefetched_strands`; `CSeq_align::GetSeqStrand` reads the first segment):
+    // `ordered` holds each query's HSPs of a subject in one run, in the order of the Std-segs
+    // (`seqalign`).
+    let flipped: std::collections::HashSet<u32> = if shown.prefetched {
+        let mut previous = None;
+        ordered
+            .iter()
+            .filter(|hsp| {
+                let run = (hsp.hit.q_idx, hsp.hit.s_idx);
+                std::mem::replace(&mut previous, Some(run)) != Some(run)
+            })
+            .filter(|hsp| hsp.hit.query_frame < 0 && hsp.subject_frame > 0)
+            .map(|hsp| hsp.hit.s_idx)
+            .collect()
+    } else {
+        Default::default()
+    };
     for hsp in ordered.iter_mut() {
         let rank = ordinals
             .binary_search(&hsp.hit.s_idx)
@@ -472,7 +491,22 @@ pub(crate) fn reported_subjects(
                 // Whether `taxdb.bti` is on the search path, looked up at the first sequence
                 // with parsed Seq-ids that outfmt 0 shows (once for the run, `taxdb_found`).
                 let taxdb = shown.pairwise && database.taxdb_found();
-                shared::check_reported_parsed(subject, shown, false, taxdb, ordinal, PROGRAM)?;
+                shared::check_reported_parsed(
+                    &database.db,
+                    subject,
+                    shown,
+                    false,
+                    taxdb,
+                    ordinal,
+                    PROGRAM,
+                )?;
+                shared::check_prefetched_strands(
+                    &database.db,
+                    subject,
+                    flipped.contains(&ordinal),
+                    ordinal,
+                    PROGRAM,
+                )?;
                 if parsed.is_empty() {
                     parsed = vec![None; ordinals.len()];
                 }

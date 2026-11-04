@@ -9529,8 +9529,9 @@ fn run_in_pool(
             // (`BlastnDatabase::prefetch_messages`: the texts of opening it at the run's first
             // lookup, a volume's lookup of a taxid once per run): after the reader's messages
             // of the batch and before the warnings of its first query, which are added below.
-            // They go with the warnings, where the first format is outfmt 0, 5, 6, 7 or 17
-            // (`BlastnOutputFormat::prefetches_subjects`), so every writer of the batch's
+            // They go with the warnings, where the first format is outfmt 0, 5, 6, 7 or 17, or
+            // with `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 or 12, which write the reader's messages
+            // only (`BlastnOutputFormat::prefetches_subjects`), so every writer of the batch's
             // reports writes them there (the reports after the loop, LOSAT_X_RPTSTREAM's
             // batch writes, the error paths that write the reports of the batches before).
             // Without `taxdb.bti` nothing is read. A refusal (a taxonomy database or a taxid

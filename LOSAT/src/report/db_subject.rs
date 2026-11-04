@@ -352,6 +352,12 @@ impl ParsedSubject {
         self.unfetchable
     }
 
+    /// What NCBI's lookup of the Seq-align id finds where that is not this sequence
+    /// (`found_instead`).
+    pub fn found(&self) -> Option<&FoundInstead> {
+        self.found_instead.as_ref()
+    }
+
     /// The subject as the outfmt 0 report of a run with or without `-show_gis` shows it.
     pub fn showing_gis(mut self, show_gis: bool) -> Self {
         self.show_gis = show_gis;

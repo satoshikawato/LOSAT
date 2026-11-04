@@ -1478,10 +1478,19 @@ impl TblastxOutputFormat {
         )
     }
 
+    /// The `-outfmt` number of a Seq-annot format (8, 9 or 12), `None` for the others.
+    pub(crate) fn serial_outfmt(self) -> Option<i32> {
+        match self {
+            Self::Seqalign(serial) => Some(serial.outfmt()),
+            _ => None,
+        }
+    }
+
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
-    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7, 10 and 20,
-    /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
-    /// messages of that prefetch go with the query warnings.
+    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7, 10 and 20; with
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
+    /// the call's first report, the taxonomy database's messages of that prefetch go with the
+    /// query warnings.
     pub(crate) fn prefetches_subjects(self) -> bool {
         crate::algorithm::common::database::prefetches_subjects(match self {
             Self::Pairwise => Some(0),
@@ -1496,9 +1505,10 @@ impl TblastxOutputFormat {
                 crate::report::tabular::TabularKind::Commented => 7,
                 _ => 6,
             }),
-            // The Seq-annots and the archive fetch nothing; XML2 and JSON write the messages
-            // at each `Hit` (`TaxdbPrinter`).
-            Self::Seqalign(_) | Self::Archive | Self::Xml2(_) => None,
+            Self::Seqalign(serial) => Some(serial.outfmt()),
+            // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
+            // (`TaxdbPrinter`).
+            Self::Archive | Self::Xml2(_) => None,
         })
     }
 }

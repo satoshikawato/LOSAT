@@ -1574,6 +1574,10 @@ pub(crate) struct ParsedShown {
     pub(crate) taxonomy: bool,
     /// The subject ids that the tabular formats print (`ParsedSubject::check_printed_word`).
     pub(crate) words: crate::report::tabular::PrintedIds,
+    /// Whether the batches' prefetch reads the subjects by their Seq-align ids though the first
+    /// format writes the Seq-align ids alone: the Seq-annots with
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647` ([`seq_annots_prefetch`]; `check_prefetched_parsed`).
+    pub(crate) prefetched: bool,
 }
 
 impl ParsedShown {
@@ -1589,9 +1593,12 @@ impl ParsedShown {
 /// the reports `shown` (`protein` for a protein database; `taxdb_found`: `SeqDb::taxdb_found`),
 /// as BLASTX's (`blastx::database::ReportedSubjects::for_batch`): a sequence that NCBI's
 /// formatters do not find by its Seq-align id, an outfmt 0 description or heading that LOSAT
-/// does not write as NCBI (`check_shown_parsed_subject`), and a tabular id that it does not
-/// write as NCBI (`ParsedSubject::tabular_ids`).
+/// does not write as NCBI (`check_shown_parsed_subject`), a tabular id that it does not
+/// write as NCBI (`ParsedSubject::tabular_ids`), and where only the prefetch reads the subject
+/// (`shown.prefetched`), what it cannot read as NCBI does (`check_prefetched_parsed`). `db` is
+/// the subject's database.
 pub(crate) fn check_reported_parsed(
+    db: &SeqDb,
     subject: &crate::report::db_subject::ParsedSubject,
     shown: ParsedShown,
     protein: bool,
@@ -1603,6 +1610,8 @@ pub(crate) fn check_reported_parsed(
         subject
             .fetched(shown.taxonomy)
             .map_err(|reason| parsed_refusal(ordinal, &reason, program))?;
+    } else if shown.prefetched {
+        check_prefetched_parsed(db, subject, ordinal, program)?;
     }
     if shown.pairwise {
         check_shown_parsed_subject(subject, protein, taxdb_found, ordinal, program)?;
@@ -1741,6 +1750,7 @@ pub(crate) fn reports_may_refuse(
             }
             Ok(ReportedHeader::Parsed(subject)) => {
                 check_reported_parsed(
+                    db,
                     &subject,
                     shown,
                     protein,
@@ -1755,7 +1765,11 @@ pub(crate) fn reports_may_refuse(
                     kept.keys.extend(keys.into_iter().map(|key| (key, ordinal)));
                 }
                 if prefetch {
-                    kept.taxids.extend(subject.volume_taxids());
+                    match prefetch_reads_itself(db, &subject, true, program) {
+                        Ok(Ok(true)) => kept.taxids.extend(subject.volume_taxids()),
+                        Ok(Ok(false)) => {}
+                        Ok(Err(_)) | Err(_) => return Err(ReportRefusal::Taxonomy),
+                    }
                 }
             }
             Err(_) => return Err(ReportRefusal::Headers),
@@ -2764,8 +2778,21 @@ pub(crate) fn prefetch_messages<'s>(
         }
         // `x_GetTaxonomy` asks for a positive taxid only (seqdbvol.cpp:1136); one definition
         // line per sequence without parsed Seq-ids (`stored_title`).
+        // A subject with parsed Seq-ids is read by its Seq-align id (`prefetch_reads_itself`):
+        // every subject that a report reads the Bioseq of is itself (`ParsedSubject::fetched`
+        // refused the others), as are psiblast's kept beyond its cut (`prefetched_ranks`).
         let volume_taxids: Vec<i32> = match parsed {
-            Some(subject) => subject.volume_taxids(),
+            Some(subject) => match prefetch_reads_itself(db, subject, true, program)? {
+                Ok(true) => subject.volume_taxids(),
+                Ok(false) => continue,
+                Err(reason) => {
+                    return Err(parsed_refusal(
+                        ordinal,
+                        &format!("{reason}, {PREFETCH_READS_IT}"),
+                        program,
+                    ))
+                }
+            },
             None => db
                 .defline_taxids(ordinal)
                 .map_err(|error| database_error(error, program))?
@@ -2847,13 +2874,228 @@ fn taxonomy_cache_collision(db: &SeqDb, last: i32) -> Option<(usize, i32)> {
     None
 }
 
+/// The end of the reason of a refusal by [`prefetch_reads_itself`] where no report reads the
+/// subject's Bioseq.
+const PREFETCH_READS_IT: &str = "and NCBI BLAST+ 2.17.0's prefetch reads it by that id though the report writes the Seq-align id alone (outfmt 8, 9 and 12 with PRE_FETCH_SEQS_LIMIT=2147483647)";
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1340-1355
+// ```c++
+//         ITERATE(TDeflines, iter, orig_deflines->Get()) {
+//             if ((seqid.NotEmpty() && s_SeqDB_SeqIdIn((**iter).GetSeqid(), *seqid)) ||
+//                 (seqid_lcl.NotEmpty() && s_SeqDB_SeqIdIn((**iter).GetSeqid(), *seqid_lcl))) {
+//                 filt_dl = *iter;
+//                 break;
+//             }
+//         }
+//
+//         if (filt_dl.Empty()) {
+//             NCBI_THROW(CSeqDBException, eArgErr,
+//                        "Error: oid headers do not contain target gi/seq_id.");
+// ```
+// The prefetch rethrows a `CSeqDBException` (`BlastFormatter_PreFetchSequenceData`, quoted at
+// `ParsedSubject::prefetched`): NCBI stops with `BLAST Database error` (exit 2; probe of line DBID
+// P3, `pdb|1ABC|A` and `pdb|1abc|A` in the two databases of `ids/pshare_cd`).
+/// What NCBI's prefetch reads for the subject with parsed Seq-ids `subject`, which it loads by its
+/// Seq-align id where no report may read its Bioseq (psiblast's traceback hit lists beyond
+/// `-max_target_seqs`, the Seq-annots of `ParsedShown::prefetched`; `ParsedSubject::prefetched`):
+/// `Ok(true)` the subject itself (`ParsedSubject::volume_taxids`), `Ok(false)` nothing whose
+/// lookups write a text, and `Err` with the reason of LOSAT's refusal: a lookup that fails (NCBI's
+/// prefetch writes `Error pre-fetching sequence data` and reads no other subject of the batch),
+/// another sequence that NCBI's data loader can take for it whose definition lines hold no id that
+/// `s_SeqDB_SeqIdIn` takes for the Seq-align id (`DeflineSet::bioseq_defline`: `GetBioseq`
+/// throws and NCBI stops), and with `texts` (`taxdb.bti` on the search path) another sequence
+/// whose lookups can write other texts than LOSAT's (`lookup_texts_differ`). Without `texts` a
+/// subject that the loader can read as another sequence is left out. The other sequence's
+/// definition lines are read from `db`.
+pub(crate) fn prefetch_reads_itself(
+    db: &SeqDb,
+    subject: &crate::report::db_subject::ParsedSubject,
+    texts: bool,
+    program: &str,
+) -> Result<std::result::Result<bool, String>> {
+    use crate::report::db_subject::Prefetched;
+    let (other, or_itself, reason) = match subject.prefetched() {
+        Prefetched::Itself => return Ok(Ok(true)),
+        Prefetched::Nothing => return Ok(Ok(false)),
+        Prefetched::Failed(reason) => return Ok(Err(reason)),
+        Prefetched::Another {
+            other: None,
+            reason,
+            ..
+        } => return Ok(if texts { Err(reason) } else { Ok(false) }),
+        Prefetched::Another {
+            other: Some(other),
+            or_itself,
+            reason,
+        } => (other, or_itself, reason),
+    };
+    let set = db
+        .defline_set(other)
+        .map_err(|error| database_error(error, program))?;
+    // `x_GetOid` keeps the OID only where one of its ids compares equal to the Seq-align id
+    // (bdbloader.cpp), else the prefetch reads nothing; the subject that another sequence also
+    // holds can be read as that sequence through the ids of a blob read before (`or_itself`).
+    let equal = set
+        .deflines
+        .iter()
+        .flat_map(|defline| &defline.ids)
+        .any(|id| {
+            crate::seqid::defline_set::compare(id, subject.alignment_id())
+                == crate::seqid::defline_set::Sic::Yes
+        });
+    if (or_itself || equal) && set.bioseq_defline(subject.alignment_id()).is_none() {
+        return Ok(Err(format!(
+            "{reason}; NCBI BLAST+ 2.17.0 can read that sequence for it, whose definition lines do not hold the Seq-align id, and then stops (oid headers do not contain target gi/seq_id)"
+        )));
+    }
+    if !texts {
+        return Ok(Ok(false));
+    }
+    let mut other_taxids: Vec<i32> = Vec::new();
+    for defline in &set.deflines {
+        if let Some(taxid) = defline.taxid.filter(|&taxid| taxid > 0) {
+            if !other_taxids.contains(&taxid) {
+                other_taxids.push(taxid);
+            }
+        }
+    }
+    let own = subject.volume_taxids();
+    let (choices, keep): (Vec<&[i32]>, bool) = if or_itself {
+        (vec![&own, &other_taxids], true)
+    } else {
+        let read: &[i32] = if equal { &other_taxids } else { &[] };
+        (vec![read, &[]], false)
+    };
+    if lookup_texts_differ(db, &choices) {
+        return Ok(Err(reason));
+    }
+    Ok(Ok(keep))
+}
+
+/// LOSAT's refusal of the reported sequence `ordinal` with parsed Seq-ids `subject` where the
+/// batches' prefetch reads it though no report reads its Bioseq (`ParsedShown::prefetched`), with
+/// or without `taxdb.bti` on the search path: a lookup that fails and another sequence whose
+/// definition lines do not hold its Seq-align id ([`prefetch_reads_itself`] without texts; the
+/// texts are `prefetch_messages`'s).
+pub(crate) fn check_prefetched_parsed(
+    db: &SeqDb,
+    subject: &crate::report::db_subject::ParsedSubject,
+    ordinal: u32,
+    program: &str,
+) -> Result<()> {
+    match prefetch_reads_itself(db, subject, false, program)? {
+        Ok(_) => Ok(()),
+        Err(reason) => Err(parsed_refusal(
+            ordinal,
+            &format!("{reason}, {PREFETCH_READS_IT}"),
+            program,
+        )),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1113-1134
+// ```c++
+// 	CScope::TBioseqHandles bhs = scope->GetBioseqHandles(ids);
+//     ...
+//     ITERATE(CScope::TBioseqHandles, it, bhs) {
+//     	CRef<CDelta_seq> seq(new CDelta_seq);
+// 	    CSeq_interval& interval = seq->SetLoc().SetInt();
+// 	    interval.SetId(*SerialClone(*it->GetAccessSeq_id_Handle().GetSeqId()));
+// 	    if (ranges[i].GetFrom() > ranges[i].GetToOpen()) {
+// 	    	TSeqPos length = it->GetBioseqLength();
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:679-687
+// ```c++
+//             CConstRef<CSeq_id> subj(&(*aln)->GetSeq_id(kSubjRow));
+//             TSeqRange subj_range((*aln)->GetSeqRange(kSubjRow));
+//             if ((*aln)->GetSeqStrand(kQueryRow) == eNa_strand_minus &&
+//                 (*aln)->GetSeqStrand(kSubjRow) == eNa_strand_plus) {
+//                 TSeqRange r(subj_range);
+//                 // flag the range as needed to be flipped once the sequence
+//                 // length is known
+// ```
+// A Seq-align on the query's minus strand and the subject's plus strand (BLASTN's minus-strand
+// HSPs, TBLASTX's of a minus query frame and a plus subject frame: the strand of the first
+// Std-seg) asks the handle for the length; a null handle throws, which the prefetch catches with
+// `Error pre-fetching sequence data` (probe of line DBID P3: `lcl|777` before `gi|777` in
+// `ids/nrefuse_v5`, TBLASTX). The protein side of TBLASTN and BLASTX has no strand.
+/// Whether NCBI's prefetch gets no Bioseq of the subject with parsed Seq-ids `subject` by its
+/// Seq-align id (a null handle of `GetBioseqHandles`): a subject whose definition line the
+/// formatters do not find (`ParsedSubject::unfetchable`; its blob is read, with its taxids), one
+/// that the lookup finds nowhere, and one that it finds as another sequence that `x_GetOid` does
+/// not keep (none of its ids compares equal to the Seq-align id). Where the batch has a Seq-align
+/// of it on the query's minus strand and the subject's plus strand, NCBI's prefetch fails:
+/// [`check_prefetched_strands`].
+fn prefetch_gets_no_bioseq(
+    db: &SeqDb,
+    subject: &crate::report::db_subject::ParsedSubject,
+    program: &str,
+) -> Result<bool> {
+    use crate::report::db_subject::FoundInstead;
+    if subject.unfetchable() {
+        return Ok(true);
+    }
+    Ok(match subject.found() {
+        Some(FoundInstead::Nothing) => true,
+        Some(FoundInstead::Sequence(other)) => !db
+            .defline_set(*other)
+            .map_err(|error| database_error(error, program))?
+            .deflines
+            .iter()
+            .flat_map(|defline| &defline.ids)
+            .any(|id| {
+                crate::seqid::defline_set::compare(id, subject.alignment_id())
+                    == crate::seqid::defline_set::Sic::Yes
+            }),
+        _ => false,
+    })
+}
+
+/// LOSAT's refusal of the reported sequence `ordinal` with parsed Seq-ids `subject` where the
+/// batches' prefetch reads it though no report reads its Bioseq (`ParsedShown::prefetched`) and
+/// `flipped`: the batch has a Seq-align of it on the query's minus strand and the subject's plus
+/// strand, whose length NCBI's prefetch asks for. Where it gets no Bioseq of the subject
+/// (`prefetch_gets_no_bioseq`), NCBI writes `Error pre-fetching sequence data`.
+pub(crate) fn check_prefetched_strands(
+    db: &SeqDb,
+    subject: &crate::report::db_subject::ParsedSubject,
+    flipped: bool,
+    ordinal: u32,
+    program: &str,
+) -> Result<()> {
+    if flipped && prefetch_gets_no_bioseq(db, subject, program)? {
+        return Err(parsed_refusal(
+            ordinal,
+            &format!(
+                "has the Seq-align id {}, of which NCBI BLAST+ 2.17.0's prefetch gets no sequence, and a Seq-align on the minus strand of the query and the plus strand of the subject, whose length the prefetch then fails to read (Error pre-fetching sequence data), {PREFETCH_READS_IT}",
+                String::from_utf8_lossy(&subject.alignment_fasta())
+            ),
+            program,
+        ));
+    }
+    Ok(())
+}
+
+/// Whether the batches of a `-db` search prefetch their reported subjects though the first format
+/// `outfmt` writes the Seq-align ids alone: outfmt 8, 9 and 12 with
+/// `PRE_FETCH_SEQS_LIMIT=2147483647` ([`prefetches_subjects`]; `ParsedShown::prefetched`).
+pub(crate) fn seq_annots_prefetch(outfmt: Option<i32>) -> bool {
+    matches!(outfmt, Some(8 | 9 | 12)) && prefetches_subjects(outfmt)
+}
+
 /// Whether the first format of a call is one whose batches prefetch their reported subjects
-/// and that shows no taxonomy of them (`prefetch_messages`): outfmt 0, 5, 6, 7 and 17. The
-/// query warnings, which the batch's messages go with, are written with the first format; the
-/// XML2 and JSON formats write theirs at each `Hit` (`TaxdbPrinter`), and the Seq-annots and the
-/// archive prefetch nothing.
+/// and that shows no taxonomy of them (`prefetch_messages`): outfmt 0, 5, 6, 7 and 17, and with
+/// `PRE_FETCH_SEQS_LIMIT=2147483647` the Seq-annots 8, 9 and 12 too (`s_PreFetchSeqs`, quoted at
+/// [`prefetch_may_be_off`], returns before its test of the format). The query warnings, which
+/// the batch's messages go with, are written with the first format (the Seq-annots write only
+/// the reader's); the XML2 and JSON formats write theirs at each `Hit` (`TaxdbPrinter`), and the
+/// archive, which NCBI writes without calling the prefetch, prefetches nothing.
 pub(crate) fn prefetches_subjects(outfmt: Option<i32>) -> bool {
-    matches!(outfmt, Some(0 | 5 | 6 | 7 | 17))
+    match outfmt {
+        Some(0 | 5 | 6 | 7 | 17) => true,
+        Some(8 | 9 | 12) => prefetch_seqs_limit() == Some(i32::MAX),
+        _ => false,
+    }
 }
 
 /// How many taxonomy database entries cost as much to check as one database sequence: the
@@ -3417,6 +3659,77 @@ mod taxdb_prepass_tests {
                 (got, _) => panic!("{name} {ordinal}: {got:?}"),
             }
         }
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    #[test]
+    fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
+        // Line DBID P3 (probes of `blastdb-ids-20261021/R/intmaxpf`): where no report reads the
+        // Bioseq, `prefetch_reads_itself` without texts (no `taxdb.bti` on this search path).
+        let cwd = empty_cwd("prefetch_reads");
+        let stops = "and then stops (oid headers do not contain target gi/seq_id)";
+        for (name, ordinal, want) in [
+            // `pdb|1ABC|A` of pshare_c and `pdb|1abc|A` of pshare_d: the scope can read the
+            // other, whose definition lines do not hold the id (NCBI exit 2).
+            ("ids/pshare_cd", 0, Err(stops)),
+            // `lcl|555`, which sequence 1 also holds in a second definition line: read as it or
+            // as itself, nothing to refuse without texts.
+            ("ids/pshare_v5", 0, Ok(false)),
+            ("ids/pshare_v5", 1, Ok(true)),
+            // `gnl|BL_ORD_ID|0` stored with a text tag.
+            (
+                "ids/pshare_v5",
+                2,
+                Err("whose lookup in the database fails"),
+            ),
+            // An id that the lookup finds nowhere, and one that it finds first on sequence 5,
+            // none of whose ids compares equal: nothing is read.
+            ("ids/plook_v5", 4, Ok(false)),
+            ("ids/plook_v5", 6, Ok(false)),
+        ] {
+            let db = db_search(name, None, &cwd);
+            let headers = HeaderReader::new(&db);
+            let ReportedHeader::Parsed(subject) =
+                read_header(&headers, ordinal, 0, "BLASTP").unwrap()
+            else {
+                panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
+            };
+            match (
+                prefetch_reads_itself(&db, &subject, false, "BLASTP").unwrap(),
+                want,
+            ) {
+                (Ok(got), Ok(want)) => assert_eq!(got, want, "{name} {ordinal}"),
+                (Err(reason), Err(text)) => {
+                    assert!(reason.contains(text), "{name} {ordinal}: {reason}")
+                }
+                (got, _) => panic!("{name} {ordinal}: {got:?}"),
+            }
+            let check = check_prefetched_parsed(&db, &subject, ordinal, "BLASTP");
+            assert_eq!(check.is_err(), want.is_err(), "{name} {ordinal}");
+        }
+        // `lcl|777` before `gi|777`: the formatters do not find the Bioseq, which the prefetch
+        // reads as itself; it fails where it asks for the length (a minus-strand alignment).
+        let search = SearchPath::new(&cwd, None, None).unwrap();
+        let path = root().join("db_search/ids/nrefuse_v5");
+        let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+        let headers = HeaderReader::new(&db);
+        let ReportedHeader::Parsed(subject) = read_header(&headers, 0, 0, "TBLASTX").unwrap()
+        else {
+            panic!("nrefuse_v5 0: a sequence with parsed Seq-ids");
+        };
+        assert!(subject.unfetchable());
+        assert_eq!(
+            prefetch_reads_itself(&db, &subject, true, "TBLASTX").unwrap(),
+            Ok(true)
+        );
+        assert!(check_prefetched_strands(&db, &subject, false, 0, "TBLASTX").is_ok());
+        let refused = check_prefetched_strands(&db, &subject, true, 0, "TBLASTX")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("whose length the prefetch then fails to read"),
+            "{refused}"
+        );
         std::fs::remove_dir_all(&cwd).unwrap();
     }
 

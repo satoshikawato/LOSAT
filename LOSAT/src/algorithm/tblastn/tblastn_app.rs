@@ -1602,7 +1602,8 @@ fn search(
         // (`TblastnDatabase::prefetch_messages`: the texts of opening it at the run's first
         // lookup, a volume's lookup of a taxid once per run): after the reader's messages of the
         // batch and before the warnings of its first query. They go with the warnings, where the
-        // first format is outfmt 0, 5, 6 or 7 (`database::prefetches_subjects`); XML2 and JSON
+        // first format is outfmt 0, 5, 6 or 7, or with `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 or
+        // 12, which write the reader's messages only (`database::prefetches_subjects`); XML2 and JSON
         // write theirs at each `Hit` (`TaxdbPrinter`). They are read here, after the refusals of
         // the reported subjects and before any format is written, so a refusal (a taxonomy
         // database or a taxid that LOSAT cannot read as NCBI does) comes before any byte, as
@@ -1901,6 +1902,9 @@ fn parsed_shown(
                     ))
                 },
             ),
+        prefetched: crate::algorithm::common::database::seq_annots_prefetch(
+            numbers.first().copied(),
+        ),
     }
 }
 

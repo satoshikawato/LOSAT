@@ -257,7 +257,7 @@ describe('DataService runs and storage status', () => {
   });
 });
 
-describe('DataService sources named .gz, .bz2 or .zst', () => {
+describe('DataService sources named .gz or .zst', () => {
   const A = '>a one\nACGT\n';
   const B = '>b two\nGGCC\nTT\n';
   const RECORDS = [
@@ -265,13 +265,8 @@ describe('DataService sources named .gz, .bz2 or .zst', () => {
     ['b', 6],
   ];
   const bytes = (base64: string) => Buffer.from(base64, 'base64');
-  // One bzip2 stream of `>a\nACGT...TTT\n`, and two streams (that record, then `>b\nTTTT...\n`).
-  const BZ2_A =
-    'QlpoOTFBWSZTWSPZP5cAAAHPAEAQAAEogAQAIAAgADEMCBmqbRqZ1mPE/TlEyiZomF+LuSKcKEgR7J/LgA==';
-  const BZ2_AB =
-    'QlpoOTFBWSZTWSPZP5cAAAHPAEAQAAEogAQAIAAgADEMCBmqbRqZ1mPE/TlEyiZomF+LuSKcKEgR7J/LgEJaaDkxQVkmU1ko1BM1AAAFTwBAEAABKIAEABAAIAAxDAgSKejSTDSkzrBQomUTKJ73xdyRThQkCjUEzUA=';
-  const BZ2_A_TEXT = '>a\nACGTACGTACGTACGTACGTACGTAAAACCCGGGTTT\n';
-  const BZ2_AB_TEXT = BZ2_A_TEXT + '>b\nTTTTGGGGCCCCAAAATTTTGGGGCCCCAAAA\n';
+  const A_TEXT = '>a\nACGTACGTACGTACGTACGTACGTAAAACCCGGGTTT\n';
+  const AB_TEXT = A_TEXT + '>b\nTTTTGGGGCCCCAAAATTTTGGGGCCCCAAAA\n';
   // pzstd output: a skippable frame, then one frame.
   const PZSTD =
     'UCpNGAQAAAA/AAAAKLUv/QRYlQEAhAI+YQpBQ0dUQUFBQ0NDR0dHVFRUCj5iClRUVFRHR0dHQ0NDQ0FBQUEKAgCYibw/ZwTZFtvJ';
@@ -279,26 +274,23 @@ describe('DataService sources named .gz, .bz2 or .zst', () => {
   const formats = [
     { suffix: 'gz', label: 'gzip', pack: (t: string) => gzipSync(t), two: () => Buffer.concat([gzipSync(A), gzipSync(B)]) },
     { suffix: 'zst', label: 'zstd', pack: (t: string) => zstdCompressSync(t), two: () => Buffer.concat([zstdCompressSync(A), zstdCompressSync(B)]) },
-    { suffix: 'bz2', label: 'bzip2', pack: undefined, two: undefined },
   ] as const;
 
   for (const f of formats) {
-    if (f.pack !== undefined && f.two !== undefined) {
-      const { pack, two } = f;
-      it(`inflates every part of a concatenated .${f.suffix} file and keeps the plain name`, async () => {
-        const { data } = service({ readChunkBytes: 5 });
-        const source = await data.addSource(new File([two()], `two.fa.${f.suffix}`));
-        expect(source).toEqual({ sourceId: 'token-1', name: 'two.fa', size: (A + B).length });
-        const revision = await data.indexSource(source.sourceId, 1);
-        expect(revision.records.map((r) => [r.id, r.length])).toEqual(RECORDS);
-      });
+    const { pack, two } = f;
+    it(`inflates every part of a concatenated .${f.suffix} file and keeps the plain name`, async () => {
+      const { data } = service({ readChunkBytes: 5 });
+      const source = await data.addSource(new File([two()], `two.fa.${f.suffix}`));
+      expect(source).toEqual({ sourceId: 'token-1', name: 'two.fa', size: (A + B).length });
+      const revision = await data.indexSource(source.sourceId, 1);
+      expect(revision.records.map((r) => [r.id, r.length])).toEqual(RECORDS);
+    });
 
-      it(`takes the .${f.suffix} suffix in any case`, async () => {
-        const { data } = service();
-        const source = await data.addSource(new File([pack(A)], `x.FA.${f.suffix.toUpperCase()}`));
-        expect(source).toMatchObject({ name: 'x.FA', size: A.length });
-      });
-    }
+    it(`takes the .${f.suffix} suffix in any case`, async () => {
+      const { data } = service();
+      const source = await data.addSource(new File([pack(A)], `x.FA.${f.suffix.toUpperCase()}`));
+      expect(source).toMatchObject({ name: 'x.FA', size: A.length });
+    });
 
     it(`refuses a file named .${f.suffix} that is not ${f.label} data`, async () => {
       const { data } = service();
@@ -308,38 +300,22 @@ describe('DataService sources named .gz, .bz2 or .zst', () => {
     });
   }
 
-  it('inflates a bzip2 file of one stream and of two streams (pbzip2, cat)', async () => {
-    const { data } = service({ readChunkBytes: 7 });
-    const one = await data.addSource(new File([bytes(BZ2_A)], 'one.fa.bz2'));
-    expect(one).toMatchObject({ name: 'one.fa', size: BZ2_A_TEXT.length });
-    const two = await data.addSource(new File([bytes(BZ2_AB)], 'two.fa.bz2'));
-    expect(two).toMatchObject({ name: 'two.fa', size: BZ2_AB_TEXT.length });
-    const revision = await data.indexSource(two.sourceId, 1);
-    expect(revision.records.map((r) => [r.id, r.length])).toEqual([
-      ['a', 37],
-      ['b', 32],
-    ]);
-    expect(decoder.decode(await data.previewSource(two.sourceId, 1000))).toBe(BZ2_AB_TEXT);
-  });
-
-  it('takes the .bz2 suffix in any case', async () => {
+  it('refuses a file named .bz2 in any case and adds no source', async () => {
     const { data } = service();
-    const source = await data.addSource(new File([bytes(BZ2_A)], 'x.FA.BZ2'));
-    expect(source).toMatchObject({ name: 'x.FA', size: BZ2_A_TEXT.length });
-  });
-
-  it('refuses a bzip2 file that starts with other bytes or is cut short', async () => {
-    const { data } = service();
-    const good = bytes(BZ2_A);
-    await expect(data.addSource(new File([Buffer.concat([Buffer.from('xx'), good])], 'late.fa.bz2'))).rejects.toThrow('late.fa.bz2 is named .bz2 but is not bzip2 data (');
-    await expect(data.addSource(new File([good.subarray(0, 30)], 'cut.fa.bz2'))).rejects.toThrow('cut.fa.bz2 is named .bz2 but is not bzip2 data (');
+    for (const name of ['x.fa.bz2', 'x.fa.BZ2', 'x.fa.Bz2']) {
+      await expect(data.addSource(new File([A], name))).rejects.toThrow(
+        `'${name}' is named .bz2; the web app reads .gz and .zst, not bzip2 (the command line does)`,
+      );
+    }
+    // A refused file takes no token: the next source is the first.
+    expect(await data.addSource(new File([A], 'ok.fa'))).toMatchObject({ sourceId: 'token-1' });
   });
 
   it('inflates a pzstd file: a skippable frame and then a frame', async () => {
     const { data } = service();
     const source = await data.addSource(new File([bytes(PZSTD)], 'p.fa.zst'));
-    expect(source).toMatchObject({ name: 'p.fa', size: BZ2_AB_TEXT.length });
-    expect(decoder.decode(await data.previewSource(source.sourceId, 1000))).toBe(BZ2_AB_TEXT);
+    expect(source).toMatchObject({ name: 'p.fa', size: AB_TEXT.length });
+    expect(decoder.decode(await data.previewSource(source.sourceId, 1000))).toBe(AB_TEXT);
   });
 
   const BIG_LINE = '>r\n' + 'ACGT'.repeat(15) + '\n';
@@ -363,8 +339,8 @@ describe('DataService sources named .gz, .bz2 or .zst', () => {
     expect(['a.gz', 'a.GZ', 'a.bz2', 'a.Bz2', 'a.zst', 'a.ZST', 'q.zstd', 'q.bz', 'q.gzip', '-'].map(compressionOfName)).toEqual([
       'gzip',
       'gzip',
-      'bzip2',
-      'bzip2',
+      undefined,
+      undefined,
       'zstd',
       'zstd',
       undefined,
@@ -375,10 +351,10 @@ describe('DataService sources named .gz, .bz2 or .zst', () => {
     expect(['a.fa.gz', 'a.FA.Gz', 'a.fa.bz2', 'a.fa.zst', '.gz', '.bz2', '.zst', 'a.fa', 'q.zstd'].map(plainName)).toEqual([
       'a.fa',
       'a.FA',
-      'a.fa',
+      'a.fa.bz2',
       'a.fa',
       'input',
-      'input',
+      '.bz2',
       'input',
       'a.fa',
       'q.zstd',

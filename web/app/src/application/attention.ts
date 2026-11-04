@@ -202,24 +202,37 @@ export class Attention {
       if (generation === this.probeGeneration && resume !== undefined) this.set({ resume: { ...resume, ...change } });
     };
     let answered = false;
+    const responded = () => {
+      answered = true;
+      clearTimeout(timer);
+    };
     const timer = setTimeout(() => {
       if (!answered) report({ dataWorker: 'not-responding' });
     }, this.deps.probeTimeoutMs ?? 10_000);
     // A late answer still corrects the report.
     this.deps.probe().then(
       () => {
-        answered = true;
-        clearTimeout(timer);
+        responded();
         report({ dataWorker: 'responding' });
       },
       () => {
-        answered = true;
-        clearTimeout(timer);
+        // The answer of the check below already showed that the Data worker answers.
+        if (answered) return;
+        responded();
         report({ dataWorker: 'not-responding' });
       },
     );
+    // Its answer is also an answer of the Data worker: what it found is shown even when `probe` is late or refused.
     this.deps.checkStored().then(
-      (check) => report({ stored: 'checked', removed: this.completed(check.removed), unreadable: this.completed(check.unreadable) }),
+      (check) => {
+        responded();
+        report({
+          dataWorker: 'responding',
+          stored: 'checked',
+          removed: this.completed(check.removed),
+          unreadable: this.completed(check.unreadable),
+        });
+      },
       () => report({ stored: 'failed' }),
     );
   }

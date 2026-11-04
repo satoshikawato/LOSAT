@@ -11,7 +11,7 @@ defineEmits<{ dismiss: [] }>();
 const lost = computed(() => lostResultsText(props.report.removed, props.report.unreadable));
 /** Until the Data worker has answered and the check of the stored results has ended (it has no time limit). */
 const checking = computed(() => props.report.dataWorker === 'checking' || props.report.stored === 'checking');
-/** The Data worker did not answer, or refused the check of the stored results. */
+/** The Data worker answered neither the probe nor the check in time, or refused the check of the stored results. */
 const silent = computed(() => props.report.dataWorker === 'not-responding' || props.report.stored === 'failed');
 </script>
 

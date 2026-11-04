@@ -403,7 +403,11 @@ describe('resume report', () => {
   });
 
   it("is 'not-responding' when the probe rejects", async () => {
-    const { page, state } = setup({ runs: [run('a', 1, 'running')], probe: () => Promise.reject(new Error('gone')) });
+    const { page, state } = setup({
+      runs: [run('a', 1, 'running')],
+      probe: () => Promise.reject(new Error('gone')),
+      checkStored: () => new Promise(() => undefined), // an answer of the check is an answer of the Data worker too
+    });
     page.setVisible(false);
     page.setVisible(true);
     expect(state().resume?.dataWorker).toBe('checking');
@@ -415,6 +419,7 @@ describe('resume report', () => {
     const { page, state } = setup({
       runs: [run('a', 1, 'running')],
       probe: () => new Promise(() => undefined),
+      checkStored: () => new Promise(() => undefined),
       probeTimeoutMs: 20,
     });
     page.setVisible(false);
@@ -521,6 +526,7 @@ describe('resume report', () => {
     const { page, state } = setup({
       runs: [run('a', 1, 'running')],
       probe: () => new Promise<void>((resolve) => (answer = resolve)),
+      checkStored: () => new Promise(() => undefined),
       probeTimeoutMs: 20,
     });
     page.setVisible(false);
@@ -579,6 +585,44 @@ describe('resume report', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it('shows what the check found when it answers after the Data worker missed probeTimeoutMs', async () => {
+      vi.useFakeTimers();
+      try {
+        const { page, state } = setup({
+          runs: [run('a', 1, 'completed'), run('b', 2, 'running')],
+          // storageInfo waits for navigator.storage.estimate(), which can be slow.
+          probe: () => new Promise((resolve) => setTimeout(resolve, 20_000)),
+          checkStored: () => new Promise((resolve) => setTimeout(() => resolve({ removed: ['a'], unreadable: [] }), 15_000)),
+          probeTimeoutMs: 10_000,
+        });
+        page.setVisible(false);
+        page.setVisible(true);
+        await vi.advanceTimersByTimeAsync(10_001);
+        expect(state().resume).toMatchObject({ dataWorker: 'not-responding', stored: 'checking' });
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked', removed: [1] });
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked', removed: [1] });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps 'responding' when the Data worker answered the check and then refuses `probe`", async () => {
+      let refuse: (error: Error) => void = () => undefined;
+      const { page, state } = setup({
+        runs: [run('a', 1, 'running')],
+        probe: () => new Promise((_, reject) => (refuse = reject)),
+      });
+      page.setVisible(false);
+      page.setVisible(true);
+      await flush();
+      expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked' });
+      refuse(new Error('late'));
+      await flush();
+      expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked' });
     });
 
     it("is 'failed' when the Data worker refuses the check, and the Data worker's answer stays its own", async () => {

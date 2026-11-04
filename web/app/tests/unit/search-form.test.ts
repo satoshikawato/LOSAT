@@ -30,6 +30,7 @@ import {
   fastaParser,
   MATRICES,
   PROGRAMS,
+  PROTEIN_GAP_COSTS,
   PROTEIN_WORD_SIZES,
   programById,
   residueUnit,
@@ -567,13 +568,14 @@ describe("NCBI's pair selects: Match/Mismatch Scores and Gap Costs", () => {
     expect(pairList(tblastn, tblastnGaps, { '-matrix': 'IDENTITY' }, tn)).toEqual([]);
     expect(pairList(tblastn, tblastnGaps, { '-matrix': 'constructor' }, tn)).toEqual([]);
     expect(setField(tblastn, {}, '-matrix', '__proto__', tn)).toEqual({ '-matrix': '__proto__' });
-    expect(pairList(blastp, proteinGaps, {}, bp)).toEqual(['11 1']);
-    expect(pairList(blastp, proteinGaps, { '-matrix': 'BLOSUM45' }, bp)).toEqual(['11 1']);
+    // BLASTP's list is NCBI's of BLOSUM62, the one matrix that LOSAT's BLASTP reads.
+    expect(pairList(blastp, proteinGaps, {}, bp)).toEqual(PROTEIN_GAP_COSTS.lists.BLOSUM62);
+    expect(pairList(blastp, proteinGaps, { '-matrix': 'BLOSUM45' }, bp)).toEqual([]);
     expect(pairList(programById('blastx'), pairRows(programById('blastx'))[0]!, {}, optionsOf('blastx'))).toEqual(['11 1']);
   });
 
   it("give each matrix's list NCBI's default, which is the engine's default for that matrix", () => {
-    for (const id of ['tblastn'] as const) {
+    for (const id of ['tblastn', 'blastp'] as const) {
       const program = programById(id);
       const pair = pairRows(program)[0]!;
       for (const [matrix, value] of Object.entries(pair.select.defaults ?? {})) {

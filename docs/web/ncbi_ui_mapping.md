@@ -66,7 +66,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 |---|---|
 | Max target sequences | 10、50、100、250、500、1000、5000（NCBI の既定は 100、LOSAT は CLI の 500） |
 | Word size | megablast 16、20、24、28、32、48、64／dc-megablast 11、12／blastn と blastn-short 7、11、15／TBLASTN 2、3、5、6／BLASTP と BLASTX 3、5（LOSAT の BLASTP・BLASTX が読む値だけ、DW-36、WA-FM-02）／TBLASTX 3（NCBI は 2、3。LOSAT の TBLASTX は 3 だけ） |
-| Matrix | PAM30、PAM70、BLOSUM90、BLOSUM80、BLOSUM62、BLOSUM50、BLOSUM45、PAM250（NCBI の順）／BLASTP と BLASTX は BLOSUM62 だけ（LOSAT の BLASTP・BLASTX が読む行列。Gap Costs も 11 / 1 だけ、Compositional adjustments は 0 と 2 だけ、DW-36、WA-FM-02）／TBLASTN は word size 5〜7（tblastn-fast の既定 5）で BLOSUM62 だけ（compressed lookup table が読む行列。`listBy`） |
+| Matrix | PAM30、PAM70、BLOSUM90、BLOSUM80、BLOSUM62、BLOSUM50、BLOSUM45、PAM250（NCBI の順）／BLASTP と BLASTX は BLOSUM62 だけ（LOSAT の BLASTP・BLASTX が読む行列。Gap Costs は BLASTP が BLOSUM62 の一覧、BLASTX が 11 / 1 だけ、Compositional adjustments は 0 と 2 だけ、DW-36、WA-FM-02）／TBLASTN は word size 5〜7（tblastn-fast の既定 5）で BLOSUM62 だけ（compressed lookup table が読む行列。`listBy`） |
 
 一覧が LOSAT の読む値に絞ってある欄のうち Matrix・Word size・Gap Costs は、「Other」で他の値を書ける（エンジンが CLI と同じ文で拒む）。Compositional adjustments（BLASTP・BLASTX の 0 と 2）は「Other」の無い選択なので、1 と 3 は書けない（どちらの CLI も必ず拒む）。エンジンが読む値を増やす PR は一覧も広げる：エンジンの e2e（`search.spec.ts`「the selects of the protein modes offer NCBI's values that the engine reads, and no other」）が、NCBI の値のそれぞれで「一覧にある ⇔ エンジンが読む」を確かめる（Compositional adjustments は同じ commit の native CLI で）。
 
@@ -77,7 +77,8 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | Match/Mismatch Scores（BLASTN） | 1,-2、1,-3、1,-4、2,-3、4,-5、1,-1 | task の既定（megablast 1,-2、ほか 2,-3、blastn-short 1,-3） |
 | Gap Costs（BLASTN、組ごと） | 1,-2：Linear、5 2、2 2、1 2、0 2、3 1、2 1、1 1／1,-3：Linear、5 2、2 2、1 2、0 2、2 1、1 1／1,-4：Linear、5 2、1 2、0 2、2 1、1 1／2,-3：Linear、4 4、2 4、0 4、3 3、6 2、5 2、4 2、2 2／4,-5：Linear、12 8、6 5、5 5、4 5、3 5／1,-1：5 2、3 2、2 2、1 2、0 2、4 1、3 1、2 1 | Linear（0 0）は megablast の時だけ出し、その時の既定。ほかは 5 2、4,-5 は 12 8 |
 | Gap Costs（TBLASTN、matrix ごと） | BLOSUM62：11 2、10 2、9 2、8 2、7 2、6 2、13 1、12 1、11 1、10 1、9 1 ほか（PAM30、PAM70、BLOSUM80、BLOSUM45、BLOSUM50、PAM250、BLOSUM90 の一覧は `programs.ts`） | BLOSUM62 11 1、PAM30 9 1、PAM70 10 1、BLOSUM80 10 1、BLOSUM45 14 2、BLOSUM50 13 2、PAM250 15 2、BLOSUM90 10 1（エンジンが matrix ごとに解決する値と同じ。unit test が `describe.json` と照らす） |
-| Gap Costs（BLASTP・BLASTX） | 11 1 だけ（LOSAT の BLASTP・BLASTX が読む値、DW-36、WA-FM-02） | 11 1 |
+| Gap Costs（BLASTP） | BLOSUM62 の一覧（11 2、10 2、9 2、8 2、7 2、6 2、13 1、12 1、11 1、10 1、9 1。LOSAT の BLASTP が読む値、WA-FM-02） | 11 1 |
+| Gap Costs（BLASTX） | 11 1 だけ（LOSAT の BLASTX が読む値、DW-36、WA-FM-02） | 11 1 |
 
 task・組・matrix を選んで Gap Costs の一覧が変わると、Gap Costs はその一覧の既定になる（NCBI の画面の `changeOptionList` と同じ。BLAST+ は一覧に無い組を止めることがある：task blastn の 4,-5 に既定の 5 2 は「Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -5」、megablast の 1,-1 に 0 0 も止まる。CLI 2.16.0 と LOSAT で確かめた）。一覧が同じ変更（blastp と blastp-fast の切り替え）や、一覧の無い値（「Other」で打った matrix や組）では書いた値を残す。ただし一覧が同じでも、使う組が一覧から外れるとき（task blastn で 1,-1 を選び megablast に替えると既定の 0 0）は一覧の既定にする。組を選ぶと 2 つの値を書く（既定の組を選んだときは書かない）ので、task を替えても選んだ組のまま（megablast で選んだ 1,-4 は blastn でも 1,-4。argv には既定と違う値だけが出る）。
 

@@ -179,13 +179,15 @@ const NUCLEOTIDE_GAP_COSTS: PairSelect = {
   only: { tasks: ['megablast'], values: ['0 0'] },
   labels: gapCostsLabel,
 };
+// NCBI's gap costs of BLOSUM62, all of which LOSAT's BLASTP and TBLASTN read.
+const BLOSUM62_GAP_COSTS = ['11 2', '10 2', '9 2', '8 2', '7 2', '6 2', '13 1', '12 1', '11 1', '10 1', '9 1'];
 // NCBI's lists of the protein programs' pages (the same on BLASTP's, TBLASTN's and TBLASTX's), by matrix.
 export const PROTEIN_GAP_COSTS: PairSelect = {
   id: 'gapcosts',
   separator: ' ',
   by: ['-matrix'],
   lists: {
-    BLOSUM62: ['11 2', '10 2', '9 2', '8 2', '7 2', '6 2', '13 1', '12 1', '11 1', '10 1', '9 1'],
+    BLOSUM62: BLOSUM62_GAP_COSTS,
     PAM30: ['7 2', '6 2', '5 2', '10 1', '9 1', '8 1', '13 3', '15 3', '14 1', '14 2'],
     PAM70: ['8 2', '7 2', '6 2', '11 1', '10 1', '9 1', '12 3', '11 2'],
     BLOSUM80: ['8 2', '7 2', '6 2', '11 1', '10 1', '9 1'],
@@ -207,10 +209,16 @@ export const PROTEIN_GAP_COSTS: PairSelect = {
   labels: gapCostsLabel,
 };
 const PROTEIN_SCORING: Pick<ParameterSection, 'pairs'> = { pairs: { 'Gap Costs': PROTEIN_GAP_COSTS } };
-// LOSAT's BLASTP and BLASTX score with BLOSUM62 and gap costs 11/1 only, and adjust with modes 0
-// and 2: their lists keep these of NCBI's values ("Other" still takes any matrix and costs, which
-// the engine refuses with its message; Compositional adjustments has no "Other"). A series that
-// makes the engine read more widens them (the engine's e2e of the selects fails until then).
+// LOSAT's BLASTP scores with BLOSUM62 and the gap costs of its list, LOSAT's BLASTX with BLOSUM62
+// and gap costs 11/1 only, and both adjust with modes 0 and 2: their lists keep these of NCBI's
+// values ("Other" still takes any matrix and costs, which the engine refuses with its message;
+// Compositional adjustments has no "Other"). A series that makes the engine read more widens them
+// (the engine's e2e of the selects fails until then).
+const BLASTP_BLOSUM62: Pick<ParameterSection, 'pairs'> = {
+  pairs: {
+    'Gap Costs': { ...PROTEIN_GAP_COSTS, lists: { BLOSUM62: BLOSUM62_GAP_COSTS }, defaults: { BLOSUM62: '11 1' } },
+  },
+};
 const BLOSUM62_ONLY: Pick<ParameterSection, 'pairs'> = {
   pairs: { 'Gap Costs': { id: 'gapcosts', separator: ' ', lists: { '': ['11 1'] }, labels: gapCostsLabel } },
 };
@@ -376,7 +384,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         title: 'Scoring Parameters',
         placement: 'algorithm',
         fields: [{ ...matrix, list: ['BLOSUM62'] }, gapOpen, gapExtend, { ...compBasedStats, choices: ['0', '2'] }],
-        ...BLOSUM62_ONLY,
+        ...BLASTP_BLOSUM62,
       },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
       { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize, maxHsps] },

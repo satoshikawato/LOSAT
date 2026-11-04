@@ -36,6 +36,21 @@ const needsDefline = computed(() => {
   return props.source.origin === 'paste' && props.source.status === 'failed' && text !== '' && !text.startsWith('>');
 });
 const refusedRecord = computed(() => (props.source.check?.state === 'refused' ? props.source.check.record : undefined));
+/** Why a source that starts with a byte order mark cannot be read (WA-IN-05); the engine's message is NCBI's. */
+const markHint = computed(() => {
+  const lead = props.source.lead;
+  if (props.source.status !== 'failed' || lead === undefined || !('mark' in lead)) return undefined;
+  if (props.source.origin === 'paste') return 'The text starts with a byte order mark (U+FEFF).';
+  return lead.mark === 'UTF-16'
+    ? 'The file is UTF-16 text. Save it as plain UTF-8 or ASCII text.'
+    : 'The file starts with a UTF-8 byte order mark. Save it as plain text without the mark (UTF-8 or ASCII).';
+});
+const FORMAT_NAMES = { GenBank: 'a GenBank flat file', EMBL: 'an EMBL or UniProt flat file', FASTQ: 'a FASTQ file' } as const;
+/** Another sequence file format, which the engine reads as FASTA text as the command line does (WA-IN-04). */
+const formatName = computed(() => {
+  const lead = props.source.lead;
+  return lead !== undefined && 'format' in lead ? FORMAT_NAMES[lead.format] : undefined;
+});
 const testid = computed(() => `${props.role}-source-${props.index}`);
 </script>
 
@@ -62,6 +77,21 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
         <button type="button" class="link" :data-testid="`${testid}-add-defline`" @click="draft.addDefline(role)">
           Add the line "&gt;pasted_{{ role }}" before the sequence
         </button>
+      </p>
+      <p v-if="markHint" class="hint" :data-testid="`${testid}-mark`">
+        {{ markHint }}
+        <button
+          v-if="source.origin === 'paste'"
+          type="button"
+          class="link"
+          :data-testid="`${testid}-remove-mark`"
+          @click="draft.removeByteOrderMark(role)"
+        >
+          Remove the byte order mark
+        </button>
+      </p>
+      <p v-if="formatName" class="warning" :data-testid="`${testid}-format-warning`">
+        This looks like {{ formatName }}, which LOSAT reads as FASTA. Convert it to FASTA and use that instead.
       </p>
     </template>
     <template v-else>
@@ -98,6 +128,9 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
         The input could not be checked here ({{ source.check.message }}).
       </p>
 
+      <p v-if="formatName" class="warning" :data-testid="`${testid}-format-warning`">
+        This looks like {{ formatName }}, which LOSAT reads as FASTA. Convert it to FASTA and use that instead.
+      </p>
       <p v-if="otherKind > 0" class="warning" :data-testid="`${testid}-kind-warning`">
         {{ formatCount(otherKind) }} {{ otherKind === 1 ? 'record looks' : 'records look' }} like {{ otherKindName }}
         sequences, but {{ programLabel }} reads the {{ role }} as {{ kind }}.

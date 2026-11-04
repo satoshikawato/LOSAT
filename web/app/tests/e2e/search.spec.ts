@@ -5,8 +5,10 @@
 import { expect, test, type Page } from '@playwright/test';
 import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { BUILD_HAS_ENGINE } from './support/browser';
+import { reload } from './support/navigate';
 import {
   chooseRun,
+  described,
   fasta,
   openFiles,
   openParameters,
@@ -301,13 +303,20 @@ test('the region of a role with one record: the drag, the fields, the limits and
   await expect(page.getByTestId('search-message')).toHaveText(
     'Subject region: The stop must be between 1 and 100, the length of the record.',
   );
+  // A range of one letter and a start after the stop are NCBI's errors in every mode; the fields say so (WA-IN-07).
+  await page.getByTestId('subject-region-stop').fill('5');
+  await expect(page.getByTestId('subject-region-problem')).toHaveText(
+    'The range cannot be empty: the stop must be larger than the start.',
+  );
+  await page.getByTestId('subject-region-start').fill('60');
+  await expect(page.getByTestId('subject-region-problem')).toHaveText('The start cannot be larger than the stop.');
+  await submit(page);
+  await expect(page.getByTestId('search-message')).toHaveText('Subject region: The start cannot be larger than the stop.');
   if (BUILD_HAS_ENGINE) {
-    // A range of one letter is NCBI's error, which the engine's validate gives.
-    await page.getByTestId('subject-region-stop').fill('5');
-    await expect(page.getByTestId('argv-validation')).toHaveText(
-      'BLAST engine error: Invalid specification of subject location (range cannot be empty)',
-    );
+    // The argv leaves the region out until it is one, so the engine's validate has nothing to refuse.
+    await expect(page.getByTestId('argv-validation')).not.toContainText('subject location');
   }
+  await page.getByTestId('subject-region-start').fill('5');
   await page.getByTestId('subject-region-stop').fill('060');
   await expect(page.getByTestId('subject-region-argument')).toHaveText('Positions in the results are those of the whole record.');
   // The query has one record once the other is excluded.
@@ -618,6 +627,67 @@ test("a run after the browser removed the tab's storage still completes", async 
   await pickRun(page, 1);
   await expect(page.getByTestId('results-status')).toContainText('The browser removed the stored results of this run');
   await expect(page.getByTestId('results-status')).toContainText('Run it again.');
+});
+
+test('a GenBank, EMBL or FASTQ file is read as FASTA text, as the command line does, with a warning (WA-IN-04)', async ({ page }) => {
+  await program(page, 'blastn');
+  await openFiles(page, 'query', [
+    { name: 'x.gb', text: 'LOCUS       X 24 bp DNA linear\nORIGIN\n        1 acgtacgtac gtacgtacgt acgt\n//\n' },
+    { name: 'r.fastq', text: '@r1\nACGTACGTACGTACGTACGTACGT\n+\nIIIIIIIIIIIIIIIIIIIIIIII\n' },
+    { name: 'x.fa', text: '>x\nACGTACGTACGTACGTACGTACGT\n' },
+  ]);
+  await expect(page.getByTestId('query-source-0-format-warning')).toHaveText(
+    'This looks like a GenBank flat file, which LOSAT reads as FASTA. Convert it to FASTA and use that instead.',
+  );
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('1 record');
+  await expect(page.getByTestId('query-source-1-format-warning')).toContainText('This looks like a FASTQ file');
+  await expect(page.getByTestId('query-source-2-summary')).toBeVisible();
+  await expect(page.getByTestId('query-source-2-format-warning')).toHaveCount(0);
+  await paste(page, 'subject', 'ID   X56734; SV 1; linear; mRNA; STD; PLN; 24 BP.\nSQ   Sequence 24 BP;\n     acgtacgtac gtacgtacgt acgt 24\n//\n');
+  await expect(page.getByTestId('subject-source-0-format-warning')).toContainText('This looks like an EMBL or UniProt flat file');
+});
+
+test('an input that starts with a byte order mark says why it cannot be read (WA-IN-05)', async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', '\uFEFF>q1\nACGTACGTACGTACGTACGTACGT\n');
+  await expect(page.getByTestId('query-source-0-error')).toContainText("doesn't look like plausible data");
+  await expect(page.getByTestId('query-source-0-mark')).toContainText('The text starts with a byte order mark (U+FEFF).');
+  await page.getByTestId('query-source-0-remove-mark').click();
+  await expect(page.getByTestId('query-input')).toHaveValue('>q1\nACGTACGTACGTACGTACGTACGT\n');
+  await expect(page.getByTestId('query-source-0-summary')).toHaveText('1 record · 24 nt');
+  await expect(page.getByTestId('query-source-0-mark')).toHaveCount(0);
+
+  const utf16le = (text: string) => Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]);
+  const utf16be = (text: string) => Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(text, 'utf16le').swap16()]);
+  await openFiles(page, 'subject', [
+    { name: 'bom.fa', text: Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('>s1\nACGTACGTACGTACGTACGTACGT\n')]) },
+    { name: 'le.fa', text: utf16le('>s2\nACGT\n') },
+    { name: 'be.fa', text: utf16be('>s3\nACGT\n') },
+  ]);
+  await expect(page.getByTestId('subject-source-0-mark')).toHaveText(
+    'The file starts with a UTF-8 byte order mark. Save it as plain text without the mark (UTF-8 or ASCII).',
+  );
+  await expect(page.getByTestId('subject-source-0-remove-mark')).toHaveCount(0);
+  await expect(page.getByTestId('subject-source-1-mark')).toHaveText('The file is UTF-16 text. Save it as plain UTF-8 or ASCII text.');
+  await expect(page.getByTestId('subject-source-2-mark')).toHaveText('The file is UTF-16 text. Save it as plain UTF-8 or ASCII text.');
+});
+
+test('reloading the tab asks first while the form holds inputs, which no later visit restores (WA-IN-06)', async ({ page }) => {
+  const dialogs: string[] = [];
+  page.on('dialog', (dialog) => {
+    dialogs.push(dialog.type());
+    void dialog.accept();
+  });
+  await reload(page);
+  expect(dialogs).toEqual([]);
+  await described(page);
+  await paste(page, 'query', '>q1\nACGTACGTACGTACGTACGTACGT\n');
+  // Browsers ask only on a page that the user has interacted with.
+  await page.getByTestId('query-input').click();
+  await reload(page);
+  expect(dialogs).toEqual(['beforeunload']);
+  await described(page);
+  await expect(page.getByTestId('query-input')).toHaveValue('');
 });
 
 test('the sequence kind warning is an estimate and does not change the program', async ({ page }) => {

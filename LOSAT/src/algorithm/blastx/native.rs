@@ -1165,19 +1165,18 @@ fn run_inner(
                             // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                             // (`shared::prefetch_off`), each query's report fetches the
                             // subjects it shows, after the query's own warnings
-                            // (`ReportedSubjects::fetch_by_query`), where the format reads their
-                            // Bioseqs (`TabularSpec::fetches_subject`).
+                            // (`ReportedSubjects::fetch_by_query`), where the format's rows read
+                            // their Bioseqs (`TabularSpec::subject_fetch`).
                             if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                                let fetches = options.tabular.is_none_or(|spec| {
-                                    spec.fetches_subject(crate::blastinput::app::Program::Blastx)
-                                });
-                                if fetches
-                                    || !crate::algorithm::common::database::prefetch_always_off()
-                                {
-                                    reported
-                                        .fetch_by_query(database, results, options.gapped, fetches)
-                                        .inspect_err(discard)?;
-                                }
+                                let rows = options.tabular.map_or(
+                                    crate::report::tabular::SubjectFetch::Every,
+                                    |spec| {
+                                        spec.subject_fetch(crate::blastinput::app::Program::Blastx)
+                                    },
+                                );
+                                reported
+                                    .fetch_by_query(database, results, options.gapped, rows)
+                                    .inspect_err(discard)?;
                                 if options.outfmt == 5 {
                                     diagnostics.write_all(&reported.take_query_fetches())?;
                                 }

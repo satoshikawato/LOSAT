@@ -35,6 +35,7 @@ use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::blast_xml::HitTaxonomy;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
+use crate::report::tabular::SubjectFetch;
 use crate::seqdb::{SeqDb, SeqType};
 
 /// The program that LOSAT's refusals name.
@@ -546,25 +547,36 @@ impl ReportedSubjects {
 
     /// NCBI's messages about the taxonomy database where `PRE_FETCH_SEQS_LIMIT` turns the
     /// prefetch of the query batch whose hit lists are `batches` off (`shared::prefetch_off`):
-    /// each query's report fetches the sequences it shows, where the first format reads their
-    /// Bioseqs (`fetches`, `TabularSpec::fetches_subject`), after the query's own warnings. The
-    /// messages are kept by query for the writers (`query_fetches`). Refusals as
-    /// `prefetch_messages`; a batch that fetches nothing still asks for the run's refusal of
-    /// NCBI's taxonomy cache (the caller does not call it where no batch of the run prefetches,
-    /// `shared::prefetch_always_off`).
+    /// each query's report fetches the sequences it shows, where the first format's rows read
+    /// their Bioseqs (`rows`, `TabularSpec::subject_fetch`, by the engine's identities of each
+    /// shown HSP), after the query's own warnings. The messages are kept by query for the
+    /// writers (`query_fetches`). Refusals as `prefetch_messages`; a batch that fetches nothing
+    /// still asks for the run's refusal of NCBI's taxonomy cache (the caller does not call it
+    /// where no batch of the run prefetches, `shared::prefetch_always_off`, unless rows read the
+    /// subjects only for their identities: then a query asks only where its rows read one).
     pub(crate) fn fetch_by_query(
         &mut self,
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
-        fetches: bool,
+        rows: SubjectFetch,
     ) -> Result<()> {
+        let asks = rows == SubjectFetch::Every
+            || !crate::algorithm::common::database::prefetch_always_off();
         for batch in batches {
             for (index, lists) in batch.queries.iter().enumerate() {
-                let subjects = lists
+                let mut subjects = lists
                     .iter()
-                    .filter(|list| fetches && super::report::reported(list, gapped))
-                    .map(|list| (self.ordinals[list.oid], self.parsed_subject(list.oid)));
+                    .filter(|list| {
+                        list.hsps.iter().any(|hsp| {
+                            super::report::has_seqalign(hsp, gapped) && rows.reads(hsp.identity)
+                        })
+                    })
+                    .map(|list| (self.ordinals[list.oid], self.parsed_subject(list.oid)))
+                    .peekable();
+                if !asks && subjects.peek().is_none() {
+                    continue;
+                }
                 let messages =
                     shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)?;
                 if !messages.is_empty() {
@@ -980,7 +992,8 @@ mod tests {
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
-        let fetched = |fetches: bool| -> [Vec<u8>; 3] {
+        // `identities`: the engine's identities of every HSP.
+        let fetched = |rows: SubjectFetch, identities: usize| -> [Vec<u8>; 3] {
             let database = open_with_taxdb("x16_taxid_99990", Some("offset_last_past_end"), &cwd);
             let longest = database.x_check_stores().unwrap();
             let stream = super::super::x_db_stream::XStreamDb::new(&database.db, longest);
@@ -1005,8 +1018,15 @@ mod tests {
                 false,
             )
             .unwrap();
+            for hsp in batches
+                .iter_mut()
+                .flat_map(|batch| batch.queries.iter_mut().flatten())
+                .flat_map(|list| list.hsps.iter_mut())
+            {
+                hsp.identity = identities;
+            }
             reported
-                .fetch_by_query(&database, &batches, true, fetches)
+                .fetch_by_query(&database, &batches, true, rows)
                 .unwrap();
             [
                 reported.query_fetches(0).to_vec(),
@@ -1015,8 +1035,15 @@ mod tests {
             ]
         };
         let offset = b"Error: [blastx] Error: Offset error at end of taxdb file.\n".to_vec();
-        assert_eq!(fetched(true), [Vec::new(), offset.clone(), offset]);
-        assert_eq!(fetched(false), [Vec::new(), Vec::new(), Vec::new()]);
+        let none = [Vec::new(), Vec::new(), Vec::new()];
+        let second = [Vec::new(), offset.clone(), offset];
+        assert_eq!(fetched(SubjectFetch::Every, 1), second);
+        assert_eq!(fetched(SubjectFetch::Every, 0), second);
+        assert_eq!(fetched(SubjectFetch::Never, 1), none);
+        // L1: rows that read the subject only for its identities (`nident` alone) read none of
+        // HSPs without identities.
+        assert_eq!(fetched(SubjectFetch::WithIdentities, 1), second);
+        assert_eq!(fetched(SubjectFetch::WithIdentities, 0), none);
         std::fs::remove_dir_all(&cwd).unwrap();
     }
 }

@@ -393,12 +393,12 @@ pub(crate) fn read_reported_lengths(
 /// lines of those with parsed Seq-ids from `titles` (`read_titles`). Empty, and nothing read,
 /// without `taxdb.bti` on the search path. A taxonomy database that LOSAT cannot read as NCBI
 /// does, and a header whose taxid does not decode, are refused.
-pub(crate) fn prefetch_messages(
+pub(crate) fn prefetch_messages<'h>(
     database: &TblastxDatabase,
-    ordered: &[TblastxHsp],
+    ordered: impl IntoIterator<Item = &'h TblastxHsp>,
     titles: &DatabaseTitles,
 ) -> Result<Vec<u8>> {
-    let subjects = ordered.iter().map(|hsp| {
+    let subjects = ordered.into_iter().map(|hsp| {
         let ordinal = hsp.hit.s_idx;
         let parsed = match titles.get(&ordinal) {
             Some(ReportedHeader::Parsed(subject)) => Some(&**subject),

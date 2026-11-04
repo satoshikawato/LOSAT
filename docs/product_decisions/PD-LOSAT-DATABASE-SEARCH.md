@@ -26,7 +26,10 @@
   as a known difference, and line DBID P3 wrote them in outfmt 8, 9 and 12 with
   `PRE_FETCH_SEQS_LIMIT=2147483647`, at which NCBI prefetches for these formats too, which version
   1.3 listed as a known difference, and refused the subjects with parsed Seq-ids that this
-  prefetch cannot read as NCBI does)
+  prefetch cannot read as NCBI does; on 2026-11-05 line DBID L1 looked a subject up for a
+  tabular report whose only field of the alignment block is `nident` only where one of its shown
+  HSPs has identities, as NCBI's formatter reads it with the prefetch off, which line DBID P2
+  listed as a known difference)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -659,11 +662,6 @@ Known differences that remain:
     on the copy, also where the bytes do not change (the copy with a tax id fetched first, which
     makes the same first lookup).
 - A damaged LMDB file can stop NCBI and LOSAT with other exit statuses and texts.
-- With `PRE_FETCH_SEQS_LIMIT` turning NCBI's prefetch off, a tabular report whose only field of the
-  alignment block is `nident` (such as `6 qseqid nident`) reads a subject in NCBI only for a row with
-  at least one identity (tabular.cpp:904); LOSAT's BLASTP, PSIBLAST, TBLASTN, BLASTX and TBLASTX look
-  the subject up for every row, so a subject whose shown HSPs have no identity (possible with a low
-  `-threshold`) can get a taxonomy database message that NCBI does not write.
 
 ## Evidence
 

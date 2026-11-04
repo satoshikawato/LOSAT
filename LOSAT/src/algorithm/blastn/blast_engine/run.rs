@@ -9605,14 +9605,16 @@ fn run_in_pool(
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                 // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
                 // after the query's own warnings (`query_fetches`, added after them below), where
-                // the first format reads their Bioseqs (`TabularSpec::fetches_subject`; BLASTN's
-                // formatter does not fetch for the identities). A batch that fetches nothing still
+                // the first format reads their Bioseqs (`TabularSpec::subject_fetch`; BLASTN's
+                // formatter does not fetch for the identities, so every row reads them or none
+                // does). A batch that fetches nothing still
                 // asks for the run's refusal of NCBI's taxonomy cache before its first byte, unless
                 // no batch of the run prefetches (`shared::prefetch_always_off`).
                 let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                     let fetches = match output_formats.first() {
                         Some(BlastnOutputFormat::CustomTabular(spec)) => {
-                            spec.fetches_subject(crate::blastinput::app::Program::Blastn)
+                            spec.subject_fetch(crate::blastinput::app::Program::Blastn)
+                                != crate::report::tabular::SubjectFetch::Never
                         }
                         _ => true,
                     };

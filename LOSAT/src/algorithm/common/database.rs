@@ -768,7 +768,7 @@ fn prefetch_may_be_off() -> bool {
 /// subject of an ungapped one: [`subject_seq_aligns`]):
 /// `PRE_FETCH_SEQS_LIMIT` is an integer other than `INT_MAX` that is 0 or below `seq_aligns`.
 /// Its formatters then fetch the sequences that each query's report shows, after the query's
-/// own warnings, where the report reads them (`TabularSpec::fetches_subject`).
+/// own warnings, where the report reads them (`TabularSpec::subject_fetch`).
 pub(crate) fn prefetch_off(seq_aligns: usize) -> bool {
     prefetch_seqs_limit().is_some_and(|limit| {
         limit != i32::MAX

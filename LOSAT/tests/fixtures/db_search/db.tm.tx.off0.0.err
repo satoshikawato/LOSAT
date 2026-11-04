@@ -1,0 +1,2 @@
+Warning: [tblastx] Query_2 qempty: Sequence contains no data 
+Error: [tblastx] Error: Tax database file has wrong magic number.

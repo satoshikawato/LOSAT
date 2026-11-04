@@ -1135,6 +1135,18 @@ pub(crate) enum ShownSubjects<'a> {
     },
 }
 
+impl ShownSubjects<'_> {
+    /// The taxonomy database's messages of the query `ordinal`'s own fetches, which follow its
+    /// warnings where `PRE_FETCH_SEQS_LIMIT` turned its batch's prefetch off
+    /// (`ReportedSubjects::fetch_by_query`); empty otherwise.
+    pub(crate) fn query_fetches(&self, ordinal: usize) -> &[u8] {
+        match self {
+            ShownSubjects::Database { reported, .. } => reported.query_fetches(ordinal),
+            ShownSubjects::Fasta { .. } => &[],
+        }
+    }
+}
+
 /// The records of a subject set whose ids `-parse_deflines` read, by subject index: as subjects
 /// (`db_subject::parsed_records`), with what the tabular rows show of each (`None`: shown as a
 /// record without the option).
@@ -1461,6 +1473,7 @@ pub(super) fn render_queries_with(
                 batch.search_skipped,
                 options.filtered_empty,
             ))?;
+            stderr.write_all(shown.query_fetches(batch.query_ordinal + qidx))?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:779-783
             // ```c++
             //               m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader)
@@ -1718,11 +1731,10 @@ fn write_pairwise(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            warnings.push(query_warning(
-                query,
-                batch.search_skipped,
-                options.filtered_empty,
-            ));
+            let mut query_warnings =
+                query_warning(query, batch.search_skipped, options.filtered_empty);
+            query_warnings.extend_from_slice(shown.query_fetches(batch.query_ordinal + qidx));
+            warnings.push(query_warnings);
             valid.push(first.is_some());
             skipped.push(batch.search_skipped);
         }

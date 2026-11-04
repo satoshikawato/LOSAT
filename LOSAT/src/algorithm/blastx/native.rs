@@ -1131,24 +1131,63 @@ fn run_inner(
                             10 | 20 => 6,
                             outfmt => i32::from(outfmt),
                         };
+                        let mut reported = reported;
                         if prefetches_subjects(Some(prefetch_format)) && database.taxdb_found() {
-                            let messages = reported
-                                .prefetch_messages(database, results, options.gapped)
-                                .inspect_err(|error| {
-                                    if error.is::<TaxonomyRefusal>() {
-                                        if let Some(held) = &held {
-                                            held.discard();
-                                        }
+                            let discard = |error: &anyhow::Error| {
+                                if error.is::<TaxonomyRefusal>() {
+                                    if let Some(held) = &held {
+                                        held.discard();
                                     }
-                                })?;
-                            diagnostics.write_all(&messages)?;
+                                }
+                            };
+                            // The batch's Seq-aligns: one for each HSP that the reports show
+                            // (`has_seqalign`), one for each subject of an ungapped search.
+                            let seq_aligns: usize = results
+                                .iter()
+                                .flat_map(|batch| batch.queries.iter().flatten())
+                                .map(|list| {
+                                    crate::algorithm::common::database::subject_seq_aligns(
+                                        list.hsps
+                                            .iter()
+                                            .filter(|hsp| {
+                                                super::report::has_seqalign(hsp, options.gapped)
+                                            })
+                                            .count(),
+                                        options.gapped,
+                                    )
+                                })
+                                .sum();
+                            // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
+                            // (`shared::prefetch_off`), each query's report fetches the
+                            // subjects it shows, after the query's own warnings
+                            // (`ReportedSubjects::fetch_by_query`), where the format reads their
+                            // Bioseqs (`TabularSpec::fetches_subject`).
+                            if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                                let fetches = options.tabular.is_none_or(|spec| {
+                                    spec.fetches_subject(crate::blastinput::app::Program::Blastx)
+                                });
+                                if fetches
+                                    || !crate::algorithm::common::database::prefetch_always_off()
+                                {
+                                    reported
+                                        .fetch_by_query(database, results, options.gapped, fetches)
+                                        .inspect_err(discard)?;
+                                }
+                                if options.outfmt == 5 {
+                                    diagnostics.write_all(&reported.take_query_fetches())?;
+                                }
+                            } else {
+                                let messages = reported
+                                    .prefetch_messages(database, results, options.gapped)
+                                    .inspect_err(discard)?;
+                                diagnostics.write_all(&messages)?;
+                            }
                         }
                         // The values of a custom tabular field list that reads more of the
                         // definition lines than the default report (`sall*`) or the taxonomy
                         // (`staxid`, `staxids`, the names), read before the batch's first byte so
                         // that their refusals come before it, after the prefetch (which opens the
                         // taxonomy database first, as NCBI's does).
-                        let mut reported = reported;
                         if let Some(spec) = options.tabular {
                             reported.read_tabular(database, spec, results, options.gapped)?;
                         }

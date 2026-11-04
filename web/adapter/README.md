@@ -16,7 +16,7 @@ changes follow the root [`AGENTS.md`](../../AGENTS.md).
 | `src/emit.rs`, `src/json.rs` | output streams to the host, JSON |
 | `tests/scan_properties.rs` | property tests of the scan against the parser |
 | `tests/v_abi.js` | V-ABI: both reactors under Node, compared with the native CLI |
-| `tools/check_build_identity.py` | build identity with the certified engine builds (plan TD-6) |
+| `tools/check_build_identity.py` | build identity with LOSAT's command-WASI release builds (plan TD-6) |
 | `tools/build_reactors.py` | builds both reactors and records their identity |
 | `tools/v_abi_cases.py` | the V-ABI searches (quick for CI, full for gate records) |
 | `tools/run_v_abi_parallel.py` | runs `tests/v_abi.js` over a case list in parallel parts and merges the results |

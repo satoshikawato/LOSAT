@@ -11245,7 +11245,9 @@ fn run_resolved_in_pool(
                 Some(BlastpReport::CustomTabular(spec)) if spec.checks_taxdb()
             );
             let rows_fetch = match format_plans.first() {
-                Some(BlastpReport::CustomTabular(spec)) => spec.fetches_subject(false),
+                Some(BlastpReport::CustomTabular(spec)) => {
+                    spec.fetches_subject(crate::blastinput::app::Program::Blastp)
+                }
                 _ => true,
             };
             let open_for_rows = |lists: &[Option<BlastpHitList>]| -> Result<()> {

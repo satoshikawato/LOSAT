@@ -804,3 +804,31 @@ The database (version 4, no `-parse_seqids`; only `.pin .psq .phr` are kept). Ru
 The `-subject` rows `bxqloc.blastx.*` of `outfmt0_manifest.tsv` use `tests/fasta/outfmt0/bxqloc_q.fna` (`ATGAAAGTt`,
 the same 9,000 nucleotides and 11,000 more random ones: 20,000 searched nucleotides, which NCBI splits at the default
 sizes, 10,002 and 297) and `tests/fasta/outfmt0/bxqloc_s.faa` (a copy of `bxqloc.faa`), at `-evalue 2e-7`.
+
+## BLASTN `-query_loc` and the chunk masks (line NP, series SM)
+
+Rows `db.bnqloc.*` search `bnqloc` with `bnqloc_q.fna`, `-query_loc 10-3009 -lcase_masking` and
+`CHUNK_SIZE=1001 OVERLAP_CHUNK_SIZE=100` (NCBI BLASTN stops at 1000/100 with `Empty CBlastQueryVector`: its batch size
+mixer's maximum is the chunk size less 1,000). NCBI restricts the lower-case runs of the whole record to each chunk
+(`split_query_cxx.cpp:278-281`), one letter longer, so a run that holds the letter before the interval masks the
+interval's first letter in the preliminary search of each chunk that holds it, when the query's part there is longer than
+the interval's start (here 9 letters). Without `BATCH_SIZE` each record is a batch of its own; with `BATCH_SIZE=100000`
+`p` and `q` share a split batch (four chunks of 1,126 letters) and `q`'s first letter lies 174 letters into the second
+chunk. The inputs come from `random.Random(20261105)`:
+
+- `bnqloc_q.fna`: `a` (`AC`, which the range skips), `p` (1,209 random nucleotides) and `q` (`ACGTACGTa` and B, 3,000
+  random nucleotides).
+- `bnqloc.fna`: `s11`, `s24` and `s40`, the first 11, 24 and 40 nucleotides of B between 50 random nucleotides on each
+  side (the nucleotide after each differs from B's).
+
+At `-task blastn -soft_masking false -evalue 1e-7` (`db.bnqloc.hard.*`, `db.bnqloc.two.6`) NCBI reports `q` against
+`s40` only; with `ACGTACGTA` in place of `ACGTACGTa` it reports `s24` too. With the default `-soft_masking true` at
+`-evalue 10` (`db.bnqloc.soft.6`) the masked letter leaves the lookup table, and `s11`, whose only seed starts there, is
+not reported (with `ACGTACGTA` it is). Megablast at `-evalue 5e-17` (`db.bnqloc.mb.7`) reports no hit (with
+`ACGTACGTA`, `s40`).
+
+The database (version 4, no `-parse_seqids`; only `.nin .nsq .nhr` are kept). Run from `LOSAT/`:
+
+    makeblastdb -in tests/db_search/bnqloc.fna -dbtype nucl -out tests/db_search/bnqloc \
+        -title "B[0:11], B[0:24] and B[0:40] of bnqloc_q.fna's q between random letters" -blastdb_version 4
+    rm tests/db_search/bnqloc.njs

@@ -96,7 +96,8 @@ use super::super::pairwise::{
     pairwise_hits, pairwise_windows, shown_query_masks, DisplayMasks, Rows as PairwiseRows,
 };
 use super::super::query_split::{
-    calculate_num_chunks, restrict_masks, split_query_batch, QueryChunk, SplitSizes,
+    calculate_num_chunks, restrict_masks, restrict_masks_with_letter_before, split_query_batch,
+    QueryChunk, SplitSizes,
 };
 use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
@@ -8750,9 +8751,13 @@ enum BatchStage<'a> {
     ///
     /// `query_masks` are the masks of the batch's queries when the loop has made them
     /// (`-window_masker_db`, whose errors stop the batch before its search); `None`: made here.
+    /// `lower_case_before`: whether the letter before each query's interval is lower case, which
+    /// the chunks restrict too (empty without a range, without `-lcase_masking` and with
+    /// `-window_masker_db`).
     Search {
         query_offsets: &'a [usize],
         query_masks: Option<&'a [Vec<MaskedInterval>]>,
+        lower_case_before: &'a [bool],
     },
     /// The preliminary search of one query chunk of a split batch
     /// (`SplitQuery_CreateChunkData`), with the masks of its query parts and the search
@@ -9298,6 +9303,25 @@ fn run_in_pool(
         }
         warnings[start].extend(batch_title_warnings);
         check_batch_window(&args, batch_records.batch_queries().records())?;
+        // NCBI restricts the lower-case runs of each whole record to the chunks of a split
+        // batch, and of the letters outside a `-query_loc` interval the one before it reaches
+        // them (`query_split::restrict_masks_with_letter_before`); WindowMasker replaces the
+        // runs. The input records keep that letter.
+        let lower_case_before: Vec<bool> = if args.lcase_masking
+            && args.window_masker.is_none()
+            && query_input.placements.ranged()
+        {
+            (start..end)
+                .map(|index| {
+                    let record = &batch_records.input()[query_input.ordinal(index) - input_start];
+                    query_offsets[index]
+                        .checked_sub(1)
+                        .is_some_and(|letter| record.seq()[letter].is_ascii_lowercase())
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         // The batch's search, on the whole pool. EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps
         // its megablast table from batch to batch.
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:929
@@ -9317,6 +9341,7 @@ fn run_in_pool(
                 BatchStage::Search {
                     query_offsets: &query_offsets[start..end],
                     query_masks: window_masker_masks.as_deref(),
+                    lower_case_before: &lower_case_before,
                 },
                 x_lut_keep.as_ref(),
             )
@@ -9332,6 +9357,7 @@ fn run_in_pool(
                 BatchStage::Search {
                     query_offsets: &query_offsets[start..end],
                     query_masks: window_masker_masks.as_deref(),
+                    lower_case_before: &lower_case_before,
                 },
                 x_lut_keep.as_ref(),
             )
@@ -11544,22 +11570,25 @@ fn search_query_batch<const UNGAPPED: bool>(
         // ```c
         //     if (!options->GetGappedMode()) m_NumChunks = 1;
         // ```
-        BatchStage::Search { query_offsets, .. } if any_valid_context && !UNGAPPED => {
-            search_query_chunks(
-                args,
-                &letters,
-                &seq_data.query_masks,
-                query_offsets,
-                &query_eff_searchsp,
-                &query_context_offsets,
-                subjects,
-                reborrow_outputs(&mut outputs),
-                parallel_pool,
-                batching,
-                first_batch,
-                x_keep,
-            )?
-        }
+        BatchStage::Search {
+            query_offsets,
+            lower_case_before,
+            ..
+        } if any_valid_context && !UNGAPPED => search_query_chunks(
+            args,
+            &letters,
+            &seq_data.query_masks,
+            query_offsets,
+            lower_case_before,
+            &query_eff_searchsp,
+            &query_context_offsets,
+            subjects,
+            reborrow_outputs(&mut outputs),
+            parallel_pool,
+            batching,
+            first_batch,
+            x_keep,
+        )?,
         _ => None,
     };
     // EXPERIMENT (LOSAT_X_BNQPACK): the encoding and the query chunks were the last readers of the
@@ -19400,6 +19429,7 @@ fn search_query_chunks(
     queries: &x_query_drop::Letters<'_>,
     query_masks: &[Vec<MaskedInterval>],
     query_offsets: &[usize],
+    lower_case_before: &[bool],
     batch_eff_searchsp: &[i64],
     context_offsets: &[i32],
     subjects: SubjectSource<'_>,
@@ -19449,10 +19479,19 @@ fn search_query_chunks(
             .iter()
             .map(|part| queries.cut(part.query, part.from, part.to))
             .collect();
+        // A query whose letter before its `-query_loc` interval is lower case
+        // (`lower_case_before`) restricts that letter too.
         let restricted = chunk
             .queries
             .iter()
-            .map(|part| restrict_masks(&query_masks[part.query], part, query_offsets[part.query]))
+            .map(|part| {
+                let (masks, offset) = (&query_masks[part.query], query_offsets[part.query]);
+                if lower_case_before.get(part.query) == Some(&true) {
+                    restrict_masks_with_letter_before(masks, part, offset)
+                } else {
+                    restrict_masks(masks, part, offset)
+                }
+            })
             .collect();
         let part_masks = chunk_query_masks(args, &parts, restricted, parallel_pool)
             .map_err(|error| window_masker_rejection(args, &error))?;

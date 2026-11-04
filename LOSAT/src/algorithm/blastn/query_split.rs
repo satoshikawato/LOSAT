@@ -693,6 +693,30 @@ pub fn restrict_record_masks(
         .collect()
 }
 
+/// `restrict_masks` of a query whose letter before its `-query_loc` interval (record letter
+/// `offset - 1`) is lower case, with `-lcase_masking`. NCBI restricts the lower-case runs of the
+/// whole record (`restrict_record_masks`); of the letters outside the interval only that one can
+/// reach a part, the first letter of the query's first part, whether its run ends there or goes
+/// on into the interval. The masks in the searched letters' coordinates are moved into the
+/// record's with that letter added. It masks the first letter of a part that starts the query and
+/// is longer than `offset` letters; `restrict_masks` misses that letter when the run ends on the
+/// letter before the interval, or goes on into the interval and the part is `offset + 1` letters
+/// long, and masks the same letters in every other part.
+pub fn restrict_masks_with_letter_before(
+    masks: &[MaskedInterval],
+    part: &ChunkQuery,
+    offset: usize,
+) -> Vec<MaskedInterval> {
+    let mut record = Vec::with_capacity(masks.len() + 1);
+    record.push(MaskedInterval::new(offset - 1, offset));
+    record.extend(
+        masks
+            .iter()
+            .map(|mask| MaskedInterval::new(mask.start + offset, mask.end + offset)),
+    );
+    restrict_record_masks(&record, part, offset)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -940,6 +964,56 @@ mod tests {
         assert!(restrict_record_masks(&before, &later, offset).is_empty());
         let two_before = [MaskedInterval::new(4, 9)];
         assert!(restrict_record_masks(&two_before, &part(100), offset).is_empty());
+    }
+
+    // The masks of a part from the runs of the searched letters, with the letter before the
+    // interval when it is lower case, mask the residues that the runs of the whole record mask
+    // (`restrict_record_masks`, NCBI's), for every lower-case pattern of a 10-letter record, four
+    // intervals and every part; the searched letters' runs alone miss some.
+    #[test]
+    fn the_letter_before_the_interval_gives_the_whole_records_masks() {
+        use super::super::coordination::collect_lowercase_masks;
+        let residues = |masks: &[MaskedInterval]| -> std::collections::BTreeSet<usize> {
+            masks.iter().flat_map(|mask| mask.start..mask.end).collect()
+        };
+        let mut missed = 0;
+        for pattern in 0u32..1 << 10 {
+            let record: Vec<u8> = (0..10)
+                .map(|letter| {
+                    if pattern >> letter & 1 == 1 {
+                        b'a'
+                    } else {
+                        b'A'
+                    }
+                })
+                .collect();
+            let runs = collect_lowercase_masks(&record);
+            for (offset, end) in [(1, 10), (2, 8), (3, 10), (4, 9)] {
+                let searched = collect_lowercase_masks(&record[offset..end]);
+                let before = record[offset - 1].is_ascii_lowercase();
+                for from in 0..end - offset {
+                    for to in from + 1..=end - offset {
+                        let part = ChunkQuery { query: 0, from, to };
+                        let whole = residues(&restrict_record_masks(&runs, &part, offset));
+                        let masks = if before {
+                            restrict_masks_with_letter_before(&searched, &part, offset)
+                        } else {
+                            restrict_masks(&searched, &part, offset)
+                        };
+                        assert_eq!(
+                            residues(&masks),
+                            whole,
+                            "{} {offset}..{end} {from}..{to}",
+                            String::from_utf8_lossy(&record)
+                        );
+                        missed += usize::from(
+                            residues(&restrict_masks(&searched, &part, offset)) != whole,
+                        );
+                    }
+                }
+            }
+        }
+        assert!(missed > 0);
     }
 
     // CHUNK_SIZE and OVERLAP_CHUNK_SIZE as NCBI reads them (split_query_aux_priv.cpp:100-138).

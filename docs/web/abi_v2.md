@@ -201,8 +201,9 @@ the WASI imports.
   ranges and the query options: `validate` reports the error of the CLI's own checks of the argv
   with that `-outfmt` (a `-subject_loc` of bad syntax first), whatever the hit list sizes of the
   searches, and `run` fails with it, never tolerating the failure of the tabular search (below).
-  TBLASTN's and TBLASTX's engine reads every format of a run before the ranges, so their `run` of an
-  argv with both errors reports the delimiter's, where the CLI and `validate` report the range's.
+  TBLASTN's and TBLASTX's engine reads every format of a run before the ranges and the option
+  checks that come before the handler (`-seg`, `-query_loc`), so their `run` of an argv with both
+  errors reports the delimiter's, where the CLI and `validate` report the other.
   The formats that the handler rejects (SAM of another program, 19, 21) are rejected with the
   handler's message as the argv is parsed, before the ranges. The rule reads the words, not the fields that they give, so that a
   host reads it from the argv without the table of fields: `6 std` adds a stream 4 with the bytes of

@@ -133,9 +133,10 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 
 /// Parses an argv (program name first) with the engine's CLI parser, and reads its `-outfmt` as
 /// the CLI does (`parse_formatting_string`, `report_format`, with the CLI's messages; the
-/// formatting handler's check of a custom delimiter comes later, `custom_handler_check`). A run writes the program's formats 0, 6 and 7 whatever
-/// the value; 6 and 7 with words after the number (fields, `delim=`) add an output of their own,
-/// the third value returned (docs/web/abi_v2.md §7). The rule reads the words, not the fields
+/// formatting handler's check of a custom delimiter comes later, `custom_handler_check`). A run
+/// writes the program's formats 0, 6 and 7 whatever the value; 6 and 7 with words after the
+/// number (fields, `delim=`) add an output of their own, the third value returned
+/// (docs/web/abi_v2.md §7). The rule reads the words, not the fields
 /// they make, so that the application reads it from the argv alike: `6 std` adds an output with
 /// the bytes of outfmt 6. A value of another format is refused. The arguments come back with
 /// `-outfmt` at the CLI's default, `0`: the engine is given the formats of each search
@@ -173,8 +174,8 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
     // program, AIRR, FASTA), which a run never gives the engine; the CLI rejects those after the
     // ranges and the query options, so for an argv with an error of both the CLI reports the
     // other. The CLI is taken with `-out`, which the formats 13 and 14 need there. The handler's
-    // check of a custom delimiter is the engine's, where the CLI makes it (`run_local`, and
-    // `custom_handler_check` in `validate`).
+    // check of a custom delimiter comes with the program's checks of the options (`validate`) and
+    // in the engine's `run_local`.
     let engine = engine_program(program);
     LOSAT::blastinput::app::report_format(&choice, engine, Some(std::path::Path::new("out")))
         .and_then(|format| match format {
@@ -227,6 +228,12 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
             outfmt.clone_from(custom.as_ref().expect("a rejected -outfmt"));
         }
     };
+    // The CLI checks the thread count before the options (`validate_threads`), the checks of the
+    // options alone last; with the argv's `-outfmt` they stop at its delimiter first.
+    if custom_rejected {
+        LOSAT::utils::threading::validate_threads(num_threads(&command))
+            .map_err(|error| format!("{error:#}"))?;
+    }
     match command {
         Commands::Blastn(mut args) => subject_range(args.subject_loc.as_deref(), "BLASTN")
             .and_then(|()| args.resolve_dust())
@@ -250,8 +257,8 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
                 first_error.map_or(Ok(()), Err)
             })?,
         // The checks of the options read the formats as without `-outfmt` (`parse_run`); with an
-        // `-outfmt` whose custom delimiter the CLI rejects they read the argv's (`with_custom`), and
-        // fail as the CLI's.
+        // `-outfmt` whose custom delimiter the CLI rejects they read the argv's (`with_custom`),
+        // and fail as the CLI's.
         Commands::Tblastx(mut args) => subject_range(args.subject_loc.as_deref(), "TBLASTX")
             .and_then(|()| {
                 with_custom(&mut args.outfmt);
@@ -300,9 +307,10 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
 }
 
 /// NCBI's formatting handler's check of the argv's own `-outfmt` (a custom delimiter that a field
-/// uses to separate its entries), with the CLI's message; `validate` makes it where each program's
-/// CLI does, or after the checks of the options (BLASTX's `check_options` makes it, with the
-/// formats of each search). A run's engine makes it (`run_local`).
+/// uses to separate its entries), with the CLI's message. `validate` and `run` ask it whether the
+/// CLI rejects the argv: `validate` then reports the error of the program's checks of the options
+/// with that `-outfmt`, which make it where the CLI does (BLASTN's right after the query range),
+/// and `run` tolerates no failed search. A run's engine makes it (`run_local`).
 fn custom_handler_check(program: Program, custom: Option<&str>) -> Result<(), String> {
     let Some(outfmt) = custom else {
         return Ok(());

@@ -1,0 +1,17 @@
+# TBLASTN 2.17.0+
+# Query: BDT63287.1 hypothetical protein [Armadillidium vulgare clopovirus]
+# Database: User specified sequence set (Input: subject)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, q. start, q. end, s. start, s. end, evalue, bit score, sbjct frame
+# 1 hits found
+BDT63287.1	AvCLPV_120501_122200	100.000	329	1	329	1314	328	0.0	593	-3
+# TBLASTN 2.17.0+
+# Query: BDT63290.1 hypothetical protein [Armadillidium vulgare clopovirus]
+# Database: User specified sequence set (Input: subject)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, q. start, q. end, s. start, s. end, evalue, bit score, sbjct frame
+# 1 hits found
+BDT63290.1	AvCLPV_134001_135600	100.000	283	1	283	407	1255	0.0	549	2
+# TBLASTN 2.17.0+
+# Query: BDT63274.1 hypothetical protein [Armadillidium vulgare clopovirus]
+# Database: User specified sequence set (Input: subject)
+# 0 hits found
+# BLAST processed 3 queries

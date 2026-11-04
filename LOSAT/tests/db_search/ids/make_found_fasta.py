@@ -14,7 +14,9 @@ holds one record gb|EEN00005.1|, the back-translation of `pdup.faa` (query `ndup
 other taxids. Line DBID N1b L1: `ndupe.fna` the letters of `ndup.fna` as gb|EEN00006.1| without a title, `nsubj.fna`
 as lcl|Subject_1 without a title, `nsubjg.fna` as lcl|Subject_3 beside gb|EEN00007.1| without a title, `psubj.faa` the letters of `pdup.faa` as lcl|Subject_1 without a title and
 `psubjb.faa` as lcl|Subject_2 with a title ending in ']' (the tabular formats replace a `lcl|Subject_` id by the
-first word of the generated title).
+first word of the generated title). Line DBID H3: `nbare.fna` and `pbare.faa` the letters of `ndup.fna` and
+`pdup.faa` with a definition line without a title (`>` alone), for databases without parsed Seq-ids whose outfmt 0
+title NCBI makes from the taxid.
 
 usage: make_found_fasta.py [--out LOSAT/tests/db_search/ids]
 """
@@ -71,6 +73,8 @@ def main() -> int:
     (out / "nsubjg.fna").write_text(f">lcl|Subject_3|gb|EEN00007.1|\n{wrap(nseq_dup)}")
     (out / "psubj.faa").write_text(f">lcl|Subject_1\n{wrap(seq)}")
     (out / "psubjb.faa").write_text(f">lcl|Subject_2 alpha, partial [Homo sapiens]\n{wrap(seq)}")
+    (out / "nbare.fna").write_text(f">\n{wrap(nseq_dup)}")
+    (out / "pbare.faa").write_text(f">\n{wrap(seq)}")
     nseq = "".join(line.strip() for line in (out / "njoined_a.fna").read_text().splitlines()[1:])
     (out / "nfound.fna").write_text(
         f">gb|AF000050.1| nucleotide pair, versioned\n{wrap(nseq)}"

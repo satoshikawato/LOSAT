@@ -66,6 +66,7 @@ impl ListedSubjects {
         let ranks = self.ordinals.len();
         let mut titles: Vec<Arc<[u8]>> = vec![Arc::from(&b""[..]); ranks];
         let mut replaced_title_bytes = vec![false; ranks];
+        let mut taxonomy_titles = vec![false; ranks];
         let mut read = vec![false; ranks];
         let mut parsed = ParsedSubjects::default();
         let headers = crate::algorithm::common::database::HeaderReader::new(&database.db);
@@ -79,16 +80,18 @@ impl ListedSubjects {
                 if std::mem::replace(&mut read[rank], true) {
                     continue;
                 }
-                let (title, replaced) =
+                let stored =
                     parsed.read(database, &headers, rank, self.ordinals[rank], query, ranks)?;
-                titles[rank] = Arc::from(title);
-                replaced_title_bytes[rank] = replaced;
+                titles[rank] = Arc::from(stored.title);
+                replaced_title_bytes[rank] = stored.replaced_bytes;
+                taxonomy_titles[rank] = stored.taxonomy_title;
             }
         }
         Ok(ListedTitles {
             listed: self,
             shown: ListedShown::Lean(titles),
             replaced_title_bytes,
+            taxonomy_titles,
             parsed: parsed.by_rank,
             program: database.program,
         })
@@ -97,8 +100,8 @@ impl ListedSubjects {
 
 // No NCBI counterpart: a check of the unit tests; it changes no value NCBI computes.
 /// The lean titles (`lean`) against the records of `read_titles` (`records`) of the same search,
-/// rank by rank: the title, the flag of replaced title bytes and every letter (the stored
-/// residue's `ncbistdaa_to_ascii`).
+/// rank by rank: the title, the flags of replaced title bytes and of a title made from the
+/// taxid, and every letter (the stored residue's `ncbistdaa_to_ascii`).
 #[cfg(test)]
 pub(in crate::algorithm::blastp::blast_engine) fn x_assert_same_titles_and_letters(
     lean: &ListedTitles<'_>,
@@ -126,6 +129,10 @@ pub(in crate::algorithm::blastp::blast_engine) fn x_assert_same_titles_and_lette
         assert_eq!(
             lean.replaced_title_bytes[rank], records.replaced_title_bytes[rank],
             "rank {rank} (ordinal {ordinal}): replaced title bytes"
+        );
+        assert_eq!(
+            lean.taxonomy_titles[rank], records.taxonomy_titles[rank],
+            "rank {rank} (ordinal {ordinal}): title made from the taxid"
         );
         let stored = &listed.encoded[rank];
         let residues = &stored.aa_seq[1..=stored.aa_len];

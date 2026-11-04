@@ -32,7 +32,7 @@ import type { RecordScanner } from '../../ports/scan';
 import { RunOutputReceiver } from '../run-output/receiver';
 import { concatBytes } from '../bytes';
 import { asStorageFull, isStorageFull, type BlockStore, type BlockWriter } from './block-store';
-import { compressionOfName, inflateFile } from './inflate';
+import { compressionOfName, inflateFile, refusedCompressionOfName } from './inflate';
 
 export interface DataServiceDeps {
   readonly store: BlockStore;
@@ -103,6 +103,10 @@ export class DataService implements DataGateway {
 
   async addSource(file: File): Promise<SourceRef> {
     if (!(file instanceof Blob)) throw new TypeError('a source must be a File');
+    const refused = refusedCompressionOfName(file.name);
+    if (refused !== undefined) {
+      throw new Error(`'${file.name}' is named ${refused}; the web app reads .gz and .zst, not bzip2 (the command line does)`);
+    }
     if (compressionOfName(file.name) !== undefined) file = await inflateFile(file);
     const sourceId = this.deps.newToken();
     this.sources.set(sourceId, file);

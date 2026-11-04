@@ -1744,6 +1744,14 @@ label.inline {
   margin: 6px 0;
 }
 
+.result-notices .notice > p {
+  margin: 0;
+}
+
+.result-notices .notice > pre {
+  margin: 4px 0 0;
+}
+
 .virtual-rows {
   position: relative;
   overflow-y: auto;

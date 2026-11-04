@@ -5,10 +5,9 @@
 //! query's context (BLASTN's two strands are `blastn/query_split.rs`).
 
 use crate::algorithm::blastn::query_split::{
-    calculate_num_chunks, restrict_masks, ChunkQuery, SplitSizes, QUERY_CHUNK_OVERLAP,
+    calculate_num_chunks, ChunkQuery, SplitSizes, QUERY_CHUNK_OVERLAP,
 };
 use crate::algorithm::tblastn::archive::lowercase_runs;
-use crate::utils::dust::MaskedInterval;
 
 /// The query chunk size of blastp (10000) or tblastn (20000) when the environment variable
 /// `CHUNK_SIZE` is not set or blank, and the overlap (100) when `OVERLAP_CHUNK_SIZE` is not.
@@ -296,11 +295,15 @@ pub fn protein_chunk_would_be_split(chunks: &[ProteinQueryChunk], sizes: SplitSi
     })
 }
 
-/// The residues of a query part as the chunk's query reads them. With lower-case masking,
-/// NCBI restricts the query's lower-case masks (`m_UserSpecifiedMasks`) to the part
+/// The residues of a query part as the chunk's query reads them with lower-case masking: NCBI
+/// restricts the query's lower-case masks (`m_UserSpecifiedMasks`) to the part
 /// (`blastn/query_split.rs` `restrict_masks`, which extends a mask by one residue), so the
-/// part's letters are upper case except inside the restricted masks; without it the case of
-/// the letters does not mask.
+/// part's letters are upper case except inside the restricted masks. The query's searched
+/// letters start at `offset` in `record`, its whole record (`-query_loc`; `offset` 0 and the
+/// query itself without a range). NCBI's masks are the lower-case runs of the whole record, so a
+/// run that ends on the letter before the interval reaches the interval's first letter through
+/// the restriction's extra residue (`restrict_masks`, whose steps this takes in record
+/// coordinates).
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:278-281
 /// ```c
@@ -309,50 +312,6 @@ pub fn protein_chunk_would_be_split(chunks: &[ProteinQueryChunk], sizes: SplitSi
 ///             TMaskedQueryRegions split_mask =
 ///                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
 /// ```
-/// With `-query_loc`, `offset` is the start of the query's interval in its record: the
-/// restriction then keeps a mask only from `from + offset` on (`restrict_masks`).
-pub fn protein_chunk_part(
-    query: &[u8],
-    part: &ChunkQuery,
-    mask_lowercase: bool,
-    offset: usize,
-) -> Vec<u8> {
-    if !mask_lowercase {
-        return query[part.from..part.to].to_vec();
-    }
-    let mut masks = Vec::new();
-    let mut start = None;
-    for (index, residue) in query.iter().enumerate() {
-        match (residue.is_ascii_lowercase(), start) {
-            (true, None) => start = Some(index),
-            (false, Some(left)) => {
-                masks.push(MaskedInterval::new(left, index));
-                start = None;
-            }
-            _ => {}
-        }
-    }
-    if let Some(left) = start {
-        masks.push(MaskedInterval::new(left, query.len()));
-    }
-    let mut residues: Vec<u8> = query[part.from..part.to]
-        .iter()
-        .map(u8::to_ascii_uppercase)
-        .collect();
-    for mask in restrict_masks(&masks, part, offset) {
-        for residue in &mut residues[mask.start..mask.end] {
-            *residue = residue.to_ascii_lowercase();
-        }
-    }
-    residues
-}
-
-/// `protein_chunk_part` with lower-case masking for a query whose searched letters start at
-/// `offset` in `record`, its whole record (`-query_loc`; `offset` 0 and the query itself without a
-/// range). NCBI's masks are the lower-case runs of the whole record, so a run that ends on the
-/// letter before the interval reaches the interval's first letter through the restriction's
-/// extra residue (`restrict_masks`, whose steps this takes in record coordinates).
-///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:383-384
 /// ```c++
 ///         if (m_ReadProteins || m_LowerCaseMask)
@@ -367,6 +326,8 @@ pub fn protein_chunk_part_in_record(record: &[u8], offset: usize, part: &ChunkQu
     let (interval_from, interval_to) = (part.from + offset, last + offset);
     for (start, end) in lowercase_runs(record) {
         // The run is [start, end] in the record; `loc` is [from, to - 1) in the searched letters.
+        // NCBI compares the two as numbers (`RestrictToSeqInt`), so with an offset a run is cut by
+        // the part's searched coordinates, not by where the part lies in the record.
         let left = (start as usize).max(part.from);
         let right_open = (end as usize + 1).min(last);
         if left >= right_open {
@@ -456,8 +417,6 @@ mod tests {
             from: 4,
             to: 8,
         };
-        assert_eq!(protein_chunk_part(query, &part, true, 0), b"fghI".to_vec());
-        assert_eq!(protein_chunk_part(query, &part, false, 0), b"fgHI".to_vec());
         assert_eq!(
             protein_chunk_part_in_record(query, 0, &part),
             b"fghI".to_vec()
@@ -465,9 +424,9 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:278-281 (quoted at
-    // `protein_chunk_part`): with `-query_loc 5-` of `MKVa...`, the run [3, 3] of the record grows
-    // to [3, 4] and masks the first searched letter in the first chunk; a run ending two letters
-    // before the interval does not reach it.
+    // `protein_chunk_part_in_record`): with `-query_loc 5-` of `MKVa...`, the run [3, 3] of the
+    // record grows to [3, 4] and masks the first searched letter in the first chunk; a run ending
+    // two letters before the interval does not reach it.
     #[test]
     fn a_run_before_the_interval_reaches_its_first_letter() {
         let part = ChunkQuery {

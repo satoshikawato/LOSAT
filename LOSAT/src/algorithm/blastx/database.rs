@@ -312,7 +312,7 @@ impl ReportedSubjects {
     /// query by query in hit-list order; NCBI's reader error stops the run at this batch
     /// (`HeaderReadError`), and a title LOSAT does not show as NCBI is its refusal
     /// (`check_reported_title`; with `tabular`, `tabular_subject_id`; with `pairwise`,
-    /// `check_shown_protein_title`). A sequence with parsed Seq-ids is read with every Seq-id
+    /// `check_shown_stored_title` and `check_shown_protein_title`). A sequence with parsed Seq-ids is read with every Seq-id
     /// (`shared::read_header`), with LOSAT's refusals of `ParsedSubject::fetched`, of
     /// `shared::check_shown_parsed_subject` (with `pairwise`), of `shared::refuse_joined_hits`
     /// (with `joined`: outfmt 0, 5 and 13 to 16) and of `ParsedSubject::tabular_ids` (with
@@ -359,6 +359,13 @@ impl ReportedSubjects {
                     )? {
                         shared::ReportedHeader::Stored(stored) => {
                             shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                            if pairwise {
+                                shared::check_shown_stored_title(
+                                    stored.taxonomy_title,
+                                    ordinal,
+                                    PROGRAM,
+                                )?;
+                            }
                             listed.insert(list.oid, Some(Arc::from(stored.title)));
                         }
                         shared::ReportedHeader::Parsed(subject) => {

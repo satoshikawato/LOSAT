@@ -1,0 +1,2 @@
+# The CLI's bytes that web ABI v1's TBLASTN must return, and their inputs: no line-end conversion.
+* -text

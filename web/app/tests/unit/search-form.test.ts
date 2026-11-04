@@ -405,10 +405,10 @@ describe("the selects of the protein modes: NCBI's values that LOSAT reads", () 
   const field = (id: ProgramId, flag: string) => programById(id).sections.flatMap((section) => section.fields).find((f) => f.flag === flag)!;
   const list = (id: ProgramId, flag: string, values: FormValues = {}) => fieldList(programById(id), field(id, flag), values, optionsOf(id));
 
-  it('gives BLASTP BLOSUM62, word sizes 3 and 5, and modes 0 and 2, in both tasks', () => {
+  it('gives BLASTP BLOSUM62, word sizes 3, 5 and 6, and modes 0 and 2, in both tasks', () => {
     for (const values of [{}, { '-task': 'blastp-fast' }]) {
       expect(list('blastp', '-matrix', values)).toEqual(['BLOSUM62']);
-      expect(list('blastp', '-word_size', values)).toEqual(['3', '5']);
+      expect(list('blastp', '-word_size', values)).toEqual(['3', '5', '6']);
     }
     expect(fieldChoices(field('blastp', '-comp_based_stats'), optionsOf('blastp').find((o) => o.flag === '-comp_based_stats'))).toEqual(['0', '2']);
     // TBLASTN keeps NCBI's four: its engine reads modes 1 and 3 with -matrix IDENTITY (resetting them to 0).

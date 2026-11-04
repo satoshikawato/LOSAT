@@ -15,6 +15,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { generateVerificationTable } from '../../build/verification';
 import type { OutputFormat } from '../../src/domain/output-format';
 import { optionKey } from '../../src/domain/verification';
+import { RESULTS_REMOVED_MESSAGE } from '../../src/infra/data/block-store';
 import { TMP_DIRECTORY } from '../../src/infra/data/session';
 import { BUILD_HAS_ENGINE, sessionDirectories, sessionFiles } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
@@ -1994,7 +1995,7 @@ test('after the browser removed the stored results, the Outputs, Export and Down
       { timeout: 10_000 },
     )
     .toBe('removed');
-  const removed = 'The browser removed the stored results of this run, probably because the site data was cleared. Run it again.';
+  const removed = RESULTS_REMOVED_MESSAGE;
   const downloads: string[] = [];
   page.on('download', (download) => downloads.push(download.suggestedFilename()));
 

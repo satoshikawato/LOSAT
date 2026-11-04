@@ -5,7 +5,8 @@
 // can choose (engine.spec.ts). Auto reads the processors from navigator.hardwareConcurrency in
 // the page (infra/engine-worker/gateway.ts), which the tests set, so that its count is the same
 // on every machine: 6 of 12 processors below 1 MB of input, 32 of 64 from 1 MB.
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { chooseRun, fasta, openFiles, openSearch, program, submit, task, waitStatus } from './support/search';
 

@@ -2,7 +2,8 @@
 // application. The tests run with the FakeEngine build and with the engine build
 // (LOSAT_WEB_REACTORS); what only the engine can show (its messages, the kept subject, a
 // search long enough to edit or cancel while it runs) is checked in the engine build.
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './support/test';
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { gzipSync, zstdCompressSync } from 'node:zlib';

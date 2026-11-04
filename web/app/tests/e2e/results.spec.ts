@@ -11,7 +11,8 @@
 // Every program that LOSAT Web runs is covered: BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX.
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
+import { test } from './support/test';
 import { generateVerificationTable } from '../../build/verification';
 import type { OutputFormat } from '../../src/domain/output-format';
 import { optionKey } from '../../src/domain/verification';

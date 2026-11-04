@@ -13,6 +13,7 @@ const webkitExecutable = process.env.LOSAT_WEB_WEBKIT_EXECUTABLE;
 // the process exits. WSL saves a dump of several GB of each. No test compares screenshots;
 // the Dot Plot tests count canvas pixels near the HSP colours, and they pass on the CPU.
 const webkitEnv = { ...process.env, WEBKIT_SKIA_ENABLE_CPU_RENDERING: '1' };
+// The WebKit pages' Screen Wake Lock is a stand-in: tests/e2e/support/test.ts.
 // The engine track runs the same tests in its own worktree on the same machine (plan DW-7):
 // a server already on the port is never reused, and LOSAT_WEB_E2E_PORT can move this one.
 

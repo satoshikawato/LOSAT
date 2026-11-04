@@ -10,7 +10,8 @@
 // File kept by mistake is not seen here; the unit tests see it. Chromium only (the protocol).
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './support/test';
 import { openFiles, openSearch, program } from './support/search';
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'the heap is read with the Chrome DevTools Protocol');

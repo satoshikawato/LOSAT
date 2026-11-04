@@ -511,6 +511,12 @@ pub(crate) mod x_subject_flow;
 #[path = "x_bx_mem.rs"]
 pub(crate) mod x_bx_mem;
 
+// No NCBI counterpart (LOSAT's check of a `-db` stream, `XStreamDb::x_check`): the point where a
+// database refused before the search fails the first batch with a valid context
+// (`Subjects::Unreadable`, below) is marked, and an error that the call raises after it, while the
+// stream's reads have not checked every sequence, is an `XPastHead`: the run reports the
+// database's first error before it (`native::search_error`), as when the whole database was read
+// before the first batch.
 pub(crate) fn search_core(
     records: &[FastaRecord],
     subjects: Subjects<'_>,
@@ -520,10 +526,38 @@ pub(crate) fn search_core(
     pool: &crate::utils::threading::SearchPool<'_>,
     prep: Option<UnitPrep>,
 ) -> Result<Vec<BatchStage>> {
-    ensure!(
-        !subjects.is_empty() || subjects.is_unreadable() || options.filtered_empty,
-        "BLASTX preliminary requires a protein subject"
-    );
+    let past_head = std::cell::Cell::new(false);
+    x_search_core(
+        records,
+        subjects,
+        options,
+        diagnostics,
+        sink,
+        pool,
+        prep,
+        &past_head,
+    )
+    .map_err(|error| {
+        if past_head.get() {
+            subjects.x_past_head(error)
+        } else {
+            error
+        }
+    })
+}
+
+/// `search_core`, which sets `past_head` where the database refused before the search fails.
+#[allow(clippy::too_many_arguments)]
+fn x_search_core(
+    records: &[FastaRecord],
+    subjects: Subjects<'_>,
+    options: &ResolvedOptions,
+    diagnostics: bool,
+    sink: &mut impl PreliminarySink,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    prep: Option<UnitPrep>,
+    past_head: &std::cell::Cell<bool>,
+) -> Result<Vec<BatchStage>> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
     // ```c++
     //     if(dbscan_mode)
@@ -547,10 +581,8 @@ pub(crate) fn search_core(
     //         subject->length = MAX_DBSEQ_LEN;
     //         backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
     // ```
-    ensure!(
-        subjects.longest_length() <= 5_000_000,
-        "BLASTX preliminary protein-subject splitting above 5000000 residues is not implemented"
-    );
+    // LOSAT does not split a subject; a batch that is searched refuses longer ones (below).
+    let longest_subject = subjects.longest_length();
     let db_length = subjects.total_length()?;
     let db_count = i64::try_from(subjects.statistics_len())?;
     let min_subject_length = subjects.shortest_length();
@@ -644,10 +676,21 @@ pub(crate) fn search_core(
             continue;
         }
         // NCBI reads the database's sequences in the preliminary search of the first batch
-        // with a valid context (batches without one are not searched, above).
+        // with a valid context (batches without one are not searched, above). The subjects are
+        // checked there too, after the split sizes and the setup of the queries, whose errors
+        // come first at any thread count (`native.rs`, `XUnit::take_prep`).
+        ensure!(
+            !subjects.is_empty() || subjects.is_unreadable() || options.filtered_empty,
+            "BLASTX preliminary requires a protein subject"
+        );
+        ensure!(
+            longest_subject <= 5_000_000,
+            "BLASTX preliminary protein-subject splitting above 5000000 residues is not implemented"
+        );
         if subjects.is_unreadable() {
             return Err(super::subjects::UnreadableSubjects.into());
         }
+        past_head.set(true);
         let x_t = super::x_timing::lap();
         // Dispatch point (LOSAT_X_BXKAONCE, in the strict set), taking the blocks: `score_block`'s
         // raw blocks, before the lengths, kept for the one chunk of a batch that is not split (the

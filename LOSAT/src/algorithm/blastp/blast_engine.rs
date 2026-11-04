@@ -2359,6 +2359,15 @@ impl BlastpReport {
                 | BlastpReport::CustomTabular(_)
         )
     }
+
+    /// The subject ids that the report prints (`PrintedIds`): none but in a table.
+    fn printed_ids(self) -> crate::report::tabular::PrintedIds {
+        match self {
+            BlastpReport::CustomTabular(spec) => crate::report::tabular::PrintedIds::of(Some(spec)),
+            _ if self.is_tabular() => crate::report::tabular::PrintedIds::of(None),
+            _ => crate::report::tabular::PrintedIds::default(),
+        }
+    }
 }
 
 /// The Seq-annot format of a `-outfmt` value (outfmt 8, 12), read as NCBI reads the value
@@ -5030,7 +5039,7 @@ fn read_cli_subjects(
 pub fn check_options(args: &BlastpArgs) -> Result<()> {
     // The host has no database files (`run_local_with`).
     if args.db.is_some() {
-        bail!("-db (a database search) is not supported by LOSAT Web yet");
+        bail!("-db (a database search) is not supported in the browser yet");
     }
     let resolved = args.resolve()?;
     validate_requested_blastp_support(&resolved)?;
@@ -5320,7 +5329,7 @@ pub(crate) fn run_local_with(
     // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
     // database is read from files by the command line only.
     if args.db.is_some() {
-        bail!("-db (a database search) is not supported by LOSAT Web yet");
+        bail!("-db (a database search) is not supported in the browser yet");
     }
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
     // cannot write, and a diagnostics stream that saves the messages.
@@ -5878,7 +5887,7 @@ fn search(
     if v1.is_some() {
         check_v1_query_intervals(&searched_queries, &query_input)?;
     }
-    check_blastp_environment(args.app.name())?;
+    check_blastp_environment(args.app, database.is_none(), outputs.only_archive())?;
     let batches = match args.app {
         BlastpApp::Blastp => crate::blastinput::query_batch::read_query_batches(
             query_records,
@@ -6542,8 +6551,8 @@ fn x_block_search_refuses_nothing(
 // cells, and a batch's tables have no more words than the batch's offsets add
 // (`CompressedWordCount`): a batch whose words are at most four times the banks' cells cannot fill
 // them; a batch with more leaves the search to the reference path, which tests the batch exactly.
-// The batches are tested one by one, in groups on the pool's threads when it has more than one
-// (each group with its own counter); the outcome is whether all pass.
+// The batches are tested one by one, on the pool's threads when it has more than one, with one
+// counter whose kept counts serve them all; the outcome is whether all pass.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 fn x_block_words_fit(
     args: &ResolvedBlastpArgs,
@@ -6557,15 +6566,15 @@ fn x_block_words_fit(
         return true;
     }
     // The threshold as the table is built (`run_resolved_in_pool`).
-    let counter = || {
-        CompressedWordCount::new(
-            args.word_size,
-            crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
-        )
+    let Some(words) = CompressedWordCount::new(
+        args.word_size,
+        crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
+    ) else {
+        return false;
     };
     // The letters of the lookup query (`encode_protein_query_frame_with_seg`) where SEG does
     // not mask them; a lookup segment holds only those (`build_lookup_segments_for_context`).
-    let fits = |words: &mut CompressedWordCount, searched: &std::ops::Range<usize>| {
+    let fits = |searched: &std::ops::Range<usize>| {
         let encoded: Vec<EncodedProtein> = queries[searched.clone()]
             .iter()
             .map(|record| encode_protein_sequence(record.seq()))
@@ -6586,27 +6595,12 @@ fn x_block_words_fit(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     if pool.enabled() && pool.threads() > 1 {
-        // One group of consecutive batches per thread, each with its counter (whose kept counts
-        // serve the group's batches).
-        let group = searched_batches.len().div_ceil(pool.threads()).max(1);
-        return pool.install(|| {
-            searched_batches
-                .par_chunks(group)
-                .map(|batches| {
-                    counter().is_some_and(|mut words| {
-                        batches.iter().all(|searched| fits(&mut words, searched))
-                    })
-                })
-                .all(|fit| fit)
-        });
+        // The batches on the pool's threads, with the one counter (whose kept counts serve all
+        // batches).
+        return pool.install(|| searched_batches.par_iter().all(fits));
     }
     let _ = pool;
-    let Some(mut words) = counter() else {
-        return false;
-    };
-    searched_batches
-        .iter()
-        .all(|searched| fits(&mut words, searched))
+    searched_batches.iter().all(fits)
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the outfmt 0 report of the search of all queries refuses a
@@ -6956,13 +6950,22 @@ struct BlastpReports<'a> {
 }
 
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
-/// `BL2SEQ_LEGACY`, `OLD_FSC` and query split values that NCBI cannot convert. Other
+/// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`), a
+/// `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless every requested format is the
+/// archive (`archive`), `OLD_FSC` and query split values that NCBI cannot convert. Other
 /// batch sizes change a blastp report only through the query batches
 /// (`read_query_batches`; the redo of a query reads the heaps of its batch,
 /// `kappa_query_batches`) and the query split (`search_split_query_batches`).
-fn check_blastp_environment(app_name: &str) -> Result<()> {
+fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool) -> Result<()> {
     use crate::blastinput::app;
-    app::check_unsupported_environment(app_name)?;
+    let app_name = app.name();
+    // psiblast's iterations fetch the report's sequences ahead before they choose the
+    // archive (`app::check_search_environment`).
+    app::check_search_environment(
+        app_name,
+        fasta_subjects,
+        archive && app == BlastpApp::Blastp,
+    )?;
     app::check_old_fsc(app_name)?;
     app::check_query_split_environment(app_name, false)??;
     Ok(())
@@ -10895,18 +10898,27 @@ fn run_resolved_in_pool(
     // `max_target_seqs` subjects that have one (the pairwise report shows at most as many, its
     // numbers of descriptions and alignments).
     // NCBI's cut counts the Seq-aligns of subjects whose Seq-align ids match as those of one
-    // subject (`PruneSeqalign`, quoted at `refuse_joined_cut`): where it keeps another subject
-    // than the cut below, the run is LOSAT's refusal before any format is written.
-    if let (BlastpApp::Psiblast, Some(titles)) = (args.app, listed_titles.as_ref()) {
-        titles.check_joined_cut(&hit_lists, args.max_target_seqs)?;
-    }
+    // subject (`PruneSeqalign`, quoted at `joined_cut`): a copy of one record that follows
+    // another is kept with it; where it keeps another subject for others, the run is LOSAT's
+    // refusal before any format is written.
+    let psiblast_kept: Option<Vec<usize>> = match (args.app, listed_titles.as_ref()) {
+        (BlastpApp::Psiblast, Some(titles)) => {
+            Some(titles.joined_cut(&hit_lists, args.max_target_seqs)?)
+        }
+        _ => None,
+    };
     let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
         hit_lists
             .iter_mut()
-            .map(|hit_list_opt| {
+            .enumerate()
+            .map(|(query, hit_list_opt)| {
                 let found = blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt));
                 if let Some(hit_list) = hit_list_opt {
-                    hit_list.prune_by_size(args.max_target_seqs);
+                    hit_list.prune_by_size(
+                        psiblast_kept
+                            .as_ref()
+                            .map_or(args.max_target_seqs, |kept| kept[query]),
+                    );
                 }
                 found
             })
@@ -11130,20 +11142,30 @@ fn run_resolved_in_pool(
         titles.check_reported_titles(&hit_lists)?;
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
         // (the formats that read a subject's Bioseq need its sequence found by its Seq-align
-        // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids).
+        // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids, which LOSAT
+        // does for copies of one record; 13 to 16 and the tables of taxonomy fields write their
+        // taxids).
         titles.check_parsed_reports(
             &hit_lists,
             format_plans
                 .iter()
                 .any(|outfmt| !matches!(outfmt, BlastpReport::Seqalign(_) | BlastpReport::Archive)),
-            format_plans.iter().any(|outfmt| {
-                matches!(
-                    outfmt,
-                    BlastpReport::Text(OutputFormat::Pairwise)
-                        | BlastpReport::Xml
-                        | BlastpReport::Xml2(_)
-                )
+            format_plans.iter().any(|outfmt| match outfmt {
+                BlastpReport::Text(OutputFormat::Pairwise)
+                | BlastpReport::Xml
+                | BlastpReport::Xml2(_) => true,
+                BlastpReport::CustomTabular(spec) => spec.needs().joins_subjects(),
+                _ => false,
             }),
+            format_plans.iter().any(|outfmt| match outfmt {
+                BlastpReport::Xml2(_) => true,
+                BlastpReport::CustomTabular(spec) => spec.needs().taxonomy,
+                _ => false,
+            }),
+            format_plans.iter().fold(
+                crate::report::tabular::PrintedIds::default(),
+                |words, outfmt| words.or(outfmt.printed_ids()),
+            ),
         )?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288

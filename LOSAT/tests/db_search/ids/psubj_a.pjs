@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "psubj_a",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psubj_a",
+  "number-of-letters": 220,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-04T00:45:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49608,
+  "bytes-to-cache": 318,
+  "files": [
+    "psubj_a.pdb",
+    "psubj_a.phr",
+    "psubj_a.pin",
+    "psubj_a.pog",
+    "psubj_a.pos",
+    "psubj_a.pot",
+    "psubj_a.psq",
+    "psubj_a.ptf",
+    "psubj_a.pto"
+  ]
+}

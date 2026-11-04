@@ -10,6 +10,7 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import type { HspId, ResultsBrowser } from '../application/results';
+import { shellWords } from '../domain/argv';
 import { recordName } from '../domain/dataset';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal } from '../domain/run';
@@ -20,6 +21,7 @@ import DotPlot from './DotPlot.vue';
 import { formatCount } from './format';
 import GraphicSummary from './GraphicSummary.vue';
 import HspTable from './HspTable.vue';
+import LosatLoader from './LosatLoader.vue';
 import OutputsView from './OutputsView.vue';
 import QueryPicker from './QueryPicker.vue';
 import ResultFilters from './ResultFilters.vue';
@@ -83,10 +85,13 @@ function runLabel(run: RunView): string {
   return `Run ${number} · ${programById(program).label} · ${query.name} vs ${subject.name}${status}`;
 }
 
-/** The options of the run's argv: the words after the program and the two inputs (plan §5.3). */
+/**
+ * The options of the run's argv: the words after the program and the two inputs (plan §5.3),
+ * quoted as on a command line, so that they can be typed again ("Additional options").
+ */
 function options(run: RunView): string {
   const words = run.snapshot.argv.slice(5);
-  return words.length === 0 ? 'defaults' : words.join(' ');
+  return words.length === 0 ? 'defaults' : shellWords(words);
 }
 
 /** The program and the task that the search used (the argv's, or the engine's default once the run is read). */
@@ -187,7 +192,7 @@ async function toAlignments(id: HspId): Promise<void> {
         <ResultFilters v-if="state.phase === 'ready' && loaded" :results="results" :filters="state.filters" />
       </div>
 
-      <p v-if="state.phase === 'loading'" class="muted" data-testid="results-status" data-phase="loading">Reading the results…</p>
+      <p v-if="state.phase === 'loading'" class="muted" data-testid="results-status" data-phase="loading"><LosatLoader />Reading the results…</p>
       <RunStatus v-else-if="state.phase === 'unavailable' && active && selected" :coordinator="coordinator" :run="selected" :runs="runs" />
       <p
         v-else-if="state.phase === 'unavailable' || state.phase === 'failed'"

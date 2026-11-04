@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
+import { navigate } from './support/navigate';
 import { chooseRun, fasta, openFiles, openParameters, pickRun, program, showRecords, submit, task, waitStatus } from './support/search';
 
 const SCREENS = process.env['LOSAT_WEB_SCREENS'] || undefined;
@@ -45,7 +46,7 @@ async function ready(page: Page, role: string, index = 0): Promise<void> {
 for (const size of SIZES) {
   test(`search screen at the ${size.name} size`, async ({ page, browserName }) => {
     await page.setViewportSize({ width: size.width, height: size.height });
-    await page.goto('/');
+    await navigate(page, '/');
     // The storage is open (its section shows nothing in the normal case, stop-describing-ui rule 4).
     await expect(page.getByTestId('storage-status')).toBeAttached();
     // After the engine has checked the default options (S13 screen review L6).
@@ -219,7 +220,7 @@ async function openResults(page: Page, number: number): Promise<void> {
 for (const size of SIZES) {
   test(`results screen at the ${size.name} size`, async ({ page, browserName }) => {
     await page.setViewportSize({ width: size.width, height: size.height });
-    await page.goto('/');
+    await navigate(page, '/');
     // The storage is open (its section shows nothing in the normal case, stop-describing-ui rule 4).
     await expect(page.getByTestId('storage-status')).toBeAttached();
     // The Hits view stays mounted (hidden) beside the dot plot: each has its own HSP table.

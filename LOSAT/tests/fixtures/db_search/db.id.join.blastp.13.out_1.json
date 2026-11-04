@@ -1,0 +1,291 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/ids/pjoin_abc"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "pjq query of the joined records",
+          "query_len": 200,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gb|JHA00001.1|",
+                  "accession": "JHA00001",
+                  "title": "joined record one"
+                }
+              ],
+              "len": 200,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 422.935,
+                  "score": 1086,
+                  "evalue": 1.93555e-157,
+                  "identity": 200,
+                  "positive": 200,
+                  "query_from": 1,
+                  "query_to": 200,
+                  "hit_from": 1,
+                  "hit_to": 200,
+                  "align_len": 200,
+                  "gaps": 0,
+                  "qseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "hseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "midline": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gb|JHA00006.1|",
+                  "accession": "JHA00006",
+                  "title": "twin of record one"
+                }
+              ],
+              "len": 200,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 422.935,
+                  "score": 1086,
+                  "evalue": 1.93555e-157,
+                  "identity": 200,
+                  "positive": 200,
+                  "query_from": 1,
+                  "query_to": 200,
+                  "hit_from": 1,
+                  "hit_to": 200,
+                  "align_len": 200,
+                  "gaps": 0,
+                  "qseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "hseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "midline": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gb|JHA00001.1|",
+                  "accession": "JHA00001",
+                  "title": "joined record one"
+                }
+              ],
+              "len": 200,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 422.935,
+                  "score": 1086,
+                  "evalue": 1.93555e-157,
+                  "identity": 200,
+                  "positive": 200,
+                  "query_from": 1,
+                  "query_to": 200,
+                  "hit_from": 1,
+                  "hit_to": 200,
+                  "align_len": 200,
+                  "gaps": 0,
+                  "qseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "hseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "midline": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 422.935,
+                  "score": 1086,
+                  "evalue": 1.93555e-157,
+                  "identity": 200,
+                  "positive": 200,
+                  "query_from": 1,
+                  "query_to": 200,
+                  "hit_from": 1,
+                  "hit_to": 200,
+                  "align_len": 200,
+                  "gaps": 0,
+                  "qseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "hseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "midline": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "gb|JHA00002.1|",
+                  "accession": "JHA00002",
+                  "title": "other record two"
+                }
+              ],
+              "len": 200,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 280.411,
+                  "score": 716,
+                  "evalue": 6.14128e-101,
+                  "identity": 145,
+                  "positive": 153,
+                  "query_from": 1,
+                  "query_to": 200,
+                  "hit_from": 1,
+                  "hit_to": 200,
+                  "align_len": 200,
+                  "gaps": 0,
+                  "qseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "hseq": "MDEGPPSYFCTPGTQGRHMLGMMRMRHITEAWLCTSIMMNCDSAHLLKCWEMKQISATFVCWCEPETEYDFGMCCHGTQCNIWIRWLSWNQISDVCSLWIPCLNSVLLYYMSEKWKFANNVKIGGGRQYCVATHTRGNECSPDDIRMPPYDYVGQYIVDTSELQGPSSWCKTWVDHRMLQVCEACVRWGEYLFRPWMDDD",
+                  "midline": "MD G   YFCT  T+GRHM GMMRMRHITEA L TSI  NCDS H LKCWEM QISA   C+ EPETEY+FGMCCHGTQCN WI W SWNQISDV  +W+PC+N+V LY MSEK KFANNV IG G Q C A HTRGN CS  D   PPYDYV Q  VDTSEL GPSS C TWVD R+LQVCEACVRWGEYLF  WMDDD"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "gb|JHA00004.1|",
+                  "accession": "JHA00004",
+                  "title": "distant record four"
+                }
+              ],
+              "len": 200,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 223.016,
+                  "score": 567,
+                  "evalue": 2.03324e-78,
+                  "identity": 117,
+                  "positive": 130,
+                  "query_from": 1,
+                  "query_to": 200,
+                  "hit_from": 1,
+                  "hit_to": 200,
+                  "align_len": 200,
+                  "gaps": 0,
+                  "qseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEEVWLPCMNNVWLYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "hseq": "MDFFQGAYPCGKTSSGEQMTSKMRDRQITDADRHTFIERNCDQHNWIFCIKGHGCKGWSPCFTEPFCAQNMIQCHHNTQCNGWICWRFWNQIVDIADYWIIWMNNVWLYYWSEKKKFFNVVNIGWGLERGHAQFTRGIYCELADEPHDPYDYLPHGEVPTSELTEPSRTCLTWFDGRYWWVCQHCVRSWEYLENNWMDYD",
+                  "midline": "MDF    Y C KT+ G  MT  MR R IT+AD HT IE NCD  +W+ C + H    WS CFTEP    N   C H TQCN WI WR WNQI D+ + W+  MNNVWLY  SEK KF N VNIG G++R HAQ TRG YC + D PH PYDY+P GEV TSELT PS TCLTW D R   VC+ CVR  EYL NNWMD D"
+                }
+              ]
+            },
+            {
+              "num": 6,
+              "description": [
+                {
+                  "id": "gb|JHA00003.1|",
+                  "accession": "JHA00003",
+                  "title": "two-piece record three"
+                },
+                {
+                  "id": "ref|XP_900003.1|",
+                  "accession": "XP_900003",
+                  "title": "merged definition line of three"
+                }
+              ],
+              "len": 300,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 196.438,
+                  "score": 498,
+                  "evalue": 1.62424e-66,
+                  "identity": 91,
+                  "positive": 93,
+                  "query_from": 1,
+                  "query_to": 97,
+                  "hit_from": 1,
+                  "hit_to": 97,
+                  "align_len": 97,
+                  "gaps": 0,
+                  "qseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEE",
+                  "hseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNVPIDLNK",
+                  "midline": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWN   D+ +"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 194.126,
+                  "score": 492,
+                  "evalue": 1.31689e-65,
+                  "identity": 96,
+                  "positive": 98,
+                  "query_from": 81,
+                  "query_to": 200,
+                  "hit_from": 185,
+                  "hit_to": 300,
+                  "align_len": 122,
+                  "gaps": 8,
+                  "qseq": "NKWIMWRSWNQISDVEEVWLPCMNNVW--LYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "hseq": "NAWFFWMEWGVVDEDCRYW------CWKAFINMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "midline": "N W  W  W  + +    W       W     MSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 196.438,
+                  "score": 498,
+                  "evalue": 1.62424e-66,
+                  "identity": 91,
+                  "positive": 93,
+                  "query_from": 1,
+                  "query_to": 97,
+                  "hit_from": 1,
+                  "hit_to": 97,
+                  "align_len": 97,
+                  "gaps": 0,
+                  "qseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNQISDVEE",
+                  "hseq": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWNVPIDLNK",
+                  "midline": "MDFGGHYYFCTKTTEGRHMTGMMRMRHITEADLHTSIEPNCDSFHWLKCWEMHQISAWSGCFTEPETEYNFGMCCHGTQCNKWIMWRSWN   D+ +"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 194.126,
+                  "score": 492,
+                  "evalue": 1.31689e-65,
+                  "identity": 96,
+                  "positive": 98,
+                  "query_from": 81,
+                  "query_to": 200,
+                  "hit_from": 185,
+                  "hit_to": 300,
+                  "align_len": 122,
+                  "gaps": 8,
+                  "qseq": "NKWIMWRSWNQISDVEEVWLPCMNNVW--LYVMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "hseq": "NAWFFWMEWGVVDEDCRYW------CWKAFINMSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD",
+                  "midline": "N W  W  W  + +    W       W     MSEKTKFANNVNIGKGMQRCHAQHTRGNYCSIQDWPHPPYDYVPQGEVDTSELTGPSSTCLTWVDIRLLQVCEACVRWGEYLFNNWMDDD"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 8,
+            "db_len": 1800,
+            "hsp_len": 35,
+            "eff_space": 250800,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+}

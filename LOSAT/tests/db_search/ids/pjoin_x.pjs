@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pjoin_x",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pjoin_x",
+  "number-of-letters": 510,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-03T21:36:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50152,
+  "bytes-to-cache": 617,
+  "files": [
+    "pjoin_x.pdb",
+    "pjoin_x.phr",
+    "pjoin_x.pin",
+    "pjoin_x.pog",
+    "pjoin_x.pos",
+    "pjoin_x.pot",
+    "pjoin_x.psq",
+    "pjoin_x.ptf",
+    "pjoin_x.pto"
+  ]
+}

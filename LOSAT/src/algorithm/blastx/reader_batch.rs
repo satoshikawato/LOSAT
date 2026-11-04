@@ -4,7 +4,7 @@ use super::{
     args::ResolvedOptions,
     input::FastaRecord,
     parameters::{score_block, subject_parameters, ContextParameters},
-    query_setup::{context_frame, prepare_queries, PreparedQueryBatch},
+    query_setup::{context_frame, prepare_queries, prepare_unit_queries, PreparedQueryBatch},
     subjects::Subjects,
 };
 use crate::stats::tables::KarlinParams;
@@ -22,6 +22,11 @@ pub(crate) struct ReaderBatchShape {
     pub(crate) concatenated_length: usize,
     /// `last_context + 1` of the batch.
     pub(crate) contexts: usize,
+    /// Whether a context of the batch has residues, and the batch's empty queries: the setup of
+    /// a batch without a valid context fails with one message per empty query
+    /// (`query_setup::prepare_unit_queries`).
+    pub(crate) valid: bool,
+    pub(crate) empty_queries: usize,
     /// The Karlin block of the first valid context with the smallest ungapped lambda, over the
     /// batch's contexts.
     pub(crate) smallest_lambda: Option<KarlinParams>,
@@ -122,8 +127,8 @@ impl ReaderBatchShape {
     // it is known before any unit is prepared. The smallest lambda is the first strict minimum
     // over the contexts in order, as above; the two cutoff minima are the minima over the units'.
     /// The values of a reader batch that follow from its records: the query count, the
-    /// concatenated length and the context count (phase 1 starts with these; the units' cutoff
-    /// minima are taken with the average length they give).
+    /// concatenated length, the context count and whether one is valid (phase 1 starts with
+    /// these; the units' cutoff minima are taken with the average length they give).
     pub(crate) fn layout(records: &[FastaRecord], options: &ResolvedOptions) -> Self {
         let (mut offset, mut concatenated_length, mut contexts) = (0, 0, 0);
         for record in records {
@@ -141,6 +146,8 @@ impl ReaderBatchShape {
             query_count: records.len(),
             concatenated_length,
             contexts,
+            valid: offset > 0,
+            empty_queries: records.iter().filter(|q| q.sequence.is_empty()).count(),
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
@@ -157,6 +164,8 @@ impl ReaderBatchShape {
             query_count: layout.query_count,
             concatenated_length: layout.concatenated_length,
             contexts: layout.contexts,
+            valid: layout.valid,
+            empty_queries: layout.empty_queries,
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
@@ -210,8 +219,8 @@ impl ReaderBatchShape {
 // contexts, and the unit's cutoff minima with the batch's average length, which the layout of the
 // records gives), reduces the batch's values, and hands each unit its preparation with the shape
 // attached; phase 2 searches the units as before, from these. A batch with no valid context is
-// not searched, and subjects that cannot be read end the search before they are used, so the
-// minima are not taken then.
+// not searched, and a database refused before its sequences are read (`Subjects::Unreadable`)
+// ends the search before they are used, so the minima are not taken then.
 /// Phase 1 for one unit (`queries`) of a reader batch of `layout`. The unit's preparation has
 /// the layout attached; `attach` replaces it with the reduced shape.
 pub(crate) fn prepare_unit(
@@ -220,7 +229,7 @@ pub(crate) fn prepare_unit(
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
 ) -> Result<UnitPrep> {
-    let mut prepared = prepare_queries(queries, options)?;
+    let mut prepared = prepare_unit_queries(queries, Some(layout), options)?;
     let params = score_block(&prepared);
     prepared.reader_shape = Some(Arc::clone(layout));
     let kappa = options.composition == 2 && options.gapped;
@@ -232,20 +241,31 @@ pub(crate) fn prepare_unit(
         && !subjects.is_empty()
     {
         let mut minima = params.clone();
-        subject_parameters(
-            &prepared,
-            &mut minima,
-            options,
-            subjects.total_length()?,
-            i64::try_from(subjects.len())?,
-            subjects.shortest_length(),
-            None,
-        )?;
-        let valid = || minima.iter().filter(|p| p.valid);
-        word_cutoff_min = ungapped_link
-            .then(|| valid().map(|p| p.word_cutoff).min())
-            .flatten();
-        redo_cutoff_min = kappa.then(|| valid().map(|p| p.hit_cutoff).min()).flatten();
+        let computed = (|| {
+            subject_parameters(
+                &prepared,
+                &mut minima,
+                options,
+                subjects.total_length()?,
+                i64::try_from(subjects.len())?,
+                subjects.shortest_length(),
+                None,
+            )
+        })();
+        match computed {
+            Ok(_) => {
+                let valid = || minima.iter().filter(|p| p.valid);
+                word_cutoff_min = ungapped_link
+                    .then(|| valid().map(|p| p.word_cutoff).min())
+                    .flatten();
+                redo_cutoff_min = kappa.then(|| valid().map(|p| p.hit_cutoff).min()).flatten();
+            }
+            // A database that fails the whole check takes no minima, as when it was refused
+            // before the search: its error comes where the unit is searched
+            // (`search::search_core`, `XPastHead`).
+            Err(_) if subjects.x_damaged() => {}
+            Err(error) => return Err(error),
+        }
     }
     Ok(UnitPrep {
         prepared,
@@ -387,6 +407,40 @@ mod tests {
         }
     }
 
+    /// NCBI validates the query batch as a whole: a unit of only empty records is prepared when
+    /// another unit of its reader batch has a valid context, and in a reader batch without one
+    /// every unit fails with one message per empty record of the batch.
+    #[test]
+    fn whether_a_unit_has_no_data_is_its_reader_batchs() {
+        let options = super::super::stage_c_tests::options();
+        let pool = crate::utils::threading::SearchPool::x_serial();
+        let valid: Vec<_> = [12000, 0, 0].map(record).to_vec();
+        let ranges = super::super::query_setup::batch_ranges(&valid, 10002);
+        assert_eq!(ranges, [0..1, 1..3]);
+        let subjects: Subjects<'_> = (&valid[..1]).into();
+        let units = prepare_reader_batch(&valid, &ranges, &options, subjects, &pool).unwrap();
+        assert!(!units[1].params.iter().any(|p| p.valid));
+        assert!(prepare_queries(&valid[1..], &options).is_err());
+        let none: Vec<_> = [0]
+            .into_iter()
+            .chain([2; 5001])
+            .chain([0])
+            .map(record)
+            .collect();
+        let ranges = super::super::query_setup::batch_ranges(&none, 10002);
+        assert_eq!(ranges, [0..5002, 5002..5003]);
+        let layout = Arc::new(ReaderBatchShape::layout(&none, &options));
+        for range in ranges {
+            let error = prepare_unit(&none[range], &layout, &options, subjects)
+                .err()
+                .expect("a reader batch without a valid context");
+            assert_eq!(
+                error.to_string(),
+                "Warning: Sequence contains no data ".repeat(2)
+            );
+        }
+    }
+
     /// A unit of 19,410 nucleotides or more that is alone in its search is split into chunks;
     /// the same unit as a part of a reader batch of several queries is not (NCBI splits no
     /// batch of several queries).
@@ -405,6 +459,8 @@ mod tests {
             query_count: 2,
             concatenated_length: 2 * full.batch_concatenated_length(),
             contexts: 2 * full.contexts.len(),
+            valid: true,
+            empty_queries: 0,
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,

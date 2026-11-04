@@ -6406,14 +6406,16 @@ fn post_process_hits_and_write(
     } else {
         None
     };
-    // EXPERIMENT (LOSAT_X_RPTSTREAM): a subject set's ids made once for every batch; the
-    // switch acts only when no subject's id is refused (`x_rpt_stream::SubjectCache`), so
-    // they are the ids made here.
+    // EXPERIMENT (LOSAT_X_RPTSTREAM): a subject set's ids made once for every batch where LOSAT
+    // refuses none of them (`x_rpt_stream::SubjectCache`), so they are the ids made here.
     let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> =
         if output_formats.iter().any(|format| format.is_tabular()) {
-            match (report.database_subject_ids, report.subject_cache) {
+            match (
+                report.database_subject_ids,
+                report.subject_cache.and_then(|cache| cache.ids.as_deref()),
+            ) {
                 (Some(ids), _) => std::borrow::Cow::Borrowed(ids),
-                (None, Some(cache)) => std::borrow::Cow::Borrowed(cache.ids.as_slice()),
+                (None, Some(ids)) => std::borrow::Cow::Borrowed(ids),
                 (None, None) => std::borrow::Cow::Owned(tabular_subject_ids(
                     &hit_lists,
                     report.subjects.records(),
@@ -7635,20 +7637,28 @@ fn search_cli(
     // batch is read.
     let shared_standard_input =
         args.query.as_os_str() == "-" && args.subject_path().as_os_str() == "-";
-    // EXPERIMENT (LOSAT_X_QSTREAM): what its rule reads (`x_query_stream::Rule`): the task and the
-    // largest query batch.
+    // EXPERIMENT (LOSAT_X_QSTREAM): what its rule reads (`x_query_stream::Rule`): the largest query
+    // batch.
     let x_rule = x_query_stream::Rule {
-        megablast: args.task == "megablast",
         batch_letters: x_query_batch_letters(&args.task),
     };
     // EXPERIMENT (LOSAT_X_QSTREAM): whether the query file is read a second time, batch by batch
     // (a second handle on it, at the position its reader starts from), where the reports may be
-    // written batch by batch (LOSAT_X_RPTSTREAM).
+    // written batch by batch (LOSAT_X_RPTSTREAM, unless it keeps them after the loop for a reason
+    // known before the reading).
+    let x_reports_streamed = !args.parse_deflines
+        && x_rpt_stream::refused_before_reading(
+            x_rpt_stream::switch_on(),
+            &args,
+            outputs,
+            &output_formats,
+        )
+        .is_none();
     let mut x_opening = x_query_stream::Opening::new(
         &args.query,
         &query_file,
         shared_standard_input,
-        x_rpt_stream::switch_on() && !args.parse_deflines,
+        x_reports_streamed,
         x_rule,
     );
     // EXPERIMENT (LOSAT_X_BNQPACK): whether the records read before the search move into a store
@@ -8037,13 +8047,13 @@ fn run_local_formats(
     // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
     // database is read from files by the command line only.
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
+        anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
     // The counts file of `-window_masker_db` comes from the caller's counts source (LOSAT
     // Web's registered inputs); a caller that gives none has no file to read.
     if args.window_masker_db.is_some() && args.window_masker_counts.is_none() {
         anyhow::bail!(
-            "-window_masker_db (a WindowMasker counts file) is not supported by LOSAT Web yet"
+            "-window_masker_db (a WindowMasker counts file) is not supported in the browser yet"
         );
     }
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
@@ -8177,7 +8187,11 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
-    check_unsupported_environment(matches!(subjects, Subjects::Database(_)))?;
+    app::check_search_environment(
+        "BLASTN",
+        !matches!(subjects, Subjects::Database(_)),
+        outputs.only_archive(),
+    )?;
     let batching = query_batching_from_environment(
         super::super::coordination::task_uses_megablast_chunks(&args.task),
     )?;
@@ -8260,62 +8274,6 @@ fn search(
     // No NCBI counterpart: the PAIRPAR counters with LOSAT_TIMING; nothing without it.
     x_pair_seed::summary();
     x_result
-}
-
-/// Rejects the environment variables that put NCBI BLAST+ into a search mode or report that
-/// LOSAT does not reproduce.
-///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:204-210
-/// ```c
-///     if ( (subjects = db_args->GetSubjects(scope)) ) {
-///         _ASSERT(search_db.Empty());
-/// 	char* bl2seq_legacy = getenv("BL2SEQ_LEGACY");
-/// 	if (bl2seq_legacy)
-///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, false));
-/// 	else
-///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
-/// ```
-/// `BL2SEQ_LEGACY` (any value, also an empty one) turns off the scan of the subjects as a
-/// database: `CLocalBlast` then searches each subject on its own (local_blast.cpp:189,289)
-/// and `CBlastFormat` writes the legacy bl2seq report (`m_IsBl2Seq && !m_IsDbScan`). NCBI
-/// reads it in that branch only: a database search (`database`) does not read it.
-fn check_unsupported_environment(database: bool) -> Result<()> {
-    if !database && std::env::var_os("BL2SEQ_LEGACY").is_some() {
-        anyhow::bail!(
-            "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's BLASTN"
-        );
-    }
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:732-737
-    // ```c
-    // 		char * pre_fetch_limit_str = getenv("PRE_FETCH_SEQS_LIMIT");
-    // 		if (pre_fetch_limit_str) {
-    // 			int pre_fetch_limit = NStr::StringToInt(pre_fetch_limit_str);
-    // 			if(pre_fetch_limit == 0) {
-    // 				return false;
-    // 			}
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:761-766
-    // ```c
-    //     if (results.size() == 0) {
-    //         return;
-    //     }
-    //     if(!s_PreFetchSeqs(results, format_type)){
-    //     	return;
-    //     }
-    // ```
-    // An integer only decides whether the report's sequences are fetched ahead, which
-    // changes no output. Before the report of each query batch NCBI converts the value, and
-    // one that `NStr::StringToInt` cannot convert (an empty one too) stops it with a
-    // `CStringException` whose text names its build's source files (exit 255).
-    if let Some(value) = std::env::var_os("PRE_FETCH_SEQS_LIMIT") {
-        if crate::blastinput::query_batch::ncbi_string_to_int(&value).is_none() {
-            anyhow::bail!(
-                "the environment variable PRE_FETCH_SEQS_LIMIT has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's BLASTN",
-                value.to_string_lossy()
-            );
-        }
-    }
-    Ok(())
 }
 
 /// An error of a query batch after the first that does not depend on the batch's queries
@@ -8993,7 +8951,6 @@ fn run_in_pool(
         query_input,
         &lengths,
         batching,
-        parallel_pool,
     );
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
     // (`lookup::x_mb_lut_keep`), freed when the loop ends.
@@ -9107,7 +9064,9 @@ fn run_in_pool(
                         },
                     )
                 };
-                if stream.acting() {
+                // In the first batch nothing was streamed: the call of the off path writes the
+                // prologs that come with the reports (outfmt 20's line of the field names).
+                if stream.acting() && start > 0 {
                     stream.finish_sam(outputs)?;
                 } else {
                     before(outputs)?;
@@ -9156,7 +9115,9 @@ fn run_in_pool(
                     },
                 )
             };
-            if stream.acting() {
+            // In the first batch nothing was streamed: the call of the off path writes the
+            // prologs that come with the reports (outfmt 20's line of the field names).
+            if stream.acting() && start > 0 {
                 stream.finish_sam(outputs)?;
             } else {
                 before(outputs)?;
@@ -9238,7 +9199,9 @@ fn run_in_pool(
                         },
                     )
                 };
-                if stream.acting() {
+                // In the first batch nothing was streamed: the call of the off path writes the
+                // prologs that come with the reports (outfmt 20's line of the field names).
+                if stream.acting() && start > 0 {
                     stream.finish_sam(outputs)?;
                 } else {
                     before(outputs)?;
@@ -9316,7 +9279,9 @@ fn run_in_pool(
                     },
                 )
             };
-            if stream.acting() {
+            // In the first batch nothing was streamed: the call of the off path writes the
+            // prologs that come with the reports (outfmt 20's line of the field names).
+            if stream.acting() && start > 0 {
                 stream.finish_sam(outputs)?;
             } else {
                 before(outputs)?;
@@ -9420,7 +9385,9 @@ fn run_in_pool(
                             None,
                         )
                     };
-                    if stream.acting() {
+                    // In the first batch nothing was streamed: the call of the off path writes the
+                    // prologs that come with the reports (outfmt 20's line of the field names).
+                    if stream.acting() && start > 0 {
                         stream.finish_sam(outputs)?;
                     } else {
                         before(outputs)?;
@@ -9432,8 +9399,9 @@ fn run_in_pool(
                 // The warnings of the batches read so far, in NCBI's order (the outfmt 0
                 // prolog of a Karlin-Altschul error of the first batch is written).
                 // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were written
-                // with their reports; the off path writes no report here (the switch acts only
-                // where LOSAT's refusals cannot come after the first batch, `x_rpt_stream`).
+                // with their reports, which a refusal of LOSAT's in a later batch follows (the
+                // traceback's of ambiguity data that it cannot decode, `x_rpt_stream`); the off
+                // path writes no report here.
                 Err(error) => {
                     let written = if stream.acting() { start } else { 0 };
                     for query_warnings in &warnings[written..=start] {
@@ -9491,9 +9459,8 @@ fn run_in_pool(
                     // LOSAT's refusal: the warnings of the batches read so far, as for the
                     // other errors of a batch (below).
                     // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were
-                    // written with their reports; the off path writes no report here (the
-                    // switch acts only where every title is read before the search,
-                    // `x_rpt_stream`).
+                    // written with their reports, which the refusal follows (`x_rpt_stream`);
+                    // the off path writes no report here.
                     Err(error) => {
                         let written = if stream.acting() { start } else { 0 };
                         for query_warnings in &warnings[written..=start] {
@@ -9528,7 +9495,9 @@ fn run_in_pool(
                         },
                     )
                 };
-                if stream.acting() {
+                // In the first batch nothing was streamed: the call of the off path writes the
+                // prologs that come with the reports (outfmt 20's line of the field names).
+                if stream.acting() && start > 0 {
                     stream.finish_sam(outputs)?;
                 } else {
                     before(outputs)?;
@@ -9562,8 +9531,9 @@ fn run_in_pool(
             // reports writes them there (the reports after the loop, LOSAT_X_RPTSTREAM's
             // batch writes, the error paths that write the reports of the batches before).
             // Without `taxdb.bti` nothing is read. A refusal (a taxonomy database or a taxid
-            // that LOSAT cannot read as NCBI does) is written as the titles' refusals above;
-            // LOSAT_X_RPTSTREAM acts only where none can come (`x_rpt_stream::check`).
+            // that LOSAT cannot read as NCBI does) or an error of the taxonomy database is
+            // written as the titles' refusals above: with LOSAT_X_RPTSTREAM after the reports of
+            // the batches before (`x_rpt_stream`).
             if output_formats
                 .first()
                 .is_some_and(|format| format.prefetches_subjects())

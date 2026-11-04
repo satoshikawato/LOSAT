@@ -7,18 +7,26 @@
 // the engine's refusal of the options when there is one. "Run LOSAT" starts the search and the
 // page goes to its results (`submitted`), as NCBI's BLAST button does. Explanatory copy follows
 // stop-describing-ui (Owner, 2026-11-02): NCBI's sentences stay, LOSAT's explanations go.
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import type { Attention, AttentionState } from '../application/attention';
 import type { SearchDraft } from '../application/draft';
+import type { ExampleLoader } from '../application/examples';
 import { effectiveValue, formParameters, placementFlags, sectionsAt } from '../domain/parameters';
 import { PROGRAMS, programById, searchSummaryParts, type InputRole } from '../domain/programs';
 import { useStore } from './useStore';
+import ExampleLine from './ExampleLine.vue';
 import HelpTip from './HelpTip.vue';
 import InputPanel from './InputPanel.vue';
+import LosatLoader from './LosatLoader.vue';
 import ParameterField from './ParameterField.vue';
 import ParameterForm from './ParameterForm.vue';
 
-const props = defineProps<{ draft: SearchDraft; attention: Attention; attentionState: AttentionState }>();
+const props = defineProps<{
+  draft: SearchDraft;
+  examples: ExampleLoader;
+  attention: Attention;
+  attentionState: AttentionState;
+}>();
 /** A search was started: the ID of its first run (a group of separate searches starts several). */
 const emit = defineEmits<{ submitted: [runId: string] }>();
 const state = useStore(props.draft.state);
@@ -54,10 +62,33 @@ const describeState = computed(() => {
   if (state.value.description !== undefined) return 'ready';
   return state.value.descriptionError === undefined ? 'loading' : 'failed';
 });
+/**
+ * "Loading the engine…" (DW-43) once the describe has waited 0.4 s: the first describe of a
+ * mode fetches its engine, which takes seconds; the next ones end at once and show nothing.
+ */
+const engineWaitShown = ref(false);
+let engineWait: ReturnType<typeof setTimeout> | undefined;
+watch(
+  describeState,
+  (now) => {
+    clearTimeout(engineWait);
+    engineWaitShown.value = false;
+    if (now === 'loading') engineWait = setTimeout(() => (engineWaitShown.value = true), 400);
+  },
+  { immediate: true },
+);
+onUnmounted(() => clearTimeout(engineWait));
 const taskFields = computed(() => sectionsAt(program.value, options.value, 'program').flatMap((section) => section.fields));
 const summaryParts = computed(() => searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value)));
-/** The Algorithm parameters that the argv writes: each differs from the engine's default. */
-const changed = computed(() => formParameters(program.value, values.value, options.value, 'algorithm').length);
+/**
+ * The Algorithm parameters that the argv writes: each differs from the engine's default; the
+ * words of "Additional options" count as one.
+ */
+const changed = computed(
+  () =>
+    formParameters(program.value, values.value, options.value, 'algorithm').length +
+    (state.value.extra[state.value.program].trim() === '' ? 0 : 1),
+);
 /**
  * "Algorithm parameters" starts closed, as on NCBI's page, unless one of its values is
  * written to the argv; a program whose values differ from the defaults opens it when it is
@@ -83,6 +114,7 @@ async function submit(from: 'top' | 'bottom'): Promise<void> {
 
 function restoreDefaults(): void {
   props.draft.resetFields(placementFlags(program.value, 'algorithm'));
+  props.draft.setExtra('');
 }
 
 function onThreads(event: Event): void {
@@ -114,6 +146,7 @@ function onThreads(event: Event): void {
       </label>
     </fieldset>
     <p class="program-summary" data-testid="program-summary">{{ program.summary }}</p>
+    <ExampleLine :examples="examples" :program="state.program" />
 
     <InputPanel v-for="role in roles" :key="role" :draft="draft" :state="state" :role="role" />
 
@@ -129,11 +162,12 @@ function onThreads(event: Event): void {
         :disabled="state.submitting"
         @click="submit('top')"
       >
-        {{ buttonLabel }}
+        <LosatLoader v-if="state.submitting" />{{ buttonLabel }}
       </button>
       <p class="search-summary-line" data-testid="search-summary-line">
         <template v-for="(part, index) in summaryParts" :key="index"><strong v-if="part.strong">{{ part.text }}</strong><template v-else>{{ part.text }}</template></template>
       </p>
+      <p v-if="engineWaitShown" class="muted" role="status" data-testid="engine-loading"><LosatLoader />Loading the engine…</p>
     </div>
 
     <div class="blast-notes">
@@ -207,7 +241,7 @@ function onThreads(event: Event): void {
             :disabled="state.submitting"
             @click="submit('bottom')"
           >
-            {{ buttonLabel }}
+            <LosatLoader v-if="state.submitting" />{{ buttonLabel }}
           </button>
           <p class="search-summary-line">
             <template v-for="(part, index) in summaryParts" :key="index"><strong v-if="part.strong">{{ part.text }}</strong><template v-else>{{ part.text }}</template></template>

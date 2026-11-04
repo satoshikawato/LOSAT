@@ -4,13 +4,14 @@
 //!
 //! What differs from the search of a FASTA subject set (`-subject`):
 //!
-//! - the subjects are the stored bytes of the database, checked once before the query batches
-//!   (`BlastxDatabase::x_check_stores`, `common::database::x_check_protein_stores`) and read in
-//!   blocks where they are searched (`x_db_stream.rs`, through `subjects::Subjects::Stream`),
-//!   by ordinal id; the set-level numbers are the index's (total, count) and 10 for the
-//!   shortest sequence (D1);
+//! - the subjects are the stored bytes of the database, read in blocks where they are searched
+//!   (`x_db_stream.rs`, through `subjects::Subjects::Stream`) by ordinal id and checked where
+//!   they are first read (`XStreamDb::x_check`, the checks of `BlastxDatabase::x_check_stores`);
+//!   the set-level numbers are the index's (total, count, longest) and 10 for the shortest
+//!   sequence (D1);
 //! - a database that cannot be read fails the first query batch with a valid context, after
-//!   the reports of the batches before it (NCBI does not search a batch without one);
+//!   the reports of the batches before it (NCBI does not search a batch without one), with the
+//!   check's first error in ordinal order;
 //! - after each batch's search, the titles of its reported sequences are read in NCBI's
 //!   order and the batch's hit lists are renamed to ranks over records of those sequences
 //!   (`ReportedSubjects::for_batch`), so the report writers keep indexing by subject;
@@ -40,7 +41,11 @@ use crate::seqdb::{SeqDb, SeqType};
 const PROGRAM: &str = "BLASTX";
 
 /// The longest subject BLASTX searches in one piece (NCBI's `MAX_DBSEQ_LEN`).
-const MAX_DBSEQ_LEN: usize = 5_000_000;
+pub(super) const MAX_DBSEQ_LEN: usize = 5_000_000;
+
+/// Sequences whose lengths `BlastxDatabase::x_open_stream` reads with one read of the index (64 KiB
+/// of offsets). No NCBI counterpart; the size changes nothing but the number of reads.
+const X_LENGTHS_PER_READ: u32 = 16_384;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-119
 // ```c
@@ -160,35 +165,43 @@ impl BlastxDatabase {
     // sequence): NCBI opens it, writes the outfmt 0 prolog, reads the first query batch and
     // fails in that batch's preliminary search, where its reader cannot map the sequence
     // file (BLASTP's `-db`, fixture `LOSAT/tests/seqdb/db/empty`).
-    /// Reads every sequence of the database once, in blocks (`x_check_protein_stores`), and keeps
-    /// nothing but the residues of the longest sequence. The error (a reader error of NCBI's
-    /// preliminary search, LOSAT's refusal of a sequence, or the empty database's) belongs to the
-    /// first query batch with a valid context, which the caller fails with it. The sequences are
-    /// read again where they are searched (`x_db_stream.rs`).
-    pub(crate) fn x_check_stores(&self) -> Result<usize> {
+    // No NCBI counterpart for the lengths (NCBI takes the longest from the volumes' index headers,
+    // seqdbimpl.cpp:128-136, quoted at `SeqDb::max_length`): the choices that read the longest
+    // (`x_subject_flow::offsets_stay_below_2_30`, `search_core`'s limit, `x_bx_mem`) take the
+    // value the check counted, also where a damaged header says less (with a `-window_size` near
+    // 2^28 that header chose the kept tables of 2 GiB a thread).
+    /// What the search needs of the database before the first query batch, without reading its
+    /// sequences: the residues of the longest sequence, from the index's offsets
+    /// (`SeqDb::x_protein_lengths`, the lengths of the check's reads; 4 bytes a sequence where the
+    /// check read the residues). The empty database's error, and the check's (`x_check_stores`)
+    /// where the longest is above `MAX_DBSEQ_LEN` or the index cannot be read, belong to the first
+    /// query batch with a valid context, which the caller fails with it. The search checks each
+    /// sequence where it first reads it (`XStreamDb::x_check`).
+    pub(crate) fn x_open_stream(&self) -> Result<usize> {
         if self.db.printed_num_seqs() == 0 {
             return Err(PreliminaryReadError("Database memory map file error").into());
         }
+        let count = self.db.num_seqs();
         let mut longest = 0;
-        let mut first_too_long = None;
-        shared::x_check_protein_stores(&self.db, PROGRAM, |ordinal, length| {
-            longest = longest.max(length);
-            if length > MAX_DBSEQ_LEN && first_too_long.is_none() {
-                first_too_long = Some((ordinal, length));
-            }
-        })?;
-        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
-        // ```c
-        // /** Split subject sequences if longer than this */
-        // #define MAX_DBSEQ_LEN 5000000
-        // ```
-        // NCBI searches a longer subject in overlapping parts, which BLASTX does not port (the
-        // same limit stops `-subject` in `search::search_core`); the refusal belongs to the
-        // first batch with a valid context, as the reader's errors.
-        if let Some((ordinal, length)) = first_too_long {
-            return Err(too_long(ordinal as usize, length));
+        let mut first = 0;
+        while first < count {
+            let end = count.min(first.saturating_add(X_LENGTHS_PER_READ));
+            let lengths = match self.db.x_protein_lengths(first, end) {
+                Ok(lengths) if !lengths.is_empty() => lengths,
+                _ => return self.x_check_stores(),
+            };
+            longest = longest.max(lengths.iter().copied().max().unwrap_or(0) as usize);
+            first += lengths.len() as u32;
+        }
+        if longest > MAX_DBSEQ_LEN {
+            return self.x_check_stores();
         }
         Ok(longest)
+    }
+
+    /// The whole check of the database (`x_check_whole`).
+    pub(crate) fn x_check_stores(&self) -> Result<usize> {
+        x_check_whole(&self.db)
     }
 
     /// The opened database.
@@ -197,9 +210,42 @@ impl BlastxDatabase {
     }
 }
 
+/// Reads every sequence of the database once, in blocks (`x_check_protein_stores`), and keeps
+/// nothing but the residues of the longest sequence. The error (a reader error of NCBI's
+/// preliminary search, LOSAT's refusal of a sequence, or the empty database's) is that of the
+/// first sequence in ordinal order: the error of a database whose longest is above
+/// `MAX_DBSEQ_LEN` (`x_open_stream`), and the error the run reports for a read or a check
+/// that fails during the search (`native::search_error`), whichever sequence the search's
+/// threads read first.
+pub(super) fn x_check_whole(db: &SeqDb) -> Result<usize> {
+    if db.printed_num_seqs() == 0 {
+        return Err(PreliminaryReadError("Database memory map file error").into());
+    }
+    let mut longest = 0;
+    let mut first_too_long = None;
+    shared::x_check_protein_stores(db, PROGRAM, |ordinal, length| {
+        longest = longest.max(length);
+        if length > MAX_DBSEQ_LEN && first_too_long.is_none() {
+            first_too_long = Some((ordinal, length));
+        }
+    })?;
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
+    // ```c
+    // /** Split subject sequences if longer than this */
+    // #define MAX_DBSEQ_LEN 5000000
+    // ```
+    // NCBI searches a longer subject in overlapping parts, which BLASTX does not port (the
+    // same limit stops `-subject` in `search::search_core`); the refusal belongs to the
+    // first batch with a valid context, as the reader's errors.
+    if let Some((ordinal, length)) = first_too_long {
+        return Err(too_long(ordinal as usize, length));
+    }
+    Ok(longest)
+}
+
 /// LOSAT's refusal of database sequence `ordinal` of `length` residues, longer than
 /// `MAX_DBSEQ_LEN`.
-fn too_long(ordinal: usize, length: usize) -> anyhow::Error {
+pub(super) fn too_long(ordinal: usize, length: usize) -> anyhow::Error {
     anyhow::anyhow!(
         "database sequence {ordinal} has {length} residues; a subject longer than {MAX_DBSEQ_LEN} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX"
     )
@@ -270,7 +316,9 @@ impl ReportedSubjects {
     /// (`shared::read_header`), with LOSAT's refusals of `ParsedSubject::fetched`, of
     /// `shared::check_shown_parsed_subject` (with `pairwise`), of `shared::refuse_joined_hits`
     /// (with `joined`: outfmt 0, 5 and 13 to 16) and of `ParsedSubject::tabular_ids` (with
-    /// `tabular`).
+    /// `tabular`, and `ParsedSubject::check_printed_word` of the ids it prints, `words`).
+    /// `taxonomy`: whether the report writes the sequences' taxids or their names (13 to 16, a
+    /// table of taxonomy fields; `ParsedSubject::fetched`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -281,6 +329,8 @@ impl ReportedSubjects {
         pairwise: bool,
         taxids: bool,
         joined: bool,
+        taxonomy: bool,
+        words: crate::report::tabular::PrintedIds,
     ) -> Result<Self> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
@@ -350,7 +400,7 @@ impl ReportedSubjects {
                 // write its Seq-align id alone.
                 if tabular || pairwise || joined || taxids {
                     subject
-                        .fetched()
+                        .fetched(taxonomy)
                         .map_err(|reason| shared::parsed_refusal(ordinal, &reason, PROGRAM))?;
                 }
                 if pairwise {
@@ -363,8 +413,10 @@ impl ReportedSubjects {
                     )?;
                 }
                 if tabular {
-                    let [id, accession, version] =
-                        subject.tabular_ids(true).map_err(|problem| {
+                    let [id, accession, version] = subject
+                        .tabular_ids(true)
+                        .and_then(|ids| subject.check_printed_word(true, words).map(|()| ids))
+                        .map_err(|problem| {
                             shared::parsed_refusal(ordinal, &format!("has {problem}"), PROGRAM)
                         })?;
                     // The ids of a stored definition line are VisibleStrings: ASCII.
@@ -700,10 +752,15 @@ mod tests {
     }
 
     #[test]
-    fn a_record_of_the_stored_letters_encodes_to_the_stored_bytes() {
-        // Every residue byte 1..=27 (O = 26 included) reads back as itself through its
-        // letter: the records of the reported sequences and `-subject` records alike.
+    fn a_record_of_the_stored_letters_encodes_to_the_searched_bytes() {
+        // A record of the stored letters encodes every residue byte 1..=27 back to itself but
+        // O (26): the search reads a `-subject` O as X (`subjects::search_residue`), and a
+        // database's stored O as it is (`read_encoded`).
         let bytes: Vec<u8> = (1..28).collect();
+        let searched: Vec<u8> = bytes
+            .iter()
+            .map(|&residue| if residue == 26 { 21 } else { residue })
+            .collect();
         let record = FastaRecord {
             internal_id: "gnl|BL_ORD_ID|0".into(),
             title: String::new(),
@@ -716,7 +773,7 @@ mod tests {
             source: None,
         };
         let records = [record];
-        assert_eq!(&*Subjects::Fasta(&records).encoded(0), &bytes[..]);
+        assert_eq!(&*Subjects::Fasta(&records).encoded(0), &searched[..]);
     }
 
     /// The fixture database `name` of `tests/db_search`, with the taxonomy database variant
@@ -819,6 +876,8 @@ mod tests {
                 false,
                 false,
                 false,
+                false,
+                crate::report::tabular::PrintedIds::default(),
             )
             .unwrap();
             let messages = reported.prefetch_messages(database, &batches, true);

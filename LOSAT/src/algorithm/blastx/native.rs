@@ -44,7 +44,7 @@ use std::{
     //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
     // }
     // ```
-    io::{self, BufWriter, Write},
+    io::{self, BufWriter, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -351,8 +351,7 @@ fn run_inner(
     let subject_file = match (&args.db, subject_path) {
         (Some(_), _) => None,
         (None, Some(path)) => Some(
-            File::open(path)
-                .map_err(|_| inaccessible("subject", path))
+            crate::blastinput::input_files::open_file_input(path, "subject")
                 .map_err(early_archive_error)?,
         ),
         (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
@@ -671,12 +670,22 @@ fn run_inner(
                 choice.number
             );
         }
-        let query_file = File::open(&args.query).map_err(|_| inaccessible("query", &args.query))?;
+        // The read before the search goes through a second handle on the open file (a `.gz`
+        // query is an unnamed inflated file, `input_files::open_file_input`, which no path
+        // reaches); the handles share one position, put back where it was.
+        let start = (&query_file)
+            .stream_position()
+            .map_err(|_| inaccessible("query", &args.query))?;
         let messages_may_be_refused = super::blast_xml::prescan_queries(
-            query_file,
+            query_file
+                .try_clone()
+                .map_err(|_| inaccessible("query", &args.query))?,
             args.lcase_masking,
             query_range.as_ref(),
         )?;
+        (&query_file)
+            .seek(SeekFrom::Start(start))
+            .map_err(|_| inaccessible("query", &args.query))?;
         // The documents of a `-db` search with a taxonomy database on the search path: a later
         // batch can still refuse the scientific name of a taxid (XML2 and JSON), or the damaged
         // database (`read_reported_taxids`, which needs the batch's hits; outfmt 5 looks the
@@ -725,9 +734,20 @@ fn run_inner(
     //
     // 	return false;
     // ```
-    // The prescan of the titles of outfmt 11 (below) reads the query file a second time: whether it
-    // is a regular file is decided here, on the handle already open, before any second open.
+    // The prescan of the titles of outfmt 11 (below) reads the query file a second time, through a
+    // second handle on the open file (a `.gz` query is an unnamed inflated file that no path
+    // reaches): whether it is a regular file is decided here, on the handle already open, and the
+    // handle for that read is taken before the file goes into the stream.
     let query_is_regular = args.query.as_os_str() != "-" && archive::query_is_regular(&query_file);
+    let query_prescan = if archive.is_some() && query_is_regular {
+        Some(
+            query_file
+                .try_clone()
+                .map_err(|_| inaccessible("query", &args.query))?,
+        )
+    } else {
+        None
+    };
     let mut query_stream = FastaStream::from_file(query_file);
     query_stream.parse_deflines = args.parse_deflines;
     query_stream.id_scope = id_scope.clone();
@@ -770,7 +790,9 @@ fn run_inner(
             archive::refuse_irregular_query()?;
         }
         archive::prescan_query_titles(
-            &args.query,
+            query_prescan
+                .as_ref()
+                .expect("the second handle of a regular query"),
             args.lcase_masking,
             batch_size,
             query_range.as_ref(),
@@ -862,13 +884,13 @@ fn run_inner(
     writer.flush().map_err(output_error)?;
     super::x_timing::run(XRun::Prolog, x_t);
     let x_t = super::x_timing::lap();
-    // The database's sequences, checked once here and read in blocks where they are searched
-    // (`x_db_stream.rs`); an error belongs to the first batch with a valid context
-    // (`Subjects::Unreadable`, `search_error`). No NCBI counterpart for the blocks: NCBI maps the
-    // volume files.
+    // The database's sequences, read in blocks where they are searched and checked where they are
+    // first read (`x_db_stream.rs`); the empty database's error belongs to the first batch with a
+    // valid context (`Subjects::Unreadable`, `search_error`). No NCBI counterpart for the blocks:
+    // NCBI maps the volume files.
     let (x_longest, unreadable) = match &database {
         None => (None, None),
-        Some(database) => match database.x_check_stores() {
+        Some(database) => match database.x_open_stream() {
             Ok(longest) => (Some(longest), None),
             Err(error) => (None, Some(error)),
         },
@@ -891,6 +913,19 @@ fn run_inner(
         (Some(_), None) => Subjects::Unreadable,
     };
     let search_error = |error: anyhow::Error| -> anyhow::Error {
+        // An error the search raised after the point where a database refused before the search
+        // fails it: the database's first error comes before it (`search::search_core`).
+        let error = match error.downcast::<super::x_db_stream::XPastHead>() {
+            Ok(super::x_db_stream::XPastHead(error)) => {
+                if let Some(stream) = x_stream.as_ref().filter(|stream| !stream.x_checked()) {
+                    if let Some(first) = stream.x_first_error() {
+                        return database_error(first);
+                    }
+                }
+                error
+            }
+            Err(error) => error,
+        };
         // LOSAT's refusal, not an error of NCBI's engine.
         if error.is::<super::parameters::SearchSpaceOverflow>()
             || error.is::<super::split::QuerySplitRefusal>()
@@ -904,10 +939,15 @@ fn run_inner(
                 .expect("the database's error, raised once");
             return database_error(kept);
         }
-        // A read of the database that failed during the search,
-        // reported as the check's error for the same read.
+        // A read or a check of the database that failed during the search, reported as the
+        // check's error while the reads have not checked every sequence (the first sequence in
+        // ordinal order that fails, whichever the search's threads read first; the search's own
+        // where the check finds none), and as its own after that (a file changed during the run).
         match error.downcast::<super::x_db_stream::XReadError>() {
-            Ok(super::x_db_stream::XReadError(kept)) => database_error(kept),
+            Ok(super::x_db_stream::XReadError(kept)) => database_error(match &x_stream {
+                Some(stream) if !stream.x_checked() => stream.x_first_error().unwrap_or(kept),
+                _ => kept,
+            }),
             Err(error) => engine(error),
         }
     };
@@ -955,6 +995,8 @@ fn run_inner(
                                 false,
                                 false,
                                 false,
+                                false,
+                                crate::report::tabular::PrintedIds::default(),
                             )
                             .map_err(|error| match error.downcast::<HeaderReadError>() {
                                 Ok(header) => header.error,
@@ -1011,7 +1053,17 @@ fn run_inner(
                             matches!(options.outfmt, 6 | 7 | 10 | 20),
                             options.outfmt == 0,
                             matches!(options.outfmt, 13..=16),
-                            matches!(options.outfmt, 0 | 5 | 13..=16),
+                            matches!(options.outfmt, 0 | 5 | 13..=16)
+                                || options
+                                    .tabular
+                                    .is_some_and(|spec| spec.needs().joins_subjects()),
+                            matches!(options.outfmt, 13..=16)
+                                || options.tabular.is_some_and(|spec| spec.needs().taxonomy),
+                            if matches!(options.outfmt, 6 | 7 | 10 | 20) {
+                                crate::report::tabular::PrintedIds::of(options.tabular)
+                            } else {
+                                crate::report::tabular::PrintedIds::default()
+                            },
                         );
                         super::x_timing::run(XRun::Titles, x_t);
                         let reported = reported
@@ -1441,14 +1493,14 @@ pub(super) fn run_query_batches(
                                 search_subjects,
                                 options,
                                 pool,
-                                unit.take_prep(),
+                                unit.take_prep(options, search_subjects)?,
                             )
                         } else {
                             super::runtime::x_search_unit_serial(
                                 queries,
                                 search_subjects,
                                 options,
-                                unit.take_prep(),
+                                unit.take_prep(options, search_subjects)?,
                             )
                         }
                     },
@@ -1509,7 +1561,7 @@ pub(super) fn run_query_batches(
                                     search_subjects,
                                     options,
                                     pool,
-                                    unit.take_prep(),
+                                    unit.take_prep(options, search_subjects)?,
                                 )
                             })
                             .collect::<Vec<_>>()
@@ -1530,14 +1582,14 @@ pub(super) fn run_query_batches(
                                             search_subjects,
                                             options,
                                             pool,
-                                            unit.take_prep(),
+                                            unit.take_prep(options, search_subjects)?,
                                         )
                                     } else {
                                         super::runtime::x_search_unit_serial(
                                             queries,
                                             search_subjects,
                                             options,
-                                            unit.take_prep(),
+                                            unit.take_prep(options, search_subjects)?,
                                         )
                                     };
                                     super::x_timing::run(XRun::WaveBusy, x_t);
@@ -1957,9 +2009,10 @@ struct XReaderPrep {
     /// shape (`reader_batch::prepare_lone_unit`).
     layout: Option<std::sync::Arc<ReaderBatchShape>>,
     /// The units' preparations, from the end of phase 1 until each unit's search takes its own.
-    /// All `None` if phase 1 failed: each unit then prepares itself when it is searched, and the
-    /// one whose queries fail raises the error there (a reader batch with a search error writes
-    /// nothing, so the values of the units before it are not used).
+    /// All `None` if phase 1 failed: each unit is then prepared again when it is searched
+    /// (`XUnit::take_prep`), and the first one whose preparation fails raises the error there (a
+    /// reader batch with a search error writes nothing, so the values of the units before it
+    /// are not used).
     slots: Vec<std::sync::Mutex<Option<UnitPrep>>>,
     /// The flow's tasks of phase 1 not yet ended, and whether one failed.
     remaining: std::sync::atomic::AtomicUsize,
@@ -2108,14 +2161,30 @@ impl XUnit {
         None
     }
 
-    /// The unit's phase 1 preparation, once.
-    fn take_prep(&self) -> Option<UnitPrep> {
-        self.prep.as_ref().and_then(|(prep, position)| {
-            prep.slots[*position]
-                .lock()
-                .expect("a unit's preparation")
-                .take()
-        })
+    /// The unit's phase 1 preparation, once. If phase 1 failed, the unit of a batch of several is
+    /// prepared again as phase 1 prepares it, after the split sizes that NCBI reads before the
+    /// setup (with the reader batch's query count): the error is the reader batch's, as with one
+    /// thread (`search::search_core`).
+    fn take_prep(
+        &self,
+        options: &super::args::ResolvedOptions,
+        subjects: Subjects<'_>,
+    ) -> Result<Option<UnitPrep>> {
+        let Some((prep, position)) = self.prep.as_ref() else {
+            return Ok(None);
+        };
+        let taken = prep.slots[*position]
+            .lock()
+            .expect("a unit's preparation")
+            .take();
+        match (taken, &prep.layout) {
+            (Some(unit), _) => Ok(Some(unit)),
+            (None, Some(layout)) => {
+                super::split::split_sizes(layout.query_count)?;
+                prepare_unit(self.queries(), layout, options, subjects).map(Some)
+            }
+            (None, None) => Ok(None),
+        }
     }
 
     fn queries(&self) -> &[FastaRecord] {
@@ -2556,6 +2625,33 @@ mod reader_batch_tests {
         let small = XUnit::split(&batch[..3], &options, false);
         assert_eq!(small.len(), 1);
         assert!(small[0].last);
+    }
+
+    /// A unit whose phase 1 did not end with a preparation (it failed) is prepared again with
+    /// the reader batch's layout, so its error is the batch's: here a batch without a valid
+    /// context, whose two empty records are in different units.
+    #[test]
+    fn a_unit_without_its_phase_1_fails_as_its_reader_batch() {
+        let batch: Vec<_> = [0]
+            .into_iter()
+            .chain([2; 5001])
+            .chain([0])
+            .map(record)
+            .collect();
+        let options = super::super::stage_c_tests::options();
+        let units = XUnit::split(&batch, &options, false);
+        assert_eq!(units.len(), 2);
+        let subjects: Subjects<'_> = (&batch[1..2]).into();
+        for unit in &units {
+            let error = unit
+                .take_prep(&options, subjects)
+                .err()
+                .expect("a reader batch without a valid context");
+            assert_eq!(
+                error.to_string(),
+                "Warning: Sequence contains no data ".repeat(2)
+            );
+        }
     }
 
     /// The results of the units become the reader batch's at its last unit: ordinals count from

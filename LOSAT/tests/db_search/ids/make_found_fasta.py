@@ -8,7 +8,13 @@ emb|BBB00002.1|; pair 3: gb|CCC00003.1| then lcl|CCC00003; pair 4: gb|DDD00004| 
 pair 5: pdb|2XYZ| then pdb|2XYZ|AA. `pfound_q1.fna` and `pfound_q4.fna` are back-translations of the
 queries of pairs 1 and 4. `pdup.faa` holds one record gb|EEE00005.1| (query `pdup_q.faa`), `pdup_c.faa`
 the same record with another title. `nfound.fna`: the sequence of `njoined_a.fna` as gb|AF000050.1| and,
-with three substitutions, gb|AF000050|. `../seqidlist/sl_pfound_neg.txt`: AAA00001.1.
+with three substitutions, gb|AF000050|. `../seqidlist/sl_pfound_neg.txt`: AAA00001.1. Line DBID N1b: `ndup.fna`
+holds one record gb|EEN00005.1|, the back-translation of `pdup.faa` (query `ndup_q.fna`, the same letters), and
+`pdupe.faa` the letters of `pdup.faa` as gb|EEE00006.1| without a title, for the databases of the same record with
+other taxids. Line DBID N1b L1: `ndupe.fna` the letters of `ndup.fna` as gb|EEN00006.1| without a title, `nsubj.fna`
+as lcl|Subject_1 without a title, `nsubjg.fna` as lcl|Subject_3 beside gb|EEN00007.1| without a title, `psubj.faa` the letters of `pdup.faa` as lcl|Subject_1 without a title and
+`psubjb.faa` as lcl|Subject_2 with a title ending in ']' (the tabular formats replace a `lcl|Subject_` id by the
+first word of the generated title).
 
 usage: make_found_fasta.py [--out LOSAT/tests/db_search/ids]
 """
@@ -56,6 +62,15 @@ def main() -> int:
     (out / "pdup.faa").write_text(f">gb|EEE00005.1| duplicated record\n{wrap(seq)}")
     (out / "pdup_c.faa").write_text(f">gb|EEE00005.1| duplicated record, another title\n{wrap(seq)}")
     (out / "pdup_q.faa").write_text(f">pdq query of the duplicated record\n{wrap(seq)}")
+    nseq_dup = "".join(CODON[a] for a in seq)
+    (out / "ndup.fna").write_text(f">gb|EEN00005.1| duplicated nucleotide record\n{wrap(nseq_dup)}")
+    (out / "ndup_q.fna").write_text(f">ndq query of the duplicated nucleotide record\n{wrap(nseq_dup)}")
+    (out / "pdupe.faa").write_text(f">gb|EEE00006.1|\n{wrap(seq)}")
+    (out / "ndupe.fna").write_text(f">gb|EEN00006.1|\n{wrap(nseq_dup)}")
+    (out / "nsubj.fna").write_text(f">lcl|Subject_1\n{wrap(nseq_dup)}")
+    (out / "nsubjg.fna").write_text(f">lcl|Subject_3|gb|EEN00007.1|\n{wrap(nseq_dup)}")
+    (out / "psubj.faa").write_text(f">lcl|Subject_1\n{wrap(seq)}")
+    (out / "psubjb.faa").write_text(f">lcl|Subject_2 alpha, partial [Homo sapiens]\n{wrap(seq)}")
     nseq = "".join(line.strip() for line in (out / "njoined_a.fna").read_text().splitlines()[1:])
     (out / "nfound.fna").write_text(
         f">gb|AF000050.1| nucleotide pair, versioned\n{wrap(nseq)}"

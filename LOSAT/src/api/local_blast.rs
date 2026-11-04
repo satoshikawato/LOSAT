@@ -216,8 +216,10 @@ pub trait FormatObserver {
     // ```
     /// The outfmt 0 formatter for `ReportOutputs::formats[format]` starts the heading of
     /// a subject (its defline and length line), which precedes the first HSP of that
-    /// subject, `first_hsp`. Every byte written for that format before this call has
-    /// reached its sink. Formatters without subject headings never call it.
+    /// subject, `first_hsp`, and the HSPs of the copies of one database record that follow it
+    /// and that the heading also covers (`report::db_subject::joins_as_copy`). Every byte
+    /// written for that format before this call has reached its sink. Formatters without
+    /// subject headings never call it.
     fn subject_begin(&mut self, _format: usize, _first_hsp: HspIndex) {}
     /// The formatter finished the heading that `subject_begin` announced. Every byte of
     /// it has reached the sink.
@@ -309,6 +311,20 @@ pub struct ReportOutputs<'a> {
 }
 
 impl ReportOutputs<'_> {
+    /// Whether every requested format is the BLAST archive (outfmt 11), which NCBI's apps but
+    /// psiblast write without fetching the report's sequences ahead
+    /// (`blastinput::app::check_search_environment`); a call without formats (hit records
+    /// only) is not.
+    pub(crate) fn only_archive(&self) -> bool {
+        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+        !self.formats.is_empty()
+            && self.formats.iter().all(|format| {
+                parse_formatting_string(format.outfmt).is_ok_and(|choice| {
+                    ReportFormat::from_number(choice.number) == Some(ReportFormat::ArchiveFormat)
+                })
+            })
+    }
+
     /// Runs `f` with the same outputs and a diagnostics stream that also saves what it
     /// writes as the messages of the BLAST archive (outfmt 11) of `handle`.
     pub(crate) fn with_archive_diagnostics<R>(

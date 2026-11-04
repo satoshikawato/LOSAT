@@ -1442,6 +1442,33 @@ impl TblastxOutputFormat {
         matches!(self, Self::Xml | Self::Xml2(_))
     }
 
+    /// Whether the format writes the subjects' taxids or their names: the XML2 and JSON
+    /// documents and a table of taxonomy fields (`TabularNeeds::taxonomy`).
+    pub(crate) fn writes_taxonomy(self) -> bool {
+        match self {
+            Self::Xml2(_) => true,
+            Self::CustomTabular(spec) => spec.needs().taxonomy,
+            _ => false,
+        }
+    }
+
+    /// The subject ids that the format prints (`PrintedIds`): none but in a table.
+    pub(crate) fn printed_ids(self) -> crate::report::tabular::PrintedIds {
+        match self {
+            Self::Tabular | Self::TabularWithComments => {
+                crate::report::tabular::PrintedIds::of(None)
+            }
+            Self::CustomTabular(spec) => crate::report::tabular::PrintedIds::of(Some(spec)),
+            _ => crate::report::tabular::PrintedIds::default(),
+        }
+    }
+
+    /// Whether the format is a table that counts following subjects whose Seq-align ids match as
+    /// one (`TabularNeeds::joins_subjects`: `qcovs`, `qcovus`).
+    pub(crate) fn tabular_joins_subjects(self) -> bool {
+        matches!(self, Self::CustomTabular(spec) if spec.needs().joins_subjects())
+    }
+
     /// Whether the format writes a query's own warnings to standard error
     /// (`ReportFormat::writes_query_warnings`: not the structured formats).
     pub(crate) fn writes_query_warnings(self) -> bool {

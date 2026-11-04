@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { REPOSITORY } from './harness-server';
+import { navigate } from './navigate';
 
 export type Role = 'query' | 'subject';
 
@@ -25,7 +26,7 @@ export async function described(page: Page): Promise<void> {
 
 /** Opens the application at its search form, once the form no longer moves (`described`). */
 export async function openSearch(page: Page): Promise<void> {
-  await page.goto('/');
+  await navigate(page, '/');
   await described(page);
 }
 

@@ -23,7 +23,12 @@
 //!   lists when they first align it and hold it until the stage has done its last match
 //!   (`XStageSubjects`, LOSAT_X_TBNSTAGEDROP; with `=0` until the stage ends); the reports read
 //!   the sequences they show, one read each, when a report reads their letters
-//!   (`database::reported_subjects`; the other reports read the lengths of the stream).
+//!   (`database::reported_subjects`; the other reports read the lengths alone, from the index
+//!   and the last byte of each sequence, `XDbStream::read_length`).
+//! - The search reads a subject's length with its block (`XDbStream::length`, a long one's from
+//!   the index), or takes the one its kept plan was made of (`XSubjectSide::length`): the stream
+//!   holds no length per sequence. The chunks of the threads are cut once for each budget from
+//!   the index's lengths (`stage_d_pipeline::x_all_chunks`).
 //! - A sequence whose plan has no residues (LOSAT_X_TBNUNITXLATE: a first frame of 1 MiB or more,
 //!   in a search that keeps no plan of it) is read before its plan and held while its units
 //!   translate it, as a packed subject of the copy is (`search_seed::x_lean_subject`,

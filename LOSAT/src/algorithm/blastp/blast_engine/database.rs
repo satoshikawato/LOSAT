@@ -1300,13 +1300,19 @@ impl ListedTitles<'_> {
     /// for do not write as NCBI, before any format is written: a subject that NCBI's formatters
     /// cannot find by its Seq-align id where a format reads its Bioseq (`fetched`: outfmt 0, 5,
     /// 6, 7, 13 to 16; `ParsedSubject::fetched`), two of them that follow each
-    /// other in a hit list with matching Seq-align ids where outfmt 0, 5 or 13 to 16 is written
-    /// (`joined`, `shared::refuse_joined_hits`). `hit_lists` are in the order of the reports.
+    /// other in a hit list with matching Seq-align ids where outfmt 0, 5 or 13 to 16 is written,
+    /// but for copies of one record, which those reports show in one hit (`joined`,
+    /// `shared::refuse_joined_hits`), and a word of a title made from the taxids that a table
+    /// prints (`words`, `ParsedSubject::check_printed_word`). `taxonomy`: whether a format
+    /// writes the subjects' taxids or their names (13 to 16, a table of taxonomy fields).
+    /// `hit_lists` are in the order of the reports.
     pub(super) fn check_parsed_reports(
         &self,
         hit_lists: &[Option<BlastpHitList>],
         fetched: bool,
         joined: bool,
+        taxonomy: bool,
+        words: crate::report::tabular::PrintedIds,
     ) -> Result<()> {
         if self.parsed.is_empty() {
             return Ok(());
@@ -1314,8 +1320,15 @@ impl ListedTitles<'_> {
         if fetched {
             for rank in Self::reported(hit_lists) {
                 if let Some(subject) = self.parsed_subject(rank) {
-                    subject.fetched().map_err(|reason| {
+                    subject.fetched(taxonomy).map_err(|reason| {
                         shared::parsed_refusal(self.listed.ordinals[rank], &reason, self.program)
+                    })?;
+                    subject.check_printed_word(true, words).map_err(|problem| {
+                        shared::parsed_refusal(
+                            self.listed.ordinals[rank],
+                            &format!("has {problem}"),
+                            self.program,
+                        )
                     })?;
                 }
             }
@@ -1340,39 +1353,39 @@ impl ListedTitles<'_> {
         Ok(())
     }
 
-    /// LOSAT's refusal of psiblast's cut of its traceback hit lists `hit_lists` (in the order of
-    /// the reports) to `max_target_seqs` subjects where NCBI's formatter keeps one more, for
-    /// every format: a list longer than `max_target_seqs` whose first `max_target_seqs + 1` HSP
-    /// lists hold two parsed subjects that follow each other with matching Seq-align ids
-    /// (`shared::refuse_joined_cut`).
-    pub(super) fn check_joined_cut(
+    /// The number of HSP lists of each of psiblast's traceback hit lists `hit_lists` (in the
+    /// order of the reports) that its cut to `max_target_seqs` subjects keeps for every format,
+    /// as NCBI's formatter counts them (`shared::joined_cut`): a copy of one record that follows
+    /// another counts with it; two other parsed subjects that follow each other with matching
+    /// Seq-align ids where the count reaches them are LOSAT's refusal.
+    pub(super) fn joined_cut(
         &self,
         hit_lists: &[Option<BlastpHitList>],
         max_target_seqs: usize,
-    ) -> Result<()> {
-        if self.parsed.is_empty() {
-            return Ok(());
-        }
-        for (query, hit_list) in hit_lists.iter().enumerate() {
-            let Some(hit_list) = hit_list else {
-                continue;
-            };
-            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-            if count <= max_target_seqs {
-                continue;
-            }
-            shared::refuse_joined_cut(
-                query,
-                max_target_seqs,
-                hit_list.hsplist_array[..count].iter().map(|hsp_list| {
-                    let rank = hsp_list.oid as usize;
-                    self.parsed_subject(rank)
-                        .map(|subject| (self.listed.ordinals[rank], subject))
-                }),
-                self.program,
-            )?;
-        }
-        Ok(())
+    ) -> Result<Vec<usize>> {
+        hit_lists
+            .iter()
+            .enumerate()
+            .map(|(query, hit_list)| {
+                let Some(hit_list) = hit_list else {
+                    return Ok(max_target_seqs);
+                };
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                if self.parsed.is_empty() || count <= max_target_seqs {
+                    return Ok(max_target_seqs);
+                }
+                shared::joined_cut(
+                    query,
+                    max_target_seqs,
+                    hit_list.hsplist_array[..count].iter().map(|hsp_list| {
+                        let rank = hsp_list.oid as usize;
+                        self.parsed_subject(rank)
+                            .map(|subject| (self.listed.ordinals[rank], subject))
+                    }),
+                    self.program,
+                )
+            })
+            .collect()
     }
 
     /// The `stitle` text of every listed subject, by rank: the stored title (an empty

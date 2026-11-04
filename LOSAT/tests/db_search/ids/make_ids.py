@@ -47,8 +47,8 @@ find no sequence by the Seq-align id `gi|777`). `njoined_a.*` and `njoined_b.*` 
 `njoined_a.fna` and `njoined_b.fna`, read through the alias `njoined.nal`: `gb|AF000040.1|` and
 `gb|AF000040|` follow each other in the hits, and NCBI's XML and outfmt 0 take them for one sequence.
 `nambig_v4.*` (version 4) from `nambig.fna` (the sequence of the first record of `nucl.fna`, and a copy of it
-with runs of N, an R and a Y, so with ambiguity data; the unit test of blastn's report stream raises its
-ambiguity count, `x_streaming_refusal`).
+with runs of N, an R and a Y, so with ambiguity data; `tests/blastn_report_stream.rs` raises its
+ambiguity count in a copy, which the traceback of a later batch refuses).
 
 Seq-align ids that NCBI's lookup finds in another record (line DBID N1; the FASTA comes from
 `make_found_fasta.py`): `pfound_v5.*` and `pfound_v4.*` from `pfound.faa`, five pairs of unrelated proteins, the
@@ -79,6 +79,27 @@ Seq-ids that NCBI's scope matches weakly (line DBID N2c; the FASTA comes from `m
 `pweak_v4.*` from `pweak.faa`, `pweak_r_v5.*` and `pweak_r_v4.*` from `pweak_r.faa` (review 1), `nweak_v5.*` and
 `nweak_v4.*` from `nweak.fna`. `--weak-only` builds only these, so
 that the other databases keep their bytes.
+
+The same record with other taxids (line DBID N1b; `make_found_fasta.py`), all version 5: `pdup_t.*` from `pdup.faa`
+with taxid 9606 and `pdup_u.*` without one, read through `pdup_at.pal` (`pdup_a` first: NCBI shows the copy without
+a taxid) and `pdup_tu.pal` (`pdup_t` first); `pdup_n.*` and `pdup_o.*` from `pdup.faa`, both with taxid 99990 (the
+last entry of `tests/seqdb/taxdb/*`, whose lookup writes the offset error of `offset_last_past_end`), through
+`pdup_no.pal`; `pdupe_a.*` and `pdupe_t.*` from `pdupe.faa` (no title) without a taxid and with 9606, through
+`pdupe_at.pal`; `ndup_a.*` from `ndup.fna` without a taxid and `ndup_t.*` with taxid 9606, through `ndup_at.nal`.
+`--copytaxid-only` builds only these. Line DBID N1b L1 (titles that NCBI can make from the taxids): `ndupe_a.*` and
+`ndupe_t.*` from `ndupe.fna` (no title) without a taxid and with 9606, through `ndupe_at.nal`; `nsubj_t.*` from
+`nsubj.fna` (lcl|Subject_1, no title) and `nsubjg_t.*` from `nsubjg.fna` (lcl|Subject_3 beside gb|EEN00007.1|) with
+9606; `psubj_a.*`, `psubj_t.*` from `psubj.faa` (lcl|Subject_1, no title)
+and `psubjb_a.*`, `psubjb_t.*` from `psubjb.faa` (lcl|Subject_2, a title ending in ']'), through `psubj_at.pal` and
+`psubjb_at.pal`. `--titlesrc-only` builds only these.
+
+Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
+`pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
+through `pjoin_abc.pal` and `njoin_abc.nal`; `pjoin_bt.*` and `njoin_bt.*` from `pjoin_b.faa` and `njoin_b.fna` with
+taxid 9606, read in place of the b databases through `pjoin_abt.pal` and `njoin_abt.nal` (copies with other taxids);
+`pjoin_x.*` and `njoin_x.*` from the FASTA of the same names (the definition lines of r1 and r3 with other letters),
+read after `pjoin_a` and `njoin_a` through `pjoin_ax.pal` and `njoin_ax.nal`; `njoin_ta.*` and `njoin_tb.*` from
+`njoin_t.fna` with taxid 9606, through `njoin_tab.nal`. `--join-only` builds only these.
 """
 import argparse
 import subprocess
@@ -111,14 +132,87 @@ def build_weak(args: argparse.Namespace) -> None:
                 check=True, stdout=subprocess.DEVNULL)
 
 
+def build_copytaxid(args: argparse.Namespace) -> None:
+    for name, fasta, dbtype, taxid in (("pdup_t", "pdup.faa", "prot", "9606"), ("pdup_u", "pdup.faa", "prot", None),
+                                       ("pdup_n", "pdup.faa", "prot", "99990"), ("pdup_o", "pdup.faa", "prot", "99990"),
+                                       ("pdupe_a", "pdupe.faa", "prot", None), ("pdupe_t", "pdupe.faa", "prot", "9606"),
+                                       ("ndup_a", "ndup.fna", "nucl", None), ("ndup_t", "ndup.fna", "nucl", "9606")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", dbtype, "-parse_seqids",
+             "-blastdb_version", "5", "-title", name, "-out", str(args.out / name)]
+            + (["-taxid", taxid] if taxid else []),
+            check=True, stdout=subprocess.DEVNULL)
+    for alias, names, extension in (("pdup_at", "pdup_a pdup_t", "pal"), ("pdup_tu", "pdup_t pdup_u", "pal"),
+                                    ("pdup_no", "pdup_n pdup_o", "pal"), ("pdupe_at", "pdupe_a pdupe_t", "pal"),
+                                    ("ndup_at", "ndup_a ndup_t", "nal")):
+        (args.out / f"{alias}.{extension}").write_text(
+            f"#\n# Alias file of line DBID, N1b\n#\nTITLE {alias} (two databases, parsed Seq-ids)\n"
+            f"DBLIST {names}\n")
+
+
+def build_titlesrc(args: argparse.Namespace) -> None:
+    for name, fasta, dbtype, taxid in (("ndupe_a", "ndupe.fna", "nucl", None), ("ndupe_t", "ndupe.fna", "nucl", "9606"),
+                                       ("nsubj_t", "nsubj.fna", "nucl", "9606"),
+                                       ("nsubjg_t", "nsubjg.fna", "nucl", "9606"),
+                                       ("psubj_a", "psubj.faa", "prot", None), ("psubj_t", "psubj.faa", "prot", "9606"),
+                                       ("psubjb_a", "psubjb.faa", "prot", None),
+                                       ("psubjb_t", "psubjb.faa", "prot", "9606")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", dbtype, "-parse_seqids",
+             "-blastdb_version", "5", "-title", name, "-out", str(args.out / name)]
+            + (["-taxid", taxid] if taxid else []),
+            check=True, stdout=subprocess.DEVNULL)
+    for alias, names, extension in (("ndupe_at", "ndupe_a ndupe_t", "nal"), ("psubj_at", "psubj_a psubj_t", "pal"),
+                                    ("psubjb_at", "psubjb_a psubjb_t", "pal")):
+        (args.out / f"{alias}.{extension}").write_text(
+            f"#\n# Alias file of line DBID, N1b L1\n#\nTITLE {alias} (two databases, parsed Seq-ids)\n"
+            f"DBLIST {names}\n")
+
+
+def build_join(args: argparse.Namespace) -> None:
+    for name, fasta, dbtype, taxid in (("pjoin_a", "pjoin_a.faa", "prot", None), ("pjoin_b", "pjoin_b.faa", "prot", None),
+                                       ("pjoin_c", "pjoin_c.faa", "prot", None), ("pjoin_bt", "pjoin_b.faa", "prot", "9606"),
+                                       ("njoin_a", "njoin_a.fna", "nucl", None), ("njoin_b", "njoin_b.fna", "nucl", None),
+                                       ("njoin_c", "njoin_c.fna", "nucl", None), ("njoin_bt", "njoin_b.fna", "nucl", "9606"),
+                                       ("pjoin_x", "pjoin_x.faa", "prot", None), ("njoin_x", "njoin_x.fna", "nucl", None),
+                                       ("njoin_ta", "njoin_t.fna", "nucl", "9606"), ("njoin_tb", "njoin_t.fna", "nucl", "9606")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", dbtype, "-parse_seqids",
+             "-blastdb_version", "5", "-title", name, "-out", str(args.out / name)]
+            + (["-taxid", taxid] if taxid else []),
+            check=True, stdout=subprocess.DEVNULL)
+    for alias, names, extension in (("pjoin_abc", "pjoin_a pjoin_b pjoin_c", "pal"),
+                                    ("pjoin_abt", "pjoin_a pjoin_bt pjoin_c", "pal"),
+                                    ("njoin_abc", "njoin_a njoin_b njoin_c", "nal"),
+                                    ("njoin_abt", "njoin_a njoin_bt njoin_c", "nal"),
+                                    ("pjoin_ax", "pjoin_a pjoin_x", "pal"), ("njoin_ax", "njoin_a njoin_x", "nal"),
+                                    ("njoin_tab", "njoin_ta njoin_tb", "nal")):
+        count = {2: "two", 3: "three"}[len(names.split())]
+        (args.out / f"{alias}.{extension}").write_text(
+            f"#\n# Alias file of line DBID, N3\n#\nTITLE {alias} ({count} databases, parsed Seq-ids)\n"
+            f"DBLIST {names}\n")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--ncbi-bin", required=True, type=Path)
     ap.add_argument("--out", type=Path, default=HERE)
     ap.add_argument("--weak-only", action="store_true", help="build only the databases of line DBID N2c")
+    ap.add_argument("--copytaxid-only", action="store_true", help="build only the databases of line DBID N1b")
+    ap.add_argument("--join-only", action="store_true", help="build only the databases of line DBID N3")
+    ap.add_argument("--titlesrc-only", action="store_true", help="build only the databases of line DBID N1b L1")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
+        return 0
+    if args.copytaxid_only:
+        build_copytaxid(args)
+        return 0
+    if args.join_only:
+        build_join(args)
+        return 0
+    if args.titlesrc_only:
+        build_titlesrc(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants
@@ -230,6 +324,9 @@ def main() -> int:
         "#\n# Alias file of line DBID, ID2b\n#\nTITLE njoined (two volumes, parsed Seq-ids)\n"
         "DBLIST njoined_a njoined_b\n")
     build_weak(args)
+    build_copytaxid(args)
+    build_join(args)
+    build_titlesrc(args)
     return 0
 
 

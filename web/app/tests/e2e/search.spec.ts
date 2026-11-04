@@ -3,6 +3,7 @@
 // (LOSAT_WEB_REACTORS); what only the engine can show (its messages, the kept subject, a
 // search long enough to edit or cancel while it runs) is checked in the engine build.
 import { expect, test, type Page } from '@playwright/test';
+import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import {
   chooseRun,
@@ -80,6 +81,33 @@ test('a file is summarized with its records, not put in the paste box; files can
 // engine's register reads with the index scan's reader kind (DW-38), so it refuses no record that
 // the index read; NCBI's reader skips the '!', and the record is left out with its checkbox.
 const REFUSED_RECORD = '>bad\nACGT!ACGT\n';
+
+test('a file named .gz is inflated when it is opened and shows its plain name', async ({ page }) => {
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta.gz', text: gzipSync(fasta('LC738884.fasta')) }]);
+  await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('subject-source-0').locator('.source-name')).toHaveText('LC738884.fasta');
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta', text: fasta('LC738884.fasta') }]);
+  const summary = await page.getByTestId('subject-source-0-summary').textContent();
+  expect(summary).toMatch(/record/);
+  await expect(page.getByTestId('subject-source-1-summary')).toHaveText(summary!.trim());
+});
+
+test('files named .zst and .bz2 are inflated when they are opened and show their plain names', async ({ page }) => {
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta.zst', text: zstdCompressSync(fasta('LC738884.fasta')) }]);
+  await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('subject-source-0').locator('.source-name')).toHaveText('LC738884.fasta');
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta', text: fasta('LC738884.fasta') }]);
+  const summary = await page.getByTestId('subject-source-0-summary').textContent();
+  expect(summary).toMatch(/record/);
+  await expect(page.getByTestId('subject-source-1-summary')).toHaveText(summary!.trim());
+  // Two bzip2 streams, as pbzip2 writes them: both records are read.
+  const twoStreams =
+    'QlpoOTFBWSZTWSPZP5cAAAHPAEAQAAEogAQAIAAgADEMCBmqbRqZ1mPE/TlEyiZomF+LuSKcKEgR7J/LgEJaaDkxQVkmU1ko1BM1AAAFTwBAEAABKIAEABAAIAAxDAgSKejSTDSkzrBQomUTKJ73xdyRThQkCjUEzUA=';
+  await openFiles(page, 'subject', [{ name: 'two.fa.bz2', text: Buffer.from(twoStreams, 'base64') }]);
+  await expect(page.getByTestId('subject-source-2')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('subject-source-2').locator('.source-name')).toHaveText('two.fa');
+  await expect(page.getByTestId('subject-source-2-summary')).toContainText('2 records');
+});
 
 test('records: duplicate IDs by number, a record that the input check refuses (FakeEngine), exclusion, and a run after exclusion', async ({ page }) => {
   await program(page, 'blastn');
@@ -197,6 +225,7 @@ test('several runs; the next search is edited while one runs; separate searches 
     await expect(page.getByTestId('run-1-option')).toHaveAttribute('data-status', 'running');
     await pickRun(page, 1);
     await expect(page.getByTestId('run-status-phase')).toHaveText('Searching');
+    await expect(page.getByTestId('run-status-phase').getByTestId('losat-loader')).toBeVisible(); // the loader before the words (DW-43)
     await expect(page.getByTestId('run-status-elapsed')).toHaveText(/^\d+:\d\d$/);
     await backToSearch(page);
     await submit(page); // the same group again, behind run 1
@@ -204,6 +233,9 @@ test('several runs; the next search is edited while one runs; separate searches 
     await pickRun(page, 1);
     await page.getByTestId('run-status-cancel').click();
     await waitStatus(page, 1, 'cancelled');
+    // A run that ended leaves the status block, and its loader, for the results message.
+    await expect(page.getByTestId('results-status')).toHaveAttribute('data-run-status', 'cancelled');
+    await expect(page.getByTestId('run-status')).toHaveCount(0);
     await waitStatus(page, 4, 'completed');
     await waitStatus(page, 5, 'completed');
   } else {
@@ -426,7 +458,7 @@ test('empty inputs, every record excluded, a sequence without a defline, and the
   // A gap line fails the index: NCBI's reader reads it as data of the record before it.
   await paste(page, 'query', '>q\nACGT\n>?10\nACGT\n');
   await expect(page.getByTestId('query-source-0-error')).toHaveText(
-    "This input cannot be read: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT Web's index to locate; gap lines are not supported by LOSAT Web",
+    "This input cannot be read: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser",
   );
   if (BUILD_HAS_ENGINE) {
     // A first line that NCBI's data loaders would fetch as a Seq-id fails; a defline can go first.
@@ -593,13 +625,13 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
     ['subject', 'Subject'],
   ] as const) {
     const panel = page.getByTestId(`${role}-panel`);
-    await expect(panel).toContainText('Enter FASTA sequence(s)');
+    await expect(panel).toContainText('Enter accession number(s) or FASTA sequence(s)');
     // The subrange appears only once one record is included.
     await expect(page.getByTestId(`${role}-region`)).toHaveCount(0);
     await expect(panel).not.toContainText(`${title} subrange`);
     await expect(panel).toContainText('or drop files here');
     await expect(panel).toContainText('Or, upload file');
-    await expect(page.getByTestId(`${role}-input`)).toHaveAccessibleName('Enter FASTA sequence(s)');
+    await expect(page.getByTestId(`${role}-input`)).toHaveAccessibleName('Enter accession number(s) or FASTA sequence(s)');
   }
   await expect(page.getByTestId('query-panel')).toContainText('Job Title');
   await expect(page.getByTestId('query-panel')).toContainText('Enter a descriptive title for your search');
@@ -879,6 +911,59 @@ test("NCBI's selects of pairs follow the scores and the matrix; Other shows the 
   // BLASTX's list holds the one pair that LOSAT's BLASTX reads.
   await program(page, 'blastx');
   await expect(gaps.locator('option')).toHaveText(['Existence: 11 Extension: 1', 'Other']);
+});
+
+test("Additional options: the command line's other options after the form's, marked and counted, read by the engine; Max matches in a query range in every mode (DW-42)", async ({
+  page,
+}) => {
+  await openParameters(page);
+  for (const id of ['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx']) {
+    await program(page, id);
+    await expect(page.getByTestId('param-culling_limit-field')).toContainText('Max matches in a query range');
+    // The last row of the form, in Other Parameters.
+    await expect(page.getByTestId('parameter-form').locator('.parameter-section').last().locator('.param-row').last()).toHaveAttribute(
+      'data-testid',
+      'param-extra-field',
+    );
+  }
+  await program(page, 'blastn');
+  const field = page.getByTestId('param-extra-field');
+  const extra = page.getByTestId('param-extra');
+  const validation = page.getByTestId('argv-validation');
+  await expect(field).not.toHaveClass(/\bchanged\b/);
+  await expect(extra).toHaveAccessibleName('Additional options');
+  // The engine reads the words as the command line does, and says what it does not read.
+  await extra.fill('-qcov_hsp_perc 50 -foo');
+  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
+  await extra.fill('-num_threads 2');
+  await expect(validation).toHaveText('-num_threads is managed by LOSAT');
+  await extra.fill("-strand 'plus");
+  await expect(validation).toHaveText("Additional options: a quote (') is not closed");
+  // An option of the form is set there.
+  await extra.fill('-ungapped -evalue=1');
+  await expect(validation).toHaveText('-evalue is set in the form: Expect threshold');
+  await extra.fill("-ungapped  -strand 'plus'");
+  await expect(validation).toHaveAttribute('data-state', 'ok');
+  await expect(field).toHaveClass(/\bchanged\b/);
+  await expect(field).toContainText('♦');
+  await expect(extra).toHaveAccessibleName(/^Additional options\s*, changed from the default$/);
+  await page.getByTestId('param-culling_limit').fill('1');
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(2 changed)');
+  await paste(page, 'query', '>q\nACGTACGTACGTAAACCCGGGTTT\n');
+  await paste(page, 'subject', '>s\nACGTACGTACGTAAACCCGGGTTTACGT\n');
+  await submit(page);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-culling_limit 1 -ungapped -strand plus');
+  await waitStatus(page, 1, 'completed');
+  await backToSearch(page);
+  // Each mode has its own; "Restore default search parameters" empties them.
+  await program(page, 'blastp');
+  await expect(extra).toHaveValue('');
+  await program(page, 'blastn');
+  await expect(extra).toHaveValue("-ungapped  -strand 'plus'");
+  await page.getByTestId('restore-defaults').click();
+  await expect(extra).toHaveValue('');
+  await expect(field).not.toHaveClass(/\bchanged\b/);
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveCount(0);
 });
 
 test('narrow screens put the inputs one under the other, without horizontal scrolling', async ({ page }) => {

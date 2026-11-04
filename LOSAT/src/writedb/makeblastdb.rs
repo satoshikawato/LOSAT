@@ -766,12 +766,96 @@ fn warn_to(err: &mut dyn Write) -> impl FnMut(&[u8]) + '_ {
     }
 }
 
-/// A name of `-in` that makeblastdb reads through a decompressor.
+/// A name of `-in` that makeblastdb reads through a decompressor LOSAT does not have (bzip2,
+/// zstd); a `.gz` name is read through gzip (`GzipInput`, `input_files::is_gzip_name`).
 fn is_compressed_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    [".gz", ".bz2", ".zst"]
-        .iter()
-        .any(|ext| lower.ends_with(ext))
+    [".bz2", ".zst"].iter().any(|ext| lower.ends_with(ext))
+}
+
+/// The input of `-in x.gz`, inflated while it is read (`MultiGzDecoder`: concatenated members,
+/// as bgzip writes them, are read whole), as makeblastdb's `CDecompressIStream` reads it. A
+/// fault of the gzip data (not gzip, cut short) is kept apart from a failed read of the file
+/// itself, so that the build can name it (`gzip_fault`).
+///
+/// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1037-1050
+/// ```c++
+/// 		if( (is_gz  = NStr::EndsWith( seq_file, ".gz", NStr::eNocase)) ||
+/// 		    (is_bz2 = NStr::EndsWith( seq_file, ".bz2",NStr::eNocase)) ||
+/// 		    (is_zst = NStr::EndsWith( seq_file, ".zst",NStr::eNocase))
+/// 		  )
+/// 		{
+/// 		    if( is_bz2  ) method = CDecompressIStream::eBZip2;
+/// 		    if( is_zst  ) method = CDecompressIStream::eZstd;
+/// 		    comp_seq_istream.reset(new CDecompressIStream(f , method ));
+/// 		    data_in =  comp_seq_istream.get();
+/// 		}
+/// ```
+struct GzipInput<R: Read> {
+    inflater: flate2::read::MultiGzDecoder<std::io::BufReader<ReadWatch<R>>>,
+    fault: Option<String>,
+}
+
+/// A reader that remembers whether a read of its own failed.
+struct ReadWatch<R: Read> {
+    inner: R,
+    failed: bool,
+}
+
+impl<R: Read> Read for ReadWatch<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let result = self.inner.read(buf);
+        if let Err(error) = &result {
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                self.failed = true;
+            }
+        }
+        result
+    }
+}
+
+impl<R: Read> GzipInput<R> {
+    fn new(input: R) -> Self {
+        let watch = ReadWatch {
+            inner: input,
+            failed: false,
+        };
+        Self {
+            inflater: flate2::read::MultiGzDecoder::new(std::io::BufReader::with_capacity(
+                1 << 16,
+                watch,
+            )),
+            fault: None,
+        }
+    }
+
+    /// The gzip fault that ended the reading, if the file itself read without error.
+    fn gzip_fault(&self) -> Option<&str> {
+        if self.inflater.get_ref().get_ref().failed {
+            return None;
+        }
+        self.fault.as_deref()
+    }
+}
+
+impl<R: Read> Read for GzipInput<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let result = self.inflater.read(buf);
+        if let Err(error) = &result {
+            if error.kind() != std::io::ErrorKind::Interrupted && self.fault.is_none() {
+                self.fault = Some(error.to_string());
+            }
+        }
+        result
+    }
+}
+
+/// The sentence of a `-in` name ending in `.gz` whose bytes are not gzip data, or are cut short
+/// (line GZ, DECISIONS 5): exit status 1, the files of the build removed.
+fn gzip_fault_error(name: &str, fault: &str) -> MakedbError {
+    unsupported(format!(
+        "-in: '{name}' is named .gz but is not gzip data ({fault}); LOSAT reads a file named .gz through gzip"
+    ))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:792-836
@@ -823,7 +907,15 @@ fn verify_input_files(names: &[&str], err: &mut dyn Write) -> Result<(), MakedbE
             Ok(meta) if meta.is_file() => {}
             _ => return Err(options_error(format!("File {seq_file} does not exist"))),
         }
-        let looks_like_fasta = std::fs::File::open(seq_file).is_ok_and(appears_fasta);
+        // A `.gz` name is guessed on its inflated bytes, as `x_VerifyInputFilesType` guesses on
+        // its `CDecompressIStream` (makeblastdb.cpp:815-830); a gzip fault reads as "not FASTA".
+        let looks_like_fasta = std::fs::File::open(seq_file).is_ok_and(|file| {
+            if crate::blastinput::input_files::is_gzip_name(std::path::Path::new(seq_file)) {
+                appears_fasta(GzipInput::new(file))
+            } else {
+                appears_fasta(file)
+            }
+        });
         if !looks_like_fasta {
             let _ = write!(
                 err,
@@ -1013,7 +1105,7 @@ fn build_database_with_log(
         if let Some(name) = names.iter().find(|name| is_compressed_name(name)) {
             return Err(unsupported(format!(
                 "{name}: makeblastdb reads a file of this name as compressed; losat makeblastdb \
-                 reads uncompressed FASTA only"
+                 reads uncompressed FASTA and gzip (.gz) only"
             )));
         }
     }
@@ -1153,6 +1245,18 @@ fn add_input_and_close(
         // file without a sequence.
         for &name in names {
             match std::fs::File::open(name) {
+                // A `.gz` name is inflated while it is read (`GzipInput`); its gzip fault is
+                // reported by name, after the build removed its files as for any failed input.
+                Ok(file)
+                    if crate::blastinput::input_files::is_gzip_name(std::path::Path::new(name)) =>
+                {
+                    let mut input = GzipInput::new(file);
+                    let result = add_fasta(db, &mut input, err);
+                    if let Some(fault) = input.gzip_fault() {
+                        return Err(gzip_fault_error(name, fault));
+                    }
+                    result?
+                }
                 Ok(mut file) => add_fasta(db, &mut file, err)?,
                 // A file that exists and cannot be opened. makeblastdb does
                 // not test the stream it opened: `AddFasta` skips a stream

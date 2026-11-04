@@ -159,6 +159,40 @@ describe('DataService sources and record tables', () => {
   });
 });
 
+describe('DataService dropSource (SURVEY #15)', () => {
+  it('forgets a source and every revision of it, and leaves the other sources alone', async () => {
+    const { data } = service();
+    const dropped = await data.addSource(new File([THREE], 'three.fa'));
+    const kept = await data.addSource(new File(['>k\nACGT\n'], 'kept.fa'));
+    const nucleotide = await data.indexSource(dropped.sourceId, 1);
+    const protein = await data.indexSource(dropped.sourceId, 2);
+    const selection = await data.reviseDataset(nucleotide.revisionId, [1]);
+    const other = await data.indexSource(kept.sourceId, 1);
+    await data.dropSource(dropped.sourceId);
+    await expect(data.previewSource(dropped.sourceId, 10)).rejects.toThrow(`unknown source ${dropped.sourceId}`);
+    await expect(data.indexSource(dropped.sourceId, 1)).rejects.toThrow(`unknown source ${dropped.sourceId}`);
+    for (const revision of [nucleotide, protein, selection]) {
+      await expect(data.buildRunInput([revision.revisionId])).rejects.toThrow(`unknown dataset revision ${revision.revisionId}`);
+      await expect(data.reviseDataset(revision.revisionId, [])).rejects.toThrow(`unknown dataset revision ${revision.revisionId}`);
+    }
+    expect(decoder.decode((await data.buildRunInput([other.revisionId])).bytes)).toBe('>k\nACGT\n');
+    // An unknown or dropped id is ignored.
+    await data.dropSource(dropped.sourceId);
+    await data.dropSource('never-added');
+  });
+
+  it('gives a dropped source back its memory in the tables it holds', async () => {
+    const { data } = service();
+    const tables = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown> };
+    const source = await data.addSource(new File([THREE], 'three.fa'));
+    const base = await data.indexSource(source.sourceId, 1);
+    await data.reviseDataset(base.revisionId, [0]);
+    expect([tables.sources.size, tables.revisions.size]).toEqual([1, 2]);
+    await data.dropSource(source.sourceId);
+    expect([tables.sources.size, tables.revisions.size]).toEqual([0, 0]);
+  });
+});
+
 describe('DataService runs and storage status', () => {
   it('reports the storage it uses, the session bytes and the cleanup state', async () => {
     let settle!: (value: { state: 'done'; removedSessions: number }) => void;

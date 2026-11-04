@@ -55,6 +55,12 @@ export interface DatasetStore {
   checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck>;
   /** The first `maxBytes` bytes of a source, for its preview. */
   previewSource(sourceId: string, maxBytes: number): Promise<Uint8Array>;
+  /**
+   * Forgets a source and every revision of it, giving back their memory; later calls that
+   * name them reject as for an unknown id. The caller drops only what no one uses
+   * (src/application/source-refs.ts). An unknown id is ignored.
+   */
+  dropSource(sourceId: string): Promise<void>;
 }
 
 export interface ResultSetRef {

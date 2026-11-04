@@ -52,6 +52,7 @@ import type { AccessionFetcher, FetchResult } from '../ports/fetch';
 import type { InputCheck } from '../ports/input-check';
 import type { EnqueueAllResult, SearchRequest } from './coordinator';
 import { SourceRace, type RaceStanding } from './source-race';
+import { SourceRefs } from './source-refs';
 import { Store } from './store';
 
 export type InputMode = 'combined' | 'separate';
@@ -174,7 +175,7 @@ export interface DraftDeps {
   readonly engine: Pick<EngineGateway, 'describe' | 'validate' | 'prepare'>;
   readonly data: Pick<
     DataGateway,
-    'addSource' | 'indexSource' | 'reviseDataset' | 'checkInput' | 'previewSource'
+    'addSource' | 'indexSource' | 'reviseDataset' | 'checkInput' | 'previewSource' | 'dropSource'
   >;
   readonly enqueueAll: (requests: readonly SearchRequest[]) => Promise<EnqueueAllResult>;
   readonly fetcher: AccessionFetcher;
@@ -203,6 +204,12 @@ export class SearchDraft {
   private readonly verdicts = new Map<string, Promise<InputCheck>>();
   /** Revisions of a selection, by base revision and excluded records (revisionFor). */
   private readonly revisions = new Map<string, Promise<string>>();
+  /** Who uses the data layer's sources: one that the form, an index and "Run LOSAT" no longer use is dropped. */
+  private readonly refs: SourceRefs;
+  /** The data layer's sources that the form shows. */
+  private formSources: ReadonlySet<string> = new Set();
+  /** The revisions of each of those sources, whose cached verdicts and selections go with the source. */
+  private readonly sourceRevisions = new Map<string, Set<string>>();
   /** The latest request of each asynchronous task; older results are dropped. */
   private readonly generations = new Map<string, number>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -216,6 +223,7 @@ export class SearchDraft {
   private nextKey = 1;
 
   constructor(private readonly deps: DraftDeps) {
+    this.refs = new SourceRefs((sourceId) => void deps.data.dropSource(sourceId).catch(() => undefined));
     this.race = new SourceRace({
       fetcher: deps.fetcher,
       now: deps.now,
@@ -741,6 +749,7 @@ export class SearchDraft {
       if (!result.ok) this.set({ message: { kind: 'error', text: result.message } });
       return result;
     } finally {
+      this.refs.release('submit');
       this.set({ submitting: false });
     }
   }
@@ -783,6 +792,11 @@ export class SearchDraft {
     }
     // Everything from one state, before any wait.
     const groups = { query: this.inputGroups('query'), subject: this.inputGroups('subject') };
+    // Their sources stay until the runs have their inputs, also when the form lets them go meanwhile.
+    this.refs.set(
+      'submit',
+      [...groups.query, ...groups.subject].flatMap((group) => group.sources.map((source) => source.sourceId!)),
+    );
     const parameters = this.parameters();
     let extra: readonly string[];
     try {
@@ -979,6 +993,8 @@ export class SearchDraft {
     const task = `${role}:${key}`;
     const generation = this.nextGeneration(task);
     const current = () => this.generations.get(task) === generation;
+    // The index holds its source until the form shows it; a superseded or failed index lets it go.
+    const holder = `index:${task}:${generation}`;
     const started = this.deps.now();
     // Kept for a source that cannot be read too: a byte order mark says why.
     let lead: InputLead | undefined;
@@ -986,6 +1002,7 @@ export class SearchDraft {
       // The source is added once: its other kind's index reads the same data (no second inflation of a .gz).
       const ref = known === undefined ? await this.deps.data.addSource(file) : undefined;
       const sourceId = known ?? ref!.sourceId;
+      this.refs.set(holder, [sourceId]);
       const preview =
         ref === undefined ? undefined : await this.deps.data.previewSource(sourceId, HEAD_BYTES).catch(() => undefined);
       const head = preview === undefined ? undefined : headText(preview);
@@ -1005,6 +1022,7 @@ export class SearchDraft {
         ...(head === undefined ? {} : { head }),
         ...(lead === undefined ? {} : { lead }),
       }));
+      this.noteRevision(sourceId, base.revisionId);
       this.scheduleCheck(role, key, 0);
     } catch (error) {
       if (!current()) return;
@@ -1015,6 +1033,7 @@ export class SearchDraft {
         ...(lead === undefined ? {} : { lead }),
       }));
     } finally {
+      this.refs.release(holder);
       this.scheduleValidation();
     }
   }
@@ -1038,6 +1057,8 @@ export class SearchDraft {
     let check: SourceCheck;
     try {
       const revisionId = await this.revisionFor(source);
+      // A source removed meanwhile is not checked (nor cached).
+      if (source.sourceId === undefined || !this.formSources.has(source.sourceId)) return;
       const key = `${program}|${role}|${revisionId}`;
       let verdict = this.verdicts.get(key);
       if (verdict === undefined) {
@@ -1065,7 +1086,10 @@ export class SearchDraft {
     const key = `${base.revisionId}|${source.excluded.join(',')}`;
     let revision = this.revisions.get(key);
     if (revision === undefined) {
-      revision = this.deps.data.reviseDataset(base.revisionId, source.excluded).then((r) => r.revisionId);
+      revision = this.deps.data.reviseDataset(base.revisionId, source.excluded).then((r) => {
+        this.noteRevision(base.sourceId, r.revisionId);
+        return r.revisionId;
+      });
       this.revisions.set(key, revision);
       revision.catch(() => this.revisions.delete(key));
     }
@@ -1187,7 +1211,42 @@ export class SearchDraft {
     for (const key of Object.keys(change) as Array<keyof DraftState>) {
       if (change[key] === undefined) delete next[key];
     }
+    // Before the listeners, which may change the state again.
+    this.holdFormSources(next as DraftState);
     this.state.set(next as DraftState);
+  }
+
+  /** Holds the sources that the form shows; one it no longer shows goes, with the draft's caches of it. */
+  private holdFormSources(state: DraftState): void {
+    const shown = new Set<string>();
+    for (const role of ROLES) {
+      for (const source of state[role].sources) if (source.sourceId !== undefined) shown.add(source.sourceId);
+    }
+    if (shown.size === this.formSources.size && [...shown].every((sourceId) => this.formSources.has(sourceId))) return;
+    for (const sourceId of this.formSources) if (!shown.has(sourceId)) this.forget(sourceId);
+    this.formSources = shown;
+    this.refs.set('draft', shown);
+  }
+
+  private noteRevision(sourceId: string, revisionId: string): void {
+    // A source that the form no longer shows keeps nothing in the caches.
+    if (!this.formSources.has(sourceId)) return;
+    let revisions = this.sourceRevisions.get(sourceId);
+    if (revisions === undefined) this.sourceRevisions.set(sourceId, (revisions = new Set()));
+    revisions.add(revisionId);
+  }
+
+  /** Drops the verdicts and the selections of a source's revisions. */
+  private forget(sourceId: string): void {
+    const revisions = this.sourceRevisions.get(sourceId);
+    this.sourceRevisions.delete(sourceId);
+    if (revisions === undefined) return;
+    for (const key of [...this.verdicts.keys()]) {
+      if (revisions.has(key.slice(key.lastIndexOf('|') + 1))) this.verdicts.delete(key);
+    }
+    for (const key of [...this.revisions.keys()]) {
+      if (revisions.has(key.slice(0, key.indexOf('|')))) this.revisions.delete(key);
+    }
   }
 }
 

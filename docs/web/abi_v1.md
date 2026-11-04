@@ -1,10 +1,12 @@
 # LOSAT Web ABI v1 (`losat_web_*`)
 
-Status: **version 1, frozen** (plan TD-1), apart from fail-fast defect fixes. The
-exports are in `LOSAT/src/web_api.rs`, which `LOSAT/src/lib.rs:28` builds for
+Status: **version 1, frozen** (plan TD-1), apart from fail-fast defect fixes and the
+program `tblastn`, which the Owner had added on 2026-11-04 for gbdraw's serial module
+(§7). The exports are in `LOSAT/src/web_api.rs`, which `LOSAT/src/lib.rs:28` builds for
 `wasm32` only. The program modules are `LOSAT/src/web_api/v1_blastn.rs`,
 `v1_blastp.rs`, `v1_tblastx.rs` and `v1_bio.rs`; BLASTX has its own
-`LOSAT/src/algorithm/blastx/web.rs`. gbdraw calls this ABI. The adapter
+`LOSAT/src/algorithm/blastx/web.rs`, TBLASTN `LOSAT/src/algorithm/tblastn/web.rs`.
+gbdraw calls this ABI. The adapter
 (`web/adapter/`) links it in unchanged next to ABI v2 ([`abi_v2.md`](abi_v2.md)), and
 the two ABIs share no state. The v1 exports are in both the serial and the threaded
 module.
@@ -35,7 +37,7 @@ Every export is `extern "C"`. Wasm sees `usize` and pointers as `i32` (wasm32).
 | `losat_web_release_fasta` | `handle: i32` | `0` on success; `-1` if the handle is unknown (§6) |
 | `losat_web_clear_fasta_store` | — | `0`; `-1` only if the store's mutex is poisoned |
 | `losat_web_run_pair` | `program`, `query`, `subject`, `outfmt`, `extra_args`, each a `ptr, len` pair (10 × `i32`) | `0` on success, with the report in the result buffer; `-1` on failure, with the message in the error buffer |
-| `losat_web_run_pair_handles` | `program_ptr`, `program_len`, `query_handle`, `subject_handle`, `outfmt_ptr`, `outfmt_len`, `extra_args_ptr`, `extra_args_len` (all `i32`) | as `losat_web_run_pair`. Only BLASTP and BLASTX (§7) |
+| `losat_web_run_pair_handles` | `program_ptr`, `program_len`, `query_handle`, `subject_handle`, `outfmt_ptr`, `outfmt_len`, `extra_args_ptr`, `extra_args_len` (all `i32`) | as `losat_web_run_pair`. Only BLASTP, BLASTX and TBLASTN (§7) |
 | `losat_web_result_ptr` | — | pointer `i32` to the result buffer (§3) |
 | `losat_web_result_len` | — | length `i32` of the result buffer in bytes |
 | `losat_web_error_ptr` | — | pointer `i32` to the error buffer (§3) |
@@ -154,7 +156,11 @@ host can search one input many times without sending it again.
       `FASTA store handle space exhausted`.
     - The store keeps the original bytes and the parsed records.
     - `label` is any UTF-8 text, empty allowed. BLASTP and BLASTX use the subject's
-      label as the subject name in the report; the query label is used by BLASTP only.
+      label as the subject name in the report; the query label is used by BLASTP and
+      TBLASTN. TBLASTN names the inputs by their labels as the CLI names them by the
+      paths of `-query` and `-subject` (outfmt 0 and 7 show `Input: <subject label>`).
+    - BLASTX and TBLASTN search the stored bytes with their own readers; for them the
+      `bio` parse only decides whether the store takes the input.
 - `losat_web_release_fasta(handle)` removes one entry and returns `0`. An unknown
   handle (never issued, already released, `0`, negative) returns `-1` with
   `unknown FASTA handle: <handle>`. Releasing twice is an error the second time. A
@@ -165,19 +171,19 @@ host can search one input many times without sending it again.
   A host that clears the store drops all its old handles.
 - `losat_web_run_pair_handles` looks up the query handle and then the subject handle,
   and fails with `unknown query FASTA handle: <n>` or `unknown subject FASTA handle: <n>`.
-  The lookup happens after `outfmt` and `extra args` are read, and for BLASTP and BLASTX
-  only. The same handle may be used as both the query and the subject.
+  The lookup happens after `outfmt` and `extra args` are read, and for BLASTP, BLASTX
+  and TBLASTN only. The same handle may be used as both the query and the subject.
 - The store lives as long as the instance. Nothing releases an entry but the two
   release exports. Handles are not valid in another instance (§9).
-- The search holds the store's lock while it runs (BLASTP and BLASTX).
+- The search holds the store's lock while it runs (BLASTP, BLASTX and TBLASTN).
 
 ## 7. Request: program, `outfmt`, extra arguments
 
 `run_pair` (`LOSAT/src/web_api.rs:725-803`) and `run_pair_handles` (`:806-894`) build the
 same request.
 
-- `program` is one of `blastp`, `blastn`, `tblastx`, `blastx`, in lower case. Anything
-  else (`tblastn` included) fails with `unsupported LOSAT program: <name>`.
+- `program` is one of `blastp`, `blastn`, `tblastx`, `blastx`, `tblastn`, in lower case.
+  Anything else fails with `unsupported LOSAT program: <name>`.
 - `extra_args` is a list of words separated by NUL (`\0`). Empty words are dropped
   (`parse_extra_args`, `LOSAT/src/web_api.rs:183`). A value is the next word
   (`-evalue` `1e-5`) or joined with `=` (`-evalue=1e-5`).
@@ -192,6 +198,7 @@ same request.
 | `blastp` | `LOSAT/src/web_api/v1_blastp.rs`; arguments `parse_blastp_args` (`:527`) | the formats that BLASTP accepts, with field lists for the tabular ones (`check_web_v1_request`, `v1_blastp.rs:104`) | `-task`, `-outfmt`, `-evalue`, `-threshold`, `-word_size`, `-num_threads`, `-max_target_seqs`, `-max_hsps`, `-window_size`, `-matrix`, `-gapopen`, `-gapextend`, `-comp_based_stats`, `-seg`, `-ungapped`, `-use_sw_tback` |
 | `tblastx` | `LOSAT/src/web_api/v1_tblastx.rs`; arguments `parse_tblastx_args` (`:361`) | `6` only (`tblastx_v1_outfmt`, `LOSAT/src/blastinput/value_parsers.rs:1136`) | `-query_gencode`, `-db_gencode`, `-num_threads`, `-outfmt`, `-evalue` |
 | `blastx` | `LOSAT/src/algorithm/blastx/web.rs` | `0`, `6`, `7`, with field lists for `6` and `7` (`v1_outfmt`, `web.rs:68`) | the BLASTX options of the CLI's parser, except `-db`, `-query`, `-subject`, `-out`, `-help`, `--help`, `--version` (`web.rs:14-30`) |
+| `tblastn` | `LOSAT/src/algorithm/tblastn/web.rs` | the formats `losat tblastn` writes to standard output, read by the CLI's `-outfmt` parser with its errors (`13` and `14` fail as without `-out`) | the TBLASTN options of the CLI's parser, except `-db`, `-query`, `-subject`, `-out`, `-h`, `-help`, `--help`, `-version`, `--version` (`parse_args`) |
 
 - For `blastn`, `blastp` and `tblastx` any other word fails with
   `unsupported <program> argument for web API: <word>` (`:339`, `:463`, `:717`). A flag
@@ -207,10 +214,25 @@ same request.
 - `blastp`: the default task is `blastp` and `-comp_based_stats` is `2`.
 - The other options of each program take the defaults of the args structure in the
   parser. Ranges (`-query_loc`, `-subject_loc`), masking, and database options are not
-  available in v1.
+  available in v1, apart from TBLASTN.
+- `tblastn` runs `losat tblastn -query query -subject subject <extra words> -outfmt
+  <outfmt>` (with handles, the two labels name the inputs) over the call's bytes, read
+  as the files with the same bytes, without `.ncbirc` or NCBI's registry variables
+  (`TblastnArgs::run_in_memory`, `LOSAT/src/algorithm/tblastn/tblastn_app.rs`). The
+  report is what the CLI writes to standard output, and the error message what it
+  writes to standard error: its parser's message (`cli::render_message`) or the
+  program's (`BLAST query/options error: ...`). The diagnostics go to standard error.
+  Every CLI option of TBLASTN but those in the table works as on the CLI, ranges and
+  masking included. An `-outfmt` word among the extra words fails with the parser's
+  `the argument '-outfmt <OUTFMT>' cannot be used multiple times`, as for BLASTX.
+  `-db` fails with `-db (a database search) is not supported in the browser yet`; the
+  file, help and version words with `file/help arguments are unsupported for the
+  TBLASTN web API`. The shared vector `LOSAT/tests/fixtures/web_v1_tblastn/` (6 cases)
+  holds the CLI's bytes: `LOSAT/tests/web_v1_tblastn.rs` checks the CLI against it, and
+  the `web_api` tests check both exports.
 - `-num_threads` defaults to `1`. The serial module rejects a value above 1
   (`abi_v2.md` §2); `validate_threads` is in `LOSAT/src/utils/threading.rs:104`.
-- `run_pair_handles` supports only `blastp` and `blastx`. For `blastn` and `tblastx` it
+- `run_pair_handles` supports only `blastp`, `blastx` and `tblastn`. For `blastn` and `tblastx` it
   fails with `FASTA handle API is not yet ported for <program>; use losat_web_run_pair`
   (`LOSAT/src/web_api.rs:889`).
 - Besides the parser, the v1 modules check the inputs with helpers in
@@ -219,7 +241,8 @@ same request.
   non-ASCII bytes in sequence lines; records without residues; residues that are not
   IUPAC letters. Which checks run depends on the program: `v1_blastn.rs`, `v1_blastp.rs`
   and `v1_tblastx.rs` each call their own set. These messages say that NCBI BLAST+
-  reads the input differently and that LOSAT's program does not support it.
+  reads the input differently and that LOSAT's program does not support it. TBLASTN
+  makes none of these checks: NCBI's reader reads its inputs, as on the CLI.
 
 ## 8. Order of one call
 

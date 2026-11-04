@@ -1,0 +1,3 @@
+error: invalid value '1' for '-word_size <WORD_SIZE>': expected an integer >= 2
+
+For more information, try '--help'.

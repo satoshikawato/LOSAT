@@ -1,0 +1,11 @@
+# The shared vector of web ABI v1's TBLASTN: losat tblastn -query query -subject subject <extra> -outfmt <outfmt>
+# over query.faa and subject.fna (named query and subject) writes <name>.out to standard output, or, for
+# an "err" case, fails with <name>.err on standard error; losat_web_run_pair("tblastn", ...) returns the
+# same bytes (tests/web_v1_tblastn.rs, src/web_api.rs). Columns: name, outfmt, extra words (space
+# separated), out or err.
+fmt6	6		out
+fmt0	0		out
+fmt7	7 qaccver saccver pident length qstart qend sstart send evalue bitscore sframe	-evalue 1e-5	out
+matrix	6	-matrix FOO	err
+word_size	6	-word_size 1	err
+unknown	6	-nosuch	err

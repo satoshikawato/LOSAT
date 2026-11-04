@@ -39,3 +39,5 @@ mod tblastn_ungap;
 mod tblastn_unit_xlate;
 #[path = "../tblastn_xlate_simd.rs"]
 mod tblastn_xlate_simd;
+#[path = "../web_v1_tblastn.rs"]
+mod web_v1_tblastn;

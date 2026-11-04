@@ -132,15 +132,16 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 }
 
 /// Parses an argv (program name first) with the engine's CLI parser, and reads its `-outfmt` as
-/// the CLI does (`parse_formatting_string`, then the formatting handler's check of a custom
-/// delimiter, with the CLI's messages). A run writes the program's formats 0, 6 and 7 whatever
+/// the CLI does (`parse_formatting_string`, `report_format`, with the CLI's messages; the
+/// formatting handler's check of a custom delimiter comes later, `custom_handler_check`). A run writes the program's formats 0, 6 and 7 whatever
 /// the value; 6 and 7 with words after the number (fields, `delim=`) add an output of their own,
 /// the third value returned (docs/web/abi_v2.md §7). The rule reads the words, not the fields
 /// they make, so that the application reads it from the argv alike: `6 std` adds an output with
 /// the bytes of outfmt 6. A value of another format is refused. The arguments come back with
 /// `-outfmt` at the CLI's default, `0`: the engine is given the formats of each search
 /// (`ReportOutputs`), and the checks of the arguments alone (`check_options`) read the formats
-/// as they do without `-outfmt`.
+/// as they do without `-outfmt`, but for an `-outfmt` whose custom delimiter the CLI rejects
+/// (`validate`).
 pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), String> {
     for word in words.iter().skip(1) {
         let key = word.split('=').next().unwrap_or("");
@@ -217,6 +218,15 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
     let (program, command, custom) = parse_run(words)?;
     let groups = search_groups(&outputs(program, custom.as_deref()), &command);
     let custom_check = || custom_handler_check(program, custom.as_deref());
+    // A custom delimiter that a field uses makes the CLI reject the argv, whatever the hit list
+    // sizes of the searches: its error is that of the CLI's checks with the argv's `-outfmt`, which
+    // make the handler's check where the CLI does (the error may come before it).
+    let custom_rejected = custom_check().is_err();
+    let with_custom = |outfmt: &mut String| {
+        if custom_rejected {
+            outfmt.clone_from(custom.as_ref().expect("a rejected -outfmt"));
+        }
+    };
     match command {
         Commands::Blastn(mut args) => subject_range(args.subject_loc.as_deref(), "BLASTN")
             .and_then(|()| args.resolve_dust())
@@ -239,26 +249,38 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
                 }
                 first_error.map_or(Ok(()), Err)
             })?,
-        // The checks of the options read the formats as without `-outfmt` (`parse_run`), and the
-        // output of the argv's `-outfmt` is checked after them: the CLI checks it among them
-        // (after the query range), so for an argv with an error of both the CLI may report the
-        // delimiter's.
-        Commands::Tblastx(args) => subject_range(args.subject_loc.as_deref(), "TBLASTX")
-            .and_then(|()| LOSAT::algorithm::tblastx::blast_engine::check_options(&args))
+        // The checks of the options read the formats as without `-outfmt` (`parse_run`); with an
+        // `-outfmt` whose custom delimiter the CLI rejects they read the argv's (`with_custom`), and
+        // fail as the CLI's.
+        Commands::Tblastx(mut args) => subject_range(args.subject_loc.as_deref(), "TBLASTX")
+            .and_then(|()| {
+                with_custom(&mut args.outfmt);
+                LOSAT::algorithm::tblastx::blast_engine::check_options(&args)
+            })
             .map_err(|error| format!("{error:#}"))
             .and_then(|()| custom_check())?,
-        Commands::Blastp(args) => subject_range(args.subject_loc.as_deref(), "BLASTP")
-            .and_then(|()| LOSAT::algorithm::blastp::blast_engine::check_options(&args))
+        Commands::Blastp(mut args) => subject_range(args.subject_loc.as_deref(), "BLASTP")
+            .and_then(|()| {
+                with_custom(&mut args.outfmt);
+                LOSAT::algorithm::blastp::blast_engine::check_options(&args)
+            })
             .map_err(|error| format!("{error:#}"))
             .and_then(|()| custom_check())?,
-        Commands::Tblastn(args) => subject_range(args.subject_loc.as_deref(), "TBLASTN")
-            .and_then(|()| LOSAT::algorithm::tblastn::check_options(&args))
+        Commands::Tblastn(mut args) => subject_range(args.subject_loc.as_deref(), "TBLASTN")
+            .and_then(|()| {
+                with_custom(&mut args.outfmt);
+                LOSAT::algorithm::tblastn::check_options(&args)
+            })
             .map_err(|error| format!("{error:#}"))
             .and_then(|()| custom_check())?,
         // The checks of each search's formats, as for BLASTN: BLASTX resolves its options for
         // each format (the hit list size). Its ranges are read among them, where its run reads
         // them: after LOSAT's limits of the options (`blastx::check_options`).
         Commands::Blastx(args) => {
+            // The tabular search's formats hold the argv's `-outfmt`: its error is the run's.
+            if custom_rejected {
+                return blastx_group_check(&args, &groups[0]).and_then(|()| custom_check());
+            }
             let mut first_error = None;
             for group in &groups {
                 match blastx_group_check(&args, group) {
@@ -831,6 +853,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
     use std::io::Write as _;
     let (program, command, custom) = parse_run(words)?;
     let groups = search_groups(&outputs(program, custom.as_deref()), &command);
+    let custom_accepted = custom_handler_check(program, custom.as_deref()).is_ok();
     let mut diagnostics = StreamWriter::new(STREAM_DIAGNOSTICS);
     let threads = num_threads(&command);
     let mut command = Some(command);
@@ -856,8 +879,10 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
             } else {
                 search(command, group, query, subject, &mut scratch)
             };
+            // The CLI rejects an `-outfmt` whose custom delimiter a field uses: the failure of its
+            // search (the tabular one) is never tolerated.
             if let Err(failed) = &result {
-                if fails_run(failed, rejected) {
+                if fails_run(failed, rejected && custom_accepted) {
                     return Err(failed.message.clone());
                 }
             }
@@ -1581,6 +1606,27 @@ mod tests {
                 Err(format!("{handler:#}")),
                 "{program}"
             );
+            // The CLI rejects the argv whatever the hit list sizes: a run of two searches does not
+            // write the other one, and validate gives the error of the CLI's checks with the argv's
+            // -outfmt (review 2).
+            for extra in [
+                &["-num_descriptions", "3"][..],
+                &["-num_alignments", "3"],
+                &["-num_alignments", "0"],
+                &["-evalue", "0"],
+            ] {
+                let both = [&words[..], extra].concat();
+                assert_eq!(
+                    validate(&both),
+                    Err(format!("{handler:#}")),
+                    "{program} {extra:?}"
+                );
+                assert_eq!(
+                    run(&both, &query, &query),
+                    Err(format!("{handler:#}")),
+                    "{program} {extra:?}"
+                );
+            }
             let twice = [
                 program, "-query", "q", "-subject", "s", "-outfmt", "6", "-outfmt", "7",
             ];

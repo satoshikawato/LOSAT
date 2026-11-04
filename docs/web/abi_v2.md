@@ -196,10 +196,14 @@ the WASI imports.
   (after NCBI's white space around the value is removed, a space follows the number: fields,
   `-field`, `std`, `delim=`) add stream 4, written by the tabular search (the first search, below)
   as its first format, so that it is the CLI's output for the same argv and adds no search (its hit
-  list size is that of 6 and 7). NCBI's formatting handler checks its custom delimiter where the CLI
-  does, after the ranges and the query options (in `validate` after the program's checks of the
-  options for BLASTP, TBLASTN and TBLASTX, so an argv with an error of both may report the other);
-  the formats that the handler rejects (SAM of another program, 19, 21) are rejected with the
+  list size is that of 6 and 7). A custom delimiter that a field uses to separate its entries
+  (`6 delim=; qseqid staxids`) is NCBI's formatting handler's error, which the CLI makes after the
+  ranges and the query options: `validate` reports the error of the CLI's own checks of the argv
+  with that `-outfmt` (a `-subject_loc` of bad syntax first), whatever the hit list sizes of the
+  searches, and `run` fails with it, never tolerating the failure of the tabular search (below).
+  TBLASTN's and TBLASTX's engine reads every format of a run before the ranges, so their `run` of an
+  argv with both errors reports the delimiter's, where the CLI and `validate` report the range's.
+  The formats that the handler rejects (SAM of another program, 19, 21) are rejected with the
   handler's message as the argv is parsed, before the ranges. The rule reads the words, not the fields that they give, so that a
   host reads it from the argv without the table of fields: `6 std` adds a stream 4 with the bytes of
   stream 6. The engine is given the run's formats, and the checks of the options read them as

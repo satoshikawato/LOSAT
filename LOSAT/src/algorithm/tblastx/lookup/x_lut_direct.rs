@@ -217,10 +217,14 @@ impl XLists<'_> {
 
 /// No NCBI counterpart: a build's temporary vectors, kept between pooled builds (`cells`, `starts`
 /// and `offsets`: the present source cells of a partitioned build, `x_counted_sources`, which keeps
-/// its cursors in `base`; the build's `counts` holds its ranges' counts, `x_partitioned_passes`).
+/// its cursors in `ranges` before the vector holds the build's ranges' counts,
+/// `x_partitioned_passes`; `counts`, `base` and `fill` are a build's on one thread). Each use has a
+/// vector of its own, so that a set taken by builds of both kinds is not shrunk and grown again
+/// (`x_fit`).
 #[derive(Default)]
 struct XBuildTemps {
     counts: Vec<u32>,
+    ranges: Vec<u32>,
     base: Vec<u32>,
     fill: Vec<u32>,
     chains: Option<LookupBackboneChains>,
@@ -246,9 +250,10 @@ fn x_pool_lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-// No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them); one
-// short of room grows to `n` entries, or with `slack` (the overflow, whose length changes from
-// table to table) `n + n / 4`, not the doubling of `resize`. It grows by a reallocation of its own
+// No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them), with
+// the room of `x_fit`: one short of room grows to `n` entries, or with `slack` (the overflow, whose
+// length changes from table to table) `n + n / 4`, not the doubling of `resize`, and one with more
+// room than that is shrunk to it. It grows by a reallocation of its own
 // allocation (`reserve_exact`), never a new allocation and a free of the old one: glibc moves a
 // mapped allocation with `mremap`, so the pool never frees a mapped vector, and a free of one
 // raises glibc's dynamic mmap threshold to its size and the trim threshold of every arena to
@@ -258,11 +263,72 @@ fn x_pool_lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 // arenas held 47 MiB at the peak, 23 MiB of it free.
 fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
     vector.clear();
-    if vector.capacity() < n {
-        vector.reserve_exact(if slack { n + n / 4 } else { n });
-    }
+    x_fit(&mut vector, n, slack);
     vector.resize(n, T::default());
     vector
+}
+
+// No NCBI counterpart: the capacity of a pooled vector taken for `n` entries (`slack`: `n + n / 4`,
+// see `x_zeroed`): grown when short of `n`, and given back down to that when above it, so that a
+// kept vector holds the pages of the table it is taken for, not those of the largest table it
+// held (NCBI callocs each table and frees it with its search). A vector that grows to
+// `X_MAPPED_FROM` bytes is mapped (`x_mapped_capacity`, then given its room), and glibc resizes a
+// mapped allocation with `mremap`, both ways: the pages past a shrunk vector go back to the system,
+// and no mapped vector is freed (which would raise glibc's mmap threshold, see `x_zeroed`); other
+// allocators resize it with `realloc`. A smaller vector stays where the allocator puts it, as
+// before: mapping every vector from its first allocation gave the 112 KiB vectors of a build on
+// one thread pages of their own (the default path at 8 threads read +0.2-0.4 MiB against dev in 10
+// runs). At 64 threads, 800 cDNAs x 50 yeast proteins `-subject` kept eight tables' overflow
+// vectors of 2.1-4.2 MiB of pages (22.8 MiB) for tables of 1.82 MiB on average (the run's 184
+// tables, median 1.74 MiB).
+fn x_fit<T>(vector: &mut Vec<T>, n: usize, slack: bool) {
+    let want = if slack { n + n / 4 } else { n };
+    if vector.capacity() < n {
+        let size = std::mem::size_of::<T>();
+        let room = if crate::utils::x_mapped::x_is_mapped(vector.capacity() * size) {
+            want
+        } else {
+            crate::utils::x_mapped::x_mapped_capacity(want, size)
+        };
+        vector.clear();
+        vector.reserve_exact(room);
+    }
+    if vector.capacity() > want {
+        vector.truncate(n);
+        // At least one entry: a vector shrunk to nothing would be freed.
+        vector.shrink_to(want.max(1));
+    }
+}
+
+// No NCBI counterpart (buffer reuse only): the overflow vector for a table of `n` hits: `own` (that
+// of the kept vectors the build took) or, where it fits `n` better, the overflow vector of another
+// kept set, the two swapped: the smallest capacity of at least `n`, else the largest (the least to
+// grow). The tables of a search differ in size (800 cDNAs `-subject`, 184 tables: overflow 1.2-4.2
+// MiB, median 1.74), and the vector on top of the pool was the last one given back: taken that way, about every
+// other build grew its vector and the next one shrank it again (`x_fit`, 110-128 resizes for 184
+// tables at 64 threads, and their pages faulted again); taken by size, the large vectors serve
+// the large tables (43-58 resizes, no more faults than vectors never shrunk).
+fn x_fitting_overflow<C: XVec>(kept: &mut [XAaVectors], own: &mut Vec<C::Hit>, n: usize) {
+    let fits_better = |a: usize, b: usize| {
+        if (a >= n) != (b >= n) {
+            a >= n
+        } else if a >= n {
+            a < b
+        } else {
+            a > b
+        }
+    };
+    let mut best: Option<&mut Vec<C::Hit>> = None;
+    for vectors in kept.iter_mut() {
+        let (_, overflow) = C::vectors(vectors);
+        let held = best.as_ref().map_or(own.capacity(), |best| best.capacity());
+        if fits_better(overflow.capacity(), held) {
+            best = Some(overflow);
+        }
+    }
+    if let Some(best) = best {
+        std::mem::swap(best, own);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 (see
@@ -1391,12 +1457,14 @@ fn x_build_direct_in<C: XVec>(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     if pooled && parts > 1 && room.is_none() {
+        let parts = parts.min(X_MOST_PARTS);
         x_counted_sources(
             &concat_query,
             &lookup_locations,
             word_length,
             charsize,
             backbone_size,
+            parts,
             &mut temps,
         );
         let shared = x_shared_memo(key, backbone_size);
@@ -1519,8 +1587,13 @@ fn x_build_direct_in<C: XVec>(
         None if pooled => {
             let mut kept = x_pool_lock(&X_BX_TABLES).pop().unwrap_or_default();
             let (kept_backbone, kept_overflow) = C::vectors(&mut kept);
-            let (kept_backbone, kept_overflow) =
+            let (kept_backbone, mut kept_overflow) =
                 (std::mem::take(kept_backbone), std::mem::take(kept_overflow));
+            x_fitting_overflow::<C>(
+                &mut x_pool_lock(&X_BX_TABLES),
+                &mut kept_overflow,
+                overflow_size + C::PAD_HITS,
+            );
             (
                 x_zeroed(kept_backbone, backbone_size + C::PAD_CELLS, false),
                 x_zeroed(kept.pv, pv_size, false),
@@ -1974,19 +2047,16 @@ fn x_claimed<T: Send, R: Send>(parts: Vec<T>, f: &(dyn Fn(T) -> R + Sync)) -> Ve
 }
 
 // No NCBI counterpart: `vector` with `n` entries for a build that writes every entry itself: the
-// entries kept are not cleared (new ones are zero), and one short of room is replaced as by
-// `x_zeroed`.
+// entries kept are not cleared (new ones are zero), and the room is that of `x_zeroed` (`x_fit`:
+// grown when short, shrunk when above it).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 fn x_sized<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
-    if vector.capacity() < n {
-        // Grown in its own allocation, as `x_zeroed` grows (no vector of the pool is freed).
-        vector.clear();
-        vector.reserve_exact(if slack { n + n / 4 } else { n });
-    }
     vector.truncate(n);
+    // Grown or shrunk in its own allocation, as `x_zeroed` (no vector of the pool is freed).
+    x_fit(&mut vector, n, slack);
     vector.resize(n, T::default());
     vector
 }
@@ -2168,7 +2238,10 @@ fn x_for_each_exact_word(
 // ascending order, with no chain allocated.
 /// EXPERIMENT (LOSAT_X_BXBUILDPAR): the exact backbone of a partitioned build as plain slices:
 /// `temps.cells` the cells that have a chain, ascending, and cell i's offsets (chain order)
-/// `temps.offsets[temps.starts[i]..temps.starts[i + 1]]`.
+/// `temps.offsets[temps.starts[i]..temps.starts[i + 1]]`. The cursors are the first
+/// `backbone_size` entries of `temps.ranges`, given the room of the build's `parts` ranges' counts
+/// (`x_partitioned_passes`), so that the vector is not shrunk and grown again by each build
+/// (`x_fit`).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -2179,9 +2252,16 @@ fn x_counted_sources(
     word_length: usize,
     charsize: usize,
     backbone_size: usize,
+    parts: usize,
     temps: &mut XBuildTemps,
 ) {
-    let mut at = x_zeroed(std::mem::take(&mut temps.base), backbone_size, false);
+    let mut counts = x_sized(
+        std::mem::take(&mut temps.ranges),
+        parts * backbone_size,
+        false,
+    );
+    let at = &mut counts[..backbone_size];
+    at.fill(0);
     let mut words = 0usize;
     x_for_each_exact_word(query, locations, word_length, charsize, |idx, _| {
         at[idx] += 1;
@@ -2206,7 +2286,7 @@ fn x_counted_sources(
             i32::try_from(offset).expect("NCBI BLAST query offset must fit Int4");
         at[idx] += 1;
     });
-    temps.base = at;
+    temps.ranges = counts;
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 and 283-358 (cited
@@ -2283,7 +2363,7 @@ fn x_partitioned_passes(
     let ranges = || bounds[..=parts].windows(2).map(|bound| bound[0]..bound[1]);
     // (a) The ranges' counts per target cell.
     let mut per_range = x_sized(
-        std::mem::take(&mut temps.counts),
+        std::mem::take(&mut temps.ranges),
         parts * backbone_size,
         false,
     );
@@ -2382,7 +2462,13 @@ fn x_partitioned_passes(
         }
     });
     // (d) The appends.
-    let mut overflow = x_sized(kept.overflow, overflow_size, true);
+    let mut overflow = kept.overflow;
+    x_fitting_overflow::<BackboneCell>(
+        &mut x_pool_lock(&X_BX_TABLES),
+        &mut overflow,
+        overflow_size,
+    );
+    let mut overflow = x_sized(overflow, overflow_size, true);
     let out = XDisjointOut {
         backbone: backbone.as_mut_ptr(),
         overflow: overflow.as_mut_ptr(),
@@ -2408,7 +2494,7 @@ fn x_partitioned_passes(
             }
         },
     );
-    temps.counts = per_range;
+    temps.ranges = per_range;
     temps.cells = cells;
     temps.starts = starts;
     temps.offsets = offsets;
@@ -3009,6 +3095,58 @@ mod tests {
             let mut table = pooled(queries, threshold, matrix);
             x_give_back_pooled(&mut table);
         }
+    }
+
+    // No NCBI counterpart (buffer reuse only): a pooled vector taken for fewer entries than it has
+    // room for is given back down to them (`n + n / 4` for the overflow), one short of room grows,
+    // a new one has the room of its first table, and a build takes the kept overflow vector that
+    // fits its table best: the smallest of at least its size, else the largest.
+    #[test]
+    fn pooled_vectors_fit_the_table_they_are_taken_for() {
+        let vector = x_zeroed(vec![7i32; 4_000], 1_000, true);
+        assert_eq!(vector.len(), 1_000);
+        assert!(vector.iter().all(|&hit| hit == 0));
+        assert!((1_000..=1_250).contains(&vector.capacity()));
+        let vector = x_zeroed(vector, 3_000, true);
+        assert!((3_000..=3_750).contains(&vector.capacity()));
+        let vector = x_zeroed(vector, 500, false);
+        assert_eq!(vector.len(), 500);
+        assert!((500..1_000).contains(&vector.capacity()));
+        let vector = x_zeroed(vector, 0, true);
+        assert!(vector.is_empty() && (1..500).contains(&vector.capacity()));
+        let vector = x_zeroed(Vec::<u32>::new(), 10, false);
+        assert_eq!(vector.len(), 10);
+        assert!((10..1_000).contains(&vector.capacity()));
+
+        let with_room = |room: usize| Vec::<i32>::with_capacity(room);
+        let mut kept: Vec<XAaVectors> = [100, 300, 200]
+            .into_iter()
+            .map(|room| XAaVectors {
+                overflow: with_room(room),
+                ..XAaVectors::default()
+            })
+            .collect();
+        let rooms = |kept: &[XAaVectors]| -> Vec<usize> {
+            kept.iter().map(|v| v.overflow.capacity()).collect()
+        };
+        let (r100, r300, r200) = (rooms(&kept)[0], rooms(&kept)[1], rooms(&kept)[2]);
+        let mut own = with_room(50);
+        let r50 = own.capacity();
+        x_fitting_overflow::<BackboneCell>(&mut kept, &mut own, 150);
+        assert_eq!(
+            (own.capacity(), rooms(&kept)),
+            (r200, vec![r100, r300, r50])
+        );
+        x_fitting_overflow::<BackboneCell>(&mut kept, &mut own, 1_000);
+        assert_eq!(
+            (own.capacity(), rooms(&kept)),
+            (r300, vec![r100, r200, r50])
+        );
+        x_fitting_overflow::<BackboneCell>(&mut kept, &mut own, r300);
+        assert_eq!(
+            (own.capacity(), rooms(&kept)),
+            (r300, vec![r100, r200, r50])
+        );
     }
 
     // No NCBI counterpart (scheduling only): LOSAT_X_BXBUILDPAR's passes by source ranges give the

@@ -71,19 +71,28 @@ const X_UNPACKED: [[u8; COMPRESSION_RATIO]; 256] = {
 /// ```
 /// Byte `i` of the result is `NCBI2NA_UNPACK_BASE(packed[i / 4], 3 - i % 4)` for the first
 /// `len` bases (the remainder count in the last packed byte is not a base and is not copied).
+// No NCBI counterpart: LOSAT's speed. The copy is written into its capacity, not into a zeroed
+// buffer: the loop writes every byte, and the zeroing of a copy of the whole subject was 1.1 % of
+// the user cycles of megablast `-db` (ref_prok_rep_genomes, 16 threads).
 pub(crate) fn x_unpack_ncbi2na(packed: &[u8], len: usize) -> Vec<u8> {
     let bytes = len.div_ceil(COMPRESSION_RATIO);
     assert!(
         packed.len() >= bytes,
         "packed subject shorter than its length"
     );
-    let mut unpacked = vec![0u8; bytes * COMPRESSION_RATIO];
-    for (bases, &byte) in unpacked
+    let mut unpacked = Vec::with_capacity(bytes * COMPRESSION_RATIO);
+    let spare = &mut unpacked.spare_capacity_mut()[..bytes * COMPRESSION_RATIO];
+    for (bases, &byte) in spare
         .chunks_exact_mut(COMPRESSION_RATIO)
         .zip(&packed[..bytes])
     {
-        bases.copy_from_slice(&X_UNPACKED[byte as usize]);
+        for (slot, &base) in bases.iter_mut().zip(&X_UNPACKED[byte as usize]) {
+            slot.write(base);
+        }
     }
+    // SAFETY: the loop wrote bytes `[0, bytes * COMPRESSION_RATIO)` (`bytes` packed bytes of
+    // `COMPRESSION_RATIO` bases each), within the capacity taken above.
+    unsafe { unpacked.set_len(bytes * COMPRESSION_RATIO) };
     unpacked.truncate(len);
     unpacked
 }
@@ -212,7 +221,7 @@ mod tests {
     fn x_unpack_ncbi2na_gives_the_resolved_bases() {
         const LETTERS: &[u8] = b"ACGTacgtNRYKMSWBDHVnrykmswbdhv-";
         let mut state = 0x9E37_79B9_7F4A_7C15u64;
-        for len in [1usize, 3, 4, 5, 63, 64, 65, 1000] {
+        for len in [0usize, 1, 2, 3, 4, 5, 63, 64, 65, 1000] {
             let text: Vec<u8> = (0..len)
                 .map(|_| {
                     state ^= state << 13;

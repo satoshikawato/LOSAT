@@ -3138,6 +3138,17 @@ fn run_batch_loop(
             report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
         )
     });
+    // Whether the first format's report reads the subjects' Bioseqs, which NCBI's formatters
+    // fetch one by one where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off: a custom
+    // tabular report only for fields that read them (`TabularSpec::fetches_subject`).
+    let fetches =
+        outputs
+            .formats
+            .first()
+            .is_none_or(|format| match report::output_format(format.outfmt) {
+                report::TblastxOutputFormat::CustomTabular(spec) => spec.fetches_subject(false),
+                _ => true,
+            });
     // A batch is read from the input records (`input_start..input_end`); its searched
     // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
     // whole records, and a record whose range starts past its end is skipped
@@ -3424,6 +3435,9 @@ fn run_batch_loop(
         // `-db`: the definition lines of the batch's reported sequences are read where NCBI
         // makes the batch's Seq-aligns (`database::read_titles`, in report order); a header file
         // that NCBI cannot read fails this batch, after the reports of the batches before.
+        // The taxonomy database's messages of each query's own fetches, where the batch's
+        // prefetch is off (below), by query of the batch.
+        let mut query_fetches: Vec<Vec<u8>> = Vec::new();
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
             let ordered = batch.hits.as_slice();
             let read = super::super::database::read_titles(
@@ -3500,15 +3514,49 @@ fn run_batch_loop(
             // database or a taxid that LOSAT cannot read as NCBI does) stops the run before any
             // report, as the refusals of the titles above and XML2's lookups (`read_taxids`) do.
             if prefetches && database.taxdb_found() {
-                let messages = super::super::database::prefetch_messages(
-                    database,
-                    ordered,
-                    &reports.titles.borrow(),
-                )?;
-                if plural_names && !ordered.is_empty() {
-                    database.open_for_tabular_rows()?;
+                // The batch's Seq-aligns: one for each subject of each query (TBLASTX's search
+                // is ungapped), whose HSPs follow each other in report order.
+                let seq_aligns: usize = ordered
+                    .chunk_by(|a, b| a.hit.q_idx == b.hit.q_idx && a.hit.s_idx == b.hit.s_idx)
+                    .map(|hsps| {
+                        crate::algorithm::common::database::subject_seq_aligns(hsps.len(), false)
+                    })
+                    .sum();
+                // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
+                // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
+                // after the query's own warnings (`query_fetches`, added after them below), where
+                // the first format reads their Bioseqs (`fetches`). A batch that fetches nothing
+                // still asks for the run's refusal of NCBI's taxonomy cache before any byte.
+                if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                    debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
+                    for query in 0..(end - start) as u32 {
+                        let shown = if fetches {
+                            let from = ordered.partition_point(|hsp| hsp.hit.q_idx < query);
+                            let to = ordered.partition_point(|hsp| hsp.hit.q_idx <= query);
+                            &ordered[from..to]
+                        } else {
+                            &[]
+                        };
+                        query_fetches.push(super::super::database::prefetch_messages(
+                            database,
+                            shown,
+                            &reports.titles.borrow(),
+                        )?);
+                        if plural_names && ordered.iter().any(|hsp| hsp.hit.q_idx == query) {
+                            database.open_for_tabular_rows()?;
+                        }
+                    }
+                } else {
+                    let messages = super::super::database::prefetch_messages(
+                        database,
+                        ordered,
+                        &reports.titles.borrow(),
+                    )?;
+                    if plural_names && !ordered.is_empty() {
+                        database.open_for_tabular_rows()?;
+                    }
+                    warnings[start].extend(messages);
                 }
-                warnings[start].extend(messages);
             }
         }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1450-1452
@@ -3560,6 +3608,9 @@ fn run_batch_loop(
                 query,
                 &messages,
             ));
+        }
+        for (offset, messages) in query_fetches.into_iter().enumerate() {
+            warnings[start + offset].extend(messages);
         }
         if stream {
             // The batch's reports, written now, as NCBI's loop prints a batch's result sets

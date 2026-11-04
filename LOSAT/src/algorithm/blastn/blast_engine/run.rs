@@ -9437,6 +9437,9 @@ fn run_in_pool(
         // (`database::read_titles`), before the HSPs of score 0 are dropped. A header file
         // that NCBI cannot read fails this batch, after the reports of the batches before
         // and the messages of this batch's reading.
+        // The taxonomy database's messages of each query's own fetches, where the batch's
+        // prefetch is off (below), by query of the batch.
+        let mut query_fetches: Vec<Vec<u8>> = Vec::new();
         if let SubjectSource::Database(database) = source {
             let hitlist_size = args.report_counts.hitlist_size;
             for (q_idx, hit_list) in batch_hit_lists.iter_mut().enumerate() {
@@ -9543,21 +9546,68 @@ fn run_in_pool(
                 // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
                 // the taxonomy database before a later batch's prefetch
                 // (`TaxdbRun::open_for_rows`).
-                let rows_open = matches!(
+                let plural_names = matches!(
                     output_formats.first(),
                     Some(BlastnOutputFormat::CustomTabular(spec)) if spec.checks_taxdb()
-                ) && batch_hit_lists
+                );
+                let rows_open = |hit_lists: &[Option<BlastnHitList>]| -> Result<()> {
+                    if plural_names
+                        && hit_lists
+                            .iter()
+                            .flatten()
+                            .any(|hit_list| !hit_list.hsplist_array.is_empty())
+                    {
+                        database.open_for_tabular_rows()?;
+                    }
+                    Ok(())
+                };
+                let seq_aligns: usize = batch_hit_lists
                     .iter()
                     .flatten()
-                    .any(|hit_list| !hit_list.hsplist_array.is_empty());
-                let prefetch = database
-                    .prefetch_messages(&titles, &batch_hit_lists)
-                    .and_then(|messages| {
-                        if rows_open {
-                            database.open_for_tabular_rows()?;
-                        }
-                        Ok(messages)
-                    });
+                    .flat_map(|hit_list| {
+                        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                        &hit_list.hsplist_array[..count]
+                    })
+                    .map(|hsp_list| {
+                        crate::algorithm::common::database::subject_seq_aligns(
+                            hsp_list.hsps.len(),
+                            !args.ungapped,
+                        )
+                    })
+                    .sum();
+                // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
+                // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
+                // after the query's own warnings (`query_fetches`, added after them below), where
+                // the first format reads their Bioseqs (`TabularSpec::fetches_subject`; BLASTN's
+                // formatter does not fetch for the identities). A batch that fetches nothing still
+                // asks for the run's refusal of NCBI's taxonomy cache before its first byte.
+                let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                    let fetches = match output_formats.first() {
+                        Some(BlastnOutputFormat::CustomTabular(spec)) => spec.fetches_subject(true),
+                        _ => true,
+                    };
+                    batch_hit_lists
+                        .iter()
+                        .map(|hit_list| {
+                            let shown = std::slice::from_ref(hit_list);
+                            let messages = database
+                                .prefetch_messages(&titles, if fetches { shown } else { &[] })?;
+                            rows_open(shown)?;
+                            Ok(messages)
+                        })
+                        .collect::<Result<Vec<_>>>()
+                        .map(|messages| {
+                            query_fetches = messages;
+                            Vec::new()
+                        })
+                } else {
+                    database
+                        .prefetch_messages(&titles, &batch_hit_lists)
+                        .and_then(|messages| {
+                            rows_open(&batch_hit_lists)?;
+                            Ok(messages)
+                        })
+                };
                 match prefetch {
                     Ok(messages) => warnings[start].extend(messages),
                     Err(error) => {
@@ -9634,6 +9684,9 @@ fn run_in_pool(
                 &batch_records.searched()[index],
                 &messages,
             ));
+        }
+        for (index, messages) in query_fetches.into_iter().enumerate() {
+            warnings[start + index].extend(messages);
         }
         context_karlin.extend(batch.context_karlin);
         query_eff_searchsp.extend(batch.query_eff_searchsp);

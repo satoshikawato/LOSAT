@@ -775,6 +775,25 @@ pub(crate) fn prefetch_off(seq_aligns: usize) -> bool {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1417-1446
+// ```c++
+//     /* All HSPs are put in one seqalign, containing a list of
+//      * DenseDiag for same molecule search, or StdSeg for translated searches.
+//      */
+//     ...
+//     sa_vector.push_back(seqalign);
+// ```
+/// The number of Seq-aligns NCBI makes of a subject's `hsps` HSPs, which [`prefetch_off`]
+/// counts: one for each HSP of a gapped search (`BLASTHspListToSeqAlign`), one for all of them
+/// in an ungapped search (`BLASTUngappedHspListToSeqAlign`; TBLASTX's is always ungapped).
+pub(crate) fn subject_seq_aligns(hsps: usize, gapped: bool) -> usize {
+    if gapped {
+        hsps
+    } else {
+        usize::from(hsps > 0)
+    }
+}
+
 /// `PRE_FETCH_SEQS_LIMIT` as `NStr::StringToInt` reads it; `None` when it is not set or is no
 /// integer.
 fn prefetch_seqs_limit() -> Option<i32> {

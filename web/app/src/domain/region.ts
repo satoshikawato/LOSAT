@@ -2,8 +2,10 @@
 // becomes `-query_loc start-stop` or `-subject_loc start-stop`. Positions are 1-based and
 // inclusive, in the record's letters (nucleotides or residues). The form limits both
 // positions to the record (1 to its length), as the preview's selection does (S12
-// instructions, item 3); every other rule (for example start < stop) is the engine's,
-// whose `validate` gives NCBI's message.
+// instructions, item 3), and asks for a start before the stop: the engine refuses the others
+// in every mode and role, as NCBI does ("start cannot be larger than stop", and "range cannot be
+// empty" for one letter), and a drag never makes them (WA-IN-07). Any other rule is the
+// engine's, whose `validate` gives NCBI's message.
 import type { InputRole } from './programs';
 
 /** The two fields as the user typed them. */
@@ -29,6 +31,8 @@ export function regionProblem(region: RegionText, length: number): string | unde
     const value = Number(text);
     if (value < 1 || value > length) return `The ${name} must be between 1 and ${length}, the length of the record.`;
   }
+  if (Number(start) > Number(stop)) return 'The start cannot be larger than the stop.';
+  if (Number(start) === Number(stop)) return 'The stop must be larger than the start.';
   return undefined;
 }
 

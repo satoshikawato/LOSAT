@@ -5,13 +5,16 @@
 //   ("Keep searching while you're away", on by default, Owner 2026-11-03; the choice is shown on
 //   handheld devices, whose screens turn off by themselves and end the search), not released and
 //   requested again between the runs of a queue;
-// - asks the browser to warn before the page is left while runs are active or queued;
+// - asks the browser to warn before the page is left while runs are active or queued, and also
+//   while the search form holds inputs or a run has results: LOSAT Web keeps nothing for the
+//   next visit (REQ-20) and sends nothing to a server, so a reload loses them for good (WA-IN-06);
 // - when the page becomes visible again after being hidden with runs in progress, reports
 //   how long it was hidden, what became of those runs, and whether the Data worker (which
 //   keeps the results) still answers.
 import type { PagePort, WakeLockHandle } from '../ports/page';
 import type { RunStatus } from '../domain/run';
 import type { AppState } from './coordinator';
+import { holdsInputs, type DraftState } from './draft';
 import { Store } from './store';
 
 export type WakeLockState = 'unsupported' | 'off' | 'requesting' | 'held' | 'failed';
@@ -44,6 +47,8 @@ export interface AttentionDeps {
   /** Whether keepAwake starts on (the default) or off. */
   readonly keepAwake?: boolean | undefined;
   readonly runs: Store<AppState>;
+  /** The search form, whose inputs a reload would lose. */
+  readonly draft?: Store<DraftState>;
   /** A call that the Data worker answers (its storage status). */
   readonly probe: () => Promise<unknown>;
   readonly now: () => number;
@@ -60,6 +65,7 @@ export class Attention {
   private lock: WakeLockHandle | undefined;
   private hidden: { readonly at: number; readonly runs: ReadonlyMap<string, { number: number; status: RunStatus }> } | undefined;
   private probeGeneration = 0;
+  private leaveGuard: boolean | undefined;
 
   constructor(private readonly deps: AttentionDeps) {
     this.state = new Store<AttentionState>({
@@ -70,6 +76,7 @@ export class Attention {
       busy: false,
     });
     deps.runs.subscribe(() => this.update());
+    deps.draft?.subscribe(() => this.updateLeaveGuard());
     deps.page.onVisibilityChange((visible) => (visible ? this.shown() : this.hide()));
     this.update();
   }
@@ -89,9 +96,21 @@ export class Attention {
     const busy = active || runs.some((run) => run.status === 'queued');
     const state = this.state.get();
     if (state.active !== active || state.busy !== busy) this.set({ active, busy });
-    this.deps.page.setLeaveGuard(busy);
+    this.updateLeaveGuard();
     this.updateWakeLock();
     // A report whose runs have all finished keeps its numbers: they describe the past.
+  }
+
+  /** On while leaving would end a search or lose results or inputs. */
+  private updateLeaveGuard(): void {
+    const draft = this.deps.draft?.get();
+    const on =
+      this.state.get().busy ||
+      this.deps.runs.get().runs.some((run) => run.status === 'completed') ||
+      (draft !== undefined && holdsInputs(draft));
+    if (on === this.leaveGuard) return;
+    this.leaveGuard = on;
+    this.deps.page.setLeaveGuard(on);
   }
 
   private updateWakeLock(): void {

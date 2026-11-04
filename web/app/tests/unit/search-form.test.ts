@@ -763,11 +763,23 @@ describe('regionProblem', () => {
     expect(problem('1', '8', 7)).toBe('The stop must be between 1 and 7, the length of the record.');
   });
 
-  it('accepts positions within the record, including start == stop and start > stop', () => {
+  it('accepts positions within the record with the start before the stop', () => {
     expect(problem('1', '100')).toBeUndefined();
-    expect(problem('50', '50')).toBeUndefined();
-    expect(problem('80', '20')).toBeUndefined();
+    expect(problem('50', '51')).toBeUndefined();
     expect(problem('007', '0100')).toBeUndefined();
+  });
+
+  // The engine refuses both, as NCBI does (WA-IN-07): `-query_loc 300-100` "start cannot be
+  // larger than stop", `-query_loc 100-100` "range cannot be empty", in every mode and role.
+  it('refuses a start after the stop, and a range of one letter, as the engine does', () => {
+    expect(problem('80', '20')).toBe('The start cannot be larger than the stop.');
+    expect(problem('0100', '99')).toBe('The start cannot be larger than the stop.');
+    expect(problem('50', '50')).toBe('The stop must be larger than the start.');
+    expect(problem('007', '7')).toBe('The stop must be larger than the start.');
+  });
+
+  it('names a position outside the record before the order', () => {
+    expect(problem('300', '100')).toBe('The start must be between 1 and 100, the length of the record.');
   });
 
   it('accepts surrounding white space', () => {
@@ -787,13 +799,15 @@ describe('region value, range and positions', () => {
 
   it('gives the range of a valid region', () => {
     expect(regionRange({ start: ' 05', stop: '10 ' }, 20)).toEqual({ start: 5, stop: 10 });
-    expect(regionRange({ start: '20', stop: '5' }, 20)).toEqual({ start: 20, stop: 5 });
+    expect(regionRange({ start: '5', stop: '20' }, 20)).toEqual({ start: 5, stop: 20 });
   });
 
   it('gives no range while the region is incomplete or outside the record', () => {
     expect(regionRange({ start: '', stop: '5' }, 20)).toBeUndefined();
     expect(regionRange({ start: '1', stop: '21' }, 20)).toBeUndefined();
     expect(regionRange({ start: 'a', stop: '5' }, 20)).toBeUndefined();
+    expect(regionRange({ start: '20', stop: '5' }, 20)).toBeUndefined();
+    expect(regionRange({ start: '5', stop: '5' }, 20)).toBeUndefined();
   });
 
   it('orders, rounds and limits positions', () => {

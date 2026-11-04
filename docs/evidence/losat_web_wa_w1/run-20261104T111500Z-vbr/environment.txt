@@ -1,0 +1,9 @@
+commit: 98bac1391 (branch fix/web-supported-table, base origin/dev 5ea799bf1)
+uncommitted files: docs/evidence/losat_web_wa_w1/README.md only (this record's folder)
+purpose: V-BR (web/app/tests/e2e/engine.spec.ts) at every thread count from 1 to 32 per program and the tasks' defaults (WA-RS-03, line WA W1 PR-b)
+machine: 32 logical CPUs (WSL2), other sessions running (load average 10-28)
+browsers: Chromium 149.0.7827.55, Firefox 151.0, WebKit 26.5 (Playwright, headless)
+native: losat built from the commit's engine (cargo build --release --manifest-path LOSAT/Cargo.toml, Rust 1.92.0)
+reactors: web/adapter/tools/build_reactors.py from the commit's engine (losat-web-serial.wasm sha256:3e2351865ea1b3bb, losat-web-threads.wasm sha256:68764abb4a92be0f)
+command: LOSAT_WEB_REACTORS=<reactors> LOSAT_WEB_NATIVE=<native> LOSAT_WEB_EVIDENCE=records npx playwright test --project=<browser> tests/e2e/engine.spec.ts -g "V-BR"
+result: 7 tests passed in each browser (2026-11-04 20:15-20:25 JST)

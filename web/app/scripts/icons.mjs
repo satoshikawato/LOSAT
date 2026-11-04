@@ -33,7 +33,7 @@ for (const [file, svg, size] of [
   ['apple-touch-icon.png', square(0.62), 180],
   ['icon-192.png', favicon, 192],
   ['icon-512.png', favicon, 512],
-  // The A's lower corners, the farthest from the middle (7.14 in the favicon), at 0.38 of the side.
+  // The A's lower corners, the farthest from the middle (7.12 in the favicon), at 0.37 of the side.
   ['icon-maskable-512.png', square(0.54), 512],
 ]) {
   await page.setViewportSize({ width: size, height: size });

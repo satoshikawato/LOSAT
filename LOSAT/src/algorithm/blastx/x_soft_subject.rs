@@ -12,8 +12,8 @@ use super::input::FastaRecord;
 use super::parameters::ContextParameters;
 use super::query_setup::PreparedQueryBatch;
 use super::seed::{
-    word_finder_over, x_compressed_scan, x_compressed_word_length, x_scan_bytes, Diagonals,
-    InitHsp, Lookup,
+    word_finder_over, x_compressed_scan, x_compressed_word_length, x_scan_bytes, BxLookup,
+    Diagonals, InitHsp, Lookup,
 };
 use super::subjects::Subjects;
 use crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject;
@@ -77,7 +77,7 @@ pub(super) fn x_word_finder(
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
-    lookup: &Lookup,
+    lookup: &BxLookup,
     diagonals: &mut Diagonals,
     ranges: &[(i32, i32)],
     mut seeds: Option<&mut Vec<(i32, i32)>>,
@@ -87,9 +87,13 @@ pub(super) fn x_word_finder(
         parameters,
         options,
         subject,
-        lookup,
+        |each| match lookup {
+            BxLookup::Wide(lookup) => x_scan(lookup, subject, ranges, options.window_size, each),
+            BxLookup::Narrow(lookup) => {
+                lookup.x_scan(subject, 0, Some(ranges), options.window_size, each)
+            }
+        },
         diagonals,
-        Some(ranges),
         |pairs| {
             if let Some(seeds) = seeds.as_deref_mut() {
                 seeds.extend_from_slice(pairs);
@@ -473,17 +477,18 @@ mod tests {
         let query = b"ATGGCTCGTAACGATTGCCAAGAAGGACATATCCTGAAAATGTTCCCAAGCACCTGGTACGTCGCTCGTAACGATTGCCAAGAAGGACATATCCTGAAAATGTTCCCAAGCACCTGGTACGTCGCTCGTAACGATTGCCAAGAAGGACATATCCTG";
         for window in ["0", "40"] {
             let (batch, params, options, lookup) = search(query, &["-window_size", window]);
+            let bx = BxLookup::Wide(lookup);
             let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
             let mut whole = Diagonals::new(length, options.window_size).unwrap();
             let mut ranged = Diagonals::new(length, options.window_size).unwrap();
             for letters in [300, 7, 300] {
                 let subject = subject(letters);
-                let expected = super::super::seed::word_finder(
+                let expected = super::super::seed::word_finder_bx(
                     &batch,
                     &params,
                     &options,
                     &subject,
-                    &lookup,
+                    &bx,
                     &mut whole,
                     |_| {},
                 )
@@ -494,7 +499,7 @@ mod tests {
                     &params,
                     &options,
                     &subject,
-                    &lookup,
+                    &bx,
                     &mut ranged,
                     &[(0, letters as i32)],
                     Some(&mut seeds),

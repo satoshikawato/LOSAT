@@ -2345,9 +2345,10 @@ impl BlastpReport {
     }
 
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
-    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7,
-    /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
-    /// messages of that prefetch go with the query warnings.
+    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7; with
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
+    /// the call's first report, the taxonomy database's messages of that prefetch go with the
+    /// query warnings.
     fn prefetches_subjects(self) -> bool {
         crate::algorithm::common::database::prefetches_subjects(match self {
             BlastpReport::Text(outfmt) => Some(outfmt as i32),
@@ -2359,9 +2360,10 @@ impl BlastpReport {
                 _ => 6,
             }),
             BlastpReport::Xml => Some(5),
-            // The Seq-annots and the archive fetch nothing; XML2 and JSON write the messages
-            // at each `Hit` (`TaxdbPrinter`).
-            BlastpReport::Seqalign(_) | BlastpReport::Archive | BlastpReport::Xml2(_) => None,
+            BlastpReport::Seqalign(serial) => Some(serial.outfmt()),
+            // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
+            // (`TaxdbPrinter`).
+            BlastpReport::Archive | BlastpReport::Xml2(_) => None,
         })
     }
 
@@ -6063,7 +6065,23 @@ fn search(
                 // does not ask for). The refusal of NCBI's taxonomy cache
                 // (`shared::TaxdbRun::cache_collision`) comes at the first batch that prefetches,
                 // which with `PRE_FETCH_SEQS_LIMIT` can be in a later block: such a run takes the
-                // search of all queries, which refuses before any row.
+                // search of all queries, which refuses before any row. So does a run whose first
+                // format is a Seq-annot that the batches prefetch for
+                // (`PRE_FETCH_SEQS_LIMIT=2147483647`, `shared::seq_annots_prefetch`), whose
+                // prefetch can refuse a subject with parsed Seq-ids too
+                // (`ListedTitles::check_prefetched`).
+                if database.is_some()
+                    && outfmts.first().is_some_and(|outfmt| {
+                        crate::algorithm::common::database::seq_annots_prefetch(
+                            crate::blastinput::app::parse_formatting_string(outfmt)
+                                .ok()
+                                .map(|choice| choice.number),
+                        )
+                    })
+                {
+                    super::x_query_blocks::x_reach_block_search(false);
+                    return Ok(false);
+                }
                 let x_prefetch_taxids = |x_kind: XBlockReport| {
                     matches!(
                         x_kind,
@@ -10935,6 +10953,12 @@ fn run_resolved_in_pool(
             .is_some_and(|outfmt| outfmt.prefetches_subjects());
     let prefetch_taxids =
         batches_prefetch && database.is_some_and(|database| database.taxdb_found());
+    // Whether that prefetch reads the subjects though the first format writes their Seq-align ids
+    // alone (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`): a subject with parsed
+    // Seq-ids that it cannot read as NCBI does is refused also without `taxdb.bti`
+    // (`ListedTitles::check_prefetched`).
+    let seq_annots_prefetch =
+        batches_prefetch && matches!(requested_formats.first(), Some(BlastpReport::Seqalign(_)));
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:673-678
     // ```c++
     //     ITERATE(blast::CSearchResultSet, result, results) {
@@ -11235,7 +11259,8 @@ fn run_resolved_in_pool(
     // (`database::prefetch_messages`: the texts of opening it at the run's first lookup, a
     // volume's lookup of a taxid once per run): after the reader's messages of the batch and
     // before the warnings of its first query. They go with the warnings, where the first format
-    // is outfmt 0, 5, 6 or 7 (`BlastpReport::prefetches_subjects`). They are read here, after
+    // is outfmt 0, 5, 6 or 7, or with `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 or 12, which write
+    // the reader's messages only (`BlastpReport::prefetches_subjects`). They are read here, after
     // the subjects' refusals and before any format is written, so a taxonomy database that LOSAT
     // cannot read is refused before any byte; without `taxdb.bti` nothing is read.
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:262-264
@@ -11251,7 +11276,7 @@ fn run_resolved_in_pool(
     // the query's own warnings: those of its final hit list, psiblast's after the cut, where the
     // first format reads their Bioseqs (`TabularSpec::fetches_subject`).
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
-        if prefetch_taxids || psiblast_prefetched.is_some() {
+        if prefetch_taxids || psiblast_prefetched.is_some() || seq_annots_prefetch {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
             // too, which the prefetch does not: the rows of a batch with hits may open the
             // taxonomy database before a later batch's prefetch (`TaxdbRun::open_for_rows`).
@@ -11309,6 +11334,13 @@ fn run_resolved_in_pool(
                             continue;
                         }
                         titles.prefetch_messages(database, prefetched)?
+                    }
+                    None if !prefetch_taxids => {
+                        titles.check_prefetched(
+                            database,
+                            database::ListedTitles::reported_ranks(lists),
+                        )?;
+                        continue;
                     }
                     None => titles.prefetch_messages(
                         database,

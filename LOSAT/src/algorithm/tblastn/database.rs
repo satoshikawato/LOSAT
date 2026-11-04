@@ -414,7 +414,15 @@ pub(super) fn reported_subjects(
             ReportedHeader::Parsed(subject) => {
                 let taxdb =
                     shown.pairwise && *taxdb_found.get_or_insert_with(|| database.db.taxdb_found());
-                shared::check_reported_parsed(subject, shown, false, taxdb, ordinal, PROGRAM)?;
+                shared::check_reported_parsed(
+                    &database.db,
+                    subject,
+                    shown,
+                    false,
+                    taxdb,
+                    ordinal,
+                    PROGRAM,
+                )?;
                 if parsed.is_empty() {
                     parsed = vec![None; ordinals.len()];
                 }

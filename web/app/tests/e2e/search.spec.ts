@@ -7,7 +7,9 @@ import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { COMPOSITION_MODES, MATRICES, PROTEIN_GAP_COSTS, PROTEIN_WORD_SIZES } from '../../src/domain/programs';
-import { BUILD_HAS_ENGINE } from './support/browser';
+import { RESULTS_REMOVED_MESSAGE } from '../../src/infra/data/block-store';
+import { TMP_DIRECTORY } from '../../src/infra/data/session';
+import { BUILD_HAS_ENGINE, sessionDirectories, sessionFiles } from './support/browser';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { reload } from './support/navigate';
 import {
@@ -310,6 +312,7 @@ test('the region of a role with one record: the drag, the fields, the limits and
   // A range of one letter and a start after the stop are NCBI's errors in every mode; the fields say so (WA-IN-07).
   await page.getByTestId('subject-region-stop').fill('5');
   await expect(page.getByTestId('subject-region-problem')).toHaveText('The stop must be larger than the start.');
+  await expect(page.getByTestId('subject-region-swap')).toHaveCount(0);
   await page.getByTestId('subject-region-start').fill('60');
   await expect(page.getByTestId('subject-region-problem')).toHaveText('The start cannot be larger than the stop.');
   await submit(page);
@@ -318,6 +321,15 @@ test('the region of a role with one record: the drag, the fields, the limits and
     // The argv leaves the region out until it is one, so the engine's validate has nothing to refuse.
     await expect(page.getByTestId('argv-validation')).not.toContainText('subject location');
   }
+  // The form offers the swap (Owner, 2026-11-04); outside the record it offers none.
+  await expect(page.getByTestId('subject-region-swap')).toHaveText('Swap to 5–60');
+  await page.getByTestId('subject-region-swap').click();
+  await expect(page.getByTestId('subject-region-start')).toBeFocused();
+  await expect(page.getByTestId('subject-region-start')).toHaveValue('5');
+  await expect(page.getByTestId('subject-region-stop')).toHaveValue('60');
+  await expect(page.getByTestId('subject-region-problem')).toHaveCount(0);
+  await page.getByTestId('subject-region-start').fill('101');
+  await expect(page.getByTestId('subject-region-swap')).toHaveCount(0);
   await page.getByTestId('subject-region-start').fill('5');
   await page.getByTestId('subject-region-stop').fill('060');
   await expect(page.getByTestId('subject-region-argument')).toHaveText('Positions in the results are those of the whole record.');
@@ -747,14 +759,14 @@ test("a run after the browser removed the tab's storage still completes", async 
   await expect
     .poll(
       () =>
-        page.evaluate(async () => {
+        page.evaluate(async (tmp) => {
           try {
-            await (await navigator.storage.getDirectory()).removeEntry('tmp', { recursive: true });
+            await (await navigator.storage.getDirectory()).removeEntry(tmp, { recursive: true });
             return 'removed';
           } catch (error) {
             return (error as Error).name;
           }
-        }),
+        }, TMP_DIRECTORY),
       { timeout: 10_000 },
     )
     .toBe('removed');
@@ -764,8 +776,134 @@ test("a run after the browser removed the tab's storage still completes", async 
   await chooseRun(page, 2);
   // What the removal took with it says so when it is opened.
   await pickRun(page, 1);
-  await expect(page.getByTestId('results-status')).toContainText('The browser removed the stored results of this run');
-  await expect(page.getByTestId('results-status')).toContainText('Run it again.');
+  await expect(page.getByTestId('results-status')).toHaveText(`The results of run 1 could not be read: ${RESULTS_REMOVED_MESSAGE}`);
+});
+
+/**
+ * Hides the page (visibilityState and its event, as the browsers do for a tab in the background) as soon as a run is in
+ * progress: a FakeEngine run lasts a fraction of a second. The check on return is made only for a page that was hidden
+ * with runs in progress.
+ */
+async function hideWhenARunStarts(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const busy = ['queued', 'preparing', 'running', 'finalizing'].map((status) => `[data-testid^="run-"][data-status="${status}"]`).join(', ');
+    const observer = new MutationObserver(() => {
+      if (document.querySelector(busy) === null) return;
+      observer.disconnect();
+      Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-status'] });
+  });
+}
+
+async function showPage(page: Page): Promise<void> {
+  await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe('hidden');
+  // Shorter hides (a quick switch of tabs) make no report (application/attention.ts).
+  await page.waitForTimeout(1100);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+}
+
+/** The tokens of the runs stored in OPFS under tmp/<session>/runs/, sorted. */
+async function storedRuns(page: Page): Promise<string[]> {
+  const tokens = new Set<string>();
+  for (const session of await sessionDirectories(page)) {
+    for (const path of await sessionFiles(page, session)) if (path.startsWith('runs/')) tokens.add(path.split('/')[1]!);
+  }
+  return [...tokens].sort();
+}
+
+/** Removes the stored blocks of runs (by token) from OPFS, or all of tmp/, as the browser can under an open tab. */
+async function removeStored(page: Page, tokens: readonly string[] | 'all'): Promise<void> {
+  // A synchronous access handle holds its file for a moment after it is closed: the removal is tried again.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          async ({ tmpName, tokens }) => {
+            try {
+              const root = await navigator.storage.getDirectory();
+              if (tokens === 'all') {
+                await root.removeEntry(tmpName, { recursive: true });
+                return 'removed';
+              }
+              const tmp = await root.getDirectoryHandle(tmpName);
+              const sessions = (tmp as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries();
+              for await (const [, session] of sessions) {
+                if (session.kind !== 'directory') continue;
+                const runs = await (session as FileSystemDirectoryHandle).getDirectoryHandle('runs').catch(() => undefined);
+                for (const token of tokens) {
+                  await runs?.removeEntry(token, { recursive: true }).catch((error: Error) => {
+                    if (error.name !== 'NotFoundError') throw error;
+                  });
+                }
+              }
+              return 'removed';
+            } catch (error) {
+              return (error as Error).name;
+            }
+          },
+          { tmpName: TMP_DIRECTORY, tokens },
+        ),
+      { timeout: 10_000 },
+    )
+    .toBe('removed');
+}
+
+// The browser can also remove the stored results by itself: Chromium did in an off-the-record context after about
+// half an hour, and the notice on return said "The stored results are available." while no run could be opened
+// (WA2-SC-05). The check on return reads back a byte of each run's stored HSP records.
+test('a tab hidden while a run is in progress says on return that the stored results are available', async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', '>q1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await hideWhenARunStarts(page);
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await showPage(page);
+  await expect(page.getByTestId('resume-run-1')).toContainText(/Run 1 was \w+ when the tab was hidden; it is completed now\./);
+  await expect(page.getByTestId('resume-data')).toHaveText('The stored results are available.');
+  await chooseRun(page, 1);
+});
+
+test('a tab hidden while a run is in progress says on return which runs the browser removed the stored results of', async ({
+  page,
+}) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', '>q1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  test.skip((await page.getByTestId('storage-status').getAttribute('data-backend')) !== 'opfs', 'this browser keeps results in memory');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  const [first] = await storedRuns(page);
+  expect(first).toBeDefined();
+
+  // The browser removes the stored results of run 1 while the tab is hidden with run 2 in progress.
+  await backToSearch(page);
+  await hideWhenARunStarts(page);
+  await submit(page);
+  await waitStatus(page, 2, 'completed');
+  await removeStored(page, [first!]);
+  await showPage(page);
+  await expect(page.getByTestId('resume-data')).toHaveText('The browser removed the stored results of run 1. Run it again.');
+  await expect(page.getByTestId('resume-notice')).not.toContainText('available');
+  await chooseRun(page, 2);
+  await pickRun(page, 1);
+  // The sentence names no cause (tests/unit/opfs-block-store.test.ts).
+  await expect(page.getByTestId('results-status')).toHaveText(`The results of run 1 could not be read: ${RESULTS_REMOVED_MESSAGE}`);
+  await page.getByTestId('resume-dismiss').click();
+
+  // All of them, as in WA2-SC-05.
+  await backToSearch(page);
+  await hideWhenARunStarts(page);
+  await submit(page);
+  await waitStatus(page, 3, 'completed');
+  await removeStored(page, 'all');
+  await showPage(page);
+  await expect(page.getByTestId('resume-data')).toHaveText('The browser removed the stored results of runs 1–3. Run them again.');
 });
 
 test('a GenBank, EMBL or FASTQ file is read as FASTA text, as the command line does, with a warning (WA-IN-04)', async ({ page }) => {

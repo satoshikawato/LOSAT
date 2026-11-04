@@ -46,6 +46,7 @@ import {
   regionProblem,
   regionRange,
   regionValue,
+  swappedRegion,
 } from '../../src/domain/region';
 import { estimateKind, looksLikeOtherKind } from '../../src/domain/sequence-kind';
 import { toProgramDescription } from '../../src/infra/reactor/control';
@@ -786,6 +787,28 @@ describe('regionProblem', () => {
 
   it('accepts surrounding white space', () => {
     expect(problem(' 5 ', '\t10\n')).toBeUndefined();
+  });
+});
+
+describe('swappedRegion', () => {
+  const swap = (start: string, stop: string, length = 400) => swappedRegion({ start, stop }, length);
+
+  it('swaps a start after the stop when both are within the record', () => {
+    expect(swap('300', '100')).toEqual({ start: '100', stop: '300' });
+    expect(swap(' 0300 ', '100\n')).toEqual({ start: '100', stop: '300' });
+    expect(swap('400', '1')).toEqual({ start: '1', stop: '400' });
+  });
+
+  it('offers nothing for a region that the swap would not make one', () => {
+    expect(swap('100', '300')).toBeUndefined();
+    expect(swap('100', '100')).toBeUndefined();
+    expect(swap('500', '100')).toBeUndefined();
+    expect(swap('300', '0')).toBeUndefined();
+    expect(swap('3a', '1')).toBeUndefined();
+    // Not whole numbers: the problem says so, and a swap would not mend it.
+    expect(swap('300.0', '100')).toBeUndefined();
+    expect(swap('1e3', '100')).toBeUndefined();
+    expect(swap('', '1')).toBeUndefined();
   });
 });
 

@@ -12326,10 +12326,11 @@ fn search_query_batch<const UNGAPPED: bool>(
         // ...
         //                          (Boolean) TRUE, FALSE, fence_hit);
         // ```
-        // No NCBI counterpart: the one-byte copy of this subject's packed sequence
-        // that the preliminary greedy alignment reads instead (made on first use, shared by every
-        // chunk and worker of this subject). Off unless the search uses the
-        // greedy aligner and this is the preliminary stage.
+        // No NCBI counterpart: this subject's packed sequence widened to one base per byte for
+        // the preliminary greedy alignment instead: a window around each call's ungapped hit, and
+        // the whole subject once a call reads past its window (made then, shared by every chunk
+        // and worker of this subject). Off unless the search uses the greedy aligner and this is
+        // the preliminary stage.
         let x_prelim_subject = x_greedy_prelim::XPrelimSubject::new(
             !use_dp && prelim_source.is_none(),
             s_seq_packed_full,
@@ -15575,24 +15576,6 @@ fn search_query_batch<const UNGAPPED: bool>(
                 .fetch_add(total_ungapped as u64, std::sync::atomic::Ordering::Relaxed);
             let gapped_start_time = std::time::Instant::now();
             let mut dbg_gapped_calls = 0usize;
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2786-2794
-            // ```c
-            //    if (!compressed_subject) {
-            //       s = subject + s_off;
-            //       rem = 4; /* Special value to indicate that sequence is already
-            //                   uncompressed */
-            //    } else {
-            //       s = subject + s_off/4;
-            //       rem = s_off % 4;
-            // ```
-            // No NCBI counterpart: the bases of `s_seq_packed` one per byte, for the
-            // greedy calls below; `None` where no score-only greedy call happens (no ungapped
-            // hits, or the dynamic-programming extension).
-            let x_prelim_s = if total_ungapped > 0 {
-                x_prelim_subject.chunk(chunk.offset)
-            } else {
-                None
-            };
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2959-2963,4012-4025,4041-4046
             // ```c
@@ -15657,12 +15640,11 @@ fn search_query_batch<const UNGAPPED: bool>(
                         let ungapped_len = uh.qe.saturating_sub(uh.qs) as usize;
                         let seed_qs = uh.qs as usize + ungapped_len / 2;
                         let seed_ss = uh.ss as usize + ungapped_len / 2;
-                        x_greedy_prelim::x_greedy_gapped_alignment_score_only(
-                            x_prelim_s.expect(
-                                "the one-byte copy exists wherever a score-only greedy call runs",
-                            ),
-                            q_seq_blastna,
+                        x_prelim_subject.score_only(
+                            chunk.offset,
                             s_len,
+                            (uh.ss as usize, uh.se as usize),
+                            q_seq_blastna,
                             seed_qs,
                             seed_ss,
                             reward,
@@ -15802,8 +15784,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                             // ```
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
                             // The dynamic-programming score-only call below reads the packed subject
-                            // (`s_seq_score`); the greedy one runs on the one-byte copy (`x_prelim_s`),
-                            // NCBI's `compressed_subject = FALSE` form.
+                            // (`s_seq_score`); the greedy one runs on the bases one per byte
+                            // (`x_prelim_subject`), NCBI's `compressed_subject = FALSE` form.
                             let s_seq_score = s_seq_packed;
 
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
@@ -16060,25 +16042,25 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 let seed_qs = uh.qs as usize + ungapped_len / 2;
                                 let seed_ss = uh.ss as usize + ungapped_len / 2;
 
-                                let prelim =
-                                    match x_greedy_prelim::x_greedy_gapped_alignment_score_only(
-                                        x_prelim_s.expect("the one-byte copy exists wherever a score-only greedy call runs"),
-                                        q_seq_blastna,
-                                        subject_len,
-                                        seed_qs,
-                                        seed_ss,
-                                        reward,
-                                        penalty,
-                                        gap_open,
-                                        gap_extend,
-                                        x_drop_gapped,
-                                        greedy_align_scratch,
-                                    ) {
-                                        Some(value) => value,
-                                        None => {
-                                            continue;
-                                        }
-                                    };
+                                let prelim = match x_prelim_subject.score_only(
+                                    chunk.offset,
+                                    subject_len,
+                                    (uh.ss as usize, uh.se as usize),
+                                    q_seq_blastna,
+                                    seed_qs,
+                                    seed_ss,
+                                    reward,
+                                    penalty,
+                                    gap_open,
+                                    gap_extend,
+                                    x_drop_gapped,
+                                    greedy_align_scratch,
+                                ) {
+                                    Some(value) => value,
+                                    None => {
+                                        continue;
+                                    }
+                                };
 
                                 let (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss) = prelim;
                                 (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)

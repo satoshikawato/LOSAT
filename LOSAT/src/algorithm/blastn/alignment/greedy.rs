@@ -247,7 +247,8 @@ pub struct GreedyOffset {
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_util.h:358-364 (FENCE_SENTRY)
-const FENCE_SENTRY: u8 = 201;
+// Visible to `x_greedy_prelim`, which writes it around a window.
+pub(super) const FENCE_SENTRY: u8 = 201;
 
 /// Greedy seed descriptor for locating the best start point.
 /// NCBI reference: ncbi-blast/c++/include/algo/blast/core/greedy_align.h:102-106 (SGreedySeed)
@@ -589,7 +590,8 @@ pub struct GreedyAlignScratch {
     //    s_BlastGreedyAlignMemAlloc(score_params, NULL, new_dist, xdrop);
     // ```
     // NCBI keeps greedy scratch max_dist in BlastGapAlignStruct and only grows it.
-    max_dist: i32,
+    // Visible to `x_greedy_prelim`, which puts it back before it repeats a fenced call.
+    pub(super) max_dist: i32,
     non_affine_mem: GreedyNonAffineMem,
     affine_mem: GreedyAffineMem,
     fwd_prelim_tback: GapPrelimEditBlock,
@@ -606,6 +608,9 @@ pub struct GreedyAlignScratch {
     // its own operations (`greedy_gapped_alignment_with_traceback`), given to the next script
     // instead of new ones. Reuse only: the next script is sized and filled as a new one.
     x_edit_script: GapEditScript,
+    // No NCBI counterpart: the bases around a preliminary call's ungapped hit, one per byte
+    // between fence sentries, kept for the next call of the same chunk (`x_greedy_prelim`).
+    pub(super) x_window: super::x_greedy_prelim::XPrelimWindow,
 }
 
 impl GreedyAlignScratch {
@@ -617,6 +622,7 @@ impl GreedyAlignScratch {
             fwd_prelim_tback: GapPrelimEditBlock::new(),
             rev_prelim_tback: GapPrelimEditBlock::new(),
             x_edit_script: GapEditScript::new(0),
+            x_window: Default::default(),
         }
     }
 }
@@ -4281,15 +4287,19 @@ pub(super) struct GreedyGappedCore {
 
 /// Greedy gapped alignment core (with or without traceback).
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
-// No NCBI counterpart: visible to `x_greedy_prelim`, which calls it on the one-byte copy of the
-// packed subject.
+// No NCBI counterpart: visible to `x_greedy_prelim`, which calls it on a window of the packed
+// subject, one base per byte, or on the one-byte copy of the whole subject.
 //
 // `subject` holds one base per byte: NCBI's `compressed_subject = FALSE` form, which LOSAT always
-// runs (the packed form is not ported).
+// runs (the packed form is not ported). `max_dist_len` is the `subject_length` that sizes
+// `max_dist` (blast_gapalign.c:323-330): `subject_len` itself, except for a window, which reads
+// `subject_len` bases but sizes `max_dist` by its chunk.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn greedy_gapped_alignment_internal(
     query: &[u8],
     subject: &[u8],
     subject_len: usize,
+    max_dist_len: usize,
     q_off: usize,
     s_off: usize,
     reward: i32,
@@ -4342,7 +4352,7 @@ pub(super) fn greedy_gapped_alignment_internal(
     // NCBI reuses `gap_align->greedy_align_mem` across HSPs and does not shrink
     // `max_dist` between calls. Keep the same grow-only behavior in scratch.
     let initial_max_dist =
-        (GREEDY_MAX_COST as i32).min((subject_len as i32) / GREEDY_MAX_COST_FRACTION as i32 + 1);
+        (GREEDY_MAX_COST as i32).min((max_dist_len as i32) / GREEDY_MAX_COST_FRACTION as i32 + 1);
     let mut max_dist = scratch.max_dist.max(initial_max_dist);
 
     let mut q_ext_r = 0;
@@ -4626,6 +4636,7 @@ pub fn greedy_gapped_alignment_with_traceback(
         query,
         subject,
         subject_len,
+        subject_len,
         q_off,
         s_off,
         reward,
@@ -4726,6 +4737,7 @@ mod tests {
             let core = greedy_gapped_alignment_internal(
                 query,
                 subject,
+                subject.len(),
                 subject.len(),
                 q_off,
                 s_off,

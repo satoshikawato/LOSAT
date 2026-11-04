@@ -198,7 +198,7 @@ fn make_shim(_: &std::path::Path, _: bool, _: &std::path::Path) -> std::io::Resu
 #[command(
     name = "losat",
     version,
-    about = "Pure-Rust pairwise alignment with NCBI-verified fixtures and genetic-code exceptions",
+    about = "Pure-Rust pairwise alignment that matches NCBI BLAST+ on LOSAT's test fixtures, with genetic-code exceptions",
     help_template = LOSAT_HELP_TEMPLATE,
     after_help = "To call the programs by NCBI's names (blastn, makeblastdb, ...), link them with:\n  losat -install-shims [DIR]   (default: the directory of this executable)"
 )]

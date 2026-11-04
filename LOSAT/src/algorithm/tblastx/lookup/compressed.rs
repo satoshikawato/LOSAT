@@ -1258,7 +1258,7 @@ fn blast_nint(x: f64) -> i32 {
 //     }
 // }
 // ```
-// Inlined into the builder of each matrix, as into BLOSUM62's when it was the only one.
+// Always inlined: BLOSUM62's builder keeps the code it had as the only caller.
 #[inline(always)]
 fn compressed_probabilities(compressed_alphabet_size: usize) -> Option<[f64; BLASTAA_SIZE]> {
     let reverse = build_compressed_reverse_lookup(compressed_alphabet_size)?;
@@ -1556,7 +1556,7 @@ fn try_build_compressed_lookup_with_capacity<S: CompressedScores>(
 // One of NCBI's tables (a query batch's lookup segments), built with NCBI's capacity only to
 // see whether its words fill the banks; it stops there. Its offsets are those of the whole
 // query, which changes no count of a cell.
-// Inlined into the builder of each matrix, as into BLOSUM62's when it was the only one.
+// Always inlined: BLOSUM62's builder keeps the code it had as the only caller.
 #[inline(always)]
 fn compressed_table_fills_banks(
     word_size: usize,
@@ -2185,6 +2185,21 @@ mod tests {
         .expect("word size 5")
         .expect("no batch fills the banks");
         assert_same_table(&got, &want);
+        // Another matrix's words fill other cells.
+        let pam30 = try_build_compressed_lookup(
+            ScoringMatrix::Pam30,
+            5,
+            LOW_THRESHOLD,
+            &query,
+            &locations,
+            &tables,
+        )
+        .expect("word size 5")
+        .expect("no batch fills the banks");
+        assert!(
+            pam30.backbone != want.backbone,
+            "PAM30's cells are BLOSUM62's"
+        );
         assert!(try_build_compressed_lookup(
             ScoringMatrix::Identity,
             5,

@@ -2537,15 +2537,15 @@ fn query_set_setup(
     );
     let mut contexts = match x_contexts {
         Some(contexts) => contexts,
-        // The compressed table (word sizes 5 to 7, BLOSUM62 only: `args::search_settings`) is not
-        // the standard table that the diagnostics count; the contexts are the same.
+        // The compressed table (word sizes 5 to 7) is not the standard table that the diagnostics
+        // count; the contexts are the same.
         None if inputs.scoring.word_size > 4 => {
-            crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size(
+            crate::algorithm::tblastx::lookup::x_compressed_contexts_for_profile(
                 &working_frames,
-                inputs.scoring.word_size,
                 false,
+                inputs.scoring.matrix,
+                inputs.scoring.word_size,
             )
-            .2
         }
         None => {
             build_ncbi_lookup_for_profile(

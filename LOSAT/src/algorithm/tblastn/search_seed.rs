@@ -453,18 +453,18 @@ fn x_build_compressed(
             .map(|built| built.map(XCompressedLookup::Reference))
     };
     built
-    .ok_or_else(|| {
-        anyhow::anyhow!(
-            "-word_size {word_length} (the compressed lookup table) is not supported by LOSAT's TBLASTN"
-        )
-    })?
-    .map_err(|()| {
-        anyhow::anyhow!(
-            "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's TBLASTN: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
-            f64::from(threshold) / 100.0,
-            word_length
-        )
-    })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "-word_size {word_length} (the compressed lookup table) is not supported by LOSAT's TBLASTN"
+            )
+        })?
+        .map_err(|()| {
+            anyhow::anyhow!(
+                "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's TBLASTN: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
+                f64::from(threshold) / 100.0,
+                word_length
+            )
+        })
 }
 
 /// The compressed table of a scan plan (`x_scan_plan`, word sizes 5 to 7) and its longest chain,

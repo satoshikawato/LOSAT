@@ -1,14 +1,19 @@
 import { expect, test } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
+import { navigate } from './support/navigate';
 import { chooseRun, openSearch, paste, program, waitStatus } from './support/search';
 
 test('the page is cross-origin isolated, so the threaded engine can use shared memory', async ({ page }) => {
-  await page.goto('/');
+  await navigate(page, '/');
   expect(await page.evaluate(() => globalThis.crossOriginIsolated)).toBe(true);
   expect(await page.evaluate(() => typeof SharedArrayBuffer)).toBe('function');
 });
 
 test(`paste, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' : 'the fake engine'}`, async ({ page }) => {
+  // With the engine, more than the default 30 s, as in the other specs that search with it: on
+  // CI, WebKit took 10-23 s of the 30 s to open the page alone, and the run was still preparing
+  // when the test ended (losat-baselines/web-flaky-20261103/runs).
+  if (BUILD_HAS_ENGINE) test.setTimeout(120_000);
   await openSearch(page);
   // The banner shows exactly when the build has no engine (web/AGENTS.md rule 7).
   await expect(page.getByTestId('fake-engine-banner')).toHaveCount(BUILD_HAS_ENGINE ? 0 : 1);

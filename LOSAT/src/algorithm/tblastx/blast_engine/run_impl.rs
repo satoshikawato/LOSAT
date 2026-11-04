@@ -3713,9 +3713,15 @@ impl BatchReports<'_> {
                     tabular: formats.iter().any(|format| format.is_tabular()),
                     pairwise: pairwise_shown,
                     joined: pairwise_shown
-                        || formats.iter().any(|format| format.is_structured_xml()),
+                        || formats.iter().any(|format| {
+                            format.is_structured_xml() || format.tabular_joins_subjects()
+                        }),
                     sam: false,
                     taxonomy: formats.iter().any(|format| format.writes_taxonomy()),
+                    words: formats.iter().fold(
+                        crate::report::tabular::PrintedIds::default(),
+                        |words, format| words.or(format.printed_ids()),
+                    ),
                 };
                 reported_subjects = super::super::database::reported_subjects(
                     database,

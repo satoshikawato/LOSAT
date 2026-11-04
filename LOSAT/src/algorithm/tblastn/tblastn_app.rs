@@ -1694,15 +1694,33 @@ fn parsed_shown(
             .any(|&number| matches!(number, 6 | 7 | 10 | 20)),
         pairwise,
         joined: pairwise
-            || formats
-                .iter()
-                .any(|format| super::stage_e_report::is_structured_xml(&format.outfmt)),
+            || formats.iter().any(|format| {
+                super::stage_e_report::is_structured_xml(&format.outfmt)
+                    || super::tabular::tabular_spec(&format.outfmt)
+                        .is_some_and(|spec| spec.needs().joins_subjects())
+            }),
         sam: false,
         taxonomy: formats.iter().any(|format| {
             super::stage_e_report::xml2_kind(&format.outfmt).is_some()
                 || super::tabular::tabular_spec(&format.outfmt)
                     .is_some_and(|spec| spec.needs().taxonomy)
         }),
+        words: formats
+            .iter()
+            .filter(|format| {
+                matches!(
+                    super::stage_e_report::format_number(&format.outfmt),
+                    6 | 7 | 10 | 20
+                )
+            })
+            .fold(
+                crate::report::tabular::PrintedIds::default(),
+                |words, format| {
+                    words.or(crate::report::tabular::PrintedIds::of(
+                        super::tabular::tabular_spec(&format.outfmt).as_ref(),
+                    ))
+                },
+            ),
     }
 }
 

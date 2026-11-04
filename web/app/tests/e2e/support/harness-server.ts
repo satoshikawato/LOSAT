@@ -11,6 +11,7 @@ import type { BrowserContext, Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { HEADERS_FILE, parseHeadersFile, pathHeaders, siteHeaders } from '../../../build/headers';
 import type { HarnessFiles } from './browser';
+import { navigate } from './navigate';
 
 /** The repository root; /__files/<path> serves <root>/<path> (inputs of the searches). */
 export const REPOSITORY = fileURLToPath(new URL('../../../../../', import.meta.url));
@@ -95,7 +96,7 @@ export async function openHarness(context: BrowserContext, server: HarnessServer
   const page = await context.newPage();
   // The harness logs each case and search as it finishes.
   page.on('console', (message) => console.log(message.text()));
-  await page.goto(`${server.origin}/__harness/index.html`);
+  await navigate(page, `${server.origin}/__harness/index.html`);
   await page.waitForFunction(() => window.losatHarness !== undefined);
   return page;
 }

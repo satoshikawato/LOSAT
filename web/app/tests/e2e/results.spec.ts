@@ -212,20 +212,34 @@ const rangeBlocks = (page: Page) => page.getByTestId('alignments').locator('sect
 
 /**
  * Watches the reads of outfmt 0 byte ranges that the page asks of the Data worker (its requests
- * `readOutputRange` of format 0, counted as they are sent, answered or not), and can make the
- * next ones fail (the worker answers that it has no such method), as a read of storage may.
+ * `readOutputRange` of format 0, counted as they are sent and as they are answered), and can make
+ * the next ones fail (the worker answers that it has no such method), as a read of storage may.
  */
 async function watchReads(page: Page): Promise<{ asked: () => Promise<number>; failNext: (n: number) => Promise<void> }> {
   await page.evaluate(() => {
-    const w = window as unknown as { __reads?: number; __fail?: number };
+    const w = window as unknown as { __reads?: number; __answered?: number; __fail?: number };
     if (w.__reads !== undefined) return;
     w.__reads = 0;
+    w.__answered = 0;
     w.__fail = 0;
+    // The reads not answered yet, by worker (the IDs of requests are a worker's own).
+    const unanswered = new WeakMap<Worker, Set<unknown>>();
     const post = Worker.prototype.postMessage as (this: Worker, message: unknown, transfer: Transferable[]) => void;
     Worker.prototype.postMessage = function (this: Worker, message: unknown, transfer: Transferable[]) {
-      const request = message as { method?: unknown; args?: unknown[] } | null;
+      const request = message as { id?: unknown; method?: unknown; args?: unknown[] } | null;
       if (typeof request === 'object' && request !== null && request.method === 'readOutputRange' && request.args?.[1] === 0) {
         w.__reads!++;
+        let ids = unanswered.get(this);
+        if (ids === undefined) {
+          const waiting = new Set<unknown>();
+          ids = waiting;
+          unanswered.set(this, waiting);
+          // After the page's own listener: an answer counted here has been handed to the Alignments.
+          this.addEventListener('message', (event) => {
+            if (waiting.delete((event as MessageEvent<{ id?: unknown } | null>).data?.id)) w.__answered!++;
+          });
+        }
+        ids.add(request.id);
         if (w.__fail! > 0) {
           w.__fail!--;
           message = { ...request, method: 'readOutputRange (made to fail by the test)' };
@@ -242,16 +256,29 @@ async function watchReads(page: Page): Promise<{ asked: () => Promise<number>; f
   };
 }
 
-/** Waits until the Alignments ask for no more sections and every section asked for has arrived. */
-async function settledSections(page: Page, asked: () => Promise<number>): Promise<void> {
+/**
+ * Waits until the Alignments ask for no more sections and every section asked for has arrived:
+ * every read asked for is answered, the sections answered are shown, and neither changes for
+ * 700 ms. (Unchanged counts alone were read as settled in CI while nine reads were unanswered.)
+ * It does not know whether the browser has yet to report blocks that came into view: wait for
+ * the section of such a block first.
+ */
+async function settledSections(page: Page): Promise<void> {
   let last = '';
-  const state = async () =>
-    `${await asked()}/${await page.getByTestId('alignments').locator('[data-testid="range-section"]:not([data-state="pending"])').count()}`;
+  const state = () =>
+    page.evaluate(async () => {
+      const w = window as unknown as { __reads: number; __answered: number };
+      const [asked, answered] = [w.__reads, w.__answered];
+      // The sections answered by then are shown at the next frame (AlignmentsView's arrive()).
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const shown = document.querySelectorAll('[data-testid="alignments"] [data-testid="range-section"]:not([data-state="pending"])').length;
+      return asked === answered ? `${asked}/${shown}` : 'reading';
+    });
   await expect
     .poll(
       async () => {
         const now = await state();
-        const same = now === last;
+        const same = now === last && now !== 'reading';
         last = now;
         return same;
       },
@@ -352,7 +379,10 @@ async function expectRanges(page: Page, queryRows: readonly string[][], pairRank
     await expect(block.getByTestId('range-label')).toHaveText(rangeLabel(position + 1, queryRows[rank]!));
     const section = block.getByTestId('range-section');
     if (checked >= sections || (await section.count()) === 0) continue;
-    await section.scrollIntoViewIfNeeded();
+    // The block comes into view, not the section: the section's "Reading the alignment…" is
+    // replaced by its text when it arrives, and the scroll of an element replaced meanwhile fails
+    // ("Element is not attached to the DOM", 10 CI jobs from 2026-10-27 to 11-03).
+    await block.scrollIntoViewIfNeeded();
     await expect(section).toHaveAttribute('data-state', 'ready');
     // An HSP's section of outfmt 0 starts with its Score line (an empty text would pass toContain).
     const body = await text(section);
@@ -1155,12 +1185,15 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   // Each block that was seen asked for its section once (the reads counted as they were asked
   // for): every read asked for arrived in a block; the blocks never seen still wait.
   const sectionsIn = (state: string) => page.getByTestId('alignments').locator(`[data-testid="range-section"][data-state="${state}"]`);
-  await settledSections(page, asked);
+  await settledSections(page);
   expect((await asked()) - before).toBe(await sectionsIn('ready').count());
   // Further down: the blocks around the 13th ask for theirs. The first read asked for fails.
   await failNext(1);
   await rangeBlocks(page).nth(12).evaluate((block) => block.scrollIntoView({ block: 'start' }));
-  await settledSections(page, asked);
+  // The block at the top of the screen has its section (or its failure) once the browser has
+  // reported it in view, which WebKit did in CI only after the counts had stayed for 700 ms.
+  await expect(rangeBlocks(page).nth(12).getByTestId('range-section')).toHaveAttribute('data-state', /^(ready|failed)$/);
+  await settledSections(page);
   const readNow = await sectionsIn('ready').count();
   expect(readNow).toBeGreaterThan(0);
   expect((await asked()) - before).toBe(readNow + 1);
@@ -1182,9 +1215,12 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   // arrives to move the blocks (a failed block that leaves the screen is read again on its return).
   await failNext(1000);
   await rangeBlocks(page).nth(45).evaluate((block) => block.scrollIntoView({ block: 'start' }));
-  await settledSections(page, asked);
-  await failNext(0);
   const retried = rangeBlocks(page).nth(45).getByTestId('range-section');
+  // Read, and failed, once the browser has reported the block in view: the reads must still fail
+  // then (in CI, WebKit reported it after failNext(0), and the block was read).
+  await expect(retried).toHaveAttribute('data-state', 'failed');
+  await settledSections(page);
+  await failNext(0);
   await expect(retried).toHaveAttribute('data-state', 'failed');
   await expect(retried).toBeInViewport();
   await retried.getByTestId('range-retry').click();

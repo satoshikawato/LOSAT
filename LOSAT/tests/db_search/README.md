@@ -173,6 +173,11 @@ without hits come from seeded generators):
   points; `bxchunk.faa`: the nine planted proteins with a quarter of their residues changed, for the database
   `bxchunk` (rows `db.bxchunk.*`: BLASTX `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE`). `bxchunk_empty.fna`: a record of a
   defline only (NCBI reports the query splitter's errors before the empty query's `Sequence contains no data`).
+- `bxempty_*.fna` (rows `db.bxempty.*`, against `bxchunk`, with `BATCH_SIZE=200000`: LOSAT searches such a batch in
+  units of 10002 letters): `bxempty_le.fna` is the query of `bxchunk_q.fna` and an empty record (a defline only);
+  `bxempty_lel.fna` adds a second query (its first 12,000 bases) and a second empty record; `bxempty_none.fna` is an
+  empty record, 5,001 records of 2 bases (no context to search) and an empty record; `bxempty_none1.fna` the 5,001
+  records and one empty record.
 - `bnophr.pin` and `bnophr.psq` are copies of `bslice.pin` and `.psq`: the database without its header file, used
   with the query without hits (with a hit NCBI fails with exit 2).
 
@@ -433,6 +438,32 @@ both copies the one its lookup gives first, with its taxids: the same rows where
 LOSAT writes; LOSAT refuses the sequence in the formats of taxids and their names, for `pdupe_at` with the
 taxonomy database (a title made from the taxids), and with a taxonomy database on `BLASTDB` whose texts depend on
 the copy NCBI fetches (`bad_magic` for `pdup_at`, `offset_last_past_end` for the copies of 99990 in `pdup_no`).
+
+Copies whose title NCBI can make from the taxids (line DBID N1b L1; rows `db.id.title.*`): `make_ids.py
+--titlesrc-only` writes `ids/ndupe_a` and `ids/ndupe_t` (`ndupe.fna`, the letters of `ndup.fna` without a title,
+without a taxid and with 9606, through `ids/ndupe_at.nal`), `ids/psubj_a`, `ids/psubj_t` (`psubj.faa`, lcl|Subject_1
+without a title) and `ids/psubjb_a`, `ids/psubjb_t` (`psubjb.faa`, lcl|Subject_2 with a title ending in `]`), through
+`ids/psubj_at.pal` and `ids/psubjb_at.pal`, and `ids/nsubj_t` (`nsubj.fna`, lcl|Subject_1 without a title, taxid
+9606, one database). NCBI generates the title of the copy it fetches, from its taxids where the taxonomy database names them,
+only in outfmt 0 and for the tabular word that replaces a `lcl|Subject_` id: LOSAT writes the other formats
+(`pdupe_at` and `ndupe_at` with `tests/seqdb/taxdb/good`, `psubj_at`, whose word is `unnamed` either way) and refuses
+those two where the word is printed (`psubjb_at`, whose word is taken after NCBI rewrites the end of the title), also
+for `nsubj_t` alone with the taxonomy database (NCBI's word is `Homo`, the organism's; not with `6 salltitles`, which
+prints no id).
+
+Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
+--join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and
+`ids/njoin_a`, `ids/njoin_b`, `ids/njoin_c` (version 5; r1 in all three, r3 with two definition lines and two
+pieces of the query in a and b, r6 the letters of r1 under another id in b), `ids/pjoin_bt` and `ids/njoin_bt` (the b
+records with taxid 9606), and the aliases `ids/pjoin_abc.pal`, `ids/pjoin_abt.pal`, `ids/njoin_abc.nal` and
+`ids/njoin_abt.nal` (queries `pjoin_q.faa`, `njoin_q.fna` and `njoin_q2.fna`, the last with two records for two
+query batches). NCBI orders tied hits by the later ordinal id first: r1 of c, r6, then r1 of b and a, which outfmt 0,
+5 and 13 to 16 show in one hit (r3 of b and a too), as LOSAT does; `-num_descriptions`, `-num_alignments` and
+psiblast's cut to `-max_target_seqs` count them as one subject, the tabular `qcovs` and `qcovus` take the group's
+coverage. `ids/pjoin_x` and `ids/njoin_x` hold the definition lines of r1 and r3 with other letters (no copies,
+refused; aliases `ids/pjoin_ax.pal`, `ids/njoin_ax.nal`); `ids/njoin_ta` and `ids/njoin_tb` (alias `ids/njoin_tab.nal`)
+hold r10 with taxid 9606 and a second definition line `lcl|loc10`, which the outfmt 0 heading under `-taxids 9606
+-no_taxid_expansion` hides where each copy has one HSP.
 
 Sequences whose only Seq-id is `gnl|BL_ORD_ID|n` (line DBID N2a; rows `db.id.*.ord.*`): `make_ids.py` writes, from
 the FASTA of `ids/make_ord_fasta.py`, `ids/pord_v5` and `ids/pord_v4` from `ids/pord.faa` (two accessions, then

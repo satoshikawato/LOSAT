@@ -44,6 +44,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
+use crate::report::tabular::PrintedIds;
 use crate::seqdb::{BlockRange, NucleotideAmbiguity, SeqDb, SeqDbError, SeqType, SequenceBlock};
 use crate::sequence::packed_subject::PackedNucleotide;
 use crate::utils::threading::SearchPool;
@@ -1190,9 +1191,12 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
         tabular: output_formats.iter().any(|format| format.is_tabular()),
         pairwise,
         joined: pairwise
-            || output_formats
-                .iter()
-                .any(|format| format.is_structured_xml()),
+            || output_formats.iter().any(|format| {
+                format.is_structured_xml()
+                    || format
+                        .tabular_spec()
+                        .is_some_and(|spec| spec.needs().joins_subjects())
+            }),
         sam: output_formats
             .iter()
             .any(|format| matches!(format, BlastnOutputFormat::Sam(_))),
@@ -1202,6 +1206,12 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
                     .tabular_spec()
                     .is_some_and(|spec| spec.needs().taxonomy)
         }),
+        words: output_formats
+            .iter()
+            .filter(|format| format.is_tabular())
+            .fold(PrintedIds::default(), |words, format| {
+                words.or(PrintedIds::of(format.tabular_spec()))
+            }),
     }
 }
 

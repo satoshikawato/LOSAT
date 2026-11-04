@@ -260,8 +260,8 @@ losat psiblast \
 
 | Flag | Type | Default | Description |
 |:---|:---|:---|:---|
-| `-query <file>` | File path | *(Required)* | Input query sequence file (FASTA) |
-| `-subject <file>` | File path | *(Required unless `-db`)* | Input subject sequence file (FASTA) |
+| `-query <file>` | File path | *(Required)* | Input query sequence file (FASTA; a name ending in `.gz` is read through gzip, see below) |
+| `-subject <file>` | File path | *(Required unless `-db`)* | Input subject sequence file (FASTA; `.gz` as for `-query`) |
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX, PSIBLAST; section 6) |
 | `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp` or `blastp-fast` (for `blastp`); `blastx` or `blastx-fast` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`). `blastp-short` is not supported |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
@@ -278,6 +278,8 @@ losat psiblast \
 | `-lcase_masking` | Flag | off | Lower-case letters of the query join the filtering locations, and those of a `-subject` are not scanned for words (all five programs) |
 | `-query_gencode <int>` | Integer | `1` | Genetic code for query translation (BLASTX/TBLASTX) |
 | `-db_gencode <int>` | Integer | `1` | Genetic code for subject translation (TBLASTX/TBLASTN) |
+
+A `-query`, `-subject` or `makeblastdb -in` file whose name ends in `.gz` (in any case) is read through gzip, concatenated members (the output of `bgzip`) included; the name alone decides, as it does in NCBI's makeblastdb, and `-` (standard input) is read as it comes (`zcat reads.fa.gz | losat blastn -query - ...`). NCBI BLAST+ inflates `.gz` only in makeblastdb: its search programs read such a file as text and stop at its first line. A search program inflates the file into an unnamed temporary file (`TMPDIR`) before reading it, so the run needs that room; a `.gz` that is not gzip data is refused before the search (`-query: 'x.fa.gz' is named .gz but is not gzip data (...)`, exit status 1). `makeblastdb -in` names ending in `.bz2` or `.zst`, which NCBI's makeblastdb also inflates, are refused.
 
 ---
 
@@ -409,9 +411,9 @@ LOSAT stops with an error for each option and value below; it does not run somet
 - `-filtering_db`, `-window_masker_taxid`, `-use_index true` and `-index_name`: `blastn`.
 - Alias-file keys `FIRST_OID`, `LAST_OID`, `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `MEMB_BIT`, `MASKLIST`, `VDBLIST`, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH` and `OID_MASK_TYPE` (they select or re-count sequences). `TITLE`, `DBLIST`, `NSEQ` and `LENGTH` work.
 - On a database built with `-parse_seqids`, a reported sequence of the kinds below. The error names the sequence, and [PD-LOSAT-DATABASE-SEARCH](docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md#databases-with-parsed-seq-ids-version-13-line-dbid) has the full list. No comparison with NCBI on its swissprot, pdbaa, 18S_fungal_sequences and 16S_ribosomal_RNA was refused (all six programs, not every program on every database).
-  - An id that NCBI's formatters do not find, or find on another sequence first (`gnl|PIG|`, in version 4 `bbs|` and `nat|`, `gb|X|` after `gb|X.1|`, `lcl|300` after `bbs|300` in version 5, a stored `gnl|BL_ORD_ID|n` with n other than the sequence's position in its volume), or that another sequence also holds in any letter case (`lcl|555` and `gb|X.1|` with `lcl|555` in its second definition line), in outfmt 0, 5, 6, 7, 10, 13 to 17 and 20. NCBI stops, writes `Unknown` or writes the other sequence's names. The same record in two databases is not refused; with other tax ids, only in outfmt 13 to 16 and the tabular tax id and name fields (NCBI writes the first copy's tax ids for both) and where a title or the taxonomy database's messages depend on them.
+  - An id that NCBI's formatters do not find, or find on another sequence first (`gnl|PIG|`, in version 4 `bbs|` and `nat|`, `gb|X|` after `gb|X.1|`, `lcl|300` after `bbs|300` in version 5, a stored `gnl|BL_ORD_ID|n` with n other than the sequence's position in its volume), or that another sequence also holds in any letter case (`lcl|555` and `gb|X.1|` with `lcl|555` in its second definition line), in outfmt 0, 5, 6, 7, 10, 13 to 17 and 20. NCBI stops, writes `Unknown` or writes the other sequence's names. The same record in two databases is not refused; with other tax ids, only in outfmt 13 to 16 and the tabular tax id and name fields (NCBI writes the first copy's tax ids for both) and where a title that the report shows (outfmt 0, a printed tabular id that replaces `lcl|Subject_N`) or the taxonomy database's messages depend on them.
   - An id that NCBI's scope matches weakly to the id of a query read with `-parse_deflines` (`sp|P00001.1|NAME` and a query `sp||NAME`, `gb|X|` and a query `gb|X.1|`), in every format; with `PRE_FETCH_SEQS_LIMIT` (an integer other than 2147483647), also to an id of another sequence of the database (in version 5 any id with a name or of `pir` or `prf`), in outfmt 0, 5, 6, 7, 10, 13 to 17 and 20. NCBI writes the query's or the other sequence's names.
-  - Following hits whose ids NCBI takes for one sequence (`pdb|1ABC|` and `pdb|1ABC|AA`, two copies of one record), in outfmt 0, 5 and 13 to 16, and in every format of `psiblast` when they reach its `-max_target_seqs` cut.
+  - Following hits whose ids NCBI takes for one sequence but that are not copies of one record (`pdb|1ABC|` and `pdb|1ABC|AA`, `gb|X|` and `gb|X.1|`), in outfmt 0, 5 and 13 to 16 and the tabular `qcovs` and `qcovus`, and in every format of `psiblast` when they reach its `-max_target_seqs` cut. Copies of one record (the same definition lines but for their tax ids) that follow each other are shown in one hit, as NCBI shows them.
   - Ids and titles that NCBI cannot write or that it rewrites from taxonomy data, such as an outfmt 0 description id of 65 bytes or more.
 - On such a database, the environment variables `SEQ_ID_PREFER_ACCESSION_OVER_GI` and `SEQ_ID_AVOID_GI`.
 

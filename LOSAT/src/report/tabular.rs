@@ -357,6 +357,70 @@ pub struct TabularNeeds {
     pub all_deflines: bool,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:612-660
+// (`CBlastFormatUtil::InsertSubjectScores`: after a group's first Seq-align it takes the following
+// ones whose subject id `Match`es that first id, and stores the coverage of the whole group on the
+// first; `CBlastTabularInfo::x_SetQueryCovSubject`, tabular.cpp:707-719, writes it on the later
+// rows of the same FASTA id and `N/A` on the others).
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:808-811
+// ```c++
+//     // Extract the full list of subject ids
+//     bool setSubjectIds = (x_IsFieldRequested(eSubjectAllSeqIds) ||
+//     					  x_IsFieldRequested(eSubjectAllGis) ||
+//                           x_IsFieldRequested(eSubjectAllAccessions));
+// ```
+/// The subject ids that a tabular report prints of those that NCBI's `GetSeqIdList` makes, in
+/// which the first word of the subject Bioseq's generated title can replace an id
+/// (`ParsedSubject::check_printed_word`): `sseqid`, `sacc` and `saccver` of the subject (the
+/// default fields print `saccver`), `sallseqid` and `sallacc` of every definition line
+/// (`sallgi` prints the GIs, `salltitles` the stored titles).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PrintedIds {
+    /// `sseqid`, `sacc`, `saccver`.
+    pub subject: bool,
+    /// `sallseqid`, `sallacc`.
+    pub all: bool,
+}
+
+impl PrintedIds {
+    /// The ids of the report of `spec`, `None` for the default fields.
+    pub fn of(spec: Option<&TabularSpec>) -> Self {
+        let Some(spec) = spec else {
+            return Self {
+                subject: true,
+                all: false,
+            };
+        };
+        Self {
+            subject: spec.has_any(&[
+                TabularField::SubjectSeqId,
+                TabularField::SubjectAccession,
+                TabularField::SubjectAccessionVersion,
+            ]),
+            all: spec.has_any(&[
+                TabularField::SubjectAllSeqIds,
+                TabularField::SubjectAllAccessions,
+            ]),
+        }
+    }
+
+    /// The ids that either report prints.
+    pub fn or(self, other: Self) -> Self {
+        Self {
+            subject: self.subject || other.subject,
+            all: self.all || other.all,
+        }
+    }
+}
+
+impl TabularNeeds {
+    /// Whether the rows count following subjects whose Seq-align ids match as one subject:
+    /// `qcovs` and `qcovus` (`ParsedShown::joined`).
+    pub fn joins_subjects(&self) -> bool {
+        self.qcovs || self.qcovus
+    }
+}
+
 impl TabularSpec {
     /// The tabular report of `format` with the custom specification of `choice`, or `None` for
     /// a format that is not tabular and for the default outfmt 6 and 7 (the `std` fields and a

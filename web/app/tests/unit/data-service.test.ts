@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { IndexedRecord } from '../../src/domain/dataset';
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { MEMORY_FULL_MESSAGE } from '../../src/infra/data/block-store';
 import { DataService, type DataServiceDeps } from '../../src/infra/data/data-service';
+import { isGzipName, plainName } from '../../src/infra/data/gunzip';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { RunOutputWriter } from '../../src/infra/run-output/writer';
@@ -252,5 +254,51 @@ describe('DataService runs and storage status', () => {
     writer.write(0, encoder.encode('123456789'));
     writer.end();
     await expect(data.commitRun('run-1')).rejects.toMatchObject({ name: 'StorageFullError', message: MEMORY_FULL_MESSAGE });
+  });
+});
+
+describe('DataService sources named .gz', () => {
+  const A = '>a one\nACGT\n';
+  const B = '>b two\nGGCC\nTT\n';
+
+  it('inflates every member of a concatenated gzip file and keeps the plain name', async () => {
+    const { data } = service({ readChunkBytes: 5 });
+    const gz = new File([Buffer.concat([gzipSync(A), gzipSync(B)])], 'two.fa.gz');
+    const source = await data.addSource(gz);
+    expect(source).toEqual({ sourceId: 'token-1', name: 'two.fa', size: (A + B).length });
+    const revision = await data.indexSource(source.sourceId, 1);
+    expect(revision.records.map((r) => [r.id, r.length])).toEqual([
+      ['a', 4],
+      ['b', 6],
+    ]);
+  });
+
+  it('takes the suffix in any case', async () => {
+    const { data } = service();
+    const source = await data.addSource(new File([gzipSync(A)], 'x.FA.GZ'));
+    expect(source).toMatchObject({ name: 'x.FA', size: A.length });
+  });
+
+  it('refuses a file named .gz that is not gzip data', async () => {
+    const { data } = service();
+    await expect(data.addSource(new File([A], 'text.fa.gz'))).rejects.toThrow('text.fa.gz is named .gz but is not gzip data (');
+    await expect(data.addSource(new File([], 'empty.fa.gz'))).rejects.toThrow('empty.fa.gz is named .gz but is not gzip data (');
+  });
+
+  it('inflates a file read in several slices', async () => {
+    // 9 MiB of plain text: more than one 8 MiB slice of the file and more than one Blob part.
+    const line = '>r\n' + 'ACGT'.repeat(15) + '\n';
+    const text = line.repeat(Math.ceil((9 * 1024 * 1024) / line.length));
+    const { data } = service();
+    const gz = new File([gzipSync(text)], 'big.fa.gz');
+    const source = await data.addSource(gz);
+    expect(source).toMatchObject({ name: 'big.fa', size: text.length });
+    const head = decoder.decode(await data.previewSource(source.sourceId, line.length * 2));
+    expect(head).toBe(line + line);
+  });
+
+  it('names the plain file', () => {
+    expect([isGzipName('a.gz'), isGzipName('a.GZ'), isGzipName('q.gzip'), isGzipName('-')]).toEqual([true, true, false, false]);
+    expect([plainName('a.fa.gz'), plainName('a.FA.Gz'), plainName('.gz'), plainName('a.fa')]).toEqual(['a.fa', 'a.FA', 'input', 'a.fa']);
   });
 });

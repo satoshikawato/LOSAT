@@ -1,4 +1,4 @@
-// DW-43: the logo in the header, the tab's icon (PNG icons DW-44), and the loader (the logo's A drawn in one stroke)
+// DW-43: the logo in the header, the tab's icon (PNG icons DW-44, the web app manifest DW-45), and the loader (the logo's A drawn in one stroke)
 // before the words of a state in progress. An accession fetch whose answer is held keeps one such
 // state on the page.
 import { expect, test } from '@playwright/test';
@@ -21,6 +21,27 @@ test('the header shows the logo, and the tab and home-screen icons are served', 
     expect(icon.ok(), href!).toBe(true);
     expect(icon.headers()['content-type'], href!).toContain(href!.endsWith('.svg') ? 'image/svg+xml' : 'image/png');
   }
+});
+
+test('the web app manifest and its icons are served', async ({ page, browserName }) => {
+  await openSearch(page);
+  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', '/manifest.webmanifest');
+  const response = await page.request.get(new URL('/manifest.webmanifest', page.url()).href);
+  expect(response.ok()).toBe(true);
+  expect(response.headers()['content-type']).toContain('application/manifest+json');
+  const manifest = (await response.json()) as { icons: { src: string }[] };
+  for (const { src } of manifest.icons) {
+    const icon = await page.request.get(new URL(src, page.url()).href);
+    expect(icon.ok(), src).toBe(true);
+    expect(icon.headers()['content-type'], src).toContain('image/png');
+  }
+  // Chromium's own reading (only Chromium answers): it finds the manifest from the page and reads
+  // every member without an error (an invalid colour, for one, is an error) and every icon.
+  if (browserName !== 'chromium') return;
+  const read = await (await page.context().newCDPSession(page)).send('Page.getAppManifest');
+  expect(read.url).toBe(response.url());
+  expect(read.errors).toEqual([]);
+  expect(read.manifest.icons?.map((icon) => icon.url)).toEqual(manifest.icons.map(({ src }) => new URL(src, page.url()).href));
 });
 
 test('a state in progress shows the loader; it draws, and stands still when the system asks for less motion', async ({ page }) => {

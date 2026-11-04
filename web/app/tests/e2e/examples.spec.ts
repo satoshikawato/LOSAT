@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { expect, test, type Page } from '@playwright/test';
 import { exampleById, exampleQuery } from '../../src/domain/examples';
+import { reload } from './support/navigate';
 import { E2E_ORIGIN } from './support/origin';
 import { openSearch, program, settled } from './support/search';
 
@@ -70,7 +71,7 @@ test('an Example downloads its set only when asked; the saved copy loads again w
   }
   await expect(note).toHaveText('Saved in this browser (2026-10-27, 111 bytes)');
 
-  await page.reload();
+  await reload(page);
   await expect(note).toHaveText('Saved in this browser (2026-10-27, 111 bytes)');
   await page.getByTestId('example-refseq-16s-bacteria').click();
   await settled(page, 'subject');

@@ -346,8 +346,15 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             let mut first = 0usize;
             while first < query_hits.len() {
                 let s_idx = query_hits[first].hit.s_idx;
-                let mut end = first;
-                while end < query_hits.len() && query_hits[end].hit.s_idx == s_idx {
+                // The subject's HSPs and those of the copies of one record that follow it
+                // (`XmlSubjects::joins`, as `hit_ranges`).
+                let mut end = first + 1;
+                while end < query_hits.len() {
+                    let (previous, next) =
+                        (query_hits[end - 1].hit.s_idx, query_hits[end].hit.s_idx);
+                    if previous != next && !subjects.joins(previous as usize, next as usize) {
+                        break;
+                    }
                     end += 1;
                 }
                 let subject = cache.get(s_idx as usize, PROGRAM)?;

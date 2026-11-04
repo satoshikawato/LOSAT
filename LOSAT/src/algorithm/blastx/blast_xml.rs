@@ -76,8 +76,8 @@ use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names::{self, QueryText};
 use crate::report::blast_xml::subjects::SubjectNames;
 use crate::report::blast_xml::{
-    filter, BlastXmlWriter, QueryMask, StructuredXml, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
-    REFERENCE_GAPPED_BLAST,
+    filter, hit_ranges, BlastXmlWriter, QueryMask, StructuredXml, XmlHit, XmlHsp, XmlQuery, XmlRun,
+    XmlStats, REFERENCE_GAPPED_BLAST,
 };
 use crate::report::blast_xml2::framing::{side_file_open_error, side_file_write_error};
 use crate::report::blast_xml2::{
@@ -774,57 +774,82 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 masks: &masks,
             };
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
-                for list in lists.iter().filter(|list| reported(list, options.gapped)) {
-                    let subject = &subjects[list.oid];
+                // A copy of one record of the database that follows another is shown in its
+                // `Hit`.
+                let hits = hit_ranges(
+                    lists,
+                    |list| reported(list, options.gapped).then_some(list.oid),
+                    |previous, oid| match shown {
+                        ShownSubjects::Database { reported, .. } => {
+                            match (
+                                reported.parsed_subject(previous),
+                                reported.parsed_subject(oid),
+                            ) {
+                                (Some(earlier), Some(later)) => {
+                                    crate::report::db_subject::joins_as_copy(earlier, later)
+                                }
+                                _ => false,
+                            }
+                        }
+                        ShownSubjects::Fasta { .. } => false,
+                    },
+                );
+                for range in hits {
+                    let first = lists[range.start].oid;
                     let names = subject_cache
-                        .get(&list.oid)
+                        .get(&first)
                         .context("names of a subject with hits")?;
-                    let subject_place = subject.placement();
-                    let subject_offset = subject_place.offset as i32;
-                    let hit = XmlHit::of(names, i32::try_from(subject_place.length)?);
+                    let hit = XmlHit::of(names, i32::try_from(subjects[first].placement().length)?);
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time.
-                    taxdb_printer.at_names(list.oid, names, &mut *diagnostics)?;
+                    taxdb_printer.at_names(first, names, &mut *diagnostics)?;
                     sink.hit(&hit, |hsps| {
-                        for hsp in list
-                            .hsps
+                        for list in lists[range]
                             .iter()
-                            .filter(|hsp| has_seqalign(hsp, options.gapped))
+                            .filter(|list| reported(list, options.gapped))
                         {
-                            // The Seq-align's endpoints, lower first: the minus frame's
-                            // outfmt 6 order is not the XML's.
-                            let (query_from, query_to) =
-                                xml_rows(hsp, subject, query, &code, &mut qrow, &mut srow)?;
-                            let (query_from, query_to) = (
-                                query_from + place.offset as i32,
-                                query_to + place.offset as i32,
-                            );
-                            let plus = hsp.hsp.frame > 0;
-                            hsps.hsp(&XmlHsp {
-                                score: hsp.hsp.score,
-                                bit_score: hsp.bit_score,
-                                evalue: seqalign_evalue(hsp.evalue),
-                                query_from,
-                                query_to,
-                                hit_from: hsp.hsp.s_start + 1 + subject_offset,
-                                hit_to: hsp.hsp.s_end + subject_offset,
-                                query_frame: translation_frame(
-                                    plus,
+                            let subject = &subjects[list.oid];
+                            let subject_offset = subject.placement().offset as i32;
+                            for hsp in list
+                                .hsps
+                                .iter()
+                                .filter(|hsp| has_seqalign(hsp, options.gapped))
+                            {
+                                // The Seq-align's endpoints, lower first: the minus frame's
+                                // outfmt 6 order is not the XML's.
+                                let (query_from, query_to) =
+                                    xml_rows(hsp, subject, query, &code, &mut qrow, &mut srow)?;
+                                let (query_from, query_to) = (
+                                    query_from + place.offset as i32,
+                                    query_to + place.offset as i32,
+                                );
+                                let plus = hsp.hsp.frame > 0;
+                                hsps.hsp(&XmlHsp {
+                                    score: hsp.hsp.score,
+                                    bit_score: hsp.bit_score,
+                                    evalue: seqalign_evalue(hsp.evalue),
                                     query_from,
                                     query_to,
-                                    place.length as i32,
-                                ),
-                                hit_frame: 0,
-                                qrow: &qrow,
-                                srow: &srow,
-                                ops: Some(&hsp.edit_script),
-                                // The first residue of the row: the lowest nucleotide of the
-                                // interval on the plus strand, the highest on the minus
-                                // strand, where the row runs backwards.
-                                query_first: if plus { query_from - 1 } else { query_to - 1 },
-                                query_step: if plus { 3 } else { -3 },
-                            })?;
+                                    hit_from: hsp.hsp.s_start + 1 + subject_offset,
+                                    hit_to: hsp.hsp.s_end + subject_offset,
+                                    query_frame: translation_frame(
+                                        plus,
+                                        query_from,
+                                        query_to,
+                                        place.length as i32,
+                                    ),
+                                    hit_frame: 0,
+                                    qrow: &qrow,
+                                    srow: &srow,
+                                    ops: Some(&hsp.edit_script),
+                                    // The first residue of the row: the lowest nucleotide of the
+                                    // interval on the plus strand, the highest on the minus
+                                    // strand, where the row runs backwards.
+                                    query_first: if plus { query_from - 1 } else { query_to - 1 },
+                                    query_step: if plus { 3 } else { -3 },
+                                })?;
+                            }
                         }
                         Ok(())
                     })?;

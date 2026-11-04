@@ -1,0 +1,17 @@
+# The shared vector of web ABI v1's TBLASTN. For each case, `losat tblastn -query query -subject <label>
+# <extra> -outfmt <outfmt>`, run where `query` holds the bytes of <query> and <label> those of <subject>,
+# writes <name>.out to standard output, or, for an "err" case, fails with <name>.err on standard error;
+# losat_web_run_pair("tblastn", ...) (label "subject" only) and losat_web_run_pair_handles (the subject
+# stored with <label>) return the same bytes (tests/web_v1_tblastn.rs, src/algorithm/tblastn/web.rs,
+# src/web_api.rs). Columns: name, query, subject, label, outfmt, extra words (space separated), out or err.
+fmt6	query.faa	subject.fna	subject	6		out
+fmt0	query.faa	subject.fna	subject	0		out
+fmt7	query.faa	subject.fna	subject	7 qaccver saccver pident length qstart qend sstart send evalue bitscore sframe	-evalue 1e-5	out
+fmt11	query.faa	subject.fna	subject	11	-evalue 1e-5	out
+label	query.faa	subject.fna	AvCLPV_regions.fna	7	-evalue 1e-5	out
+blank_query	blank.faa	subject.fna	subject	6		out
+comment_query	comment.faa	subject.fna	subject	6		err
+blank_subject	query.faa	blank.fna	subject	6		err
+matrix	query.faa	subject.fna	subject	6	-matrix FOO	err
+word_size	query.faa	subject.fna	subject	6	-word_size 1	err
+unknown	query.faa	subject.fna	subject	6	-nosuch	err

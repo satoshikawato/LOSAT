@@ -39,7 +39,8 @@ use crate::algorithm::blastp::encoding::{
 };
 use crate::algorithm::blastp::gapalign::GapAlignScratch;
 use crate::algorithm::common::protein_query_split::{
-    protein_chunk_part, protein_chunk_would_be_split, split_protein_batch, ProteinQueryChunk,
+    protein_chunk_part_in_record, protein_chunk_would_be_split, split_protein_batch,
+    ProteinQueryChunk,
 };
 use crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile;
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
@@ -74,9 +75,10 @@ pub(super) struct LocalStageDProfile<'a> {
     pub genetic_code: u8,
     pub expect_value: f64,
     pub max_target_seqs: usize,
-    /// Where each query's searched letters start in its record (`-query_loc`; empty: 0),
-    /// which the masks of a split query's chunks depend on (`protein_chunk_part`).
-    pub query_offsets: &'a [usize],
+    /// Each query's whole record and where its searched letters start in it (`-query_loc`;
+    /// empty: each query is its record, from 0): the lower-case runs of the record mask a split
+    /// query's chunks (`protein_chunk_part_in_record`).
+    pub query_records: &'a [(&'a [u8], usize)],
     /// The numbers of the subject set that the statistics read (a database's, `-dbsize`).
     pub subject_set: SubjectSetNumbers,
     /// The Seq-aligns are requested (outfmt 8, 12; `ReportNeeds::seqalign`): the HSPs of a
@@ -2295,17 +2297,17 @@ fn split_preliminary_hitlists(
             .queries
             .iter()
             .map(|part| {
-                protein_chunk_part(
-                    &queries[part.query],
-                    part,
-                    inputs.profile.mask_lowercase,
-                    inputs
-                        .profile
-                        .query_offsets
-                        .get(part.query)
-                        .copied()
-                        .unwrap_or(0),
-                )
+                let query = &queries[part.query];
+                if !inputs.profile.mask_lowercase {
+                    return query[part.from..part.to].to_vec();
+                }
+                let (record, offset) = inputs
+                    .profile
+                    .query_records
+                    .get(part.query)
+                    .copied()
+                    .unwrap_or((query, 0));
+                protein_chunk_part_in_record(record, offset, part)
             })
             .collect();
         // A chunk's setup is inside `search` (the common line marks only the batch's own).
@@ -3421,7 +3423,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 500,
-                query_offsets: &[],
+                query_records: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
@@ -3471,7 +3473,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 500,
-                query_offsets: &[],
+                query_records: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
@@ -3761,7 +3763,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 2,
-                query_offsets: &[],
+                query_records: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
@@ -3849,7 +3851,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 500,
-                query_offsets: &[],
+                query_records: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
@@ -4006,7 +4008,7 @@ mod tests {
                 genetic_code: 32,
                 expect_value: 10.0,
                 max_target_seqs: 500,
-                query_offsets: &[],
+                query_records: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
@@ -4099,7 +4101,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10.0,
                     max_target_seqs: 500,
-                    query_offsets: &[],
+                    query_records: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
@@ -4283,7 +4285,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10000.0,
                     max_target_seqs: 500,
-                    query_offsets: &[],
+                    query_records: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
@@ -4510,7 +4512,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10000.0,
                     max_target_seqs: 500,
-                    query_offsets: &[],
+                    query_records: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
@@ -4720,7 +4722,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 500,
-                query_offsets: &[],
+                query_records: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
@@ -4868,7 +4870,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 500,
-                query_offsets: &[],
+                query_records: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
@@ -5037,7 +5039,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 500,
-                query_offsets: &[],
+                query_records: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
@@ -5234,7 +5236,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10000.0,
                     max_target_seqs: 500,
-                    query_offsets: &[],
+                    query_records: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
@@ -5394,7 +5396,7 @@ mod tests {
                         genetic_code: selected,
                         expect_value: 10.0,
                         max_target_seqs: 500,
-                        query_offsets: &[],
+                        query_records: &[],
                         subject_set: Default::default(),
                         engine_positives: false,
                         culling_limit: 0,
@@ -5705,7 +5707,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 112,
-                query_offsets: &[],
+                query_records: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
@@ -5895,7 +5897,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10.0,
                     max_target_seqs: 500,
-                    query_offsets: &[],
+                    query_records: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
@@ -6010,7 +6012,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 1,
-                query_offsets: &[],
+                query_records: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
@@ -6107,7 +6109,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 1,
-                query_offsets: &[],
+                query_records: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
@@ -6221,7 +6223,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 1,
-                query_offsets: &[],
+                query_records: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
@@ -6496,7 +6498,7 @@ mod tests {
             genetic_code: 1,
             expect_value: 10.0,
             max_target_seqs: 500,
-            query_offsets: &[],
+            query_records: &[],
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
@@ -6589,7 +6591,7 @@ mod tests {
             genetic_code: 1,
             expect_value: 10.0,
             max_target_seqs: 500,
-            query_offsets: &[],
+            query_records: &[],
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,

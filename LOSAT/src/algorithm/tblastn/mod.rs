@@ -77,6 +77,8 @@ mod seqalign;
 // NCBI c++/src/app/blast/tblastn_app.cpp:188-194 and seqsrc_seqdb.cpp: the search of a BLAST
 // nucleotide database (`-db`): its sequences, numbers and titles.
 mod database;
+// Web ABI v1's TBLASTN (`web_api::run_pair`): the CLI's parser and run over the call's bytes.
+pub(crate) mod web;
 pub use args::{check_options, ResolvedTblastnArgs, TblastnArgs};
 pub use tblastn_app::run_local;
 // The summary lines `main` prints at exit (`LOSAT_X_TBNXLATESIMD`, `LOSAT_X_TBNUNITXLATE`).

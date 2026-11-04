@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { IndexedRecord } from '../../src/domain/dataset';
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { MEMORY_FULL_MESSAGE, RESULTS_REMOVED_MESSAGE, StorageRemovedError } from '../../src/infra/data/block-store';
-import { DataService, type DataServiceDeps } from '../../src/infra/data/data-service';
+import { DataService, STORED_CHECK_READS, type DataServiceDeps } from '../../src/infra/data/data-service';
 import { compressionOfName, plainName } from '../../src/infra/data/inflate';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
@@ -291,13 +291,13 @@ describe('DataService runs and storage status', () => {
   });
 });
 
-// WA2-SC-05: the browser removed the stored results of every run under a tab hidden for half an hour, and
-// the check after the tab came back said they were available. The check reads a byte of each block.
+// WA2-SC-05: the browser removed the stored results of every run under a tab hidden for about half an hour, and
+// the check after the tab came back said they were available. The check reads a byte of each run's HSP records.
 describe('DataService checkStoredResults', () => {
-  async function committed(data: DataService, runId: string, out6: string): Promise<void> {
+  async function committed(data: DataService, runId: string, hits: string): Promise<void> {
     const writer = new RunOutputWriter(await data.openRun(runId));
-    writer.write(6, encoder.encode(out6));
-    writer.write(1, encoder.encode('{"index":0}\n'));
+    writer.write(6, encoder.encode('row\n'));
+    if (hits !== '') writer.write(1, encoder.encode(hits));
     writer.end();
     await data.commitRun(runId);
   }
@@ -317,32 +317,51 @@ describe('DataService checkStoredResults', () => {
     return { store, reads, failures };
   }
 
-  it('finds the committed runs whose blocks the browser removed or could not read, in the order of the runs', async () => {
+  it('finds the committed runs whose stored results the browser removed or could not read, in the order of the runs', async () => {
     const { store, reads, failures } = failingStore();
     const { data } = service({ store });
-    await committed(data, 'run-1', 'one\n');
-    await committed(data, 'run-2', 'two\n');
-    await committed(data, 'run-3', 'three\n');
-    await committed(data, 'run-4', 'four\n');
+    await committed(data, 'run-1', '{"index":0}\n');
+    await committed(data, 'run-2', ''); // no HSPs: an empty block, opened but not read
+    await committed(data, 'run-3', '{"index":0}\n');
+    await committed(data, 'run-4', '{"index":0}\n');
     await data.openRun('run-5'); // staged: nothing stored to check yet
     expect(await data.checkStoredResults()).toEqual({ removed: [], unreadable: [] });
+    // One block of each committed run, the HSP records that opening the run reads, and at most its first byte.
+    expect(reads).toEqual([
+      { path: 'runs/token-1/hits', length: 1 },
+      { path: 'runs/token-2/hits', length: 0 },
+      { path: 'runs/token-3/hits', length: 1 },
+      { path: 'runs/token-4/hits', length: 1 },
+    ]);
     // Tokens are given in order: run-1 has token-1, run-2 token-2, ...
     failures.set('token-3', () => new DOMException('A requested file or directory could not be found', 'NotFoundError'));
     failures.set('token-1', () => new StorageRemovedError(RESULTS_REMOVED_MESSAGE));
     failures.set('token-4', () => new DOMException('fault', 'NotReadableError'));
     expect(await data.checkStoredResults()).toEqual({ removed: ['run-1', 'run-3'], unreadable: ['run-4'] });
-    // The outputs are not read: one byte of each block, none of an empty one; the staged run is not read.
-    expect(reads.every(({ length }) => length <= 1)).toBe(true);
-    expect(reads.some(({ length }) => length === 0)).toBe(true);
-    expect(reads.some(({ path }) => path.startsWith('runs/token-5/'))).toBe(false);
-    expect(new Set(reads.map(({ path }) => path.split('/')[2])).size).toBe(5);
+  });
+
+  it(`reads at most ${STORED_CHECK_READS} blocks at a time, however many runs there are`, async () => {
+    const store = new MemoryBlockStore();
+    const read = store.read.bind(store);
+    let open = 0;
+    let most = 0;
+    store.read = async (path, offset, length) => {
+      most = Math.max(most, ++open);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      open--;
+      return read(path, offset, length);
+    };
+    const { data } = service({ store });
+    for (let i = 1; i <= 100; i++) await committed(data, `run-${i}`, '{"index":0}\n');
+    expect(await data.checkStoredResults()).toEqual({ removed: [], unreadable: [] });
+    expect(most).toBe(STORED_CHECK_READS);
   });
 
   it('does not report a run deleted while it was checked', async () => {
     const { store, failures } = failingStore();
     const { data } = service({ store });
-    await committed(data, 'run-1', 'one\n');
-    await committed(data, 'run-2', 'two\n');
+    await committed(data, 'run-1', '{"index":0}\n');
+    await committed(data, 'run-2', '{"index":0}\n');
     failures.set('token-1', () => {
       void data.deleteRun('run-1');
       return new DOMException('gone', 'NotFoundError');

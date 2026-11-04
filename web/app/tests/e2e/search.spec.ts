@@ -8,6 +8,7 @@ import { writeFileSync } from 'node:fs';
 import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { COMPOSITION_MODES, MATRICES, PROTEIN_GAP_COSTS, PROTEIN_WORD_SIZES } from '../../src/domain/programs';
 import { RESULTS_REMOVED_MESSAGE } from '../../src/infra/data/block-store';
+import { TMP_DIRECTORY } from '../../src/infra/data/session';
 import { BUILD_HAS_ENGINE, sessionDirectories, sessionFiles } from './support/browser';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { reload } from './support/navigate';
@@ -748,14 +749,14 @@ test("a run after the browser removed the tab's storage still completes", async 
   await expect
     .poll(
       () =>
-        page.evaluate(async () => {
+        page.evaluate(async (tmp) => {
           try {
-            await (await navigator.storage.getDirectory()).removeEntry('tmp', { recursive: true });
+            await (await navigator.storage.getDirectory()).removeEntry(tmp, { recursive: true });
             return 'removed';
           } catch (error) {
             return (error as Error).name;
           }
-        }),
+        }, TMP_DIRECTORY),
       { timeout: 10_000 },
     )
     .toBe('removed');
@@ -765,8 +766,7 @@ test("a run after the browser removed the tab's storage still completes", async 
   await chooseRun(page, 2);
   // What the removal took with it says so when it is opened.
   await pickRun(page, 1);
-  await expect(page.getByTestId('results-status')).toContainText('The browser removed the stored results of this run');
-  await expect(page.getByTestId('results-status')).toContainText('Run it again.');
+  await expect(page.getByTestId('results-status')).toHaveText(`The results of run 1 could not be read: ${RESULTS_REMOVED_MESSAGE}`);
 });
 
 /**
@@ -812,37 +812,40 @@ async function removeStored(page: Page, tokens: readonly string[] | 'all'): Prom
   await expect
     .poll(
       () =>
-        page.evaluate(async (tokens) => {
-          try {
-            const root = await navigator.storage.getDirectory();
-            if (tokens === 'all') {
-              await root.removeEntry('tmp', { recursive: true });
-              return 'removed';
-            }
-            const tmp = await root.getDirectoryHandle('tmp');
-            const sessions = (tmp as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries();
-            for await (const [, session] of sessions) {
-              if (session.kind !== 'directory') continue;
-              const runs = await (session as FileSystemDirectoryHandle).getDirectoryHandle('runs').catch(() => undefined);
-              for (const token of tokens) {
-                await runs?.removeEntry(token, { recursive: true }).catch((error: Error) => {
-                  if (error.name !== 'NotFoundError') throw error;
-                });
+        page.evaluate(
+          async ({ tmpName, tokens }) => {
+            try {
+              const root = await navigator.storage.getDirectory();
+              if (tokens === 'all') {
+                await root.removeEntry(tmpName, { recursive: true });
+                return 'removed';
               }
+              const tmp = await root.getDirectoryHandle(tmpName);
+              const sessions = (tmp as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries();
+              for await (const [, session] of sessions) {
+                if (session.kind !== 'directory') continue;
+                const runs = await (session as FileSystemDirectoryHandle).getDirectoryHandle('runs').catch(() => undefined);
+                for (const token of tokens) {
+                  await runs?.removeEntry(token, { recursive: true }).catch((error: Error) => {
+                    if (error.name !== 'NotFoundError') throw error;
+                  });
+                }
+              }
+              return 'removed';
+            } catch (error) {
+              return (error as Error).name;
             }
-            return 'removed';
-          } catch (error) {
-            return (error as Error).name;
-          }
-        }, tokens),
+          },
+          { tmpName: TMP_DIRECTORY, tokens },
+        ),
       { timeout: 10_000 },
     )
     .toBe('removed');
 }
 
-// The browser can also remove the stored results by itself: Chromium did in a private context whose tab was hidden for
+// The browser can also remove the stored results by itself: Chromium did in an off-the-record context after about
 // half an hour, and the notice on return said "The stored results are available." while no run could be opened
-// (WA2-SC-05). The check on return reads back a byte of each stored block.
+// (WA2-SC-05). The check on return reads back a byte of each run's stored HSP records.
 test('a tab hidden while a run is in progress says on return that the stored results are available', async ({ page }) => {
   await program(page, 'blastn');
   await paste(page, 'query', '>q1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');

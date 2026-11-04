@@ -104,10 +104,10 @@ export interface RunStore {
   readDiagnostics(runId: string): Promise<string>;
   deleteRun(runId: string): Promise<void>;
   /**
-   * Whether the stored outputs of every committed run are still there: it opens each of their
-   * blocks and reads its first byte, not the outputs, so it stays quick for hundreds of runs.
-   * The browser can remove them under an open tab (WA2-SC-05); the check after the page was
-   * hidden (application/attention.ts) asks.
+   * Whether the stored outputs of every committed run are still there: it opens the HSP records
+   * of each run (the first block that opening the run asks for) and reads its first byte, a few
+   * runs at a time, so it stays quick for hundreds of runs. The browser can remove them under an
+   * open tab (WA2-SC-05); the check after the page was hidden (application/attention.ts) asks.
    */
   checkStoredResults(): Promise<StoredResultsCheck>;
 }

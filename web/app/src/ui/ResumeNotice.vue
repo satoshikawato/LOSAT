@@ -1,22 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { ResumeReport } from '../application/attention';
-import { formatDuration, formatRuns } from './format';
+import { formatDuration, lostResultsText } from './format';
 import LosatLoader from './LosatLoader.vue';
 
 const props = defineProps<{ report: ResumeReport }>();
 defineEmits<{ dismiss: [] }>();
 
-/** What became of the stored results that the Data worker could not read back (WA2-SC-05); empty if none. */
-const lost = computed(() => {
-  const { removed, unreadable } = props.report;
-  const sentences = [
-    ...(removed.length > 0 ? [`The browser removed the stored results of ${formatRuns(removed)}.`] : []),
-    ...(unreadable.length > 0 ? [`The stored results of ${formatRuns(unreadable)} could not be read.`] : []),
-  ];
-  if (sentences.length === 0) return '';
-  return `${sentences.join(' ')} Run ${removed.length + unreadable.length === 1 ? 'it' : 'them'} again.`;
-});
+/** The runs whose stored results the Data worker could not read back (WA2-SC-05); empty if none. */
+const lost = computed(() => lostResultsText(props.report.removed, props.report.unreadable));
+/** Until the Data worker has answered and the check of the stored results has ended (it has no time limit). */
+const checking = computed(() => props.report.dataWorker === 'checking' || props.report.stored === 'checking');
+/** The Data worker did not answer, or refused the check of the stored results. */
+const silent = computed(() => props.report.dataWorker === 'not-responding' || props.report.stored === 'failed');
 </script>
 
 <template>
@@ -32,13 +28,13 @@ const lost = computed(() => {
         </template>
       </li>
     </ul>
-    <p v-if="report.dataWorker === 'checking'" class="muted" data-testid="resume-data"><LosatLoader />Checking the stored results…</p>
-    <p v-else-if="report.dataWorker === 'responding' && lost !== ''" class="error" data-testid="resume-data">{{ lost }}</p>
-    <p v-else-if="report.dataWorker === 'responding'" class="muted" data-testid="resume-data">The stored results are available.</p>
-    <p v-else class="error" data-testid="resume-data">
+    <p v-if="silent" class="error" data-testid="resume-data">
       The part of LOSAT that keeps the results did not answer. If results cannot be opened, reload the page; the
       results of this session are then lost.
     </p>
+    <p v-else-if="checking" class="muted" data-testid="resume-data"><LosatLoader />Checking the stored results…</p>
+    <p v-else-if="lost !== ''" class="error" data-testid="resume-data">{{ lost }}</p>
+    <p v-else class="muted" data-testid="resume-data">The stored results are available.</p>
     <button type="button" data-testid="resume-dismiss" @click="$emit('dismiss')">Dismiss</button>
   </div>
 </template>

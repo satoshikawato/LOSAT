@@ -166,10 +166,11 @@ describe('OpfsBlockStore with a directory that is still there', () => {
   });
 });
 
-// WA2-SC-05: Chromium also removed them by itself (a private context whose tab was hidden for half an hour), and the
-// message blamed a cleared site data that the user had not cleared. The e2e tests read this constant.
-describe('RESULTS_REMOVED_MESSAGE', () => {
-  it('says that the browser removed the stored results, and names no cause', () => {
+// WA2-SC-05: Chromium also removed them by itself, in an off-the-record context after about half an hour, and the
+// messages blamed cleared site data that the user had not cleared. The e2e tests read these constants.
+describe('the messages of a removed storage', () => {
+  it('say that the browser removed the stored results, or the storage of the tab, and name no cause', () => {
     expect(RESULTS_REMOVED_MESSAGE).toBe('The browser removed the stored results of this run. Run it again.');
+    expect(STORAGE_REMOVED_MESSAGE).toBe("The browser removed this tab's storage. Reload the page.");
   });
 });

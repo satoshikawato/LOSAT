@@ -11,7 +11,9 @@
 // - when the page becomes visible again after being hidden with runs in progress, reports
 //   how long it was hidden, what became of those runs, whether the Data worker (which
 //   keeps the results) still answers, and which completed runs lost their stored results: the
-//   browser can remove them while the tab is hidden (WA2-SC-05).
+//   browser can remove them under an open tab (WA2-SC-05). The two are asked apart: the
+//   Data worker's answer comes at once or not at all, while the check of the stored results
+//   takes longer the more runs there are, so it has no time limit.
 import type { StoredResultsCheck } from '../ports/data';
 import type { PagePort, WakeLockHandle } from '../ports/page';
 import type { RunStatus } from '../domain/run';
@@ -26,9 +28,11 @@ export interface ResumeReport {
   readonly hiddenMs: number;
   /** The runs that were active or queued when the page was hidden: their status then and now. */
   readonly runs: ReadonlyArray<{ readonly number: number; readonly before: RunStatus; readonly now: RunStatus }>;
-  /** Whether the Data worker answered after the page came back. */
+  /** Whether the Data worker answered after the page came back (`probe`, within probeTimeoutMs). */
   readonly dataWorker: 'checking' | 'responding' | 'not-responding';
-  /** The completed runs whose stored results the browser removed, by number, as the Data worker answered. */
+  /** The check of the stored results (`checkStored`): it has no time limit; 'failed' when the Data worker refused it. */
+  readonly stored: 'checking' | 'checked' | 'failed';
+  /** The completed runs whose stored results the browser removed, by number, once the check answered. */
   readonly removed: readonly number[];
   /** The completed runs whose stored results could not be read for another reason, by number. */
   readonly unreadable: readonly number[];
@@ -55,10 +59,12 @@ export interface AttentionDeps {
   readonly runs: Store<AppState>;
   /** The search form, whose inputs a reload would lose. */
   readonly draft?: Store<DraftState>;
+  /** A call that the Data worker answers at once (its storage status): whether it still answers. */
+  readonly probe: () => Promise<unknown>;
   /** Asks the Data worker whether the stored results of the completed runs are still there (RunStore.checkStoredResults). */
-  readonly probe: () => Promise<StoredResultsCheck>;
+  readonly checkStored: () => Promise<StoredResultsCheck>;
   readonly now: () => number;
-  /** How long the Data worker may take to answer after the page comes back. */
+  /** How long the Data worker may take to answer `probe` after the page comes back; `checkStored` has no limit. */
   readonly probeTimeoutMs?: number;
   /** Shorter hides (a quick switch of tabs) make no report. */
   readonly minHiddenMs?: number;
@@ -187,44 +193,46 @@ export class Attention {
       before: before.status,
       now: current.get(runId) ?? before.status,
     }));
-    this.set({ resume: { hiddenMs: this.deps.now() - hidden.at, runs, dataWorker: 'checking', removed: [], unreadable: [] } });
+    this.set({
+      resume: { hiddenMs: this.deps.now() - hidden.at, runs, dataWorker: 'checking', stored: 'checking', removed: [], unreadable: [] },
+    });
     const generation = ++this.probeGeneration;
-    const report = (dataWorker: ResumeReport['dataWorker'], check?: StoredResultsCheck) => {
+    const report = (change: Partial<ResumeReport>) => {
       const resume = this.state.get().resume;
-      if (generation !== this.probeGeneration || resume === undefined) return;
-      this.set({
-        resume: {
-          ...resume,
-          dataWorker,
-          ...(check === undefined ? {} : { removed: this.numbers(check.removed), unreadable: this.numbers(check.unreadable) }),
-        },
-      });
+      if (generation === this.probeGeneration && resume !== undefined) this.set({ resume: { ...resume, ...change } });
     };
     let answered = false;
     const timer = setTimeout(() => {
-      if (!answered) report('not-responding');
+      if (!answered) report({ dataWorker: 'not-responding' });
     }, this.deps.probeTimeoutMs ?? 10_000);
     // A late answer still corrects the report.
     this.deps.probe().then(
-      (check) => {
+      () => {
         answered = true;
         clearTimeout(timer);
-        report('responding', check);
+        report({ dataWorker: 'responding' });
       },
       () => {
         answered = true;
         clearTimeout(timer);
-        report('not-responding');
+        report({ dataWorker: 'not-responding' });
       },
+    );
+    this.deps.checkStored().then(
+      (check) => report({ stored: 'checked', removed: this.completed(check.removed), unreadable: this.completed(check.unreadable) }),
+      () => report({ stored: 'failed' }),
     );
   }
 
-  /** The numbers of the runs, in order; a run no longer in the list is left out. */
-  private numbers(runIds: readonly string[]): number[] {
+  /**
+   * The numbers of the completed runs among `runIds`, in order. A run no longer in the list is left out, and so is
+   * one that is not completed: a run whose commit reached the Data worker but whose answer did not is failed here.
+   */
+  private completed(runIds: readonly string[]): number[] {
     const ids = new Set(runIds);
     return this.deps.runs
       .get()
-      .runs.filter((run) => ids.has(run.snapshot.runId))
+      .runs.filter((run) => run.status === 'completed' && ids.has(run.snapshot.runId))
       .map((run) => run.snapshot.number)
       .sort((a, b) => a - b);
   }

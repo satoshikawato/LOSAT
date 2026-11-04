@@ -67,6 +67,20 @@ export function formatRuns(numbers: readonly number[]): string {
   return `${sorted.length === 1 ? 'run' : 'runs'} ${list}`;
 }
 
+/**
+ * What the notice after a hidden tab says of the completed runs whose stored results could not be read back
+ * (WA2-SC-05): the runs the browser removed them of, then those that failed to read otherwise, and that they can be
+ * run again. Empty when there are none.
+ */
+export function lostResultsText(removed: readonly number[], unreadable: readonly number[]): string {
+  const sentences = [
+    ...(removed.length > 0 ? [`The browser removed the stored results of ${formatRuns(removed)}.`] : []),
+    ...(unreadable.length > 0 ? [`The stored results of ${formatRuns(unreadable)} could not be read.`] : []),
+  ];
+  if (sentences.length === 0) return '';
+  return `${sentences.join(' ')} Run ${removed.length + unreadable.length === 1 ? 'it' : 'them'} again.`;
+}
+
 /** The frames of an HSP of a translated search: the translated sequences' only (results.ts hspEntry). */
 export interface Frames {
   readonly queryFrame?: number;

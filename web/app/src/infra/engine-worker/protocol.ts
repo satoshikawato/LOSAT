@@ -105,6 +105,8 @@ export type EngineEvent =
   | { readonly type: 'phase'; readonly generation: number; readonly runId: string; readonly phase: EnginePhase }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: true; readonly result: WorkerRunResult }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: false; readonly error: WorkerError }
+  /** The shared memory of the threaded instance, before a search runs on it (the Gateway grows it to its maximum if it ends the worker during the search). */
+  | { readonly type: 'memory'; readonly generation: number; readonly memory: WebAssembly.Memory; readonly maximumPages: number }
   | { readonly type: 'test-reply'; readonly id: number; readonly ok: boolean; readonly value?: number; readonly error?: WorkerError };
 
 // --- thread workers -------------------------------------------------------------------

@@ -926,7 +926,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10.0,
                     max_target_seqs: 500,
-                    query_offsets: &[],
+                    query_records: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,

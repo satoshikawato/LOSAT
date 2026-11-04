@@ -1080,8 +1080,14 @@ fn search(
         // pipe, or `-query -` after `-subject -`).
         let searched_done = batches.searched_done;
         let queries = &searched_queries[..searched_done];
-        let query_offsets: Vec<usize> = (0..queries.len())
-            .map(|index| query_input.placements.offset(index))
+        // Each searched query's whole record and where its letters start in it (`-query_loc`).
+        let whole_records: Vec<(&[u8], usize)> = (0..queries.len())
+            .map(|index| {
+                (
+                    input_records[query_input.ordinal(index)].seq(),
+                    query_input.placements.offset(index),
+                )
+            })
             .collect();
         let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();
         let seg = resolved.seg.params();
@@ -1151,7 +1157,7 @@ fn search(
                 genetic_code: resolved.db_gencode,
                 expect_value: resolved.evalue,
                 max_target_seqs: resolved.hitlist_size,
-                query_offsets: &query_offsets[range],
+                query_records: &whole_records[range],
                 subject_set,
                 engine_positives,
                 culling_limit: resolved.culling_limit,
@@ -1197,7 +1203,7 @@ fn search(
                             genetic_code: resolved.db_gencode,
                             expect_value: resolved.evalue,
                             max_target_seqs: resolved.hitlist_size,
-                            query_offsets: &query_offsets[range.clone()],
+                            query_records: &whole_records[range.clone()],
                             subject_set,
                             engine_positives,
                             culling_limit: resolved.culling_limit,

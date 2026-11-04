@@ -10906,12 +10906,14 @@ fn run_resolved_in_pool(
         }
         _ => None,
     };
-    // Whether the batches' prefetch looks the subjects' taxids up (`prefetch_messages`, below).
-    let prefetch_taxids = listed_titles.is_some()
+    // Whether the batches prefetch the subjects of a database, and whether that looks their
+    // taxids up (`prefetch_messages`, below).
+    let batches_prefetch = listed_titles.is_some()
         && requested_formats
             .first()
-            .is_some_and(|outfmt| outfmt.prefetches_subjects())
-        && database.is_some_and(|database| database.taxdb_found());
+            .is_some_and(|outfmt| outfmt.prefetches_subjects());
+    let prefetch_taxids =
+        batches_prefetch && database.is_some_and(|database| database.taxdb_found());
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:673-678
     // ```c++
     //     ITERATE(blast::CSearchResultSet, result, results) {
@@ -10923,13 +10925,18 @@ fn run_resolved_in_pool(
     // ```
     // NCBI's prefetch reads the subject of every Seq-align of a batch's results, which are
     // psiblast's before its formatter's cut: the subjects of the traceback hit lists, also those
-    // beyond `max_target_seqs` that no report shows. Their ranks, by query, for the prefetch.
+    // beyond `max_target_seqs` that no report shows. Their ranks, by query, for the prefetch
+    // (`ListedTitles::prefetched_ranks`).
     let psiblast_prefetched: Option<Vec<Vec<usize>>> =
-        (args.app == BlastpApp::Psiblast && prefetch_taxids).then(|| {
+        (args.app == BlastpApp::Psiblast && batches_prefetch).then(|| {
             hit_lists
                 .iter()
                 .map(|hit_list| {
-                    database::ListedTitles::reported_ranks(std::slice::from_ref(hit_list)).collect()
+                    let mut ranks: Vec<usize> =
+                        database::ListedTitles::reported_ranks(std::slice::from_ref(hit_list))
+                            .collect();
+                    ranks.dedup();
+                    ranks
                 })
                 .collect()
         });
@@ -11220,9 +11227,10 @@ fn run_resolved_in_pool(
     // way, the subjects of the traceback hit lists (`psiblast_prefetched`).
     // Where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off (`s_PreFetchSeqs`, quoted at
     // `shared::prefetch_may_be_off`), each query's report fetches the subjects it shows, after
-    // the query's own warnings: those of its final hit list, psiblast's after the cut.
+    // the query's own warnings: those of its final hit list, psiblast's after the cut, where the
+    // first format reads their Bioseqs (`TabularSpec::fetches_subject`).
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
-        if prefetch_taxids {
+        if prefetch_taxids || psiblast_prefetched.is_some() {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
             // too, which the prefetch does not: the rows of a batch with hits may open the
             // taxonomy database before a later batch's prefetch (`TaxdbRun::open_for_rows`).
@@ -11230,6 +11238,10 @@ fn run_resolved_in_pool(
                 format_plans.first(),
                 Some(BlastpReport::CustomTabular(spec)) if spec.checks_taxdb()
             );
+            let rows_fetch = match format_plans.first() {
+                Some(BlastpReport::CustomTabular(spec)) => spec.fetches_subject(false),
+                _ => true,
+            };
             let open_for_rows = |lists: &[Option<BlastpHitList>]| -> Result<()> {
                 if plural_names
                     && lists
@@ -11249,6 +11261,9 @@ fn run_resolved_in_pool(
                     None => blastp_hit_list_hsp_count(lists),
                 };
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                    if !(prefetch_taxids && rows_fetch) {
+                        continue;
+                    }
                     for query in batch.searched.clone() {
                         let shown = std::slice::from_ref(&hit_lists[query]);
                         let messages = titles.prefetch_messages(
@@ -11261,10 +11276,17 @@ fn run_resolved_in_pool(
                     continue;
                 }
                 let messages = match psiblast_prefetched.as_ref() {
-                    Some(ranks) => titles.prefetch_messages(
-                        database,
-                        ranks[batch.searched.clone()].iter().flatten().copied(),
-                    )?,
+                    Some(ranks) => {
+                        let prefetched = titles.prefetched_ranks(
+                            database,
+                            &ranks[batch.searched.clone()].concat(),
+                            prefetch_taxids,
+                        )?;
+                        if !prefetch_taxids {
+                            continue;
+                        }
+                        titles.prefetch_messages(database, prefetched)?
+                    }
                     None => titles.prefetch_messages(
                         database,
                         database::ListedTitles::reported_ranks(lists),

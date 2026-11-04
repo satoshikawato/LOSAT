@@ -1203,6 +1203,73 @@ impl ListedTitles<'_> {
         )
     }
 
+    /// The subjects of ranks `ranks` of psiblast's traceback hit lists as NCBI's prefetch reads
+    /// them by their Seq-align ids (`ParsedSubject::prefetched`), for `prefetch_messages`: those
+    /// it finds as themselves; one that it finds nowhere is left out (the prefetch reads
+    /// nothing for it). A lookup that fails is refused (NCBI's prefetch writes its warning and
+    /// reads no other subject of the batch). With `taxids` (`taxdb.bti` on the search path), one
+    /// for which the prefetch can read another sequence is left out where neither that sequence
+    /// nor, where the prefetch can read it instead, the subject has a positive taxid (no lookup
+    /// either way), and refused otherwise. The subjects that the reports show were refused before
+    /// for all of these (`check_parsed_reports`).
+    pub(super) fn prefetched_ranks(
+        &self,
+        database: &BlastpDatabase,
+        ranks: &[usize],
+        taxids: bool,
+    ) -> Result<Vec<usize>> {
+        use crate::report::db_subject::Prefetched;
+        let mut kept = Vec::with_capacity(ranks.len());
+        for &rank in ranks {
+            let Some(subject) = self.parsed_subject(rank) else {
+                kept.push(rank);
+                continue;
+            };
+            let ordinal = self.listed.ordinals[rank];
+            let refused = |reason: &str| {
+                shared::parsed_refusal(
+                    ordinal,
+                    &format!(
+                        "{reason}, and is in psiblast's traceback hit list beyond -max_target_seqs, which NCBI BLAST+ 2.17.0 prefetches"
+                    ),
+                    self.program,
+                )
+            };
+            match subject.prefetched() {
+                Prefetched::Itself => kept.push(rank),
+                Prefetched::Nothing => {}
+                Prefetched::Failed(reason) => return Err(refused(&reason)),
+                Prefetched::Another { .. } if !taxids => {}
+                Prefetched::Another {
+                    other,
+                    or_itself,
+                    reason,
+                } => {
+                    let looks_up = |other: u32| -> Result<bool> {
+                        let set = database
+                            .db
+                            .defline_set(other)
+                            .map_err(|error| shared::database_error(error, self.program))?;
+                        Ok(set
+                            .deflines
+                            .iter()
+                            .any(|defline| defline.taxid.is_some_and(|taxid| taxid > 0)))
+                    };
+                    let none = match other {
+                        Some(other) => {
+                            !looks_up(other)? && !(or_itself && !subject.volume_taxids().is_empty())
+                        }
+                        None => false,
+                    };
+                    if !none {
+                        return Err(refused(&reason));
+                    }
+                }
+            }
+        }
+        Ok(kept)
+    }
+
     /// The ranks of the subjects with rows in `hit_lists` (the final hit lists).
     fn reported(hit_lists: &[Option<BlastpHitList>]) -> std::collections::BTreeSet<usize> {
         Self::reported_ranks(hit_lists).collect()

@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "tm_psi_ra0",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm_psi_ra0",
+  "number-of-letters": 220,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-04T16:44:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49634,
+  "bytes-to-cache": 326,
+  "files": [
+    "tm_psi_ra0.pdb",
+    "tm_psi_ra0.phr",
+    "tm_psi_ra0.pin",
+    "tm_psi_ra0.pog",
+    "tm_psi_ra0.pos",
+    "tm_psi_ra0.pot",
+    "tm_psi_ra0.psq",
+    "tm_psi_ra0.ptf",
+    "tm_psi_ra0.pto"
+  ]
+}

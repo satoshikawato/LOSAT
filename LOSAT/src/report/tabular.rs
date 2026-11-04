@@ -473,6 +473,58 @@ impl TabularSpec {
         fields.iter().any(|field| self.has(*field))
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-837 and 973-980
+    // ```c++
+    //     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
+    //        x_IsFieldRequested(eSubjectStrand) || setSubjectId)
+    //     {
+    //         try {
+    //        		const CBioseq_Handle& subject_bh =
+    //     ...
+    //     if (x_IsFieldRequested(eQuerySeq) ||
+    //         x_IsFieldRequested(eSubjectSeq) ||
+    //         x_IsFieldRequested(ePositives) ||
+    //         x_IsFieldRequested(ePercentPositives) ||
+    //         x_IsFieldRequested(eBTOP) ||
+    //         (x_IsFieldRequested(eNumIdentical) && !kNoFetchSequence) ||
+    //         (x_IsFieldRequested(eMismatches) && !kNoFetchSequence) ||
+    //         (x_IsFieldRequested(ePercentIdentical) && !kNoFetchSequence)) {
+    // ```
+    /// Whether NCBI's rows read the subject's Bioseq, which loads its taxonomy where no prefetch
+    /// loaded it before (`PRE_FETCH_SEQS_LIMIT`): the subject's ids, taxonomy, titles and strand,
+    /// and the alignment's letters, also for the identities unless the formatter does not fetch
+    /// sequences (`no_fetch`: BLASTN's, blast_format.cpp:791-792). `slen` is read without the
+    /// Bioseq (`sequence::GetLength`).
+    pub fn fetches_subject(&self, no_fetch: bool) -> bool {
+        self.has_any(&[
+            SubjectSeqId,
+            SubjectGi,
+            SubjectAccession,
+            SubjectAccessionVersion,
+            SubjectAllSeqIds,
+            SubjectAllGis,
+            SubjectAllAccessions,
+            SubjectTaxId,
+            SubjectSciName,
+            SubjectCommonName,
+            SubjectBlastName,
+            SubjectSuperKingdom,
+            SubjectTaxIds,
+            SubjectSciNames,
+            SubjectCommonNames,
+            SubjectBlastNames,
+            SubjectSuperKingdoms,
+            SubjectTitle,
+            SubjectAllTitles,
+            SubjectStrand,
+            QuerySeq,
+            SubjectSeq,
+            Positives,
+            PercentPositives,
+            Btop,
+        ]) || (!no_fetch && self.has_any(&[NumIdentical, Mismatches, PercentIdentical]))
+    }
+
     pub fn needs(&self) -> TabularNeeds {
         const NAMES: [TabularField; 8] = [
             SubjectSciName,
@@ -1457,6 +1509,44 @@ mod tests {
         for (index, (name, field, _)) in FIELDS.iter().enumerate() {
             assert_eq!(*field as usize, index);
             assert_eq!(TabularField::from_name(name), Some(*field));
+        }
+    }
+
+    // Line DBID P1: with NCBI's prefetch off, the rows read the subject's Bioseq (and look its
+    // taxids up) only for these fields (review 1 of P1, field by field against NCBI 2.17.0).
+    #[test]
+    fn rows_read_the_subject_for_its_ids_taxonomy_titles_strand_and_letters() {
+        let fetches = |fields: &str, no_fetch: bool| {
+            TabularSpec {
+                kind: TabularKind::Tabular,
+                fields: parse_fields(fields),
+                delimiter: "\t".into(),
+            }
+            .fetches_subject(no_fetch)
+        };
+        for fields in [
+            "qseqid evalue",
+            "qseqid qacc qlen slen qstart qend sstart send evalue bitscore score length gaps gapopen",
+            "qseqid qframe sframe frames qcovs qcovhsp qcovus",
+        ] {
+            assert!(!fetches(fields, false), "{fields}");
+        }
+        for fields in [
+            "std",
+            "qseqid sseqid",
+            "qseqid sallacc",
+            "qseqid staxid",
+            "qseqid sskingdoms",
+            "qseqid salltitles",
+            "qseqid sstrand",
+            "qseqid sseq",
+            "qseqid btop",
+            "qseqid ppos",
+        ] {
+            assert!(fetches(fields, false) && fetches(fields, true), "{fields}");
+        }
+        for fields in ["qseqid nident", "qseqid mismatch", "qseqid pident"] {
+            assert!(fetches(fields, false) && !fetches(fields, true), "{fields}");
         }
     }
 

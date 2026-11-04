@@ -11,7 +11,7 @@
 //! ```c++
 //!                    results = psiblast->Run();
 //!                    BlastFormatter_PreFetchSequenceData(*results, scope,
-//!                 		   m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice());
+//!                            m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice());
 //! ```
 
 use std::process::{Command, Output};
@@ -123,7 +123,11 @@ fn blocks_write_the_prefetch_messages_of_the_search_of_all_queries() {
             let reference = psiblast("tm_psi_q.faa", taxdb, "0", &args, &home);
             let blocks = psiblast("tm_psi_q.faa", taxdb, "1", &args, &home);
             let label = format!("{taxdb} outfmt {outfmt}");
-            assert!(reference.status.success(), "{label}: {}", messages(&reference));
+            assert!(
+                reference.status.success(),
+                "{label}: {}",
+                messages(&reference)
+            );
             assert!(blocks.status.success(), "{label}: {}", messages(&blocks));
             assert_eq!(searches(&reference), 1, "{label}");
             assert_eq!(searches(&blocks), 3, "{label}: the block search ran");
@@ -132,7 +136,9 @@ fn blocks_write_the_prefetch_messages_of_the_search_of_all_queries() {
             if taxdb == "bad_magic" {
                 assert_eq!(
                     messages(&blocks)
-                        .matches("Error: [psiblast] Error: Tax database file has wrong magic number.")
+                        .matches(
+                            "Error: [psiblast] Error: Tax database file has wrong magic number."
+                        )
                         .count(),
                     1,
                     "{label}"

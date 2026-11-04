@@ -681,21 +681,14 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     //     std_freqs = _PSIMatrixFrequencyRatiosNew(sbp->name);
     // ```
     // NCBI's compressed lookup table (word sizes 5 to 7, tblastn-fast) scores its words with
-    // a matrix made from the search matrix's frequency ratios; LOSAT's table is BLOSUM62's
-    // (`tblastx/lookup/compressed.rs`, as blastp-fast's). IDENTITY has no frequency ratios, and
-    // NCBI BLAST+ 2.17.0's tblastn dies of SIGSEGV in `s_BlastCompressedAaScanSubject` with it
-    // at word size 5 (`-task tblastn-fast` too) on every input; larger word sizes are NCBI's
-    // error (`validate_protein_options`).
+    // a matrix made from the search matrix's frequency ratios, as LOSAT's does
+    // (`tblastx/lookup/compressed.rs`, `build_compressed_score_matrix`). IDENTITY has no
+    // frequency ratios, and NCBI BLAST+ 2.17.0's tblastn dies of SIGSEGV in
+    // `s_BlastCompressedAaScanSubject` with it at word size 5 (`-task tblastn-fast` too) on every
+    // input; larger word sizes are NCBI's error (`validate_protein_options`).
     if args.compressed_lookup && args.matrix_name.eq_ignore_ascii_case("IDENTITY") {
         anyhow::bail!(
             "-matrix {} with the compressed lookup table (-word_size {}), with which NCBI BLAST+'s tblastn crashes, is not supported by LOSAT's TBLASTN",
-            args.matrix_name,
-            args.word_size
-        );
-    }
-    if args.compressed_lookup && !args.matrix_name.eq_ignore_ascii_case("BLOSUM62") {
-        anyhow::bail!(
-            "-matrix {} with the compressed lookup table (-word_size {}) is not supported by LOSAT's TBLASTN",
             args.matrix_name,
             args.word_size
         );
@@ -819,8 +812,8 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // Every matrix of NCBI's tables (the nine of blastp and tblastn, IDENTITY with them) and
     // every gap cost pair of its table, as `validate_protein_options` has checked them; the
     // threshold and window are the options' (the matrix's suggested values by default). The
-    // standard table takes word sizes 2 to 4 and the compressed one, BLOSUM62's, 5 to 7 (above);
-    // the word finder is the two-hit one (a window above 0).
+    // standard table takes word sizes 2 to 4 and the compressed one 5 to 7; the word finder is
+    // the two-hit one (a window above 0).
     let profile_supported = (2..=7).contains(&args.word_size) && window > 0;
     let Some(matrix) = matrix.filter(|_| profile_supported) else {
         anyhow::bail!(
@@ -1034,9 +1027,7 @@ mod tests {
                 "{extra:?}"
             );
         }
-        // The compressed lookup table is BLOSUM62's; NCBI's tblastn crashes with IDENTITY's.
-        assert!(limit(&["-task", "tblastn-fast", "-matrix", "BLOSUM80"])
-            .contains("-matrix BLOSUM80 with the compressed lookup table (-word_size 5) is not supported by LOSAT's TBLASTN"));
+        // NCBI's tblastn crashes with IDENTITY's compressed lookup table.
         for extra in [
             &["-task", "tblastn-fast", "-matrix", "IDENTITY"][..],
             &["-matrix", "identity", "-word_size", "5"],
@@ -1065,9 +1056,46 @@ mod tests {
                 "-window_size",
                 "60",
             ],
+            // The compressed lookup table with every matrix but IDENTITY (series SC, SC11).
+            &["-task", "tblastn-fast", "-matrix", "BLOSUM80"],
+            &[
+                "-matrix",
+                "pam30",
+                "-word_size",
+                "5",
+                "-comp_based_stats",
+                "0",
+            ],
+            &["-matrix", "BLOSUM45", "-word_size", "6", "-threshold", "15"],
+            &[
+                "-task",
+                "tblastn-fast",
+                "-matrix",
+                "PAM250",
+                "-word_size",
+                "7",
+            ],
         ] {
             check_options(&parse(extra).unwrap()).unwrap();
         }
+        // NCBI blast_args.cpp:606-620: the matrix's suggested threshold replaces tblastn's 13
+        // only, not the compressed table's 19.3, 21 or 20.25 (nor tblastn-fast's 20); the
+        // window is the matrix's (BLOSUM45's 60).
+        let settings = search_settings(
+            &parse(&["-matrix", "BLOSUM45", "-word_size", "6"])
+                .unwrap()
+                .resolve()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                settings.scoring.word_size,
+                settings.scoring.threshold,
+                settings.scoring.window
+            ),
+            (6, 21.0, 60)
+        );
         // NCBI setup_factory.cpp:143-155: IDENTITY is searched in mode 0 with a warning (for the
         // first query batch), whatever mode is asked.
         for (extra, reset) in [

@@ -66,7 +66,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 |---|---|
 | Max target sequences | 10、50、100、250、500、1000、5000（NCBI の既定は 100、LOSAT は CLI の 500） |
 | Word size | megablast 16、20、24、28、32、48、64／dc-megablast 11、12／blastn と blastn-short 7、11、15／TBLASTN 2、3、5、6／BLASTP と BLASTX 3、5（LOSAT の BLASTP・BLASTX が読む値だけ、DW-36、WA-FM-02）／TBLASTX 3（NCBI は 2、3。LOSAT の TBLASTX は 3 だけ） |
-| Matrix | PAM30、PAM70、BLOSUM90、BLOSUM80、BLOSUM62、BLOSUM50、BLOSUM45、PAM250（NCBI の順）／BLASTP と BLASTX は BLOSUM62 だけ（LOSAT の BLASTP・BLASTX が読む行列。Gap Costs も 11 / 1 だけ、Compositional adjustments は 0 と 2 だけ、DW-36、WA-FM-02）／TBLASTN は word size 5〜7（tblastn-fast の既定 5）で BLOSUM62 だけ（compressed lookup table が読む行列。`listBy`） |
+| Matrix | PAM30、PAM70、BLOSUM90、BLOSUM80、BLOSUM62、BLOSUM50、BLOSUM45、PAM250（NCBI の順）／BLASTP と BLASTX は BLOSUM62 だけ（LOSAT の BLASTP・BLASTX が読む行列。Gap Costs も 11 / 1 だけ、Compositional adjustments は 0 と 2 だけ、DW-36、WA-FM-02） |
 
 一覧が LOSAT の読む値に絞ってある欄のうち Matrix・Word size・Gap Costs は、「Other」で他の値を書ける（エンジンが CLI と同じ文で拒む）。Compositional adjustments（BLASTP・BLASTX の 0 と 2）は「Other」の無い選択なので、1 と 3 は書けない（どちらの CLI も必ず拒む）。エンジンが読む値を増やす PR は一覧も広げる：エンジンの e2e（`search.spec.ts`「the selects of the protein modes offer NCBI's values that the engine reads, and no other」）が、NCBI の値のそれぞれで「一覧にある ⇔ エンジンが読む」を確かめる（Compositional adjustments は同じ commit の native CLI で）。
 
@@ -231,6 +231,8 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 - **2026-11-04（線 WA の W3、入力の P3、WA-IN-04〜07）**：source の card に、先頭の bytes が GenBank（`LOCUS`）、EMBL / UniProt（`ID   `）、FASTQ（`@` の行から 4 行の組）の時は「This looks like a GenBank flat file. LOSAT reads it as FASTA, so its text becomes sequence. Convert it to FASTA first.」（拒まない：CLI も NCBI の reader で同じに読む）。BOM で読めない時は reader の文の後に「The file starts with a UTF-8 byte order mark. Save it as plain text without the mark (UTF-8 or ASCII).」か「The file is UTF-16 text. Save it as plain UTF-8 or ASCII text.」、貼った文は「The text starts with a byte order mark (U+FEFF).」とボタン「Remove the byte order mark」（規則 8）。subrange は start ≥ stop を欄の下で言う：start > stop は「The start cannot be larger than the stop.」（engine の「start cannot be larger than stop」）、start = stop は「The stop must be larger than the start.」（engine は「range cannot be empty」と言うが、欄の位置は 1 から数えて両端を含むので、1 文字を「空」とは書かない）。engine は 5 mode の query と subject で両方を拒む。再読み込みと tab を閉じる時のブラウザの確認は、run 中に加えて、form に入力がある時と結果のある run がある時にも出す（文はブラウザの物）。NCBI はこれをしないが、LOSAT は入力を server に送らず、次の訪問で戻さない（REQ-20）ので、消えると戻せない。
 
 - **2026-11-04（保守者「範囲の逆順は『ひっくり返しますか？』って聞いてあげれば？」）**：subrange で start > stop（両方とも record の中）の時は、欄の下の「The start cannot be larger than the stop.」の横にボタン「Swap to 100–300」（入れ替えた後の範囲を名乗る、規則 1・8）。押すと From と To が入れ替わる。入れ替えても範囲にならない時（範囲の外）は出さない。逆順を -strand の意味には読まない（strand は Strand の欄）。
+
+- **2026-11-05（線 WA の W5、WA2-BR-01）**：保存した結果が開いたまま消えた時（site data の削除）、Outputs は前の format の本文を残さず、本文を出さずに Results を開き直した時と同じ「The results of run 1 could not be read: 」と store の `RESULTS_REMOVED_MESSAGE`（`infra/data/block-store.ts`）を Export の上（本文があればその下）に出す（`results-message error`）。Export の失敗も同じ所（押したボタンの上）に、「Download All」の失敗は run の行の下（一覧の出た所）に、Example の写しの保存と同じ「Not saved: …」と理由を出す。新しい文は作らない（Owner-delegated）。
 
 ## 5. 見た目
 

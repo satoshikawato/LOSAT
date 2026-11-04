@@ -996,7 +996,7 @@ impl XCount {
 //         }
 // ```
 // The passes of the module header; the tests of NCBI's tables are those of
-// `try_build_blosum62_compressed_lookup_with_capacity`, made after each chunk of appends and at the end
+// `try_build_compressed_lookup_with_capacity`, made after each chunk of appends and at the end
 // of a table instead of after each query offset (the reference tests a table once, at the first query
 // offset where its appends have taken more cells of the table of all batches than the capacity, and its
 // outcome, the batch's own table, does not depend on that offset; the cells taken only grow, so a table
@@ -3283,8 +3283,14 @@ mod tests {
             }
             capacities.retain(|&capacity| capacity > 0);
             for capacity in capacities {
-                let reference = try_build_blosum62_compressed_lookup_with_capacity(
-                    5, threshold, &query, &locations, &tables, capacity,
+                let reference = try_build_compressed_lookup_with_capacity(
+                    Blosum62Compressed,
+                    5,
+                    threshold,
+                    &query,
+                    &locations,
+                    &tables,
+                    capacity,
                 )
                 .expect("word size 5");
                 // The bucket fill (LOSAT_X_BPFFILL) builds the same table or declines.

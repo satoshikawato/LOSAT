@@ -290,7 +290,7 @@ export class ResultsBrowser {
       if (first !== undefined) this.selectQuery(first.qIdx);
     } catch (error) {
       if (token !== this.loadToken) return;
-      this.set({ phase: 'failed', message: `The results of run ${run.snapshot.number} could not be read: ${errorMessage(error)}` });
+      this.set({ phase: 'failed', message: unreadableResults(run, error) });
       if (this.state.get().grammar === undefined) this.describeGrammar(token, run.snapshot.program);
     }
   }
@@ -702,6 +702,14 @@ export function optionGrammar(description: ProgramDescription): OptionGrammar {
   const valued = new Set(description.parameters.filter((p) => p.takesValue).map((p) => p.flag));
   const task = description.parameters.find((p) => p.flag === '-task')?.defaultValue;
   return { takesValue: (flag: string) => valued.has(flag), ...(task === undefined ? {} : { defaultTask: task }) };
+}
+
+/**
+ * Why the stored results of a completed run could not be read: opening the results, and reading
+ * one of its outputs in the Outputs, say it alike (WA2-BR-01).
+ */
+export function unreadableResults(run: RunView, error: unknown): string {
+  return `The results of run ${run.snapshot.number} could not be read: ${errorMessage(error)}`;
 }
 
 function unavailableMessage(run: RunView): string {

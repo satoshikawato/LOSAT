@@ -2259,18 +2259,21 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     if args.use_sw_tback {
         bail!("-use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's {program}");
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1389-1392
+    // ```c
+    //         else if (options->lut_type == eCompressedAaLookupTable &&
+    //                  options->word_size != 5 && options->word_size != 6 &&
+    //                  options->word_size != 7) {
+    // ```
+    // The compressed lookup table runs at each of its word sizes, 5 to 7
+    // (`validate_protein_options` has refused the others); of the lookup table's sizes, LOSAT's
+    // BLASTP implements 3 only.
     if args.word_size != 3
-        && !(args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable
-            && args.word_size == 5)
+        && args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable
     {
         bail!(
-            "-word_size {} ({} lookup table) is not supported by LOSAT's {program}",
-            args.word_size,
-            if args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable {
-                "the compressed"
-            } else {
-                "the"
-            }
+            "-word_size {} (the lookup table) is not supported by LOSAT's {program}",
+            args.word_size
         );
     }
     if !args.matrix_name.eq_ignore_ascii_case("BLOSUM62")
@@ -13303,12 +13306,35 @@ mod tests {
     // ASSERT(word_size == 5 || word_size == 6 || word_size == 7);
     // ```
     #[test]
-    fn test_validate_requested_blastp_support_rejects_unverified_compressed_word_size() {
+    fn test_validate_requested_blastp_support_accepts_each_compressed_word_size() {
+        for task in ["blastp", "blastp-fast"] {
+            for word_size in 5..=7 {
+                let mut args = make_blastp_args();
+                args.task = task.to_string();
+                args.word_size = Some(word_size);
+                let resolved = args.resolve().expect("resolved blastp args");
+                assert_eq!(
+                    resolved.lookup_table_type,
+                    BlastpLookupTableType::CompressedAaLookupTable
+                );
+                validate_requested_blastp_support(&resolved)
+                    .unwrap_or_else(|err| panic!("{task} -word_size {word_size}: {err}"));
+            }
+        }
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_options.c:1163-1169
+    // (above): word size 4 keeps the lookup table, of which LOSAT's BLASTP implements word size 3.
+    #[test]
+    fn test_validate_requested_blastp_support_rejects_lookup_table_word_size_four() {
         let mut args = make_blastp_args();
-        args.word_size = Some(6);
+        args.word_size = Some(4);
         let resolved = args.resolve().expect("resolved blastp args");
         let err = validate_requested_blastp_support(&resolved).expect_err("unsupported word size");
-        assert!(err.to_string().contains("not supported by LOSAT's BLASTP"));
+        assert_eq!(
+            err.to_string(),
+            "-word_size 4 (the lookup table) is not supported by LOSAT's BLASTP"
+        );
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3036-3062

@@ -258,6 +258,11 @@ pub(crate) fn x_word_finder_scan(
     diagonals: &mut Diagonals,
     sent: Option<XSent<'_>>,
 ) -> Result<Vec<InitHsp>> {
+    // No NCBI counterpart: records which extension this subject takes (LOSAT_X_REACH); every loop
+    // below takes `sent`.
+    if super::x_ungap_sent::on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_BXUNGAPSENT", sent.is_some());
+    }
     // The table of 16-bit hits is scanned by the fused loop (x_seed_diag.rs), never by the loops of
     // `Int4` hits below.
     let lookup = match lookup {
@@ -268,11 +273,6 @@ pub(crate) fn x_word_finder_scan(
             );
         }
     };
-    // No NCBI counterpart: records which extension this subject takes (LOSAT_X_REACH); both
-    // loops below take `sent`.
-    if super::x_ungap_sent::on() {
-        crate::utils::xreach::x_reach!("LOSAT_X_BXUNGAPSENT", sent.is_some());
-    }
     // EXPERIMENT (LOSAT_X_BXDIAG): the fused loop where it acts (x_seed_diag.rs); where it does
     // not, the direct loop.
     if super::x_seed_diag::x_bxdiag_mode() != 0 {

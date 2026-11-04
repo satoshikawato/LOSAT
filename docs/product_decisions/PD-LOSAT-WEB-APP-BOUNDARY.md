@@ -1,10 +1,15 @@
 # Product Decision: LOSAT Web application boundary
 
 - Decision ID: `PD-LOSAT-WEB-APP-BOUNDARY`
-- Version: 1.0
-- Date: 2026-09-29
+- Version: 1.1
+- Date: 2026-09-29; amended 2026-11-04
 - Status: Accepted by the maintainer on 2026-09-29 (plan decisions DW-1 and DW-12 in
-  [`docs/losat_web_gui_plan.md`](../losat_web_gui_plan.md)).
+  [`docs/losat_web_gui_plan.md`](../losat_web_gui_plan.md)). 1.1 2026-11-04 (the maintainer's
+  instruction of 2026-11-04, recorded in [`docs/web/ncbi_ui_mapping.md`](../web/ncbi_ui_mapping.md)
+  §4: a run's mark says "Supported" or "Not yet supported", and LOSAT Web, the README and the
+  CLI help do not say "verification", "verify", "verified", "certified" or "certification";
+  the sentences' form is Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07). The invariants are unchanged.
 
 ## Scope
 
@@ -94,10 +99,11 @@ NCBI source authority, NCBI reference comments and the parity gates.
 - Identity gates (plan §6): the engine entry must reproduce the CLI bytes (V-NAT), the
   Wasm adapter must reproduce the frozen native bytes (V-ABI), and the browser must
   reproduce them through the real application path (V-BR).
-- A verification badge may say that a run matches a certified profile only when the
-  program, task, options and runtime path are inside a profile certified for that
-  engine build and runtime path. Other runs are labelled "Engine-supported, outside
-  certified profile". Application outputs never inherit an identity label.
+- A run's mark may say "Supported" only when the gate records for that engine build show
+  both that its program, task and options were compared byte for byte with NCBI BLAST+ for
+  every output format the run wrote, and that its runtime path in the browser was compared
+  with the native engine for those formats at the run's thread count. Other runs are marked
+  "Not yet supported". Application outputs never carry a run's mark.
 
 ## Change policy
 
@@ -109,7 +115,8 @@ be implemented in the engine under the root `AGENTS.md` rules, or not at all.
 
 - It does not authorize new engine behavior or any NCBI runtime, build, FFI or
   subprocess dependency.
-- It does not certify the browser runtime; certification comes only from the gates.
+- This decision makes no claim about the browser runtime by itself; a run's mark comes only
+  from the gate records.
 - It does not change the existing web ABI v1 (`losat_web_*` in `LOSAT/src/web_api.rs`),
   which gbdraw uses, beyond the fail-fast fixes in decision item 5.
 
@@ -118,3 +125,7 @@ be implemented in the engine under the root `AGENTS.md` rules, or not at all.
 - 0.1 (2026-09-29): proposed.
 - 1.0 (2026-09-29): accepted. Defined the engine input as whole original records;
   replaced "one search per option set" with an explicit error.
+- 1.1 (2026-11-04): the marks are "Supported" and "Not yet supported", and the text that users
+  read drops the verification and certification words (the maintainer's instruction of
+  2026-11-04); the compatibility contract states what the gates compared; Non-goals reworded.
+  Invariants unchanged.

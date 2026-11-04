@@ -7,7 +7,8 @@ name: Dev head
 # dev, once a day. So every four hours this workflow starts ci.yml on dev (workflow_dispatch, which
 # the default token may start) when dev's head has no run of ci.yml that passed or is still
 # running, and fails when the last run of ci.yml on dev that ended did not pass: the scheduled
-# run's mail reports it, as nightly.yml's job `dev` does.
+# run's mail reports it, as nightly.yml's job `dev` does. A head whose run failed is not started
+# again: the job stays red until someone reruns that run or dev moves on.
 #
 # GitHub starts a schedule only from the file on the default branch, main. main and dev carry the
 # same file; the copy on main is the one that runs, and it starts dev's own copy of ci.yml.
@@ -39,11 +40,13 @@ jobs:
         run: |
           set -euo pipefail
           head=$(gh api "repos/$GH_REPO/commits/dev" --jq .sha)
-          # Runs of ci.yml on dev itself (push, or started here); a pull request's runs check
-          # its merge ref, never dev's commit. A cancelled run (a newer run of dev cancels it,
-          # ci.yml's concurrency) counts as none.
+          # Runs of ci.yml on dev itself (push, or started here), newest first; a pull request's
+          # runs check its merge ref, never dev's commit. A cancelled run that a newer run
+          # follows was cancelled by it (ci.yml's concurrency) and counts as none; the newest
+          # run, if cancelled, was stopped by hand or by a timeout and counts as not passed.
           runs='[.[] | select(.event == "push" or .event == "workflow_dispatch")
-                 | select(.conclusion != "cancelled" and .conclusion != "skipped")]'
+                 | select(.conclusion != "skipped")]
+                | [to_entries[] | select(.key == 0 or .value.conclusion != "cancelled") | .value]'
           list() {
             gh run list --workflow ci.yml --branch dev --limit 50 \
               --json event,headSha,status,conclusion,url --jq "$runs | $1"

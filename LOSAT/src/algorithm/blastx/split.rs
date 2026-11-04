@@ -5,7 +5,9 @@ use super::{
     preliminary::{sort_by_score, PreliminaryHsp},
     query_setup::{prepare_queries, PreparedQueryBatch},
 };
-use crate::algorithm::blastn::query_split::{restrict_masks, ChunkQuery, SplitSizes};
+use crate::algorithm::blastn::query_split::{
+    restrict_masks, restrict_record_masks, ChunkQuery, SplitSizes,
+};
 use crate::utils::dust::MaskedInterval;
 use anyhow::{ensure, Result};
 use std::ops::Range;
@@ -716,17 +718,44 @@ fn x_chunk_masks(whole: &FastaRecord, start: usize, end: usize) -> Vec<(i32, i32
     // `[start + offset, end - 1]` of the record (E2d AUTHORITY §E.1, as BLASTN's and TBLASTN's
     // split queries): the preliminary search of a chunk sees the runs of its last `offset` letters
     // unmasked, which the traceback of the whole query masks again.
-    let runs: Vec<MaskedInterval> = whole
-        .lowercase_masks
-        .iter()
-        .map(|&(a, b)| MaskedInterval::new(a as usize, b as usize + 1))
-        .collect();
     let part = ChunkQuery {
         query: 0,
         from: start,
         to: end,
     };
-    restrict_masks(&runs, &part, whole.placement().offset)
+    let offset = whole.placement().offset;
+    let masks = match whole
+        .source
+        .as_deref()
+        .and_then(|source| source.uncut.as_deref())
+    {
+        // NCBI's masks are the runs of the whole record (`m_UserSpecifiedMasks`), so a run that
+        // ends on the letter before the interval masks the first chunk's first letter, which the
+        // runs cut to the interval (`lowercase_masks`) no longer hold. A record cut to its
+        // interval keeps its whole letters when it has runs (`input::emit_fasta_batch`). The
+        // restriction keeps a run only where it reaches `[start + offset, end - 1]` of the
+        // record, so the runs are read from the chunk's letters in the record and the one before
+        // them: a run cut at either end of these is restricted to the same letters.
+        Some(uncut) => {
+            let from = (start + offset).saturating_sub(1);
+            let to = (end + offset).min(uncut.len());
+            let runs: Vec<MaskedInterval> =
+                crate::algorithm::tblastn::archive::lowercase_runs(&uncut[from..to])
+                    .into_iter()
+                    .map(|(a, b)| MaskedInterval::new(from + a as usize, from + b as usize + 1))
+                    .collect();
+            restrict_record_masks(&runs, &part, offset)
+        }
+        None => {
+            let runs: Vec<MaskedInterval> = whole
+                .lowercase_masks
+                .iter()
+                .map(|&(a, b)| MaskedInterval::new(a as usize, b as usize + 1))
+                .collect();
+            restrict_masks(&runs, &part, offset)
+        }
+    };
+    masks
         .into_iter()
         .map(|mask| (mask.start as i32, mask.end as i32 - 1))
         .collect()
@@ -1202,26 +1231,95 @@ mod x_chunk_record_tests {
         }
     }
 
+    /// `whole` cut `offset` letters into its record, keeping the record's letters: `before` lower
+    /// case letters end on the letter before the interval.
+    fn cut_whole(mut whole: FastaRecord, offset: usize, before: usize) -> FastaRecord {
+        let mut uncut = vec![b'A'; offset];
+        uncut[offset - before..].make_ascii_lowercase();
+        uncut.extend_from_slice(&whole.sequence);
+        for &(left, right) in &whole.lowercase_masks {
+            uncut[offset + left as usize..=offset + right as usize].make_ascii_lowercase();
+        }
+        let source = whole.source.as_deref_mut().unwrap();
+        source.cut_from = offset;
+        source.uncut_length = uncut.len();
+        source.uncut = Some(uncut);
+        whole
+    }
+
+    // A chunk restricts the runs it reads from its letters in the record and the one before
+    // them as it would restrict all the runs of the record, also runs that cross the ends of those
+    // letters, at offsets 0, 1 and 2,500.
+    #[test]
+    fn a_chunks_runs_read_near_it_restrict_as_all_the_records_runs() {
+        use crate::algorithm::blastn::query_split::{restrict_record_masks, ChunkQuery};
+        use crate::utils::dust::MaskedInterval;
+        let mut whole = whole();
+        whole
+            .lowercase_masks
+            .extend([(9_700, 9_710), (19_405, 19_415), (19_700, 19_720)]);
+        whole.lowercase_masks.sort_unstable();
+        for (offset, before) in [(0, 0), (1, 1), (2_500, 0), (2_500, 1), (2_500, 3)] {
+            let cut = cut_whole(whole.clone(), offset, before);
+            let letters = cut.source.as_deref().unwrap().uncut.as_deref().unwrap();
+            let runs: Vec<_> = crate::algorithm::tblastn::archive::lowercase_runs(letters)
+                .into_iter()
+                .map(|(a, b)| MaskedInterval::new(a as usize, b as usize + 1))
+                .collect();
+            for (start, end) in [
+                (0, 10_002),
+                (9_705, 19_707),
+                (19_410, 30_000),
+                (99, 101),
+                (299, 300),
+                (9_701, 9_702),
+            ] {
+                let part = ChunkQuery {
+                    query: 0,
+                    from: start,
+                    to: end,
+                };
+                let all: Vec<_> = restrict_record_masks(&runs, &part, offset)
+                    .into_iter()
+                    .map(|mask| (mask.start as i32, mask.end as i32 - 1))
+                    .collect();
+                assert_eq!(
+                    x_chunk_record(&cut, start, end).lowercase_masks,
+                    all,
+                    "offset {offset} before {before} {start}..{end}"
+                );
+            }
+        }
+    }
+
     // `-query_loc`: a record cut 2,500 letters into its record keeps a run in a chunk only in
     // `[start + 2,500, end - 1]` of the record (the run in the last chunk's last letters is
-    // dropped, those inside stay), and no chunk copies the record's whole letters.
+    // dropped, those inside stay), the run that ends on the letter before the interval masks the
+    // first chunk's first letter (a record without its whole letters cannot), and no chunk copies
+    // the record's whole letters.
     #[test]
     fn a_cut_records_chunks_restrict_the_runs_in_the_record() {
         let mut whole = whole();
+        whole.lowercase_masks.remove(0);
         let plain: Vec<_> = [(9_705, 19_707), (29_000, 30_000)]
             .iter()
             .map(|&(start, end)| x_chunk_record(&whole, start, end).lowercase_masks)
             .collect();
-        let source = whole.source.as_deref_mut().unwrap();
-        source.cut_from = 2_500;
-        source.uncut_length = 32_500;
-        source.uncut = Some(vec![b'a'; 32_500]);
+        let whole = cut_whole(whole, 2_500, 3);
+        let mut runs_cut_only = whole.clone();
+        runs_cut_only.source.as_deref_mut().unwrap().uncut = None;
+        let first = x_chunk_record(&whole, 0, 10_002);
+        assert_eq!(first.lowercase_masks, vec![(0, 0), (100, 300)]);
+        assert_eq!(
+            x_chunk_record(&runs_cut_only, 0, 10_002).lowercase_masks,
+            vec![(100, 300)]
+        );
         let inside = x_chunk_record(&whole, 9_705, 19_707);
         assert_eq!(inside.lowercase_masks, plain[0]);
         assert!(!plain[1].is_empty());
         let last = x_chunk_record(&whole, 29_000, 30_000);
         assert!(last.lowercase_masks.is_empty());
-        for chunk in [inside, last] {
+        for chunk in [first, inside, last] {
             let source = chunk.source.as_deref().unwrap();
             assert!(source.uncut.is_none());
             assert_eq!(

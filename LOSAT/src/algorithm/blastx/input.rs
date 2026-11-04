@@ -155,8 +155,9 @@ impl FastaRecord {
     /// with a range (`seq_range::record_cut`): the lower-case masks are clipped to the letters
     /// and moved with them, and the source keeps where they lie in the record (`placement`).
     /// `keep_whole`: the source keeps the record's whole letters too (`archive_letters`,
-    /// `archive_lowercase_runs`), for the archive's Bioseq (outfmt 11) and the lower case of the
-    /// whole record that outfmt 0 shows on a `-subject_loc` subject's rows.
+    /// `archive_lowercase_runs`), for the archive's Bioseq (outfmt 11), the lower case of the
+    /// whole record that outfmt 0 shows on a `-subject_loc` subject's rows, and the runs of the
+    /// whole record that the chunks of a split query restrict (`split::x_chunk_masks`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1041-1046
     /// ```c
@@ -1414,7 +1415,10 @@ fn emit_fasta_batch(
     match batch.range.map(|range| record_interval(range, length)) {
         None => batch.length += length,
         Some(RecordInterval::Letters { from, to }) => {
-            record.cut_in_place(from, to + 1, batch.keep_whole);
+            // A record with lower-case runs keeps its whole letters for the chunks of a split
+            // query, which restrict the runs of the whole record (`split::x_chunk_masks`).
+            let keep_whole = batch.keep_whole || !record.lowercase_masks.is_empty();
+            record.cut_in_place(from, to + 1, keep_whole);
             batch.length += length;
         }
         Some(RecordInterval::Empty) => {
@@ -2998,6 +3002,20 @@ mod range_tests {
         let (delivered, kept) = batches(b">a\nACG\n", &range, 10);
         assert!(kept.is_empty());
         assert_eq!(delivered, vec![Vec::new()]);
+    }
+
+    // A record with lower-case runs keeps its whole letters after the cut, also when its only run
+    // ends on the letter before the interval (the runs of the whole record, which a split query's
+    // chunks restrict); a record without runs keeps only its interval.
+    #[test]
+    fn a_cut_record_with_lower_case_runs_keeps_its_whole_letters() {
+        let range = SequenceRange { from: 4, to: 7 };
+        let (_, kept) = batches(b">a\nACGtACGTAC\n>b\nACGTACGTAC\n", &range, 100);
+        assert_eq!(kept[0].sequence, b"ACGT");
+        assert!(kept[0].lowercase_masks.is_empty());
+        assert_eq!(kept[0].archive_letters(), b"ACGtACGTAC");
+        assert_eq!(kept[0].archive_lowercase_runs(), vec![(3, 3)]);
+        assert_eq!(kept[1].archive_letters(), b"ACGT");
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1041-1046

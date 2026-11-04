@@ -703,3 +703,29 @@ LOSAT's PSIBLAST does not write. A `-db` search of each of them ignores `BL2SEQ_
 search by queries (`-num_threads` 2 or more, a large query file, a small database) catches the exception as `-mt_mode 1` does. The ncbi rows are `abc` (BLASTN: an
 empty value) in outfmt 11 and `BL2SEQ_LEGACY=1` in outfmt 6 (TBLASTN: 0); the `losat-rejection` row is BLASTN's `abc` in
 outfmt 6. The `-subject` cases of the five programs are `tests/search_environment.rs`.
+
+## BLASTX `-query_loc` and the chunk masks (line NP, series SM)
+
+Rows `db.bxqloc.*` search `bxqloc` with `bxqloc_q.fna`, `-query_loc 10-9009 -lcase_masking` and
+`CHUNK_SIZE=1002 OVERLAP_CHUNK_SIZE=99` (a BLASTX chunk is a multiple of 3). NCBI restricts the lower-case runs of the
+whole record to each chunk (`split_query_cxx.cpp:278-281`), one letter longer, so a run that ends on the letter before
+the interval masks the interval's first letter in the first chunk's preliminary search. NCBI splits a BLASTX query
+batch only when it holds one query. The inputs come from `random.Random(20261104)` (Q and its back-translation, as in
+the `db.tqloc.*` rows) and `random.Random(20261105)`:
+
+- `bxqloc_q.fna`: `a` (`AC`, which the range skips), `p` (`ATGAAAGTT` and 600 random nucleotides) and `q`
+  (`ATGAAAGTt` and Q of 3,000 residues, which starts with W, back-translated with one codon per residue: 9,000
+  nucleotides). Without `BATCH_SIZE`, `p` and `q` share a query batch, which is not split (`db.bxqloc.two.6`: `s14` is
+  reported); with `BATCH_SIZE=100` `q` is alone in its batch and split (`db.bxqloc.b100.6`: at `-evalue 1e-7` NCBI
+  reports `q` against `s30` only; with `ATGAAAGTT` in place of `ATGAAAGTt` it reports `s14` too).
+- `bxqloc.faa`: `s14` and `s30`, the first 14 and 30 residues of Q between 50 random residues on each side.
+
+The database (version 4, no `-parse_seqids`; only `.pin .psq .phr` are kept). Run from `LOSAT/`:
+
+    makeblastdb -in tests/db_search/bxqloc.faa -dbtype prot -out tests/db_search/bxqloc \
+        -title "Q[0:14] and Q[0:30] of bxqloc_q.fna's q between random letters" -blastdb_version 4
+    rm tests/db_search/bxqloc.pjs
+
+The `-subject` rows `bxqloc.blastx.*` of `outfmt0_manifest.tsv` use `tests/fasta/outfmt0/bxqloc_q.fna` (`ATGAAAGTt`,
+the same 9,000 nucleotides and 11,000 more random ones: 20,000 searched nucleotides, which NCBI splits at the default
+sizes, 10,002 and 297) and `tests/fasta/outfmt0/bxqloc_s.faa` (a copy of `bxqloc.faa`), at `-evalue 2e-7`.

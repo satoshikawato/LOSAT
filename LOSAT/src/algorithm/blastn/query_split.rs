@@ -665,6 +665,34 @@ pub fn restrict_masks(
         .collect()
 }
 
+/// `restrict_masks` for masks given in the record's coordinates (`[start, end)` in the record),
+/// as NCBI holds a query's lower-case masks: the runs of the whole record, also those before a
+/// `-query_loc` interval. A run that ends on the letter before the interval then reaches the
+/// first letter of the query's first part through the restriction's extra residue, which a mask
+/// in the searched letters' coordinates cannot express. The steps are `restrict_masks`'s.
+pub fn restrict_record_masks(
+    masks: &[MaskedInterval],
+    part: &ChunkQuery,
+    offset: usize,
+) -> Vec<MaskedInterval> {
+    let last = part.to - 1;
+    let (interval_from, interval_to) = (part.from + offset, last + offset);
+    masks
+        .iter()
+        .filter_map(|mask| {
+            let left = mask.start.max(part.from);
+            let right_open = mask.end.min(last);
+            if left >= right_open {
+                return None;
+            }
+            let restricted_left = left.saturating_sub(interval_from);
+            let restricted_right = right_open.min(interval_to) as isize - interval_from as isize;
+            (restricted_left as isize <= restricted_right)
+                .then(|| MaskedInterval::new(restricted_left, restricted_right as usize + 1))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -862,6 +890,56 @@ mod tests {
                 MaskedInterval::new(90, 100),
             ]
         );
+    }
+
+    // Masks in the record's coordinates are restricted as `restrict_masks` restricts the same
+    // masks in the searched letters' coordinates; a run that ends on the letter before the
+    // interval (record 9 with offset 10) reaches the first part's first letter, only while that
+    // part's last letter (`to - 1`, which bounds the run in record coordinates) is not before the
+    // offset.
+    #[test]
+    fn record_masks_restrict_as_searched_masks_and_reach_the_first_letter() {
+        let offset = 10;
+        let searched = [
+            MaskedInterval::new(0, 3),
+            MaskedInterval::new(95, 120),
+            MaskedInterval::new(185, 190),
+        ];
+        let record: Vec<_> = searched
+            .iter()
+            .map(|mask| MaskedInterval::new(mask.start + offset, mask.end + offset))
+            .collect();
+        for (from, to) in [(0, 100), (90, 200), (180, 200), (0, 11), (0, 12)] {
+            let part = ChunkQuery { query: 0, from, to };
+            assert_eq!(
+                restrict_record_masks(&record, &part, offset),
+                restrict_masks(&searched, &part, offset),
+                "{from}..{to}"
+            );
+        }
+        let before = [MaskedInterval::new(4, 10)];
+        let part = |to| ChunkQuery {
+            query: 0,
+            from: 0,
+            to,
+        };
+        assert_eq!(
+            restrict_record_masks(&before, &part(100), offset),
+            vec![MaskedInterval::new(0, 1)]
+        );
+        assert_eq!(
+            restrict_record_masks(&before, &part(11), offset),
+            vec![MaskedInterval::new(0, 1)]
+        );
+        assert!(restrict_record_masks(&before, &part(10), offset).is_empty());
+        let later = ChunkQuery {
+            query: 0,
+            from: 90,
+            to: 200,
+        };
+        assert!(restrict_record_masks(&before, &later, offset).is_empty());
+        let two_before = [MaskedInterval::new(4, 9)];
+        assert!(restrict_record_masks(&two_before, &part(100), offset).is_empty());
     }
 
     // CHUNK_SIZE and OVERLAP_CHUNK_SIZE as NCBI reads them (split_query_aux_priv.cpp:100-138).

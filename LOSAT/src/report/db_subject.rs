@@ -127,6 +127,31 @@ pub enum FoundInstead {
     Failed(String),
 }
 
+/// What NCBI's prefetch of a query batch reads for a subject that no report shows, by its
+/// Seq-align id (`ParsedSubject::prefetched`): psiblast's traceback hit lists beyond
+/// `-max_target_seqs`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Prefetched {
+    /// The sequence itself, or the same record whose lookups of its taxids write the same texts
+    /// (`ParsedSubject::fetched` without the taxonomy formats).
+    Itself,
+    /// No sequence: the prefetch reads nothing for it.
+    Nothing,
+    /// Another sequence, by ordinal id where LOSAT knows it, whose taxids the prefetch can look up
+    /// instead: `FoundInstead::Sequence` (that sequence where one of its ids compares equal to
+    /// the Seq-align id, else none), `AlsoHeld` (`or_itself`: the subject or that sequence, as
+    /// the ids of the blobs read before in the run decide, `CBlastDbDataLoader::m_Ids`), and the
+    /// same record whose lookups write other texts (`None`); `reason` as `fetched` gives it.
+    Another {
+        other: Option<u32>,
+        or_itself: bool,
+        reason: String,
+    },
+    /// A lookup that fails (the reason): NCBI's prefetch catches the exception, writes the
+    /// warning `Error pre-fetching sequence data` and reads no other subject of the batch.
+    Failed(String),
+}
+
 /// Why the reports can show apart a copy of a subject with the same definition lines but for
 /// their taxids (`FoundInstead::CopyApart`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -505,6 +530,69 @@ impl ParsedSubject {
                 "has the Seq-align id {}, by which NCBI BLAST+'s formatters do not find the sequence (NCBI BLAST+ 2.17.0 writes Unknown or another sequence's names, or stops)",
                 id()
             )),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:770-786
+    // ```c++
+    //        s_ExtractSeqidsAndRanges(results, ids, ranges);
+    //        _TRACE("Prefetching " << ids.size() << " sequence lengths");
+    //        LoadSequencesToScope(ids, ranges, scope);
+    // 	}
+    //     catch(const CSeqDBException & e) {
+    //         _TRACE(e.GetMsg());
+    //     	throw;
+    //     }
+    //     catch (const CException& e) {
+    // 	   if(s_IsUsingRemoteBlastDbDataLoader()) {
+    //           ERR_POST(Warning << "Error fetching sequence data from BLAST databases at NCBI, "
+    //                      "please try again later");
+    // 	   }
+    // 	   else {
+    //           ERR_POST(Warning << "Error pre-fetching sequence data");
+    // 	   }
+    //    }
+    // ```
+    // The prefetch loads each subject's Bioseq by its Seq-align id, as the formatters find it
+    // (`fetched`), by the exact lookup only (the weak matches come where it is off): an id that
+    // the lookup finds nowhere loads nothing, without a message (probe of DBID P1 review 1:
+    // `gnl|PIG|124`, `gnl|BL_ORD_ID|40` of no sequence); a lookup that fails (a `gnl|BL_ORD_ID|0`
+    // stored with a text tag) ends the prefetch with that warning; `lcl|555` that an earlier
+    // sequence holds loads that sequence, whose taxids it looks up.
+    /// What NCBI's prefetch reads for this subject where no report shows it (`Prefetched`).
+    pub fn prefetched(&self) -> Prefetched {
+        let reason = || self.fetched(false).err().unwrap_or_default();
+        // The loader reads the blob of a subject whose definition line the formatters do not
+        // find (`unfetchable`) and looks its taxids up (review 2 of DBID P1: `lcl|777` before
+        // `gi|777`, `bad_magic`).
+        if self.unfetchable {
+            return Prefetched::Itself;
+        }
+        match &self.found_instead {
+            None
+            | Some(
+                FoundInstead::OtherTaxids(_)
+                | FoundInstead::CopyApart(_, CopyApart::Title)
+                | FoundInstead::WeaklyHeld(_)
+                | FoundInstead::WeakUnlisted,
+            ) => Prefetched::Itself,
+            Some(FoundInstead::Nothing) => Prefetched::Nothing,
+            Some(FoundInstead::Failed(_)) => Prefetched::Failed(reason()),
+            Some(FoundInstead::Sequence(other)) => Prefetched::Another {
+                other: Some(*other),
+                or_itself: false,
+                reason: reason(),
+            },
+            Some(FoundInstead::AlsoHeld(other)) => Prefetched::Another {
+                other: Some(*other),
+                or_itself: true,
+                reason: reason(),
+            },
+            Some(FoundInstead::CopyApart(_, CopyApart::TaxonomyTexts)) => Prefetched::Another {
+                other: None,
+                or_itself: false,
+                reason: reason(),
+            },
         }
     }
 
@@ -1834,6 +1922,49 @@ mod tests {
             error.contains("whose lookup in the database fails (DB contains no accession info.;"),
             "{error}"
         );
+    }
+
+    // Line DBID P1: what NCBI's prefetch reads for a subject that no report shows (psiblast's
+    // traceback hit list beyond -max_target_seqs), from what its lookup finds.
+    #[test]
+    fn the_prefetch_of_an_unshown_subject_reads_what_the_lookup_finds() {
+        let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
+        let prefetched =
+            |found: Option<FoundInstead>| subject.clone().found_instead(found).prefetched();
+        for itself in [
+            None,
+            Some(FoundInstead::OtherTaxids(2)),
+            Some(FoundInstead::CopyApart(2, CopyApart::Title)),
+            Some(FoundInstead::WeaklyHeld(2)),
+            Some(FoundInstead::WeakUnlisted),
+        ] {
+            assert_eq!(prefetched(itself.clone()), Prefetched::Itself, "{itself:?}");
+        }
+        assert_eq!(prefetched(Some(FoundInstead::Nothing)), Prefetched::Nothing);
+        assert!(matches!(
+            prefetched(Some(FoundInstead::Failed("no accession info".into()))),
+            Prefetched::Failed(reason) if reason.contains("whose lookup in the database fails")
+        ));
+        assert!(matches!(
+            prefetched(Some(FoundInstead::Sequence(4))),
+            Prefetched::Another {
+                other: Some(4),
+                or_itself: false,
+                ..
+            }
+        ));
+        assert!(matches!(
+            prefetched(Some(FoundInstead::AlsoHeld(4))),
+            Prefetched::Another {
+                other: Some(4),
+                or_itself: true,
+                ..
+            }
+        ));
+        assert!(matches!(
+            prefetched(Some(FoundInstead::CopyApart(4, CopyApart::TaxonomyTexts))),
+            Prefetched::Another { other: None, .. }
+        ));
     }
 
     // Line DBID N1b L1: a copy with other taxids from which NCBI can make the subject's title is

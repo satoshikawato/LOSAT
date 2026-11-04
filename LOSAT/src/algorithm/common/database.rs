@@ -708,6 +708,20 @@ impl LookupTexts {
     }
 }
 
+/// Whether the lookups of the taxonomy database of `db` can write other texts for two of the
+/// taxid lists `choices`, each what a prefetch can read for one subject (a sequence's positive
+/// taxids, `ParsedSubject::volume_taxids`; empty for reading nothing): `LookupTexts::differ`.
+/// `false` without `taxdb.bti` on the search path and for a taxonomy database whose lookups
+/// write nothing.
+pub(crate) fn lookup_texts_differ(db: &SeqDb, choices: &[&[i32]]) -> bool {
+    let texts = LookupTexts::of(db);
+    choices.iter().enumerate().any(|(index, taxids)| {
+        choices[index + 1..]
+            .iter()
+            .any(|other| texts.differ(taxids, other))
+    })
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753
 // ```c++
 // static bool
@@ -741,14 +755,31 @@ impl LookupTexts {
 // ```
 /// Whether NCBI's formatters may read a batch's reported sequences one by one, not all at once
 /// before its report: `PRE_FETCH_SEQS_LIMIT` is an integer other than `INT_MAX` (0, or one below
-/// the batch's number of Seq-aligns, which LOSAT does not count, turns NCBI's prefetch off).
-/// A value that is no integer stops NCBI before its report; LOSAT refuses it in
-/// `blastinput::app::check_search_environment` (not for outfmt 11, whose archive NCBI writes
-/// without the prefetch).
+/// the batch's number of Seq-aligns, which the readers of the headers do not count, turns NCBI's
+/// prefetch off, [`prefetch_off`]). A value that is no integer stops NCBI before its report;
+/// LOSAT refuses it in `blastinput::app::check_search_environment` (not for outfmt 11, whose
+/// archive NCBI writes without the prefetch).
 fn prefetch_may_be_off() -> bool {
+    prefetch_seqs_limit().is_some_and(|limit| limit != i32::MAX)
+}
+
+/// Whether NCBI's prefetch is off for a query batch whose results hold `seq_aligns` Seq-aligns
+/// (one for each HSP of its hit lists, the count of outfmt 7's `# N hits found`):
+/// `PRE_FETCH_SEQS_LIMIT` is an integer other than `INT_MAX` that is 0 or below `seq_aligns`.
+/// Its formatters then fetch the sequences that each query's report shows, after the query's
+/// own warnings, where the report reads them (`TabularSpec::fetches_subject`).
+pub(crate) fn prefetch_off(seq_aligns: usize) -> bool {
+    prefetch_seqs_limit().is_some_and(|limit| {
+        limit != i32::MAX
+            && (limit == 0 || i64::try_from(seq_aligns).unwrap_or(i64::MAX) > i64::from(limit))
+    })
+}
+
+/// `PRE_FETCH_SEQS_LIMIT` as `NStr::StringToInt` reads it; `None` when it is not set or is no
+/// integer.
+fn prefetch_seqs_limit() -> Option<i32> {
     std::env::var_os("PRE_FETCH_SEQS_LIMIT")
         .and_then(|value| crate::blastinput::query_batch::ncbi_string_to_int(&value))
-        .is_some_and(|limit| limit != i32::MAX)
 }
 
 impl<'a> HeaderReader<'a> {

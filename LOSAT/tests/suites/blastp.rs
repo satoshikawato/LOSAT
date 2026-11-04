@@ -53,6 +53,8 @@ mod blastp_subj_meta;
 mod blastp_subject_runs;
 #[path = "../blastp_ungap_sent.rs"]
 mod blastp_ungap_sent;
+#[path = "../psiblast_taxdb_blocks.rs"]
+mod psiblast_taxdb_blocks;
 #[path = "../run_local_blastp.rs"]
 mod run_local_blastp;
 #[path = "../run_local_blastp_blocks.rs"]

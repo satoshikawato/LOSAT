@@ -2,11 +2,11 @@
 // The region of a role's only record (DW-9; NCBI's "Query subrange" / "Subject subrange"):
 // two position fields, and a bar that shows the record, on which a range can be chosen by
 // dragging. The region becomes -query_loc or -subject_loc start-stop.
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import type { SearchDraft } from '../application/draft';
 import type { DatasetRecord } from '../domain/dataset';
 import type { InputRole } from '../domain/programs';
-import { regionFromPositions, regionProblem, regionRange, type RegionText } from '../domain/region';
+import { regionFromPositions, regionProblem, regionRange, swappedRegion, type RegionText } from '../domain/region';
 import { formatCount } from './format';
 
 const props = defineProps<{
@@ -20,9 +20,12 @@ const props = defineProps<{
 }>();
 
 const bar = ref<HTMLElement>();
+const startInput = ref<HTMLInputElement>();
 const dragFrom = ref<number>();
 const testid = computed(() => `${props.role}-region`);
 const problem = computed(() => (props.region === undefined ? undefined : regionProblem(props.region, props.record.length)));
+/** A start after the stop: the swap, offered beside the problem (Owner, 2026-11-04). */
+const swapped = computed(() => (props.region === undefined ? undefined : swappedRegion(props.region, props.record.length)));
 const range = computed(() => (props.region === undefined ? undefined : regionRange(props.region, props.record.length)));
 const selection = computed(() => {
   const value = range.value;
@@ -32,6 +35,12 @@ const selection = computed(() => {
   const width = ((Math.abs(value.stop - value.start) + 1) / length) * 100;
   return { left: `${left}%`, width: `${Math.max(width, 0.4)}%` };
 });
+
+/** Swaps the fields; the button goes with the problem, so the focus moves to From. */
+function swap(region: RegionText): void {
+  props.draft.setRegion(props.role, region);
+  void nextTick(() => startInput.value?.focus());
+}
 
 function update(change: Partial<RegionText>): void {
   const current = props.region ?? { start: '', stop: '' };
@@ -89,6 +98,7 @@ function up(): void {
         <input
           type="text"
           inputmode="numeric"
+          ref="startInput"
           :value="region?.start ?? ''"
           placeholder="1"
           :data-testid="`${testid}-start`"
@@ -110,7 +120,18 @@ function up(): void {
         Whole record
       </button>
     </div>
-    <p v-if="problem" class="error" :data-testid="`${testid}-problem`">{{ problem }}</p>
+    <p v-if="problem" class="error">
+      <!-- One line: the space between the two is kept. -->
+      <span :data-testid="`${testid}-problem`">{{ problem }}</span> <button
+        v-if="swapped"
+        type="button"
+        class="link"
+        :data-testid="`${testid}-swap`"
+        @click="swap(swapped)"
+      >
+        Swap to {{ swapped.start }}–{{ swapped.stop }}
+      </button>
+    </p>
     <p v-else-if="region" class="hint" :data-testid="`${testid}-argument`">Positions in the results are those of the whole record.</p>
   </fieldset>
 </template>

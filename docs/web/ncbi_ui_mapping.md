@@ -228,6 +228,8 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 
 - **2026-11-04（線 WA の W3、入力の P3、WA-IN-04〜07）**：source の card に、先頭の bytes が GenBank（`LOCUS`）、EMBL / UniProt（`ID   `）、FASTQ（`@` の行から 4 行の組）の時は「This looks like a GenBank flat file. LOSAT reads it as FASTA, so its text becomes sequence. Convert it to FASTA first.」（拒まない：CLI も NCBI の reader で同じに読む）。BOM で読めない時は reader の文の後に「The file starts with a UTF-8 byte order mark. Save it as plain text without the mark (UTF-8 or ASCII).」か「The file is UTF-16 text. Save it as plain UTF-8 or ASCII text.」、貼った文は「The text starts with a byte order mark (U+FEFF).」とボタン「Remove the byte order mark」（規則 8）。subrange は start ≥ stop を欄の下で言う：start > stop は「The start cannot be larger than the stop.」（engine の「start cannot be larger than stop」）、start = stop は「The stop must be larger than the start.」（engine は「range cannot be empty」と言うが、欄の位置は 1 から数えて両端を含むので、1 文字を「空」とは書かない）。engine は 5 mode の query と subject で両方を拒む。再読み込みと tab を閉じる時のブラウザの確認は、run 中に加えて、form に入力がある時と結果のある run がある時にも出す（文はブラウザの物）。NCBI はこれをしないが、LOSAT は入力を server に送らず、次の訪問で戻さない（REQ-20）ので、消えると戻せない。
 
+- **2026-11-04（保守者「範囲の逆順は『ひっくり返しますか？』って聞いてあげれば？」）**：subrange で start > stop（両方とも record の中）の時は、欄の下の「The start cannot be larger than the stop.」の横にボタン「Swap to 100–300」（入れ替えた後の範囲を名乗る、規則 1・8）。押すと From と To が入れ替わる。入れ替えても範囲にならない時（範囲の外）は出さない。逆順を -strand の意味には読まない（strand は Strand の欄）。
+
 ## 5. 見た目
 
 保守者の指示（2026-11-02）「色とかボタンを gbdraw の GUI っぽく」「フォントも Inter で」。配置・節の順・言葉は NCBI のまま（§1〜§4）、色・字・部品の形は gbdraw の Web GUI（`gbdraw/web/index.html` の `--ui-*` と `css/tailwind.input.css` の `.btn` `.card` `.form-input`）に合わせる（`web/app/src/ui/styles.css` の `:root`）。

@@ -310,6 +310,7 @@ test('the region of a role with one record: the drag, the fields, the limits and
   // A range of one letter and a start after the stop are NCBI's errors in every mode; the fields say so (WA-IN-07).
   await page.getByTestId('subject-region-stop').fill('5');
   await expect(page.getByTestId('subject-region-problem')).toHaveText('The stop must be larger than the start.');
+  await expect(page.getByTestId('subject-region-swap')).toHaveCount(0);
   await page.getByTestId('subject-region-start').fill('60');
   await expect(page.getByTestId('subject-region-problem')).toHaveText('The start cannot be larger than the stop.');
   await submit(page);
@@ -318,6 +319,15 @@ test('the region of a role with one record: the drag, the fields, the limits and
     // The argv leaves the region out until it is one, so the engine's validate has nothing to refuse.
     await expect(page.getByTestId('argv-validation')).not.toContainText('subject location');
   }
+  // The form offers the swap (Owner, 2026-11-04); outside the record it offers none.
+  await expect(page.getByTestId('subject-region-swap')).toHaveText('Swap to 5–60');
+  await page.getByTestId('subject-region-swap').click();
+  await expect(page.getByTestId('subject-region-start')).toBeFocused();
+  await expect(page.getByTestId('subject-region-start')).toHaveValue('5');
+  await expect(page.getByTestId('subject-region-stop')).toHaveValue('60');
+  await expect(page.getByTestId('subject-region-problem')).toHaveCount(0);
+  await page.getByTestId('subject-region-start').fill('101');
+  await expect(page.getByTestId('subject-region-swap')).toHaveCount(0);
   await page.getByTestId('subject-region-start').fill('5');
   await page.getByTestId('subject-region-stop').fill('060');
   await expect(page.getByTestId('subject-region-argument')).toHaveText('Positions in the results are those of the whole record.');

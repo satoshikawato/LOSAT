@@ -247,13 +247,20 @@ fn x_pool_lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 // No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them); one
-// short of room is replaced by one of `n` entries, or with `slack` (the overflow, whose length
-// changes from table to table) `n + n / 4`, not the doubling of `resize`.
+// short of room grows to `n` entries, or with `slack` (the overflow, whose length changes from
+// table to table) `n + n / 4`, not the doubling of `resize`. It grows by a reallocation of its own
+// allocation (`reserve_exact`), never a new allocation and a free of the old one: glibc moves a
+// mapped allocation with `mremap`, so the pool never frees a mapped vector, and a free of one
+// raises glibc's dynamic mmap threshold to its size and the trim threshold of every arena to
+// twice that. From then on the blocks below that size land in the arenas of the threads that
+// allocate them, and an arena keeps up to that much of free memory at its top: at 64 threads,
+// 800 cDNAs x 2 yeast proteins `-subject` freed 1.9-3.0 MiB overflow vectors, and the threads'
+// arenas held 47 MiB at the peak, 23 MiB of it free.
 fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
-    if vector.capacity() < n {
-        vector = Vec::with_capacity(if slack { n + n / 4 } else { n });
-    }
     vector.clear();
+    if vector.capacity() < n {
+        vector.reserve_exact(if slack { n + n / 4 } else { n });
+    }
     vector.resize(n, T::default());
     vector
 }
@@ -1975,7 +1982,9 @@ fn x_claimed<T: Send, R: Send>(parts: Vec<T>, f: &(dyn Fn(T) -> R + Sync)) -> Ve
 ))]
 fn x_sized<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
     if vector.capacity() < n {
-        vector = Vec::with_capacity(if slack { n + n / 4 } else { n });
+        // Grown in its own allocation, as `x_zeroed` grows (no vector of the pool is freed).
+        vector.clear();
+        vector.reserve_exact(if slack { n + n / 4 } else { n });
     }
     vector.truncate(n);
     vector.resize(n, T::default());

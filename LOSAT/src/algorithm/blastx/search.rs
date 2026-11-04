@@ -787,7 +787,7 @@ fn x_search_core(
             let x_cap = x_bx_mem::chunk_unit_cap(pool, options, subjects);
             // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): a capped wave's chunks build
             // their tables on the threads the cap leaves each (x_bx_mem.rs).
-            let x_parts = x_bx_mem::build_parts(pool, x_cap.is_some());
+            let x_parts = x_bx_mem::build_parts(pool, x_cap.is_some(), None);
             let mut x_next = 0;
             while x_next < chunks.len() {
                 let x_wave = x_cap.map(|(k, _)| x_bx_mem::chunk_wave(pool, k));
@@ -1010,12 +1010,11 @@ fn x_search_core(
             // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): a batch of the capped batch
             // flow builds its table on the threads the cap leaves it (x_bx_mem.rs).
             #[cfg(feature = "parallel")]
-            let x_parts = x_bx_mem::build_parts(pool, false);
+            let x_parts = x_bx_mem::build_parts(pool, false, Some(subjects.len()));
             #[cfg(not(feature = "parallel"))]
             let x_parts = 1;
             let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
             let last = batch.contexts.last().expect("BLASTX contexts");
-            let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;
             let xdrop = subject_parameters(
                 batch,
                 &mut params,
@@ -1066,6 +1065,26 @@ fn x_search_core(
             #[cfg(feature = "parallel")]
             let x_keep =
                 pool.enabled() && x_flow_k.is_some() && x_bx_mem::diag_keep(options, subjects);
+            // The loop's own table: where the helpers run on the tables their threads keep, the
+            // one this thread keeps too (x_bx_mem.rs `XDiagSlot`), not a new table for every
+            // batch or chunk the thread searches.
+            let mut x_new_table = None;
+            #[cfg(feature = "parallel")]
+            let mut x_own_slot = x_keep
+                .then(|| x_bx_mem::XDiagSlot::new(last.offset + last.length, options.window_size));
+            #[cfg(feature = "parallel")]
+            let diagonals: &mut Diagonals = match x_own_slot.as_mut() {
+                Some(slot) => slot.get()?,
+                None => x_new_table.insert(Diagonals::new(
+                    last.offset + last.length,
+                    options.window_size,
+                )?),
+            };
+            #[cfg(not(feature = "parallel"))]
+            let diagonals: &mut Diagonals = x_new_table.insert(Diagonals::new(
+                last.offset + last.length,
+                options.window_size,
+            )?);
             #[cfg(feature = "parallel")]
             let mut worker_diagonals = if pool.enabled() && !x_keep {
                 (0..subjects.len().min(pool.threads()))
@@ -1083,8 +1102,12 @@ fn x_search_core(
             #[cfg(feature = "parallel")]
             let x_flowed = if let Some(x_k) = x_flow_k {
                 let x_t = super::x_timing::lap();
+                // Dispatch point (LOSAT_X_BXCAPFILL, in the strict set): a batch of one task of the
+                // capped batch flow has helpers for the threads the cap leaves it
+                // (x_bx_mem::flow_threads).
+                let x_threads = x_bx_mem::flow_threads(pool, options, subjects.len());
                 let helper_tables = if x_keep {
-                    (1..pool.threads())
+                    (1..x_threads)
                         .map(|_| {
                             x_bx_mem::XScratch::Slot(x_bx_mem::XDiagSlot::new(
                                 last.offset + last.length,
@@ -1095,7 +1118,7 @@ fn x_search_core(
                 } else {
                     std::mem::take(&mut worker_diagonals)
                         .into_iter()
-                        .take(pool.threads() - 1)
+                        .take(x_threads - 1)
                         .map(x_bx_mem::XScratch::Owned)
                         .collect()
                 };
@@ -1106,7 +1129,7 @@ fn x_search_core(
                     &params,
                     options,
                     &lookup,
-                    &mut diagonals,
+                    &mut *diagonals,
                     helper_tables,
                     xdrop,
                     db_length,
@@ -1229,7 +1252,7 @@ fn x_search_core(
                             &params,
                             options,
                             &lookup,
-                            &mut diagonals,
+                            &mut *diagonals,
                             xdrop,
                             diagnostics,
                             db_length,

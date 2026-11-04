@@ -1665,17 +1665,24 @@ fn search(
                     // (`shared::prefetch_off`), each query's report fetches the subjects it
                     // shows, after the query's own warnings, where the first format reads their
                     // Bioseqs (`TabularSpec::fetches_subject`). A batch that fetches nothing still
-                    // asks for the run's refusal of NCBI's taxonomy cache before any byte.
+                    // asks for the run's refusal of NCBI's taxonomy cache before any byte, unless
+                    // no batch of the run prefetches (`shared::prefetch_always_off`).
                     if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                        let fetches = first_spec
-                            .as_ref()
-                            .is_none_or(|spec| spec.fetches_subject(false));
+                        let fetches = first_spec.as_ref().is_none_or(|spec| {
+                            spec.fetches_subject(crate::blastinput::app::Program::Tblastn)
+                        });
+                        let asks =
+                            fetches || !crate::algorithm::common::database::prefetch_always_off();
                         for (query, hitlist) in span.clone().zip(hitlists) {
                             let shown = std::slice::from_ref(hitlist);
-                            let messages = database
-                                .prefetch_messages(reported, if fetches { shown } else { &[] })?;
+                            if asks {
+                                let messages = database.prefetch_messages(
+                                    reported,
+                                    if fetches { shown } else { &[] },
+                                )?;
+                                query_warning_lines[query].extend(messages);
+                            }
                             rows_open(shown)?;
-                            query_warning_lines[query].extend(messages);
                         }
                         continue;
                     }

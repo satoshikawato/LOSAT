@@ -545,7 +545,8 @@ impl ReportedSubjects {
     /// Bioseqs (`fetches`, `TabularSpec::fetches_subject`), after the query's own warnings. The
     /// messages are kept by query for the writers (`query_fetches`). Refusals as
     /// `prefetch_messages`; a batch that fetches nothing still asks for the run's refusal of
-    /// NCBI's taxonomy cache.
+    /// NCBI's taxonomy cache (the caller does not call it where no batch of the run prefetches,
+    /// `shared::prefetch_always_off`).
     pub(crate) fn fetch_by_query(
         &mut self,
         database: &BlastxDatabase,

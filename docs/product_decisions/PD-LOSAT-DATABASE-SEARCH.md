@@ -652,6 +652,9 @@ Known differences that remain:
     on the copy, also where the bytes do not change (the copy with a tax id fetched first, which
     makes the same first lookup).
 - A damaged LMDB file can stop NCBI and LOSAT with other exit statuses and texts.
+- With `PRE_FETCH_SEQS_LIMIT=2147483647`, NCBI's prefetch also runs for outfmt 8, 9 and 12 (its
+  `s_PreFetchSeqs` returns before it tests the format) and writes the taxonomy database's messages;
+  LOSAT writes none for these formats (all five programs).
 
 ## Evidence
 

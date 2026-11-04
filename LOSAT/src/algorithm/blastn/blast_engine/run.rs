@@ -9580,18 +9580,27 @@ fn run_in_pool(
                 // after the query's own warnings (`query_fetches`, added after them below), where
                 // the first format reads their Bioseqs (`TabularSpec::fetches_subject`; BLASTN's
                 // formatter does not fetch for the identities). A batch that fetches nothing still
-                // asks for the run's refusal of NCBI's taxonomy cache before its first byte.
+                // asks for the run's refusal of NCBI's taxonomy cache before its first byte, unless
+                // no batch of the run prefetches (`shared::prefetch_always_off`).
                 let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                     let fetches = match output_formats.first() {
-                        Some(BlastnOutputFormat::CustomTabular(spec)) => spec.fetches_subject(true),
+                        Some(BlastnOutputFormat::CustomTabular(spec)) => {
+                            spec.fetches_subject(crate::blastinput::app::Program::Blastn)
+                        }
                         _ => true,
                     };
+                    let asks =
+                        fetches || !crate::algorithm::common::database::prefetch_always_off();
                     batch_hit_lists
                         .iter()
                         .map(|hit_list| {
                             let shown = std::slice::from_ref(hit_list);
-                            let messages = database
-                                .prefetch_messages(&titles, if fetches { shown } else { &[] })?;
+                            let messages = if asks {
+                                database
+                                    .prefetch_messages(&titles, if fetches { shown } else { &[] })?
+                            } else {
+                                Vec::new()
+                            };
                             rows_open(shown)?;
                             Ok(messages)
                         })

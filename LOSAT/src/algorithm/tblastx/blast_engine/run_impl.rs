@@ -3146,7 +3146,9 @@ fn run_batch_loop(
             .formats
             .first()
             .is_none_or(|format| match report::output_format(format.outfmt) {
-                report::TblastxOutputFormat::CustomTabular(spec) => spec.fetches_subject(false),
+                report::TblastxOutputFormat::CustomTabular(spec) => {
+                    spec.fetches_subject(crate::blastinput::app::Program::Tblastx)
+                }
                 _ => true,
             });
     // A batch is read from the input records (`input_start..input_end`); its searched
@@ -3526,9 +3528,12 @@ fn run_batch_loop(
                 // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
                 // after the query's own warnings (`query_fetches`, added after them below), where
                 // the first format reads their Bioseqs (`fetches`). A batch that fetches nothing
-                // still asks for the run's refusal of NCBI's taxonomy cache before any byte.
+                // still asks for the run's refusal of NCBI's taxonomy cache before any byte, unless
+                // no batch of the run prefetches (`shared::prefetch_always_off`).
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                     debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
+                    let asks =
+                        fetches || !crate::algorithm::common::database::prefetch_always_off();
                     for query in 0..(end - start) as u32 {
                         let shown = if fetches {
                             let from = ordered.partition_point(|hsp| hsp.hit.q_idx < query);
@@ -3537,11 +3542,15 @@ fn run_batch_loop(
                         } else {
                             &[]
                         };
-                        query_fetches.push(super::super::database::prefetch_messages(
-                            database,
-                            shown,
-                            &reports.titles.borrow(),
-                        )?);
+                        query_fetches.push(if asks {
+                            super::super::database::prefetch_messages(
+                                database,
+                                shown,
+                                &reports.titles.borrow(),
+                            )?
+                        } else {
+                            Vec::new()
+                        });
                         if plural_names && ordered.iter().any(|hsp| hsp.hit.q_idx == query) {
                             database.open_for_tabular_rows()?;
                         }

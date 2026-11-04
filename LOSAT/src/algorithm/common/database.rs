@@ -764,7 +764,8 @@ fn prefetch_may_be_off() -> bool {
 }
 
 /// Whether NCBI's prefetch is off for a query batch whose results hold `seq_aligns` Seq-aligns
-/// (one for each HSP of its hit lists, the count of outfmt 7's `# N hits found`):
+/// (one for each HSP of a gapped search, the count of outfmt 7's `# N hits found`, one for each
+/// subject of an ungapped one: [`subject_seq_aligns`]):
 /// `PRE_FETCH_SEQS_LIMIT` is an integer other than `INT_MAX` that is 0 or below `seq_aligns`.
 /// Its formatters then fetch the sequences that each query's report shows, after the query's
 /// own warnings, where the report reads them (`TabularSpec::fetches_subject`).
@@ -792,6 +793,13 @@ pub(crate) fn subject_seq_aligns(hsps: usize, gapped: bool) -> usize {
     } else {
         usize::from(hsps > 0)
     }
+}
+
+/// Whether NCBI's prefetch is off for every query batch of the run: `PRE_FETCH_SEQS_LIMIT` is 0 or
+/// negative ([`prefetch_off`] of a batch without Seq-aligns). A run whose reports then read no
+/// subject looks no taxid up, so it has no refusal of NCBI's taxonomy cache to ask for.
+pub(crate) fn prefetch_always_off() -> bool {
+    prefetch_off(0)
 }
 
 /// `PRE_FETCH_SEQS_LIMIT` as `NStr::StringToInt` reads it; `None` when it is not set or is no

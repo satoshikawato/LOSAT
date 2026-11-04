@@ -1163,12 +1163,16 @@ fn run_inner(
                             // (`ReportedSubjects::fetch_by_query`), where the format reads their
                             // Bioseqs (`TabularSpec::fetches_subject`).
                             if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                                let fetches = options
-                                    .tabular
-                                    .is_none_or(|spec| spec.fetches_subject(false));
-                                reported
-                                    .fetch_by_query(database, results, options.gapped, fetches)
-                                    .inspect_err(discard)?;
+                                let fetches = options.tabular.is_none_or(|spec| {
+                                    spec.fetches_subject(crate::blastinput::app::Program::Blastx)
+                                });
+                                if fetches
+                                    || !crate::algorithm::common::database::prefetch_always_off()
+                                {
+                                    reported
+                                        .fetch_by_query(database, results, options.gapped, fetches)
+                                        .inspect_err(discard)?;
+                                }
                                 if options.outfmt == 5 {
                                     diagnostics.write_all(&reported.take_query_fetches())?;
                                 }

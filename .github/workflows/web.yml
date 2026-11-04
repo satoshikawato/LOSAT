@@ -15,6 +15,9 @@ on:
       - '.github/workflows/web.yml'
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   # One always-present gate for the required check: the `on.pull_request` trigger has no `paths:`
   # filter (a required check of a workflow that did not run would block the pull request forever),

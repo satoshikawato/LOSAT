@@ -1,13 +1,18 @@
 name: CI
 
 # Pull requests run the fast checks (no NCBI executable); pushes run them on main
-# and on the integration branch dev only. The two-hour WASI matrix and the full
-# TBLASTX output set run in nightly.yml (schedule, workflow_dispatch) and in
-# release-readiness.yml.
+# and on the integration branch dev only. dev-head.yml starts a run of dev's head
+# (workflow_dispatch) when it has none: a merge made with the default token starts
+# no push run. The two-hour WASI matrix and the full TBLASTX output set run in
+# nightly.yml (schedule, workflow_dispatch) and in release-readiness.yml.
 on:
   push:
     branches: [main, dev]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -70,7 +75,7 @@ jobs:
       - name: Changelog fragments
         run: python3 scripts/changelog_fragments.py check
       - run: cd LOSAT && cargo fmt --check
-      - run: cd LOSAT && cargo clippy --all-targets --all-features -- -D warnings
+      - run: cd LOSAT && cargo clippy --locked --all-targets --all-features -- -D warnings
 
   # cargo test --all-features in two shards on two runners (cargo-nextest, `--partition count:k/2`:
   # each test binary's tests in turn to the shards). Four vCPUs shaped like a runner's (two cores
@@ -80,6 +85,8 @@ jobs:
   rust-tests:
     name: cargo test (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
+    # About twice the longest shard of 40 passing runs (39.8 min, 2026-11-04).
+    timeout-minutes: 80
     strategy:
       fail-fast: false
       matrix:
@@ -106,13 +113,14 @@ jobs:
         with:
           tool: cargo-nextest@0.9.148
       - name: cargo nextest run --all-features
-        run: cd LOSAT && cargo nextest run --all-features --no-fail-fast --partition count:${{ matrix.shard }}/2
+        run: cd LOSAT && cargo nextest run --locked --all-features --no-fail-fast --partition count:${{ matrix.shard }}/2
         env:
           LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
-      # nextest runs no doc tests.
+      # nextest runs no doc tests. The crate has none yet (`running 0 tests`, 2026-11-04): the
+      # step stays so that the first doc example is run without a change here.
       - name: cargo test --all-features --doc
         if: matrix.shard == 1
-        run: cd LOSAT && cargo test --all-features --doc
+        run: cd LOSAT && cargo test --locked --all-features --doc
 
   # The check to require in the rulesets: it always runs and fails if a job above failed or was
   # cancelled.

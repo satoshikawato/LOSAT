@@ -35,6 +35,12 @@ const OTHER_THREADS: readonly number[] = Array.from({ length: 32 }, (_, i) => i 
  * (several records, query batches, the threaded module's own reducer).
  */
 const EVERY_COUNT_CASES: readonly string[] = ['multi.megablast', 'e2e.blastp.fast', 'blastx.batches', 'tblastn.batches', 'tblastx.threaded-direct'];
+/**
+ * The defaults of the search form's tasks (WA-RS-03), run in a page of their own: in WebKit 26.5,
+ * a page that had run some 95 searches failed the next dc-megablast search with "ran out of
+ * memory" (memory.grow refused) at every thread count, which a new page does not.
+ */
+const TASK_DEFAULT_CASES: readonly string[] = ['multi.megablast', 'dc.default', 'short.default', 'e2e.blastp.fast', 'pyl.blastx', 'tfast.e2e.def'];
 
 let harness: HarnessFiles;
 let isolated: HarnessServer;
@@ -184,17 +190,28 @@ async function vbrSearches(context: BrowserContext, runs: readonly (readonly [Vb
 
 test('V-BR: searches through the application give the expected bytes at 1, 2, 4, 8, 16 and 32 threads', async ({ context, browserName }) => {
   test.skip(NATIVE === undefined, NO_NATIVE_REASON);
-  const runs = vbrCases().flatMap((vbr) => VBR_THREADS.map((threads) => [vbr, threads] as const));
+  const cases = vbrCases().filter((vbr) => !TASK_DEFAULT_CASES.includes(vbr.id));
+  const runs = cases.flatMap((vbr) => VBR_THREADS.map((threads) => [vbr, threads] as const));
   record('v-br', browserName, await vbrSearches(context, runs));
 });
 
-test('V-BR: one search of each program gives the expected bytes at every other thread count up to 32', async ({ context, browserName }) => {
+test('V-BR: the defaults of the tasks give the expected bytes at 1, 2, 4, 8, 16 and 32 threads', async ({ context, browserName }) => {
   test.skip(NATIVE === undefined, NO_NATIVE_REASON);
-  const cases = vbrCases().filter((vbr) => EVERY_COUNT_CASES.includes(vbr.id));
-  expect(cases.map((vbr) => vbr.program).sort()).toEqual(['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx']);
-  const runs = cases.flatMap((vbr) => OTHER_THREADS.map((threads) => [vbr, threads] as const));
-  record('v-br-counts', browserName, await vbrSearches(context, runs));
+  const cases = vbrCases().filter((vbr) => TASK_DEFAULT_CASES.includes(vbr.id));
+  expect(cases.map((vbr) => vbr.id)).toEqual(TASK_DEFAULT_CASES);
+  const runs = cases.flatMap((vbr) => VBR_THREADS.map((threads) => [vbr, threads] as const));
+  record('v-br-defaults', browserName, await vbrSearches(context, runs));
 });
+
+// One search of each program at every other thread count up to 32, each program in a page of its own.
+if (new Set(vbrCases().filter((vbr) => EVERY_COUNT_CASES.includes(vbr.id)).map((vbr) => vbr.program)).size !== 5) throw new Error('EVERY_COUNT_CASES: one case of each program');
+for (const id of EVERY_COUNT_CASES) {
+  test(`V-BR: ${id} gives the expected bytes at every other thread count up to 32`, async ({ context, browserName }) => {
+    test.skip(NATIVE === undefined, NO_NATIVE_REASON);
+    const vbr = vbrCases().find((candidate) => candidate.id === id)!;
+    record(`v-br-counts-${id}`, browserName, await vbrSearches(context, OTHER_THREADS.map((threads) => [vbr, threads] as const)));
+  });
+}
 
 test('R1: searches of one subject with other queries and options reuse it and give the expected bytes', async ({ context, browserName }) => {
   test.skip(NATIVE === undefined, NO_NATIVE_REASON);

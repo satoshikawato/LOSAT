@@ -34,6 +34,7 @@ import {
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES, splitOptions } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
 import type { ExampleId } from '../domain/examples';
+import { inputLead, type InputLead } from '../domain/input-format';
 import { formControlOf, formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
 import {
   fastaParser,
@@ -101,6 +102,8 @@ export interface DraftSource {
   readonly tables?: Readonly<Partial<Record<FastaParserKind, SourceTable>>>;
   /** The first lines of the source, as text, for its preview. */
   readonly head?: string;
+  /** What the first bytes say besides FASTA: a byte order mark, or another file format (WA-IN-04, WA-IN-05). */
+  readonly lead?: InputLead;
   readonly check?: SourceCheck;
   /** Milliseconds that the index (scan and record hashes) took. */
   readonly indexMs?: number;
@@ -367,6 +370,12 @@ export class SearchDraft {
    */
   addDefline(role: InputRole): void {
     this.setPaste(role, `>pasted_${role}\n${this.role(role).paste.trimStart()}`);
+  }
+
+  /** Removes the byte order mark (U+FEFF) that a pasted text starts with, which NCBI's reader cannot read (WA-IN-05). */
+  removeByteOrderMark(role: InputRole): void {
+    const paste = this.role(role).paste;
+    if (paste.startsWith('\uFEFF')) this.setPaste(role, paste.slice(1));
   }
 
   /** Adds files; each is indexed at once (S12 instructions). */
@@ -987,15 +996,17 @@ export class SearchDraft {
     // The index holds its source until the form shows it; a superseded or failed index lets it go.
     const holder = `index:${task}:${generation}`;
     const started = this.deps.now();
+    // Kept for a source that cannot be read too: a byte order mark says why.
+    let lead: InputLead | undefined;
     try {
       // The source is added once: its other kind's index reads the same data (no second inflation of a .gz).
       const ref = known === undefined ? await this.deps.data.addSource(file) : undefined;
       const sourceId = known ?? ref!.sourceId;
       this.refs.set(holder, [sourceId]);
-      const head =
-        ref === undefined
-          ? undefined
-          : await this.deps.data.previewSource(sourceId, HEAD_BYTES).then(headText, () => undefined);
+      const preview =
+        ref === undefined ? undefined : await this.deps.data.previewSource(sourceId, HEAD_BYTES).catch(() => undefined);
+      const head = preview === undefined ? undefined : headText(preview);
+      lead = preview === undefined ? undefined : inputLead(preview, preview.length >= ref!.size);
       const base = await this.deps.data.indexSource(sourceId, parser);
       if (!current()) return;
       this.updateSource(role, key, (source) => ({
@@ -1009,12 +1020,18 @@ export class SearchDraft {
         check: { state: 'pending' },
         indexMs: this.deps.now() - started,
         ...(head === undefined ? {} : { head }),
+        ...(lead === undefined ? {} : { lead }),
       }));
       this.noteRevision(sourceId, base.revisionId);
       this.scheduleCheck(role, key, 0);
     } catch (error) {
       if (!current()) return;
-      this.updateSource(role, key, (source) => ({ ...source, status: 'failed', error: messageOf(error) }));
+      this.updateSource(role, key, (source) => ({
+        ...source,
+        status: 'failed',
+        error: messageOf(error),
+        ...(lead === undefined ? {} : { lead }),
+      }));
     } finally {
       this.refs.release(holder);
       this.scheduleValidation();
@@ -1256,6 +1273,11 @@ function fetchProblem(result: Exclude<FetchResult, { ok: true }>, source: FetchS
         ? `${label} asks to wait (too many requests): fetch again in a moment.`
         : `${label} answered HTTP ${result.status} for ${accession}.`;
   }
+}
+
+/** Whether the form holds inputs: a pasted text (accessions too) or a source of either role. */
+export function holdsInputs(state: DraftState): boolean {
+  return ROLES.some((role) => state[role].paste !== '' || state[role].sources.length > 0);
 }
 
 /** The included records of a ready source. */

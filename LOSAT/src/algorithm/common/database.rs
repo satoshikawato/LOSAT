@@ -764,7 +764,8 @@ fn prefetch_may_be_off() -> bool {
 }
 
 /// Whether NCBI's prefetch is off for a query batch whose results hold `seq_aligns` Seq-aligns
-/// (one for each HSP of its hit lists, the count of outfmt 7's `# N hits found`):
+/// (one for each HSP of a gapped search, the count of outfmt 7's `# N hits found`, one for each
+/// subject of an ungapped one: [`subject_seq_aligns`]):
 /// `PRE_FETCH_SEQS_LIMIT` is an integer other than `INT_MAX` that is 0 or below `seq_aligns`.
 /// Its formatters then fetch the sequences that each query's report shows, after the query's
 /// own warnings, where the report reads them (`TabularSpec::fetches_subject`).
@@ -773,6 +774,32 @@ pub(crate) fn prefetch_off(seq_aligns: usize) -> bool {
         limit != i32::MAX
             && (limit == 0 || i64::try_from(seq_aligns).unwrap_or(i64::MAX) > i64::from(limit))
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1417-1446
+// ```c++
+//     /* All HSPs are put in one seqalign, containing a list of
+//      * DenseDiag for same molecule search, or StdSeg for translated searches.
+//      */
+//     ...
+//     sa_vector.push_back(seqalign);
+// ```
+/// The number of Seq-aligns NCBI makes of a subject's `hsps` HSPs, which [`prefetch_off`]
+/// counts: one for each HSP of a gapped search (`BLASTHspListToSeqAlign`), one for all of them
+/// in an ungapped search (`BLASTUngappedHspListToSeqAlign`; TBLASTX's is always ungapped).
+pub(crate) fn subject_seq_aligns(hsps: usize, gapped: bool) -> usize {
+    if gapped {
+        hsps
+    } else {
+        usize::from(hsps > 0)
+    }
+}
+
+/// Whether NCBI's prefetch is off for every query batch of the run: `PRE_FETCH_SEQS_LIMIT` is 0 or
+/// negative ([`prefetch_off`] of a batch without Seq-aligns). A run whose reports then read no
+/// subject looks no taxid up, so it has no refusal of NCBI's taxonomy cache to ask for.
+pub(crate) fn prefetch_always_off() -> bool {
+    prefetch_off(0)
 }
 
 /// `PRE_FETCH_SEQS_LIMIT` as `NStr::StringToInt` reads it; `None` when it is not set or is no

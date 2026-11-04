@@ -171,5 +171,13 @@ export function vbrCases(): VbrCase[] {
       subject: 'docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/s.fna',
       frozen: {},
     },
+    // The defaults of every mode and task of the search form (WA-RS-03): megablast and BLASTX
+    // with their outfmt 7 rows (def7.*), dc-megablast, blastn-short, blastp-fast, tblastn-fast.
+    manifestCase('multi.megablast', ['multi.megablast', 'def7.multi.megablast']),
+    manifestCase('dc.default', ['dc.default', 'dc.default.7']),
+    manifestCase('short.default', ['short.default', 'short.default.7']),
+    manifestCase('e2e.blastp.fast', ['e2e.blastp.fast']),
+    manifestCase('pyl.blastx', ['pyl.blastx.0', 'pyl.blastx.6', 'def7.pyl.blastx']),
+    manifestCase('tfast.e2e.def', ['tfast.e2e.def.0', 'def7.tfast.e2e']),
   ];
 }

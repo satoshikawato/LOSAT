@@ -140,6 +140,40 @@ describe('SearchDraft inputs', () => {
     expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready' });
   });
 
+  it('names a byte order mark of a text that cannot be read, and removes it on request (WA-IN-05)', async () => {
+    const { draft } = setup();
+    draft.setPaste('query', '\uFEFF>q1\nACGT\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', lead: { mark: 'UTF-8' } });
+    expect(sourceOf(draft, 'query').error).toContain("doesn't look like plausible data");
+    draft.removeByteOrderMark('query');
+    await draft.idle();
+    expect(draft.state.get().query.paste).toBe('>q1\nACGT\n');
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', check: { state: 'ok', records: 1 } });
+    expect(sourceOf(draft, 'query').lead).toBeUndefined();
+  });
+
+  it('reads a GenBank file as FASTA text, as the command line does, and names its format through a mode change (WA-IN-04)', async () => {
+    const { draft } = setup();
+    draft.addFiles('query', [file('x.gb', 'LOCUS       X 8 bp DNA\nORIGIN\n        1 acgtacgt\n//\n')]);
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', lead: { format: 'GenBank' } });
+    expect(sourceOf(draft, 'query').base?.records).toHaveLength(1);
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ parser: 2, lead: { format: 'GenBank' } });
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ parser: 1, status: 'ready', lead: { format: 'GenBank' } });
+  });
+
+  it('names the format of a compressed file from its inflated bytes', async () => {
+    const { draft } = setup();
+    draft.addFiles('query', [new File([gzipSync('LOCUS       X 8 bp DNA\nORIGIN\n        1 acgtacgt\n//\n')], 'x.gb.gz')]);
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ name: 'x.gb', status: 'ready', lead: { format: 'GenBank' } });
+  });
+
   it('shows the engine refusal of a record and maps it to the record table; excluding it passes the check', async () => {
     const { draft } = setup();
     draft.setPaste('query', '>a\nACGT\n>b\nACGT!ACGT\n>c\nACGT\n');

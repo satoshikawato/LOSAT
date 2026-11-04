@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Attention, type AttentionDeps } from '../../src/application/attention';
 import type { AppState, RunView } from '../../src/application/coordinator';
+import type { DraftSource, DraftState, RoleDraft } from '../../src/application/draft';
 import { Store } from '../../src/application/store';
 import type { RunStatus } from '../../src/domain/run';
 import type { PagePort, WakeLockHandle } from '../../src/ports/page';
@@ -74,6 +75,7 @@ function setup(
     probe?: AttentionDeps['probe'];
     probeTimeoutMs?: number;
     minHiddenMs?: number;
+    draft?: Store<DraftState>;
   } = {},
 ) {
   const page = new FakePage(options.supported ?? true);
@@ -83,6 +85,7 @@ function setup(
   const attention = new Attention({
     page,
     runs,
+    ...(options.draft === undefined ? {} : { draft: options.draft }),
     keepAwake: options.keepAwake,
     probe: options.probe ?? (() => Promise.resolve()),
     now: () => clock.now,
@@ -107,19 +110,48 @@ describe('leave guard', () => {
     expect(state().active).toBe(status !== 'queued');
   });
 
-  it('follows the runs: on while any run is in progress, off when all are terminal', () => {
+  it('follows the runs: on while any run is in progress, off when all have ended without results', () => {
     const { page, setRuns, state } = setup({ runs: [run('a', 1, 'running'), run('b', 2, 'queued')] });
     expect(page.guard).toBe(true);
-    setRuns([run('a', 1, 'completed'), run('b', 2, 'queued')]);
+    setRuns([run('a', 1, 'cancelled'), run('b', 2, 'queued')]);
     expect(page.guard).toBe(true);
     expect(state()).toMatchObject({ active: false, busy: true });
-    setRuns([run('a', 1, 'completed'), run('b', 2, 'running')]);
+    setRuns([run('a', 1, 'cancelled'), run('b', 2, 'running')]);
     expect(state()).toMatchObject({ active: true, busy: true });
-    setRuns([run('a', 1, 'completed'), run('b', 2, 'failed')]);
+    setRuns([run('a', 1, 'cancelled'), run('b', 2, 'failed')]);
     expect(page.guard).toBe(false);
     expect(state()).toMatchObject({ active: false, busy: false });
     setRuns([run('a', 1, 'cancelled')]);
     expect(page.guard).toBe(false);
+  });
+
+  // Nothing is kept for the next visit (REQ-20), so a reload loses results and inputs for good (WA-IN-06).
+  it('stays on while a run has results', () => {
+    const { page, setRuns, state } = setup({ runs: [run('a', 1, 'running')] });
+    setRuns([run('a', 1, 'completed')]);
+    expect(page.guard).toBe(true);
+    expect(state()).toMatchObject({ active: false, busy: false });
+  });
+
+  it('is on while the search form holds a pasted text or a source of either role', () => {
+    const role = (change: Partial<RoleDraft> = {}): RoleDraft => ({ paste: '', sources: [], mode: 'combined', ...change });
+    const form = (query: RoleDraft, subject: RoleDraft) => ({ query, subject }) as unknown as DraftState;
+    const draft = new Store<DraftState>(form(role(), role()));
+    const { page } = setup({ draft });
+    expect(page.guard).toBe(false);
+    draft.set(form(role({ paste: '>q\nACGT\n' }), role()));
+    expect(page.guard).toBe(true);
+    draft.set(form(role(), role()));
+    expect(page.guard).toBe(false);
+    draft.set(form(role(), role({ sources: [{ key: 'file-1' } as DraftSource] })));
+    expect(page.guard).toBe(true);
+    // A box of accessions only has no source until it is fetched; it is an input too.
+    draft.set(form(role({ paste: 'NC_045512.2' }), role()));
+    expect(page.guard).toBe(true);
+    // A form change that leaves the guard as it is does not set it again.
+    const calls = page.leaveGuards.length;
+    draft.set(form(role({ paste: 'NC_045512.3' }), role()));
+    expect(page.leaveGuards).toHaveLength(calls);
   });
 });
 

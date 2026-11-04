@@ -11,7 +11,7 @@ import { computed, onUnmounted, ref, watch } from 'vue';
 import type { Attention, AttentionState } from '../application/attention';
 import type { SearchDraft } from '../application/draft';
 import type { ExampleLoader } from '../application/examples';
-import { effectiveValue, formParameters, placementFlags, sectionsAt } from '../domain/parameters';
+import { changedFields, effectiveValue, placementFlags, sectionsAt } from '../domain/parameters';
 import { PROGRAMS, programById, searchSummaryParts, type InputRole } from '../domain/programs';
 import { useStore } from './useStore';
 import ExampleLine from './ExampleLine.vue';
@@ -81,12 +81,12 @@ onUnmounted(() => clearTimeout(engineWait));
 const taskFields = computed(() => sectionsAt(program.value, options.value, 'program').flatMap((section) => section.fields));
 const summaryParts = computed(() => searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value)));
 /**
- * The Algorithm parameters that the argv writes: each differs from the engine's default; the
- * words of "Additional options" count as one.
+ * The Algorithm parameters that differ from the engine's defaults ("♦"); the words of
+ * "Additional options" count as one.
  */
 const changed = computed(
   () =>
-    formParameters(program.value, values.value, options.value, 'algorithm').length +
+    changedFields(program.value, values.value, options.value, 'algorithm') +
     (state.value.extra[state.value.program].trim() === '' ? 0 : 1),
 );
 /**

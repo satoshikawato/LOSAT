@@ -1084,6 +1084,27 @@ describe('SearchDraft submit', () => {
     expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
   });
 
+  // WA-FM-04, WA-FM-05: the CLI prints its help for -h, and its messages for these name
+  // -subject and -num_threads, which the browser sets itself.
+  it("refuses in Additional options the CLI's help and the options that a search in the browser cannot have, in the browser's words", async () => {
+    const { draft } = setup({ useCoordinator: true });
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    const refusal = async (text: string) => {
+      draft.setExtra(text);
+      await draft.idle();
+      const validation = draft.state.get().validation;
+      return validation.state === 'invalid' ? validation.message : validation.state;
+    };
+    expect(await refusal('-help')).toBe('-help is not available in the browser');
+    expect(await refusal('-ungapped -h')).toBe('-h is not available in the browser');
+    expect(await refusal('-db nt')).toBe('-db (a database search) is not supported in the browser yet');
+    expect(await refusal('-taxids 9606')).toBe('-taxids (a database search filter) is not supported in the browser yet');
+    expect(await refusal('-mt_mode 1')).toBe('-mt_mode is managed by LOSAT');
+    expect(await draft.submit()).toEqual({ ok: false, message: '-mt_mode is managed by LOSAT' });
+  });
+
   it('gives every run of the draft its Job Title, outside the argv', async () => {
     const { draft, requests, coordinator } = setup({ useCoordinator: true });
     draft.addFiles('subject', [file('s1.fa', '>s1\nACGT\n'), file('s2.fa', '>s2\nACGT\n')]);

@@ -10,7 +10,6 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { noHspReason, type HspId, type ResultsBrowser } from '../application/results';
-import { shellWords } from '../domain/argv';
 import { recordName } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
@@ -140,11 +139,10 @@ function runLabel(run: RunView): string {
 
 /**
  * The options of the run's argv: the words after the program and the two inputs (plan §5.3),
- * quoted as on a command line, so that they can be typed again ("Additional options").
+ * which CommandText quotes as on a command line, so that they can be typed again ("Additional options").
  */
-function options(run: RunView): string {
-  const words = run.snapshot.argv.slice(5);
-  return words.length === 0 ? 'defaults' : shellWords(words);
+function options(run: RunView): readonly string[] {
+  return run.snapshot.argv.slice(5);
 }
 
 /** The program and the task that the search used (the argv's, or the engine's default once the run is read). */
@@ -231,7 +229,8 @@ async function toAlignments(id: HspId): Promise<void> {
             </dd>
             <dt>Options</dt>
             <dd class="run-inputs" data-testid="results-run-options">
-              <CommandText :text="options(selected)" />
+              <CommandText v-if="options(selected).length > 0" :words="options(selected)" :takes-value="state.grammar?.takesValue" />
+              <template v-else>defaults</template>
               <template v-if="selected.snapshot.group">
                 · group run {{ selected.snapshot.group.position }} of {{ selected.snapshot.group.size }}
               </template>

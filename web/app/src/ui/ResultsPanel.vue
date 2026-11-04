@@ -9,7 +9,7 @@
 // selection, held by the HSP's identity (application/results.ts).
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
-import { saveOutput } from '../application/outputs';
+import { OutputSaver } from '../application/outputs';
 import { noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
@@ -72,19 +72,15 @@ const downloadsOpen = ref(false);
 const downloadsId = useId();
 const downloadsButton = ref<HTMLButtonElement>();
 const downloadsList = ref<HTMLElement>();
-const downloadProblem = ref('');
-let downloads = 0;
+const saver = new OutputSaver(props.coordinator);
+const downloadProblem = useStore(saver.problem);
 
-async function download(format: OutputFormat): Promise<void> {
+function download(format: OutputFormat): void {
   downloadsOpen.value = false;
   // The chosen item leaves the page with the list; the focus stays on "Download All".
   downloadsButton.value?.focus();
   const run = loaded.value?.run;
-  if (run === undefined) return;
-  const attempt = ++downloads;
-  downloadProblem.value = '';
-  const problem = await saveOutput(props.coordinator, run, format);
-  if (attempt === downloads) downloadProblem.value = problem;
+  if (run !== undefined) void saver.save(run, format);
 }
 
 /** Escape closes the list, and the focus goes back to its button (Safari does not focus a clicked button). */
@@ -130,8 +126,7 @@ const active = computed(() => selected.value !== undefined && !isTerminal(select
 // Another run, or the same run read again, starts with the list closed and without the reason of a download.
 watch([() => state.value.runId, () => state.value.phase], () => {
   downloadsOpen.value = false;
-  downloads++;
-  downloadProblem.value = '';
+  saver.reset();
 });
 
 // With no run chosen, show the newest completed one.

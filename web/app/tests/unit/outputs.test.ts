@@ -1,9 +1,9 @@
 // The Outputs' reads and exports (src/application/outputs.ts): an output that cannot be read shows
 // no text and says why, as the Results do; an export that is not saved says why in the same place;
-// a read or an export that ends after a later choice changes nothing (WA2-BR-01).
+// a read or an export that ends after a later choice, a later export or a reset changes nothing (WA2-BR-01).
 import { describe, expect, it } from 'vitest';
 import type { RunView } from '../../src/application/coordinator';
-import { OutputReader, saveOutput, type OutputPort } from '../../src/application/outputs';
+import { OutputReader, OutputSaver, saveOutput, type OutputPort } from '../../src/application/outputs';
 import type { OutputFormat } from '../../src/domain/output-format';
 import { RESULTS_REMOVED_MESSAGE, StorageRemovedError } from '../../src/infra/data/block-store';
 
@@ -52,16 +52,16 @@ describe('OutputReader', () => {
   it('shows the output read, and keeps the text shown while the next one is read', async () => {
     const { outputs, reader, state } = setup();
     void reader.show(run(1), 6);
-    expect(state()).toEqual({ shown: '', text: '', failed: false, problem: '' });
+    expect(state()).toEqual({ shown: '', text: '', failed: '', problem: '' });
     outputs.reads[0]!.resolve('q\ts\n');
     await settle();
-    expect(state()).toEqual({ shown: '1:6', text: 'q\ts\n', failed: false, problem: '' });
+    expect(state()).toEqual({ shown: '1:6', text: 'q\ts\n', failed: '', problem: '' });
     void reader.show(run(1), 0);
     expect(outputs.reads[1]).toMatchObject({ runId: 'r1', format: 0 });
-    expect(state()).toEqual({ shown: '', text: 'q\ts\n', failed: false, problem: '' });
+    expect(state()).toEqual({ shown: '', text: 'q\ts\n', failed: '', problem: '' });
     outputs.reads[1]!.resolve('BLASTN\n');
     await settle();
-    expect(state()).toEqual({ shown: '1:0', text: 'BLASTN\n', failed: false, problem: '' });
+    expect(state()).toEqual({ shown: '1:0', text: 'BLASTN\n', failed: '', problem: '' });
   });
 
   it('an output that cannot be read shows no text, not the format shown before, and says why as the Results do', async () => {
@@ -72,13 +72,29 @@ describe('OutputReader', () => {
     void reader.show(run(1), 0);
     outputs.reads[1]!.reject(removed());
     await settle();
-    expect(state()).toEqual({ shown: '', text: '', failed: true, problem: UNREADABLE });
-    // The next format is read; the reason stays until it is.
-    void reader.show(run(1), 7);
-    expect(state()).toEqual({ shown: '', text: '', failed: true, problem: UNREADABLE });
-    outputs.reads[2]!.resolve('# BLASTN\n');
+    expect(state()).toEqual({ shown: '', text: '', failed: '1:0', problem: UNREADABLE });
+    // The next format is read; the reason stays until it is, and `failed` names the read that failed.
+    void reader.show(run(1), 6);
+    expect(state()).toEqual({ shown: '', text: '', failed: '1:0', problem: UNREADABLE });
+    outputs.reads[2]!.reject(removed());
     await settle();
-    expect(state()).toEqual({ shown: '1:7', text: '# BLASTN\n', failed: false, problem: '' });
+    expect(state()).toEqual({ shown: '', text: '', failed: '1:6', problem: UNREADABLE });
+    void reader.show(run(1), 7);
+    outputs.reads[3]!.resolve('# BLASTN\n');
+    await settle();
+    expect(state()).toEqual({ shown: '1:7', text: '# BLASTN\n', failed: '', problem: '' });
+  });
+
+  it('a listener that throws on a read output is not told as a read that failed', async () => {
+    const { outputs, reader, state } = setup();
+    const unsubscribe = reader.state.subscribe((value) => {
+      if (value.shown !== '') throw new Error('listener failed');
+    });
+    const shown = reader.show(run(1), 6);
+    outputs.reads[0]!.resolve('q\ts\n');
+    await expect(shown).rejects.toThrow('listener failed');
+    unsubscribe();
+    expect(state()).toEqual({ shown: '1:6', text: 'q\ts\n', failed: '', problem: '' });
   });
 
   it('a read that ends after a later choice changes nothing, whether it is read or not', async () => {
@@ -89,7 +105,7 @@ describe('OutputReader', () => {
     await settle();
     outputs.reads[0]!.resolve('zero\n');
     await settle();
-    expect(state()).toEqual({ shown: '1:7', text: 'seven\n', failed: false, problem: '' });
+    expect(state()).toEqual({ shown: '1:7', text: 'seven\n', failed: '', problem: '' });
 
     void reader.show(run(1), 0);
     void reader.show(run(1), 6);
@@ -97,17 +113,17 @@ describe('OutputReader', () => {
     await settle();
     outputs.reads[2]!.reject(removed());
     await settle();
-    expect(state()).toEqual({ shown: '1:6', text: 'six\n', failed: false, problem: '' });
+    expect(state()).toEqual({ shown: '1:6', text: 'six\n', failed: '', problem: '' });
 
     // A failure that ends first, while the later read is still being read, is not shown either.
     void reader.show(run(1), 0);
     void reader.show(run(2), 6);
     outputs.reads[4]!.reject(removed());
     await settle();
-    expect(state()).toEqual({ shown: '', text: 'six\n', failed: false, problem: '' });
+    expect(state()).toEqual({ shown: '', text: 'six\n', failed: '', problem: '' });
     outputs.reads[5]!.resolve('run 2\n');
     await settle();
-    expect(state()).toEqual({ shown: '2:6', text: 'run 2\n', failed: false, problem: '' });
+    expect(state()).toEqual({ shown: '2:6', text: 'run 2\n', failed: '', problem: '' });
   });
 
   it('an export that is not saved says why where the output is; the next export or another format clears it', async () => {
@@ -120,9 +136,10 @@ describe('OutputReader', () => {
     outputs.exports[0]!.reject(removed());
     await settle();
     // The text read before stays: it is the output of the format chosen.
-    expect(state()).toEqual({ shown: '1:6', text: 'q\ts\n', failed: false, problem: NOT_SAVED });
+    expect(state()).toEqual({ shown: '1:6', text: 'q\ts\n', failed: '', problem: NOT_SAVED });
+    // The reason stays while the next export runs, and goes when it is saved.
     void reader.export(run(1), 6);
-    expect(state().problem).toBe('');
+    expect(state().problem).toBe(NOT_SAVED);
     outputs.exports[1]!.resolve();
     await settle();
     expect(state().problem).toBe('');
@@ -145,7 +162,7 @@ describe('OutputReader', () => {
     outputs.reads[1]!.resolve('# BLASTN\n');
     outputs.exports[0]!.reject(removed());
     await settle();
-    expect(state()).toEqual({ shown: '1:7', text: '# BLASTN\n', failed: false, problem: '' });
+    expect(state()).toEqual({ shown: '1:7', text: '# BLASTN\n', failed: '', problem: '' });
 
     void reader.export(run(1), 7);
     void reader.export(run(1), 7);
@@ -163,11 +180,71 @@ describe('OutputReader', () => {
     void reader.export(run(1), 0);
     outputs.exports[0]!.reject(removed());
     await settle();
-    expect(state()).toEqual({ shown: '', text: '', failed: true, problem: NOT_SAVED });
+    expect(state()).toEqual({ shown: '', text: '', failed: '1:0', problem: NOT_SAVED });
     void reader.export(run(1), 0);
     outputs.exports[1]!.resolve();
     await settle();
-    expect(state()).toEqual({ shown: '', text: '', failed: true, problem: UNREADABLE });
+    expect(state()).toEqual({ shown: '', text: '', failed: '1:0', problem: UNREADABLE });
+  });
+
+  it('exports that keep failing after a read failed tell their reason once, not the read and the export in turn', async () => {
+    const { outputs, reader, state } = setup();
+    const told: string[] = [];
+    reader.state.subscribe(({ problem }) => {
+      if (told.at(-1) !== problem) told.push(problem);
+    });
+    void reader.show(run(1), 0);
+    outputs.reads[0]!.reject(removed());
+    await settle();
+    for (let i = 0; i < 3; i++) {
+      void reader.export(run(1), 0);
+      outputs.exports[i]!.reject(removed());
+      await settle();
+    }
+    expect(told).toEqual(['', UNREADABLE, NOT_SAVED]);
+    expect(state().problem).toBe(NOT_SAVED);
+  });
+});
+
+describe('OutputSaver', () => {
+  it('a save that ends after a reset says nothing: another run or format was chosen', async () => {
+    const outputs = new Outputs();
+    const saver = new OutputSaver(outputs);
+    void saver.save(run(1), 6);
+    expect(outputs.exports[0]).toMatchObject({ runId: 'r1', format: 6 });
+    saver.reset();
+    outputs.exports[0]!.reject(removed());
+    await settle();
+    expect(saver.problem.get()).toBe('');
+    // A reset forgets the reason told.
+    void saver.save(run(1), 6);
+    outputs.exports[1]!.reject(removed());
+    await settle();
+    expect(saver.problem.get()).toBe(NOT_SAVED);
+    saver.reset();
+    expect(saver.problem.get()).toBe('');
+  });
+
+  it('the latest save wins over one that ends after it; the reason stays while the next save runs', async () => {
+    const outputs = new Outputs();
+    const saver = new OutputSaver(outputs);
+    void saver.save(run(1), 0);
+    void saver.save(run(1), 7);
+    outputs.exports[1]!.resolve();
+    outputs.exports[0]!.reject(removed());
+    await settle();
+    expect(saver.problem.get()).toBe('');
+    void saver.save(run(1), 0);
+    void saver.save(run(1), 7);
+    outputs.exports[3]!.reject(removed());
+    outputs.exports[2]!.resolve();
+    await settle();
+    expect(saver.problem.get()).toBe(NOT_SAVED);
+    void saver.save(run(1), 6);
+    expect(saver.problem.get()).toBe(NOT_SAVED);
+    outputs.exports[4]!.resolve();
+    await settle();
+    expect(saver.problem.get()).toBe('');
   });
 });
 

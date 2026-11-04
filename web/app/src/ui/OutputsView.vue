@@ -67,8 +67,9 @@ watch(() => output.value.text, () => generation.value++);
     <p class="command">
       Command: <code data-testid="result-command">{{ toShellCommand(run.snapshot.argv, format) }}</code>
     </p>
-    <p v-if="output.problem" class="results-message error" role="alert" data-testid="outputs-problem">{{ output.problem }}</p>
     <pre v-if="!output.failed" ref="view" class="output" data-testid="result-output" :data-shown="output.shown"><span v-for="(chunk, index) in chunks" :key="`${generation}:${index}`" class="output-chunk" :style="{ '--output-chunk-lines': chunk.lines }">{{ chunk.text }}</span></pre>
+    <!-- Next to Export, whose failure it also tells; where the text would be when the text could not be read. -->
+    <p v-if="output.problem" class="results-message error" role="alert" data-testid="outputs-problem" :data-failed="output.failed">{{ output.problem }}</p>
     <button data-testid="export-output" @click="reader.export(run, format)">
       Export outfmt {{ format }}
     </button>

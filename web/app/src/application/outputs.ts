@@ -1,7 +1,7 @@
 // The Outputs of a run (plan §5.8): one compatibility output at a time, byte for byte as the
 // engine wrote it, and its export. The stored results can go while they are shown (the browser
-// clears the site's data): a read or an export that fails says why where the output is, and the
-// text of the format shown before never stays under the format chosen (WA2-BR-01).
+// clears the site's data): a read or an export that fails says why where the output is, and once
+// the read of the format chosen has failed, the text of the format shown before goes (WA2-BR-01).
 import type { OutputFormat } from '../domain/output-format';
 import type { Coordinator, RunView } from './coordinator';
 import { unreadableResults } from './results';
@@ -14,53 +14,77 @@ export interface OutputState {
   readonly shown: string;
   /** The output as the engine wrote it; '' when it could not be read. */
   readonly text: string;
-  /** The output chosen could not be read: there is no text to show. */
-  readonly failed: boolean;
+  /** The run and format ("<number>:<format>") whose read failed, which leaves no text to show; '' when the latest read did not fail. */
+  readonly failed: string;
   /** Why the latest export was not saved, else why the output could not be read; '' when neither. */
   readonly problem: string;
 }
 
+/** Saves outputs as files (Export, "Download All"), and says why the latest one was not saved. */
+export class OutputSaver {
+  /** Why the latest save was not saved; '' when it was, or when none is to be told. */
+  readonly problem = new Store('');
+  private saves = 0;
+
+  constructor(private readonly outputs: Pick<OutputPort, 'exportOutput'>) {}
+
+  /** Saves one output of a completed run. The reason shown stays until this save ends; a later save or a reset wins. */
+  async save(run: RunView, format: OutputFormat): Promise<void> {
+    const save = ++this.saves;
+    const problem = await saveOutput(this.outputs, run, format);
+    if (save === this.saves) this.set(problem);
+  }
+
+  /** Forgets the reason, and what the saves still running would say: another run or format is chosen. */
+  reset(): void {
+    this.saves++;
+    this.set('');
+  }
+
+  private set(problem: string): void {
+    if (problem !== this.problem.get()) this.problem.set(problem);
+  }
+}
+
 /** The output shown in the Outputs: the latest choice of a run and a format wins. */
 export class OutputReader {
-  readonly state = new Store<OutputState>({ shown: '', text: '', failed: false, problem: '' });
+  readonly state = new Store<OutputState>({ shown: '', text: '', failed: '', problem: '' });
+  private readonly saver: OutputSaver;
   private reads = 0;
-  private exports = 0;
   private readProblem = '';
-  private saveProblem = '';
 
-  constructor(private readonly outputs: OutputPort) {}
+  constructor(private readonly outputs: OutputPort) {
+    this.saver = new OutputSaver(outputs);
+    this.saver.problem.subscribe(() => this.publish({}));
+  }
 
   /** Reads one output of a completed run. What is shown stays until it is read; an export of the output before says no more. */
   async show(run: RunView, format: OutputFormat): Promise<void> {
     const read = ++this.reads;
-    this.exports++;
-    this.saveProblem = '';
+    this.saver.reset();
     this.publish({ shown: '' });
+    const choice = `${run.snapshot.number}:${format}`;
+    let text: string;
     try {
-      const text = await this.outputs.readOutput(run.snapshot.runId, format);
-      if (read !== this.reads) return;
-      this.readProblem = '';
-      this.publish({ shown: `${run.snapshot.number}:${format}`, text, failed: false });
+      text = await this.outputs.readOutput(run.snapshot.runId, format);
     } catch (error) {
       if (read !== this.reads) return;
       this.readProblem = unreadableResults(run, error);
-      this.publish({ text: '', failed: true });
+      this.publish({ text: '', failed: choice });
+      return;
     }
+    if (read !== this.reads) return;
+    this.readProblem = '';
+    this.publish({ shown: choice, text, failed: '' });
   }
 
   /** Saves an output as a file; one that is not saved says why, until the next export or choice. */
-  async export(run: RunView, format: OutputFormat): Promise<void> {
-    const attempt = ++this.exports;
-    this.saveProblem = '';
-    this.publish({});
-    const problem = await saveOutput(this.outputs, run, format);
-    if (attempt !== this.exports) return;
-    this.saveProblem = problem;
-    this.publish({});
+  export(run: RunView, format: OutputFormat): Promise<void> {
+    return this.saver.save(run, format);
   }
 
   private publish(change: Partial<Omit<OutputState, 'problem'>>): void {
-    this.state.set({ ...this.state.get(), ...change, problem: this.saveProblem || this.readProblem });
+    this.state.set({ ...this.state.get(), ...change, problem: this.saver.problem.get() || this.readProblem });
   }
 }
 

@@ -8,7 +8,7 @@ import { writeFileSync } from 'node:fs';
 import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { COMPOSITION_MODES, MATRICES, PROTEIN_GAP_COSTS, PROTEIN_WORD_SIZES } from '../../src/domain/programs';
 import { BUILD_HAS_ENGINE } from './support/browser';
-import { NATIVE } from './support/native';
+import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import {
   chooseRun,
   fasta,
@@ -527,15 +527,18 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
         await expect(validation).toHaveAttribute('data-state', 'ok');
       }
     }
-    if (NATIVE !== undefined) {
+    if (NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `Compositional adjustments of ${id}: ${NO_NATIVE_REASON}` });
+    else {
       const query = testInfo.outputPath(`${id}-query.fa`);
       const subject = testInfo.outputPath(`${id}-subject.fa`);
       writeFileSync(query, id === 'blastp' ? '>q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n' : '>q\nATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCAT\n');
       writeFileSync(subject, '>s\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n');
       const offered = await page.getByTestId('param-comp_based_stats').locator('option').evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));
       for (const mode of COMPOSITION_MODES) {
-        const run = spawnSync(NATIVE, [id, '-query', query, '-subject', subject, '-comp_based_stats', mode, '-outfmt', '6', '-num_threads', '1']);
-        expect(run.status === 0, `${id} -comp_based_stats ${mode}: ${String(run.stderr)}`).toBe(offered.includes(mode));
+        const run = spawnSync(NATIVE, [id, '-query', query, '-subject', subject, '-comp_based_stats', mode, '-outfmt', '6', '-num_threads', '1'], {
+          timeout: 60_000,
+        });
+        expect(run.status === 0, `${id} -comp_based_stats ${mode}: ${run.error?.message ?? String(run.stderr)}`).toBe(offered.includes(mode));
       }
     }
   }

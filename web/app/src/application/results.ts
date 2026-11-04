@@ -288,6 +288,7 @@ export class ResultsBrowser {
     } catch (error) {
       if (token !== this.loadToken) return;
       this.set({ phase: 'failed', message: `The results of run ${run.snapshot.number} could not be read: ${errorMessage(error)}` });
+      if (this.state.get().grammar === undefined) this.describeGrammar(token, run.snapshot.program);
     }
   }
 
@@ -301,7 +302,7 @@ export class ResultsBrowser {
     return grammar;
   }
 
-  /** Sets the grammar of the mode of a run without results that `open` shows (`token`), once the engine describes it. */
+  /** Sets the grammar of the mode of a run shown without results (`token`), once the engine describes it. */
   private describeGrammar(token: number, program: ProgramId): void {
     this.deps.describe(program).then(
       (description) => {

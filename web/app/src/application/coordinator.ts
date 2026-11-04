@@ -7,9 +7,9 @@
 // Inputs go through the data layer (plan §5.4): each input becomes a source, the source
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
 // included records with their IDs and lengths, which the engine checks at `register`.
-import { buildArgv, PASTED_NAMES } from '../domain/argv';
+import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
 import type { FastaParserKind } from '../domain/dataset';
-import type { OutputFormat } from '../domain/output-format';
+import { outputFileName, type OutputFormat } from '../domain/output-format';
 import { fastaParser, programById, type ProgramId } from '../domain/programs';
 import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
@@ -22,6 +22,7 @@ import {
   type HspRecord,
   type ValidationResult,
 } from '../ports/engine';
+import { taskOf } from './results';
 import { Store } from './store';
 
 /**
@@ -189,13 +190,18 @@ export class Coordinator {
     this.deps.engine.cancel(runId);
   }
 
-  /** Saves one compatibility output of a completed run, byte for byte. */
+  /** Saves one compatibility output of a completed run, byte for byte, named by outputFileName. */
   async exportOutput(runId: string, format: OutputFormat): Promise<void> {
     const view = this.find(runId);
     if (view?.status !== 'completed') throw new Error('only completed runs can be exported');
-    const bytes = await this.deps.data.readOutput(runId, format);
-    const { number, program } = view.snapshot;
-    this.deps.downloader.save(`losat-run${number}-${program}.outfmt${format}.txt`, bytes, 'text/plain');
+    const { number, program, argv, queuedAt } = view.snapshot;
+    const [bytes, description] = await Promise.all([
+      this.deps.data.readOutput(runId, format),
+      // Without the engine's default task the name has none; the output is still saved.
+      this.deps.engine.describe(program).catch(() => undefined),
+    ]);
+    const { task } = description === undefined ? { task: optionValue(argv, '-task') } : taskOf(argv, description);
+    this.deps.downloader.save(outputFileName({ number, program, task, queuedAt }, format), bytes, 'text/plain');
   }
 
   async readOutput(runId: string, format: OutputFormat): Promise<string> {
@@ -281,6 +287,11 @@ export class Coordinator {
       this.update(runId, { status: 'preparing', record: { startedAt } });
       const output = await this.deps.data.openRun(runId);
       staged = true;
+      // A cancel while the outputs were staged found no search to end: the engine has not started it.
+      if (this.cancelRequested.has(runId)) {
+        output.close();
+        throw new RunCancelledError(runId);
+      }
       const runtime = await this.deps.engine.run(
         {
           runId,

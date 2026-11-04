@@ -215,7 +215,32 @@ describe('wake lock', () => {
     expect(state()).toMatchObject({ wakeLock: 'failed', wakeLockError: 'refused' });
   });
 
-  it('is requested again after a failure, and the error is cleared', async () => {
+  it('is not requested again while the same runs go on after a failure, so the failure stays shown (WA-RN-04)', async () => {
+    const { page, setRuns, state } = setup();
+    page.nextRequestError = new Error('Wake Lock permission request denied');
+    setRuns([run('a', 1, 'queued'), run('b', 2, 'queued')]);
+    await flush();
+    const seen: string[] = [];
+    const record = () => seen.push(`${state().wakeLock}:${state().wakeLockError ?? ''}`);
+    record();
+    // Two runs one after the other: every phase changes the runs.
+    for (const next of [
+      [run('a', 1, 'preparing'), run('b', 2, 'queued')],
+      [run('a', 1, 'running'), run('b', 2, 'queued')],
+      [run('a', 1, 'finalizing'), run('b', 2, 'queued')],
+      [run('a', 1, 'completed'), run('b', 2, 'preparing')],
+      [run('a', 1, 'completed'), run('b', 2, 'running')],
+      [run('a', 1, 'completed'), run('b', 2, 'finalizing')],
+    ]) {
+      setRuns(next);
+      await flush();
+      record();
+    }
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(1);
+    expect(new Set(seen)).toEqual(new Set(['failed:Wake Lock permission request denied']));
+  });
+
+  it('is requested again after a failure when runs start again, and the error is cleared', async () => {
     const { page, attention, setRuns, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     page.nextRequestError = new Error('Battery is low');
     attention.setKeepAwake(true);
@@ -224,9 +249,47 @@ describe('wake lock', () => {
     page.nextRequestError = undefined;
     setRuns([run('a', 1, 'finalizing')]);
     await flush();
+    expect(state().wakeLock).toBe('failed');
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(1);
+    setRuns([run('a', 1, 'completed')]);
+    setRuns([run('a', 1, 'completed'), run('b', 2, 'running')]);
+    await flush();
     expect(state().wakeLock).toBe('held');
     expect(state().wakeLockError).toBeUndefined();
     expect(page.requestWakeLock).toHaveBeenCalledTimes(2);
+  });
+
+  it('is requested once more when the page was hidden and shown while a request that the browser refuses was made', async () => {
+    const { page, setRuns, state } = setup();
+    let refuse!: (error: Error) => void;
+    page.requestWakeLock.mockImplementationOnce(() => new Promise((_, reject) => (refuse = reject)));
+    setRuns([run('a', 1, 'running')]);
+    expect(state().wakeLock).toBe('requesting');
+    page.setVisible(false);
+    page.setVisible(true);
+    refuse(new Error('Battery is low'));
+    await flush();
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(2);
+    expect(state().wakeLock).toBe('held');
+  });
+
+  it('is requested again after a failure when the page is shown again, or the choice is turned on again', async () => {
+    const { page, attention, setRuns, state } = setup();
+    page.nextRequestError = new Error('Battery is low');
+    setRuns([run('a', 1, 'running')]);
+    await flush();
+    expect(state().wakeLock).toBe('failed');
+    page.setVisible(false);
+    page.setVisible(true);
+    await flush();
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(2);
+    expect(state().wakeLock).toBe('failed');
+    page.nextRequestError = undefined;
+    attention.setKeepAwake(false);
+    attention.setKeepAwake(true);
+    await flush();
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(3);
+    expect(state().wakeLock).toBe('held');
   });
 
   it('is requested again when the browser releases it while the run is active and the page visible', async () => {

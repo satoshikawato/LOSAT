@@ -131,6 +131,13 @@
   outline-offset: 1px;
 }
 
+/* Right of the plot (DotPlot's placePopup), outside the canvas's box: at most 20rem with its padding and
+   border, the room that DotPlot checks for, not the plot's width. */
+.plot-popup.right {
+  box-sizing: border-box;
+  max-width: 20rem;
+}
+
 .plot-popup.below {
   position: static;
   margin-top: 8px;

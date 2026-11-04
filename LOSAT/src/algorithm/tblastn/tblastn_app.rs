@@ -1669,15 +1669,22 @@ fn search(
                     // shows, after the query's own warnings, where the first format's rows read
                     // their Bioseqs (`TabularSpec::subject_fetch`). A batch that fetches nothing
                     // still asks for the run's refusal of NCBI's taxonomy cache before any byte,
-                    // unless no batch of the run prefetches (`shared::prefetch_always_off`); a
-                    // query whose rows read a subject only for its identities asks for it where
-                    // they read one.
+                    // unless no batch of the run prefetches (`shared::prefetch_always_off`). A
+                    // query whose rows read a subject only for its identities asks for it only
+                    // where they read one, NCBI's lookup: every batch's lookups are made here
+                    // before any report is written, so a later batch that prefetches still
+                    // refuses before any byte.
                     if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                         let rows = first_spec.as_ref().map_or(SubjectFetch::Every, |spec| {
                             spec.subject_fetch(crate::blastinput::app::Program::Tblastn)
                         });
-                        let asks = rows == SubjectFetch::Every
-                            || !crate::algorithm::common::database::prefetch_always_off();
+                        let asks = match rows {
+                            SubjectFetch::Every => true,
+                            SubjectFetch::Never => {
+                                !crate::algorithm::common::database::prefetch_always_off()
+                            }
+                            SubjectFetch::WithIdentities => false,
+                        };
                         for (query, hitlist) in span.clone().zip(hitlists) {
                             let shown = std::slice::from_ref(hitlist);
                             if asks

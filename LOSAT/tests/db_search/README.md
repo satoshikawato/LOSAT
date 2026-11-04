@@ -853,8 +853,14 @@ most 9 in BLOSUM62).
   residues of `IFKELSD`) with I/V, F/Y, K/R, E/Q, L/M, S/T and D/N exchanged, `sQ` is `M` and `qP`, `sR` the first half
   of `sP` and the second of `sQ`, with the taxids 99990, 9606 and 10090 (`nz_psi.map`); `nz_psi_q.faa` holds `qP`, its
   first half `qPh` and its second half `qP2`.
+- `nz_pc.faa` / `nz_nc.fna` (`db.nz.*.c150.*`) are `nz_p` / `nz_n` with `sZ`'s taxid 150 (`nz_pc.map`, `nz_nc.map`),
+  which NCBI's taxonomy cache (256 slots, taxid & 255) puts in the slot of 99990, the damaged last entry of
+  `offset_last_past_end`: LOSAT refuses a run that may look both up (`TaxdbRun::cache_collision`), but not one whose
+  rows look nothing up (`q1` alone with `nident`, a positive `PRE_FETCH_SEQS_LIMIT` below the batch's Seq-aligns).
+  BLASTX writes each batch before it searches the next, so it refuses such a run at its first batch also where no row
+  looks a tax id up (`db.nz.bx.c150.*`, as before line L1).
 - The sequences come from the line's probe script (kept outside the repository). The databases (version 4, every file
-  makeblastdb writes), run from `LOSAT/`:
+  makeblastdb writes; `nz_pc` and `nz_nc` alike with their maps), run from `LOSAT/`:
 
       makeblastdb -in tests/db_search/nz_p.faa -dbtype prot -parse_seqids -taxid_map tests/db_search/nz_p.map \
           -blastdb_version 4 -title "nz p" -out tests/db_search/nz_p

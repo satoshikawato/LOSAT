@@ -551,9 +551,11 @@ impl ReportedSubjects {
     /// their Bioseqs (`rows`, `TabularSpec::subject_fetch`, by the engine's identities of each
     /// shown HSP), after the query's own warnings. The messages are kept by query for the
     /// writers (`query_fetches`). Refusals as `prefetch_messages`; a batch that fetches nothing
-    /// still asks for the run's refusal of NCBI's taxonomy cache (the caller does not call it
-    /// where no batch of the run prefetches, `shared::prefetch_always_off`, unless rows read the
-    /// subjects only for their identities: then a query asks only where its rows read one).
+    /// still asks for the run's refusal of NCBI's taxonomy cache, unless no batch of the run
+    /// prefetches (`shared::prefetch_always_off`) and no row reads a subject. Rows that read a
+    /// subject only for its identities ask in every batch: BLASTX writes each batch's reports
+    /// before the next is searched, so a run whose later rows may look a tax id up refuses at
+    /// its first batch, before any byte (also where none of them does, as before).
     pub(crate) fn fetch_by_query(
         &mut self,
         database: &BlastxDatabase,
@@ -561,22 +563,20 @@ impl ReportedSubjects {
         gapped: bool,
         rows: SubjectFetch,
     ) -> Result<()> {
-        let asks = rows == SubjectFetch::Every
-            || !crate::algorithm::common::database::prefetch_always_off();
+        if rows == SubjectFetch::Never && crate::algorithm::common::database::prefetch_always_off()
+        {
+            return Ok(());
+        }
         for batch in batches {
             for (index, lists) in batch.queries.iter().enumerate() {
-                let mut subjects = lists
+                let subjects = lists
                     .iter()
                     .filter(|list| {
                         list.hsps.iter().any(|hsp| {
                             super::report::has_seqalign(hsp, gapped) && rows.reads(hsp.identity)
                         })
                     })
-                    .map(|list| (self.ordinals[list.oid], self.parsed_subject(list.oid)))
-                    .peekable();
-                if !asks && subjects.peek().is_none() {
-                    continue;
-                }
+                    .map(|list| (self.ordinals[list.oid], self.parsed_subject(list.oid)));
                 let messages =
                     shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)?;
                 if !messages.is_empty() {

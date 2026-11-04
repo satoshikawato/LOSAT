@@ -7,7 +7,8 @@
 // picker is stubbed with a folder of OPFS) or to the browser's download (Firefox).
 import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './support/test';
 import { exampleById, exampleQuery } from '../../src/domain/examples';
 import { reload } from './support/navigate';
 import { E2E_ORIGIN } from './support/origin';

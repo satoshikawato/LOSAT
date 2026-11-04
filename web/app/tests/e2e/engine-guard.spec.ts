@@ -5,7 +5,8 @@
 // checks it with the guard's own verifier (LOSAT/tests/wasi_shared_memory.js), which accepts
 // only the guard's helpers, call sites and counts. The serial module needs no guard.
 import { createRequire } from 'node:module';
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test } from './support/test';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
 
 test.skip(ENGINE === undefined, NO_ENGINE_REASON);

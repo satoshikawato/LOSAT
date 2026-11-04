@@ -355,6 +355,17 @@ test("the options form: the engine's defaults are not written; tasks, templates 
   await submit(page);
   await waitStatus(page, 1, 'completed');
   expect((await result(page, 1, 7)).command).toBe('losat tblastx -query query.fa -subject subject.fa -db_gencode 11 -outfmt 7');
+  // The run's mark is one of its words; the approved exception is in the run's details and in
+  // the mark's title, not in the mark (the maintainer, 2026-11-04).
+  await chooseRun(page, 1);
+  const badge = page.getByTestId('results-summary').getByTestId('verification-badge');
+  await expect(badge).toHaveText(BUILD_HAS_ENGINE ? /^(Supported|Not yet supported)$/ : 'Development build');
+  if (BUILD_HAS_ENGINE) {
+    await expect(badge).toHaveAttribute('title', /Approved exception: LOSAT translates the local subjects with -db_gencode 11\./);
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('verification-exception')).toContainText('-db_gencode 11');
+  }
+  await page.getByTestId('tab-search').click();
 
   // TBLASTN's subject codes include 32 (the approved exception); its tasks (tblastn and
   // tblastn-fast) are radio buttons.

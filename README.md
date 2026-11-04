@@ -19,13 +19,13 @@
 
 **LOSAT** is a lightweight, pure-Rust reimplementation of the NCBI BLAST sequence alignment algorithm designed specifically for pairwise sequence-to-sequence comparisons (`-query` vs `-subject`).
 
-On certified pairwise profiles and fixtures, LOSAT is checked against declared NCBI source, executable, or API oracle contracts for scores, E-values, coordinates, and output. Exact-byte parity applies where each contract requires it; documented local subject genetic-code exceptions apply to TBLASTX and TBLASTN. LOSAT runs without external C/C++ libraries, BLAST+ installations, or pre-formatted database indices. Built for high portability, LOSAT runs natively on modern operating systems and compiles directly to WebAssembly for client-side, zero-install genomic analyses in web browsers and sandboxed runtimes.
+On the pairwise profiles and fixtures of its [release test set](docs/release/v0.2.0_certification_plan.md), LOSAT is checked against declared NCBI source, executable, or API oracle contracts for scores, E-values, coordinates, and output. Exact-byte parity applies where each contract requires it; documented local subject genetic-code exceptions apply to TBLASTX and TBLASTN. LOSAT runs without external C/C++ libraries, BLAST+ installations, or pre-formatted database indices. Built for high portability, LOSAT runs natively on modern operating systems and compiles directly to WebAssembly for client-side, zero-install genomic analyses in web browsers and sandboxed runtimes.
 
 ---
 
 ## Key Highlights
 
-- **NCBI-Verified Certified Fixtures**: Matches the declared NCBI source, CLI, or API oracle contract on certified fixtures, including exact output bytes where required and the documented local subject genetic-code exceptions.
+- **NCBI Parity on Test Fixtures**: Matches the declared NCBI source, CLI, or API oracle contract on the release test fixtures, including exact output bytes where required and the documented local subject genetic-code exceptions.
 - **Pure Rust, Zero Dependencies**: Standalone single executable. Does not wrap, link, or shell out to external NCBI binaries or libraries.
 - **Direct Pairwise Alignment**: Compares FASTA files directly via `-query` and `-subject` without running `makeblastdb`.
 - **WebAssembly Ready**: Compiles to serial and threaded command-WASI (see [Platforms](#platforms)) and runs in the browser through the [Web GUI (preview)](#web-gui-preview). Browser/reactor APIs exist for integrations such as [gbdraw](https://github.com/satoshikawato/gbdraw).
@@ -133,10 +133,10 @@ The compiled binary will be located at `target/release/losat`.
 
 | Platform | Status in v0.2.0 |
 |:---|:---|
-| Linux x86_64, Linux aarch64, macOS arm64, macOS x86_64, Windows x86_64 (native) | **Certified** against NCBI BLAST+ 2.17.0 on the certification set |
-| WASI serial (`wasm32-wasip1`) | **Certified** against NCBI BLAST+ 2.17.0 on the certification set |
-| WASI threads (`wasm32-wasip1-threads`) | **Supported**: tested in CI, not certified |
-| [Web GUI](#web-gui-preview) (browser) | **Preview**: no NCBI certification is claimed |
+| Linux x86_64, Linux aarch64, macOS arm64, macOS x86_64, Windows x86_64 (native) | **Supported**: matches NCBI BLAST+ 2.17.0 on the release test set |
+| WASI serial (`wasm32-wasip1`) | **Supported**: matches NCBI BLAST+ 2.17.0 on the release test set |
+| WASI threads (`wasm32-wasip1-threads`) | **Supported**: tested in CI, outside the release's NCBI parity claim |
+| [Web GUI](#web-gui-preview) (browser) | **Preview**: outside the release's NCBI parity claim; each run is marked "Supported" or "Not yet supported" |
 
 On macOS, an E value printed with full precision (`-outfmt 11`, `-outfmt 8`) can differ from other platforms by 1 in its last (15th) digit because of Apple's libm, as in NCBI BLAST+ built on macOS; see [PD-LOSAT-PLATFORM-LIBM](docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md).
 
@@ -203,7 +203,7 @@ losat tblastn \
   -outfmt 6
 ```
 
-The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. Its certified output and target claims apply to the [declared fixtures and options](docs/release/v0.2.0.md). PSI-TBLASTN and composition modes 1/3 are unsupported; `-task tblastn-fast` and `-word_size 5`, `6` and `7` (NCBI's compressed-alphabet lookup table) run with BLOSUM62; database searches (`-db`) are described in section 6.
+The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. Its output and target claims apply to the [declared fixtures and options](docs/release/v0.2.0.md). PSI-TBLASTN and composition modes 1/3 are unsupported; `-task tblastn-fast` and `-word_size 5`, `6` and `7` (NCBI's compressed-alphabet lookup table) run with BLOSUM62; database searches (`-db`) are described in section 6.
 
 ### 5. Writing a BLAST Database (makeblastdb)
 ```bash
@@ -364,13 +364,13 @@ LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](ht
 
 ## Web GUI (preview)
 
-LOSAT also runs in the browser through the Web GUI (`web/app`), which follows the layout and terms of NCBI BLAST: a search form with a "Run LOSAT" button, then a Graphic Summary and Descriptions on one page. It is a **preview**: it claims no NCBI certification, and it rejects `-db` (database searches are native only). Its boundary is set by [PD-LOSAT-WEB-APP-BOUNDARY](docs/product_decisions/PD-LOSAT-WEB-APP-BOUNDARY.md); the build and test commands are in [web/AGENTS.md](web/AGENTS.md).
+LOSAT also runs in the browser through the Web GUI (`web/app`), which follows the layout and terms of NCBI BLAST: a search form with a "Run LOSAT" button, then a Graphic Summary and Descriptions on one page. It is a **preview**, outside the release's NCBI parity claim. A run is marked "Supported" only when its options were compared with NCBI BLAST+ on LOSAT's test fixtures and its browser runtime was checked against the native engine, and "Not yet supported" otherwise; the mark is about the build and the options, not a comparison of your inputs with NCBI. It rejects `-db` (database searches are native only). Its boundary is set by [PD-LOSAT-WEB-APP-BOUNDARY](docs/product_decisions/PD-LOSAT-WEB-APP-BOUNDARY.md); the build and test commands are in [web/AGENTS.md](web/AGENTS.md).
 
 ---
 
 ## Development variables (unsupported)
 
-The `LOSAT_X_*` environment variables, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X_REACH` and the `--features diagnostics` build are development variables. They are unsupported and may change or disappear without notice. The defaults (no variable set, a normal build) are the certified configuration; do not set these variables in production runs.
+The `LOSAT_X_*` environment variables, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X_REACH` and the `--features diagnostics` build are development variables. They are unsupported and may change or disappear without notice. The defaults (no variable set, a normal build) are the configuration that the release tests cover; do not set these variables in production runs.
 
 ---
 
@@ -380,7 +380,7 @@ The `LOSAT_X_*` environment variables, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X
 - **Database searches**: LOSAT searches `-subject` FASTA files and BLAST databases (`-db`, section 6) written by `makeblastdb` (also with `-parse_seqids`) or by `losat makeblastdb`; `-db` gives NCBI BLAST+ 2.17.0 `-db -num_threads 1` output at every thread count. In `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`, `-db` may name several databases (`-db "a b"`) and take the filters `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist` and `-no_taxid_expansion`. `psiblast` takes several names in `-db` but none of the filters.
 - **`gb`, `emb` and `dbj` ids**: NCBI BLAST+ keeps these three id types in one table for the whole run, and ids with the same prefix, digit count and version share one entry, so it can print `gb|AF000002.1|` for a sequence stored as `emb|AF000002.1|`. LOSAT prints the stored type, as NCBI BLAST+ does with `OBJECTS_PACK_TEXTID=0`. The default tabular fields (`qaccver saccver ...`) do not show it. It shows in a custom field list, in `sseqid` with `-db` and in `qseqid` with `-parse_deflines`, and with `-subject -parse_deflines` also in `sseqid`, `sallseqid` and the ids of outfmt 5, 8, 9, 11, 12 and 13 to 16. It needs definition lines that give one accession prefix two of these types: none of the 57 million such ids of NCBI's core_nt does. See [PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - **TBLASTX Subject Genetic Code**: In NCBI BLAST+, local `-subject` searches inadvertently default to genetic code 1 (Standard) regardless of command-line flags. LOSAT correctly translates the subject according to `-db_gencode`. See [PD-TBLASTX-LOCAL-SUBJECT-GENCODE](docs/product_decisions/PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md).
-- **Fail-Fast Configuration**: Unsupported flags and tasks fail fast with clear error messages rather than silently falling back to uncertified defaults.
+- **Fail-Fast Configuration**: Unsupported flags and tasks fail fast with clear error messages rather than silently falling back to defaults outside the release test set.
 
 ### What LOSAT refuses
 
@@ -441,11 +441,11 @@ LOSAT stops with an error for each option and value below; it does not run somet
 
 ---
 
-## Documentation & Verification
+## Documentation
 
 - [TLOSAN v0.2.0 release readiness and scope](docs/release/v0.2.0.md)
 - [v0.1.0 historical release scope](docs/archive/v0.1.0_scope.md)
-- [Verification & Parity Specifications](docs/release/pure_rust_runtime_v0.1.0_certification.md)
+- [v0.1.0 NCBI Parity Specifications](docs/release/pure_rust_runtime_v0.1.0_certification.md)
 - [CLI Migration Details](docs/cli_v2_migration.md)
 - [Developer & Contributor Guidelines](AGENTS.md)
 

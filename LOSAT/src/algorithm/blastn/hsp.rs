@@ -173,9 +173,10 @@ impl BlastnOutputFormat {
     }
 
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
-    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7 and 17,
-    /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
-    /// messages of that prefetch go with the query warnings.
+    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7 and 17; with
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
+    /// the call's first report, the taxonomy database's messages of that prefetch go with the
+    /// query warnings.
     pub(crate) fn prefetches_subjects(self) -> bool {
         crate::algorithm::common::database::prefetches_subjects(match self {
             BlastnOutputFormat::Pairwise => Some(0),
@@ -190,11 +191,10 @@ impl BlastnOutputFormat {
                 _ => 6,
             }),
             BlastnOutputFormat::Sam(_) => Some(17),
-            // The Seq-annots and the archive fetch nothing; XML2 and JSON write the messages
-            // at each `Hit` (`TaxdbPrinter`).
-            BlastnOutputFormat::Seqalign(_)
-            | BlastnOutputFormat::Archive
-            | BlastnOutputFormat::Xml2(_) => None,
+            BlastnOutputFormat::Seqalign(serial) => Some(serial.outfmt()),
+            // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
+            // (`TaxdbPrinter`).
+            BlastnOutputFormat::Archive | BlastnOutputFormat::Xml2(_) => None,
         })
     }
 

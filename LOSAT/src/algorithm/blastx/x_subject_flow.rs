@@ -37,7 +37,7 @@ use crate::algorithm::blastx::{
     parameters::ContextParameters,
     query_setup::PreparedQueryBatch,
     search::PreliminarySink,
-    seed::{Diagonals, Lookup},
+    seed::{BxLookup, Diagonals},
     subjects::Subjects,
 };
 use anyhow::Result;
@@ -356,7 +356,7 @@ fn search_task(
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
     options: &ResolvedOptions,
-    lookup: &Lookup,
+    lookup: &BxLookup,
     diagonals: &mut Diagonals,
     xdrop: i32,
     db_length: i64,
@@ -459,7 +459,7 @@ pub(super) fn run(
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
     options: &ResolvedOptions,
-    lookup: &Lookup,
+    lookup: &BxLookup,
     diagonals: &mut Diagonals,
     helper_tables: Vec<super::x_bx_mem::XScratch<'_>>,
     xdrop: i32,
@@ -570,7 +570,7 @@ const X_CROSS_AHEAD: usize = 16;
 /// the loop's thread.
 pub(super) struct XChunkSetup {
     pub(super) params: Vec<ContextParameters>,
-    pub(super) lookup: Lookup,
+    pub(super) lookup: BxLookup,
     pub(super) xdrop: i32,
     pub(super) table: Diagonals,
     pub(super) length: usize,
@@ -580,7 +580,7 @@ pub(super) struct XChunkSetup {
 // its lookup table (worked out once, as `run` does) and the length of its diagonal tables.
 struct XChunkReady {
     params: Vec<ContextParameters>,
-    lookup: Lookup,
+    lookup: BxLookup,
     xdrop: i32,
     ratio: Option<u64>,
     length: usize,

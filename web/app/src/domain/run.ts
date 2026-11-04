@@ -21,7 +21,11 @@ export interface InputSnapshot {
   readonly bytes: Uint8Array;
   /** Lower-case hex SHA-256 of `bytes`. */
   readonly sha256: string;
-  /** Dataset revisions whose included records make up `bytes`, in order. */
+  /**
+   * Dataset revisions whose included records made up `bytes`, in order: ids only (the engine's
+   * retained-subject key). The data layer may have dropped them since (SURVEY #15); `bytes` and
+   * `records` are the run's input.
+   */
   readonly revisionIds: readonly string[];
   /** ID and length of each record in `bytes`; the engine checks them at `register`. */
   readonly records: readonly RecordKey[];

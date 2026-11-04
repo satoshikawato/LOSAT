@@ -27,8 +27,9 @@ import { Store } from './store';
 
 /**
  * One input of a search: dataset revisions of the data layer (the search form's sources,
- * already indexed, plan §5.4) with the name passed as -query / -subject; or pasted text or
- * a file, which the coordinator indexes itself.
+ * already indexed, plan §5.4) with the name passed as -query / -subject, whose sources the
+ * caller keeps until enqueueAll returns; or pasted text or a file, which the coordinator
+ * indexes itself. A run keeps its input in its snapshot (bytes and records), not its sources.
  */
 export type SequenceInput =
   | { readonly dataset: { readonly name: string; readonly revisionIds: readonly string[] } }
@@ -83,7 +84,11 @@ export class Coordinator {
   readonly state = new Store<AppState>({ runs: [] });
   private readonly queue: string[] = [];
   private readonly cancelRequested = new Set<string>();
-  /** Run inputs by their revisions (snapshotInput). */
+  /**
+   * Run inputs of dataset revisions, by the revisions (snapshotInput). An entry outlives the
+   * sources of its revisions and shares its bytes with the snapshots that use it; an operation
+   * that removes runs must remove the entries that no run uses.
+   */
   private readonly runInputs = new Map<string, Promise<RunInput>>();
   private active: string | undefined;
   private nextNumber = 1;
@@ -105,7 +110,7 @@ export class Coordinator {
    */
   async enqueueAll(requests: readonly SearchRequest[]): Promise<EnqueueAllResult> {
     if (requests.length === 0) return { ok: false, message: 'There is nothing to search.' };
-    const prepared: Array<{ request: SearchRequest; argv: readonly string[]; queryName: string; subjectName: string }> = [];
+    const prepared: Prepared[] = [];
     for (const request of requests) {
       const queryName = inputName(request.query, PASTED_NAMES.query);
       const subjectName = inputName(request.subject, PASTED_NAMES.subject);
@@ -125,6 +130,20 @@ export class Coordinator {
       prepared.push({ request, argv, queryName, subjectName });
     }
 
+    // The snapshots hold what the runs need: the sources made here from text and files are
+    // dropped once they are read (SURVEY #15), and a request that fails caches nothing.
+    const made: Made = { sources: [], runInputs: [] };
+    let result: EnqueueAllResult | undefined;
+    try {
+      result = await this.freeze(prepared, made);
+      return result;
+    } finally {
+      for (const sourceId of made.sources) void this.deps.data.dropSource(sourceId).catch(() => undefined);
+      if (result?.ok !== true) for (const key of made.runInputs) this.runInputs.delete(key);
+    }
+  }
+
+  private async freeze(prepared: readonly Prepared[], made: Made): Promise<EnqueueAllResult> {
     const snapshots: RunSnapshot[] = [];
     const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
     for (const [index, { request, argv, queryName, subjectName }] of prepared.entries()) {
@@ -132,8 +151,8 @@ export class Coordinator {
       let query: InputSnapshot;
       let subject: InputSnapshot;
       try {
-        query = await this.snapshotInput('Query', request.query, queryName, fastaParser(program, 'query'));
-        subject = await this.snapshotInput('Subject', request.subject, subjectName, fastaParser(program, 'subject'));
+        query = await this.snapshotInput('Query', request.query, queryName, fastaParser(program, 'query'), made);
+        subject = await this.snapshotInput('Subject', request.subject, subjectName, fastaParser(program, 'subject'), made);
       } catch (error) {
         return { ok: false, message: errorMessage(error) };
       }
@@ -235,32 +254,40 @@ export class Coordinator {
 
   /**
    * Freezes the run input of an input. Dataset inputs use the revisions as they are; text
-   * and files first become a source with a record table. The run input of the same
-   * revisions is built once and shared by the snapshots that use it (a subject kept for
-   * many searches is held once).
+   * and files first become a source with a record table, which `made` lists to be dropped. The
+   * run input of the same dataset revisions is built once and shared by the snapshots that
+   * use it (a subject kept for many searches is held once); the revisions of text and files
+   * are never used again.
    */
   private async snapshotInput(
     role: string,
     input: SequenceInput,
     name: string,
     parser: FastaParserKind,
+    made: Made,
   ): Promise<InputSnapshot> {
     try {
+      let runInput: Promise<RunInput>;
       let revisionIds: readonly string[];
       if ('dataset' in input) {
         revisionIds = Object.freeze([...input.dataset.revisionIds]);
+        const key = JSON.stringify(revisionIds);
+        const cached = this.runInputs.get(key);
+        if (cached === undefined) {
+          runInput = this.deps.data.buildRunInput(revisionIds);
+          this.runInputs.set(key, runInput);
+          made.runInputs.push(key);
+          runInput.catch(() => this.runInputs.delete(key));
+        } else {
+          runInput = cached;
+        }
       } else {
         const file = 'file' in input ? input.file : new File([input.text], name, { type: 'text/plain' });
         const source = await this.deps.data.addSource(file);
+        made.sources.push(source.sourceId);
         const revision = await this.deps.data.indexSource(source.sourceId, parser);
         revisionIds = Object.freeze([revision.revisionId]);
-      }
-      const key = JSON.stringify(revisionIds);
-      let runInput = this.runInputs.get(key);
-      if (runInput === undefined) {
         runInput = this.deps.data.buildRunInput(revisionIds);
-        this.runInputs.set(key, runInput);
-        runInput.catch(() => this.runInputs.delete(key));
       }
       const { bytes, sha256, records } = await runInput;
       return Object.freeze({ name, bytes, sha256, revisionIds, records });
@@ -362,6 +389,20 @@ export class Coordinator {
   private setRuns(runs: readonly RunView[]): void {
     this.state.set({ ...this.state.get(), runs: Object.freeze([...runs]) });
   }
+}
+
+/** A request that the engine validated, with its argv and the names of its inputs. */
+interface Prepared {
+  readonly request: SearchRequest;
+  readonly argv: readonly string[];
+  readonly queryName: string;
+  readonly subjectName: string;
+}
+
+/** What one enqueueAll made: sources of text and files, and the cached run inputs of dataset revisions. */
+interface Made {
+  readonly sources: string[];
+  readonly runInputs: string[];
 }
 
 function inputName(input: SequenceInput, pastedName: string): string {

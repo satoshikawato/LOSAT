@@ -55,12 +55,26 @@ export interface DatasetStore {
   checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck>;
   /** The first `maxBytes` bytes of a source, for its preview. */
   previewSource(sourceId: string, maxBytes: number): Promise<Uint8Array>;
+  /**
+   * Forgets a source and every revision of it, giving back their memory; later calls that
+   * name them reject as for an unknown id. The caller drops only what no one uses
+   * (src/application/source-refs.ts). An unknown id is ignored.
+   */
+  dropSource(sourceId: string): Promise<void>;
 }
 
 export interface ResultSetRef {
   readonly runId: string;
   readonly byteLengths: Readonly<Record<OutputFormat, number>>;
   readonly hitCount: number;
+}
+
+/** The committed runs whose stored outputs cannot be read back (`RunStore.checkStoredResults`), in the order of the runs. */
+export interface StoredResultsCheck {
+  /** The browser removed their stored outputs: it answers that they are not found. */
+  readonly removed: readonly string[];
+  /** Their stored outputs failed to read for another reason. */
+  readonly unreadable: readonly string[];
 }
 
 /**
@@ -89,6 +103,13 @@ export interface RunStore {
   readHitTable(runId: string): Promise<HspTable>;
   readDiagnostics(runId: string): Promise<string>;
   deleteRun(runId: string): Promise<void>;
+  /**
+   * Whether the stored outputs of every committed run are still there: it opens the HSP records
+   * of each run (the first block that opening the run asks for) and reads its first byte, a few
+   * runs at a time, so it stays quick for hundreds of runs. The browser can remove them under an
+   * open tab (WA2-SC-05); the check after the page was hidden (application/attention.ts) asks.
+   */
+  checkStoredResults(): Promise<StoredResultsCheck>;
 }
 
 export type StorageBackend = 'opfs' | 'memory';

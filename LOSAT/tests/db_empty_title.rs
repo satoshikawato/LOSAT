@@ -29,7 +29,8 @@ fn run((program, db, query, _): (&str, &str, &str, &str), taxdb: &str, home: &st
         .args(["-query", &format!("tests/db_search/ids/{query}")])
         .args(["-outfmt", "0", "-num_threads", "1"]);
     for (name, _) in std::env::vars() {
-        if name.starts_with("LOSAT_")
+        // `LOSAT_BLASTX_WORKER_LOG` stays: an `--all-features` binary writes its probe there.
+        if name.starts_with("LOSAT_X_")
             || name.starts_with("NCBI")
             || matches!(
                 name.as_str(),

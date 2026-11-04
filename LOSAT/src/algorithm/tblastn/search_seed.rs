@@ -410,16 +410,19 @@ impl XCompressedSide {
 /// (`x_scan_plan`), their concatenation and lookup segments as the standard table takes them (the
 /// coordinates of the word finder's query, `x_lookup_query_for_profile`), and
 /// blastp-fast's builders of NCBI's one table of the query batch (`x_tbn_build_compressed_lookup`:
-/// the flat table, or the reference one with `LOSAT_X_BPCLUT=0`) on this thread.
+/// the flat table, or the reference one with `LOSAT_X_BPCLUT=0`) on this thread. The words of a
+/// matrix other than BLOSUM62 take the reference table (`try_build_compressed_lookup`).
 fn x_build_compressed(
     queries: &[&[u8]],
     seg: Option<&SegParams>,
     mask_lowercase: bool,
     threshold: i32,
+    matrix: ScoringMatrix,
     word_length: usize,
     // The query set's frames as the table's query, made once for the batch (`x_scan_plan`).
     x_frames: Option<&[QueryFrame]>,
 ) -> Result<XCompressedLookup> {
+    use crate::algorithm::tblastx::lookup::compressed::try_build_compressed_lookup;
     use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_tbn_build_compressed_lookup;
     let query_frames: Vec<_> = match x_frames {
         Some(frames) => frames.iter().map(|frame| vec![frame.clone()]).collect(),
@@ -430,25 +433,38 @@ fn x_build_compressed(
     };
     let (query, locations) =
         crate::algorithm::tblastx::lookup::x_lookup_query_for_profile(&query_frames, word_length);
-    x_tbn_build_compressed_lookup(
-        word_length,
-        threshold,
-        &query,
-        &locations,
-        &[0..locations.len()],
-    )
-    .ok_or_else(|| {
-        anyhow::anyhow!(
-            "-word_size {word_length} (the compressed lookup table) is not supported by LOSAT's TBLASTN"
-        )
-    })?
-    .map_err(|()| {
-        anyhow::anyhow!(
-            "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's TBLASTN: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
-            f64::from(threshold) / 100.0,
-            word_length
-        )
-    })
+    let tables = [0..locations.len()];
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310
+    // ```c
+    //     /* compute a custom score matrix, for use only
+    //        with lookup table creation. The matrix dimensions
+    //        are BLASTAA_SIZE x compressed_alphabet_size, and
+    //        the score entries are scaled up by kMatrixScale */
+    //
+    //     new_alphabet = SCompressedAlphabetNew(sbp,
+    //                                 lookup->compressed_alphabet_size,
+    //                                 kMatrixScale);
+    // ```
+    // Dispatch point: the words of BLOSUM62 (the default) or of the search's other matrix.
+    let built = if matrix == ScoringMatrix::Blosum62 {
+        x_tbn_build_compressed_lookup(word_length, threshold, &query, &locations, &tables)
+    } else {
+        try_build_compressed_lookup(matrix, word_length, threshold, &query, &locations, &tables)
+            .map(|built| built.map(XCompressedLookup::Reference))
+    };
+    built
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "-word_size {word_length} (the compressed lookup table) is not supported by LOSAT's TBLASTN"
+            )
+        })?
+        .map_err(|()| {
+            anyhow::anyhow!(
+                "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's TBLASTN: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
+                f64::from(threshold) / 100.0,
+                word_length
+            )
+        })
 }
 
 /// The compressed table of a scan plan (`x_scan_plan`, word sizes 5 to 7) and its longest chain,
@@ -462,6 +478,7 @@ fn x_compressed_plan_lookup(
     seg: Option<&SegParams>,
     mask_lowercase: bool,
     threshold: i32,
+    matrix: ScoringMatrix,
     word_length: usize,
     x_frames: Option<&[QueryFrame]>,
 ) -> Result<(XPlanLookup, i32)> {
@@ -471,6 +488,7 @@ fn x_compressed_plan_lookup(
             seg,
             mask_lowercase,
             threshold,
+            matrix,
             word_length,
             x_frames,
         )
@@ -1134,6 +1152,7 @@ pub(super) fn x_scan_plan(
             seg,
             mask_lowercase,
             threshold,
+            matrix,
             word_length,
             x_frames,
         )?

@@ -1430,8 +1430,14 @@ mod tests {
             }
             capacities.retain(|&capacity| capacity > 0);
             for capacity in capacities {
-                let reference = try_build_blosum62_compressed_lookup_with_capacity(
-                    5, threshold, &query, &locations, &tables, capacity,
+                let reference = try_build_compressed_lookup_with_capacity(
+                    Blosum62Compressed,
+                    5,
+                    threshold,
+                    &query,
+                    &locations,
+                    &tables,
+                    capacity,
                 )
                 .expect("word size 5");
                 for (threads, chunk_sizes) in [(2, &[][..]), (3, &[7, 1, 50][..]), (7, &[1][..])] {

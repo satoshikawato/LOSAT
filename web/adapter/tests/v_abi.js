@@ -286,8 +286,11 @@ function checkSurface(reactor, native) {
   for (const outfmt of ["6", "0", "6 qseqid sseqid pident", "7 std qcovs"]) {
     assert.equal(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-outfmt", outfmt].join("\0")).status, 0, outfmt);
   }
+  // The CLI reads the files before its formatting handler checks the delimiter: real files.
+  const files = ["-query", path.join(ROOT, "LOSAT/tests/fasta/outfmt0/mask_query.fasta"),
+                 "-subject", path.join(ROOT, "LOSAT/tests/fasta/outfmt0/mask_subject.fasta")];
   for (const outfmt of ["abc", "99", "6 delim=; qseqid staxids"]) {
-    const argv = ["blastn", "-query", "q", "-subject", "s", "-outfmt", outfmt];
+    const argv = ["blastn", ...files, "-outfmt", outfmt];
     const validated = reactor.call("losat_web2_validate", argv.join("\0"));
     assert.equal(validated.status, -1, outfmt);
     const cli = require("node:child_process").spawnSync(native, argv);

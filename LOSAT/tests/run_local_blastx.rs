@@ -359,8 +359,9 @@ fn display_counts_of_the_pairwise_report() {
     );
 }
 
-/// The rows of `outfmt0_manifest.tsv` of BLASTX with outfmt 0, 6 or 7 and without
-/// `-parse_deflines` (LOSAT Web refuses it): (fixture id, query, subject, extra arguments, outfmt).
+/// The rows of `outfmt0_manifest.tsv` of BLASTX with outfmt 0, 6 or 7 (6 and 7 with custom fields
+/// too, W10) and without `-parse_deflines` (LOSAT Web refuses it): (fixture id, query, subject,
+/// extra arguments, outfmt).
 fn manifest_rows() -> Vec<(String, String, String, Vec<String>, String)> {
     let text =
         std::fs::read_to_string(crate_dir().join("tests/outfmt0_manifest.tsv")).expect("manifest");
@@ -378,7 +379,10 @@ fn manifest_rows() -> Vec<(String, String, String, Vec<String>, String)> {
     );
     lines
         .map(|line| line.split('\t').collect::<Vec<_>>())
-        .filter(|row| row[program] == "blastx" && matches!(row[outfmt], "0" | "6" | "7"))
+        .filter(|row| {
+            row[program] == "blastx"
+                && matches!(row[outfmt].split(' ').next(), Some("0" | "6" | "7"))
+        })
         .filter(|row| !row[extra].contains("-parse_deflines"))
         .map(|row| {
             (
@@ -692,15 +696,14 @@ impl ReaderDifference {
     }
 }
 
-/// LOSAT Web writes outfmt 0, 6 and 7 and refuses the rest, with a database and the ids of the
-/// deflines, before anything is written.
+/// LOSAT Web writes outfmt 0, 6 and 7 (6 and 7 with custom fields too, W10) and refuses the
+/// rest, with a database and the ids of the deflines, before anything is written.
 #[test]
 fn refusals_come_before_any_output() {
     let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
     for (formats, extra) in [
         (&["5"][..], &[][..]),
         (&["0", "11"][..], &[][..]),
-        (&["6 qseqid sseqid"][..], &[][..]),
         (&["6"][..], &["-parse_deflines"][..]),
     ] {
         let queries = queries(&Inputs::path(&inputs.query)).unwrap();
@@ -728,7 +731,8 @@ fn check_options_fails_as_a_run_does() {
     for (formats, extra) in [
         (&FORMATS[..], &[][..]),
         (&["5"][..], &[][..]),
-        (&["6 qseqid sseqid"][..], &[][..]),
+        // NCBI's formatting handler: a custom delimiter that a field uses (W10).
+        (&["6 delim=; qseqid staxids", "0"][..], &[][..]),
         (&["6"][..], &["-parse_deflines"][..]),
         (&FORMATS[..], &["-matrix", "PAM30"][..]),
         (&FORMATS[..], &["-evalue", "0"][..]),

@@ -2279,7 +2279,10 @@ mod tests {
             assert!(format.is_tabular(), "{outfmt}");
         }
         // DBID item T: the formats whose batches' prefetch writes the taxonomy database's
-        // messages (not the Seq-annots, the archive, XML2 and JSON).
+        // messages (not the archive, XML2 and JSON; the Seq-annots only with
+        // `PRE_FETCH_SEQS_LIMIT=2147483647`, DBID P3, which the test process may have set).
+        let seq_annots =
+            |number| crate::algorithm::common::database::seq_annots_prefetch(Some(number));
         for (outfmt, prefetches) in [
             ("0", true),
             ("5", true),
@@ -2287,10 +2290,10 @@ mod tests {
             ("7 qseqid", true),
             ("10", true),
             ("20 qseqid", true),
-            ("8", false),
-            ("9", false),
+            ("8", seq_annots(8)),
+            ("9", seq_annots(9)),
             ("11", false),
-            ("12", false),
+            ("12", seq_annots(12)),
             ("13", false),
             ("15", false),
             ("16", false),

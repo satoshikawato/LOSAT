@@ -2778,20 +2778,16 @@ pub(crate) fn prefetch_messages<'s>(
         }
         // `x_GetTaxonomy` asks for a positive taxid only (seqdbvol.cpp:1136); one definition
         // line per sequence without parsed Seq-ids (`stored_title`).
-        // A subject with parsed Seq-ids is read by its Seq-align id (`prefetch_reads_itself`):
-        // every subject that a report reads the Bioseq of is itself (`ParsedSubject::fetched`
-        // refused the others), as are psiblast's kept beyond its cut (`prefetched_ranks`).
+        // A subject with parsed Seq-ids is read by its Seq-align id (`prefetch_reads_itself`). In
+        // the formats that read the Bioseq, `ParsedSubject::fetched` refuses every subject that
+        // is not itself, with the same reason (BLASTN and TBLASTX ask it after the batch loop, so
+        // such a subject can be refused here first); psiblast's kept beyond its cut are itself
+        // (`prefetched_ranks`).
         let volume_taxids: Vec<i32> = match parsed {
             Some(subject) => match prefetch_reads_itself(db, subject, true, program)? {
                 Ok(true) => subject.volume_taxids(),
                 Ok(false) => continue,
-                Err(reason) => {
-                    return Err(parsed_refusal(
-                        ordinal,
-                        &format!("{reason}, {PREFETCH_READS_IT}"),
-                        program,
-                    ))
-                }
+                Err(reason) => return Err(parsed_refusal(ordinal, &reason, program)),
             },
             None => db
                 .defline_taxids(ordinal)
@@ -2933,16 +2929,9 @@ pub(crate) fn prefetch_reads_itself(
         .defline_set(other)
         .map_err(|error| database_error(error, program))?;
     // `x_GetOid` keeps the OID only where one of its ids compares equal to the Seq-align id
-    // (bdbloader.cpp), else the prefetch reads nothing; the subject that another sequence also
+    // (`loader_keeps`), else the prefetch reads nothing; the subject that another sequence also
     // holds can be read as that sequence through the ids of a blob read before (`or_itself`).
-    let equal = set
-        .deflines
-        .iter()
-        .flat_map(|defline| &defline.ids)
-        .any(|id| {
-            crate::seqid::defline_set::compare(id, subject.alignment_id())
-                == crate::seqid::defline_set::Sic::Yes
-        });
+    let equal = loader_keeps(&set, subject);
     if (or_itself || equal) && set.bioseq_defline(subject.alignment_id()).is_none() {
         return Ok(Err(format!(
             "{reason}; NCBI BLAST+ 2.17.0 can read that sequence for it, whose definition lines do not hold the Seq-align id, and then stops (oid headers do not contain target gi/seq_id)"
@@ -3037,18 +3026,29 @@ fn prefetch_gets_no_bioseq(
     }
     Ok(match subject.found() {
         Some(FoundInstead::Nothing) => true,
-        Some(FoundInstead::Sequence(other)) => !db
-            .defline_set(*other)
-            .map_err(|error| database_error(error, program))?
-            .deflines
-            .iter()
-            .flat_map(|defline| &defline.ids)
-            .any(|id| {
-                crate::seqid::defline_set::compare(id, subject.alignment_id())
-                    == crate::seqid::defline_set::Sic::Yes
-            }),
+        Some(FoundInstead::Sequence(other)) => !loader_keeps(
+            &db.defline_set(*other)
+                .map_err(|error| database_error(error, program))?,
+            subject,
+        ),
         _ => false,
     })
+}
+
+/// Whether NCBI's data loader keeps the sequence of the definition lines `set` that the lookup of
+/// the Seq-align id of `subject` gives (`CBlastDbDataLoader::x_GetOid`, bdbloader.cpp): one of its
+/// ids compares equal to that id.
+fn loader_keeps(
+    set: &crate::seqid::DeflineSet,
+    subject: &crate::report::db_subject::ParsedSubject,
+) -> bool {
+    set.deflines
+        .iter()
+        .flat_map(|defline| &defline.ids)
+        .any(|id| {
+            crate::seqid::defline_set::compare(id, subject.alignment_id())
+                == crate::seqid::defline_set::Sic::Yes
+        })
 }
 
 /// LOSAT's refusal of the reported sequence `ordinal` with parsed Seq-ids `subject` where the
@@ -3089,7 +3089,9 @@ pub(crate) fn seq_annots_prefetch(outfmt: Option<i32>) -> bool {
 /// [`prefetch_may_be_off`], returns before its test of the format). The query warnings, which
 /// the batch's messages go with, are written with the first format (the Seq-annots write only
 /// the reader's); the XML2 and JSON formats write theirs at each `Hit` (`TaxdbPrinter`), and the
-/// archive, which NCBI writes without calling the prefetch, prefetches nothing.
+/// archive, which NCBI's apps but psiblast write without calling the prefetch, prefetches nothing
+/// (psiblast_app.cpp:262-264 prefetches before its test of the archive; LOSAT's PSIBLAST refuses
+/// outfmt 8, 9, 11 and 12).
 pub(crate) fn prefetches_subjects(outfmt: Option<i32>) -> bool {
     match outfmt {
         Some(0 | 5 | 6 | 7 | 17) => true,

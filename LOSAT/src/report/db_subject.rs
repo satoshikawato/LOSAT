@@ -129,7 +129,8 @@ pub enum FoundInstead {
 
 /// What NCBI's prefetch of a query batch reads for a subject that no report shows, by its
 /// Seq-align id (`ParsedSubject::prefetched`): psiblast's traceback hit lists beyond
-/// `-max_target_seqs`.
+/// `-max_target_seqs`, and the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`
+/// (`common::database::prefetch_reads_itself`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Prefetched {
     /// The sequence itself, or the same record whose lookups of its taxids write the same texts

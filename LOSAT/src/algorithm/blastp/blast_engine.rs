@@ -10942,12 +10942,8 @@ fn run_resolved_in_pool(
     // alone (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`): a subject with parsed
     // Seq-ids that it cannot read as NCBI does is refused also without `taxdb.bti`
     // (`ListedTitles::check_prefetched`).
-    let seq_annots_prefetch = batches_prefetch
-        && matches!(
-            requested_formats.first(),
-            Some(BlastpReport::Seqalign(serial))
-                if crate::algorithm::common::database::seq_annots_prefetch(Some(serial.outfmt()))
-        );
+    let seq_annots_prefetch =
+        batches_prefetch && matches!(requested_formats.first(), Some(BlastpReport::Seqalign(_)));
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:673-678
     // ```c++
     //     ITERATE(blast::CSearchResultSet, result, results) {

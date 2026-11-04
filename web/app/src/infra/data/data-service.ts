@@ -16,7 +16,7 @@ import {
   type RecordKey,
 } from '../../domain/dataset';
 import { hspTable, type HspTable } from '../../domain/hsp-table';
-import type { OutputFormat } from '../../domain/output-format';
+import { CUSTOM_OUTPUT, OUTPUT_FORMATS, type RunOutput } from '../../domain/output-format';
 import type { InputRole, ProgramId } from '../../domain/programs';
 import type {
   CleanupState,
@@ -29,7 +29,7 @@ import type {
 } from '../../ports/data';
 import type { HspRecord } from '../../ports/engine';
 import type { InputCheck, InputChecker } from '../../ports/input-check';
-import { DIAGNOSTICS_STREAM, HITS_STREAM, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output';
+import { DIAGNOSTICS_STREAM, HITS_STREAM, type OutputStream } from '../../ports/run-output';
 import type { RecordScanner } from '../../ports/scan';
 import { RunOutputReceiver } from '../run-output/receiver';
 import { concatBytes } from '../bytes';
@@ -58,13 +58,15 @@ const BLOCK_NAMES: Readonly<Record<OutputStream, string>> = {
   0: 'out0',
   6: 'out6',
   7: 'out7',
+  [CUSTOM_OUTPUT]: 'outcustom',
   [HITS_STREAM]: 'hits',
   [DIAGNOSTICS_STREAM]: 'diagnostics',
 };
 const LF = 0x0a;
 const NEWLINE = new Uint8Array([LF]);
 
-type Lengths = Record<OutputStream, number>;
+/** The bytes of each stream of a run: those of its outputs (`openRun`), the HSP records and the diagnostics. */
+type Lengths = Partial<Record<OutputStream, number>>;
 
 /** What `checkStoredResults` found for a run. */
 type StoredOutcome = 'kept' | 'removed' | 'unreadable';
@@ -195,18 +197,19 @@ export class DataService implements DataGateway {
 
   // --- runs -----------------------------------------------------------------------------
 
-  async openRun(runId: string): Promise<MessagePort> {
+  async openRun(runId: string, outputs: readonly RunOutput[] = OUTPUT_FORMATS): Promise<MessagePort> {
     if (this.runs.has(runId)) throw new Error(`run ${runId} already exists`);
     const token = this.deps.newToken();
     const writers = new Map<OutputStream, BlockWriter>();
+    const streams: readonly OutputStream[] = [...outputs, HITS_STREAM, DIAGNOSTICS_STREAM];
     try {
-      for (const stream of OUTPUT_STREAMS) writers.set(stream, await this.deps.store.create(blockPath(token, stream)));
+      for (const stream of streams) writers.set(stream, await this.deps.store.create(blockPath(token, stream)));
     } catch (error) {
       await this.deps.store.removeAll(runPrefix(token)).catch(() => undefined);
       throw isStorageFull(error) ? asStorageFull(error) : error;
     }
     const channel = new MessageChannel();
-    const lengths: Lengths = { 0: 0, 6: 0, 7: 0, [HITS_STREAM]: 0, [DIAGNOSTICS_STREAM]: 0 };
+    const lengths: Lengths = Object.fromEntries(streams.map((stream) => [stream, 0]));
     const run: StagedRun = {
       state: 'staged',
       token,
@@ -248,7 +251,9 @@ export class DataService implements DataGateway {
     }
     this.runs.set(runId, { state: 'committed', token: run.token, lengths: Object.freeze({ ...run.lengths }) });
     const hitCount = run.hitLines + (run.hitLineOpen ? 1 : 0);
-    return { runId, byteLengths: { 0: run.lengths[0], 6: run.lengths[6], 7: run.lengths[7] }, hitCount };
+    const custom = run.lengths[CUSTOM_OUTPUT];
+    const byteLengths = { 0: run.lengths[0]!, 6: run.lengths[6]!, 7: run.lengths[7]!, ...(custom === undefined ? {} : { [CUSTOM_OUTPUT]: custom }) };
+    return { runId, byteLengths, hitCount };
   }
 
   async discardRun(runId: string): Promise<void> {
@@ -257,15 +262,15 @@ export class DataService implements DataGateway {
     await this.drop(runId, run);
   }
 
-  async readOutput(runId: string, format: OutputFormat): Promise<Uint8Array> {
-    return this.readStream(runId, format);
+  async readOutput(runId: string, output: RunOutput): Promise<Uint8Array> {
+    return this.readStream(runId, output);
   }
 
-  async readOutputRange(runId: string, format: OutputFormat, start: number, end: number): Promise<Uint8Array> {
-    const run = this.runs.get(runId);
-    if (run?.state !== 'committed') throw new Error(`run ${runId} has no committed result`);
-    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > run.lengths[format]) {
-      throw new RangeError(`bytes [${start}, ${end}) are not in outfmt ${format} of run ${runId} (${run.lengths[format]} bytes)`);
+  async readOutputRange(runId: string, format: RunOutput, start: number, end: number): Promise<Uint8Array> {
+    const length = this.committed(runId, format);
+    const run = this.runs.get(runId)!;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > length) {
+      throw new RangeError(`bytes [${start}, ${end}) are not in outfmt ${format} of run ${runId} (${length} bytes)`);
     }
     return this.deps.store.read(blockPath(run.token, format), start, end - start);
   }
@@ -309,7 +314,7 @@ export class DataService implements DataGateway {
     if (run.state !== 'committed') return 'kept';
     let failure: { readonly error: unknown } | undefined;
     try {
-      await this.deps.store.read(blockPath(run.token, HITS_STREAM), 0, Math.min(1, run.lengths[HITS_STREAM]));
+      await this.deps.store.read(blockPath(run.token, HITS_STREAM), 0, Math.min(1, run.lengths[HITS_STREAM]!));
     } catch (error) {
       failure = { error };
     }
@@ -335,14 +340,17 @@ export class DataService implements DataGateway {
   private append(run: StagedRun, stream: OutputStream, bytes: Uint8Array): void {
     if (run.failure !== undefined || bytes.length === 0) return;
     try {
-      run.writers.get(stream)!.append(bytes);
+      const writer = run.writers.get(stream);
+      // The engine writes the outputs of the run's argv (`openRun`); another output is not this run's.
+      if (writer === undefined) throw new Error(`The engine wrote output stream ${stream}, which this run does not write`);
+      writer.append(bytes);
     } catch (error) {
       run.failure = isStorageFull(error) ? asStorageFull(error) : toError(error);
       // Give the space back at once; the commit reports the failure.
       void this.deps.store.removeAll(runPrefix(run.token)).catch(() => undefined);
       return;
     }
-    run.lengths[stream] += bytes.length;
+    run.lengths[stream] = run.lengths[stream]! + bytes.length;
     if (stream === HITS_STREAM) {
       for (const byte of bytes) {
         if (byte === LF) {
@@ -356,9 +364,17 @@ export class DataService implements DataGateway {
   }
 
   private async readStream(runId: string, stream: OutputStream): Promise<Uint8Array> {
+    const length = this.committed(runId, stream);
+    return this.deps.store.read(blockPath(this.runs.get(runId)!.token, stream), 0, length);
+  }
+
+  /** The bytes of a stream of a committed run; throws for a run that is not committed, and for an output that it does not write. */
+  private committed(runId: string, stream: OutputStream): number {
     const run = this.runs.get(runId);
     if (run?.state !== 'committed') throw new Error(`run ${runId} has no committed result`);
-    return this.deps.store.read(blockPath(run.token, stream), 0, run.lengths[stream]);
+    const length = run.lengths[stream];
+    if (length === undefined) throw new Error(`run ${runId} does not write output ${stream}`);
+    return length;
   }
 
   private async drop(runId: string, run: StagedRun | CommittedRun): Promise<void> {

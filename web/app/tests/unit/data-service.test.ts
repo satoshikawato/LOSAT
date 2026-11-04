@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { IndexedRecord } from '../../src/domain/dataset';
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { MEMORY_FULL_MESSAGE, RESULTS_REMOVED_MESSAGE, StorageRemovedError } from '../../src/infra/data/block-store';
+import { CUSTOM_OUTPUT } from '../../src/domain/output-format';
 import { DataService, STORED_CHECK_READS, type DataServiceDeps } from '../../src/infra/data/data-service';
 import { compressionOfName, plainName } from '../../src/infra/data/inflate';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
@@ -219,6 +220,41 @@ describe('DataService runs and storage status', () => {
     const info = await data.storageInfo();
     expect(info.sessionBytes).toBe(5);
     expect(info.cleanup).toEqual({ state: 'done', removedSessions: 2 });
+  });
+
+  // The output of the argv's -outfmt (stream 4, WA2-OP-03): stored only for a run that writes it.
+  it("stores the output of the argv's -outfmt for a run that writes it, and only there", async () => {
+    const { data, store } = service();
+    const create = store.create.bind(store);
+    const blocks: string[] = [];
+    store.create = async (path) => {
+      blocks.push(path.split('/').at(-1)!);
+      return create(path);
+    };
+    const custom = new RunOutputWriter(await data.openRun('run-1', [0, 6, 7, CUSTOM_OUTPUT]));
+    custom.write(6, encoder.encode('row\n'));
+    custom.write(CUSTOM_OUTPUT, encoder.encode('q\ts\n'));
+    custom.end();
+    expect((await data.commitRun('run-1')).byteLengths).toEqual({ 0: 0, 6: 4, 7: 0, [CUSTOM_OUTPUT]: 4 });
+    expect(new TextDecoder().decode(await data.readOutput('run-1', CUSTOM_OUTPUT))).toBe('q\ts\n');
+    expect(new TextDecoder().decode(await data.readOutputRange('run-1', CUSTOM_OUTPUT, 2, 3))).toBe('s');
+    // An empty output of the -outfmt (no hits) is stored as such.
+    const empty = new RunOutputWriter(await data.openRun('run-2', [0, 6, 7, CUSTOM_OUTPUT]));
+    empty.end();
+    expect((await data.commitRun('run-2')).byteLengths[CUSTOM_OUTPUT]).toBe(0);
+    expect(await data.readOutput('run-2', CUSTOM_OUTPUT)).toEqual(new Uint8Array(0));
+    // A run without it has no block of it, and says so when it is asked for.
+    blocks.length = 0;
+    const plain = new RunOutputWriter(await data.openRun('run-3'));
+    expect(blocks).toEqual(['out0', 'out6', 'out7', 'hits', 'diagnostics']);
+    plain.end();
+    expect((await data.commitRun('run-3')).byteLengths).toEqual({ 0: 0, 6: 0, 7: 0 });
+    await expect(data.readOutput('run-3', CUSTOM_OUTPUT)).rejects.toThrow('run run-3 does not write output 4');
+    // An engine that writes it for a run that does not fails the run.
+    const stray = new RunOutputWriter(await data.openRun('run-4'));
+    stray.write(CUSTOM_OUTPUT, encoder.encode('x'));
+    stray.end();
+    await expect(data.commitRun('run-4')).rejects.toThrow('The engine wrote output stream 4, which this run does not write');
   });
 
   it('refuses a second run with the same id and a commit of an unknown run', async () => {

@@ -433,6 +433,11 @@ input[type='radio'] {
   color: var(--tab-fg);
 }
 
+/* The output of the run's -outfmt is named by its fields, which can be longer than a phone's width. */
+.tabs button.custom-output {
+  overflow-wrap: anywhere;
+}
+
 .tabs button[aria-pressed='true'],
 .tabs button[aria-pressed='true']:hover:not(:disabled) {
   border-color: var(--accent);

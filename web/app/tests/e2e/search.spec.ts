@@ -1424,7 +1424,7 @@ test("Additional options: the command line's other options after the form's, mar
   await extra.fill('-qcov_hsp_perc 50 -foo');
   await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
   await extra.fill('-num_threads 2');
-  await expect(validation).toHaveText('-num_threads is managed by LOSAT');
+  await expect(validation).toHaveText('-num_threads is set in the form: Threads');
   // The CLI's help, and the CLI's options that a search in the browser cannot have (WA-FM-04, WA-FM-05).
   await extra.fill('-help');
   await expect(validation).toHaveText('-help is not available in the browser');

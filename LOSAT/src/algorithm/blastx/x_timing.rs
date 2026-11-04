@@ -12,7 +12,8 @@
 //! - `[TIMING] blastx_run: startup .. prolog .. read_stores .. loop .. epilog .. total ..
 //!   (search .. render .. titles .. input ..)`: wall times on the thread that runs `run`.
 //!   `startup` is everything before the prolog (options, the `-subject` file, the database's
-//!   index); `read_stores` reads the database's sequences; `loop` is the query loop (the pool's
+//!   index); `read_stores` opens the database's stream (`BlastxDatabase::x_open_stream`: the
+//!   index's longest length, no sequence read); `loop` is the query loop (the pool's
 //!   start and end included). Inside `loop`: `search` is the time the loop waits for searches,
 //!   `render` the time it writes reports (of which `titles` reads the reported sequences' titles
 //!   with `-db`), and `input = loop - search - render` the reader's own time (and the queueing of

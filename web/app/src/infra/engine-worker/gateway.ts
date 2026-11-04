@@ -24,6 +24,7 @@ import {
 import { engineBuildName, type EngineAssets } from '../reactor/assets';
 import type { EngineControl } from '../reactor/control';
 import { loadReactor } from '../reactor/instance';
+import { growToMaximum, type SharedMemory } from '../reactor/shared-memory';
 import { chooseThreads, DEFAULT_RENEWAL, renewalReason, type RenewalLimits } from './policy';
 import type { EngineCommand, EngineEvent, EngineInit, ModuleSource, ThreadFault, WorkerError, WorkerInput, WorkerRun } from './protocol';
 
@@ -47,6 +48,11 @@ interface Generation {
   renew: string | undefined;
   /** The threads and argv of the last preparation posted since the last search (prepare). */
   prepared: string | undefined;
+  /**
+   * The shared memory of the threaded instance while a search runs on it (retire). Held only
+   * then: a reference here keeps the memory, and so its pages, until this thread collects it.
+   */
+  memory: SharedMemory | undefined;
 }
 
 interface ActiveRun {
@@ -184,7 +190,7 @@ export class WasmEngine implements EngineGateway {
       this.options.createWorker?.() ??
       new Worker(new URL('./engine-worker.ts', import.meta.url), { type: 'module', name: 'losat-engine' });
     const faults = new BroadcastChannel(`losat-web:engine-faults:${crypto.randomUUID()}`);
-    const generation: Generation = { id, worker, faults, renew: undefined, prepared: undefined };
+    const generation: Generation = { id, worker, faults, renew: undefined, prepared: undefined, memory: undefined };
     worker.onmessage = (event: MessageEvent<EngineEvent>) => this.receive(generation, event.data);
     worker.onerror = (event) => {
       event.preventDefault();
@@ -216,6 +222,10 @@ export class WasmEngine implements EngineGateway {
 
   private receive(generation: Generation, event: EngineEvent): void {
     if (generation !== this.current || !('generation' in event) || event.generation !== generation.id) return;
+    if (event.type === 'memory') {
+      generation.memory = { memory: event.memory, maximumPages: event.maximumPages };
+      return;
+    }
     const active = this.active;
     if (active === undefined || active.settled || active.generation !== generation || active.runId !== event.runId) return;
     if (event.type === 'phase') {
@@ -225,9 +235,11 @@ export class WasmEngine implements EngineGateway {
     if (event.type !== 'done') return;
     if (!event.ok) {
       if (event.error.stopped === true) this.retire();
+      generation.memory = undefined;
       this.settle(active, toError(event.error));
       return;
     }
+    generation.memory = undefined;
     const { result } = event;
     generation.renew = renewalReason(result.memory, this.renewal);
     this.settle(active, undefined, {
@@ -257,6 +269,10 @@ export class WasmEngine implements EngineGateway {
     generation.worker.onmessage = null;
     generation.worker.onerror = null;
     generation.worker.onmessageerror = null;
+    // Its threads may be growing the memory: at its maximum it is not grown while they end
+    // (WebKit crashes the page otherwise, growToMaximum).
+    if (generation.memory !== undefined) growToMaximum(generation.memory);
+    generation.memory = undefined;
     generation.worker.terminate();
     generation.faults.close();
   }

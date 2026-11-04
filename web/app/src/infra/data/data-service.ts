@@ -32,7 +32,7 @@ import type { RecordScanner } from '../../ports/scan';
 import { RunOutputReceiver } from '../run-output/receiver';
 import { concatBytes } from '../bytes';
 import { asStorageFull, isStorageFull, type BlockStore, type BlockWriter } from './block-store';
-import { gunzipFile, isGzipName } from './gunzip';
+import { compressionOfName, inflateFile } from './inflate';
 
 export interface DataServiceDeps {
   readonly store: BlockStore;
@@ -103,7 +103,7 @@ export class DataService implements DataGateway {
 
   async addSource(file: File): Promise<SourceRef> {
     if (!(file instanceof Blob)) throw new TypeError('a source must be a File');
-    if (isGzipName(file.name)) file = await gunzipFile(file);
+    if (compressionOfName(file.name) !== undefined) file = await inflateFile(file);
     const sourceId = this.deps.newToken();
     this.sources.set(sourceId, file);
     return { sourceId, name: file.name, size: file.size };

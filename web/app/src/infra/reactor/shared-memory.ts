@@ -57,3 +57,26 @@ export function createSharedMemory(
 function formatGib(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
+
+/**
+ * Grows a shared memory to its maximum, so that no thread can grow it any more: the
+ * Gateway does so before it ends the Engine worker and its thread workers. WebKit
+ * (JavaScriptCore, webkit-2311) crashes the page when a thread grows a shared memory while
+ * the instances of workers that end are taken off it (`SharedArrayBufferContents::grow`
+ * reads a null instance); a memory at its maximum is not grown, so that cannot happen
+ * (losat-baselines/web-flaky-20261103/crash). The threads may grow it meanwhile, and a grow
+ * past the maximum throws, so the size is read again; a browser that cannot give the
+ * maximum leaves the memory as it is.
+ */
+export function growToMaximum({ memory, maximumPages }: SharedMemory): void {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const pages = memory.buffer.byteLength / PAGE_BYTES;
+    if (pages >= maximumPages) return;
+    try {
+      memory.grow(maximumPages - pages);
+      return;
+    } catch {
+      // Grown by a thread meanwhile (read the size again), or not available.
+    }
+  }
+}

@@ -1,0 +1,6 @@
+CFastaReader: Hyphens are invalid and will be ignored around line 2
+FASTA-Reader: Ignoring invalid residues at position(s): On line 2: 54
+FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+CFastaReader: Hyphens are invalid and will be ignored around line 5
+FASTA-Reader: Ignoring invalid residues at position(s): On line 5: 1-2
+BLAST query error: CFastaReader: Near line 6, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.

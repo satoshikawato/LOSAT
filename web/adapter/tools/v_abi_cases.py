@@ -105,6 +105,10 @@ def outfmt0_fixtures() -> list[dict]:
         # -parse_deflines works in the CLI only: the adapter refuses it (`run::parse`).
         if "-parse_deflines" in argv:
             continue
+        # `register` refuses a `>?` gap line (maintainer decision 3, as in fasta_input): a row
+        # whose input has one is a CLI case.
+        if any(b">?" in (run_oracle.ENGINE / row[side]).read_bytes() for side in ("query", "subject")):
+            continue
         assert argv[-2:] == ["-outfmt", outfmt], row["fixture_id"]
         key = (row["program"], tuple(argv[:-2]))
         search = searches.setdefault(key, {"program": row["program"], "argv": [row["program"], *argv[:-2]],

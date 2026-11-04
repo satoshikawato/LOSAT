@@ -13,7 +13,7 @@ import { OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output';
 import { EngineCallError, ROLE_QUERY, ROLE_SUBJECT } from '../reactor/abi';
 import type { ReactorArtifact } from '../reactor/artifact';
 import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from '../reactor/instance';
-import { createSharedMemory } from '../reactor/shared-memory';
+import { createSharedMemory, type SharedMemory } from '../reactor/shared-memory';
 import { RunOutputWriter } from '../run-output/writer';
 import type { RuntimePath, WorkerRun, WorkerRunResult } from './protocol';
 import { ThreadHost } from './thread-host';
@@ -24,6 +24,11 @@ export interface RuntimeOptions {
   readonly threads: () => Promise<{ readonly module: WebAssembly.Module; readonly artifact: ReactorArtifact }>;
   readonly builds: { readonly serial: string; readonly threads: string };
   readonly faultChannel: string;
+  /**
+   * Told the shared memory of the threaded instance before a search runs on it: the Engine
+   * worker posts it to the Gateway, which holds it until the search ends (gateway.ts, retire).
+   */
+  readonly onSharedMemory?: (memory: SharedMemory) => void;
 }
 
 interface Retained {
@@ -36,6 +41,8 @@ interface Loaded {
   readonly path: RuntimePath;
   readonly instance: ReactorInstance;
   readonly threads?: ThreadHost;
+  /** The shared memory of the threaded instance. */
+  readonly shared?: SharedMemory;
   runs: number;
   retained: Retained | undefined;
   /** The argvs (without -num_threads) of the searches and warm-ups that ran on this instance. */
@@ -84,6 +91,7 @@ export class EngineRuntime {
       }
     }
     loaded ??= await this.load('serial');
+    if (loaded.shared !== undefined) this.options.onSharedMemory?.(loaded.shared);
     const threads = loaded.path === 'threaded' ? request.threads : 1;
     const argv = [...request.argv, '-num_threads', String(threads)];
     const abi = loaded.instance.abi;
@@ -216,11 +224,12 @@ export class EngineRuntime {
     const { module, artifact } = await this.options.threads();
     // The maximum that the module declares, or a smaller one where the browser cannot
     // reserve it; never a larger one (plan TD-7).
-    const { memory } = createSharedMemory(artifact.memory);
+    const shared = createSharedMemory(artifact.memory);
+    const { memory } = shared;
     const threads = new ThreadHost({ module, memory, faultChannel: this.options.faultChannel });
     try {
       const instance = await instantiateThreadedMain(module, memory, threads.spawn);
-      this.loaded = { path, instance, threads, runs: 0, retained: undefined, ran: new Set() };
+      this.loaded = { path, instance, threads, shared, runs: 0, retained: undefined, ran: new Set() };
       return this.loaded;
     } catch (error) {
       threads.terminate();

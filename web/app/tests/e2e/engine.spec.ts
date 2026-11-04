@@ -1,7 +1,7 @@
 // The real engine in the browsers (S09, plan §6.2 V-BR and the S10 contracts): the S10
 // contract suites against the adapter's serial reactor and the Engine worker; V-BR,
 // searches through the application compared with the native CLI of the same commit and
-// with NCBI's frozen bytes (TD-5) at 1, 2 and 4 threads; the retained subject (R1); cancel
+// with NCBI's frozen bytes (TD-5) at 1 to 32 threads; the retained subject (R1); cancel
 // and recovery; renewal of the runtime; and the serial fallback. Every project (Chromium,
 // Firefox, WebKit) runs them, on a harness server (support/harness-server.ts). The
 // storage-full cases need the Chrome DevTools Protocol and run in contracts.spec.ts.
@@ -22,6 +22,12 @@ test.setTimeout(900_000);
 /** Where the tests write their records for the gate record (docs/evidence/losat_web_w1). */
 const EVIDENCE = process.env['LOSAT_WEB_EVIDENCE'] || undefined;
 const FORMATS: readonly OutputFormat[] = [0, 6, 7];
+/**
+ * The thread counts of V-BR: the serial path, then the threaded path up to 32, the most that
+ * Auto (infra/engine-worker/policy.ts AUTO_MAX_THREADS) and the Threads list choose. A run's mark
+ * is Supported up to the largest count checked (domain/verification.ts; WA-RS-03).
+ */
+const VBR_THREADS = [1, 2, 4, 8, 16, 32] as const;
 
 let harness: HarnessFiles;
 let isolated: HarnessServer;
@@ -138,15 +144,15 @@ test('run output contract: the writer in the Engine worker, the real Data worker
   expect(withoutQuota).toHaveLength(10);
 });
 
-test('V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads', async ({ context, browserName }) => {
+test('V-BR: searches through the application give the expected bytes at 1 to 32 threads', async ({ context, browserName }) => {
   test.skip(NATIVE === undefined, NO_NATIVE_REASON);
   const page = await openHarness(context, isolated);
   const cases = vbrCases();
-  const list: SearchCase[] = cases.flatMap((vbr) => [1, 2, 4].map((threads) => searchOf(vbr, threads)));
+  const list: SearchCase[] = cases.flatMap((vbr) => VBR_THREADS.map((threads) => searchOf(vbr, threads)));
   const results: SearchResult[] = await page.evaluate((searches) => window.losatHarness!.engine.searches(searches), list);
   const rows = [];
   for (const [i, result] of results.entries()) {
-    const vbr = cases[Math.floor(i / 3)]!;
+    const vbr = cases[Math.floor(i / VBR_THREADS.length)]!;
     const threads = list[i]!.threads as number;
     expect.soft(result.status, `${result.id}: ${result.record.error ?? ''}`).toBe('completed');
     if (result.status !== 'completed') continue;

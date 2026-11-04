@@ -1310,6 +1310,9 @@ pub(super) fn reported_subjects(
         let (title, subject) = match header {
             ReportedHeader::Stored(stored) => {
                 shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                if shown.pairwise {
+                    shared::check_shown_stored_title(stored.taxonomy_title, ordinal, PROGRAM)?;
+                }
                 (stored.title.clone(), None)
             }
             ReportedHeader::Parsed(subject) => {

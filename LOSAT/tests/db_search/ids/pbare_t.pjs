@@ -1,0 +1,23 @@
+{
+  "version": "1.2",
+  "dbname": "pbare_t",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pbare_t",
+  "number-of-letters": 220,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-04T11:51:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 37274,
+  "bytes-to-cache": 318,
+  "files": [
+    "pbare_t.pdb",
+    "pbare_t.phr",
+    "pbare_t.pin",
+    "pbare_t.pot",
+    "pbare_t.psq",
+    "pbare_t.ptf",
+    "pbare_t.pto"
+  ]
+}

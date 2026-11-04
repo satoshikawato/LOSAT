@@ -287,8 +287,11 @@ pub fn generate_bioseq_defline(
 /// names of the taxonomy database when NCBI finds one (seqdbvol.cpp:1055-1160): the title is
 /// then the organism's (`unnamed protein product [Homo sapiens]`).
 pub fn bioseq_title_from_source(title: &[u8], ids: &BioseqIds) -> bool {
-    let mut main_title = title.to_vec();
-    trim_end_of(&mut main_title, b".,;~ ");
+    // `trim_end_of` without a copy: the stored titles of every reported sequence are asked.
+    let main_title = match title.iter().rposition(|byte| !b".,;~ ".contains(byte)) {
+        Some(pos) => &title[..=pos],
+        None => title,
+    };
     main_title.is_empty() && pdb_or_patent_title(ids).is_empty()
 }
 

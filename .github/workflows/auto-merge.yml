@@ -6,7 +6,8 @@ name: Auto-merge
 # (the integration branch every work pull request targets) `rust`, `fast output regressions` and
 # `web result`; for main (the promotion pull request of dev) also `platform checks result`. The
 # rulesets are set by the repository owner. Draft pull requests are skipped until they are marked
-# ready; pull requests from forks are never touched. "Disable auto-merge" on a pull request's
+# ready; pull requests from forks are never touched. Nor are Dependabot's (.github/dependabot.yml):
+# a person reads each dependency update and merges it. "Disable auto-merge" on a pull request's
 # page turns it off again.
 #
 # The job runs on pull_request_target and does not check out pull-request code.
@@ -26,7 +27,10 @@ permissions:
 jobs:
   auto-merge:
     name: enable auto-merge
-    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Enable auto-merge (merge commit)

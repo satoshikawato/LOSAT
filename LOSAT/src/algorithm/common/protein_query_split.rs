@@ -326,6 +326,8 @@ pub fn protein_chunk_part_in_record(record: &[u8], offset: usize, part: &ChunkQu
     let (interval_from, interval_to) = (part.from + offset, last + offset);
     for (start, end) in lowercase_runs(record) {
         // The run is [start, end] in the record; `loc` is [from, to - 1) in the searched letters.
+        // NCBI compares the two as numbers (`RestrictToSeqInt`), so with an offset a run is cut by
+        // the part's searched coordinates, not by where the part lies in the record.
         let left = (start as usize).max(part.from);
         let right_open = (end as usize + 1).min(last);
         if left >= right_open {

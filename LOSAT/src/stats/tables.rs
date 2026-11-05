@@ -65,7 +65,7 @@ impl ParamEntry {
         }
     }
 
-    fn to_karlin_params(&self) -> KarlinParams {
+    fn to_karlin_params(self) -> KarlinParams {
         KarlinParams {
             lambda: self.lambda,
             k: self.k,

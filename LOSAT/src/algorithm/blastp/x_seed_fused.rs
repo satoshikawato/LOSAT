@@ -1089,6 +1089,13 @@ where
         prefetch: X_PREFETCH_DISTANCE,
     };
     let table = &mut XDiagTable::new(diag_array, diag_mask);
+    #[cfg_attr(
+        not(target_arch = "x86_64"),
+        expect(
+            clippy::infallible_destructuring_match,
+            reason = "the `Cross` variant exists on x86_64 only, so off x86_64 `Diag` is the only pattern"
+        )
+    )]
     let mode = match mode {
         XCellTest::Diag(mode) => mode,
         #[cfg(target_arch = "x86_64")]

@@ -925,9 +925,7 @@ fn x_try_build_flat_parallel_with(
         x_ahead_pv = cuts
             .spare
             .and_then(|spare| spare.x_room_for(backbone_size + 1, total, pv_words));
-        if x_ahead_pv.is_none() {
-            return None;
-        }
+        x_ahead_pv.as_ref()?;
     }
     let mut pv = if pv_in_stripes {
         match x_ahead_pv.take() {

@@ -62,7 +62,7 @@ fn entry_program(argv0: &std::ffi::OsStr) -> Option<&'static str> {
     let path = std::path::Path::new(argv0);
     if !path
         .extension()
-        .map_or(true, |extension| extension.eq_ignore_ascii_case("exe"))
+        .is_none_or(|extension| extension.eq_ignore_ascii_case("exe"))
     {
         return None;
     }
@@ -140,7 +140,7 @@ pub fn install_shims(dir: Option<&std::ffi::OsStr>) -> Result<Vec<std::path::Pat
             .map_err(|error| format!("cannot replace {}: {error}", path.display()))?;
     }
     for path in missing.into_iter().chain(stale) {
-        make_shim(&exe, &exe_dir == &dir, &path)
+        make_shim(&exe, exe_dir == dir, &path)
             .map_err(|error| format!("cannot make {}: {error}", path.display()))?;
     }
     Ok(paths)

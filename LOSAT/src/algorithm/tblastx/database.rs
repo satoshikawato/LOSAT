@@ -457,7 +457,7 @@ pub(crate) fn reported_subjects(
             .iter()
             .filter(|hsp| {
                 let run = (hsp.hit.q_idx, hsp.hit.s_idx);
-                std::mem::replace(&mut previous, Some(run)) != Some(run)
+                previous.replace(run) != Some(run)
             })
             .filter(|hsp| hsp.hit.query_frame < 0 && hsp.subject_frame > 0)
             .map(|hsp| hsp.hit.s_idx)

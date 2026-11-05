@@ -281,13 +281,12 @@ pub(crate) fn flow_unit_cap(
 ) -> Option<usize> {
     let threads = pool.threads();
     let share = |cap| unit_share(threads, cap, one_task(subjects.len()));
-    let cap = unit_cap(threads, options, subjects, |cap| {
+    unit_cap(threads, options, subjects, |cap| {
         super::x_subject_flow::subjects_per_task()
             .map(|most| capped_subjects_per_task(share(cap), subjects.len(), most))
             .filter(|&k| super::x_subject_flow::fits(k, pool, false, options, subjects))
             .map_or(0, |k| subjects.len().div_ceil(k))
-    });
-    cap
+    })
 }
 
 /// No NCBI counterpart: subjects per task of the subject flow in a chunk of a batch searched with

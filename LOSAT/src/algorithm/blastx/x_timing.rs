@@ -151,6 +151,10 @@ pub(crate) enum Batch {
     ScanInline,
     Replay,
     ChunkEnd,
+    #[expect(
+        clippy::enum_variant_names,
+        reason = "named for `Runtime::batch_end`, the stage it times; `search.rs` refers to it as `XBatch::BatchEnd`"
+    )]
     BatchEnd,
     Sum,
 }

@@ -1791,37 +1791,41 @@ fn search(
                     // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                     // (`shared::prefetch_off`), each query's report fetches the subjects it
                     // shows, after the query's own warnings, where the first format's rows read
-                    // their Bioseqs (`TabularSpec::subject_fetch`). A batch that fetches nothing
-                    // still asks for the run's refusal of NCBI's taxonomy cache before any byte,
-                    // unless no batch of the run prefetches (`shared::prefetch_always_off`). A
-                    // query whose rows read a subject only for its identities asks for it only
-                    // where they read one, NCBI's lookup: every batch's lookups are made here
-                    // before any report is written, so a later batch that prefetches still
-                    // refuses before any byte.
+                    // their Bioseqs (`TabularSpec::subject_fetch`; for `nident` alone the rows
+                    // with identities, `database::reads_subject`). NCBI looks the taxonomy up
+                    // only where it fetches a subject: in such a report, or in the prefetch of a
+                    // batch with Seq-aligns (one without them loads no id, below). Every batch's
+                    // lookups are made here before any report is written, so the run's refusal
+                    // of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
+                    // only there: a later batch that fetches still refuses before any byte.
                     if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                         let rows = first_spec.as_ref().map_or(SubjectFetch::Every, |spec| {
                             spec.subject_fetch(crate::blastinput::app::Program::Tblastn)
                         });
-                        let asks = match rows {
-                            SubjectFetch::Every => true,
-                            SubjectFetch::Never => {
-                                !crate::algorithm::common::database::prefetch_always_off()
-                            }
-                            SubjectFetch::WithIdentities => false,
-                        };
                         for (query, hitlist) in span.clone().zip(hitlists) {
                             let shown = std::slice::from_ref(hitlist);
-                            if asks
-                                || hitlist
-                                    .lists()
-                                    .iter()
-                                    .any(|list| super::database::reads_subject(list, rows))
+                            if hitlist
+                                .lists()
+                                .iter()
+                                .any(|list| super::database::reads_subject(list, rows))
                             {
                                 let messages = database.prefetch_messages(reported, shown, rows)?;
                                 query_warning_lines[query].extend(messages);
                             }
                             rows_open(shown)?;
                         }
+                        continue;
+                    }
+                    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
+                    // ```c++
+                    //        CScope::TIds ids;
+                    //        vector<TSeqRange> ranges;
+                    //        s_ExtractSeqidsAndRanges(results, ids, ranges);
+                    //        _TRACE("Prefetching " << ids.size() << " sequence lengths");
+                    //        LoadSequencesToScope(ids, ranges, scope);
+                    // ```
+                    // A batch without Seq-aligns prefetches no sequence.
+                    if seq_aligns == 0 {
                         continue;
                     }
                     let messages =

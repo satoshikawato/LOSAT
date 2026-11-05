@@ -3569,21 +3569,16 @@ fn run_batch_loop(
                 // after the query's own warnings (`query_fetches`, added after them below), where
                 // the first format's rows read their Bioseqs (`rows`; for `nident` alone the rows
                 // of HSPs with the engine's identities, counted from the batch's stores, which a
-                // report with `nident` reads above). A batch that fetches nothing still asks for
-                // the run's refusal of NCBI's taxonomy cache before any byte, unless no batch of
-                // the run prefetches (`shared::prefetch_always_off`). A query whose rows read a
-                // subject only for its identities asks for it only where they read one, NCBI's
-                // lookup: a custom tabular report is written after the loop (no report stream),
-                // so a later batch that prefetches still refuses before any byte.
+                // report with `nident` reads above). NCBI looks the taxonomy up only where it
+                // fetches a subject: in such a report, or in the prefetch of a batch with
+                // Seq-aligns (one without them loads no id, `BlastFormatter_PreFetchSequenceData`).
+                // The run's refusal of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`)
+                // is asked only there: the report stream is off for a run with that refusal
+                // (`report_stream::Off::TaxonomyCache`), so every report is then written after
+                // the loop and a later batch that fetches still refuses before any report (outfmt
+                // 0's prolog is written before the search).
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                     debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
-                    let asks = match rows {
-                        SubjectFetch::Every => true,
-                        SubjectFetch::Never => {
-                            !crate::algorithm::common::database::prefetch_always_off()
-                        }
-                        SubjectFetch::WithIdentities => false,
-                    };
                     let (query_code, db_code) = (
                         crate::utils::genetic_code::GeneticCode::from_id(args.query_gencode),
                         crate::utils::genetic_code::GeneticCode::from_id(args.db_gencode),
@@ -3621,7 +3616,7 @@ fn run_batch_loop(
                                     .collect()
                             }
                         };
-                        query_fetches.push(if asks || !shown.is_empty() {
+                        query_fetches.push(if !shown.is_empty() {
                             super::super::database::prefetch_messages(
                                 database,
                                 shown,
@@ -3634,7 +3629,7 @@ fn run_batch_loop(
                             database.open_for_tabular_rows()?;
                         }
                     }
-                } else {
+                } else if !ordered.is_empty() {
                     let messages = super::super::database::prefetch_messages(
                         database,
                         ordered,

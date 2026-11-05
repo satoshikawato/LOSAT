@@ -1396,6 +1396,27 @@ impl ListedTitles<'_> {
         Ok(taxonomy)
     }
 
+    /// The listed subjects as the library's records name them (`shared::library_subject`); a
+    /// subject without rows, which no record names, has an empty title.
+    pub(super) fn library_subjects(
+        &self,
+        database: &BlastpDatabase,
+    ) -> Vec<crate::api::local_blast::ReportedSubject> {
+        (0..self.listed.ordinals.len())
+            .map(|rank| {
+                shared::library_subject(
+                    &database.db,
+                    self.title(rank),
+                    self.listed.ordinals[rank],
+                    self.parsed_subject(rank),
+                    self.listed.x_lengths[rank] as usize,
+                    true,
+                    self.program,
+                )
+            })
+            .collect()
+    }
+
     /// The subject of rank `rank` when it has parsed Seq-ids.
     pub(super) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
         self.parsed.get(rank).and_then(Option::as_deref)

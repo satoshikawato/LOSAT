@@ -380,7 +380,7 @@ let outcome = run_collect(&search, Inputs::new(&query, &subject), &["6", "0"])?;
 // outcome.queries(): the same results by query, and .subjects() of each by subject
 ```
 
-`run_batches` gives the same records one of NCBI's query batches at a time, so a caller keeps one batch in memory, reports progress between batches and stops by not asking for the next. The inputs are records (`-query`, `-subject`, `-db`, `-out` and `-outfmt` are not argv options of the API; a database subject is not available through the API yet), the search writes nothing to standard output or error, and errors carry the command line's messages. `cargo run --release --example library_search -- blastp query.faa subject.faa -evalue 1e-5` prints the outfmt 6 report; `cargo doc --no-deps --open` shows the API. The crate is not on crates.io yet (the plan's LIB-3).
+`run_batches` gives the same records one of NCBI's query batches at a time, so a caller keeps one batch in memory, reports progress between batches and stops by not asking for the next. The inputs are records, or a BLAST database by its name (`Inputs::database(&query, "core_nt")`, the command line's `-db`; `-query`, `-subject`, `-db`, `-out` and `-outfmt` are not argv options of the API), the search writes nothing to standard output or error, and errors carry the command line's messages. `cargo run --release --example library_search -- blastp query.faa subject.faa -evalue 1e-5` prints the outfmt 6 report; `cargo doc --no-deps --open` shows the API. The crate is not on crates.io yet (the plan's LIB-3).
 
 ## Library use (Python)
 

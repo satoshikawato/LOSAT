@@ -5066,21 +5066,16 @@ pub fn check_options(args: &BlastpArgs) -> Result<()> {
     crate::utils::threading::validate_threads(args.num_threads)
 }
 
-/// The part of `run` after the files are opened: NCBI's processing of the options,
-/// `Query is Empty!`, the reading of the queries and the search.
-fn search_cli(
-    args: BlastpArgs,
-    list: Option<crate::seqdb::DbList>,
-    query_file: std::fs::File,
-    subjects: &SubjectSet<'_>,
+/// What `search_cli` and `run_local_database` do after the options are processed and before the
+/// query: the opening of the database of `-db` (`list`: its taxid or seqid list, `None` for a
+/// search without `-db`), and what the requested reports ask of it.
+fn open_search_database(
+    args: &BlastpArgs,
+    resolved: &mut ResolvedBlastpArgs,
+    list: Option<&crate::seqdb::DbList>,
+    settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
-    choice: crate::blastinput::app::FormatChoice,
-    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
-) -> Result<()> {
-    use crate::blastinput::fasta_reader::{
-        read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
-    };
-    let mut resolved = args.check_options(outputs.diagnostics)?;
+) -> Result<Option<database::BlastpDatabase>> {
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:194-199
     // ```c++
     //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
@@ -5106,9 +5101,9 @@ fn search_cli(
         Some(name) => {
             let database = database::BlastpDatabase::open_restricted(
                 name,
-                &settings,
+                settings,
                 args.app.name(),
-                list.as_ref(),
+                list,
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis)
@@ -5146,22 +5141,44 @@ fn search_cli(
             .any(|spec| spec.needs().taxonomy_names)
     {
         resolved.subject_taxdb_found =
-            crate::algorithm::common::database::subject_taxdb_found(&settings, args.app.name())?;
+            crate::algorithm::common::database::subject_taxdb_found(settings, args.app.name())?;
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
-    if let (Some(database), Some(serial)) = (
-        database.as_ref(),
-        crate::blastinput::app::ReportFormat::from_number(choice.number)
-            .and_then(crate::report::serial::SerialFormat::of),
-    ) {
-        crate::report::serial::seqalign::check_database(
-            serial,
-            database.name(),
-            &database.pairwise_database().definition,
-            crate::blastinput::app::Program::Blastp,
-        )?;
+    if let Some(database) = database.as_ref() {
+        for format in &outputs.formats {
+            let choice = crate::blastinput::app::parse_formatting_string(format.outfmt)?;
+            if let Some(serial) = crate::blastinput::app::ReportFormat::from_number(choice.number)
+                .and_then(crate::report::serial::SerialFormat::of)
+            {
+                crate::report::serial::seqalign::check_database(
+                    serial,
+                    database.name(),
+                    &database.pairwise_database().definition,
+                    crate::blastinput::app::Program::Blastp,
+                )?;
+            }
+        }
     }
+    Ok(database)
+}
+
+/// The part of `run` after the files are opened: NCBI's processing of the options,
+/// `Query is Empty!`, the reading of the queries and the search.
+fn search_cli(
+    args: BlastpArgs,
+    list: Option<crate::seqdb::DbList>,
+    query_file: std::fs::File,
+    subjects: &SubjectSet<'_>,
+    outputs: &mut ReportOutputs<'_>,
+    choice: crate::blastinput::app::FormatChoice,
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+) -> Result<()> {
+    use crate::blastinput::fasta_reader::{
+        read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
+    };
+    let mut resolved = args.check_options(outputs.diagnostics)?;
+    let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:202-216
     // ```c++
     //         SDataLoaderConfig dlconfig =
@@ -5409,6 +5426,82 @@ fn run_local_formats(
         &subjects,
         None,
         subject_label,
+        outputs,
+        None,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:194-199
+// ```c++
+//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
+//         CRef<CLocalDbAdapter> db_adapter;
+//         CRef<CScope> scope;
+//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+//                          db_adapter, scope);
+//         _ASSERT(db_adapter && scope);
+// ```
+/// Runs one BLASTP search of the records `query_records` against the database of `args` and
+/// writes every requested output format from the same result (the library API's entry; the
+/// command line's is `run`). `settings` are the NCBI application settings, which find the
+/// database. The steps are `run`'s and `search_cli`'s, in their order; what differs is what they
+/// read: the records are read already, and the outputs are the caller's. An archive (outfmt 11)
+/// ends as the command line's does (`ReportOutputs::finish_archive`).
+pub fn run_local_database(
+    mut args: BlastpArgs,
+    query_records: &[FastaRecord],
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    let archive_requested = outputs
+        .formats
+        .iter()
+        .any(|format| blastp_is_archive(format.outfmt));
+    args.archive = super::archive::handle_for(&args, archive_requested)?
+        .map(|handle| outputs.with_archive_outfmt(handle));
+    crate::utils::threading::validate_threads(args.num_threads)?;
+    args.id_scope = crate::algorithm::common::database::database_id_scope(
+        args.parse_deflines,
+        query_records,
+        args.app.name(),
+    )?;
+    match args.archive.clone() {
+        Some(handle) => {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
+                search_database(args, query_records, settings, view)
+            });
+            outputs.finish_archive(&handle, query_records.is_empty(), result)
+        }
+        None => search_database(args, query_records, settings, outputs),
+    }
+}
+
+/// `run_local_database` from the taxid or seqid list on.
+fn search_database(
+    args: BlastpArgs,
+    query_records: &[FastaRecord],
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    // The handler of the database arguments reads the list before the other handlers (`run`).
+    let list = args
+        .db_filter
+        .resolve(&settings, &mut *outputs.diagnostics)?;
+    let mut resolved = resolve_for_formats(&args, outputs)?;
+    let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?
+        .ok_or_else(crate::blastinput::app::missing_subject_error)?;
+    if args.archive.is_some() {
+        super::archive::check_titles(query_records, "query")?;
+    }
+    search(
+        resolved,
+        query_records,
+        QueryReading::Records,
+        &SubjectSet {
+            records: std::borrow::Cow::Borrowed(&[]),
+            placements: seq_range::Placements::default(),
+        },
+        Some(&database),
+        "",
         outputs,
         None,
     )
@@ -11056,6 +11149,15 @@ fn run_resolved_in_pool(
     if let (Some(hits_sink), Some(pairwise_hits)) = (outputs.hits.as_mut(), pairwise_hits.as_ref())
     {
         hits_sink(std::sync::Arc::clone(pairwise_hits));
+    }
+    // The library's records name a database's sequences through this event.
+    if let (Some(titles), Some(database), true, Some(observer)) = (
+        listed_titles.as_ref(),
+        database,
+        outputs.hits.is_some(),
+        outputs.observer.as_deref_mut(),
+    ) {
+        observer.database_subjects(titles.library_subjects(database));
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1553-1554

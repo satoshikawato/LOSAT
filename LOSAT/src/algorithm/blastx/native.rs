@@ -111,7 +111,7 @@ pub(super) fn output_error(_: io::Error) -> anyhow::Error {
 /// the query file changes between that read and the search) is LOSAT's refusal, not an error of
 /// NCBI's engine, so it gets no `BLAST engine error:` and no error archive (`archive::error_lines`
 /// takes `NativeError`s only), as `XmlRefusal` gets none from `report_error`.
-fn archive_error(error: anyhow::Error) -> anyhow::Error {
+pub(super) fn archive_error(error: anyhow::Error) -> anyhow::Error {
     if error.is::<crate::report::serial::encoder::SerialError>() {
         error
     } else {
@@ -913,43 +913,7 @@ fn run_inner(
         (Some(_), None) => Subjects::Unreadable,
     };
     let search_error = |error: anyhow::Error| -> anyhow::Error {
-        // An error the search raised after the point where a database refused before the search
-        // fails it: the database's first error comes before it (`search::search_core`).
-        let error = match error.downcast::<super::x_db_stream::XPastHead>() {
-            Ok(super::x_db_stream::XPastHead(error)) => {
-                if let Some(stream) = x_stream.as_ref().filter(|stream| !stream.x_checked()) {
-                    if let Some(first) = stream.x_first_error() {
-                        return database_error(first);
-                    }
-                }
-                error
-            }
-            Err(error) => error,
-        };
-        // LOSAT's refusal, not an error of NCBI's engine.
-        if error.is::<super::parameters::SearchSpaceOverflow>()
-            || error.is::<super::split::QuerySplitRefusal>()
-        {
-            return error;
-        }
-        if error.is::<UnreadableSubjects>() {
-            let kept = unreadable
-                .borrow_mut()
-                .take()
-                .expect("the database's error, raised once");
-            return database_error(kept);
-        }
-        // A read or a check of the database that failed during the search, reported as the
-        // check's error while the reads have not checked every sequence (the first sequence in
-        // ordinal order that fails, whichever the search's threads read first; the search's own
-        // where the check finds none), and as its own after that (a file changed during the run).
-        match error.downcast::<super::x_db_stream::XReadError>() {
-            Ok(super::x_db_stream::XReadError(kept)) => database_error(match &x_stream {
-                Some(stream) if !stream.x_checked() => stream.x_first_error().unwrap_or(kept),
-                _ => kept,
-            }),
-            Err(error) => engine(error),
-        }
+        database_search_error(error, x_stream.as_ref(), &unreadable)
     };
     // The reports of one query batch: with `-db`, the titles of its reported sequences are
     // read first and its hit lists renamed to ranks (`ReportedSubjects::for_batch`); NCBI's
@@ -1042,162 +1006,15 @@ fn run_inner(
         }
         match (&database, &pairwise_database) {
             (Some(database), Some(pairwise)) => {
-                let reported = match search_subjects {
-                    Subjects::Unreadable => ReportedSubjects::default(),
-                    search_subjects => {
-                        let x_t = super::x_timing::lap();
-                        let reported = ReportedSubjects::for_batch(
-                            database,
-                            search_subjects,
-                            results,
-                            options.gapped,
-                            matches!(options.outfmt, 6 | 7 | 10 | 20),
-                            options.outfmt == 0,
-                            matches!(options.outfmt, 13..=16),
-                            matches!(options.outfmt, 0 | 5 | 13..=16)
-                                || options
-                                    .tabular
-                                    .is_some_and(|spec| spec.needs().joins_subjects()),
-                            matches!(options.outfmt, 13..=16)
-                                || options.tabular.is_some_and(|spec| spec.needs().taxonomy),
-                            if matches!(options.outfmt, 6 | 7 | 10 | 20) {
-                                crate::report::tabular::PrintedIds::of(options.tabular)
-                            } else {
-                                crate::report::tabular::PrintedIds::default()
-                            },
-                            crate::algorithm::common::database::seq_annots_prefetch(Some(
-                                i32::from(options.outfmt),
-                            )),
-                        );
-                        super::x_timing::run(XRun::Titles, x_t);
-                        let reported = reported
-                            .map_err(|error| match error.downcast::<HeaderReadError>() {
-                                Ok(header) => header.error,
-                                // A failed read of a record's residues.
-                                Err(error) => {
-                                    match error.downcast::<super::x_db_stream::XReadError>() {
-                                        Ok(super::x_db_stream::XReadError(kept)) => {
-                                            database_error(kept)
-                                        }
-                                        Err(error) => error,
-                                    }
-                                }
-                            })
-                            .inspect_err(|error| {
-                                // A refusal of the XML2 document, or of a subject with parsed
-                                // Seq-ids, drops what the run holds.
-                                if error.is::<super::blast_xml::XmlRefusal>()
-                                    || error
-                                        .is::<crate::algorithm::common::database::ParsedRefusal>()
-                                {
-                                    if let Some(held) = &held {
-                                        held.discard();
-                                    }
-                                }
-                            })?;
-                        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
-                        // ```c++
-                        //                 BlastFormatter_PreFetchSequenceData(*results, scope,
-                        //                 		                            fmt_args->GetFormattedOutputChoice());
-                        //             	ITERATE(CSearchResultSet, result, *results) {
-                        //                	    formatter.PrintOneResultSet(**result, query_batch);
-                        //             	}
-                        // ```
-                        // Before the reports of a batch NCBI fetches every subject that the batch
-                        // reports, and with `taxdb.bti` on the search path the taxonomy database
-                        // writes its messages there (`ReportedSubjects::prefetch_messages`: the
-                        // texts of opening it at the run's first lookup, a volume's lookup of a
-                        // taxid once per run): after the reader's messages of the reader batch,
-                        // which every batch loop writes before it calls this, and before the
-                        // warnings of its first query (`report::render_queries`). Outfmt 0, 5, 6
-                        // and 7, and with `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 and 12
-                        // (`database::prefetches_subjects`); XML2 and JSON write theirs at
-                        // each `Hit` (`TaxdbPrinter`). Without `taxdb.bti` nothing is read. A
-                        // refusal comes after the reports of the batches before, as the refusals
-                        // of the batch's titles above (line DBID, DECISIONS 9 (9)); a refusal of
-                        // the taxonomy database (`TaxonomyRefusal`) drops what an outfmt 5 run
-                        // holds, and the run holds where one could come (`taxdb_may_refuse`
-                        // above), as XML2's does.
-                        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-725
-                        // ```c++
-                        // s_IsPrefetchFormat(blast::CFormattingArgs::EOutputFormat format_type)
-                        // {
-                        // 	if ((format_type == CFormattingArgs::eAsnText) ||
-                        // 	    (format_type == CFormattingArgs::eAsnBinary) ||
-                        // 	    (format_type == CFormattingArgs::eArchiveFormat)||
-                        // 	    (format_type == CFormattingArgs::eJsonSeqalign)) {
-                        // 		return false;
-                        // 	}
-                        // 	return true;
-                        // ```
-                        // Outfmt 10 and 20 read the subjects as 6 and 7 do; the rows' own
-                        // lookups of the taxonomy names come with the rows (`tabular`).
-                        let prefetch_format = match options.outfmt {
-                            10 | 20 => 6,
-                            outfmt => i32::from(outfmt),
-                        };
-                        let mut reported = reported;
-                        if prefetches_subjects(Some(prefetch_format)) && database.taxdb_found() {
-                            let discard = |error: &anyhow::Error| {
-                                if error.is::<TaxonomyRefusal>() {
-                                    if let Some(held) = &held {
-                                        held.discard();
-                                    }
-                                }
-                            };
-                            // The batch's Seq-aligns: one for each HSP that the reports show
-                            // (`has_seqalign`), one for each subject of an ungapped search.
-                            let seq_aligns: usize = results
-                                .iter()
-                                .flat_map(|batch| batch.queries.iter().flatten())
-                                .map(|list| {
-                                    crate::algorithm::common::database::subject_seq_aligns(
-                                        list.hsps
-                                            .iter()
-                                            .filter(|hsp| {
-                                                super::report::has_seqalign(hsp, options.gapped)
-                                            })
-                                            .count(),
-                                        options.gapped,
-                                    )
-                                })
-                                .sum();
-                            // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
-                            // (`shared::prefetch_off`), each query's report fetches the
-                            // subjects it shows, after the query's own warnings
-                            // (`ReportedSubjects::fetch_by_query`), where the format's rows read
-                            // their Bioseqs (`TabularSpec::subject_fetch`).
-                            if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                                let rows = options.tabular.map_or(
-                                    crate::report::tabular::SubjectFetch::Every,
-                                    |spec| {
-                                        spec.subject_fetch(crate::blastinput::app::Program::Blastx)
-                                    },
-                                );
-                                reported
-                                    .fetch_by_query(database, results, options.gapped, rows)
-                                    .inspect_err(discard)?;
-                                if options.outfmt == 5 {
-                                    diagnostics.write_all(&reported.take_query_fetches())?;
-                                }
-                            } else {
-                                let messages = reported
-                                    .prefetch_messages(database, results, options.gapped)
-                                    .inspect_err(discard)?;
-                                diagnostics.write_all(&messages)?;
-                            }
-                        }
-                        // The values of a custom tabular field list that reads more of the
-                        // definition lines than the default report (`sall*`) or the taxonomy
-                        // (`staxid`, `staxids`, the names), read before the batch's first byte so
-                        // that their refusals come before it, after the prefetch (which opens the
-                        // taxonomy database first, as NCBI's does).
-                        if let Some(spec) = options.tabular {
-                            reported.read_tabular(database, spec, results, options.gapped)?;
-                        }
-                        reported
-                    }
-                };
+                let reported = reported_batch(
+                    database,
+                    search_subjects,
+                    &options,
+                    ReportedAsks::of(&options),
+                    results,
+                    diagnostics,
+                    held.as_ref(),
+                )?;
                 report::render_queries(
                     writer,
                     diagnostics,
@@ -1283,6 +1100,270 @@ fn run_inner(
     super::x_timing::common_run();
     super::x_timing::write(&mut *stderr, options.num_threads as usize)?;
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
+// ```c++
+//                 BlastFormatter_PreFetchSequenceData(*results, scope,
+//                 		                            fmt_args->GetFormattedOutputChoice());
+//             	ITERATE(CSearchResultSet, result, *results) {
+//                	    formatter.PrintOneResultSet(**result, query_batch);
+//             	}
+// ```
+/// What the reports of a query batch read of its database sequences
+/// (`ReportedSubjects::for_batch`): the arguments of one format (`of`), or of several (`or`).
+#[derive(Clone, Copy, Default)]
+pub(super) struct ReportedAsks {
+    tabular: bool,
+    pairwise: bool,
+    taxids: bool,
+    joined: bool,
+    taxonomy: bool,
+    words: crate::report::tabular::PrintedIds,
+    prefetched: bool,
+}
+
+impl ReportedAsks {
+    /// What the reports of `options.outfmt` ask.
+    pub(super) fn of(options: &super::args::ResolvedOptions) -> Self {
+        let tabular = matches!(options.outfmt, 6 | 7 | 10 | 20);
+        Self {
+            tabular,
+            pairwise: options.outfmt == 0,
+            taxids: matches!(options.outfmt, 13..=16),
+            joined: matches!(options.outfmt, 0 | 5 | 13..=16)
+                || options
+                    .tabular
+                    .is_some_and(|spec| spec.needs().joins_subjects()),
+            taxonomy: matches!(options.outfmt, 13..=16)
+                || options.tabular.is_some_and(|spec| spec.needs().taxonomy),
+            words: if tabular {
+                crate::report::tabular::PrintedIds::of(options.tabular)
+            } else {
+                crate::report::tabular::PrintedIds::default()
+            },
+            prefetched: crate::algorithm::common::database::seq_annots_prefetch(Some(i32::from(
+                options.outfmt,
+            ))),
+        }
+    }
+
+    /// What two reports of one batch ask.
+    pub(super) fn or(self, other: Self) -> Self {
+        Self {
+            tabular: self.tabular || other.tabular,
+            pairwise: self.pairwise || other.pairwise,
+            taxids: self.taxids || other.taxids,
+            joined: self.joined || other.joined,
+            taxonomy: self.taxonomy || other.taxonomy,
+            words: self.words.or(other.words),
+            prefetched: self.prefetched || other.prefetched,
+        }
+    }
+}
+
+/// The reported sequences of the query batch `results` of a `-db` search, with its hit lists
+/// renamed to ranks (`ReportedSubjects::for_batch`, `asks`), and what NCBI does before the reports
+/// of a batch, for the format of `options`: its prefetch and the values of a custom tabular field
+/// list. NCBI's reader error stops the run at this batch, with no epilog. `held`: what the run
+/// holds of its report, which a refusal drops.
+pub(super) fn reported_batch(
+    database: &BlastxDatabase,
+    search_subjects: Subjects<'_>,
+    options: &super::args::ResolvedOptions,
+    asks: ReportedAsks,
+    results: &mut Vec<BatchResults>,
+    diagnostics: &mut dyn Write,
+    held: Option<&super::blast_xml::HeldOutput>,
+) -> Result<ReportedSubjects> {
+    use super::x_timing::Run as XRun;
+    if matches!(search_subjects, Subjects::Unreadable) {
+        return Ok(ReportedSubjects::default());
+    }
+    let x_t = super::x_timing::lap();
+    let reported = ReportedSubjects::for_batch(
+        database,
+        search_subjects,
+        results,
+        options.gapped,
+        asks.tabular,
+        asks.pairwise,
+        asks.taxids,
+        asks.joined,
+        asks.taxonomy,
+        asks.words,
+        asks.prefetched,
+    );
+    super::x_timing::run(XRun::Titles, x_t);
+    let reported = reported
+        .map_err(|error| match error.downcast::<HeaderReadError>() {
+            Ok(header) => header.error,
+            // A failed read of a record's residues.
+            Err(error) => match error.downcast::<super::x_db_stream::XReadError>() {
+                Ok(super::x_db_stream::XReadError(kept)) => database_error(kept),
+                Err(error) => error,
+            },
+        })
+        .inspect_err(|error| {
+            // A refusal of the XML2 document, or of a subject with parsed
+            // Seq-ids, drops what the run holds.
+            if error.is::<super::blast_xml::XmlRefusal>()
+                || error.is::<crate::algorithm::common::database::ParsedRefusal>()
+            {
+                if let Some(held) = held {
+                    held.discard();
+                }
+            }
+        })?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
+    // ```c++
+    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+    //                 		                            fmt_args->GetFormattedOutputChoice());
+    //             	ITERATE(CSearchResultSet, result, *results) {
+    //                	    formatter.PrintOneResultSet(**result, query_batch);
+    //             	}
+    // ```
+    // Before the reports of a batch NCBI fetches every subject that the batch
+    // reports, and with `taxdb.bti` on the search path the taxonomy database
+    // writes its messages there (`ReportedSubjects::prefetch_messages`: the
+    // texts of opening it at the run's first lookup, a volume's lookup of a
+    // taxid once per run): after the reader's messages of the reader batch,
+    // which every batch loop writes before it calls this, and before the
+    // warnings of its first query (`report::render_queries`). Outfmt 0, 5, 6
+    // and 7, and with `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 and 12
+    // (`database::prefetches_subjects`); XML2 and JSON write theirs at
+    // each `Hit` (`TaxdbPrinter`). Without `taxdb.bti` nothing is read. A
+    // refusal comes after the reports of the batches before, as the refusals
+    // of the batch's titles above (line DBID, DECISIONS 9 (9)); a refusal of
+    // the taxonomy database (`TaxonomyRefusal`) drops what an outfmt 5 run
+    // holds, and the run holds where one could come (`taxdb_may_refuse`
+    // above), as XML2's does.
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-725
+    // ```c++
+    // s_IsPrefetchFormat(blast::CFormattingArgs::EOutputFormat format_type)
+    // {
+    // 	if ((format_type == CFormattingArgs::eAsnText) ||
+    // 	    (format_type == CFormattingArgs::eAsnBinary) ||
+    // 	    (format_type == CFormattingArgs::eArchiveFormat)||
+    // 	    (format_type == CFormattingArgs::eJsonSeqalign)) {
+    // 		return false;
+    // 	}
+    // 	return true;
+    // ```
+    // Outfmt 10 and 20 read the subjects as 6 and 7 do; the rows' own
+    // lookups of the taxonomy names come with the rows (`tabular`).
+    let prefetch_format = match options.outfmt {
+        10 | 20 => 6,
+        outfmt => i32::from(outfmt),
+    };
+    let mut reported = reported;
+    if prefetches_subjects(Some(prefetch_format)) && database.taxdb_found() {
+        let discard = |error: &anyhow::Error| {
+            if error.is::<TaxonomyRefusal>() {
+                if let Some(held) = held {
+                    held.discard();
+                }
+            }
+        };
+        // The batch's Seq-aligns: one for each HSP that the reports show
+        // (`has_seqalign`), one for each subject of an ungapped search.
+        let seq_aligns: usize = results
+            .iter()
+            .flat_map(|batch| batch.queries.iter().flatten())
+            .map(|list| {
+                crate::algorithm::common::database::subject_seq_aligns(
+                    list.hsps
+                        .iter()
+                        .filter(|hsp| super::report::has_seqalign(hsp, options.gapped))
+                        .count(),
+                    options.gapped,
+                )
+            })
+            .sum();
+        // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
+        // (`shared::prefetch_off`), each query's report fetches the
+        // subjects it shows, after the query's own warnings
+        // (`ReportedSubjects::fetch_by_query`), where the format's rows read
+        // their Bioseqs (`TabularSpec::subject_fetch`).
+        if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+            let rows = options
+                .tabular
+                .map_or(crate::report::tabular::SubjectFetch::Every, |spec| {
+                    spec.subject_fetch(crate::blastinput::app::Program::Blastx)
+                });
+            reported
+                .fetch_by_query(database, results, options.gapped, rows)
+                .inspect_err(discard)?;
+            if options.outfmt == 5 {
+                diagnostics.write_all(&reported.take_query_fetches())?;
+            }
+        } else {
+            let messages = reported
+                .prefetch_messages(database, results, options.gapped)
+                .inspect_err(discard)?;
+            diagnostics.write_all(&messages)?;
+        }
+    }
+    // The values of a custom tabular field list that reads more of the
+    // definition lines than the default report (`sall*`) or the taxonomy
+    // (`staxid`, `staxids`, the names), read before the batch's first byte so
+    // that their refusals come before it, after the prefetch (which opens the
+    // taxonomy database first, as NCBI's does).
+    if let Some(spec) = options.tabular {
+        reported.read_tabular(database, spec, results, options.gapped)?;
+    }
+    Ok(reported)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:226-227
+// ```c++
+//             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
+//             exit_code = BLAST_ENGINE_ERROR;                                 \
+// ```
+/// The error of the search of a query batch as a `-db` run reports it, and a `-subject` run
+/// (no `x_stream`, nothing `unreadable`).
+pub(super) fn database_search_error(
+    error: anyhow::Error,
+    x_stream: Option<&super::x_db_stream::XStreamDb<'_>>,
+    unreadable: &std::cell::RefCell<Option<anyhow::Error>>,
+) -> anyhow::Error {
+    // An error the search raised after the point where a database refused before the search
+    // fails it: the database's first error comes before it (`search::search_core`).
+    let error = match error.downcast::<super::x_db_stream::XPastHead>() {
+        Ok(super::x_db_stream::XPastHead(error)) => {
+            if let Some(stream) = x_stream.filter(|stream| !stream.x_checked()) {
+                if let Some(first) = stream.x_first_error() {
+                    return database_error(first);
+                }
+            }
+            error
+        }
+        Err(error) => error,
+    };
+    // LOSAT's refusal, not an error of NCBI's engine.
+    if error.is::<super::parameters::SearchSpaceOverflow>()
+        || error.is::<super::split::QuerySplitRefusal>()
+    {
+        return error;
+    }
+    if error.is::<UnreadableSubjects>() {
+        let kept = unreadable
+            .borrow_mut()
+            .take()
+            .expect("the database's error, raised once");
+        return database_error(kept);
+    }
+    // A read or a check of the database that failed during the search, reported as the
+    // check's error while the reads have not checked every sequence (the first sequence in
+    // ordinal order that fails, whichever the search's threads read first; the search's own
+    // where the check finds none), and as its own after that (a file changed during the run).
+    match error.downcast::<super::x_db_stream::XReadError>() {
+        Ok(super::x_db_stream::XReadError(kept)) => database_error(match x_stream {
+            Some(stream) if !stream.x_checked() => stream.x_first_error().unwrap_or(kept),
+            _ => kept,
+        }),
+        Err(error) => engine(error),
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175

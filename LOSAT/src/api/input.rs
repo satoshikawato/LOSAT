@@ -78,10 +78,54 @@ pub(super) fn is_protein(program: Program, role: Role) -> bool {
 fn reader_config(program: Program, role: Role) -> ReaderConfig {
     let name = program.reader_name();
     let protein = is_protein(program, role);
+    // The archive (outfmt 11) shows each record's defline as it is written, and the formats of
+    // the searches of the records are not known here (`check_archive_inputs`).
     match role {
         Role::Query => ReaderConfig::query(name, protein, true),
         Role::Subject => ReaderConfig::subject(name, protein, true),
     }
+    .with_defline(true)
+    .with_archive_unknown()
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:633-640
+// ```c++
+//     if (has_range) {
+//         auto old_id = FindBestChoice(GetIDs(), CSeq_id::BestRank);
+//         // generate a new ID, and record its relation to the given one(s).
+//         SetIDs().clear();
+//         GenerateID();
+//
+//         CRef<CSeq_align> align = xCreateAlignment(old_id,
+//             GetIDs().front(), range_start, range_end);
+// ```
+// LOSAT's archive does not write this Seq-hist alignment of a record with a range; the command
+// line's reader refuses such a record as it reads it.
+/// The refusal of a search that writes the BLAST archive of records with a range in their first
+/// word under `-parse_deflines` (`refuse_range_in_archive`).
+pub(super) fn check_archive_inputs(program: Program, inputs: Inputs<'_>) -> Result<(), Error> {
+    use crate::blastinput::fasta_reader::believed::{defline_has_range, refuse_range_in_archive};
+    let name = program.reader_name();
+    for (role, records, protein) in [
+        ("query", inputs.query, is_protein(program, Role::Query)),
+        (
+            "subject",
+            inputs.subject,
+            is_protein(program, Role::Subject),
+        ),
+    ] {
+        let ranged = records.iter().any(|record| {
+            record.believed().is_some()
+                && record
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| defline_has_range(&source.defline, protein, name))
+        });
+        if ranged {
+            return Err(Error::search(&refuse_range_in_archive(role, name)));
+        }
+    }
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-152
@@ -161,7 +205,8 @@ pub fn read_input_file(role: Role, path: &std::path::Path) -> Result<Vec<u8>, Er
 /// search's argv the ids of their deflines. The subjects come first, in one scope of ids with the
 /// queries, as NCBI reads them: a query and a subject with one id are one sequence to the reports.
 ///
-/// A search with `-parse_deflines` takes its records from here. Returns `(query, subject)`.
+/// A search with `-parse_deflines` takes its records from here; a search of a database gives no
+/// subject bytes. Returns `(query, subject)`.
 pub fn read_inputs(
     search: &Search,
     query: &[u8],
@@ -171,6 +216,10 @@ pub fn read_inputs(
     let scope = parse_deflines.then(Default::default);
     let read = |role: Role, bytes: &[u8]| {
         let config = reader_config(search.program(), role).with_parse_deflines(parse_deflines);
+        let config = match search.strand() {
+            Some(strand) if role == Role::Query => config.with_strand(&strand),
+            _ => config,
+        };
         let mut source = FastaInputSource::from_bytes(bytes, config);
         source.set_id_scope(scope.clone());
         read_source(source)
@@ -191,21 +240,22 @@ pub fn read_inputs(
 /// `Database:` line of a `-subject` search, `User specified sequence set (Input: NAME)`).
 ///
 /// The records come from [`read_fasta`] with the search's program and the input's role, or
-/// from [`FastaRecord::new`]. The library API has no database (`-db`) input yet
-/// (docs/losat_library_surface_plan.md §3.3): it will be another constructor, so the fields are
-/// not part of the API.
+/// from [`FastaRecord::new`]. A database subject comes from [`Inputs::database`]: the engine
+/// opens it by its name, as the command line opens `-db`.
 #[derive(Debug, Clone, Copy)]
 pub struct Inputs<'a> {
     /// The query records (`-query`).
     pub(crate) query: &'a [FastaRecord],
-    /// The subject records (`-subject`).
+    /// The subject records (`-subject`); none for a database.
     pub(crate) subject: &'a [FastaRecord],
     /// What the reports show as the query's file name. The command line's default is the
     /// `-query` argument; the API's is `query`.
     pub(crate) query_name: &'a str,
-    /// What the reports show as the subject set's file name. The command line's default is the
-    /// `-subject` argument; the API's is `subject`.
+    /// What the reports show as the subject set's file name, or the name of the database. The
+    /// command line's default is the `-subject` argument; the API's is `subject`.
     pub(crate) subject_name: &'a str,
+    /// Whether the subject is the database `subject_name` (`-db`).
+    pub(crate) database: bool,
 }
 
 impl<'a> Inputs<'a> {
@@ -216,15 +266,41 @@ impl<'a> Inputs<'a> {
             subject,
             query_name: "query",
             subject_name: "subject",
+            database: false,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
+    // ```c++
+    //     if (args.Exist(kArgDb) && args[kArgDb]) {
+    // 	std::string local_dblist = NStr::TruncateSpaces( args[kArgDb].AsString() );
+    //
+    //         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
+    //                                              mol_type));
+    // ```
+    /// The query records against the BLAST database `name`: the command line's `-db name`, one
+    /// or more space-separated names, resolved as there (the `BLASTDB` search path). The search
+    /// opens the database.
+    pub fn database(query: &'a [FastaRecord], name: &'a str) -> Self {
+        Self {
+            query,
+            subject: &[],
+            query_name: "query",
+            subject_name: name,
+            database: true,
         }
     }
 
     /// The same inputs, shown with these names (the file names of a command line whose output
-    /// the search is to reproduce).
+    /// the search is to reproduce). A database keeps its name.
     pub fn named(self, query_name: &'a str, subject_name: &'a str) -> Self {
         Self {
             query_name,
-            subject_name,
+            subject_name: if self.database {
+                self.subject_name
+            } else {
+                subject_name
+            },
             ..self
         }
     }

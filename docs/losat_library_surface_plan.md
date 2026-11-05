@@ -1,12 +1,12 @@
 # LOSAT ライブラリ化計画（公開面の設計メモ）
 
-状態：**LIB-1 は `dev` に入った（#845）。段階 1（公開面を固める）は `dev` に入った（#846）。段階 2（結果と実行制御、#849）と段階 3（`pylosat`、#850）は積んだ PR が feature branch に merge されたので、1 本の PR で `dev` へ入れる（2026-11-05）。** 設計メモは LIB-0（2026-10-31、保守者「OK」）。v0.2.0 自体は crates.io に出さない（release の決定 5、2026-10-25）。LIB-1 で決めたことは §9、順番の変更と段階 1 で決めたことは §10、段階 2 は §11、段階 3 は §12。
+状態：**LIB-1 は `dev` に入った（#845）。段階 1（公開面を固める）は `dev` に入った（#846）。段階 2（結果と実行制御）と段階 3（`pylosat`）は `dev` に入った（#851）。今の段は §13（全機能をライブラリに）で、公開はその後（保守者の決定、2026-11-05）。** 設計メモは LIB-0（2026-10-31、保守者「OK」）。v0.2.0 自体は crates.io に出さない（release の決定 5、2026-10-25）。LIB-1 で決めたことは §9、順番の変更と段階 1 で決めたことは §10、段階 2 は §11、段階 3 は §12、全機能の段は §13。
 
 | 項目 | 内容 |
 |---|---|
 | 目的 | LOSAT を Rust crate（crates.io）、npm、PyPI から使えるようにするときの**公開面**（public API surface）を先に決める |
 | 対象 | `LOSAT/`（エンジン crate）の公開面、`web/adapter/` との分担、配布の 3 チャネルの形と順番 |
-| 対象外 | wasm-bindgen、ネイティブ C ABI、`psiblast` と `makedb` の API 化（§8） |
+| 対象外 | wasm-bindgen、ネイティブ C ABI（§8） |
 | 基点 | `origin/dev` `4b2588e01` で確認し、`61fe55d2d` で関係するファイルに差分が無いことを確かめた（2026-10-31） |
 | 規則 | ルートの [`AGENTS.md`](../AGENTS.md)（エンジンの変更は NCBI の権威と parity gate）、[`web/AGENTS.md`](../web/AGENTS.md)、[`PD-LOSAT-WEB-APP-BOUNDARY`](product_decisions/PD-LOSAT-WEB-APP-BOUNDARY.md)、[`PD-PURE-RUST-RUNTIME-AUTHORITY`](product_decisions/PD-PURE-RUST-RUNTIME-AUTHORITY.md) |
 | 記録 | `losat-baselines/library-20261031/`（DECISIONS、STATE、次のセッションの指示） |
@@ -16,7 +16,7 @@
 ## 0. 結論
 
 1. 三つのチャネルの前提は同じで、**公開面を `losat::api` の 1 モジュールに絞る**ことである（`cli` も隠す、§10.2）。今の lib は内部モジュールが全部 `pub` で（§1.2）、このまま publish すると docs.rs が内部実装の目録になり、互換の約束ができない。
-2. 順番は **公開の前に Python で API を確かめる**：公開面を固める → 結果と実行制御 → `pylosat` で検証 → 公開（§10.1。2026-11-05 に変更。初版の順番は crates.io → npm → PyPI）。
+2. 順番は **公開の前に Python で API を確かめ、全機能をライブラリに入れる**：公開面を固める → 結果と実行制御 → `pylosat` で検証 → 全機能 → 公開（§10.1。2026-11-05 に変更。初版の順番は crates.io → npm → PyPI）。
    - crates.io は、Cargo.toml のメタデータが既に揃っていて、`cargo package --list` が通る（§1.1）。公開面を絞る LIB-1 の後なら、残りは名前とメタデータだけである。
    - npm は **wasm-bindgen を使わず**、既にある 2 つの WASI リアクタと ABI v2 のホスト側 TypeScript をそのまま包む（§4.2）。他のチャネルと独立に進められる。
    - PyPI は **pyo3 の binding `pylosat`**（§4.3、§9.1、§10.1）。
@@ -224,7 +224,6 @@ LIB-1、LIB-1b、LIB-2 は `LOSAT/src` を触るので `AGENTS.md` の規則の�
 
 - wasm-bindgen（§4.2）。pyo3 は §9.1 で対象に入った（LIB-5、段階 3）。
 - ネイティブの C ABI（`cdylib` は wasm のために既にあるが、C のヘッダと FFI は作らない）。
-- `psiblast` と `makedb` の API 化（CLI のみ。`blastdbcmd` も同じ）。
 - 検索の途中での中断。バッチの境界で止めることは対象に入った（段階 2、§10.1）：Python の Ctrl-C は同じ process の中で止めるほかない。ブラウザではホストが worker を止める。バッチの中で止めるには NCBI の `SetInterruptCallback` に当たるものをエンジンに入れる（まだやらない）。
 - 内部モジュールの `pub(crate)` 化（別の線。`#[doc(hidden)]` で足りる間はやらない）。
 
@@ -279,7 +278,7 @@ LIB-1、LIB-1b、LIB-2 は `LOSAT/src` を触るので `AGENTS.md` の規則の�
 | 1 | 中断 | 対象に入れる。バッチの境界で止める（§8） |
 | 2 | binding の置き場 | `LOSAT/` の外で、`web/` と同じ境界規則（§4.3）。PD は段階 3 で書き、その PR は保守者が merge する |
 | 3 | PyPI の名前 | `pylosat` |
-| 4 | 最初の公開の `-db` | 含めない。`Inputs` は足せる形にする（§10.2）。LIB-1c は要望に応じて |
+| 4 | 最初の公開の `-db` | ~~含めない。`Inputs` は足せる形にする（§10.2）。LIB-1c は要望に応じて~~ 公開より先に、`-db` を含む全機能をライブラリで使えるようにする（保守者、2026-11-05、§13） |
 | 5 | 順番 | 公開の前に `pylosat` で確かめる（下の表）。LIB-2 は段階 3 の後で、公開の前提ではない |
 | 6 | 段階 3 の検証先 | Python 版の gbdraw |
 
@@ -288,6 +287,7 @@ LIB-1、LIB-1b、LIB-2 は `LOSAT/src` を触るので `AGENTS.md` の規則の�
 | 1 公開面を固める（この PR） | §10.2 | 型付きの値と `-outfmt` の列の一致テスト |
 | 2 結果と実行制御 | `queries()` と `subjects()`、`run_batches`（逐次返却、進捗、境界での中断）、`Parameter` の `value_kind`、`-parse_deflines` | 分割実行と一括実行の全行一致 |
 | 3 `pylosat` で検証（LIB-5 の先行版） | PyO3 で薄く包む（path 依存）、Arrow、GIL の解放、Ctrl-C、pickle。gbdraw とノートブックで API の不足を洗い出す | gbdraw が subprocess なしで動く |
+| 全機能（§13） | `-db`、残りの拒否、`psiblast`、`makeblastdb`、`blastdbcmd` をライブラリに。`pylosat` はその後に追う | 各機能が CLI の固定バイトと一致する |
 | 4 公開（LIB-3、LIB-5、LIB-4） | crate 名 `losat`、crates.io と PyPI。npm は ABI v2 を包むだけなので独立に進められる | 公開面の差分検査（cargo-semver-checks、cargo-public-api）を CI に足す |
 
 ### 10.2 公開面の変更（§9.2 からの差分）
@@ -354,7 +354,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 ### 11.3 残ること
 
 - バッチごとに `run_local` を 1 回呼ぶので、subject の準備もバッチごとにやり直す。文書の測定では 20 分割で 0.75 s が 0.87 s。`-db` の後で測り直す（再利用状態の項）。
-- BLASTX の `-parse_deflines`：`run_local` が records の id を持ち越さない（`blastx_record`）。
+- ~~BLASTX の `-parse_deflines`：`run_local` が records の id を持ち越さない（`blastx_record`）。~~ §13 で解決した。
 - `Batches` は `Search` と records を借りる。`pylosat` の generator は所有する形を要するかもしれない（段階 3 で決める）。→ API は変えなかった（§12.1）。
 
 ### 11.4 検証
@@ -421,3 +421,43 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 - 公開（段階 4）：wheel のマトリクス、release workflow、`cargo-semver-checks` と `cargo-public-api`。
 - gbdraw の製品判断：`pylosat` を runtime に入れるか、その順番と記録の形。
 - `panic = "unwind"` の経路はテストしていない（公開の API から panic を起こす手段が無い）。release profile の build は通り、`python/tests` と gbdraw の比較はその build でも通る。
+
+## 13. 全機能をライブラリに（2026-11-05）
+
+保守者の決定（2026-11-05）：「そもそも db とか全ての機能を library でも使えるようにするのが公開より先では」。順番は `-db` → 残りの拒否 → `psiblast`、`makeblastdb`、`blastdbcmd` → `pylosat` が追う → 公開。PR は最初から `dev` 向けで、積み重ねない（#849 と #850 は積んだ先の branch に CI なしで merge された、#851 の本文）。
+
+### 13.1 `-db`（PR `feature/library-api-db`）
+
+| 項目 | 実装 | 理由 |
+|---|---|---|
+| 入力 | `Inputs::database(&query, name)`。`name` は `-db` の値（空白区切りの複数名も同じ）で、CLI と同じく `BLASTDB` の探索で開く | 開く処理は engine の中にあり、順番（リスト → オプション → 開く → `Query is Empty!`）が NCBI の順である。開いたものを渡す形は順番を呼び出し側に出す |
+| `validate` | `-subject` で解析し、失敗したら `-db` で解析する。`Search::command(inputs)` が入力の種類で解析し直す | argv は入力より先に検査する。`-subject_loc` と `-taxids` は片方の種類でしか解析を通らない |
+| 入口 | 各 program の `run_local_database(args, query, settings, outputs)`。`run_local` はブラウザの入口のままで、`-db` を拒否する | `settings` は CLI と同じ `check_ncbi_application_settings`。レコードの検索は NCBI の設定を読まない（§9）が、データベースは `BLASTDB` と `.ncbirc` で見つかる |
+| 共有 | データベースを開く塊を `open_search_database` に切り出し、`search_cli` と共有する。BLASTX は `reported_batch`、`database_search_error`、`ReportedAsks` を `native.rs` に切り出す | 重ねて書くと CLI との差が生まれる |
+| BLASTX の複数形式 | `report_batches`：`-subject` と `-db` が同じ batch loop を通る。1 回の検索で全形式を書き、`for_batch` の引数は全形式の和（`ReportedAsks::or`） | CLI の `run_inner` は 1 形式で、ライブラリは 1 回の検索で全形式を書く |
+| HSP の subject | `FormatObserver::database_subjects`（`ReportedSubject`：OID、`saccver`、長さ）。`HspRecord::s_idx` は database の順序 ID（`gnl\|BL_ORD_ID\|n` の n） | engine の `Hit::s_idx` は報告の rank で、バッチごとに意味が変わる。ID は表形式の報告が拒否するときも検索を失敗させない（`library_subject`） |
+| `-parse_deflines` | `read_inputs(&search, query, b"")`。query の id からスコープを作り直す（`database_id_scope`） | データベースはスコープに query の id を尋ねるだけで、読み手は要らない |
+| 読み手 | `read_fasta` と `read_inputs` は defline を保持する（`with_defline`）。範囲の拒否は outfmt 11 を求める検索で行う（`check_archive_inputs`） | 読むときに形式が分からない。archive は defline をそのまま書く |
+| BLASTN のバッチ | `QueryBatchSizes::of_database`：全体の文字数（リストがあっても全体）で `CBatchSizeMixer` を始める | `run_in_pool` と同じ値 |
+| archive | `ReportOutputs::finish_archive`：失敗と、どの archive にも載らなかったメッセージの error archive を CLI と同じく書く | `PrintErrorArchive` |
+
+BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`blastx_record` が `RecordSource` を持ち越す）。LOSAT Web の records は id を持たないので、ブラウザの拒否は残る。
+
+### 13.2 検証
+
+- `examples/library_database.rs`：CLI と同じ引数を受け、`api::run` で検索し、report を stdout、警告と失敗を stderr に書く。
+- `tests/db_search_fixtures.py check --library`：同じ manifest の全行を、その example で NCBI の固定バイトと比べる。5 program の 2,247 行で、差は 0（1 thread と 2 threads）。1,987 行は stdout、stderr が全バイト一致。CI の `fast output regressions` が毎回走らせる。
+  - 終了コードは 0 か 0 以外かだけ比べる（`Error` は CLI のメッセージを持ち、終了コードを持たない）。
+  - `library-input-error`（26 行）：query の読み取りエラーは検索の前に `Error::Input` になる。文言は CLI と同じで、エラーの前のバッチの報告は無い。
+  - `library-skip`（23 行）：outfmt 13、14（side file を書く先が API に無い）。
+  - LOSAT の拒否の行（211 行）は文言だけを比べる：`run` は書きながら進むので、CLI のように拒否の前のバイトを止めない。`run_collect` は何も返さない。
+- `LOSAT/tests/library_api.rs`：7 検索で outfmt 6、0、7、5、11 と列の一覧を 1 回の検索で書いて CLI と比べ、全 HSP の型付きの値と列、outfmt 5 の統計、バッチに分けた結果と一括の結果の一致を確かめる。失敗の文言は CLI の stderr と同じ。
+
+### 13.3 残ること
+
+- outfmt 13、14：side file の出力先を API に持たせる。
+- BLASTN の `-window_masker_db` と `-subject`：`run_local` が counts を持たないと拒否する（`-db` の経路はファイルを読む）。
+- BLASTX の `-subject` で outfmt 11。
+- `psiblast`、`makeblastdb`、`blastdbcmd`。
+- `pylosat` の `-db`。
+- `-db` のバッチごとの再利用：`run_batches` はバッチごとにデータベースを開き直す（§11.3 の測定の続き）。taxonomy データベースについて NCBI が 1 回だけ書くメッセージも、読むバッチごとに出る。

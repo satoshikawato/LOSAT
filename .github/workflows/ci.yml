@@ -175,7 +175,7 @@ jobs:
           workspaces: LOSAT -> target
       - name: Build release binary
         if: steps.select.outputs.programs != 'none'
-        run: cd LOSAT && cargo build --release --locked --bin losat --example library_database
+        run: cd LOSAT && cargo build --release --locked --bin losat --example library_command_line
       # FMA instructions and references to fma only where mul_add is (docs/agents/diagnostics.md,
       # "Floating-point contract").
       - name: Floating-point contract (release binary)
@@ -196,7 +196,7 @@ jobs:
           LOSAT_X_REACH: ${{ github.workspace }}/.tmp/switch-reach
         run: |
           python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/losat \
-            --library-example LOSAT/target/release/examples/library_database \
+            --library-example LOSAT/target/release/examples/library_command_line \
             --out .tmp/fast-regressions --programs "${{ steps.select.outputs.programs }}"
       # Every side of a conditional switch that switch_reach_expected.tsv requires was taken by
       # some fixture above (a switch's own path and its reference path while it is on).

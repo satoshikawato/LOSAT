@@ -18,7 +18,7 @@ selected program the FASTA-input fixtures of fasta_input_fixtures.py (`check --r
 hashes, and LOSAT's explicit rejections where it rejects an input or option); for BLASTP,
 BLASTN, TBLASTN, BLASTX, TBLASTX and PSIBLAST the `-db` fixtures of db_search_fixtures.py (`check --program <program>`: stdout,
 stderr and exit status against the frozen NCBI `<program> -db -num_threads 1` bytes, at 1 and
-4 threads), with --library-example the same rows through the library API (`check --library`, at 1
+4 threads), with --library-example the `-subject` and `-db` rows through the library API (at 1
 thread); and, whenever a program is selected, the command lines of the downstream tools and
 the common forms of each program (dropin_corpus.py `check`: every row).
 
@@ -287,8 +287,18 @@ def run_fixtures(losat: Path, programs: set[str], out: Path) -> list[str]:
 
 
 def run_library_fixtures(example: Path, programs: set[str], out: Path) -> list[str]:
-    """The `-db` fixtures through the library API (`db_search_fixtures.py check --library`)."""
+    """The `-subject` and `-db` fixtures through the library API (`check_losat.py` and
+    `db_search_fixtures.py check --library` with `examples/library_command_line`)."""
     failures = []
+    selected = [program for program in OUTFMT0_PROGRAMS if program in programs and program != "psiblast"]
+    if selected:
+        log = out / "outfmt0-fixtures-library.tsv"
+        result = subprocess.run([sys.executable, str(FIXTURE_DIR / "check_losat.py"), "--losat", str(example),
+                                 "--programs", ",".join(selected), "--threads", "1"],
+                                cwd=FIXTURE_DIR, capture_output=True, text=True)
+        log.write_text(result.stdout + result.stderr)
+        if result.returncode != 0:
+            failures.append(f"outfmt 0 fixtures differ through the library: see {log.name}")
     for program in DB_SEARCH_PROGRAMS:
         if program not in programs or program == "psiblast":
             continue
@@ -313,7 +323,7 @@ def main() -> int:
     parser.add_argument("--select-only", action="store_true")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     parser.add_argument("--library-example", type=Path,
-                        help="examples/library_database: the -db fixtures through the library API too")
+                        help="examples/library_command_line: the fixtures through the library API too")
     args = parser.parse_args()
 
     if args.changed_from:

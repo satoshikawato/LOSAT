@@ -15,8 +15,8 @@ use LOSAT::api::local_blast::{
     run_local_blastn, FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs,
 };
 use LOSAT::api::{
-    describe, read_fasta, read_inputs, run, run_batches, run_collect, validate, Error, FastaRecord,
-    HspRecord, Inputs, Outcome, Program, Role, Strand, ValueKind, API_OWNED,
+    describe, read_fasta, read_inputs, run, run_batches, run_collect, run_to_file, validate, Error,
+    FastaRecord, HspRecord, Inputs, Outcome, Program, Role, Strand, ValueKind, API_OWNED,
 };
 
 /// One search: a program, two fixtures of `tests/fasta`, options and the formats to compare.
@@ -143,6 +143,19 @@ fn cli(case: &Case, query: &Path, subject: &Path, outfmt: &str) -> (Vec<u8>, Vec
     let bytes = std::fs::read(&out).expect("the command line's report");
     let _ = std::fs::remove_file(&out);
     (bytes, output.stderr)
+}
+
+/// The library's error for the case with `outfmt`.
+fn api_error(case: &Case, query: &Path, subject: &Path, outfmt: &str) -> Error {
+    let queries = read_fasta(case.program, Role::Query, &std::fs::read(query).unwrap()).unwrap();
+    let subjects = read_fasta(
+        case.program,
+        Role::Subject,
+        &std::fs::read(subject).unwrap(),
+    )
+    .unwrap();
+    let search = validate(case.program, case.options).unwrap();
+    run_collect(&search, Inputs::new(&queries, &subjects), &[outfmt]).unwrap_err()
 }
 
 /// The library's outcome for the case, with the fixtures' paths as the inputs' names (what the
@@ -1166,7 +1179,7 @@ fn the_value_kinds_read_the_defaults_of_the_options() {
 fn every_structured_format_is_the_command_lines() {
     // The formats that hold the whole run in one document, from the search of each program.
     for case in [&CASES[0], &CASES[2], &CASES[3], &CASES[4], &CASES[5]] {
-        const FORMATS: &[&str] = &["5", "8", "9", "10", "12", "15", "16", "20"];
+        const FORMATS: &[&str] = &["5", "8", "9", "10", "11", "12", "15", "16", "20"];
         let (query, subject) = (fixture(case.query), fixture(case.subject));
         let outcome = api(
             &Case {
@@ -1189,6 +1202,93 @@ fn every_structured_format_is_the_command_lines() {
             );
         }
     }
+}
+
+/// The file of `outfmt` and the side files next to it, by name, removed.
+fn take_files(directory: &Path) -> Vec<(String, Vec<u8>)> {
+    let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| {
+            let path = entry.unwrap().path();
+            let bytes = std::fs::read(&path).unwrap();
+            std::fs::remove_file(&path).unwrap();
+            (
+                path.file_name().unwrap().to_string_lossy().into_owned(),
+                bytes,
+            )
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+#[test]
+fn a_report_in_a_file_has_its_side_files_as_on_the_command_line() {
+    let directory = temp_path("files");
+    std::fs::create_dir_all(&directory).unwrap();
+    // Both write to one name: the master file names its side files by it.
+    let out = directory.join("report.out");
+    for case in [&CASES[0], &CASES[2], &CASES[3], &CASES[4], &CASES[5]] {
+        for outfmt in ["13", "14", "6"] {
+            let context = format!("{} -outfmt {outfmt}", case.program);
+            let (query, subject) = (fixture(case.query), fixture(case.subject));
+            let queries =
+                read_fasta(case.program, Role::Query, &std::fs::read(&query).unwrap()).unwrap();
+            let subjects = read_fasta(
+                case.program,
+                Role::Subject,
+                &std::fs::read(&subject).unwrap(),
+            )
+            .unwrap();
+            let search = validate(case.program, case.options).unwrap();
+            let inputs = Inputs::new(&queries, &subjects)
+                .named(query.to_str().unwrap(), subject.to_str().unwrap());
+            let mut diagnostics = Vec::new();
+            run_to_file(&search, inputs, outfmt, &out, &mut diagnostics).unwrap();
+            let written = take_files(&directory);
+            let status = command(env!("CARGO_BIN_EXE_losat"))
+                .arg(case.program.name())
+                .arg("-query")
+                .arg(&query)
+                .arg("-subject")
+                .arg(&subject)
+                .args(case.options)
+                .args(["-outfmt", outfmt, "-out"])
+                .arg(&out)
+                .output()
+                .unwrap();
+            assert!(status.status.success(), "{context}");
+            let frozen = take_files(&directory);
+            assert_eq!(
+                written.iter().map(|file| &file.0).collect::<Vec<_>>(),
+                frozen.iter().map(|file| &file.0).collect::<Vec<_>>(),
+                "{context}"
+            );
+            assert!(written == frozen, "{context}: the bytes");
+            assert_eq!(diagnostics, status.stderr, "{context}: the warnings");
+            assert_eq!(
+                written.len() > 1,
+                outfmt != "6",
+                "{context}: the side files"
+            );
+        }
+    }
+    // Without a file there is no place for the side files: the command line's message.
+    let (query, subject) = (fixture(CASES[0].query), fixture(CASES[0].subject));
+    let error = api_error(&CASES[0], &query, &subject, "14");
+    assert!(error.message().contains("provide a file name"), "{error}");
+    // `-` is the command line's standard output, which the library does not write.
+    let search = validate(Program::Blastp, &[]).unwrap();
+    let error = run_to_file(
+        &search,
+        Inputs::new(&[], &[]),
+        "6",
+        Path::new("-"),
+        &mut std::io::sink(),
+    )
+    .unwrap_err();
+    assert!(matches!(error, Error::Argv(_)), "{error}");
+    std::fs::remove_dir_all(&directory).unwrap();
 }
 
 #[test]

@@ -7952,15 +7952,16 @@ fn cli_output_formats(
 
 /// The requested output formats of `run_local`, each read as the CLI reads its single
 /// `-outfmt` (`cli_output_formats`); a format that NCBI rejects later fails here with NCBI's
-/// error, as in the other programs' `run_local` (they have no output file).
+/// error, as in the other programs' `run_local`. `out`: the file of `api::run_to_file`.
 fn parse_output_formats<'a>(
     formats: impl IntoIterator<Item = &'a str>,
+    out: Option<&std::path::Path>,
 ) -> Result<Vec<BlastnOutputFormat>> {
     formats
         .into_iter()
         .map(|outfmt| {
             let choice = app::parse_formatting_string(outfmt)?;
-            match app::report_format(&choice, Program::Blastn, None)? {
+            match app::report_format(&choice, Program::Blastn, out)? {
                 Some(format) => BlastnOutputFormat::of(format, &choice),
                 None => {
                     app::formatting_handler_check(&choice, Program::Blastn)?;
@@ -8070,13 +8071,15 @@ pub fn run_local(
     });
     if archive_requested && args.db.is_none() {
         QueryStrand::parse(&args.strand)?;
-        args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), true)?;
+        args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), true)?
+            .map(|handle| outputs.with_archive_outfmt(handle));
         archive::check_titles(query_records, "query")?;
         archive::check_titles(subject_records, "subject")?;
         if let Some(handle) = args.archive.clone() {
-            return outputs.with_archive_diagnostics(handle, |view| {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(args, query_records, subject_records, view)
             });
+            return outputs.finish_archive(&handle, query_records.is_empty(), result);
         }
     }
     run_local_formats(args, query_records, subject_records, outputs)
@@ -8102,7 +8105,10 @@ fn run_local_formats(
     }
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
     QueryStrand::parse(&args.strand)?;
-    let output_formats = parse_output_formats(outputs.formats.iter().map(|format| format.outfmt))?;
+    let output_formats = parse_output_formats(
+        outputs.formats.iter().map(|format| format.outfmt),
+        args.out.as_deref(),
+    )?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
     let subject_range =
@@ -8171,7 +8177,10 @@ pub fn run_local_database(
 ) -> Result<()> {
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
     QueryStrand::parse(&args.strand)?;
-    let output_formats = parse_output_formats(outputs.formats.iter().map(|format| format.outfmt))?;
+    let output_formats = parse_output_formats(
+        outputs.formats.iter().map(|format| format.outfmt),
+        args.out.as_deref(),
+    )?;
     args.archive = archive::handle_for(
         &args,
         args.dust_filtering.as_deref(),
@@ -21175,13 +21184,13 @@ mod tests {
             ("21", "FASTA output format is only applicable to magicblast"),
         ] {
             assert_eq!(
-                native(parse_output_formats(["6", outfmt]).unwrap_err()),
+                native(parse_output_formats(["6", outfmt], None).unwrap_err()),
                 options(error),
                 "{outfmt}"
             );
         }
         assert_eq!(
-            parse_output_formats(["0", "6", "07"]).unwrap(),
+            parse_output_formats(["0", "6", "07"], None).unwrap(),
             [
                 BlastnOutputFormat::Pairwise,
                 BlastnOutputFormat::Tabular,
@@ -21189,7 +21198,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            parse_output_formats(["17", "17 SQ SR"]).unwrap(),
+            parse_output_formats(["17", "17 SQ SR"], None).unwrap(),
             [
                 BlastnOutputFormat::Sam(crate::report::sam::SamSpec::default()),
                 BlastnOutputFormat::Sam(crate::report::sam::SamSpec {

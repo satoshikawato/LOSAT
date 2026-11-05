@@ -518,6 +518,11 @@ mod rows {
     }
 
     impl<T> Rows<T> {
+        /// No NCBI counterpart: the bytes the row holds (its buffer's capacity).
+        pub(super) fn x_bytes(&self) -> usize {
+            crate::utils::scratch_pool::vec_bytes(&self.v)
+        }
+
         /// `Vec::as_ptr`: the row's first element without a slice made first, so that a pointer a
         /// kernel takes stays valid when the row is then read or written through `Deref` /
         /// `DerefMut` or another `as_ptr` / `as_mut_ptr` call, as Miri accepts for a `Vec` (a
@@ -878,7 +883,7 @@ fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
 // its trace, as NCBI does: nothing goes to its pool. Off (`LOSAT_X_DPNIBBLE=0`): every scratch
 // keeps its own trace. Placement of memory only: the kernels write and the walk reads the same
 // rows either way.
-const X_POOL_FROM: usize = 2_097_152 / 2;
+pub(crate) const X_POOL_FROM: usize = 2_097_152 / 2;
 // No NCBI counterpart: how many idle trace + rows pairs the pool keeps. One was measured on the
 // workstation (2026-11-03, Sakai x EDL933 `-subject`): a trace given back to a pool that held one
 // was freed and the next long traceback made it again, dc-megablast 1.046x the time at 16 threads
@@ -983,6 +988,34 @@ impl Drop for XdropScratch {
 }
 
 impl XdropScratch {
+    /// No NCBI counterpart (memory placement only): what the scratch of a pooled gapped aligner
+    /// keeps between pieces of work (`scratch_pool::Settle`). Past the steady size, its band rows
+    /// (sized together by `grow`), its operation list, its trace or its trace's rows make it a
+    /// new scratch (`for_search`), whose rows hold what used ones hold for a call: every call
+    /// starts from cleared rows (`reset`). The trace of a scratch on a Rayon pool thread does not
+    /// pass it: it goes to the pool after each call past `X_POOL_FROM` (`x_trace_release`).
+    pub(crate) fn x_settle(&mut self) {
+        use crate::utils::scratch_pool::{passes, vec_bytes};
+        let band = self.ha.x_bytes()
+            + self.hb.x_bytes()
+            + self.e.x_bytes()
+            + self.h8a.x_bytes()
+            + self.h8b.x_bytes()
+            + self.e8.x_bytes()
+            + self.sb.x_bytes()
+            + vec_bytes(&self.surv);
+        if passes(band)
+            || passes(vec_bytes(&self.ops))
+            || passes(vec_bytes(&self.trace))
+            || passes(vec_bytes(&self.rows))
+        {
+            // The new scratch is counted (`X_SCRATCHES`) before this one goes, so that the pool's
+            // idle pairs stay while scratches are alive.
+            let fresh = Self::for_search();
+            drop(std::mem::replace(self, fresh));
+        }
+    }
+
     /// No NCBI counterpart: after a traceback call (`X_POOL_FROM`): a pooled pair goes back
     /// (the thread's own buffers return), and the trace of a scratch on a Rayon pool thread that
     /// grew past the pool size by itself goes to the pool. A one-thread search (no pool) keeps its

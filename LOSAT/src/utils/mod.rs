@@ -7,6 +7,9 @@ mod seg_lnfact;
 // (*thread)->Run(); (*thread)->Join(&result);
 pub mod threading;
 pub mod winmask;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1533-1537
+// tid = omp_get_thread_num(); ... gap_align = thread_data->tld[tid]->gap_align;
+pub(crate) mod scratch_pool;
 pub(crate) mod x87;
 pub(crate) mod x_frame;
 pub mod x_logclone;

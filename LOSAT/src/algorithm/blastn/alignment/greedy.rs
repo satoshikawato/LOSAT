@@ -627,6 +627,59 @@ impl GreedyAlignScratch {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2853-2858
+// ```c
+//        /* double the max distance */
+//        new_dist = gap_align->greedy_align_mem->max_dist * 2;
+//        xdrop    = gap_align->greedy_align_mem->xdrop;
+//        s_BlastGreedyAlignsFree(gap_align->greedy_align_mem);
+//        gap_align->greedy_align_mem =
+//           s_BlastGreedyAlignMemAlloc(score_params, NULL, new_dist, xdrop);
+// ```
+// NCBI frees the greedy aligner's memory (`SGreedyAlignMem`) and makes it again, whole, when it
+// needs another size. No NCBI counterpart (memory placement only): what the greedy scratch of a
+// pooled aligner keeps between pieces of work (`scratch_pool::Settle`). Past the steady size,
+// that memory (the rows and score arrays of both aligners) goes back to a new scratch's: every
+// cell a call reads was written earlier in the same call, and each call sizes the memory it
+// uses. `max_dist` stays, as NCBI keeps it in the thread's `gap_align` and only doubles it, so
+// a later call starts from it as before and repeats no retry. The edit blocks, the edit
+// script's arrays and the preliminary call's window, which every call refills, go back the same
+// way.
+impl crate::utils::scratch_pool::Settle for GreedyAlignScratch {
+    fn settle(&mut self) {
+        use crate::utils::scratch_pool::{passes, vec_bytes, Settle};
+        let non_affine = &self.non_affine_mem;
+        let affine = &self.affine_mem;
+        let memory = vec_bytes(&non_affine.last_seq2_off[0])
+            + vec_bytes(&non_affine.last_seq2_off[1])
+            + vec_bytes(&non_affine.max_score)
+            + vec_bytes(&non_affine.traceback_pool)
+            + vec_bytes(&non_affine.rows)
+            + vec_bytes(&affine.rows)
+            + affine
+                .rows
+                .iter()
+                .map(|row| vec_bytes(&row.offsets))
+                .sum::<usize>()
+            + vec_bytes(&affine.diag_lower)
+            + vec_bytes(&affine.diag_upper)
+            + vec_bytes(&affine.max_score);
+        if passes(memory) {
+            self.non_affine_mem = GreedyNonAffineMem::new();
+            self.affine_mem = GreedyAffineMem::new();
+        }
+        for block in [&mut self.fwd_prelim_tback, &mut self.rev_prelim_tback] {
+            if passes(vec_bytes(&block.edit_ops)) {
+                *block = GapPrelimEditBlock::new();
+            }
+        }
+        if passes(vec_bytes(&self.x_edit_script.op_type) + vec_bytes(&self.x_edit_script.num)) {
+            self.x_edit_script = GapEditScript::new(0);
+        }
+        self.x_window.settle();
+    }
+}
+
 /// Greedy edit script container.
 /// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:56-61 (GapEditScript)
 struct GapEditScript {

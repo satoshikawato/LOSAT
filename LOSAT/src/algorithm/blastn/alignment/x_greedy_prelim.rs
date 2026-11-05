@@ -98,6 +98,16 @@ pub(crate) struct XPrelimWindow {
     len: usize,
 }
 
+// No NCBI counterpart (memory placement only): a window past the steady size goes back to none
+// (`scratch_pool::Settle`); the next call fills a window as a new scratch's first call does.
+impl crate::utils::scratch_pool::Settle for XPrelimWindow {
+    fn settle(&mut self) {
+        if crate::utils::scratch_pool::passes(crate::utils::scratch_pool::vec_bytes(&self.bytes)) {
+            *self = Self::default();
+        }
+    }
+}
+
 /// The four bases of each packed byte, first base first.
 const X_UNPACKED: [[u8; COMPRESSION_RATIO]; 256] = {
     let mut table = [[0u8; COMPRESSION_RATIO]; 256];

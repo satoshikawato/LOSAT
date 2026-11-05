@@ -4264,24 +4264,6 @@ struct SubjectScratch {
     // gap_align->rev_prelim_tback = GapPrelimEditBlockNew();
     // ```
     greedy_align_scratch: GreedyAlignScratch,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:356-357
-    // ```c
-    //    gap_align->fwd_prelim_tback = GapPrelimEditBlockNew();
-    //    gap_align->rev_prelim_tback = GapPrelimEditBlockNew();
-    // ```
-    // Every look-ahead helper has its own scratch, as each NCBI call has the `gap_align` structure
-    // that holds its working memory. A helper never uses the caller's scratch. Reuse only.
-    // No NCBI counterpart: scratch memory of the look-ahead helpers.
-    x_ahead_scratch: Vec<(GapAlignScratch, GreedyAlignScratch)>,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-513
-    // ```c
-    //             BLAST_GappedAlignmentWithTraceback(program_number,
-    //                 query, adjusted_subject, gap_align, score_params,
-    // ```
-    // No NCBI counterpart: the scratch of the speculative traceback batches, one pair per thread
-    // of the pool, kept with the rest of this scratch so that each subject's traceback reuses it
-    // instead of making it again. Reuse only, as `x_ahead_scratch`.
-    x_spec_scratch: Vec<(GapAlignScratch, GreedyAlignScratch)>,
     cutoff_scores: Vec<i32>,
     x_dropoff_scores: Vec<i32>,
     reduced_cutoff_scores: Vec<i32>,
@@ -4399,10 +4381,6 @@ impl SubjectScratch {
             // gap_align->rev_prelim_tback = GapPrelimEditBlockNew();
             // ```
             greedy_align_scratch: GreedyAlignScratch::new(),
-            // No NCBI counterpart: the helper scratch list starts empty and is filled when helpers are used;
-            // it does not change any value NCBI computes.
-            x_ahead_scratch: Vec::new(),
-            x_spec_scratch: Vec::new(),
             cutoff_scores: Vec::with_capacity(query_count),
             x_dropoff_scores: Vec::with_capacity(query_count),
             reduced_cutoff_scores: Vec::with_capacity(query_count),
@@ -4451,6 +4429,43 @@ impl SubjectScratch {
             // No NCBI counterpart: every user sets the subject's ranges first (`reset_with_bounds`).
             x_tree: BlastIntervalTree::new(0, 1, 0, 1),
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1040-1041
+// ```c
+//     aux_struct->offset_pairs =
+//       (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-57
+// ```c
+//                 diag_array_length = 1;
+//                 /* What power of 2 is just longer than the query? */
+//                 while (diag_array_length < (qlen+window_size))
+//                 {
+//                         diag_array_length = diag_array_length << 1;
+//                 }
+// ```
+// No NCBI counterpart (memory placement only): what a subject scratch of a search's pool
+// (`scratch_pool`: the chunks of one subject, the database traceback) keeps between pieces of
+// work. The buffers that a piece of work sizes settle: the hits, the ungapped hits, the
+// preliminary hits and the subject's ranges (each emptied by the piece of work that fills it),
+// the diagonal hash, whose chain grows with the chunk's hits (a new table holds what one that
+// has seen every diagonal of a chunk holds: the next chunk's offset is past all of them), and the
+// greedy aligner's memory. The ones the search sizes keep their size, as NCBI keeps them for the
+// thread's whole search: the offset pairs (`GetOffsetArraySize`), the diagonal array (the query's
+// length) and the cutoffs (one per context).
+impl crate::utils::scratch_pool::Settle for SubjectScratch {
+    fn settle(&mut self) {
+        use crate::utils::scratch_pool::{passes, settle_vec, vec_bytes, Settle};
+        settle_vec(&mut self.hits);
+        settle_vec(&mut self.prelim_hits);
+        settle_vec(&mut self.ungapped_hits);
+        settle_vec(&mut self.seq_ranges_scratch);
+        if passes(vec_bytes(&self.diag_hash.chain)) {
+            self.diag_hash = DiagHashTable::new(self.diag_hash.window);
+        }
+        self.greedy_align_scratch.settle();
     }
 }
 
@@ -12301,6 +12316,46 @@ fn search_query_batch<const UNGAPPED: bool>(
             reduced_cutoff_scores,
         )
     };
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+    // ```c
+    // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+    // ...
+    // aux_struct->offset_pairs =
+    //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+    // ```
+    // A new subject scratch with the gapped aligner's scratch (one `gap_align`), for every pass
+    // over the subjects and for the search's pool of chunk scratches below.
+    let new_subject_scratch = || {
+        (
+            GapAlignScratch::new(),
+            SubjectScratch::new(queries_ref.len(), offset_array_size, window_size),
+        )
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1533-1537
+    // ```c
+    // #ifdef _OPENMP
+    //             tid = omp_get_thread_num();
+    // #endif
+    //             seqsrc = thread_data->tld[tid]->seqsrc;
+    //             gap_align = thread_data->tld[tid]->gap_align;
+    // ```
+    // NCBI finds a thread's `gap_align` by the thread's number. The working memory of the pieces of
+    // work that Rayon schedules is kept the same way (`scratch_pool`), one value per thread: here
+    // the gapped aligner's and the greedy aligner's scratches (`x_pairs`) of the look-ahead helpers
+    // of the two ordered loops and of the speculative traceback batches, for every subject of the
+    // search; the scratches of the chunks of a subject searched in parallel have their pool in
+    // that subject's loop over its chunks. No NCBI counterpart: scheduling and memory placement
+    // only.
+    let x_pairs: crate::utils::scratch_pool::ScratchPool<(GapAlignScratch, GreedyAlignScratch)> =
+        crate::utils::scratch_pool::ScratchPool::new(num_threads);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:356-357
+    // ```c
+    //    gap_align->fwd_prelim_tback = GapPrelimEditBlockNew();
+    //    gap_align->rev_prelim_tback = GapPrelimEditBlockNew();
+    // ```
+    // A new pair of `x_pairs`: each helper or batch slot aligns on the pair of its thread, as each
+    // NCBI call has the `gap_align` that holds its working memory; it never uses the caller's.
+    let x_new_pair = || (GapAlignScratch::new(), GreedyAlignScratch::new());
     let good_init_extends = std::sync::atomic::AtomicU64::new(0);
     let process_subject = |s_idx: usize,
                            subject: BlastnSubjectRef<'_>,
@@ -15815,16 +15870,14 @@ fn search_query_batch<const UNGAPPED: bool>(
             // Only the caller's own (single-chunk) loop gets helpers; chunk
             // batches already occupy the pool.
             // The preliminary gapped loop over one list of ungapped hits in score order: the
-            // chunk's on the owner (with the look-ahead helpers, whose scratch
-            // `x_helper_scratch` holds), or one query's (LOSAT_X_QGROUPPAR, no helpers). Returns
-            // the alignments run and the hits the tree held.
+            // chunk's on the owner (`x_helpers`: with the look-ahead helpers, which align on the
+            // pairs of `x_pairs`), or one query's (LOSAT_X_QGROUPPAR, no helpers). Returns the
+            // alignments run and the hits the tree held.
             let x_prelim_list = |ungapped_hits: &[UngappedHit],
                                  interval_tree: &mut BlastIntervalTree,
                                  gap_scratch: &mut GapAlignScratch,
                                  greedy_align_scratch: &mut GreedyAlignScratch,
-                                 x_helper_scratch: Option<
-                &mut Vec<(GapAlignScratch, GreedyAlignScratch)>,
-            >,
+                                 x_helpers: bool,
                                  prelim_hits: &mut Vec<PrelimHit>|
              -> (usize, usize) {
                 let mut dbg_containment_skipped = 0usize;
@@ -15835,7 +15888,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 };
                 let x_ahead = match x_ahead_window {
                     Some(x_window)
-                        if x_helper_scratch.is_some()
+                        if x_helpers
                             && reuse_prelim_hits
                             && !blastn_trace_enabled
                             && x_ungapped.len() >= 2 * x_window =>
@@ -15850,16 +15903,18 @@ fn search_query_batch<const UNGAPPED: bool>(
                 if x_greedy_spec && x_ahead_window.is_some() {
                     crate::utils::xreach::x_reach!("LOSAT_X_GREEDYSPEC", x_ahead.is_some());
                 }
-                let mut x_no_helpers = Vec::new();
-                let x_helper_scratch = x_helper_scratch.unwrap_or(&mut x_no_helpers);
-                if x_ahead.is_some() {
-                    while x_helper_scratch.len() + 1 < num_threads {
-                        x_helper_scratch.push((GapAlignScratch::new(), GreedyAlignScratch::new()));
-                    }
-                }
-                let x_helpers = x_helper_scratch
-                    .iter_mut()
-                    .map(|(gap, greedy)| XAheadScratch { gap, greedy });
+                // No NCBI counterpart: one helper per other thread of the pool; a helper aligns
+                // on the pair of the thread that runs it (`x_pairs`), taken at its first
+                // alignment, so that a helper that finds no work takes none.
+                let x_helper_pairs = (1..num_threads).map(|_| x_pairs.deferred());
+                let x_helper_compute = |x_index: usize,
+                                        x_pair: &mut crate::utils::scratch_pool::Deferred<
+                    '_,
+                    (GapAlignScratch, GreedyAlignScratch),
+                >| {
+                    let (gap, greedy) = x_pair.get(x_new_pair);
+                    x_prelim_compute(x_index, &mut XAheadScratch { gap, greedy })
+                };
 
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,4087-4088
                 // ```c
@@ -15873,8 +15928,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                 // Process each ungapped hit in score order
                 crate::utils::xahead::with_helpers(
                     x_ahead.as_ref(),
-                    x_helpers,
-                    &x_prelim_compute,
+                    x_helper_pairs,
+                    &x_helper_compute,
                     || {
                         for (idx, uh) in ungapped_hits.iter().enumerate() {
                             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919
@@ -16387,7 +16442,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                         hits.sort_by(score_compare_ungapped_hits);
                         tree.reset();
                         let mut out = Vec::new();
-                        let dbg = x_prelim_list(&hits, tree, gap, greedy, None, &mut out);
+                        let dbg = x_prelim_list(&hits, tree, gap, greedy, false, &mut out);
                         (purge_prelim_hits_with_common_endpoints(out), dbg)
                     },
                 );
@@ -16405,7 +16460,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     interval_tree,
                     gap_scratch,
                     greedy_align_scratch,
-                    Some(&mut subject_scratch.x_ahead_scratch),
+                    true,
                     prelim_hits,
                 );
                 dbg_gapped_calls = calls;
@@ -16558,6 +16613,14 @@ fn search_query_batch<const UNGAPPED: bool>(
                     let max_in_flight = num_threads.max(1) * 2;
                     let mut chunk_batch: Vec<SubjectChunk> = Vec::with_capacity(max_in_flight);
                     let mut done = false;
+                    // No NCBI counterpart (memory placement only): the scratches of this subject's
+                    // chunks searched in parallel, one per thread (`scratch_pool`), made at the first
+                    // batch of two chunks or more and dropped with the subject's chunks, as the
+                    // scratches of each batch were before: they hold arrays the query sizes (the
+                    // diagonal array) that the rest of the search does not need.
+                    let mut x_chunk_scratch: Option<
+                        crate::utils::scratch_pool::ScratchPool<(GapAlignScratch, SubjectScratch)>,
+                    > = None;
                     loop {
                         chunk_batch.clear();
                         while chunk_batch.len() < max_in_flight && !done {
@@ -16638,38 +16701,35 @@ fn search_query_batch<const UNGAPPED: bool>(
                         } else {
                             let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> =
                                 Vec::with_capacity(chunk_batch.len());
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1533-1537
+                            // ```c
+                            //             tid = omp_get_thread_num();
+                            // ...
+                            //             gap_align = thread_data->tld[tid]->gap_align;
+                            // ```
+                            // Each chunk is searched on the scratch of the thread that searches it
+                            // (`x_chunk_scratch`), not on one made for each piece Rayon cuts the
+                            // batch into (`map_init`). Memory placement only.
+                            let x_chunk_scratch = &*x_chunk_scratch.get_or_insert_with(|| {
+                                crate::utils::scratch_pool::ScratchPool::new(num_threads)
+                            });
                             chunk_batch
                                 .par_iter()
-                                .map_init(
-                                    || {
-                                        (
-                                            GapAlignScratch::new(),
-                                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-                                            // ```c
-                                            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                                            // ...
-                                            // aux_struct->offset_pairs =
-                                            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-                                            // ```
-                                            SubjectScratch::new(
-                                                queries_ref.len(),
-                                                offset_array_size,
-                                                window_size,
-                                            ),
-                                        )
-                                    },
-                                    |state, chunk| {
-                                        let (gap_scratch, subject_scratch) = state;
-                                        let hits = collect_prelim_hits_for_chunk(
-                                            chunk,
-                                            soft_ranges,
-                                            gap_scratch,
-                                            subject_scratch,
-                                            false,
-                                        );
-                                        (chunk.offset, chunk.overlap, hits)
-                                    },
-                                )
+                                .map(|chunk| {
+                                    x_chunk_scratch.with(
+                                        new_subject_scratch,
+                                        |(gap_scratch, subject_scratch)| {
+                                            let hits = collect_prelim_hits_for_chunk(
+                                                chunk,
+                                                soft_ranges,
+                                                gap_scratch,
+                                                subject_scratch,
+                                                false,
+                                            );
+                                            (chunk.offset, chunk.overlap, hits)
+                                        },
+                                    )
+                                })
                                 .collect_into_vec(&mut chunk_results);
                             for (offset, overlap, hits) in chunk_results {
                                 let _ = merge_prelim_hit_lists(
@@ -17032,28 +17092,18 @@ fn search_query_batch<const UNGAPPED: bool>(
         let mut traceback_edit_script_lengths: Vec<u32> = Vec::new();
         let mut traceback_alignment_lengths: Vec<u32> = Vec::new();
 
-        // The traceback loop over one list of kept HSPs: the subject's on the owner (with the
-        // look-ahead helpers, whose scratch `x_helper_scratch` holds, or the speculative
-        // batches), or one query's (LOSAT_X_QGROUPPAR, neither). The HSPs go to `hits`.
+        // The traceback loop over one list of kept HSPs: the subject's on the owner (`x_helpers`:
+        // with the look-ahead helpers or the speculative batches, which align on the pairs of
+        // `x_pairs`), or one query's (LOSAT_X_QGROUPPAR, neither). The HSPs go to `hits`.
         let x_trace_list = |prelim_hits: &[PrelimHit],
                             interval_tree: &mut BlastIntervalTree,
                             gap_scratch: &mut GapAlignScratch,
                             greedy_align_scratch: &mut GreedyAlignScratch,
-                            x_helper_scratch: Option<
-            &mut Vec<(GapAlignScratch, GreedyAlignScratch)>,
-        >,
-                            x_spec_scratch: Option<
-            &mut Vec<(GapAlignScratch, GreedyAlignScratch)>,
-        >,
+                            x_helpers: bool,
                             hits: &mut Vec<BlastnHsp>,
                             traceback_edit_script_lengths: &mut Vec<u32>,
                             traceback_alignment_lengths: &mut Vec<u32>| {
-            let speculative_traceback = speculative_traceback && x_helper_scratch.is_some();
-            #[cfg(not(all(
-                feature = "parallel",
-                any(not(target_arch = "wasm32"), feature = "wasm-threads")
-            )))]
-            let _ = &x_spec_scratch;
+            let speculative_traceback = speculative_traceback && x_helpers;
             if x_greedy_spec {
                 crate::utils::xreach::x_reach!("LOSAT_X_GREEDYSPEC", speculative_traceback);
             }
@@ -17199,17 +17249,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     feature = "parallel",
                     any(not(target_arch = "wasm32"), feature = "wasm-threads")
                 ))]
-                let mut x_no_spec = Vec::new();
-                #[cfg(all(
-                    feature = "parallel",
-                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                ))]
-                let x_spec_scratch = x_spec_scratch.unwrap_or(&mut x_no_spec);
-                #[cfg(all(
-                    feature = "parallel",
-                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                ))]
-                let mut speculative_scratch: Vec<_> = if speculative_traceback {
+                let mut speculative_scratch: Vec<Vec<_>> = if speculative_traceback {
                     // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-513
                     // BLAST_GappedAlignmentWithTraceback(...);
                     // Each independent scratch slot retains its intermediate results.
@@ -17219,17 +17259,11 @@ fn search_query_batch<const UNGAPPED: bool>(
                     //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
                     //                 query_length, adjusted_s_length, gap_align,
                     // ```
-                    // Each slot of the batch also has the scratch of the greedy aligner, so that
-                    // the greedy traceback call can run on a slot instead of on the ordered loop.
-                    // Scratch only, made once per subject scratch (`x_spec_scratch`).
-                    while x_spec_scratch.len() < num_threads {
-                        x_spec_scratch.push((GapAlignScratch::new(), GreedyAlignScratch::new()));
-                    }
-                    x_spec_scratch
-                        .iter_mut()
-                        .take(num_threads)
-                        .map(|(gap, greedy)| (gap, greedy, Vec::new()))
-                        .collect()
+                    // Each slot of the batch has its results; its traceback calls, dynamic
+                    // programming or greedy, run on the pair of the thread that runs the slot
+                    // (`x_pairs`), taken at the slot's first call, so that the greedy traceback
+                    // call can run on a slot instead of on the ordered loop.
+                    (0..num_threads).map(|_| Vec::new()).collect()
                 } else {
                     Vec::new()
                 };
@@ -17357,7 +17391,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 // the loop runs as ported.
                 let x_ahead = match x_ahead_window {
                     Some(x_window)
-                        if x_helper_scratch.is_some()
+                        if x_helpers
                             && !blastn_trace_enabled
                             && prelim_hits.len() >= 2 * x_window =>
                     {
@@ -17368,16 +17402,17 @@ fn search_query_batch<const UNGAPPED: bool>(
                 if x_ahead_window.is_some() {
                     crate::utils::xreach::x_reach!("LOSAT_X_AHEAD", x_ahead.is_some());
                 }
-                let mut x_no_helpers = Vec::new();
-                let x_helper_scratch = x_helper_scratch.unwrap_or(&mut x_no_helpers);
-                if x_ahead.is_some() {
-                    while x_helper_scratch.len() + 1 < num_threads {
-                        x_helper_scratch.push((GapAlignScratch::new(), GreedyAlignScratch::new()));
-                    }
-                }
-                let x_helpers = x_helper_scratch
-                    .iter_mut()
-                    .map(|(gap, greedy)| XAheadScratch { gap, greedy });
+                // No NCBI counterpart: one helper per other thread of the pool, on the pair of the
+                // thread that runs it (`x_pairs`), taken at its first traceback.
+                let x_helper_pairs = (1..num_threads).map(|_| x_pairs.deferred());
+                let x_helper_compute = |x_index: usize,
+                                        x_pair: &mut crate::utils::scratch_pool::Deferred<
+                    '_,
+                    (GapAlignScratch, GreedyAlignScratch),
+                >| {
+                    let (gap, greedy) = x_pair.get(x_new_pair);
+                    x_trace_compute(x_index, &mut XAheadScratch { gap, greedy })
+                };
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,600-601
                 // ```c
                 //    for (index=0; index < num_initial_hsps; index++) {
@@ -17389,8 +17424,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                 // order; the other threads of the pool only evaluate tracebacks ahead.
                 crate::utils::xahead::with_helpers(
                     x_ahead.as_ref(),
-                    x_helpers,
-                    &x_trace_compute,
+                    x_helper_pairs,
+                    &x_helper_compute,
                     || {
                         for prelim_index in 0..prelim_hits.len() {
                             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,404-405
@@ -17498,7 +17533,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 let pool = parallel_pool;
                                 pool.install(|| {
                                     speculative_scratch.par_iter_mut().enumerate().for_each(
-                                        |(slot, (scratch, x_greedy_scratch, results))| {
+                                        |(slot, results)| {
+                                            // No NCBI counterpart: the pair of the thread that
+                                            // runs this slot (`x_pairs`), taken at its first call.
+                                            let mut x_pair = x_pairs.deferred();
                                             results.clear();
                                             results.extend(
                                                 jobs.iter().skip(slot).step_by(num_threads).filter_map(
@@ -17516,6 +17554,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                                                             return None;
                                                         }
                                                         let x_mark = x_fence::x_fence_mark(x_fenced);
+                                                        let (scratch, x_greedy_scratch) =
+                                                            x_pair.get(x_new_pair);
                                                         if !use_dp {
                                                             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507
                                                             // ```c
@@ -17585,7 +17625,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 // Blast_HSPUpdateWithTraceback(gap_align, hsp);
                                 // BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
                                 // One owner restores each result to its original batch index.
-                                for (_, _, results) in &mut speculative_scratch {
+                                for results in &mut speculative_scratch {
                                     for (index, result) in results.drain(..) {
                                         speculative_results[index - prelim_index] = Some(result);
                                     }
@@ -18865,8 +18905,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                             tree,
                             gap,
                             greedy,
-                            None,
-                            None,
+                            false,
                             &mut hits,
                             &mut edit_lengths,
                             &mut alignment_lengths,
@@ -18900,8 +18939,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     interval_tree,
                     gap_scratch,
                     &mut subject_scratch.greedy_align_scratch,
-                    Some(&mut subject_scratch.x_ahead_scratch),
-                    Some(&mut subject_scratch.x_spec_scratch),
+                    true,
                     hits,
                     &mut traceback_edit_script_lengths,
                     &mut traceback_alignment_lengths,
@@ -19024,16 +19062,8 @@ fn search_query_batch<const UNGAPPED: bool>(
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
         // ```c
         // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-        // ...
-        // aux_struct->offset_pairs =
-        //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
         // ```
-        let new_state = || {
-            (
-                GapAlignScratch::new(),
-                SubjectScratch::new(queries_ref.len(), offset_array_size, window_size),
-            )
-        };
+        let new_state = new_subject_scratch;
         let search_one = |state: &mut (GapAlignScratch, SubjectScratch), s_idx: usize| {
             let (gap_scratch, subject_scratch) = state;
             let mut subject_hits: Option<SubjectHits> = None;
@@ -19125,16 +19155,8 @@ fn search_query_batch<const UNGAPPED: bool>(
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
     // ```c
     // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-    // ...
-    // aux_struct->offset_pairs =
-    //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
     // ```
-    let new_scratch = || {
-        (
-            GapAlignScratch::new(),
-            SubjectScratch::new(queries_ref.len(), offset_array_size, window_size),
-        )
-    };
+    let new_scratch = new_subject_scratch;
     // An ungapped (`-ungapped`) search only (the other instance never calls them): the steps of
     // NCBI's preliminary stage that finish a subject's HSP list and that `process_subject` leaves
     // to its caller. The reap by the query coverage is made as the HSPs are given to the

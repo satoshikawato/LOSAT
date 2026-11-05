@@ -175,15 +175,7 @@ pub struct GapAlignScratch {
 
 impl GapAlignScratch {
     pub fn new() -> Self {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
-        let dp_mem_alloc = 1000;
-        let dp_mem = vec![
-            BlastGapDP {
-                best: GAP_MININT,
-                best_gap: GAP_MININT
-            };
-            dp_mem_alloc
-        ];
+        let (dp_mem, dp_mem_alloc) = Self::x_new_dp_mem();
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:448-450 (edit_script/edit_start_offset arrays)
         let trace_rows = Vec::with_capacity(100);
@@ -201,6 +193,25 @@ impl GapAlignScratch {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:317-319
+    // ```c
+    // 	   gap_align->dp_mem_alloc = 1000;
+    // 	   gap_align->dp_mem = (BlastGapDP *)malloc(gap_align->dp_mem_alloc *
+    // 						    sizeof(BlastGapDP));
+    // ```
+    /// The DP memory of a new scratch (`BLAST_GapAlignStructNew`).
+    fn x_new_dp_mem() -> (Vec<BlastGapDP>, usize) {
+        let dp_mem_alloc = 1000;
+        let dp_mem = vec![
+            BlastGapDP {
+                best: GAP_MININT,
+                best_gap: GAP_MININT
+            };
+            dp_mem_alloc
+        ];
+        (dp_mem, dp_mem_alloc)
+    }
+
     /// No NCBI counterpart: the SIMD kernel's operations (`fast.ops`) as edit operations, in a
     /// spare vector of this scratch when one is left (`x_spare_ops`), reversed when `reverse`.
     fn x_ops_vec(&mut self, reverse: bool) -> Vec<GapEditOp> {
@@ -216,6 +227,47 @@ impl GapAlignScratch {
             edit_ops.reverse();
         }
         edit_ops
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:802-808
+// ```c
+// if (num_extra_cells > gap_align->dp_mem_alloc) {
+//     gap_align->dp_mem_alloc = MAX(num_extra_cells + 100,
+//                                   2 * gap_align->dp_mem_alloc);
+//     sfree(gap_align->dp_mem);
+//     gap_align->dp_mem = (BlastGapDP *)malloc(gap_align->dp_mem_alloc *
+//                                               sizeof(BlastGapDP));
+// }
+// ```
+// No NCBI counterpart (memory placement only): what the scratch of a pooled gapped aligner keeps
+// between pieces of work (`scratch_pool::Settle`). Past the steady size, each of its buffers
+// that a call sizes goes back to its size in a new scratch: the vector kernels' rows
+// (`XdropScratch::x_settle`), the DP memory (NCBI's `dp_mem`, which a call enlarges as above),
+// the rows of the scalar traceback with their offsets (`trace_rows_used` back to none, as
+// `gap_reset_traceback_state` sets it for every call), and the spare operation lists. A call
+// writes every cell it reads, as on a new scratch; the cached score tables (`x_tables`) depend on
+// the matrix only and stay.
+impl crate::utils::scratch_pool::Settle for GapAlignScratch {
+    fn settle(&mut self) {
+        use crate::utils::scratch_pool::{passes, vec_bytes};
+        self.fast.x_settle();
+        if passes(vec_bytes(&self.dp_mem)) {
+            (self.dp_mem, self.dp_mem_alloc) = Self::x_new_dp_mem();
+        }
+        let trace = vec_bytes(&self.trace_rows)
+            + self.trace_rows.iter().map(vec_bytes).sum::<usize>()
+            + vec_bytes(&self.trace_offsets);
+        if passes(trace) {
+            self.trace_rows = Vec::new();
+            self.trace_offsets = Vec::new();
+            self.trace_rows_used = 0;
+        }
+        let spare =
+            vec_bytes(&self.x_spare_ops) + self.x_spare_ops.iter().map(vec_bytes).sum::<usize>();
+        if passes(spare) {
+            self.x_spare_ops = Vec::new();
+        }
     }
 }
 

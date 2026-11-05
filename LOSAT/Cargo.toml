@@ -65,7 +65,7 @@ path = "tests/unit_tests.rs"
 
 [dependencies]
 anyhow = "1.0"
-bio = "1.6"
+bio = "4.2"
 clap = { version = "4.5", features = ["derive"] }
 rayon = { version = "1.11", optional = true }
 libm = "0.2.15"

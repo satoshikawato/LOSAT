@@ -109,8 +109,12 @@
 //! per query batch. A block's table is tested for NCBI's overflow banks with the block's own
 //! batches (`blast_engine.rs` `ncbi_compressed_lookup_tables`), and the block search is taken only
 //! where the words of each batch's offsets show that no batch's table fills them
-//! (`x_block_words_fit`, tested before the first block), so that the reference path's refusal,
-//! which comes before any row, is never made in a later block.
+//! (`x_word_blocks`, tested before the first block), so that the reference path's refusal,
+//! which comes before any row, is never made in a later block. The same counts also close a block
+//! before a batch whose words would take the block's table past the slots of NCBI's largest batch
+//! table (`x_word_blocks`): NCBI holds one batch's table at a time, so with a lowered threshold a
+//! block of 50,000 letters would hold several times NCBI's table. A block is still made of whole
+//! batches of the whole input, so the argument above holds for it.
 //!
 //! It also takes the other formats of one blastp report (outfmt 8, 9, 11 and 12, and outfmt 5):
 //! - outfmt 8, 9 and 12 (Seq-annot of Seq-aligns as ASN.1 text, BER and JSON): NCBI writes one
@@ -265,8 +269,9 @@
 //! outputs, hit records or an observer; the search of all queries runs (Owner-delegated 2026-10-22).
 //!
 //! `LOSAT_X_BPQBLOCK` is a value switch of the strict set (`utils/xswitch.rs`): a positive number
-//! of query letters (the block closes at the first batch end at or past it), 50,000 when it is
-//! not set or is not a positive number. `0`,
+//! of query letters (the block closes at the first batch end at or past it; with the compressed
+//! table also before a batch whose words pass the block's most, `blast_engine.rs`
+//! `x_word_blocks`), 50,000 when it is not set or is not a positive number. `0`,
 //! turns the block path off.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
@@ -595,20 +600,38 @@ impl FormatObserver for XOffsetObserver<'_> {
 // NCBI searches and reports one batch at a time; a block is one or more whole batches.
 /// The blocks of searched queries: consecutive batches (`batches`, of the whole input), each
 /// block closed at the first batch end where its letters (`lengths` of the searched queries)
-/// reach `block_letters`. `None` when a batch has no searched query or the batches do not cover
-/// the searched queries in order.
+/// reach `block_letters`. With `words` (the words of each batch's compressed table, one per
+/// batch, and the most a block may hold: `blast_engine.rs` `x_word_blocks`), a block is also
+/// closed before a batch whose words would take the block's past the most; a batch is never
+/// split, so a block holds at least one. `None` when a batch has no searched query, the batches
+/// do not cover the searched queries in order, or `words` does not have one count per batch.
 pub(crate) fn x_query_blocks(
     batches: &[RangedBatch],
     lengths: &[usize],
     block_letters: usize,
+    words: Option<(&[u64], u64)>,
 ) -> Option<Vec<Range<usize>>> {
+    if words.is_some_and(|(batch_words, _)| batch_words.len() != batches.len()) {
+        return None;
+    }
     let mut blocks = Vec::new();
     let mut start = 0usize;
     let mut end = 0usize;
     let mut letters = 0usize;
-    for batch in batches {
+    let mut block_words = 0u64;
+    for (index, batch) in batches.iter().enumerate() {
         if batch.searched.is_empty() || batch.searched.start != end {
             return None;
+        }
+        if let Some((batch_words, most)) = words {
+            let added = batch_words[index];
+            if start < end && block_words.saturating_add(added) > most {
+                blocks.push(start..end);
+                start = end;
+                letters = 0;
+                block_words = 0;
+            }
+            block_words = block_words.saturating_add(added);
         }
         end = batch.searched.end;
         letters += lengths.get(batch.searched.clone())?.iter().sum::<usize>();
@@ -616,6 +639,7 @@ pub(crate) fn x_query_blocks(
             blocks.push(start..end);
             start = end;
             letters = 0;
+            block_words = 0;
         }
     }
     if end != lengths.len() {
@@ -1231,33 +1255,92 @@ mod tests {
         ];
         // Letters per batch: 12, 12, 4, 7.
         assert_eq!(
-            x_query_blocks(&batches, &lengths, 20),
+            x_query_blocks(&batches, &lengths, 20, None),
             Some(vec![0..4, 4..7])
         );
         assert_eq!(
-            x_query_blocks(&batches, &lengths, 12),
+            x_query_blocks(&batches, &lengths, 12, None),
             Some(vec![0..2, 2..4, 4..7])
         );
         assert_eq!(
-            x_query_blocks(&batches, &lengths, 1),
+            x_query_blocks(&batches, &lengths, 1, None),
             Some(vec![0..2, 2..4, 4..6, 6..7])
         );
-        assert_eq!(x_query_blocks(&batches, &lengths, 1000), Some(vec![0..7]));
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 1000, None),
+            Some(vec![0..7])
+        );
+    }
+
+    #[test]
+    fn blocks_close_before_a_batch_that_takes_their_words_past_the_most() {
+        let lengths = [6, 6, 3, 9, 2, 2, 7];
+        let batches = [
+            batch(0..2, 0..2),
+            batch(2..4, 2..4),
+            batch(4..6, 4..6),
+            batch(6..7, 6..7),
+        ];
+        let words = [40u64, 30, 10, 50];
+        // The words close a block before the batch that takes it past the most (a block may
+        // reach the most).
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 1000, Some((&words, 80))),
+            Some(vec![0..6, 6..7])
+        );
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 1000, Some((&words, 70))),
+            Some(vec![0..4, 4..7])
+        );
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 1000, Some((&words, 69))),
+            Some(vec![0..2, 2..6, 6..7])
+        );
+        // A batch above the most is a block of its own; it is never split.
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 1000, Some((&words, 1))),
+            Some(vec![0..2, 2..4, 4..6, 6..7])
+        );
+        // Words that never reach the most leave the blocks of the letters.
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 20, Some((&words, 1000))),
+            Some(vec![0..4, 4..7])
+        );
+        // Both: the letters close 0..2 and 2..4 (12 letters each), the words close 4..6 before
+        // the last batch (10 + 50 > 55); a block closed by its letters counts its words anew.
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 12, Some((&words, 55))),
+            Some(vec![0..2, 2..4, 4..6, 6..7])
+        );
+        // A block closed by its words counts its letters anew: 40 + 30 > 55 closes 0..2, and
+        // 2..6 has 16 letters, below 20, when 10 + 50 > 55 closes it.
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 20, Some((&words, 55))),
+            Some(vec![0..2, 2..6, 6..7])
+        );
+        // One count per batch, or no blocks.
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 20, Some((&words[..3], 1000))),
+            None
+        );
     }
 
     #[test]
     fn batches_that_do_not_cover_the_queries_give_no_blocks() {
         let lengths = [5, 5, 5];
         assert_eq!(
-            x_query_blocks(&[batch(0..2, 0..2), batch(2..3, 2..2)], &lengths, 1),
+            x_query_blocks(&[batch(0..2, 0..2), batch(2..3, 2..2)], &lengths, 1, None),
             None
         );
-        assert_eq!(x_query_blocks(&[batch(0..2, 0..2)], &lengths, 1), None);
         assert_eq!(
-            x_query_blocks(&[batch(0..1, 0..1), batch(1..3, 2..3)], &lengths, 1),
+            x_query_blocks(&[batch(0..2, 0..2)], &lengths, 1, None),
             None
         );
-        assert_eq!(x_query_blocks(&[], &[], 1), Some(vec![]));
+        assert_eq!(
+            x_query_blocks(&[batch(0..1, 0..1), batch(1..3, 2..3)], &lengths, 1, None),
+            None
+        );
+        assert_eq!(x_query_blocks(&[], &[], 1, None), Some(vec![]));
     }
 
     // The XML checks of the block search agree with the writer's own functions on the probe titles

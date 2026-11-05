@@ -52,7 +52,7 @@
 //! `Err` is dropped), that the reference builder would make (`TooLarge`), or whose vectors lack the
 //! room (below) gives no values, and block i + 1 builds inline as without the switch, so its error
 //! is raised by the same call at the same point of its search: after block i's rows, before any of
-//! block i + 1's. In the block search such errors do not arise (`x_block_words_fit` sends a query set
+//! block i + 1's. In the block search such errors do not arise (`x_word_blocks` sends a query set
 //! whose tables could refuse to the search of all queries before any block); the rule stands
 //! regardless.
 //!

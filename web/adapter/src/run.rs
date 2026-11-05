@@ -60,8 +60,8 @@ impl Program {
 }
 
 /// One output of a run: a format that every run of the program writes (`Program::formats`), on
-/// the stream of its number, or the output of the argv's own `-outfmt`, on `STREAM_CUSTOM`
-/// (docs/web/abi_v2.md §5, §7).
+/// the stream of its number, or the output of the argv's own `-outfmt` (any other format that the
+/// CLI writes, or 6 and 7 with fields), on `STREAM_CUSTOM` (docs/web/abi_v2.md §5, §7).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Output {
     pub stream: u32,
@@ -134,11 +134,13 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 /// Parses an argv (program name first) with the engine's CLI parser, and reads its `-outfmt` as
 /// the CLI does (`parse_formatting_string`, `report_format`, with the CLI's messages; the
 /// formatting handler's check of a custom delimiter comes later, `custom_handler_check`). A run
-/// writes the program's formats 0, 6 and 7 whatever the value; 6 and 7 with words after the
-/// number (fields, `delim=`) add an output of their own, the third value returned
-/// (docs/web/abi_v2.md §7). The rule reads the words, not the fields
-/// they make, so that the application reads it from the argv alike: `6 std` adds an output with
-/// the bytes of outfmt 6. A value of another format is refused. The arguments come back with
+/// writes the program's formats 0, 6 and 7 whatever the value; every other format that the CLI
+/// writes (5, 8 to 12, 15, 16, 20, BLASTN's 17), and 6 and 7 with words after the number (fields,
+/// `delim=`), add an output of their own, the third value returned (docs/web/abi_v2.md §7). The
+/// rule reads the words, not the fields they make, so that the application reads it from the argv
+/// alike: `6 std` adds an output with the bytes of outfmt 6. 0 with words adds none (the CLI writes
+/// outfmt 0). Outfmt 13 and 14 (side files next to `-out`) and BLASTX's 11 are refused. The
+/// arguments come back with
 /// `-outfmt` at the CLI's default, `0`: the engine is given the formats of each search
 /// (`ReportOutputs`), and the checks of the arguments alone (`check_options`) read the formats
 /// as they do without `-outfmt`, but for an `-outfmt` whose custom delimiter the CLI rejects
@@ -166,6 +168,16 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
         LOSAT::cli::try_parse_from(argv).map_err(|error| LOSAT::cli::render_message(&error))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
     let mut command = cli.command;
+    // The `@PG` line of SAM (outfmt 17) shows the command line, which `main` gives BLASTN: the
+    // run's, `losat` and its argv, each word followed by one space (`cli::command_line_bytes`).
+    if let Commands::Blastn(args) = &mut command {
+        let mut line = b"losat ".to_vec();
+        for word in words {
+            line.extend_from_slice(word.as_bytes());
+            line.push(b' ');
+        }
+        args.command_line = Some(line);
+    }
     let outfmt = std::mem::replace(outfmt_of(&mut command), "0".to_string());
     let choice = LOSAT::blastinput::app::parse_formatting_string(&outfmt)
         .map_err(|error| format!("{error:#}"))?;
@@ -183,9 +195,10 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
             None => LOSAT::blastinput::app::formatting_handler_check(&choice, engine),
         })
         .map_err(|error| format!("{error:#}"))?;
-    if !u32::try_from(choice.number).is_ok_and(|number| program.formats().contains(&number)) {
+    // No writer in memory yet: the side files of 13 and 14, BLASTX's archive (its `run_local`).
+    if matches!(choice.number, 13 | 14) || (choice.number == 11 && program == Program::Blastx) {
         return Err(format!(
-            "-outfmt {}: the browser writes outfmt 0, 6 and 7 (6 and 7 with any fields); other formats need the CLI",
+            "-outfmt {} is not supported in the browser yet",
             choice.number
         ));
     }
@@ -194,8 +207,24 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
     let words_follow = outfmt
         .trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r'))
         .contains(' ');
-    let custom = (matches!(choice.number, 6 | 7) && words_follow).then_some(outfmt);
+    let custom = match choice.number {
+        0 => None,
+        6 | 7 => words_follow.then_some(outfmt),
+        _ => Some(outfmt),
+    };
     Ok((program, command, custom))
+}
+
+/// Whether the run of `words` writes the BLAST archive (outfmt 11), whose Bioseqs show the whole
+/// records (`store::with_inputs`).
+pub fn writes_archive(words: &[&str]) -> bool {
+    parse_run(words).is_ok_and(|(_, _, custom)| {
+        custom.is_some_and(|outfmt| {
+            LOSAT::blastinput::app::parse_formatting_string(&outfmt).is_ok_and(|choice| {
+                choice.number == LOSAT::blastinput::app::output_format::ARCHIVE_FORMAT
+            })
+        })
+    })
 }
 
 /// `validate`: `parse`, then the syntax of `-subject_loc` and `-query_loc`, BLASTN's
@@ -578,8 +607,8 @@ pub fn hit_list_size(command: &Commands, format: u32) -> usize {
 /// sizes are equal and the group is the program's formats in their order (the one search of
 /// before). The tabular group goes first because the formatting handler's warnings belong to
 /// the first format, and the CLI writes the tabular formats' (`ReportCounts::warnings`). The
-/// output of the argv's `-outfmt` (6 or 7 with fields) has the hit list size of its number, so
-/// it joins the tabular group, first (`outputs`): it adds no search.
+/// output of the argv's `-outfmt` (a format above 4) has the hit list size of the tabular
+/// formats, so it joins the tabular group, first (`outputs`): it adds no search.
 pub fn search_groups(formats: &[Output], command: &Commands) -> Vec<Vec<Output>> {
     let [_, descriptions, alignments] = count_options(command);
     if descriptions.is_none() && alignments.is_none() {
@@ -836,8 +865,8 @@ fn link_format0(
 /// Without `-num_descriptions` and `-num_alignments` this is one search that writes every
 /// format. With them it is one search per distinct hit list size of the formats
 /// (`search_groups`), so that each format's stream is the CLI's output for that format
-/// alone. The output of the argv's `-outfmt` (6 or 7 with fields, stream 4) is written by the
-/// tabular search, as the CLI writes that `-outfmt`. The HSP records follow the tabular search;
+/// alone. The output of the argv's `-outfmt` (stream 4) is written by the tabular search, as the
+/// CLI writes that `-outfmt`. The HSP records follow the tabular search;
 /// a record gets the section of format 0 only where the search of format 0 has exactly its HSPs
 /// (`link_format0`) (docs/web/abi_v2.md §5, §7, §8).
 ///
@@ -1560,11 +1589,47 @@ mod tests {
             let (_, mut command, given) = parse_run(&words).unwrap();
             assert_eq!(given.as_deref(), Some("6 qseqid"));
             assert_eq!(outfmt_of(&mut command), "0");
-            for outfmt in ["5", "10", "11", "15"] {
+            // Every other format that the CLI writes adds an output, with or without words (W11).
+            for outfmt in [
+                "5",
+                "8",
+                "9",
+                "10",
+                "12",
+                "15",
+                "16",
+                "20",
+                " 5 ",
+                "+010",
+                "10 qseqid",
+                "20 delim=| std",
+                "5 qseqid",
+            ] {
+                assert_eq!(
+                    custom(program, outfmt),
+                    Ok(Some(outfmt.to_string())),
+                    "{program} {outfmt:?}"
+                );
+                let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
+                assert_eq!(validate(&words), Ok(()), "{program} {outfmt:?}");
+            }
+            assert_eq!(
+                custom(program, "11").map(|c| c.is_some()),
+                if program == "blastx" {
+                    Err("-outfmt 11 is not supported in the browser yet".to_string())
+                } else {
+                    Ok(true)
+                },
+                "{program}"
+            );
+            // The side files of 13 and 14 have no writer in memory yet; the CLI's own errors
+            // (13 and 14 need -out there) do not apply to a run, which writes no file.
+            for outfmt in ["13", "14", "14 qseqid"] {
+                let number = &outfmt[..2];
                 assert_eq!(
                     custom(program, outfmt),
                     Err(format!(
-                        "-outfmt {outfmt}: the browser writes outfmt 0, 6 and 7 (6 and 7 with any fields); other formats need the CLI"
+                        "-outfmt {number} is not supported in the browser yet"
                     )),
                     "{program}"
                 );
@@ -1661,6 +1726,7 @@ mod tests {
             "Error: Formatting choice is out of range\n"
         );
         assert_eq!(custom("blastp", "17").unwrap_err(), "BLAST query/options error: SAM format is only applicable to blastn\nPlease refer to the BLAST+ user manual.\n");
+        assert_eq!(custom("blastn", "17 SQ"), Ok(Some("17 SQ".to_string())));
     }
 
     /// The streams of `run` over inputs that the program's reader reads (`store::register`).
@@ -1673,9 +1739,13 @@ mod tests {
         let (query, _) = crate::store::register(words[0], 0, query).unwrap();
         let (subject, _) = crate::store::register(words[0], 1, subject).unwrap();
         crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
-        let result = crate::store::with_inputs(program, query, subject, |queries, subjects| {
-            run(words, queries, subjects)
-        });
+        let result = crate::store::with_inputs(
+            program,
+            query,
+            subject,
+            writes_archive(words),
+            |queries, subjects| run(words, queries, subjects),
+        );
         crate::store::release(query).unwrap();
         crate::store::release(subject).unwrap();
         result.unwrap().unwrap();
@@ -1737,6 +1807,846 @@ mod tests {
             }
             assert!(!plain.contains_key(&STREAM_CUSTOM), "{id}");
         }
+    }
+
+    /// NCBI BLAST+ 2.17.0's frozen outputs of the formats besides 0, 6 and 7 (rows of
+    /// `LOSAT/tests/outfmt0_manifest.tsv`: id and argv, run from LOSAT/): every program in 5, 8, 9,
+    /// 12, 15 and 16, 10 and 20 with and without fields, the BLAST archive (11) of four programs
+    /// with `-query_loc`, `-subject_loc` and deflines that the title does not give, and SAM (17).
+    const FORMAT_ROWS: [(&str, &[&str]); 55] = [
+        (
+            "sm1.blastp.x16.soft.5",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/x16_seg_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/x16_seg_s.faa",
+                "-seg",
+                "yes",
+                "-soft_masking",
+                "true",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "sm1.blastp.x16.soft.11",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/x16_seg_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/x16_seg_s.faa",
+                "-seg",
+                "yes",
+                "-soft_masking",
+                "true",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sm1.blastp.x16.soft.16",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/x16_seg_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/x16_seg_s.faa",
+                "-seg",
+                "yes",
+                "-soft_masking",
+                "true",
+                "-outfmt",
+                "16",
+            ],
+        ),
+        (
+            "sm2.tblastx.mask.soft.5",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt0/mask_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/mask_subject.fasta",
+                "-soft_masking",
+                "true",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "sm2.tblastx.mask.soft.16",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt0/mask_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/mask_subject.fasta",
+                "-soft_masking",
+                "true",
+                "-outfmt",
+                "16",
+            ],
+        ),
+        (
+            "sm3.megablast.mask.hard.5",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/mask_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/mask_subject.fasta",
+                "-task",
+                "megablast",
+                "-soft_masking",
+                "false",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "sm3.megablast.mask.hard.16",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/mask_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/mask_subject.fasta",
+                "-task",
+                "megablast",
+                "-soft_masking",
+                "false",
+                "-outfmt",
+                "16",
+            ],
+        ),
+        (
+            "sm3.megablast.mask.hard.11",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/mask_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/mask_subject.fasta",
+                "-task",
+                "megablast",
+                "-soft_masking",
+                "false",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.multi.megablast.8",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/multi_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/multi_subject.fasta",
+                "-task",
+                "megablast",
+                "-outfmt",
+                "8",
+            ],
+        ),
+        (
+            "sa.multi.megablast.12",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/multi_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/multi_subject.fasta",
+                "-task",
+                "megablast",
+                "-outfmt",
+                "12",
+            ],
+        ),
+        (
+            "sa.e2e.blastp.invalid_o.8",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/e2e_invalid_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_protein_subject.faa",
+                "-outfmt",
+                "8",
+            ],
+        ),
+        (
+            "sa.e2e.blastp.invalid_o.12",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/e2e_invalid_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_protein_subject.faa",
+                "-outfmt",
+                "12",
+            ],
+        ),
+        (
+            "sa.e2e.tblastn.xdrop_final.8",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/e2e_protein_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-xdrop_gap_final",
+                "1e9",
+                "-outfmt",
+                "8",
+            ],
+        ),
+        (
+            "sa.e2d.tblastn.sloc.12",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/e2d_t_qp2.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2d_n_sub8k.fa",
+                "-subject_loc",
+                "1001-6000",
+                "-outfmt",
+                "12",
+            ],
+        ),
+        (
+            "sa.tblastx.nohit.8",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt0/tblastx_multi_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/tblastx_multi_subject.fasta",
+                "-evalue",
+                "1e-100",
+                "-outfmt",
+                "8",
+            ],
+        ),
+        (
+            "sa.tblastx.nohit.12",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt0/tblastx_multi_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/tblastx_multi_subject.fasta",
+                "-evalue",
+                "1e-100",
+                "-outfmt",
+                "12",
+            ],
+        ),
+        (
+            "sa.blastx.multi.8",
+            &[
+                "blastx",
+                "-query",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-subject",
+                "tests/fasta/outfmt0/e2d_t_qp2.faa",
+                "-outfmt",
+                "8",
+            ],
+        ),
+        (
+            "sa.blastx.multi.12",
+            &[
+                "blastx",
+                "-query",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-subject",
+                "tests/fasta/outfmt0/e2d_t_qp2.faa",
+                "-outfmt",
+                "12",
+            ],
+        ),
+        (
+            "sa.multi.megablast.9",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/multi_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/multi_subject.fasta",
+                "-task",
+                "megablast",
+                "-outfmt",
+                "9",
+            ],
+        ),
+        (
+            "sa.e2e.blastp.invalid_o.9",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/e2e_invalid_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_protein_subject.faa",
+                "-outfmt",
+                "9",
+            ],
+        ),
+        (
+            "sa.e2d.tblastn.sloc.9",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/e2d_t_qp2.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2d_n_sub8k.fa",
+                "-subject_loc",
+                "1001-6000",
+                "-outfmt",
+                "9",
+            ],
+        ),
+        (
+            "sa.tblastx.nohit.9",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt0/tblastx_multi_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/tblastx_multi_subject.fasta",
+                "-evalue",
+                "1e-100",
+                "-outfmt",
+                "9",
+            ],
+        ),
+        (
+            "sa.blastx.multi.9",
+            &[
+                "blastx",
+                "-query",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-subject",
+                "tests/fasta/outfmt0/e2d_t_qp2.faa",
+                "-outfmt",
+                "9",
+            ],
+        ),
+        (
+            "x5.tblastn.sloc2_470",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/e2e_protein_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-subject_loc",
+                "2-470",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "x5.blastx.ungapped_cbs0",
+            &[
+                "blastx",
+                "-query",
+                "tests/fasta/outfmt0/x5_bx_q_mix.fna",
+                "-subject",
+                "tests/db_search/bslice.faa",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-max_target_seqs",
+                "1",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "sa.e2e.blastp.invalid_o.15",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/e2e_invalid_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_protein_subject.faa",
+                "-outfmt",
+                "15",
+            ],
+        ),
+        (
+            "sa.x16.blastn.minus.15",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/x16n_q.fna",
+                "-subject",
+                "tests/fasta/outfmt0/x16n_s.fna",
+                "-outfmt",
+                "15",
+            ],
+        ),
+        (
+            "x16.blastx.ungapped_cbs0.16",
+            &[
+                "blastx",
+                "-query",
+                "tests/fasta/outfmt0/x5_bx_q_mix.fna",
+                "-subject",
+                "tests/db_search/bslice.faa",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-max_target_seqs",
+                "1",
+                "-outfmt",
+                "16",
+            ],
+        ),
+        (
+            "x16.blastx.ungapped_cbs0.15",
+            &[
+                "blastx",
+                "-query",
+                "tests/fasta/outfmt0/x5_bx_q_mix.fna",
+                "-subject",
+                "tests/db_search/bslice.faa",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-max_target_seqs",
+                "1",
+                "-outfmt",
+                "15",
+            ],
+        ),
+        (
+            "sa.x16.tblastn.sloc.16",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/e2e_protein_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-subject_loc",
+                "2-470",
+                "-outfmt",
+                "16",
+            ],
+        ),
+        (
+            "sa.x16.tblastn.sloc.15",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/e2e_protein_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-subject_loc",
+                "2-470",
+                "-outfmt",
+                "15",
+            ],
+        ),
+        (
+            "sa.x16.tblastx.sub.15",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt0/x16x_q.fna",
+                "-subject",
+                "tests/fasta/outfmt0/x16x_s.fna",
+                "-evalue",
+                "0.01",
+                "-max_target_seqs",
+                "2",
+                "-outfmt",
+                "15",
+            ],
+        ),
+        (
+            "culling.tblastn.dom_cl2.11",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/culling_dom_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/culling_dom_s.fna",
+                "-culling_limit",
+                "2",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.sam.multi.17p",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/sam_multi_q.fna",
+                "-subject",
+                "tests/fasta/outfmt0/sam_multi_s.fna",
+                "-task",
+                "megablast",
+                "-outfmt",
+                "17",
+            ],
+        ),
+        (
+            "sa.sam.multi.17q",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/sam_multi_q.fna",
+                "-subject",
+                "tests/fasta/outfmt0/sam_multi_s.fna",
+                "-task",
+                "megablast",
+                "-outfmt",
+                "17 SQ",
+            ],
+        ),
+        (
+            "sa.arch.bn.g4.11",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt11/arch_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_s.fna",
+                "-max_target_seqs",
+                "1",
+                "-dust",
+                "20 64 1",
+                "-query_loc",
+                "10-300",
+                "-subject_loc",
+                "10-300",
+                "-dbsize",
+                "1000000",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.bn.qloc.11",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt11/arch_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_s.fna",
+                "-query_loc",
+                "10-300",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.bp.sloc.11",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt11/arch_bp_q.faa",
+                "-subject",
+                "tests/fasta/outfmt11/arch_bp_s.faa",
+                "-subject_loc",
+                "10-100",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.bp.titles.11",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt11/arch_bp_titles.faa",
+                "-subject",
+                "tests/fasta/outfmt11/arch_bp_s.faa",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.tbn.qloc.11",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt11/arch_tbn_q.faa",
+                "-subject",
+                "tests/fasta/outfmt11/arch_tbn_s.fna",
+                "-query_loc",
+                "10-100",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.tbx.def.11",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt11/arch_tbx_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_tbx_s.fna",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.tbx.qloc.11",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt11/arch_tbx_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_tbx_s.fna",
+                "-query_loc",
+                "10-100",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.tbx.stitles.11",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt11/arch_tbx_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_tbx_s_titles.fna",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "tab.bn.csv.10",
+            &[
+                "blastn",
+                "-query",
+                "tests/db_search/nslice_q.fna",
+                "-subject",
+                "tests/db_search/nslice.fna",
+                "-outfmt",
+                "10 std sstrand",
+            ],
+        ),
+        (
+            "tab.bn.csvhdr.20",
+            &[
+                "blastn",
+                "-query",
+                "tests/db_search/nslice_q.fna",
+                "-subject",
+                "tests/db_search/nslice.fna",
+                "-outfmt",
+                "20 qseqid sseqid evalue",
+            ],
+        ),
+        (
+            "tab.bp.csv.10",
+            &[
+                "blastp",
+                "-query",
+                "tests/db_search/ids/ids_q.faa",
+                "-subject",
+                "tests/fasta/outfmt11/arch_bp_s.faa",
+                "-outfmt",
+                "10 std",
+            ],
+        ),
+        (
+            "tab.bp.csvhdr.20",
+            &[
+                "blastp",
+                "-query",
+                "tests/db_search/ids/ids_q.faa",
+                "-subject",
+                "tests/fasta/outfmt11/arch_bp_s.faa",
+                "-outfmt",
+                "20 qseqid sseqid evalue",
+            ],
+        ),
+        (
+            "tab.bx.csv.10",
+            &[
+                "blastx",
+                "-query",
+                "tests/db_search/ids/ids_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_bp_s.faa",
+                "-outfmt",
+                "10 std",
+            ],
+        ),
+        (
+            "tab.bx.csvhdr.20",
+            &[
+                "blastx",
+                "-query",
+                "tests/db_search/ids/ids_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_bp_s.faa",
+                "-outfmt",
+                "20 qseqid sseqid evalue",
+            ],
+        ),
+        (
+            "tab.tbn.csv.10",
+            &[
+                "tblastn",
+                "-query",
+                "tests/db_search/tab_tbn_q.faa",
+                "-subject",
+                "tests/db_search/tslice.fna",
+                "-outfmt",
+                "10 std sstrand",
+            ],
+        ),
+        (
+            "tab.tbn.csvhdr.20",
+            &[
+                "tblastn",
+                "-query",
+                "tests/db_search/tab_tbn_q.faa",
+                "-subject",
+                "tests/db_search/tslice.fna",
+                "-outfmt",
+                "20 qseqid sseqid evalue",
+            ],
+        ),
+        (
+            "tab.tbx.csv.10",
+            &[
+                "tblastx",
+                "-query",
+                "tests/db_search/tab_tbx_q.fna",
+                "-subject",
+                "tests/db_search/xslice.fna",
+                "-outfmt",
+                "10 std sstrand",
+            ],
+        ),
+        (
+            "tab.tbx.csvhdr.20",
+            &[
+                "tblastx",
+                "-query",
+                "tests/db_search/tab_tbx_q.fna",
+                "-subject",
+                "tests/db_search/xslice.fna",
+                "-outfmt",
+                "20 qseqid sseqid evalue",
+            ],
+        ),
+        (
+            "sxd.blastx.qloc.10",
+            &[
+                "blastx",
+                "-query",
+                "tests/db_search/bslice_q.fna",
+                "-subject",
+                "tests/db_search/bslice.faa",
+                "-query_loc",
+                "1001-3000",
+                "-outfmt",
+                "10",
+            ],
+        ),
+        (
+            "sxd.blastx.qframe.20",
+            &[
+                "blastx",
+                "-query",
+                "tests/db_search/bslice_q.fna",
+                "-subject",
+                "tests/db_search/bslice.faa",
+                "-query_loc",
+                "1002-3000",
+                "-outfmt",
+                "20",
+            ],
+        ),
+    ];
+
+    /// A SAM document without the CL tag of its `@PG` line (`db_search_fixtures.strip_sam_cl`, the
+    /// rule of the SAM rows: the CLI writes its own command line there).
+    fn without_cl(document: &[u8]) -> Vec<u8> {
+        let text = String::from_utf8(document.to_vec()).unwrap();
+        let head = "\n@PG\tID:0\tVN:2.17.0+";
+        let Some(at) = text.find(&format!("{head}\tCL:")) else {
+            return document.to_vec();
+        };
+        let start = at + head.len();
+        let end = start + text[start..].find("\tPN:blastn\n").unwrap();
+        format!("{}{}", &text[..start], &text[end..]).into_bytes()
+    }
+
+    // The output of an -outfmt besides 0, 6 and 7 is stream 4, NCBI's bytes of the same command
+    // line (W11), and stream 3 NCBI's standard error of it; the formats 0, 6 and 7 and the HSP
+    // records are those of the run without -outfmt. The archive's Bioseqs are the whole records
+    // and the deflines as read; SAM's @PG line shows the run's command line.
+    #[test]
+    fn every_format_is_written_as_the_cli_writes_it() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
+        let read = |path: &str| std::fs::read(format!("{root}/{path}")).unwrap();
+        for (id, words) in FORMAT_ROWS {
+            let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
+            let (query, subject) = (read(at("-query")), read(at("-subject")));
+            let with = registered_streams(words, &query, &subject);
+            let plain = registered_streams(&words[..words.len() - 2], &query, &subject);
+            let mut ncbi = read(&format!("tests/fixtures/outfmt0/{id}.out"));
+            let mut ours = with.get(&STREAM_CUSTOM).cloned().unwrap_or_default();
+            if at("-outfmt").starts_with("17") {
+                let cl = format!("\tCL:losat {} \tPN:blastn\n", words.join(" "));
+                assert!(text(&ours).contains(&cl), "{id}: {cl:?}");
+                (ncbi, ours) = (without_cl(&ncbi), without_cl(&ours));
+            }
+            assert!(ours == ncbi, "{id}: stream 4");
+            let stderr = std::fs::read(format!("{root}/tests/fixtures/outfmt0/{id}.err"))
+                .unwrap_or_default();
+            let diagnostics = with.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
+            assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
+            for stream in [0, 6, 7, STREAM_HITS] {
+                assert!(
+                    plain.get(&stream) == with.get(&stream),
+                    "{id}: stream {stream}"
+                );
+            }
+        }
+    }
+
+    // A record keeps its defline only where the archive cannot make it from the title, and a run
+    // that writes the archive gives the records back as they were.
+    #[test]
+    fn the_store_keeps_the_deflines_that_the_title_does_not_give() {
+        let fasta = b">a one\nACGT\n>b\twith tab\nGG\n>  c\nTT\n";
+        let (handle, _) = crate::store::register("blastn", 0, fasta).unwrap();
+        let (subject, _) = crate::store::register("blastn", 1, b">s\nACGTACGT\n").unwrap();
+        let sources = |whole: bool| {
+            crate::store::with_inputs(Program::Blastn, handle, subject, whole, |queries, _| {
+                queries
+                    .iter()
+                    .map(|record| record.source.as_ref().map(|source| source.defline.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap()
+        };
+        let kept = vec![None, Some(b">b\twith tab".to_vec()), Some(b">  c".to_vec())];
+        assert_eq!(sources(false), kept);
+        assert_eq!(
+            sources(true),
+            vec![Some(Vec::new()), kept[1].clone(), kept[2].clone()]
+        );
+        assert_eq!(sources(false), kept);
+        crate::store::release(handle).unwrap();
+        crate::store::release(subject).unwrap();
     }
 
     const SPLIT_QUERY: &[u8] =

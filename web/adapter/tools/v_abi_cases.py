@@ -4,9 +4,11 @@
 Every case is one search: a program, its argv without -outfmt, -out and -num_threads
 (the adapter writes every format, the host sets the threads), the working directory,
 and for each supported output format the frozen SHA-256 where one exists. A search with
-`"outfmt"` adds that -outfmt (6 or 7 with fields: abi_v2.md §7) to the argv; the output of
-it (stream 4) is compared with the CLI's for the same argv, and its frozen SHA-256 is
-`frozen["custom"]`.
+`"outfmt"` adds that -outfmt (a format besides 0, 6 and 7, or 6 or 7 with fields: abi_v2.md
+§7) to the argv; the output of it (stream 4) is compared with the CLI's for the same argv, and
+its frozen SHA-256 is `frozen["custom"]`. For SAM (`"sam": true`) both sides are compared
+without the CL tag of the @PG line, where each writes its own command line, and the frozen
+SHA-256 is that of NCBI's fixture without it (`db_search_fixtures.strip_sam_cl`).
 
 - full: the regression cases of docs/evidence/losat_web_e1a/capture_outputs.py (Gate A,
   the Stage G matrix, the BLASTP manifest in outfmt 0/6/7), grouped into searches.
@@ -20,7 +22,10 @@ it (stream 4) is compared with the CLI's for the same argv, and its frozen SHA-2
   per program, with NCBI's frozen hashes, and per program one search whose first query batch
   fails after the outfmt 0 prolog (`"expect": "failure"`: queries without residues only).
 - quick: a few searches per program with repository paths, compared with the native
-  CLI only (for CI), the NCBI-frozen numdesc searches with two hit list sizes, the
+  CLI only (for CI), the NCBI-frozen fixtures of the outfmt 0 manifest in 0, 6 and 7 (with
+  fields too) and, of the other formats, QUICK_PER_FORMAT rows of each program and format and
+  the archive rows with ranges and titles (the full suite has every row), the NCBI-frozen
+  numdesc searches with two hit list sizes, the
   NCBI-frozen BLASTN `-ungapped` searches (four tasks, two input pairs) and three NCBI-frozen
   BLASTN X-drop / `-no_greedy` searches (DI-6).
 
@@ -33,6 +38,7 @@ Usage: v_abi_cases.py --suite quick|full [--group fasta_input] --out FILE.json
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shlex
@@ -50,12 +56,31 @@ ADAPTER_OWNED = {"-outfmt", "-out", "-num_threads"}
 NCBI_SPACE = " \t\n\x0b\x0c\r"
 
 
+def format_number(outfmt: str) -> int | None:
+    """The format number of an -outfmt value (its first word, as NCBI reads it)."""
+    number = outfmt.strip(NCBI_SPACE).partition(" ")[0]
+    return int(number) if re.fullmatch(r"\+?\d+", number) else None
+
+
 def custom_outfmt(outfmt: str) -> bool:
-    """Whether the -outfmt value adds an output of its own to a run (`run::parse_run`): 6 or 7
-    with words after the number."""
-    value = outfmt.strip(NCBI_SPACE)
-    number, space, _ = value.partition(" ")
-    return bool(space) and re.fullmatch(r"\+?0*[67]", number) is not None
+    """Whether the -outfmt value adds an output of its own to a run (`run::parse_run`): a format
+    besides 0, 6 and 7, or 6 or 7 with words after the number."""
+    number = format_number(outfmt)
+    has_words = " " in outfmt.strip(NCBI_SPACE)
+    return number is not None and number != 0 and (has_words or number not in (6, 7))
+
+
+def written_in_browser(program: str, outfmt: str) -> bool:
+    """Whether a run writes the -outfmt value: not yet 13 and 14 (side files) and BLASTX's 11
+    (`run::parse_run`)."""
+    number = format_number(outfmt)
+    return number not in (13, 14) and not (number == 11 and program == "blastx")
+
+
+# Of the other formats, the quick suite takes this many rows of each program and format, and the
+# archive rows whose Bioseqs are the whole records or show the deflines as read.
+QUICK_PER_FORMAT = 2
+QUICK_ROWS = re.compile(r"^sa\.arch\.\w+\.(qloc|sloc|titles|stitles)\.11$")
 
 
 def split(command: list[str]) -> tuple[str | None, list[str]]:
@@ -80,7 +105,7 @@ def group(cases: list[capture.Case], frozen: bool) -> list[dict]:
         outfmt, argv = split(case.command)
         outfmt = outfmt or "0"
         if outfmt not in FORMATS[case.program]:
-            continue  # custom field lists are CLI-only
+            continue  # the other formats and the field lists: the NCBI-frozen rows (outfmt0_fixtures)
         key = (case.program, tuple(argv), str(case.cwd))
         search = searches.setdefault(key, {"program": case.program, "argv": argv, "cwd": str(case.cwd),
                                            "cases": [], "frozen": {}})
@@ -92,29 +117,30 @@ def group(cases: list[capture.Case], frozen: bool) -> list[dict]:
     return list(searches.values())
 
 
-def outfmt0_fixtures() -> list[dict]:
-    """The NCBI-frozen outfmt 0 and 7 fixtures (docs/evidence/losat_web_e2a/, e2b/), run from
-    LOSAT/: one search per argv, with the frozen hash of each fixture's format (none for an
-    approved genetic-code deviation, whose oracle is NCBI's database search)."""
+def outfmt0_fixtures(every_format: bool = True) -> list[dict]:
+    """The NCBI-frozen fixtures of the outfmt 0 manifest (docs/evidence/losat_web_e2a/, e2b/), run
+    from LOSAT/: one search per argv, with the frozen hash of each fixture's format (none for an
+    approved genetic-code deviation, whose oracle is NCBI's database search). A row of another
+    format than 0, 6 and 7 (or of 6 or 7 with fields) is a search of its own, which writes that
+    output besides; without `every_format`, QUICK_PER_FORMAT rows of each program and format and
+    the QUICK_ROWS."""
     sys.path.insert(0, str(REPO / "docs/evidence/losat_web_e2a"))
     import run_oracle  # noqa: E402  (the manifest reader and the oracle's arguments)
     searches: dict[tuple, dict] = {}
+    taken: dict[tuple, int] = {}
     for row in run_oracle.read_manifest()[2]:
         if row["program"] not in FORMATS:
             continue
+        outfmt = run_oracle.outfmt(row)
         # The rows of outfmt 13 and 14 (the `files` column: side files and a master file next to
-        # `-out`) are CLI-only until ABI v2 (DECISIONS 26 Q10): not an ABI case.
-        if row.get("files"):
+        # `-out`) and BLASTX's archive: the browser does not write them yet (W11b).
+        if row.get("files") or not written_in_browser(row["program"], outfmt):
             continue
         argv = run_oracle.search_argv(row)
-        outfmt = run_oracle.outfmt(row)
         # A hit list of 0 (-num_alignments 0) fails the CLI's outfmt 6 and 7 while the Web run
         # succeeds with the error on stream 3 (abi_v2.md §5, §7), so there is no native output of
         # those formats to compare: the adapter's tests cover the row (run.rs).
         if any(argv[k:k + 2] == ["-num_alignments", "0"] for k in range(len(argv) - 1)):
-            continue
-        # SAM (outfmt 17) is not a format of ABI v1 (DECISIONS 10 of the outfmt line).
-        if run_oracle.is_sam_outfmt(outfmt):
             continue
         # -parse_deflines works in the CLI only: the adapter refuses it (`run::parse`).
         if "-parse_deflines" in argv:
@@ -124,15 +150,27 @@ def outfmt0_fixtures() -> list[dict]:
         if any(b">?" in (run_oracle.ENGINE / row[side]).read_bytes() for side in ("query", "subject")):
             continue
         assert argv[-2:] == ["-outfmt", outfmt], row["fixture_id"]
-        # A row of -outfmt with fields is a search of its own, which writes that output besides.
+        # A row of another format, or of 6 or 7 with fields, is a search of its own, which writes
+        # that output besides.
         custom = custom_outfmt(outfmt)
+        sam = run_oracle.is_sam_outfmt(outfmt)
+        if custom and not every_format and " " not in outfmt.strip(NCBI_SPACE):
+            kind = (row["program"], format_number(outfmt))
+            if taken.get(kind, 0) >= QUICK_PER_FORMAT and not QUICK_ROWS.match(row["fixture_id"]):
+                continue
+            taken[kind] = taken.get(kind, 0) + 1
         key = (row["program"], tuple(argv[:-2]), outfmt if custom else None)
         search = searches.setdefault(key, {"program": row["program"], "argv": [row["program"], *argv[:-2]],
                                            "cwd": str(run_oracle.ENGINE), "cases": [], "frozen": {},
-                                           **({"outfmt": outfmt} if custom else {})})
+                                           **({"outfmt": outfmt} if custom else {}),
+                                           **({"sam": True} if sam else {})})
         search["cases"].append(row["fixture_id"])
         if row.get("contract") != run_oracle.DEVIATION:
-            search["frozen"]["custom" if custom else outfmt] = row["stdout_sha256"]
+            frozen = row["stdout_sha256"]
+            if sam:
+                fixture = run_oracle.ENGINE / "tests/fixtures/outfmt0" / f"{row['fixture_id']}.out"
+                frozen = hashlib.sha256(run_oracle.strip_sam_cl(fixture.read_bytes())).hexdigest()
+            search["frozen"]["custom" if custom else outfmt] = frozen
     return list(searches.values())
 
 
@@ -243,7 +281,7 @@ def quick() -> list[dict]:
     # -num_alignments (O-webopt), BLASTN -ungapped (O4a-1) and the X-drop and window options (DI-6). From
     # 2026-10-25 an operator precedence in the selection of the -num_descriptions fixtures took them all
     # by accident (`set & {...} | {...}`); the suite keeps them on purpose (line SX, DECISIONS 7).
-    searches += outfmt0_fixtures()
+    searches += outfmt0_fixtures(every_format=False)
     # The frozen outfmt 6 of BLASTN -ungapped on the t2 pair (O4a-1; the four tasks, of the
     # LOSAT/tests/fixtures/blastn_regression/manifest.tsv rows without stderr).
     ungapped = {f"ungapped.{task}.t2.0" for task in ("mb", "bn", "dc", "short")}

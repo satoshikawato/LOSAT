@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use std::sync::Mutex;
 
 use LOSAT::blastinput::fasta_reader::{
-    read_all, FastaInputSource, FastaRecord, ReadError, ReaderConfig,
+    FastaInputSource, FastaRecord, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };
 
 use crate::json;
@@ -91,6 +91,39 @@ fn reader_error(error: ReadError) -> String {
         .to_string()
 }
 
+/// Every record of `source`, as `fasta_reader::read_all` reads them, with the defline kept only
+/// where the BLAST archive (outfmt 11) cannot make it from the title: the archive's Bioseq shows
+/// the defline as read (`report::archive::defline_of`), which the CLI's reader keeps when the run
+/// writes the archive (`ReaderConfig::with_defline`), and else `>` and the title, which the title
+/// does not give for a defline with a control byte (the title ends there) or with white space
+/// after the `>`. A record whose defline is `>` and its title keeps no source, so that the store
+/// holds what it held without the archive; each record drops it before the next is read.
+fn read_records(source: &mut FastaInputSource<&[u8]>) -> Result<Vec<FastaRecord>, ReadError> {
+    let mut records = Vec::new();
+    let mut quiet = |_: &[u8]| Ok(());
+    while !source.end() {
+        match source.next_sequence(&mut quiet) {
+            Ok(mut record) => {
+                let made = record.source.as_deref().is_none_or(|kept| {
+                    kept.defline.is_empty()
+                        || (kept.defline.first() == Some(&b'>')
+                            && kept.defline[1..] == record.title)
+                });
+                if made {
+                    record.source = None;
+                }
+                records.push(record);
+            }
+            Err(ReadError::Parse {
+                code: ParseErrorCode::Eof,
+                ..
+            }) => break,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(records)
+}
+
 /// Reads `bytes` with the program's reader for `role`, checks the records against the
 /// index scan of the same bytes (plan TD-8), keeps them, and returns the handle and the
 /// *register* JSON.
@@ -120,13 +153,9 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
         ReaderConfig::query(name, protein, true)
     } else {
         ReaderConfig::subject(name, protein, true)
-    };
-    let read = || {
-        read_all(
-            &mut FastaInputSource::from_bytes(bytes, config),
-            &mut |_| Ok(()),
-        )
-    };
+    }
+    .with_defline(true);
+    let read = || read_records(&mut FastaInputSource::from_bytes(bytes, config));
     let scanned = match scan::scan_ncbi(bytes, protein) {
         Ok(scanned) => scanned,
         // The scan stops at the reader's error with the reader's message: the CLI's text.
@@ -250,15 +279,22 @@ pub fn release(handle: u32) -> Result<(), String> {
 }
 
 /// Calls `work` with the records of a query handle and a subject handle registered for
-/// `program`.
+/// `program`. For a run that writes the BLAST archive (`whole`), every record has a source while
+/// `work` runs, as the CLI's reader gives each record when the run writes the archive
+/// (`ReaderConfig::with_defline`): a record that a range cuts then keeps its whole letters for the
+/// archive's Bioseq (`FastaRecord::cut`, `archive_letters`). The records get back what they held.
 pub fn with_inputs<R>(
     program: Program,
     query: u32,
     subject: u32,
+    whole: bool,
     work: impl FnOnce(&[FastaRecord], &[FastaRecord]) -> R,
 ) -> Result<R, String> {
-    let store = store().lock().expect("input store");
-    let get = |handle: u32, role: u32, name: &str| {
+    let mut store = store().lock().expect("input store");
+    for (handle, role, name) in [
+        (query, ROLE_QUERY, "query"),
+        (subject, ROLE_SUBJECT, "subject"),
+    ] {
         let entry = store
             .entries
             .get(&handle)
@@ -271,16 +307,42 @@ pub fn with_inputs<R>(
                 program.name()
             ));
         }
-        Ok(entry.records.as_slice())
-    };
-    let queries = get(query, ROLE_QUERY, "query")?;
-    let subjects = get(subject, ROLE_SUBJECT, "subject")?;
-    Ok(work(queries, subjects))
+    }
+    if whole {
+        set_sources(&mut store, [query, subject], true);
+    }
+    let result = work(
+        &store.entries[&query].records,
+        &store.entries[&subject].records,
+    );
+    if whole {
+        set_sources(&mut store, [query, subject], false);
+    }
+    Ok(result)
+}
+
+/// Gives every record of `handles` a source (`give`), or takes back the empty ones given.
+fn set_sources(store: &mut Store, handles: [u32; 2], give: bool) {
+    for handle in handles {
+        let entry = store.entries.get_mut(&handle).expect("a registered handle");
+        for record in &mut entry.records {
+            if give {
+                record.source.get_or_insert_with(Box::default);
+            } else if record
+                .source
+                .as_deref()
+                .is_some_and(|source| *source == RecordSource::default())
+            {
+                record.source = None;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use LOSAT::blastinput::fasta_reader::read_all;
 
     // `register` stops when the scan and the reader disagree on the records.
     #[test]
@@ -382,11 +444,11 @@ mod tests {
     fn a_handle_belongs_to_its_program() {
         let (query, _) = register("blastp", ROLE_QUERY, b">q t\nACXGT\n").unwrap();
         let (subject, _) = register("blastn", ROLE_SUBJECT, b">s\nACGT\n").unwrap();
-        let error = with_inputs(Program::Blastn, query, subject, |_, _| ()).unwrap_err();
+        let error = with_inputs(Program::Blastn, query, subject, false, |_, _| ()).unwrap_err();
         assert!(
             error.contains("registered for blastp, not blastn"),
             "{error}"
         );
-        assert!(with_inputs(Program::Blastp, query, subject, |_, _| ()).is_err());
+        assert!(with_inputs(Program::Blastp, query, subject, false, |_, _| ()).is_err());
     }
 }

@@ -1032,53 +1032,6 @@ fn bytes_read_as_a_file_with_the_same_bytes() {
     std::fs::remove_file(&path).unwrap();
 }
 
-/// Reader-only speed against `bio::io::fasta` (port plan R1), median of three runs per
-/// file. Run with `LOSAT_FASTA_READER_BENCH=<file>[,<file>...] cargo test --release --lib
-/// fasta_reader::tests::reader_speed -- --ignored --nocapture`.
-#[test]
-#[ignore]
-fn reader_speed_against_bio() {
-    let Ok(files) = std::env::var("LOSAT_FASTA_READER_BENCH") else {
-        return;
-    };
-    let median = |mut times: Vec<f64>| {
-        times.sort_by(f64::total_cmp);
-        times[times.len() / 2]
-    };
-    for path in files.split(',') {
-        let (mut reader_times, mut bio_times) = (Vec::new(), Vec::new());
-        for _ in 0..3 {
-            let start = std::time::Instant::now();
-            let mut source = FastaInputSource::from_file(
-                std::fs::File::open(path).unwrap(),
-                ReaderConfig::subject("BLASTN", false, false),
-            );
-            let records = read_all(&mut source, &mut |_| Ok(())).unwrap();
-            reader_times.push(start.elapsed().as_secs_f64());
-            let reader_letters: usize = records.iter().map(|record| record.sequence.len()).sum();
-            let reader_records = records.len();
-            drop(records);
-            let start = std::time::Instant::now();
-            let records: Vec<bio::io::fasta::Record> = bio::io::fasta::Reader::from_file(path)
-                .unwrap()
-                .records()
-                .map(Result::unwrap)
-                .collect();
-            bio_times.push(start.elapsed().as_secs_f64());
-            let bio_letters: usize = records.iter().map(|record| record.seq().len()).sum();
-            assert_eq!(
-                (reader_records, reader_letters),
-                (records.len(), bio_letters)
-            );
-        }
-        let (reader, bio) = (median(reader_times), median(bio_times));
-        println!(
-            "reader_speed\t{path}\treader {reader:.3} s\tbio {bio:.3} s\tratio {:.2}",
-            reader / bio
-        );
-    }
-}
-
 /// The exit code and message of a program error (`crate::cli::NativeError`).
 fn native(error: &anyhow::Error) -> (i32, String) {
     let native = error

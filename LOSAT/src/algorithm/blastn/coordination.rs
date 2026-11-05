@@ -882,8 +882,7 @@ pub fn subject_metadata_from_records<R: InputRecord>(
 // No NCBI counterpart: the name of a subject in LOSAT's debug and trace lines
 // (`LOSAT_DEBUG_BLASTN`, `blastn_trace`), made only when they are on; it changes no value
 // NCBI computes.
-/// The title of a subject record up to its first space (the ID of a `bio` record, whose ID
-/// has no white space), "unknown" when that is empty.
+/// The title of a subject record up to its first space, "unknown" when that is empty.
 pub fn subject_trace_id(title: &[u8]) -> String {
     let end = title
         .iter()

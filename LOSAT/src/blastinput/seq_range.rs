@@ -338,44 +338,6 @@ pub fn subjects_read<R: InputRecord>(records: &[R], range: Option<&SequenceRange
         .map_or(records.len(), |index| index + 1)
 }
 
-/// The explicit rejection of an interval without letters (a range that starts just past
-/// a record's end), which NCBI searches as a sequence without data ("Sequence contains no
-/// data"); LOSAT does not search records without letters either.
-/// `ordinals` are the input positions of the records (empty: their indexes).
-pub fn check_no_empty_interval<R: InputRecord>(
-    records: &[R],
-    placements: &Placements,
-    ordinals: &[usize],
-    role: RangeRole,
-    program: &str,
-) -> Result<()> {
-    for (index, (record, placement)) in records.iter().zip(&placements.0).enumerate() {
-        let index = ordinals.get(index).copied().unwrap_or(index);
-        if record.seq().is_empty() && placement.length > 0 {
-            let (role_name, option) = match role {
-                RangeRole::Query => ("query", "-query_loc"),
-                RangeRole::Subject => ("subject", "-subject_loc"),
-            };
-            bail!(
-                "{role_name} record {} ({}) has no letters in the {option} range (the range starts just past its end); NCBI BLAST+ searches it as a sequence without data, which is not supported by LOSAT's {program}",
-                index + 1,
-                first_word(&record.title_bytes())
-            );
-        }
-    }
-    Ok(())
-}
-
-/// The title of a record up to its first space, as text (the `bio` ID of a `bio` record),
-/// for LOSAT's messages.
-fn first_word(title: &[u8]) -> String {
-    let end = title
-        .iter()
-        .position(|&byte| byte == b' ')
-        .unwrap_or(title.len());
-    String::from_utf8_lossy(&title[..end]).into_owned()
-}
-
 /// The query input as NCBI reads it, one record at a time: where each searched query lies
 /// in its record, its position in the input, and the records that are not searched.
 #[derive(Clone, Debug, Default)]

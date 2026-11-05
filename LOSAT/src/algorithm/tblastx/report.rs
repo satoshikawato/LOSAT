@@ -1195,8 +1195,7 @@ impl<'a> PairwiseRows<'a> {
             positives: Some(positives),
             gaps: Some(0),
             subject_length: Some(subject_length),
-            // The title after its first word (the `bio` description of the inputs
-            // that `bio` read alike), as BLASTN's; the reports take the subject's
+            // The title after its first word, as BLASTN's; the reports take the subject's
             // title bytes by subject index (`write_tblastx_pairwise_report`).
             subject_title: subject
                 .title

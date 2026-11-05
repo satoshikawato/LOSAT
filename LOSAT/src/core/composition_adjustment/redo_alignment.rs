@@ -1681,7 +1681,7 @@ fn translated_subject_window_sequence(
     let strand = if frame > 0 {
         segment.to_vec()
     } else {
-        bio::alphabets::dna::revcomp(segment)
+        crate::utils::genetic_code::revcomp(segment)
     };
     let mut translated = Vec::with_capacity((range.end - range.begin) as usize + 2);
     translated.push(0);

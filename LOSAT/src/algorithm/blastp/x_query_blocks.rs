@@ -59,7 +59,7 @@
 //!   (`BlastpReports::x_queries_before`).
 //! - the refusals of the reference path that come before it writes anything and depend on the
 //!   hits are, for outfmt 0, those of a shown subject's title (a title of punctuation that NCBI's
-//!   `x_CleanAndCompress` reads past, ABI v1's titles): the blocks are searched only when no
+//!   `x_CleanAndCompress` reads past): the blocks are searched only when no
 //!   subject's title is refused (`blast_engine.rs` `x_block_shown_titles_allowed`, with `-db`
 //!   `database::x_titles_allow_blocks`), so that none comes after the reports of the blocks
 //!   before. The other refusals are those of outfmt 6 above.

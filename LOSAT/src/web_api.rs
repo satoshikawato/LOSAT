@@ -3,14 +3,11 @@ use std::path::PathBuf;
 use std::slice;
 use std::sync::{Mutex, OnceLock};
 
-use bio::io::fasta;
-
-// ABI v1's `bio` records and its searches of BLASTN, BLASTP and TBLASTX (plan TD-1): the
-// v1 layer reads its inputs with `bio` and makes its frozen checks; the engines take the
-// records of NCBI's reader only (session SFc, S10).
-pub mod v1_bio;
+// ABI v1's searches of BLASTN, BLASTP and TBLASTX (plan TD-1): the v1 layer makes its frozen
+// checks of the request and reads its inputs with NCBI's reader (`v1_input`).
 mod v1_blastn;
 mod v1_blastp;
+mod v1_input;
 mod v1_tblastx;
 
 use crate::algorithm::blastp::args::{BlastpCompBasedStats, BlastpCompositionMode, BlastpSegSpec};
@@ -21,6 +18,7 @@ use crate::algorithm::blastp::args::{BlastpCompBasedStats, BlastpCompositionMode
 //                 results = lcl_blast.Run();
 // ```
 use crate::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
+use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
 
 static LAST_RESULT: OnceLock<Mutex<Vec<u8>>> = OnceLock::new();
 static LAST_ERROR: OnceLock<Mutex<Vec<u8>>> = OnceLock::new();
@@ -64,7 +62,6 @@ fn fasta_store() -> &'static Mutex<FastaStore> {
 // ```
 struct StoredFasta {
     bytes: Vec<u8>,
-    records: Vec<fasta::Record>,
     label: String,
 }
 
@@ -75,13 +72,8 @@ struct FastaStore {
 }
 
 impl FastaStore {
-    fn insert(
-        &mut self,
-        records: Vec<fasta::Record>,
-        label: String,
-        bytes: Vec<u8>,
-    ) -> Result<i32, String> {
-        if records.is_empty() {
+    fn insert(&mut self, records: usize, label: String, bytes: Vec<u8>) -> Result<i32, String> {
+        if records == 0 {
             return Err("FASTA store input did not contain any records".to_string());
         }
         if self.next_handle <= 0 {
@@ -92,14 +84,7 @@ impl FastaStore {
             .next_handle
             .checked_add(1)
             .ok_or_else(|| "FASTA store handle space exhausted".to_string())?;
-        self.entries.insert(
-            handle,
-            StoredFasta {
-                records,
-                label,
-                bytes,
-            },
-        );
+        self.entries.insert(handle, StoredFasta { label, bytes });
         Ok(handle)
     }
 
@@ -165,7 +150,10 @@ unsafe fn read_bytes<'a>(ptr: *const u8, len: usize, name: &str) -> Result<&'a [
     Ok(slice::from_raw_parts(ptr, len))
 }
 
-fn parse_fasta_records(bytes: &[u8], name: &str) -> Result<Vec<fasta::Record>, String> {
+/// The records of a stored input, which the store only counts: each run reads the stored bytes
+/// with the reader of its program and role (`run_pair_handles`). The store does not know the
+/// molecule, so it reads with protein flags, which take every nucleotide letter.
+fn count_stored_records(bytes: &[u8]) -> Result<usize, String> {
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
     // ```c
     // SetupQueries_OMF(IBlastQuerySource& queries,
@@ -174,10 +162,12 @@ fn parse_fasta_records(bytes: &[u8], name: &str) -> Result<Vec<fasta::Record>, S
     //                  EBlastProgramType prog,
     //                  ...)
     // ```
-    fasta::Reader::new(bytes)
-        .records()
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|err| format!("failed to parse {name}: {err}"))
+    read_all(
+        &mut FastaInputSource::from_bytes(bytes, ReaderConfig::subject("BLASTP", true, false)),
+        &mut |_| Ok(()),
+    )
+    .map(|records| records.len())
+    .map_err(|err| format!("failed to parse stored FASTA: {err}"))
 }
 
 fn parse_extra_args(raw: &str) -> Vec<&str> {
@@ -931,15 +921,15 @@ fn run_pair_handles(
                 .entries
                 .get(&subject_handle)
                 .ok_or_else(|| format!("unknown subject FASTA handle: {subject_handle}"))?;
-            v1_blastp::run_web_pair_records(
+            v1_blastp::run_web_pair_bytes(
                 parse_blastp_args(
                     &extra,
                     std::path::PathBuf::new(),
                     std::path::PathBuf::new(),
                     std::path::PathBuf::new(),
                 )?,
-                &query.records,
-                &subject.records,
+                &query.bytes,
+                &subject.bytes,
                 &query.label,
                 &subject.label,
             )
@@ -1016,7 +1006,7 @@ pub unsafe extern "C" fn losat_web_store_fasta(
         Ok(value) => value.to_string(),
         Err(err) => return set_error(err),
     };
-    let records = match parse_fasta_records(fasta_bytes, "stored FASTA") {
+    let records = match count_stored_records(fasta_bytes) {
         Ok(value) => value,
         Err(err) => return set_error(err),
     };
@@ -1187,10 +1177,6 @@ pub extern "C" fn losat_web_has_direct_api() -> i32 {
 mod tests {
     use super::*;
 
-    fn record(id: &str) -> fasta::Record {
-        fasta::Record::with_attrs(id, None, b"ARND")
-    }
-
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
     // ```c
     // SetupQueries_OMF(IBlastQuerySource& queries,
@@ -1204,18 +1190,10 @@ mod tests {
         let mut store = FastaStore::default();
 
         let first = store
-            .insert(
-                vec![record("q1")],
-                "query".to_string(),
-                b">q1\nACGT\n".to_vec(),
-            )
+            .insert(1, "query".to_string(), b">q1\nACGT\n".to_vec())
             .expect("first handle");
         let second = store
-            .insert(
-                vec![record("s1")],
-                "subject".to_string(),
-                b">s1\nACGT\n".to_vec(),
-            )
+            .insert(1, "subject".to_string(), b">s1\nACGT\n".to_vec())
             .expect("second handle");
 
         assert_eq!(first, 1);
@@ -1312,8 +1290,8 @@ mod tests {
         assert!(v1_blastn::run_web_pair(with(&["-evalue", "1e400"]), "", fasta).is_ok());
         #[cfg(not(feature = "parallel"))]
         assert!(v1_blastn::run_web_pair(with(&["-num_threads", "2"]), "", fasta).is_err());
-        let error = v1_blastn::run_web_pair(with(&[]), fasta, empty_record).unwrap_err();
-        assert!(engine_error(error).contains("subject record 1 (s0) has no residues"));
+        // A subject without residues gets its warning and is not searched, as in the CLI.
+        assert!(v1_blastn::run_web_pair(with(&[]), fasta, empty_record).is_ok());
         // NCBI's CArg_Double reads a signed infinity and NaN, not a bare `inf`, and NCBI
         // searches with them (E2g).
         let error = parse_blastn_args(
@@ -1326,6 +1304,91 @@ mod tests {
         assert!(error.contains("expected a number"), "{error}");
         assert!(v1_blastn::run_web_pair(with(&["-evalue", "+inf"]), fasta, fasta).is_ok());
         assert!(v1_blastn::run_web_pair(with(&["-evalue=+nan"]), fasta, fasta).is_ok());
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:338-340
+    // ```c++
+    //    	flags+= CFastaReader::fHyphensIgnoreAndWarn;
+    //
+    //     flags+= CFastaReader::fDisableNoResidues;
+    // ```
+    // Plan TD-1, revised (DW-48): ABI v1 reads its inputs with NCBI's reader, as the CLI: the
+    // same report for what the reader removes or changes, and every defline that it reads.
+    #[test]
+    fn inputs_are_read_by_ncbis_reader() {
+        let dna = "GGATCCTTAGCAATCGGCTAAGCTTCCGATACGTTAGGCATCCAGTTCAGGATTACAGGCTTAACCGGT";
+        let protein = "MKVLAAGIVGLLLAQPAMAAEIPVDPALAVKLTSGQTVEFRWDNGHYCPIM";
+        for (program, letters) in [("blastn", dna), ("tblastx", dna), ("blastp", protein)] {
+            let (head, tail) = letters.split_at(30);
+            let subject = format!(">s1\n{letters}\n");
+            let report = |query: &str| run_pair(program, query, &subject, "6", "");
+            let expected = report(&format!(">q1 first\n{letters}\n")).expect("report");
+            assert!(!expected.is_empty(), "{program}");
+            for query in [
+                format!(">q1 first\n{head}-{tail}\n"),
+                format!(">q1 first\r\n{head}\r\n\r\n{tail}\r\n"),
+                format!(";comment\n>q1 first\n{head} {tail}\n"),
+                format!("  \n>q1 first\n{letters}\n>q2\n"),
+            ] {
+                assert_eq!(
+                    report(&query).as_ref(),
+                    Ok(&expected),
+                    "{program}: {query:?}"
+                );
+            }
+            // A subject without residues among others gets its warning and counts in the
+            // statistics of the search (the E-value differs), as in the CLI.
+            let subjects = format!(">s0\n{subject}");
+            let query = format!(">q1 first\n{letters}\n");
+            let with_empty = run_pair(program, &query, &subjects, "6", "").expect("report");
+            assert!(with_empty.starts_with(b"q1\ts1\t"), "{program}");
+            // White space only is NCBI's `Query is Empty!`; comment lines only are not empty.
+            assert_eq!(report(" \n"), Ok(Vec::new()), "{program}");
+            let error = report(";comment\n").unwrap_err();
+            assert!(error.contains("Empty CBlastQueryVector"), "{error}");
+            // A defline that is not ASCII is read as bytes.
+            let named = report(&format!(">\u{3042}1\n{letters}\n")).expect("report");
+            assert!(named.starts_with("\u{3042}1\t".as_bytes()), "{program}");
+        }
+    }
+
+    // BLASTP's handles read the stored bytes as `run_pair` reads the call's, with the labels.
+    #[test]
+    fn blastp_handles_read_the_stored_bytes_as_the_call_does() {
+        let fasta = b">q\nMKVLAAGIVGLLLAQPAMAAEIPVDPALAVKLTSGQTVEFRWDNGHYCPIM\n".to_vec();
+        let text = std::str::from_utf8(&fasta).expect("UTF-8");
+        let expected = run_pair("blastp", text, text, "6", "");
+        assert!(expected.as_ref().is_ok_and(|report| !report.is_empty()));
+        let stored = |label: &str| {
+            fasta_store()
+                .lock()
+                .expect("store")
+                .insert(
+                    count_stored_records(&fasta).expect("records"),
+                    label.to_string(),
+                    fasta.clone(),
+                )
+                .expect("handle")
+        };
+        let (query, subject) = (stored("query"), stored("subject"));
+        assert_eq!(
+            run_pair_handles("blastp", query, subject, "6", ""),
+            expected
+        );
+        let mut store = fasta_store().lock().expect("store");
+        store.release(query).expect("release");
+        store.release(subject).expect("release");
+    }
+
+    // The store counts the records of NCBI's reader: white space and comments have none, and
+    // the letters before the first defline are a record (`fDLOptional`).
+    #[test]
+    fn the_store_counts_the_records_of_ncbis_reader() {
+        assert_eq!(count_stored_records(b""), Ok(0));
+        assert_eq!(count_stored_records(b" \n\n"), Ok(0));
+        assert_eq!(count_stored_records(b";comment\n"), Ok(0));
+        assert_eq!(count_stored_records(b">a\nACGT\n>b\nMKV\n"), Ok(2));
+        assert_eq!(count_stored_records(b"ACGT\n"), Ok(1));
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:213-219
@@ -1349,8 +1412,8 @@ mod tests {
                 .lock()
                 .expect("store")
                 .insert(
-                    // The store takes only inputs that `bio` reads as one record or more.
-                    parse_fasta_records(&bytes, "stored FASTA").unwrap_or_default(),
+                    // The store takes only inputs with one record or more.
+                    count_stored_records(&bytes).unwrap_or_default(),
                     label.to_string(),
                     bytes,
                 )
@@ -1446,9 +1509,7 @@ mod tests {
     fn fasta_store_rejects_empty_and_unknown_handles() {
         let mut store = FastaStore::default();
 
-        assert!(store
-            .insert(Vec::new(), "empty".to_string(), Vec::new())
-            .is_err());
+        assert!(store.insert(0, "empty".to_string(), Vec::new()).is_err());
         assert!(store.release(42).is_err());
     }
 
@@ -1461,11 +1522,7 @@ mod tests {
     fn fasta_store_clear_removes_entries_and_resets_handles() {
         let mut store = FastaStore::default();
         let handle = store
-            .insert(
-                vec![record("q1")],
-                "query".to_string(),
-                b">q1\nACGT\n".to_vec(),
-            )
+            .insert(1, "query".to_string(), b">q1\nACGT\n".to_vec())
             .expect("stored handle");
 
         assert_eq!(handle, 1);
@@ -1473,11 +1530,7 @@ mod tests {
         assert!(store.entries.is_empty());
 
         let next = store
-            .insert(
-                vec![record("q2")],
-                "query2".to_string(),
-                b">q2\nACGT\n".to_vec(),
-            )
+            .insert(1, "query2".to_string(), b">q2\nACGT\n".to_vec())
             .expect("stored handle after clear");
         assert_eq!(next, 1);
     }

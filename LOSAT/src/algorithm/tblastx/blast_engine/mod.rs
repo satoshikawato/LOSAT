@@ -38,9 +38,6 @@ pub use run_impl::x_pair_par_print_summary;
 // The seed release's `LOSAT_X_STATS` line `main` prints at exit. No NCBI
 // counterpart: it prints counters and changes no value NCBI computes.
 pub use run_impl::x_seed_release_print_summary;
-// ABI v1 (`web_api::v1_tblastx`) searches through `run_local_with` with its checks.
-#[cfg(target_arch = "wasm32")]
-pub(crate) use run_impl::{check_losat_limits, run_local_with, V1Checks};
 // What every report of a run needs (`blast_xml`).
 pub(crate) use run_impl::TblastxReportRun;
 

@@ -17,14 +17,17 @@ use crate::scan;
 pub const ROLE_QUERY: u32 = 0;
 pub const ROLE_SUBJECT: u32 = 1;
 
+/// Deflines by record index, in the order of the records.
+pub type KeptDeflines = Vec<(usize, Box<[u8]>)>;
+
 pub struct Registered {
     pub role: u32,
     /// The program whose reader read the records; only its runs use them.
     pub program: Program,
     pub records: Vec<FastaRecord>,
-    /// The deflines that the BLAST archive cannot make from the title (`read_deflines`), by record
-    /// index, in order; the records themselves keep no source.
-    pub deflines: Vec<(usize, Box<[u8]>)>,
+    /// The deflines that the BLAST archive cannot make from the title (`read_deflines`); the
+    /// records themselves keep no source.
+    pub deflines: KeptDeflines,
 }
 
 #[derive(Default)]
@@ -107,7 +110,7 @@ fn read_deflines(
     config: ReaderConfig,
     scanned: &[scan::ScanRecord],
     records: &[FastaRecord],
-) -> Result<Vec<(usize, Box<[u8]>)>, ReadError> {
+) -> Result<KeptDeflines, ReadError> {
     let made = |line: &[u8], title: &[u8]| line.first() == Some(&b'>') && &line[1..] == title;
     let suspects: Vec<usize> = scanned
         .iter()

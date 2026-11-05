@@ -1392,7 +1392,8 @@ test("NCBI's selects of pairs follow the scores and the matrix; Other shows the 
   await expect(gaps).toHaveValue('9 1');
   await expect(page.getByTestId('param-gapcosts-field')).not.toHaveClass(/\bchanged\b/);
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
-  // BLASTP's list is NCBI's of BLOSUM62 and BLASTX's holds the one pair that LOSAT's BLASTX reads (WA-FM-02).
+  // BLASTP's list is NCBI's of the matrix (BLOSUM62 here) and BLASTX's holds the one pair that
+  // LOSAT's BLASTX reads (WA-FM-02).
   await program(page, 'blastp');
   await expect(gaps.locator('option')).toHaveText([
     ...PROTEIN_GAP_COSTS.lists.BLOSUM62!.map((pair) => `Existence: ${pair.replace(' ', ' Extension: ')}`),

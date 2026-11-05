@@ -4151,8 +4151,13 @@ mod tests {
             })
             .collect();
         let (wide, _) = x_bp_build_ncbi_lookup(&frames, 11, false);
-        let (XBpLookup::Narrow(narrow), _) = x_bp_build_ncbi_lookup_as(&frames, 11, false, true)
-        else {
+        let (XBpLookup::Narrow(narrow), _) = x_bp_build_ncbi_lookup_as(
+            &frames,
+            11,
+            false,
+            true,
+            crate::config::ScoringMatrix::Blosum62,
+        ) else {
             panic!("the query set fits 16 bits");
         };
         let lengths: Vec<usize> = narrow.backbone.iter().map(|cell| cell.count()).collect();

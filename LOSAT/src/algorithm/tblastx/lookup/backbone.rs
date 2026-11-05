@@ -97,8 +97,9 @@ fn ideal_karlin_params_for_matrix(matrix: ScoringMatrix, bounds: (i32, i32)) -> 
 
 /// The ideal Karlin block of `matrix` (`kbp_ideal`) with the score range that the profile
 /// lookup's query preparation gives it (`x_lookup_table_for_profile`): BLOSUM62's -4..11, the
-/// range of the matrix's scores otherwise. TBLASTN's composition redo takes its ungapped lambda
-/// (`stage_d_kappa_params.rs`).
+/// range of the matrix's scores otherwise. The composition redo of TBLASTN (`stage_d_kappa_params.rs`)
+/// and of BLASTP with another matrix than BLOSUM62 (`run_resolved_in_pool`) takes its ungapped
+/// lambda.
 pub(crate) fn ideal_karlin_params_of(matrix: ScoringMatrix) -> KarlinParams {
     let bounds = if matrix == ScoringMatrix::Blosum62 {
         (-4, 11)
@@ -1561,6 +1562,76 @@ pub(crate) fn prepare_blosum62_lookup_query_for_word_size(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (cited at
+// `x_context_karlin`)
+// ```c
+//       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+// ```
+/// [`prepare_blosum62_lookup_query_for_word_size`] for another matrix than BLOSUM62 (BLASTP's
+/// compressed table, item SC2b): the contexts' Karlin blocks from the matrix's scores, its score
+/// bounds and its ideal block, as `build_ncbi_lookup_for_profile(.., matrix, word_length)`
+/// prepares them; with a `pool` of more than one thread they are computed on its threads (each
+/// reads only its own context: the same blocks, as `x_prepare_blosum62_lookup_query_in_pool`).
+pub(crate) fn prepare_matrix_lookup_query_for_word_size(
+    queries: &[Vec<QueryFrame>],
+    word_length: usize,
+    check_ideal: bool,
+    matrix: ScoringMatrix,
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
+) -> (Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
+    let bounds = matrix_score_bounds(matrix);
+    let ideal_params = ideal_karlin_params_for_matrix(matrix, bounds);
+    let std_comp = compute_std_aa_composition();
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if let Some(pool) = pool.filter(|pool| pool.enabled() && pool.threads() > 1) {
+        use rayon::prelude::*;
+        let prepared = x_prepare_lookup_query(
+            queries,
+            ideal_params,
+            &std_comp,
+            word_length,
+            check_ideal,
+            matrix,
+            bounds,
+            false,
+        );
+        let mut contexts = prepared.contexts;
+        let frames: Vec<&QueryFrame> = queries.iter().flatten().collect();
+        let karlin: Vec<(bool, KarlinParams)> = pool.install(|| {
+            frames
+                .par_iter()
+                .map(|frame| {
+                    x_context_karlin(frame, &std_comp, bounds, matrix, check_ideal, ideal_params)
+                })
+                .collect()
+        });
+        assert_eq!(karlin.len(), contexts.len());
+        for (context, (is_valid, karlin_params)) in contexts.iter_mut().zip(karlin) {
+            context.is_valid = is_valid;
+            context.karlin_params = karlin_params;
+        }
+        return (prepared.concat_query, prepared.lookup_locations, contexts);
+    }
+    let _ = pool;
+    let prepared = prepare_lookup_query(
+        queries,
+        ideal_params,
+        &std_comp,
+        word_length,
+        check_ideal,
+        matrix,
+        bounds,
+    );
+    (
+        prepared.concat_query,
+        prepared.lookup_locations,
+        prepared.contexts,
+    )
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803
 // ```c
 //    for (context = query_info->first_context;
@@ -2076,14 +2147,16 @@ pub(crate) fn x_bp_build_ncbi_lookup(
 
 /// EXPERIMENT (LOSAT_X_BPLK16): [`x_bp_build_ncbi_lookup`] with the width of the table's hits
 /// chosen by the build (`narrow`: a table of `u16` hits where the lookup query is at most 65,535
-/// letters and the in-place builder applies; x_lut_direct.rs `x_bp_build_lookup_as`).
+/// letters and the in-place builder applies; x_lut_direct.rs `x_bp_build_lookup_as`), of the words
+/// of the search's `matrix`.
 pub(crate) fn x_bp_build_ncbi_lookup_as(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     check_ideal: bool,
     narrow: bool,
+    matrix: ScoringMatrix,
 ) -> (x_lut_direct::XBpLookup, Vec<QueryContext>) {
-    x_lut_direct::x_bp_build_lookup_as(queries, threshold, check_ideal, narrow)
+    x_lut_direct::x_bp_build_lookup_as(queries, threshold, check_ideal, narrow, matrix)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:356-360

@@ -248,6 +248,29 @@ pub fn extend_one_hit(
 // else
 //     sum += matrix[q[q_off + i]][s[s_off + i]];
 // ```
+/// [`extend_one_hit`] of a matrix other than BLOSUM62 (BLASTP's other matrices, item SC2b): the
+/// reference walk with `protein_score`, without the dispatch, so that BLOSUM62's instance keeps the
+/// one caller (`extend_one_hit_blosum62`'s reference) that inlines it.
+pub(crate) fn extend_one_hit_of(
+    matrix: ScoringMatrix,
+    query: &[u8],
+    subject: &[u8],
+    q_off: usize,
+    s_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpOneHitUngappedResult> {
+    debug_assert_ne!(matrix, ScoringMatrix::Blosum62);
+    extend_one_hit_impl::<false>(matrix, query, subject, q_off, s_off, dropoff, word_size)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
+// ```c
+// if (use_pssm)
+//     sum += matrix[q_off + i][s[s_off + i]];
+// else
+//     sum += matrix[q[q_off + i]][s[s_off + i]];
+// ```
 #[inline]
 pub(crate) fn extend_one_hit_blosum62(
     query: &[u8],

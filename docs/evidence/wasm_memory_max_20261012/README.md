@@ -62,7 +62,7 @@ A は変更前（`141615ec`、最大 16,384 ページ）の build（`out-base`�
 | 4 | link 引数は `build.rs` でなく、2 つの `.cargo/config.toml` の rustflags に置く | TD-6 の同一性の検査がこの 2 つを比べている。成果物の JSON が `target_rustflags` と `memory.maximum` を記録する（改訂前の §2.3 が求めた記録） |
 | 5 | ブランチは `feature/wasm-mem-max` と `feature/wasm-mem-max-app`、専用の worktree。セッションは merge しない | `.worktrees/web-gui` に SFe の未コミットの変更がある。計画の決定の行（DW-28、TD-7）を変えるので保守者の merge を待つ |
 | 6 | host は宣言した最大値を確保できないときに段階的に下げ、各候補を 1 ページ伸ばして確かめる。環境変数 `LOSAT_WASM_MEMORY_MAXIMUM_PAGES` を与えたときは下げない | JavaScriptCore は `RangeError`、guard region の無い V8 は誤り無しで小さい予約になる（上の表の `ulimit` の行） |
-| 7 | `node:wasi` を使う道具すべてで WASI の引数を符号なしにし、export のポインタは `>>> 0` | `node:wasi` は負の数に `EINVAL` を返す（nodejs/node#62671 は未解決、修正の PR #66636 は未 merge）。serial の runner の不具合も直る |
+| 7 | `node:wasi` を使う道具すべてで WASI の引数を符号なしにし、export のポインタは `>>> 0` | `node:wasi` は負の数に `EINVAL` を返す（nodejs/node#62671 は未解決、修正の PR #66636 は未 merge。2026-11-05 追記: Issue は 2026-10-19 に閉じ、PR は Node の main に入った。11-05 の時点で修正を持つのは v27.0.0-alpha だけなので、符号なしにする回避はそのまま。`wasm32_4g_study.md` (a) 9）。serial の runner の不具合も直る |
 | 8 | `wasm_performance.py` は最大値を 16,384 に固定しない | 計測は出荷する上限で行う |
 | 9 | 計画書に DW-28 の行を足し、TD-7・G12・§2.3・§5.5・§8 から引く | 保守者の決定の記録 |
 | 10 | アプリの instance の作り直しの閾値は 512 MiB のまま（「最大値の半分」でなく固定の値にする） | linear memory は縮まないので、大きな検索の後のメモリをブラウザに返すための値である |

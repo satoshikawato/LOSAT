@@ -21,7 +21,7 @@
    - npm は **wasm-bindgen を使わず**、既にある 2 つの WASI リアクタと ABI v2 のホスト側 TypeScript をそのまま包む（§4.2）。他のチャネルと独立に進められる。
    - PyPI は **pyo3 の binding `pylosat`**（§4.3、§9.1、§10.1）。
 3. 公開面の形は LOSAT Web の ABI v2（[`docs/web/abi_v2.md`](web/abi_v2.md)）を Rust の型にしたものにする（§3）。検索条件は CLI と同じ argv 1 本、入力はメモリ上の FASTA、出力は outfmt ごとのバイト列 + HSP レコード + 診断。ABI v2 がこの形で 4 program を既に動かしているので、設計の新しさはない。
-4. エンジンの動作は変えない。blastn / blastp / tblastn / tblastx の façade（§3）は既存の入口（各 program の `run_local`、`ReportOutputs`、`FormatObserver`）を包むだけである。blastx には `run_local` が無く（§1.2）、ABI v2 も blastx を断っているので、blastx は LIB-1b で入口を足す（§5、§7 Q6）。CLI の出力バイトは既存の gate で不変を確かめる（§6）。
+4. エンジンの動作は変えない。blastn / blastp / tblastn / tblastx の façade（§3）は既存の入口（各 program の `run_local`、`ReportOutputs`、`FormatObserver`）を包むだけである。blastx には `run_local` が無く（§1.2）、ABI v2 も blastx を断っているので、blastx は LIB-1b で入口を足す（§5、§7 Q6）。（2026-11-05 注: dev では `fcbde1359`（2026-11-02）から blastx にも `run_local` があり、ABI v2 も blastx を動かす。LIB-1b は要らなくなった。§9）CLI の出力バイトは既存の gate で不変を確かめる（§6）。
 
 ## 1. 現状（dev `4b2588e01` で確認）
 
@@ -37,7 +37,7 @@
 
 - `LOSAT/src/lib.rs` は `#![allow(warnings, clippy::all)]` で、19 のモジュール（`algorithm`、`core`、`seqdb`、`writedb`、`blastdbcmd`、`cli` など。`web_api` は wasm32 のみ）を全部 `pub mod` にしている。非公開のモジュールは無い。`pub` 項目 約 2,600、`pub(crate)` を含む行 約 1,600（`src/` 約 49 万行）。
 - `api` モジュールは `mod.rs`（12 行）と `local_blast.rs`（353 行）だけで、中身は出力の束ね方（`OutputSink`、`FormatOutput`、`ReportOutputs`（`formats`、`diagnostics`、`hits`、`observer`）、`FormatObserver`、`HspIndex`）。
-- 検索の入口は program ごとの `run_local(args, query_records, subject_records, outputs)` で、blastn（`blast_engine/run.rs`）、blastp（`blast_engine.rs`。query / subject のラベルが 2 つ余分）、tblastn（`tblastn_app.rs`。`-db` を断る: Web のホストにはファイルが無い）、tblastx（`blast_engine/run_impl.rs`）の 4 つにある。**blastx には無い**: 入口は `native::run`（CLI）と ABI v1 用の `web::run_pair`（`pub(crate)`）だけで、ABI v2 も blastx を断っている（`abi_v2.md` の冒頭、adapter `run.rs`）。
+- 検索の入口は program ごとの `run_local(args, query_records, subject_records, outputs)` で、blastn（`blast_engine/run.rs`）、blastp（`blast_engine.rs`。query / subject のラベルが 2 つ余分）、tblastn（`tblastn_app.rs`。`-db` を断る: Web のホストにはファイルが無い）、tblastx（`blast_engine/run_impl.rs`）の 4 つにある。**blastx には無い**: 入口は `native::run`（CLI）と ABI v1 用の `web::run_pair`（`pub(crate)`）だけで、ABI v2 も blastx を断っている（`abi_v2.md` の冒頭、adapter `run.rs`）。（2026-11-05 注: これは `4b2588e01` の時点の記録。dev では `fcbde1359`（2026-11-02）から blastx にも `run_local` がある（`algorithm/blastx/local.rs`）。§9）
 - `args` は clap 派生の `BlastnArgs` 等。`records` は **LOSAT 自前の** `blastinput::fasta_reader::FastaRecord`（`local_id`、`title: Vec<u8>`、`sequence`、`warnings`、`source`）で、reader は `FastaInputSource::from_bytes(bytes, ReaderConfig::query / subject(...))`。CLI と adapter（`store.rs`）が同じ reader を使う。rust-bio（`bio`）は 2026-11-05 に依存から外した（計画の DW-48）。
 - 結果は返り値ではなく、`ReportOutputs` の writer（outfmt ごと）と `FormatObserver`（HSP の位置）と `hits` callback（`PairwiseHit`）に流れる。1 回の `run_local` の outfmt は同じ検索条件でなければならず（blastp は違うと断る）、adapter は hit list の大きさが違う outfmt を `search_groups`（`run.rs`）で別の検索に分けている。
 - `cli` モジュール: `Cli` / `Commands`（blastx、blastn、blastp、tblastx、tblastn、psiblast、makedb の 7 つ。`blastdbcmd` は `Commands` の外で `main.rs` が扱う）、`try_parse_from`、`render_message`、`ncbi_version_request`、`exit_on_native_error`（`main.rs` 以外で `process::exit` を呼ぶ唯一の場所）、`report_standard_output`、`ReportStream`、`NativeError`、`inaccessible`、`command_line_bytes`。

@@ -74,6 +74,10 @@ jobs:
       # request (changelog.d/README.md), so two pull requests never conflict in CHANGELOG.md.
       - name: Changelog fragments
         run: python3 scripts/changelog_fragments.py check
+      # No NCBI counterpart: maintainer bookkeeping. Line and stage IDs cited in CHANGELOG.md,
+      # changelog.d/ and docs/ that have no row in docs/decisions/LINE_IDS.md, as warnings only.
+      - name: Line IDs
+        run: python3 scripts/line_ids.py check
       - run: cd LOSAT && cargo fmt --check
       - run: cd LOSAT && cargo clippy --locked --all-targets --all-features -- -D warnings
 
@@ -171,7 +175,7 @@ jobs:
           workspaces: LOSAT -> target
       - name: Build release binary
         if: steps.select.outputs.programs != 'none'
-        run: cd LOSAT && cargo build --release --locked --bin losat
+        run: cd LOSAT && cargo build --release --locked --bin losat --example library_database
       # FMA instructions and references to fma only where mul_add is (docs/agents/diagnostics.md,
       # "Floating-point contract").
       - name: Floating-point contract (release binary)
@@ -192,6 +196,7 @@ jobs:
           LOSAT_X_REACH: ${{ github.workspace }}/.tmp/switch-reach
         run: |
           python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/losat \
+            --library-example LOSAT/target/release/examples/library_database \
             --out .tmp/fast-regressions --programs "${{ steps.select.outputs.programs }}"
       # Every side of a conditional switch that switch_reach_expected.tsv requires was taken by
       # some fixture above (a switch's own path and its reference path while it is on).

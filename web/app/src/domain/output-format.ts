@@ -57,9 +57,13 @@ export function formatNumber(value: string): number | undefined {
   return /^\+?\d+$/.test(head) ? Number(head) : undefined;
 }
 
-/** Whether an -outfmt value has words after its number (fields, `delim=`, SAM's tags). */
-function hasWords(value: string): boolean {
-  return value.replace(NCBI_SPACE, '').includes(' ');
+/** The formats that read the words after the number (BLAST+'s -outfmt help: "Options 6, 7, 10, 17 and 20 can be additionally configured"); the others ignore them. */
+const CONFIGURABLE: ReadonlySet<number> = new Set([6, 7, 10, 17, 20]);
+
+/** Whether an -outfmt value configures its format: words after a number of CONFIGURABLE (fields, `delim=`, SAM's tags). */
+function configures(value: string): boolean {
+  const number = formatNumber(value);
+  return number !== undefined && CONFIGURABLE.has(number) && value.replace(NCBI_SPACE, '').includes(' ');
 }
 
 /** BLAST+'s names of the formats (its -outfmt help), for "Download All". */
@@ -127,8 +131,8 @@ export function outfmtOf(argv: readonly string[], output: RunOutput): string {
  * runs of the four BLASTN tasks, and runs of the same number in other tabs, get other names
  * (`losat-run3-blastn-megablast-20261104T111530Z.outfmt6.txt`). The output of the argv's -outfmt
  * has the extension of its format (`…outfmt5.xml`, `…outfmt10.csv`, `…outfmt9.asnb`), and
- * `-custom` after the number where words follow it (`…outfmt6-custom.txt`, BLAST+'s "custom
- * format" of its -outfmt help).
+ * `-custom` after the number where words configure it (`…outfmt6-custom.txt`, BLAST+'s "custom
+ * format" of its -outfmt help; outfmt 5 ignores words).
  */
 export function outputFileName(
   run: {
@@ -143,7 +147,7 @@ export function outputFileName(
   const time = new Date(run.queuedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
   const task = run.task === undefined ? '' : `-${run.task}`;
   const number = outputNumber(run.argv, output);
-  const format = output === CUSTOM_OUTPUT && hasWords(outfmtOf(run.argv, output)) ? `${number}-custom` : String(number);
+  const format = output === CUSTOM_OUTPUT && configures(outfmtOf(run.argv, output)) ? `${number}-custom` : String(number);
   const { extension } = FILE_TYPES[number] ?? TEXT_FILE;
   return `losat-run${run.number}-${run.program}${task}-${time}.outfmt${format}.${extension}`;
 }

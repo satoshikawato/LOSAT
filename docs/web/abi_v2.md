@@ -150,7 +150,7 @@ which runs slot zero of the search's thread pool (`LOSAT/src/utils/threading.rs`
 | `0` | outfmt 0 text (only for programs that support outfmt 0) |
 | `6` | outfmt 6 text |
 | `7` | outfmt 7 text (only for programs that support outfmt 7) |
-| `4` | the output of the argv's `-outfmt` when it is a format besides 0, 6 and 7 that the CLI writes (5, 8 to 12, 15, 16, 20, BLASTN's 17; with or without words after the number), or 6 or 7 with words after the number (fields, `delim=`, §7): the CLI's output for the same argv, text, or binary ASN.1 for outfmt 9. Only such a run writes it. An output without bytes (outfmt 6 of a search without hits) comes as no chunk at all, so a host tells from the argv, as the adapter does, whether the run has this output |
+| `4` | the output of the argv's `-outfmt` when it is a format besides 0, 6 and 7 that the CLI writes (5, 8 to 12, 15, 16, 20, BLASTN's 17; not BLASTX's 11; with or without words after the number), or 6 or 7 with words after the number (fields, `delim=`, §7): the CLI's output for the same argv, text, or binary ASN.1 for outfmt 9. Only such a run writes it. An output without bytes (outfmt 6 of a search without hits) comes as no chunk at all, so a host tells from the argv, as the adapter does, whether the run has this output |
 | `1` | HSP records as JSON Lines, one object per HSP (§8); every program |
 | `2` | JSON response of `describe`, `register` or `scan_end` |
 | `3` | diagnostics that the CLI writes to stderr (warnings), UTF-8, each written once: the CLI's standard error for `-outfmt 6` (that of `-outfmt 7` is the same, and that of `-outfmt 0` has the same lines without the formatting handler's `-num_descriptions` and `Examining 5 or more matches` lines, which `-num_descriptions` / `-num_alignments` can make differ). With stream 4 it is the CLI's standard error for the argv's `-outfmt` instead: for 6, 7, 10 and 20 the same lines, and the warnings of the fields' writer (NCBI's `Taxonomy name lookup from taxid requires installation of taxdb database`); for the structured formats (5, 8, 9, 11, 12, 15, 16, 17) without the queries' warnings, which their writers do not write; as the CLI writes them. In a run of two searches in which one failed before it wrote anything (§7), it is that standard error followed by the CLI's standard error for `-outfmt 0`, error included |
@@ -198,8 +198,8 @@ the WASI imports.
   the tabular search (the first search, below) as its first format, so that it is the CLI's output
   for the same argv and adds no search (the hit list size of every format above 4 is that of 6 and
   7). What the CLI's run of that format has besides, the run has too (session W11): SAM's `@PG`
-  line shows the command line (`CL:losat ` and the run's argv, each word followed by a space, as
-  NCBI's `GetCmdlineArgs`; the CLI writes its own argv there); the BLAST archive's Bioseqs hold
+  line shows the command line (`CL:losat ` and the run's argv with the host's `-num_threads`, each
+  word followed by a space, as NCBI's `GetCmdlineArgs`; the CLI writes its own argv there); the BLAST archive's Bioseqs hold
   the whole records (with `-query_loc` and `-subject_loc` too) and the deflines as read (`register`
   keeps a defline that `>` and the title do not give). A custom delimiter that a field uses to separate its entries
   (`6 delim=; qseqid staxids`) is NCBI's formatting handler's error, which the CLI makes after the

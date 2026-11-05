@@ -59,19 +59,15 @@ export class OutputReader {
   }
 
   /**
-   * Reads one output of a completed run (`text`; a binary output is not read). What is shown stays
-   * until it is read; an export of the output before says no more.
+   * Reads one output of a completed run; a binary one (not `text`) is read only to know that it can
+   * be, and shows no text. What is shown stays until it is read; an export of the output before
+   * says no more.
    */
   async show(run: RunView, format: RunOutput, text = true): Promise<void> {
     const read = ++this.reads;
     this.saver.reset();
     this.publish({ shown: '' });
     const choice = `${run.snapshot.number}:${format}`;
-    if (!text) {
-      this.readProblem = '';
-      this.publish({ shown: choice, text: '', failed: '' });
-      return;
-    }
     let output: string;
     try {
       output = await this.outputs.readOutput(run.snapshot.runId, format);
@@ -83,7 +79,7 @@ export class OutputReader {
     }
     if (read !== this.reads) return;
     this.readProblem = '';
-    this.publish({ shown: choice, text: output, failed: '' });
+    this.publish({ shown: choice, text: text ? output : '', failed: '' });
   }
 
   /** Saves an output as a file; one that is not saved says why, until the next export or choice. */

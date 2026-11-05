@@ -51,6 +51,7 @@ function withoutCl(document) {
   if (at < 0) return document;
   const start = at + head.length - "\tCL:".length;
   const end = document.indexOf(Buffer.from("\tPN:blastn\n"), start);
+  if (end < 0) return document;
   return Buffer.concat([document.subarray(0, start), document.subarray(end)]);
 }
 

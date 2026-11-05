@@ -2622,29 +2622,48 @@ mod tests {
         }
     }
 
-    // A record keeps its defline only where the archive cannot make it from the title, and a run
-    // that writes the archive gives the records back as they were.
+    // The store keeps the deflines that the archive cannot make from the title (a control byte, white
+    // space after the `>` or at the end; not a CRLF line end), aside from the records: only a run that
+    // writes the archive gives the records a source, which they hold no longer after it.
     #[test]
     fn the_store_keeps_the_deflines_that_the_title_does_not_give() {
-        let fasta = b">a one\nACGT\n>b\twith tab\nGG\n>  c\nTT\n";
+        let fasta: &[u8] = b">a one\r\nACGT\n>b\twith tab\nGG\n>  c\nTT\n>d \nAA\n>e\r\nCC\n";
         let (handle, _) = crate::store::register("blastn", 0, fasta).unwrap();
         let (subject, _) = crate::store::register("blastn", 1, b">s\nACGTACGT\n").unwrap();
         let sources = |whole: bool| {
-            crate::store::with_inputs(Program::Blastn, handle, subject, whole, |queries, _| {
-                queries
-                    .iter()
-                    .map(|record| record.source.as_ref().map(|source| source.defline.clone()))
-                    .collect::<Vec<_>>()
-            })
+            crate::store::with_inputs(
+                Program::Blastn,
+                handle,
+                subject,
+                whole,
+                |queries, subjects| {
+                    let source = |record: &FastaRecord| {
+                        record.source.as_ref().map(|source| source.defline.clone())
+                    };
+                    (
+                        queries.iter().map(source).collect::<Vec<_>>(),
+                        subjects.iter().map(source).collect::<Vec<_>>(),
+                    )
+                },
+            )
             .unwrap()
         };
-        let kept = vec![None, Some(b">b\twith tab".to_vec()), Some(b">  c".to_vec())];
-        assert_eq!(sources(false), kept);
+        assert_eq!(sources(false), (vec![None; 5], vec![None]));
+        let kept = |line: &[u8]| Some(line.to_vec());
         assert_eq!(
             sources(true),
-            vec![Some(Vec::new()), kept[1].clone(), kept[2].clone()]
+            (
+                vec![
+                    kept(b""),
+                    kept(b">b\twith tab"),
+                    kept(b">  c"),
+                    kept(b">d "),
+                    kept(b"")
+                ],
+                vec![kept(b"")]
+            )
         );
-        assert_eq!(sources(false), kept);
+        assert_eq!(sources(false), (vec![None; 5], vec![None]));
         crate::store::release(handle).unwrap();
         crate::store::release(subject).unwrap();
     }

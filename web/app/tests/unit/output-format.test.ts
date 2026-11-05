@@ -100,6 +100,8 @@ describe('outputFileName', () => {
     ['17', 'outfmt17.sam', 'text/plain'],
     ['17 SQ', 'outfmt17-custom.sam', 'text/plain'],
     ['+020', 'outfmt20.csv', 'text/csv'],
+    // Words that the format ignores (NCBI clears them) configure nothing.
+    ['5 qseqid', 'outfmt5.xml', 'application/xml'],
   ])('names the output of -outfmt %j …%s (%s)', (value, name, type) => {
     const custom = argv('-outfmt', value);
     expect(outputFileName({ ...run, argv: custom }, CUSTOM_OUTPUT)).toBe(`losat-run3-blastn-megablast-20251104T111640Z.${name}`);

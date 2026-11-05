@@ -25,11 +25,12 @@ if TYPE_CHECKING:
         BlastnOptions,
         BlastpOptions,
         BlastxOptions,
+        PsiblastOptions,
         TblastnOptions,
         TblastxOptions,
     )
 
-PROGRAMS = ("blastn", "blastp", "blastx", "tblastn", "tblastx")
+PROGRAMS = ("blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast")
 """The search programs, by their command-line names."""
 
 
@@ -136,6 +137,20 @@ class Sequences:
         return self._source, default_name if self.name is None else self.name
 
 
+@dataclass(frozen=True)
+class Database:
+    """A BLAST database as the subject of a search: the value of `-db`.
+
+    The search opens it by its name, one or more space-separated names, and finds it as the
+    command line finds it (`BLASTDB`, `.ncbirc`).
+    """
+
+    name: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", os.fspath(self.name))
+
+
 def _input(sequences: Sequences, role: str) -> tuple[bytes | str, str]:
     if not isinstance(sequences, Sequences):
         raise TypeError(
@@ -143,6 +158,12 @@ def _input(sequences: Sequences, role: str) -> tuple[bytes | str, str]:
             f"not {sequences!r}"
         )
     return sequences._named(role)
+
+
+def _subject(subject: Sequences | Database) -> tuple[bytes | str | None, str]:
+    if isinstance(subject, Database):
+        return None, subject.name
+    return _input(subject, "subject")
 
 
 @dataclass(frozen=True)
@@ -284,7 +305,7 @@ class Search:
 
     Each keyword is an option of the command line without its dash: `evalue=1e-5` is
     `-evalue 1e-5`. `describe` lists them. `-query`, `-subject`, `-db`, `-out` and `-outfmt` are
-    not options here. The search itself is `run` or `batches`.
+    not options here. The search itself is `run`, `batches` or `run_to_file`.
     """
 
     __slots__ = ("_argv", "_program")
@@ -305,6 +326,10 @@ class Search:
     @overload
     def __init__(
         self, program: Literal["tblastx"], /, **options: Unpack[TblastxOptions]
+    ) -> None: ...
+    @overload
+    def __init__(
+        self, program: Literal["psiblast"], /, **options: Unpack[PsiblastOptions]
     ) -> None: ...
 
     def __init__(self, program: str, /, **options: object) -> None:
@@ -354,7 +379,7 @@ class Search:
     def run(
         self,
         query: Sequences,
-        subject: Sequences,
+        subject: Sequences | Database,
         *,
         outfmt: str | Sequence[str] = (),
     ) -> Outcome:
@@ -368,18 +393,72 @@ class Search:
             self._program,
             list(self._argv),
             _input(query, "query"),
-            _input(subject, "subject"),
+            _subject(subject),
             formats,
         )
         return Outcome([Report(*report) for report in reports], hsps, _stats(stats), diagnostics)
 
-    def batches(self, query: Sequences, subject: Sequences) -> Batches:
+    def run_to_file(
+        self,
+        query: Sequences,
+        subject: Sequences | Database,
+        *,
+        outfmt: str,
+        path: str | os.PathLike[str],
+    ) -> str:
+        """Runs the search and writes the report of `outfmt` to the file `path`, as `-out path`.
+
+        Outfmt 13 and 14 come through here: their side files lie next to `path`. Returns what the
+        command line writes to its standard error. The GIL is released.
+        """
+        return _pylosat.run_to_file(
+            self._program,
+            list(self._argv),
+            _input(query, "query"),
+            _subject(subject),
+            outfmt,
+            os.fspath(path),
+        )
+
+    def batches(self, query: Sequences, subject: Sequences | Database) -> Batches:
         """The search as an iterator of `Batch`, one of NCBI's query batches at a time."""
         return Batches(
             _pylosat.Batches(
                 self._program,
                 list(self._argv),
                 _input(query, "query"),
-                _input(subject, "subject"),
+                _subject(subject),
             )
         )
+
+
+@dataclass(frozen=True)
+class ToolOutput:
+    """What a database program writes: its standard output and its standard error."""
+
+    bytes: bytes
+    diagnostics: str
+
+    @property
+    def text(self) -> str:
+        return self.bytes.decode(errors="replace")
+
+
+def makeblastdb(*words: str, input: bytes | str = b"") -> ToolOutput:
+    """Runs `makeblastdb` with the command line's words, which writes the database's files.
+
+    `input` is what the command line reads as standard input (`-in -`, and without `-in`), so a
+    database can be built from FASTA in memory. A failure raises `SearchError` with what the
+    command line writes to its standard error. The GIL is released.
+    """
+    data = input.encode() if isinstance(input, str) else bytes(input)
+    return ToolOutput(*_pylosat.makeblastdb(list(words), data))
+
+
+def blastdbcmd(*words: str) -> ToolOutput:
+    """Runs `blastdbcmd` with the command line's words.
+
+    A failure raises `SearchError` with what the command line writes to its standard error. The
+    GIL is released.
+    """
+    return ToolOutput(*_pylosat.blastdbcmd(list(words)))

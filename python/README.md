@@ -29,7 +29,7 @@ lists them, from the engine's own table, and the type stubs list them by program
 parser checks every option, so an option means, and fails, as it does there (`ArgumentError`).
 
 `-query`, `-subject`, `-db`, `-out` and `-outfmt` are not options here: the inputs and the formats
-are arguments of `run`. A database subject (`-db`) is not supported yet.
+are arguments of `run`.
 
 ## Inputs
 
@@ -38,6 +38,16 @@ A `Sequences` is one FASTA input, and the search reads it with the command line'
 - `Sequences.from_fasta(path)`: a file, inflated when it is named `.gz`, `.bz2` or `.zst`.
 - `Sequences.from_text(text)`: FASTA text.
 - `Sequences.from_pairs([(title, sequence), ...])`: the FASTA file of those records.
+
+A BLAST database takes the place of the subject: `Database("core_nt")` is `-db core_nt`, found as
+the command line finds it (`BLASTDB`, `.ncbirc`), and the options of a database search (`taxids`,
+`seqidlist`, ...) go to `Search` with the others. Then `hsp.s_idx` is the sequence's ordinal id,
+the same in every search of that database.
+
+```python
+search = pylosat.Search("blastn", taxids="9606", evalue=1e-5)
+outcome = search.run(query, pylosat.Database("core_nt"), outfmt="6")
+```
 
 ## Results
 
@@ -55,6 +65,24 @@ is the slice of `report.bytes` that holds the row or section of an HSP.
 
 `qframe` and `sframe` are null where the program does not translate that side; the reports print
 a number there.
+
+## Files
+
+`search.run_to_file(query, subject, outfmt="14", path="report.xml")` is the command line's `-out`,
+and the way to outfmt 13 and 14: their side files lie next to `path`. It returns what the command
+line writes to its standard error.
+
+## Databases
+
+```python
+pylosat.makeblastdb("-dbtype", "prot", "-out", "proteins", input=fasta_text)
+print(pylosat.blastdbcmd("-db", "proteins", "-info").text)
+```
+
+`makeblastdb` and `blastdbcmd` take the command line's words and return a `ToolOutput`, what it
+writes to standard output (`bytes`, `text`) and to standard error (`diagnostics`). `input` is what
+`makeblastdb` reads as standard input, so a database can be built from FASTA in memory. A failure
+raises `SearchError` with what the command line writes to its standard error.
 
 ## Long searches
 

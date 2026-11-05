@@ -71,6 +71,20 @@ def command_line():
 
 
 @pytest.fixture(scope="session")
+def command_line_files():
+    """Runs `losat <program> -query <query> -subject <subject> <words>`, which writes files."""
+    executable = os.environ.get("LOSAT_BIN")
+    if not executable:
+        pytest.skip("LOSAT_BIN names no losat executable")
+
+    def run(program: str, query: str, subject: str, words: list[str]) -> None:
+        command = [executable, program, "-query", query, "-subject", subject, *words]
+        subprocess.run(command, capture_output=True, check=True)
+
+    return run
+
+
+@pytest.fixture(scope="session")
 def many_batches(tmp_path_factory) -> tuple[str, str]:
     """A BLASTP query file of several query batches, and its subject."""
     records = (FASTA / "outfmt0" / "e2e_many_query.faa").read_text()

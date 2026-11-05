@@ -437,6 +437,12 @@ web/                       # LOSAT Web (browser application)
 ├── AGENTS.md              # Rules for code under web/
 ├── adapter/               # Rust crate: Wasm ABI v2 over the LOSAT library (added in session S05)
 └── app/                   # Vite + Vue 3 + TypeScript application
+
+python/                    # pylosat: the Python binding of LOSAT::api (PyO3, its own Cargo root)
+├── AGENTS.md              # Rules for code under python/
+├── src/                   # Rust crate: the extension module
+├── pylosat/               # Python package
+└── tests/                 # pytest, against the losat executable of the same commit
 ```
 
 ### Scope of these rules for `web/`
@@ -448,6 +454,15 @@ outputs; it therefore does not carry NCBI reference comments, and application fe
 permitted by that decision are not "unauthorized features" under requirement 5. Every
 change under `LOSAT/`, including one made for LOSAT Web, remains subject to all the
 requirements above.
+
+### Scope of these rules for `python/`
+
+Code under `python/` follows [`python/AGENTS.md`](python/AGENTS.md) under
+[`PD-LOSAT-PYTHON-BINDING-BOUNDARY`](docs/product_decisions/PD-LOSAT-PYTHON-BINDING-BOUNDARY.md),
+as `web/` does under its decision: it computes no BLAST behavior or compatibility output, so it
+carries no NCBI reference comments, and what that decision permits there is not an "unauthorized
+feature" under requirement 5. Every change under `LOSAT/`, including one made for the binding,
+remains subject to all the requirements above.
 
 ---
 

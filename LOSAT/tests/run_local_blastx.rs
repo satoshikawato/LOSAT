@@ -765,8 +765,8 @@ fn check_options_fails_as_a_run_does() {
         assert_eq!(checked, run, "{formats:?} {extra:?}");
         failed += usize::from(run.is_err());
     }
-    // Every case but the two searches and the valid ranges fails.
-    assert_eq!(failed, 13);
+    // Every case but the three searches and the valid ranges fails.
+    assert_eq!(failed, 12);
 }
 
 /// A query whose first batch ends on its first record only when the batch counts the whole record:

@@ -70,8 +70,9 @@ describe('buildArgv', () => {
     ).toThrow('-num_threads is set in the form: Threads');
   });
 
-  // The engine reads -outfmt as the CLI does, and adds the output of 6 and 7 with fields (WA2-OP-03):
-  // the application passes its words on, and the engine refuses what a run does not write.
+  // The engine reads -outfmt as the CLI does, and adds the output of the other formats and of 6 and 7
+  // with fields (WA2-OP-03, W11): the application passes its words on, and the engine refuses what a
+  // run does not write.
   it.each([
     [['-outfmt', '6 qseqid sseqid pident']],
     [['-outfmt=7 std qcovs']],

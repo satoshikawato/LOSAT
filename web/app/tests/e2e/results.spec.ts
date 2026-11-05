@@ -2048,16 +2048,16 @@ test('after the browser removed the stored results, the Outputs, Export and Down
 
 // The output of the argv's own -outfmt (WA2-OP-03, Owner 2026-11-05): -outfmt 6 or 7 with fields in Additional
 // options adds it to the Outputs, Export and "Download All", named by its value, and to the commands of Run details; the
-// formats of every run keep their commands. The formats that a run does not write need the CLI. With the engine, its text
-// is the native CLI's for the same argv (the same commit, one thread), in BLASTN and BLASTP.
+// formats of every run keep their commands. The formats that the browser does not write yet are refused. With the engine,
+// its text is the native CLI's for the same argv (the same commit, one thread), in BLASTN and BLASTP.
 test("Additional options' -outfmt with fields adds its output to the Outputs, Export and Download All", async ({ page }, testInfo) => {
   const extra = page.getByTestId('param-extra');
   const validation = page.getByTestId('argv-validation');
   await openParameters(page);
   await program(page, 'blastn');
-  for (const value of ['5', '10']) {
+  for (const value of ['13', '14']) {
     await extra.fill(`-outfmt ${value}`);
-    await expect(validation).toHaveText(`-outfmt ${value}: the browser writes outfmt 0, 6 and 7 (6 and 7 with any fields); other formats need the CLI`);
+    await expect(validation).toHaveText(`-outfmt ${value} is not supported in the browser yet`);
   }
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is set in the form: Threads');
@@ -2137,6 +2137,99 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
   await expect(page.getByTestId('results-outputs').locator('nav.tabs button')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7']);
   await page.getByTestId('results-download-all').click();
   await expect(page.getByTestId('results-download-menu').getByRole('button')).toHaveCount(3);
+});
+
+/** A SAM document without the CL tag of its @PG line, where the CLI writes its own command line (the SAM rows' rule). */
+const withoutCl = (sam: string) => sam.replace(/(\n@PG\tID:0\tVN:[^\t\n]*)\tCL:[^\n]*?(\tPN:blastn\n)/, '$1$2');
+
+// Every other format that the CLI writes (W11, Owner 2026-11-05 "all output formats"): Additional options' -outfmt adds
+// its output to the Outputs, Export (with the format's extension) and "Download All" (BLAST+'s name of the format). A
+// binary output (outfmt 9) is saved, not shown. With the engine, the output is the native CLI's for the same argv (SAM
+// without the command line of its @PG line, which is each one's own), in BLASTN, BLASTP and BLASTX.
+test("Additional options' -outfmt of another format adds its output to the Outputs, Export and Download All", async ({ page }, testInfo) => {
+  const extra = page.getByTestId('param-extra');
+  const validation = page.getByTestId('argv-validation');
+  await openParameters(page);
+  await program(page, 'blastx');
+  await extra.fill('-outfmt 11');
+  await expect(validation).toHaveText('-outfmt 11 is not supported in the browser yet');
+  const protein = '>q protein query\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n';
+  const inputs = {
+    blastn: [`>q1 first query\n${A}\n`, `>s1 first subject\n${S1}\n`],
+    blastp: [protein, '>s protein subject\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n'],
+    blastx: [fasta('outfmt0/pd_sub_q.fna').toString('utf8'), fasta('outfmt0/pd_sub_p.faa').toString('utf8')],
+  } as const;
+  type Case = readonly [keyof typeof inputs, string, string, string];
+  // Program, -outfmt, the file's extension, and BLAST+'s name of the format.
+  const all: readonly Case[] = [
+    ['blastn', '5', 'outfmt5.xml', 'BLAST XML'],
+    ['blastn', '9', 'outfmt9.asnb', 'Seqalign (Binary ASN.1)'],
+    ['blastn', '11', 'outfmt11.asn', 'BLAST archive (ASN.1)'],
+    ['blastn', '17 SQ', 'outfmt17-custom.sam', 'Sequence Alignment/Map (SAM)'],
+    ['blastp', '10 qseqid sseqid evalue', 'outfmt10-custom.csv', 'Comma-separated values'],
+    ['blastp', '12', 'outfmt12.json', 'Seqalign (JSON)'],
+    ['blastx', '15', 'outfmt15.json', 'Single-file BLAST JSON'],
+    ['blastx', '20', 'outfmt20.csv', 'Comma-separated values with header lines'],
+  ];
+  const cases = BUILD_HAS_ENGINE ? all : all.filter(([, outfmt]) => outfmt === '5' || outfmt === '9');
+  if (BUILD_HAS_ENGINE && NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The bytes of the outputs: ${NO_NATIVE_REASON}` });
+  const downloads: Download[] = [];
+  page.on('download', (download) => downloads.push(download));
+  const output = page.getByTestId('result-output');
+  for (const [index, [id, outfmt, extension, name]] of cases.entries()) {
+    const run = index + 1;
+    const binary = outfmt === '9';
+    if (run > 1) await page.getByTestId('tab-search').click();
+    await program(page, id);
+    await paste(page, 'query', inputs[id][0]);
+    await paste(page, 'subject', inputs[id][1]);
+    await openParameters(page);
+    await extra.fill(outfmt.includes(' ') ? `-outfmt '${outfmt}'` : `-outfmt ${outfmt}`);
+    await expect(validation).toHaveAttribute('data-state', 'ok');
+    await submit(page);
+    await waitStatus(page, run, 'completed');
+    await chooseRun(page, run);
+    await page.getByTestId('results-view-outputs').click();
+    await expect(page.getByTestId('results-outputs').locator('nav.tabs button')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7', `outfmt ${outfmt}`]);
+    await page.getByTestId('format-custom').click();
+    await expect(page.getByTestId('export-output')).toHaveText(`Export outfmt ${outfmt}`);
+    if (binary) await expect(output).toHaveCount(0);
+    else await expect(output).toHaveAttribute('data-shown', `${run}:4`);
+    const text = binary ? '' : ((await output.textContent()) ?? '');
+    await page.getByTestId('export-output').click();
+    await page.getByTestId('results-download-all').click();
+    const item = page.getByTestId('results-download-menu').getByTestId('results-download-custom');
+    await expect(item).toHaveText(`${name} (outfmt ${outfmt})`);
+    await item.click();
+    await expect.poll(() => downloads.length).toBe(2 * run);
+    const saved: Buffer[] = [];
+    for (const download of downloads.slice(-2)) {
+      expect(download.suggestedFilename()).toMatch(new RegExp(`^losat-run${run}-${id}-.*\\.${extension.replace('.', '\\.')}$`));
+      saved.push(readFileSync((await download.path())!));
+    }
+    expect(saved[0]!.equals(saved[1]!)).toBe(true);
+    if (!binary) expect(saved[0]!.toString('utf8')).toBe(text);
+    if (!BUILD_HAS_ENGINE) expect(saved[0]!.toString('utf8')).toContain(`# -outfmt ${outfmt}\n`);
+    else if (NATIVE !== undefined) {
+      const directory = testInfo.outputPath(`format-${run}`);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, 'query.fa'), inputs[id][0]);
+      writeFileSync(join(directory, 'subject.fa'), inputs[id][1]);
+      const cli = spawnSync(NATIVE, [id, '-query', 'query.fa', '-subject', 'subject.fa', '-outfmt', outfmt, '-num_threads', '1'], { cwd: directory });
+      expect(cli.status, String(cli.stderr)).toBe(0);
+      expect(saved[0]!.length).toBeGreaterThan(0);
+      if (outfmt.startsWith('17')) {
+        // The run's own command line: the argv that the engine ran, with the form's threads.
+        expect(text).toContain(`\tCL:losat ${id} -query query.fa -subject subject.fa -outfmt ${outfmt} -num_threads `);
+        expect(withoutCl(text), `${id} -outfmt '${outfmt}'`).toBe(withoutCl(String(cli.stdout)));
+      } else expect(saved[0]!.equals(cli.stdout), `${id} -outfmt '${outfmt}'`).toBe(true);
+    }
+    // Run details: the command of the output.
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-command-custom')).toHaveText(
+      `losat ${id} -query query.fa -subject subject.fa -outfmt ${outfmt.includes(' ') ? `'${outfmt}'` : outfmt}`,
+    );
+  }
 });
 
 // On a phone's width, the output of a long -outfmt (fields, and one long delim= token) wraps in its tab, its command,

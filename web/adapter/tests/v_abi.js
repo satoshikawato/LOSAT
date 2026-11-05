@@ -12,9 +12,10 @@
 // The searches come from web/adapter/tools/v_abi_cases.py; where a frozen SHA-256
 // exists (Gate A, the Stage G matrix, NCBI's fixtures) the match is recorded as well. A
 // search marked `"expect": "failure"` must fail in the CLI and in the ABI with the same
-// error. A search with `"outfmt"` (6 or 7 with fields) runs with that -outfmt: its output,
-// stream 4, is compared with the CLI's run of the same argv, whose standard error is then
-// stream 3 (abi_v2.md §5, §7).
+// error. A search with `"outfmt"` (a format besides 0, 6 and 7, or 6 or 7 with fields) runs
+// with that -outfmt: its output, stream 4, is compared with the CLI's run of the same argv,
+// whose standard error is then stream 3 (abi_v2.md §5, §7); SAM's (`"sam": true`) without the
+// CL tag of its @PG line, where each writes its own command line.
 //
 // Usage: node v_abi.js --native losat --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
@@ -41,6 +42,22 @@ const WITH_HITS = new Set(["blastp", "tblastn", "blastn", "tblastx", "blastx"]);
 function sha256(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
+
+// A SAM document without the CL tag of its @PG line (LOSAT/tests/db_search_fixtures.py
+// `strip_sam_cl`: from the `\tCL:` after `\n@PG\tID:0\tVN:2.17.0+` up to the next `\tPN:blastn\n`).
+function withoutCl(document) {
+  const head = Buffer.from("\n@PG\tID:0\tVN:2.17.0+\tCL:");
+  const at = document.indexOf(head);
+  if (at < 0) return document;
+  const start = at + head.length - "\tCL:".length;
+  const end = document.indexOf(Buffer.from("\tPN:blastn\n"), start);
+  if (end < 0) return document;
+  return Buffer.concat([document.subarray(0, start), document.subarray(end)]);
+}
+
+// The -outfmt numbers whose warnings are those of outfmt 6 (the tabular writer's): the structured
+// formats do not write the queries' warnings (`ReportFormat::writes_query_warnings`).
+const TABULAR = new Set([6, 7, 10, 20]);
 
 function parseArgs(argv) {
   const options = {};
@@ -174,7 +191,9 @@ function nativeOutputs(native, search, scratch) {
     outputs.set(CUSTOM_STREAM, fs.readFileSync(out));
     fs.rmSync(out, { force: true });
     // The warnings of outfmt 6, and those of the fields' writer (NCBI's taxdb warning).
-    for (const line of lines(6)) assert.ok(result.stderr.toString().split("\n").includes(line), `-outfmt ${search.outfmt}: ${line} is in its warnings`);
+    if (TABULAR.has(Number(search.outfmt.trim().split(" ")[0]))) {
+      for (const line of lines(6)) assert.ok(result.stderr.toString().split("\n").includes(line), `-outfmt ${search.outfmt}: ${line} is in its warnings`);
+    }
     stderr = result.stderr;
   }
   return { outputs, stderr, status };
@@ -281,9 +300,9 @@ function checkSurface(reactor, native) {
     const cli = require("node:child_process").spawnSync(native, argv);
     assert.equal(validated.error, cli.stderr.toString(), `${argv.join(" ")}: the CLI's error`);
   }
-  // -outfmt (WA2-OP-03): the formats that every run writes and 6 and 7 with fields are valid, the CLI's errors
-  // have the CLI's words, and the formats that the CLI writes besides are refused.
-  for (const outfmt of ["6", "0", "6 qseqid sseqid pident", "7 std qcovs"]) {
+  // -outfmt (WA2-OP-03, W11): the formats that the CLI writes and 6 and 7 with fields are valid, the CLI's errors
+  // have the CLI's words, and 13, 14 and BLASTX's 11 are refused.
+  for (const outfmt of ["6", "0", "6 qseqid sseqid pident", "7 std qcovs", "5", "9", "10 qseqid", "11", "16", "17 SQ", "20"]) {
     assert.equal(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-outfmt", outfmt].join("\0")).status, 0, outfmt);
   }
   // The CLI reads the files before its formatting handler checks the delimiter: real files.
@@ -296,8 +315,10 @@ function checkSurface(reactor, native) {
     const cli = require("node:child_process").spawnSync(native, argv);
     assert.equal(validated.error, cli.stderr.toString(), `-outfmt ${outfmt}: the CLI's message`);
   }
-  assert.equal(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-outfmt", "5"].join("\0")).error,
-               "-outfmt 5: the browser writes outfmt 0, 6 and 7 (6 and 7 with any fields); other formats need the CLI");
+  assert.equal(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-outfmt", "13"].join("\0")).error,
+               "-outfmt 13 is not supported in the browser yet");
+  assert.equal(reactor.call("losat_web2_validate", ["blastx", "-query", "q", "-subject", "s", "-outfmt", "11"].join("\0")).error,
+               "-outfmt 11 is not supported in the browser yet");
   assert.match(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-out", "x"].join("\0")).error, /not accepted/);
   // The tasks of Session SD and NCBI's option check of a template (blast_options.c:1247-1261).
   for (const task of ["dc-megablast", "blastn-short"]) {
@@ -425,8 +446,10 @@ async function main() {
           if (search.frozen[format]) row.frozen[format] = sha256(actual) === search.frozen[format];
         }
         if (search.outfmt !== undefined) {
-          const actual = run.streams.get(CUSTOM_STREAM) || Buffer.alloc(0);
-          assert.equal(sha256(actual), sha256(expected.outputs.get(CUSTOM_STREAM)), `${label}: -outfmt ${search.outfmt}`);
+          const sent = run.streams.get(CUSTOM_STREAM) || Buffer.alloc(0);
+          const actual = search.sam ? withoutCl(sent) : sent;
+          const cli = expected.outputs.get(CUSTOM_STREAM);
+          assert.equal(sha256(actual), sha256(search.sam ? withoutCl(cli) : cli), `${label}: -outfmt ${search.outfmt}`);
           row.formats.custom = sha256(actual);
           if (search.frozen.custom) row.frozen.custom = sha256(actual) === search.frozen.custom;
         } else {

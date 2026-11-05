@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use std::sync::Mutex;
 
 use LOSAT::blastinput::fasta_reader::{
-    read_all, FastaInputSource, FastaRecord, ReadError, ReaderConfig,
+    read_all, FastaInputSource, FastaRecord, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };
 
 use crate::json;
@@ -17,11 +17,17 @@ use crate::scan;
 pub const ROLE_QUERY: u32 = 0;
 pub const ROLE_SUBJECT: u32 = 1;
 
+/// Deflines by record index, in the order of the records.
+pub type KeptDeflines = Vec<(usize, Box<[u8]>)>;
+
 pub struct Registered {
     pub role: u32,
     /// The program whose reader read the records; only its runs use them.
     pub program: Program,
     pub records: Vec<FastaRecord>,
+    /// The deflines that the BLAST archive cannot make from the title (`read_deflines`); the
+    /// records themselves keep no source.
+    pub deflines: KeptDeflines,
 }
 
 #[derive(Default)]
@@ -89,6 +95,78 @@ fn reader_error(error: ReadError) -> String {
     format!("{:#}", error.into_app_error())
         .trim_end_matches('\n')
         .to_string()
+}
+
+/// The deflines that the BLAST archive (outfmt 11) cannot make from the title, by record index: the
+/// archive's Bioseq shows the defline as read (`report::archive::defline_of`), which the CLI's
+/// reader keeps when the run writes the archive (`ReaderConfig::with_defline`), and else `>` and
+/// the title, which the title does not give for a defline with a control byte (the title ends
+/// there), white space after the `>` or at the end. The index scan (`scanned`, which `check_scan`
+/// matched with the records) tells the deflines whose line is not `>` and the title (a line never
+/// holds a line end, so the line without its line end is the defline as read when it is `>` and the
+/// title). The reader reads each of those lines alone, keeping the defline; the letters are not
+/// read again, so the registration of any input holds what a reader without the archive holds. A
+/// line that the reader alone reads as another title is read in the whole input instead.
+fn read_deflines(
+    bytes: &[u8],
+    config: ReaderConfig,
+    scanned: &[scan::ScanRecord],
+    records: &[FastaRecord],
+) -> Result<KeptDeflines, ReadError> {
+    let made = |line: &[u8], title: &[u8]| line.first() == Some(&b'>') && &line[1..] == title;
+    let mut quiet = |_: &[u8]| Ok(());
+    let mut deflines = Vec::new();
+    for (index, (scan, record)) in scanned.iter().zip(records).enumerate() {
+        let range = scan.header_offset as usize..scan.sequence_offset as usize;
+        let line = &bytes[range.clone()];
+        let line = line.strip_suffix(b"\n").unwrap_or(line);
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if line.is_empty() || made(line, &record.title) {
+            continue;
+        }
+        let mut alone = FastaInputSource::from_bytes(&bytes[range], config.with_defline(true));
+        let read = alone.next_sequence(&mut quiet).ok();
+        let Some(kept) = read.filter(|kept| kept.title == record.title) else {
+            return read_all_deflines(bytes, config);
+        };
+        if let Some(defline) = kept
+            .archive_defline()
+            .filter(|defline| !made(defline, &record.title))
+        {
+            deflines.push((index, defline.into()));
+        }
+    }
+    Ok(deflines)
+}
+
+/// `read_deflines` over the whole input: every record read again, one at a time, keeping the
+/// deflines that `>` and the title do not give.
+#[cold]
+fn read_all_deflines(bytes: &[u8], config: ReaderConfig) -> Result<KeptDeflines, ReadError> {
+    let made = |line: &[u8], title: &[u8]| line.first() == Some(&b'>') && &line[1..] == title;
+    let mut source = FastaInputSource::from_bytes(bytes, config.with_defline(true));
+    let mut quiet = |_: &[u8]| Ok(());
+    let mut deflines = Vec::new();
+    let mut index = 0;
+    while !source.end() {
+        match source.next_sequence(&mut quiet) {
+            Ok(record) => {
+                if let Some(defline) = record
+                    .archive_defline()
+                    .filter(|defline| !made(defline, &record.title))
+                {
+                    deflines.push((index, defline.into()));
+                }
+                index += 1;
+            }
+            Err(ReadError::Parse {
+                code: ParseErrorCode::Eof,
+                ..
+            }) => break,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(deflines)
 }
 
 /// Reads `bytes` with the program's reader for `role`, checks the records against the
@@ -181,6 +259,7 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
         .to_string());
     }
     check_scan(role_name, &scanned, &records)?;
+    let deflines = read_deflines(bytes, config, &scanned, &records).map_err(reader_error)?;
     let mut response = String::from("{\"handle\":");
     let mut store = store().lock().expect("input store");
     store.next = store
@@ -204,6 +283,7 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
             role,
             program,
             records,
+            deflines,
         },
     );
     Ok((handle, response))
@@ -250,15 +330,24 @@ pub fn release(handle: u32) -> Result<(), String> {
 }
 
 /// Calls `work` with the records of a query handle and a subject handle registered for
-/// `program`.
+/// `program`. For a run that writes the BLAST archive (`whole`), every record has a source while
+/// `work` runs, as the CLI's reader gives each record when the run writes the archive
+/// (`ReaderConfig::with_defline`): its defline where `>` and the title do not give it
+/// (`read_deflines`), and a record that a range cuts keeps its whole letters for the archive's
+/// Bioseq (`FastaRecord::cut`, `archive_letters`). Afterwards the records have no source again, as
+/// every other run sees them.
 pub fn with_inputs<R>(
     program: Program,
     query: u32,
     subject: u32,
+    whole: bool,
     work: impl FnOnce(&[FastaRecord], &[FastaRecord]) -> R,
 ) -> Result<R, String> {
-    let store = store().lock().expect("input store");
-    let get = |handle: u32, role: u32, name: &str| {
+    let mut store = store().lock().expect("input store");
+    for (handle, role, name) in [
+        (query, ROLE_QUERY, "query"),
+        (subject, ROLE_SUBJECT, "subject"),
+    ] {
         let entry = store
             .entries
             .get(&handle)
@@ -271,11 +360,39 @@ pub fn with_inputs<R>(
                 program.name()
             ));
         }
-        Ok(entry.records.as_slice())
-    };
-    let queries = get(query, ROLE_QUERY, "query")?;
-    let subjects = get(subject, ROLE_SUBJECT, "subject")?;
-    Ok(work(queries, subjects))
+    }
+    if whole {
+        set_sources(&mut store, [query, subject], true);
+    }
+    let result = work(
+        &store.entries[&query].records,
+        &store.entries[&subject].records,
+    );
+    if whole {
+        set_sources(&mut store, [query, subject], false);
+    }
+    Ok(result)
+}
+
+/// Gives every record of `handles` a source with its kept defline (`give`), or takes the sources
+/// back.
+fn set_sources(store: &mut Store, handles: [u32; 2], give: bool) {
+    for handle in handles {
+        let entry = store.entries.get_mut(&handle).expect("a registered handle");
+        let mut kept = entry.deflines.iter().peekable();
+        for (index, record) in entry.records.iter_mut().enumerate() {
+            record.source = give.then(|| {
+                let defline = kept
+                    .next_if(|(at, _)| *at == index)
+                    .map(|(_, defline)| defline.to_vec())
+                    .unwrap_or_default();
+                Box::new(RecordSource {
+                    defline,
+                    ..RecordSource::default()
+                })
+            });
+        }
+    }
 }
 
 #[cfg(test)]
@@ -382,11 +499,11 @@ mod tests {
     fn a_handle_belongs_to_its_program() {
         let (query, _) = register("blastp", ROLE_QUERY, b">q t\nACXGT\n").unwrap();
         let (subject, _) = register("blastn", ROLE_SUBJECT, b">s\nACGT\n").unwrap();
-        let error = with_inputs(Program::Blastn, query, subject, |_, _| ()).unwrap_err();
+        let error = with_inputs(Program::Blastn, query, subject, false, |_, _| ()).unwrap_err();
         assert!(
             error.contains("registered for blastp, not blastn"),
             "{error}"
         );
-        assert!(with_inputs(Program::Blastp, query, subject, |_, _| ()).is_err());
+        assert!(with_inputs(Program::Blastp, query, subject, false, |_, _| ()).is_err());
     }
 }

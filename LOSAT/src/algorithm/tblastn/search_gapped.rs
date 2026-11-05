@@ -810,13 +810,29 @@ fn x_preliminary_protein_hsps_by_unit(
         hits.clear();
         #[cfg(test)]
         probe_begin_unit(unit, frame.frame, chunk.offset);
-        x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
-            #[cfg(test)]
-            probe_seeds(unit, frame.frame, chunk_offset, filled);
-            // The two-hit loop of the units without a branch on the common outcomes
-            // (tblastn/x_tbn_hitbf.rs).
-            two_hit.x_pairs_bf(frame.frame, chunk_offset, subject_sequence, filled, hits)
-        });
+        match two_hit.x_ungap_matrix() {
+            None => x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
+                #[cfg(test)]
+                probe_seeds(unit, frame.frame, chunk_offset, filled);
+                // The two-hit loop of the units without a branch on the common outcomes
+                // (tblastn/x_tbn_hitbf.rs).
+                two_hit.x_pairs_bf(frame.frame, chunk_offset, subject_sequence, filled, hits)
+            }),
+            // Another matrix's byte-table walks (`XTwoHit::x_pairs_bf_of`), in a scan of its own
+            // so that BLOSUM62's keeps its code.
+            Some(table) => x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
+                #[cfg(test)]
+                probe_seeds(unit, frame.frame, chunk_offset, filled);
+                two_hit.x_pairs_bf_of(
+                    table,
+                    frame.frame,
+                    chunk_offset,
+                    subject_sequence,
+                    filled,
+                    hits,
+                )
+            }),
+        }
         // NCBI c++/src/algo/blast/core/aa_ungapped.c:608-609:
         // Blast_ExtendWordExit(ewp, subject->length);
         // Right after the scan, before anything that can fail, so that the table is ready for the

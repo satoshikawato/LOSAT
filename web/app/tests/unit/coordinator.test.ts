@@ -367,6 +367,8 @@ describe('Coordinator', () => {
     expect(saved[0]!.type).toBe('application/xml');
     await coordinator.exportOutput(runId, 0);
     expect(saved[1]!.type).toBe('text/plain');
+    // An output is opened without being read (a binary one, which the Outputs do not show).
+    await expect(coordinator.checkOutput(runId, CUSTOM_OUTPUT)).resolves.toBeUndefined();
   });
 
   it('queues a group in order, numbered without gaps, and cancels the group together', async () => {

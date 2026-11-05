@@ -2669,6 +2669,39 @@ mod tests {
         assert_eq!(sources(false), (vec![None; 5], vec![None]));
         crate::store::release(handle).unwrap();
         crate::store::release(subject).unwrap();
+        // A first record without a defline, a kept defline at the end of the input without a line
+        // end, and CR line ends.
+        for (fasta, kept_lines) in [
+            (
+                &b"ACGT\n>b\tx\nGG\n"[..],
+                vec![b"".to_vec(), b">b\tx".to_vec()],
+            ),
+            (&b">a\nAC\n>b \t"[..], vec![b"".to_vec(), b">b \t".to_vec()]),
+            (
+                &b">a \rAC\r>b\rGG\r"[..],
+                vec![b">a ".to_vec(), b"".to_vec()],
+            ),
+        ] {
+            let (handle, _) = crate::store::register("blastn", 0, fasta).unwrap();
+            let (subject, _) = crate::store::register("blastn", 1, b">s\nACGTACGT\n").unwrap();
+            let defline = |whole: bool| {
+                crate::store::with_inputs(Program::Blastn, handle, subject, whole, |queries, _| {
+                    queries
+                        .iter()
+                        .map(|record| record.source.as_ref().map(|source| source.defline.clone()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap()
+            };
+            assert_eq!(defline(false), vec![None; kept_lines.len()], "{fasta:?}");
+            assert_eq!(
+                defline(true),
+                kept_lines.into_iter().map(Some).collect::<Vec<_>>(),
+                "{fasta:?}"
+            );
+            crate::store::release(handle).unwrap();
+            crate::store::release(subject).unwrap();
+        }
     }
 
     const SPLIT_QUERY: &[u8] =

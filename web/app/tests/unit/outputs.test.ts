@@ -26,10 +26,15 @@ interface Pending<T> {
 /** Reads and exports that end when the test says so. */
 class Outputs implements OutputPort {
   readonly reads: Pending<string>[] = [];
+  readonly checks: Pending<void>[] = [];
   readonly exports: Pending<void>[] = [];
 
   readOutput(runId: string, format: RunOutput): Promise<string> {
     return new Promise((resolve, reject) => this.reads.push({ runId, format, resolve, reject }));
+  }
+
+  checkOutput(runId: string, format: RunOutput): Promise<void> {
+    return new Promise((resolve, reject) => this.checks.push({ runId, format, resolve, reject }));
   }
 
   exportOutput(runId: string, format: RunOutput): Promise<void> {
@@ -85,16 +90,17 @@ describe('OutputReader', () => {
     expect(state()).toEqual({ shown: '1:7', text: '# BLASTN\n', failed: '', problem: '' });
   });
 
-  // W11: a binary output (outfmt 9) is read to know that it can be, and shows no text.
+  // W11: a binary output (outfmt 9) is opened to know that it can be read, not read, and shows no text.
   it('a binary output shows no text, and says why when it cannot be read', async () => {
     const { outputs, reader, state } = setup();
     void reader.show(run(1), 4, false);
-    expect(outputs.reads[0]).toMatchObject({ runId: 'r1', format: 4 });
-    outputs.reads[0]!.resolve('\u0030\u0080');
+    expect(outputs.checks[0]).toMatchObject({ runId: 'r1', format: 4 });
+    expect(outputs.reads).toHaveLength(0);
+    outputs.checks[0]!.resolve();
     await settle();
     expect(state()).toEqual({ shown: '1:4', text: '', failed: '', problem: '' });
     void reader.show(run(1), 4, false);
-    outputs.reads[1]!.reject(removed());
+    outputs.checks[1]!.reject(removed());
     await settle();
     expect(state()).toEqual({ shown: '', text: '', failed: '1:4', problem: UNREADABLE });
   });

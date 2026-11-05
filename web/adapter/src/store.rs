@@ -102,9 +102,11 @@ fn reader_error(error: ReadError) -> String {
 /// reader keeps when the run writes the archive (`ReaderConfig::with_defline`), and else `>` and
 /// the title, which the title does not give for a defline with a control byte (the title ends
 /// there), white space after the `>` or at the end. The index scan (`scanned`, which `check_scan`
-/// matched with the records) tells the deflines whose line is not `>` and the title; only an input
-/// with such a line is read again, keeping the deflines (one record at a time), so that the
-/// records and the registration of an ordinary input are those of a reader without the archive.
+/// matched with the records) tells the deflines whose line is not `>` and the title (a line never
+/// holds a line end, so the line without its line end is the defline as read when it is `>` and the
+/// title). The reader reads each of those lines alone, keeping the defline; the letters are not
+/// read again, so the registration of any input holds what a reader without the archive holds. A
+/// line that the reader alone reads as another title is read in the whole input instead.
 fn read_deflines(
     bytes: &[u8],
     config: ReaderConfig,
@@ -112,34 +114,48 @@ fn read_deflines(
     records: &[FastaRecord],
 ) -> Result<KeptDeflines, ReadError> {
     let made = |line: &[u8], title: &[u8]| line.first() == Some(&b'>') && &line[1..] == title;
-    let suspects: Vec<usize> = scanned
-        .iter()
-        .zip(records)
-        .enumerate()
-        .filter(|(_, (scan, record))| {
-            let line = &bytes[scan.header_offset as usize..scan.sequence_offset as usize];
-            let line = line.strip_suffix(b"\n").unwrap_or(line);
-            let line = line.strip_suffix(b"\r").unwrap_or(line);
-            !line.is_empty() && !made(line, &record.title)
-        })
-        .map(|(index, _)| index)
-        .collect();
+    let mut quiet = |_: &[u8]| Ok(());
     let mut deflines = Vec::new();
-    if suspects.is_empty() {
-        return Ok(deflines);
+    for (index, (scan, record)) in scanned.iter().zip(records).enumerate() {
+        let range = scan.header_offset as usize..scan.sequence_offset as usize;
+        let line = &bytes[range.clone()];
+        let line = line.strip_suffix(b"\n").unwrap_or(line);
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if line.is_empty() || made(line, &record.title) {
+            continue;
+        }
+        let mut alone = FastaInputSource::from_bytes(&bytes[range], config.with_defline(true));
+        let read = alone.next_sequence(&mut quiet).ok();
+        let Some(kept) = read.filter(|kept| kept.title == record.title) else {
+            return read_all_deflines(bytes, config);
+        };
+        if let Some(defline) = kept
+            .archive_defline()
+            .filter(|defline| !made(defline, &record.title))
+        {
+            deflines.push((index, defline.into()));
+        }
     }
+    Ok(deflines)
+}
+
+/// `read_deflines` over the whole input: every record read again, one at a time, keeping the
+/// deflines that `>` and the title do not give.
+#[cold]
+fn read_all_deflines(bytes: &[u8], config: ReaderConfig) -> Result<KeptDeflines, ReadError> {
+    let made = |line: &[u8], title: &[u8]| line.first() == Some(&b'>') && &line[1..] == title;
     let mut source = FastaInputSource::from_bytes(bytes, config.with_defline(true));
     let mut quiet = |_: &[u8]| Ok(());
+    let mut deflines = Vec::new();
     let mut index = 0;
-    while !source.end() && index <= *suspects.last().expect("not empty") {
+    while !source.end() {
         match source.next_sequence(&mut quiet) {
             Ok(record) => {
-                if suspects.binary_search(&index).is_ok() {
-                    if let Some(defline) = record.archive_defline() {
-                        if !made(defline, &record.title) {
-                            deflines.push((index, defline.into()));
-                        }
-                    }
+                if let Some(defline) = record
+                    .archive_defline()
+                    .filter(|defline| !made(defline, &record.title))
+                {
+                    deflines.push((index, defline.into()));
                 }
                 index += 1;
             }

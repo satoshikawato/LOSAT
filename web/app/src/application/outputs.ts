@@ -7,7 +7,7 @@ import type { Coordinator, RunView } from './coordinator';
 import { unreadableResults } from './results';
 import { Store } from './store';
 
-export type OutputPort = Pick<Coordinator, 'readOutput' | 'exportOutput'>;
+export type OutputPort = Pick<Coordinator, 'readOutput' | 'checkOutput' | 'exportOutput'>;
 
 export interface OutputState {
   /** The run and format of `text` ("<number>:<format>") once it is read; '' while it is read, or when it could not be. */
@@ -59,9 +59,9 @@ export class OutputReader {
   }
 
   /**
-   * Reads one output of a completed run; a binary one (not `text`) is read only to know that it can
-   * be, and shows no text. What is shown stays until it is read; an export of the output before
-   * says no more.
+   * Reads one output of a completed run; a binary one (not `text`) is only opened, to know that it
+   * can be read, and shows no text. What is shown stays until it is read; an export of the output
+   * before says no more.
    */
   async show(run: RunView, format: RunOutput, text = true): Promise<void> {
     const read = ++this.reads;
@@ -70,7 +70,11 @@ export class OutputReader {
     const choice = `${run.snapshot.number}:${format}`;
     let output: string;
     try {
-      output = await this.outputs.readOutput(run.snapshot.runId, format);
+      if (text) output = await this.outputs.readOutput(run.snapshot.runId, format);
+      else {
+        await this.outputs.checkOutput(run.snapshot.runId, format);
+        output = '';
+      }
     } catch (error) {
       if (read !== this.reads) return;
       this.readProblem = unreadableResults(run, error);
@@ -79,7 +83,7 @@ export class OutputReader {
     }
     if (read !== this.reads) return;
     this.readProblem = '';
-    this.publish({ shown: choice, text: text ? output : '', failed: '' });
+    this.publish({ shown: choice, text: output, failed: '' });
   }
 
   /** Saves an output as a file; one that is not saved says why, until the next export or choice. */

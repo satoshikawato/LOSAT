@@ -223,6 +223,12 @@ export class Coordinator {
     this.deps.downloader.save(outputFileName({ number, program, task, queuedAt, argv }, output), bytes, outputMediaType(argv, output));
   }
 
+  /** Opens one output of a completed run without reading it (a binary one, which is not shown): rejects as `readOutput` when it cannot be read. */
+  async checkOutput(runId: string, output: RunOutput): Promise<void> {
+    if (this.find(runId)?.status !== 'completed') throw new Error('run is not completed');
+    await this.deps.data.readOutputRange(runId, output, 0, 0);
+  }
+
   async readOutput(runId: string, output: RunOutput): Promise<string> {
     if (this.find(runId)?.status !== 'completed') throw new Error('run is not completed');
     return new TextDecoder().decode(await this.deps.data.readOutput(runId, output));

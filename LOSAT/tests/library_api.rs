@@ -11,9 +11,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use LOSAT::api::local_blast::{
+    run_local_blastn, FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs,
+};
 use LOSAT::api::{
-    describe, read_fasta, run, run_collect, validate, Error, FastaRecord, HspRecord, Inputs,
-    Outcome, Program, Role, Strand, API_OWNED,
+    describe, read_fasta, read_inputs, run, run_batches, run_collect, validate, Error, FastaRecord,
+    HspRecord, Inputs, Outcome, Program, Role, Strand, ValueKind, API_OWNED,
 };
 
 /// One search: a program, two fixtures of `tests/fasta`, options and the formats to compare.
@@ -566,6 +569,22 @@ fn check_ranges(
     }
 }
 
+/// A protein, and a nucleotide sequence that translates to it.
+const PROTEIN: &str = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
+const NUCLEOTIDE: &str = "ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGCCAGCTG\
+                          GAAGAACGCCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGCGTGGGCGATGGCACCCAGGAT\
+                          AACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTGAAAGCGCTGCCGGATGCGCAG";
+
+/// The letters that `program` reads for the input of `role`.
+fn letters_of(program: Program, role: Role) -> &'static str {
+    match (program, role) {
+        (Program::Blastp, _)
+        | (Program::Blastx, Role::Subject)
+        | (Program::Tblastn, Role::Query) => PROTEIN,
+        _ => NUCLEOTIDE,
+    }
+}
+
 /// The search of `case` with its options as written, `formats` asked for, from `query_bytes`.
 fn search_case(case: &Case, query_bytes: &[u8], subject_bytes: &[u8], formats: &[&str]) -> Outcome {
     let queries = read_fasta(case.program, Role::Query, query_bytes).expect("query records");
@@ -662,8 +681,7 @@ fn check_statistics(context: &str, outcome: &Outcome, xml: &str, searched: &[usi
     }
 }
 
-/// The command line's outfmt 5 report of `case` (LOSAT Web's BLASTX, which `run_collect` runs,
-/// writes no XML).
+/// The command line's outfmt 5 report of `case`.
 fn xml_report(case: &Case, query: &Path, subject: &Path) -> String {
     String::from_utf8(cli(case, query, subject, "5").0).unwrap()
 }
@@ -761,20 +779,9 @@ fn the_records_and_the_statistics_change_nothing_at_the_edges_of_the_inputs() {
     // `run_collect` asks each program for its hit list and the query statistics, `run` for
     // neither: without records, without residues, or with one of them missing, both give the
     // same reports and diagnostics, or the same error.
-    const PROTEIN: &str = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
-    const NUCLEOTIDE: &str =
-        "ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGCCAGCTG\
-                              GAAGAACGCCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGCGTGGGCGATGGCACCCAGGAT\
-                              AACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTGAAAGCGCTGCCGGATGCGCAG";
     for program in Program::ALL {
         let inputs = |role: Role| -> Vec<Vec<FastaRecord>> {
-            let protein = matches!(
-                (program, role),
-                (Program::Blastp, _)
-                    | (Program::Blastx, Role::Subject)
-                    | (Program::Tblastn, Role::Query)
-            );
-            let letters = if protein { PROTEIN } else { NUCLEOTIDE };
+            let letters = letters_of(program, role);
             [
                 String::new(),
                 ">empty\n".to_string(),
@@ -811,6 +818,351 @@ fn the_records_and_the_statistics_change_nothing_at_the_edges_of_the_inputs() {
                     other => panic!("{context}: {other:?}"),
                 }
             }
+        }
+    }
+}
+
+/// The batches of `case` one after the other against the whole search, and how many there are.
+fn check_batches(case: &Case, query_bytes: &[u8], subject_bytes: &[u8]) -> usize {
+    let context = format!("{} {:?}", case.program, case.options);
+    let whole = search_case(case, query_bytes, subject_bytes, &["6"]);
+    let queries = read_fasta(case.program, Role::Query, query_bytes).unwrap();
+    let subjects = read_fasta(case.program, Role::Subject, subject_bytes).unwrap();
+    let search = validate(case.program, case.options).unwrap();
+    let batches = run_batches(&search, Inputs::new(&queries, &subjects)).unwrap();
+    assert_eq!(batches.query_count(), queries.len(), "{context}");
+    let (mut hsps, mut stats, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
+    let mut count = 0;
+    for batch in batches {
+        let batch = batch.unwrap_or_else(|error| panic!("{context}: {error}"));
+        assert_eq!(batch.query_indices.start, stats.len(), "{context}");
+        assert_eq!(
+            batch.query_stats.len(),
+            batch.query_indices.len(),
+            "{context}"
+        );
+        // The views of a batch number the queries as the inputs do.
+        for (query, view) in batch.query_indices.clone().zip(batch.queries()) {
+            assert_eq!(view.q_idx, query, "{context}");
+            assert!(view.hsps.iter().all(|hsp| hsp.q_idx == query), "{context}");
+        }
+        hsps.extend(batch.hsps);
+        stats.extend(batch.query_stats);
+        diagnostics.extend(batch.diagnostics);
+        count += 1;
+    }
+    assert_eq!(stats.len(), queries.len(), "{context}: every query");
+    assert!(hsps == whole.hsps, "{context}: the records");
+    assert_eq!(stats, whole.query_stats, "{context}: the statistics");
+    assert_eq!(
+        String::from_utf8_lossy(&diagnostics),
+        String::from_utf8_lossy(&whole.diagnostics),
+        "{context}: the diagnostics"
+    );
+    count
+}
+
+#[test]
+fn the_batches_one_after_the_other_are_the_whole_search() {
+    for case in CASES.iter().chain(RANGE_CASES) {
+        let query_bytes = std::fs::read(fixture(case.query)).expect("query fixture");
+        let subject_bytes = std::fs::read(fixture(case.subject)).expect("subject fixture");
+        check_batches(case, &query_bytes, &subject_bytes);
+    }
+    // Copies of a query file past NCBI's batch size.
+    let blastn = Case {
+        program: Program::Blastn,
+        query: "small_test.fasta",
+        subject: "small_test.fasta",
+        options: &["-task", "blastn"],
+        formats: &[],
+    };
+    let blastp = Case {
+        program: Program::Blastp,
+        query: "outfmt0/e2e_many_query.faa",
+        subject: "outfmt0/e2e_many_query.faa",
+        options: &[],
+        formats: &[],
+    };
+    for (case, copies) in [
+        (&blastn, 20),
+        (&blastp, 60),
+        (&CASES[3], 200),
+        (&CASES[4], 100),
+        (&CASES[5], 2),
+    ] {
+        let once = std::fs::read(fixture(case.query)).expect("query fixture");
+        let subject_bytes = std::fs::read(fixture(case.subject)).expect("subject fixture");
+        let count = check_batches(case, &once.repeat(copies), &subject_bytes);
+        assert!(count > 1, "{} batches of {}", count, case.program);
+    }
+}
+
+#[test]
+fn the_messages_of_the_run_come_once_with_the_first_batch() {
+    // `-max_target_seqs 1` has a warning of the run, a subject without residues another.
+    for program in Program::ALL {
+        let options: &'static [&'static str] = &["-max_target_seqs", "1"];
+        let case = Case {
+            program,
+            query: "",
+            subject: "",
+            options,
+            formats: &[],
+        };
+        // A query longer than each program's batch size, twice, and one without residues.
+        let letters = letters_of(program, Role::Query);
+        let long = letters.repeat(25_000 / letters.len());
+        let query = format!(">q1\n{long}\n>q2\n{long}\n>q3\n>q4\n{letters}\n");
+        let letters = letters_of(program, Role::Subject);
+        let subject = format!(">s1\n{letters}\n>empty\n");
+        let batches = check_batches(&case, query.as_bytes(), subject.as_bytes());
+        assert!(batches > 1, "{program}: {batches} batches");
+        // The check above compared them with the search of all queries; they are there.
+        let whole = search_case(&case, query.as_bytes(), subject.as_bytes(), &["6"]);
+        let text = String::from_utf8_lossy(&whole.diagnostics).into_owned();
+        assert_eq!(
+            text.matches("Subject sequence contains no data").count(),
+            1,
+            "{program}: {text}"
+        );
+    }
+}
+
+/// The extensions of each batch of a search, as the engine reports them.
+#[derive(Default)]
+struct Extensions(Vec<i32>);
+
+impl FormatObserver for Extensions {
+    fn hsp_begin(&mut self, _format: usize, _hsp: HspIndex) {}
+
+    fn hsp_end(&mut self, _format: usize, _hsp: HspIndex) {}
+
+    fn batch_extensions(&mut self, extensions: i32) {
+        self.0.push(extensions);
+    }
+}
+
+#[test]
+fn blastn_batches_are_those_of_the_search_of_all_queries() {
+    // `CBatchSizeMixer` sizes BLASTN's batches by the extensions of the batch before.
+    let once = std::fs::read(fixture("small_test.fasta")).expect("fixture");
+    let copied = once.repeat(30);
+    let queries = read_fasta(Program::Blastn, Role::Query, &copied).unwrap();
+    let subjects = read_fasta(Program::Blastn, Role::Subject, &once).unwrap();
+    for task in ["blastn", "megablast"] {
+        let cli = LOSAT::cli::try_parse_from::<LOSAT::cli::Cli, _, _>([
+            "losat", "blastn", "-query", "q", "-subject", "s", "-task", task,
+        ])
+        .unwrap();
+        let LOSAT::cli::Commands::Blastn(args) = cli.command else {
+            panic!("a BLASTN command")
+        };
+        let mut extensions = Extensions::default();
+        let mut report = Vec::new();
+        let mut diagnostics = Vec::new();
+        {
+            let mut on_hits = |_| {};
+            let mut outputs = ReportOutputs {
+                formats: vec![FormatOutput {
+                    outfmt: "6",
+                    sink: OutputSink::Writer(&mut report),
+                }],
+                diagnostics: &mut diagnostics,
+                hits: Some(&mut on_hits),
+                observer: Some(&mut extensions),
+            };
+            run_local_blastn(args, &queries, &subjects, &mut outputs).unwrap();
+        }
+        let search = validate(Program::Blastn, &["-task", task]).unwrap();
+        let batches = run_batches(&search, Inputs::new(&queries, &subjects))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(batches.len(), extensions.0.len(), "{task}");
+        assert!(batches.len() > 1, "{task}");
+    }
+}
+
+#[test]
+fn a_caller_stops_between_batches() {
+    let case = &CASES[3];
+    let once = std::fs::read(fixture(case.query)).expect("query fixture");
+    let copied = once.repeat(200);
+    let queries = read_fasta(case.program, Role::Query, &copied).unwrap();
+    let subject_bytes = std::fs::read(fixture(case.subject)).expect("subject fixture");
+    let subjects = read_fasta(case.program, Role::Subject, &subject_bytes).unwrap();
+    let search = validate(case.program, case.options).unwrap();
+    let mut batches = run_batches(&search, Inputs::new(&queries, &subjects)).unwrap();
+    let first = batches.next().unwrap().unwrap();
+    assert!(first.query_indices.end < batches.query_count());
+    drop(batches);
+    let whole = search_case(case, &copied, &subject_bytes, &["6"]);
+    assert_eq!(first.hsps[..], whole.hsps[..first.hsps.len()]);
+}
+
+#[test]
+fn the_views_hold_each_query_and_each_pair_together() {
+    let mut pairs_seen = 0;
+    for case in CASES.iter().chain(RANGE_CASES) {
+        let context = format!("{} {:?}", case.program, case.options);
+        let query_bytes = std::fs::read(fixture(case.query)).expect("query fixture");
+        let subject_bytes = std::fs::read(fixture(case.subject)).expect("subject fixture");
+        let outcome = search_case(case, &query_bytes, &subject_bytes, &["6"]);
+        assert_eq!(outcome.queries().count(), outcome.query_stats.len());
+        let mut seen = 0;
+        let mut pairs = std::collections::HashSet::new();
+        for (q_idx, query) in outcome.queries().enumerate() {
+            assert_eq!(query.q_idx, q_idx, "{context}");
+            assert_eq!(
+                query.stats,
+                outcome.query_stats[q_idx].as_ref(),
+                "{context}"
+            );
+            assert_eq!(outcome.query(q_idx), Some(query), "{context}");
+            for subject in query.subjects() {
+                // A pair is one run of the hit list: it comes once.
+                assert!(pairs.insert((q_idx, subject.s_idx)), "{context}");
+                assert_eq!(query.subject(subject.s_idx), Some(subject), "{context}");
+                for hsp in subject.hsps {
+                    assert_eq!((hsp.q_idx, hsp.s_idx), (q_idx, subject.s_idx), "{context}");
+                    assert_eq!(hsp.index, seen, "{context}: in the order of the hit list");
+                    seen += 1;
+                }
+            }
+        }
+        assert_eq!(seen, outcome.hsps.len(), "{context}: every HSP");
+        assert_eq!(outcome.query(outcome.query_stats.len()), None);
+        pairs_seen += pairs.len();
+    }
+    assert!(pairs_seen > 0);
+}
+
+#[test]
+fn parsed_ids_show_as_on_the_command_line() {
+    for program in [
+        Program::Blastn,
+        Program::Blastp,
+        Program::Tblastn,
+        Program::Tblastx,
+    ] {
+        let query = format!(
+            ">gb|AB000001.1| a query\n{0}\n>lcl|mine a second query\n{0}\n",
+            letters_of(program, Role::Query)
+        );
+        let subject = format!(
+            ">sp|P69905.2|HBA_HUMAN a subject\n{0}\n>gnl|db|42 a second subject\n{0}\n",
+            letters_of(program, Role::Subject)
+        );
+        let (query_path, subject_path) = (temp_path("ids_q.fa"), temp_path("ids_s.fa"));
+        std::fs::write(&query_path, &query).unwrap();
+        std::fs::write(&subject_path, &subject).unwrap();
+        let options: &'static [&'static str] = &["-parse_deflines"];
+        let case = Case {
+            program,
+            query: "",
+            subject: "",
+            options,
+            formats: &[],
+        };
+        let search = validate(program, options).unwrap();
+        let (queries, subjects) =
+            read_inputs(&search, query.as_bytes(), subject.as_bytes()).unwrap();
+        let inputs = Inputs::new(&queries, &subjects)
+            .named(query_path.to_str().unwrap(), subject_path.to_str().unwrap());
+        let formats = ["6", "0", "7"];
+        let outcome = run_collect(&search, inputs, &formats).unwrap();
+        for (position, outfmt) in formats.iter().enumerate() {
+            let (bytes, _) = cli(&case, &query_path, &subject_path, outfmt);
+            assert!(
+                outcome.reports[position].bytes == bytes,
+                "{program} -outfmt {outfmt}\n--- api\n{}\n--- cli\n{}",
+                String::from_utf8_lossy(&outcome.reports[position].bytes),
+                String::from_utf8_lossy(&bytes)
+            );
+        }
+        assert!(!outcome.hsps.is_empty(), "{program}");
+        // The records of `read_fasta` have no ids to show.
+        let (plain_queries, plain_subjects) = (
+            read_fasta(program, Role::Query, query.as_bytes()).unwrap(),
+            read_fasta(program, Role::Subject, subject.as_bytes()).unwrap(),
+        );
+        let plain = Inputs::new(&plain_queries, &plain_subjects);
+        let error = run_collect(&search, plain, &["6"]).unwrap_err();
+        assert!(matches!(error, Error::Argv(_)), "{error}");
+        assert!(run_batches(&search, plain).is_err());
+        let _ = std::fs::remove_file(&query_path);
+        let _ = std::fs::remove_file(&subject_path);
+    }
+}
+
+#[test]
+fn the_value_kinds_read_the_defaults_of_the_options() {
+    let kind_of = |program: Program, flag: &str| {
+        describe(program)
+            .parameters
+            .iter()
+            .find(|parameter| parameter.flag == flag)
+            .unwrap_or_else(|| panic!("{program} {flag}"))
+            .value_kind
+    };
+    assert_eq!(kind_of(Program::Blastn, "-evalue"), ValueKind::Real);
+    assert_eq!(kind_of(Program::Blastp, "-num_threads"), ValueKind::Integer);
+    assert_eq!(kind_of(Program::Blastn, "-ungapped"), ValueKind::Flag);
+    assert_eq!(kind_of(Program::Blastp, "-task"), ValueKind::Text);
+    assert_eq!(
+        kind_of(Program::Tblastn, "-soft_masking"),
+        ValueKind::Boolean
+    );
+    for program in Program::ALL {
+        for parameter in describe(program).parameters {
+            let flag = format!("{program} {}", parameter.flag);
+            assert_eq!(
+                parameter.takes_value,
+                parameter.value_kind != ValueKind::Flag,
+                "{flag}"
+            );
+            let Some(default) = parameter.default.as_deref() else {
+                continue;
+            };
+            match parameter.value_kind {
+                ValueKind::Integer => assert!(default.parse::<i64>().is_ok(), "{flag}: {default}"),
+                ValueKind::Real => assert!(default.parse::<f64>().is_ok(), "{flag}: {default}"),
+                ValueKind::Boolean => assert!(
+                    matches!(default, "true" | "false" | "t" | "f" | "T" | "F"),
+                    "{flag}: {default}"
+                ),
+                _ => {}
+            }
+        }
+    }
+}
+
+#[test]
+fn every_structured_format_is_the_command_lines() {
+    // The formats that hold the whole run in one document, from the search of each program.
+    for case in [&CASES[0], &CASES[2], &CASES[3], &CASES[4], &CASES[5]] {
+        const FORMATS: &[&str] = &["5", "8", "9", "10", "12", "15", "16", "20"];
+        let (query, subject) = (fixture(case.query), fixture(case.subject));
+        let outcome = api(
+            &Case {
+                program: case.program,
+                query: case.query,
+                subject: case.subject,
+                options: case.options,
+                formats: FORMATS,
+            },
+            &query,
+            &subject,
+            &[],
+        );
+        for (report, outfmt) in outcome.reports.iter().zip(FORMATS) {
+            let (bytes, _) = cli(case, &query, &subject, outfmt);
+            assert!(
+                report.bytes == bytes,
+                "{} -outfmt {outfmt}: the report differs from the command line's",
+                case.program
+            );
         }
     }
 }

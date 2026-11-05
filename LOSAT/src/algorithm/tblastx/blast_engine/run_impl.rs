@@ -2749,6 +2749,19 @@ fn run_in_pool(
     batch_size: u32,
 ) -> Result<()> {
     check_report_formats(outputs, args.out.as_deref())?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
+    // ```c++
+    //         formatter.PrintProlog();
+    //         ...
+    //         /*** Process the input ***/
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    //         ...
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    // ```
+    // What the run writes before its query batches ends here.
+    if let Some(observer) = outputs.observer.as_deref_mut() {
+        observer.queries_begin();
+    }
     let query_records = query_runs.records;
     let input = query_runs.input;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
@@ -3591,7 +3604,7 @@ fn run_batch_loop(
             }
             warnings[index].extend(crate::report::query_warnings::query_warning(
                 "tblastx",
-                input.ordinal(index),
+                reports.args.first_query_ordinal + input.ordinal(index),
                 query,
                 &messages,
             ));

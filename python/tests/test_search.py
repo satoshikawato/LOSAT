@@ -63,8 +63,6 @@ def test_the_parser_refuses_as_on_the_command_line():
         Search.from_argv("blastp", ["-evalue"])
     with pytest.raises(ArgumentError, match="unknown program"):
         Search("nosuchprogram")  # type: ignore[call-overload]
-    with pytest.raises(ArgumentError, match="command line only"):
-        Search("psiblast")  # type: ignore[call-overload]
 
 
 def test_an_error_survives_pickle():
@@ -85,7 +83,7 @@ def test_a_search_is_a_value():
 
 
 def test_describe_is_the_engines_table():
-    assert pylosat.PROGRAMS == ("blastn", "blastp", "blastx", "tblastn", "tblastx")
+    assert pylosat.PROGRAMS == ("blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast")
     description = pylosat.describe("blastp")
     parameters = {parameter.name: parameter for parameter in description.parameters}
     assert parameters["evalue"].flag == "-evalue"

@@ -24,15 +24,15 @@ DATABASES = [
 ]
 
 
-def tests_file(name: str) -> str:
+def engine_file(name: str) -> str:
     return str(ENGINE_TESTS / name)
 
 
 @pytest.mark.parametrize(("program", "query", "database", "options"), DATABASES)
 def test_a_database_gives_the_rows_of_its_report(program, query, database, options):
     search = pylosat.Search(program, **options)
-    query = pylosat.Sequences.from_fasta(tests_file(query))
-    outcome = search.run(query, pylosat.Database(tests_file(database)), outfmt="6")
+    query = pylosat.Sequences.from_fasta(engine_file(query))
+    outcome = search.run(query, pylosat.Database(engine_file(database)), outfmt="6")
     rows = outcome.reports[0].text.splitlines()
     assert rows
     assert len(rows) == len(outcome.hsps)
@@ -44,8 +44,8 @@ def test_a_database_gives_the_rows_of_its_report(program, query, database, optio
 
 def test_batches_of_a_database_are_the_whole_search():
     search = pylosat.Search("blastp")
-    query = pylosat.Sequences.from_fasta(tests_file("seqdb/prot.faa"))
-    database = pylosat.Database(tests_file("seqdb/db/prot_v5"))
+    query = pylosat.Sequences.from_fasta(engine_file("seqdb/prot.faa"))
+    database = pylosat.Database(engine_file("seqdb/db/prot_v5"))
     whole = search.run(query, database)
     rows = [hsp.s_idx for batch in search.batches(query, database) for hsp in batch.hsps]
     assert rows == [hsp.s_idx for hsp in whole.hsps]

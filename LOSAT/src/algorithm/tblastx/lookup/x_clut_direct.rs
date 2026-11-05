@@ -1424,7 +1424,9 @@ fn x_zeroed_on<T: Copy + Default>(mut vector: Vec<T>, n: usize) -> Vec<T> {
 // that a large one is mapped and its pages are touched only when the fill writes them) of `n`
 // entries, or with `slack` (the hits, whose number changes from table to table) of `n + n / 4`
 // entries cut to `n`. Zero-filling them again cost the small searches 1-5 % of their user cycles.
-fn x_sized_on<T: Copy + Default>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
+// `S` is the bucket fill's matrix type (`x_buckets_with`), so that BLOSUM62's builders keep the
+// callers, and the inlining, of their own instances.
+fn x_sized_on<S, T: Copy + Default>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
     if vector.capacity() < n {
         let mut fresh = vec![T::default(); if slack { n + n / 4 } else { n }];
         fresh.truncate(n);
@@ -1555,7 +1557,7 @@ fn x_buckets_with<S: CompressedScores>(
         XFlatTableVectors::default()
     };
     // One more entry: the number of hits.
-    let mut starts = x_sized_on(kept.starts, backbone_size + 1, false);
+    let mut starts = x_sized_on::<S, _>(kept.starts, backbone_size + 1, false);
 
     // Appends, over the segments before, inside and between NCBI's tables, recorded as the
     // count-and-fill builder records them; not counted.
@@ -1621,7 +1623,7 @@ fn x_buckets_with<S: CompressedScores>(
         bucket_starts[b + 1] += bucket_starts[b];
     }
     let mut pv = x_zeroed_on(kept.pv, (backbone_size >> PV_ARRAY_BTS) + 1);
-    let mut hits = x_sized_on(kept.hits, total, pooled);
+    let mut hits = x_sized_on::<S, _>(kept.hits, total, pooled);
     {
         let mut cursors = bucket_starts[..buckets].to_vec();
         let out = hits.as_mut_ptr();
@@ -1902,7 +1904,7 @@ fn x_bx_buckets_on(
         XFlatTableVectors::default()
     };
     // One more entry: the number of hits.
-    let mut starts = x_sized_on(kept.starts, backbone_size + 1, false);
+    let mut starts = x_sized_on::<Blosum62Compressed, _>(kept.starts, backbone_size + 1, false);
 
     // Appends, over the segments before, inside and between NCBI's tables, in the count-and-fill
     // builder's order, into their buckets' chunks; not counted.
@@ -1960,7 +1962,7 @@ fn x_bx_buckets_on(
     // Per bucket, as `x_buckets_on`: its slots of `hits` after those of the buckets before, the
     // counts of its cells, their starts, the PV bits and `finalize`'s statistics, the fill from its
     // chunks, then the scan order of the cells of more than 5 offsets.
-    let mut hits = x_sized_on(kept.hits, total, pooled);
+    let mut hits = x_sized_on::<Blosum62Compressed, _>(kept.hits, total, pooled);
     let mut pv = x_zeroed_on(kept.pv, (backbone_size >> PV_ARRAY_BTS) + 1);
     let mut cell_slots = vec![0u32; 1 << X_BUCKET_SHIFT];
     let mut overflowed: Vec<u32> = Vec::new();

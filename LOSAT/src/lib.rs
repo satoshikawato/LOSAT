@@ -1,17 +1,14 @@
 //! LOSAT: a pure-Rust reimplementation of NCBI BLAST+ for local searches, with the command
 //! line's output byte for byte.
 //!
-//! The public surface of this crate is two modules (`docs/losat_library_surface_plan.md`):
+//! The public surface of this crate is the module [`api`] (`docs/losat_library_surface_plan.md`):
+//! a search of FASTA records in memory ([`api::read_fasta`], [`api::validate`],
+//! [`api::run_collect`]), with the command line's options and the command line's reports.
 //!
-//! - [`api`]: a search of FASTA records in memory ([`api::read_fasta`], [`api::validate`],
-//!   [`api::run_collect`]), with the command line's options and the command line's reports.
-//! - [`cli`]: the command line's definitions ([`cli::Cli`], [`cli::Commands`]) and parser
-//!   ([`cli::try_parse_from`], [`cli::render_message`]), for a host that takes an argv.
-//!
-//! Every other module is the engine: NCBI's algorithms, ported function by function. They are
-//! `pub` so that the command line, the web adapters and the tests reach them, but they are
-//! hidden from this documentation and outside the compatibility promise of the version number:
-//! their items change as the port advances.
+//! Every other module is the command line or the engine: NCBI's algorithms, ported function by
+//! function. They are `pub` so that the command line, the web adapters and the tests reach them,
+//! but they are hidden from this documentation and outside the compatibility promise of the
+//! version number: their items change as the port advances.
 #![allow(warnings, clippy::all)]
 
 #[doc(hidden)]
@@ -62,4 +59,5 @@ pub mod blastdbcmd;
 pub mod web_api;
 
 // NCBI blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.
+#[doc(hidden)]
 pub mod cli;

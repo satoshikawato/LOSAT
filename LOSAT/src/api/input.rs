@@ -58,7 +58,7 @@ pub enum Role {
 // ```
 /// Whether the program reads the input of `role` as protein (`fAssumeProt`) or nucleotide
 /// (`fAssumeNuc`) sequences.
-fn protein(program: Program, role: Role) -> bool {
+pub(super) fn is_protein(program: Program, role: Role) -> bool {
     match (program, role) {
         (Program::Blastn, _) | (Program::Tblastx, _) => false,
         (Program::Blastp, _) => true,
@@ -73,7 +73,7 @@ fn protein(program: Program, role: Role) -> bool {
 /// the data loaders on (the command line without `.ncbirc` or `DATA_LOADERS`).
 fn reader_config(program: Program, role: Role) -> ReaderConfig {
     let name = program.reader_name();
-    let protein = protein(program, role);
+    let protein = is_protein(program, role);
     match role {
         Role::Query => ReaderConfig::query(name, protein, true),
         Role::Subject => ReaderConfig::subject(name, protein, true),
@@ -125,19 +125,20 @@ pub fn read_fasta(program: Program, role: Role, bytes: &[u8]) -> Result<Vec<Fast
 ///
 /// The records come from [`read_fasta`] with the search's program and the input's role, or
 /// from [`FastaRecord::new`]. The library API has no database (`-db`) input yet
-/// (docs/losat_library_surface_plan.md §3.3).
+/// (docs/losat_library_surface_plan.md §3.3): it will be another constructor, so the fields are
+/// not part of the API.
 #[derive(Debug, Clone, Copy)]
 pub struct Inputs<'a> {
     /// The query records (`-query`).
-    pub query: &'a [FastaRecord],
+    pub(crate) query: &'a [FastaRecord],
     /// The subject records (`-subject`).
-    pub subject: &'a [FastaRecord],
+    pub(crate) subject: &'a [FastaRecord],
     /// What the reports show as the query's file name. The command line's default is the
     /// `-query` argument; the API's is `query`.
-    pub query_name: &'a str,
+    pub(crate) query_name: &'a str,
     /// What the reports show as the subject set's file name. The command line's default is the
     /// `-subject` argument; the API's is `subject`.
-    pub subject_name: &'a str,
+    pub(crate) subject_name: &'a str,
 }
 
 impl<'a> Inputs<'a> {
@@ -189,16 +190,16 @@ mod tests {
 
     #[test]
     fn the_readers_flags_follow_the_programs_molecules() {
-        assert!(!protein(Program::Blastn, Role::Query));
-        assert!(!protein(Program::Blastn, Role::Subject));
-        assert!(protein(Program::Blastp, Role::Query));
-        assert!(protein(Program::Blastp, Role::Subject));
-        assert!(!protein(Program::Blastx, Role::Query));
-        assert!(protein(Program::Blastx, Role::Subject));
-        assert!(protein(Program::Tblastn, Role::Query));
-        assert!(!protein(Program::Tblastn, Role::Subject));
-        assert!(!protein(Program::Tblastx, Role::Query));
-        assert!(!protein(Program::Tblastx, Role::Subject));
+        assert!(!is_protein(Program::Blastn, Role::Query));
+        assert!(!is_protein(Program::Blastn, Role::Subject));
+        assert!(is_protein(Program::Blastp, Role::Query));
+        assert!(is_protein(Program::Blastp, Role::Subject));
+        assert!(!is_protein(Program::Blastx, Role::Query));
+        assert!(is_protein(Program::Blastx, Role::Subject));
+        assert!(is_protein(Program::Tblastn, Role::Query));
+        assert!(!is_protein(Program::Tblastn, Role::Subject));
+        assert!(!is_protein(Program::Tblastx, Role::Query));
+        assert!(!is_protein(Program::Tblastx, Role::Subject));
     }
 
     #[test]

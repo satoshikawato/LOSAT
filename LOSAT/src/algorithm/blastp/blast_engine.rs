@@ -6083,10 +6083,11 @@ fn search(
                     let mut x_collect =
                         |found: std::sync::Arc<Vec<PairwiseHit>>| x_found.push(found);
                     // EXPERIMENT (LOSAT_X_BPQBLOCK): the caller's observer with the block's HSP
-                    // indices moved past the blocks before.
+                    // and query indices moved past the blocks before.
                     let mut x_offset = observer.as_deref_mut().map(|inner| XOffsetObserver {
                         inner,
                         base: x_hsps_before,
+                        first_query: block.start,
                     });
                     let mut block_outputs = ReportOutputs {
                         formats: sinks
@@ -11341,7 +11342,41 @@ fn run_resolved_in_pool(
     let mut warning_lines: Option<&[Vec<u8>]> = Some(&query_warning_lines);
     // Each requested format prints the same final result without searching again.
     let mut output_result: Result<()> = Ok(());
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
+    // ```c++
+    //     // find the first valid context corresponding to this query
+    //     for (i = 0; i < context_per_query; i++) {
+    //         BlastContextInfo *ctx = query_info->contexts +
+    //                                 query_number * context_per_query + i;
+    //         if (ctx->is_valid) {
+    //             m_SearchSpace = ctx->eff_searchsp;
+    //             m_LengthAdjustment = ctx->length_adjustment;
+    //             break;
+    // ```
+    // The statistics of each query: what the XML reports print and what the observer receives.
+    let query_stats = || -> Vec<crate::report::blast_xml::XmlStats> {
+        (0..query_records.len())
+            .map(|q_idx| {
+                if !query_valid[q_idx] {
+                    return crate::report::blast_xml::XmlStats::NONE;
+                }
+                crate::report::blast_xml::XmlStats {
+                    hsp_len: search_spaces[q_idx].length_adjustment as i32,
+                    eff_space: exact_search_spaces[q_idx]
+                        .unwrap_or(search_spaces[q_idx].effective_space.round() as i64),
+                    kappa: gapped_params.k,
+                    lambda: gapped_params.lambda,
+                    entropy: gapped_params.h,
+                }
+            })
+            .collect()
+    };
     let observer = &mut outputs.observer;
+    if let Some(observer) = observer.as_deref_mut() {
+        for (q_idx, stats) in query_stats().into_iter().enumerate() {
+            observer.query_stats(q_idx, stats);
+        }
+    }
     for (format_index, (format, &outfmt)) in outputs
         .formats
         .iter_mut()
@@ -11557,21 +11592,7 @@ fn run_resolved_in_pool(
                     }
                 };
                 let mut writer = format.sink.open()?;
-                let xml_stats: Vec<crate::report::blast_xml::XmlStats> = (0..query_records.len())
-                    .map(|q_idx| {
-                        if !query_valid[q_idx] {
-                            return crate::report::blast_xml::XmlStats::NONE;
-                        }
-                        crate::report::blast_xml::XmlStats {
-                            hsp_len: search_spaces[q_idx].length_adjustment as i32,
-                            eff_space: exact_search_spaces[q_idx]
-                                .unwrap_or(search_spaces[q_idx].effective_space.round() as i64),
-                            kappa: gapped_params.k,
-                            lambda: gapped_params.lambda,
-                            entropy: gapped_params.h,
-                        }
-                    })
-                    .collect();
+                let xml_stats = query_stats();
                 // The messages of each query's result: the same ones the warnings of the other
                 // formats write (`query_warning_lines`).
                 let xml_messages: Vec<Vec<String>> = query_records

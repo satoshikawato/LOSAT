@@ -11,6 +11,7 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
+use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
 // Re-export TBLASTX run function
@@ -189,7 +190,8 @@ pub type HspIndex = usize;
 // it prints before the first HSP of each subject (the section starts at " Score =").
 
 /// Reports which HSP a formatter is writing, so that a caller can relate each HSP to its
-/// bytes in every output. The written bytes do not change.
+/// bytes in every output, and the statistics of each query of the search. The written bytes do
+/// not change.
 pub trait FormatObserver {
     /// The formatter for `ReportOutputs::formats[format]` starts the row (outfmt 6/7) or
     /// the alignment section (outfmt 0: the score lines and the alignment, without the
@@ -224,6 +226,31 @@ pub trait FormatObserver {
     /// The formatter finished the heading that `subject_begin` announced. Every byte of
     /// it has reached the sink.
     fn subject_end(&mut self, _format: usize, _first_hsp: HspIndex) {}
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-94
+    // ```c++
+    //     // find the first valid context corresponding to this query
+    //     for (i = 0; i < context_per_query; i++) {
+    //         BlastContextInfo *ctx = query_info->contexts +
+    //                                 query_number * context_per_query + i;
+    //         if (ctx->is_valid) {
+    //             m_SearchSpace = ctx->eff_searchsp;
+    //             m_LengthAdjustment = ctx->length_adjustment;
+    //             break;
+    //         }
+    //     }
+    //     if (i >= context_per_query) {
+    //         return; // we didn't find a valid context :(
+    //     }
+    // ```
+    // NCBI keeps one `CBlastAncillaryData` per query with the query's result; here each program
+    // hands over what its XML reports print of it, whichever formats were asked for.
+    /// The statistics of query `q_idx` of the search: the values that the `Statistics` of its
+    /// `Iteration` in outfmt 5 shows (`XmlStats::NONE` for a query without a valid context).
+    /// `q_idx` counts as `Hit::q_idx` of the final hit list. The call comes once per query,
+    /// before the reports of the query are written, and only with an observer (the program does
+    /// not make these values otherwise).
+    fn query_stats(&mut self, _q_idx: usize, _stats: XmlStats) {}
 }
 
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973

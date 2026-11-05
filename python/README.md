@@ -27,6 +27,7 @@ outcome.diagnostics               # what the command line writes to its standard
 lists them, from the engine's own table, and the type stubs list them by program.
 `Search.from_argv("blastn", ["-evalue", "1e-5"])` takes the words themselves. The command line's
 parser checks every option, so an option means, and fails, as it does there (`ArgumentError`).
+`pylosat.PROGRAMS` names the programs; `psiblast` is its first round, as on the command line.
 
 `-query`, `-subject`, `-db`, `-out` and `-outfmt` are not options here: the inputs and the formats
 are arguments of `run`.

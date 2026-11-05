@@ -56,30 +56,25 @@ def fasta(name: str) -> str:
 
 
 @pytest.fixture(scope="session")
-def command_line():
-    """Runs `losat <program> -query <query> -subject <subject> <words>`: stdout and stderr."""
+def losat():
+    """Runs `losat <words>`: stdout and stderr."""
     executable = os.environ.get("LOSAT_BIN")
     if not executable:
         pytest.skip("LOSAT_BIN names no losat executable")
 
-    def run(program: str, query: str, subject: str, words: list[str]) -> tuple[bytes, bytes]:
-        command = [executable, program, "-query", query, "-subject", subject, *words]
-        done = subprocess.run(command, capture_output=True, check=True)
+    def run(*words: str) -> tuple[bytes, bytes]:
+        done = subprocess.run([executable, *words], capture_output=True, check=True)
         return done.stdout, done.stderr
 
     return run
 
 
 @pytest.fixture(scope="session")
-def command_line_files():
-    """Runs `losat <program> -query <query> -subject <subject> <words>`, which writes files."""
-    executable = os.environ.get("LOSAT_BIN")
-    if not executable:
-        pytest.skip("LOSAT_BIN names no losat executable")
+def command_line(losat):
+    """Runs `losat <program> -query <query> -subject <subject> <words>`: stdout and stderr."""
 
-    def run(program: str, query: str, subject: str, words: list[str]) -> None:
-        command = [executable, program, "-query", query, "-subject", subject, *words]
-        subprocess.run(command, capture_output=True, check=True)
+    def run(program: str, query: str, subject: str, words: list[str]) -> tuple[bytes, bytes]:
+        return losat(program, "-query", query, "-subject", subject, *words)
 
     return run
 

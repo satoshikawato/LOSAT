@@ -6,8 +6,8 @@ The working records of those lines (plans, state, decision logs) are kept outsid
 This file gives each cited ID one row: what it is, its state, its main pull requests, and the document
 in this repository that holds its fullest record ("external" when there is none).
 
-As of dev 8a5656f7f (2026-11-05): 151 IDs cited in the tree, 97 of them in `CHANGELOG.md`, `changelog.d/`
-and `docs/`. State: 139 done, 12 in progress, 0 stopped.
+As of dev 48648ac76 (2026-11-05): 152 IDs cited in the tree, 97 of them in `CHANGELOG.md`, `changelog.d/`
+and `docs/`. State: 140 done, 12 in progress, 0 stopped.
 
 - `python3 scripts/line_ids.py list --all` lists the IDs the tree cites, with the number of citing
   lines and the first one; `python3 scripts/line_ids.py check` names the IDs that `CHANGELOG.md`,
@@ -113,6 +113,7 @@ and `docs/`. State: 139 done, 12 in progress, 0 stopped.
 | `NP O3b` | Stage O3b: -culling_limit for blastp and tblastn, using NCBI hspfilter_culling on the culling core shared with blastn and tblastx. | done | #527 | [LOSAT/tests/db_search/README.md](../../LOSAT/tests/db_search/README.md), “-culling_limit rows (line NP, O3b)” |
 | `NP O4a` | Stage O4a: blastn -ungapped, finishing the search in the preliminary stage as NCBI does; O4a-1 covers outfmt 0, 5, 7, 13-16. | in progress | #629 | [LOSAT/tests/db_search/README.md](../../LOSAT/tests/db_search/README.md), “Ungapped nucleotide databases (line NP, O4a-1)” |
 | `NP SC1` | Stage SC1: tblastn accepts all nine NCBI matrices, every gap-cost pair of their tables, recommended word thresholds and composition-based statistics modes 0 and 2. | done | #631 | [LOSAT/tests/outfmt0_manifest.tsv](../../LOSAT/tests/outfmt0_manifest.tsv) |
+| `NP SC2a` | Stage SC2a: blastp accepts BLOSUM62 with every gap-cost pair of NCBI's table, with -comp_based_stats 2 and 0, -task blastp and blastp-fast, -subject and -db. | done | #824 | [LOSAT/tests/outfmt0_manifest.tsv](../../LOSAT/tests/outfmt0_manifest.tsv) |
 | `NP SC4a` | Stage SC4a: blastp -comp_based_stats 0 runs NCBI ordinary traceback (no composition adjustment), also for -db. | done | #624 | [LOSAT/tests/outfmt0_manifest.tsv](../../LOSAT/tests/outfmt0_manifest.tsv) |
 | `NP SC8a` | Stage SC8a: blastp -word_size 6 and 7 with NCBI compressed lookup table (BLOSUM62). | done | #822 | [LOSAT/tests/outfmt0_manifest.tsv](../../LOSAT/tests/outfmt0_manifest.tsv) |
 | `NP SC11` | Stage SC11: tblastn compressed lookup table (tblastn-fast, word size 5-7) for every matrix except IDENTITY. | done | #823 | [LOSAT/tests/outfmt0_manifest.tsv](../../LOSAT/tests/outfmt0_manifest.tsv) |

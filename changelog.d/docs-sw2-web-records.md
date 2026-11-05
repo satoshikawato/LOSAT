@@ -1,0 +1,1 @@
+- docs: LOSAT Web's records follow what shipped: the requirement table (compressed FASTA input is in scope; what the accession fetch sends over the network), the plan's decision log (one row per DW number, rows for the numbers that were cited but missing), and the session table (SX is done).

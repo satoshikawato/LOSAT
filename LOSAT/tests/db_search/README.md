@@ -865,6 +865,13 @@ most 9 in BLOSUM62).
   rows look nothing up (`q1` alone with `nident`, a positive `PRE_FETCH_SEQS_LIMIT` below the batch's Seq-aligns).
   BLASTX writes each batch before it searches the next, so it refuses such a run at its first batch also where no row
   looks a tax id up (`db.nz.bx.c150.*`, as before line L1).
+- Rows `db.nz.cq.*` (line DBID, L1b): TBLASTN and TBLASTX without the report stream make every batch's lookups before
+  any report, so they ask for that refusal only where NCBI fetches a subject: not for fields that read none (`6 qseqid
+  evalue`) where `PRE_FETCH_SEQS_LIMIT` turns the prefetch off, nor for a batch without hits, whose prefetch loads no
+  sequence. `nz_qx.faa` / `nz_qx.fna` hold `qx` (`M` and 70 random residues, no hit at `-evalue 1e-3`) and
+  `nz_qx2.*` `qx` then `q2`: with `BATCH_SIZE=1` the refusal of `q2`'s batch still comes before any byte. TBLASTX's
+  report stream (outfmt 7 in two batches), which would write `qx`'s block before `q2`'s lookups, is off for a run that
+  the taxonomy cache refuses, so `nz_qxy.fna` (`qx`, then `qy` without hits either) gets NCBI's bytes.
 - The sequences come from the line's probe script (kept outside the repository). The databases (version 4, every file
   makeblastdb writes; `nz_pc` and `nz_nc` alike with their maps), run from `LOSAT/`:
 

@@ -168,9 +168,15 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
         LOSAT::cli::try_parse_from(argv).map_err(|error| LOSAT::cli::render_message(&error))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
     let mut command = cli.command;
+    let outfmt = std::mem::replace(outfmt_of(&mut command), "0".to_string());
+    let choice = LOSAT::blastinput::app::parse_formatting_string(&outfmt)
+        .map_err(|error| format!("{error:#}"))?;
     // The `@PG` line of SAM (outfmt 17) shows the command line, which `main` gives BLASTN: the
-    // run's, `losat` and its argv, each word followed by one space (`cli::command_line_bytes`).
-    if let Commands::Blastn(args) = &mut command {
+    // run's, `losat` and its argv, each word followed by one space (`cli::command_line_bytes`). Only
+    // a run that writes SAM holds it.
+    if let (Commands::Blastn(args), LOSAT::blastinput::app::output_format::SAM) =
+        (&mut command, choice.number)
+    {
         let mut line = b"losat ".to_vec();
         for word in words {
             line.extend_from_slice(word.as_bytes());
@@ -178,9 +184,6 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
         }
         args.command_line = Some(line);
     }
-    let outfmt = std::mem::replace(outfmt_of(&mut command), "0".to_string());
-    let choice = LOSAT::blastinput::app::parse_formatting_string(&outfmt)
-        .map_err(|error| format!("{error:#}"))?;
     // What the CLI rejects, with its message: a format that LOSAT's program does not write, and the
     // formats that NCBI's formatting handler rejects (`report_format` gives none: SAM of another
     // program, AIRR, FASTA), which a run never gives the engine; the CLI rejects those after the

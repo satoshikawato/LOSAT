@@ -1288,7 +1288,7 @@ pub(crate) fn check_losat_limits(args: &TblastxArgs) -> Result<()> {
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options and LOSAT's limits.
 pub fn check_options(args: &TblastxArgs) -> Result<()> {
-    // The host has no database files (`run_local_with`).
+    // The host has no database files (`run_local`).
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
@@ -1477,7 +1477,7 @@ fn search_cli(
         QueryEnd::EofError => QueryReading::BlankLines,
         QueryEnd::Error { error, warnings } => QueryReading::Error { error, warnings },
     };
-    search(args, &records, reading, query_range, source, outputs, None)
+    search(args, &records, reading, query_range, source, outputs)
 }
 
 // NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
@@ -1503,22 +1503,10 @@ fn search_cli(
 /// are written where NCBI reads them): queries without a record are NCBI's
 /// `Query is Empty!`.
 pub fn run_local(
-    args: TblastxArgs,
-    query_records: &[FastaRecord],
-    subject_records: &[FastaRecord],
-    outputs: &mut ReportOutputs<'_>,
-) -> Result<()> {
-    run_local_with(args, query_records, subject_records, outputs, None)
-}
-
-/// `run_local`, with the checks that ABI v1 makes of its `bio` records (`v1`,
-/// `web_api::v1_tblastx::run_web_pair`).
-pub(crate) fn run_local_with(
     mut args: TblastxArgs,
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
-    v1: Option<&dyn V1Checks>,
 ) -> Result<()> {
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
@@ -1527,25 +1515,6 @@ pub(crate) fn run_local_with(
     // NCBI parses -outfmt before its option handlers read the subjects (BLASTN's
     // `run_local`); `search` checks the formats again.
     check_report_formats(outputs, None)?;
-    // No NCBI counterpart: ABI v1 is frozen (plan TD-1; line OF, outfmt-20261019 DECISIONS
-    // 10): it adds no format, so it refuses the Seq-annot formats (outfmt 8, 9, 12), and outfmt
-    // 10 and 20 and a custom specification (fields or a delimiter) of the tabular formats (line
-    // CLI C2, PR 2), with the messages that `check_report_formats` gave them before TBLASTX wrote
-    // them. (Its `-outfmt` reader takes 6 alone, `tblastx_v1_outfmt`.)
-    if v1.is_some() {
-        for format in &outputs.formats {
-            let choice = crate::blastinput::app::parse_formatting_string(format.outfmt)?;
-            let number = choice.number;
-            if matches!(number, 8 | 9 | 10 | 11 | 12 | 20) {
-                anyhow::bail!("output format {number} is not supported by LOSAT's TBLASTX");
-            }
-            if choice.custom() {
-                anyhow::bail!(
-                    "a custom output format specification (fields or a delimiter) is not supported by LOSAT's TBLASTX"
-                );
-            }
-        }
-    }
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
     // cannot write, and a diagnostics stream that saves the messages. The records' deflines are
     // those the caller's reader kept; records without one get `>` and their title.
@@ -1557,7 +1526,7 @@ pub(crate) fn run_local_with(
         args.archive = super::super::archive::handle_for(&args, true)?;
         if let Some(handle) = args.archive.clone() {
             return outputs.with_archive_diagnostics(handle, |view| {
-                run_local_with(args, query_records, subject_records, view, v1)
+                run_local(args, query_records, subject_records, view)
             });
         }
     }
@@ -1592,7 +1561,6 @@ pub(crate) fn run_local_with(
             x_stores: None,
         },
         outputs,
-        v1,
     )
 }
 
@@ -1625,7 +1593,6 @@ fn check_report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Pat
 /// The search of `run_local` and of the CLI, after NCBI's checks of the options and the
 /// reading of the subjects: `Query is Empty!` for records without a query, the query batch
 /// size, the subjects without letters, and the query batches.
-#[allow(clippy::too_many_arguments)]
 fn search(
     args: TblastxArgs,
     query_records: &[FastaRecord],
@@ -1633,7 +1600,6 @@ fn search(
     query_range: Option<SequenceRange>,
     source: SubjectSource<'_>,
     outputs: &mut ReportOutputs<'_>,
-    v1: Option<&dyn V1Checks>,
 ) -> Result<()> {
     // NCBI reads the subjects before the queries (`run`); the records are those of NCBI's
     // reader (`fasta_reader`; `run_local`'s callers read them so). The CLI has already
@@ -1653,11 +1619,6 @@ fn search(
     // The batch size is read before the formatter is made and before the queries, which
     // NCBI reads one batch at a time after the outfmt 0 prolog (`run_in_pool`).
     let batch_size = crate::blastinput::app::query_batch_size("TBLASTX", 10002)?;
-    // ABI v1's checks of its `bio` records come where they came before the records of
-    // NCBI's reader (plan TD-1).
-    if let Some(v1) = v1 {
-        v1.check_search(&args, query_range.as_ref(), outputs)?;
-    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:129-136
     // ```c
     //     if(m_IsDbScan) {
@@ -1854,46 +1815,8 @@ fn search(
             outputs,
             pool,
             batch_size,
-            v1.is_some(),
         )
     })
-}
-
-/// ABI v1's checks of its `bio` records (plan TD-1), which the v1 layer makes on its own
-/// records (`web_api::v1_tblastx`): the search calls them where ABI v1 made them when it
-/// searched those records (and `check_shown_subject_titles` before the reports), and
-/// searches the records of NCBI's reader made from them, which those checks guarantee to be
-/// read alike.
-pub(crate) trait V1Checks: Sync {
-    /// ABI v1's checks where the search starts, in their order: the outfmt 0 and 7 titles,
-    /// LOSAT's limits and environment, the residues, the records without residues and the
-    /// intervals without letters (the subjects cut to `-subject_loc`, the queries to
-    /// `-query_loc`).
-    fn check_search(
-        &self,
-        args: &TblastxArgs,
-        query_range: Option<&SequenceRange>,
-        outputs: &ReportOutputs<'_>,
-    ) -> Result<()>;
-}
-
-/// ABI v1's rejection (`V1Checks`) of the outfmt 0 titles that it did not write as NCBI,
-/// of the subjects that the reports show: those with hits in the final hit lists, which
-/// NCBI's description tables list (blast_format.cpp:1540, `report/defline.rs`). The check
-/// comes after the outfmt 0 prolog, where NCBI writes the titles of the first query's
-/// report. ABI v1's titles are its `bio` deflines (`web_api::v1_bio::from_bio`), which
-/// `check_report_titles` keeps ASCII.
-fn check_shown_subject_titles(hits: &[TblastxHsp], subjects: &[FastaRecord]) -> Result<()> {
-    let shown: std::collections::BTreeSet<usize> =
-        hits.iter().map(|hsp| hsp.hit.s_idx as usize).collect();
-    for index in shown {
-        crate::report::defline::check_shown_subject_title(
-            &String::from_utf8_lossy(&subjects[index].title),
-            index + 1,
-            "TBLASTX",
-        )?;
-    }
-    Ok(())
 }
 
 /// What every report of a run needs besides its HSPs.
@@ -1940,8 +1863,6 @@ pub(crate) struct TblastxReportRun<'a> {
     /// command line's one `-outfmt`) look up (`TblastxDatabase::tabular_names`); `None`: every
     /// lookup fails (no name field, no `taxdb.bti`, `-subject`).
     pub tabular_names: Option<&'a crate::report::tabular::TabularNames>,
-    /// Whether ABI v1's rejection of outfmt 0 titles applies (`V1Checks`).
-    pub v1_titles: bool,
     /// The queries of each batch searched, in order (the documents of the BLAST archive).
     pub archive_spans: &'a [std::ops::Range<usize>],
     /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the pool the report stage runs on (tblastx/x_rpt_par.rs),
@@ -2102,9 +2023,6 @@ fn write_tblastx_outputs(
     } else {
         Vec::new()
     };
-    if run.v1_titles && output_formats.contains(&report::TblastxOutputFormat::Pairwise) {
-        check_shown_subject_titles(&hits, run.subjects)?;
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1220
     // ```c++
     //     // Set the identity score
@@ -2809,7 +2727,6 @@ fn run_in_pool(
     outputs: &mut ReportOutputs<'_>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     batch_size: u32,
-    v1_titles: bool,
 ) -> Result<()> {
     check_report_formats(outputs, args.out.as_deref())?;
     let query_records = query_runs.records;
@@ -2847,7 +2764,6 @@ fn run_in_pool(
                     }
                     _ => true,
                 }),
-        v1_titles,
         x_search_pool: parallel_pool,
         queries_written: std::cell::Cell::new(0),
     };
@@ -2948,7 +2864,6 @@ fn run_in_pool(
     let stream = report_stream::check(
         &args,
         outputs,
-        v1_titles,
         query_runs,
         subjects,
         stores_error.is_some(),
@@ -3738,7 +3653,6 @@ struct BatchReports<'a> {
     /// report without a field that reads them (`tabular::reads_letters`), and the hits and the
     /// observer of a library caller (`report_counts`).
     reads_letters: bool,
-    v1_titles: bool,
     /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the search's pool, for the report stage
     /// (`TblastxReportRun::x_pool`).
     x_search_pool: &'a crate::utils::threading::SearchPool<'a>,
@@ -3918,7 +3832,6 @@ impl BatchReports<'_> {
                 xml_taxa: &xml_taxa,
                 tabular_taxonomy: &tabular_taxonomy,
                 tabular_names: tabular_names.as_ref(),
-                v1_titles: self.v1_titles,
                 archive_spans: &done.spans,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
                 x_pairwise_pool: crate::report::x_pairwise_par::pool(self.x_search_pool),

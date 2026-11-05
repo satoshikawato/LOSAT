@@ -86,9 +86,8 @@
 //! the Seq-annots and the archive, whose framing and refusals are not argued here); the tabular
 //! reports with a field list or a delimiter and outfmt 10 and 20 (`Off::CustomTabular`: their
 //! refusals of a subject, a name of the taxonomy database or a definition line's ids, must come
-//! before the first byte, DECISIONS 5 of line CLI C2); ABI v1's outfmt 0, which refuses a
-//! reported subject's title (`check_shown_subject_titles`); the debugging output; the refusals
-//! above; and a database with parsed Seq-ids too large for the check (`Off::LargeParsed`).
+//! before the first byte, DECISIONS 5 of line CLI C2); the debugging output; the refusals above;
+//! and a database with parsed Seq-ids too large for the check (`Off::LargeParsed`).
 //!
 //! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXRPTSTREAM off= check_s=` before the search
 //! (`off`: `none` when the loop writes each batch's reports, else the reason, `Off::name`;
@@ -121,8 +120,6 @@ pub(super) enum Off {
     /// (`TblastxOutputFormat::CustomTabular`), which is written after the loop (the module
     /// doc).
     CustomTabular,
-    /// ABI v1's outfmt 0, which refuses a reported subject's title.
-    V1Titles,
     /// The debugging output of the search.
     Debug,
     /// A concatenated query of a batch that the diag table could refuse.
@@ -151,7 +148,6 @@ impl Off {
             Off::Outputs => "outputs",
             Off::Format => "format",
             Off::CustomTabular => "custom_tabular",
-            Off::V1Titles => "v1_titles",
             Off::Debug => "debug",
             Off::Window => "window",
             Off::SearchSpace => "search_space",
@@ -169,11 +165,9 @@ impl Off {
 /// With `-db` it reads every header of the database in `pool`
 /// (`TblastxDatabase::reports_may_refuse`), unless an earlier condition is off or the database
 /// has parsed Seq-ids and more sequences than the check reads (`Off::LargeParsed`).
-#[allow(clippy::too_many_arguments)]
 pub(super) fn check(
     args: &TblastxArgs,
     outputs: &ReportOutputs<'_>,
-    v1_titles: bool,
     query_runs: &QueryRuns<'_>,
     subjects: &RunSubjects<'_>,
     unreadable: bool,
@@ -204,12 +198,8 @@ pub(super) fn check(
     if let report::TblastxOutputFormat::CustomTabular(_) = format {
         return Err(Off::CustomTabular);
     }
-    let pairwise = format == report::TblastxOutputFormat::Pairwise;
-    if !(pairwise || format.is_tabular()) {
+    if !(format == report::TblastxOutputFormat::Pairwise || format.is_tabular()) {
         return Err(Off::Format);
-    }
-    if v1_titles && pairwise {
-        return Err(Off::V1Titles);
     }
     if writes_debug_output() {
         return Err(Off::Debug);

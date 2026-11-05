@@ -229,8 +229,7 @@ impl Rows<'_> {
                 positives: None,
                 gaps: Some(gaps),
                 subject_length: Some(subject_length),
-                // The title after its first word (the `bio` description of the
-                // inputs that `bio` read alike); the reports take the subject's title
+                // The title after its first word; the reports take the subject's title
                 // bytes by subject index.
                 subject_title: subject
                     .title

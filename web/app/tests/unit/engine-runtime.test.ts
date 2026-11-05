@@ -217,6 +217,7 @@ describe('EngineRuntime.prepare', () => {
       },
       builds: { serial: 'serial', threads: 'threads' },
       faultChannel: 'faults',
+      keeperChannel: 'keeper',
     });
     return { runtime, calls };
   }

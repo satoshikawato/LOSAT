@@ -52,7 +52,8 @@ function init(command: EngineInit): void {
     threads: () => (threads ??= moduleOf(command.modules.threads)),
     builds: command.builds,
     faultChannel: command.faultChannel,
-    onSharedMemory: ({ memory, maximumPages }) => scope.postMessage({ type: 'memory', generation, memory, maximumPages }),
+    keeperChannel: command.keeperChannel,
+    onThreadedSearch: () => scope.postMessage({ type: 'threaded-search', generation }),
   });
 }
 

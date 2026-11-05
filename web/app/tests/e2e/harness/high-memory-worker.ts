@@ -48,7 +48,7 @@ async function runMode(
   request: HighMemoryRequest,
 ): Promise<HighMemoryMode> {
   const { memory, maximumPages } = createSharedMemory(limits);
-  const host = new ThreadHost({ module, memory, faultChannel: request.faultChannel });
+  const host = new ThreadHost({ module, memory, maximumPages, faultChannel: request.faultChannel, keeperChannel: `${request.faultChannel}:keeper` });
   try {
     // As instantiateThreadedMain, keeping the exports for fillLow.
     const wasi = createWasi();

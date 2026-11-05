@@ -552,7 +552,10 @@ impl Fill<'_, '_, '_> {
     /// cells are 3-byte elements, and the pages marked those of the words that hold the first and
     /// the last byte of the cell's element.
     ///
-    /// SAFETY: no other job of the phase uses reader `a`'s region, row or marks.
+    /// SAFETY: `a < parts`, no other job of the phase uses reader `a`'s region, row or marks, and
+    /// the span has at most `shape.half` positions (`s1 - s0 <= half`): each caller's `span` cuts a
+    /// chunk of at most `chunk.min(total)` positions into `parts`, at most `ceil(chunk / parts)`
+    /// each, and `Shape::new(chunk.min(total), parts)` rounds that up.
     unsafe fn read<const MARK: bool, const H24: bool>(&self, a: usize, s0: usize, s1: usize) {
         let words = self.words;
         let lut_word_length = words.lut_word_length;
@@ -590,8 +593,10 @@ impl Fill<'_, '_, '_> {
                 let cell = current_kmer as usize;
                 let q_off_1 = (seg.query_offset + (pos + 1 - lut_word_length) + 1) as u32;
                 debug_assert!(n < self.arena.shape.half);
-                // SAFETY: reader `a`'s scratch region has `half` entries, at least the positions
-                // of its span (`Shape::new`), and one word per position at most.
+                // SAFETY: `n < half`, the entries of reader `a`'s scratch region: a word is written
+                // only at a stream position of `[s0, s1)` (the segments' stream ranges follow each
+                // other without overlap, `segments`), one at most per position, and
+                // `s1 - s0 <= half` (this function's contract).
                 unsafe {
                     scratch.add(n).write(Entry {
                         index: q_off_1,
@@ -1159,9 +1164,12 @@ fn fill_chunked(
         run_phase(&mut clock, 0, parts, in_pool, |a| {
             if k > 0 {
                 // C of the chunk before.
+                // SAFETY: phase C of job `a < parts` links reader `a`'s words only (all phases).
                 unsafe { fill.link_any(h24, a) };
             }
             let (s0, s1) = span(current, a);
+            // Reader `a < parts` reads its span of chunk `current` (`chunk.min(total)` positions).
+            // SAFETY: the reader is this job's (all phases); the span fits `shape.half` (`read`).
             match (mark, h24) {
                 (true, true) => unsafe { fill.read::<true, true>(a, s0, s1) },
                 (true, false) => unsafe { fill.read::<true, false>(a, s0, s1) },
@@ -1189,6 +1197,8 @@ fn fill_chunked(
             });
             stats.prefault_rounds += 1;
         }
+        // SAFETY: phase B of owner `o < parts` uses only the sub-ranges `(*, o)`, the cells of
+        // `o`'s blocks and `o`'s copies (all phases); every reader of the chunk has returned.
         run_phase(&mut clock, 1, parts, in_pool, |o| unsafe {
             if h24 {
                 fill.update::<true>(o)
@@ -1212,6 +1222,8 @@ fn fill_chunked(
             };
         }
     }
+    // SAFETY: after the last phase B, job `i < parts` links reader `i`'s words and flushes
+    // owner `i`'s copies into its own blocks' counters and presence words (all phases).
     run_phase(&mut clock, 2, parts, in_pool, |i| unsafe {
         fill.link_any(h24, i);
         fill.flush(i);
@@ -1488,6 +1500,8 @@ fn csr_on_pool(
             // its ranks (`starts[p0 .. p0 + its non-empty cells]`, disjoint from the other owners'),
             // its entries of the owners' words and non-empty cells (read by the later owners after a
             // barrier) and `qs` at its places.
+            // SAFETY (`o`, `read`): `o = ctx.index() < parts` (the caller runs this only on a pool
+            // of `parts` threads), and `span(c, o)` has at most `shape.half` positions (`read`).
             unsafe {
                 std::ptr::write_bytes(cb.ptr.add(c0), 0, c1 - c0);
                 let mut got = 0u64;
@@ -1616,6 +1630,8 @@ fn csr_on_pool(
         // places, which lie in `base .. base + its words` (disjoint from the other owners'); every
         // element read was written before by the same thread or before a barrier (the function's
         // documentation for the cursor of `c0`).
+        // SAFETY (`o`, `read`): `o = ctx.index() < parts` (the caller runs this only on a pool of
+        // `parts` threads), and `span(c, o)` has at most `shape.half` positions (`read`).
         unsafe {
             std::ptr::write_bytes(cnt.add(c0), 0, c1 - c0);
             let mut got = 0u64;

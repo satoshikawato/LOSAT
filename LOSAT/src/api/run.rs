@@ -25,8 +25,10 @@
 //! ```
 #![warn(missing_docs, unused)]
 
-use std::io::{self, Write};
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 use std::ops::Range;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -672,7 +674,20 @@ pub(super) fn run_local(
     match command {
         Commands::Blastp(args) => run_local_blastp(args, query, subject, "", "", outputs),
         Commands::Tblastn(args) => run_local_tblastn(args, query, subject, outputs),
-        Commands::Blastn(args) => run_local_blastn(args, query, subject, outputs),
+        Commands::Blastn(mut args) => {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-448
+            // ```c++
+            //     if (args.Exist(kArgWindowMaskerDatabase) &&
+            //         args[kArgWindowMaskerDatabase]) {
+            //         const string& stat_file = args[kArgWindowMaskerDatabase].AsString();
+            // ```
+            // The counts file of `-window_masker_db` is read from the file system, as on the
+            // command line (LOSAT Web's host gives its own source).
+            if args.window_masker_db.is_some() {
+                args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
+            }
+            run_local_blastn(args, query, subject, outputs)
+        }
         Commands::Tblastx(args) => run_local_tblastx(args, query, subject, outputs),
         Commands::Blastx(args) => run_local_blastx(args, query, subject, outputs),
         Commands::Psiblast(_) | Commands::Makedb(_) => {
@@ -790,6 +805,76 @@ pub fn run(
         }
         Ok(())
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+// ```c++
+//     else {
+//         m_OutputStream = &args[kArgOutput].AsOutputFile();
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:255-257
+// ```c++
+//         if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
+//         	formatter.SetBaseFile(args[kArgOutput].AsString());
+//         }
+// ```
+/// Runs the search and writes the report of one `-outfmt` to the file `path`, as the command
+/// line's `-out path` does, and the command line's warnings to `diagnostics`. Outfmt 13 and 14
+/// come through here: the file is the master file, which names the side files that the search
+/// writes next to it (`path_1.json` or `path_1.xml`, ...). The error is the command line's, as in
+/// [`run`].
+pub fn run_to_file(
+    search: &Search,
+    inputs: Inputs<'_>,
+    outfmt: &str,
+    path: &Path,
+    diagnostics: &mut (dyn Write + Send),
+) -> Result<(), Error> {
+    // `-` is the command line's standard output, which the library does not write.
+    if path.as_os_str() == "-" {
+        return Err(Error::Argv(
+            "run_to_file writes a file: `run` gives a report to a writer".to_string(),
+        ));
+    }
+    let threads = {
+        let formats = [outfmt];
+        searches(search, inputs, &formats)?.1
+    };
+    let mut command = search.command(inputs)?;
+    set_output_file(&mut command, path);
+    let file =
+        File::create(path).map_err(|_| Error::search(&crate::cli::inaccessible("out", path)))?;
+    let mut file = BufWriter::new(file);
+    with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
+        let mut outputs = ReportOutputs {
+            formats: vec![FormatOutput {
+                outfmt,
+                sink: OutputSink::Writer(&mut file),
+            }],
+            diagnostics: &mut *diagnostics,
+            hits: None,
+            observer: None,
+        };
+        run_local(command, inputs, &mut outputs).map_err(|error| Error::search(&error))
+    })?;
+    file.flush()
+        .map_err(|error| Error::search(&anyhow::Error::from(error)))
+}
+
+/// The search's `-out` file: a report names its side files by it (`run_to_file`).
+fn set_output_file(command: &mut Commands, path: &Path) {
+    let out = Some(path.to_path_buf());
+    match command {
+        Commands::Blastp(args) => args.out = out,
+        Commands::Tblastn(args) => args.out = out,
+        Commands::Blastn(args) => args.out = out,
+        Commands::Tblastx(args) => args.out = out,
+        Commands::Blastx(args) => args.out = out,
+        Commands::Psiblast(_) | Commands::Makedb(_) => {
+            unreachable!("Program::parse admits the five search programs only")
+        }
+    }
 }
 
 /// What one search of `run_collect` gathered.

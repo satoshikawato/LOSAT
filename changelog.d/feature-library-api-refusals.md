@@ -1,0 +1,1 @@
+- The library API writes a report to a file (`run_to_file`, the command line's `-out`), which is how outfmt 13 and 14 come with their side files; takes `-window_masker_db` with `-subject`; and writes BLASTX's outfmt 11 with `-subject`. A search of records writes the error archive that the command line writes.

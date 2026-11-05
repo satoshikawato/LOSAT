@@ -890,24 +890,27 @@ pub fn run_local(
         .iter()
         .any(|format| super::stage_e_report::format_number(format.outfmt) == 11);
     if archive_requested {
-        args.archive = super::archive::handle_for(&args, true)?;
+        args.archive = super::archive::handle_for(&args, true)?
+            .map(|handle| outputs.with_archive_outfmt(handle));
         super::archive::check_titles(subject_records, "subject")?;
         if let Some(handle) = args.archive.clone() {
-            return outputs.with_archive_diagnostics(handle, |view| {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(args, query_records, subject_records, view)
             });
+            return outputs.finish_archive(&handle, query_records.is_empty(), result);
         }
     }
     run_local_formats(args, query_records, subject_records, outputs)
 }
 
-/// The numbers of the requested formats, each read as on the command line.
-fn read_formats(outputs: &ReportOutputs<'_>) -> Result<Vec<i32>> {
+/// The numbers of the requested formats, each read as on the command line. `out`: the file of
+/// `api::run_to_file`.
+fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<Vec<i32>> {
     use crate::blastinput::app;
     let mut outfmts = Vec::with_capacity(outputs.formats.len());
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        if app::report_format(&choice, app::Program::Tblastn, None)?.is_none() {
+        if app::report_format(&choice, app::Program::Tblastn, out)?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastn)?;
             app::xinclude_check(&choice)?;
         }
@@ -977,7 +980,7 @@ fn search_database(
     let list = args
         .db_filter
         .resolve(&settings, &mut *outputs.diagnostics)?;
-    let outfmts = read_formats(outputs)?;
+    let outfmts = read_formats(outputs, args.out.as_deref())?;
     let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
     let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
@@ -1010,7 +1013,7 @@ fn run_local_formats(
 ) -> Result<()> {
     use crate::blastinput::app;
     use crate::blastinput::seq_range;
-    let outfmts = read_formats(outputs)?;
+    let outfmts = read_formats(outputs, args.out.as_deref())?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
     let subject_range = seq_range::parse_optional_range(

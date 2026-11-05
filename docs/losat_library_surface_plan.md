@@ -445,7 +445,7 @@ BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`bl
 
 ### 13.2 検証
 
-- `examples/library_database.rs`：CLI と同じ引数を受け、`api::run` で検索し、report を stdout、警告と失敗を stderr に書く。
+- `examples/library_command_line.rs`：CLI と同じ引数を受け、`api::run` で検索し、report を stdout、警告と失敗を stderr に書く。
 - `tests/db_search_fixtures.py check --library`：同じ manifest の全行を、その example で NCBI の固定バイトと比べる。5 program の 2,247 行で、差は 0（1 thread と 2 threads）。1,987 行は stdout、stderr が全バイト一致。CI の `fast output regressions` が毎回走らせる。
   - 終了コードは 0 か 0 以外かだけ比べる（`Error` は CLI のメッセージを持ち、終了コードを持たない）。
   - `library-input-error`（26 行）：query の読み取りエラーは検索の前に `Error::Input` になる。文言は CLI と同じで、エラーの前のバッチの報告は無い。
@@ -453,11 +453,24 @@ BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`bl
   - LOSAT の拒否の行（211 行）は文言だけを比べる：`run` は書きながら進むので、CLI のように拒否の前のバイトを止めない。`run_collect` は何も返さない。
 - `LOSAT/tests/library_api.rs`：7 検索で outfmt 6、0、7、5、11 と列の一覧を 1 回の検索で書いて CLI と比べ、全 HSP の型付きの値と列、outfmt 5 の統計、バッチに分けた結果と一括の結果の一致を確かめる。失敗の文言は CLI の stderr と同じ。
 
-### 13.3 残ること
+### 13.3 残りの拒否（PR `feature/library-api-refusals`）
 
-- outfmt 13、14：side file の出力先を API に持たせる。
-- BLASTN の `-window_masker_db` と `-subject`：`run_local` が counts を持たないと拒否する（`-db` の経路はファイルを読む）。
-- BLASTX の `-subject` で outfmt 11。
+| 項目 | 実装 |
+|---|---|
+| outfmt 13、14 | `run_to_file(search, inputs, outfmt, path, diagnostics)`：CLI の `-out path` と同じで、side file は `path` の隣に書く。メモリ上の報告には置き場が無いので、`run` と `run_collect` は NCBI の `Please provide a file name` のままにする。engine は `args.out` を見る（CLI と同じ経路）。BLASTX は `report_batches` が `FsSideFiles` を使う |
+| BLASTN の `-window_masker_db` | API の `run_local` が `FileCounts` を渡す。ブラウザはホストの counts のまま |
+| BLASTX の `-subject` で outfmt 11 | `report_batches` の archive の枝を `-subject` でも使う |
+| error archive | `-subject` でも `finish_archive`（4 program の `run_local`）。CLI が書く error archive が欠けていた（`kaempty.gaps_fmt11`） |
+
+検証：`examples/library_command_line.rs`（`library_database.rs` を `-subject` と `-out` に広げた）を CLI の代わりに既存の固定バイトの検査に渡す。
+
+- `check_losat.py`（`-subject`、outfmt 0、5 から 17 まで、5 program）：1,907 行が全部一致。
+- `db_search_fixtures.py check --library`：2,247 行で差は 0。2,010 行が全バイト一致、211 行が拒否の文言、26 行が読み取りエラー（§13.2）。`library-skip` は無くなった。
+- `blastn_regression_fixtures.py`、`tblastx_regression_fixtures.py`：stdout と stderr の差は、example が持たない経路（`-query -`、`-subject` なしの NCBI のエラー、書き込み失敗の文言）だけ。終了コードは比べられない。
+- `fast output regressions` は `check_losat.py` も API で走らせる。
+
+### 13.4 残ること
+
 - `psiblast`、`makeblastdb`、`blastdbcmd`。
 - `pylosat` の `-db`。
 - `-db` のバッチごとの再利用：`run_batches` はバッチごとにデータベースを開き直す（§11.3 の測定の続き）。taxonomy データベースについて NCBI が 1 回だけ書くメッセージも、読むバッチごとに出る。

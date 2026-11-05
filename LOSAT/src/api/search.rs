@@ -32,7 +32,7 @@ use crate::cli::{Cli, Commands};
 // ```
 /// The options that the library API sets itself and does not take in an argv: the inputs
 /// (`Inputs` gives the records and their names), the output file and the output format
-/// (arguments of `run_collect` and `run`).
+/// (arguments of `run_collect`, `run` and `run_to_file`).
 pub const API_OWNED: &[&str] = &["query", "subject", "db", "out", "outfmt"];
 
 /// A program and an argv that the command line's parser accepted.

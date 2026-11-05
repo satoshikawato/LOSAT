@@ -2276,9 +2276,24 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             args.word_size
         );
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:258-271
+    // ```c
+    // static array_of_8 blosum62_values[BLOSUM62_VALUES_MAX] = {
+    //     {(double) INT2_MAX, (double) INT2_MAX, (double) INT2_MAX, 0.3176, 0.134, 0.4012, 0.7916, -3.2, 0.623757, 4.964660, 4.964660},
+    //     {11, 2, (double) INT2_MAX, 0.297, 0.082, 0.27, 1.1, -10, 0.641766, 12.673800, 12.757600},
+    // ...
+    //     {9, 1, (double) INT2_MAX, 0.206, 0.010, 0.052, 4.0, -87, 0.731887, 210.333000, 214.842000},
+    // };
+    // ```
+    // BLASTP reads the gap costs of the search at run time (the gapped alignments, the chaining
+    // and the composition-based redo) and their Karlin and Gumbel values from NCBI's table
+    // (`lookup_protein_params`, `lookup_protein_gumbel_params`), and the options handler has
+    // checked them against the table (`validate_protein_options`): BLOSUM62 runs with any of its
+    // rows. psiblast's first round is BLASTP's search; its later rounds, whose PSSM scores take
+    // the gap costs too, are not ported, and it keeps 11/1.
     if !args.matrix_name.eq_ignore_ascii_case("BLOSUM62")
-        || args.scoring.gap_open != 11
-        || args.scoring.gap_extend != 1
+        || (args.app == BlastpApp::Psiblast
+            && (args.scoring.gap_open != 11 || args.scoring.gap_extend != 1))
     {
         bail!(
             "the matrix {} with gap costs {}/{} is not supported by LOSAT's {program}",
@@ -13413,6 +13428,47 @@ mod tests {
         let resolved = args.resolve().expect("resolved blastp args");
         let err = validate_requested_blastp_support(&resolved).expect_err("unsupported scoring");
         assert!(err.to_string().contains("not supported by LOSAT's BLASTP"));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:258-271 (BLOSUM62's rows)
+    #[test]
+    fn test_validate_requested_blastp_support_takes_blosum62_gap_costs_of_the_table() {
+        for (gap_open, gap_extend) in [
+            (11, 2),
+            (10, 2),
+            (9, 2),
+            (8, 2),
+            (7, 2),
+            (6, 2),
+            (13, 1),
+            (12, 1),
+            (11, 1),
+            (10, 1),
+            (9, 1),
+            (32767, 32767),
+        ] {
+            let mut args = make_blastp_args();
+            args.gap_open = Some(gap_open);
+            args.gap_extend = Some(gap_extend);
+            let resolved = args.resolve().expect("resolved blastp args");
+            validate_requested_blastp_support(&resolved)
+                .unwrap_or_else(|err| panic!("{gap_open}/{gap_extend}: {err}"));
+            // psiblast keeps 11/1 (its later rounds are not ported).
+            let mut args = make_blastp_args();
+            args.app = BlastpApp::Psiblast;
+            args.gap_open = Some(gap_open);
+            args.gap_extend = Some(gap_extend);
+            let resolved = args.resolve().expect("resolved psiblast args");
+            let result = validate_requested_blastp_support(&resolved);
+            if (gap_open, gap_extend) == (11, 1) {
+                result.expect("psiblast 11/1");
+            } else {
+                let err = result.expect_err("psiblast other gap costs");
+                assert!(err.to_string().contains(&format!(
+                    "the matrix BLOSUM62 with gap costs {gap_open}/{gap_extend} is not supported by LOSAT's PSIBLAST"
+                )));
+            }
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2387-2415

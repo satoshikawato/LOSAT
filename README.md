@@ -17,9 +17,9 @@
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/losat/badges/platforms.svg)](https://anaconda.org/bioconda/losat)
 
 
-**LOSAT** is a lightweight, pure-Rust reimplementation of the NCBI BLAST sequence alignment algorithm designed specifically for pairwise sequence-to-sequence comparisons (`-query` vs `-subject`).
+**LOSAT** is a lightweight, pure-Rust reimplementation of the NCBI BLAST sequence alignment algorithm. It compares query sequences with subject sequences from FASTA files (`-query` vs `-subject`) and searches BLAST databases (`-db`), including those written by NCBI's `makeblastdb` or by `losat makeblastdb`.
 
-On the pairwise profiles and fixtures of its [release test set](docs/release/v0.2.0_certification_plan.md), LOSAT is checked against declared NCBI source, executable, or API oracle contracts for scores, E-values, coordinates, and output. Exact-byte parity applies where each contract requires it; documented local subject genetic-code exceptions apply to TBLASTX and TBLASTN. LOSAT runs without external C/C++ libraries, BLAST+ installations, or pre-formatted database indices. Built for high portability, LOSAT runs natively on modern operating systems and compiles directly to WebAssembly for client-side, zero-install genomic analyses in web browsers and sandboxed runtimes.
+On the pairwise profiles and fixtures of its [release test set](docs/release/v0.2.0_certification_plan.md), LOSAT is checked against declared NCBI source, executable, or API oracle contracts for scores, E-values, coordinates, and output. Exact-byte parity applies where each contract requires it; documented local subject genetic-code exceptions apply to TBLASTX and TBLASTN. LOSAT runs without external C/C++ libraries or a BLAST+ installation, and a `-subject` search needs no pre-formatted database. Built for high portability, LOSAT runs natively on modern operating systems and compiles directly to WebAssembly for client-side, zero-install genomic analyses in web browsers and sandboxed runtimes.
 
 ---
 
@@ -417,7 +417,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 - `-html`, `-line_length`, `-sorthits`, `-sorthsps`: all five programs.
 
 **Scoring and search settings**
-- `-matrix` and gap costs: `blastp` and `blastx` accept only BLOSUM62 with `-gapopen 11 -gapextend 1`; `tblastn` and `tblastx` accept every matrix.
+- `-matrix` and gap costs: `blastp` accepts only BLOSUM62, with any gap costs of NCBI's BLOSUM62 table; `blastx` accepts only BLOSUM62 with `-gapopen 11 -gapextend 1`; `tblastn` and `tblastx` accept every matrix.
 - `-comp_based_stats 1` and `3`: `blastp`, `blastx`, `tblastn` (`0` and `2` work).
 - `-word_size` 2 and 4: `blastp` (3 and 5 to 7 work). Other than 3 and 5: `blastx`. Other than 3: `tblastx`. `tblastn` takes 2 to 7.
 - `-task blastp-short`: `blastp`. `-task rmblastn`: `blastn`.

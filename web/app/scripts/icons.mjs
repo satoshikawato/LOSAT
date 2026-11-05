@@ -4,7 +4,7 @@
 //                                the corners itself and shows transparent pixels as black, so the
 //                                tile fills the square and the A keeps a wider margin.
 //   public/icon-192.png, icon-512.png, icon-maskable-512.png
-//                                the icons of manifest.webmanifest (DW-45): the tab icon's tile, and for
+//                                the icons of manifest.webmanifest (DW-50): the tab icon's tile, and for
 //                                Android's home screen, which cuts its own shape out of the middle, a
 //                                full square whose A stays inside the middle circle of 80 % (the
 //                                maskable safe zone).

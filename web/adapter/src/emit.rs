@@ -13,7 +13,8 @@ pub const CHUNK: usize = 1 << 20;
 pub const STREAM_HITS: u32 = 1;
 pub const STREAM_RESPONSE: u32 = 2;
 pub const STREAM_DIAGNOSTICS: u32 = 3;
-/// The output of the argv's own `-outfmt`: 6 or 7 with fields (docs/web/abi_v2.md §5, §7).
+/// The output of the argv's own `-outfmt`: a format besides 0, 6 and 7, or 6 or 7 with fields
+/// (docs/web/abi_v2.md §5, §7).
 pub const STREAM_CUSTOM: u32 = 4;
 
 #[cfg(target_arch = "wasm32")]

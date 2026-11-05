@@ -9,7 +9,7 @@
 // included records with their IDs and lengths, which the engine checks at `register`.
 import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
 import type { FastaParserKind } from '../domain/dataset';
-import { outputFileName, runOutputs, type RunOutput } from '../domain/output-format';
+import { outputFileName, outputMediaType, runOutputs, type RunOutput } from '../domain/output-format';
 import { fastaParser, programById, type ProgramId } from '../domain/programs';
 import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
@@ -209,7 +209,7 @@ export class Coordinator {
     this.deps.engine.cancel(runId);
   }
 
-  /** Saves one compatibility output of a completed run, byte for byte, named by outputFileName. */
+  /** Saves one compatibility output of a completed run, byte for byte, named by outputFileName, with its format's media type. */
   async exportOutput(runId: string, output: RunOutput): Promise<void> {
     const view = this.find(runId);
     if (view?.status !== 'completed') throw new Error('only completed runs can be exported');
@@ -220,7 +220,13 @@ export class Coordinator {
       this.deps.engine.describe(program).catch(() => undefined),
     ]);
     const { task } = description === undefined ? { task: optionValue(argv, '-task') } : taskOf(argv, description);
-    this.deps.downloader.save(outputFileName({ number, program, task, queuedAt, argv }, output), bytes, 'text/plain');
+    this.deps.downloader.save(outputFileName({ number, program, task, queuedAt, argv }, output), bytes, outputMediaType(argv, output));
+  }
+
+  /** Opens one output of a completed run without reading it (a binary one, which is not shown): rejects as `readOutput` when it cannot be read. */
+  async checkOutput(runId: string, output: RunOutput): Promise<void> {
+    if (this.find(runId)?.status !== 'completed') throw new Error('run is not completed');
+    await this.deps.data.readOutputRange(runId, output, 0, 0);
   }
 
   async readOutput(runId: string, output: RunOutput): Promise<string> {

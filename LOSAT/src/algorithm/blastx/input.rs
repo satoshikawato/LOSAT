@@ -630,6 +630,45 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         if line.is_empty() || matches!(line[0], b';' | b'#' | b'!') {
             continue;
         }
+        // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:383-398
+        // ```c++
+        //         if (c == '!'  ||  c == '#' || c == ';') {
+        //             // no content, just a comment or blank line
+        //             continue;
+        //         } else if (need_defline) {
+        //             if (TestFlag(fDLOptional)) {
+        //                 ParseDefLine(">", pMessageListener);
+        //                 need_defline = false;
+        //             } else {
+        //                 const auto lineNum = LineNumber();
+        //                 GetLineReader().UngetLine();
+        //                 NCBI_THROW2(CObjReaderParseException, eNoDefline,
+        //                             "CFastaReader: Input doesn't start with"
+        //                             " a defline or comment around line " + NStr::NumericToString(lineNum),
+        //                              lineNum);
+        //             }
+        //         }
+        // ```
+        // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:774-780
+        // ```c++
+        // void CFastaReader::ParseDataLine(
+        //     const TStr& s, ILineErrorListener * pMessageListener)
+        // {
+        //     if( NStr::StartsWith(s, ">?") ) {
+        //         ParseGapLine(s, pMessageListener);
+        //         return;
+        //     }
+        // ```
+        // `-parse_deflines` reads without `fDLOptional`, so a first line that is not a defline,
+        // a comment or blank stops the read before `ParseDataLine`: a `>?N` gap line too, and
+        // whatever its size or modifiers.
+        if !is_header && parse_deflines.is_some() && current.is_none() {
+            return Err(FastaParseError(format!(
+                "CFastaReader: Input doesn't start with a defline or comment around line {}",
+                line_index + 1
+            ))
+            .into());
+        }
         if line.starts_with(b">?") {
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1098-1122
             // ```c++
@@ -905,13 +944,6 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             current = Some(record);
             raw_residues = 0;
             continue;
-        }
-        if parse_deflines.is_some() && current.is_none() {
-            return Err(FastaParseError(format!(
-                "CFastaReader: Input doesn't start with a defline or comment around line {}",
-                line_index + 1
-            ))
-            .into());
         }
         let record = current.get_or_insert_with(|| {
             new_record(records.len() + batch.skipped, protein, String::new())
@@ -3082,5 +3114,78 @@ mod range_tests {
                 length: 4
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod defline_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    /// The records of `data` read as a nucleotide query file, with or without `-parse_deflines`.
+    fn read(data: &[u8], parse_deflines: bool) -> Result<Vec<FastaRecord>> {
+        let mut stream = FastaStream::new(Cursor::new(data.to_vec()));
+        stream.parse_deflines = parse_deflines;
+        parse_fasta_stream_keeping(
+            &mut stream,
+            false,
+            false,
+            100,
+            false,
+            None,
+            &mut |_| Ok(()),
+            &mut |_| Ok(()),
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:383-398
+    // ```c++
+    //         if (c == '!'  ||  c == '#' || c == ';') {
+    //             // no content, just a comment or blank line
+    //             continue;
+    //         } else if (need_defline) {
+    //             if (TestFlag(fDLOptional)) {
+    //                 ParseDefLine(">", pMessageListener);
+    //                 need_defline = false;
+    //             } else {
+    //                 const auto lineNum = LineNumber();
+    //                 GetLineReader().UngetLine();
+    //                 NCBI_THROW2(CObjReaderParseException, eNoDefline,
+    //                             "CFastaReader: Input doesn't start with"
+    //                             " a defline or comment around line " + NStr::NumericToString(lineNum),
+    //                              lineNum);
+    //             }
+    //         }
+    // ```
+    // Under -parse_deflines a gap line before any defline stops the read at its line, whatever
+    // its size or modifiers; without it, the gap line starts a record without a defline. A gap
+    // line inside a record is that record's letters either way.
+    #[test]
+    fn a_gap_line_before_any_defline_stops_a_parse_deflines_read() {
+        for (data, line) in [
+            (&b">?5\nACGT\n>r1\nACGT\n"[..], 1),
+            (b">?5", 1),
+            (b">?0\nACGT\n", 1),
+            (b">?abc\nACGT\n", 1),
+            (b">?unk100\n>?7\nACGT\n", 1),
+            (b"  >?5\r\nACGT\r\n", 1),
+            (b";c\n\n#x\n>?5\nACGT\n", 4),
+        ] {
+            let error = read(data, true).unwrap_err();
+            assert_eq!(
+                error.downcast_ref::<FastaParseError>().map(|e| e.0.clone()),
+                Some(format!(
+                    "CFastaReader: Input doesn't start with a defline or comment around line {line}"
+                )),
+                "{}",
+                String::from_utf8_lossy(data)
+            );
+        }
+        let records = read(b">?5\nACGT\n>r1\nACGT\n", false).unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].sequence, b"NNNNNACGT");
+        let records = read(b">r0\nAC\n>?5\nGT\n", true).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].sequence, b"ACNNNNNGT");
     }
 }

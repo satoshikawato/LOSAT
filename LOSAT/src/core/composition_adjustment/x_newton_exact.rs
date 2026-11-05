@@ -1218,6 +1218,8 @@ pub(crate) fn optimize_target_frequencies_exact(
                     optimize_avx512(x, q, row_sums, col_sums, relative_entropy, ln_one, shortcut)
                 }
             }
+            // SAFETY: `x86_level` returns 1 only when `is_x86_feature_detected!("avx2")` was true,
+            // which the `#[target_feature(enable = "avx2")]` of `optimize_avx2` needs.
             1 => {
                 return unsafe {
                     optimize_avx2(x, q, row_sums, col_sums, relative_entropy, ln_one, shortcut)

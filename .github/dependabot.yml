@@ -43,6 +43,11 @@ updates:
     groups:
       npm-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # typescript-eslint 8.72.1 (2026-11-05, also its canary) accepts typescript >=4.8.4 <6.1.0,
+      # so typescript 6.1 and 7 fail `npm ci` (ERESOLVE, #837). Remove when it accepts them.
+      - dependency-name: typescript
+        versions: ['>= 6.1']
 
   - package-ecosystem: github-actions
     directory: /

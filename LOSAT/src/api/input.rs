@@ -26,9 +26,13 @@
 //! ```
 #![warn(missing_docs, unused)]
 
+use std::io::Read;
+
 use super::error::Error;
 use super::program::Program;
+use super::search::Search;
 use crate::blastinput::fasta_reader::{read_all, FastaInputSource, FastaRecord, ReaderConfig};
+use crate::blastinput::input_files::open_file_input;
 
 /// Which input of a search a FASTA holds. The reader's flags and the generated local IDs
 /// (`Query_N`, `Subject_N`) depend on it.
@@ -58,7 +62,7 @@ pub enum Role {
 // ```
 /// Whether the program reads the input of `role` as protein (`fAssumeProt`) or nucleotide
 /// (`fAssumeNuc`) sequences.
-fn protein(program: Program, role: Role) -> bool {
+pub(super) fn is_protein(program: Program, role: Role) -> bool {
     match (program, role) {
         (Program::Blastn, _) | (Program::Tblastx, _) => false,
         (Program::Blastp, _) => true,
@@ -73,7 +77,7 @@ fn protein(program: Program, role: Role) -> bool {
 /// the data loaders on (the command line without `.ncbirc` or `DATA_LOADERS`).
 fn reader_config(program: Program, role: Role) -> ReaderConfig {
     let name = program.reader_name();
-    let protein = protein(program, role);
+    let protein = is_protein(program, role);
     match role {
         Role::Query => ReaderConfig::query(name, protein, true),
         Role::Subject => ReaderConfig::subject(name, protein, true),
@@ -99,18 +103,81 @@ fn reader_config(program: Program, role: Role) -> ReaderConfig {
 /// a search of the records is the command line's search of the file. An input of white space
 /// only has no record. A reader error is the command line's message (`Error::Input`).
 pub fn read_fasta(program: Program, role: Role, bytes: &[u8]) -> Result<Vec<FastaRecord>, Error> {
-    let config = reader_config(program, role);
-    read_all(
-        &mut FastaInputSource::from_bytes(bytes, config),
-        &mut |_| Ok(()),
-    )
-    .map_err(|error| {
+    read_source(FastaInputSource::from_bytes(
+        bytes,
+        reader_config(program, role),
+    ))
+}
+
+/// Reads every record of an input source; a reader error is the command line's message.
+fn read_source<R: std::io::Read>(
+    mut source: FastaInputSource<R>,
+) -> Result<Vec<FastaRecord>, Error> {
+    read_all(&mut source, &mut |_| Ok(())).map_err(|error| {
         Error::Input(
             format!("{:#}", error.into_app_error())
                 .trim_end_matches('\n')
                 .to_string(),
         )
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
+// ```c++
+// void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
+// {
+//     if ( !m_Ios ) {
+//         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
+//             "File is not accessible",AsString()));
+// ```
+/// The bytes of the file `path`, as the command line opens its `-query` or `-subject` argument:
+/// the same message for a file that does not open (`Error::Input`), and a file named `.gz`,
+/// `.bz2` or `.zst` is inflated (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 8). `read_fasta`
+/// and `read_inputs` read the bytes.
+pub fn read_input_file(role: Role, path: &std::path::Path) -> Result<Vec<u8>, Error> {
+    let input_error = |error: anyhow::Error| {
+        Error::Input(format!("{error:#}").trim_end_matches('\n').to_string())
+    };
+    let name = match role {
+        Role::Query => "query",
+        Role::Subject => "subject",
+    };
+    let mut file = open_file_input(path, name).map_err(input_error)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|error| input_error(error.into()))?;
+    Ok(bytes)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:188-207
+// ```c++
+//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+//                           db_adapter, scope);
+//         ...
+//         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
+// ```
+/// Reads the query and subject FASTA bytes of `search`, as the command line reads its `-query`
+/// and `-subject` files: the records that `read_fasta` gives, and with `-parse_deflines` in the
+/// search's argv the ids of their deflines. The subjects come first, in one scope of ids with the
+/// queries, as NCBI reads them: a query and a subject with one id are one sequence to the reports.
+///
+/// A search with `-parse_deflines` takes its records from here. Returns `(query, subject)`.
+pub fn read_inputs(
+    search: &Search,
+    query: &[u8],
+    subject: &[u8],
+) -> Result<(Vec<FastaRecord>, Vec<FastaRecord>), Error> {
+    let parse_deflines = search.parse_deflines();
+    let scope = parse_deflines.then(Default::default);
+    let read = |role: Role, bytes: &[u8]| {
+        let config = reader_config(search.program(), role).with_parse_deflines(parse_deflines);
+        let mut source = FastaInputSource::from_bytes(bytes, config);
+        source.set_id_scope(scope.clone());
+        read_source(source)
+    };
+    let subject = read(Role::Subject, subject)?;
+    let query = read(Role::Query, query)?;
+    Ok((query, subject))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-799
@@ -125,19 +192,20 @@ pub fn read_fasta(program: Program, role: Role, bytes: &[u8]) -> Result<Vec<Fast
 ///
 /// The records come from [`read_fasta`] with the search's program and the input's role, or
 /// from [`FastaRecord::new`]. The library API has no database (`-db`) input yet
-/// (docs/losat_library_surface_plan.md §3.3).
+/// (docs/losat_library_surface_plan.md §3.3): it will be another constructor, so the fields are
+/// not part of the API.
 #[derive(Debug, Clone, Copy)]
 pub struct Inputs<'a> {
     /// The query records (`-query`).
-    pub query: &'a [FastaRecord],
+    pub(crate) query: &'a [FastaRecord],
     /// The subject records (`-subject`).
-    pub subject: &'a [FastaRecord],
+    pub(crate) subject: &'a [FastaRecord],
     /// What the reports show as the query's file name. The command line's default is the
     /// `-query` argument; the API's is `query`.
-    pub query_name: &'a str,
+    pub(crate) query_name: &'a str,
     /// What the reports show as the subject set's file name. The command line's default is the
     /// `-subject` argument; the API's is `subject`.
-    pub subject_name: &'a str,
+    pub(crate) subject_name: &'a str,
 }
 
 impl<'a> Inputs<'a> {
@@ -189,16 +257,16 @@ mod tests {
 
     #[test]
     fn the_readers_flags_follow_the_programs_molecules() {
-        assert!(!protein(Program::Blastn, Role::Query));
-        assert!(!protein(Program::Blastn, Role::Subject));
-        assert!(protein(Program::Blastp, Role::Query));
-        assert!(protein(Program::Blastp, Role::Subject));
-        assert!(!protein(Program::Blastx, Role::Query));
-        assert!(protein(Program::Blastx, Role::Subject));
-        assert!(protein(Program::Tblastn, Role::Query));
-        assert!(!protein(Program::Tblastn, Role::Subject));
-        assert!(!protein(Program::Tblastx, Role::Query));
-        assert!(!protein(Program::Tblastx, Role::Subject));
+        assert!(!is_protein(Program::Blastn, Role::Query));
+        assert!(!is_protein(Program::Blastn, Role::Subject));
+        assert!(is_protein(Program::Blastp, Role::Query));
+        assert!(is_protein(Program::Blastp, Role::Subject));
+        assert!(!is_protein(Program::Blastx, Role::Query));
+        assert!(is_protein(Program::Blastx, Role::Subject));
+        assert!(is_protein(Program::Tblastn, Role::Query));
+        assert!(!is_protein(Program::Tblastn, Role::Subject));
+        assert!(!is_protein(Program::Tblastx, Role::Query));
+        assert!(!is_protein(Program::Tblastx, Role::Subject));
     }
 
     #[test]
@@ -216,6 +284,35 @@ mod tests {
             }
             other => panic!("expected a reader error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_file_reads_as_the_command_line_opens_it() {
+        use std::io::Write;
+        let directory =
+            std::env::temp_dir().join(format!("losat-read-input-file-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let plain = directory.join("q.fa");
+        std::fs::write(&plain, PROTEIN).unwrap();
+        assert_eq!(read_input_file(Role::Query, &plain).unwrap(), PROTEIN);
+        let packed = directory.join("q.fa.gz");
+        let mut encoder = flate2::write::GzEncoder::new(
+            std::fs::File::create(&packed).unwrap(),
+            flate2::Compression::default(),
+        );
+        encoder.write_all(PROTEIN).unwrap();
+        encoder.finish().unwrap();
+        assert_eq!(read_input_file(Role::Subject, &packed).unwrap(), PROTEIN);
+        let missing = directory.join("none.fa");
+        let error = read_input_file(Role::Subject, &missing).unwrap_err();
+        assert_eq!(
+            error,
+            Error::Input(format!(
+                "Command line argument error: Argument \"subject\". File is not accessible:  `{}'",
+                missing.display()
+            ))
+        );
+        std::fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]

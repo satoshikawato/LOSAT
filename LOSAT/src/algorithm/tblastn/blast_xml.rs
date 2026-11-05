@@ -181,6 +181,45 @@ fn query_messages(
     messages
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
+// ```c++
+//     // find the first valid context corresponding to this query
+//     for (i = 0; i < context_per_query; i++) {
+//         BlastContextInfo *ctx = query_info->contexts +
+//                                 query_number * context_per_query + i;
+//         if (ctx->is_valid) {
+//             m_SearchSpace = ctx->eff_searchsp;
+//             m_LengthAdjustment = ctx->length_adjustment;
+//             break;
+// ```
+/// The `Statistics` of every query, with the gapped Karlin block of the scoring; the unsearched
+/// values for a query without a valid context.
+pub(super) fn query_stats(
+    parameters: &LocalSubjectParameters,
+    query_validity: &[bool],
+    scoring: LocalStageDScoring,
+) -> Vec<XmlStats> {
+    let gapped = lookup_protein_params(&ProteinScoringSpec {
+        matrix: scoring.matrix,
+        gap_open: scoring.gap_open,
+        gap_extend: scoring.gap_extend,
+    });
+    query_validity
+        .iter()
+        .enumerate()
+        .map(|(q_idx, &valid)| match parameters.lengths.get(q_idx) {
+            Some(length) if valid => XmlStats {
+                hsp_len: length.length_adjustment as i32,
+                eff_space: length.eff_searchsp,
+                kappa: gapped.k,
+                lambda: gapped.lambda,
+                entropy: gapped.h,
+            },
+            _ => XmlStats::NONE,
+        })
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prepare(
     values: XmlValues,
@@ -206,27 +245,7 @@ pub(super) fn prepare(
     );
     unsupported_matrix(matrix_name, !query_records.is_empty())?;
     let positives = FormattingMatrix::new(matrix_name);
-    let spec = ProteinScoringSpec {
-        matrix: scoring.matrix,
-        gap_open: scoring.gap_open,
-        gap_extend: scoring.gap_extend,
-    };
-    let gapped = lookup_protein_params(&spec);
-    let stats = (0..query_records.len())
-        .map(|q_idx| {
-            if !query_validity[q_idx] {
-                return XmlStats::NONE;
-            }
-            let length = &parameters.lengths[q_idx];
-            XmlStats {
-                hsp_len: length.length_adjustment as i32,
-                eff_space: length.eff_searchsp,
-                kappa: gapped.k,
-                lambda: gapped.lambda,
-                entropy: gapped.h,
-            }
-        })
-        .collect();
+    let stats = query_stats(parameters, query_validity, scoring);
     let has_hits = |hitlist: &KappaResultHitList| {
         hitlist
             .lists()

@@ -1,0 +1,2 @@
+- `pylosat` (`python/`), the Python binding of the library API: searches in the Python process with the command line's options and report bytes, results as an Arrow table, one query batch at a time with Ctrl-C between batches, and pickle. Not published yet.
+- The library API gives each HSP's `query_id` and `subject_id` (`qaccver`, `saccver`) and `percent_identity()` (`pident`), reads an input file as the command line does (`read_input_file`) and names the engine's version (`VERSION`).

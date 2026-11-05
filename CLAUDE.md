@@ -4,7 +4,8 @@
 
 `AGENTS.md`, imported above, is the authoritative guidance for LOSAT, including current parity
 status, accepted exceptions, build commands, and verification rules. If this file conflicts with
-`AGENTS.md`, follow `AGENTS.md`. Code under `web/` also follows `web/AGENTS.md`.
+`AGENTS.md`, follow `AGENTS.md`. Code under `web/` also follows `web/AGENTS.md`, and code under `python/` follows
+`python/AGENTS.md`.
 
 Use repository plans, release documents, session instructions, and gate records for
 task-specific state. Do not add session-resume notes, old investigations, or recently fixed lists

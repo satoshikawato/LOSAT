@@ -1031,6 +1031,7 @@ mod tests {
             archive: None,
             app: BlastpApp::Blastp,
             inclusion_ethresh: None,
+            first_query_ordinal: 0,
         }
         .resolve()
         .expect("resolved arguments")

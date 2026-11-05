@@ -2122,6 +2122,26 @@ fn write_tblastx_outputs(
     // diagnostics at every format.
     let mut warning_lines = Some(run.warnings);
     let observer = &mut outputs.observer;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
+    // ```c++
+    //     // find the first valid context corresponding to this query
+    //     for (i = 0; i < context_per_query; i++) {
+    //         BlastContextInfo *ctx = query_info->contexts +
+    //                                 query_number * context_per_query + i;
+    //         if (ctx->is_valid) {
+    //             m_SearchSpace = ctx->eff_searchsp;
+    //             m_LengthAdjustment = ctx->length_adjustment;
+    //             break;
+    // ```
+    // The statistics of each query for the observer, the values of the XML reports.
+    if let Some(observer) = observer.as_deref_mut() {
+        for (q_idx, stats) in run.query_stats.iter().enumerate() {
+            observer.query_stats(
+                run.queries_before + q_idx,
+                super::super::blast_xml::query_stats(stats, run.numbers),
+            );
+        }
+    }
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(&output_formats).enumerate()
     {
@@ -2729,6 +2749,19 @@ fn run_in_pool(
     batch_size: u32,
 ) -> Result<()> {
     check_report_formats(outputs, args.out.as_deref())?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
+    // ```c++
+    //         formatter.PrintProlog();
+    //         ...
+    //         /*** Process the input ***/
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    //         ...
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    // ```
+    // What the run writes before its query batches ends here.
+    if let Some(observer) = outputs.observer.as_deref_mut() {
+        observer.queries_begin();
+    }
     let query_records = query_runs.records;
     let input = query_runs.input;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
@@ -3571,7 +3604,7 @@ fn run_batch_loop(
             }
             warnings[index].extend(crate::report::query_warnings::query_warning(
                 "tblastx",
-                input.ordinal(index),
+                reports.args.first_query_ordinal + input.ordinal(index),
                 query,
                 &messages,
             ));

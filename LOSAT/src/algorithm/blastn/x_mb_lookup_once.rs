@@ -554,8 +554,9 @@ impl Fill<'_, '_, '_> {
     ///
     /// SAFETY: `a < parts`, no other job of the phase uses reader `a`'s region, row or marks, and
     /// the span has at most `shape.half` positions (`s1 - s0 <= half`): each caller's `span` cuts a
-    /// chunk of at most `chunk.min(total)` positions into `parts`, at most `ceil(chunk / parts)`
-    /// each, and `Shape::new(chunk.min(total), parts)` rounds that up.
+    /// chunk of `L <= chunk.min(total)` positions into `parts` spans of at most `ceil(L / parts)`
+    /// positions (`floor(L(a+1)/P) - floor(La/P) <= ceil(L/P)`), and the `half` of
+    /// `Shape::new(chunk.min(total), parts)` is `ceil(chunk.min(total) / parts)` rounded up.
     unsafe fn read<const MARK: bool, const H24: bool>(&self, a: usize, s0: usize, s1: usize) {
         let words = self.words;
         let lut_word_length = words.lut_word_length;
@@ -1168,7 +1169,7 @@ fn fill_chunked(
                 unsafe { fill.link_any(h24, a) };
             }
             let (s0, s1) = span(current, a);
-            // Reader `a < parts` reads its span of chunk `current` (`chunk.min(total)` positions).
+            // Reader `a < parts` reads its span of chunk `current` (at most `chunk.min(total)`).
             // SAFETY: the reader is this job's (all phases); the span fits `shape.half` (`read`).
             match (mark, h24) {
                 (true, true) => unsafe { fill.read::<true, true>(a, s0, s1) },
@@ -1188,6 +1189,9 @@ fn fill_chunked(
                     })
                 })
                 .collect();
+            // SAFETY: toucher `j < parts` alone uses slot `j` of `touched` (all phases); the round
+            // runs between phase A and the first phase B, on the zeroed `hashtable`, and `marked`
+            // (the OR of the readers' marks) holds pages of `hashtable` only (`Fill::prefault`).
             run_phase(&mut clock, PREFAULT_PHASE, parts, in_pool, |j| unsafe {
                 if h24 {
                     fill.prefault::<true>(j, &marked)

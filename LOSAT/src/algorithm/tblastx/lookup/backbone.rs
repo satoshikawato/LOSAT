@@ -3289,6 +3289,8 @@ mod tests {
         broken.backbone[0].num_used = AA_HITS_PER_CELL as i32 + 1;
         broken.backbone[0].entries[0] = broken.overflow.len() as i32;
         assert!(read(&broken, 0).is_err());
+        broken.backbone[0].num_used = -1;
+        assert!(read(&broken, 0).is_err());
     }
 
     // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:222-244 DebruijnSequenceTest

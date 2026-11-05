@@ -1,6 +1,6 @@
 # LOSAT ライブラリ化計画（公開面の設計メモ）
 
-状態：**LIB-1 は `dev` に入った（#845）。段階 1（公開面を固める）を実装中（PR `feature/library-api-values` → `dev`、2026-11-05）。** 設計メモは LIB-0（2026-10-31、保守者「OK」）。v0.2.0 自体は crates.io に出さない（release の決定 5、2026-10-25）。LIB-1 で決めたことは §9、順番の変更と段階 1 で決めたことは §10。
+状態：**LIB-1 は `dev` に入った（#845）。段階 1（公開面を固める、#846）と段階 2（結果と実行制御、PR `feature/library-api-batches`）を実装中（2026-11-05）。** 設計メモは LIB-0（2026-10-31、保守者「OK」）。v0.2.0 自体は crates.io に出さない（release の決定 5、2026-10-25）。LIB-1 で決めたことは §9、順番の変更と段階 1 で決めたことは §10、段階 2 は §11。
 
 | 項目 | 内容 |
 |---|---|
@@ -315,7 +315,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 
 残ること：
 
-- BLASTX の `run_local` は outfmt 0、6、7 だけで、ほかは `not supported in the browser` と断る。`api` からの文言としては変なので、`pylosat` の前に CLI の format へ広げるか文言を直す。
+- BLASTX の `run_local` は outfmt 0、6、7 だけで、ほかは `not supported in the browser` と断る（段階 2 で広げた、§11.1）。
 - `HspRecord` は `pident` を持たない。`100 * num_ident / length` で、印字は報告の列を読む。
 - `Outcome` の型付きの結果だけが欲しい呼び出しでも、報告を 1 つ要求し整列行を描く（文書の「計算段階」。後回し）。
 
@@ -323,3 +323,47 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 
 - 関門のテストは `LOSAT/tests/library_api.rs`：5 program の 13 検索（`-query_loc`、`-subject_loc`、minus 鎖を含む）の全 HSP で、`length nident positive mismatch gapopen gaps qlen slen qstart qend sstart send qframe sframe sstrand score bitscore evalue` の列と `HspRecord` が一致し、`query_range` と `subject_range` が整列行の文字と一致する。統計は CLI の outfmt 5 の `Statistics` と query ごとに一致する（バッチに分かれる入力、BLASTP の block の経路、有効な context が無い query、`-query_loc` が飛ばす query を含む）。
 - CLI の出力バイトは `fast output regressions`（CI）。full tier は保守者の機で（§9.3 と同じ）。
+
+## 11. 段階 2：結果と実行制御（2026-11-05、PR `feature/library-api-batches`）
+
+基点は段階 1 の `feature/library-api-values`。
+
+### 11.1 公開面に足したもの
+
+| 項目 | 実装 | 理由 |
+|---|---|---|
+| ビュー | `Outcome::queries()`、`Outcome::query(q_idx)`、`Batch::queries()` が `QueryHits`（`q_idx`、`stats`、`hsps`）を返し、`QueryHits::subjects()`、`QueryHits::subject(s_idx)` が `SubjectHits`（`q_idx`、`s_idx`、`hsps`）を返す。`hsps` の範囲でコピーしない | NCBI の `CSearchResultSet::operator[]` と `GetResults(qi, si)`。hit list は query の順で、query の中で subject ごとに隣接する（全ケースをテストで固定） |
+| 逐次返却 | `run_batches(search, inputs) -> Batches`。`Batches` は `Iterator<Item = Result<Batch, Error>>` で、`next` が 1 バッチを検索する。`Batch` は `query_indices`（inputs の添字の範囲）、`hsps`、`query_stats`、`diagnostics` | 結果を 1 バッチ分ずつ持てばよい。NCBI の `for (; !input.End(); ...)` そのもの |
+| 進捗と中断 | `Batch::query_indices` と `Batches::query_count()` が進捗で、次を求めなければ止まる（iterator を捨てる）。callback は無い | Python の generator にそのまま写る。Ctrl-C は `next` の間に効く（§10.1 の決定 1）。バッチの中は止まらない |
+| 型付きのみ | `run_batches` の対象は `HspRecord` と `QueryStats` だけ。報告は無い | outfmt 0 と 7 は run 全体の頭と尾を持つ |
+| オプションの型 | `Parameter::value_kind: ValueKind`（`Flag`、`Boolean`、`Integer`、`Real`、`Path`、`Text`）。parser が作る型から決める | NCBI の `CArgDescriptions::EType`。Python の引数と型スタブをここから作る |
+| `-parse_deflines` | `read_inputs(search, query, subject)` が `(query, subject)` の records を返す。subject を先に、id の scope を共有して読む。`validate` は受け付ける（BLASTX を除く）。`read_fasta` の records で走らせると `Error::Argv` | scope は 1 組の入力のものなので、`Search` には持たせない。NCBI も subject を先に読む |
+| BLASTX の format | `run_local` が outfmt 5、8、9、10、12、15、16、20 も書く（CLI の writer）。断るのは 11 と 13、14 だけで、文言から `in the browser` を除いた | 「各報告は CLI のバイトと同じ」の約束を BLASTX でも守る。LOSAT Web は adapter が 0、6、7 に絞る |
+
+### 11.2 文書の見込みとの違い
+
+文書は「`run_batches` はエンジンを変えず、バッチごとに `run_local` を呼ぶだけで作れる」としたが、3 点で足りなかった。
+
+1. **run の警告がバッチごとに繰り返される。** subject の reader の警告、`Subject sequence contains no data`、オプションの警告（`-max_target_seqs 1` など）は `run_local` の頭で毎回書かれる。CLI は 1 回。`FormatObserver::queries_begin`（既定は何もしない）で run の分の終わりを教え、2 番目以降のバッチではそこまでを捨てる。
+2. **BLASTN のバッチの大きさは固定でない。** `CBatchSizeMixer` が直前のバッチの extension 数から次の大きさを決める（`blastn_app.cpp:261-300`）。バッチが違えば lookup table の選び方も変わりうるので、CLI と同じ境界にする。`QueryBatchSizes`（`blast_engine/run.rs`）が同じ計算をし、`FormatObserver::batch_extensions` で各バッチの数を受け取る。入れ子の `run_local` が自分の mixer で切り直さないよう、`BlastnArgs::one_query_batch`（`#[arg(skip)]`、CLI は設定しない）で渡した records を 1 バッチにする。
+
+3. **警告の `Query_N` は入力全体の番号。** BLASTN、BLASTP、TBLASTN、TBLASTX の警告は query の位置から番号を作るので、入れ子の `run_local` ではバッチの中の番号になる。各 program の引数に `first_query_ordinal`（`#[arg(skip)]`、CLI では 0。NCBI の `SetLocalIdCounterInitValue` に当たる）を足した。BLASTX の警告は record の id を使うので要らない。
+
+どれも observer があるとき、または `run_batches` からのときだけ値が変わり、CLI の経路の出力は変わらない。
+
+### 11.3 残ること
+
+- バッチごとに `run_local` を 1 回呼ぶので、subject の準備もバッチごとにやり直す。文書の測定では 20 分割で 0.75 s が 0.87 s。`-db` の後で測り直す（再利用状態の項）。
+- BLASTX の `-parse_deflines`：`run_local` が records の id を持ち越さない（`blastx_record`）。
+- `Batches` は `Search` と records を借りる。`pylosat` の generator は所有する形を要するかもしれない（段階 3 で決める）。
+
+### 11.4 検証
+
+`LOSAT/tests/library_api.rs`：
+
+- `run_batches` の `hsps`、`query_stats`、`diagnostics` を連結すると `run_collect` の値と全項目で一致する。5 program の 13 検索と、バッチに分かれるコピー入力（BLASTN は `-task blastn`、BLASTP は 2 ブロック分）で。
+- run の警告は 5 program とも 1 回だけ（`-max_target_seqs 1` と残基のない subject）。
+- BLASTN のバッチ数は、全 query の検索が engine から報告する数と一致する（`blastn`、`megablast`）。
+- 全 HSP が `queries()` と `subjects()` のちょうど 1 か所に、hit list の順で現れる。
+- `-parse_deflines` の報告（outfmt 6、0、7）が CLI とバイト一致する（BLASTN、BLASTP、TBLASTN、TBLASTX）。
+- outfmt 5、8、9、10、12、15、16、20 の報告が 5 program で CLI とバイト一致する。

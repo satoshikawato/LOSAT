@@ -537,6 +537,17 @@ pub struct BlastpArgs {
     /// (`PSI_INCLUSION_ETHRESH`, which blastp's options have too).
     #[arg(skip)]
     pub inclusion_ethresh: Option<f64>,
+    // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
+    // ```c++
+    //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
+    //     ...
+    //     void SetLocalIdCounterInitValue(int val) { m_LocalIdCounter = val; }
+    // ```
+    // The position in the whole input of the first of these records, as a reader's counter
+    // starts there (`api::run_batches`): a query's `Query_N` in the messages. 0 on the command
+    // line, whose records are the whole input.
+    #[arg(skip)]
+    pub first_query_ordinal: usize,
 }
 
 // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:381-402
@@ -726,6 +737,8 @@ pub struct ResolvedBlastpArgs {
     /// The inclusion threshold (`psi_options->inclusion_ethresh`): psiblast's
     /// `-inclusion_ethresh`, or `PSI_INCLUSION_ETHRESH`.
     pub inclusion_ethresh: f64,
+    /// `BlastpArgs::first_query_ordinal`.
+    pub first_query_ordinal: usize,
     /// `traceback_hitlist_size`, computed once (psiblast's reads `ADAPTIVE_CBS`).
     traceback_hitlist: usize,
     /// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search whose custom tabular
@@ -1129,6 +1142,7 @@ impl BlastpArgs {
             query_range,
             outfmt: self.outfmt.clone(),
             archive: self.archive.clone(),
+            first_query_ordinal: self.first_query_ordinal,
             app: self.app,
             inclusion_ethresh: self
                 .inclusion_ethresh

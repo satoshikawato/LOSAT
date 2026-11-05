@@ -311,6 +311,17 @@ pub struct TblastxArgs {
     /// give no search path: not found, DECISIONS 7 of line CLI C2). Not a public option.
     #[arg(skip)]
     pub tabular_taxdb: Option<bool>,
+    // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
+    // ```c++
+    //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
+    //     ...
+    //     void SetLocalIdCounterInitValue(int val) { m_LocalIdCounter = val; }
+    // ```
+    // The position in the whole input of the first of these records, as a reader's counter
+    // starts there (`api::run_batches`): a query's `Query_N` in the messages. 0 on the command
+    // line, whose records are the whole input.
+    #[arg(skip)]
+    pub first_query_ordinal: usize,
 }
 
 /// What NCBI's score block makes of the `-matrix` name of an ungapped search.

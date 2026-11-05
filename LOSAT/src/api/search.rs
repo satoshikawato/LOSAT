@@ -34,12 +34,6 @@ use crate::cli::{Cli, Commands};
 /// (arguments of `run_collect` and `run`).
 pub const API_OWNED: &[&str] = &["query", "subject", "db", "out", "outfmt"];
 
-/// Options that the library API rejects with a reason of its own.
-const API_REJECTED: [(&str, &str); 1] = [(
-    "parse_deflines",
-    "records are read before the options are known (`read_fasta`), so their ids cannot be parsed",
-)];
-
 /// A program and an argv that the command line's parser accepted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Search {
@@ -56,6 +50,18 @@ impl Search {
     /// The argv as given: the options after the program name.
     pub fn argv(&self) -> &[String] {
         &self.argv
+    }
+
+    /// Whether the search's argv has `-parse_deflines` (`read_inputs`).
+    pub(crate) fn parse_deflines(&self) -> bool {
+        match self.command("query", "subject") {
+            Commands::Blastp(args) => args.parse_deflines,
+            Commands::Tblastn(args) => args.parse_deflines,
+            Commands::Blastn(args) => args.parse_deflines,
+            Commands::Tblastx(args) => args.parse_deflines,
+            Commands::Blastx(args) => args.parse_deflines,
+            Commands::Psiblast(_) | Commands::Makedb(_) => false,
+        }
     }
 
     /// The parsed arguments of the search with the inputs named `query` and `subject` (the
@@ -93,8 +99,8 @@ fn parse(program: Program, argv: &[String], query: &str, subject: &str) -> Resul
 /// option means, and fails, exactly as there; the error is the parser's message.
 ///
 /// The library API sets the inputs and the outputs itself, so `-query`, `-subject`, `-db`,
-/// `-out` and `-outfmt` are refused (`API_OWNED`), as is `-parse_deflines` (the records are
-/// read before the options are known). The checks of the options that the command line makes
+/// `-out` and `-outfmt` are refused (`API_OWNED`). BLASTX's in-memory entry does not take
+/// `-parse_deflines` yet. The checks of the options that the command line makes
 /// before it searches (ranges, scoring, the hit list size of each format) come with `run` and
 /// `run_collect`, which know the formats and the inputs, and report them with the command
 /// line's messages.
@@ -110,9 +116,9 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
                 "{key} is not accepted by the library API: the inputs are given as records and the outputs as formats"
             )));
         }
-        if let Some((_, reason)) = API_REJECTED.iter().find(|(flag, _)| *flag == name) {
+        if program == Program::Blastx && name == "parse_deflines" {
             return Err(Error::Argv(format!(
-                "{key} is not supported by the library API yet: {reason}"
+                "{key} is not supported by the library API for BLASTX yet"
             )));
         }
     }
@@ -170,13 +176,16 @@ mod tests {
             );
             assert!(error.message().starts_with(key(word)), "{word}: {error}");
         }
-        let error = validate(Program::Blastp, &["-parse_deflines"]).unwrap_err();
+        let error = validate(Program::Blastx, &["-parse_deflines"]).unwrap_err();
         assert!(
             error
                 .message()
-                .contains("not supported by the library API yet"),
+                .contains("not supported by the library API for BLASTX yet"),
             "{error}"
         );
+        assert!(validate(Program::Blastp, &["-parse_deflines"])
+            .unwrap()
+            .parse_deflines());
         // A value that looks like an option is a value.
         validate(Program::Blastp, &["-matrix", "BLOSUM62"]).unwrap();
     }

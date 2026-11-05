@@ -28,6 +28,7 @@
 
 use super::error::Error;
 use super::program::Program;
+use super::search::Search;
 use crate::blastinput::fasta_reader::{read_all, FastaInputSource, FastaRecord, ReaderConfig};
 
 /// Which input of a search a FASTA holds. The reader's flags and the generated local IDs
@@ -99,18 +100,54 @@ fn reader_config(program: Program, role: Role) -> ReaderConfig {
 /// a search of the records is the command line's search of the file. An input of white space
 /// only has no record. A reader error is the command line's message (`Error::Input`).
 pub fn read_fasta(program: Program, role: Role, bytes: &[u8]) -> Result<Vec<FastaRecord>, Error> {
-    let config = reader_config(program, role);
-    read_all(
-        &mut FastaInputSource::from_bytes(bytes, config),
-        &mut |_| Ok(()),
-    )
-    .map_err(|error| {
+    read_source(FastaInputSource::from_bytes(
+        bytes,
+        reader_config(program, role),
+    ))
+}
+
+/// Reads every record of an input source; a reader error is the command line's message.
+fn read_source<R: std::io::Read>(
+    mut source: FastaInputSource<R>,
+) -> Result<Vec<FastaRecord>, Error> {
+    read_all(&mut source, &mut |_| Ok(())).map_err(|error| {
         Error::Input(
             format!("{:#}", error.into_app_error())
                 .trim_end_matches('\n')
                 .to_string(),
         )
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:188-207
+// ```c++
+//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+//                           db_adapter, scope);
+//         ...
+//         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
+// ```
+/// Reads the query and subject FASTA bytes of `search`, as the command line reads its `-query`
+/// and `-subject` files: the records that `read_fasta` gives, and with `-parse_deflines` in the
+/// search's argv the ids of their deflines. The subjects come first, in one scope of ids with the
+/// queries, as NCBI reads them: a query and a subject with one id are one sequence to the reports.
+///
+/// A search with `-parse_deflines` takes its records from here. Returns `(query, subject)`.
+pub fn read_inputs(
+    search: &Search,
+    query: &[u8],
+    subject: &[u8],
+) -> Result<(Vec<FastaRecord>, Vec<FastaRecord>), Error> {
+    let parse_deflines = search.parse_deflines();
+    let scope = parse_deflines.then(Default::default);
+    let read = |role: Role, bytes: &[u8]| {
+        let config = reader_config(search.program(), role).with_parse_deflines(parse_deflines);
+        let mut source = FastaInputSource::from_bytes(bytes, config);
+        source.set_id_scope(scope.clone());
+        read_source(source)
+    };
+    let subject = read(Role::Subject, subject)?;
+    let query = read(Role::Query, query)?;
+    Ok((query, subject))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-799

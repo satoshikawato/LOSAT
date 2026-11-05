@@ -568,6 +568,14 @@ impl FormatObserver for XOffsetObserver<'_> {
     fn query_stats(&mut self, q_idx: usize, stats: crate::report::blast_xml::XmlStats) {
         self.inner.query_stats(self.first_query + q_idx, stats);
     }
+
+    fn queries_begin(&mut self) {
+        self.inner.queries_begin();
+    }
+
+    fn batch_extensions(&mut self, extensions: i32) {
+        self.inner.batch_extensions(extensions);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-287

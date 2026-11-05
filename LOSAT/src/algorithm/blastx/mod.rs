@@ -485,6 +485,8 @@ pub mod native;
 // LOSAT Web's entry (web ABI v2): one search, every requested output format.
 mod local;
 pub use local::{check_options, run_local};
+/// The default size of a query batch, in letters (`GetQueryBatchSize`).
+pub(crate) use query_setup::BATCH_SIZE as QUERY_BATCH_SIZE;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
 // ```c++

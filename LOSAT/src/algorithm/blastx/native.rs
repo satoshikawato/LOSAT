@@ -1172,7 +1172,7 @@ pub(super) fn reported_batch(
     search_subjects: Subjects<'_>,
     options: &super::args::ResolvedOptions,
     asks: ReportedAsks,
-    results: &mut Vec<BatchResults>,
+    results: &mut [BatchResults],
     diagnostics: &mut dyn Write,
     held: Option<&super::blast_xml::HeldOutput>,
 ) -> Result<ReportedSubjects> {
@@ -1867,7 +1867,7 @@ pub(super) fn run_query_batches(
         // With 2+ threads one pool is built for the whole run and every batch is searched on
         // it. Reuse of threads only.
         crate::utils::xreach::x_reach!("LOSAT_X_BXPOOL", options.num_threads > 1);
-        let x_batches = if options.num_threads > 1 {
+        if options.num_threads > 1 {
             // A pool that cannot be built is the engine error it was when each
             // batch built its own.
             match crate::utils::threading::x_with_search_pool_local(
@@ -1887,8 +1887,7 @@ pub(super) fn run_query_batches(
             }
         } else {
             x_run_batches(None)
-        };
-        x_batches
+        }
     };
     x_batches?;
     super::x_timing::run(XRun::Loop, x_t_loop);

@@ -1073,7 +1073,7 @@ fn read_up_to<R: Read>(r: &mut R, buf: &mut [u8]) -> usize {
 }
 
 fn skip_bytes<R: Read>(r: &mut R, n: u64) -> bool {
-    std::io::copy(&mut r.take(n), &mut std::io::sink()).map_or(false, |got| got == n)
+    std::io::copy(&mut r.take(n), &mut std::io::sink()).is_ok_and(|got| got == n)
 }
 
 /// The reads of NCBI's readers on one `CNcbiIfstream`: a read that comes up short sets

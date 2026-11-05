@@ -604,7 +604,7 @@ impl Fill<'_, '_, '_> {
                     // SAFETY: reader `a`'s bits; the pages are `hashtable`'s (the element's bytes
                     // lie in its words).
                     unsafe {
-                        marks.mark(a, (cells + (3 * cell >> 2)) >> PAGE_ELEMS_SHIFT);
+                        marks.mark(a, (cells + ((3 * cell) >> 2)) >> PAGE_ELEMS_SHIFT);
                         marks.mark(a, (cells + ((3 * cell + 2) >> 2)) >> PAGE_ELEMS_SHIFT);
                     }
                 } else if MARK {
@@ -2031,7 +2031,7 @@ mod tests {
     // chunks are `ceil(positions / chunk)`.
     #[test]
     fn once_fill_builds_the_loops_tables() {
-        let mut rng = Lcg(0x0E_CE_5EED);
+        let mut rng = Lcg(0x0ECE_5EED);
         let mut multi_chunk = 0;
         for case in 0..40 {
             let c = Case::random(&mut rng, case % 2 == 1);

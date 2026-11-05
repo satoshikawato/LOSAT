@@ -910,8 +910,8 @@ fn generated_line(rng: &mut Rng, out: &mut Vec<u8>) {
     ];
     const RESIDUES: &[u8] = b"ACGTACGTACGTNacgtnURYE*-;  1x\t";
     match rng.below(10) {
-        0 | 1 => out.extend_from_slice(*rng.pick(&DEFLINES)),
-        2 | 3 => out.extend_from_slice(*rng.pick(&OTHER)),
+        0 | 1 => out.extend_from_slice(rng.pick::<&[u8]>(&DEFLINES)),
+        2 | 3 => out.extend_from_slice(rng.pick::<&[u8]>(&OTHER)),
         _ => {
             for _ in 0..rng.below(90) {
                 out.push(*rng.pick(RESIDUES));
@@ -941,7 +941,7 @@ fn generated_input(rng: &mut Rng, large: bool) -> Vec<u8> {
         }
         if rng.below(if large { 60 } else { 8 }) == 0 {
             // An embedded line end of another style inside the line.
-            text.extend_from_slice(*rng.pick(&LINE_ENDS));
+            text.extend_from_slice(rng.pick::<&[u8]>(&LINE_ENDS));
             for _ in 0..rng.below(40) {
                 text.push(*rng.pick(b"ACGT-"));
             }

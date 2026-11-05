@@ -1379,8 +1379,8 @@ where
     // return ((ext_max == ext_to) ? 2 : 1);
     // ```
     if double_ext_max == double_ext_to {
-        return (2, extended, q_off_adjusted, s_off_adjusted);
+        (2, extended, q_off_adjusted, s_off_adjusted)
     } else {
-        return (1, extended, q_off_adjusted, s_off_adjusted);
+        (1, extended, q_off_adjusted, s_off_adjusted)
     }
 }

@@ -2669,7 +2669,7 @@ pub(crate) fn read_reported_taxonomy(
     let mut asked: std::collections::BTreeMap<i32, HitTaxonomy> = Default::default();
     // The lookup of a `Hit` description (`CSeqDB::GetTaxInfo`).
     let mut hit_lookup = |taxid: i32| -> Result<HitTaxonomy> {
-        if !asked.contains_key(&taxid) {
+        if let std::collections::btree_map::Entry::Vacant(slot) = asked.entry(taxid) {
             let mut messages = Vec::new();
             let found = taxdb
                 .names(taxid, &mut messages)
@@ -2689,7 +2689,7 @@ pub(crate) fn read_reported_taxonomy(
                 }
                 None => HitTaxonomy::NotFound(messages),
             };
-            asked.insert(taxid, answer);
+            slot.insert(answer);
         }
         Ok(asked[&taxid].clone())
     };
@@ -3261,9 +3261,9 @@ pub(crate) fn taxdb_may_refuse(db: &SeqDb, names: bool) -> bool {
     let sequences = u64::from(db.num_seqs());
     // An index that cannot be opened is left to the database side, which asks for a name only
     // when a sequence has a taxid.
-    let taxdb_first = taxdb.entry_count().map_or(false, |entries| {
-        entries <= TAXDB_ENTRIES_PER_SEQUENCE * sequences
-    });
+    let taxdb_first = taxdb
+        .entry_count()
+        .is_ok_and(|entries| entries <= TAXDB_ENTRIES_PER_SEQUENCE * sequences);
     if taxdb_first {
         if taxdb_side(&taxdb, names) == Some(false) {
             return false;

@@ -2007,7 +2007,7 @@ impl SeqDb {
             .copied()
             .collect();
         let rule = if negative {
-            (!found.is_empty()).then(|| DeflineRule::NegativeTaxids(found))
+            (!found.is_empty()).then_some(DeflineRule::NegativeTaxids(found))
         } else {
             Some(DeflineRule::Taxids(found))
         };

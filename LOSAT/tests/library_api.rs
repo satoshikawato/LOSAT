@@ -333,7 +333,10 @@ fn the_reports_and_the_diagnostics_are_the_command_lines() {
         }
     }
     assert!(shown_links > 0, "a case with linked HSPs");
-    assert!(shown_methods > 0, "a case with composition-based statistics");
+    assert!(
+        shown_methods > 0,
+        "a case with composition-based statistics"
+    );
     // The warnings case has warnings, so the comparison above checked them.
     let case = &CASES[WARNINGS_CASE];
     let outcome = api(case, &fixture(case.query), &fixture(case.subject), &[]);

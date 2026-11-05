@@ -60,7 +60,7 @@
 | SFd | [E2h の続き：最後のコミットでのゲート、Gate A、V-PERF、修正の再監査、終了](session_sfd_e2h_final_gate.md) | E2h | SF の行と同じ | 未着手（エンジン側の次。アプリ側の S13b と並行できる） |
 | S13+ | [subject ごとの集約の値と HSP の鎖](session_s13p_e2j_subject_aggregates.md) | E2j | NCBI の `align_format` の集約の値と HSP の鎖が ABI v2 で NCBI と同じ（S13 の判断 1〜3） | 未着手（エンジン側、SF の後。S13 の判断 1〜3 は保守者の確認待ち） |
 | S09+ | [TBLASTN の subject の前処理](session_s09p_r2_tblastn_subject_cache.md)（条件付き） | R2 | DW-8 の条件を TBLASTN が満たした（S09）。連続実行の出力が CLI と一致 | 未着手（エンジン側、SF の後。進め方は保守者が決めた：翻訳の表引きを先にし、20% 未満ならキャッシュは入れない。DW-22） |
-| SX | [BLASTX の統合](session_sx_blastx_integration.md)（条件付き） | SX | LOSATX の v0.2.0 の認証が `main` に入った後の最初の区切りで実施。S17 の前に必ず終える | 条件待ち |
+| SX | [BLASTX の統合](session_sx_blastx_integration.md)（条件付き） | SX | LOSATX の v0.2.0 の認証が `main` に入った後の最初の区切りで実施。S17 の前に必ず終える | 完了（2026-11-03、線 SX。#731 SXa BLASTX の `run_local`、#734 SXc Web で BLASTX を選べる、#749 SXd3 Web で `-query_loc` / `-subject_loc`、#760 SXd2 その範囲を outfmt 5・8・9・11〜16 にも。条件の「`main` に入った後」は待たず、`dev` で行った。期待値は `docs/web/verification_cells.tsv` の SXa〜SXd3） |
 | S17 | [公開判定](session_s17_g_release_decision.md) | G | 初期の要求に未達が無い | 未着手 |
 
 1 つのセッションで段階を終えられないときは、続きを同じ段階の次のセッション（例：S07b）とし、この表に行を足す。条件付きのセッション（S09+、SX）は、条件が満たされた後の最初のセッションの区切りで実行する。

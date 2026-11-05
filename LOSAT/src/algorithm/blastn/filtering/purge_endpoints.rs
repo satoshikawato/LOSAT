@@ -2050,6 +2050,9 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
                                     let s_code = (s & 0x0f) as usize;
                                     // NCBI kResidueMask = 0x0f -> indices 0..15
                                     // Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:510-511
+                                    // SAFETY: `q_code` and `s_code` are `& 0x0f`, so the index
+                                    // `q_code * 16 + s_code` is at most 255, inside `matrix`
+                                    // (`&[i32; BLASTNA_SIZE * BLASTNA_SIZE]`, 256 entries).
                                     let score = unsafe {
                                         *matrix.get_unchecked(q_code * BLASTNA_SIZE + s_code)
                                     };

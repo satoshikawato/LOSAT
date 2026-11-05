@@ -13,6 +13,9 @@ first differing line of a difference, and exits 1 on any difference.
 A row whose `files` column is `xinclude` (outfmt 13 or 14) runs with `-out <tmp>/<fixture_id>.out`;
 its master file must equal <fixture_id>.out, each side file <fixture_id>.out_<n>.json|xml, their
 number the frozen number, and standard output must be empty (LOSAT/tests/xinclude_fixtures.py).
+A psiblast row whose `files` column is `pssm` runs with `-out_ascii_pssm <tmp>/<fixture_id>.pssm`;
+its report is compared as usual, and the PSSM files it writes must be the frozen ones byte for byte
+(none when `side_sha256` is empty).
 
 A row with the contract `approved_db_gencode_deviation` (AGENTS.md's approved TBLASTX
 exception: LOSAT's local search applies a non-default -db_gencode to the subject) is
@@ -87,9 +90,13 @@ def main() -> int:
         threads = ["-num_threads", str(args.threads)] if args.threads else []
         command = [str(args.losat.resolve()), row["program"], *search_argv(row), *threads]
         files = xinclude.wants_files(row)
+        pssm = xinclude.wants_pssm(row)
         if files:
             written = xinclude.run_with_files(command, row["fixture_id"], outfmt(row), cwd=ENGINE)
             run = written.run
+        elif pssm:
+            pssms = xinclude.run_with_pssm(command, row["fixture_id"], cwd=ENGINE)
+            run = pssms.run
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True)
         expected_err_path = FIXTURES / f"{row['fixture_id']}.err"
@@ -116,6 +123,8 @@ def main() -> int:
             problems.append("stdout " + first_difference(expected_out, run.stdout))
         if run.returncode == 0 and run.stderr != expected_err:
             problems.append("stderr " + first_difference(expected_err, run.stderr))
+        if pssm:
+            problems += xinclude.pssm_problems(pssms, row, FIXTURES, first_difference)
         if problems:
             differing.append(row["fixture_id"])
         status = "DIFF" if problems else "same"

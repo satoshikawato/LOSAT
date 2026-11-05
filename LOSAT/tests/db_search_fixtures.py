@@ -4,7 +4,9 @@
 LOSAT/tests/db_search_manifest.tsv lists the rows (columns: row_id, program, kind, db, query, extra_args,
 outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers, and for the rows of outfmt 13 and 14 two more:
 files, side_sha256; xinclude_fixtures.py says what they mean: the run gets `-out <tmp>/<row_id>.out`, the frozen
-master is <row_id>.out, the side files <row_id>.out_<n>.json|xml; a row without them has 12 cells). Every row runs from LOSAT/ as
+master is <row_id>.out, the side files <row_id>.out_<n>.json|xml; a row without them has 12 cells; a psiblast row
+whose files column is `pssm` gets `-out_ascii_pssm <tmp>/<row_id>.pssm`, and the files it writes are frozen as
+<row_id>.pssm and <row_id>.pssm.<n>, listed in side_sha256, none when the cell is empty). Every row runs from LOSAT/ as
 `PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT`, PROGRAM being the row's `program` cell
 (`blastp`, `blastn`, `tblastn`, `blastx`, `tblastx` or `psiblast`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
 argument `-db ""`; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/); `outfmt` is one argument, so a custom
@@ -16,7 +18,8 @@ LOSAT/tests/db_search (README.md there says how they were built).
   LOSAT/tests/fixtures/db_search/<row_id>.out and <row_id>.err (only when stderr is not empty).
 - kind `losat-rejection`: NCBI is not run. LOSAT must exit with `rc`, write nothing to stdout, and
   its stderr must contain the text that follows `expect: ` in the `covers` cell (up to the end of
-  the cell or a ` | ` separator). The hash columns stay empty.
+  the cell or a ` | ` separator). The hash columns stay empty. A rejection row whose files column is
+  `pssm` must also write no PSSM file.
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
@@ -35,7 +38,8 @@ With `--library` BIN is `examples/library_database`, the same search through the
 failure's exit status counts as any other failure's, a row whose query the reader refuses is
 `library-input-error` when the message is the command line's (the library reads the whole query
 before it searches, so the reports of the batches before the error do not exist), and the rows that
-the API does not run (psiblast's, and outfmt 13 and 14 with their side files) are `library-skip`.
+the API does not run (psiblast's, outfmt 13 and 14 with their side files, and the PSSM files) are
+`library-skip`.
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
@@ -205,11 +209,18 @@ def freeze(args: argparse.Namespace) -> int:
             continue
         command = [str(Path(args.ncbi_bin) / row["program"]), *search_argv(row), "-num_threads", "1"]
         files = xinclude.wants_files(row)
+        pssm = xinclude.wants_pssm(row)
         if files:
             written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
                                               timeout=TIMEOUT, env=row_env(row, env))
             run = written.run
             xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
+        elif pssm:
+            pssms = xinclude.run_with_pssm(command, row["row_id"], cwd=ENGINE, timeout=TIMEOUT,
+                                           env=row_env(row, env))
+            run = pssms.run
+            xinclude.freeze_pssm(pssms, FROZEN, row["row_id"])
+            (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
                                  env=row_env(row, env))
@@ -223,8 +234,11 @@ def freeze(args: argparse.Namespace) -> int:
                    stderr_sha256=sha256(run.stderr) if run.stderr else "")
         if files:
             row.update(xinclude.observed(written))
+        if pssm:
+            row.update(xinclude.observed_pssm(pssms, row["row_id"]))
         print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(run.stdout)}\tstderr={len(run.stderr)}"
-              + (f"\tsides={len(written.sides)}" if files else ""))
+              + (f"\tsides={len(written.sides)}" if files else "")
+              + (f"\tpssm_files={len(pssms.files)}" if pssm else ""))
     write_manifest(comments, rows)
     return 0
 
@@ -237,13 +251,18 @@ def status_differs(observed: int, expected: int, library: bool) -> bool:
 
 def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False) -> tuple[str, str]:
     files = xinclude.wants_files(row)
-    if library and (files or row["program"] == "psiblast"):
+    pssm = xinclude.wants_pssm(row)
+    if library and (files or pssm or row["program"] == "psiblast"):
         return "library-skip", ""
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     if files:
         written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
                                           env=row_env(row, env), timeout=TIMEOUT)
         run = written.run
+    elif pssm:
+        pssms = xinclude.run_with_pssm(command, row["row_id"], cwd=ENGINE, env=row_env(row, env),
+                                       timeout=TIMEOUT)
+        run = pssms.run
     else:
         run = subprocess.run(command, cwd=ENGINE, capture_output=True, env=row_env(row, env), timeout=TIMEOUT)
     if row["kind"] == "losat-rejection":
@@ -256,6 +275,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
         if expected_text(row).encode() not in run.stderr:
             problems.append(f"stderr lacks {expected_text(row)!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
+        if pssm and (pssms.files or pssms.stray):
+            problems.append(f"a refused run wrote {[name for name, _ in pssms.files] + pssms.stray}")
         return ("differs", "; ".join(problems)) if problems else ("rejection", "")
     out = (FROZEN / f"{row['row_id']}.out").read_bytes()
     err_path = FROZEN / f"{row['row_id']}.err"
@@ -283,6 +304,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
             problems.append("stdout " + first_difference(expected_out, observed_out))
     if run.stderr != err:
         problems.append("stderr " + first_difference(err, run.stderr))
+    if pssm:
+        problems += xinclude.pssm_problems(pssms, row, FROZEN, first_difference)
     return ("differs", "; ".join(problems)) if problems else ("same", "")
 
 

@@ -449,8 +449,8 @@ LOSAT stops with an error for each option and value below; it does not run somet
 **Strategy files**
 - `-import_search_strategy` and `-export_search_strategy`: all five programs.
 
-**psiblast** runs the first round only.
-- Refused: `-num_iterations` above 1, `-in_pssm`, `-out_pssm`, `-out_ascii_pssm`, `-save_each_pssm`, `-save_pssm_after_last_round`, `-in_msa`, `-msa_master_idx`, `-ignore_msa_master`, `-phi_pattern`, `-gap_trigger`, `-sum_stats`, `-culling_limit`, `-lcase_masking`, `-searchsp`, `-show_gis`, `-parse_deflines`, `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist`, `-no_taxid_expansion`, and `-outfmt` other than 0, 6, 7, 10 and 20.
+**psiblast** runs the first round only. With `-save_pssm_after_last_round -out_ascii_pssm FILE` (and `-save_each_pssm`) it writes the round's PSSM in NCBI's ASCII form.
+- Refused: `-num_iterations` above 1, `-in_pssm`, `-out_pssm`, `-in_msa`, `-msa_master_idx`, `-ignore_msa_master`, `-phi_pattern`, `-gap_trigger`, `-sum_stats`, `-culling_limit`, `-lcase_masking`, `-searchsp`, `-show_gis`, `-parse_deflines`, `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist`, `-no_taxid_expansion`, and `-outfmt` other than 0, 6, 7, 10 and 20.
 - It also refuses the `blastp` entries above that apply to it, and `-comp_based_stats 0`, `-word_size 2` and `4`, and every matrix and gap cost but BLOSUM62 with 11/1.
 
 **makeblastdb**

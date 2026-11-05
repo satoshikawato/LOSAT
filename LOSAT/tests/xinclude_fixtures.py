@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Fixture rows of `-outfmt 13` and `-outfmt 14` (BLAST JSON / XML2 side files and a master file).
+"""Fixture rows that write files: `-outfmt 13` and `-outfmt 14` (BLAST JSON / XML2 side files and a
+master file), and psiblast's ASCII PSSM (`-out_ascii_pssm`).
 
 An `-outfmt 13` or `14` run needs `-out FILE`: it writes the report of the n-th query to
 `<base>_<n>.json` / `<base>_<n>.xml` next to FILE and a master file at FILE that lists them
@@ -17,6 +18,14 @@ and `stdout_bytes`, the stdout of the run being empty), the side files as `<fixt
 A check compares the master, the number of side files and each side file, the empty standard output,
 standard error and the exit status.
 
+A row whose `files` column is `pssm` (psiblast's `-out_ascii_pssm`, line PS, PS2) runs with
+`-out_ascii_pssm <tmp>/<fixture_id>.pssm` added, with a fresh `<tmp>`. The run writes that file, or
+with `-save_each_pssm` the files `<fixture_id>.pssm.<n>`, or none. Its standard output, standard
+error and exit status are the row's as for a row without files. The files are frozen under their
+names, and `side_sha256` lists them as `<name without the fixture id>=<SHA-256>` (`.pssm=...`,
+`.pssm.1=...`), the file `.pssm` first and the numbered ones in order; an empty `side_sha256` is the
+expectation that the run writes no file. A check compares the names and the bytes of the files.
+
 This module has no manifest of its own: `run_oracle.py` / `check_losat.py` (outfmt 0 manifest) and
 `db_search_fixtures.py` call it.
 """
@@ -30,6 +39,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 XINCLUDE = "xinclude"
+PSSM = "pssm"
 FILES_COLUMNS = ["files", "side_sha256"]
 EXTENSIONS = {"13": "json", "14": "xml"}
 
@@ -38,12 +48,22 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def files_kind(row: dict[str, str]) -> str:
+    """The row's `files` column: empty, `xinclude` or `pssm`."""
+    files = row.get("files", "") or ""
+    if files not in ("", XINCLUDE, PSSM):
+        raise SystemExit(f"unknown files column {files!r} (empty, {XINCLUDE!r} or {PSSM!r})")
+    return files
+
+
 def wants_files(row: dict[str, str]) -> bool:
     """Whether the row is a run of outfmt 13 or 14 with side files (the `files` column)."""
-    files = row.get("files", "") or ""
-    if files not in ("", XINCLUDE):
-        raise SystemExit(f"unknown files column {files!r} (empty or {XINCLUDE!r})")
-    return files == XINCLUDE
+    return files_kind(row) == XINCLUDE
+
+
+def wants_pssm(row: dict[str, str]) -> bool:
+    """Whether the row is a psiblast run whose ASCII PSSM files are compared (the `files` column)."""
+    return files_kind(row) == PSSM
 
 
 def extension(outfmt: str) -> str:
@@ -162,6 +182,88 @@ def problems(result: Result, row: dict[str, str], frozen: Path, first_difference
         for n, (want, got) in enumerate(zip(expected_sides, result.sides), 1):
             if want != got:
                 out.append(f"side file {n} " + first_difference(want, got))
+    if result.stray:
+        out.append(f"unexpected files {result.stray}")
+    return out
+
+
+# --- psiblast's ASCII PSSM files (`files` = pssm) ------------------------------------------------
+
+
+@dataclass
+class PssmResult:
+    """A run with `-out_ascii_pssm`: the process, the files it wrote as (name, bytes) in the order of
+    `side_sha256`, and the names that do not belong."""
+
+    run: subprocess.CompletedProcess
+    files: list[tuple[str, bytes]]
+    stray: list[str] = field(default_factory=list)
+
+
+def pssm_files(directory: Path, row_id: str) -> tuple[list[tuple[str, bytes]], list[str]]:
+    """The PSSM files of `row_id` in `directory` (`<row_id>.pssm`, then `<row_id>.pssm.<n>` by n) and
+    the other names."""
+    base = f"{row_id}.pssm"
+    numbered = re.compile(re.escape(base) + r"\.([1-9][0-9]*)$")
+    found: list[tuple[int, str]] = []
+    stray = []
+    for path in directory.iterdir():
+        match = numbered.match(path.name)
+        if path.name == base:
+            found.append((0, path.name))
+        elif match:
+            found.append((int(match.group(1)), path.name))
+        else:
+            stray.append(path.name)
+    return [(name, (directory / name).read_bytes()) for _, name in sorted(found)], sorted(stray)
+
+
+def run_with_pssm(command: list[str], row_id: str, **kwargs) -> PssmResult:
+    """Runs `command` with `-out_ascii_pssm <tmp>/<row_id>.pssm` added and collects the files it wrote.
+    `kwargs` go to `subprocess.run` (cwd, env, timeout); the output is captured."""
+    with tempfile.TemporaryDirectory(prefix="losat_pssm_") as tmp:
+        directory = Path(tmp)
+        run = subprocess.run([*command, "-out_ascii_pssm", str(directory / f"{row_id}.pssm")],
+                             capture_output=True, **kwargs)
+        files, stray = pssm_files(directory, row_id)
+    return PssmResult(run, files, stray)
+
+
+def pssm_cell(files: list[tuple[str, bytes]], row_id: str) -> str:
+    """The `side_sha256` cell of PSSM files."""
+    return ",".join(f"{name.removeprefix(row_id)}={sha256(data)}" for name, data in files)
+
+
+def observed_pssm(result: PssmResult, row_id: str) -> dict[str, str]:
+    """The `side_sha256` column of a PSSM run."""
+    return {"side_sha256": pssm_cell(result.files, row_id)}
+
+
+def freeze_pssm(result: PssmResult, frozen: Path, row_id: str) -> None:
+    """Writes the PSSM files under their names; removes those of an older freeze."""
+    if result.stray:
+        raise SystemExit(f"{row_id}: unexpected files {result.stray}")
+    for old in frozen.glob(f"{row_id}.pssm*"):
+        old.unlink()
+    for name, data in result.files:
+        (frozen / name).write_bytes(data)
+
+
+def pssm_problems(result: PssmResult, row: dict[str, str], frozen: Path, first_difference) -> list[str]:
+    """What differs between a run's PSSM files and the frozen ones of `row` (empty: the same), and
+    whether the frozen files agree with `side_sha256`."""
+    row_id = row.get("fixture_id") or row["row_id"]
+    expected, _ = pssm_files(frozen, row_id) if frozen.is_dir() else ([], [])
+    out = []
+    if pssm_cell(expected, row_id) != row.get("side_sha256", ""):
+        out.append("frozen PSSM files do not match side_sha256")
+    names = [name for name, _ in result.files]
+    if names != [name for name, _ in expected]:
+        out.append(f"PSSM files {names}, expected {[name for name, _ in expected]}")
+    else:
+        for (name, want), (_, got) in zip(expected, result.files):
+            if want != got:
+                out.append(f"{name} " + first_difference(want, got))
     if result.stray:
         out.append(f"unexpected files {result.stray}")
     return out

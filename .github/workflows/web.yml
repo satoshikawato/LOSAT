@@ -223,8 +223,13 @@ jobs:
 
   # The check to require in the ruleset: it always runs and fails only if a job failed or was
   # cancelled (jobs skipped because no relevant file changed count as passed).
+  # Only the pull_request run carries that name. A push run of a branch that an open pull request
+  # covers skips every job (`changes`), so its gate passes within seconds, on the same commit, while
+  # the pull request's own gate has no check run until the jobs it needs end; the rulesets took the
+  # push run's for the pull request's. Auto-merge merged #843 at 03:16Z (2026-11-05) on the push
+  # run's pass of 02:49Z, though its `app` had failed at 02:59Z; its own gate failed at 03:37Z.
   result:
-    name: web result
+    name: ${{ github.event_name == 'pull_request' && 'web result' || 'web result (push)' }}
     if: always()
     needs: [changes, app, engine-web-api, adapter, browser-engine]
     runs-on: ubuntu-latest

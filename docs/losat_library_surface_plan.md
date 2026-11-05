@@ -1,6 +1,6 @@
 # LOSAT ライブラリ化計画（公開面の設計メモ）
 
-状態：**LIB-1 は `dev` に入った（#845）。段階 1（公開面を固める、#846）、段階 2（結果と実行制御、#849）、段階 3（`pylosat`、PR `feature/pylosat`）は PR 中（2026-11-05）。** 設計メモは LIB-0（2026-10-31、保守者「OK」）。v0.2.0 自体は crates.io に出さない（release の決定 5、2026-10-25）。LIB-1 で決めたことは §9、順番の変更と段階 1 で決めたことは §10、段階 2 は §11、段階 3 は §12。
+状態：**LIB-1 は `dev` に入った（#845）。段階 1（公開面を固める）は `dev` に入った（#846）。段階 2（結果と実行制御、#849）と段階 3（`pylosat`、#850）は積んだ PR が feature branch に merge されたので、1 本の PR で `dev` へ入れる（2026-11-05）。** 設計メモは LIB-0（2026-10-31、保守者「OK」）。v0.2.0 自体は crates.io に出さない（release の決定 5、2026-10-25）。LIB-1 で決めたことは §9、順番の変更と段階 1 で決めたことは §10、段階 2 は §11、段階 3 は §12。
 
 | 項目 | 内容 |
 |---|---|
@@ -420,5 +420,4 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 
 - 公開（段階 4）：wheel のマトリクス、release workflow、`cargo-semver-checks` と `cargo-public-api`。
 - gbdraw の製品判断：`pylosat` を runtime に入れるか、その順番と記録の形。
-- `panic = "unwind"` の経路はテストしていない（公開の API から panic を起こす手段が無い）。
-- release profile の build は段階 4 の wheel で確かめる。
+- `panic = "unwind"` の経路はテストしていない（公開の API から panic を起こす手段が無い）。release profile の build は通り、`python/tests` と gbdraw の比較はその build でも通る。

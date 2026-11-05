@@ -22,8 +22,8 @@ LOSAT_BIN=<losat> PYTHONPATH=. python compare_runtimes.py <empty directory>
 
 ## Results
 
-Dev builds on the machine of the stage 3 session, Rust 1.97.0, Python 3.13.18, LOSAT at the head of
-`feature/pylosat`:
+The extension in the dev and in the release profile, the executable in the dev profile, on the
+machine of the stage 3 session (Rust 1.97.0, Python 3.13.18), LOSAT at the head of the stage 3 work:
 
 | Scenario | SVG | Raw searches |
 |---|---|---|

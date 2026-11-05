@@ -1,0 +1,29 @@
+# BLASTP 2.17.0+
+# Query: q1
+# Database: tests/db_search/nz_p
+# Fields: query id, identical
+# 23 hits found
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+q1	0
+# BLAST processed 1 queries

@@ -1280,11 +1280,34 @@ impl ListedTitles<'_> {
     pub(super) fn reported_ranks(
         hit_lists: &[Option<BlastpHitList>],
     ) -> impl Iterator<Item = usize> + '_ {
-        hit_lists.iter().flatten().flat_map(|hit_list| {
+        Self::fetched_ranks(hit_lists, crate::report::tabular::SubjectFetch::Every)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-904
+    // ```c++
+    //     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
+    //     ...
+    //         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
+    // ```
+    /// The ranks of the subjects of `hit_lists`, one for each HSP whose row reads the subject
+    /// (`rows`, by the HSP's identities, the Seq-align's `num_ident`; psiblast's Seq-align holds
+    /// -1 for none, blast_seqalign.cpp:1492-1496), where a query's report fetches them
+    /// (`PRE_FETCH_SEQS_LIMIT`).
+    pub(super) fn fetched_ranks(
+        hit_lists: &[Option<BlastpHitList>],
+        rows: crate::report::tabular::SubjectFetch,
+    ) -> impl Iterator<Item = usize> + '_ {
+        hit_lists.iter().flatten().flat_map(move |hit_list| {
             let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
             hit_list.hsplist_array[..count]
                 .iter()
-                .flat_map(|hsp_list| hsp_list.hsps.iter().map(|hsp| hsp.s_idx as usize))
+                .flat_map(move |hsp_list| {
+                    hsp_list
+                        .hsps
+                        .iter()
+                        .filter(move |hsp| rows.reads(hsp.num_ident))
+                        .map(|hsp| hsp.s_idx as usize)
+                })
         })
     }
 

@@ -9,9 +9,10 @@
 // selection, held by the HSP's identity (application/results.ts).
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
+import { OutputSaver } from '../application/outputs';
 import { noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
-import type { OutputFormat } from '../domain/output-format';
+import { CUSTOM_OUTPUT, customOutfmt, type RunOutput } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal } from '../domain/run';
 import { useStore } from './useStore';
@@ -58,25 +59,38 @@ const emptyPlot = computed(() => (state.value.hsps.length > 0 ? undefined : noHs
 
 /**
  * "Download All" lists the outputs of the run, as NCBI's lists its formats, by BLAST+'s names of
- * them (its -outfmt help); the one chosen is saved as one file (WA-RS-05). The list opens in the
- * page's flow, under the run's line, so that it fits a phone's width.
+ * them (its -outfmt help), the output of the run's own -outfmt with its value (W10); the one
+ * chosen is saved as one file (WA-RS-05). The list opens in the page's flow, under the run's line,
+ * so that it fits a phone's width; an output that is not saved says why there, until the next
+ * download or another run (WA2-BR-01).
  */
-const DOWNLOADS: readonly { readonly format: OutputFormat; readonly label: string }[] = [
-  { format: 0, label: 'Pairwise (outfmt 0)' },
-  { format: 6, label: 'Tabular (outfmt 6)' },
-  { format: 7, label: 'Tabular with comment lines (outfmt 7)' },
-];
+const FORMAT_NAMES = { 0: 'Pairwise', 6: 'Tabular', 7: 'Tabular with comment lines' } as const;
+const downloads = computed(() => {
+  const items: { readonly format: RunOutput; readonly label: string; readonly testid: string }[] = ([0, 6, 7] as const).map((format) => ({
+    format,
+    label: `${FORMAT_NAMES[format]} (outfmt ${format})`,
+    testid: `results-download-${format}`,
+  }));
+  const custom = customOutfmt(loaded.value?.run.snapshot.argv ?? []);
+  if (custom !== undefined) {
+    const name = FORMAT_NAMES[Number(custom.split(' ', 1)[0]) as 6 | 7];
+    items.push({ format: CUSTOM_OUTPUT, label: `${name} (outfmt ${custom})`, testid: 'results-download-custom' });
+  }
+  return items;
+});
 const downloadsOpen = ref(false);
 const downloadsId = useId();
 const downloadsButton = ref<HTMLButtonElement>();
 const downloadsList = ref<HTMLElement>();
+const saver = new OutputSaver(props.coordinator);
+const downloadProblem = useStore(saver.problem);
 
-function download(format: OutputFormat): void {
+function download(format: RunOutput): void {
   downloadsOpen.value = false;
   // The chosen item leaves the page with the list; the focus stays on "Download All".
   downloadsButton.value?.focus();
   const run = loaded.value?.run;
-  if (run !== undefined) void props.coordinator.exportOutput(run.snapshot.runId, format);
+  if (run !== undefined) void saver.save(run, format);
 }
 
 /** Escape closes the list, and the focus goes back to its button (Safari does not focus a clicked button). */
@@ -119,8 +133,11 @@ const loaded = computed(() => state.value.loaded);
 /** The selected run waits or searches: its status is shown in place of its results. */
 const active = computed(() => selected.value !== undefined && !isTerminal(selected.value.status));
 
-// Another run, or the same run read again, starts with the list closed.
-watch([() => state.value.runId, () => state.value.phase], () => (downloadsOpen.value = false));
+// Another run, or the same run read again, starts with the list closed and without the reason of a download.
+watch([() => state.value.runId, () => state.value.phase], () => {
+  downloadsOpen.value = false;
+  saver.reset();
+});
 
 // With no run chosen, show the newest completed one.
 watch(
@@ -216,10 +233,13 @@ async function toAlignments(id: HspId): Promise<void> {
               Download All
             </button>
             <ul v-if="state.phase === 'ready' && downloadsOpen" :id="downloadsId" ref="downloadsList" class="download-list" data-testid="results-download-menu">
-              <li v-for="item in DOWNLOADS" :key="item.format">
-                <button type="button" :data-testid="`results-download-${item.format}`" @click="download(item.format)">{{ item.label }}</button>
+              <li v-for="item in downloads" :key="item.format">
+                <button type="button" :data-testid="item.testid" @click="download(item.format)">{{ item.label }}</button>
               </li>
             </ul>
+            <p v-if="state.phase === 'ready' && downloadProblem" class="results-message error" role="alert" data-testid="results-download-problem">
+              {{ downloadProblem }}
+            </p>
           </dd>
           <template v-if="selected">
             <dt>Mode</dt>

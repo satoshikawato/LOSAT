@@ -1195,8 +1195,8 @@ describe('SearchDraft submit', () => {
     draft.setPaste('subject', '>s\nACGT\n');
     draft.setExtra('-num_threads 4');
     await draft.idle();
-    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: '-num_threads is managed by LOSAT' });
-    expect(await draft.submit()).toEqual({ ok: false, message: '-num_threads is managed by LOSAT' });
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: '-num_threads is set in the form: Threads' });
+    expect(await draft.submit()).toEqual({ ok: false, message: '-num_threads is set in the form: Threads' });
     draft.setExtra('-qcov_hsp_perc 50 -ungapped');
     expect((await draft.submit()).ok).toBe(true);
     expect(coordinator.state.get().runs[0]!.snapshot.argv.slice(5)).toEqual(['-qcov_hsp_perc', '50', '-ungapped']);

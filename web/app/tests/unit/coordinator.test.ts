@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Coordinator, type SearchRequest } from '../../src/application/coordinator';
+import { CUSTOM_OUTPUT } from '../../src/domain/output-format';
 import type { RunStatus } from '../../src/domain/run';
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
@@ -323,6 +324,32 @@ describe('Coordinator', () => {
     await waitFor(coordinator, tblastx, 'completed');
     await coordinator.exportOutput(tblastx, 6);
     expect(saved[2]!.fileName).toBe('losat-run3-tblastx-19700101T000001Z.outfmt6.txt');
+  });
+
+  // The output of the argv's -outfmt with fields (WA2-OP-03): run, stored and exported besides the
+  // formats of every run; the engine refuses the formats that a run does not write.
+  it("runs, stores and exports the output of the argv's -outfmt with fields", async () => {
+    const { coordinator, data, saved } = setup();
+    const runId = (await coordinator.enqueue({ ...request, extra: ['-outfmt', '7 std qcovs'] })).runId!;
+    await waitFor(coordinator, runId, 'completed');
+    const view = coordinator.state.get().runs.find((run) => run.snapshot.runId === runId)!;
+    expect(Object.keys(view.result!.byteLengths)).toEqual(['0', '4', '6', '7']);
+    const custom = await coordinator.readOutput(runId, CUSTOM_OUTPUT);
+    expect(custom).toContain('# -outfmt 7 std qcovs');
+    await coordinator.exportOutput(runId, CUSTOM_OUTPUT);
+    expect(saved[0]!.fileName).toBe('losat-run1-blastn-megablast-19700101T000001Z.outfmt7-custom.txt');
+    expect(saved[0]!.text).toBe(custom);
+    // Its formats are those of a run without -outfmt.
+    const plain = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, plain, 'completed');
+    for (const format of [0, 6, 7] as const) {
+      expect(await coordinator.readOutput(runId, format)).toBe(await coordinator.readOutput(plain, format));
+    }
+    await expect(data.readOutput(plain, CUSTOM_OUTPUT)).rejects.toThrow('does not write output 4');
+    expect(await coordinator.enqueue({ ...request, extra: ['-outfmt', '5'] })).toEqual({
+      ok: false,
+      message: '-outfmt 5: the browser writes outfmt 0, 6 and 7 (6 and 7 with any fields); other formats need the CLI',
+    });
   });
 
   it('queues a group in order, numbered without gaps, and cancels the group together', async () => {

@@ -2259,18 +2259,21 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     if args.use_sw_tback {
         bail!("-use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's {program}");
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1389-1392
+    // ```c
+    //         else if (options->lut_type == eCompressedAaLookupTable &&
+    //                  options->word_size != 5 && options->word_size != 6 &&
+    //                  options->word_size != 7) {
+    // ```
+    // The compressed lookup table runs at each of its word sizes, 5 to 7
+    // (`validate_protein_options` has refused the others); of the lookup table's sizes, LOSAT's
+    // BLASTP implements 3 only.
     if args.word_size != 3
-        && !(args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable
-            && args.word_size == 5)
+        && args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable
     {
         bail!(
-            "-word_size {} ({} lookup table) is not supported by LOSAT's {program}",
-            args.word_size,
-            if args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable {
-                "the compressed"
-            } else {
-                "the"
-            }
+            "-word_size {} (the lookup table) is not supported by LOSAT's {program}",
+            args.word_size
         );
     }
     if !args.matrix_name.eq_ignore_ascii_case("BLOSUM62")
@@ -3487,8 +3490,7 @@ fn build_pairwise_hits(
             positives: Some(positives),
             gaps: Some(gaps),
             subject_length: Some(subjects[s_idx].aa_len),
-            // The title after its first word (the `bio` description of the inputs that
-            // `bio` read alike), as the other programs give it; the reports take the
+            // The title after its first word, as the other programs give it; the reports take the
             // subject's title bytes by subject index (`write_blastp_pairwise_report`).
             subject_title: shown_subjects.title(s_idx).and_then(|title| {
                 title
@@ -5039,7 +5041,7 @@ fn read_cli_subjects(
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options (`BlastpArgs::check_options`) and LOSAT's limits.
 pub fn check_options(args: &BlastpArgs) -> Result<()> {
-    // The host has no database files (`run_local_with`).
+    // The host has no database files (`run_local`).
     if args.db.is_some() {
         bail!("-db (a database search) is not supported in the browser yet");
     }
@@ -5241,7 +5243,6 @@ fn search_cli(
         // The XInclude formats fail only on standard output; to a file they take its name as
         // the base of their side files.
         choice_to_standard_output.then_some(&choice),
-        None,
     )
 }
 
@@ -5294,39 +5295,17 @@ fn search_cli(
 /// The search options are resolved once per format and must not differ between formats:
 /// NCBI derives the hitlist size from the output format only through `-num_descriptions`
 /// and `-num_alignments`, which BLASTP does not accept, so a difference is an error here.
-pub fn run_local(
-    args: BlastpArgs,
-    query_records: &[FastaRecord],
-    subject_records: &[FastaRecord],
-    query_label: &str,
-    subject_label: &str,
-    outputs: &mut ReportOutputs<'_>,
-) -> Result<()> {
-    run_local_with(
-        args,
-        query_records,
-        subject_records,
-        query_label,
-        subject_label,
-        outputs,
-        None,
-    )
-}
-
-/// `run_local`, with the checks that ABI v1 makes of its `bio` records (`v1`,
-/// `web_api::v1_blastp::run_web_pair_records`).
 ///
 /// The BLAST archive (outfmt 11) among the formats writes each record's DefLine as the reader
 /// kept it (`ReaderConfig::with_defline(true)`). Records without a kept defline get `>` and
 /// their title, which differs from NCBI for a defline with extra spaces or control bytes.
-pub(crate) fn run_local_with(
+pub fn run_local(
     mut args: BlastpArgs,
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     query_label: &str,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
-    v1: Option<&dyn V1Checks>,
 ) -> Result<()> {
     // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
     // database is read from files by the command line only.
@@ -5352,7 +5331,6 @@ pub(crate) fn run_local_with(
                     query_label,
                     subject_label,
                     view,
-                    v1,
                 )
             });
         }
@@ -5364,7 +5342,6 @@ pub(crate) fn run_local_with(
         query_label,
         subject_label,
         outputs,
-        v1,
     )
 }
 
@@ -5375,7 +5352,6 @@ fn run_local_formats(
     _query_label: &str,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
-    v1: Option<&dyn V1Checks>,
 ) -> Result<()> {
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
@@ -5420,54 +5396,7 @@ fn run_local_formats(
         subject_label,
         outputs,
         None,
-        v1,
     )
-}
-
-/// ABI v1's checks of its `bio` records (plan TD-1), which the v1 layer makes on its own
-/// records (`web_api::v1_blastp`): the search calls them where ABI v1 made them when it
-/// searched those records, and searches the records of NCBI's reader made from them, which
-/// those checks guarantee to be read alike.
-pub(crate) trait V1Checks: Sync {
-    /// ABI v1's checks of the residues, after the warnings of the subjects without
-    /// residues: a residue that NCBI's protein reader removes (subjects, then queries), and
-    /// a query without residues. NCBI reads those inputs with a warning (or reports a query
-    /// without residues), and ABI v1 rejects them as it did.
-    fn check_records(&self) -> Result<()>;
-}
-
-/// ABI v1's rejection of a query interval without letters (`-query_loc` starting just
-/// past a record's end), after LOSAT's limits, as ABI v1 made it (`V1Checks`).
-fn check_v1_query_intervals(
-    searched: &[FastaRecord],
-    query_input: &seq_range::QueryInput,
-) -> Result<()> {
-    seq_range::check_no_empty_interval(
-        searched,
-        &query_input.placements,
-        &query_input.ordinals,
-        seq_range::RangeRole::Query,
-        "BLASTP",
-    )
-}
-
-/// ABI v1's rejection (`V1Checks`) of the outfmt 0 titles that it did not write as NCBI,
-/// of the subjects that the report shows (those with hits): a title that NCBI decodes
-/// (`NStr::HtmlDecode`) and a title of punctuation that NCBI's `x_CleanAndCompress` reads
-/// past (`report::defline::check_shown_protein_subject_title`). ABI v1's titles are its
-/// `bio` deflines (`web_api::v1_bio::from_bio`).
-fn check_v1_shown_subject_titles(
-    shown: impl IntoIterator<Item = usize>,
-    subject_records: &[FastaRecord],
-) -> Result<()> {
-    for index in shown {
-        crate::report::defline::check_shown_protein_subject_title(
-            &String::from_utf8_lossy(&subject_records[index].title),
-            index + 1,
-            "BLASTP",
-        )?;
-    }
-    Ok(())
 }
 
 /// LOSAT's rejection of a protein subject title of punctuation that NCBI's
@@ -5757,7 +5686,7 @@ fn psiblast_stop_at_invalid_query(
 /// The search of `run_local` and of the CLI, after NCBI's processing of the options and
 /// the reading of the subjects: `Query is Empty!` for records without a query, the query
 /// batch size, the subjects without letters, the XInclude formats (`xinclude`, the CLI's
-/// format), ABI v1's checks (`v1`), LOSAT's limits and environment, then the query batches
+/// format), LOSAT's limits and environment, then the query batches
 /// (`read_query_batches`), the search of the batches that NCBI searches and their reports.
 #[allow(clippy::too_many_arguments)]
 fn search(
@@ -5769,7 +5698,6 @@ fn search(
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
     xinclude: Option<&crate::blastinput::app::FormatChoice>,
-    v1: Option<&dyn V1Checks>,
 ) -> Result<()> {
     // What the search reads its subjects from: the database of `-db` (then `subjects` has
     // no record), or the subject records.
@@ -5866,11 +5794,6 @@ fn search(
             )?;
         }
     }
-    // ABI v1's checks of its `bio` records come where they came before the records of
-    // NCBI's reader (plan TD-1).
-    if let Some(v1) = v1 {
-        v1.check_records()?;
-    }
     // LOSAT's limits come where NCBI starts the search, after its checks.
     validate_requested_blastp_support(&args)?;
     // The query range applies to every query record as NCBI's batch reader reads it
@@ -5886,9 +5809,6 @@ fn search(
             seq_range::QueryInput::whole(query_records),
         ),
     };
-    if v1.is_some() {
-        check_v1_query_intervals(&searched_queries, &query_input)?;
-    }
     check_blastp_environment(args.app, database.is_none(), outputs.only_archive())?;
     let batches = match args.app {
         BlastpApp::Blastp => crate::blastinput::query_batch::read_query_batches(
@@ -5950,7 +5870,6 @@ fn search(
         let reports = BlastpReports {
             reader_warnings: &batches.warnings[..searched_done],
             epilog,
-            v1_titles: v1.is_some(),
             x_prolog: true,
             x_queries_before: 0,
             x_xml2_carry: None,
@@ -5996,7 +5915,6 @@ fn search(
         subject_source,
         outputs,
         batch_size,
-        v1.is_some(),
     );
     if x_plan.is_none() {
         super::x_query_blocks::x_reach_block_search(false);
@@ -6102,7 +6020,7 @@ fn search(
                         pool,
                     ),
                     (None, XBlockReport::Pairwise) => {
-                        x_block_shown_titles_allowed(&subjects.records, v1.is_some(), pool)
+                        x_block_shown_titles_allowed(&subjects.records, pool)
                     }
                     (None, XBlockReport::Xml | XBlockReport::Xml2) => {
                         super::x_query_blocks::x_block_xml_subjects_allowed(&subjects.records, pool)
@@ -6207,7 +6125,6 @@ fn search(
                             &BlastpReports {
                                 reader_warnings: &reader_warnings[block.clone()],
                                 epilog: epilog && index + 1 == blocks.len(),
-                                v1_titles: v1.is_some(),
                                 x_prolog: index == 0,
                                 x_queries_before: block.start,
                                 x_xml2_carry: x_kinds
@@ -6385,7 +6302,6 @@ fn x_query_block_plan(
     subject_source: BlastpSubjectSource<'_>,
     outputs: &ReportOutputs<'_>,
     batch_size: u32,
-    v1: bool,
 ) -> Option<(
     Vec<super::x_query_blocks::XBlockReport>,
     Vec<std::ops::Range<usize>>,
@@ -6438,10 +6354,7 @@ fn x_query_block_plan(
         Ok((OutputFormat::Tabular | OutputFormat::TabularWithComments, _)) => {
             Some(XBlockReport::Tabular)
         }
-        // ABI v1's outfmt 0 titles of a database are not argued here.
-        Ok((OutputFormat::Pairwise, _)) if !(v1 && subject_source.database().is_some()) => {
-            Some(XBlockReport::Pairwise)
-        }
+        Ok((OutputFormat::Pairwise, _)) => Some(XBlockReport::Pairwise),
         Err(_) if blastp_seqalign_format(outfmt).is_some() => Some(XBlockReport::Seqalign),
         // Outfmt 11 (the BLAST archive: one document per NCBI batch, `x_query_blocks.rs`). Only in a
         // call of one output without hit records and observer, as outfmt 15 and 16: the run-level
@@ -6628,20 +6541,17 @@ fn x_block_words_fit(
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the outfmt 0 report of the search of all queries refuses a
 // subject title that LOSAT does not write as NCBI where the report shows the subject
-// (`check_shown_subject_titles`, and ABI v1's `check_v1_shown_subject_titles`), before it writes
-// anything; a block search would have written the reports of the blocks before. So with outfmt 0
+// (`check_shown_subject_titles`), before it writes anything; a block search would have written the reports of the blocks before. So with outfmt 0
 // and `-subject` the blocks are searched only when no subject's title is refused (with `-db`:
 // `database::x_titles_allow_blocks`). Tested on the pool before the first block, in groups of
 // consecutive subjects on its threads when it has more than one; the outcome is whether all pass.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 fn x_block_shown_titles_allowed(
     subject_records: &[FastaRecord],
-    v1: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> bool {
     let allowed = |subjects: std::ops::Range<usize>| {
-        check_shown_subject_titles(subjects.clone(), subject_records).is_ok()
-            && (!v1 || check_v1_shown_subject_titles(subjects, subject_records).is_ok())
+        check_shown_subject_titles(subjects, subject_records).is_ok()
     };
     #[cfg(all(
         feature = "parallel",
@@ -6953,13 +6863,11 @@ fn preliminary_search_error(
 }
 
 /// What the reports of the searched batches need besides the search: the reader's
-/// messages before each query's report (`read_query_batches`), whether the reports end
-/// with the epilog, and whether ABI v1's rejection of outfmt 0 titles applies
-/// (`V1Checks`).
+/// messages before each query's report (`read_query_batches`) and whether the reports end
+/// with the epilog.
 struct BlastpReports<'a> {
     reader_warnings: &'a [Vec<u8>],
     epilog: bool,
-    v1_titles: bool,
     /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether the outfmt 0 report starts with the prolog
     /// (false for the blocks after the first of the block search, `x_query_blocks.rs`).
     x_prolog: bool,
@@ -7139,7 +7047,6 @@ fn search_split_query_batches(
                 &BlastpReports {
                     reader_warnings: &[],
                     epilog: false,
-                    v1_titles: false,
                     x_prolog,
                     x_queries_before: 0,
                     x_xml2_carry: None,
@@ -10813,11 +10720,10 @@ fn run_resolved_in_pool(
     // reads the Seq-ids of its Seq-aligns (`database::ListedSubjects::read_titles`), before
     // the HSPs of score 0 are dropped.
     // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the titles of the reported subjects only, and the
-    // letters from the stored residues (`database/x_listed_lean.rs`); ABI v1's title checks
-    // read the records.
-    let x_listed_lean = !reports.v1_titles && database::x_bp_listed_lean();
-    if listed_subjects.is_some() && database.is_some() && database::x_bp_listed_lean() {
-        crate::utils::xreach::x_reach!("LOSAT_X_BPLISTEDLEAN", !reports.v1_titles);
+    // letters from the stored residues (`database/x_listed_lean.rs`).
+    let x_listed_lean = database::x_bp_listed_lean();
+    if listed_subjects.is_some() && database.is_some() && x_listed_lean {
+        crate::utils::xreach::x_reach!("LOSAT_X_BPLISTEDLEAN", true);
     }
     // The residues that the reports read, read from the
     // database again after the redo (`ListedSubjects::x_read_shown`): every listed subject's for
@@ -11259,7 +11165,8 @@ fn run_resolved_in_pool(
     // Where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off (`s_PreFetchSeqs`, quoted at
     // `shared::prefetch_may_be_off`), each query's report fetches the subjects it shows, after
     // the query's own warnings: those of its final hit list, psiblast's after the cut, where the
-    // first format reads their Bioseqs (`TabularSpec::fetches_subject`).
+    // first format's rows read their Bioseqs (`TabularSpec::subject_fetch`; `nident` alone on
+    // rows with identities, `ListedTitles::fetched_ranks`).
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         if prefetch_taxids || psiblast_prefetched.is_some() || seq_annots_prefetch {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
@@ -11269,11 +11176,11 @@ fn run_resolved_in_pool(
                 format_plans.first(),
                 Some(BlastpReport::CustomTabular(spec)) if spec.checks_taxdb()
             );
-            let rows_fetch = match format_plans.first() {
+            let rows = match format_plans.first() {
                 Some(BlastpReport::CustomTabular(spec)) => {
-                    spec.fetches_subject(crate::blastinput::app::Program::Blastp)
+                    spec.subject_fetch(crate::blastinput::app::Program::Blastp)
                 }
-                _ => true,
+                _ => crate::report::tabular::SubjectFetch::Every,
             };
             let open_for_rows = |lists: &[Option<BlastpHitList>]| -> Result<()> {
                 if plural_names
@@ -11294,16 +11201,21 @@ fn run_resolved_in_pool(
                     None => blastp_hit_list_hsp_count(lists),
                 };
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    if !(prefetch_taxids && rows_fetch) {
+                    if !prefetch_taxids || rows == crate::report::tabular::SubjectFetch::Never {
                         continue;
                     }
                     for query in batch.searched.clone() {
                         let shown = std::slice::from_ref(&hit_lists[query]);
-                        let messages = titles.prefetch_messages(
-                            database,
-                            database::ListedTitles::reported_ranks(shown),
-                        )?;
-                        query_warning_lines[query].extend(messages);
+                        // Rows that read a subject only for its identities (`nident` alone) read
+                        // none of a query whose HSPs have none, which looks no taxid up.
+                        let mut fetched =
+                            database::ListedTitles::fetched_ranks(shown, rows).peekable();
+                        if rows == crate::report::tabular::SubjectFetch::Every
+                            || fetched.peek().is_some()
+                        {
+                            let messages = titles.prefetch_messages(database, fetched)?;
+                            query_warning_lines[query].extend(messages);
+                        }
                         open_for_rows(shown)?;
                     }
                     continue;
@@ -11962,14 +11874,11 @@ fn run_resolved_in_pool(
                     .expect("pairwise hits prepared for blastp outfmt 0");
                 // NCBI makes the titles of the subjects that the report shows, those with
                 // hits (blast_format.cpp:1540); LOSAT rejects the titles that it does not
-                // write as NCBI (`check_shown_subject_titles`, and ABI v1's own).
+                // write as NCBI (`check_shown_subject_titles`).
                 let shown: std::collections::BTreeSet<usize> = pairwise_hits
                     .iter()
                     .map(|hit| hit.hit.s_idx as usize)
                     .collect();
-                if reports.v1_titles {
-                    check_v1_shown_subject_titles(shown.iter().copied(), subject_records)?;
-                }
                 match listed_titles.as_ref() {
                     Some(titles) => titles.check_shown_titles(
                         database.expect("listed titles are a database's"),
@@ -13303,12 +13212,35 @@ mod tests {
     // ASSERT(word_size == 5 || word_size == 6 || word_size == 7);
     // ```
     #[test]
-    fn test_validate_requested_blastp_support_rejects_unverified_compressed_word_size() {
+    fn test_validate_requested_blastp_support_accepts_each_compressed_word_size() {
+        for task in ["blastp", "blastp-fast"] {
+            for word_size in 5..=7 {
+                let mut args = make_blastp_args();
+                args.task = task.to_string();
+                args.word_size = Some(word_size);
+                let resolved = args.resolve().expect("resolved blastp args");
+                assert_eq!(
+                    resolved.lookup_table_type,
+                    BlastpLookupTableType::CompressedAaLookupTable
+                );
+                validate_requested_blastp_support(&resolved)
+                    .unwrap_or_else(|err| panic!("{task} -word_size {word_size}: {err}"));
+            }
+        }
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_options.c:1163-1169
+    // (above): word size 4 keeps the lookup table, of which LOSAT's BLASTP implements word size 3.
+    #[test]
+    fn test_validate_requested_blastp_support_rejects_lookup_table_word_size_four() {
         let mut args = make_blastp_args();
-        args.word_size = Some(6);
+        args.word_size = Some(4);
         let resolved = args.resolve().expect("resolved blastp args");
         let err = validate_requested_blastp_support(&resolved).expect_err("unsupported word size");
-        assert!(err.to_string().contains("not supported by LOSAT's BLASTP"));
+        assert_eq!(
+            err.to_string(),
+            "-word_size 4 (the lookup table) is not supported by LOSAT's BLASTP"
+        );
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3036-3062

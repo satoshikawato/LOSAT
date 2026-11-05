@@ -362,6 +362,25 @@ LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](ht
 
 ---
 
+## Library use (Rust)
+
+The crate's public surface is two modules, `LOSAT::api` and `LOSAT::cli` ([plan](docs/losat_library_surface_plan.md)); every other module is the engine, hidden from the documentation and outside the compatibility promise. `api` searches FASTA records in memory with the command line's options and returns the command line's reports byte for byte, plus one record per HSP:
+
+```rust
+use LOSAT::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
+
+let query = read_fasta(Program::Blastp, Role::Query, &std::fs::read("query.faa")?)?;
+let subject = read_fasta(Program::Blastp, Role::Subject, &std::fs::read("subject.faa")?)?;
+let search = validate(Program::Blastp, &["-evalue", "1e-5", "-num_threads", "4"])?;
+let outcome = run_collect(&search, Inputs::new(&query, &subject), &["6", "0"])?;
+// outcome.reports[0].bytes == `losat blastp -query query -subject subject -outfmt 6 -evalue 1e-5 ...`
+// outcome.hsps[i]: q_idx, s_idx, bit_score, e_value, coordinates, and the HSP's row in each report
+```
+
+The inputs are records (`-query`, `-subject`, `-db`, `-out` and `-outfmt` are not argv options of the API; a database subject is not available through the API yet), the search writes nothing to standard output or error, and errors carry the command line's messages. `cargo run --release --example library_search -- blastp query.faa subject.faa -evalue 1e-5` prints the outfmt 6 report; `cargo doc --no-deps --open` shows the API. The crate is not on crates.io yet (the plan's LIB-3).
+
+---
+
 ## Web GUI (preview)
 
 LOSAT also runs in the browser through the Web GUI (`web/app`), which follows the layout and terms of NCBI BLAST: a search form with a "Run LOSAT" button, then a Graphic Summary and Descriptions on one page. It is a **preview**, outside the release's NCBI parity claim. A run is marked "Supported" only when its options were compared with NCBI BLAST+ on LOSAT's test fixtures and its browser runtime was checked against the native engine, and "Not yet supported" otherwise; the mark is about the build and the options, not a comparison of your inputs with NCBI. It rejects `-db` (database searches are native only). Its boundary is set by [PD-LOSAT-WEB-APP-BOUNDARY](docs/product_decisions/PD-LOSAT-WEB-APP-BOUNDARY.md); the build and test commands are in [web/AGENTS.md](web/AGENTS.md).
@@ -393,7 +412,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 **Scoring and search settings**
 - `-matrix` and gap costs: `blastp` and `blastx` accept only BLOSUM62 with `-gapopen 11 -gapextend 1`; `tblastn` and `tblastx` accept every matrix.
 - `-comp_based_stats 1` and `3`: `blastp`, `blastx`, `tblastn` (`0` and `2` work).
-- `-word_size` other than 3 and 5: `blastp`, `blastx`. Other than 3: `tblastx`. `tblastn` takes 2 to 7.
+- `-word_size` 2 and 4: `blastp` (3 and 5 to 7 work). Other than 3 and 5: `blastx`. Other than 3: `tblastx`. `tblastn` takes 2 to 7.
 - `-task blastp-short`: `blastp`. `-task rmblastn`: `blastn`.
 - `-use_sw_tback`: `blastp`, `blastx`.
 - `-max_intron_length`: `tblastn`.

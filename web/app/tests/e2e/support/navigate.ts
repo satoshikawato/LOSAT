@@ -8,7 +8,8 @@
 // A second navigation of the same page got its response within a second each time, so each
 // navigation waits a bounded time and is made once more, and the test records that it was
 // (WFL, losat-baselines/web-flaky-20261103).
-import { errors, test, type Page } from '@playwright/test';
+import { errors, type Page } from '@playwright/test';
+import { test } from './test';
 
 /** How long a first navigation may take before it is made again (normal ones take < 1 s). */
 const FIRST_WAIT_MS = 15_000;

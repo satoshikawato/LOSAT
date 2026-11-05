@@ -33,4 +33,24 @@ export default tseslint.config(
   restrict(['src/application/**'], ['infra', 'ui', 'vue']),
   restrict(['src/infra/**'], ['application', 'ui', 'vue']),
   restrict(['src/ui/**'], ['infra']),
+  // The e2e tests take `test` from tests/e2e/support/test.ts, which puts the WebKit pages'
+  // wake lock stand-in in place.
+  {
+    files: ['tests/e2e/**'],
+    ignores: ['tests/e2e/support/test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@playwright/test',
+              importNames: ['test'],
+              message: 'Import test from tests/e2e/support/test.ts.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

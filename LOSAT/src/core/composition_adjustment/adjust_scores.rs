@@ -1510,7 +1510,7 @@ fn freq_ratio_to_score_square(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:117-240
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:220-334
 // ```c
 // void Blast_CalcLambdaFullPrecision(double * plambda, int *piterations,
 //                                    double **score, int alphsize,
@@ -1554,12 +1554,18 @@ fn calc_lambda_full_precision_from_scores(
 
     let mut k = 0usize;
     while k < K_LAMBDA_ITERATION_LIMIT {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:266
+        // ```c
+        // double fold = f;            /* previous value of f */
+        // ```
+        // `fold` takes f before f is evaluated again, so the Newton test
+        // below compares this iteration's f with the previous iteration's f.
+        let fold = f;
         let lambda = -x.ln();
         let was_newton = is_newton;
         let x_pow_max_score = (-max_score * lambda).exp();
         f = -x_pow_max_score;
         let mut slope = max_score * f / x;
-        let fold = f;
 
         for i in 0..alphsize {
             if row_prob[i] == 0.0 {
@@ -1594,7 +1600,7 @@ fn calc_lambda_full_precision_from_scores(
             x = (left + right) / 2.0;
             break;
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:290-320
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:311-330
         // ```c
         // if ((was_newton && fabs(f) > .9 * fabs(fold)) || slope >= 0) {
         //     x = (left + right)/2;
@@ -4116,5 +4122,158 @@ mod tests {
 
         assert!((scores[E_BCHAR][E_XCHAR] - (-15.0)).abs() < 1.0e-12);
         assert!((scores[E_XCHAR][E_BCHAR] - (-10.0)).abs() < 1.0e-12);
+    }
+
+    /// NCBI's `Blast_CalcLambdaFullPrecision`, statement by statement. The
+    /// third value counts the Newton steps it refused because f did not fall
+    /// below 0.9 of the previous iteration's f (`fold`).
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:220-334
+    // ```c
+    // for (k = 0;  k < max_iterations;  k++) {
+    //     double fold = f;            /* previous value of f */
+    //     ...
+    //     if ((was_newton && fabs(f) > .9 * fabs(fold)) || slope >= 0) {
+    //         x = (left + right)/2;  /* bisect */
+    // ```
+    fn ncbi_calc_lambda_full_precision(
+        score: &[Vec<f64>],
+        alphsize: usize,
+        row_prob: &[f64],
+        col_prob: &[f64],
+    ) -> (f64, usize, usize) {
+        let mut f = 4.0;
+        let mut left = 0.0;
+        let mut right = 1.0;
+        let mut x = 0.367879441171f64;
+        let mut is_newton = false;
+        let mut max_score = COMPO_SCORE_MIN as f64;
+        let mut avg_score = 0.0;
+        for i in 0..alphsize {
+            for j in 0..alphsize {
+                if row_prob[i] == 0.0 || col_prob[j] == 0.0 {
+                    continue;
+                }
+                if max_score < score[i][j] {
+                    max_score = score[i][j];
+                }
+                avg_score += row_prob[i] * col_prob[j] * score[i][j];
+            }
+        }
+        assert!(max_score > 0.0 && avg_score < 0.0, "lambda must exist");
+        let mut fold_refusals = 0;
+        let mut k = 0;
+        while k < K_LAMBDA_ITERATION_LIMIT {
+            let fold = f;
+            let lambda = -x.ln();
+            let was_newton = is_newton;
+            let x_pow_max_score = (-max_score * lambda).exp();
+            f = -x_pow_max_score;
+            let mut slope = max_score * f / x;
+            for i in 0..alphsize {
+                for j in 0..alphsize {
+                    if row_prob[i] == 0.0 || col_prob[j] == 0.0 {
+                        continue;
+                    }
+                    let ff = if max_score != score[i][j] {
+                        let diff_score = max_score - score[i][j];
+                        let ff = row_prob[i] * col_prob[j] * (-lambda * diff_score).exp();
+                        slope += diff_score * ff / x;
+                        ff
+                    } else {
+                        row_prob[i] * col_prob[j]
+                    };
+                    f += ff;
+                }
+            }
+            if f > 0.0 {
+                left = x;
+            } else if f < 0.0 {
+                right = x;
+            } else {
+                break;
+            }
+            if right - left <= 2.0 * left * (1.0 - right) * K_LAMBDA_ERROR_TOLERANCE
+                && (f / x_pow_max_score).abs() <= K_LAMBDA_FUNCTION_TOLERANCE
+            {
+                x = (left + right) / 2.0;
+                break;
+            }
+            let f_fell_too_little = was_newton && f.abs() > 0.9 * fold.abs();
+            if f_fell_too_little || slope >= 0.0 {
+                if f_fell_too_little && slope < 0.0 {
+                    fold_refusals += 1;
+                }
+                x = (left + right) / 2.0;
+            } else {
+                let p = -f / slope;
+                let y = x + p;
+                if y <= left || y >= right {
+                    x = (left + right) / 2.0;
+                } else {
+                    is_newton = true;
+                    x = y;
+                    if p.abs() <= K_LAMBDA_ERROR_TOLERANCE * x * (1.0 - x)
+                        && (f / x_pow_max_score).abs() <= K_LAMBDA_FUNCTION_TOLERANCE
+                    {
+                        break;
+                    }
+                }
+            }
+            k += 1;
+        }
+        let lambda = if k < K_LAMBDA_ITERATION_LIMIT {
+            -x.ln()
+        } else {
+            -1.0
+        };
+        (lambda, k, fold_refusals)
+    }
+
+    // The two matrices make NCBI refuse one Newton step because f did not
+    // fall below 0.9 of the previous f. Comparing with -x^max_score instead
+    // (the order LOSAT had before) takes 6 and 5 iterations, and the first
+    // lambda differs in its last bits.
+    #[test]
+    fn calc_lambda_full_precision_compares_f_with_the_previous_iteration_like_ncbi() {
+        let cases = [
+            (
+                "a",
+                [[-2.0, -6.0], [-2.0, 4.0]],
+                [5.0 / 7.0, 2.0 / 7.0],
+                [2.0 / 3.0, 1.0 / 3.0],
+                3,
+            ),
+            ("b", [[-4.0, -5.0], [-4.0, 4.0]], [0.8, 0.2], [0.5, 0.5], 4),
+        ];
+        for (name, matrix, rows, cols, iterations) in cases {
+            let score: Vec<Vec<f64>> = matrix.iter().map(|row| row.to_vec()).collect();
+            let mut row_prob = [0.0; COMPO_NUM_TRUE_AA];
+            let mut col_prob = [0.0; COMPO_NUM_TRUE_AA];
+            row_prob[..2].copy_from_slice(&rows);
+            col_prob[..2].copy_from_slice(&cols);
+
+            let (ncbi_lambda, ncbi_iterations, fold_refusals) =
+                ncbi_calc_lambda_full_precision(&score, 2, &row_prob, &col_prob);
+            assert_eq!(fold_refusals, 1, "case {name} reaches the refusal");
+            assert_eq!(ncbi_iterations, iterations, "case {name}");
+
+            let (lambda, iter_count) =
+                calc_lambda_full_precision_from_scores(&score, 2, &row_prob, &col_prob);
+            assert_eq!(iter_count, ncbi_iterations, "case {name} iterations");
+            assert_eq!(
+                lambda.to_bits(),
+                ncbi_lambda.to_bits(),
+                "case {name}: lambda {lambda} vs NCBI {ncbi_lambda}"
+            );
+
+            // lambda solves sum_ij p_i q_j exp(lambda s_ij) = 1.
+            let mut phi = -1.0;
+            for i in 0..2 {
+                for j in 0..2 {
+                    phi += rows[i] * cols[j] * (lambda * matrix[i][j]).exp();
+                }
+            }
+            assert!(phi.abs() <= 1.0e-12, "case {name}: phi {phi}");
+        }
     }
 }

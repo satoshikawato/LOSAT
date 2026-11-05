@@ -6,7 +6,8 @@ outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers, and for the rows
 files, side_sha256; xinclude_fixtures.py says what they mean: the run gets `-out <tmp>/<row_id>.out`, the frozen
 master is <row_id>.out, the side files <row_id>.out_<n>.json|xml; a row without them has 12 cells; a psiblast row
 whose files column is `pssm` gets `-out_ascii_pssm <tmp>/<row_id>.pssm`, and the files it writes are frozen as
-<row_id>.pssm and <row_id>.pssm.<n>, listed in side_sha256, none when the cell is empty). Every row runs from LOSAT/ as
+<row_id>.pssm and <row_id>.pssm.<n>, listed in side_sha256, none when the cell is empty; `{pssm_dir}` in its
+extra_args is that <tmp>, where any other file the run writes is reported). Every row runs from LOSAT/ as
 `PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT`, PROGRAM being the row's `program` cell
 (`blastp`, `blastn`, `tblastn`, `blastx`, `tblastx` or `psiblast`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
 argument `-db ""`; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/); `outfmt` is one argument, so a custom

@@ -136,11 +136,8 @@ fn the_msa_has_a_row_per_qualifying_subject_in_seq_align_order() {
         // Subject 1 is not below the threshold, but moves `last_sid` on.
         alignment(1, 1.0, 0, 0, 3, None),
         alignment(2, 0.0, 3, 0, 3, None),
-        // Subject 0 again, after another subject: the index moves past the rows NCBI allocates
-        // (one per qualifying subject), where NCBI writes out of bounds and LOSAT drops it.
-        alignment(0, 1e-3, 0, 0, 1, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, 0.002);
+    let msa = input_msa(&query, &alignments, &subject, 0.002).unwrap();
     assert_eq!(msa.rows.len(), 3);
     assert_eq!(row_letters(&msa.rows[0]), query.map(Some).to_vec());
     // HSP 1 at query 0: 11 12, a gap in the subject at query 2, the subject's 13 14 skipped,
@@ -154,6 +151,35 @@ fn the_msa_has_a_row_per_qualifying_subject_in_seq_align_order() {
         row_letters(&msa.rows[2]),
         vec![None, None, None, Some(7), Some(8), Some(9)]
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:310-323 (quoted at
+// `input_msa`): `msa_index` moves on after a subject that is not counted, and an HSP whose index
+// passes the rows NCBI allocates is written out of bounds (`_ASSERT` only). LOSAT refuses it.
+#[test]
+fn an_alignment_past_the_last_row_is_refused() {
+    let query = [1, 2, 3];
+    let subject = |_: u32| vec![4, 5, 6];
+    // Subject 1 is not counted but comes first: subject 0's HSP takes index 2 of 2 rows.
+    let alignments = [
+        alignment(1, 1.0, 0, 0, 3, None),
+        alignment(0, 1e-10, 0, 0, 3, None),
+    ];
+    let error = input_msa(&query, &alignments, &subject, 0.002).unwrap_err();
+    assert!(error.downcast_ref::<crate::cli::NativeError>().is_none());
+    assert_eq!(
+        error.to_string(),
+        "an alignment past the last row of the PSSM's multiple alignment (a subject included by -inclusion_ethresh after one that is not, where NCBI BLAST+'s psiblast writes out of bounds) is not supported by LOSAT's PSIBLAST"
+    );
+    // A counted subject first keeps every later counted subject in its row.
+    let alignments = [
+        alignment(0, 1e-10, 0, 0, 3, None),
+        alignment(1, 1.0, 0, 0, 3, None),
+        alignment(2, 1e-10, 0, 0, 3, None),
+    ];
+    let msa = input_msa(&query, &alignments, &subject, 0.002).unwrap();
+    assert_eq!(msa.rows.len(), 3);
+    assert_eq!(row_letters(&msa.rows[2]), vec![Some(4), Some(5), Some(6)]);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:529-547
@@ -177,7 +203,8 @@ fn an_e_value_from_10_on_counts_as_10() {
             &[alignment(0, e_value, 0, 0, 2, None)],
             &subject,
             threshold,
-        );
+        )
+        .unwrap();
         assert_eq!(msa.rows.len(), rows, "{e_value} {threshold}");
     }
 }
@@ -266,6 +293,110 @@ fn the_ascii_pssm_has_ncbis_columns() {
     expected.push_str("PSI Ungapped         0.1370     0.3200\n");
     expected.push_str("PSI Gapped           0.0410     0.2670\n");
     assert_eq!(text, expected);
+}
+
+const TK_1_40: &[u8] = b"MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGG";
+
+fn pssm_request(pseudocount: i32) -> PssmRequest {
+    PssmRequest {
+        ascii_path: "-".to_string(),
+        save_each: false,
+        pseudocount,
+    }
+}
+
+const ANCILLARY: PssmAncillary = PssmAncillary {
+    ungapped: (0.13697, 0.31998),
+    gapped: (0.041, 0.267),
+};
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:894-903 and
+// psi_pssm_input.cpp:166-171 (quoted at `ascii_pssm`); NCBI 2.17.0 `db.ps.pssm.o.0`: an O of
+// the query record is X in the search's buffer, which is the PSSM's query, so the ASCII PSSM
+// prints X and the X branch of the gapless weight (`    0.00`) at that position.
+#[test]
+fn an_o_in_the_query_prints_as_x() {
+    // TK 1-40 with O at 30 (as `tk_o.faa`); the subject is TK 1-40 with three substitutions
+    // (92.5% identity: not purged as near-identical), so column 30 has two sequences.
+    let mut record = TK_1_40.to_vec();
+    record[29] = b'O';
+    let mut subject_letters = TK_1_40.to_vec();
+    for (position, letter) in [(4, b'A'), (14, b'I'), (24, b'S')] {
+        subject_letters[position] = letter;
+    }
+    let subject = |_: u32| ncbistdaa_letters(&subject_letters);
+    let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
+    let query = crate::algorithm::blastp::encoding::encode_protein_sequence(&record);
+    let query = &query.aa_seq[1..=query.aa_len];
+    assert_eq!(query[29], ncbistdaa::X);
+    let msa = input_msa(query, &alignments, &subject, 0.002).unwrap();
+    let sbp = score_block(ScoringMatrix::Blosum62).unwrap();
+    let pssm = psi::create_pssm_with_diagnostics(&msa, 0, &sbp).unwrap();
+    assert!(pssm.num_matching_seqs[29] > 1);
+    let text = String::from_utf8(
+        ascii_pssm(
+            &pssm_request(0),
+            ScoringMatrix::Blosum62,
+            0.002,
+            &record,
+            &alignments,
+            &subject,
+            ANCILLARY,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(text.as_bytes(), print_ascii_pssm(&pssm, query, ANCILLARY));
+    let line = text
+        .lines()
+        .find(|line| line.starts_with("   30 "))
+        .unwrap();
+    assert!(line.starts_with("   30 X  "), "{line}");
+    // `"  " info " "` then the X branch's `"    0.00"` (the other branch has no padding).
+    assert!(line.ends_with("     0.00"), "{line}");
+    // A column with an O nowhere keeps its letter and its weight.
+    let line = text
+        .lines()
+        .find(|line| line.starts_with("   31 "))
+        .unwrap();
+    assert!(line.starts_with("   31 K  "), "{line}");
+    assert!(!line.ends_with("     0.00"), "{line}");
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1577-1600 and
+// c++/src/algo/blast/api/pssm_engine.cpp:131-148 (quoted at `ascii_pssm`); NCBI 2.17.0
+// `db.ps.pssm.pcneg.7` and `db.ps.pssm.inc0.6`: the PSSM engine's options checks, the pseudocount
+// first, then the inclusion threshold.
+#[test]
+fn the_pssm_engine_checks_the_pseudocount_then_the_inclusion_threshold() {
+    let subject = |_: u32| ncbistdaa_letters(TK_1_40);
+    let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
+    let run = |pseudocount: i32, inclusion_ethresh: f64| {
+        ascii_pssm(
+            &pssm_request(pseudocount),
+            ScoringMatrix::Blosum62,
+            inclusion_ethresh,
+            TK_1_40,
+            &alignments,
+            &subject,
+            ANCILLARY,
+        )
+    };
+    let pseudocount = (
+        1,
+        "BLAST options error: IPssmInputData returns invalid PSIBlastOptions: Pseudo count must be greater than or equal to 0\n"
+            .to_string(),
+    );
+    let inclusion = (
+        1,
+        "BLAST options error: IPssmInputData returns invalid PSIBlastOptions: Inclusion threshold must be greater than 0\n"
+            .to_string(),
+    );
+    assert_eq!(native(&run(-1, 0.002).unwrap_err()), pseudocount);
+    assert_eq!(native(&run(-1, 0.0).unwrap_err()), pseudocount);
+    assert_eq!(native(&run(0, 0.0).unwrap_err()), inclusion);
+    assert_eq!(native(&run(5, -1e-5).unwrap_err()), inclusion);
+    assert!(run(0, 1e-300).is_ok());
 }
 
 /// A directory of its own for a test's files.

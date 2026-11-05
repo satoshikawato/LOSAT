@@ -3,7 +3,7 @@
 //! (`CPsiBlastInputData`), the engine's score block (`CPssmEngine`), the ASCII PSSM
 //! (`CBlastFormatUtil::PrintAsciiPssm`) and its file (`CAutoOutputFileReset`). The engine itself
 //! is `core::psi`. The blastp engine reaches this module only when a PSSM is requested
-//! (`blast_engine.rs` `x_psi_ascii_pssms`).
+//! (`blast_engine.rs` `psiblast_ascii_pssms`).
 
 use std::io::Write as _;
 
@@ -216,17 +216,76 @@ pub(crate) struct PssmAncillary {
 //         NCBI_THROW(CBlastException, eInvalidOptions, msg);
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1586-1590
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1577-1600
 // ```c
+// Int2 PSIBlastOptionsValidate(const PSIBlastOptions* psi_options,
+//                              Blast_Message** blast_msg)
+// {
+//     Int2 retval = 1;    /* assume failure */
+//
+//     if ( !psi_options ) {
+//         return retval;
+//     }
+//
 //     if (psi_options->pseudo_count < 0) {
 //         Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
 //                            "Pseudo count must be greater than or equal to 0");
 //         return retval;
 //     }
+//
+//     if (psi_options->inclusion_ethresh <= 0.0) {
+//         Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+//                            "Inclusion threshold must be greater than 0");
+//         return retval;
+//     }
+//
+//     retval = 0;
+//     return retval;
+// }
 // ```
-// The inclusion threshold is checked before the search (blastp's `Validate`). The ungapped
-// statistical parameters that `SetUngappedStatisticalParams` gives the score block are not read
-// by the ASCII PSSM, which prints the ancillary data's.
+// Every check of `PSIBlastOptionsValidate`, in its order (the options are never NULL here). The
+// search before it does not check the inclusion threshold: nothing else calls this function, so
+// a run with `-inclusion_ethresh 0` reports the query first. The ungapped statistical parameters
+// that `SetUngappedStatisticalParams` gives the score block are not read by the ASCII PSSM, which
+// prints the ancillary data's.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:894-903
+// ```c++
+//     for (i = 0; i < sv.size(); i++) {
+//         // Change unsupported residues to X
+//         if (sv[i] == AMINOACID_TO_NCBISTDAA[(int)'O']) {
+//             replaced_residues.push_back(i);
+//             *buf_var++ = AMINOACID_TO_NCBISTDAA[(int)'X'];
+//         } else if (!s_IsValidResidue(sv[i])) {
+//             invalid_residues.push_back(i);
+//         } else {
+//             *buf_var++ = sv[i];
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:98-99 and 166-171
+// ```c++
+//     m_Query = new Uint1[query_length];
+//     memcpy((void*) m_Query, (void*) query, query_length);
+//     ...
+//     // set the sequence data in ncbistdaa format
+//     CNCBIstdaa& seq = m_QueryBioseq->SetInst().SetSeq_data().SetNcbistdaa();
+//     seq.Set().reserve(GetQueryLength());
+//     for (TSeqPos i = 0; i < GetQueryLength(); i++) {
+//         seq.Set().push_back(m_Query[i]);
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:402-405
+// ```c++
+//     CRef<CBioseq> query = m_PssmInput->GetQueryForPssm();
+//     if (query.NotEmpty()) {
+//         retval->SetQuery().SetSeq(*query);
+//     }
+// ```
+// The MSA's query row and the PSSM's query Bioseq, which `PrintAsciiPssm` prints, are both the
+// search's buffer (`GetBlastSequence` with `eBlastEncodingProtein`): an O is X in both. That is
+// the only letter the buffer changes from the record's NCBIstdaa letters, and
+// `encode_protein_sequence` makes the same change, so the printed letters are the buffer's (NCBI
+// 2.17.0 and LOSAT give the same PSSM for a query with lower-case letters, a lower-case o, and a
+// `-` that the FASTA reader drops).
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -241,24 +300,21 @@ pub(crate) fn ascii_pssm(
 ) -> Result<Vec<u8>> {
     let sbp = score_block(matrix)?;
     let query = crate::algorithm::blastp::encoding::encode_protein_sequence(query_letters);
-    let msa = input_msa(
-        &query.aa_seq[1..=query.aa_len],
-        alignments,
-        subject,
-        inclusion_ethresh,
-    );
+    let query = &query.aa_seq[1..=query.aa_len];
+    let msa = input_msa(query, alignments, subject, inclusion_ethresh)?;
     if request.pseudocount < 0 {
         return Err(blast_options_error(
             "IPssmInputData returns invalid PSIBlastOptions: Pseudo count must be greater than or equal to 0",
         ));
     }
+    if inclusion_ethresh <= 0.0 {
+        return Err(blast_options_error(
+            "IPssmInputData returns invalid PSIBlastOptions: Inclusion threshold must be greater than 0",
+        ));
+    }
     let pssm = psi::create_pssm_with_diagnostics(&msa, request.pseudocount, &sbp)
         .map_err(|error| crate::blastinput::app::engine_error(error_code_to_string(error)))?;
-    Ok(print_ascii_pssm(
-        &pssm,
-        &ncbistdaa_letters(query_letters),
-        ancillary,
-    ))
+    Ok(print_ascii_pssm(&pssm, query, ancillary))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:218-282
@@ -472,15 +528,39 @@ pub(crate) fn score_block(matrix: ScoringMatrix) -> Result<PsiScoreBlk> {
 //     }
 // ```
 // A Seq-align names its subject by its Seq-id; LOSAT's names it by the subject's index, which
-// the Seq-ids of different subjects do not share in the runs LOSAT accepts. An HSP after a
-// subject that is not counted (an HSP above the threshold before the first one below it) moves
-// `msa_index` past the rows NCBI allocates; NCBI writes there out of bounds, LOSAT drops it.
+// the Seq-ids of different subjects do not share in the runs LOSAT accepts.
+// `msa_index` also moves on after a subject that is not counted, so an HSP below the threshold
+// whose subject comes after one without such an HSP, before the first counted subject, can take
+// `msa_index` past the rows NCBI allocates (one per counted subject). NCBI then writes out of
+// bounds (`_ASSERT` only), a failure without a checkable result: LOSAT refuses the PSSM there.
+// The hit lists are sorted by their best e-value (`s_EvalueCompareHSPLists`), which puts the
+// counted subjects first, but two e-values below 1.0e-180 compare as equal and those lists are
+// then ordered by score, so with an inclusion threshold below 1.0e-180 the counted subjects are
+// not shown to come first:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1390-1395 and 3095-3102
+// ```c
+// s_EvalueComp(double evalue1, double evalue2)
+// {
+//     const double epsilon = 1.0e-180;
+//     if (evalue1 < epsilon && evalue2 < epsilon) {
+//         return 0;
+//     }
+//     ...
+//    if ((retval = s_EvalueComp(h1->best_evalue,
+//                                    h2->best_evalue)) != 0)
+//       return retval;
+//
+//    if (h1->hsp_array[0]->score > h2->hsp_array[0]->score)
+//       return -1;
+//    if (h1->hsp_array[0]->score < h2->hsp_array[0]->score)
+//       return 1;
+// ```
 fn input_msa(
     query: &[u8],
     alignments: &[PssmAlignment<'_>],
     subject: &dyn Fn(u32) -> Vec<u8>,
     inclusion_ethresh: f64,
-) -> PsiMsa {
+) -> Result<PsiMsa> {
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:158
     // ```c
     // #define BLAST_EXPECT_VALUE 10.0 /**< by default, alignments whose expect
@@ -514,13 +594,16 @@ fn input_msa(
             if last_subject.is_some_and(|last| last != alignment.subject) {
                 msa_index += 1;
             }
-            if let Some(row) = msa.rows.get_mut(msa_index) {
-                process_denseg(row, alignment, &subject(alignment.subject));
-            }
+            let Some(row) = msa.rows.get_mut(msa_index) else {
+                anyhow::bail!(
+                    "an alignment past the last row of the PSSM's multiple alignment (a subject included by -inclusion_ethresh after one that is not, where NCBI BLAST+'s psiblast writes out of bounds) is not supported by LOSAT's PSIBLAST"
+                );
+            };
+            process_denseg(row, alignment, &subject(alignment.subject));
         }
         last_subject = Some(alignment.subject);
     }
-    msa
+    Ok(msa)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:363-408
@@ -627,8 +710,10 @@ fn process_denseg(row: &mut [PsiMsaCell], alignment: &PssmAlignment<'_>, subject
     }
 }
 
-/// A record's letters in NCBIstdaa as its Bioseq holds them (`CSeqVector`,
-/// `CPssm::GetQuerySequenceData`): upper case, and O stays O (only the search reads it as X).
+/// A subject record's letters in NCBIstdaa as its Bioseq holds them (the `CSeqVector` of
+/// `CPsiBlastInputData::x_GetSubjectSequence`, quoted at `process_denseg`): upper case, and O
+/// stays O. The query's letters are not these: the PSSM's query is the search's buffer, in which
+/// O is X (`ascii_pssm`).
 pub(crate) fn ncbistdaa_letters(letters: &[u8]) -> Vec<u8> {
     letters
         .iter()
@@ -783,8 +868,10 @@ fn fixed(value: f64, precision: usize) -> String {
 //     }
 // ```
 // The scores matrix of `GetScores` has the 28 rows of NCBIstdaa (pssm_engine.cpp
-// `x_PSIMatrix2Asn1` stores every row). The query's letters are those of its Bioseq
-// (`GetQuerySequenceData`, blastfmtutil.cpp:253-255), in which an O stays O.
+// `x_PSIMatrix2Asn1` stores every row). The query's letters are those of the PSSM's query Bioseq
+// (`GetQuerySequenceData`, blastfmtutil.cpp:253-255), which `CPsiBlastInputData` builds from the
+// search's buffer, in which an O is X (quoted at `ascii_pssm`): `query` is that buffer, so an O
+// of the record prints as X and takes the X branch of the gapless weight.
 pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAncillary) -> Vec<u8> {
     use std::fmt::Write as _;
     let mut out = String::new();

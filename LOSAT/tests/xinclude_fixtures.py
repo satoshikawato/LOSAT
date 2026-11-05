@@ -24,7 +24,9 @@ with `-save_each_pssm` the files `<fixture_id>.pssm.<n>`, or none. Its standard 
 error and exit status are the row's as for a row without files. The files are frozen under their
 names, and `side_sha256` lists them as `<name without the fixture id>=<SHA-256>` (`.pssm=...`,
 `.pssm.1=...`), the file `.pssm` first and the numbered ones in order; an empty `side_sha256` is the
-expectation that the run writes no file. A check compares the names and the bytes of the files.
+expectation that the run writes no file. A check compares the names and the bytes of the files. An
+argument of the row may name that `<tmp>` as `{pssm_dir}` (`-out_pssm {pssm_dir}/p.asn`), so that any
+other file the run writes there is seen: every name in `<tmp>` other than the PSSM files is reported.
 
 This module has no manifest of its own: `run_oracle.py` / `check_losat.py` (outfmt 0 manifest) and
 `db_search_fixtures.py` call it.
@@ -218,11 +220,16 @@ def pssm_files(directory: Path, row_id: str) -> tuple[list[tuple[str, bytes]], l
     return [(name, (directory / name).read_bytes()) for _, name in sorted(found)], sorted(stray)
 
 
+PSSM_DIR = "{pssm_dir}"
+
+
 def run_with_pssm(command: list[str], row_id: str, **kwargs) -> PssmResult:
-    """Runs `command` with `-out_ascii_pssm <tmp>/<row_id>.pssm` added and collects the files it wrote.
-    `kwargs` go to `subprocess.run` (cwd, env, timeout); the output is captured."""
+    """Runs `command` with `-out_ascii_pssm <tmp>/<row_id>.pssm` added and collects the files it wrote;
+    `{pssm_dir}` in an argument is `<tmp>`. `kwargs` go to `subprocess.run` (cwd, env, timeout); the
+    output is captured."""
     with tempfile.TemporaryDirectory(prefix="losat_pssm_") as tmp:
         directory = Path(tmp)
+        command = [word.replace(PSSM_DIR, tmp) for word in command]
         run = subprocess.run([*command, "-out_ascii_pssm", str(directory / f"{row_id}.pssm")],
                              capture_output=True, **kwargs)
         files, stray = pssm_files(directory, row_id)

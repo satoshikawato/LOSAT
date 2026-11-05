@@ -1257,6 +1257,10 @@ fn spread_gap_weights(msa: &Msa, seq_weights: &mut SequenceWeights) {
 //             return PSIERR_BADSEQWEIGHTS;
 //         }
 // ```
+// `!(0.99..=1.01).contains(..)` is NCBI's two comparisons for every number but NaN, which
+// NCBI's lets through and this rejects. The weights are finite (sums of finite products,
+// normalised by a positive total in `_PSICalculateNormalizedSequenceWeights`), so no NaN
+// reaches this check.
 fn check_sequence_weights(msa: &Msa, seq_weights: &SequenceWeights) -> Result<(), PsiError> {
     for pos in 0..msa.query_length {
         if msa.num_matching_seqs[pos] <= 1 || msa.cell[K_QUERY_INDEX][pos].letter == X {
@@ -1458,7 +1462,8 @@ fn initialize_exp_num_observations(background: &[f64; 20]) -> [f64; MAX_IND_OBSE
 // ```
 // The distribution of a column whose extent was set holds one count per column of the extent
 // (`_PSICalculateNormalizedSequenceWeights`), at least `halfNumColumns`, so `k` stays at 0 or
-// above; the loop also stops there, where NCBI's would read before the row.
+// above. The loop's `k >= 0` stands for NCBI's `ASSERT(k >= 0)`, which only debug builds check:
+// a release build of NCBI would read before the row there; LOSAT stops instead (not reached).
 fn effective_observations(
     align_blk: &AlignedBlock,
     seq_weights: &SequenceWeights,
@@ -1994,6 +1999,24 @@ const STD_ALPHABET: [u8; 20] = [
 //         score_freqs->score_avg += (s * score_freqs->sprob[s]);
 //     }
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2102-2104, 2118-2119 and
+// 2703-2704
+// ```c
+//    if (lo >= 0 || hi <= 0 ||
+//          lo < BLAST_SCORE_MIN || hi > BLAST_SCORE_MAX)
+//       return 1;
+//    ...
+//    if (BlastScoreChk(score_min, score_max) != 0)
+//       return NULL;
+//    ...
+//    if (kbp == NULL || sfp == NULL)
+//       return 1;
+// ```
+// NCBI's `Blast_ScoreFreqNew` returns NULL when the PSSM's smallest score is 0 or more or its
+// largest 0 or less; `Blast_KarlinBlkUngappedCalc` then leaves `kbp_psi[0]` as it was (the
+// previous Lambda). This port does not model that branch: the scaled scores of a BLOSUM62 round
+// (the only matrix LOSAT's psiblast accepts) keep negative and positive values at every factor
+// the scaling tries, so it is not reached.
 fn compute_score_probabilities(
     pssm: &[[i32; BLASTAA_SIZE]],
     query: &[u8],

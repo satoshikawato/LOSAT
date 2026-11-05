@@ -9,7 +9,8 @@ export const DIAGNOSTICS_STREAM = 3;
 
 /**
  * The ABI v2 `emit` streams of a run (docs/web/abi_v2.md §5): 0, 6 and 7 are the output
- * formats, 4 the output of the argv's -outfmt (6 or 7 with fields; only such a run writes it),
+ * formats, 4 the output of the argv's -outfmt (another format, or 6 or 7 with fields; only such a
+ * run writes it),
  * 1 the HSP records (JSON Lines) and 3 the diagnostics (UTF-8).
  */
 export type OutputStream = RunOutput | typeof HITS_STREAM | typeof DIAGNOSTICS_STREAM;

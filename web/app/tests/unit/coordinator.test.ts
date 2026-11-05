@@ -39,9 +39,9 @@ function setup(engine: EngineGateway = new FakeEngine(), wrap: (data: DataServic
     newToken: () => `token-${++token}`,
     cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
   });
-  const saved: Array<{ fileName: string; text: string }> = [];
+  const saved: Array<{ fileName: string; text: string; type: string }> = [];
   const downloader: Downloader = {
-    save: (fileName, bytes) => saved.push({ fileName, text: new TextDecoder().decode(bytes) }),
+    save: (fileName, bytes, type) => saved.push({ fileName, text: new TextDecoder().decode(bytes), type }),
   };
   let id = 0;
   const coordinator = new Coordinator({
@@ -339,6 +339,7 @@ describe('Coordinator', () => {
     await coordinator.exportOutput(runId, CUSTOM_OUTPUT);
     expect(saved[0]!.fileName).toBe('losat-run1-blastn-megablast-19700101T000001Z.outfmt7-custom.txt');
     expect(saved[0]!.text).toBe(custom);
+    expect(saved[0]!.type).toBe('text/plain');
     // Its formats are those of a run without -outfmt.
     const plain = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, plain, 'completed');
@@ -346,10 +347,26 @@ describe('Coordinator', () => {
       expect(await coordinator.readOutput(runId, format)).toBe(await coordinator.readOutput(plain, format));
     }
     await expect(data.readOutput(plain, CUSTOM_OUTPUT)).rejects.toThrow('does not write output 4');
-    expect(await coordinator.enqueue({ ...request, extra: ['-outfmt', '5'] })).toEqual({
+    expect(await coordinator.enqueue({ ...request, extra: ['-outfmt', '13'] })).toEqual({
       ok: false,
-      message: '-outfmt 5: the browser writes outfmt 0, 6 and 7 (6 and 7 with any fields); other formats need the CLI',
+      message: '-outfmt 13 is not supported in the browser yet',
     });
+  });
+
+  // Every other format that the CLI writes is the output of the argv's -outfmt too (W11), saved
+  // with its format's extension and media type.
+  it("runs, stores and exports the output of an -outfmt besides 0, 6 and 7", async () => {
+    const { coordinator, saved } = setup();
+    const runId = (await coordinator.enqueue({ ...request, extra: ['-outfmt', '5'] })).runId!;
+    await waitFor(coordinator, runId, 'completed');
+    const view = coordinator.state.get().runs.find((run) => run.snapshot.runId === runId)!;
+    expect(Object.keys(view.result!.byteLengths)).toEqual(['0', '4', '6', '7']);
+    expect(await coordinator.readOutput(runId, CUSTOM_OUTPUT)).toContain('# -outfmt 5');
+    await coordinator.exportOutput(runId, CUSTOM_OUTPUT);
+    expect(saved[0]!.fileName).toBe('losat-run1-blastn-megablast-19700101T000001Z.outfmt5.xml');
+    expect(saved[0]!.type).toBe('application/xml');
+    await coordinator.exportOutput(runId, 0);
+    expect(saved[1]!.type).toBe('text/plain');
   });
 
   it('queues a group in order, numbered without gaps, and cancels the group together', async () => {

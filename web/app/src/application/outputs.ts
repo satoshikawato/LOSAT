@@ -58,15 +58,23 @@ export class OutputReader {
     this.saver.problem.subscribe(() => this.publish({}));
   }
 
-  /** Reads one output of a completed run. What is shown stays until it is read; an export of the output before says no more. */
-  async show(run: RunView, format: RunOutput): Promise<void> {
+  /**
+   * Reads one output of a completed run (`text`; a binary output is not read). What is shown stays
+   * until it is read; an export of the output before says no more.
+   */
+  async show(run: RunView, format: RunOutput, text = true): Promise<void> {
     const read = ++this.reads;
     this.saver.reset();
     this.publish({ shown: '' });
     const choice = `${run.snapshot.number}:${format}`;
-    let text: string;
+    if (!text) {
+      this.readProblem = '';
+      this.publish({ shown: choice, text: '', failed: '' });
+      return;
+    }
+    let output: string;
     try {
-      text = await this.outputs.readOutput(run.snapshot.runId, format);
+      output = await this.outputs.readOutput(run.snapshot.runId, format);
     } catch (error) {
       if (read !== this.reads) return;
       this.readProblem = unreadableResults(run, error);
@@ -75,7 +83,7 @@ export class OutputReader {
     }
     if (read !== this.reads) return;
     this.readProblem = '';
-    this.publish({ shown: choice, text, failed: '' });
+    this.publish({ shown: choice, text: output, failed: '' });
   }
 
   /** Saves an output as a file; one that is not saved says why, until the next export or choice. */

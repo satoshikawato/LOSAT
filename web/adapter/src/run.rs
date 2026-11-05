@@ -1779,7 +1779,7 @@ mod tests {
         ("tab.bx.delim_comma.6", "blastx", "tests/db_search/ids/ids_q.fna", "tests/fasta/outfmt11/arch_bp_s.faa", "6 delim=, qseqid sseqid scomnames"),
     ];
 
-    // The output of the argv's -outfmt (6 or 7 with fields) is stream 4, NCBI's bytes of the same
+    // The output of the argv's -outfmt (6 or 7 with fields here) is stream 4, NCBI's bytes of the same
     // command line, in the five programs, and stream 3 NCBI's standard error of it (with the
     // warnings of its fields' writer); the formats 0, 6 and 7 and the HSP records are those of
     // the run without -outfmt.

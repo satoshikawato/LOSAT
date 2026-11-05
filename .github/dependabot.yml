@@ -12,7 +12,8 @@
 #   (`@<old>` picks one when the lock file holds two versions of the package), and raise
 #   web/adapter/Cargo.toml's own requirement when clap moves to a new major.
 # - npm: minor and patch updates of web/app in one pull request; each major update in its own.
-# - auto-merge.yml does not turn on auto-merge for these pull requests: a person merges each one.
+# - auto-merge.yml turns on auto-merge for these pull requests as for every other one (Owner
+#   2026-11-05): a cargo pull request merges once the web/adapter commit above makes web.yml pass.
 # - cooldown: a release is considered 7 days after it was published.
 version: 2
 updates:

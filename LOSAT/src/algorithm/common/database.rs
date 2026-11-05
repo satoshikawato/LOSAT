@@ -1661,6 +1661,110 @@ pub(crate) fn tabular_subject_ids(
         .collect()
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:202-208
+// ```c++
+//         SDataLoaderConfig dlconfig =
+//             InitializeQueryDataLoaderConfiguration(query_opts->QueryIsProtein(),
+//                                                    db_adapter);
+//         CBlastInputSourceConfig iconfig(dlconfig, query_opts->GetStrand(),
+//                                      query_opts->UseLowercaseMasks(),
+//                                      query_opts->GetParseDeflines(),
+//                                      query_opts->GetRange());
+// ```
+/// The scope of ids of a database search of records in memory under `-parse_deflines`
+/// (`seqid::id_scope`): the ids that the reader of `query_records` kept. The command line's
+/// reader adds them as it reads; a database only asks the scope for the queries' ids.
+pub(crate) fn database_id_scope(
+    parse_deflines: bool,
+    query_records: &[crate::blastinput::fasta_reader::FastaRecord],
+    program: &str,
+) -> Result<Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>> {
+    if !parse_deflines {
+        return Ok(None);
+    }
+    let scope = crate::seqid::id_scope::IdScope::default();
+    for believed in query_records.iter().filter_map(|record| record.believed()) {
+        scope.add_record(&believed.ids, None, "query", program)?;
+    }
+    Ok(Some(std::sync::Arc::new(scope)))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
+// ```c++
+// const char* kDfltArgTabularOutputFmt =
+//     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
+//     "evalue bitscore";
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
+// ```c++
+//        		const CBioseq_Handle& subject_bh =
+//                 scope.GetBioseqHandle(align.GetSeq_id(1));
+//             if(setSubjectId) {
+//             	SetSubjectId(subject_bh);
+//             }
+//             m_SubjectLength = subject_bh.GetBioseqLength();
+// ```
+/// A reported sequence as a caller of the library reads it (`FormatObserver::database_subjects`):
+/// the id of the default tabular report (`tabular_subject_ids`) of the sequence `ordinal` with the
+/// stored title `title` (with parsed Seq-ids: `parsed`), and `length` letters. A sequence whose
+/// tabular id LOSAT refuses shows the first word of its title: only a tabular report refuses
+/// that id, not the search.
+pub(crate) fn library_subject(
+    db: &SeqDb,
+    title: &[u8],
+    ordinal: u32,
+    parsed: Option<&crate::report::db_subject::ParsedSubject>,
+    length: usize,
+    protein: bool,
+    program: &str,
+) -> crate::api::local_blast::ReportedSubject {
+    let id = match parsed {
+        Some(subject) => subject.tabular_saccver(protein).ok().map(|id| id.to_vec()),
+        None => tabular_subject_id(title, ordinal, protein, program).ok(),
+    }
+    .unwrap_or_else(|| {
+        title
+            .split(|&byte| byte == b' ')
+            .next()
+            .unwrap_or_default()
+            .to_vec()
+    });
+    crate::api::local_blast::ReportedSubject {
+        oid: db.oid(ordinal),
+        id: std::sync::Arc::from(String::from_utf8_lossy(&id)),
+        length,
+    }
+}
+
+/// `library_subject` of each reported sequence of a nucleotide database, by rank: `records` hold
+/// the stored titles, `ordinals` and `parsed` as in `tabular_subject_ids`.
+pub(crate) fn library_subjects(
+    db: &SeqDb,
+    records: &[crate::blastinput::fasta_reader::FastaRecord],
+    ordinals: &[u32],
+    parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+    length: impl Fn(usize) -> usize,
+    program: &str,
+) -> Vec<crate::api::local_blast::ReportedSubject> {
+    records
+        .iter()
+        .zip(ordinals)
+        .enumerate()
+        .map(|(rank, (record, &ordinal))| {
+            let subject = parsed.get(rank).and_then(Option::as_deref);
+            library_subject(
+                db,
+                &record.title,
+                ordinal,
+                subject,
+                length(rank),
+                false,
+                program,
+            )
+        })
+        .collect()
+}
+
 // No NCBI counterpart: bounds LOSAT's own check before the search (`reports_may_refuse`).
 /// The most sequences of a database with parsed Seq-ids whose headers a program's check before
 /// the search reads with `reports_may_refuse` (tblastx's `report_stream::check`; blastn's

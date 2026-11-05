@@ -13,6 +13,7 @@
 #![warn(missing_docs, unused)]
 
 use super::error::Error;
+use super::input::Inputs;
 use super::program::Program;
 use crate::cli::{Cli, Commands};
 
@@ -52,9 +53,17 @@ impl Search {
         &self.argv
     }
 
+    /// The parsed arguments, with either kind of subject: `validate` accepted one of them.
+    fn any_subject(&self) -> Commands {
+        let names = ["query", "subject"];
+        parse(self.program, &self.argv, names[0], SUBJECT, names[1])
+            .or_else(|_| parse(self.program, &self.argv, names[0], DATABASE, names[1]))
+            .expect("validated argv")
+    }
+
     /// Whether the search's argv has `-parse_deflines` (`read_inputs`).
     pub(crate) fn parse_deflines(&self) -> bool {
-        match self.command("query", "subject") {
+        match self.any_subject() {
             Commands::Blastp(args) => args.parse_deflines,
             Commands::Tblastn(args) => args.parse_deflines,
             Commands::Blastn(args) => args.parse_deflines,
@@ -64,13 +73,43 @@ impl Search {
         }
     }
 
-    /// The parsed arguments of the search with the inputs named `query` and `subject` (the
-    /// command line's `-query` and `-subject` values, shown in the reports). `validate`
-    /// accepted the argv, so this parses.
-    pub(crate) fn command(&self, query: &str, subject: &str) -> Commands {
-        parse(self.program, &self.argv, query, subject).expect("validated argv")
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:67-72
+    // ```c++
+    //     // Set an appropriate default for the strand
+    //     if (m_Strand == eNa_strand_other) {
+    //         m_Strand = (m_DLConfig.m_IsLoadingProteins)
+    //             ? eNa_strand_unknown
+    //             : eNa_strand_both;
+    //     }
+    // ```
+    /// The `-strand` value of the search's argv, for the programs that have the option.
+    pub(crate) fn strand(&self) -> Option<String> {
+        match self.any_subject() {
+            Commands::Blastn(args) => Some(args.strand),
+            Commands::Blastx(args) => Some(args.strand),
+            _ => None,
+        }
+    }
+
+    /// The parsed arguments of the search of `inputs`: the command line's `-query` and
+    /// `-subject` or `-db` values. An option can hold for one kind of subject only (`-subject_loc`
+    /// excludes `-db`, `-seqidlist` excludes `-subject`), so this can fail with the parser's
+    /// message where `validate`, which knows no inputs, could not.
+    pub(crate) fn command(&self, inputs: Inputs<'_>) -> Result<Commands, Error> {
+        let subject_flag = if inputs.database { DATABASE } else { SUBJECT };
+        parse(
+            self.program,
+            &self.argv,
+            inputs.query_name,
+            subject_flag,
+            inputs.subject_name,
+        )
     }
 }
+
+/// The flags of the two kinds of subject.
+const SUBJECT: &str = "-subject";
+const DATABASE: &str = "-db";
 
 /// The key of an argv word: the option name, without a value joined by `=`.
 fn key(word: &str) -> &str {
@@ -78,14 +117,20 @@ fn key(word: &str) -> &str {
 }
 
 /// Parses the argv with the command line's parser, as `losat <program> -query <query>
-/// -subject <subject> <argv...>`.
-fn parse(program: Program, argv: &[String], query: &str, subject: &str) -> Result<Commands, Error> {
+/// <subject_flag> <subject> <argv...>`.
+fn parse(
+    program: Program,
+    argv: &[String],
+    query: &str,
+    subject_flag: &str,
+    subject: &str,
+) -> Result<Commands, Error> {
     let words = [
         "losat",
         program.name(),
         "-query",
         query,
-        "-subject",
+        subject_flag,
         subject,
     ];
     let cli: Cli =
@@ -116,14 +161,21 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
                 "{key} is not accepted by the library API: the inputs are given as records and the outputs as formats"
             )));
         }
-        if program == Program::Blastx && name == "parse_deflines" {
-            return Err(Error::Argv(format!(
-                "{key} is not supported by the library API for BLASTX yet"
-            )));
-        }
     }
     let argv: Vec<String> = argv.iter().map(|word| word.to_string()).collect();
-    parse(program, &argv, "query", "subject")?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2377-2381
+    // ```c++
+    //         ITERATE(vector<string>, dbarg, database_args) {
+    //             arg_desc.SetDependency(kArgSubjectLocation,
+    //                                    CArgDescriptions::eExcludes,
+    //                                    *dbarg);
+    //         }
+    // ```
+    // An argv is checked before the inputs are known: it holds if it holds for one kind of
+    // subject, and the search parses it again for the kind it has (`Search::command`).
+    if let Err(error) = parse(program, &argv, "query", SUBJECT, "subject") {
+        parse(program, &argv, "query", DATABASE, "subject").map_err(|_| error)?;
+    }
     Ok(Search { program, argv })
 }
 
@@ -136,7 +188,8 @@ mod tests {
         let search = validate(Program::Blastp, &["-evalue", "0.1", "-num_threads", "2"]).unwrap();
         assert_eq!(search.program(), Program::Blastp);
         assert_eq!(search.argv(), ["-evalue", "0.1", "-num_threads", "2"]);
-        match search.command("q.faa", "s.faa") {
+        let inputs = Inputs::new(&[], &[]).named("q.faa", "s.faa");
+        match search.command(inputs).unwrap() {
             Commands::Blastp(args) => {
                 assert_eq!(args.evalue, Some(0.1));
                 assert_eq!(args.num_threads, 2);
@@ -176,16 +229,11 @@ mod tests {
             );
             assert!(error.message().starts_with(key(word)), "{word}: {error}");
         }
-        let error = validate(Program::Blastx, &["-parse_deflines"]).unwrap_err();
-        assert!(
-            error
-                .message()
-                .contains("not supported by the library API for BLASTX yet"),
-            "{error}"
-        );
-        assert!(validate(Program::Blastp, &["-parse_deflines"])
-            .unwrap()
-            .parse_deflines());
+        for program in [Program::Blastp, Program::Blastx] {
+            assert!(validate(program, &["-parse_deflines"])
+                .unwrap()
+                .parse_deflines());
+        }
         // A value that looks like an option is a value.
         validate(Program::Blastp, &["-matrix", "BLOSUM62"]).unwrap();
     }

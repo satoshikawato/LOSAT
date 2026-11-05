@@ -578,6 +578,21 @@ impl ReportedSubjects {
     pub(crate) fn tabular_subject_ids(&self) -> Result<Vec<Arc<[u8]>>> {
         shared::tabular_subject_ids(&self.records, &self.ordinals, &self.parsed, false, PROGRAM)
     }
+
+    /// The reported sequences as the library's records name them (`shared::library_subjects`).
+    pub(crate) fn library_subjects(
+        &self,
+        database: &TblastxDatabase,
+    ) -> Vec<crate::api::local_blast::ReportedSubject> {
+        shared::library_subjects(
+            &database.db,
+            &self.records,
+            &self.ordinals,
+            &self.parsed,
+            |rank| self.lengths[rank] as usize,
+            PROGRAM,
+        )
+    }
 }
 
 #[cfg(test)]

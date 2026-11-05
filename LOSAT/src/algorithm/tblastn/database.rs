@@ -364,6 +364,21 @@ impl ReportedSubjects {
         self.parsed.get(rank).and_then(Option::as_deref)
     }
 
+    /// The reported sequences as the library's records name them (`shared::library_subjects`).
+    pub(super) fn library_subjects(
+        &self,
+        database: &TblastnDatabase,
+    ) -> Vec<crate::api::local_blast::ReportedSubject> {
+        shared::library_subjects(
+            &database.db,
+            &self.records,
+            &self.ordinals,
+            &self.parsed,
+            |rank| self.lengths[rank],
+            PROGRAM,
+        )
+    }
+
     /// The subjects as the reports read them, by rank: their stores, or without stores (no report
     /// reads their letters) their lengths.
     pub(super) fn letters(&self) -> super::x_subject_store::SubjectLetters<'_> {

@@ -33,6 +33,7 @@ mod run_impl;
 pub use run_impl::check_options;
 pub use run_impl::run;
 pub use run_impl::run_local;
+pub use run_impl::run_local_database;
 // EXPERIMENT (PAIRPAR): the summary line `main` prints at exit.
 pub use run_impl::x_pair_par_print_summary;
 // The seed release's `LOSAT_X_STATS` line `main` prints at exit. No NCBI

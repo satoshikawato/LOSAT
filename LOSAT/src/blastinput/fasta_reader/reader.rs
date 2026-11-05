@@ -1101,7 +1101,7 @@ impl<R: Read> FastaReader<R> {
                 line: line_number,
             });
         }
-        if parsed.range && self.config.keep_defline {
+        if parsed.range && self.config.keep_defline && self.config.archive_known {
             return Err(ReadError::Unsupported(refuse_range_in_archive(
                 self.config.role,
                 self.config.program,

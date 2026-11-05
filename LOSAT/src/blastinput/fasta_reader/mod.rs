@@ -89,12 +89,25 @@ pub struct ReaderConfig {
     /// The strand of a query's Seq-loc (`CBlastInputSourceConfig::GetStrand`), read with
     /// `-parse_deflines`.
     pub strand: crate::report::archive::bioseq::SeqLocStrand,
+    /// Whether the reader knows that the run writes the archive when it keeps the deflines
+    /// (`keep_defline`), and refuses what the archive cannot write as it reads
+    /// (`refuse_range_in_archive`). The library API reads before it knows the formats.
+    pub archive_known: bool,
 }
 
 impl ReaderConfig {
     /// The same reader, keeping the defline lines (`-outfmt 11`).
     pub fn with_defline(mut self, keep: bool) -> Self {
         self.keep_defline = keep;
+        self
+    }
+
+    // No NCBI counterpart: NCBI reads for one format; a caller of the library reads the records
+    // before it asks for its formats (`api::read_fasta`), and the refusal comes with the search.
+    /// The reader of a caller that keeps every defline, whatever the formats of its searches
+    /// (`archive_known`).
+    pub fn with_archive_unknown(mut self) -> Self {
+        self.archive_known = false;
         self
     }
 
@@ -131,6 +144,7 @@ impl ReaderConfig {
             program,
             role: "query",
             keep_defline: false,
+            archive_known: true,
             parse_deflines: false,
             strand: if protein {
                 crate::report::archive::bioseq::SeqLocStrand::Unknown
@@ -161,6 +175,7 @@ impl ReaderConfig {
             program,
             role: "subject",
             keep_defline: false,
+            archive_known: true,
             parse_deflines: false,
             strand: if protein {
                 crate::report::archive::bioseq::SeqLocStrand::Unknown

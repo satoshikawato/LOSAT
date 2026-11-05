@@ -266,6 +266,11 @@ pub struct PsiblastArgs {
         help = "E-value inclusion threshold for pairwise alignments"
     )]
     pub inclusion_ethresh: f64,
+
+    /// `BlastpArgs::first_query_ordinal`: the number of the first query of the records of a call
+    /// that starts there (`api::run_batches`). 0 on the command line.
+    #[arg(skip)]
+    pub first_query_ordinal: usize,
 }
 
 impl PsiblastArgs {
@@ -286,37 +291,7 @@ impl PsiblastArgs {
                 self.num_iterations
             );
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2744-2748
-        // ```c++
-        // CFormattingArgs::ArchiveFormatRequested(const CArgs& args) const
-        // {
-        //     EOutputFormat output_fmt;
-        //     string ignore1, ignore2;
-        //     ParseFormattingString(args, output_fmt, ignore1, ignore2);
-        // ```
-        // NCBI parses `-outfmt` before the option handlers; its own errors come from that parse
-        // and from blastp's (`run`). The formats that NCBI runs and LOSAT's psiblast does not
-        // write yet are refused here. The tabular reports with a field list, and outfmt 10 and
-        // 20, are blastp's (`blastp::tabular`), without a custom delimiter, which psiblast's
-        // formatter does not get (psiblast_app.cpp:482-505, `blast_engine.rs` `run`).
-        let choice = crate::blastinput::app::parse_formatting_string(&self.outfmt)?;
-        if let Some(format) = crate::blastinput::app::ReportFormat::from_number(choice.number) {
-            use crate::blastinput::app::ReportFormat;
-            if !matches!(
-                format,
-                ReportFormat::Pairwise
-                    | ReportFormat::Tabular
-                    | ReportFormat::TabularWithComments
-                    | ReportFormat::CommaSeparatedValues
-                    | ReportFormat::CommaSeparatedValuesWithHeader
-                    | ReportFormat::Sam
-            ) {
-                bail!(
-                    "output format {} is not supported by LOSAT's PSIBLAST",
-                    choice.number
-                );
-            }
-        }
+        Self::check_outfmt(&self.outfmt)?;
         Ok(BlastpArgs {
             query: self.query,
             subject: self.subject,
@@ -370,8 +345,43 @@ impl PsiblastArgs {
             archive: None,
             app: BlastpApp::Psiblast,
             inclusion_ethresh: Some(self.inclusion_ethresh),
-            first_query_ordinal: 0,
+            first_query_ordinal: self.first_query_ordinal,
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2744-2748
+    // ```c++
+    // CFormattingArgs::ArchiveFormatRequested(const CArgs& args) const
+    // {
+    //     EOutputFormat output_fmt;
+    //     string ignore1, ignore2;
+    //     ParseFormattingString(args, output_fmt, ignore1, ignore2);
+    // ```
+    /// NCBI parses `-outfmt` before the option handlers; its own errors come from that parse
+    /// and from blastp's (`run`). The formats that NCBI runs and LOSAT's psiblast does not
+    /// write yet are refused here. The tabular reports with a field list, and outfmt 10 and
+    /// 20, are blastp's (`blastp::tabular`), without a custom delimiter, which psiblast's
+    /// formatter does not get (psiblast_app.cpp:482-505, `blast_engine.rs` `run`).
+    pub fn check_outfmt(outfmt: &str) -> Result<()> {
+        let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
+        if let Some(format) = crate::blastinput::app::ReportFormat::from_number(choice.number) {
+            use crate::blastinput::app::ReportFormat;
+            if !matches!(
+                format,
+                ReportFormat::Pairwise
+                    | ReportFormat::Tabular
+                    | ReportFormat::TabularWithComments
+                    | ReportFormat::CommaSeparatedValues
+                    | ReportFormat::CommaSeparatedValuesWithHeader
+                    | ReportFormat::Sam
+            ) {
+                bail!(
+                    "output format {} is not supported by LOSAT's PSIBLAST",
+                    choice.number
+                );
+            }
+        }
+        Ok(())
     }
 }
 

@@ -15,8 +15,9 @@ use LOSAT::api::local_blast::{
     run_local_blastn, FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs,
 };
 use LOSAT::api::{
-    describe, read_fasta, read_inputs, run, run_batches, run_collect, run_to_file, validate, Error,
-    FastaRecord, HspRecord, Inputs, Outcome, Program, Role, Strand, ValueKind, API_OWNED,
+    describe, read_fasta, read_inputs, run, run_batches, run_blastdbcmd, run_collect,
+    run_makeblastdb, run_to_file, validate, Error, FastaRecord, HspRecord, Inputs, Outcome,
+    Program, Role, Strand, ValueKind, API_OWNED,
 };
 
 /// One search: a program, two fixtures of `tests/fasta`, options and the formats to compare.
@@ -81,6 +82,14 @@ const CASES: &[Case] = &[
         subject: "outfmt0/sml_bx_tie_s.faa",
         options: &[],
         formats: &["6", "0"],
+    },
+    // psiblast's first round: blastp's search, a batch of one query, psiblast's report.
+    Case {
+        program: Program::Psiblast,
+        query: "outfmt0/e2e_many_query.faa",
+        subject: "outfmt0/e2e_many_subject.faa",
+        options: &["-evalue", "1e-5"],
+        formats: &["6", "0", "7"],
     },
 ];
 
@@ -579,8 +588,14 @@ fn check_ranges(
     let translated_subject = matches!(program, Program::Tblastn | Program::Tblastx);
     assert_eq!(hsp.query_frame.is_some(), translated_query, "{context}");
     assert_eq!(hsp.subject_frame.is_some(), translated_subject, "{context}");
-    let protein_query = matches!(program, Program::Blastp | Program::Tblastn);
-    let protein_subject = matches!(program, Program::Blastp | Program::Blastx);
+    let protein_query = matches!(
+        program,
+        Program::Blastp | Program::Psiblast | Program::Tblastn
+    );
+    let protein_subject = matches!(
+        program,
+        Program::Blastp | Program::Psiblast | Program::Blastx
+    );
     assert_eq!(hsp.query_strand.is_none(), protein_query, "{context}");
     assert_eq!(hsp.subject_strand.is_none(), protein_subject, "{context}");
     if let Some(strand) = hsp.query_strand {
@@ -601,7 +616,7 @@ const NUCLEOTIDE: &str = "ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCAT
 /// The letters that `program` reads for the input of `role`.
 fn letters_of(program: Program, role: Role) -> &'static str {
     match (program, role) {
-        (Program::Blastp, _)
+        (Program::Blastp | Program::Psiblast, _)
         | (Program::Blastx, Role::Subject)
         | (Program::Tblastn, Role::Query) => PROTEIN,
         _ => NUCLEOTIDE,
@@ -711,7 +726,9 @@ fn xml_report(case: &Case, query: &Path, subject: &Path) -> String {
 
 #[test]
 fn the_statistics_are_those_of_the_xml_report() {
-    for case in CASES.iter().chain(RANGE_CASES) {
+    // LOSAT's psiblast writes no outfmt 5.
+    let cases = CASES.iter().chain(RANGE_CASES);
+    for case in cases.filter(|case| case.program != Program::Psiblast) {
         let context = format!("{} {:?}", case.program, case.options);
         let query_bytes = std::fs::read(fixture(case.query)).expect("query fixture");
         let subject_bytes = std::fs::read(fixture(case.subject)).expect("subject fixture");
@@ -933,10 +950,16 @@ fn the_messages_of_the_run_come_once_with_the_first_batch() {
             options,
             formats: &[],
         };
-        // A query longer than each program's batch size, twice, and one without residues.
+        // A query longer than each program's batch size, twice, and one without residues
+        // (with psiblast, that one and the next are a batch that `CPsiBlast` does not take).
         let letters = letters_of(program, Role::Query);
         let long = letters.repeat(25_000 / letters.len());
-        let query = format!(">q1\n{long}\n>q2\n{long}\n>q3\n>q4\n{letters}\n");
+        let empty = if program == Program::Psiblast {
+            ""
+        } else {
+            ">q3\n"
+        };
+        let query = format!(">q1\n{long}\n>q2\n{long}\n{empty}>q4\n{letters}\n");
         let letters = letters_of(program, Role::Subject);
         let subject = format!(">s1\n{letters}\n>empty\n");
         let batches = check_batches(&case, query.as_bytes(), subject.as_bytes());
@@ -1475,6 +1498,12 @@ const DATABASE_CASES: &[DatabaseCase] = &[
         db: "db_search/xslice",
         options: &[],
     },
+    DatabaseCase {
+        program: Program::Psiblast,
+        query: "fasta/psiblast/tk.faa",
+        db: "db_search/paja",
+        options: &[],
+    },
 ];
 
 fn engine_tests(name: &str) -> String {
@@ -1528,8 +1557,12 @@ fn a_database_search_is_the_command_lines() {
         let db = engine_tests(case.db);
         let query_name = engine_tests(case.query);
         let inputs = Inputs::database(&records, &db).named(&query_name, "ignored");
-        let formats = ["6", "0", "7", "5", "11", COLUMNS];
-        let outcome = run_collect(&search, inputs, &formats).unwrap();
+        // psiblast writes the first three and the columns (`PsiblastArgs::check_outfmt`).
+        let formats: &[&str] = match case.program {
+            Program::Psiblast => &["6", "0", "7", COLUMNS],
+            _ => &["6", "0", "7", COLUMNS, "5", "11"],
+        };
+        let outcome = run_collect(&search, inputs, formats).unwrap();
         for (report, outfmt) in outcome.reports.iter().zip(formats) {
             assert!(
                 report.bytes == case.cli(outfmt),
@@ -1538,7 +1571,7 @@ fn a_database_search_is_the_command_lines() {
         }
         assert!(!outcome.hsps.is_empty(), "{context}");
         // The typed values are the columns, each row's span in every report that has rows.
-        let table = &outcome.reports[5].bytes;
+        let table = &outcome.reports[3].bytes;
         let rows = rows(table);
         assert_eq!(rows.len(), outcome.hsps.len(), "{context}");
         for (hsp, row) in outcome.hsps.iter().zip(rows) {
@@ -1559,9 +1592,11 @@ fn a_database_search_is_the_command_lines() {
             assert_eq!(*id, hsp.subject_id, "{context}");
         }
         // The statistics are those of the XML report.
-        let xml = String::from_utf8_lossy(&outcome.reports[3].bytes);
-        let searched: Vec<usize> = (0..records.len()).collect();
-        check_statistics(&context, &outcome, &xml, &searched);
+        if let Some(xml) = outcome.reports.get(4) {
+            let xml = String::from_utf8_lossy(&xml.bytes);
+            let searched: Vec<usize> = (0..records.len()).collect();
+            check_statistics(&context, &outcome, &xml, &searched);
+        }
     }
 }
 
@@ -1656,6 +1691,95 @@ fn a_database_fails_as_on_the_command_line() {
 }
 
 #[test]
+fn a_database_made_through_the_library_is_read_and_searched_through_it() {
+    let directory = temp_path("made");
+    std::fs::create_dir_all(&directory).unwrap();
+    let name = directory.join("made");
+    let name = name.to_str().unwrap();
+    let fasta = format!(">one a protein\n{PROTEIN}\n>two the same protein\n{PROTEIN}A\n");
+    // From FASTA in memory: the command line's standard input.
+    let (mut log, mut warnings) = (Vec::new(), Vec::new());
+    run_makeblastdb(
+        &["-dbtype", "prot", "-title", "made", "-out", name],
+        &mut fasta.as_bytes(),
+        &mut log,
+        &mut warnings,
+    )
+    .unwrap();
+    assert!(
+        String::from_utf8_lossy(&log).contains("added 2 sequences"),
+        "{}",
+        String::from_utf8_lossy(&log)
+    );
+    assert!(warnings.is_empty());
+    // The command line reads what the library wrote, and the two read it alike.
+    for words in [
+        vec!["-db", name, "-info"],
+        vec!["-db", name, "-entry", "all", "-outfmt", "%o %l %t"],
+    ] {
+        let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+        run_blastdbcmd(&words, &mut output, &mut diagnostics).unwrap();
+        let cli = command(env!("CARGO_BIN_EXE_losat"))
+            .arg("blastdbcmd")
+            .args(&words)
+            .output()
+            .unwrap();
+        assert!(cli.status.success(), "{words:?}");
+        assert_eq!(output, cli.stdout, "{words:?}");
+        assert_eq!(diagnostics, cli.stderr, "{words:?}");
+    }
+    // A search of it names its sequences by their ordinal ids.
+    let search = validate(Program::Blastp, &["-max_hsps", "1"]).unwrap();
+    let query = read_fasta(Program::Blastp, Role::Query, fasta.as_bytes()).unwrap();
+    let outcome = run_collect(&search, Inputs::database(&query, name), &["6"]).unwrap();
+    let mut pairs: Vec<(usize, usize, usize)> = outcome
+        .hsps
+        .iter()
+        .map(|hsp| (hsp.q_idx, hsp.s_idx, hsp.subject_length))
+        .collect();
+    pairs.sort_unstable();
+    let long = PROTEIN.len();
+    assert_eq!(
+        pairs,
+        [
+            (0, 0, long),
+            (0, 1, long + 1),
+            (1, 0, long),
+            (1, 1, long + 1)
+        ]
+    );
+    // A failure's message is what the command line writes to standard error.
+    let missing = directory.join("none");
+    let missing = missing.to_str().unwrap();
+    let words = ["-db", missing, "-info"];
+    let mut diagnostics = Vec::new();
+    let error = run_blastdbcmd(&words, &mut std::io::sink(), &mut diagnostics).unwrap_err();
+    let cli = command(env!("CARGO_BIN_EXE_losat"))
+        .arg("blastdbcmd")
+        .args(words)
+        .output()
+        .unwrap();
+    assert!(!cli.status.success());
+    assert_eq!(diagnostics, cli.stderr);
+    assert!(matches!(error, Error::Search(_)), "{error}");
+    assert_eq!(
+        error.message().as_bytes(),
+        cli.stderr.trim_ascii_end(),
+        "{error}"
+    );
+    // An argv that the parser refuses is the parser's message.
+    let error = run_makeblastdb(
+        &["-dbtype", "neither"],
+        &mut std::io::empty(),
+        &mut std::io::sink(),
+        &mut std::io::sink(),
+    )
+    .unwrap_err();
+    assert!(matches!(error, Error::Argv(_)), "{error}");
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
+#[test]
 fn the_api_owns_the_inputs_and_the_outputs() {
     for owned in API_OWNED {
         let flag = format!("-{owned}");
@@ -1677,5 +1801,5 @@ fn the_api_owns_the_inputs_and_the_outputs() {
     let error = validate(Program::Tblastx, &["-evalue"]).unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error}");
     let error = Program::parse("makeblastdb").unwrap_err();
-    assert!(error.message().contains("command line only"), "{error}");
+    assert!(error.message().contains("run_makeblastdb"), "{error}");
 }

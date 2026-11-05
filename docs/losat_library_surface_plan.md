@@ -469,8 +469,24 @@ BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`bl
 - `blastn_regression_fixtures.py`、`tblastx_regression_fixtures.py`：stdout と stderr の差は、example が持たない経路（`-query -`、`-subject` なしの NCBI のエラー、書き込み失敗の文言）だけ。終了コードは比べられない。
 - `fast output regressions` は `check_losat.py` も API で走らせる。
 
-### 13.4 残ること
+### 13.4 `psiblast`（PR `feature/library-api-psiblast`）
 
-- `psiblast`、`makeblastdb`、`blastdbcmd`。
+`Program::Psiblast`。LOSAT の `psiblast` は第 1 ラウンド（PSSM の無い検索）で、blastp の engine を使う（`algorithm::psiblast`）。API の `run_local` は `PsiblastArgs::into_blastp_args` のあとで blastp の入口を呼ぶ。形式の拒否は要求された形式ごとに行う（`PsiblastArgs::check_outfmt`、`-num_iterations` の拒否は CLI のまま）。バッチは 1 query ずつ（`psiblast_app.cpp:468`）。
+
+検証：`db_search_fixtures.py check --library --program psiblast` の 83 行（64 行が全バイト一致、19 行が拒否の文言）と、`check_losat.py --programs psiblast` の 12 行が全部一致。`library_api.rs` は `-subject` と `-db` の検索を CLI と比べる。
+
+### 13.5 `makeblastdb` と `blastdbcmd`（同じ PR）
+
+| 項目 | 実装 |
+|---|---|
+| `run_makeblastdb(argv, input, output, diagnostics)` | CLI の語をそのまま parser に渡し、`run_with` を呼ぶ。`input` は CLI の標準入力で、`-in -` か `-in` なしのときに読むので、メモリ上の FASTA から database を作れる。データベースの書き先は `-out` |
+| `run_blastdbcmd(argv, output, diagnostics)` | NCBI の引数読み（`blastdbcmd::args`）をそのまま使う `run_with`。`output` は CLI の標準出力 |
+| 失敗 | `Error::Search` で、文言は CLI が標準エラーに書いたものそのまま（`diagnostics` にも書く）。parser の拒否は `Error::Argv` |
+
+CLI の `run_with` はもとから writer を取っていたので、engine の変更は無い。
+
+検証：`dropin_corpus.py check` を example で走らせて、210 行のうち 191 行が一致（`makeblastdb` と `blastdbcmd` の行を含む）。残り 19 行は example が持たない経路（標準入力の query、`-version`、`-help`）で、API の差ではない。`library_api.rs` はメモリ上の FASTA から database を作り、`-info` と `-entry all` を CLI と比べ、同じ database を検索する。
+
+### 13.6 残ること
 - `pylosat` の `-db`。
 - `-db` のバッチごとの再利用：`run_batches` はバッチごとにデータベースを開き直す（§11.3 の測定の続き）。taxonomy データベースについて NCBI が 1 回だけ書くメッセージも、読むバッチごとに出る。

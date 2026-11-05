@@ -65,7 +65,7 @@ pub enum Role {
 pub(super) fn is_protein(program: Program, role: Role) -> bool {
     match (program, role) {
         (Program::Blastn, _) | (Program::Tblastx, _) => false,
-        (Program::Blastp, _) => true,
+        (Program::Blastp | Program::Psiblast, _) => true,
         (Program::Tblastn, Role::Query) => true,
         (Program::Tblastn, Role::Subject) => false,
         (Program::Blastx, Role::Query) => false,

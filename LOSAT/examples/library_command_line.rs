@@ -7,15 +7,16 @@
 //! Reads the query and subject files into memory, searches with `LOSAT::api::run`, or
 //! `run_to_file` with `-out`, and writes the search's warnings and a failure's message to
 //! standard error, so that a run compares with `losat <program>` with the same arguments
-//! (`tests/db_search_fixtures.py check --library`). A failure ends with status 1, whatever the
-//! command line's status for it.
+//! (`tests/db_search_fixtures.py check --library`). `makeblastdb` and `blastdbcmd` go to their
+//! functions. A failure ends with status 1, whatever the command line's status for it.
 
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
 use LOSAT::api::{
-    read_input_file, read_inputs, run, run_to_file, validate, Error, Inputs, Program, Role,
+    read_input_file, read_inputs, run, run_blastdbcmd, run_makeblastdb, run_to_file, validate,
+    Error, Inputs, Program, Role,
 };
 
 fn main() -> ExitCode {
@@ -24,11 +25,20 @@ fn main() -> ExitCode {
         Err(error) => {
             let mut stderr = std::io::stderr();
             let _ = stderr.write_all(error.message().as_bytes());
-            if !error.message().ends_with('\n') {
+            if !error.message().is_empty() && !error.message().ends_with('\n') {
                 let _ = stderr.write_all(b"\n");
             }
             ExitCode::FAILURE
         }
+    }
+}
+
+/// A tool has written the failure to standard error, so `main` adds nothing; an error of its
+/// argv is the parser's.
+fn reported(result: Result<(), Error>) -> Result<(), Error> {
+    match result {
+        Err(Error::Search(_)) => Err(Error::Search(String::new())),
+        other => other,
     }
 }
 
@@ -39,6 +49,25 @@ fn search() -> Result<(), Error> {
             "usage: library_command_line <program> -query <file> -db <db> [options...]".to_string(),
         ));
     };
+    // The two database programs take the command line's words as they are.
+    let words_of_tool: Vec<&str> = words.iter().map(String::as_str).collect();
+    match program.as_str() {
+        "blastdbcmd" => {
+            let (mut stdout, mut stderr) = (std::io::stdout(), std::io::stderr());
+            return reported(run_blastdbcmd(&words_of_tool, &mut stdout, &mut stderr));
+        }
+        "makeblastdb" => {
+            let (mut stdin, mut stdout, mut stderr) =
+                (std::io::stdin(), std::io::stdout(), std::io::stderr());
+            return reported(run_makeblastdb(
+                &words_of_tool,
+                &mut stdin,
+                &mut stdout,
+                &mut stderr,
+            ));
+        }
+        _ => {}
+    }
     let program: Program = program.parse()?;
     let (mut db, mut subject, mut query, mut out, mut outfmt) = (None, None, None, None, "0");
     let mut options: Vec<&str> = Vec::new();

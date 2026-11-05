@@ -154,18 +154,21 @@ def outfmt0_fixtures(every_format: bool = True) -> list[dict]:
         # that output besides.
         custom = custom_outfmt(outfmt)
         sam = run_oracle.is_sam_outfmt(outfmt)
+        frozen_kept = True
         if custom and not every_format and " " not in outfmt.strip(NCBI_SPACE):
             kind = (row["program"], format_number(outfmt))
             if taken.get(kind, 0) >= QUICK_PER_FORMAT and not QUICK_ROWS.match(row["fixture_id"]):
-                continue
-            taken[kind] = taken.get(kind, 0) + 1
+                # The search of 0, 6 and 7 alone, as the row was before W11.
+                custom = sam = frozen_kept = False
+            else:
+                taken[kind] = taken.get(kind, 0) + 1
         key = (row["program"], tuple(argv[:-2]), outfmt if custom else None)
         search = searches.setdefault(key, {"program": row["program"], "argv": [row["program"], *argv[:-2]],
                                            "cwd": str(run_oracle.ENGINE), "cases": [], "frozen": {},
                                            **({"outfmt": outfmt} if custom else {}),
                                            **({"sam": True} if sam else {})})
         search["cases"].append(row["fixture_id"])
-        if row.get("contract") != run_oracle.DEVIATION:
+        if frozen_kept and row.get("contract") != run_oracle.DEVIATION:
             frozen = row["stdout_sha256"]
             if sam:
                 fixture = run_oracle.ENGINE / "tests/fixtures/outfmt0" / f"{row['fixture_id']}.out"

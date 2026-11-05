@@ -349,12 +349,18 @@ pub fn format_percent_identity_ncbi(
     alignment_length: usize,
     precision: usize,
 ) -> String {
-    let perc_ident = if alignment_length > 0 {
+    let perc_ident = percent_identity_ncbi(num_ident, alignment_length);
+    format!("{:.prec$}", perc_ident, prec = precision)
+}
+
+/// The value that `format_percent_identity_ncbi` prints, not rounded: the expression of
+/// `x_PrintPercentIdentical` (c++/include/objtools/align_format/tabular.hpp:437-442, above).
+pub fn percent_identity_ncbi(num_ident: usize, alignment_length: usize) -> f64 {
+    if alignment_length > 0 {
         (num_ident as f64 / alignment_length as f64) * 100.0
     } else {
         0.0
-    };
-    format!("{:.prec$}", perc_ident, prec = precision)
+    }
 }
 
 /// Write E-value exactly as NCBI BLAST does (base GetScoreString logic).

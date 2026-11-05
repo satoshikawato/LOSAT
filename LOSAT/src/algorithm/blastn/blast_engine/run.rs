@@ -6450,6 +6450,26 @@ fn post_process_hits_and_write(
             std::borrow::Cow::Owned(Vec::new())
         };
     let observer = &mut outputs.observer;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
+    // ```c++
+    //     // find the first valid context corresponding to this query
+    //     for (i = 0; i < context_per_query; i++) {
+    //         BlastContextInfo *ctx = query_info->contexts +
+    //                                 query_number * context_per_query + i;
+    //         if (ctx->is_valid) {
+    //             m_SearchSpace = ctx->eff_searchsp;
+    //             m_LengthAdjustment = ctx->length_adjustment;
+    //             break;
+    // ```
+    // The statistics of each query for the observer, the values of the XML reports: `q_idx` is
+    // that of the hit lists (a caller with an observer gets one report of all queries,
+    // `x_rpt_stream`).
+    if let Some(observer) = observer.as_deref_mut() {
+        let stats = blastn_xml_stats(report, query_lengths)?;
+        for (q_idx, stats) in stats.into_iter().enumerate() {
+            observer.query_stats(q_idx, stats);
+        }
+    }
     // The warnings are written once, with the first format (`QueryWarnings`).
     let mut warning_lines = Some(query_warnings);
     for (format_index, (format, &output_format)) in
@@ -8196,9 +8216,20 @@ fn search(
         !matches!(subjects, Subjects::Database(_)),
         outputs.only_archive(),
     )?;
-    let batching = query_batching_from_environment(
+    let mut batching = query_batching_from_environment(
         super::super::coordination::task_uses_megablast_chunks(&args.task),
     )?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:263-264
+    // ```c++
+    //         if (batch_size) {
+    //             input.SetBatchSize(batch_size);
+    // ```
+    // The caller's records are one batch (`BlastnArgs::one_query_batch`): a size that the
+    // records do not reach, fixed as `BATCH_SIZE` fixes it.
+    if args.one_query_batch {
+        batching.fixed_batch_size = i32::MAX;
+        batching.batch_size = i32::MAX as u32;
+    }
     // The query range applies to every query record as NCBI's batch reader reads it
     // (`cut_queries`): a record is searched cut, and one whose interval starts just past
     // its end is a query without data (`run_in_pool`).
@@ -8335,6 +8366,69 @@ fn database_search_error(
     match write_pairwise_prologs(outputs, output_formats, megablast, shown, false) {
         Ok(()) => error,
         Err(write_error) => write_error,
+    }
+}
+
+/// NCBI's query batch sizes of a search of `subjects`, one batch at a time, as `run_in_pool`
+/// takes them: for a caller that hands over one batch at a time (`api::run_batches`,
+/// `BlastnArgs::one_query_batch`).
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-270
+/// ```c++
+///         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
+///         int batch_size = m_CmdLineArgs->GetQueryBatchSize();
+///         if (batch_size) {
+///             input.SetBatchSize(batch_size);
+///         ...
+///         } else {
+///             Int8 total_len = formatter.GetDbTotalLength();
+///             if (total_len > 0) {
+///                 /* the optimal hits per batch scales with total db size */
+///                 mixer.SetTargetHits(total_len / 3000);
+/// ```
+pub(crate) struct QueryBatchSizes {
+    batching: QueryBatching,
+    mixer: BatchSizeMixer,
+}
+
+impl QueryBatchSizes {
+    pub(crate) fn new(args: &BlastnArgs, subjects: &[FastaRecord]) -> Result<Self> {
+        let mut batching = query_batching_from_environment(
+            super::super::coordination::task_uses_megablast_chunks(&args.task),
+        )?;
+        let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
+        if batching.fixed_batch_size == 0 {
+            use crate::blastinput::seq_range::{record_interval, RecordInterval};
+            let subject_range =
+                parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTN")?;
+            let total_length: i64 = subjects
+                .iter()
+                .map(|record| match subject_range.as_ref() {
+                    Some(range) => match record_interval(range, record.seq().len()) {
+                        RecordInterval::Letters { from, to } => (to - from + 1) as i64,
+                        RecordInterval::Empty | RecordInterval::PastEnd => 0,
+                    },
+                    None => record.seq().len() as i64,
+                })
+                .sum();
+            if total_length > 0 {
+                mixer.set_target_hits((total_length / 3000) as i32);
+            }
+            batching.batch_size = mixer.batch_size(None) as u32;
+        }
+        Ok(Self { batching, mixer })
+    }
+
+    /// The size of the next batch (`TSeqPos`).
+    pub(crate) fn batch_size(&self) -> u32 {
+        self.batching.batch_size
+    }
+
+    /// The batch just searched made `extensions` successful initial extensions.
+    pub(crate) fn searched(&mut self, extensions: i32) {
+        if self.batching.fixed_batch_size == 0 {
+            self.batching.batch_size = self.mixer.batch_size(Some(extensions)) as u32;
+        }
     }
 }
 
@@ -8812,6 +8906,17 @@ fn run_in_pool(
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     mut batching: QueryBatching,
 ) -> Result<()> {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:258-261
+    // ```c++
+    //         formatter.PrintProlog();
+    //
+    //         /*** Process the input ***/
+    //         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
+    // ```
+    // What the run writes before its query batches ends here.
+    if let Some(observer) = outputs.observer.as_deref_mut() {
+        observer.queries_begin();
+    }
     let prepared: PreparedSubjects<'_>;
     let source = match subjects {
         Subjects::Records(subject_set) => {
@@ -9721,7 +9826,7 @@ fn run_in_pool(
             }
             warnings[start + index].extend(query_warning(
                 "blastn",
-                query_input.ordinal(start + index),
+                args.first_query_ordinal + query_input.ordinal(start + index),
                 &batch_records.searched()[index],
                 &messages,
             ));
@@ -9735,6 +9840,15 @@ fn run_in_pool(
         if batching.fixed_batch_size == 0 {
             batching.batch_size =
                 mixer.batch_size(Some(batch.good_init_extends as u32 as i32)) as u32;
+        }
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:299-300
+        // ```c++
+        //                 if (!batch_size)
+        //                     input.SetBatchSize(mixer.GetBatchSize(lcl_blast.GetNumExtensions()));
+        // ```
+        // For a caller that sizes the batches itself (`QueryBatchSizes`).
+        if let Some(observer) = outputs.observer.as_deref_mut() {
+            observer.batch_extensions(batch.good_init_extends as u32 as i32);
         }
         // EXPERIMENT (LOSAT_X_RPTSTREAM): the batch's reports, written now, after the mixer
         // has its gie, as NCBI's loop prints a batch's result sets (`x_rpt_stream.rs`). The

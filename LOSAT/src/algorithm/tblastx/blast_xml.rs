@@ -129,7 +129,7 @@ fn query_messages(query: &FastaRecord, searched: bool, filtered_empty: bool) -> 
 /// is computed again here with the search's own function (`try_compute_eff_lengths_tblastx`,
 /// the call of `search_query_batch` with the same subject set), and the search space it gives
 /// must be the kept one.
-fn query_stats(stats: &TblastxQueryStats, numbers: &SubjectSetNumbers) -> XmlStats {
+pub(crate) fn query_stats(stats: &TblastxQueryStats, numbers: &SubjectSetNumbers) -> XmlStats {
     let Some(karlin) = &stats.karlin else {
         return XmlStats::NONE;
     };

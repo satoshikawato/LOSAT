@@ -17,6 +17,7 @@ use super::error::Error;
 /// `psiblast`, `makeblastdb` and `blastdbcmd` are command-line programs only
 /// (docs/losat_library_surface_plan.md §8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Program {
     /// Nucleotide query against nucleotide subjects (`megablast`, `dc-megablast`, `blastn`,
     /// `blastn-short`).

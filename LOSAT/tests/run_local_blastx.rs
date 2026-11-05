@@ -696,13 +696,13 @@ impl ReaderDifference {
     }
 }
 
-/// LOSAT Web writes outfmt 0, 6 and 7 (6 and 7 with custom fields too, W10) and refuses the
-/// rest, with a database and the ids of the deflines, before anything is written.
+/// The BLAST archive and the side files of outfmt 13 and 14 are refused, as are a database and the
+/// ids of the deflines, before anything is written.
 #[test]
 fn refusals_come_before_any_output() {
     let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
     for (formats, extra) in [
-        (&["5"][..], &[][..]),
+        (&["14"][..], &[][..]),
         (&["0", "11"][..], &[][..]),
         (&["6"][..], &["-parse_deflines"][..]),
     ] {
@@ -711,7 +711,7 @@ fn refusals_come_before_any_output() {
         let (result, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, formats, extra);
         let error = result.expect_err("refused");
         assert!(
-            error.to_string().contains("not supported in the browser"),
+            error.to_string().contains("not supported in"),
             "{formats:?} {extra:?}: {error}"
         );
         assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());
@@ -730,7 +730,7 @@ fn check_options_fails_as_a_run_does() {
     let mut failed = 0;
     for (formats, extra) in [
         (&FORMATS[..], &[][..]),
-        (&["5"][..], &[][..]),
+        (&["11"][..], &[][..]),
         // NCBI's formatting handler: a custom delimiter that a field uses (W10).
         (&["6 delim=; qseqid staxids", "0"][..], &[][..]),
         (&["6"][..], &["-parse_deflines"][..]),

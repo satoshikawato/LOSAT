@@ -1445,7 +1445,7 @@ pub(super) fn render_queries_with(
     // writer (`tabular`, NCBI's `CBlastTabularInfo`); the default outfmt 6 and 7 below.
     if let Some(spec) = options.tabular {
         return super::tabular::write_blastx_tabular(
-            writer, stderr, options, spec, queries, subjects, shown, batches,
+            writer, stderr, options, spec, queries, subjects, shown, batches, probe, first_hsp,
         );
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986

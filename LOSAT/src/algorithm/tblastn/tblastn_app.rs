@@ -1026,6 +1026,19 @@ fn search(
 ) -> Result<()> {
     use crate::blastinput::app;
     use crate::blastinput::seq_range;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
+    // ```c++
+    //         formatter.PrintProlog();
+    //         ...
+    //         /*** Process the input ***/
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    //         ...
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    // ```
+    // What the run writes before its query batches ends here.
+    if let Some(observer) = outputs.observer.as_deref_mut() {
+        observer.queries_begin();
+    }
     // The records are NCBI's reader's records: the subjects of its nucleotide reader (a
     // subject without letters stays in the database, its warning written before the prolog,
     // `before_prolog`) and the queries of its protein reader. The query range applies to
@@ -1552,7 +1565,7 @@ fn search(
                 }
                 lines.extend(crate::report::query_warnings::query_warning(
                     "tblastn",
-                    query_input.ordinal(index),
+                    args.first_query_ordinal + query_input.ordinal(index),
                     query,
                     &messages,
                 ));

@@ -370,6 +370,7 @@ impl PsiblastArgs {
             archive: None,
             app: BlastpApp::Psiblast,
             inclusion_ethresh: Some(self.inclusion_ethresh),
+            first_query_ordinal: 0,
         })
     }
 }

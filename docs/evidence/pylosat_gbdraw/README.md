@@ -45,8 +45,10 @@ gbdraw's own tests with a real search, through `pylosat` with process starts ref
   the engine here is 0.2.0.
 - `test_cli_tlosatx_reproduces_the_t_cli_09_figure` and the three
   `test_native_tlosatx_reproduces_metazoan_mtdna_bytes` fail, and so does the executable of the same
-  commit. Those tables were made by LOSAT v0.1.0 (`losat` built at the tag reproduces them byte for
-  byte), whose tables of genetic codes 2, 3, 5, 9, 13, 14 and 21 differ from NCBI's `gc.prt`: for
-  example code 2 has `ATA` as I where `gc.prt` has M. The current engine has `gc.prt`'s tables
-  (`LOSAT/src/utils/genetic_code.rs`), so gbdraw's tutorial rows for those codes change when it moves
-  to a newer LOSAT.
+  commit. Those tables were made by LOSAT v0.1.0: `losat` built at the tag reproduces them byte for
+  byte. Its tables of genetic codes 2, 3, 5, 13 and 21 have `ATA` as I where NCBI's `gc.prt` has M,
+  and code 31's has `TGA` as a stop where `gc.prt` has W. The 27 tables of the current engine
+  (`LOSAT/src/utils/genetic_code.rs`) equal `gc.prt`. Rows across the `N` at position 3107 of the
+  human sequence differ as well, also with code 1: the current engine draws ambiguous subject letters
+  as NCBI's preliminary stage does (`tblastx/subjects.rs`); which commit changed them was not traced.
+  gbdraw's tutorial rows for these inputs change when it moves to a newer LOSAT.

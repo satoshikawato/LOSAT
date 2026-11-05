@@ -410,7 +410,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 
 ### 12.3 関門
 
-- gbdraw が subprocess なしで動く：`docs/evidence/pylosat_gbdraw/`。gbdraw `033a3aa` に小さな patch を当て（gbdraw の repository は変えない）、`subprocess.Popen` を断った状態で linear と circular の 7 シナリオ（`losatn`、`tlosatx`、`losatp`）を実行し、同じ commit の `losat` を使う実行と SVG と raw の bytes が一致した。gbdraw 自身の T-CLI-07 の図の test は通る。T-CLI-09 の表は同じ commit の `losat` でも一致しない：v0.1.0 の遺伝暗号表（コード 2、3、5、9、13、14、21）が `gc.prt` と違っていたため（例：コード 2 の `ATA`）。
+- gbdraw が subprocess なしで動く：`docs/evidence/pylosat_gbdraw/`。gbdraw `033a3aa` に小さな patch を当て（gbdraw の repository は変えない）、`subprocess.Popen` を断った状態で linear と circular の 7 シナリオ（`losatn`、`tlosatx`、`losatp`）を実行し、同じ commit の `losat` を使う実行と SVG と raw の bytes が一致した。gbdraw 自身の T-CLI-07 の図の test は通る。T-CLI-09 の表は同じ commit の `losat` でも一致しない：表を作った v0.1.0 の遺伝暗号表は、コード 2、3、5、13、21 の `ATA` とコード 31 の `TGA` が `gc.prt` と違っていた（今の 27 表は `gc.prt` と同じ）。ヒトの配列の 3107 番の `N` をまたぐ行も v0.1.0 と違う。
 - ノートブックの流れ（進捗つきの `batches`、`polars` と `pandas` と `pyarrow` への受け渡し、`queries()`、`spans`、pickle）を `python/tests` と手元の script で確認した。
 - `python/tests`：5 program で、報告（outfmt 6、7、0、10、列指定）のバイトと `diagnostics` が `losat` と一致し、表の値が列と一致する。Ctrl-C、GIL、2 スレッド同時、process pool、pickle、Arrow の 3 consumer。
 - `LOSAT/tests/library_api.rs`：`qaccver`、`saccver`、`pident` の列と全 HSP で一致（§10.3 の 13 検索と `-parse_deflines`）。

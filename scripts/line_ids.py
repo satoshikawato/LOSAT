@@ -19,17 +19,19 @@ LIB-n in docs/losat_library_surface_plan.md).
 from __future__ import annotations
 
 import argparse
-import os
 import re
+import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DECISIONS = ROOT / "docs" / "decisions"  # the registries themselves; not citations
 REGISTRY = DECISIONS / "LINE_IDS.md"
+SELF = Path(__file__).resolve()  # its patterns are not citations
 EXTS = (".md", ".tsv", ".txt", ".json", ".py", ".sh", ".yml", ".yaml", ".rs", ".ts", ".vue", ".toml",
         ".js", ".mjs", ".html", ".css")
-SKIP_DIRS = {"node_modules", ".git", "target", "dist"}
+SKIP_PREFIXES = ("LOSAT/tests/fixtures/",)
 SKIP_FILES = {"package-lock.json", "Cargo.lock"}
 
 # Lines of plan v4, cited as "line R", "plan v4 line W" or "v4-MEM".
@@ -39,7 +41,7 @@ LINES = {"SF", "NP", "DI", "DBID", "BDC", "OF", "CLI", "PS", "GZ", "WF", "WA", "
          "SX", "TS", "ST", "EB", "BW", "LIB", "RL", "NCMEM", "SW", "MK"}
 
 
-def _line_mention(m: re.Match) -> str | None:
+def _line_mention(m: re.Match[str]) -> str | None:
     """'line X', 'Line X, S1', '線 X', 'plan v4 line W', 'structural line S3'."""
     pre, code, stage = m.group("pre") or "", m.group("code"), m.group("stage")
     if "structural" in pre and re.fullmatch(r"S[0-9]+", code):
@@ -58,13 +60,13 @@ def _line_mention(m: re.Match) -> str | None:
     return base + " " + stage
 
 
-PATTERNS: list[tuple[re.Pattern, object]] = [
+_RAW: list[tuple[str, Callable[[re.Match[str]], str | None]]] = [
     (r"(?P<pre>(?:plan v4 |v4 |structural )?)(?:\b[Ll]ines?|線) (?P<code>[A-Z][A-Za-z0-9]*(?:-[0-9]+[a-z]?)?)"
      r"(?:,? (?:item )?(?P<stage>[A-Z]{1,4}[0-9]+[a-z]?|s[0-9]+|session [0-9]+))?", _line_mention),
     (r"\bDI-?([0-9]+[a-z]?)\b", lambda m: "DI-" + m.group(1)),
     (r"\bDBID (?:item )?([A-Z]{1,2}[0-9]+[a-z]?)\b", lambda m: "DBID " + m.group(1)),
     (r"\bBDC([0-9]+[a-z]?)\b", lambda m: "BDC" + m.group(1)),
-    (r"\bOF([0-9]+[a-z]?)\b", lambda m: "OF" + m.group(1)),
+    (r"\bOF([0-9]+[a-z]?)[0-9]*\b", lambda m: "OF" + m.group(1)),  # OF8b2 is a step of OF8b
     (r"\bSF S([0-9]+)\b", lambda m: "SF S" + m.group(1)),
     (r"\bNP (M[0-9]+|WW[0-9]+|SC[0-9]+[a-z]?|SM[0-9]+)\b", lambda m: "NP " + m.group(1)),
     (r"(?:\bNP,? |\bline NP, |parity line )(O[0-9]+[a-z](?:-[0-9]+)?)\b", lambda m: "NP " + m.group(1).split("-")[0]),
@@ -83,23 +85,23 @@ PATTERNS: list[tuple[re.Pattern, object]] = [
     (r"\bRL([0-9]+)\b", lambda m: "RL" + m.group(1)),
     (r"\bmemory line \(v4-MEM\)|\bline MEM\b", lambda m: "v4-MEM"),
 ]
-PATTERNS = [(re.compile(rx), fn) for rx, fn in PATTERNS]
+PATTERNS = [(re.compile(rx), fn) for rx, fn in _RAW]
 
 
 def files(whole_tree: bool) -> list[Path]:
-    if not whole_tree:
-        bases = [ROOT / "changelog.d", ROOT / "docs"]
-        out = [ROOT / "CHANGELOG.md"]
-    else:
-        bases, out = [ROOT], []
-    for base in bases:
-        for d, ds, fs in os.walk(base):
-            rel = Path(d).relative_to(ROOT).as_posix()
-            if SKIP_DIRS & set(rel.split("/")) or rel.startswith("LOSAT/tests/fixtures"):
-                ds[:] = []
-                continue
-            out += [Path(d) / f for f in fs if f.endswith(EXTS) and f not in SKIP_FILES]
-    return sorted(p for p in out if p.is_file() and DECISIONS not in p.parents)
+    """Tracked files and new files not ignored by git (CHANGELOG.md, changelog.d/, docs/; or all)."""
+    listed = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                            cwd=ROOT, check=True, capture_output=True, text=True).stdout.split("\0")
+    out = []
+    for rel in listed:
+        if not rel.endswith(EXTS) or rel.rsplit("/", 1)[-1] in SKIP_FILES or rel.startswith(SKIP_PREFIXES):
+            continue
+        if not whole_tree and rel != "CHANGELOG.md" and not rel.startswith(("changelog.d/", "docs/")):
+            continue
+        path = ROOT / rel
+        if path.is_file() and path != SELF and DECISIONS not in path.parents:
+            out.append(path)
+    return sorted(set(out))
 
 
 def cited(paths: list[Path]) -> dict[str, list[str]]:

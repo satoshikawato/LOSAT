@@ -59,7 +59,7 @@
 //!   (`BlastpReports::x_queries_before`).
 //! - the refusals of the reference path that come before it writes anything and depend on the
 //!   hits are, for outfmt 0, those of a shown subject's title (a title of punctuation that NCBI's
-//!   `x_CleanAndCompress` reads past, ABI v1's titles): the blocks are searched only when no
+//!   `x_CleanAndCompress` reads past): the blocks are searched only when no
 //!   subject's title is refused (`blast_engine.rs` `x_block_shown_titles_allowed`, with `-db`
 //!   `database::x_titles_allow_blocks`), so that none comes after the reports of the blocks
 //!   before. The other refusals are those of outfmt 6 above.
@@ -543,6 +543,9 @@ fn x_all_in_groups(
 pub(crate) struct XOffsetObserver<'a> {
     pub(crate) inner: &'a mut (dyn FormatObserver + Send),
     pub(crate) base: HspIndex,
+    /// The block's first query among the call's queries (a record's `q_idx` is this plus its
+    /// index in the block).
+    pub(crate) first_query: usize,
 }
 
 impl FormatObserver for XOffsetObserver<'_> {
@@ -560,6 +563,18 @@ impl FormatObserver for XOffsetObserver<'_> {
 
     fn subject_end(&mut self, format: usize, first_hsp: HspIndex) {
         self.inner.subject_end(format, self.base + first_hsp);
+    }
+
+    fn query_stats(&mut self, q_idx: usize, stats: crate::report::blast_xml::XmlStats) {
+        self.inner.query_stats(self.first_query + q_idx, stats);
+    }
+
+    fn queries_begin(&mut self) {
+        self.inner.queries_begin();
+    }
+
+    fn batch_extensions(&mut self, extensions: i32) {
+        self.inner.batch_extensions(extensions);
     }
 }
 

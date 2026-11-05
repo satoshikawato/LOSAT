@@ -8,9 +8,8 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:438-453
 
 use super::constants::SENTINEL_BYTE;
-use crate::utils::genetic_code::GeneticCode;
+use crate::utils::genetic_code::{complement, revcomp, GeneticCode};
 use crate::utils::matrix::aa_char_to_ncbistdaa;
-use bio::alphabets::dna;
 
 /// A query frame containing translated sequence and metadata
 #[derive(Debug, Clone)]
@@ -88,7 +87,7 @@ fn translate_sequence(seq: &[u8], table: &GeneticCode) -> (Vec<u8>, usize) {
 /// The residue of codon `offset` of `frame` (+1..+3, -1..-3) of `sequence` as the search
 /// translates it: the residue `generate_frames` puts at index `offset + 1` of that frame (the
 /// codon from `3 * offset + |frame| - 1` of the sequence, or of its reverse complement
-/// `dna::revcomp`, translated by `codon_to_aa_ncbistdaa`). The report reads single codons
+/// `revcomp`, translated by `codon_to_aa_ncbistdaa`). The report reads single codons
 /// with it (the engine counts of the Seq-aligns, `report::engine_counts`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1299-1308
@@ -109,13 +108,13 @@ pub(crate) fn frame_residue(sequence: &[u8], frame: i8, offset: usize, table: &G
     if frame > 0 {
         codon_to_aa_ncbistdaa(&sequence[first..first + 3], table)
     } else {
-        // `dna::revcomp(sequence)[j]` is `dna::complement(sequence[len - 1 - j])`.
+        // `revcomp(sequence)[j]` is `complement(sequence[len - 1 - j])`.
         let last = sequence.len() - 1 - first;
         codon_to_aa_ncbistdaa(
             &[
-                dna::complement(sequence[last]),
-                dna::complement(sequence[last - 1]),
-                dna::complement(sequence[last - 2]),
+                complement(sequence[last]),
+                complement(sequence[last - 1]),
+                complement(sequence[last - 2]),
             ],
             table,
         )
@@ -134,7 +133,7 @@ pub(crate) fn frame_residue(sequence: &[u8], frame: i8, offset: usize, table: &G
 /// Amino acids are encoded in NCBISTDAA (0-27).
 pub fn generate_frames(seq: &[u8], table: &GeneticCode) -> Vec<QueryFrame> {
     let mut frames = Vec::with_capacity(6);
-    let rev_seq = dna::revcomp(seq);
+    let rev_seq = revcomp(seq);
     let seq_len = seq.len();
 
     // Forward (Frames 1,2,3)
@@ -192,7 +191,7 @@ pub(crate) fn translate_frame(
     Some(if frame > 0 {
         translate_sequence(&seq[i..], table)
     } else {
-        translate_sequence(&dna::revcomp(seq)[i..], table)
+        translate_sequence(&revcomp(seq)[i..], table)
     })
 }
 
@@ -218,7 +217,7 @@ const X_FRAME_WINDOW: usize = 3 << 16;
 // six frames are filled in one pass over the letters, each codon start q (0 <= q <= len - 3)
 // giving the residue of forward frame q % 3 at index q / 3 (the codon letters q..q+3) and of
 // reverse frame r % 3 at index r / 3 with r = len - 3 - q (the complements of letters q+2, q+1,
-// q, in that order: `dna::revcomp` is `rev().map(complement)`). Every residue of the six frames
+// q, in that order: `revcomp` is `rev().map(complement)`). Every residue of the six frames
 // of `generate_frames` is the translation of the same three letters by the same
 // `codon_to_aa_ncbistdaa`, so the frames are the same: the frames that exist (`i + 3 <= len`),
 // in the same order, with the same lengths, sentinels and residues.
@@ -304,14 +303,8 @@ fn x_frames_in_windows(
                 let (b0, b1, b2) = (letters[at], letters[at + 1], letters[at + 2]);
                 forward[q % 3].aa_seq[q / 3 + 1] = codon_to_aa_ncbistdaa(&[b0, b1, b2], table);
                 let r = len - 3 - q;
-                reverse[r % 3].aa_seq[r / 3 + 1] = codon_to_aa_ncbistdaa(
-                    &[
-                        dna::complement(b2),
-                        dna::complement(b1),
-                        dna::complement(b0),
-                    ],
-                    table,
-                );
+                reverse[r % 3].aa_seq[r / 3 + 1] =
+                    codon_to_aa_ncbistdaa(&[complement(b2), complement(b1), complement(b0)], table);
             }
         }
         letters.drain(..codons_end - start);
@@ -322,7 +315,7 @@ fn x_frames_in_windows(
 }
 
 /// The ncbi4na mask (`base_mask`) of every byte as a codon letter, and of its complement
-/// (`dna::complement`, the map of `dna::revcomp`).
+/// (`complement`, the map of `revcomp`).
 struct XLetterMasks {
     forward: [u8; 256],
     reverse: [u8; 256],
@@ -333,7 +326,7 @@ fn x_letter_masks() -> &'static XLetterMasks {
     MASKS.get_or_init(|| XLetterMasks {
         forward: std::array::from_fn(|byte| crate::utils::genetic_code::base_mask(byte as u8)),
         reverse: std::array::from_fn(|byte| {
-            crate::utils::genetic_code::base_mask(dna::complement(byte as u8))
+            crate::utils::genetic_code::base_mask(complement(byte as u8))
         }),
     })
 }

@@ -1,0 +1,20 @@
+# BLASTP 2.17.0+
+# Query: BDT63074.1 tyrosine recombinase [Sicyonia whispovirus]
+# Database: tests/db_search/paja
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: nohit a query without hits
+# Database: tests/db_search/paja
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT63075.1 wsv226-like protein [Sicyonia whispovirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+BDT63075.1	BDT63562.1	30.911	1087	615	24	125	1140	76	1097	1.41e-164	510
+BDT63075.1	BDT63532.1	23.729	59	42	2	1078	1134	480	537	4.6	23.9
+# BLASTP 2.17.0+
+# Query: BDT63076.1 hypothetical protein [Sicyonia whispovirus]
+# Database: tests/db_search/paja
+# 0 hits found
+# BLAST processed 4 queries

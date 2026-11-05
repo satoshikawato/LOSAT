@@ -697,6 +697,41 @@ pub struct BlastnArgs {
     /// ```
     #[arg(skip)]
     pub command_line: Option<Vec<u8>>,
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
+    // ```c++
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+    // 	    BLAST_PROF_START( APP.LOOP.PRE );
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    // ```
+    // NCBI's application writes nothing to its standard error while it searches. LOSAT's
+    // progress bar over the subjects of a parallel search (no NCBI counterpart) belongs to the
+    // command line (`run`), which sets this; the library API and the web entries (`run_local`)
+    // leave it off, so a search from memory writes nothing to the process's standard error.
+    #[arg(skip)]
+    pub progress_bar: bool,
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-264
+    // ```c++
+    //         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
+    //         int batch_size = m_CmdLineArgs->GetQueryBatchSize();
+    //         if (batch_size) {
+    //             input.SetBatchSize(batch_size);
+    // ```
+    // `api::run_batches` hands over one of NCBI's query batches at a time, sized as the loop
+    // sizes them (`QueryBatchSizes`); these records are that batch, whatever its size. No
+    // argument of the command line sets this.
+    #[arg(skip)]
+    pub one_query_batch: bool,
+    // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
+    // ```c++
+    //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
+    //     ...
+    //     void SetLocalIdCounterInitValue(int val) { m_LocalIdCounter = val; }
+    // ```
+    // The position in the whole input of the first of these records, as a reader's counter
+    // starts there (`api::run_batches`): a query's `Query_N` in the messages. 0 on the command
+    // line, whose records are the whole input.
+    #[arg(skip)]
+    pub first_query_ordinal: usize,
 }
 
 impl BlastnArgs {

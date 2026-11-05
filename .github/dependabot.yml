@@ -1,0 +1,71 @@
+# Dependabot version updates. Work pull requests merge into dev, so version updates open their
+# pull requests against dev (target-branch). GitHub reads this file from the default branch,
+# main: main and dev carry the same file. Security updates are a repository setting and keep
+# targeting main.
+#
+# - cargo: LOSAT, one pull request per dependency. web/adapter/tools/check_build_identity.py
+#   (web.yml, job `adapter`) requires web/adapter/Cargo.lock to hold the same version of every
+#   package it shares with LOSAT/Cargo.lock, and Dependabot updates only the direct dependencies
+#   of a directory (web/adapter's are LOSAT and clap). So before merging, add a commit that moves
+#   web/adapter's lock file to the same versions, for each package that changed:
+#     cargo update --manifest-path web/adapter/Cargo.toml -p <package>@<old> --precise <new>
+#   (`@<old>` picks one when the lock file holds two versions of the package), and raise
+#   web/adapter/Cargo.toml's own requirement when clap moves to a new major.
+# - npm: minor and patch updates of web/app in one pull request; each major update in its own.
+# - auto-merge.yml turns on auto-merge for these pull requests as for every other one (Owner
+#   2026-11-05): a cargo pull request merges once the web/adapter commit above makes web.yml pass.
+# - cooldown: a release is considered 7 days after it was published.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /LOSAT
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: npm
+    directory: /web/app
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # typescript-eslint 8.72.1 (2026-11-05, also its canary) accepts typescript >=4.8.4 <6.1.0,
+      # so typescript 6.1 and 7 fail `npm ci` (ERESOLVE, #837). Remove when it accepts them.
+      - dependency-name: typescript
+        versions: ['>= 6.1']
+      # @playwright/test 1.64.1 (#836, #843): its WebKit fails tests/e2e/browsers.spec.ts:35 (the
+      # OPFS BlockStore in a dedicated worker, "UnknownError") on every run, and 1.61.1 passes.
+      # Dependabot proposes no newer release while this entry stays: try one by hand, and remove the
+      # entry when that test passes with it.
+      - dependency-name: '@playwright/test'
+        versions: ['>= 1.62']
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ['*']

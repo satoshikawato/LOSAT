@@ -1,0 +1,44 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST engine error: Error: Gap existence and extension values 5
+ and 2 are not supported for substitution scores 4 and -5 6 and 5 are
+ supported existence and extension values 5 and 5 are supported existence and
+ extension values 4 and 5 are supported existence and extension values 3 and 5
+ are supported existence and extension values 12 and 8 are supported existence
+ and extension values Any values more stringent than 12 and 8 are supported
+ Warning: Sequence contains no data Error: Gap existence and extension values
+ 5 and 2 are not supported for substitution scores 4 and -5 6 and 5 are
+ supported existence and extension values 5 and 5 are supported existence and
+ extension values 4 and 5 are supported existence and extension values 3 and 5
+ are supported existence and extension values 12 and 8 are supported existence
+ and extension values Any values more stringent than 12 and 8 are supported
+ Error: Gap existence and extension values 5 and 2 are not supported for
+ substitution scores 4 and -5 6 and 5 are supported existence and extension
+ values 5 and 5 are supported existence and extension values 4 and 5 are
+ supported existence and extension values 3 and 5 are supported existence and
+ extension values 12 and 8 are supported existence and extension values Any
+ values more stringent than 12 and 8 are supported Warning: Sequence contains
+ no data Error: Gap existence and extension values 5 and 2 are not supported
+ for substitution scores 4 and -5 6 and 5 are supported existence and
+ extension values 5 and 5 are supported existence and extension values 4 and 5
+ are supported existence and extension values 3 and 5 are supported existence
+ and extension values 12 and 8 are supported existence and extension values
+ Any values more stringent than 12 and 8 are supported Error: Gap existence
+ and extension values 5 and 2 are not supported for substitution scores 4 and
+ -5 6 and 5 are supported existence and extension values 5 and 5 are supported
+ existence and extension values 4 and 5 are supported existence and extension
+ values 3 and 5 are supported existence and extension values 12 and 8 are
+ supported existence and extension values Any values more stringent than 12
+ and 8 are supported Warning: Sequence contains no data"
+    }
+  }
+}

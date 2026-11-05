@@ -9,7 +9,7 @@
 // included records with their IDs and lengths, which the engine checks at `register`.
 import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
 import type { FastaParserKind } from '../domain/dataset';
-import { outputFileName, type OutputFormat } from '../domain/output-format';
+import { outputFileName, runOutputs, type RunOutput } from '../domain/output-format';
 import { fastaParser, programById, type ProgramId } from '../domain/programs';
 import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
@@ -210,22 +210,22 @@ export class Coordinator {
   }
 
   /** Saves one compatibility output of a completed run, byte for byte, named by outputFileName. */
-  async exportOutput(runId: string, format: OutputFormat): Promise<void> {
+  async exportOutput(runId: string, output: RunOutput): Promise<void> {
     const view = this.find(runId);
     if (view?.status !== 'completed') throw new Error('only completed runs can be exported');
     const { number, program, argv, queuedAt } = view.snapshot;
     const [bytes, description] = await Promise.all([
-      this.deps.data.readOutput(runId, format),
+      this.deps.data.readOutput(runId, output),
       // Without the engine's default task the name has none; the output is still saved.
       this.deps.engine.describe(program).catch(() => undefined),
     ]);
     const { task } = description === undefined ? { task: optionValue(argv, '-task') } : taskOf(argv, description);
-    this.deps.downloader.save(outputFileName({ number, program, task, queuedAt }, format), bytes, 'text/plain');
+    this.deps.downloader.save(outputFileName({ number, program, task, queuedAt, argv }, output), bytes, 'text/plain');
   }
 
-  async readOutput(runId: string, format: OutputFormat): Promise<string> {
+  async readOutput(runId: string, output: RunOutput): Promise<string> {
     if (this.find(runId)?.status !== 'completed') throw new Error('run is not completed');
-    return new TextDecoder().decode(await this.deps.data.readOutput(runId, format));
+    return new TextDecoder().decode(await this.deps.data.readOutput(runId, output));
   }
 
   /** The HSP records of a completed run (docs/web/abi_v2.md §8). */
@@ -312,7 +312,7 @@ export class Coordinator {
     const startedAt = this.deps.now();
     try {
       this.update(runId, { status: 'preparing', record: { startedAt } });
-      const output = await this.deps.data.openRun(runId);
+      const output = await this.deps.data.openRun(runId, runOutputs(snapshot.argv));
       staged = true;
       // A cancel while the outputs were staged found no search to end: the engine has not started it.
       if (this.cancelRequested.has(runId)) {

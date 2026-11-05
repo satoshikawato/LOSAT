@@ -305,6 +305,8 @@ pub(super) fn write_blastx_tabular(
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
+    mut probe: Option<&mut crate::api::local_blast::FormatProbe<'_>>,
+    first_hsp: crate::api::local_blast::HspIndex,
 ) -> Result<()> {
     let needs = spec.needs();
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:183
@@ -343,6 +345,7 @@ pub(super) fn write_blastx_tabular(
     let counts_by_fields = COUNTS_FIELDS.iter().any(|field| spec.has(*field));
     let no_taxonomy = TabularTaxonomy::default();
     let mut query_ranges: Vec<(u64, u64)> = Vec::new();
+    let mut next_hsp = first_hsp;
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
@@ -526,7 +529,32 @@ pub(super) fn write_blastx_tabular(
                                 query_length,
                             ),
                         };
-                        table.row(&mut buf, &tabular_query, &tabular_subject, &row);
+                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1102-1108
+                        // ```c++
+                        // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                        //     // Add tab in front of field, except for the first field.
+                        //     if (iter != m_FieldsToShow.begin())
+                        //         m_Ostream << m_FieldDelimiter;
+                        //     x_PrintField(*iter);
+                        // }
+                        // m_Ostream << "\n";
+                        // ```
+                        // One printed row is one HSP; the probe marks it without changing it.
+                        match probe.as_deref_mut() {
+                            Some(probe) => {
+                                writer.write_all(&buf)?;
+                                buf.clear();
+                                writer.flush()?;
+                                probe.begin(next_hsp);
+                                table.row(&mut buf, &tabular_query, &tabular_subject, &row);
+                                writer.write_all(&buf)?;
+                                buf.clear();
+                                writer.flush()?;
+                                probe.end(next_hsp);
+                            }
+                            None => table.row(&mut buf, &tabular_query, &tabular_subject, &row),
+                        }
+                        next_hsp += 1;
                     }
                 }
                 writer.write_all(&buf)?;

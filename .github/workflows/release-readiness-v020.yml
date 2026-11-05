@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ inputs.candidate_sha }}
@@ -62,7 +62,7 @@ jobs:
           components: clippy, rustfmt
           targets: wasm32-wasip1, wasm32-wasip1-threads
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.21.0
 
@@ -134,7 +134,7 @@ jobs:
             --crate "${package_target}/package/LOSAT-0.2.0.crate" \
             --output-dir .tmp/release-readiness/source
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: rc-quality-evidence
@@ -142,7 +142,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rc-source-package
           path: .tmp/release-readiness/source
@@ -188,7 +188,7 @@ jobs:
       EXECUTABLE_SUFFIX: ${{ matrix.executable_suffix }}
       PYTHON: ${{ matrix.python }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ inputs.candidate_sha }}
@@ -225,7 +225,7 @@ jobs:
             --binary "LOSAT/target/release/losat${EXECUTABLE_SUFFIX}" \
             --output-dir ".tmp/release-readiness/native-${{ matrix.platform_id }}"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rc-native-${{ matrix.platform_id }}
           path: .tmp/release-readiness/native-${{ matrix.platform_id }}
@@ -238,7 +238,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ inputs.candidate_sha }}
@@ -248,7 +248,7 @@ jobs:
           toolchain: 1.92.0
           targets: wasm32-wasip1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.21.0
 
@@ -271,7 +271,7 @@ jobs:
             --binary LOSAT/target/wasm32-wasip1/release/losat.wasm \
             --output-dir .tmp/release-readiness/serial-wasm
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rc-serial-wasm
           path: .tmp/release-readiness/serial-wasm
@@ -284,7 +284,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ inputs.candidate_sha }}
@@ -294,7 +294,7 @@ jobs:
           toolchain: 1.92.0
           targets: wasm32-wasip1-threads
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.21.0
 
@@ -334,7 +334,7 @@ jobs:
             --unguarded-binary LOSAT/target/wasm32-wasip1-threads/release/losat.wasm \
             --output-dir .tmp/release-readiness/threaded-wasm
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rc-threaded-wasm
           path: .tmp/release-readiness/threaded-wasm
@@ -402,7 +402,7 @@ jobs:
     env:
       PYTHON: ${{ matrix.python }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.candidate_sha }}
 
@@ -411,12 +411,12 @@ jobs:
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: ${{ matrix.wasm }}
         with:
           node-version: 24.21.0
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ matrix.artifact }}
           path: .tmp/release-readiness/download
@@ -447,28 +447,28 @@ jobs:
           needs.extracted-smoke.result == 'success' }}
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ inputs.candidate_sha }}
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: rc-native-*
           path: .tmp/release-readiness/inputs
           merge-multiple: true
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: rc-serial-wasm
           path: .tmp/release-readiness/inputs
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: rc-threaded-wasm
           path: .tmp/release-readiness/inputs
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: rc-source-package
           path: .tmp/release-readiness/inputs
@@ -482,7 +482,7 @@ jobs:
             --output-dir .tmp/release-readiness/handoff \
             --workflow-run-id "${{ github.run_id }}"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: LOSAT-v0.2.0-rc-${{ inputs.candidate_sha }}
           path: .tmp/release-readiness/handoff

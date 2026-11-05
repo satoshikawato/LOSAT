@@ -29,8 +29,7 @@
 //!
 //! `LOSAT_X_BPLISTEDLEAN` is a switch of the strict set: on unless it is `0`.
 //! It acts for every task of BLASTP with `-db`, in the
-//! search of all queries and in the blocks of `LOSAT_X_BPQBLOCK` (not with ABI v1's titles, which
-//! read the records).
+//! search of all queries and in the blocks of `LOSAT_X_BPQBLOCK`.
 
 use std::sync::{Arc, OnceLock};
 

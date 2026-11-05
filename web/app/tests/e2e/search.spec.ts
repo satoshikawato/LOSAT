@@ -2,7 +2,8 @@
 // application. The tests run with the FakeEngine build and with the engine build
 // (LOSAT_WEB_REACTORS); what only the engine can show (its messages, the kept subject, a
 // search long enough to edit or cancel while it runs) is checked in the engine build.
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './support/test';
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { gzipSync, zstdCompressSync } from 'node:zlib';
@@ -563,15 +564,16 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
   }
   await program(page, 'tblastx');
   await check('word_size', PROTEIN_WORD_SIZES.filter((size) => ['2', '3'].includes(size)), '3');
-  // TBLASTN's compressed lookup table (tblastn-fast, word sizes 5 to 7) reads BLOSUM62 only.
+  // TBLASTN reads NCBI's matrices with the compressed lookup table (tblastn-fast, word sizes 5 to
+  // 7) and with the standard one.
   await program(page, 'tblastn');
   await task(page, 'tblastn-fast');
-  await check('matrix', ['BLOSUM62', 'BLOSUM45', 'PAM30'], 'BLOSUM62');
+  await check('matrix', MATRICES, 'BLOSUM62');
   await page.getByTestId('param-word_size').selectOption('3');
   await check('matrix', ['BLOSUM45', 'PAM30'], 'BLOSUM62');
   await task(page, 'tblastn');
   await page.getByTestId('param-word_size').selectOption('6');
-  await check('matrix', ['BLOSUM62', 'BLOSUM45'], 'BLOSUM62');
+  await check('matrix', MATRICES, 'BLOSUM62');
 });
 
 // WA-FM-03: BLAST+ reads the template length only with its type, and the type with its length.
@@ -1428,7 +1430,7 @@ test("Additional options: the command line's other options after the form's, mar
   await extra.fill('-qcov_hsp_perc 50 -foo');
   await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
   await extra.fill('-num_threads 2');
-  await expect(validation).toHaveText('-num_threads is managed by LOSAT');
+  await expect(validation).toHaveText('-num_threads is set in the form: Threads');
   // The CLI's help, and the CLI's options that a search in the browser cannot have (WA-FM-04, WA-FM-05).
   await extra.fill('-help');
   await expect(validation).toHaveText('-help is not available in the browser');

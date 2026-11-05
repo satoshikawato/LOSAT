@@ -175,6 +175,47 @@ fn query_stats(
     }
 }
 
+/// The gapped Karlin block of the search: the table value of BLASTX's one matrix and the gap
+/// costs (`args`: other values are refused before the search).
+fn gapped_karlin(options: &ResolvedOptions) -> crate::stats::tables::KarlinParams {
+    use crate::config::{ProteinScoringSpec, ScoringMatrix};
+    crate::stats::tables::lookup_protein_params(&ProteinScoringSpec {
+        matrix: ScoringMatrix::Blosum62,
+        gap_open: options.gap_open,
+        gap_extend: options.gap_extend,
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
+// ```c++
+//     // find the first valid context corresponding to this query
+//     for (i = 0; i < context_per_query; i++) {
+//         BlastContextInfo *ctx = query_info->contexts +
+//                                 query_number * context_per_query + i;
+//         if (ctx->is_valid) {
+//             m_SearchSpace = ctx->eff_searchsp;
+//             m_LengthAdjustment = ctx->length_adjustment;
+//             break;
+// ```
+/// Hands the observer the statistics of every query of `batches`, the values of the XML reports,
+/// each query numbered among the run's queries (`queries_before` queries before `batches`).
+pub(super) fn observe_query_stats(
+    options: &ResolvedOptions,
+    batches: &[BatchResults],
+    queries_before: usize,
+    observer: &mut dyn crate::api::local_blast::FormatObserver,
+) {
+    let karlin = gapped_karlin(options);
+    for batch in batches {
+        for qidx in 0..batch.queries.len() {
+            observer.query_stats(
+                queries_before + batch.query_ordinal + qidx,
+                query_stats(batch, qidx, options.gapped, &karlin),
+            );
+        }
+    }
+}
+
 /// The messages of a query's result (the warnings the other formats write to standard error,
 /// `report::query_warning`): the Karlin-Altschul message of a batch NCBI did not search, and
 /// the message of a record without letters.
@@ -678,12 +719,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
 ) -> Result<()> {
-    use crate::config::{ProteinScoringSpec, ScoringMatrix};
-    let gapped_karlin = crate::stats::tables::lookup_protein_params(&ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
-        gap_open: options.gap_open,
-        gap_extend: options.gap_extend,
-    });
+    let gapped_karlin = gapped_karlin(options);
     let positives = FormattingMatrix::new(&options.matrix)
         .with_context(|| format!("no formatting matrix for {}", options.matrix))?;
     let (db_name, db_num, db_len) = match shown {

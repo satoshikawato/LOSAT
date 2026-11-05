@@ -1658,7 +1658,7 @@ Rebuilding less:
   at 1 and 4 threads under the shadow (0 differing, the exit line `identical` in every run that ends without an error).
 - `LOSAT_X_BPLISTEDLEAN=1` (BLASTP `-db`, memory; in the strict set from the pull request that added it (perf/bp-db-tail,
   evidence at the end of this entry): on unless it is `0`; acts for every task
-  with `-db`, in the search of all queries and in the blocks of `LOSAT_X_BPQBLOCK`, not with ABI v1's titles) the reports of a `-db` search read the letters of
+  with `-db`, in the search of all queries and in the blocks of `LOSAT_X_BPQBLOCK`) the reports of a `-db` search read the letters of
   the listed subjects (every subject of the preliminary hit lists, `ListedSubjects`) from their stored residues and hold
   the titles of the reported subjects only (`blastp/blast_engine/database/x_listed_lean.rs`). Without it
   `ListedSubjects::read_titles` makes one record per listed subject, with its letters in ASCII and its title (empty for a
@@ -1698,7 +1698,7 @@ Rebuilding less:
   recount the HSPs whose query or subject has a pyrrolysine (O), it keeps the residues of the subjects with an O (read
   again only where the flag is set: the redo read every final subject) and of the subjects of the HSPs whose query has
   one; otherwise those of every final subject; those of every listed subject when the reports make records
-  (`LOSAT_X_BPLISTEDLEAN=0`, ABI v1's titles); the others keep their lengths. The redo reads the same
+  (`LOSAT_X_BPLISTEDLEAN=0`); the others keep their lengths. The redo reads the same
   stored residues and the reports the same letters and lengths, so reports do not change. A reader error of the redo's
   reads is the error that the copy's read gave, reached in the redo and only for a subject that the redo reads; only a database
   changed after its preliminary read can fail there. The reports are held by the frozen NCBI `-db` fixtures
@@ -2785,7 +2785,7 @@ Rebuilding less:
   fails after the rows of the blocks before; where one applies, the search of all queries runs and refuses (or
   completes) exactly as it does:
   outfmt 0 needs every shown subject title writable (not a title of punctuation that NCBI's `x_CleanAndCompress`
-  reads past the end of; not ABI v1's titles with `-db`); outfmt 8, 9, 11 and 12 with `-db` need every definition
+  reads past the end of); outfmt 8, 9, 11 and 12 with `-db` need every definition
   line to read, to be one line and to hold no byte outside ' ' ..= '~' (`database::x_titles_read_allow_blocks`, one
   pass in the search pool; with `-subject` no title is read).
   Outfmt 5 needs the database name and every query's definition line and message id writable and every `-subject`

@@ -130,6 +130,12 @@ pub struct HspRecord {
     pub s_idx: usize,
     /// 0-based position of the HSP among the HSPs of its query.
     pub rank: usize,
+    /// The query's id (`qaccver`): the first word of its title, its generated `Query_N` without a
+    /// title, and with `-parse_deflines` the accession and version of its id. A byte that is not
+    /// UTF-8 shows as U+FFFD here and as itself in the reports. The HSPs of a query share it.
+    pub query_id: Arc<str>,
+    /// The subject's id (`saccver`), by the same rules. The HSPs of a subject share it.
+    pub subject_id: Arc<str>,
     /// The raw alignment score (`score`).
     pub raw_score: i32,
     /// The bit score (`bitscore`), not rounded.
@@ -193,6 +199,20 @@ pub struct HspRecord {
 }
 
 impl HspRecord {
+    // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-442
+    // ```c++
+    // inline void CBlastTabularInfo::x_PrintPercentIdentical(void)
+    // {
+    //     double perc_ident =
+    //         (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
+    //     m_Ostream << NStr::DoubleToString(perc_ident, 3);
+    // }
+    // ```
+    /// The percentage of identical columns (`pident`), not rounded.
+    pub fn percent_identity(&self) -> f64 {
+        crate::report::outfmt6::percent_identity_ncbi(self.num_ident, self.length)
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1109-1120
     // ```c
     // Blast_HSPGetAdjustedOffsets(EBlastProgramType program, BlastHSP* hsp,
@@ -815,6 +835,24 @@ pub(super) fn query_ordinal(ordinals: Option<&[usize]>, q_idx: usize) -> usize {
 // ```
 /// The HSP records of the final hit list of a search of `inputs`. `qlen` is the record's length
 /// or the length of the `-query_loc` interval as given; `slen` is the record's.
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
+// ```c++
+// const char* kDfltArgTabularOutputFmt =
+//     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
+//     "evalue bitscore";
+// ```
+// `shown_id` and `subject_tabular_id` are the first two columns of the default report.
+/// The id of a record, read once: many HSPs show it.
+fn shared_id(
+    ids: &mut [Option<Arc<str>>],
+    index: usize,
+    read: impl FnOnce() -> Vec<u8>,
+) -> Arc<str> {
+    ids[index]
+        .get_or_insert_with(|| Arc::from(String::from_utf8_lossy(&read())))
+        .clone()
+}
+
 pub(super) fn records(
     program: Program,
     inputs: Inputs<'_>,
@@ -827,6 +865,8 @@ pub(super) fn records(
     let translated_query = matches!(program, Program::Blastx | Program::Tblastx);
     let translated_subject = matches!(program, Program::Tblastn | Program::Tblastx);
     let mut ranks: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    let mut query_ids = vec![None; inputs.query.len()];
+    let mut subject_ids = vec![None; inputs.subject.len()];
     hits.iter()
         .enumerate()
         .map(|(index, record)| {
@@ -844,6 +884,15 @@ pub(super) fn records(
                 q_idx,
                 s_idx,
                 rank: this_rank,
+                query_id: shared_id(&mut query_ids, q_idx, || {
+                    inputs.query[q_idx].shown_id().to_vec()
+                }),
+                subject_id: shared_id(&mut subject_ids, s_idx, || {
+                    let subject = &inputs.subject[s_idx];
+                    subject
+                        .subject_tabular_id(subject_protein)
+                        .unwrap_or_else(|_| subject.shown_id().to_vec())
+                }),
                 raw_score: hit.raw_score,
                 bit_score: hit.bit_score,
                 e_value: hit.e_value,

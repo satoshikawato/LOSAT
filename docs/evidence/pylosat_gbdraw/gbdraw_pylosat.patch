@@ -1,0 +1,102 @@
+diff --git a/gbdraw/comparisons/losat_runtime.py b/gbdraw/comparisons/losat_runtime.py
+index 934be5f..5ab2141 100644
+--- a/gbdraw/comparisons/losat_runtime.py
++++ b/gbdraw/comparisons/losat_runtime.py
+@@ -26,6 +26,11 @@ import tempfile
+ from types import MappingProxyType
+ from typing import Callable, Literal, Mapping, Sequence, TypedDict, cast
+ 
++try:
++    import pylosat
++except ImportError:
++    pylosat = None
++
+ from gbdraw.comparisons.losat_jobs import losat_entry_filename
+ from gbdraw.exceptions import ValidationError
+ 
+@@ -46,7 +51,7 @@ LosatRuntimeKind = Literal["losat", "ncbi-blast"]
+ # Sessions written by gbdraw 0.14.2 or earlier may also record "bundled" (a
+ # development build once tracked in the source tree). Python never reads the
+ # record back; the Web shows its source and path as stored.
+-LosatRuntimeSource = Literal["explicit", "conda", "managed", "path"]
++LosatRuntimeSource = Literal["explicit", "conda", "managed", "path", "pylosat"]
+ 
+ 
+ class LosatRuntimeRecord(TypedDict):
+@@ -305,6 +310,9 @@ def resolve_losat_runtime(
+     if requested_ncbi_bin is not None:
+         return LosatRuntime("ncbi-blast", requested_ncbi_bin, "explicit")
+ 
++    if pylosat is not None:
++        return LosatRuntime("losat", "pylosat", "pylosat")
++
+     conda_runtime = _conda_losat_runtime()
+     if conda_runtime is not None:
+         return conda_runtime
+@@ -357,6 +365,9 @@ def losat_task_values(executable: str) -> frozenset[str] | None:
+     """
+ 
+     key = str(executable)
++    if key == "pylosat":
++        # The parser checks the task when the search starts.
++        return None
+     if key in _TASK_VALUES:
+         return _TASK_VALUES[key]
+     completed = _probe([key, "blastn", "--help"])
+@@ -410,6 +421,8 @@ def require_losat_task_support(
+ 
+ 
+ def _runtime_version(runtime: LosatRuntime) -> str | None:
++    if runtime.source == "pylosat":
++        return pylosat.ENGINE_VERSION
+     key = (runtime.kind, runtime.executable)
+     if key in _RUNTIME_VERSIONS:
+         return _RUNTIME_VERSIONS[key]
+@@ -522,6 +535,35 @@ def _run_losat_subprocess(
+         ) from exc
+ 
+ 
++def _run_pylosat(
++    spec: LosatProgram,
++    query_fasta: str,
++    subject_fasta: str,
++    options: LosatSearchArgs,
++    threads: int | None,
++) -> str:
++    """The search in this process: the words of ``build_losat_command`` without the files."""
++
++    words: list[str] = []
++    for name, value in _option_values(spec, options):
++        words.extend([LOSAT_OPTION_FLAGS[name].search, value])
++    if threads is not None:
++        words.extend(["-num_threads", str(int(threads))])
++    try:
++        search = pylosat.Search.from_argv(spec.search, words)
++        outcome = search.run(
++            pylosat.Sequences.from_text(query_fasta),
++            pylosat.Sequences.from_text(subject_fasta),
++            outfmt="6",
++        )
++    except pylosat.LosatError as exc:
++        raise ValidationError(
++            f"pylosat {spec.search} failed: {exc}",
++            diagnostic={"code": "LOSAT_RUNTIME", "reason": "FAILED", "program": spec.name},
++        ) from exc
++    return outcome.reports[0].text
++
++
+ def run_losat_search(
+     program: str | LosatProgram,
+     query_fasta: str,
+@@ -541,6 +583,11 @@ def run_losat_search(
+     spec = losat_program(program)
+     runtime_record: LosatRuntimeRecord | None = None
+     runtime = resolve_losat_runtime(spec, losat_bin=losat_bin, ncbi_blast_bin=ncbi_blast_bin)
++    if runtime.source == "pylosat":
++        text = _run_pylosat(spec, query_fasta, subject_fasta, options, threads)
++        if runtime_callback is not None:
++            runtime_callback(losat_runtime_record(runtime, spec))
++        return text
+     with tempfile.TemporaryDirectory(prefix="gbdraw_losat_") as temp_dir:
+         temp_path = Path(temp_dir)
+         query_path = temp_path / f"query{spec.fasta_suffix}"

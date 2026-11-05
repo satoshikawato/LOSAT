@@ -26,10 +26,13 @@
 //! ```
 #![warn(missing_docs, unused)]
 
+use std::io::Read;
+
 use super::error::Error;
 use super::program::Program;
 use super::search::Search;
 use crate::blastinput::fasta_reader::{read_all, FastaInputSource, FastaRecord, ReaderConfig};
+use crate::blastinput::input_files::open_file_input;
 
 /// Which input of a search a FASTA holds. The reader's flags and the generated local IDs
 /// (`Query_N`, `Subject_N`) depend on it.
@@ -117,6 +120,33 @@ fn read_source<R: std::io::Read>(
                 .to_string(),
         )
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
+// ```c++
+// void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
+// {
+//     if ( !m_Ios ) {
+//         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
+//             "File is not accessible",AsString()));
+// ```
+/// The bytes of the file `path`, as the command line opens its `-query` or `-subject` argument:
+/// the same message for a file that does not open (`Error::Input`), and a file named `.gz`,
+/// `.bz2` or `.zst` is inflated (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 8). `read_fasta`
+/// and `read_inputs` read the bytes.
+pub fn read_input_file(role: Role, path: &std::path::Path) -> Result<Vec<u8>, Error> {
+    let input_error = |error: anyhow::Error| {
+        Error::Input(format!("{error:#}").trim_end_matches('\n').to_string())
+    };
+    let name = match role {
+        Role::Query => "query",
+        Role::Subject => "subject",
+    };
+    let mut file = open_file_input(path, name).map_err(input_error)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|error| input_error(error.into()))?;
+    Ok(bytes)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:188-207
@@ -254,6 +284,35 @@ mod tests {
             }
             other => panic!("expected a reader error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_file_reads_as_the_command_line_opens_it() {
+        use std::io::Write;
+        let directory =
+            std::env::temp_dir().join(format!("losat-read-input-file-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let plain = directory.join("q.fa");
+        std::fs::write(&plain, PROTEIN).unwrap();
+        assert_eq!(read_input_file(Role::Query, &plain).unwrap(), PROTEIN);
+        let packed = directory.join("q.fa.gz");
+        let mut encoder = flate2::write::GzEncoder::new(
+            std::fs::File::create(&packed).unwrap(),
+            flate2::Compression::default(),
+        );
+        encoder.write_all(PROTEIN).unwrap();
+        encoder.finish().unwrap();
+        assert_eq!(read_input_file(Role::Subject, &packed).unwrap(), PROTEIN);
+        let missing = directory.join("none.fa");
+        let error = read_input_file(Role::Subject, &missing).unwrap_err();
+        assert_eq!(
+            error,
+            Error::Input(format!(
+                "Command line argument error: Argument \"subject\". File is not accessible:  `{}'",
+                missing.display()
+            ))
+        );
+        std::fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]

@@ -415,13 +415,23 @@ const RANGE_CASES: &[Case] = &[
 
 /// Every typed column of the HSP records, in the order of `check_columns`.
 const COLUMNS: &str = "6 length nident positive mismatch gapopen gaps qlen slen qstart qend \
-     sstart send qframe sframe sstrand score bitscore evalue";
+     sstart send qframe sframe sstrand score bitscore evalue qaccver saccver pident";
 
 /// One row of `COLUMNS` against the record of its HSP.
 fn check_columns(context: &str, hsp: &HspRecord, row: &[u8]) {
     let row = std::str::from_utf8(row).unwrap().trim_end();
     let fields: Vec<&str> = row.split('\t').collect();
-    assert_eq!(fields.len(), 18, "{context}: {row}");
+    assert_eq!(fields.len(), 21, "{context}: {row}");
+    assert_eq!(
+        (&*hsp.query_id, &*hsp.subject_id),
+        (fields[18], fields[19]),
+        "{context}: the ids of {row}"
+    );
+    assert_eq!(
+        format!("{:.3}", hsp.percent_identity()),
+        fields[20],
+        "{context}: pident of {row}"
+    );
     let number = |at: usize| fields[at].parse::<i64>().unwrap();
     assert_eq!(
         (
@@ -1072,6 +1082,19 @@ fn parsed_ids_show_as_on_the_command_line() {
             .named(query_path.to_str().unwrap(), subject_path.to_str().unwrap());
         let formats = ["6", "0", "7"];
         let outcome = run_collect(&search, inputs, &formats).unwrap();
+        // The ids of the records are those of the default report's columns.
+        let (ids, _) = cli(&case, &query_path, &subject_path, "6 qaccver saccver");
+        let ids: Vec<String> = String::from_utf8(ids)
+            .unwrap()
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        let shown: Vec<String> = outcome
+            .hsps
+            .iter()
+            .map(|hsp| format!("{}\t{}", hsp.query_id, hsp.subject_id))
+            .collect();
+        assert_eq!(shown, ids, "{program:?}");
         for (position, outfmt) in formats.iter().enumerate() {
             let (bytes, _) = cli(&case, &query_path, &subject_path, outfmt);
             assert!(

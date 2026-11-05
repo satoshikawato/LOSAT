@@ -1,6 +1,6 @@
 # LOSAT ライブラリ化計画（公開面の設計メモ）
 
-状態：**LIB-1 は `dev` に入った（#845）。段階 1（公開面を固める、#846）と段階 2（結果と実行制御、PR `feature/library-api-batches`）を実装中（2026-11-05）。** 設計メモは LIB-0（2026-10-31、保守者「OK」）。v0.2.0 自体は crates.io に出さない（release の決定 5、2026-10-25）。LIB-1 で決めたことは §9、順番の変更と段階 1 で決めたことは §10、段階 2 は §11。
+状態：**LIB-1 は `dev` に入った（#845）。段階 1（公開面を固める、#846）、段階 2（結果と実行制御、#849）、段階 3（`pylosat`、PR `feature/pylosat`）は PR 中（2026-11-05）。** 設計メモは LIB-0（2026-10-31、保守者「OK」）。v0.2.0 自体は crates.io に出さない（release の決定 5、2026-10-25）。LIB-1 で決めたことは §9、順番の変更と段階 1 で決めたことは §10、段階 2 は §11、段階 3 は §12。
 
 | 項目 | 内容 |
 |---|---|
@@ -176,7 +176,7 @@ ABI v2 §7 を基にするが、入力の渡し方が違う。
 
 保守者の決定（§9.1、§10.1）：**pyo3 の binding `pylosat`** を `api` の上に薄く作る。初版の案（maturin の bin wheel だけ）は採らない。
 
-- 置き場は `LOSAT/` の外（別 crate か workspace）で、`web/` と同じ境界規則を当てる。境界の PD は段階 3 の PR で書き、その PR は保守者が merge する。NCBI にない要素（Arrow など）はそこに置き、`LOSAT/` には入れない。
+- 置き場は `python/`（独自の Cargo root）で、`web/` と同じ境界規則を当てる（[`PD-LOSAT-PYTHON-BINDING-BOUNDARY`](product_decisions/PD-LOSAT-PYTHON-BINDING-BOUNDARY.md)、[`python/AGENTS.md`](../python/AGENTS.md)）。その PR は保守者が merge する。NCBI にない要素（Arrow など）はそこに置き、`LOSAT/` には入れない。
 - `panic = "unwind"` はその crate の profile で設定する。LOSAT の既定の `abort` のままだと、panic が Python の process ごと落とす。
 - 段階 3 は path 依存のまま動かし、Python 版の gbdraw で確かめる。関門は gbdraw が subprocess なしで動くこと。
 - 配布は wheel のマトリクス（manylinux x86_64 / aarch64、macOS arm64 / x86_64、Windows x64）。release のバイナリと同じ build（`release-readiness.yml` / release workflow）から作る。詳細は LIB-5。
@@ -355,7 +355,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 
 - バッチごとに `run_local` を 1 回呼ぶので、subject の準備もバッチごとにやり直す。文書の測定では 20 分割で 0.75 s が 0.87 s。`-db` の後で測り直す（再利用状態の項）。
 - BLASTX の `-parse_deflines`：`run_local` が records の id を持ち越さない（`blastx_record`）。
-- `Batches` は `Search` と records を借りる。`pylosat` の generator は所有する形を要するかもしれない（段階 3 で決める）。
+- `Batches` は `Search` と records を借りる。`pylosat` の generator は所有する形を要するかもしれない（段階 3 で決める）。→ API は変えなかった（§12.1）。
 
 ### 11.4 検証
 
@@ -367,3 +367,58 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 - 全 HSP が `queries()` と `subjects()` のちょうど 1 か所に、hit list の順で現れる。
 - `-parse_deflines` の報告（outfmt 6、0、7）が CLI とバイト一致する（BLASTN、BLASTP、TBLASTN、TBLASTX）。
 - outfmt 5、8、9、10、12、15、16、20 の報告が 5 program で CLI とバイト一致する。
+
+## 12. 段階 3：`pylosat` で確かめる（2026-11-05、PR `feature/pylosat`）
+
+基点は段階 2 の `feature/library-api-batches`。使い方は [`python/README.md`](../python/README.md)。
+
+### 12.1 形
+
+| 項目 | 実装 | 理由 |
+|---|---|---|
+| 二層 | Rust は `run`、`Batches`、`HspTable`、`Hsp`、`describe`、`validate` と例外（`python/src/`）。ほかは Python（`pylosat/_api.py`） | dataclass なら等価と pickle を書かずに済み、公開の形を型つきの Python のまま読める |
+| 引数 | `Search("blastn", evalue=1e-5)` は `describe` の表で `-evalue 1e-05` にして parser に渡す。`Search.from_argv` は語のまま | 検索条件の定義は argv 1 か所のまま。値の種類が違えば `TypeError`。`repr(float)` は同じ値に戻る |
+| 型スタブ | `pylosat/_options.pyi` を `tools/generate_option_stubs.py` が同じ表から作る。`Search.__init__` は program ごとの overload に `Unpack[TypedDict]` | 表と stub のずれはテストが見る |
+| 入力 | `Sequences.from_fasta`、`from_text`、`from_pairs`。bytes か path を持ち、検索の開始時に `read_inputs` で読む | reader は program と `-parse_deflines` で変わるので、作るときには読めない。`from_pairs` は FASTA の bytes にする |
+| 表 | `HspTable` の中身は Arrow の `RecordBatch` 1 個。`Hsp` はその 1 行、slice と `queries()` はコピーしない | 保持を 1 か所にして、表、行、pickle を同じものから作る。`HspRecord` は `#[non_exhaustive]` で、外から作り直せない |
+| 列名 | `-outfmt` の名前で、既定の報告の 12 列が先頭（`qaccver saccver pident ...`）。`Hsp` は `HspRecord` の名前 | 文書の方針どおり。文書の例の `qseqid` ではなく `qaccver`：既定の列がそれで、`-parse_deflines` のとき値が違う |
+| Arrow | `arrow-array` の `ffi` で `__arrow_c_stream__` を直に作る。pyo3-arrow は使わない | 使うのは capsule 1 個で、pyo3-arrow は numpy、chrono-tz、arrow-cast を連れてくる。要求された schema は無視する（interface は best effort）。文字列は `LargeUtf8`（`qseq` の合計が 2 GiB を越えても切れない） |
+| pickle | 表は Arrow IPC の bytes、`Hsp` は 1 行の表、ほかは dataclass | process pool で結果を返せる。`arrow-ipc` は `zstd` なし |
+| `Batches` の所有 | binding が `self_cell` で `Search` と records を一緒に持つ。API は借りる形のまま | Rust の呼び出し側に `Arc` を強いる理由が無い。`unsafe` も書かずに済む |
+| Ctrl-C | `Batches.__next__` と、報告なしの `run` の各バッチの前に `check_signals` | 決定 1。報告なしの `run` は `run_batches` で動かす（§11.4 で全項目一致）。報告ありは `run_collect` 1 回で、戻るまで効かない |
+| GIL | 入力の読み込み、検索、表の作成、IPC を `Python::detach` の中で | 検索中も他の Python スレッドが動く |
+| panic | `python/Cargo.toml` の release profile は LOSAT の写しで `panic = "unwind"` だけ違う | §4.3 |
+| wheel | `abi3-py310` | wheel が Python の版ごとに要らない |
+
+### 12.2 gbdraw とノートブックで見つかった API の不足
+
+足したもの（`LOSAT/src/api`、規則は `LOSAT/` のまま）：
+
+| 不足 | 足したもの | 根拠 |
+|---|---|---|
+| 行に id が無い。表が `qaccver` を持てない | `HspRecord::query_id`、`subject_id`（`Arc<str>`、record ごとに 1 回作る） | engine の `shown_id`、`subject_tabular_id`。列との一致は `check_columns` と `-parse_deflines` のテスト |
+| `pident` は binding が計算できない | `HspRecord::percent_identity()`。式は `report/outfmt6.rs` の 1 か所 | `x_PrintPercentIdentical`（`tabular.hpp:437-442`） |
+| ファイルは bytes にしてからで、`.gz` は呼び出し側が開けない | `read_input_file(role, path)`。CLI の開き方と文言 | `open_file_input`、`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` の例外 8 |
+| エンジンの版が取れない（gbdraw の runtime 記録） | `api::VERSION` | `CBlastVersion`（`version.hpp`） |
+
+足さなかったもの：
+
+- 報告つきの検索は止まらない。`run_collect` は engine の 1 回の呼び出しで、バッチの境界を外に見せない。gbdraw は outfmt 6 の text が要るのでこの形になる。
+- 1 query は 1 バッチなので、ゲノム 2 本の比較には境界が無い。gbdraw の検索はほぼこれで、subprocess なら kill できたものが、process の中では終わるまで待つことになる。NCBI の `SetInterruptCallback` に当たるものがエンジンに入れば解ける（文書の「後回し」のまま）。gbdraw が移るかどうかの判断材料になる。
+- BLASTN の `-task` は `Parameter::choices` に出ない。parser が `String` で受け、engine が後で断るため（BLASTP は parser の list）。gbdraw の `losat_task_values` は `--help` を読んでいて、binding では検索の開始時のエラーになる。
+- 警告は `diagnostics` の text のままで、深刻度も query の番号も無い（文書の「後回し」）。Python の `warnings` には流さない。
+
+### 12.3 関門
+
+- gbdraw が subprocess なしで動く：`docs/evidence/pylosat_gbdraw/`。gbdraw `033a3aa` に小さな patch を当て（gbdraw の repository は変えない）、`subprocess.Popen` を断った状態で linear と circular の 7 シナリオ（`losatn`、`tlosatx`、`losatp`）を実行し、同じ commit の `losat` を使う実行と SVG と raw の bytes が一致した。gbdraw 自身の T-CLI-07 の図の test は通る。T-CLI-09 の表は同じ commit の `losat` でも一致しない：表を作った v0.1.0 の遺伝暗号表は、コード 2、3、5、13、21 の `ATA` とコード 31 の `TGA` が `gc.prt` と違っていた（今の 27 表は `gc.prt` と同じ）。ヒトの配列の 3107 番の `N` をまたぐ行も v0.1.0 と違う。
+- ノートブックの流れ（進捗つきの `batches`、`polars` と `pandas` と `pyarrow` への受け渡し、`queries()`、`spans`、pickle）を `python/tests` と手元の script で確認した。
+- `python/tests`：5 program で、報告（outfmt 6、7、0、10、列指定）のバイトと `diagnostics` が `losat` と一致し、表の値が列と一致する。Ctrl-C、GIL、2 スレッド同時、process pool、pickle、Arrow の 3 consumer。
+- `LOSAT/tests/library_api.rs`：`qaccver`、`saccver`、`pident` の列と全 HSP で一致（§10.3 の 13 検索と `-parse_deflines`）。
+- `.github/workflows/python.yml`：`python/` と `LOSAT/src/api` の変更で走る。必須の check にはしていない。
+
+### 12.4 残ること
+
+- 公開（段階 4）：wheel のマトリクス、release workflow、`cargo-semver-checks` と `cargo-public-api`。
+- gbdraw の製品判断：`pylosat` を runtime に入れるか、その順番と記録の形。
+- `panic = "unwind"` の経路はテストしていない（公開の API から panic を起こす手段が無い）。
+- release profile の build は段階 4 の wheel で確かめる。

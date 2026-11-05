@@ -1,0 +1,36 @@
+# The Python binding of LOSAT's library API (docs/product_decisions/PD-LOSAT-PYTHON-BINDING-BOUNDARY.md).
+# Its own build root: nothing under LOSAT/ depends on it, and Arrow and PyO3 stay out of LOSAT.
+[package]
+name = "pylosat"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.92"
+publish = false
+license = "MIT"
+repository = "https://github.com/satoshikawato/LOSAT"
+
+[lib]
+name = "_pylosat"
+crate-type = ["cdylib"]
+
+[dependencies]
+LOSAT = { path = "../LOSAT" }
+arrow-array = { version = "60.1", default-features = false, features = ["ffi"] }
+arrow-ipc = { version = "60.1", default-features = false }
+arrow-schema = { version = "60.1", default-features = false }
+pyo3 = { version = "0.30", features = ["abi3-py310"] }
+self_cell = "1"
+
+[workspace]
+
+# Searches too slow to test without it, as in LOSAT's [profile.test].
+[profile.dev]
+opt-level = 1
+
+# LOSAT's release profile (LOSAT/Cargo.toml) with one difference: a panic must reach Python as an
+# exception. `panic = "abort"` would end the interpreter.
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "unwind"
+opt-level = 3

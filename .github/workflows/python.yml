@@ -1,0 +1,73 @@
+name: Python
+
+# The Python binding of the library API (python/): its Rust checks and its tests, which compare
+# reports and rows with the losat executable of the same commit. The binding is not published yet
+# and this check is not required (docs/losat_library_surface_plan.md §12).
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'python/**'
+      - 'LOSAT/src/api/**'
+      - 'LOSAT/Cargo.toml'
+      - 'LOSAT/Cargo.lock'
+      - '.github/workflows/python.yml'
+  pull_request:
+    paths:
+      - 'python/**'
+      - 'LOSAT/src/api/**'
+      - 'LOSAT/Cargo.toml'
+      - 'LOSAT/Cargo.lock'
+      - '.github/workflows/python.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pylosat:
+    name: pylosat
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: python
+    env:
+      CARGO_PROFILE_DEV_OPT_LEVEL: '1'
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            python
+            LOSAT
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.13'
+      - name: Format
+        run: cargo fmt --check
+      - name: Lints
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: The tools of the tests
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --quiet -r tests/requirements.txt
+      - name: The extension
+        run: VIRTUAL_ENV="$PWD/.venv" PATH="$PWD/.venv/bin:$PATH" maturin develop --locked
+      - name: The command line, the tests' expectation
+        working-directory: LOSAT
+        run: cargo build --locked --bin losat
+      - name: Tests
+        env:
+          LOSAT_BIN: ${{ github.workspace }}/LOSAT/target/debug/losat
+        run: .venv/bin/python -m pytest tests --timeout=300
+      - name: Types
+        run: .venv/bin/python -m mypy --strict pylosat

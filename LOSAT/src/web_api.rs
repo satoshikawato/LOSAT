@@ -1330,18 +1330,11 @@ mod tests {
                 format!(";comment\n>q1 first\n{head} {tail}\n"),
                 format!("  \n>q1 first\n{letters}\n>q2\n"),
             ] {
-                let got = report(&query);
-                // A query without residues after the first fails the BLASTN and TBLASTX
-                // searches, as in the CLI, and BLASTP reports the queries that it has.
-                if query.ends_with(">q2\n") && program != "blastp" {
-                    assert!(
-                        got.as_ref()
-                            .is_err_and(|error| error.contains("Sequence contains no data")),
-                        "{program}: {got:?}"
-                    );
-                } else {
-                    assert_eq!(got.as_ref(), Ok(&expected), "{program}: {query:?}");
-                }
+                assert_eq!(
+                    report(&query).as_ref(),
+                    Ok(&expected),
+                    "{program}: {query:?}"
+                );
             }
             // A subject without residues among others gets its warning.
             let subjects = format!(">s0\n{subject}");

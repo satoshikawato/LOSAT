@@ -6547,9 +6547,13 @@ fn x_block_search_refuses_nothing(
 //   threshold (24 bytes with its count), and the words past them go to overflow cells of four (24
 //   bytes). A block's table (`x_clut_direct.rs`: an entry of 4 bytes per word and per backbone cell)
 //   is kept to the slots of that table: at most four words per backbone cell plus the words of the
-//   batch with the most, so a block takes about the memory of NCBI's largest table, not a multiple
-//   of it. At the default thresholds a block of `LOSAT_X_BPQBLOCK` letters holds fewer words (the
-//   backbone's slots dominate), and the blocks are those of the letters; with a lowered threshold a
+//   batch with the most, so a block's finished table takes about the memory of NCBI's largest
+//   table, not a multiple of it (the builder's own vectors, and at more than one thread the next
+//   block's table built ahead, `x_lookup_ahead.rs`, come on top). At the default thresholds of
+//   blastp-fast (word size 5, 20) and of word size 6 (21) a block of `LOSAT_X_BPQBLOCK` letters
+//   holds fewer words (the backbone's slots dominate), and the blocks are those of the letters; at
+//   those of word sizes 5 (19.3) and 7 (20.25) of `-task blastp` the words of a block of 50,000
+//   letters come near the most, and a block can end one batch earlier; with a lowered threshold a
 //   block holds one batch or a few.
 // The batches are counted one by one, on the pool's threads when it has more than one, with one
 // counter whose kept counts serve them all. The standard table (`AaLookupTable`) has no overflow
@@ -14520,8 +14524,15 @@ mod tests {
                     assert_eq!(block.end, next.start);
                     // Closed before the next batch: the block and that batch pass the most.
                     let block_words: u64 = words[block.clone()].iter().sum();
-                    assert!(block.len() == 1 || block_words <= most, "{blocks:?}");
                     assert!(block_words + words[next.start] > most, "{blocks:?}");
+                }
+                // No block holds more than the most (a batch holds at most the largest batch's
+                // words, which the most includes).
+                for block in &blocks {
+                    assert!(
+                        words[block.clone()].iter().sum::<u64>() <= most,
+                        "{blocks:?}"
+                    );
                 }
                 assert_eq!(
                     x_word_blocks(&low_aa, &records, &input, batch_size, &whole, pool),

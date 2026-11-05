@@ -1809,8 +1809,9 @@ impl CompressedWordCount {
         self.words_within(queries, NCBI_OVERFLOW_CELL_CAPACITY)
     }
 
-    /// The cells of NCBI's backbone of the table: the compressed alphabet's size to the power of
-    /// the word length (`backbone_size`, blast_aalookup.c above).
+    /// The cells of NCBI's backbone of the table that a word's index can reach: the compressed
+    /// alphabet's size to the power of the word length. NCBI's `backbone_size` (blast_aalookup.c
+    /// above) is one more, a last cell that no word's index reaches.
     pub(crate) fn backbone_cells(&self) -> u64 {
         (self.compressed_alphabet_size as u64).pow(self.word_length as u32)
     }

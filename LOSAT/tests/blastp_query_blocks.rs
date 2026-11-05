@@ -18,7 +18,8 @@
 //! blocks of 50,000 letters need all of them. The block plan reads no other size whose outcome the
 //! four change (it needs more than one block, the `Int8` search space of the database and the
 //! longest query, the diagonal table's window, the batches' split sizes and, for blastp-fast, their
-//! words, `x_block_words_fit`). Two rules of other default switches that read sizes are not
+//! words, `x_word_blocks`, which also closes the blocks on them). Two rules of other default
+//! switches that read sizes are not
 //! reached by the four: a build ahead that lacks the room (`LOSAT_X_BPLKPAHEAD`:
 //! `blastp_lookup_ahead.rs`) and several redo windows that end inside queries
 //! (`LOSAT_X_BPREDOPAR`: the default test, `blastp_redo_par.rs`).
@@ -197,8 +198,8 @@ fn blocks_write_the_rows_of_the_search_of_all_queries() {
 }
 
 // blastp-fast's compressed lookup table: each block builds its own (exactness argument for the
-// compressed scan in `x_query_blocks.rs`), after the test of its batches' words
-// (`x_block_words_fit`, in groups on the pool at four threads: three groups of one batch here; one
+// compressed scan in `x_query_blocks.rs`), after the count of its batches' words
+// (`x_word_blocks`, in groups on the pool at four threads: three groups of one batch here; one
 // counter for every batch at one thread).
 #[test]
 fn blastp_fast_blocks_write_the_rows_of_the_search_of_all_queries() {
@@ -206,6 +207,34 @@ fn blastp_fast_blocks_write_the_rows_of_the_search_of_all_queries() {
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     let query = queries("fast");
     assert_block_rows(&query, &subject, &[(FAST, 1, TWO_BLOCKS), (FAST, 4, "1")]);
+    std::fs::remove_dir_all(query.parent().unwrap()).unwrap();
+}
+
+// With a lowered threshold blastp-fast's blocks also close on the words of their tables
+// (`x_word_blocks` in `blast_engine.rs`): at `-threshold 7` the first two batches of `queries`
+// hold more words than four per backbone cell plus the largest batch's, so the blocks of
+// `TWO_BLOCKS` letters become a block per batch (three searches, at `-threshold 9` they stay two),
+// and the rows are those of the search of all queries. Four threads: the pool counts the batches
+// (one thread: the unit tests of `x_word_blocks`).
+#[test]
+fn blastp_fast_blocks_close_on_the_words_of_a_lowered_threshold() {
+    let subject = fixture("MejoMJNV.faa");
+    let subject = [OsStr::new("-subject"), subject.as_os_str()];
+    let query = queries("words");
+    let task: &[&str] = &["-task", "blastp-fast", "-threshold", "7", "-outfmt", "6"];
+    let (reference, reference_searches) =
+        blastp_against(&query, &subject, 4, &[BATCH, SWITCH_OFF], task);
+    assert!(!reference.is_empty(), "the fixture pair has rows");
+    assert_eq!(reference_searches, 1, "the reference");
+    let (rows, searches) = blastp_against(
+        &query,
+        &subject,
+        4,
+        &[BATCH, ("LOSAT_X_BPQBLOCK", TWO_BLOCKS)],
+        task,
+    );
+    assert!(rows == reference, "rows differ");
+    assert_eq!(searches, blocks("1"), "a block per batch");
     std::fs::remove_dir_all(query.parent().unwrap()).unwrap();
 }
 

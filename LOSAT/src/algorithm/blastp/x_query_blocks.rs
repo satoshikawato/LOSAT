@@ -270,8 +270,8 @@
 //!
 //! `LOSAT_X_BPQBLOCK` is a value switch of the strict set (`utils/xswitch.rs`): a positive number
 //! of query letters (the block closes at the first batch end at or past it; with the compressed
-//! table also before a batch whose words pass the block's most, `blast_engine.rs`
-//! `x_word_blocks`), 50,000 when it is not set or is not a positive number. `0`,
+//! table also before a batch whose words would take the block's words past its most,
+//! `blast_engine.rs` `x_word_blocks`), 50,000 when it is not set or is not a positive number. `0`,
 //! turns the block path off.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
@@ -1306,11 +1306,12 @@ mod tests {
             x_query_blocks(&batches, &lengths, 20, Some((&words, 1000))),
             Some(vec![0..4, 4..7])
         );
-        // Both: the letters close 0..2 and 2..4 (12 letters each), the words close 4..6 before
-        // the last batch (10 + 50 > 55); a block closed by its letters counts its words anew.
+        // A block closed by its letters counts its words anew: the letters close 0..2 and 2..4
+        // (12 letters each), and 4..7 holds 10 + 50 words, within 75 (with the words of the
+        // blocks before kept, 40 + 30 + 10 would pass 75 and close 4..6).
         assert_eq!(
-            x_query_blocks(&batches, &lengths, 12, Some((&words, 55))),
-            Some(vec![0..2, 2..4, 4..6, 6..7])
+            x_query_blocks(&batches, &lengths, 12, Some((&words, 75))),
+            Some(vec![0..2, 2..4, 4..7])
         );
         // A block closed by its words counts its letters anew: 40 + 30 > 55 closes 0..2, and
         // 2..6 has 16 letters, below 20, when 10 + 50 > 55 closes it.

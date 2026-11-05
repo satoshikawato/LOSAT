@@ -358,17 +358,10 @@ impl<'a> SubjectLetters<'a> {
         let s_idx = hsp.hit.s_idx as usize;
         match self {
             Self::Records(records) => (records[s_idx].seq(), 0),
-            Self::Stored { .. } | Self::Database { .. } => {
-                let store = match self {
-                    Self::Stored { stores, ordinals } => &stores[ordinals[s_idx] as usize],
-                    Self::Database { stores, .. } => &*stores[s_idx],
-                    Self::Records(_) => unreachable!("the records' letters are above"),
-                };
-                let (from, to) = (hsp.hit.sort_subject_offset, hsp.hit.sort_subject_end);
-                let (start, length) = codon_window(store.len(), hsp.subject_frame, from, to);
-                store.letters_into(start, start + length, window);
-                (window, from)
+            Self::Stored { stores, ordinals } => {
+                stored_letters(&stores[ordinals[s_idx] as usize], hsp, window)
             }
+            Self::Database { stores, .. } => stored_letters(&stores[s_idx], hsp, window),
         }
     }
 
@@ -463,6 +456,43 @@ impl SubjectLetters<'_> {
         self.engine_counts(hsp, query, query_code, db_code, window, Blosum62Score)
             .0
     }
+}
+
+/// The codons of the residues of `hsp` in its subject's packed letters `store`, made into
+/// `window`, and the residue offset they start at (`codon_window`).
+fn stored_letters<'w>(
+    store: &PackedNucleotide,
+    hsp: &TblastxHsp,
+    window: &'w mut Vec<u8>,
+) -> (&'w [u8], usize) {
+    let (from, to) = (hsp.hit.sort_subject_offset, hsp.hit.sort_subject_end);
+    let (start, length) = codon_window(store.len(), hsp.subject_frame, from, to);
+    store.letters_into(start, start + length, window);
+    (window, from)
+}
+
+/// The engine's identities of `hsp` (`SubjectLetters::engine_identities`) against `store`, its
+/// subject's packed letters: the batch loop's, which names the subjects by ordinal id before the
+/// reports name them by rank.
+pub(crate) fn stored_engine_identities(
+    hsp: &TblastxHsp,
+    store: &PackedNucleotide,
+    query: &[u8],
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+    window: &mut Vec<u8>,
+) -> usize {
+    let (subject, subject_first) = stored_letters(store, hsp, window);
+    hsp_engine_counts(
+        hsp,
+        query,
+        subject,
+        subject_first,
+        query_code,
+        db_code,
+        Blosum62Score,
+    )
+    .0
 }
 
 /// The nucleotides `(start, number)` of the codons of residues `[from, to)` of `frame` in a
@@ -1165,8 +1195,7 @@ impl<'a> PairwiseRows<'a> {
             positives: Some(positives),
             gaps: Some(0),
             subject_length: Some(subject_length),
-            // The title after its first word (the `bio` description of the inputs
-            // that `bio` read alike), as BLASTN's; the reports take the subject's
+            // The title after its first word, as BLASTN's; the reports take the subject's
             // title bytes by subject index (`write_tblastx_pairwise_report`).
             subject_title: subject
                 .title

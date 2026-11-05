@@ -391,10 +391,10 @@ describe('fieldList', () => {
   const task = [valueOption('-task', 'megablast')];
 
   it("gives NCBI's list of the task the search uses", () => {
-    expect(fieldList(blastn, wordSize, {}, task)).toEqual(['16', '20', '24', '28', '32', '48', '64']);
-    expect(fieldList(blastn, wordSize, { '-task': 'blastn' }, task)).toEqual(['7', '11', '15']);
-    expect(fieldList(blastn, wordSize, {}, undefined)).toEqual([]);
-    expect(fieldList(blastn, { flag: '-x', label: 'X', kind: 'text' }, {}, task)).toEqual([]);
+    expect(fieldList(wordSize, {}, task)).toEqual(['16', '20', '24', '28', '32', '48', '64']);
+    expect(fieldList(wordSize, { '-task': 'blastn' }, task)).toEqual(['7', '11', '15']);
+    expect(fieldList(wordSize, {}, undefined)).toEqual([]);
+    expect(fieldList({ flag: '-x', label: 'X', kind: 'text' }, {}, task)).toEqual([]);
   });
 });
 
@@ -404,12 +404,12 @@ describe("the selects of the protein modes: NCBI's values that LOSAT reads", () 
   const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
   const optionsOf = (id: ProgramId) => toProgramDescription(described[id]).parameters;
   const field = (id: ProgramId, flag: string) => programById(id).sections.flatMap((section) => section.fields).find((f) => f.flag === flag)!;
-  const list = (id: ProgramId, flag: string, values: FormValues = {}) => fieldList(programById(id), field(id, flag), values, optionsOf(id));
+  const list = (id: ProgramId, flag: string, values: FormValues = {}) => fieldList(field(id, flag), values, optionsOf(id));
 
-  it('gives BLASTP BLOSUM62, word sizes 3 and 5, and modes 0 and 2, in both tasks', () => {
+  it('gives BLASTP BLOSUM62, word sizes 3, 5 and 6, and modes 0 and 2, in both tasks', () => {
     for (const values of [{}, { '-task': 'blastp-fast' }]) {
       expect(list('blastp', '-matrix', values)).toEqual(['BLOSUM62']);
-      expect(list('blastp', '-word_size', values)).toEqual(['3', '5']);
+      expect(list('blastp', '-word_size', values)).toEqual(['3', '5', '6']);
     }
     expect(fieldChoices(field('blastp', '-comp_based_stats'), optionsOf('blastp').find((o) => o.flag === '-comp_based_stats'))).toEqual(['0', '2']);
     // TBLASTN keeps NCBI's four: its engine reads modes 1 and 3 with -matrix IDENTITY (resetting them to 0).
@@ -421,12 +421,11 @@ describe("the selects of the protein modes: NCBI's values that LOSAT reads", () 
     expect(list('tblastx', '-matrix')).toEqual(MATRICES);
   });
 
-  it("gives TBLASTN BLOSUM62 alone with the compressed lookup table (word sizes 5 to 7), NCBI's matrices otherwise", () => {
+  it("gives TBLASTN NCBI's matrices with either lookup table (the compressed one of word sizes 5 to 7 too)", () => {
     expect(list('tblastn', '-matrix')).toEqual(MATRICES);
-    expect(list('tblastn', '-matrix', { '-task': 'tblastn-fast' })).toEqual(['BLOSUM62']);
+    expect(list('tblastn', '-matrix', { '-task': 'tblastn-fast' })).toEqual(MATRICES);
     expect(list('tblastn', '-matrix', { '-task': 'tblastn-fast', '-word_size': '3' })).toEqual(MATRICES);
-    for (const size of ['5', '6', '7']) expect(list('tblastn', '-matrix', { '-word_size': ` ${size} ` })).toEqual(['BLOSUM62']);
-    expect(list('tblastn', '-matrix', { '-word_size': '4' })).toEqual(MATRICES);
+    for (const size of ['4', '5', '6', '7']) expect(list('tblastn', '-matrix', { '-word_size': ` ${size} ` })).toEqual(MATRICES);
     expect(list('tblastn', '-word_size')).toEqual(PROTEIN_WORD_SIZES);
   });
 });

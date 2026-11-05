@@ -357,6 +357,30 @@ pub struct TabularNeeds {
     pub all_deflines: bool,
 }
 
+/// Which rows of a tabular report read the subject's Bioseq in NCBI's formatter
+/// (`TabularSpec::subject_fetch`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SubjectFetch {
+    /// No row.
+    Never,
+    /// Every row.
+    Every,
+    /// The rows whose HSP has identities (the engine's, the Seq-align's `num_ident`): `nident`
+    /// is the only field that enters the alignment block.
+    WithIdentities,
+}
+
+impl SubjectFetch {
+    /// Whether the row of an HSP with the engine's identities `num_ident` reads the subject.
+    pub fn reads(self, num_ident: usize) -> bool {
+        match self {
+            Self::Never => false,
+            Self::Every => true,
+            Self::WithIdentities => num_ident > 0,
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:612-660
 // (`CBlastFormatUtil::InsertSubjectScores`: after a group's first Seq-align it takes the following
 // ones whose subject id `Match`es that first id, and stores the coverage of the whole group on the
@@ -495,6 +519,8 @@ impl TabularSpec {
     //     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
     //         x_IsFieldRequested(eSubjectStart) || x_IsFieldRequested(eSubjectEnd) ||
     //         x_IsFieldRequested(eAlignmentLength) || x_IsFieldRequested(eGaps) ||
+    //         x_IsFieldRequested(eGapOpenings) || x_IsFieldRequested(eQuerySeq) ||
+    //         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
     //     ...
     //         x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eBTOP) ||
     //         x_IsFieldRequested(eSubjectStrand)) {
@@ -506,24 +532,47 @@ impl TabularSpec {
     //                 GetFrame (s_start - 1, ds.GetSeqStrand(kSubjectRow),
     //                           scope.GetBioseqHandle(align.GetSeq_id(1)));
     // ```
-    /// Whether `program`'s rows read the subject's Bioseq in NCBI's formatter, which loads its
-    /// taxonomy where no prefetch loaded it before (`PRE_FETCH_SEQS_LIMIT`): the subject's ids,
-    /// taxonomy, titles and strand, and the alignment's letters, also for the identities unless
-    /// the formatter does not fetch sequences (BLASTN's, blast_format.cpp:791-792); in BLASTX,
-    /// TBLASTN and TBLASTX, whose alignments are Std-segs, also the subject's frame (`sframe`,
-    /// `frames`) where a field that enters that block is asked for (a coordinate, `length`,
-    /// `gaps`, `gapopen` or `qframe`; the block's other fields fetch on their own). `slen` is read
-    /// without the Bioseq (`sequence::GetLength`). NCBI enters the block for `nident` alone only
-    /// on a row with identities, which this per-report answer does not see (PD-LOSAT-DATABASE-SEARCH,
-    /// known differences).
-    pub fn fetches_subject(&self, program: crate::blastinput::app::Program) -> bool {
+    /// Which of `program`'s rows read the subject's Bioseq in NCBI's formatter, which loads its
+    /// taxonomy where no prefetch loaded it before (`PRE_FETCH_SEQS_LIMIT`): every row for the
+    /// subject's ids, taxonomy, titles and strand, and the alignment's letters, also for the
+    /// identities unless the formatter does not fetch sequences (BLASTN's,
+    /// blast_format.cpp:791-792); in BLASTX, TBLASTN and TBLASTX, whose alignments are Std-segs,
+    /// also the subject's frame (`sframe`, `frames`) where a field that enters that block is asked
+    /// for (a coordinate, `length`, `gaps`, `gapopen` or `qframe`; the block's other fields fetch
+    /// on their own). `slen` is read without the Bioseq (`sequence::GetLength`). NCBI enters the
+    /// block for `nident` alone only on a row whose HSP has identities (the Seq-align's
+    /// `num_ident` above 0): where no other field enters it, only those rows read the subject,
+    /// for the letters of `nident` and the frames ([`SubjectFetch::WithIdentities`]).
+    pub fn subject_fetch(&self, program: crate::blastinput::app::Program) -> SubjectFetch {
         use crate::blastinput::app::Program;
         let no_fetch = program == Program::Blastn;
         let translated = matches!(
             program,
             Program::Blastx | Program::Tblastn | Program::Tblastx
         );
-        self.has_any(&[
+        // The fields that enter the block on every row, and whether the block reads the subject
+        // through `nident` or the frames.
+        let block = self.has_any(&[
+            QueryStart,
+            QueryEnd,
+            SubjectStart,
+            SubjectEnd,
+            AlignmentLength,
+            Gaps,
+            GapOpenings,
+            QuerySeq,
+            SubjectSeq,
+            Positives,
+            Mismatches,
+            PercentPositives,
+            PercentIdentical,
+            QueryFrame,
+            Btop,
+            SubjectStrand,
+        ]);
+        let block_reads = (!no_fetch && self.has(NumIdentical))
+            || (translated && self.has_any(&[SubjectFrame, Frames]));
+        let every = self.has_any(&[
             SubjectSeqId,
             SubjectGi,
             SubjectAccession,
@@ -549,19 +598,15 @@ impl TabularSpec {
             Positives,
             PercentPositives,
             Btop,
-        ]) || (!no_fetch && self.has_any(&[NumIdentical, Mismatches, PercentIdentical]))
-            || (translated
-                && self.has_any(&[SubjectFrame, Frames])
-                && self.has_any(&[
-                    QueryStart,
-                    QueryEnd,
-                    SubjectStart,
-                    SubjectEnd,
-                    AlignmentLength,
-                    Gaps,
-                    GapOpenings,
-                    QueryFrame,
-                ]))
+        ]) || (!no_fetch && self.has_any(&[Mismatches, PercentIdentical]))
+            || (block && block_reads);
+        if every {
+            SubjectFetch::Every
+        } else if block_reads && self.has(NumIdentical) {
+            SubjectFetch::WithIdentities
+        } else {
+            SubjectFetch::Never
+        }
     }
 
     pub fn needs(&self) -> TabularNeeds {
@@ -1553,7 +1598,8 @@ mod tests {
 
     // Line DBID P1: with NCBI's prefetch off, the rows read the subject's Bioseq (and look its
     // taxids up) only for these fields (review 1 of P1, field by field against NCBI 2.17.0); P2
-    // (review 1): in the translated programs also for the subject's frame with a coordinate.
+    // (review 1): in the translated programs also for the subject's frame with a coordinate; L1
+    // (review 2 of P2): `nident` without another field of the block only on rows with identities.
     #[test]
     fn rows_read_the_subject_for_its_ids_taxonomy_titles_strand_and_letters() {
         use crate::blastinput::app::Program;
@@ -1562,37 +1608,47 @@ mod tests {
             fields: parse_fields(fields),
             delimiter: "\t".into(),
         };
-        let fetches = |fields: &str, no_fetch: bool| {
-            spec(fields).fetches_subject(if no_fetch {
+        let fetch = |fields: &str, no_fetch: bool| {
+            spec(fields).subject_fetch(if no_fetch {
                 Program::Blastn
             } else {
                 Program::Blastp
             })
         };
         for (fields, translated) in [
-            ("qseqid sframe", false),
-            ("qseqid frames qcovs", false),
-            ("qseqid sstart sframe", true),
-            ("qseqid qframe frames", true),
-            ("qseqid length sframe", true),
-            ("qseqid qstart qframe slen", false),
+            ("qseqid sframe", SubjectFetch::Never),
+            ("qseqid frames qcovs", SubjectFetch::Never),
+            ("qseqid sstart sframe", SubjectFetch::Every),
+            ("qseqid qframe frames", SubjectFetch::Every),
+            ("qseqid length sframe", SubjectFetch::Every),
+            ("qseqid qstart qframe slen", SubjectFetch::Never),
+            ("qseqid nident sframe", SubjectFetch::WithIdentities),
+            ("qseqid nident frames sstart", SubjectFetch::Every),
         ] {
             for program in [Program::Blastx, Program::Tblastn, Program::Tblastx] {
-                assert_eq!(
-                    spec(fields).fetches_subject(program),
-                    translated,
-                    "{fields}"
-                );
+                assert_eq!(spec(fields).subject_fetch(program), translated, "{fields}");
             }
-            assert!(!spec(fields).fetches_subject(Program::Blastp), "{fields}");
-            assert!(!spec(fields).fetches_subject(Program::Blastn), "{fields}");
+            let protein = match translated {
+                SubjectFetch::Every if !fields.contains("nident") => SubjectFetch::Never,
+                fetch => fetch,
+            };
+            assert_eq!(
+                spec(fields).subject_fetch(Program::Blastp),
+                protein,
+                "{fields}"
+            );
+            assert_eq!(
+                spec(fields).subject_fetch(Program::Blastn),
+                SubjectFetch::Never,
+                "{fields}"
+            );
         }
         for fields in [
             "qseqid evalue",
             "qseqid qacc qlen slen qstart qend sstart send evalue bitscore score length gaps gapopen",
             "qseqid qframe sframe frames qcovs qcovhsp qcovus",
         ] {
-            assert!(!fetches(fields, false), "{fields}");
+            assert_eq!(fetch(fields, false), SubjectFetch::Never, "{fields}");
         }
         for fields in [
             "std",
@@ -1605,12 +1661,25 @@ mod tests {
             "qseqid sseq",
             "qseqid btop",
             "qseqid ppos",
+            "qseqid nident sseqid",
         ] {
-            assert!(fetches(fields, false) && fetches(fields, true), "{fields}");
+            assert_eq!(fetch(fields, false), SubjectFetch::Every, "{fields}");
+            assert_eq!(fetch(fields, true), SubjectFetch::Every, "{fields}");
         }
-        for fields in ["qseqid nident", "qseqid mismatch", "qseqid pident"] {
-            assert!(fetches(fields, false) && !fetches(fields, true), "{fields}");
+        for fields in ["qseqid mismatch", "qseqid pident", "qseqid nident length"] {
+            assert_eq!(fetch(fields, false), SubjectFetch::Every, "{fields}");
+            assert_eq!(fetch(fields, true), SubjectFetch::Never, "{fields}");
         }
+        for fields in ["qseqid nident", "nident evalue qcovs slen"] {
+            assert_eq!(
+                fetch(fields, false),
+                SubjectFetch::WithIdentities,
+                "{fields}"
+            );
+            assert_eq!(fetch(fields, true), SubjectFetch::Never, "{fields}");
+        }
+        assert!(!SubjectFetch::WithIdentities.reads(0) && SubjectFetch::WithIdentities.reads(1));
+        assert!(SubjectFetch::Every.reads(0) && !SubjectFetch::Never.reads(1));
     }
 
     #[test]

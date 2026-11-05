@@ -9,14 +9,19 @@
 // text), never with values computed here.
 //
 // Every program that LOSAT Web runs is covered: BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX.
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, type Download, type Locator, type Page } from '@playwright/test';
+import { test } from './support/test';
 import { generateVerificationTable } from '../../build/verification';
 import type { OutputFormat } from '../../src/domain/output-format';
 import { optionKey } from '../../src/domain/verification';
-import { BUILD_HAS_ENGINE } from './support/browser';
+import { RESULTS_REMOVED_MESSAGE } from '../../src/infra/data/block-store';
+import { TMP_DIRECTORY } from '../../src/infra/data/session';
+import { BUILD_HAS_ENGINE, sessionDirectories, sessionFiles } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
+import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { chooseRun, fasta, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
 import { repeats } from './support/synthetic';
 
@@ -1946,4 +1951,217 @@ test('the Outputs view lays out blocks of lines near the view, and shows, finds 
     return { marked: element.querySelectorAll('.output-chunk-selected').length, blocks: element.children.length, hasLast: document.getSelection()!.toString().includes(last) };
   });
   expect(selected).toEqual({ marked: selected.blocks, blocks: selected.blocks, hasLast: true });
+});
+
+// The browser can remove the stored results under an open tab (clearing the site's data, or some of the files). The
+// Outputs then show no text of another format: reading an output, Export and "Download All" say why, as the Results do
+// when they are opened again (WA2-BR-01). WebKit's build of Playwright has no OPFS, and keeps results in memory.
+test('after the browser removed the stored results, the Outputs, Export and Download All say why, and show no other format', async ({ page }) => {
+  // A failure that reaches no message reaches the page as an uncaught error.
+  const uncaught: string[] = [];
+  page.on('pageerror', (error) => uncaught.push(String(error)));
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${A}\n`);
+  await paste(page, 'subject', `>s1\n${S1}\n`);
+  test.skip((await page.getByTestId('storage-status').getAttribute('data-backend')) !== 'opfs', 'this browser keeps results in memory');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  const [session] = await sessionDirectories(page);
+  const runDirectory = (files: readonly string[]) => [...new Set(files.filter((f) => f.startsWith('runs/')).map((f) => f.split('/')[1]!))];
+  const [first] = runDirectory(await sessionFiles(page, session!));
+  await page.getByTestId('tab-search').click();
+  await submit(page);
+  await waitStatus(page, 2, 'completed');
+  expect(runDirectory(await sessionFiles(page, session!))).toHaveLength(2);
+  await showOutput(page, 1, 6);
+  const output = page.getByTestId('result-output');
+  const problem = page.getByTestId('outputs-problem');
+  await expect(output).not.toHaveText('');
+  await expect(problem).toHaveCount(0);
+  // The stored results of run 1 go; run 2's stay. A synchronous access handle holds its file for a moment after it is
+  // closed: the removal is tried again.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          async ({ tmp, session, run }) => {
+            try {
+              const runs = await (await (await navigator.storage.getDirectory()).getDirectoryHandle(tmp)).getDirectoryHandle(session);
+              await (await runs.getDirectoryHandle('runs')).removeEntry(run, { recursive: true });
+              return 'removed';
+            } catch (error) {
+              return (error as Error).name;
+            }
+          },
+          { tmp: TMP_DIRECTORY, session: session!, run: first! },
+        ),
+      { timeout: 10_000 },
+    )
+    .toBe('removed');
+  const removed = RESULTS_REMOVED_MESSAGE;
+  const downloads: string[] = [];
+  page.on('download', (download) => downloads.push(download.suggestedFilename()));
+
+  // Export of the output shown says why next to its button, under the text, which stays.
+  await page.getByTestId('export-output').click();
+  await expect(problem).toHaveText(`Not saved: ${removed}`);
+  await expect(output).toHaveAttribute('data-shown', '1:6');
+  const box = async (testid: string) => (await page.getByTestId(testid).boundingBox())!;
+  expect((await box('outputs-problem')).y).toBeGreaterThanOrEqual((await box('result-output')).y + (await box('result-output')).height);
+  expect((await box('outputs-problem')).y + (await box('outputs-problem')).height).toBeLessThanOrEqual((await box('export-output')).y);
+
+  // Another format: its command, the reason, and no text of the format shown before.
+  await page.getByTestId('format-0').click();
+  await expect(problem).toHaveAttribute('data-failed', '1:0');
+  await expect(problem).toHaveText(`The results of run 1 could not be read: ${removed}`);
+  await expect(output).toHaveCount(0);
+  await expect(page.getByTestId('format-0')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('result-command')).toHaveText('losat blastn -query query.fa -subject subject.fa -outfmt 0');
+  // Export saves nothing and says why, in the same place.
+  await page.getByTestId('export-output').click();
+  await expect(problem).toHaveText(`Not saved: ${removed}`);
+  await expect(output).toHaveCount(0);
+  // The format shown before cannot be read either.
+  await page.getByTestId('format-6').click();
+  await expect(problem).toHaveAttribute('data-failed', '1:6');
+  await expect(problem).toHaveText(`The results of run 1 could not be read: ${removed}`);
+  await expect(output).toHaveCount(0);
+  // "Download All" says why under the run's line, where its list was.
+  await page.getByTestId('results-download-all').click();
+  await page.getByTestId('results-download-menu').getByTestId('results-download-7').click();
+  await expect(page.getByTestId('results-download-problem')).toHaveText(`Not saved: ${removed}`);
+  await expect(page.getByTestId('results-download-all')).toBeFocused();
+  expect(downloads).toEqual([]);
+  // The message stays on the run's line in the other tabs, and goes when the run picker shows another run, whose
+  // outputs are read and saved.
+  await page.getByTestId('results-view-hits').click();
+  await expect(page.getByTestId('results-download-problem')).toHaveText(`Not saved: ${removed}`);
+  await chooseRun(page, 2);
+  await expect(page.getByTestId('results-download-problem')).toHaveCount(0);
+  await showOutput(page, 2, 0, false);
+  await expect(problem).toHaveCount(0);
+  await page.getByTestId('export-output').click();
+  await expect.poll(() => downloads).toEqual([expect.stringMatching(/^losat-run2-blastn-.*\.outfmt0\.txt$/)]);
+  await expect(problem).toHaveCount(0);
+  expect(uncaught).toEqual([]);
+});
+
+// The output of the argv's own -outfmt (WA2-OP-03, Owner 2026-11-05): -outfmt 6 or 7 with fields in Additional
+// options adds it to the Outputs, Export and "Download All", named by its value, and to the commands of Run details; the
+// formats of every run keep their commands. The formats that a run does not write need the CLI. With the engine, its text
+// is the native CLI's for the same argv (the same commit, one thread), in BLASTN and BLASTP.
+test("Additional options' -outfmt with fields adds its output to the Outputs, Export and Download All", async ({ page }, testInfo) => {
+  const extra = page.getByTestId('param-extra');
+  const validation = page.getByTestId('argv-validation');
+  await openParameters(page);
+  await program(page, 'blastn');
+  for (const value of ['5', '10']) {
+    await extra.fill(`-outfmt ${value}`);
+    await expect(validation).toHaveText(`-outfmt ${value}: the browser writes outfmt 0, 6 and 7 (6 and 7 with any fields); other formats need the CLI`);
+  }
+  await extra.fill('-num_threads 2');
+  await expect(validation).toHaveText('-num_threads is set in the form: Threads');
+  const protein = '>q protein query\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n';
+  const inputs = {
+    blastn: [`>q1 first query\n${A}\n`, `>s1 first subject\n${S1}\n`],
+    blastp: [protein, '>s protein subject\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n'],
+  } as const;
+  const cases = BUILD_HAS_ENGINE
+    ? (['blastn', 'blastp'] as const).flatMap((id) => ['6 qseqid sseqid pident', '7 std qcovs'].map((outfmt) => [id, outfmt] as const))
+    : ([['blastn', '6 qseqid sseqid']] as const);
+  if (BUILD_HAS_ENGINE && NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The text of the outputs: ${NO_NATIVE_REASON}` });
+  const downloads: Download[] = [];
+  page.on('download', (download) => downloads.push(download));
+  const output = page.getByTestId('result-output');
+  const command = page.getByTestId('result-command');
+  for (const [index, [id, outfmt]] of cases.entries()) {
+    const run = index + 1;
+    if (run > 1) await page.getByTestId('tab-search').click();
+    await program(page, id);
+    await paste(page, 'query', inputs[id][0]);
+    await paste(page, 'subject', inputs[id][1]);
+    await openParameters(page);
+    await extra.fill(`-outfmt '${outfmt}'`);
+    await expect(validation).toHaveAttribute('data-state', 'ok');
+    await submit(page);
+    await waitStatus(page, run, 'completed');
+    await chooseRun(page, run);
+    await page.getByTestId('results-view-outputs').click();
+    await expect(page.getByTestId('results-outputs').locator('nav.tabs button')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7', `outfmt ${outfmt}`]);
+    await page.getByTestId('format-custom').click();
+    await expect(output).toHaveAttribute('data-shown', `${run}:4`);
+    await expect(command).toHaveText(`losat ${id} -query query.fa -subject subject.fa -outfmt '${outfmt}'`);
+    await expect(page.getByTestId('export-output')).toHaveText(`Export outfmt ${outfmt}`);
+    const text = (await output.textContent()) ?? '';
+    if (!BUILD_HAS_ENGINE) expect(text).toContain(`# -outfmt ${outfmt}\n`);
+    else if (NATIVE !== undefined) {
+      const directory = testInfo.outputPath(`custom-${run}`);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, 'query.fa'), inputs[id][0]);
+      writeFileSync(join(directory, 'subject.fa'), inputs[id][1]);
+      const cli = spawnSync(NATIVE, [id, '-query', 'query.fa', '-subject', 'subject.fa', '-outfmt', outfmt, '-num_threads', '1'], { cwd: directory });
+      expect(cli.status, String(cli.stderr)).toBe(0);
+      expect(text, `${id} -outfmt '${outfmt}'`).toBe(String(cli.stdout));
+      expect(text.length).toBeGreaterThan(0);
+    }
+    // The formats of every run: their own -outfmt in place of the argv's.
+    await page.getByTestId('format-6').click();
+    await expect(output).toHaveAttribute('data-shown', `${run}:6`);
+    await expect(command).toHaveText(`losat ${id} -query query.fa -subject subject.fa -outfmt 6`);
+    // Export and "Download All" save it byte for byte, as BLAST+'s custom format of its number.
+    await page.getByTestId('format-custom').click();
+    await expect(output).toHaveAttribute('data-shown', `${run}:4`);
+    await page.getByTestId('export-output').click();
+    await page.getByTestId('results-download-all').click();
+    const item = page.getByTestId('results-download-menu').getByTestId('results-download-custom');
+    await expect(item).toHaveText(`${outfmt.startsWith('7') ? 'Tabular with comment lines' : 'Tabular'} (outfmt ${outfmt})`);
+    await item.click();
+    await expect.poll(() => downloads.length).toBe(2 * run);
+    for (const download of downloads.slice(-2)) {
+      expect(download.suggestedFilename()).toMatch(new RegExp(`^losat-run${run}-${id}-.*\\.outfmt${outfmt[0]}-custom\\.txt$`));
+      expect(readFileSync((await download.path())!, 'utf8')).toBe(text);
+    }
+    // Run details: the command of each output.
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-command-7')).toHaveText(`losat ${id} -query query.fa -subject subject.fa -outfmt 7`);
+    await expect(page.getByTestId('run-command-custom')).toHaveText(`losat ${id} -query query.fa -subject subject.fa -outfmt '${outfmt}'`);
+  }
+  // A run without -outfmt has the formats of every run only.
+  await chooseRun(page, 1);
+  await page.getByTestId('tab-search').click();
+  await extra.fill('');
+  await submit(page);
+  await waitStatus(page, cases.length + 1, 'completed');
+  await chooseRun(page, cases.length + 1);
+  await page.getByTestId('results-view-outputs').click();
+  await expect(page.getByTestId('results-outputs').locator('nav.tabs button')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7']);
+  await page.getByTestId('results-download-all').click();
+  await expect(page.getByTestId('results-download-menu').getByRole('button')).toHaveCount(3);
+});
+
+// On a phone's width, the output of a long -outfmt (fields, and one long delim= token) wraps in its tab, its command,
+// Export and "Download All": no horizontal scrolling (W10).
+test("the output of a long -outfmt fits a phone's width", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const outfmt = `7 delim=${'|'.repeat(60)} qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos btop`;
+  await openParameters(page);
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${A}\n`);
+  await paste(page, 'subject', `>s1\n${S1}\n`);
+  await page.getByTestId('param-extra').fill(`-outfmt '${outfmt}'`);
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  await page.getByTestId('results-view-outputs').click();
+  await page.getByTestId('format-custom').click();
+  await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:4');
+  await page.getByTestId('results-download-all').click();
+  await expect(page.getByTestId('results-download-custom')).toBeVisible();
+  const wide = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+  expect(wide[0], 'the page is wider than the window').toBeLessThanOrEqual(wide[1]!);
+  for (const id of ['format-custom', 'export-output', 'results-download-custom', 'result-command']) {
+    const box = (await page.getByTestId(id).boundingBox())!;
+    expect(box.x + box.width, id).toBeLessThanOrEqual(390);
+  }
 });

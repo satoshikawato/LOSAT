@@ -7104,6 +7104,9 @@ pub fn run(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     args.id_scope = args.parse_deflines.then(Default::default);
+    // The command line's progress bar (`BlastnArgs::progress_bar`; no NCBI counterpart). The
+    // library API and the web entries come through `run_local` and leave it off.
+    args.progress_bar = true;
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:128-133
     // ```c
     // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -9605,14 +9608,16 @@ fn run_in_pool(
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                 // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
                 // after the query's own warnings (`query_fetches`, added after them below), where
-                // the first format reads their Bioseqs (`TabularSpec::fetches_subject`; BLASTN's
-                // formatter does not fetch for the identities). A batch that fetches nothing still
+                // the first format reads their Bioseqs (`TabularSpec::subject_fetch`; BLASTN's
+                // formatter does not fetch for the identities, so every row reads them or none
+                // does). A batch that fetches nothing still
                 // asks for the run's refusal of NCBI's taxonomy cache before its first byte, unless
                 // no batch of the run prefetches (`shared::prefetch_always_off`).
                 let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                     let fetches = match output_formats.first() {
                         Some(BlastnOutputFormat::CustomTabular(spec)) => {
-                            spec.fetches_subject(crate::blastinput::app::Program::Blastn)
+                            spec.subject_fetch(crate::blastinput::app::Program::Blastn)
+                                != crate::report::tabular::SubjectFetch::Never
                         }
                         _ => true,
                     };
@@ -11279,15 +11284,14 @@ fn search_query_batch<const UNGAPPED: bool>(
                     batching.batch_size
                 );
             }
+            // A query without letters (also a `-query_loc` interval that holds none) keeps its
+            // warning in the error (`karlin_error`).
+            let empty_queries = query_lengths.iter().map(|&length| length == 0);
             // A batch after the first: every batch before it had only invalid queries (one
             // with a valid query would have raised the error), and NCBI has written their
             // reports (`run_in_pool`).
             if !first_batch {
-                return Err(ErrorAfterInvalidBatches(karlin_error(
-                    &message,
-                    seq_data.queries.len(),
-                ))
-                .into());
+                return Err(ErrorAfterInvalidBatches(karlin_error(&message, empty_queries)).into());
             }
             // The prolog of a file sink (the others were written before the search).
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
@@ -11296,7 +11300,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     write_format_prolog(format, output_format, megablast, &shown)?;
                 }
             }
-            return Err(karlin_error(&message, seq_data.queries.len()));
+            return Err(karlin_error(&message, empty_queries));
         }
     };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:324-332
@@ -11723,7 +11727,9 @@ fn search_query_batch<const UNGAPPED: bool>(
     // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
     // ```
     let subject_count = seq_data.db_num_seqs as u64;
-    let progress_bar = if subjects_parallel {
+    // The bar is the command line's (`BlastnArgs::progress_bar`): a search from memory
+    // (`run_local`: the library API, the web entries) writes nothing to standard error.
+    let progress_bar = if subjects_parallel && args.progress_bar {
         let bar = ProgressBar::new(subject_count);
         bar.set_style(
             ProgressStyle::default_bar()

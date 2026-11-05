@@ -1,6 +1,6 @@
 # LOSAT ライブラリ化計画（公開面の設計メモ）
 
-状態：**設計メモ（LIB-0）。実装は v0.2.0 の cut の後に始める（保守者 2026-10-31 「OK」）。** v0.2.0 自体は crates.io に出さない（release の決定 5、2026-10-25）。作成 2026-10-31。
+状態：**LIB-1 実装中（PR `feature/library-api` → `dev`、2026-11-05）。** 設計メモは LIB-0（2026-10-31、保守者「OK」）。v0.2.0 自体は crates.io に出さない（release の決定 5、2026-10-25）。LIB-1 で決めたことは §9。
 
 | 項目 | 内容 |
 |---|---|
@@ -38,7 +38,7 @@
 - `LOSAT/src/lib.rs` は `#![allow(warnings, clippy::all)]` で、19 のモジュール（`algorithm`、`core`、`seqdb`、`writedb`、`blastdbcmd`、`cli` など。`web_api` は wasm32 のみ）を全部 `pub mod` にしている。非公開のモジュールは無い。`pub` 項目 約 2,600、`pub(crate)` を含む行 約 1,600（`src/` 約 49 万行）。
 - `api` モジュールは `mod.rs`（12 行）と `local_blast.rs`（353 行）だけで、中身は出力の束ね方（`OutputSink`、`FormatOutput`、`ReportOutputs`（`formats`、`diagnostics`、`hits`、`observer`）、`FormatObserver`、`HspIndex`）。
 - 検索の入口は program ごとの `run_local(args, query_records, subject_records, outputs)` で、blastn（`blast_engine/run.rs`）、blastp（`blast_engine.rs`。query / subject のラベルが 2 つ余分）、tblastn（`tblastn_app.rs`。`-db` を断る: Web のホストにはファイルが無い）、tblastx（`blast_engine/run_impl.rs`）の 4 つにある。**blastx には無い**: 入口は `native::run`（CLI）と ABI v1 用の `web::run_pair`（`pub(crate)`）だけで、ABI v2 も blastx を断っている（`abi_v2.md` の冒頭、adapter `run.rs`）。
-- `args` は clap 派生の `BlastnArgs` 等。`records` は **LOSAT 自前の** `blastinput::fasta_reader::FastaRecord`（`local_id`、`title: Vec<u8>`、`sequence`、`warnings`、`source`）で、reader は `FastaInputSource::from_bytes(bytes, ReaderConfig::query / subject(...))`。CLI と adapter（`store.rs`）が同じ reader を使う。rust-bio（`bio`）は ABI v1（`v1_bio.rs`）と `bio::alphabets::dna`（translation、redo_alignment）に残るだけで、公開面の型には出ていない。
+- `args` は clap 派生の `BlastnArgs` 等。`records` は **LOSAT 自前の** `blastinput::fasta_reader::FastaRecord`（`local_id`、`title: Vec<u8>`、`sequence`、`warnings`、`source`）で、reader は `FastaInputSource::from_bytes(bytes, ReaderConfig::query / subject(...))`。CLI と adapter（`store.rs`）が同じ reader を使う。rust-bio（`bio`）は 2026-11-05 に依存から外した（計画の DW-48）。
 - 結果は返り値ではなく、`ReportOutputs` の writer（outfmt ごと）と `FormatObserver`（HSP の位置）と `hits` callback（`PairwiseHit`）に流れる。1 回の `run_local` の outfmt は同じ検索条件でなければならず（blastp は違うと断る）、adapter は hit list の大きさが違う outfmt を `search_groups`（`run.rs`）で別の検索に分けている。
 - `cli` モジュール: `Cli` / `Commands`（blastx、blastn、blastp、tblastx、tblastn、psiblast、makedb の 7 つ。`blastdbcmd` は `Commands` の外で `main.rs` が扱う）、`try_parse_from`、`render_message`、`ncbi_version_request`、`exit_on_native_error`（`main.rs` 以外で `process::exit` を呼ぶ唯一の場所）、`report_standard_output`、`ReportStream`、`NativeError`、`inaccessible`、`command_line_bytes`。
 
@@ -186,6 +186,7 @@ ABI v2 §7 を基にするが、入力の渡し方が違う。
 | LIB-0 | この計画（このメモ） | `docs/` | — |
 | LIB-1 | façade（4 program）: `api::{read_fasta, Program, describe, validate, Search, Inputs, run, run_collect, HspRecord, Error}` と `search_groups` の移設、`#[doc(hidden)]`、進捗バーの切り離し、`examples/library_search.rs` | `LOSAT/src/lib.rs`、`LOSAT/src/api/`、`LOSAT/src/main.rs`（進捗バー） | 既存の parity gate 全段（出力バイト不変）、adapter の V-ABI quick、`cargo doc --no-deps`、例の出力 = CLI の出力、同時 2 検索（§6） |
 | LIB-1b | blastx の入口: `native::run` を `run_local(args, query, subject, outputs)` の形に分ける（動作は不変）。ABI v2 の「BLASTX joins in session SX」と同じ作業なので、Web の線と共有する | `LOSAT/src/algorithm/blastx/` | blastx の parity gate 全段、ABI v2 の blastx（SX の V-ABI） |
+| LIB-1c | `-db` の入口: 各 program の `run_local` が `-db` を断る（§9.2）。ネイティブのホストに database の subject を開く入口を足す（`Subject::Db`、§3.1）。動作は CLI の `-db` と同じ | `LOSAT/src/algorithm/*/`、`LOSAT/src/api/` | `-db` の parity gate（既存の database fixtures） |
 | LIB-2 | adapter を `api` の上に載せ替え: program 非依存の部分（`run.rs` の parse / validate / `search_groups` / HSP の収集、`describe.rs`）を `LOSAT/src/api` へ移し、adapter は WASI の export、store（名前 → `Inputs`）、scan、emit だけにする | `web/adapter/`、`LOSAT/src/api/` | V-ABI full（定義は `docs/losat_web_gui_plan.md` と `web/adapter/tools/v_abi_cases.py`）、同一性の検査（TD-6） |
 | LIB-3 | crate 名、メタデータ、`cargo publish --dry-run` の gate、README の文、changelog | `LOSAT/Cargo.toml`、49 ファイルの path、`.github/workflows/release-readiness.yml`、`README.md` | `cargo publish --dry-run --locked`、CI 全緑 |
 | LIB-4 | npm package | `web/`（切り出し方は LIB-4 で決める）、`.github/workflows/web.yml` | V-ABI quick を package の build 物で、`npm pack` の内容の確認 |
@@ -210,15 +211,53 @@ LIB-1、LIB-1b、LIB-2 は `LOSAT/src` を触るので `AGENTS.md` の規則の�
 |---|---|---|---|
 | Q1 | crate 名 | `losat`（小文字）に改名 | `LOSAT` のまま（code の変更なし、綴りが他のチャネルと違う） |
 | Q2 | npm の名前 | スコープなしの `losat` | `@satoshikawato/losat` など（org / user が要る） |
-| Q3 | Python | maturin の bin wheel だけ | pyo3 の binding を今作る |
+| Q3 | Python | ~~maturin の bin wheel だけ~~ → **pyo3 の binding を作る（保守者 2026-11-05、§9.1）** | maturin の bin wheel だけ |
 | Q4 | 時期と版 | cut（11-01）後に LIB-1 を dev で始め、`0.3.0` で出す | `0.2.x` の patch に入れる |
 | Q5 | argv の `-outfmt` / `-out` | ABI v2 と同じく断る | 受け取って既定にする |
 | Q6 | blastx | LIB-1 は 4 program、blastx は LIB-1b で入口を足してから | LIB-1 に含める（LIB-1 が blastx の engine の変更を抱える） |
 
 ## 8. 対象外と決めないこと
 
-- wasm-bindgen（§4.2）、pyo3（§4.3）。
+- wasm-bindgen（§4.2）。pyo3 は §9.1 で対象に入った（LIB-5）。
 - ネイティブの C ABI（`cdylib` は wasm のために既にあるが、C のヘッダと FFI は作らない）。
 - `psiblast` と `makedb` の API 化（CLI のみ。`blastdbcmd` も同じ）。
 - 検索の中断（ホストが止める）。部分結果のストリーム（`run` の writer は既にストリームだが、`run_collect` は集めて返す）。
 - 内部モジュールの `pub(crate)` 化（別の線。`#[doc(hidden)]` で足りる間はやらない）。
+
+## 9. LIB-1 の決定（2026-11-05、PR `feature/library-api`）
+
+基点は `origin/dev` `701657e69`。dev では blastx にも `run_local` が入っていて（`algorithm/blastx/local.rs`、Web の線の SX）、ABI v2 も blastx を動かす。LIB-1b（§5）はもう要らず、LIB-1 は 5 program を包む。
+
+### 9.1 保守者の決定
+
+| # | 問い | 決定 |
+|---|---|---|
+| Q3 | Python | **pyo3 の binding を作る**（2026-11-05。§4.3 の推奨を変更）。`api` の上に薄く、LIB-5 で。保守者の呼び名は `pylosat`；PyPI の名前は LIB-5 で確定する |
+| Q1 | crate の形 | 計画どおり（別の façade crate ではなく、エンジン crate の `api` に足す。改名は LIB-3） |
+| — | 段 | LIB-1 を 1 PR で。npm（LIB-4）と PyPI（LIB-5）は後の PR |
+
+### 9.2 公開面（実装したもの；§3 の案との違い）
+
+`LOSAT/src/api/`：`program.rs`（`Program`）、`input.rs`（`Role`、`read_fasta`、`Inputs`）、`describe.rs`（`describe`、`Description`、`Parameter`）、`search.rs`（`validate`、`Search`、`API_OWNED`）、`run.rs`（`run`、`run_collect`、`search_groups`、`Outcome`、`Report`、`HspRecord`）、`error.rs`（`Error`）。`local_blast.rs` は不変。
+
+| 項目 | §3 の案 | 実装 | 理由 |
+|---|---|---|---|
+| 入力の名前 | argv の `-query` / `-subject` は `Error::Argv`、名前は無し | `Inputs { query, subject, query_name, subject_name }`（既定 `query` / `subject`、`Inputs::named`） | 報告は `-subject` の名前を印字する（outfmt 7 の `# Database: User specified sequence set (Input: NAME)`、outfmt 0 の `Database:`）。CLI と同じバイトを出すには名前が要る。`run` は argv の前に `-query NAME -subject NAME` を置いて CLI の parser に渡す |
+| `-db` | `Subject::Db(path)` | 無し。argv の `-db` は `Error::Argv`（`API_OWNED`） | 5 program の `run_local` はどれも `-db` を断る（`-db (a database search) is not supported in the browser yet`）。`-db` の入口はエンジンの変更（別の段、LIB-1c として §5 に足す） |
+| `-parse_deflines` | — | `Error::Argv`（`validate`） | adapter と同じ理由：レコードはオプションを知る前に読む（`read_fasta`） |
+| `validate` | parser + option の検査 | parser と API の規則だけ。範囲・scoring・hit list の検査は `run` / `run_collect` が CLI の文言で返す | 検査は format と入力に依る（adapter は group ごとに検査している）。重複を作らない |
+| `Outcome.formats: Vec<(String, Vec<u8>)>` | | `Outcome.reports: Vec<Report { outfmt, bytes }>`、要求した順 | 名前付き |
+| `HspRecord.out6 / out0 / out0_subject` | | `spans: Vec<Option<Range<usize>>>` と `subject_headings: Vec<Option<Range<usize>>>`、`reports` と同じ順 | API は任意の `-outfmt`（`6 qseqid ...`、`7`、`10`、…）を取るので、format 番号で固定しない。npm の JSON はこれを ABI v2 の形に写せる |
+| `run_collect` の失敗 | | どの検索の失敗も `Error::Search`（fail fast） | adapter の「hit list 0 で断られた検索を許す」規則は Web の 3 format 固定の都合。API では要求した format が CLI でも失敗する |
+| HSP レコードの出どころ | | 最初の検索（tabular 群）。他の群の report には span を付けない | adapter の `link_format0` は Web の UI 用。API は report ごとの正しい span だけ返す |
+| `describe` | adapter の JSON を移す | 型付き（`Description`、`Parameter`）。adapter の `defaults`（661 行の解決）は LIB-2 で | `defaults` は Web のフォーム用 |
+| `search_groups` | adapter から移す | `api::search_groups(command, numbers) -> Vec<Vec<usize>>`（format 番号の列の位置で群を返す、program 非依存） | adapter は LIB-2 でこれを使う |
+| 進捗バー（§3.4） | `ReportOutputs` に足すか feature | `BlastnArgs::progress_bar`（`#[arg(skip)]`）。CLI の `run` が `true` にし、`run_local` は触らない | `ReportOutputs` の構築箇所が 20 を超え（blastp の block、tblastn の stage E、adapter、ABI v1）、field 追加は engine の広い編集になる。feature は `parallel` と抱き合わせになる |
+| エラーの型 | `Error { Argv, Input, Search }` | 同じ。`#[non_exhaustive]`。`Error::message()` | |
+
+受け入れ条件（§6）の実装：`LOSAT/examples/library_search.rs`（`<program> <query.fa> <subject.fa> [options...]`、outfmt 6 を標準出力へ）、`LOSAT/tests/library_api.rs`（`common` suite：CLI とのバイト一致、同時 2 検索、例の stderr が空、`-db` の拒否）。
+
+### 9.3 この PR で検証できたこと／残ること
+
+- この PR の作業機は Rust 1.97.0（1.92.0 と wasm32 target を取得できない網）、NCBI BLAST+ 無し。quick tier（fmt、clippy、`cargo test --lib api::`、`cargo test --test common library_api::`、`cargo doc --no-deps`）はここで、`fast output regressions` と `rust` は CI で、V-ABI quick は `web.yml` で。
+- 残り（保守者の機）：full tier の parity gate（出力バイト不変の確認。変更は `api/` の追加、`lib.rs` の `#[doc(hidden)]`、`BlastnArgs::progress_bar` の 3 行、`web_api.rs` の field 1 行）。

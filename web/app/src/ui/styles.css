@@ -433,6 +433,15 @@ input[type='radio'] {
   color: var(--tab-fg);
 }
 
+/* The output of the run's -outfmt is named by its fields, which can be longer than a phone's
+   width (one token too, a delim= value): its tab, its command, Export and its "Download All" item. */
+.tabs button.custom-output,
+.outputs-view .command,
+.outputs-view > button,
+.download-list button {
+  overflow-wrap: anywhere;
+}
+
 .tabs button[aria-pressed='true'],
 .tabs button[aria-pressed='true']:hover:not(:disabled) {
   border-color: var(--accent);
@@ -1607,6 +1616,12 @@ label.inline {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--bg);
+}
+
+/* Why the output chosen there was not saved: in the same place as the list. */
+.results-run > .results-message {
+  flex-basis: 100%;
+  margin: 2px 0 0;
 }
 
 .download-list button {

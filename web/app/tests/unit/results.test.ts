@@ -346,6 +346,21 @@ describe('verificationBadge', () => {
     expect(reasons({ runtimePath: 'fake' }).level).toBe('development');
   });
 
+  // The records compare the formats that every run writes; the output of the run's own -outfmt
+  // with fields is not among them, so such a run is not yet supported, and the reasons say so (W10).
+  it("does not support a run with the output of its -outfmt, and names that output", () => {
+    const badge = verificationBadge({ ...input, argv: [...input.argv, '-outfmt', '6 qseqid sseqid'], custom: '6 qseqid sseqid' }, table);
+    expect(badge.level).toBe('outside');
+    expect(badge.label).toBe('Not yet supported');
+    expect(badge.details).toEqual([
+      'These options were compared with NCBI BLAST+ 2.17.0 for outfmt 0, 6 and 7, not for outfmt 6 qseqid sseqid.',
+      'The browser runtime was not checked for outfmt 6 qseqid sseqid.',
+    ]);
+    // -outfmt itself is not an option of the profile: the same options without it are supported, in either form.
+    expect(verificationBadge({ ...input, argv: [...input.argv, '-outfmt', '7'] }, table).level).toBe('certified');
+    expect(verificationBadge({ ...input, argv: [...input.argv, '-outfmt=7'] }, table).level).toBe('certified');
+  });
+
   it('supports a thread count only when it was checked in the browser (WA-RS-03)', () => {
     // Auto picks a count from the user's processors; a count that V-BR did not run is not supported.
     const level = (change: Partial<BadgeInput>) => verificationBadge({ ...input, ...change }, table).level;

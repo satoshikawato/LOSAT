@@ -697,6 +697,18 @@ pub struct BlastnArgs {
     /// ```
     #[arg(skip)]
     pub command_line: Option<Vec<u8>>,
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
+    // ```c++
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+    // 	    BLAST_PROF_START( APP.LOOP.PRE );
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    // ```
+    // NCBI's application writes nothing to its standard error while it searches. LOSAT's
+    // progress bar over the subjects of a parallel search (no NCBI counterpart) belongs to the
+    // command line (`run`), which sets this; the library API and the web entries (`run_local`)
+    // leave it off, so a search from memory writes nothing to the process's standard error.
+    #[arg(skip)]
+    pub progress_bar: bool,
 }
 
 impl BlastnArgs {

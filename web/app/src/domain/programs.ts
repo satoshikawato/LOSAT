@@ -42,12 +42,6 @@ export interface ParameterField {
    * task); its "Other" takes any other value in a text box, which the engine's parser reads.
    */
   readonly list?: readonly string[] | Readonly<Record<string, readonly string[]>>;
-  /**
-   * For `text` fields with a `list`: the lists that another option's value (as the search uses
-   * it) chooses instead, where LOSAT reads fewer of NCBI's values with that value (TBLASTN's
-   * matrices with the compressed lookup table of word sizes 5 to 7); `list` for other values.
-   */
-  readonly listBy?: { readonly flag: string; readonly lists: Readonly<Record<string, readonly string[]>> };
   /** NCBI's sentence beside the control ("Select the maximum number of aligned sequences to display"). */
   readonly hint?: string;
   /**
@@ -366,11 +360,11 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           },
         ],
       },
-      // LOSAT's BLASTP reads word sizes 3 and 5 only.
+      // LOSAT's BLASTP reads word sizes 3 and 5 to 7 (7, which NCBI's select lacks, through "Other").
       {
         title: 'General Parameters',
         placement: 'algorithm',
-        fields: [maxTargetSeqs, evalue, { ...wordSize, list: ['3', '5'] }, cullingLimit],
+        fields: [maxTargetSeqs, evalue, { ...wordSize, list: ['3', '5', '6'] }, cullingLimit],
       },
       {
         title: 'Scoring Parameters',
@@ -438,11 +432,10 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       { title: 'Task Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
       { title: 'Genetic code', placement: 'subject', fields: [{ flag: '-db_gencode', label: 'Genetic code', kind: 'gencode' }] },
       { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize, cullingLimit] },
-      // The compressed lookup table (word sizes 5 to 7, tblastn-fast's 5) of LOSAT's TBLASTN reads BLOSUM62 only.
       {
         title: 'Scoring Parameters',
         placement: 'algorithm',
-        fields: [{ ...matrix, listBy: { flag: '-word_size', lists: { '5': ['BLOSUM62'], '6': ['BLOSUM62'], '7': ['BLOSUM62'] } } }, gapOpen, gapExtend, compBasedStats],
+        fields: [matrix, gapOpen, gapExtend, compBasedStats],
         ...PROTEIN_SCORING,
       },
       {

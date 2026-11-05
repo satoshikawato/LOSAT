@@ -1526,7 +1526,7 @@ pub fn x_identify_accession(
             let oqp = matches!(at(0), b'O' | b'P' | b'Q');
             #[expect(
                 clippy::if_same_then_else,
-                reason = "NCBI has the two UniProt patterns as two branches that both return eAcc_swissprot (Seq_id.cpp:1713-1726)"
+                reason = "NCBI has the two UniProt patterns as two branches that both return eAcc_swissprot (Seq_id.cpp:1713-1727)"
             )]
             if digit_pos == 1
                 && main_size == 6

@@ -4287,7 +4287,7 @@ fn search_query_batch<S: TbxScore>(
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
     }
 
-    let t_read_queries: Duration = t_phase_read_queries.elapsed();
+    let t_read_queries = t_phase_read_queries.elapsed();
 
     let t_phase_build_lookup = Instant::now();
     // Note: karlin_params argument is now unused - computed per context in build_ncbi_lookup()
@@ -4417,7 +4417,7 @@ fn search_query_batch<S: TbxScore>(
             true,
         ),
     };
-    let t_build_lookup: Duration = t_phase_build_lookup.elapsed();
+    let t_build_lookup = t_phase_build_lookup.elapsed();
     // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs). No
     // NCBI counterpart.
     crate::utils::xtiming::add_duration(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
@@ -4471,7 +4471,7 @@ fn search_query_batch<S: TbxScore>(
             x_timing: Vec::new(),
         });
     }
-    let t_read_subjects: Duration = t_phase_read_subjects.elapsed();
+    let t_read_subjects = t_phase_read_subjects.elapsed();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
     // ```c

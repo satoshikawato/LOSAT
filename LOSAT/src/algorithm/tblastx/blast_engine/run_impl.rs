@@ -3484,12 +3484,11 @@ fn run_batch_loop(
                 // report with `nident` reads above). NCBI looks the taxonomy up only where it
                 // fetches a subject: in such a report, or in the prefetch of a batch with
                 // Seq-aligns (one without them loads no id, `BlastFormatter_PreFetchSequenceData`).
-                // Without the report stream every report is written after the loop, so the run's
-                // refusal of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
-                // only there: a later batch that fetches still refuses before any byte. With the
-                // stream (`report_stream`: outfmt 0, 6 and 7 in two or more batches; its check
-                // does not read the cache) a batch's reports are written before the next batch's
-                // lookups, so every batch asks for it, the first one before any byte.
+                // The run's refusal of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`)
+                // is asked only there: the report stream is off for a run with that refusal
+                // (`report_stream::Off::TaxonomyCache`), so every report is then written after
+                // the loop and a later batch that fetches still refuses before any report (outfmt
+                // 0's prolog is written before the search).
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                     debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
                     let (query_code, db_code) = (
@@ -3529,7 +3528,7 @@ fn run_batch_loop(
                                     .collect()
                             }
                         };
-                        query_fetches.push(if stream || !shown.is_empty() {
+                        query_fetches.push(if !shown.is_empty() {
                             super::super::database::prefetch_messages(
                                 database,
                                 shown,
@@ -3542,7 +3541,7 @@ fn run_batch_loop(
                             database.open_for_tabular_rows()?;
                         }
                     }
-                } else if stream || !ordered.is_empty() {
+                } else if !ordered.is_empty() {
                     let messages = super::super::database::prefetch_messages(
                         database,
                         ordered,

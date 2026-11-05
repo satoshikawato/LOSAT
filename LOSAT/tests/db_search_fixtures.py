@@ -34,8 +34,7 @@ line), writes the same lines to --out, and exits 0 only when every row is `same`
 With `--library` BIN is `examples/library_command_line`, the same search through the library API: a
 failure's exit status counts as any other failure's, a row whose query the reader refuses is
 `library-input-error` when the message is the command line's (the library reads the whole query
-before it searches, so the reports of the batches before the error do not exist), and the rows that
-the API does not run (psiblast's) are `library-skip`.
+before it searches, so the reports of the batches before the error do not exist).
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
@@ -237,8 +236,6 @@ def status_differs(observed: int, expected: int, library: bool) -> bool:
 
 def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False) -> tuple[str, str]:
     files = xinclude.wants_files(row)
-    if library and row["program"] == "psiblast":
-        return "library-skip", ""
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     if files:
         written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,

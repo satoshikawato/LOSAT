@@ -290,7 +290,7 @@ def run_library_fixtures(example: Path, programs: set[str], out: Path) -> list[s
     """The `-subject` and `-db` fixtures through the library API (`check_losat.py` and
     `db_search_fixtures.py check --library` with `examples/library_command_line`)."""
     failures = []
-    selected = [program for program in OUTFMT0_PROGRAMS if program in programs and program != "psiblast"]
+    selected = [program for program in OUTFMT0_PROGRAMS if program in programs]
     if selected:
         log = out / "outfmt0-fixtures-library.tsv"
         result = subprocess.run([sys.executable, str(FIXTURE_DIR / "check_losat.py"), "--losat", str(example),
@@ -300,7 +300,7 @@ def run_library_fixtures(example: Path, programs: set[str], out: Path) -> list[s
         if result.returncode != 0:
             failures.append(f"outfmt 0 fixtures differ through the library: see {log.name}")
     for program in DB_SEARCH_PROGRAMS:
-        if program not in programs or program == "psiblast":
+        if program not in programs:
             continue
         log = out / f"db-search-library-{program}.tsv"
         result = subprocess.run([sys.executable, str(TESTS / "db_search_fixtures.py"), "check", "--library",

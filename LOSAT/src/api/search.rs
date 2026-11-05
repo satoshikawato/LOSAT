@@ -144,11 +144,10 @@ fn parse(
 /// option means, and fails, exactly as there; the error is the parser's message.
 ///
 /// The library API sets the inputs and the outputs itself, so `-query`, `-subject`, `-db`,
-/// `-out` and `-outfmt` are refused (`API_OWNED`). BLASTX's in-memory entry does not take
-/// `-parse_deflines` yet. The checks of the options that the command line makes
-/// before it searches (ranges, scoring, the hit list size of each format) come with `run` and
-/// `run_collect`, which know the formats and the inputs, and report them with the command
-/// line's messages.
+/// `-out` and `-outfmt` are refused (`API_OWNED`). The checks of the options that the command
+/// line makes before it searches (ranges, scoring, the hit list size of each format) come with
+/// `run` and `run_collect`, which know the formats and the inputs, and report them with the
+/// command line's messages.
 pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
     for word in argv {
         let key = key(word);

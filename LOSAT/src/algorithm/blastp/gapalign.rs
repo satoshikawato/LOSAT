@@ -1266,6 +1266,31 @@ fn x_blosum62_tables() -> &'static crate::utils::xdrop_simd::StaticTables {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:543,578
+// ```c
+//                 matrix_row = matrix[ A[ M - a_index ] ];
+// ...
+//             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+// ```
+// The tables hold the scores that matrix[A[a]][B[b]] reads for a matrix other than BLOSUM62
+// (`blastp_standard_score`, built as `x_blosum62_tables` is); they only change how the row is
+// looked up, and give the kernel the matrix's largest score (its 8-bit lanes need it).
+/// The lookup tables of the SIMD kernel for `matrix`, built at the first call for the matrix;
+/// `None` if a score is outside the 16-bit tables (the kernel then builds each row as before).
+fn x_standard_tables(
+    matrix: ScoringMatrix,
+) -> Option<&'static crate::utils::xdrop_simd::StaticTables> {
+    use std::sync::OnceLock;
+    static T: [OnceLock<Option<Box<crate::utils::xdrop_simd::StaticTables>>>;
+        ScoringMatrix::ALL.len()] = [const { OnceLock::new() }; ScoringMatrix::ALL.len()];
+    T[matrix as usize]
+        .get_or_init(|| {
+            let f = move |q: u8, s: u8| blastp_standard_score(matrix, q, s);
+            crate::utils::xdrop_simd::build_tables(&f, 28)
+        })
+        .as_deref()
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:839-850
 // ```c
 //         if (!(gap_align->positionBased)) {
@@ -1291,7 +1316,10 @@ fn with_x_scores<R>(
         BlastpScoreMatrix::Adjusted(m) => run(&Scores::Rows28(&m.scores)),
         BlastpScoreMatrix::Standard(matrix) => {
             let f = move |q: u8, s: u8| blastp_standard_score(matrix, q, s);
-            run(&Scores::Func { f: &f, n: 28 })
+            run(&match x_standard_tables(matrix) {
+                Some(t) => Scores::Tables { t, n: 28 },
+                None => Scores::Func { f: &f, n: 28 },
+            })
         }
     }
 }

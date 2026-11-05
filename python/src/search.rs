@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use arrow_array::RecordBatch;
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedBytes;
-use pyo3::types::{PyList, PySlice, PyTuple};
+use pyo3::types::{PyBytes, PyList, PySlice, PyTuple};
 use self_cell::self_cell;
 use LOSAT::api::{self, FastaRecord, HspRecord, Inputs, Program, Role, Search};
 
@@ -37,6 +37,9 @@ impl Source {
 /// An input and the name that the reports show for it.
 type NamedSource = (Source, String);
 
+/// The subject of a search: a FASTA input and its name, or no input and the name of a database.
+type NamedSubject = (Option<Source>, String);
+
 /// The search of `program` with `argv`, checked by the command line's parser.
 pub fn checked(program: &str, argv: &[String]) -> Result<Search, api::Error> {
     let words: Vec<&str> = argv.iter().map(String::as_str).collect();
@@ -50,6 +53,8 @@ pub struct Loaded {
     subject: Vec<FastaRecord>,
     query_name: String,
     subject_name: String,
+    /// Whether `subject_name` is a database.
+    database: bool,
 }
 
 impl Loaded {
@@ -57,11 +62,15 @@ impl Loaded {
         program: &str,
         argv: &[String],
         (query, query_name): NamedSource,
-        (subject, subject_name): NamedSource,
+        (subject, subject_name): NamedSubject,
     ) -> Result<Self, api::Error> {
         let search = checked(program, argv)?;
         let query_bytes = query.bytes(Role::Query)?;
-        let subject_bytes = subject.bytes(Role::Subject)?;
+        let database = subject.is_none();
+        let subject_bytes = match &subject {
+            Some(subject) => subject.bytes(Role::Subject)?,
+            None => Cow::Borrowed(&[][..]),
+        };
         let (query, subject) = api::read_inputs(&search, &query_bytes, &subject_bytes)?;
         Ok(Self {
             search,
@@ -69,11 +78,16 @@ impl Loaded {
             subject,
             query_name,
             subject_name,
+            database,
         })
     }
 
     fn inputs(&self) -> Inputs<'_> {
-        Inputs::new(&self.query, &self.subject).named(&self.query_name, &self.subject_name)
+        let inputs = match self.database {
+            true => Inputs::database(&self.query, &self.subject_name),
+            false => Inputs::new(&self.query, &self.subject),
+        };
+        inputs.named(&self.query_name, &self.subject_name)
     }
 }
 
@@ -125,7 +139,7 @@ pub fn run<'py>(
     program: &str,
     argv: Vec<String>,
     query: NamedSource,
-    subject: NamedSource,
+    subject: NamedSubject,
     formats: Vec<String>,
 ) -> PyResult<Bound<'py, PyTuple>> {
     let loaded = py
@@ -148,7 +162,7 @@ pub fn run<'py>(
         .map(|report| {
             Ok((
                 report.outfmt.as_str(),
-                pyo3::types::PyBytes::new(py, &report.bytes),
+                PyBytes::new(py, &report.bytes),
                 slices(py, &report.spans)?,
                 slices(py, &report.subject_headings)?,
             ))
@@ -161,6 +175,71 @@ pub fn run<'py>(
         diagnostics_text(&outcome.diagnostics),
     )
         .into_pyobject(py)
+}
+
+/// The report of `outfmt` written to the file `path`, as the command line's `-out` writes it, with
+/// the side files of outfmt 13 and 14 next to it; returns what the command line writes to its
+/// standard error.
+#[pyfunction]
+pub fn run_to_file(
+    py: Python<'_>,
+    program: &str,
+    argv: Vec<String>,
+    query: NamedSource,
+    subject: NamedSubject,
+    outfmt: &str,
+    path: PathBuf,
+) -> PyResult<String> {
+    py.detach(|| {
+        let loaded = Loaded::read(program, &argv, query, subject)?;
+        let mut diagnostics = Vec::new();
+        api::run_to_file(
+            &loaded.search,
+            loaded.inputs(),
+            outfmt,
+            &path,
+            &mut diagnostics,
+        )?;
+        Ok(diagnostics_text(&diagnostics))
+    })
+    .map_err(exception)
+}
+
+/// `makeblastdb` with the command line's words: `input` is its standard input. Returns what it
+/// writes to standard output and to standard error.
+#[pyfunction]
+pub fn makeblastdb<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<(Bound<'py, PyBytes>, String)> {
+    let (output, diagnostics) = py
+        .detach(|| {
+            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+            api::run_makeblastdb(&words, &mut &*input, &mut output, &mut diagnostics)?;
+            Ok((output, diagnostics))
+        })
+        .map_err(exception)?;
+    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
+}
+
+/// `blastdbcmd` with the command line's words. Returns what it writes to standard output and to
+/// standard error.
+#[pyfunction]
+pub fn blastdbcmd<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+) -> PyResult<(Bound<'py, PyBytes>, String)> {
+    let (output, diagnostics) = py
+        .detach(|| {
+            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+            api::run_blastdbcmd(&words, &mut output, &mut diagnostics)?;
+            Ok((output, diagnostics))
+        })
+        .map_err(exception)?;
+    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
 }
 
 /// `run` without reports.
@@ -222,7 +301,7 @@ impl Batches {
         program: &str,
         argv: Vec<String>,
         query: NamedSource,
-        subject: NamedSource,
+        subject: NamedSubject,
     ) -> PyResult<Self> {
         let running = py
             .detach(|| {

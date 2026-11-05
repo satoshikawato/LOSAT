@@ -26,7 +26,7 @@
 use clap::CommandFactory;
 
 use super::program::Program;
-use super::search::API_OWNED;
+use super::search::{pssm_file_options, API_OWNED};
 use crate::cli::Cli;
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbiargs.hpp:588-598
@@ -89,7 +89,8 @@ pub struct Description {
     pub program: Program,
     /// The options that an argv of the library API may hold, in the order of the command
     /// line's help: every option of the program but those the API sets itself (`-query`,
-    /// `-subject`, `-db`, `-out`, `-outfmt`; `search::API_OWNED`).
+    /// `-subject`, `-db`, `-out`, `-outfmt`; `search::API_OWNED`) and psiblast's PSSM files,
+    /// which it refuses (`search::pssm_file_options`).
     pub parameters: Vec<Parameter>,
     /// The values that `-query_gencode` accepts; empty for a program without the option.
     pub query_gencodes: Vec<u32>,
@@ -167,7 +168,10 @@ pub fn describe(program: Program) -> Description {
     let mut parameters = Vec::new();
     for arg in command.get_arguments() {
         let Some(long) = arg.get_long() else { continue };
-        if matches!(long, "help" | "version") || API_OWNED.contains(&long) {
+        if matches!(long, "help" | "version")
+            || API_OWNED.contains(&long)
+            || pssm_file_options(program).contains(&long)
+        {
             continue;
         }
         let defaults: Vec<String> = arg
@@ -223,7 +227,7 @@ mod tests {
                 .iter()
                 .map(|parameter| parameter.flag.as_str())
                 .collect();
-            for owned in API_OWNED {
+            for owned in API_OWNED.iter().chain(pssm_file_options(program)) {
                 assert!(
                     !flags.contains(&format!("-{owned}").as_str()),
                     "{program} lists -{owned}"

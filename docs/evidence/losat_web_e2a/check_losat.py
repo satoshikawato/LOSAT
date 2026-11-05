@@ -15,7 +15,8 @@ its master file must equal <fixture_id>.out, each side file <fixture_id>.out_<n>
 number the frozen number, and standard output must be empty (LOSAT/tests/xinclude_fixtures.py).
 A psiblast row whose `files` column is `pssm` runs with `-out_ascii_pssm <tmp>/<fixture_id>.pssm`;
 its report is compared as usual, and the PSSM files it writes must be the frozen ones byte for byte
-(none when `side_sha256` is empty).
+(none when `side_sha256` is empty). With `--library` LOSAT is `examples/library_command_line`, the
+same search through the library API, which writes no PSSM file: those rows are `library-skip`.
 
 A row with the contract `approved_db_gencode_deviation` (AGENTS.md's approved TBLASTX
 exception: LOSAT's local search applies a non-default -db_gencode to the subject) is
@@ -24,7 +25,7 @@ outside the lines that name the database (`normalize_database_lines`); its line 
 `exception` and how many lines differ from NCBI's local search (<fixture_id>.out).
 
 Usage: check_losat.py --losat LOSAT [--programs blastn,blastp,tblastn,tblastx,blastx,psiblast] [--threads N]
-       [--only PREFIX]
+       [--only PREFIX] [--library]
 """
 from __future__ import annotations
 
@@ -81,6 +82,8 @@ def main() -> int:
     parser.add_argument("--programs", default="blastn,blastp,tblastn,tblastx,blastx,psiblast")
     parser.add_argument("--threads", type=int)
     parser.add_argument("--only", default="")
+    parser.add_argument("--library", action="store_true",
+                        help="--losat is examples/library_command_line (the search through the library API)")
     args = parser.parse_args()
     programs = set(args.programs.split(","))
     differing = []
@@ -91,6 +94,10 @@ def main() -> int:
         command = [str(args.losat.resolve()), row["program"], *search_argv(row), *threads]
         files = xinclude.wants_files(row)
         pssm = xinclude.wants_pssm(row)
+        # The library API refuses the PSSM file options (`api::search`).
+        if args.library and pssm:
+            print(f"{row['fixture_id']}\tlibrary-skip\t")
+            continue
         if files:
             written = xinclude.run_with_files(command, row["fixture_id"], outfmt(row), cwd=ENGINE)
             run = written.run

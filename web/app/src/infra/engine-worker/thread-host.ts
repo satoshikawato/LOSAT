@@ -25,6 +25,7 @@ import {
   START_ABANDONED,
   START_PENDING,
   START_TAKEN,
+  type KeeperCommand,
   type ThreadCommand,
   type ThreadFault,
 } from './protocol';
@@ -32,9 +33,15 @@ import {
 export interface ThreadHostOptions {
   readonly module: WebAssembly.Module;
   readonly memory: WebAssembly.Memory;
+  /** The maximum of `memory` in pages (shared-memory.ts). */
+  readonly maximumPages: number;
   /** BroadcastChannel name on which a thread that stops reports it (to the main thread). */
   readonly faultChannel: string;
+  /** BroadcastChannel name on which the main thread asks the keeper to grow the memory (memory-keeper.ts). */
+  readonly keeperChannel: string;
   readonly createWorker?: () => Worker;
+  /** Starts the keeper of the memory (tests may start a fake one). */
+  readonly createKeeper?: () => Worker;
   /** How long a thread worker may take to become ready; 30 s by default. */
   readonly readyTimeoutMs?: number;
   /** How long a prepared thread worker may take to start a thread; 30 s by default. */
@@ -60,13 +67,36 @@ export class ThreadHost {
   private readonly slots: Slot[] = [];
   private nextTid = 1;
   private faults: BroadcastChannel | undefined;
+  /** The keeper of the shared memory (memory-keeper.ts): it ends with the thread workers. */
+  private readonly keeper: Worker;
+  private keeperReady = false;
+  private keeperError: string | undefined;
 
-  constructor(private readonly options: ThreadHostOptions) {}
+  constructor(private readonly options: ThreadHostOptions) {
+    this.keeper =
+      options.createKeeper?.() ??
+      new Worker(new URL('./memory-keeper-worker.ts', import.meta.url), { type: 'module', name: 'losat-memory' });
+    this.keeper.onmessage = (event: MessageEvent<{ type?: string }>) => {
+      if (event.data?.type === 'ready') this.keeperReady = true;
+    };
+    this.keeper.onerror = (event) => {
+      // A script that does not load fires a plain Event, without a message.
+      this.keeperError = `the memory keeper failed: ${event.message || 'its script did not load'}`;
+    };
+    const keep: KeeperCommand = {
+      type: 'keep',
+      memory: options.memory,
+      maximumPages: options.maximumPages,
+      channel: options.keeperChannel,
+    };
+    this.keeper.postMessage(keep);
+  }
 
   /**
    * Makes `count` thread workers (the threads of a search of `count` + 1 threads), if there
    * are fewer, and waits until `count` of them are ready: also those whose thread of the
-   * previous search is still returning.
+   * previous search is still returning. The keeper must hold the memory too: without it, the
+   * Gateway could not have the memory grown before it ends the runtime during the search.
    */
   async prepare(count: number): Promise<void> {
     const total = count;
@@ -75,8 +105,12 @@ export class ThreadHost {
     for (;;) {
       const failed = this.slots.find((slot) => Atomics.load(slot.state, 0) === SLOT_FAILED);
       if (failed !== undefined) throw new ThreadHostError(failed.error ?? 'a thread worker stopped');
-      if (this.slots.filter((slot) => Atomics.load(slot.state, 0) === SLOT_READY).length >= total) return;
-      if (performance.now() > deadline) throw new ThreadHostError('the thread workers did not become ready in time');
+      if (this.keeperError !== undefined) throw new ThreadHostError(this.keeperError);
+      const ready = this.slots.filter((slot) => Atomics.load(slot.state, 0) === SLOT_READY).length >= total;
+      if (ready && this.keeperReady) return;
+      if (performance.now() > deadline) {
+        throw new ThreadHostError(ready ? 'the memory keeper did not start in time' : 'the thread workers did not become ready in time');
+      }
       await new Promise((resolve) => setTimeout(resolve, 2));
     }
   }
@@ -105,9 +139,10 @@ export class ThreadHost {
     return -1;
   };
 
-  /** Ends every thread worker. */
+  /** Ends every thread worker and the keeper. */
   terminate(): void {
     for (const slot of this.slots.splice(0)) slot.worker.terminate();
+    this.keeper.terminate();
     this.faults?.close();
     this.faults = undefined;
   }

@@ -5448,11 +5448,12 @@ pub fn run_local(
         .iter()
         .any(|format| blastp_is_archive(format.outfmt));
     if archive_requested {
-        args.archive = super::archive::handle_for(&args, true)?;
+        args.archive = super::archive::handle_for(&args, true)?
+            .map(|handle| outputs.with_archive_outfmt(handle));
         super::archive::check_titles(query_records, "query")?;
         super::archive::check_titles(subject_records, "subject")?;
         if let Some(handle) = args.archive.clone() {
-            return outputs.with_archive_diagnostics(handle, |view| {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(
                     args,
                     query_records,
@@ -5462,6 +5463,7 @@ pub fn run_local(
                     view,
                 )
             });
+            return outputs.finish_archive(&handle, query_records.is_empty(), result);
         }
     }
     run_local_formats(
@@ -5736,7 +5738,7 @@ fn resolve_for_formats(
         requested.outfmt = format.outfmt.to_string();
         let choice = crate::blastinput::app::parse_formatting_string(&requested.outfmt)?;
         let program = crate::blastinput::app::Program::Blastp;
-        if crate::blastinput::app::report_format(&choice, program, None)?.is_none() {
+        if crate::blastinput::app::report_format(&choice, program, args.out.as_deref())?.is_none() {
             crate::blastinput::app::formatting_handler_check(&choice, program)?;
             crate::blastinput::app::xinclude_check(&choice)?;
         }

@@ -1527,7 +1527,7 @@ pub fn run_local(
     }
     // NCBI parses -outfmt before its option handlers read the subjects (BLASTN's
     // `run_local`); `search` checks the formats again.
-    check_report_formats(outputs, None)?;
+    check_report_formats(outputs, args.out.as_deref())?;
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
     // cannot write, and a diagnostics stream that saves the messages. The records' deflines are
     // those the caller's reader kept; records without one get `>` and their title.
@@ -1536,11 +1536,13 @@ pub fn run_local(
         .iter()
         .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Archive);
     if archive_requested && args.archive.is_none() {
-        args.archive = super::super::archive::handle_for(&args, true)?;
+        args.archive = super::super::archive::handle_for(&args, true)?
+            .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
-            return outputs.with_archive_diagnostics(handle, |view| {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local(args, query_records, subject_records, view)
             });
+            return outputs.finish_archive(&handle, query_records.is_empty(), result);
         }
     }
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
@@ -1599,7 +1601,7 @@ pub fn run_local_database(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     // NCBI parses -outfmt before its option handlers run; `search` checks the formats again.
-    check_report_formats(outputs, None)?;
+    check_report_formats(outputs, args.out.as_deref())?;
     let archive_requested = outputs
         .formats
         .iter()
@@ -1656,7 +1658,7 @@ fn search_database(
 /// format that LOSAT's TBLASTX does not write.
 ///
 /// `out` is the run's `-out`: outfmt 13 and 14 write side files next to it, and fail on standard
-/// output (`xinclude_check_for`). `run_local` has no output file.
+/// output (`xinclude_check_for`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
 /// ```c++

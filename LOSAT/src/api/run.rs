@@ -25,8 +25,10 @@
 //! ```
 #![warn(missing_docs, unused)]
 
-use std::io::{self, Write};
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 use std::ops::Range;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -512,7 +514,8 @@ fn query_loc(command: &Commands) -> (Option<&str>, &'static str) {
         Commands::Blastn(a) => (a.query_loc.as_deref(), "BLASTN"),
         Commands::Tblastx(a) => (a.query_loc.as_deref(), "TBLASTX"),
         Commands::Blastx(a) => (a.query_loc.as_deref(), "BLASTX"),
-        Commands::Psiblast(_) | Commands::Makedb(_) => (None, ""),
+        Commands::Psiblast(a) => (a.query_loc.as_deref(), "BLASTP"),
+        Commands::Makedb(_) => (None, ""),
     }
 }
 
@@ -543,7 +546,8 @@ fn num_threads(command: &Commands) -> usize {
         Commands::Tblastx(a) => a.num_threads,
         // A positive `i32` (the parser's `positive`).
         Commands::Blastx(a) => a.num_threads as usize,
-        Commands::Psiblast(_) | Commands::Makedb(_) => 1,
+        Commands::Psiblast(a) => a.num_threads,
+        Commands::Makedb(_) => 1,
     }
 }
 
@@ -561,7 +565,8 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
             a.num_descriptions,
             a.num_alignments,
         ],
-        Commands::Psiblast(_) | Commands::Makedb(_) => [None; 3],
+        Commands::Psiblast(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
+        Commands::Makedb(_) => [None; 3],
     }
 }
 
@@ -664,21 +669,66 @@ pub(super) fn run_local(
             Commands::Blastx(args) => {
                 run_local_database_blastx(args, query, settings("blastx")?, outputs)
             }
-            Commands::Psiblast(_) | Commands::Makedb(_) => {
-                unreachable!("Program::parse admits the five search programs only")
+            Commands::Psiblast(args) => {
+                let args = psiblast_args(args, outputs)?;
+                run_local_database_blastp(args, query, settings("psiblast")?, outputs)
+            }
+            Commands::Makedb(_) => {
+                unreachable!("Program::parse admits the search programs only")
             }
         };
     }
     match command {
         Commands::Blastp(args) => run_local_blastp(args, query, subject, "", "", outputs),
         Commands::Tblastn(args) => run_local_tblastn(args, query, subject, outputs),
-        Commands::Blastn(args) => run_local_blastn(args, query, subject, outputs),
+        Commands::Blastn(mut args) => {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-448
+            // ```c++
+            //     if (args.Exist(kArgWindowMaskerDatabase) &&
+            //         args[kArgWindowMaskerDatabase]) {
+            //         const string& stat_file = args[kArgWindowMaskerDatabase].AsString();
+            // ```
+            // The counts file of `-window_masker_db` is read from the file system, as on the
+            // command line (LOSAT Web's host gives its own source).
+            if args.window_masker_db.is_some() {
+                args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
+            }
+            run_local_blastn(args, query, subject, outputs)
+        }
         Commands::Tblastx(args) => run_local_tblastx(args, query, subject, outputs),
         Commands::Blastx(args) => run_local_blastx(args, query, subject, outputs),
-        Commands::Psiblast(_) | Commands::Makedb(_) => {
-            unreachable!("Program::parse admits the five search programs only")
+        Commands::Psiblast(args) => {
+            let args = psiblast_args(args, outputs)?;
+            run_local_blastp(args, query, subject, "", "", outputs)
+        }
+        Commands::Makedb(_) => {
+            unreachable!("Program::parse admits the search programs only")
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:233-241
+// ```c++
+//     CRef<IQueryFactory> query_factory(s_MakeQueryFactory(pssm, query));
+//             CRef<CPsiBlast> psiblast;
+//             if (run_token & 2)
+//             {
+//                 _ASSERT(psi_opts.NotEmpty());
+//                 if (pssm.NotEmpty()) {
+//                     psiblast.Reset(new CPsiBlast(pssm, db_adapter, psi_opts));
+//                 } else {
+//                     psiblast.Reset(new CPsiBlast(query_factory, db_adapter, psi_opts));
+// ```
+/// blastp's arguments for psiblast's first round (`algorithm::psiblast`), after LOSAT's refusals
+/// of each requested format.
+fn psiblast_args(
+    args: crate::algorithm::psiblast::PsiblastArgs,
+    outputs: &ReportOutputs<'_>,
+) -> anyhow::Result<crate::algorithm::blastp::args::BlastpArgs> {
+    for format in &outputs.formats {
+        crate::algorithm::psiblast::PsiblastArgs::check_outfmt(format.outfmt)?;
+    }
+    args.into_blastp_args()
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
@@ -790,6 +840,77 @@ pub fn run(
         }
         Ok(())
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+// ```c++
+//     else {
+//         m_OutputStream = &args[kArgOutput].AsOutputFile();
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:255-257
+// ```c++
+//         if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
+//         	formatter.SetBaseFile(args[kArgOutput].AsString());
+//         }
+// ```
+/// Runs the search and writes the report of one `-outfmt` to the file `path`, as the command
+/// line's `-out path` does, and the command line's warnings to `diagnostics`. Outfmt 13 and 14
+/// come through here: the file is the master file, which names the side files that the search
+/// writes next to it (`path_1.json` or `path_1.xml`, ...). The error is the command line's, as in
+/// [`run`].
+pub fn run_to_file(
+    search: &Search,
+    inputs: Inputs<'_>,
+    outfmt: &str,
+    path: &Path,
+    diagnostics: &mut (dyn Write + Send),
+) -> Result<(), Error> {
+    // `-` is the command line's standard output, which the library does not write.
+    if path.as_os_str() == "-" {
+        return Err(Error::Argv(
+            "run_to_file writes a file: `run` gives a report to a writer".to_string(),
+        ));
+    }
+    let threads = {
+        let formats = [outfmt];
+        searches(search, inputs, &formats)?.1
+    };
+    let mut command = search.command(inputs)?;
+    set_output_file(&mut command, path);
+    let file =
+        File::create(path).map_err(|_| Error::search(&crate::cli::inaccessible("out", path)))?;
+    let mut file = BufWriter::new(file);
+    with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
+        let mut outputs = ReportOutputs {
+            formats: vec![FormatOutput {
+                outfmt,
+                sink: OutputSink::Writer(&mut file),
+            }],
+            diagnostics: &mut *diagnostics,
+            hits: None,
+            observer: None,
+        };
+        run_local(command, inputs, &mut outputs).map_err(|error| Error::search(&error))
+    })?;
+    file.flush()
+        .map_err(|error| Error::search(&anyhow::Error::from(error)))
+}
+
+/// The search's `-out` file: a report names its side files by it (`run_to_file`).
+fn set_output_file(command: &mut Commands, path: &Path) {
+    let out = Some(path.to_path_buf());
+    match command {
+        Commands::Blastp(args) => args.out = out,
+        Commands::Tblastn(args) => args.out = out,
+        Commands::Blastn(args) => args.out = out,
+        Commands::Tblastx(args) => args.out = out,
+        Commands::Blastx(args) => args.out = out,
+        Commands::Psiblast(args) => args.out = out,
+        Commands::Makedb(_) => {
+            unreachable!("Program::parse admits the search programs only")
+        }
+    }
 }
 
 /// What one search of `run_collect` gathered.

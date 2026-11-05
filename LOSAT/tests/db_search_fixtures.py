@@ -35,12 +35,12 @@ taxonomy database or a BLASTDB), compares stdout,
 stderr and exit status with the frozen files (and checks that each frozen file's sha256 is the
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
 line), writes the same lines to --out, and exits 0 only when every row is `same` or `rejection`.
-With `--library` BIN is `examples/library_database`, the same search through the library API: a
+With `--library` BIN is `examples/library_command_line`, the same search through the library API: a
 failure's exit status counts as any other failure's, a row whose query the reader refuses is
 `library-input-error` when the message is the command line's (the library reads the whole query
 before it searches, so the reports of the batches before the error do not exist), and the rows that
-the API does not run (psiblast's, outfmt 13 and 14 with their side files, and the PSSM files) are
-`library-skip`.
+write PSSM files (the `pssm` kind) or pass a PSSM file option are `library-skip`: the library API
+writes no PSSM file and refuses those options (`LIBRARY_REFUSED`).
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
@@ -245,15 +245,20 @@ def freeze(args: argparse.Namespace) -> int:
 
 
 def status_differs(observed: int, expected: int, library: bool) -> bool:
-    """Whether a run's exit status is not the frozen one. `examples/library_database.rs` ends every
+    """Whether a run's exit status is not the frozen one. `examples/library_command_line.rs` ends every
     failure with status 1: the library API's errors carry the command line's message, not its status."""
     return (observed != 0) != (expected != 0) if library else observed != expected
+
+
+# psiblast's PSSM file options, which the library API refuses before any search
+# (`api::search::pssm_file_options`).
+LIBRARY_REFUSED = {"-out_ascii_pssm", "-save_pssm_after_last_round", "-save_each_pssm"}
 
 
 def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False) -> tuple[str, str]:
     files = xinclude.wants_files(row)
     pssm = xinclude.wants_pssm(row)
-    if library and (files or pssm or row["program"] == "psiblast"):
+    if library and (pssm or LIBRARY_REFUSED.intersection(search_argv(row))):
         return "library-skip", ""
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     if files:
@@ -343,7 +348,7 @@ def main() -> int:
     ck.add_argument("--only", default="")
     ck.add_argument("--out", type=Path)
     ck.add_argument("--library", action="store_true",
-                    help="--losat is examples/library_database (the search through the library API)")
+                    help="--losat is examples/library_command_line (the search through the library API)")
     args = parser.parse_args()
     return freeze(args) if args.command == "freeze" else check(args)
 

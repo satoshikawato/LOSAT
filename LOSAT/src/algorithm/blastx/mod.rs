@@ -484,7 +484,7 @@ mod tabular;
 pub mod native;
 // LOSAT Web's entry (web ABI v2): one search, every requested output format.
 mod local;
-pub use local::{check_options, run_local};
+pub use local::{check_options, run_local, run_local_database};
 /// The default size of a query batch, in letters (`GetQueryBatchSize`).
 pub(crate) use query_setup::BATCH_SIZE as QUERY_BATCH_SIZE;
 

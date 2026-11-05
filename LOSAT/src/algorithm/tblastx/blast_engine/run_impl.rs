@@ -1298,21 +1298,15 @@ pub fn check_options(args: &TblastxArgs) -> Result<()> {
     crate::utils::threading::validate_threads(args.num_threads)
 }
 
-/// The part of `run` after the output is opened: the options, `Query is Empty!`, the
-/// reading of the queries and the search.
-fn search_cli(
-    mut args: TblastxArgs,
-    list: Option<crate::seqdb::DbList>,
-    query_file: std::fs::File,
-    subjects: &[FastaRecord],
-    subject_placements: &Placements,
-    x_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
+/// What `search_cli` and `run_local_database` do after the options are processed and before the
+/// query: the opening of the database of `-db` (`list`: its taxid or seqid list, `None` for a
+/// search without `-db`), and what the requested reports ask of it.
+fn open_search_database(
+    args: &mut TblastxArgs,
+    list: Option<&crate::seqdb::DbList>,
+    settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
-    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
-) -> Result<()> {
-    let (query_range, counts) =
-        check_ncbi_options(&args, &cli_outfmts(&args)?, outputs.diagnostics)?;
-    args.report_counts = counts;
+) -> Result<Option<super::super::database::TblastxDatabase>> {
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:113-119
     // ```c++
     //         /*** Initialize the database/subject ***/
@@ -1328,8 +1322,8 @@ fn search_cli(
         Some(name) => {
             let database = super::super::database::TblastxDatabase::open_restricted(
                 name,
-                &settings,
-                list.as_ref(),
+                settings,
+                list,
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis)
@@ -1366,7 +1360,7 @@ fn search_cli(
     }) {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
-            None => crate::algorithm::common::database::subject_taxdb_found(&settings, "TBLASTX")?,
+            None => crate::algorithm::common::database::subject_taxdb_found(settings, "TBLASTX")?,
         });
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
@@ -1396,6 +1390,25 @@ fn search_cli(
             crate::report::blast_xml::names::check_database_name("TBLASTX", database.name())?;
         }
     }
+    Ok(database)
+}
+
+/// The part of `run` after the output is opened: the options, `Query is Empty!`, the
+/// reading of the queries and the search.
+fn search_cli(
+    mut args: TblastxArgs,
+    list: Option<crate::seqdb::DbList>,
+    query_file: std::fs::File,
+    subjects: &[FastaRecord],
+    subject_placements: &Placements,
+    x_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
+    outputs: &mut ReportOutputs<'_>,
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+) -> Result<()> {
+    let (query_range, counts) =
+        check_ncbi_options(&args, &cli_outfmts(&args)?, outputs.diagnostics)?;
+    args.report_counts = counts;
+    let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?;
     let source = match &database {
         Some(database) => SubjectSource::Database(database),
         None => SubjectSource::Fasta {
@@ -1560,6 +1573,81 @@ pub fn run_local(
             placements: subject_placements,
             x_stores: None,
         },
+        outputs,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:113-119
+// ```c++
+//         /*** Initialize the database/subject ***/
+//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
+//         CRef<CLocalDbAdapter> db_adapter;
+//         CRef<CScope> scope;
+//         InitializeSubject(db_args, opts_hndl, m_CmdLineArgs->ExecuteRemotely(),
+//                          db_adapter, scope);
+// ```
+/// Runs one TBLASTX search of the records `query_records` against the database of `args` and
+/// writes every requested output format from the same result (the library API's entry; the
+/// command line's is `run`). `settings` are the NCBI application settings, which find the
+/// database. The steps are `run`'s and `search_cli`'s, in their order; what differs is what they
+/// read: the records are read already, and the outputs are the caller's. An archive (outfmt 11)
+/// ends as the command line's does (`ReportOutputs::finish_archive`).
+pub fn run_local_database(
+    mut args: TblastxArgs,
+    query_records: &[FastaRecord],
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    // NCBI parses -outfmt before its option handlers run; `search` checks the formats again.
+    check_report_formats(outputs, None)?;
+    let archive_requested = outputs
+        .formats
+        .iter()
+        .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Archive);
+    args.archive = super::super::archive::handle_for(&args, archive_requested)?
+        .map(|handle| outputs.with_archive_outfmt(handle));
+    crate::utils::threading::validate_threads(args.num_threads)?;
+    args.id_scope = crate::algorithm::common::database::database_id_scope(
+        args.parse_deflines,
+        query_records,
+        "TBLASTX",
+    )?;
+    match args.archive.clone() {
+        Some(handle) => {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
+                search_database(args, query_records, settings, view)
+            });
+            outputs.finish_archive(&handle, query_records.is_empty(), result)
+        }
+        None => search_database(args, query_records, settings, outputs),
+    }
+}
+
+/// `run_local_database` from the taxid or seqid list on.
+fn search_database(
+    mut args: TblastxArgs,
+    query_records: &[FastaRecord],
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    // The handler of the database arguments reads the list before the other handlers (`run`).
+    let list = args
+        .db_filter
+        .resolve(&settings, &mut *outputs.diagnostics)?;
+    let mut outfmts = Vec::with_capacity(outputs.formats.len());
+    for format in &outputs.formats {
+        outfmts.push(crate::blastinput::app::parse_formatting_string(format.outfmt)?.number);
+    }
+    let (query_range, counts) = check_ncbi_options(&args, &outfmts, outputs.diagnostics)?;
+    args.report_counts = counts;
+    let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?
+        .ok_or_else(crate::blastinput::app::missing_subject_error)?;
+    search(
+        args,
+        query_records,
+        QueryReading::Records,
+        query_range,
+        SubjectSource::Database(&database),
         outputs,
     )
 }
@@ -3779,6 +3867,12 @@ impl BatchReports<'_> {
                     &self.lengths.borrow(),
                     shown,
                 )?;
+                // The library's records name a database's sequences through this event.
+                if outputs.hits.is_some() {
+                    if let Some(observer) = outputs.observer.as_deref_mut() {
+                        observer.database_subjects(reported_subjects.library_subjects(database));
+                    }
+                }
                 (
                     reported_subjects.records.as_slice(),
                     report::SubjectLetters::Database {

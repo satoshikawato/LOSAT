@@ -1,0 +1,410 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/PajaWSV.faa).
+           86 sequences; 66,738 total letters
+
+
+
+Query= BDT63074.1 tyrosine recombinase [Sicyonia whispovirus]
+
+Length=897
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63577.1 wsv220-like protein [Pasiphaea japonica whispovirus]       26.3    0.48 
+BDT63565.1 wsv078-like protein [Pasiphaea japonica whispovirus]       26.0    0.51 
+BDT63542.1 wsv313-like protein [Pasiphaea japonica whispovirus]       22.7    6.8  
+
+
+> BDT63577.1 wsv220-like protein [Pasiphaea japonica whispovirus]
+Length=730
+
+ Score = 26.3 bits (66),  Expect = 0.48, Method: Compositional matrix adjust.
+ Identities = 33/123 (27%), Positives = 59/123 (48%), Gaps = 16/123 (13%)
+
+Query  512  AQFSLANIQRFMRKLF-----CLYDLPLLRIATVRKFLTTQAHKEGDSEIQEATASLLKH  566
+            A F +  I   ++K        L + PL+  A     L  + H  G   IQ   AS + +
+Sbjct  92   ASFGVKKILDGIKKTLKMHHTLLLEKPLINAAGDTHHLFIRPHNLG--AIQPPEASQVVN  149
+
+Query  567  SMKTAKRDYKAMQR-DHDALHTANRLSKILRDRLEQKTSG-ENALSAITATTANFDEYDD  624
+            ++K    + + + + D D++HTA  L+ I   ++E++T   EN+++   A   NF E D 
+Sbjct  150  AIKLKFEELRVINKLDSDSIHTA--LTAI---QIERETFNIENSIN--NAFDINFAERDV  202
+
+Query  625  NDN  627
+            ++N
+Sbjct  203  DEN  205
+
+
+> BDT63565.1 wsv078-like protein [Pasiphaea japonica whispovirus]
+Length=514
+
+ Score = 26.0 bits (65),  Expect = 0.51, Method: Compositional matrix adjust.
+ Identities = 27/99 (27%), Positives = 44/99 (44%), Gaps = 17/99 (17%)
+
+Query  637  ATATATTTTTTTTTTTTTTTTTTTTTTTTTNANANATTNANATTTGNCIPAYSVITATIT  696
+            A   A+ TT+T+    +T T + +   T  N  A+ATT+ +        P  S  TA+I+
+Sbjct  316  ANPRASATTSTSPPHLSTLTASISEGVTFANPRASATTSTSP-------PHLSTPTASIS  368
+
+Query  697  NFDECDDDDNDDTVTATPTTTTTTTTTTTTTTTTTNANA  735
+                      +    A P T+ TT+T+    +T T  N+
+Sbjct  369  ----------EGVTFANPRTSATTSTSPPHLSTPTAYNS  397
+
+
+> BDT63542.1 wsv313-like protein [Pasiphaea japonica whispovirus]
+Length=1041
+
+ Score = 22.7 bits (54),  Expect = 6.8, Method: Compositional matrix adjust.
+ Identities = 21/79 (27%), Positives = 34/79 (43%), Gaps = 12/79 (15%)
+
+Query  575  YKAMQRDHDALHTANRLSK---ILRDRLEQKTSGE-------NALSAITATTAN--FDEY  622
+            ++ +  D  + +  N L +    L   +E KTS         N ++ I +  AN  FD Y
+Sbjct  614  FRILHPDPKSRNNINMLGERITFLNRLIEYKTSNSVTWLRLINLMAGILSKAANVIFDNY  673
+
+Query  623  DDNDNDDTVTATATATATA  641
+            + N   D    T T+T +A
+Sbjct  674  EQNQKQDEKKTTETSTLSA  692
+
+
+
+Lambda      K        H        a         alpha
+   0.315    0.128    0.366    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.206   0.0100   0.0520     4.00     210.     215. 
+
+Effective search space used: 38812410
+
+
+Query= nohit a query without hits
+
+Length=12
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.343    0.153     1.14    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.206   0.0100   0.0520     4.00     210.     215. 
+
+Effective search space used: 800856
+
+
+Query= BDT63075.1 wsv226-like protein [Sicyonia whispovirus]
+
+Length=1142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63562.1 wsv226-like protein [Pasiphaea japonica whispovirus]       413     1e-148
+BDT63548.1 wsv419-like protein [Pasiphaea japonica whispovirus]       21.5    4.0   
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       23.9    4.3   
+BDT63506.1 wsv199-like protein [Pasiphaea japonica whispovirus]       23.0    6.2   
+BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]       23.0    7.4   
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       22.7    9.3   
+
+
+> BDT63562.1 wsv226-like protein [Pasiphaea japonica whispovirus]
+Length=1101
+
+ Score = 413 bits (1369),  Expect = 1e-148, Method: Compositional matrix adjust.
+ Identities = 355/1168 (30%), Positives = 569/1168 (49%), Gaps = 176/1168 (15%)
+
+Query  74    TLRVFGELQGDYLPEEEEAEAAVETEA--------------TFKAEDAET----ATIESE  115
+             ++ +   +  D + + EE    V+ EA              TF  ++ E     + +E E
+Sbjct  5     SVDLLSSIVNDTILKVEEETTNVKAEANTLEKDVLLFAVNQTFVKDELEKLNFLSMVEDE  64
+
+Query  116   AETA--LEAKAETALEAEADLYEQEIRRNVSEFVAGLPHVTGDYAEAERFGAPYLPPGKR  173
+              +     ++  ET  + E  LY      N   F+  LPH+TG   +A ++G PYLP  + 
+Sbjct  65    HQVMDFGDSIYETNTKQEDALYID----NDKNFINQLPHITGVCEDAVKYGRPYLPTNEM  120
+
+Query  174   RKETYRFWASKDFRAQYLGHLAGNRWIGEFVRGEIDATTCVGMLRSVATAYGCGPIIRIA  233
+              K    +W + + + +YLG+L GN  I  FV   IDATTC+G LRS ATA+G  P     
+Sbjct  121   AKIVDGYWNTNNRKKKYLGYLCGNFAINAFVSNTIDATTCIGFLRSRATAFG-YP----G  175
+
+Query  234   LSCLNTLASGYSNSNNFEVKREDLVASINPPWRATRPLSMHPEALNATNPSKVVSKLLGE  293
+             L CL  +    S++N+F V R+ ++A+  P     RP ++       +   +V  KL  +
+Sbjct  176   LKCLAEMCLSTSSNNSFTVPRKQMMAATFPEEMRRRPSTIQQ----MSETCQVYKKLANK  231
+
+Query  294   KTRCVALDWKDTSRELGFCDSRNVGVLTNLIYAIAVPAYTAEMILSTEGKMEQHVL----  349
+              T CV +DW + S+++ +  SR V +L NLI  I +PAYT ++IL T+ ++E++VL    
+Sbjct  232   NTVCVTMDWSEASKKINYDYSRKVCLLQNLIVIILLPAYTMDVILDTDRELERYVLASVG  291
+
+Query  350   -------RKQGMQPPIERVELLKQKSVLCAIHSLTQYFSGPVRDSDVNDDDRTRRGVPSG  402
+                     K   Q   E+  LL    VL A+  L  +FSG     D  DD          
+Sbjct  292   QQDDRDKYKYNQQTKEEKKNLLDDLCVLSAMSYLYTFFSG-----DGKDD--------KS  338
+
+Query  403   KHLFAAPLRLPPFDAHPVVNLENHPLFTTDPLSTDGNPLR--VLASVSTPAHSAVALKHR  460
+              HL+ APLRLPPFD HPV+NL   P F     S  G   R  V+AS+STP+ S V L HR
+Sbjct  339   IHLYNAPLRLPPFDDHPVINLHECPYF-----SDCGETARRKVVASISTPSQSMVTLNHR  393
+
+Query  461   SGRRP-------------------KKLLGLSKNGIELHVL--PALKDTGSRRRKKKVVRS  499
+               R P                    KL+G++ +GIE+ V+  P    +   R+KK+ V+ 
+Sbjct  394   VQRTPLNNVNGCKDDKEQTSDNTYNKLIGVTNSGIEVRVVKKPTATQSSCLRKKKREVKH  453
+
+Query  500   DVMTNR----QRDPLLHMATKEPPVFVRNVLAVAGNYGWFALIVGYMSSPDVLFNKTNCD  555
+               +  +     RDP+ HM  +E P+F+R++LA+ G+YGWF++++GY  + DVLF   + D
+Sbjct  454   SRLAQKLGEITRDPVTHMNRRERPLFLRSMLALCGSYGWFSIVLGYNPTLDVLFMGNDHD  513
+
+Query  556   GLFAPDLIRKYRSEQITTTPLRNRRIDTRFEGLELVDAMGHTSGFRIRPASLSDDHCGGD  615
+             GLF+P  IR++R   ++ TP+RNR+ID RF GLEL D  G+   FRIRPASL    C  +
+Sbjct  514   GLFSPHWIRRFRKRYVSMTPMRNRKIDLRFHGLELADTPGNACAFRIRPASL----C--N  567
+
+Query  616   SDD------------GGLGVIGARDNPFYTKTNRPAWYSDASLEDLFGR--VTLEQHVRA  661
+             S+D              L V+    NPF+T+     WY+ + + D+FG   + +EQHV  
+Sbjct  568   SNDVYQTSPKTVKKRWTLNVLQGNRNPFFTRLLNFNWYNPSCMSDIFGDQPIYMEQHVAV  627
+
+Query  662   FDDRIGVFEDLLEG---DDRWLVNLQDKKDVLDRCKLALTFLLEAQTVMLLNVHGLSEQE  718
+             FD+ + +F +L+ G   ++RW  NL DK++V + C  +L   L+     L   H   + E
+Sbjct  628   FDNCLDMFSNLVRGTANENRWKANLLDKREVFNSCIFSLIIRLKCFCQCLHKKH--KDIE  685
+
+Query  719   VRDAIRDLKSATPMLTTLGKEDEDPAARKILATETRR-RELCSTAE-SLIEMVPLHSLVE  776
+             ++  +++++    +              + L  ET++ ++LC+  E S+I  +  +  + 
+Sbjct  686   IKKKLKNVRQLRGLRA------------QTLCRETKQLKKLCTKVESSIIGAMEFNRNMG  733
+
+Query  777   DRPEGEGHVRKARLSFPAPVRDSPHDLMEDMKKTFLSIDLCQFMLQSCEENKVRFFHGEC  836
+             +  E   +  K R      V      L + +     ++ +C  +   C+ N  RF   E 
+Sbjct  734   NEKEYNTNKNKKR-----KVISDKKLLQKTVASDMDALSVCYMLYDECDMNYQRFEDAEV  788
+
+Query  837   REAAHEFLREVYRGAARYHVKDAHVRGTRVCLTWHRPFDAPAHRALAGVPRCKMSRLLSC  896
+             RE A E +RE+YR +AR H+KD  +RGT++ LTW +P++  A   ++ +PRC++  ++  
+Sbjct  789   RETAFEMVREMYRVSARLHLKDLLMRGTKMSLTWQKPYNPVAEATMSNIPRCRIPWIVHR  848
+
+Query  897   IEKSSGTNPLPTVAVAAGKEVLTLPSLMCLSTRAITPKPVRHTLLELMYGTRAAATISTL  956
+              E  +    + T+ +              L TR    +P+RHTLL+L++G + A  +S +
+Sbjct  849   FENRTLNEKMSTLQI--------------LETRDQVYRPIRHTLLQLVFGEKMANYVSVV  894
+
+Query  957   TCLSWINWCMEA--DPKRFYGPVYESVMEIKCPRRPELLGMPPRGTK-----------RK  1003
+             TC  W++WC+     P+ +Y  V   V   K  +    L       +           R+
+Sbjct  895   TCFQWMDWCLNGVNKPEEYYWDVNRLVDSRKKNQNNNCLDTDIDNKRRNNKRNRDDLTRE  954
+
+Query  1004  MCQHLEQLSDAQKISCWLKDDIRCHPF-----RVCFPKFRKAASKIDALRPHSRGESEAE  1058
+                 +  +SD + I+ WL +D +  P+      +    +R+  S           E+E  
+Sbjct  955   SEIEITNMSDIEIINMWLNNDTKDLPYGTLNGSIINKHWRRKKSSSSGDSDDDLYENE-N  1013
+
+Query  1059  SEVGSGSGYPAGTAAKDDV-FVFKSIYSNITAPPRQKPLFGE-----KKSTGRMGFKDIY  1112
+                G  S  P      D + +V  S  S+ T   +Q  L G+     K++TGRMGF+D+Y
+Sbjct  1014  CNGGRKSKVPV--VGGDFINYVIDSDDSSNTNETQQ--LKGKVHKHNKRNTGRMGFRDVY  1069
+
+Query  1113  AVALISLPSTLDQETKDIAADLGIETDI  1140
+              + LISLP  + ++ K I  +L +ET +
+Sbjct  1070  MICLISLPVVIHEKCKKIIRELYLETSL  1097
+
+
+> BDT63548.1 wsv419-like protein [Pasiphaea japonica whispovirus]
+Length=99
+
+ Score = 21.5 bits (50),  Expect = 4.0, Method: Composition-based stats.
+ Identities = 8/15 (53%), Positives = 10/15 (67%), Gaps = 0/15 (0%)
+
+Query  344  MEQHVLRKQGMQPPI  358
+            M +HV R   MQPP+
+Sbjct  37   MYEHVCRDMAMQPPM  51
+
+
+> BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]
+Length=6062
+
+ Score = 23.9 bits (58),  Expect = 4.3, Method: Compositional matrix adjust.
+ Identities = 27/120 (23%), Positives = 47/120 (39%), Gaps = 22/120 (18%)
+
+Query  1025  IRCHPFRVCFPKFRKAASKIDALRP---HSRGESEAESEVGSGS----GYPAGTAAKDDV  1077
+             + CH   VC      A S I +  P    S  E+   SE+   +     Y   +      
+Sbjct  5065  LECHRQHVCSVD---AKSTIASAMPSIFQSTQETGNTSELVQNALPRNRYIQKSTMNAQT  5121
+
+Query  1078  FVFKSIYSNITAPPRQKPLFGEKKSTGRMGFKDIYAVALISLPSTLDQETKDIAADLGIE  1137
+              +F ++          + L G+    GR+   ++  V   S+P T+ + TKD+   LG++
+Sbjct  5122  LIFANVL---------EQLIGD---LGRVIVNELAGVVAKSVPKTVYENTKDMINQLGVD  5169
+
+
+> BDT63506.1 wsv199-like protein [Pasiphaea japonica whispovirus]
+Length=992
+
+ Score = 23.0 bits (55),  Expect = 6.2, Method: Compositional matrix adjust.
+ Identities = 29/138 (21%), Positives = 49/138 (36%), Gaps = 25/138 (18%)
+
+Query  123  KAETALEAEADLYEQEIRRNVSEFVAGLPHVTGDYAEAERFGAPYLPPGKRR--------  174
+            +A  ++  +A LY    +       AGL ++ G  A     G     P K++        
+Sbjct  777  EANMSIIKDAFLYNTLFKEEYHIATAGLINI-GRQAVETIDGVKTSHPNKKQFFGGNINR  835
+
+Query  175  -KETYRFWASKDFRAQYLGHLAGNRWIGEFVRGEIDA-TTCVGMLRSVATAYGCGPIIRI  232
+              E+   W         L    G++W+   V G++DA    V     +  +  C      
+Sbjct  836  LNESNNTWTG-------LRQSKGHKWVSPLVNGKMDAFINSVEKTTKIFESEDCSI----  884
+
+Query  233  ALSCLNTLASGYSNSNNF  250
+               CL  L++ Y  S N+
+Sbjct  885  ---CLEKLSANYGFSVNY  899
+
+
+> BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]
+Length=986
+
+ Score = 23.0 bits (55),  Expect = 7.4, Method: Compositional matrix adjust.
+ Identities = 28/139 (20%), Positives = 50/139 (36%), Gaps = 25/139 (18%)
+
+Query  122  AKAETALEAEADLYEQEIRRNVSEFVAGLPHVTGDYAEAERFGAPYLPPGKRR-------  174
+             +A  ++  +A  Y    +       AGL ++ G  A  +  G     P K++       
+Sbjct  770  VEANMSIIKDAFFYNTLFKEEYHIATAGLINI-GRQAVEKIDGVKTSHPNKKQFFGGNIN  828
+
+Query  175  --KETYRFWASKDFRAQYLGHLAGNRWIGEFVRGEIDA-TTCVGMLRSVATAYGCGPIIR  231
+               E+   W +       L    G++W+   V G++DA    V     +  +  C     
+Sbjct  829  RLNESNNTWTA-------LRQSKGHKWVSLLVNGKMDAFINSVEKTTKIFESEDCSI---  878
+
+Query  232  IALSCLNTLASGYSNSNNF  250
+                CL  L++ Y  S N+
+Sbjct  879  ----CLEKLSANYGFSVNY  893
+
+
+> BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]
+Length=1023
+
+ Score = 22.7 bits (54),  Expect = 9.3, Method: Compositional matrix adjust.
+ Identities = 27/100 (27%), Positives = 45/100 (45%), Gaps = 24/100 (24%)
+
+Query  284  SKVVSKLLGEKTRCVAL---DWKDTSRELGFCDSRNVGVLTNL-IYAIAVPAYTAEMILS  339
+            S+++S ++GE  +  ++    W + ++      S +V     L IYA A PAY A  +LS
+Sbjct  233  SRIMSMMVGEDKKIHSIYKEKWVNLAKATALAHS-SVWKEPELNIYA-ANPAYDAVNLLS  290
+
+Query  340  TEGKMEQHVLRKQGMQPPIERVELLKQKSVLCAIHSLTQY  379
+            T+                   +E+L  K V CA+  + QY
+Sbjct  291  TD------------------LLEVLFGKKVACALKMVNQY  312
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.135    0.404    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.206   0.0100   0.0520     4.00     210.     215. 
+
+Effective search space used: 50930460
+
+
+Query= BDT63076.1 hypothetical protein [Sicyonia whispovirus]
+
+Length=109
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       19.7    2.3  
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       19.1    3.2  
+BDT63521.1 wsv023-like protein [Pasiphaea japonica whispovirus]       18.8    4.1  
+BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]       18.5    6.6  
+BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]       18.2    8.3  
+
+
+> BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]
+Length=1023
+
+ Score = 19.7 bits (44),  Expect = 2.3, Method: Composition-based stats.
+ Identities = 9/26 (35%), Positives = 12/26 (46%), Gaps = 0/26 (0%)
+
+Query  17   NTMSMLNKTYNLFVLFNFLLLKFSGK  42
+            N  + LNK  NLF+  N       G+
+Sbjct  797  NEKTFLNKNENLFIFSNLFAKNLVGE  822
+
+
+> BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]
+Length=6062
+
+ Score = 19.1 bits (42),  Expect = 3.2, Method: Composition-based stats.
+ Identities = 19/86 (22%), Positives = 35/86 (41%), Gaps = 2/86 (2%)
+
+Query  11   RSTASM-NTMSMLN-KTYNLFVLFNFLLLKFSGKKGADPSREAKRNHNITSSLCRVLGCR  68
+            R+ A + N++   N + YN +   N + L  +G K  +   +  R  N+ S   R     
+Sbjct  130  RAAAEIINSIVTTNFQHYNAYSSKNLIPLFMAGNKHNEFGAKVIRQSNLRSCFLRQNAVE  189
+
+Query  69   HLARLYHSAPPCSATLLIPATRRGSM  94
+             L + +      +A   I A +  S+
+Sbjct  190  SLLKDFQRMKTNAAKAFIDAVKEKSV  215
+
+
+> BDT63521.1 wsv023-like protein [Pasiphaea japonica whispovirus]
+Length=279
+
+ Score = 18.8 bits (41),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 16/77 (21%), Positives = 29/77 (38%), Gaps = 8/77 (10%)
+
+Query  18   TMSMLNKTYNLFVLFNFL--LLKFSGKKGADPSREAKRN----HNITSSLCRVLGCRH--  69
+             M+ L+  YNL +L+  +   +         P      N     ++   +  +L  R   
+Sbjct  188  VMATLDCLYNLDILWKLIGAYIDIEAVANGQPDTVLPHNNPQVQHVKEEISIMLQIRQKI  247
+
+Query  70   LARLYHSAPPCSATLLI  86
+            +    HS PP   T+L+
+Sbjct  248  IGVGNHSTPPVPITVLL  264
+
+
+ Score = 17.9 bits (38),  Expect = 9.9, Method: Compositional matrix adjust.
+ Identities = 8/23 (35%), Positives = 11/23 (48%), Gaps = 0/23 (0%)
+
+Query  5   MADPPWRSTASMNTMSMLNKTYN  27
+           +ADPP       N     N++YN
+Sbjct  33  VADPPQNLIIDTNESLSANESYN  55
+
+
+> BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]
+Length=1516
+
+ Score = 18.5 bits (40),  Expect = 6.6, Method: Composition-based stats.
+ Identities = 8/22 (36%), Positives = 13/22 (59%), Gaps = 0/22 (0%)
+
+Query  42   KKGADPSREAKRNHNITSSLCR  63
+            K G    R +  + +ITS++CR
+Sbjct  972  KAGTYADRYSNNSISITSAICR  993
+
+
+> BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]
+Length=4023
+
+ Score = 18.2 bits (39),  Expect = 8.3, Method: Composition-based stats.
+ Identities = 7/19 (37%), Positives = 10/19 (53%), Gaps = 0/19 (0%)
+
+Query  10    WRSTASMNTMSMLNKTYNL  28
+             WR T   +  +  N T+NL
+Sbjct  1641  WRKTRQEHQETKTNTTFNL  1659
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.132    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.206   0.0100   0.0520     4.00     210.     215. 
+
+Effective search space used: 6745872
+
+
+  Database: User specified sequence set (Input: tests/fasta/PajaWSV.faa).
+    Posted date:  Unknown
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 9, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

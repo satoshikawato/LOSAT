@@ -4716,6 +4716,173 @@ mod tests {
         }
         assert!(saw_offset && saw_gap && saw_fence);
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:543,578
+    // ```c
+    //                 matrix_row = matrix[ A[ M - a_index ] ];
+    // ...
+    //             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    // ```
+    // The SIMD kernel with each matrix's tables (`x_standard_tables`) gives the scalar port's
+    // result, score-only and with traceback, in both directions: on 8-bit lanes (the largest
+    // X-drop they take, x + goe + 2M + 1 = 127 in `fits_8bit`), on 16-bit lanes (one more), and
+    // with a sentinel (code 0) in either sequence or NCBI's fence in the subject.
+    #[test]
+    fn x_standard_tables_give_the_scalar_port_for_every_matrix() {
+        use crate::utils::xdrop_simd::{xdrop_align, ColSeq, RowSeq};
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut below = move |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n
+        };
+        let mut scratch = GapAlignScratch::new();
+        for matrix in ScoringMatrix::ALL {
+            assert!(x_standard_tables(matrix).is_some(), "{matrix:?}");
+            let top = (1..28u8)
+                .flat_map(|q| (1..28u8).map(move |s| blastp_standard_score(matrix, q, s)))
+                .max()
+                .unwrap();
+            let score_matrix = BlastpScoreMatrix::Standard(matrix);
+            let mut fast_runs = 0;
+            for (gap_open, gap_extend) in [(11, 1), (14, 2), (5, 2)] {
+                let goe = gap_open + gap_extend;
+                let x8 = 126 - goe - 2 * top;
+                assert!(x8 >= goe, "{matrix:?}: x8 {x8}");
+                for x_drop in [10, 38, x8, x8 + 1] {
+                    for variant in 0..4 {
+                        let len1 = 20 + below(120) as usize;
+                        let mut query: Vec<u8> = (0..=len1).map(|_| 1 + below(27) as u8).collect();
+                        // the subject: the query with substitutions, insertions and deletions
+                        let mut subject = vec![1 + below(27) as u8];
+                        for &r in &query[1..] {
+                            match below(20) {
+                                0 => {}
+                                1 => subject.extend([r, 1 + below(27) as u8]),
+                                2..=4 => subject.push(1 + below(27) as u8),
+                                _ => subject.push(r),
+                            }
+                        }
+                        let len2 = subject.len() - 1;
+                        match variant {
+                            1 => subject[1 + below(len2 as u64) as usize] = 0,
+                            2 => query[1 + below(len1 as u64) as usize] = 0,
+                            3 => subject[1 + below(len2 as u64) as usize] = FENCE_SENTRY,
+                            _ => {}
+                        }
+                        for reverse in [false, true] {
+                            let at = format!(
+                                "{matrix:?} {gap_open}/{gap_extend} x {x_drop} variant {variant} \
+                                 reverse {reverse}"
+                            );
+                            let mut fence = (false, false);
+                            let traceback = align_ex_protein(
+                                &query,
+                                &subject,
+                                len1,
+                                len2,
+                                score_matrix,
+                                gap_open,
+                                gap_extend,
+                                x_drop,
+                                reverse,
+                                &mut scratch,
+                                &mut fence.0,
+                                false,
+                            );
+                            let expect = align_ex_protein_scalar(
+                                &query,
+                                &subject,
+                                len1,
+                                len2,
+                                score_matrix,
+                                gap_open,
+                                gap_extend,
+                                x_drop,
+                                reverse,
+                                &mut GapAlignScratch::new(),
+                                &mut fence.1,
+                                false,
+                            );
+                            assert_eq!(traceback, expect, "{at}: traceback");
+                            assert_eq!(fence.0, fence.1, "{at}: fence");
+                            if variant == 3 {
+                                // the fence is read by the traceback only
+                                continue;
+                            }
+                            let score_only = align_ex_protein_score_only(
+                                &query,
+                                0,
+                                &subject,
+                                0,
+                                len1,
+                                len2,
+                                score_matrix,
+                                gap_open,
+                                gap_extend,
+                                x_drop,
+                                reverse,
+                                &mut scratch,
+                            );
+                            let expect = align_ex_protein_score_only_scalar(
+                                &query,
+                                0,
+                                &subject,
+                                0,
+                                len1,
+                                len2,
+                                score_matrix,
+                                gap_open,
+                                gap_extend,
+                                x_drop,
+                                reverse,
+                                &mut GapAlignScratch::new(),
+                            );
+                            assert_eq!(score_only, expect, "{at}: score only");
+                        }
+                        // the kernel itself takes the problem at the widest X-drops, so the
+                        // calls above compared it with the scalar port
+                        if crate::utils::xdrop_simd::KERNEL_COMPILED && variant == 0 && x_drop >= x8
+                        {
+                            let q = RowSeq::Bytes {
+                                data: &query,
+                                base: 0,
+                                step: 1,
+                            };
+                            let s = ColSeq {
+                                data: &subject,
+                                base: 1,
+                                step: 1,
+                                zero_from: usize::MAX,
+                            };
+                            let taken = with_x_scores(score_matrix, |scores| {
+                                xdrop_align(
+                                    &q,
+                                    &s,
+                                    scores,
+                                    len1,
+                                    len2,
+                                    gap_open,
+                                    gap_extend,
+                                    x_drop,
+                                    false,
+                                    false,
+                                    &mut scratch.fast,
+                                )
+                            });
+                            assert!(taken.is_some(), "{matrix:?} x {x_drop}: kernel declined");
+                            fast_runs += 1;
+                        }
+                    }
+                }
+            }
+            assert!(
+                fast_runs == 6 || !crate::utils::xdrop_simd::KERNEL_COMPILED,
+                "{matrix:?}: {fast_runs}"
+            );
+        }
+    }
     // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:563-575,634-639
     // for (b_index = first_b_index; b_index < b_size; b_index++) {
     //     if (matrix_index == FENCE_SENTRY) { ... break; }

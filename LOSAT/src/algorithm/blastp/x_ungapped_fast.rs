@@ -1,6 +1,7 @@
-//! The BLOSUM62 protein ungapped extension (`s_BlastAaExtendOneHit`,
-//! `s_BlastAaExtendTwoHit` and the `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks they share)
-//! with a tighter inner loop.
+//! The protein ungapped extension (`s_BlastAaExtendOneHit`, `s_BlastAaExtendTwoHit` and the
+//! `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks they share) with a tighter inner loop:
+//! both extensions with BLOSUM62 (`one_hit`, `two_hit`), the two-hit one with another matrix
+//! (`two_hit_of`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883
 //! ```c
@@ -52,10 +53,9 @@
 //! walks' sentinel steps do not depend on the scores, and in a word of `w` residues with
 //! `w * M <= 127` the scores after a sentinel add up to at most `(w - 1) * M < 128`. In the two-hit
 //! word loop a score after a sentinel is then at most the score before it (itself at most
-//! `left_score`), with -128 as with -32768, so `left_score` is not raised in either; in the
-//! one-hit word loop the sum before a sentinel is at most `(w - 1) * M`, so the step leaves a sum
-//! `<= 0` and resets it to 0 in both. A longer word (`MatrixTable::max_word_size`) runs the
-//! reference.
+//! `left_score`), with -128 as with -32768, so `left_score` is not raised in either. A longer
+//! word (`MatrixTable::max_word_size`) runs the reference. (There is no one-hit extension with
+//! another matrix's table.)
 
 use super::extension::{
     BlastpOneHitUngappedResult, BlastpTwoHitUngappedResult, BlastpUngappedData,
@@ -826,9 +826,11 @@ mod tests {
             let mut compared = 0u64;
             for round in 0..300 {
                 let len = 12 + rng.below(if round % 2 == 0 { 40 } else { 400 }) as usize;
-                let mut q = random_seq(&mut rng, len, 1, 28);
+                // every fifth round also codes 28..=31, which the table holds (`CODES`)
+                let hi = if round % 5 == 4 { 32 } else { 28 };
+                let mut q = random_seq(&mut rng, len, 1, hi);
                 let mut s = if round % 3 == 0 {
-                    random_seq(&mut rng, len + 3, 1, 28)
+                    random_seq(&mut rng, len + 3, 1, hi)
                 } else {
                     let rate = 2 + rng.below(10);
                     mutate(&mut rng, &q, rate)
@@ -883,6 +885,47 @@ mod tests {
                 None
             );
             assert_eq!(two_hit_of(m, &q, &q, 2, 6, 6, 128, 3), None);
+            // the other inputs `fast_path_hands_unsupported_inputs_to_the_reference` gives
+            // `two_hit`: X-drops outside 1..=127, no word, and a code >= 32 in the word or only
+            // in the walk; the early return of a word that does not fit is the reference's
+            for d in [i32::MIN, -5, 0, 8193, i32::MAX] {
+                assert_eq!(
+                    two_hit_of(m, &q, &q, 2, 6, 6, d, 3),
+                    None,
+                    "{matrix:?} d={d}"
+                );
+            }
+            assert_eq!(two_hit_of(m, &q, &q, 0, 2, 2, 16, 0), None, "{matrix:?}");
+            let mut wide = vec![0u8; 80];
+            let mut other = vec![0u8; 80];
+            for i in 1..79 {
+                wide[i] = 1 + (i % 20) as u8;
+                other[i] = 1 + ((i * 3) % 20) as u8;
+            }
+            wide[36] = 200;
+            assert_eq!(
+                two_hit_of(m, &wide, &other, 30, 35, 35, 16, 3),
+                None,
+                "{matrix:?}"
+            );
+            let mut deep = other.clone();
+            deep[20] = 77;
+            assert_eq!(
+                two_hit_of(m, &other, &deep, 28, 30, 30, 100, 3),
+                None,
+                "{matrix:?}"
+            );
+            let short: Vec<u8> = [0].into_iter().chain(1..=20).chain([0]).collect();
+            assert_eq!(
+                two_hit_of(m, &short, &short, 0, 21, 3, 16, 3),
+                Some(extend_two_hit(matrix, &short, &short, 0, 21, 3, 16, 3)),
+                "{matrix:?}"
+            );
+            assert_eq!(
+                two_hit_of(m, &short, &short, 0, 21, 3, 16, 3),
+                Some(None),
+                "{matrix:?}"
+            );
         }
     }
 }

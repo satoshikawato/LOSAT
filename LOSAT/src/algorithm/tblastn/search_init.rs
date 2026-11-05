@@ -196,8 +196,9 @@ pub(super) struct XTwoHit<'a> {
 // scored from one signed byte (`q << 5 | s`) instead of the matrix row, and the bounds of each walk
 // computed from the slice lengths as the reference computes them, so the walks stop where the
 // reference's do on every unit, also on a chunk that ends inside a frame. An extension whose codes
-// or X-drop the byte table does not cover (a code >= 32, an X-drop outside 1..=127, a word of more
-// than 11 residues) runs the reference. BLOSUM62, the matrix of every default tblastn search,
+// or X-drop the byte table does not cover (a code >= 32, an X-drop outside 1..=127, a word longer
+// than the table takes: 11 residues for BLOSUM62, `MatrixTable::max_word_size` for another
+// matrix) runs the reference. BLOSUM62, the matrix of every default tblastn search,
 // takes `two_hit` (its table, where `build_table` gives one: every BLOSUM62 score fits a byte;
 // were it not so, the walks hand every call to the reference). Another matrix takes `two_hit_of`
 // with its own table (`matrix_table`, whose module comment gives the longest word the table
@@ -662,6 +663,11 @@ impl<'a> XTwoHit<'a> {
         pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
         hits: &mut Vec<InitHsp>,
     ) {
+        // BLOSUM62's walks: never a finder with another matrix's table (`x_tbn_ungap`).
+        debug_assert!(
+            self.x_ungap_matrix.is_none()
+                && (!self.x_ungap_fast || self.matrix == ScoringMatrix::Blosum62)
+        );
         if !super::x_tbn_hitbf::fits(self.window, self.word_size) {
             self.pairs_with(
                 XBlosum62Walks,
@@ -712,6 +718,8 @@ impl<'a> XTwoHit<'a> {
         pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
         hits: &mut Vec<InitHsp>,
     ) {
+        // The walks of the finder's own table, which `x_tbn_ungap` built for its matrix.
+        debug_assert!(self.x_ungap_matrix.is_some_and(|t| std::ptr::eq(t, table)));
         if !super::x_tbn_hitbf::fits(self.window, self.word_size) {
             self.pairs_with(table, frame, chunk_offset, subject_sequence, pairs, hits);
             return;
@@ -2028,10 +2036,13 @@ mod tests {
                 };
                 let new_bf = || {
                     let branch_free = new_in(packed);
-                    assert_eq!(
-                        branch_free.x_ungap_matrix().is_some(),
-                        matrix != ScoringMatrix::Blosum62
-                    );
+                    // with the switch on (`x_tbn_ungap`), another matrix takes `x_pairs_bf_of`
+                    if crate::utils::xswitch::on("LOSAT_X_TBNUNGAP") {
+                        assert_eq!(
+                            branch_free.x_ungap_matrix().is_some(),
+                            matrix != ScoringMatrix::Blosum62
+                        );
+                    }
                     branch_free
                 };
                 let mut reference = new();
@@ -2199,11 +2210,14 @@ mod tests {
                 "{matrix:?} X-drops {x_dropoffs:?}: the units must give hits ({found})"
             );
         }
-        // The rule: BLOSUM62 takes its own walks, another matrix the walks with its table.
-        assert!(matches!(x_tbn_ungap(ScoringMatrix::Blosum62), (true, None)));
-        assert!(matches!(
+        // The rule: BLOSUM62 takes its own walks, another matrix the walks with its table; with
+        // the switch off (`LOSAT_X_TBNUNGAP=0`) every matrix takes the reference.
+        let on = crate::utils::xswitch::on("LOSAT_X_TBNUNGAP");
+        let (b62, b45) = (
+            x_tbn_ungap(ScoringMatrix::Blosum62),
             x_tbn_ungap(ScoringMatrix::Blosum45),
-            (true, Some(_))
-        ));
+        );
+        assert_eq!((b62.0, b62.1.is_some()), (on, false));
+        assert_eq!((b45.0, b45.1.is_some()), (on, on));
     }
 }

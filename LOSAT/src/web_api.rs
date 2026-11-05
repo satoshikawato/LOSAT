@@ -307,6 +307,8 @@ fn parse_blastn_args(
         command_line: None,
         // The command line's progress bar; a web search writes nothing to standard error.
         progress_bar: false,
+        one_query_batch: false,
+        first_query_ordinal: 0,
     };
 
     let mut index = 0;
@@ -426,6 +428,7 @@ fn parse_tblastx_args(
         subject_loc: None,
         archive: None,
         tabular_taxdb: None,
+        first_query_ordinal: 0,
     };
 
     let mut index = 0;
@@ -595,6 +598,7 @@ fn parse_blastp_args(
         archive: None,
         app: blastp::args::BlastpApp::Blastp,
         inclusion_ethresh: None,
+        first_query_ordinal: 0,
     };
 
     let mut index = 0;

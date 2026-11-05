@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "pylosat"
+description = "LOSAT, a pure-Rust reimplementation of NCBI BLAST+, as a Python library"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = ["blast", "bioinformatics", "alignment", "genomics"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/satoshikawato/LOSAT"
+
+[tool.maturin]
+module-name = "pylosat._pylosat"

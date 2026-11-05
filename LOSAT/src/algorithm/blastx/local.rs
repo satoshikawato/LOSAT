@@ -42,9 +42,10 @@ use std::io::{self, Write};
 ///
 /// Each requested `-outfmt` is read as on the command line, and NCBI's checks of the options and
 /// of the subjects come in the command line's order, before the search. The `-query` and
-/// `-subject` values of `args` are used only as display names. LOSAT Web writes outfmt 0, 6 and 7,
-/// 6 and 7 with a custom field list or delimiter too (the command line's writer of them,
-/// `report::render_queries`); the other formats, `-db` and `-parse_deflines` are refused. `-subject_loc` and `-query_loc` cut the records as the command line cuts them: each
+/// `-subject` values of `args` are used only as display names. Each format is the command line's
+/// writer of it (`report::render_queries`); the BLAST archive (outfmt 11), the side files of outfmt
+/// 13 and 14, `-db` and `-parse_deflines` are refused. LOSAT Web asks for outfmt 0, 6 and 7, 6 and
+/// 7 with a custom field list or delimiter too. `-subject_loc` and `-query_loc` cut the records as the command line cuts them: each
 /// subject as it is read, each query as its batch is read (`native::run_inner`).
 ///
 /// The records are those of NCBI's reader (`fasta_reader`): the queries as its nucleotide reader
@@ -130,6 +131,18 @@ pub fn run_local(
         .iter_mut()
         .map(|format| format.sink.open())
         .collect::<io::Result<Vec<_>>>()?;
+    // The writer of each XML2 or JSON document (outfmt 15 and 16), which the run keeps across the
+    // query batches (`native::run_inner`).
+    let mut documents: Vec<_> = resolved
+        .iter()
+        .map(|options| {
+            super::blast_xml::xml2_kind(options.outfmt).map(|kind| {
+                let files: crate::report::blast_xml2::RunSideFiles =
+                    Box::new(crate::report::blast_xml2::NoSideFiles);
+                super::blast_xml::xml2_writer(kind, options, &subjects, &shown, files)
+            })
+        })
+        .collect();
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     // ```c++
     //         formatter.PrintProlog();
@@ -142,6 +155,11 @@ pub fn run_local(
             &mut quiet
         };
         report::write_prolog(writer, warnings, options, &subjects, &shown).map_err(report_error)?;
+        if let Some(document) = &mut documents[index] {
+            let mut start = Vec::new();
+            document.start(&mut start);
+            writer.write_all(&start).map_err(output_error)?;
+        }
         writer.flush().map_err(output_error)?;
     }
     // NCBI: a batch size of 0 makes the first batch empty, and its query factory refuses it.
@@ -205,6 +223,19 @@ pub fn run_local(
             engine(error)
         }
     };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
+    // ```c++
+    //         formatter.PrintProlog();
+    //         ...
+    //         /*** Process the input ***/
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    //         ...
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    // ```
+    // What the run writes before its query batches ends here.
+    if let Some(observer) = observer.as_deref_mut() {
+        observer.queries_begin();
+    }
     let made_hits = hits_sink.is_some() || choices.iter().any(|choice| choice.number == 0);
     let mut run_hits = Vec::new();
     let mut first_hsp = 0;
@@ -222,6 +253,26 @@ pub fn run_local(
             ),
             false => None,
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
+        // ```c++
+        //     // find the first valid context corresponding to this query
+        //     for (i = 0; i < context_per_query; i++) {
+        //         BlastContextInfo *ctx = query_info->contexts +
+        //                                 query_number * context_per_query + i;
+        //         if (ctx->is_valid) {
+        //             m_SearchSpace = ctx->eff_searchsp;
+        //             m_LengthAdjustment = ctx->length_adjustment;
+        //             break;
+        // ```
+        // The statistics of each query of the batch for the observer.
+        if let Some(observer) = observer.as_deref_mut() {
+            super::blast_xml::observe_query_stats(
+                search_options,
+                results,
+                queries_before,
+                &mut *observer,
+            );
+        }
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:289-290
         // ```c++
         //             	ITERATE(CSearchResultSet, result, *results) {
@@ -247,7 +298,7 @@ pub fn run_local(
                 &shown,
                 results,
                 queries_before,
-                None,
+                documents[index].as_mut(),
                 Some(LocalReport {
                     probe: probe.as_mut(),
                     first_hsp,
@@ -292,7 +343,13 @@ pub fn run_local(
             &mut quiet
         };
         report::write_epilog(
-            writer, warnings, options, &subjects, &shown, processed, None,
+            writer,
+            warnings,
+            options,
+            &subjects,
+            &shown,
+            processed,
+            documents[index].as_mut(),
         )
         .map_err(report_error)?;
         writer.flush().map_err(output_error)?;
@@ -362,10 +419,10 @@ fn read_options(
     for outfmt in outfmts {
         let choice = app::parse_formatting_string(outfmt)?;
         app::report_format(&choice, Program::Blastx, None)?;
-        // No NCBI counterpart: the formats of LOSAT Web (`docs/web/abi_v2.md`).
-        if !matches!(choice.number, 0 | 6 | 7) {
+        // No NCBI counterpart: the archive and the side files have no writer in memory here.
+        if matches!(choice.number, 11 | 13 | 14) {
             bail!(
-                "output format {} is not supported in the browser for BLASTX",
+                "output format {} is not supported in memory for BLASTX",
                 choice.number
             );
         }

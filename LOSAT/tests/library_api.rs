@@ -1053,6 +1053,7 @@ fn parsed_ids_show_as_on_the_command_line() {
     for program in [
         Program::Blastn,
         Program::Blastp,
+        Program::Blastx,
         Program::Tblastn,
         Program::Tblastx,
     ] {
@@ -1319,6 +1320,239 @@ fn the_example_prints_the_command_lines_report_and_writes_only_its_warnings_to_s
             case.program
         );
     }
+}
+
+/// One database search: a program, a query and a database under `LOSAT/tests`, and options. The
+/// whole set of database searches through the API is `tests/db_search_fixtures.py check --library`.
+struct DatabaseCase {
+    program: Program,
+    query: &'static str,
+    db: &'static str,
+    options: &'static [&'static str],
+}
+
+const DATABASE_CASES: &[DatabaseCase] = &[
+    DatabaseCase {
+        program: Program::Blastn,
+        query: "seqdb/nucl.fna",
+        db: "seqdb/db/nucl_v5",
+        options: &["-task", "blastn"],
+    },
+    DatabaseCase {
+        program: Program::Blastp,
+        query: "seqdb/prot.faa",
+        db: "seqdb/db/prot_v5",
+        options: &[],
+    },
+    // A sequence with parsed Seq-ids shows the ids of its definition lines.
+    DatabaseCase {
+        program: Program::Blastp,
+        query: "db_search/ids/ids_q.faa",
+        db: "db_search/ids/prot_v5",
+        options: &[],
+    },
+    DatabaseCase {
+        program: Program::Blastx,
+        query: "db_search/bslice_q.fna",
+        db: "db_search/bslice",
+        options: &[],
+    },
+    DatabaseCase {
+        program: Program::Blastx,
+        query: "db_search/ids/ids_q.fna",
+        db: "db_search/ids/prot_v5",
+        options: &[],
+    },
+    DatabaseCase {
+        program: Program::Tblastn,
+        query: "db_search/tslice_q.faa",
+        db: "db_search/tslice",
+        options: &[],
+    },
+    DatabaseCase {
+        program: Program::Tblastx,
+        query: "db_search/xslice_q.fna",
+        db: "db_search/xslice",
+        options: &[],
+    },
+];
+
+fn engine_tests(name: &str) -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join(name)
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
+impl DatabaseCase {
+    /// The query file's records and the search, as `-db` runs them.
+    fn read(&self) -> (Vec<u8>, Vec<FastaRecord>, LOSAT::api::Search) {
+        let bytes = std::fs::read(engine_tests(self.query)).unwrap();
+        let search = validate(self.program, self.options).unwrap();
+        let (records, none) = read_inputs(&search, &bytes, b"").unwrap();
+        assert!(none.is_empty());
+        (bytes, records, search)
+    }
+
+    /// The command line's report for one `-outfmt`.
+    fn cli(&self, outfmt: &str) -> Vec<u8> {
+        let output = command(env!("CARGO_BIN_EXE_losat"))
+            .arg(self.program.name())
+            .arg("-query")
+            .arg(engine_tests(self.query))
+            .arg("-db")
+            .arg(engine_tests(self.db))
+            .args(self.options)
+            .arg("-outfmt")
+            .arg(outfmt)
+            .output()
+            .expect("run the command line");
+        assert!(
+            output.status.success(),
+            "{} {} -outfmt {outfmt}: {}",
+            self.program,
+            self.db,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    }
+}
+
+#[test]
+fn a_database_search_is_the_command_lines() {
+    for case in DATABASE_CASES {
+        let context = format!("{} {}", case.program, case.db);
+        let (_, records, search) = case.read();
+        let db = engine_tests(case.db);
+        let query_name = engine_tests(case.query);
+        let inputs = Inputs::database(&records, &db).named(&query_name, "ignored");
+        let formats = ["6", "0", "7", "5", "11", COLUMNS];
+        let outcome = run_collect(&search, inputs, &formats).unwrap();
+        for (report, outfmt) in outcome.reports.iter().zip(formats) {
+            assert!(
+                report.bytes == case.cli(outfmt),
+                "{context} -outfmt {outfmt}"
+            );
+        }
+        assert!(!outcome.hsps.is_empty(), "{context}");
+        // The typed values are the columns, each row's span in every report that has rows.
+        let table = &outcome.reports[5].bytes;
+        let rows = rows(table);
+        assert_eq!(rows.len(), outcome.hsps.len(), "{context}");
+        for (hsp, row) in outcome.hsps.iter().zip(rows) {
+            check_columns(&context, hsp, &table[row]);
+            assert!(outcome.reports[0].spans[hsp.index].is_some(), "{context}");
+            assert!(outcome.reports[1].spans[hsp.index].is_some(), "{context}");
+            assert!(
+                outcome.reports[1].subject_headings[hsp.index].is_some(),
+                "{context}"
+            );
+        }
+        // One sequence has one ordinal id, whichever query hit it.
+        let mut ids = std::collections::HashMap::new();
+        for hsp in &outcome.hsps {
+            let id = ids
+                .entry(hsp.s_idx)
+                .or_insert_with(|| hsp.subject_id.clone());
+            assert_eq!(*id, hsp.subject_id, "{context}");
+        }
+        // The statistics are those of the XML report.
+        let xml = String::from_utf8_lossy(&outcome.reports[3].bytes);
+        let searched: Vec<usize> = (0..records.len()).collect();
+        check_statistics(&context, &outcome, &xml, &searched);
+    }
+}
+
+#[test]
+fn a_database_record_is_the_database_ordinal_id_in_every_batch() {
+    for case in DATABASE_CASES {
+        let context = format!("{} {}", case.program, case.db);
+        let (_, records, search) = case.read();
+        // Enough letters for two query batches of every program but BLASTN (whose batches follow
+        // the extensions): each batch names the sequences of its own hit lists.
+        let letters: usize = records.iter().map(|record| record.seq().len()).sum();
+        let repeated: Vec<FastaRecord> = (0..=40_000 / letters.max(1))
+            .flat_map(|copy| {
+                records.iter().enumerate().map(move |(index, record)| {
+                    FastaRecord::new(
+                        format!("Query_{}", copy * 1000 + index + 1),
+                        record.title(),
+                        record.seq(),
+                    )
+                })
+            })
+            .take(if case.program == Program::Blastn {
+                8
+            } else {
+                usize::MAX
+            })
+            .collect();
+        let db = engine_tests(case.db);
+        let inputs = Inputs::database(&repeated, &db);
+        let whole = run_collect(&search, inputs, &["6"]).unwrap();
+        let batches = run_batches(&search, inputs).unwrap();
+        assert_eq!(batches.query_count(), repeated.len(), "{context}");
+        let (mut hsps, mut stats, mut diagnostics, mut count) =
+            (Vec::new(), Vec::new(), Vec::new(), 0);
+        for batch in batches {
+            let batch = batch.unwrap_or_else(|error| panic!("{context}: {error}"));
+            hsps.extend(batch.hsps);
+            stats.extend(batch.query_stats);
+            diagnostics.extend(batch.diagnostics);
+            count += 1;
+        }
+        assert!(
+            count >= 2 || case.program == Program::Blastn,
+            "{context}: {count} batches"
+        );
+        assert!(hsps == whole.hsps, "{context}: the records");
+        assert_eq!(stats, whole.query_stats, "{context}: the statistics");
+        assert_eq!(diagnostics, whole.diagnostics, "{context}: the diagnostics");
+    }
+}
+
+#[test]
+fn a_database_fails_as_on_the_command_line() {
+    // The database does not open: NCBI's error, as the command line writes it.
+    let case = &DATABASE_CASES[0];
+    let (_, records, search) = case.read();
+    let missing = engine_tests("seqdb/db/no_such_database");
+    let error = run_collect(&search, Inputs::database(&records, &missing), &["6"]).unwrap_err();
+    assert!(matches!(error, Error::Search(_)), "{error}");
+    let output = command(env!("CARGO_BIN_EXE_losat"))
+        .args(["blastn", "-query"])
+        .arg(engine_tests(case.query))
+        .arg("-db")
+        .arg(&missing)
+        .output()
+        .unwrap();
+    assert_eq!(
+        error.message().as_bytes(),
+        output.stderr,
+        "the message of a database that does not open"
+    );
+    // The batches meet it in their first search.
+    let mut batches = run_batches(&search, Inputs::database(&records, &missing)).unwrap();
+    assert!(matches!(batches.next(), Some(Err(Error::Search(_)))));
+    assert!(batches.next().is_none());
+    // Each kind of subject has its options: `validate` holds an argv for either, and the search
+    // of the inputs gives the parser's message.
+    let only_database = validate(Program::Blastn, &["-taxids", "9606"]).unwrap();
+    let error = run_collect(&only_database, Inputs::new(&records, &records), &["6"]).unwrap_err();
+    assert!(matches!(error, Error::Argv(_)), "{error}");
+    assert!(error.message().contains("-taxids"), "{error}");
+    let only_subject = validate(Program::Blastn, &["-subject_loc", "1-10"]).unwrap();
+    let inputs = Inputs::database(&records, &missing);
+    let error = run_collect(&only_subject, inputs, &["6"]).unwrap_err();
+    assert!(matches!(error, Error::Argv(_)), "{error}");
+    assert!(error.message().contains("-subject_loc"), "{error}");
+    // Queries without a record are NCBI's warning, after the database opened.
+    let db = engine_tests(case.db);
+    let outcome = run_collect(&search, Inputs::database(&[], &db), &["6"]).unwrap();
+    assert_eq!(outcome.diagnostics, b"Warning: [blastn] Query is Empty!\n");
+    assert!(outcome.reports[0].bytes.is_empty());
 }
 
 #[test]

@@ -3,7 +3,7 @@
 - Decision ID: `PD-LOSAT-WEB-APP-BOUNDARY`
 - Version: 1.1
 - Date: 2026-09-29; amended 2026-11-04
-- Status: Accepted by the maintainer on 2026-09-29 (plan decisions DW-1 and DW-12 in
+- Status: Accepted by the maintainer on 2026-09-29 (plan decisions DW-1 and DW-49, numbered DW-12 until 2026-11-05, in
   [`docs/losat_web_gui_plan.md`](../losat_web_gui_plan.md)). 1.1 2026-11-04 (the maintainer's
   instruction of 2026-11-04, recorded in [`docs/web/ncbi_ui_mapping.md`](../web/ncbi_ui_mapping.md)
   §4: a run's mark says "Supported" or "Not yet supported", and LOSAT Web, the README and the

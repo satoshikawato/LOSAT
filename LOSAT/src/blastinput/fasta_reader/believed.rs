@@ -459,6 +459,24 @@ pub(crate) fn refuse_range_in_archive(role: &str, program: &str) -> anyhow::Erro
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:633-640
+// ```c++
+//     if (has_range) {
+//         auto old_id = FindBestChoice(GetIDs(), CSeq_id::BestRank);
+//         // generate a new ID, and record its relation to the given one(s).
+//         SetIDs().clear();
+//         GenerateID();
+//
+//         CRef<CSeq_align> align = xCreateAlignment(old_id,
+//             GetIDs().front(), range_start, range_end);
+// ```
+/// Whether the defline `defline` read under `-parse_deflines` has a first word with a range:
+/// what `refuse_range_in_archive` refuses, for a caller whose reader did not (`archive_known`).
+pub(crate) fn defline_has_range(defline: &[u8], protein: bool, program: &'static str) -> bool {
+    parse_believed_defline(defline, protein, program, 0, &mut |_| {})
+        .is_ok_and(|parsed| parsed.range)
+}
+
 /// The local id `id_prefix` + `n` that `GenerateID` makes for a record without ids.
 pub(crate) fn generated_ids(id: &str) -> Vec<ParsedSeqId> {
     vec![ParsedSeqId::Local(ObjectId::Str(id.as_bytes().to_vec()))]

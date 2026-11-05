@@ -24,6 +24,18 @@
 //! # Ok(()) }
 //! ```
 //!
+//! A BLAST database in place of the subject records (the command line's `-db`, found on the
+//! `BLASTDB` search path):
+//!
+//! ```no_run
+//! # use LOSAT::api::{read_inputs, run_collect, validate, Error, Inputs, Program};
+//! # fn use_it(fasta: &[u8]) -> Result<(), Error> {
+//! let search = validate(Program::Blastn, &["-taxids", "9606", "-evalue", "1e-5"])?;
+//! let (query, _) = read_inputs(&search, fasta, b"")?;
+//! let outcome = run_collect(&search, Inputs::database(&query, "core_nt"), &["6"])?;
+//! # Ok(()) }
+//! ```
+//!
 //! Many queries, one of NCBI's query batches in memory at a time:
 //!
 //! ```no_run
@@ -42,9 +54,12 @@
 //! # Contract
 //!
 //! - The options are one argv, parsed by the command line's parser ([`validate`]). The inputs
-//!   (`-query`, `-subject`), the output file and the output format are not options here: the
-//!   records come from [`read_fasta`] in an [`Inputs`], the formats are arguments of
-//!   [`run_collect`] and [`run`](run()).
+//!   (`-query`, `-subject`, `-db`), the output file and the output format are not options here:
+//!   the records come from [`read_fasta`] in an [`Inputs`], a database by its name
+//!   ([`Inputs::database`]), the formats are arguments of [`run_collect`] and [`run`](run()).
+//!   [`validate`] holds an argv for either kind of subject; the search of the inputs fails with
+//!   the parser's message on an option of the other kind (`-subject_loc` excludes a database,
+//!   `-taxids` needs one).
 //! - Each report of [`run_collect`] is byte for byte what the command line writes to `-out` for
 //!   that `-outfmt` alone, with the inputs' names where the command line shows its file names.
 //!   [`Report`] tells where each HSP lies in its bytes. The HSP records ([`HspRecord`]) are the
@@ -62,11 +77,16 @@
 //!   once; each has its own pool and its own outputs.
 //! - The environment variables that the command line reads (`LOSAT_X_*` performance switches,
 //!   which change no output; the diagnostic variables of `docs/agents/diagnostics.md`) are read
-//!   here too.
+//!   here too. A database search reads what the command line reads to find a database (`BLASTDB`,
+//!   `.ncbirc`) and the query batch and archive settings (`BATCH_SIZE`, `ARCHIVE_FORMAT`, ...);
+//!   a search of records reads no NCBI setting.
 //! - [`run_batches`] searches one of NCBI's query batches at a time: the host reports progress
 //!   between batches and stops the search by not asking for the next one. Inside a batch only
 //!   the host can stop it, by ending the thread or the process.
-//! - Not in this API: a database subject (`-db`), `psiblast`, `makeblastdb`, `blastdbcmd`.
+//! - The records are read before the search, so a reader error is an [`Error::Input`] before
+//!   any report, where the command line has reported the batches before the error.
+//! - Not in this API yet: outfmt 13 and 14 (their side files), `psiblast`, `makeblastdb`,
+//!   `blastdbcmd`.
 //!
 //! # Items
 //!

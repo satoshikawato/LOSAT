@@ -31,6 +31,11 @@ taxonomy database or a BLASTDB), compares stdout,
 stderr and exit status with the frozen files (and checks that each frozen file's sha256 is the
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
 line), writes the same lines to --out, and exits 0 only when every row is `same` or `rejection`.
+With `--library` BIN is `examples/library_database`, the same search through the library API: a
+failure's exit status counts as any other failure's, a row whose query the reader refuses is
+`library-input-error` when the message is the command line's (the library reads the whole query
+before it searches, so the reports of the batches before the error do not exist), and the rows that
+the API does not run (psiblast's, and outfmt 13 and 14 with their side files) are `library-skip`.
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
@@ -224,9 +229,17 @@ def freeze(args: argparse.Namespace) -> int:
     return 0
 
 
-def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str]) -> tuple[str, str]:
-    command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
+def status_differs(observed: int, expected: int, library: bool) -> bool:
+    """Whether a run's exit status is not the frozen one. `examples/library_database.rs` ends every
+    failure with status 1: the library API's errors carry the command line's message, not its status."""
+    return (observed != 0) != (expected != 0) if library else observed != expected
+
+
+def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False) -> tuple[str, str]:
     files = xinclude.wants_files(row)
+    if library and (files or row["program"] == "psiblast"):
+        return "library-skip", ""
+    command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     if files:
         written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
                                           env=row_env(row, env), timeout=TIMEOUT)
@@ -235,9 +248,11 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         run = subprocess.run(command, cwd=ENGINE, capture_output=True, env=row_env(row, env), timeout=TIMEOUT)
     if row["kind"] == "losat-rejection":
         problems = []
-        if run.returncode != int(row["rc"]):
+        if status_differs(run.returncode, int(row["rc"]), library):
             problems.append(f"exit {run.returncode}, expected {row['rc']}")
-        if run.stdout:
+        # The library writes as the search goes (`api::run`): nothing holds the bytes before a
+        # refusal, as the command line holds them.
+        if run.stdout and not library:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
         if expected_text(row).encode() not in run.stderr:
             problems.append(f"stderr lacks {expected_text(row)!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
@@ -245,6 +260,11 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     out = (FROZEN / f"{row['row_id']}.out").read_bytes()
     err_path = FROZEN / f"{row['row_id']}.err"
     err = err_path.read_bytes() if row["stderr_sha256"] else b""
+    # The library reads the whole query before it searches: a reader error ends the call there,
+    # with the command line's message of it, before the reports of the batches before it.
+    if library and run.returncode != 0 and int(row["rc"]) != 0 and run.stdout == b"" \
+            and run.stderr.startswith(b"BLAST query error:") and run.stderr in err:
+        return "library-input-error", ""
     problems = []
     if files:
         problems += xinclude.problems(written, row, FROZEN, first_difference)
@@ -252,7 +272,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         problems.append("frozen .out does not match the manifest")
     if (sha256(err) if err else "") != row["stderr_sha256"] or err_path.exists() != bool(row["stderr_sha256"]):
         problems.append("frozen .err does not match the manifest")
-    if run.returncode != int(row["rc"]):
+    if status_differs(run.returncode, int(row["rc"]), library):
         problems.append(f"exit {run.returncode}, expected {row['rc']}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
     # A SAM row differs in the command line of the @PG line only (`strip_sam_cl`).
     if not files:
@@ -274,7 +294,7 @@ def check(args: argparse.Namespace) -> int:
     for row in read_manifest()[1]:
         if not selected(row, args):
             continue
-        status, detail = check_row(row, losat, args.threads, env)
+        status, detail = check_row(row, losat, args.threads, env, args.library)
         bad += status == "differs"
         lines.append(f"{row['row_id']}\t{status}\t{detail}")
     text = "".join(line + "\n" for line in lines)
@@ -298,6 +318,8 @@ def main() -> int:
     ck.add_argument("--program", choices=PROGRAMS, default="", help="only the rows of this program (default: all)")
     ck.add_argument("--only", default="")
     ck.add_argument("--out", type=Path)
+    ck.add_argument("--library", action="store_true",
+                    help="--losat is examples/library_database (the search through the library API)")
     args = parser.parse_args()
     return freeze(args) if args.command == "freeze" else check(args)
 

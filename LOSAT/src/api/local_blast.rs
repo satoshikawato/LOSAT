@@ -26,6 +26,16 @@ pub use crate::algorithm::tblastx::blast_engine::run as run_tblastx;
 // }
 // ```
 pub use crate::algorithm::tblastx::blast_engine::run_local as run_local_tblastx;
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:113-119
+// ```c++
+//         /*** Initialize the database/subject ***/
+//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
+//         CRef<CLocalDbAdapter> db_adapter;
+//         CRef<CScope> scope;
+//         InitializeSubject(db_args, opts_hndl, m_CmdLineArgs->ExecuteRemotely(),
+//                          db_adapter, scope);
+// ```
+pub use crate::algorithm::tblastx::blast_engine::run_local_database as run_local_database_tblastx;
 
 // Re-export BLASTN run function
 pub use crate::algorithm::blastn::blast_engine::run as run_blastn;
@@ -39,6 +49,16 @@ pub use crate::algorithm::blastn::blast_engine::run as run_blastn;
 // }
 // ```
 pub use crate::algorithm::blastn::blast_engine::run_local as run_local_blastn;
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
+// ```c++
+//         /*** Initialize the database/subject ***/
+//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
+//         CRef<CLocalDbAdapter> db_adapter;
+//         CRef<CScope> scope;
+//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+//                          db_adapter, scope);
+// ```
+pub use crate::algorithm::blastn::blast_engine::run_local_database as run_local_database_blastn;
 
 // Re-export the pool of a run of several searches (`run_local` calls of one argv), which they
 // share instead of building one each (no NCBI counterpart: NCBI's CLI searches once per run).
@@ -55,6 +75,16 @@ pub use crate::utils::threading::with_run_pool;
 // ```
 pub use crate::algorithm::blastp::blast_engine::run as run_blastp;
 pub use crate::algorithm::blastp::blast_engine::run_local as run_local_blastp;
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:194-199
+// ```c++
+//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
+//         CRef<CLocalDbAdapter> db_adapter;
+//         CRef<CScope> scope;
+//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+//                          db_adapter, scope);
+//         _ASSERT(db_adapter && scope);
+// ```
+pub use crate::algorithm::blastp::blast_engine::run_local_database as run_local_database_blastp;
 
 // Re-export the TBLASTN entry
 // NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:289-301
@@ -68,6 +98,15 @@ pub use crate::algorithm::blastp::blast_engine::run_local as run_local_blastp;
 // }
 // ```
 pub use crate::algorithm::tblastn::run_local as run_local_tblastn;
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193
+// ```c++
+//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
+//         CRef<CLocalDbAdapter> db_adapter;
+//         CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
+//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+//                          db_adapter, scope);
+// ```
+pub use crate::algorithm::tblastn::run_local_database as run_local_database_tblastn;
 
 // Re-export BLASTX's shared entry (web ABI v2).
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
@@ -77,6 +116,16 @@ pub use crate::algorithm::tblastn::run_local as run_local_tblastn;
 //                 results = lcl_blast.Run();
 // ```
 pub use crate::algorithm::blastx::run_local as run_local_blastx;
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-200
+// ```c++
+//         /*** Initialize the database/subject ***/
+//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
+//         CRef<CLocalDbAdapter> db_adapter;
+//         CRef<CScope> scope;
+//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+//                          db_adapter, scope);
+// ```
+pub use crate::algorithm::blastx::run_local_database as run_local_database_blastx;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
 // ```c
@@ -134,6 +183,16 @@ pub struct FormatOutput<'a> {
     pub sink: OutputSink<'a>,
 }
 
+impl FormatOutput<'_> {
+    /// Whether this output is the BLAST archive (outfmt 11).
+    fn is_archive(&self) -> bool {
+        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+        parse_formatting_string(self.outfmt).is_ok_and(|choice| {
+            ReportFormat::from_number(choice.number) == Some(ReportFormat::ArchiveFormat)
+        })
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
 // ```c
 // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
@@ -188,6 +247,24 @@ pub type HspIndex = usize;
 // The observed units follow NCBI's: one printed row per HSP in outfmt 6 and 7, and in
 // outfmt 0 the output of one x_DisplayAlnvecInfo call without the subject defline that
 // it prints before the first HSP of each subject (the section starts at " Score =").
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
+// ```c++
+// const char* kDfltArgTabularOutputFmt =
+//     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
+//     "evalue bitscore";
+// ```
+/// A sequence of a database that a search reported (`FormatObserver::database_subjects`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportedSubject {
+    /// The sequence's ordinal id in the database (the `n` of `gnl|BL_ORD_ID|n`), the same in
+    /// every search of the database.
+    pub oid: u32,
+    /// The `saccver` of the default tabular report.
+    pub id: std::sync::Arc<str>,
+    /// Its letters.
+    pub length: usize,
+}
 
 /// Reports which HSP a formatter is writing, so that a caller can relate each HSP to its
 /// bytes in every output, and the statistics of each query of the search. The written bytes do
@@ -275,6 +352,22 @@ pub trait FormatObserver {
     /// BLASTN's query batch just searched made `extensions` successful initial extensions, which
     /// size the next batch (`CBatchSizeMixer`). The other programs' batches have one size.
     fn batch_extensions(&mut self, _extensions: i32) {}
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
+    // ```c++
+    //        		const CBioseq_Handle& subject_bh =
+    //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+    //             if(setSubjectId) {
+    //             	SetSubjectId(subject_bh);
+    //             }
+    //             m_SubjectLength = subject_bh.GetBioseqLength();
+    // ```
+    // NCBI's reports read a subject's ids and length by the Seq-align's id; a database search's
+    // hit list names its sequences by rank, and this event tells what the ranks are.
+    /// The sequences that `Hit::s_idx` of a database search's final hit list (`ReportOutputs::hits`)
+    /// names, by that index. The call comes once, with `ReportOutputs::hits` only (the program
+    /// does not make these values otherwise).
+    fn database_subjects(&mut self, _subjects: Vec<ReportedSubject>) {}
 }
 
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
@@ -367,13 +460,66 @@ impl ReportOutputs<'_> {
     /// (`blastinput::app::check_search_environment`); a call without formats (hit records
     /// only) is not.
     pub(crate) fn only_archive(&self) -> bool {
-        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
-        !self.formats.is_empty()
-            && self.formats.iter().all(|format| {
-                parse_formatting_string(format.outfmt).is_ok_and(|choice| {
-                    ReportFormat::from_number(choice.number) == Some(ReportFormat::ArchiveFormat)
-                })
-            })
+        !self.formats.is_empty() && self.formats.iter().all(FormatOutput::is_archive)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:913-916
+    // ```c++
+    // void PrintErrorArchive(const CArgs & a, const list<CRef<CBlast4_error> > & msg)
+    // {
+    // 	try {
+    // 		if(NStr::StringToInt(NStr::TruncateSpaces(a[align_format::kArgOutputFormat].AsString())) == CFormattingArgs::eArchiveFormat) {
+    // ```
+    /// `handle` with the `-outfmt` text of the requested archive format: an error archive
+    /// follows that text (`ArchiveHandle::with_outfmt_text`).
+    pub(crate) fn with_archive_outfmt(
+        &self,
+        handle: crate::report::archive::ArchiveHandle,
+    ) -> crate::report::archive::ArchiveHandle {
+        match self.formats.iter().find(|format| format.is_archive()) {
+            Some(format) => handle.with_outfmt_text(format.outfmt),
+            None => handle,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
+    // ```c++
+    //     } CATCH_ALL(status)
+    //
+    //     if(!m_Bah.GetMessages().empty()) {
+    //     	const CArgs & a = GetArgs();
+    //     	PrintErrorArchive(a, m_Bah.GetMessages());
+    //     }
+    // ```
+    /// The end of a run with a BLAST archive (outfmt 11) that `result` closes: NCBI writes an
+    /// error archive after the archives of the batches before when the application stops with one
+    /// of its own errors, and when the run ends with messages that no archive carried. `no_query`:
+    /// the run ended at `Query is Empty!`, where NCBI returns before its `PrintErrorArchive`.
+    pub(crate) fn finish_archive(
+        &mut self,
+        handle: &crate::report::archive::ArchiveHandle,
+        no_query: bool,
+        result: anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        let lines = match &result {
+            // The errors of `Run`, the files' among them (`run_local_database` opens no file
+            // that the argument handling opens).
+            Err(error) => crate::report::archive::error_lines(error, true),
+            Ok(()) if no_query => None,
+            Ok(()) => handle.has_messages().then(Vec::new),
+        };
+        if let (Some(lines), Some(format)) = (
+            lines,
+            self.formats.iter_mut().find(|format| format.is_archive()),
+        ) {
+            let mut writer = format.sink.open()?;
+            let written = crate::report::archive::write_error_archive(handle, &lines, &mut writer)
+                .and_then(|()| writer.flush().map_err(anyhow::Error::from));
+            if result.is_ok() {
+                written?;
+            }
+        }
+        result
     }
 
     /// Runs `f` with the same outputs and a diagnostics stream that also saves what it

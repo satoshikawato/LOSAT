@@ -1122,6 +1122,7 @@ fn field_value(
 /// What the reports show of the subjects: `-subject`'s path (`User specified sequence
 /// set`), or `-db`'s name, its `Database:` lines and the reported sequences of the query
 /// batch, by rank (`database::ReportedSubjects`: ids, stored titles).
+#[derive(Clone, Copy)]
 pub(crate) enum ShownSubjects<'a> {
     Fasta {
         path: &'a Path,

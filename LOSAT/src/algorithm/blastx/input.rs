@@ -630,7 +630,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         if line.is_empty() || matches!(line[0], b';' | b'#' | b'!') {
             continue;
         }
-        // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:383-397
+        // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:383-398
         // ```c++
         //         if (c == '!'  ||  c == '#' || c == ';') {
         //             // no content, just a comment or blank line
@@ -3138,7 +3138,7 @@ mod defline_tests {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:383-397
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:383-398
     // ```c++
     //         if (c == '!'  ||  c == '#' || c == ';') {
     //             // no content, just a comment or blank line

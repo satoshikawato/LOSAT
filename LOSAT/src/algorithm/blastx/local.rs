@@ -802,7 +802,7 @@ fn search_database(
 /// options, with the messages of a run. A run reports NCBI's errors after the subjects are read,
 /// so for an argv and records that both fail the run reports the records' error.
 pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
-    let (choices, resolutions) = read_options(args, outfmts, false, &[11, 13, 14])?;
+    let (choices, resolutions) = read_options(args, outfmts, false, side_files(args))?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     parse_subject_range(args)?;
     parse_query_range(args)?;
@@ -880,7 +880,7 @@ fn read_format_options(
     for outfmt in outfmts {
         let choice = app::parse_formatting_string(outfmt)?;
         app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
-        // No NCBI counterpart: the archive and the side files have no writer in memory here.
+        // No NCBI counterpart: the side files of outfmt 13 and 14 have no writer in memory.
         if unwritten.contains(&choice.number) {
             bail!(
                 "output format {} is not supported in memory for BLASTX",

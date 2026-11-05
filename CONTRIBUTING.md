@@ -130,7 +130,7 @@ Before opening a PR, please verify:
 - [ ] An issue was opened and approved by the maintainer for non-trivial changes.
 - [ ] Relevant NCBI C/C++ source citations are included in code comments for all ported algorithms.
 - [ ] No runtime, build, or fallback code invokes external NCBI binaries or libraries.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings` pass. Clippy runs, but `LOSAT/src/lib.rs`, `LOSAT/src/main.rs` and several test files start with `#![allow(warnings, clippy::all)]`, so its lints do not apply to that code yet. Removing those lines is planned work (SW5 of the engineering-quality line).
+- [ ] `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings` pass. Clippy runs, but `#![allow(warnings, clippy::all)]` at the top of `LOSAT/src/lib.rs` and `LOSAT/src/main.rs` (and of several test files) turns its lints and the compiler's warnings off for the whole library and command, so it reports nothing in `LOSAT/src` yet. Removing those lines is planned work (SW5 of the engineering-quality line).
 - [ ] Parity comparison tests confirm bit-identical output with NCBI BLAST+ on affected profiles.
 
 ---
@@ -141,8 +141,8 @@ Before opening a PR, please verify:
 - `dev` goes to `main` once a week, in one pull request from a branch `promote/<date>` at a `dev` commit (a promotion with no change of its own). From the promotion of v0.2.0 on, a session of the engineering-quality line (or, when none runs, the release line) opens it on Tuesday (JST):
   1. Pick the newest `dev` commit whose `ci.yml` run passed: the run that Dev head (`.github/workflows/dev-head.yml`) started, or a push run. Do not promote a commit whose run failed or is still running.
   2. `git push origin <sha>:refs/heads/promote/<YYYY-MM-DD>` and `gh pr create --draft --base main --head promote/<YYYY-MM-DD>`. The body lists the pull requests merged into `dev` since the last promotion (`git log --first-parent --merges <last promotion>..<sha>`).
-  3. The repository owner marks it ready. `platform checks result` runs the pull-request set; the owner reads it (every `outputs (<id>)` job, the compare job and every `cargo test (<id>)` job) and merges.
-  4. The push to `main` runs the full set of platform checks (five platforms). With the weekly run (Sunday 19:23 UTC) these are the two full-set runs that the switch lifetime rule counts (`AGENTS.md`, "Lifetime").
+  3. The repository owner marks it ready. `platform checks result` runs the pull-request set (every `outputs (<id>)` job, the compare job and every `cargo test (<id>)` job), and auto-merge merges the pull request when it and the other required checks pass.
+  4. The push to `main` runs the full set of platform checks (five platforms) when the engine, the Cargo files or the workflow changed, as they do in a promotion. With the weekly run (Sunday 19:23 UTC) these are the two full-set runs that the switch lifetime rule counts (`AGENTS.md`, "Lifetime").
 - After the promotion is merged, the same session checks which switches graduate (on `dev` for 7 days and in two passing full-set runs after reaching `main`) and opens one pull request per graduation, into `dev`.
 - Pull requests of this repository get auto-merge (merge commit) when they are opened as ready or marked ready for review.
 - A pull request into `dev` merges when `rust`, `fast output regressions` and `web result` pass. The pull request into `main` merges when those and `platform checks result` pass (the rulesets are set by the repository owner).

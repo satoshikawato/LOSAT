@@ -20,7 +20,7 @@ User reports and scientific feedback inform the project, but LOSAT is not govern
 - internal architecture, data structures, and dependency changes;
 - performance optimization strategies;
 - release contents, milestones, and timing; and
-- whether a proposed change is sufficiently maintainable, verified, and aligned with project goals to merge.
+- whether a proposed change is sufficiently maintainable, tested, and aligned with project goals to merge.
 
 A technically functioning pull request may still be declined if it would introduce:
 
@@ -28,8 +28,8 @@ A technically functioning pull request may still be declined if it would introdu
 - heuristic approximations or non-NCBI candidate pruning;
 - an external runtime dependency or fallback to NCBI binaries;
 - unnecessary complexity or excessive maintenance overhead;
-- parallel implementation paths or uncertified options; or
-- scope drift (e.g., pre-formatted database indexing, unsupported programs).
+- parallel implementation paths, or options whose output has not been compared with NCBI BLAST+; or
+- scope drift (e.g., features that NCBI BLAST+ does not have, unsupported programs).
 
 ---
 
@@ -39,7 +39,7 @@ All contributions that touch alignment or search code must strictly satisfy thes
 
 ### 1. NCBI BLAST+ Source as the Ground Truth
 - The authoritative reference for all algorithmic behavior is the official NCBI BLAST C/C++ source code (`ncbi-blast`).
-- We do not speculate, approximate, or introduce unverified heuristics. Every ported algorithm must faithfully follow NCBI's exact logic, scoring, and statistics.
+- We do not speculate, approximate, or introduce heuristics that NCBI does not use. Every ported algorithm must faithfully follow NCBI's exact logic, scoring, and statistics.
 - Code modifications affecting search or scoring behavior must include the corresponding NCBI C/C++ reference comments (file path and line numbers) immediately above the Rust code:
   ```rust
   // NCBI reference: c++/src/algo/blast/core/blast_hits.c:993-1001
@@ -52,7 +52,7 @@ All contributions that touch alignment or search code must strictly satisfy thes
 
 ### 3. Bit-Perfect Output Parity
 - Alignment boundaries, coordinates, raw scores, bit scores, E-values, and tabular output (`-outfmt 6` and `-outfmt 7`) must match NCBI BLAST+ exactly.
-- *Approved Project Exception*: In TBLASTX local pairwise searches, LOSAT explicitly respects `--db-gencode` for translating the subject sequence across all non-standard genetic codes (NCBI BLAST+ defaults to standard code in local `-subject` mode). All other scoring, statistical calculations, and alignment logic strictly adhere to NCBI.
+- *Approved Project Exception*: In TBLASTX and TBLASTN searches against a local `-subject`, LOSAT applies `-db_gencode` to the subject for every non-standard genetic code (NCBI BLAST+ uses the standard code in local `-subject` mode); TBLASTN also accepts code 32. All other scoring, statistical calculations, and alignment logic strictly adhere to NCBI. `AGENTS.md` (requirement 3) lists this and the other approved exceptions.
 
 ---
 
@@ -68,7 +68,7 @@ All contributions that touch alignment or search code must strictly satisfy thes
 
 When reporting an issue or output discrepancy against NCBI BLAST+, please provide:
 
-1. **Exact command lines** used for both `LOSAT` and `blastn`/`blastp`/`tblastx`.
+1. **Exact command lines** used for both `LOSAT` and the matching NCBI BLAST+ program (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `makeblastdb` or `blastdbcmd`).
 2. **Minimal reproducible FASTA inputs** (synthetic or non-sensitive sequences).
 3. **Exact diff of outputs**, highlighting discrepancies in coordinates, scores, or E-values.
 4. **Environment details**: OS, architecture, LOSAT version/commit, and NCBI BLAST+ version.
@@ -102,7 +102,7 @@ cargo publish --dry-run --locked \
 
 ## Parity Evidence & Testing
 
-Any behavioral changes to search, scoring, or filtering algorithms require comparative verification against official NCBI BLAST+ (v2.17.0+):
+Any behavioral change to search, scoring, or filtering algorithms must be compared with the output of official NCBI BLAST+ (v2.17.0+):
 
 1. **Run Comparison Suite**:
    ```bash
@@ -113,7 +113,7 @@ Any behavioral changes to search, scoring, or filtering algorithms require compa
    - NCBI BLAST+ version used as oracle.
    - Exact LOSAT commit SHA.
    - Command lines, query/subject FASTA inputs, and parameter flags.
-   - Verified output diffs covering coordinates, bit scores, and E-values.
+   - The output diffs between LOSAT and NCBI BLAST+, covering coordinates, bit scores, and E-values.
 
 ---
 
@@ -130,19 +130,25 @@ Before opening a PR, please verify:
 - [ ] An issue was opened and approved by the maintainer for non-trivial changes.
 - [ ] Relevant NCBI C/C++ source citations are included in code comments for all ported algorithms.
 - [ ] No runtime, build, or fallback code invokes external NCBI binaries or libraries.
-- [ ] Code builds without warnings under `cargo fmt` and `cargo clippy`.
+- [ ] `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings` pass. Clippy runs, but `#![allow(warnings, clippy::all)]` at the top of `LOSAT/src/lib.rs` and `LOSAT/src/main.rs` (and of several test files) turns its lints and the compiler's warnings off for the whole library and command, so it reports nothing in `LOSAT/src` yet. Removing those lines is planned work (SW5 of the engineering-quality line).
 - [ ] Parity comparison tests confirm bit-identical output with NCBI BLAST+ on affected profiles.
 
 ---
 
 ## Branches and auto-merge
 
-- `dev` is the integration branch. Work branches start from `origin/dev` and their pull requests target `dev`; `dev` goes to `main` in one pull request from a branch `promote/<date>` at a `dev` commit (a promotion with no change of its own), opened on the repository owner's request.
+- `dev` is the integration branch. Work branches start from `origin/dev` and their pull requests target `dev`.
+- `dev` goes to `main` once a week, in one pull request from a branch `promote/<date>` at a `dev` commit (a promotion with no change of its own). From the promotion of v0.2.0 on, a session of the engineering-quality line (or, when none runs, the release line) opens it on Tuesday (JST):
+  1. Pick the newest `dev` commit whose `ci.yml` run passed: the run that Dev head (`.github/workflows/dev-head.yml`) started, or a push run. Do not promote a commit whose run failed or is still running.
+  2. `git push origin <sha>:refs/heads/promote/<YYYY-MM-DD>` and `gh pr create --draft --base main --head promote/<YYYY-MM-DD>`. The body lists the pull requests merged into `dev` since the last promotion (`git log --first-parent --merges <last promotion>..<sha>`).
+  3. The repository owner marks it ready. `platform checks result` runs the pull-request set (every `outputs (<id>)` job, the compare job and every `cargo test (<id>)` job), and auto-merge merges the pull request when it and the other required checks pass.
+  4. The push to `main` runs the full set of platform checks (five platforms) when the engine, the Cargo files or the workflow changed, as they do in a promotion. With the weekly run (Sunday 19:23 UTC) these are the two full-set runs that the switch lifetime rule counts (`AGENTS.md`, "Lifetime").
+- After the promotion is merged, the same session checks which switches graduate (on `dev` for 7 days and in two passing full-set runs after reaching `main`) and opens one pull request per graduation, into `dev`.
 - Pull requests of this repository get auto-merge (merge commit) when they are opened as ready or marked ready for review.
 - A pull request into `dev` merges when `rust`, `fast output regressions` and `web result` pass. The pull request into `main` merges when those and `platform checks result` pass (the rulesets are set by the repository owner).
 - `rust` (`.github/workflows/ci.yml`) passes when its jobs do: `rust lint` (the Python checks, `cargo fmt --check`, `cargo clippy`) and `cargo test (1/2)` and `cargo test (2/2)`, which run `cargo test --all-features` in two shards on two runners with cargo-nextest (`--partition count:k/2`; doc tests in the first). CI builds the test profile at opt-level 3 with line tables only (`CARGO_PROFILE_TEST_*`); debug assertions and overflow checks stay on.
 - `rust` runs the tests with the performance switches as they are by default (`LOSAT/src/utils/xswitch.rs`); a switch's own tests compare it with `LOSAT_X_<NAME>=0`. `fast output regressions` (`.github/workflows/ci.yml`) records which side each conditional switch took (`LOSAT_X_REACH`), and `LOSAT/tests/switch_reach_check.py` fails the pull request when a side that `LOSAT/tests/switch_reach_expected.tsv` requires was not reached.
-- On a pull request into `main`, `platform checks result` (`.github/workflows/platform-checks.yml`) covers the outputs of the 49 platform-check cases at 1 and 4 threads on Linux x64, Linux arm64, Windows x64 and macOS arm64, and `cargo test --all-features` on Linux arm64 and Windows x64. Its platform jobs run only when the engine (`LOSAT/src/**`), the Cargo files, `LOSAT/build.rs` or the workflow's own files changed, and not on a draft or on a pull request into `dev` (a draft runs them when it is marked ready for review). macOS x64 and the macOS `cargo test` jobs run on each push to `main` (one run at a time) and weekly.
+- On a pull request into `main`, `platform checks result` (`.github/workflows/platform-checks.yml`) covers the outputs of the platform-check cases (the list is `LOSAT/tests/platform_check_cases.json`) at 1 and 4 threads on Linux x64, Linux arm64, Windows x64 and macOS arm64, and `cargo test --all-features` on Linux arm64 and Windows x64. Its platform jobs run only when the engine (`LOSAT/src/**`), the Cargo files, `LOSAT/build.rs` or the workflow's own files changed, and not on a draft or on a pull request into `dev` (a draft runs them when it is marked ready for review). macOS x64 and the macOS `cargo test` jobs run on each push to `main` (one run at a time) and weekly.
 - Once the pull request into `main` is ready and its checks run, push to it only to resolve a merge conflict or to fix a failed check: each push cancels its Platform checks run and queues it again behind the other pull requests. Neither `dev` nor `main` requires the branch to be up to date, so merging the base into a branch without conflicts is not needed.
 - Draft pull requests are not merged; mark one ready to turn auto-merge on.
 - Turn it off for one pull request with "Disable auto-merge" on its page.

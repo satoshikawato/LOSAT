@@ -48,6 +48,12 @@ updates:
       # so typescript 6.1 and 7 fail `npm ci` (ERESOLVE, #837). Remove when it accepts them.
       - dependency-name: typescript
         versions: ['>= 6.1']
+      # @playwright/test 1.64.1 (#836, #843): its WebKit fails tests/e2e/browsers.spec.ts:35 (the
+      # OPFS BlockStore in a dedicated worker, "UnknownError") on every run, and 1.61.1 passes.
+      # Dependabot proposes no newer release while this entry stays: try one by hand, and remove the
+      # entry when that test passes with it.
+      - dependency-name: '@playwright/test'
+        versions: ['>= 1.62']
 
   - package-ecosystem: github-actions
     directory: /

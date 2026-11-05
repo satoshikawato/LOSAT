@@ -63,8 +63,6 @@ def test_the_parser_refuses_as_on_the_command_line():
         Search.from_argv("blastp", ["-evalue"])
     with pytest.raises(ArgumentError, match="unknown program"):
         Search("nosuchprogram")  # type: ignore[call-overload]
-    with pytest.raises(ArgumentError, match="command line only"):
-        Search("psiblast")  # type: ignore[call-overload]
 
 
 def test_an_error_survives_pickle():

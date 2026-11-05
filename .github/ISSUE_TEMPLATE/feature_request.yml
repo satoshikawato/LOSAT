@@ -21,10 +21,10 @@ body:
     id: ncbi
     attributes:
       label: Where NCBI BLAST+ has it
-      description: The program, option or output format, the NCBI BLAST+ version, and an example command line.
+      description: The program, option or output format, the NCBI BLAST+ version, and an example command line. Leave it empty if NCBI BLAST+ does not have the feature.
       render: shell
     validations:
-      required: true
+      required: false
   - type: textarea
     id: use
     attributes:

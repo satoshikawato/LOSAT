@@ -2195,7 +2195,7 @@ class PlatformCertificationTests(unittest.TestCase):
         self.assertIn("extract-verified-archive", workflow)
         self.assertNotIn("tar -xzf", workflow)
         # Actions are pinned to a commit with the release tag as a comment.
-        self.assertRegex(workflow, r"actions/upload-artifact@[0-9a-f]{40} # v4\.")
+        self.assertRegex(workflow, r"actions/upload-artifact@[0-9a-f]{40} # v\d+\.\d+\.\d+")
         self.assertIn("if: ${{ always() }}", workflow)
         self.assertIn("cross-platform-aggregation:", workflow)
         self.assertIn("needs: [platform-certification]", workflow)
@@ -2207,7 +2207,7 @@ class PlatformCertificationTests(unittest.TestCase):
             1,
         )
         self.assertEqual(
-            len(re.findall(r"actions/download-artifact@[0-9a-f]{40} # v4\.", workflow)), 6
+            len(re.findall(r"actions/download-artifact@[0-9a-f]{40} # v\d+\.\d+\.\d+", workflow)), 6
         )
 
     def test_resume_import_revalidates_verified_output_hash(self) -> None:

@@ -471,6 +471,10 @@ impl XQueryOffset for u16 {
 pub(crate) const X_U16_LETTERS: usize = 1 << 16;
 
 /// What the flat builder made.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
+)]
 pub(crate) enum XFlatBuild<H: XQueryOffset = i32> {
     Table(XFlatCompressedLookup<H>),
     /// One of NCBI's tables fills its overflow banks (the reference's `Err(())`).
@@ -1205,6 +1209,10 @@ fn x_bucket_packs(letters: usize) -> bool {
 }
 
 /// What the bucket fill made.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
+)]
 enum XBucketBuild<H: XQueryOffset = i32> {
     /// `x_try_build_flat_with_capacity`'s outcome: its table, its `TooLarge`, or `None` where the
     /// table's header cannot be made.

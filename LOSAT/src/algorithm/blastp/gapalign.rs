@@ -1494,6 +1494,10 @@ fn align_ex_protein_score_only_impl<const BLOSUM62: bool, const REVERSE: bool>(
             (b_size - first_b_index) as u64,
         );
 
+        #[expect(
+            clippy::mut_range_bound,
+            reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:862,886-887)"
+        )]
         for b_index in first_b_index..b_size {
             let sc = blastp_subject_residue::<REVERSE>(subject, subject_base, len2, b_index);
             let score_gap_col = scratch.dp_mem[b_index].best_gap;
@@ -1739,6 +1743,10 @@ fn restricted_gapped_align_protein_impl<const BLOSUM62: bool, const REVERSE: boo
         let mut last_b_index = first_b_index;
 
         if a_index % RESTRICT_SIZE != 0 {
+            #[expect(
+                clippy::mut_range_bound,
+                reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:1112,1124-1125)"
+            )]
             for b_index in first_b_index..b_size {
                 let sc = blastp_subject_residue::<REVERSE>(subject, subject_base, len2, b_index);
                 let next_score = dp_mem[b_index].best
@@ -1793,6 +1801,10 @@ fn restricted_gapped_align_protein_impl<const BLOSUM62: bool, const REVERSE: boo
             }
             score_gap_row = score_val;
         } else {
+            #[expect(
+                clippy::mut_range_bound,
+                reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:1177,1192-1193)"
+            )]
             for b_index in first_b_index..b_size {
                 let sc = blastp_subject_residue::<REVERSE>(subject, subject_base, len2, b_index);
                 let next_score = dp_mem[b_index].best
@@ -3421,8 +3433,9 @@ fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
     // ```
     //
     // For blastp, `BlastScoringOptionsNew` leaves `reward` at zero, and
-    // `BlastScoringParametersNew` copies that zero into `score_params->reward`.
-    let blastp_reward = 0i32;
+    // `BlastScoringParametersNew` copies that zero into `score_params->reward`, so the
+    // `score += ext * score_params->reward` of the end extension below adds 0 and the score
+    // stored before it is NCBI's.
     let gap_ops = match hit.gap_info.as_mut() {
         Some(info) if !info.is_empty() => info,
         _ => return true,
@@ -3591,7 +3604,7 @@ fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
         if best_end_esp_index == best_start_esp_index {
             best_end_esp_num += ext;
         }
-        score += ext as i32 * blastp_reward;
+        // `score += ext * score_params->reward` adds 0 for blastp (reward is 0, above).
 
         let mut qp = best_q_end;
         let mut sp = best_s_end;
@@ -3610,7 +3623,7 @@ fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
             *num += ext as u32;
         }
         best_end_esp_num += ext;
-        score += ext as i32 * blastp_reward;
+        // `score += ext * score_params->reward` adds 0 for blastp (reward is 0, above).
     }
 
     hit.q_start = best_q_start + 1;

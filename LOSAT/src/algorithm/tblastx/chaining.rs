@@ -293,6 +293,10 @@ pub fn chain_and_filter_hsps_protein(
         for ext_hit in group_hits {
             // NCBI blast_hits.c:1996: `if (hsp->evalue > cutoff)` removes the HSP, so a NaN
             // cutoff keeps it.
+            #[expect(
+                clippy::neg_cmp_op_on_partial_ord,
+                reason = "NCBI removes an HSP only when evalue > cutoff (blast_hits.c:1996); `<=` would drop NaN values"
+            )]
             if !(ext_hit.hit.e_value > evalue_threshold) {
                 result_hits.push(ext_hit);
             }

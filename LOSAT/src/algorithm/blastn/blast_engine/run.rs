@@ -288,7 +288,7 @@ pub fn x_query_drop_print_summary() {
 // ```c
 // #define NCBIMATH_LN2 0.69314718055994530941723212145818
 // ```
-const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
 /// The text of a query's outfmt 0 `Query=` line and outfmt 7 `# Query:` line: the record's
 /// title bytes (the local ID is not shown without `-parse_deflines`; the writers apply
@@ -833,8 +833,8 @@ fn advance_diag_table_offset(
     diag_window: i32,
     subject_len: usize,
     use_array_indexing: bool,
-    hit_level_array: &mut Vec<DiagStruct>,
-    hit_len_array: &mut Vec<u8>,
+    hit_level_array: &mut [DiagStruct],
+    hit_len_array: &mut [u8],
     diag_hash: &mut DiagHashTable,
 ) {
     if use_array_indexing {
@@ -893,25 +893,13 @@ fn advance_diag_table_offset(
 //    Uint4 next;           /**< Offset of next element in the chain */
 // }  DiagHashCell;
 // ```
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct DiagHashCell {
     diag: i32,
     level: i32,
     hit_saved: bool,
     hit_len: i32,
     next: u32,
-}
-
-impl Default for DiagHashCell {
-    fn default() -> Self {
-        Self {
-            diag: 0,
-            level: 0,
-            hit_saved: false,
-            hit_len: 0,
-            next: 0,
-        }
-    }
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:97-105
@@ -2388,24 +2376,18 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
     let scan_step_byte = scan_step / COMPRESSION_RATIO;
     let mut pos = start;
     let mut byte_idx = (pos / COMPRESSION_RATIO) as i32;
-    let mut state = 0u8;
-
-    match pos % COMPRESSION_RATIO {
+    let mut state: u8 = match pos % COMPRESSION_RATIO {
         1 => {
             byte_idx -= 2;
-            state = 3;
+            3
         }
         2 => {
             byte_idx -= 1;
-            state = 2;
+            2
         }
-        3 => {
-            state = 1;
-        }
-        _ => {
-            state = 0;
-        }
-    }
+        3 => 1,
+        _ => 0,
+    };
 
     while pos <= end {
         match state {
@@ -3715,7 +3697,7 @@ fn merge_prelim_hit_lists(
         return incoming;
     }
     if combined.is_empty() {
-        combined.extend(incoming.drain(..));
+        combined.append(&mut incoming);
         return incoming;
     }
 
@@ -3880,10 +3862,10 @@ fn append_prelim_hit_list(
         return incoming;
     }
     if combined.is_empty() {
-        combined.extend(incoming.drain(..));
+        combined.append(&mut incoming);
         return incoming;
     }
-    combined.extend(incoming.drain(..));
+    combined.append(&mut incoming);
     sort_prelim_hits_by_score(combined);
     incoming
 }
@@ -12415,7 +12397,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     &search_karlin_ref[context_idx].ungapped,
                     hit_saving_cutoff,
                 )
-                .map_err(|limit| ungapped_cutoff_limit_error(limit))?
+                .map_err(ungapped_cutoff_limit_error)?
             } else {
                 cutoff_score_for_ungapped_extension(gap_trigger, hit_saving_cutoff, 1.0)
             };
@@ -14309,7 +14291,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 // }
                                 // ```
                                 // Update hit_level_array after collecting ungapped hit
-                                hit_ready = true;
+                                // (hit_ready is 1 here: flag 1, hit length 0)
                                 if use_array_indexing && diag_idx < diag_array_size {
                                     hit_level_array[diag_idx].last_hit = ungapped_s_end_pos as i32;
                                     hit_level_array[diag_idx].flag = 1;
@@ -15092,8 +15074,6 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 let mut s_off = kmer_start;
                                 let mut s_end = kmer_start + safe_k;
                                 let mut s_end_pos = s_end + diag_offset as usize;
-                                let mut word_type = 1u8; // Default: single word (when word_length == lut_word_length)
-                                let mut extended = 0usize;
                                 let mut off_found = false;
                                 let mut hit_ready = true;
                                 let query_mask = ctx.masks.as_slice();
@@ -15132,6 +15112,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 //     if (lookup_pos[i] == q_pos) return TRUE;
                                 // }
                                 // ```
+                                #[expect(
+                                    clippy::manual_contains,
+                                    reason = "a linear scan of the cell's hits with an early exit, as NCBI's loop (na_ungapped.c:131-133); slice::contains would switch this per-seed check to std's chunked search"
+                                )]
                                 let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
                                     if s_pos + safe_k > s_len {
                                         return true;
@@ -15191,8 +15175,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                                         true,   // check_double = TRUE
                                         &mut is_seed_masked,
                                     );
-                                    word_type = wt;
-                                    extended = ext;
+                                    let word_type = wt;
+                                    let extended = ext;
                                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
                                     // ```c
                                     // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
@@ -15667,7 +15651,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 // }
                                 // ```
                                 // Update hit_level_array after collecting ungapped hit
-                                hit_ready = true;
+                                // (hit_ready is 1 here: flag 1, hit length 0)
                                 if use_array_indexing && diag_idx < diag_array_size {
                                     hit_level_array[diag_idx].last_hit = ungapped_s_end_pos as i32;
                                     hit_level_array[diag_idx].flag = 1;
@@ -16607,6 +16591,10 @@ fn search_query_batch<const UNGAPPED: bool>(
             //
             // BlastInitHitListReset(init_hitlist);
             // ```
+            #[expect(
+                clippy::drain_collect,
+                reason = "without reuse the scratch keeps its buffer for the next chunk; mem::take would hand the buffer away and allocate again"
+            )]
             let mut chunk_prelim_hits: Vec<PrelimHit> = if reuse_prelim_hits {
                 std::mem::take(prelim_hits)
             } else {
@@ -19068,6 +19056,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                     &mut traceback_edit_script_lengths,
                     &mut traceback_alignment_lengths,
                 );
+                #[expect(
+                    clippy::drain_collect,
+                    reason = "the subject scratch keeps its buffer for the next subject; mem::take would hand the buffer away and allocate again"
+                )]
                 let (list, s1, s2, s3, s4) = x_post_purge(hits.drain(..).collect());
                 let (list, s5) = x_final_list(list, interval_tree);
                 (SubjectHits::Mixed(list), [s1, s2, s3, s4, s5])

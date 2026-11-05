@@ -47,7 +47,7 @@ pub(crate) fn redo_calc_lambda(
 // /** The natural log of 2 ... */
 // #define LOCAL_LN2 0.69314718055994530941723212145818
 // ```
-pub(crate) const LOCAL_LN2: f64 = 0.6931471805599453;
+pub(crate) const LOCAL_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:791-797
 // ```c

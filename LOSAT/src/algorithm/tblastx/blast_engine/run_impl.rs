@@ -2618,7 +2618,7 @@ fn rows_up_front(
 #[allow(clippy::too_many_arguments)]
 fn report_counts<S: TbxScore>(
     sc: S,
-    hits: &mut Vec<TblastxHsp>,
+    hits: &mut [TblastxHsp],
     outputs: &ReportOutputs<'_>,
     run: &TblastxReportRun<'_>,
     output_formats: &[report::TblastxOutputFormat],
@@ -4078,9 +4078,6 @@ fn search_query_batch<S: TbxScore>(
     // Optional timing breakdown (disabled by default to preserve output/parity logs)
     let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
     let t_total = Instant::now();
-    let mut t_read_queries = Duration::ZERO;
-    let mut t_build_lookup = Duration::ZERO;
-    let mut t_read_subjects = Duration::ZERO;
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
@@ -4290,7 +4287,7 @@ fn search_query_batch<S: TbxScore>(
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
     }
 
-    t_read_queries = t_phase_read_queries.elapsed();
+    let t_read_queries: Duration = t_phase_read_queries.elapsed();
 
     let t_phase_build_lookup = Instant::now();
     // Note: karlin_params argument is now unused - computed per context in build_ncbi_lookup()
@@ -4420,7 +4417,7 @@ fn search_query_batch<S: TbxScore>(
             true,
         ),
     };
-    t_build_lookup = t_phase_build_lookup.elapsed();
+    let t_build_lookup: Duration = t_phase_build_lookup.elapsed();
     // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs). No
     // NCBI counterpart.
     crate::utils::xtiming::add_duration(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
@@ -4474,7 +4471,7 @@ fn search_query_batch<S: TbxScore>(
             x_timing: Vec::new(),
         });
     }
-    t_read_subjects = t_phase_read_subjects.elapsed();
+    let t_read_subjects: Duration = t_phase_read_subjects.elapsed();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
     // ```c
@@ -5276,7 +5273,7 @@ fn search_query_batch<S: TbxScore>(
         let mut x_letter_frames_later = false;
         // `-db`: the block of a short sequence with ambiguous bases, kept for the frames of its
         // letters (`Subjects::x_letter_frames`).
-        let mut x_kept = None;
+        let mut x_kept;
         // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
         // return word_length * 3 + 2;
         // if (subject->length < min_subj_seq_length) { ... continue; }
@@ -5593,9 +5590,7 @@ fn search_query_batch<S: TbxScore>(
                     },
                 );
                 let mut previous_seed_s_off: Option<u32> = None;
-                for (_scan_chunk_index, (interior_start, interior_end)) in
-                    scan_interiors.into_iter().enumerate()
-                {
+                for (interior_start, interior_end) in scan_interiors.into_iter() {
                     let seq_ranges = match x_soft {
                         Some(ranges) => ranges.to_vec(),
                         None => clip_tblastx_seq_ranges_for_scan_interior(
@@ -6646,9 +6641,7 @@ fn search_query_batch<S: TbxScore>(
                         );
                     }};
                 }
-                for (_scan_chunk_index, (interior_start, interior_end)) in
-                    scan_interiors.into_iter().enumerate()
-                {
+                for (interior_start, interior_end) in scan_interiors.into_iter() {
                     let seq_ranges = clip_tblastx_seq_ranges_for_scan_interior(
                         &base_seq_ranges,
                         interior_start,
@@ -7235,6 +7228,10 @@ fn search_query_batch<S: TbxScore>(
         // ```
         // An HSP is removed when its e-value is greater than the cutoff, so a NaN cutoff
         // (`-evalue -nan`) keeps every HSP.
+        #[expect(
+            clippy::neg_cmp_op_on_partial_ord,
+            reason = "NCBI removes an HSP only when evalue > cutoff (blast_hits.c:1996); `<=` would drop NaN values"
+        )]
         prelinked_ungapped_hits.retain(|h| !(h.e_value > evalue_threshold));
         x_lap.lap(XStage::Reap);
         if diag_enabled && prelim_linked_count != prelinked_ungapped_hits.len() {
@@ -7855,7 +7852,6 @@ fn search_query_batch<S: TbxScore>(
         // ```
         // The threads' subjects go to the collector the subject loop keeps (`emit_subject_hits`;
         // no writer thread on this target), which takes them in OID order.
-        let parallel_pool = parallel_pool;
         if x_subject_next::on() {
             // EXPERIMENT (LOSAT_X_TBXNEXT): as in native builds below, each thread of the pool
             // takes the next subject when it is free, with one worker state per thread made when
@@ -7909,7 +7905,7 @@ fn search_query_batch<S: TbxScore>(
                         diag_offset: window,
                         sc,
                     },
-                    &process_subject,
+                    process_subject,
                 );
             });
         }
@@ -7959,7 +7955,6 @@ fn search_query_batch<S: TbxScore>(
         // EXPERIMENT (LOSAT_X_TBXNEXT): each thread of the pool takes the next subject when it is
         // free, with one worker state per thread, made by the same initializer as below when the
         // thread takes its first subject (tblastx/x_subject_next.rs). Same `process_subject`.
-        let parallel_pool = parallel_pool;
         parallel_pool.install(|| {
             x_subject_next::for_each_subject(
                 subjects.count(),
@@ -7987,7 +7982,6 @@ fn search_query_batch<S: TbxScore>(
             );
         });
     } else if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {
-        let parallel_pool = parallel_pool;
         parallel_pool.install(|| {
             (0..subjects.count()).into_par_iter().for_each_init(
                 || WorkerState {
@@ -8007,7 +8001,7 @@ fn search_query_batch<S: TbxScore>(
                     diag_offset: window,
                     sc,
                 },
-                &process_subject,
+                process_subject,
             );
         });
     } else {

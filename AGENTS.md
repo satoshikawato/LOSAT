@@ -404,33 +404,43 @@ bash tests/compare_long_sequences_debug.sh
 ## Repository Layout (Concise)
 
 ```
-LOSAT/                     # Rust crate root
-├── Cargo.toml
+LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
+├── Cargo.toml             # Test targets are listed by hand (`autotests = false`)
+├── build.rs               # WASI targets only: links the reactor start file, sets `losat_wasi_threads`
 ├── src/
-│   ├── main.rs            # CLI entry; dispatch to blastn/tblastx
-│   ├── algorithm/         # Core algorithms (tblastx, blastn, blastp, common)
-│   ├── core/              # NCBI-ported primitives (stats, filters, encoding)
-│   ├── stats/             # Karlin-Altschul and sum statistics
-│   ├── align/             # Alignment utilities/traceback
-│   ├── report/            # Output formatting (outfmt 0/6/7)
-│   ├── post/              # Post-processing (chaining/filtering)
-│   ├── api/               # Local search entry (`local_blast`)
-│   ├── blastinput/        # Application layer, FASTA input, shared value parsers;
+│   ├── lib.rs             # Module list; `api` is the public surface, the others are `#[doc(hidden)]`
+│   ├── main.rs            # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, makeblastdb, blastdbcmd
+│   ├── cli.rs             # CLI v2 boundary: NCBI's single-dash options and the top-level -help
+│   ├── common.rs          # Shared hit type, gap edit operations and the older output writers
+│   ├── algorithm/         # One directory per program (blastn, blastp, blastx, tblastn, tblastx, psiblast) and common/
+│   ├── api/               # Library API: FASTA records in memory, `run_collect`, `run_batches` (library surface plan)
+│   ├── blastinput/        # Application layer, FASTA and compressed input, shared value parsers;
 │   │                      # per-program args in `algorithm/<program>/args.rs`
-│   ├── config/            # Compatibility/config helpers
-│   ├── seed/              # Word finding
-│   ├── sequence/          # Sequence storage/encoding
-│   └── utils/             # Shared utilities and tables
+│   ├── core/              # NCBI core/ ports shared by several programs (encoding, HSP lists, SEG, blast_stat, composition adjustment)
+│   ├── stats/             # Karlin-Altschul, Spouge, length adjustment and sum statistics
+│   ├── report/            # Output formats: pairwise, tabular, XML, XML2, JSON, ASN.1 archive, SAM
+│   ├── seqdb/             # Reader of BLAST database volumes (NCBI CSeqDB), for `-db`
+│   ├── seqid/             # Seq-ids of database sequences (CSeq_id, deflines, id formatting)
+│   ├── writedb/           # Writer of BLAST database volumes (NCBI CWriteDB) and `losat makeblastdb`
+│   ├── blastdbcmd/        # `losat blastdbcmd`: -info and sequence retrieval
+│   ├── utils/             # DUST, SEG, WindowMasker, matrices, genetic codes, threading, switches (`xswitch`)
+│   ├── sequence/          # Sequence storage and 2-bit packed nucleotides
+│   ├── seed/              # Word finders (blastx uses them)
+│   ├── config/            # Output compatibility mode
+│   ├── align/             # Banded alignment and traceback; no program calls it
+│   ├── post/              # Chaining and filtering; no program calls it
+│   ├── web_api.rs         # wasm32 only: Wasm ABI v1 exports
+│   └── web_api/           # ABI v1 searches of BLASTN, BLASTP, TBLASTX and their input reader
 └── tests/
-    ├── run_comparison.sh  # Compare vs NCBI BLAST+
-    ├── run_all_tests.sh
-    ├── unit/              # Rust unit tests
-    ├── fasta/             # Test inputs
-    ├── blast_out/ ncbi_out/ losat_out/  # Untracked run output
-    └── plots/
+    ├── suites/            # Six test targets (five programs and common); each includes its files by `#[path]`
+    ├── unit/              # Unit tests, in the `unit_tests` target
+    ├── *.rs               # Test files of the suites, and two targets of their own (`suite_layout.rs` checks)
+    ├── fixtures/ db_search/ blastdbcmd/ seqdb/ fasta/ ...   # Inputs and frozen NCBI outputs
+    ├── *.py               # Gate scripts (fast regressions, platform checks, switch reach)
+    └── *.sh               # Older comparison scripts (run_comparison.sh, run_all_tests.sh)
 ```
 
-Additional comparison scripts live in `tests/` at the repo root.
+More comparison scripts live in `tests/` at the repo root.
 
 ```
 web/                       # LOSAT Web (browser application)

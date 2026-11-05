@@ -709,6 +709,10 @@ impl SharedBuckets {
     #[inline(always)]
     unsafe fn at<'b>(self, a: usize, o: usize) -> &'b mut Vec<Entry> {
         debug_assert!(a < self.parts && o < self.parts);
+        // SAFETY: `a * parts + o < len`: the callers pass `a, o < parts` (job indices, `0..parts`,
+        // `owner` values) on `parts * parts` buckets (`second` is empty only for one template,
+        // where nothing indexes it); no other job takes bucket `(a, o)` (the contract above), and
+        // each caller holds one bucket's borrow at a time.
         unsafe { &mut (*self.ptr.add(a * self.parts + o)).0 }
     }
 }
@@ -1139,6 +1143,9 @@ impl Fill<'_, '_> {
                 }
                 if mark_pv && ((ecode1 as usize) >> bts) < pv_len {
                     let page = (pv + ((ecode1 as usize) >> bts)) >> PAGE_ELEMS_SHIFT;
+                    // SAFETY: reader `a`'s bits (`read`'s contract); `ecode1 >> bts < pv_len`
+                    // (tested above), so `page < pages_of(pv, pv_len) <= 64 * stride`: `mark_pv`
+                    // implies `round_on`, and `fill_with` sized `marks[PV_ARRAY]` for those pages.
                     unsafe { faults.marks[PV_ARRAY].mark(a, page) };
                 }
                 if !two_templates {
@@ -1160,6 +1167,8 @@ impl Fill<'_, '_> {
                 }
                 if mark_pv && ((ecode2 as usize) >> bts) < pv_len {
                     let page = (pv + ((ecode2 as usize) >> bts)) >> PAGE_ELEMS_SHIFT;
+                    // SAFETY: as for `ecode1`'s presence-vector page: reader `a`'s bits, and
+                    // `ecode2 >> bts < pv_len` (tested above) keeps `page` in `marks[PV_ARRAY]`.
                     unsafe { faults.marks[PV_ARRAY].mark(a, page) };
                 }
             }
@@ -1675,6 +1684,8 @@ fn csr_on_pool(
         // a barrier) and `qs` at its places, which lie in `base .. base + its words` (disjoint
         // from the other owners'); every element read was written before by the same thread or
         // before a barrier.
+        // SAFETY: `o = ctx.index() < parts` (`csr` runs this only on a pool of `parts` threads),
+        // so the buckets, cells and places the paragraph above gives job `o` are its alone.
         unsafe {
             std::ptr::write_bytes(ob.ptr.add(c0), 0, c1 - c0);
             let mut got = 0u64;
@@ -2332,6 +2343,8 @@ fn fill_with<P: Fn(u8) + Sync>(
         // `Fill::link`); `run_jobs` returns after every job of the phase has returned.
         run_phase(&mut clock, 0, parts, in_pool, |a| {
             let (s0, s1) = span(a);
+            // SAFETY: `run_phase` runs job `a` once for each `a < parts`, so the buckets `(a, *)`
+            // and reader `a`'s marks are this job's alone (`read`'s contract; all-phases note).
             if mark.contains(&true) {
                 unsafe { fill.read::<true>(a, s0, s1, mark) }
             } else {
@@ -2356,6 +2369,8 @@ fn fill_with<P: Fn(u8) + Sync>(
         }
         run_phase(&mut clock, 1, parts, in_pool, |o| {
             probe(o as u8);
+            // SAFETY: job `o` alone takes the buckets `(*, o)`, whose cells `read` put in `o`'s
+            // blocks (`owner`), and `counters[_].of(o)`: `update`'s contract (all-phases note).
             unsafe { fill.update(o) }
         });
         run_phase(&mut clock, 2, parts, in_pool, |a| unsafe { fill.link(a) });

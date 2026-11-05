@@ -397,11 +397,13 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: bool>(
             }
             // [C] if ((Int4)(subject_offset + diag_offset) < diag_array[diag_coord].last_hit)
             let subject_plus_offset = subject_offset.wrapping_add(diag_offset as u32);
+            // SAFETY: `entry` (cell `cell`) is in the table by this function's contract.
             if subject_plus_offset < unsafe { (*entry).last_hit() } as u32 {
                 return;
             }
             // [C] diag_array[diag_coord].last_hit = subject_offset + diag_offset;
             // [C] diag_array[diag_coord].flag = 0;
+            // SAFETY: `entry` (cell `cell`) is in the table by this function's contract.
             unsafe {
                 (*entry).set_last_hit(subject_plus_offset as i32);
                 (*entry).set_flag(0);
@@ -409,11 +411,13 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: bool>(
             return;
         }
         // [C] last_hit = diag_array[diag_coord].last_hit - diag_offset;
+        // SAFETY: `entry` (cell `cell`) is in the table by this function's contract.
         let last_hit = unsafe { (*entry).last_hit() } - diag_offset;
         // [C] diff = subject_offset - last_hit;
         let diff = subject_offset.wrapping_sub(last_hit as u32) as i32;
         // [C] if (diff >= window)
         if diff >= window {
+            // SAFETY: `entry` (cell `cell`) is in the table by this function's contract.
             unsafe {
                 (*entry).set_last_hit(subject_offset.wrapping_add(diag_offset as u32) as i32)
             };
@@ -430,6 +434,7 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: bool>(
         // [C] if (query_offset - diff < query_info->contexts[curr_context].query_offset)
         let q_minus_diff = query_offset.wrapping_sub(diff as u32);
         if q_minus_diff < ctx.frame_base as u32 {
+            // SAFETY: `entry` (cell `cell`) is in the table by this function's contract.
             unsafe {
                 (*entry).set_last_hit(subject_offset.wrapping_add(diag_offset as u32) as i32)
             };
@@ -442,6 +447,7 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: bool>(
         // The extension's first reads: the word at the second hit and the residues before it in
         // the query (the left walk), the word in the subject. A prefetch never faults and has no
         // architectural effect (`wrapping_add` / `wrapping_sub`: no bound needed).
+        // SAFETY: `_mm_prefetch` needs only SSE, which every x86_64 target has, and never faults.
         #[cfg(target_arch = "x86_64")]
         unsafe {
             use core::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};

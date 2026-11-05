@@ -5571,6 +5571,9 @@ fn search_query_batch<S: TbxScore>(
                                     HashSet::with_capacity(hits as usize);
                                 let mut duplicate_count = 0usize;
                                 for i in 0..hits as usize {
+                                    // SAFETY: `i < hits`; a scan call returns at most
+                                    // `offset_array_size` pairs, and `offset_pairs` was made with
+                                    // `offset_pairs_len` (>= `offset_array_size`) entries.
                                     let pair = unsafe { &*offset_pairs.as_ptr().add(i) };
                                     if !seen.insert((pair.q_off, pair.s_off)) {
                                         duplicate_count += 1;
@@ -5711,6 +5714,11 @@ fn search_query_batch<S: TbxScore>(
                                 // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
                                 //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:590
                                 let ctx_idx = lookup_ref.get_context_idx(query_offset as i32);
+                                // SAFETY: `ctx_idx < contexts_ref.len()`: `get_context_idx`
+                                // gives at most `max(num_contexts, 1) - 1`, the builders set
+                                // `num_contexts` to `contexts.len()`, and `contexts` is not empty
+                                // (a batch without a valid context returns before the subject
+                                // loop).
                                 let ctx = unsafe { contexts_ref.get_unchecked(ctx_idx) };
                                 let q_raw =
                                     query_offset.wrapping_sub(ctx.frame_base as u32) as usize;
@@ -5752,9 +5760,13 @@ fn search_query_batch<S: TbxScore>(
                                 // ```c
                                 // Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
                                 // ```
+                                // SAFETY: `ctx_idx < contexts_ref.len()` (the `ctx` comment above),
+                                // and `cutoff_scores` is `vec![0; contexts_ref.len()]`.
                                 let cutoff = unsafe { *cutoff_scores.get_unchecked(ctx_idx) };
                                 // [C] cutoffs->x_dropoff (per-context x_dropoff)
                                 // Reference: aa_ungapped.c:579
+                                // SAFETY: `ctx_idx < contexts_ref.len()` (the `ctx` comment above),
+                                // and `x_dropoff_per_context` maps `contexts`, one entry each.
                                 let x_dropoff =
                                     unsafe { *x_dropoff_per_context.get_unchecked(ctx_idx) };
 
@@ -6226,6 +6238,11 @@ fn search_query_batch<S: TbxScore>(
                                 // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
                                 //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:590
                                 let ctx_idx = lookup_ref.get_context_idx(query_offset as i32);
+                                // SAFETY: `ctx_idx < contexts_ref.len()`: `get_context_idx`
+                                // gives at most `max(num_contexts, 1) - 1`, the builders set
+                                // `num_contexts` to `contexts.len()`, and `contexts` is not empty
+                                // (a batch without a valid context returns before the subject
+                                // loop).
                                 let ctx = unsafe { contexts_ref.get_unchecked(ctx_idx) };
                                 let q_raw =
                                     query_offset.wrapping_sub(ctx.frame_base as u32) as usize;
@@ -6267,9 +6284,13 @@ fn search_query_batch<S: TbxScore>(
                                 // ```c
                                 // Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
                                 // ```
+                                // SAFETY: `ctx_idx < contexts_ref.len()` (the `ctx` comment above),
+                                // and `cutoff_scores` is `vec![0; contexts_ref.len()]`.
                                 let cutoff = unsafe { *cutoff_scores.get_unchecked(ctx_idx) };
                                 // [C] cutoffs->x_dropoff (per-context x_dropoff)
                                 // Reference: aa_ungapped.c:579
+                                // SAFETY: `ctx_idx < contexts_ref.len()` (the `ctx` comment above),
+                                // and `x_dropoff_per_context` maps `contexts`, one entry each.
                                 let x_dropoff =
                                     unsafe { *x_dropoff_per_context.get_unchecked(ctx_idx) };
 
@@ -6609,6 +6630,9 @@ fn search_query_batch<S: TbxScore>(
                                     HashSet::with_capacity(hits as usize);
                                 let mut duplicate_count = 0usize;
                                 for i in 0..hits as usize {
+                                    // SAFETY: `i < hits`; a scan call returns at most
+                                    // `offset_array_size` pairs, and `offset_pairs` was made with
+                                    // `offset_pairs_len` (>= `offset_array_size`) entries.
                                     let pair = unsafe { &*offset_pairs.as_ptr().add(i) };
                                     if !seen.insert((pair.q_off, pair.s_off)) {
                                         duplicate_count += 1;

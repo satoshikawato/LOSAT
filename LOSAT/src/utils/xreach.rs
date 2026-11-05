@@ -7,8 +7,9 @@
 //! A conditional switch (class `conditional` in `LOSAT/tests/switch_reach_expected.tsv`) takes
 //! its own path only where a rule holds (input sizes, thread count, options, memory); elsewhere
 //! the reference path runs although the switch is on. A graduated switch (`GRADUATED` in
-//! `utils/xswitch.rs`) has no variable and is always on; its rule and its marks stay. With `LOSAT_X_REACH=<directory>` each of
-//! its decision points records the side it took (`x_reach!`), and the run writes one file
+//! `utils/xswitch.rs`) has no variable and is always on; its rule and its marks stay. With
+//! `LOSAT_X_REACH=<absolute directory>` each of its decision points records the side it took
+//! (`x_reach!`), and the run writes one file
 //! `reach-<pid>-<nanoseconds>.tsv` into the directory at its end (`write_report`, called by
 //! `main`). `LOSAT/tests/switch_reach_check.py` folds the files of the CI fixtures and fails
 //! where a side the expected file requires was not reached by any fixture.
@@ -17,6 +18,7 @@
 //! one load of a cached flag. It sits where the choice is made (per search, batch, subject, unit
 //! or call), never inside a per-hit loop.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
@@ -69,17 +71,33 @@ const fn same(a: &[u8], b: &[u8]) -> bool {
     true
 }
 
-/// No NCBI counterpart: the directory of `LOSAT_X_REACH`, read once; `None` when the variable is
-/// not set or empty.
+/// No NCBI counterpart: `LOSAT_X_REACH` read once (`reach_directory`).
+fn setting() -> &'static Result<Option<PathBuf>, OsString> {
+    static SETTING: OnceLock<Result<Option<PathBuf>, OsString>> = OnceLock::new();
+    SETTING.get_or_init(|| reach_directory(std::env::var_os("LOSAT_X_REACH")))
+}
+
+/// No NCBI counterpart: the directory of `LOSAT_X_REACH`; `None` when the variable is not set or
+/// empty, or is not an absolute path (`write_report` then says so on stderr, once, at the end of
+/// the run: a decision point may run on a pool thread, which must not take the stderr lock).
 fn directory() -> Option<&'static PathBuf> {
-    static DIRECTORY: OnceLock<Option<PathBuf>> = OnceLock::new();
-    DIRECTORY
-        .get_or_init(|| {
-            std::env::var_os("LOSAT_X_REACH")
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from)
-        })
-        .as_ref()
+    setting().as_ref().ok().and_then(Option::as_ref)
+}
+
+/// No NCBI counterpart: the directory a value of `LOSAT_X_REACH` names. `Ok(None)` when it is
+/// not set or empty; `Err(value)` when it is not an absolute path. A relative value would be a
+/// directory under the run's current directory: on 2026-10-31 runs with the values `0` and `1`
+/// left `LOSAT/0/` and `LOSAT/1/` in a checkout (12 files, removed by #715).
+fn reach_directory(value: Option<OsString>) -> Result<Option<PathBuf>, OsString> {
+    let Some(value) = value.filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let directory = PathBuf::from(&value);
+    if directory.is_absolute() {
+        Ok(Some(directory))
+    } else {
+        Err(value)
+    }
 }
 
 /// No NCBI counterpart: records that the switch at `index` took its own path (`own_path`) or
@@ -107,10 +125,19 @@ pub(crate) use x_reach;
 
 /// No NCBI counterpart: writes the sides this run took into the `LOSAT_X_REACH` directory, one
 /// row per switch that recorded a side (`switch`, `new`, `ref`, `program`: 1 = reached). A
-/// failure to write is reported on stderr and does not change the exit status.
+/// failure to write is reported on stderr and does not change the exit status; so is a value
+/// that is not an absolute path, which writes nothing.
 pub fn write_report() {
-    let Some(directory) = directory() else {
-        return;
+    let directory = match setting() {
+        Ok(Some(directory)) => directory,
+        Ok(None) => return,
+        Err(value) => {
+            eprintln!(
+                "[X_REACH] ignored: LOSAT_X_REACH={} is not an absolute path",
+                value.to_string_lossy()
+            );
+            return;
+        }
     };
     let program = crate::cli::entry_argv(std::env::args_os())
         .get(1)

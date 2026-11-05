@@ -84,3 +84,5 @@ mod search_environment;
 mod seqalign_samples;
 #[path = "../suite_layout.rs"]
 mod suite_layout;
+#[path = "../x_reach_directory.rs"]
+mod x_reach_directory;

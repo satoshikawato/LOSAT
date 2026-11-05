@@ -239,7 +239,8 @@ authoritative, current guidance for agent behavior in LOSAT.
   open: one lookup table per parallel unit in blastx and tblastx, and tblastn's OID-order hand-back
   waits (blastn's QBATCHPAR slots, each holding a lookup table and a query-batch copy, were removed
   on 2026-10-28). A rule-limited path lands only as a deadline fallback that its body names as such
-  and the Owner approves.
+  and the Owner approves. An Owner-delegated decision (a working session's choice under the
+  Owner's standing delegation) is not that approval (Owner, 2026-11-05).
   Thresholds (`..MIN`, capacities, backoffs) and stacked variants of one loop are folded to one form
   per family before graduation freezes them as constants. Owner, 2026-10-27 (audit of #329-#553
   after #554 was closed).
@@ -516,6 +517,9 @@ remains subject to all the requirements above.
 - Prefer explicit types over inference in public APIs.
 - Explain every deviation from the NCBI implementation, and every performance
   optimization and why it is safe, in a code comment.
+- A line or stage ID (`DI-8f`, `SF S3`) or an Owner decision that the repository cites for the
+  first time gets its row in `docs/decisions/` (`LINE_IDS.md`, `OWNER_DECISIONS.md`) in the same
+  pull request.
 
 ---
 

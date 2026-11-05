@@ -72,12 +72,14 @@
 //!
 //! - The program: [`Program`], [`describe`](describe()), [`Description`], [`Parameter`],
 //!   [`ValueKind`]
-//! - The inputs: [`read_fasta`], [`read_inputs`], [`Role`], [`FastaRecord`], [`Inputs`]
+//! - The inputs: [`read_input_file`], [`read_fasta`], [`read_inputs`], [`Role`], [`FastaRecord`],
+//!   [`Inputs`]
 //! - The options: [`validate`], [`Search`], [`API_OWNED`]
 //! - The search: [`run_collect`], [`run`](run()), [`run_batches`]
 //! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`QueryStats`],
 //!   [`Strand`], [`QueryHits`], [`SubjectHits`]
 //! - The failures: [`Error`]
+//! - The engine's version: [`VERSION`]
 
 mod batches;
 mod describe;
@@ -96,8 +98,23 @@ pub use crate::blastinput::fasta_reader::FastaRecord;
 pub use batches::{run_batches, Batch, Batches};
 pub use describe::{describe, Description, Parameter, ValueKind};
 pub use error::Error;
-pub use input::{read_fasta, read_inputs, Inputs, Role};
+pub use input::{read_fasta, read_input_file, read_inputs, Inputs, Role};
 pub use program::Program;
 pub use run::{run, run_collect, HspRecord, Outcome, QueryStats, Report, Strand};
 pub use search::{validate, Search, API_OWNED};
 pub use view::{QueryHits, SubjectHits};
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/api/version.hpp:49-57
+// ```c++
+// /// Keeps track of the version of the BLAST engine in the NCBI C++ toolkit.
+// /// Used to perform run-time version checks
+// ///
+// /// For reference, please refer to http://apr.apache.org/versioning.html
+// class CBlastVersion : public CVersionInfo {
+// public:
+//     CBlastVersion()
+//         : CVersionInfo(kBlastMajorVersion,
+//                        kBlastMinorVersion,
+// ```
+/// The version of the engine: what `losat --version` prints after the name.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");

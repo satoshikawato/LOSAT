@@ -315,6 +315,8 @@ fn parse_blastn_args(
         outfmt: "6".to_string(),
         archive: None,
         command_line: None,
+        // The command line's progress bar; a web search writes nothing to standard error.
+        progress_bar: false,
     };
 
     let mut index = 0;

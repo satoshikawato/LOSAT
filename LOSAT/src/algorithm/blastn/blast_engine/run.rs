@@ -7104,6 +7104,9 @@ pub fn run(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     args.id_scope = args.parse_deflines.then(Default::default);
+    // The command line's progress bar (`BlastnArgs::progress_bar`; no NCBI counterpart). The
+    // library API and the web entries come through `run_local` and leave it off.
+    args.progress_bar = true;
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:128-133
     // ```c
     // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -11724,7 +11727,9 @@ fn search_query_batch<const UNGAPPED: bool>(
     // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
     // ```
     let subject_count = seq_data.db_num_seqs as u64;
-    let progress_bar = if subjects_parallel {
+    // The bar is the command line's (`BlastnArgs::progress_bar`): a search from memory
+    // (`run_local`: the library API, the web entries) writes nothing to standard error.
+    let progress_bar = if subjects_parallel && args.progress_bar {
         let bar = ProgressBar::new(subject_count);
         bar.set_style(
             ProgressStyle::default_bar()

@@ -316,6 +316,24 @@ pub(super) fn render(
     // diagnostics at every format.
     let mut warning_lines = Some(query_warning_lines);
     let observer = &mut outputs.observer;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
+    // ```c++
+    //     // find the first valid context corresponding to this query
+    //     for (i = 0; i < context_per_query; i++) {
+    //         BlastContextInfo *ctx = query_info->contexts +
+    //                                 query_number * context_per_query + i;
+    //         if (ctx->is_valid) {
+    //             m_SearchSpace = ctx->eff_searchsp;
+    //             m_LengthAdjustment = ctx->length_adjustment;
+    //             break;
+    // ```
+    // The statistics of each query for the observer, the values of the XML reports.
+    if let Some(observer) = observer.as_deref_mut() {
+        let stats = super::blast_xml::query_stats(parameters, query_validity, scoring);
+        for (q_idx, stats) in stats.into_iter().enumerate() {
+            observer.query_stats(q_idx, stats);
+        }
+    }
     for (format_index, format) in outputs.formats.iter_mut().enumerate() {
         // The warnings that a format other than the archive writes are not the archive's
         // messages (a call with several formats, `run_local`).

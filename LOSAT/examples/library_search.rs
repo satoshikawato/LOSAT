@@ -61,7 +61,7 @@ fn search() -> Result<(), String> {
                 hsp.q_end,
                 hsp.s_start,
                 hsp.s_end,
-                hsp.spans[0]
+                outcome.reports[0].spans[hsp.index]
             )
             .map_err(|error| error.to_string())?;
         }

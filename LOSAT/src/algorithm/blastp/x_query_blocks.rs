@@ -543,6 +543,9 @@ fn x_all_in_groups(
 pub(crate) struct XOffsetObserver<'a> {
     pub(crate) inner: &'a mut (dyn FormatObserver + Send),
     pub(crate) base: HspIndex,
+    /// The block's first query among the call's queries (a record's `q_idx` is this plus its
+    /// index in the block).
+    pub(crate) first_query: usize,
 }
 
 impl FormatObserver for XOffsetObserver<'_> {
@@ -560,6 +563,10 @@ impl FormatObserver for XOffsetObserver<'_> {
 
     fn subject_end(&mut self, format: usize, first_hsp: HspIndex) {
         self.inner.subject_end(format, self.base + first_hsp);
+    }
+
+    fn query_stats(&mut self, q_idx: usize, stats: crate::report::blast_xml::XmlStats) {
+        self.inner.query_stats(self.first_query + q_idx, stats);
     }
 }
 

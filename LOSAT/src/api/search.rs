@@ -31,8 +31,8 @@ use crate::cli::{Cli, Commands};
 // ```
 /// The options that the library API sets itself and does not take in an argv: the inputs
 /// (`Inputs` gives the records and their names), the output file and the output format
-/// (`run_collect` takes the formats; `run` takes the caller's `ReportOutputs`).
-pub const API_OWNED: [&str; 5] = ["query", "subject", "db", "out", "outfmt"];
+/// (arguments of `run_collect` and `run`).
+pub const API_OWNED: &[&str] = &["query", "subject", "db", "out", "outfmt"];
 
 /// Options that the library API rejects with a reason of its own.
 const API_REJECTED: [(&str, &str); 1] = [(

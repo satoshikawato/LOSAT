@@ -364,7 +364,7 @@ LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](ht
 
 ## Library use (Rust)
 
-The crate's public surface is two modules, `LOSAT::api` and `LOSAT::cli` ([plan](docs/losat_library_surface_plan.md)); every other module is the engine, hidden from the documentation and outside the compatibility promise. `api` searches FASTA records in memory with the command line's options and returns the command line's reports byte for byte, plus one record per HSP:
+The crate's public surface is the module `LOSAT::api` ([plan](docs/losat_library_surface_plan.md)); every other module is the command line or the engine, hidden from the documentation and outside the compatibility promise. `api` searches FASTA records in memory with the command line's options and returns the command line's reports byte for byte, plus one typed record per HSP and the statistics of each query:
 
 ```rust
 use LOSAT::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
@@ -374,7 +374,9 @@ let subject = read_fasta(Program::Blastp, Role::Subject, &std::fs::read("subject
 let search = validate(Program::Blastp, &["-evalue", "1e-5", "-num_threads", "4"])?;
 let outcome = run_collect(&search, Inputs::new(&query, &subject), &["6", "0"])?;
 // outcome.reports[0].bytes == `losat blastp -query query -subject subject -outfmt 6 -evalue 1e-5 ...`
-// outcome.hsps[i]: q_idx, s_idx, bit_score, e_value, coordinates, and the HSP's row in each report
+// outcome.hsps[i]: the numbers of the `-outfmt` columns (scores, coordinates, strands, frames, counts)
+// outcome.reports[0].spans[i]: the byte range of that HSP's row in the report
+// outcome.query_stats[q]: the query's effective search space, length adjustment, lambda, K and H
 ```
 
 The inputs are records (`-query`, `-subject`, `-db`, `-out` and `-outfmt` are not argv options of the API; a database subject is not available through the API yet), the search writes nothing to standard output or error, and errors carry the command line's messages. `cargo run --release --example library_search -- blastp query.faa subject.faa -evalue 1e-5` prints the outfmt 6 report; `cargo doc --no-deps --open` shows the API. The crate is not on crates.io yet (the plan's LIB-3).

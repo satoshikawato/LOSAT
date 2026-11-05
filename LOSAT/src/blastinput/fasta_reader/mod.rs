@@ -173,6 +173,7 @@ impl ReaderConfig {
 
 /// One record as NCBI's FASTA input source reads it.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct FastaRecord {
     /// The generated local ID (`lcl|Query_N`, `lcl|Subject_N`, without `lcl|`).
     pub local_id: String,
@@ -188,6 +189,7 @@ pub struct FastaRecord {
     pub warnings: Vec<u8>,
     /// What the BLAST archive (outfmt 11) writes besides the letters; `None` (8 bytes, no
     /// allocation) unless the reader was configured to keep it (`ReaderConfig::keep_defline`).
+    #[doc(hidden)]
     pub source: Option<Box<RecordSource>>,
 }
 
@@ -246,7 +248,12 @@ impl FastaRecord {
     pub fn title(&self) -> &[u8] {
         &self.title
     }
+}
 
+// What the engine reads of a record: outside the library API (`api::FastaRecord`), whose types
+// these would bring along.
+#[doc(hidden)]
+impl FastaRecord {
     /// The Seq-ids `-parse_deflines` read, `None` without the option.
     pub fn believed(&self) -> Option<&believed::BelievedIds> {
         self.source.as_ref()?.believed.as_deref()

@@ -6450,6 +6450,26 @@ fn post_process_hits_and_write(
             std::borrow::Cow::Owned(Vec::new())
         };
     let observer = &mut outputs.observer;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
+    // ```c++
+    //     // find the first valid context corresponding to this query
+    //     for (i = 0; i < context_per_query; i++) {
+    //         BlastContextInfo *ctx = query_info->contexts +
+    //                                 query_number * context_per_query + i;
+    //         if (ctx->is_valid) {
+    //             m_SearchSpace = ctx->eff_searchsp;
+    //             m_LengthAdjustment = ctx->length_adjustment;
+    //             break;
+    // ```
+    // The statistics of each query for the observer, the values of the XML reports: `q_idx` is
+    // that of the hit lists (a caller with an observer gets one report of all queries,
+    // `x_rpt_stream`).
+    if let Some(observer) = observer.as_deref_mut() {
+        let stats = blastn_xml_stats(report, query_lengths)?;
+        for (q_idx, stats) in stats.into_iter().enumerate() {
+            observer.query_stats(q_idx, stats);
+        }
+    }
     // The warnings are written once, with the first format (`QueryWarnings`).
     let mut warning_lines = Some(query_warnings);
     for (format_index, (format, &output_format)) in

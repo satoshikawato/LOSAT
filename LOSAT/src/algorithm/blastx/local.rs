@@ -222,6 +222,26 @@ pub fn run_local(
             ),
             false => None,
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
+        // ```c++
+        //     // find the first valid context corresponding to this query
+        //     for (i = 0; i < context_per_query; i++) {
+        //         BlastContextInfo *ctx = query_info->contexts +
+        //                                 query_number * context_per_query + i;
+        //         if (ctx->is_valid) {
+        //             m_SearchSpace = ctx->eff_searchsp;
+        //             m_LengthAdjustment = ctx->length_adjustment;
+        //             break;
+        // ```
+        // The statistics of each query of the batch for the observer.
+        if let Some(observer) = observer.as_deref_mut() {
+            super::blast_xml::observe_query_stats(
+                search_options,
+                results,
+                queries_before,
+                &mut *observer,
+            );
+        }
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:289-290
         // ```c++
         //             	ITERATE(CSearchResultSet, result, *results) {

@@ -209,11 +209,17 @@ class XincludeFixtureTests(unittest.TestCase):
                          db_fixtures.COLUMNS + xinclude.FILES_COLUMNS)
 
     def test_files_rows_match_the_frozen_master_and_side_files(self):
-        found = 0
+        found = pssm_rows = 0
         for manifest_rows, frozen, key in (
                 (run_oracle.read_manifest()[2], run_oracle.ENGINE / "tests/fixtures/outfmt0", "fixture_id"),
                 (db_fixtures.read_manifest()[1], db_fixtures.FROZEN, "row_id")):
             for row in manifest_rows:
+                if xinclude.wants_pssm(row):
+                    # psiblast's ASCII PSSM rows: `side_sha256` names the frozen PSSM files (empty: none)
+                    pssm_rows += 1
+                    files, _ = xinclude.pssm_files(frozen, row[key])
+                    self.assertEqual(xinclude.pssm_cell(files, row[key]), row["side_sha256"], row[key])
+                    continue
                 if not xinclude.wants_files(row):
                     self.assertEqual(row.get("side_sha256", ""), "", row[key])
                     continue
@@ -231,6 +237,7 @@ class XincludeFixtureTests(unittest.TestCase):
                 self.assertEqual([name.decode() for name in listed], names, row_id)
                 self.assertEqual(master.endswith(b"\n"), outfmt == "14", row_id)
         self.assertGreaterEqual(found, 9)
+        self.assertGreaterEqual(pssm_rows, 2)
 
     def test_side_files_are_collected_in_the_order_of_their_numbers(self):
         with tempfile.TemporaryDirectory() as tmp:

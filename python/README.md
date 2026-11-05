@@ -30,7 +30,8 @@ parser checks every option, so an option means, and fails, as it does there (`Ar
 `pylosat.PROGRAMS` names the programs; `psiblast` is its first round, as on the command line.
 
 `-query`, `-subject`, `-db`, `-out` and `-outfmt` are not options here: the inputs and the formats
-are arguments of `run`.
+are arguments of `run`. Nor are psiblast's `-out_ascii_pssm`, `-save_pssm_after_last_round` and
+`-save_each_pssm`: the library writes no PSSM file.
 
 ## Inputs
 

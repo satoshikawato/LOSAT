@@ -305,7 +305,8 @@ class Search:
 
     Each keyword is an option of the command line without its dash: `evalue=1e-5` is
     `-evalue 1e-5`. `describe` lists them. `-query`, `-subject`, `-db`, `-out` and `-outfmt` are
-    not options here. The search itself is `run`, `batches` or `run_to_file`.
+    not options here, nor are psiblast's PSSM files (the library writes none). The search itself
+    is `run`, `batches` or `run_to_file`.
     """
 
     __slots__ = ("_argv", "_program")

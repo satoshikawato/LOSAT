@@ -72,8 +72,9 @@ use crate::blastinput::value_parsers::*;
 // psiblast's arguments are blastp's without `-task` (its task is "psiblast"), `-ungapped`
 // (no `CGappedArgs`), the database masks and `-mt_mode`, with the PSI-BLAST, PSSM engine and
 // PHI-BLAST arguments. LOSAT runs psiblast's first round (`-num_iterations 1`), which is blastp's
-// search (`run`); the PSSM files, `-in_msa`, `-in_pssm`, `-phi_pattern`, `-gap_trigger` and
-// `-sum_stats` are refused by the parser (`cli.rs` `is_unported_psiblast_arg`). The values are
+// search (`run`), and writes the ASCII PSSM after it (`pssm.rs`); `-out_pssm`, `-in_msa`,
+// `-in_pssm`, `-phi_pattern`, `-gap_trigger` and `-sum_stats` are refused by the parser
+// (`cli.rs` `is_unported_psiblast_arg`). The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
 // after reading them are blastp's (`BlastpArgs::check_options`, with psiblast's program).
 #[derive(Args, Debug, Clone)]
@@ -239,9 +240,9 @@ pub struct PsiblastArgs {
     //                            CArgDescriptions::eInteger,
     //                            NStr::IntToString(PSI_PSEUDO_COUNT_CONST));
     // ```
-    // Only the PSSM engine reads it (`PSIBlastOptions::pseudo_count`), which one round without a
-    // PSSM file does not run: the value changes nothing (NCBI 2.17.0: the same reports with 5 and
-    // -1).
+    // Only the PSSM engine reads it (`PSIBlastOptions::pseudo_count`), which one round runs only
+    // for `-save_pssm_after_last_round` (`pssm.rs`); without it the value changes nothing (NCBI
+    // 2.17.0: the same reports with 5 and -1).
     #[arg(
         long,
         default_value = "0",
@@ -266,6 +267,37 @@ pub struct PsiblastArgs {
         help = "E-value inclusion threshold for pairwise alignments"
     )]
     pub inclusion_ethresh: f64,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1161-1170
+    // ```c++
+    //         // ASCII matrix file
+    //         arg_desc.AddOptionalKey(kArgAsciiPssmOutputFile, "ascii_mtx_file",
+    //                                 "File name to store ASCII version of PSSM",
+    //                                 CArgDescriptions::eOutputFile);
+    //
+    //         arg_desc.AddFlag(kArgSaveLastPssm, "Save PSSM after the last database "
+    //                          "search");
+    //         arg_desc.AddFlag(kArgSaveAllPssms, "Save PSSM after each iteration "
+    //                          "(file name is given in -save_pssm or "
+    //                          "-save_ascii_pssm options)");
+    // ```
+    // The file is opened when a PSSM is written (`pssm.rs` `write_ascii_pssm_files`, as
+    // `CAutoOutputFileReset`), not by the parser.
+    #[arg(
+        long = "out_ascii_pssm",
+        value_name = "ascii_mtx_file",
+        help = "File name to store ASCII version of PSSM"
+    )]
+    pub out_ascii_pssm: Option<String>,
+    #[arg(
+        long = "save_pssm_after_last_round",
+        help = "Save PSSM after the last database search"
+    )]
+    pub save_pssm_after_last_round: bool,
+    #[arg(
+        long = "save_each_pssm",
+        help = "Save PSSM after each iteration (file name is given in -save_pssm or -save_ascii_pssm options)"
+    )]
+    pub save_each_pssm: bool,
 
     /// `BlastpArgs::first_query_ordinal`: the number of the first query of the records of a call
     /// that starts there (`api::run_batches`). 0 on the command line.
@@ -346,6 +378,12 @@ impl PsiblastArgs {
             app: BlastpApp::Psiblast,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
+            psiblast_pssm: Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {
+                save_pssm_after_last_round: self.save_pssm_after_last_round,
+                save_each_pssm: self.save_each_pssm,
+                out_ascii_pssm: self.out_ascii_pssm,
+                pseudocount: self.pseudocount,
+            }),
         })
     }
 
@@ -494,12 +532,9 @@ mod tests {
         for (option, value) in [
             ("-in_pssm", Some("x")),
             ("-out_pssm", Some("x")),
-            ("-out_ascii_pssm", Some("x")),
             ("-in_msa", Some("x")),
             ("-msa_master_idx", Some("2")),
             ("-ignore_msa_master", None),
-            ("-save_pssm_after_last_round", None),
-            ("-save_each_pssm", None),
             ("-phi_pattern", Some("x")),
             ("-gap_trigger", Some("22")),
             ("-sum_stats", Some("false")),

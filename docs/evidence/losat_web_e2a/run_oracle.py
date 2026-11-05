@@ -34,6 +34,10 @@ with `-out <tmp>/<fixture_id>.out` added. NCBI writes the master file there and 
 next to it; the master is DIR/<fixture_id>.out (its hash is `stdout_sha256`, standard output must
 be empty) and the side files are DIR/<fixture_id>.out_<n>.json|xml (`side_sha256`, in order).
 
+A psiblast row whose `files` column is `pssm` runs with `-out_ascii_pssm <tmp>/<fixture_id>.pssm`
+added; the report is DIR/<fixture_id>.out as usual and the PSSM files it writes are
+DIR/<fixture_id>.pssm and DIR/<fixture_id>.pssm.<n> (`side_sha256`; empty when it writes none).
+
 - default: compare the outputs with the manifest's hash columns; exit 1 on a difference.
 - --freeze: write the hash and size columns of the manifest instead (run with
   --out LOSAT/tests/fixtures/outfmt0 so the fixtures are the frozen bytes).
@@ -63,7 +67,7 @@ REPO = Path(__file__).resolve().parents[3]
 ENGINE = REPO / "LOSAT"
 # Appended, so that the helper modules of LOSAT/tests never shadow the standard library.
 sys.path.append(str(ENGINE / "tests"))
-import xinclude_fixtures as xinclude  # noqa: E402  (the rows of outfmt 13 and 14)
+import xinclude_fixtures as xinclude  # noqa: E402  (the rows of outfmt 13 and 14, and of psiblast's PSSM)
 # The one rule of the SAM rows (outfmt 17): the CL tag of the @PG line is not compared.
 from db_search_fixtures import is_sam_outfmt, strip_sam_cl  # noqa: E402
 MANIFEST = ENGINE / "tests/outfmt0_manifest.tsv"
@@ -194,11 +198,15 @@ def main() -> int:
         command = [str(args.bin_dir / row["program"]), *oracle_argv(row)]
         start = time.monotonic()
         files = xinclude.wants_files(row)
+        pssm = xinclude.wants_pssm(row)
         if row.get("contract", "").startswith(PUNCT_TITLE):
             run = punct_title_run(row, args.bin_dir / row["program"])
         elif files:
             written = xinclude.run_with_files(command, row["fixture_id"], outfmt(row), cwd=ENGINE)
             run = written.run
+        elif pssm:
+            pssms = xinclude.run_with_pssm(command, row["fixture_id"], cwd=ENGINE)
+            run = pssms.run
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True)
         wall = time.monotonic() - start
@@ -213,6 +221,10 @@ def main() -> int:
             defects = xinclude.defects(written)
         else:
             (args.out / f"{row['fixture_id']}.out").write_bytes(run.stdout)
+        if pssm and args.freeze:
+            xinclude.freeze_pssm(pssms, args.out, row["fixture_id"])
+        elif pssm:
+            defects = [f"stray files {pssms.stray}"] if pssms.stray else []
         err = args.out / f"{row['fixture_id']}.err"
         if run.stderr:
             err.write_bytes(run.stderr)
@@ -223,6 +235,9 @@ def main() -> int:
         hashes = list(HASHES)
         if files:
             observed.update(xinclude.observed(written))
+            hashes.append("side_sha256")
+        if pssm:
+            observed.update(xinclude.observed_pssm(pssms, row["fixture_id"]))
             hashes.append("side_sha256")
         if row.get("contract") == DEVIATION:
             # outfmt 7 prints the -db argument, so the database has a fixed path.

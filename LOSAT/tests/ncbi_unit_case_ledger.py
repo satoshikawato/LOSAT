@@ -56,7 +56,7 @@ API_MODULES = (
     "blastfilter", "blasthits", "blastoptions", "blastsetup", "gapinfo",
     "gencode_singleton", "hspfilter_besthit", "hspfilter_culling", "hspstream",
     "linkhsp", "ntlookup", "ntscan", "nuclwordfinder", "optionshandle",
-    "querydata", "queryinfo", "redoalignment", "scoreblk", "split_query",
+    "pssmcreate", "querydata", "queryinfo", "redoalignment", "scoreblk", "split_query",
     "stat", "subj_ranges", "traceback", "tracebacksearch", "bl2seq",
 )
 # (module, directory under c++/src, file glob). An api file is its own module;

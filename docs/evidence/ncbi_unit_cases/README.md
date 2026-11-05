@@ -27,15 +27,17 @@ python3 LOSAT/tests/ncbi_unit_case_ledger.py scan --root .     # citation lines 
 - `algo/blast/unit_tests/api/<m>_unit_test.cpp` for aalookup, aascan, blast, blastdiag,
   blastengine, blastextend, blastfilter, blasthits, blastoptions, blastsetup, gapinfo,
   gencode_singleton, hspfilter_besthit, hspfilter_culling, hspstream, linkhsp, ntlookup, ntscan,
-  nuclwordfinder, optionshandle, querydata, queryinfo, redoalignment, scoreblk, split_query, stat,
-  subj_ranges, traceback, tracebacksearch, bl2seq. Each file is one module, named as in the list.
+  nuclwordfinder, optionshandle, pssmcreate, querydata, queryinfo, redoalignment, scoreblk,
+  split_query, stat, subj_ranges, traceback, tracebacksearch, bl2seq. Each file is one module,
+  named as in the list.
 - `algo/blast/unit_tests/blast_format/*.cpp` (module `blast_format`),
   `algo/blast/unit_tests/blast_mt/*.cpp` (`blast_mt`),
   `algo/blast/blastinput/unit_test/blastinput_unit_test.cpp` (`blastinput`),
   `objtools/align_format/unit_test/*.cpp` (`align_format`).
 
-PSI-BLAST, PSSM, RPS, PHI, delta, magicblast, rmblast, remote BLAST, SeqDB and BLAST database tests
-are out of scope.
+The PSSM engine's tests (pssmcreate, which psiblast's `-out_ascii_pssm` uses) are in scope; the
+other PSI-BLAST, PSSM, RPS, PHI, delta, magicblast, rmblast, remote BLAST, SeqDB and BLAST
+database tests are out of scope.
 
 ## Columns
 

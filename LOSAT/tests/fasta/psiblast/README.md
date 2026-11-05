@@ -8,6 +8,12 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
 - `two.faa`: YP_009220601.1 and YP_009220615.1 of `tests/fasta/WSSV.faa`.
 - `pol.faa`: YP_009220649.1 of `tests/fasta/WSSV.faa` (DNA polymerase, 2,351 letters).
 - `rnd.faa`: a random 30-letter protein without hits.
+- `tk_rnd.faa`: `tk.faa`, then `rnd.faa` (PS2: the second query writes no PSSM).
+- `tk_xbz.faa`: `tk.faa` with X at positions 50-55, B Z U J at 100-103 and `*` at 201 (1-based), its
+  definition line ending in ` with X B Z U J *`, 60 letters a line (PS2: the PSSM's X columns and
+  printed letters).
+- `tk_o.faa`: `tk.faa` with O at positions 30 and 121 (1-based), its definition line ending in ` with O`, 60
+  letters a line (PS2: an O of the query is X in the search's buffer and in the PSSM, with NCBI's warning).
 - `tk_x_pol.faa`: `tk.faa`, a record of 20 X (no valid Karlin-Altschul parameters), `pol.faa`: psiblast
   stops at the second query with `BLAST engine error: Could not calculate ungapped Karlin-Altschul
   parameters ...`.

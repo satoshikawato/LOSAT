@@ -294,7 +294,7 @@ def run_library_fixtures(example: Path, programs: set[str], out: Path) -> list[s
     if selected:
         log = out / "outfmt0-fixtures-library.tsv"
         result = subprocess.run([sys.executable, str(FIXTURE_DIR / "check_losat.py"), "--losat", str(example),
-                                 "--programs", ",".join(selected), "--threads", "1"],
+                                 "--programs", ",".join(selected), "--threads", "1", "--library"],
                                 cwd=FIXTURE_DIR, capture_output=True, text=True)
         log.write_text(result.stdout + result.stderr)
         if result.returncode != 0:

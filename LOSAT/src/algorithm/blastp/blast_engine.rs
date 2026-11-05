@@ -3078,6 +3078,103 @@ fn shift_hsp_to_records(hsp: &mut BlastpHsp, ranges: &BlastpRanges<'_>) {
     }
 }
 
+/// psiblast's ASCII PSSMs after its round (`-save_pssm_after_last_round -out_ascii_pssm`): one
+/// for each query whose results have alignments, in the order of the queries, from the query's
+/// whole record and its Seq-aligns before the formatter's cut (`algorithm::psiblast::pssm`).
+/// A query whose PSSM fails stops the run after its report (`PssmStop`, handled by `search`),
+/// with the PSSMs of the queries before it.
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:147-162
+// ```c++
+// s_GetQueryBioseq(CConstRef<CBlastQueryVector> query, CRef<CScope> scope,
+//                  CRef<CPssmWithParameters> pssm)
+// {
+//     CConstRef<CBioseq> retval;
+//
+//     if (pssm) {
+//         retval.Reset(&pssm->SetQuery().SetSeq());
+//     } else {
+//         _ASSERT(query.NotEmpty());
+//         if (query->GetQuerySeqLoc(0)->GetId()) {
+//             CBioseq_Handle bh =
+//                 scope->GetBioseqHandle(*query->GetQuerySeqLoc(0)->GetId());
+//             _ASSERT(bh);
+//             retval.Reset(bh.GetBioseqCore());
+// ```
+// The query is its record's Bioseq, whole also with `-query_loc`; the ancillary data are the
+// query's (`CBlastAncillaryData`, blast_results.cpp:71-114: the ungapped block of its context and
+// the gapped one, and in the first round the PSI blocks are copies of them).
+#[cold]
+#[inline(never)]
+fn psiblast_ascii_pssms(
+    args: &ResolvedBlastpArgs,
+    request: &crate::algorithm::psiblast::pssm::PssmRequest,
+    hit_lists: &[Option<BlastpHitList>],
+    ranges: &BlastpRanges<'_>,
+    shown_subjects: ShownSubjects<'_>,
+    contexts: &[QueryContext],
+    gapped: (f64, f64),
+) -> Result<Vec<Vec<u8>>> {
+    use crate::algorithm::psiblast::pssm::{
+        ascii_pssm, ncbistdaa_letters, PssmAlignment, PssmAncillary, PssmStop,
+    };
+    let subject = |s_idx: u32| -> Vec<u8> {
+        match shown_subjects.letters(s_idx as usize) {
+            Some(ShownLetters::Ascii(letters)) => ncbistdaa_letters(letters),
+            Some(ShownLetters::Stored(residues)) => residues.to_vec(),
+            None => Vec::new(),
+        }
+    };
+    let mut pssms = Vec::new();
+    for (query, hit_list) in hit_lists.iter().enumerate() {
+        let Some(hit_list) = hit_list else {
+            continue;
+        };
+        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+        let q_shift = ranges.query_input.placements.offset(query);
+        let alignments: Vec<PssmAlignment<'_>> = hit_list.hsplist_array[..count]
+            .iter()
+            .flat_map(|hsp_list| &hsp_list.hsps)
+            .map(|hsp| PssmAlignment {
+                subject: hsp.s_idx,
+                e_value: crate::report::serial::seqalign::seqalign_evalue(hsp.e_value),
+                q_start: hsp.q_start - 1 + q_shift,
+                s_start: hsp.s_start - 1,
+                q_length: hsp.q_end + 1 - hsp.q_start,
+                ops: hsp.gap_info.as_deref(),
+            })
+            .collect();
+        if alignments.is_empty() {
+            continue;
+        }
+        let record = &ranges.input_records[ranges.query_input.ordinal(query)];
+        let ungapped = &contexts[query].karlin_params;
+        let ancillary = PssmAncillary {
+            ungapped: (ungapped.k, ungapped.lambda),
+            gapped,
+        };
+        match ascii_pssm(
+            request,
+            args.scoring.matrix,
+            args.inclusion_ethresh,
+            record.seq(),
+            &alignments,
+            &subject,
+            ancillary,
+        ) {
+            Ok(pssm) => pssms.push(pssm),
+            Err(error) => {
+                return Err(PssmStop {
+                    query,
+                    error,
+                    pssms,
+                }
+                .into())
+            }
+        }
+    }
+    Ok(pssms)
+}
+
 /// The stored residue of pyrrolysine (O): the only code that `ncbistdaa_to_ascii` shows as O
 /// (`NCBISTDAA_TO_AMINOACID`, blast_encoding.c:115-121, quoted above it).
 const STORED_O: u8 = 26;
@@ -5962,12 +6059,12 @@ fn search(
     let epilog = batches.stop.is_none();
     // The searches and reports of the batches up to the input record `input_done` and
     // the searched query `searched_done`.
-    let search_batches = |args: ResolvedBlastpArgs,
-                          outputs: &mut ReportOutputs<'_>,
-                          pool: &crate::utils::threading::SearchPool<'_>,
-                          input_done: usize,
-                          searched_done: usize,
-                          epilog: bool|
+    let search_batches_once = |args: ResolvedBlastpArgs,
+                               outputs: &mut ReportOutputs<'_>,
+                               pool: &crate::utils::threading::SearchPool<'_>,
+                               input_done: usize,
+                               searched_done: usize,
+                               epilog: bool|
      -> Result<()> {
         let done_input = seq_range::QueryInput {
             placements: seq_range::Placements(
@@ -6010,6 +6107,58 @@ fn search(
             &reports,
             x_lookup_ahead::XAheadBlock::none(),
         )
+    };
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523
+    // ```c++
+    //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    //
+    // 		CRef<CBlastQueryVector> query_batch(input->GetNextSeqBatch(*scope));
+    //
+    //                 const bool converged = DoIterations(opts_hndl,
+    //                            query_batch,
+    //                            pssm,
+    //                            db_args,
+    //                            db_adapter,
+    //                            scope,
+    //                            formatter);
+    // ```
+    // psiblast makes each query's PSSM after its report: a PSSM that fails
+    // (`psiblast::pssm::PssmStop`) stops the run there, after the reports of the queries up to
+    // it (without the epilog) and the PSSMs of those before it. LOSAT searches all queries
+    // together, so those queries are searched again and reported alone.
+    let search_batches = |args: ResolvedBlastpArgs,
+                          outputs: &mut ReportOutputs<'_>,
+                          pool: &crate::utils::threading::SearchPool<'_>,
+                          input_done: usize,
+                          searched_done: usize,
+                          epilog: bool|
+     -> Result<()> {
+        let Some(request) = args.psi_pssm.clone() else {
+            return search_batches_once(args, outputs, pool, input_done, searched_done, epilog);
+        };
+        let mut prefix_args = args.clone();
+        prefix_args.psi_pssm = None;
+        match search_batches_once(args, outputs, pool, input_done, searched_done, epilog) {
+            Err(error) if error.is::<crate::algorithm::psiblast::pssm::PssmStop>() => {
+                let stop = error
+                    .downcast::<crate::algorithm::psiblast::pssm::PssmStop>()
+                    .expect("the error was checked to be a PssmStop");
+                let after = batches
+                    .starts
+                    .partition_point(|&(_, searched)| searched <= stop.query);
+                let input_end = batches
+                    .starts
+                    .get(after)
+                    .map_or(input_done, |&(input, _)| input.min(input_done));
+                search_batches_once(prefix_args, outputs, pool, input_end, stop.query + 1, false)?;
+                crate::algorithm::psiblast::pssm::write_ascii_pssm_files(
+                    &request,
+                    stop.pssms.iter().map(Vec::as_slice),
+                );
+                Err(stop.error)
+            }
+            other => other,
+        }
     };
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries in blocks of whole batches, each block a search
     // of its own whose report is written before the next block is searched
@@ -6432,7 +6581,9 @@ fn x_query_block_plan(
 )> {
     use super::x_query_blocks::XBlockReport;
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
+    // psiblast's PSSMs (`psiblast_ascii_pssms`) are written by the search of all queries.
     if args.query_range.is_some()
+        || args.psi_pssm.is_some()
         || outputs.formats.is_empty()
         || batches.stop.is_some()
         || batches.searched_done != queries.len()
@@ -10858,6 +11009,7 @@ fn run_resolved_in_pool(
         let residues = if !x_listed_lean {
             database::XShownResidues::Listed
         } else if outputs.hits.is_none()
+            && args.psi_pssm.is_none()
             && requested_formats.iter().all(|outfmt| {
                 matches!(
                     outfmt,
@@ -11000,6 +11152,37 @@ fn run_resolved_in_pool(
                 })
                 .collect()
         });
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:291-309
+    // ```c++
+    //                 CSearchResults& results_1st_query = (*results)[0];
+    //                 if ( !results_1st_query.HasAlignments() ) {
+    //                     break;
+    //                 }
+    //
+    //                 if (run_token & 2)
+    //                 {
+    //                         CConstRef<CSeq_align_set> aln(results_1st_query.GetSeqAlign());
+    //                         ...
+    //                         if (itr || m_CmdLineArgs->GetSaveLastPssm()) {
+    //                         ...
+    //                         pssm =
+    //                          ComputePssmForNextIteration(*seq, aln, psi_opts, scope,
+    //                                      results_1st_query.GetAncillaryData());
+    // ```
+    // psiblast's PSSM is made from the Seq-aligns of the round's results, before the
+    // formatter's cut; it is written after the reports (below `output_result`).
+    let psiblast_pssms: Option<Vec<Vec<u8>>> = match args.psi_pssm.as_ref() {
+        Some(request) => Some(psiblast_ascii_pssms(
+            &args,
+            request,
+            &hit_lists,
+            ranges,
+            shown_subjects,
+            &contexts,
+            (gapped_params.k, gapped_params.lambda),
+        )?),
+        None => None,
+    };
     let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
         hit_lists
             .iter_mut()
@@ -12274,6 +12457,18 @@ fn run_resolved_in_pool(
     // formatting and writing of every report, after the search. No NCBI counterpart.
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, output_format_start);
     output_result?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:319-321
+    // ```c++
+    //        if (m_CmdLineArgs->GetSaveLastPssm()) {
+    //            SavePssmToFile(pssm, &itr);
+    //        }
+    // ```
+    if let (Some(request), Some(pssms)) = (args.psi_pssm.as_ref(), psiblast_pssms.as_ref()) {
+        crate::algorithm::psiblast::pssm::write_ascii_pssm_files(
+            request,
+            pssms.iter().map(Vec::as_slice),
+        );
+    }
     // EXPERIMENT (LOSAT_X_BPLKPFLAT): the flat table's vectors kept for the next block's build
     // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed. EXPERIMENT
     // (LOSAT_X_BPLKPAHEAD): exact blastp's, for the build of a later block's table ahead of it
@@ -12523,6 +12718,7 @@ mod tests {
             app: BlastpApp::Blastp,
             inclusion_ethresh: None,
             first_query_ordinal: 0,
+            psiblast_pssm: None,
         }
     }
 

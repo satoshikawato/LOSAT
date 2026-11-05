@@ -145,8 +145,8 @@
 use super::arch::*;
 use super::kernel::finish;
 use super::{
-    build_row_table, fits_8bit, script_codes, trace_bytes, ColSeq, RowSeq, Scores, XdropResult,
-    XdropScratch, FENCE_SENTRY, MAX_M, PAD, SCRIPT_GAP_IN_A, TAB, VMAX,
+    build_row_table, fits_8bit, script_codes, ColSeq, RowSeq, Scores, XdropResult, XdropScratch,
+    FENCE_SENTRY, MAX_M, PAD, SCRIPT_GAP_IN_A, TAB, VMAX,
 };
 
 // No NCBI counterpart: lane operations the `arch` layer of `xdrop_simd.rs` does not have (unsigned
@@ -1166,8 +1166,7 @@ unsafe fn body16_rows<const TB: bool, const NIB: bool>(
     }
     sc.dirty = b_size;
     if TB {
-        sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
-        sc.rows.push((0, 0, b_size as u32));
+        sc.trace.x_row_zero(NIB, b_size);
     }
 
     let mut ramp = [0i16; 8];
@@ -1278,15 +1277,11 @@ unsafe fn body16_rows<const TB: bool, const NIB: bool>(
         // no diagonal into the first lane of the band: lane 0 of the row's first block (item 3)
         let mut hpm = hpm0;
 
-        let row_off = sc.trace.len();
-        if TB {
-            crate::utils::xdrop_simd::x_trace_reserve(
-                &mut sc.trace,
-                &mut sc.rows,
-                bend - first + num_extra + 96,
-            );
-        }
-        let tr = sc.trace.as_mut_ptr().add(row_off);
+        let tr = if TB {
+            sc.trace.x_row(bend - first + num_extra + 96)
+        } else {
+            core::ptr::null_mut()
+        };
 
         let bestv0 = splat16((bias + best_rel) as i16);
         let mut rs = Row {
@@ -1370,13 +1365,7 @@ unsafe fn body16_rows<const TB: bool, const NIB: bool>(
             best_rel = lane0(rs.bestv) - bias;
         }
         if TB {
-            sc.trace
-                .set_len(row_off + trace_bytes(NIB, proc_end - first));
-            sc.rows.push((
-                row_off as u32,
-                (first + sc.x_sh) as u32,
-                (proc_end - first) as u32,
-            ));
+            sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first);
         }
         if fence_row {
             fence_hit = true;
@@ -1679,8 +1668,7 @@ unsafe fn body8_rows<const TB: bool, const NIB: bool>(
     }
     sc.dirty8 = b_size;
     if TB {
-        sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
-        sc.rows.push((0, 0, b_size as u32));
+        sc.trace.x_row_zero(NIB, b_size);
     }
 
     // 16 * gap_extend <= 128 + gap_open_extend <= 254 (checked above and by the bias test)
@@ -1789,15 +1777,11 @@ unsafe fn body8_rows<const TB: bool, const NIB: bool>(
         }
         let mut hpm = hpm0;
 
-        let row_off = sc.trace.len();
-        if TB {
-            crate::utils::xdrop_simd::x_trace_reserve(
-                &mut sc.trace,
-                &mut sc.rows,
-                bend - first + num_extra + 96,
-            );
-        }
-        let tr = sc.trace.as_mut_ptr().add(row_off);
+        let tr = if TB {
+            sc.trace.x_row(bend - first + num_extra + 96)
+        } else {
+            core::ptr::null_mut()
+        };
 
         let bestv0 = splat8((bias + best_rel) as u8 as i8);
         let mut rs = Row {
@@ -1866,13 +1850,7 @@ unsafe fn body8_rows<const TB: bool, const NIB: bool>(
             best_rel = lane0_u8(rs.bestv) - bias;
         }
         if TB {
-            sc.trace
-                .set_len(row_off + trace_bytes(NIB, proc_end - first));
-            sc.rows.push((
-                row_off as u32,
-                (first + sc.x_sh) as u32,
-                (proc_end - first) as u32,
-            ));
+            sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first);
         }
         if fence_row {
             fence_hit = true;

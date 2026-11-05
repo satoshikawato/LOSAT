@@ -773,8 +773,8 @@ Same values, faster computation:
   x1.011 (4 pairs, 0.993-1.015; user x1.000, instructions x0.9995); blastp sp4 `-subject` x1.000 (6),
   yeast `-db` x1.001 (4); user-space instructions x0.970-0.9995 in every cell.
 - `LOSAT_X_DPNIBBLE=1` (every program's vector X-drop traceback, memory; in the strict set from the
-  pull request that added it, 2026-10-24; since 2026-11-03 (the fold of line SF S3 family dp-trace) it also
-  governs the pool of long traces, folded from `LOSAT_X_DPTRACEPOOL` (entry below): a trace past the four-bit
+  pull request that added it, 2026-10-24; from 2026-11-03 (the fold of line SF S3 family dp-trace) to
+  2026-11-06 (line EB P2', next entry) it also governed the pool of long traces, folded from `LOSAT_X_DPTRACEPOOL` (entry below): a trace past the four-bit
   rows of one NCBI chunk (`CHUNKSIZE` 2,097,152 cells, `blast_gapalign.c:61`, 1 MiB) comes from a pool the
   scratches on a Rayon pool thread share, and the pool keeps two idle pairs; `=0` returns to one byte per cell
   and every scratch keeps its own trace. Measured with the fold: Sakai x EDL933 `-subject` at 16 threads, blastn and dc-megablast x0.993 and x0.995 the time and x1.015 and x1.005 the max RSS (rounds 0.93-1.12, as dev's own spread), at 4 threads x0.998 / x0.997 and x1.007 / x1.008; one-thread instructions x0.994-0.999; outputs equal to dev's and NCBI's) the
@@ -803,7 +803,12 @@ Same values, faster computation:
   the kernels' script codes in `const` blocks keep a one-byte kernel's register allocation, one thread at
   dev's instructions, x0.998 / x0.999): dc-megablast 16 threads x0.984 (8 pairs), 633 -> 476; blastn 16
   threads x0.986 (8), 535 -> 379; 4 threads x0.993 / x1.000 (6), 217 -> 189 / 257 -> 197.
-- `LOSAT_X_DPTRACEPOOL=1` (every program's vector X-drop traceback, memory; folded into `LOSAT_X_DPNIBBLE` on
+- `LOSAT_X_DPTRACEPOOL=1` (every program's vector X-drop traceback, memory; superseded on 2026-11-06, line EB
+  P2', by the rows in chunks, which no switch governs: every scratch keeps its traceback rows and their
+  records in a list of 1 MiB chunks as NCBI keeps `GapStateArrayStruct` (`XTrace`, `blast_gapalign.c:61,70-137`;
+  a row that does not fit the free part of the chunk being filled goes to the next), the chunks after a
+  scratch's first come from one pool shared by every scratch and go back when the traceback call ends, and
+  `LOSAT_X_DPNIBBLE` sets only the four-bit layout; folded into `LOSAT_X_DPNIBBLE` on
   2026-11-03, line SF S3 family dp-trace: no variable any more, the pool follows `LOSAT_X_DPNIBBLE`'s rule
   (a scratch on a Rayon pool thread) and `LOSAT_X_DPNIBBLE=0` gives every scratch its own trace; the pool keeps
   two idle pairs as before (one was measured: dc-megablast Sakai x EDL933 `-subject` 1.046x the time at 16

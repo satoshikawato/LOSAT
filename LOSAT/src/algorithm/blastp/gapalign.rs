@@ -2027,7 +2027,8 @@ fn align_ex_protein(
                 &mut scratch.fast,
             )
         });
-        // LOSAT_X_DPNIBBLE: a long traceback's rows go back to the pool (`ops` holds the script)
+        // the chunks of the traceback rows past the scratch's own go back to the pool (`ops` holds
+        // the script; `XTrace`)
         scratch.fast.x_trace_release();
         if let Some(r) = fast {
             let ops: Vec<GapEditOp> = scratch

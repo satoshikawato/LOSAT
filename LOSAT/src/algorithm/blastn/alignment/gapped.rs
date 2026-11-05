@@ -2293,7 +2293,8 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
             true,
             &mut gap_scratch.fast,
         );
-        // LOSAT_X_DPNIBBLE: a long traceback's rows go back to the pool (`ops` holds the script)
+        // the chunks of the traceback rows past the scratch's own go back to the pool (`ops` holds
+        // the script; `XTrace`)
         gap_scratch.fast.x_trace_release();
         if let Some(r) = x_r {
             crate::utils::xstats::add(&crate::utils::xstats::DP_FAST_CALLS, 1);
@@ -3059,7 +3060,8 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             true,
             &mut gap_scratch.fast,
         );
-        // LOSAT_X_DPNIBBLE: a long traceback's rows go back to the pool (`ops` holds the script)
+        // the chunks of the traceback rows past the scratch's own go back to the pool (`ops` holds
+        // the script; `XTrace`)
         gap_scratch.fast.x_trace_release();
         if let Some(r) = x_r {
             let out = if r.fence_hit {

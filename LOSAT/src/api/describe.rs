@@ -29,6 +29,38 @@ use super::program::Program;
 use super::search::API_OWNED;
 use crate::cli::Cli;
 
+// NCBI reference (598d8ae6): c++/include/corelib/ncbiargs.hpp:588-598
+// ```c++
+//     enum EType {
+//         eString = 0, ///< An arbitrary string
+//         eBoolean,    ///< {'true', 't', 'false', 'f'},  case-insensitive
+//         eInt8,       ///< Convertible into an integer number (Int8 only)
+//         eInteger,    ///< Convertible into an integer number (int or Int8)
+//         eIntId,      ///< Convertible to TIntId (int or Int8 depending on NCBI_INT8_GI
+//         eDouble,     ///< Convertible into a floating point number (double)
+//         eInputFile,  ///< Name of file (must exist and be readable)
+//         eOutputFile, ///< Name of file (must be writable)
+//         eIOFile,     ///< Name of file (must be writable)
+//         eDirectory,  ///< Name of file directory
+// ```
+/// What an option's value is, from the type that the command line's parser makes of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ValueKind {
+    /// No value: the flag stands alone.
+    Flag,
+    /// `true` or `false`, as the command line spells them.
+    Boolean,
+    /// An integer.
+    Integer,
+    /// A floating-point number.
+    Real,
+    /// A file's name.
+    Path,
+    /// Any other text; `Parameter::choices` lists the values of an option that has a list.
+    Text,
+}
+
 /// One option of a program, as the command line defines it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -39,6 +71,8 @@ pub struct Parameter {
     pub help: String,
     /// Whether the flag takes a value (`-evalue 1e-5`) or stands alone (`-ungapped`).
     pub takes_value: bool,
+    /// What the value is.
+    pub value_kind: ValueKind,
     /// The default value that the parser fills in when the flag is absent, if it has one. An
     /// option without a parser default (an `Option` of the arguments, "given or not" to NCBI)
     /// has none here even when its help text names NCBI's default.
@@ -95,6 +129,35 @@ fn accepted_gencodes(program: Program, flag: &str) -> Vec<u32> {
         .collect()
 }
 
+/// The kind of the value of `arg`, from the type its parser makes.
+fn value_kind(arg: &clap::Arg) -> ValueKind {
+    use std::any::TypeId;
+    if !arg.get_action().takes_values() {
+        return ValueKind::Flag;
+    }
+    let parser = arg.get_value_parser();
+    let made = parser.type_id();
+    let is_one_of = |types: &[TypeId]| types.iter().any(|candidate| made == *candidate);
+    if is_one_of(&[TypeId::of::<bool>()]) {
+        ValueKind::Boolean
+    } else if is_one_of(&[
+        TypeId::of::<u8>(),
+        TypeId::of::<u32>(),
+        TypeId::of::<u64>(),
+        TypeId::of::<usize>(),
+        TypeId::of::<i32>(),
+        TypeId::of::<i64>(),
+    ]) {
+        ValueKind::Integer
+    } else if is_one_of(&[TypeId::of::<f32>(), TypeId::of::<f64>()]) {
+        ValueKind::Real
+    } else if is_one_of(&[TypeId::of::<std::path::PathBuf>()]) {
+        ValueKind::Path
+    } else {
+        ValueKind::Text
+    }
+}
+
 /// The options of `program`, read from the engine's argument definitions.
 pub fn describe(program: Program) -> Description {
     let root = Cli::command();
@@ -116,6 +179,7 @@ pub fn describe(program: Program) -> Description {
             flag: format!("-{long}"),
             help: arg.get_help().map(ToString::to_string).unwrap_or_default(),
             takes_value: arg.get_action().takes_values(),
+            value_kind: value_kind(arg),
             default: (!defaults.is_empty()).then(|| defaults.join(" ")),
             choices: arg
                 .get_possible_values()

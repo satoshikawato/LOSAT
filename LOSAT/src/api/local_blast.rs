@@ -251,6 +251,30 @@ pub trait FormatObserver {
     /// before the reports of the query are written, and only with an observer (the program does
     /// not make these values otherwise).
     fn query_stats(&mut self, _q_idx: usize, _stats: XmlStats) {}
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
+    // ```c++
+    //         formatter.PrintProlog();
+    //         ...
+    //         /*** Process the input ***/
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    //         ...
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    // ```
+    // What NCBI writes before this loop is written once for the run; a call of `run_local`
+    // per query batch writes it again, and this event tells where it ends.
+    /// The checks of the run are done and the subjects are read: what the diagnostics receive
+    /// from here on belongs to the queries.
+    fn queries_begin(&mut self) {}
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:299-300
+    // ```c++
+    //                 if (!batch_size)
+    //                     input.SetBatchSize(mixer.GetBatchSize(lcl_blast.GetNumExtensions()));
+    // ```
+    /// BLASTN's query batch just searched made `extensions` successful initial extensions, which
+    /// size the next batch (`CBatchSizeMixer`). The other programs' batches have one size.
+    fn batch_extensions(&mut self, _extensions: i32) {}
 }
 
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973

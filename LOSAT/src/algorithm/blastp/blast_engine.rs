@@ -5810,6 +5810,19 @@ fn search(
         ),
     };
     check_blastp_environment(args.app, database.is_none(), outputs.only_archive())?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
+    // ```c++
+    //         formatter.PrintProlog();
+    //         ...
+    //         /*** Process the input ***/
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    //         ...
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    // ```
+    // What the run writes before its query batches ends here.
+    if let Some(observer) = outputs.observer.as_deref_mut() {
+        observer.queries_begin();
+    }
     let batches = match args.app {
         BlastpApp::Blastp => crate::blastinput::query_batch::read_query_batches(
             query_records,
@@ -11098,7 +11111,9 @@ fn run_resolved_in_pool(
             if result_warnings {
                 lines.extend(crate::report::query_warnings::query_warning(
                     args.app.ncbi_name(),
-                    ranges.x_ordinal_base + ranges.query_input.ordinal(q_idx),
+                    args.first_query_ordinal
+                        + ranges.x_ordinal_base
+                        + ranges.query_input.ordinal(q_idx),
                     record,
                     &messages,
                 ));
@@ -12388,6 +12403,7 @@ mod tests {
             archive: None,
             app: BlastpApp::Blastp,
             inclusion_ethresh: None,
+            first_query_ordinal: 0,
         }
     }
 

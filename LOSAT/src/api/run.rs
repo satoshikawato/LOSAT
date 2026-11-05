@@ -130,6 +130,12 @@ pub struct HspRecord {
     pub s_idx: usize,
     /// 0-based position of the HSP among the HSPs of its query.
     pub rank: usize,
+    /// The query's id (`qaccver`): the first word of its title, its generated `Query_N` without a
+    /// title, and with `-parse_deflines` the accession and version of its id. A byte that is not
+    /// UTF-8 shows as U+FFFD here and as itself in the reports. The HSPs of a query share it.
+    pub query_id: Arc<str>,
+    /// The subject's id (`saccver`), by the same rules. The HSPs of a subject share it.
+    pub subject_id: Arc<str>,
     /// The raw alignment score (`score`).
     pub raw_score: i32,
     /// The bit score (`bitscore`), not rounded.
@@ -193,6 +199,20 @@ pub struct HspRecord {
 }
 
 impl HspRecord {
+    // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-442
+    // ```c++
+    // inline void CBlastTabularInfo::x_PrintPercentIdentical(void)
+    // {
+    //     double perc_ident =
+    //         (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
+    //     m_Ostream << NStr::DoubleToString(perc_ident, 3);
+    // }
+    // ```
+    /// The percentage of identical columns (`pident`), not rounded.
+    pub fn percent_identity(&self) -> f64 {
+        crate::report::outfmt6::percent_identity_ncbi(self.num_ident, self.length)
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1109-1120
     // ```c
     // Blast_HSPGetAdjustedOffsets(EBlastProgramType program, BlastHSP* hsp,
@@ -255,7 +275,7 @@ pub struct QueryStats {
 
 impl QueryStats {
     /// The statistics of a query, or `None` for the values of a query without a valid context.
-    fn of_context(stats: XmlStats) -> Option<Self> {
+    pub(super) fn of_context(stats: XmlStats) -> Option<Self> {
         (stats != XmlStats::NONE).then_some(Self {
             eff_space: stats.eff_space,
             hsp_len: stats.hsp_len,
@@ -285,13 +305,13 @@ pub struct Outcome {
 }
 
 /// A writer into memory that tells its position, for the observer of its report.
-struct CountingWriter {
-    bytes: Vec<u8>,
-    position: Arc<AtomicUsize>,
+pub(super) struct CountingWriter {
+    pub(super) bytes: Vec<u8>,
+    pub(super) position: Arc<AtomicUsize>,
 }
 
 impl CountingWriter {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             bytes: Vec::new(),
             position: Arc::new(AtomicUsize::new(0)),
@@ -457,7 +477,10 @@ impl FormatObserver for RangeRecorder {
 /// query whose `-query_loc` interval starts more than one letter past its end
 /// (`seq_range::cut_queries`), so the engine's `q_idx` counts the searched queries, and the
 /// records give the index in the inputs. `None` without `-query_loc` (every query is searched).
-fn searched_queries(range: Option<SequenceRange>, records: &[FastaRecord]) -> Option<Vec<usize>> {
+pub(super) fn searched_queries(
+    range: Option<SequenceRange>,
+    records: &[FastaRecord],
+) -> Option<Vec<usize>> {
     let range = range?;
     Some(
         records
@@ -492,6 +515,15 @@ fn query_loc(command: &Commands) -> (Option<&str>, &'static str) {
 //     m_NumThreads = num_threads;
 // }
 // ```
+/// The `-query_loc` interval of the program's arguments. A value that the search will refuse
+/// has no interval here.
+pub(super) fn query_range_of(command: &Commands) -> Option<SequenceRange> {
+    let (query_loc, program) = query_loc(command);
+    parse_optional_range(query_loc, RangeRole::Query, program)
+        .ok()
+        .flatten()
+}
+
 /// `-num_threads` of the program's arguments.
 fn num_threads(command: &Commands) -> usize {
     match command {
@@ -585,7 +617,7 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
 //                 results = lcl_blast.Run();
 // ```
 /// One `run_local` call: the program's entry for the parsed arguments.
-fn run_local(
+pub(super) fn run_local(
     command: Commands,
     query: &[FastaRecord],
     subject: &[FastaRecord],
@@ -609,6 +641,22 @@ fn run_local(
 //     string fmt_choice =
 //         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
 // ```
+// No NCBI counterpart: NCBI's application reads its records itself, with the option.
+/// The refusal of records read without their ids for a search with `-parse_deflines`: the
+/// reports would show the local ids of a search without the option.
+pub(super) fn check_inputs(search: &Search, inputs: Inputs<'_>) -> Result<(), Error> {
+    let records = || inputs.query.iter().chain(inputs.subject);
+    if search.parse_deflines()
+        && records().next().is_some()
+        && records().all(|record| record.believed().is_none())
+    {
+        return Err(Error::Argv(
+            "-parse_deflines needs the records of read_inputs, which reads the ids".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// The searches of a call: `formats` grouped by hit list size (`search_groups`), and the threads
 /// of the pool they share. A `-outfmt` value that the command line rejects, and a call without
 /// formats (the engines refuse one), fail here, before any search.
@@ -621,6 +669,7 @@ fn searches(
     if formats.is_empty() {
         return Err(Error::Argv("no output format was requested".to_string()));
     }
+    check_inputs(search, inputs)?;
     let numbers: Vec<i32> = formats
         .iter()
         .map(|outfmt| {
@@ -714,11 +763,7 @@ fn collect_one(
     diagnostics: &mut (dyn Write + Send),
 ) -> Result<Searched, Error> {
     let command = search.command(inputs.query_name, inputs.subject_name);
-    let (query_loc, program) = query_loc(&command);
-    // A value that the search will refuse has no interval here.
-    let query_range = parse_optional_range(query_loc, RangeRole::Query, program)
-        .ok()
-        .flatten();
+    let query_range = query_range_of(&command);
     let ordinals = searched_queries(query_range, inputs.query);
     let mut writers: Vec<CountingWriter> =
         positions.iter().map(|_| CountingWriter::new()).collect();
@@ -760,7 +805,7 @@ fn collect_one(
 }
 
 /// The index in the inputs of the engine's query `q_idx` (`searched_queries`).
-fn query_ordinal(ordinals: Option<&[usize]>, q_idx: usize) -> usize {
+pub(super) fn query_ordinal(ordinals: Option<&[usize]>, q_idx: usize) -> usize {
     ordinals
         .and_then(|ordinals| ordinals.get(q_idx).copied())
         .unwrap_or(q_idx)
@@ -790,7 +835,25 @@ fn query_ordinal(ordinals: Option<&[usize]>, q_idx: usize) -> usize {
 // ```
 /// The HSP records of the final hit list of a search of `inputs`. `qlen` is the record's length
 /// or the length of the `-query_loc` interval as given; `slen` is the record's.
-fn records(
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
+// ```c++
+// const char* kDfltArgTabularOutputFmt =
+//     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
+//     "evalue bitscore";
+// ```
+// `shown_id` and `subject_tabular_id` are the first two columns of the default report.
+/// The id of a record, read once: many HSPs show it.
+fn shared_id(
+    ids: &mut [Option<Arc<str>>],
+    index: usize,
+    read: impl FnOnce() -> Vec<u8>,
+) -> Arc<str> {
+    ids[index]
+        .get_or_insert_with(|| Arc::from(String::from_utf8_lossy(&read())))
+        .clone()
+}
+
+pub(super) fn records(
     program: Program,
     inputs: Inputs<'_>,
     hits: &[PairwiseHit],
@@ -802,6 +865,8 @@ fn records(
     let translated_query = matches!(program, Program::Blastx | Program::Tblastx);
     let translated_subject = matches!(program, Program::Tblastn | Program::Tblastx);
     let mut ranks: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    let mut query_ids = vec![None; inputs.query.len()];
+    let mut subject_ids = vec![None; inputs.subject.len()];
     hits.iter()
         .enumerate()
         .map(|(index, record)| {
@@ -819,6 +884,15 @@ fn records(
                 q_idx,
                 s_idx,
                 rank: this_rank,
+                query_id: shared_id(&mut query_ids, q_idx, || {
+                    inputs.query[q_idx].shown_id().to_vec()
+                }),
+                subject_id: shared_id(&mut subject_ids, s_idx, || {
+                    let subject = &inputs.subject[s_idx];
+                    subject
+                        .subject_tabular_id(subject_protein)
+                        .unwrap_or_else(|_| subject.shown_id().to_vec())
+                }),
                 raw_score: hit.raw_score,
                 bit_score: hit.bit_score,
                 e_value: hit.e_value,

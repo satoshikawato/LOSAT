@@ -1,16 +1,13 @@
 // Search conditions are represented only as a LOSAT CLI argv (plan §5.3). The same argv
 // is validated and run by the engine, shown as the CLI command, and stored in sessions.
-import type { OutputFormat } from './output-format';
+import { CUSTOM_OUTPUT, OUTFMT_FLAG, outfmtOption, type RunOutput } from './output-format';
 import type { ProgramId } from './programs';
 
-/** Flags that the application manages itself; users cannot set them as parameters. */
-export const RESERVED_FLAGS: readonly string[] = Object.freeze([
-  '-query',
-  '-subject',
-  '-out',
-  '-outfmt',
-  '-num_threads',
-]);
+/**
+ * Flags that the application manages itself; users cannot set them. A run writes outfmt 0, 6
+ * and 7, and -outfmt in "Additional options" may add one (domain/output-format.ts).
+ */
+export const RESERVED_FLAGS: readonly string[] = Object.freeze(['-query', '-subject', '-out', '-num_threads']);
 
 /** The words with which the CLI prints its help instead of searching (BLAST+'s `-h` and `-help`). */
 const HELP_WORDS: readonly string[] = Object.freeze(['-h', '-help', '--help']);
@@ -39,6 +36,7 @@ const MT_MODE_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastn', 'blastp'
 function refusedWord(program: ProgramId, word: string): string | undefined {
   // -flag=value is the command line's form of -flag value too.
   const flag = word.split('=', 1)[0]!;
+  if (flag === '-num_threads') return '-num_threads is set in the form: Threads';
   if (RESERVED_FLAGS.includes(flag) || (flag === '-mt_mode' && MT_MODE_PROGRAMS.includes(program))) return `${flag} is managed by LOSAT`;
   if (HELP_WORDS.includes(word)) return `${word} is not available in the browser`;
   if (flag === '-db') return '-db (a database search) is not supported in the browser yet';
@@ -126,17 +124,21 @@ export function splitOptions(text: string): readonly string[] {
 }
 
 /**
- * Renders the CLI command that reproduces one output format of a run, as a copyable
- * POSIX shell command. `-outfmt` is always written: several programs reject their
- * CLI default format, so a command without it may not run.
+ * Renders the CLI command that reproduces one output of a run, as a copyable POSIX shell
+ * command. `-outfmt` is always written: several programs reject their CLI default format, so a
+ * command without it may not run. The command of a format that every run writes has the
+ * format's -outfmt in place of the argv's; that of the argv's own -outfmt is the argv.
  */
-export function toShellCommand(argv: readonly string[], outfmt: OutputFormat): string {
-  return shellWords(commandWords(argv, outfmt));
+export function toShellCommand(argv: readonly string[], output: RunOutput): string {
+  return shellWords(commandWords(argv, output));
 }
 
 /** The words of `toShellCommand`'s command. */
-export function commandWords(argv: readonly string[], outfmt: OutputFormat): readonly string[] {
-  return ['losat', ...argv, '-outfmt', String(outfmt)];
+export function commandWords(argv: readonly string[], output: RunOutput): readonly string[] {
+  if (output === CUSTOM_OUTPUT) return ['losat', ...argv];
+  const option = outfmtOption(argv);
+  const words = option === undefined ? argv : [...argv.slice(0, option.at), ...argv.slice(option.at + option.words)];
+  return ['losat', ...words, '-outfmt', String(output)];
 }
 
 /** A word as a POSIX shell reads it back (`splitOptions`): quoted only where it needs it. */
@@ -164,7 +166,7 @@ export function optionNames(
   return words.map((word) => {
     const name = !value && word.startsWith('-');
     // -flag=value carries its value.
-    value = name && takesValue !== undefined && !word.includes('=') && (RESERVED_FLAGS.includes(word) || takesValue(word));
+    value = name && takesValue !== undefined && !word.includes('=') && (RESERVED_FLAGS.includes(word) || word === OUTFMT_FLAG || takesValue(word));
     return { text: shellWord(word), name };
   });
 }

@@ -66,9 +66,6 @@ use std::borrow::Cow;
 use std::io::{Read, Seek};
 
 pub(crate) use stream::FastaStream;
-// The title warning of a record, for ABI v1's records (`web_api::v1_bio::from_bio`).
-#[cfg(target_arch = "wasm32")]
-pub(crate) use reader::seq_data_in_title_warning;
 use stream::LineReader;
 
 /// How an input is read: the molecule, the role's local ID prefix and whether the data
@@ -418,8 +415,7 @@ impl FastaRecord {
 
 /// A record as the programs use it: its residues, the record cut to a range, and its title
 /// bytes (the ranges in `seq_range.rs`, the query warnings, the masks and the lookup
-/// tables). The bridge of the port plan (§1) also implemented it for the `bio` records until
-/// every program read with NCBI's reader (step S8).
+/// tables).
 pub trait InputRecord: Sized {
     /// The residues (the search's letters, lower case where the lowercase mask covers
     /// them).

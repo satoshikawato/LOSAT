@@ -8,6 +8,7 @@ import { recordName, type RecordKey } from '../domain/dataset';
 import { optionValue } from '../domain/argv';
 import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan, type HspTable } from '../domain/hsp-table';
 import { shownScores, splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
+import { customOutfmt } from '../domain/output-format';
 import { programById, residueUnit, type ProgramId, type SequenceKind } from '../domain/programs';
 import {
   buildResultIndex,
@@ -273,6 +274,7 @@ export class ResultsBrowser {
             program: run.snapshot.program,
             argv: run.snapshot.argv,
             formats: description.formats,
+            custom: customOutfmt(run.snapshot.argv),
             runtimePath: run.record.runtimePath,
             threads: run.record.threads,
             grammar: this.grammarOf(run.snapshot.program, description),

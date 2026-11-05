@@ -1,6 +1,8 @@
 // The verification badge of a run (plan §6.1, design §10.3, PD-LOSAT-WEB-APP-BOUNDARY
 // "Compatibility contract"). A run matches a certified profile only when its program and
-// options were compared byte for byte with NCBI BLAST+ for every output format, and its
+// options were compared byte for byte with NCBI BLAST+ for every output format (the records
+// compare the formats that every run writes, so a run that also writes the output of its own
+// -outfmt with fields is outside them, W10), and its
 // runtime path in the browser was checked against the native engine with its thread count.
 // Auto's count depends on the user's processors (serial below 20,000 bytes of input, then half
 // of the processors, at most 8 below 1 MB and 32 from 1 MB), so V-BR runs every count from 1 to
@@ -64,6 +66,11 @@ export function optionKey(words: readonly string[], grammar: OptionGrammar): str
   while (i < words.length) {
     const flag = words[i]!;
     if (!flag.startsWith('-')) return undefined;
+    // `-outfmt=6 qseqid` is the command line's form of `-outfmt '6 qseqid'`.
+    if (NOT_OPTIONS.has(flag.split('=', 1)[0]!) && flag.includes('=')) {
+      i++;
+      continue;
+    }
     const takesValue = NOT_OPTIONS.has(flag) || grammar.takesValue(flag);
     if (takesValue && i + 1 >= words.length) return undefined;
     const value = takesValue ? words[i + 1]! : '';
@@ -81,6 +88,8 @@ export interface BadgeInput {
   readonly argv: readonly string[];
   /** The formats the run wrote. */
   readonly formats: readonly OutputFormat[];
+  /** The -outfmt value of the output of the run's own -outfmt (`customOutfmt`), which no record compares; undefined without one. */
+  readonly custom?: string | undefined;
   readonly runtimePath: 'threaded' | 'serial' | 'fake' | undefined;
   readonly threads: number | undefined;
   readonly grammar: OptionGrammar;
@@ -115,7 +124,8 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
   const key = optionKey(input.argv, input.grammar);
   const compared = key === undefined ? undefined : verification?.optionSets[key];
   const outside: string[] = [];
-  const missing = input.formats.filter((format) => !(compared ?? []).includes(format));
+  const custom = input.custom === undefined ? [] : [input.custom];
+  const missing = [...input.formats.filter((format) => !(compared ?? []).includes(format)), ...custom];
   if (compared === undefined) {
     outside.push(`These options of ${input.program} were not compared with NCBI BLAST+ ${table.ncbi} on LOSAT's test fixtures.`);
   } else if (missing.length > 0) {
@@ -125,7 +135,7 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
   if (browser === undefined) {
     outside.push(`The browser runtime of ${input.program} was not checked against the native engine.`);
   } else {
-    const formats = input.formats.filter((format) => !browser.formats.includes(format));
+    const formats = [...input.formats.filter((format) => !browser.formats.includes(format)), ...custom];
     if (formats.length > 0) outside.push(`The browser runtime was not checked for outfmt ${list(formats)}.`);
     if (input.runtimePath === undefined || !browser.paths.includes(input.runtimePath)) {
       outside.push(`The ${input.runtimePath ?? 'unknown'} runtime path was not checked in the browser.`);

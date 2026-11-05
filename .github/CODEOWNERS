@@ -1,6 +1,5 @@
-# Code owners: GitHub requests their review on a pull request that changes these paths. The Owner
-# decided (2026-11-05) that only the ruleset "main CI", which the promotion of dev into main
-# meets, is to require that review, and "dev CI" never; the rulesets are the Owner's to change.
+# Code owners: GitHub requests their review on a pull request that changes these paths. No ruleset
+# requires that review (Owner 2026-11-05: the rulesets stay as they are).
 #
 # - seqdb and writedb read and write BLAST databases: files that other programs read.
 # - .github: workflows, Dependabot, and this file.

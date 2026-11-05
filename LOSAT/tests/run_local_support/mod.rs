@@ -8,7 +8,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bio::io::fasta;
 use LOSAT::api::local_blast::{FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs};
 use LOSAT::blastinput::fasta_reader::{read_all, FastaInputSource, FastaRecord, ReaderConfig};
 use LOSAT::report::PairwiseHit;
@@ -84,12 +83,9 @@ impl Drop for TempFasta {
     }
 }
 
-pub fn read_records(path: &Path) -> Vec<fasta::Record> {
-    fasta::Reader::from_file(path)
-        .expect("FASTA")
-        .records()
-        .collect::<Result<_, _>>()
-        .expect("records")
+/// The records of a fixture of either molecule (protein flags take every nucleotide letter).
+pub fn read_records(path: &Path) -> Vec<FastaRecord> {
+    reader_records(path, ReaderConfig::query("BLASTP", true, false))
 }
 
 /// The records of a FASTA file as NCBI's reader reads them (`config`), the records of the

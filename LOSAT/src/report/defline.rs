@@ -545,91 +545,9 @@ fn contains(text: &[u8], pattern: &[u8]) -> bool {
     text.windows(pattern.len()).any(|window| window == pattern)
 }
 
-/// Rejects the outfmt 0 title of the protein subject record `record` (from 1) of
-/// `program` that LOSAT does not write as NCBI: a title that NCBI decodes
-/// (`NStr::HtmlDecode`), or one that NCBI's `x_CleanAndCompress` reads past (NCBI crashes;
-/// approved exception 2 of PD-LOSAT-NCBI-DEFECTS covers the nucleotide subjects of
-/// BLASTN, TBLASTX and TBLASTN only).
-pub fn check_shown_protein_subject_title(
-    defline: &str,
-    record: usize,
-    program: &str,
-) -> anyhow::Result<()> {
-    check_shown_subject_title(defline, record, program)?;
-    let reads_past_end = [false, true].into_iter().any(|leave_prefix| {
-        generate_defline(defline.as_bytes(), true, leave_prefix)
-            .is_ok_and(|title| title.reads_past_end)
-    });
-    if reads_past_end {
-        anyhow::bail!(
-            "subject record {record} has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0); this is not supported by LOSAT's {program}"
-        );
-    }
-    Ok(())
-}
-
-/// Whether `NStr::HtmlDecode` decodes a character reference in the outfmt 0 title of a
-/// nucleotide subject with the defline `defline`, in the alignment heading or in the
-/// description table (its result flags `fHtmlDec_CharRef_Entity` or
-/// `fHtmlDec_CharRef_Numeric`, ncbistr.cpp:4580-4588). The callers that still read with
-/// `bio` reject such a subject where NCBI writes its title.
-pub fn ncbi_nucleotide_title_is_decoded(defline: &str) -> bool {
-    [false, true].into_iter().any(|leave_prefix| {
-        html_decode(&title_before_decoding(
-            defline.as_bytes(),
-            false,
-            leave_prefix,
-        ))
-        .is_ok_and(|(_, char_refs)| char_refs)
-    })
-}
-
-/// Rejects the outfmt 0 title of the subject record `record` (from 1) of `program` that
-/// the callers reading with `bio` do not write as NCBI: a title that NCBI decodes
-/// (`NStr::HtmlDecode`). NCBI makes the titles only of the subjects that a report shows,
-/// those with hits, so the callers check those subjects after the search. A title that
-/// NCBI's `x_CleanAndCompress` reads past (NCBI crashes) is written as `generate_defline`
-/// stops it at the end of the string (approved exception 2 of PD-LOSAT-NCBI-DEFECTS,
-/// extended to TBLASTX and TBLASTN by the maintainer in session S08b, DW-17).
-///
-/// NCBI reference: c++/src/objmgr/util/create_defline.cpp:4092-4095
-/// ```c
-///     // produce final result
-///     string penult = mag + prefix + decoded + suffix;
-///
-///     x_CleanAndCompress (final, penult, m_IsAA);
-/// ```
-///
-/// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1540
-/// ```c
-///         x_DisplayDeflines(aln_set, itr_num, prev_seqids);
-/// ```
-/// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1550-1551
-/// ```c
-///     CSeq_align_set copy_aln_set;
-///     CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_NumAlignments);
-/// ```
-pub fn check_shown_subject_title(
-    defline: &str,
-    record: usize,
-    program: &str,
-) -> anyhow::Result<()> {
-    if ncbi_nucleotide_title_is_decoded(defline) {
-        anyhow::bail!(
-            "subject record {record} has an HTML character reference (such as &amp;) in its defline, which NCBI BLAST+ decodes in the outfmt 0 titles; this is not supported by LOSAT's {program}"
-        );
-    }
-    Ok(())
-}
-
 /// The title that `GenerateDefline` gives `NStr::HtmlDecode` (`m_MainTitle`, see the
 /// module), for the alignment heading (`leave_prefix_suffix` false) or the description
-/// table.
-fn title_before_decoding(title: &[u8], protein: bool, leave_prefix_suffix: bool) -> Vec<u8> {
-    title_before_decoding_of(title, protein, leave_prefix_suffix, &BioseqIds::default())
-}
-
-/// `title_before_decoding` of a Bioseq with the Seq-ids `ids`: an empty title of a `pdb` or
+/// table, of a Bioseq with the Seq-ids `ids`: an empty title of a `pdb` or
 /// `patent` record is generated from the id, and a RefSeq chromosome, mRNA or ncRNA protein
 /// keeps an empty one (`generate_bioseq_defline`).
 ///
@@ -1765,6 +1683,22 @@ mod tests {
         for defline in [", ;", ",,", "a, ,b", ", ,a", "id, ,", "MAG: , ,x"] {
             assert!(!reads_past_end(defline), "{defline:?}");
         }
+    }
+
+    // Whether `NStr::HtmlDecode` decodes a character reference in the outfmt 0 title of a
+    // nucleotide subject with the defline `defline`, in the alignment heading or in the
+    // description table (its result flags `fHtmlDec_CharRef_Entity` or
+    // `fHtmlDec_CharRef_Numeric`, ncbistr.cpp:4580-4588).
+    fn ncbi_nucleotide_title_is_decoded(defline: &str) -> bool {
+        [false, true].into_iter().any(|leave_prefix| {
+            html_decode(&title_before_decoding_of(
+                defline.as_bytes(),
+                false,
+                leave_prefix,
+                &BioseqIds::default(),
+            ))
+            .is_ok_and(|(_, char_refs)| char_refs)
+        })
     }
 
     // NCBI reference: c++/src/corelib/ncbistr.cpp:4543-4590 (NStr::HtmlDecode): table

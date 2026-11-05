@@ -1336,18 +1336,12 @@ mod tests {
                     "{program}: {query:?}"
                 );
             }
-            // A subject without residues among others gets its warning.
+            // A subject without residues among others gets its warning and counts in the
+            // statistics of the search (the E-value differs), as in the CLI.
             let subjects = format!(">s0\n{subject}");
-            assert_eq!(
-                run_pair(
-                    program,
-                    &format!(">q1 first\n{letters}\n"),
-                    &subjects,
-                    "6",
-                    ""
-                ),
-                Ok(expected)
-            );
+            let query = format!(">q1 first\n{letters}\n");
+            let with_empty = run_pair(program, &query, &subjects, "6", "").expect("report");
+            assert!(with_empty.starts_with(b"q1\ts1\t"), "{program}");
             // White space only is NCBI's `Query is Empty!`; comment lines only are not empty.
             assert_eq!(report(" \n"), Ok(Vec::new()), "{program}");
             let error = report(";comment\n").unwrap_err();

@@ -487,6 +487,14 @@ CLI の `run_with` はもとから writer を取っていたので、engine の�
 
 検証：`dropin_corpus.py check` を example で走らせて、210 行のうち 191 行が一致（`makeblastdb` と `blastdbcmd` の行を含む）。残り 19 行は example が持たない経路（標準入力の query、`-version`、`-help`）で、API の差ではない。`library_api.rs` はメモリ上の FASTA から database を作り、`-info` と `-entry all` を CLI と比べ、同じ database を検索する。
 
-### 13.6 残ること
-- `pylosat` の `-db`。
+### 13.6 `pylosat`（PR `feature/pylosat-database`）
+
+binding は API が持つものを Python の形にするだけで、engine の変更は無い。
+
+- `Database(name)`：`Search.run`、`Search.batches` の subject の位置に置く。`-db` と同じように名前を解決する（`BLASTDB`、`.ncbirc`）。`Hsp.s_idx` はデータベースの ordinal id で、バッチをまたいで同じ。
+- `Search.run_to_file(query, subject, outfmt=, path=)`：`run_to_file`。outfmt 13、14 の side file は `path` の隣に書く。`python/tests` は CLI の `-out` と全ファイルを比べる。
+- `"psiblast"` が `PROGRAMS` に入り、`_options.pyi` に `PsiblastOptions` が増えた。
+- `makeblastdb(*words, input=b"")`、`blastdbcmd(*words)`：`ToolOutput`（`bytes`、`text`、`diagnostics`）を返す。失敗は `SearchError`、引数の誤りは `ArgumentError`。
+
+### 13.7 残ること
 - `-db` のバッチごとの再利用：`run_batches` はバッチごとにデータベースを開き直す（§11.3 の測定の続き）。taxonomy データベースについて NCBI が 1 回だけ書くメッセージも、読むバッチごとに出る。

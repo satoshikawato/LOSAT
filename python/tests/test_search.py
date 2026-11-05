@@ -83,7 +83,7 @@ def test_a_search_is_a_value():
 
 
 def test_describe_is_the_engines_table():
-    assert pylosat.PROGRAMS == ("blastn", "blastp", "blastx", "tblastn", "tblastx")
+    assert pylosat.PROGRAMS == ("blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast")
     description = pylosat.describe("blastp")
     parameters = {parameter.name: parameter for parameter in description.parameters}
     assert parameters["evalue"].flag == "-evalue"

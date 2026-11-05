@@ -2,7 +2,7 @@
 
 段階 W4b（Session S13b、[指示書](../losat_web_gui_sessions/session_s13b_w4b_ncbi_style_ui.md)）で、保守者の指示（2026-10-09）「NCBI BLAST ウェブサイトの GUI にデザインを寄せてほしい」を具体にする。設計書 §2.1 の「NCBI Web BLAST に馴染みのある操作」と §11.2 の「NCBI Web に準じる入力項目・列を固定した参照画面と対応付ける」の参照画面と対応表である。
 
-- 作成：2026-10-10（S13b）。採否は保守者の確認待ち（推奨案で進めた。Owner-delegated、[W4b のゲート記録](../evidence/losat_web_w4b/README.md)の判断）。
+- 作成：2026-10-10（S13b）。推奨案で進め、保守者が 2026-10-10 に承認した（計画 DW-27 の (5)。Owner-delegated、[W4b のゲート記録](../evidence/losat_web_w4b/README.md)の判断）。
 - 寄せるのは配置・節の順・言葉（見出し、欄の名前、ボタン、タブ、列、凡例）。NCBI のロゴ、NIH / NLM のヘッダーとフッター、「BLAST®」の文字、配色は写さない。LOSAT Web が NCBI のサービスに見えないようにする。
 - 値はエンジンが書いたまま示す。TS で BLAST の値を計算・整形しない（`web/AGENTS.md` 規則 1、[`results_columns.md`](results_columns.md)）。表示の分類（Graphic Summary の得点の階級、ドットプロットの identity の階級）は、エンジンの原値を区切るだけで、値を作らない。
 - 採否の語：**採る**（NCBI と同じ場所・同じ言葉）、**寄せる**（同じ場所に LOSAT の要素を置き、言葉を近づける）、**採らない**（理由を書く）、**エンジン待ち**（S13+（E2j）が値を出すまで出さない）、**後の段階**（その段階の名）。

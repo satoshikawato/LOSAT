@@ -16,7 +16,7 @@ REQ-14	§2.1 候補	複数の実行から候補を集め、元の結果へ戻れ
 REQ-15	§2.1 出力	outfmt 0・6・7（-outfmt "6 <列>"・"7 <列>" も、計画 DW-47）、CSV、構造化JSON、結果レポート、設定ファイル（検索条件だけ）、設定＋結果のセッションファイル。2026-11-05 の時点で出るのは outfmt 0・6・7 だけ	initial	W0 W6	V-APP V-BR
 REQ-16	§2.1 環境	Windows・macOS・Linux、Chromium系・Firefox・Safari/WebKit、モバイル。組合せと規模は検証表で具体化する	initial	W1 G	V-BR V-MOB V-PERF
 REQ-17	§2.1 オフライン	必要な資産の取得後、オフラインで5programの検索・詳細・抽出・出力まで完結する。更新の適用は利用者の明示操作	initial	W7	V-OFF
-REQ-18	§2.1 検証	programと出力形式ごとのバイト一致を基本とし、根拠のある例外を列挙する。対応の印（Supported／Not yet supported、計画 DW-36）と試験記録への導線。期待値の出どころは docs/web/verification_cells.tsv（E1a で作成）	initial	E1a W4 G	V-ABI V-BR
+REQ-18	§2.1 検証	programと出力形式ごとのバイト一致を基本とし、根拠のある例外を列挙する。対応の印（Supported／Not yet supported。計画 DW-36 と 2026-11-04 の保守者の指示）と試験記録への導線。期待値の出どころは docs/web/verification_cells.tsv（E1a で作成）	initial	E1a W4 G	V-ABI V-BR
 REQ-19	§2.1 導入支援	例を試す（Example: 組み込みの query と、頼んだ時だけ取得する公開の subject 集合）、5つの小さな例題、最短のチュートリアル、任意のブラウザ自己試験	initial	W7	V-APP
 REQ-20	§0 T01, §7	計算用の一時ファイルは確認なしで自動作成してよい。次回起動時の自動保存・自動復元はしない	initial	W2	V-APP
 REQ-21	§13, §13.4	研究データ（配列、ヘッダー、ファイル名、結果、メモ）をネットワークへ送らない。例外は利用者が押した取得（アクセッション番号、Example）だけで、送るのはアクセッション番号か公開ファイルの URL だけ。送り先は CSP の connect-src の 5 オリジン（NCBI E-utilities、NCBI FTP、EBI、UniProt、CNCB）に限る。GA4は研究データを扱う文書から隔離する（2026-11-05 の時点で GA4 は入っていない）	initial	W7	V-PRIV

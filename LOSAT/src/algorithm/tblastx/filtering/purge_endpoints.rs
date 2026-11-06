@@ -244,7 +244,7 @@ mod tests {
                     s_offsets[i],
                     s_ends[i],
                     0,
-                    scores[i] as i32,
+                    scores[i],
                 )
             })
             .collect();
@@ -265,7 +265,7 @@ mod tests {
                     && h.q_aa_end as usize == q_ends[orig_idx]
                     && h.s_aa_start as usize == s_offsets[orig_idx]
                     && h.s_aa_end as usize == s_ends[orig_idx]
-                    && h.raw_score == scores[orig_idx] as i32
+                    && h.raw_score == scores[orig_idx]
             });
             assert!(
                 found,

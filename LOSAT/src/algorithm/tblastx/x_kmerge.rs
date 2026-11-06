@@ -24,10 +24,10 @@
 //! 4. Each frame list is merged into the combined list by a backward two-way merge (`x_merge_frame`),
 //!    ties to the combined list, instead of being appended and the whole list sorted. A frame list
 //!    that is not sorted (never expected) is sorted first.
-//! The merges of the chunks of one frame (`merge_tblastx_subject_chunk_hits`, subjects with more
-//! than 5 M residues in a frame) are unchanged from the second chunk on; the first chunk's list
-//! becomes the empty frame list, as `merge_subject_compact` does in both forms, which is what the
-//! empty-list branch of `merge_tblastx_subject_chunk_hits` (`combined.append`) computes.
+//!    The merges of the chunks of one frame (`merge_tblastx_subject_chunk_hits`, subjects with more
+//!    than 5 M residues in a frame) are unchanged from the second chunk on; the first chunk's list
+//!    becomes the empty frame list, as `merge_subject_compact` does in both forms, which is what the
+//!    empty-list branch of `merge_tblastx_subject_chunk_hits` (`combined.append`) computes.
 //!
 //! Why `combined_ungapped_hits` is the list of the switch off:
 //! a. Every sort involved is a stable sort by a lexicographic comparator over integers, so its
@@ -761,7 +761,7 @@ mod tests {
                 // seed offsets tell equal records apart
                 let list: Vec<XUnitHsp> = (0..n)
                     .map(|i| XUnitHsp {
-                        q_seed: i as i32,
+                        q_seed: i,
                         ..record(&mut rng)
                     })
                     .collect();

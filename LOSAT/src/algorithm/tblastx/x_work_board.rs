@@ -285,6 +285,10 @@ impl XBatch {
 struct XGroups {
     sets: Mutex<Vec<Arc<XSet>>>,
     /// A helper job waits in a thread's queue (`x_spawn_group_helper`).
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(dead_code, reason = "used only with the `parallel` feature")
+    )]
     queued: AtomicBool,
 }
 
@@ -309,6 +313,10 @@ impl XGroups {
     }
 
     /// An item of some set is left to take.
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(dead_code, reason = "used only with the `parallel` feature")
+    )]
     fn any_left(&self) -> bool {
         self.sets
             .lock()
@@ -373,6 +381,10 @@ impl XBoard {
     /// A subject's units: `run(i, taker)` for every `i < n`, on this thread (which takes this
     /// set's units only, Why 3.), on the board's takers and, for a batch's only subject, on up to
     /// `threads - 1` helper jobs of the set. Returns when every unit has run.
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(dead_code, reason = "used only with the `parallel` feature")
+    )]
     pub(crate) fn run_units(&self, batch: &XBatch, s: usize, n: usize, run: &Run<'_>) {
         let set = XSet::new(run, n);
         let owned = XOwned(&set);
@@ -409,13 +421,32 @@ impl XBoard {
     /// A linking call's groups: `run(i, taker)` for every `i < n` (the largest group first is the
     /// caller's order), on this thread, on the board's takers before any unit, and on the board's
     /// helper jobs. Returns when every group has run.
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(dead_code, reason = "used only with the `parallel` feature")
+    )]
     pub(crate) fn run_groups(&self, n: usize, run: &Run<'_>) {
         self.run_set(n, run, true);
     }
 
     /// `run_groups`, with or without the helper job (a panic in a `rayon::spawn` job aborts, so the
     /// tests of a panicking item run without it).
-    fn run_set(&self, n: usize, run: &Run<'_>, helper: bool) {
+    fn run_set(
+        &self,
+        n: usize,
+        run: &Run<'_>,
+        #[cfg_attr(
+            not(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            )),
+            expect(
+                unused_variables,
+                reason = "the helper job is spawned only with `parallel` threads"
+            )
+        )]
+        helper: bool,
+    ) {
         let set = XSet::new(run, n);
         let owned = XOwned(&set);
         self.groups
@@ -448,6 +479,13 @@ impl XBoard {
     /// are all taken (it waits, without the pool, while a subject has not yet put its units), or
     /// the loop stopped (`stopped`: a subject's search panicked, so the subjects not yet taken will
     /// never close).
+    #[cfg_attr(
+        not(all(feature = "parallel", not(target_arch = "wasm32"))),
+        expect(
+            dead_code,
+            reason = "used only by the subject loop's helper, with `parallel` off wasm32"
+        )
+    )]
     pub(crate) fn help(&self, batch: &XBatch, stopped: &AtomicBool) {
         let mut taker = XTaker::default();
         loop {
@@ -516,6 +554,10 @@ pub(crate) fn enter(board: &XBoard, batch: &XBatch) -> XEntered {
 }
 
 /// The board and batch of this thread's subject (`enter`), if any.
+#[cfg_attr(
+    not(feature = "parallel"),
+    expect(dead_code, reason = "used only with the `parallel` feature")
+)]
 pub(crate) fn current<'a>() -> Option<(&'a XBoard, &'a XBatch)> {
     // SAFETY: the pointers are set by `enter` from references that outlive its guard, and the
     // guard restores the value before them on drop; the subject's work that reads them runs

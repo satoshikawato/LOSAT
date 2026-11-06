@@ -109,8 +109,8 @@
 //! - k when n <= 5 or k < 3;
 //! - 3 + s when g = G - 1 (the head);
 //! - 3 + m + 4 (G - 2 - g) + s = n - 4 (g + 1) + s when g < G - 1.
-//! The head's positions are 3..3 + m and cell g's are n - 4 (g + 1)..n - 4 g, so the positions are a
-//! permutation of 0..n. For n = 6 and 7 there is one cell and every position is k.
+//!   The head's positions are 3..3 + m and cell g's are n - 4 (g + 1)..n - 4 g, so the positions are a
+//!   permutation of 0..n. For n = 6 and 7 there is one cell and every position is k.
 //!
 //! Identity. The count pass makes the reference's appends in the reference's order:
 //! `for_each_word` returns at a letter without a compressed letter, appends the word itself when
@@ -171,8 +171,8 @@
 //!   packed appends (the record of the appends is not read again) in their order, each at its cell's
 //!   cursor, so a cell's slice holds o_0..o_{n-1} as the fill pass leaves it; then o_k goes to slot
 //!   `x_emission_position(k, n)` in each cell of more than 5 offsets, the fill pass's statements.
-//! The table is the count-and-fill builder's slot for slot; only the order of the memory accesses
-//! differs.
+//!   The table is the count-and-fill builder's slot for slot; only the order of the memory accesses
+//!   differs.
 //!
 //! BLASTX's tables hold `u16` query offsets (`XBxCompressedLookup::Flat`; its query batches of more
 //! than 2^16 letters keep `i32` ones), so an offset above a cell's index in its bucket does not fit
@@ -310,6 +310,10 @@ impl XFlatSpare {
     /// the block before gave back), and each one short of its room is replaced here by an empty one
     /// of `backbone_size + 1`, `hits_grown` (at least `hits`) and `(backbone_size >> PV_ARRAY_BTS) +
     /// 1` entries of capacity. Nothing is written into them. Returns the number of vectors allocated.
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(dead_code, reason = "used only with the `parallel` feature")
+    )]
     pub(crate) fn x_make_room(
         &self,
         block: &XFlatSpare,
@@ -1096,14 +1100,14 @@ fn x_flat_with_capacity_of<S: CompressedScores>(
                 return true;
             }
             tested = true;
-            refused = !(words_before
-                && !x_table_fills_banks(
+            refused = !words_before
+                || x_table_fills_banks(
                     &words,
                     backbone_size,
                     query,
                     range_locations,
                     overflow_cell_capacity,
-                ));
+                );
             !refused
         };
         let completed = x_for_each_offset(word_size, query, range_locations, |offset, word| {

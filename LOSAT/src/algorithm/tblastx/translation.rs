@@ -389,7 +389,7 @@ mod tests {
                         .wrapping_add(1442695040888963407);
                     let draw = (state >> 33) as usize;
                     // mostly unambiguous bases, so stop codons and ordinary residues occur
-                    if draw % 4 == 0 {
+                    if draw.is_multiple_of(4) {
                         letters[draw / 4 % letters.len()]
                     } else {
                         b"ACGTacgt"[draw / 4 % 8]

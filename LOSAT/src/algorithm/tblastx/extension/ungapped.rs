@@ -3,6 +3,14 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
 
 use super::get_score;
+#[cfg(any(
+    target_arch = "x86_64",
+    all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )
+))]
 use std::sync::OnceLock;
 
 // ---------------------------------------------------------------------------
@@ -26,8 +34,24 @@ use std::sync::OnceLock;
 // lookup for consecutive residue pairs using AVX2 gather. Accumulation and
 // X-drop checks remain strictly sequential to preserve 1-bit parity.
 
+#[cfg(any(
+    target_arch = "x86_64",
+    all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )
+))]
 static UNGAPPED_SCORE_TABLE_32: OnceLock<[i32; 32 * 32]> = OnceLock::new();
 
+#[cfg(any(
+    target_arch = "x86_64",
+    all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )
+))]
 #[inline(always)]
 fn ungapped_score_table_32() -> &'static [i32; 32 * 32] {
     UNGAPPED_SCORE_TABLE_32.get_or_init(|| {

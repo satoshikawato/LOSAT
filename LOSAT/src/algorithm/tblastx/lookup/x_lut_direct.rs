@@ -224,12 +224,28 @@ impl XLists<'_> {
 #[derive(Default)]
 struct XBuildTemps {
     counts: Vec<u32>,
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(dead_code, reason = "used only with the `parallel` feature")
+    )]
     ranges: Vec<u32>,
     base: Vec<u32>,
     fill: Vec<u32>,
     chains: Option<LookupBackboneChains>,
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(dead_code, reason = "used only with the `parallel` feature")
+    )]
     cells: Vec<u32>,
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(dead_code, reason = "used only with the `parallel` feature")
+    )]
     starts: Vec<u32>,
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(dead_code, reason = "used only with the `parallel` feature")
+    )]
     offsets: Vec<i32>,
 }
 
@@ -796,6 +812,13 @@ impl XAaSpares {
     /// `overflow`, for the overflow). Nothing is written into them. Also keeps this thread's
     /// neighbour lists for the builds ahead, if none are kept. Returns the number of vectors
     /// allocated.
+    #[cfg_attr(
+        all(not(feature = "parallel"), not(test)),
+        expect(
+            dead_code,
+            reason = "used only with the `parallel` feature (and by unit tests)"
+        )
+    )]
     pub(crate) fn x_make_room(
         &self,
         backbone_size: usize,
@@ -811,6 +834,13 @@ impl XAaSpares {
     /// (`backbone_size` and `overflow` count their padding, as the vectors of the table built
     /// before have it); the vectors of the other width are dropped. A block whose table turns out
     /// to have the other width builds on its own vectors.
+    #[cfg_attr(
+        all(not(feature = "parallel"), not(test)),
+        expect(
+            dead_code,
+            reason = "used only with the `parallel` feature (and by unit tests)"
+        )
+    )]
     pub(crate) fn x_make_room16(
         &self,
         backbone_size: usize,
@@ -908,6 +938,13 @@ impl XAaSpares {
     /// neighbour lists kept here (both taken while it builds and given back after, the vectors only
     /// where no table was made). `None` where no table was made: the vectors lack the room, or the
     /// in-place builder declines (the reference builder would build it).
+    #[cfg_attr(
+        all(not(feature = "parallel"), not(test)),
+        expect(
+            dead_code,
+            reason = "used only with the `parallel` feature (and by unit tests)"
+        )
+    )]
     pub(crate) fn x_build_ahead(
         &self,
         queries: &[Vec<QueryFrame>],
@@ -952,6 +989,13 @@ impl XAaSpares {
     /// chosen by the build (`x_bplk16_fits`): `u16` where the lookup query is at most 65,535
     /// letters, else `Int4` as before; `None` where no table was made (the kept vectors of the
     /// width lack the room, or the in-place builder declines).
+    #[cfg_attr(
+        all(not(feature = "parallel"), not(test)),
+        expect(
+            dead_code,
+            reason = "used only with the `parallel` feature (and by unit tests)"
+        )
+    )]
     pub(crate) fn x_build_ahead16(
         &self,
         queries: &[Vec<QueryFrame>],
@@ -1411,6 +1455,7 @@ fn x_lean_target_list(
 /// The table `build_lookup_from_prepared` returns, built without chains (see the module
 /// comment). `Err(prepared)` when the reference builder must run (diagnostics mode, or a
 /// backbone index wider than 16 bits).
+#[cfg(test)]
 pub(super) fn x_build_direct(
     prepared: PreparedLookupQuery,
     threshold: i32,
@@ -1606,6 +1651,16 @@ fn x_build_direct_sel(
     memo: &mut Option<XNeighborMemo>,
     room: Option<&mut XAaVectors>,
     pooled: bool,
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        expect(
+            unused_variables,
+            reason = "the passes run on `parts` tasks only with `parallel` threads"
+        )
+    )]
     parts: usize,
     x_unthresholded: bool,
     width: XWidth,
@@ -3710,7 +3765,6 @@ mod tests {
     /// `x_bp_build_lookup(..)`'s table and contexts are those of `got`: every table field,
     /// and every context field (the Karlin blocks by their bits).
     fn assert_same_bp(got: &(BlastAaLookupTable, Vec<QueryContext>), queries: &[Vec<QueryFrame>]) {
-        let params = blosum62_ideal_karlin_params();
         let (want, want_contexts) = x_bp_build_lookup(queries, 11, false);
         x_assert_same_table_as("ahead:", &got.0, &want);
         assert!(x_same_table(&got.0, &want));
@@ -3929,7 +3983,6 @@ mod tests {
     fn same_table_finds_one_cell_entry_bit_or_field() {
         let mut seed = 47u64;
         let queries = bp_queries(&mut seed);
-        let params = blosum62_ideal_karlin_params();
         let build = || x_bp_build_lookup(&queries, 11, false).0;
         let want = build();
         assert!(x_same_table(&build(), &want));

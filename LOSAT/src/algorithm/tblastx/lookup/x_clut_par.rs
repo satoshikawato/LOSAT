@@ -63,7 +63,7 @@
 //!   first offset (a chunk's offsets lie within 2^16 of it): nothing is lost.
 //! - `TooLarge` (the reference builder runs) when the appends pass `x_max_appends`, as the serial
 //!   builder's bound; the reference then decides the table or the refusal.
-//! The cuts (chunks, stripes) depend on the thread count; by the above the table does not.
+//!   The cuts (chunks, stripes) depend on the thread count; by the above the table does not.
 //!
 //! With `LOSAT_X_BPLKPFLAT` the same passes are scheduled otherwise and the table's vectors may come
 //! from an earlier table (`XParallelCuts::passes`, `XParallelCuts::spare`); the table is the same:
@@ -1060,14 +1060,14 @@ fn x_try_build_flat_parallel_with(
             .sum();
         if cells > cuts.overflow_cell_capacity {
             let words_before = range.start > 0;
-            let refused = !(words_before
-                && !x_table_fills_banks(
+            let refused = !words_before
+                || x_table_fills_banks(
                     &words,
                     backbone_size,
                     query,
                     &locations[range.clone()],
                     cuts.overflow_cell_capacity,
-                ));
+                );
             if refused {
                 return Some(XFlatBuild::Refused);
             }
@@ -1884,7 +1884,7 @@ mod tests {
         );
         {
             let kept = ahead_spare.0.lock().unwrap();
-            assert!(kept.0.is_empty() && kept.0.capacity() >= backbone_size + 1);
+            assert!(kept.0.is_empty() && kept.0.capacity() > backbone_size);
             assert!(kept.1.is_empty() && kept.1.capacity() >= 1500);
             assert!(ahead_spare.1.lock().unwrap().capacity() >= pv_words);
         }

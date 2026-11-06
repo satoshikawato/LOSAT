@@ -5,7 +5,7 @@
 use crate::stats::sum_statistics::defaults::{GAP_SIZE, OVERLAP_SIZE};
 use crate::stats::KarlinParams;
 
-use super::params::{LinkHspCutoffs, BLAST_GAP_DECAY_RATE};
+use super::params::LinkHspCutoffs;
 
 const WINDOW_SIZE: i32 = GAP_SIZE + OVERLAP_SIZE + 1;
 

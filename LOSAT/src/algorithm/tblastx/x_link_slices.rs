@@ -199,6 +199,10 @@ pub(crate) fn x_helped(on: bool) -> XHelped {
 }
 
 /// Whether this thread's linking calls are in the helped mode.
+#[cfg_attr(
+    not(feature = "parallel"),
+    expect(dead_code, reason = "used only with the `parallel` feature")
+)]
 pub(super) fn x_helped_now() -> bool {
     HELPED.with(std::cell::Cell::get)
 }

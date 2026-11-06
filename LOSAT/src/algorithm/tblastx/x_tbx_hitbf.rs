@@ -588,7 +588,7 @@ mod tests {
     ) {
         // SAFETY: cell < width.
         rare_apply(unsafe { &mut *table.add(cell) }, s, window);
-        if s % 3 == 0 {
+        if s.is_multiple_of(3) {
             // SAFETY: (cell + 1) % width < width.
             unsafe { (*table.add((cell + 1) % width)).set_raw_bits(s.wrapping_add(window as u32)) };
         }

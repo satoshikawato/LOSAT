@@ -1,4 +1,4 @@
-// DW-43: the logo in the header, the tab's icon (PNG icons DW-44, the web app manifest DW-45), and the loader (the logo's A drawn in one stroke)
+// DW-43: the logo in the header, the tab's icon (PNG icons DW-44, the web app manifest DW-50), and the loader (the logo's A drawn in one stroke)
 // before the words of a state in progress. An accession fetch whose answer is held keeps one such
 // state on the page.
 import { expect } from '@playwright/test';

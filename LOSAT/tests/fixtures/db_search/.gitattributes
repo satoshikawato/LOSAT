@@ -3,3 +3,5 @@
 *.err -text
 *.out_*.xml -text
 *.out_*.json -text
+*.pssm -text
+*.pssm.* -text

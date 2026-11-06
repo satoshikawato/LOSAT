@@ -225,6 +225,38 @@ impl ScoreFreqProfile {
         self.score_avg
     }
 
+    /// A profile whose fields are given as NCBI's caller sets them, without the normalization of
+    /// `BlastScoreFreqCalc`: `sprob[0]` is the probability of `score_min`.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2700-2726
+    // ```c
+    //     score_freqs = Blast_ScoreFreqNew(min_score, max_score);
+    //     ...
+    //     score_freqs->obs_min = min_score;
+    //     score_freqs->obs_max = max_score;
+    //     ...
+    //             score_freqs->sprob[kScore] +=
+    //                 (std_probs[aa_alphabet[r]]/effective_length);
+    //     ...
+    //     for (s = min_score; s <= max_score; s++) {
+    //         score_freqs->score_avg += (s * score_freqs->sprob[s]);
+    //     }
+    // ```
+    pub(crate) fn from_ncbi_parts(
+        score_min: i32,
+        sprob: Vec<f64>,
+        obs_min: i32,
+        obs_max: i32,
+        score_avg: f64,
+    ) -> Self {
+        Self {
+            sprob,
+            obs_min,
+            obs_max,
+            score_avg,
+            score_min,
+        }
+    }
+
     pub fn sprob(&self) -> &[f64] {
         &self.sprob
     }
@@ -689,8 +721,8 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
     let mut low_alignment_score = 0;
     let mut high_alignment_score = 0;
     let mut inner_sum = 1.0;
-    let mut oldsum = 1.0;
-    let mut oldsum2 = 1.0;
+    // NCBI's `oldsum` and `oldsum2` (blast_stat.c:2266, 2344, 2379-2380) are read only under
+    // `#ifdef ADD_GEOMETRIC_TERMS_TO_K` (blast_stat.c:2383-2410), which nothing defines.
     alignment_score_probabilities[0] = 1.0;
 
     let mut iter_counter = 0;
@@ -780,9 +812,6 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
             inner_sum += alignment_score_probabilities[ptr_p_idx as usize];
             i += 1;
         }
-
-        oldsum2 = oldsum;
-        oldsum = inner_sum;
 
         iter_counter += 1;
         inner_sum /= iter_counter as f64;

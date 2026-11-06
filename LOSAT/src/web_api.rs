@@ -599,6 +599,7 @@ fn parse_blastp_args(
         app: blastp::args::BlastpApp::Blastp,
         inclusion_ethresh: None,
         first_query_ordinal: 0,
+        psiblast_pssm: None,
     };
 
     let mut index = 0;
@@ -854,7 +855,7 @@ fn run_pair(
             "subject",
         )
         .map_err(engine_error),
-        other => return Err(format!("unsupported LOSAT program: {other}")),
+        other => Err(format!("unsupported LOSAT program: {other}")),
     }
 }
 

@@ -601,12 +601,11 @@ fn x_batches_on_own_pools(
     } else {
         threads / 2
     };
-    let own_pools = if few_subjects && left >= 2 && left <= most {
+    if few_subjects && left >= 2 && left <= most {
         left
     } else {
         0
-    };
-    own_pools
+    }
 }
 
 /// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): the threads of the `index`-th of `pools` pools that share
@@ -1804,7 +1803,6 @@ fn run_local_search_with_pool(
             keep_item(context, &mut heaps, item);
         }
     }
-    drop(keep_item);
 
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // c++/src/algo/blast/core/blast_hits.c:3243-3297,3383-3400,3420-3437:
@@ -4519,7 +4517,7 @@ mod tests {
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
-                    &[query.clone()],
+                    std::slice::from_ref(&query),
                     &[subject.as_slice()],
                     profile,
                     mode == 2,

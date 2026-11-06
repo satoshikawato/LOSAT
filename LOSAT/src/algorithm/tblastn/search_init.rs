@@ -173,6 +173,9 @@ pub(super) struct XTwoHit<'a> {
     /// EXPERIMENT (LOSAT_X_TBNUNGAP): the extension takes BLASTP's byte-table walks
     /// ([`x_tbn_ungap`]).
     x_ungap_fast: bool,
+    /// The table of those walks for a matrix other than BLOSUM62 (`x_tbn_ungap`); `None` for
+    /// BLOSUM62 and for the reference.
+    x_ungap_matrix: Option<&'static x_ungapped_fast::MatrixTable>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1088-1096
@@ -193,23 +196,99 @@ pub(super) struct XTwoHit<'a> {
 // scored from one signed byte (`q << 5 | s`) instead of the matrix row, and the bounds of each walk
 // computed from the slice lengths as the reference computes them, so the walks stop where the
 // reference's do on every unit, also on a chunk that ends inside a frame. An extension whose codes
-// or X-drop the byte table does not cover (a code >= 32, an X-drop outside 1..=127, a word of more
-// than 11 residues) runs the reference. The table holds BLOSUM62's scores, the matrix of every
-// default tblastn search; another matrix keeps the reference. The path is taken only where
-// `build_table` gives a table (every BLOSUM62 score fits a byte; were it not so, the walks hand
-// every call to the reference). A strict-set switch (`utils/xswitch.rs`): on unless
-// `LOSAT_X_TBNUNGAP=0`.
-/// Whether a word finder with `matrix` takes BLASTP's byte-table walks (BLOSUM62, switch on).
-fn x_tbn_ungap(matrix: ScoringMatrix) -> bool {
+// or X-drop the byte table does not cover (a code >= 32, an X-drop outside 1..=127, a word longer
+// than the table takes: 11 residues for BLOSUM62, `MatrixTable::max_word_size` for another
+// matrix) runs the reference. BLOSUM62, the matrix of every default tblastn search,
+// takes `two_hit` (its table, where `build_table` gives one: every BLOSUM62 score fits a byte;
+// were it not so, the walks hand every call to the reference). Another matrix takes `two_hit_of`
+// with its own table (`matrix_table`, whose module comment gives the longest word the table
+// takes; a matrix whose scores do not fit a byte keeps the reference). A strict-set switch
+// (`utils/xswitch.rs`): on unless `LOSAT_X_TBNUNGAP=0`.
+/// Whether a word finder with `matrix` takes BLASTP's byte-table walks (switch on), and the table
+/// of a matrix other than BLOSUM62 (`None` for BLOSUM62's own walks).
+fn x_tbn_ungap(matrix: ScoringMatrix) -> (bool, Option<&'static x_ungapped_fast::MatrixTable>) {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if !*ON.get_or_init(|| {
         crate::utils::xswitch::on("LOSAT_X_TBNUNGAP") && x_ungapped_fast::build_table().is_some()
     }) {
-        return false;
+        return (false, None);
     }
-    let own = matrix == ScoringMatrix::Blosum62;
-    crate::utils::xreach::x_reach!("LOSAT_X_TBNUNGAP", own);
-    own
+    let table = (matrix != ScoringMatrix::Blosum62)
+        .then(|| x_ungapped_fast::matrix_table(matrix))
+        .flatten();
+    let fast = matrix == ScoringMatrix::Blosum62 || table.is_some();
+    crate::utils::xreach::x_reach!("LOSAT_X_TBNUNGAP", fast);
+    (fast, table)
+}
+
+/// The byte-table walks of the two-hit loop (`XTwoHit::pairs_on`): BLOSUM62's (`XBlosum62Walks`)
+/// or another matrix's (`&MatrixTable`).
+trait XUngapWalks: Copy {
+    /// `x_ungapped_fast::two_hit` with this table.
+    #[allow(clippy::too_many_arguments)]
+    fn two_hit(
+        self,
+        query: &[u8],
+        subject: &[u8],
+        s_left_off: usize,
+        s_right_off: usize,
+        q_right_off: usize,
+        dropoff: i32,
+        word_size: usize,
+    ) -> Option<Option<crate::algorithm::blastp::extension::BlastpTwoHitUngappedResult>>;
+}
+
+/// BLOSUM62's walks (`x_ungapped_fast::two_hit`).
+#[derive(Clone, Copy)]
+struct XBlosum62Walks;
+
+impl XUngapWalks for XBlosum62Walks {
+    #[inline(always)]
+    fn two_hit(
+        self,
+        query: &[u8],
+        subject: &[u8],
+        s_left_off: usize,
+        s_right_off: usize,
+        q_right_off: usize,
+        dropoff: i32,
+        word_size: usize,
+    ) -> Option<Option<crate::algorithm::blastp::extension::BlastpTwoHitUngappedResult>> {
+        x_ungapped_fast::two_hit(
+            query,
+            subject,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            dropoff,
+            word_size,
+        )
+    }
+}
+
+impl XUngapWalks for &'static x_ungapped_fast::MatrixTable {
+    #[inline(always)]
+    fn two_hit(
+        self,
+        query: &[u8],
+        subject: &[u8],
+        s_left_off: usize,
+        s_right_off: usize,
+        q_right_off: usize,
+        dropoff: i32,
+        word_size: usize,
+    ) -> Option<Option<crate::algorithm::blastp::extension::BlastpTwoHitUngappedResult>> {
+        x_ungapped_fast::two_hit_of(
+            self,
+            query,
+            subject,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            dropoff,
+            word_size,
+        )
+    }
 }
 
 impl<'a> XTwoHit<'a> {
@@ -300,6 +379,7 @@ impl<'a> XTwoHit<'a> {
             }
             _ => Diagonals::new(query_length, window, packed),
         };
+        let (x_ungap_fast, x_ungap_matrix) = x_tbn_ungap(matrix);
         Self {
             diagonals,
             query_sequence,
@@ -309,7 +389,8 @@ impl<'a> XTwoHit<'a> {
             matrix,
             window,
             word_size,
-            x_ungap_fast: x_tbn_ungap(matrix),
+            x_ungap_fast,
+            x_ungap_matrix,
         }
     }
 
@@ -395,9 +476,35 @@ impl<'a> XTwoHit<'a> {
     // The body is the per-hit loop of the two-hit word finder (the same tests, extension and HSP
     // saving of aa_ungapped.c:516-606), run on one filled offset array.
     /// The loop body of the two-hit word finder for one filled offset array.
-    #[inline]
+    #[cfg(test)]
     pub(super) fn pairs(
         &mut self,
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) {
+        match self.x_ungap_matrix {
+            None => self.pairs_with(
+                XBlosum62Walks,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            Some(table) => {
+                self.pairs_with(table, frame, chunk_offset, subject_sequence, pairs, hits)
+            }
+        }
+    }
+
+    /// `pairs` with the walks `walks`.
+    #[inline]
+    fn pairs_with<W: XUngapWalks>(
+        &mut self,
+        walks: W,
         frame: i8,
         chunk_offset: u32,
         subject_sequence: &[u8],
@@ -408,20 +515,35 @@ impl<'a> XTwoHit<'a> {
         let mut entries =
             std::mem::replace(&mut self.diagonals.entries, XDiagCells::Pair(Vec::new()));
         match &mut entries {
-            XDiagCells::Packed(cells) => {
-                self.pairs_on(cells, frame, chunk_offset, subject_sequence, pairs, hits)
-            }
-            XDiagCells::Pair(cells) => {
-                self.pairs_on(cells, frame, chunk_offset, subject_sequence, pairs, hits)
-            }
+            XDiagCells::Packed(cells) => self.pairs_on(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) => self.pairs_on(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
         }
         self.diagonals.entries = entries;
     }
 
-    /// `pairs` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`).
+    /// `pairs` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`) with the walks
+    /// `walks`.
+    #[allow(clippy::too_many_arguments)]
     #[inline]
-    fn pairs_on<C: super::x_tbn_hitbf::XDiagCell>(
+    fn pairs_on<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks>(
         &self,
+        walks: W,
         cells: &mut [C],
         frame: i8,
         chunk_offset: u32,
@@ -482,16 +604,17 @@ impl<'a> XTwoHit<'a> {
             // EXPERIMENT (LOSAT_X_TBNUNGAP): the byte-table walks (`x_tbn_ungap`); `None` = an
             // extension outside the table's range, which runs the reference.
             let result = if self.x_ungap_fast {
-                x_ungapped_fast::two_hit(
-                    self.query_sequence,
-                    subject_sequence,
-                    (previous + word_size_i32) as usize,
-                    s as usize,
-                    q as usize,
-                    self.x_dropoffs[context],
-                    word_size,
-                )
-                .unwrap_or_else(reference)
+                walks
+                    .two_hit(
+                        self.query_sequence,
+                        subject_sequence,
+                        (previous + word_size_i32) as usize,
+                        s as usize,
+                        q as usize,
+                        self.x_dropoffs[context],
+                        word_size,
+                    )
+                    .unwrap_or_else(reference)
             } else {
                 reference()
             };
@@ -529,7 +652,8 @@ impl<'a> XTwoHit<'a> {
     // `x_hits_bf` takes the too-far and overlap outcomes; the
     // body of `pairs` runs on each hit it stops at (a flag-1 cell or a candidate), in order.
     /// `pairs` with the too-far and overlap outcomes taken by `x_tbn_hitbf::x_hits_bf`; `pairs`
-    /// itself when `x_tbn_hitbf::fits` does not hold.
+    /// itself when `x_tbn_hitbf::fits` does not hold. BLOSUM62's walks: the caller takes
+    /// `x_pairs_bf_of` for a finder with another matrix's table (`x_ungap_matrix`).
     #[inline(never)]
     pub(super) fn x_pairs_bf(
         &mut self,
@@ -539,8 +663,20 @@ impl<'a> XTwoHit<'a> {
         pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
         hits: &mut Vec<InitHsp>,
     ) {
+        // BLOSUM62's walks: never a finder with another matrix's table (`x_tbn_ungap`).
+        debug_assert!(
+            self.x_ungap_matrix.is_none()
+                && (!self.x_ungap_fast || self.matrix == ScoringMatrix::Blosum62)
+        );
         if !super::x_tbn_hitbf::fits(self.window, self.word_size) {
-            self.pairs(frame, chunk_offset, subject_sequence, pairs, hits);
+            self.pairs_with(
+                XBlosum62Walks,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            );
             return;
         }
         // The cells are taken out for the call and put back (a move of the vector), so that the
@@ -548,20 +684,84 @@ impl<'a> XTwoHit<'a> {
         let mut entries =
             std::mem::replace(&mut self.diagonals.entries, XDiagCells::Pair(Vec::new()));
         match &mut entries {
-            XDiagCells::Packed(cells) => {
-                self.x_pairs_bf_on(cells, frame, chunk_offset, subject_sequence, pairs, hits)
-            }
-            XDiagCells::Pair(cells) => {
-                self.x_pairs_bf_on(cells, frame, chunk_offset, subject_sequence, pairs, hits)
-            }
+            XDiagCells::Packed(cells) => self.x_pairs_bf_on(
+                XBlosum62Walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) => self.x_pairs_bf_on(
+                XBlosum62Walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
         }
         self.diagonals.entries = entries;
     }
 
-    /// `x_pairs_bf` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`).
+    /// `x_pairs_bf` with another matrix's walks, `table` (the finder's `x_ungap_matrix`). Its own
+    /// text, as `x_pairs_bf`'s, so that BLOSUM62's keeps its code.
+    #[inline(never)]
+    pub(super) fn x_pairs_bf_of(
+        &mut self,
+        table: &'static x_ungapped_fast::MatrixTable,
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) {
+        // The walks of the finder's own table, which `x_tbn_ungap` built for its matrix.
+        debug_assert!(self.x_ungap_matrix.is_some_and(|t| std::ptr::eq(t, table)));
+        if !super::x_tbn_hitbf::fits(self.window, self.word_size) {
+            self.pairs_with(table, frame, chunk_offset, subject_sequence, pairs, hits);
+            return;
+        }
+        let mut entries =
+            std::mem::replace(&mut self.diagonals.entries, XDiagCells::Pair(Vec::new()));
+        match &mut entries {
+            XDiagCells::Packed(cells) => self.x_pairs_bf_on(
+                table,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) => self.x_pairs_bf_on(
+                table,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+        }
+        self.diagonals.entries = entries;
+    }
+
+    /// Another matrix's table of the byte-table walks (`x_tbn_ungap`): the caller of the word
+    /// finder takes `x_pairs_bf_of` with it; `None` for BLOSUM62's walks and the reference.
+    pub(super) fn x_ungap_matrix(&self) -> Option<&'static x_ungapped_fast::MatrixTable> {
+        self.x_ungap_matrix
+    }
+
+    /// `x_pairs_bf` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`) with the
+    /// walks `walks`.
+    #[allow(clippy::too_many_arguments)]
     #[inline(always)]
-    fn x_pairs_bf_on<C: super::x_tbn_hitbf::XDiagCell>(
+    fn x_pairs_bf_on<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks>(
         &self,
+        walks: W,
         cells: &mut [C],
         frame: i8,
         chunk_offset: u32,
@@ -581,6 +781,7 @@ impl<'a> XTwoHit<'a> {
             );
             if let Some(pair) = pairs.get(done) {
                 self.pairs_on(
+                    walks,
                     cells,
                     frame,
                     chunk_offset,
@@ -1751,6 +1952,8 @@ mod tests {
     // wordsize + 1, with the branch-free loop on either layout of the table (LOSAT_X_TBNDIAGPACK)
     // and `pairs` on `(last_hit, flag)` cells; each unit's offset pairs come in arrays of random
     // lengths, as the scan fills them. The init HSPs and every cell must be equal after every unit.
+    // With another matrix, `x_pairs_bf_of` with the matrix's byte-table walks against `pairs` with
+    // the reference extension.
     #[test]
     fn x_pairs_bf_gives_the_hits_and_table_of_pairs() {
         let mut seed = 0x9e37_79b9_u64;
@@ -1795,7 +1998,15 @@ mod tests {
         let mut found = 0;
         // too far, overlap, flag 1, candidate (the last two go to `pairs` in `x_pairs_bf`).
         let mut outcomes = [0u64; 4];
-        for (window, packed) in [(40, false), (4, false), (40, true), (4, true)] {
+        for (matrix, window, packed) in [
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Blosum45,
+            ScoringMatrix::Pam250,
+            ScoringMatrix::Identity,
+        ]
+        .into_iter()
+        .flat_map(|m| [(m, 40, false), (m, 4, false), (m, 40, true), (m, 4, true)])
+        {
             for (mode, start) in [
                 ("cleared", None),
                 ("kept", None),
@@ -1811,13 +2022,29 @@ mod tests {
                         &offsets,
                         &x_dropoffs,
                         &cutoffs,
-                        ScoringMatrix::Blosum62,
+                        matrix,
                         window,
                         3,
                     )
                 };
-                let new = || new_in(false);
-                let new_bf = || new_in(packed);
+                let new = || {
+                    let mut reference = new_in(false);
+                    if matrix != ScoringMatrix::Blosum62 {
+                        (reference.x_ungap_fast, reference.x_ungap_matrix) = (false, None);
+                    }
+                    reference
+                };
+                let new_bf = || {
+                    let branch_free = new_in(packed);
+                    // with the switch on (`x_tbn_ungap`), another matrix takes `x_pairs_bf_of`
+                    if crate::utils::xswitch::on("LOSAT_X_TBNUNGAP") {
+                        assert_eq!(
+                            branch_free.x_ungap_matrix().is_some(),
+                            matrix != ScoringMatrix::Blosum62
+                        );
+                    }
+                    branch_free
+                };
                 let mut reference = new();
                 let mut branch_free = new_bf();
                 if let Some(start) = start {
@@ -1853,17 +2080,22 @@ mod tests {
                     let mut rest = &pairs[..];
                     while !rest.is_empty() {
                         let (array, tail) = rest.split_at(1 + next(rest.len().min(50)));
-                        branch_free.x_pairs_bf(1, 0, unit, array, &mut got);
+                        match branch_free.x_ungap_matrix() {
+                            None => branch_free.x_pairs_bf(1, 0, unit, array, &mut got),
+                            Some(table) => {
+                                branch_free.x_pairs_bf_of(table, 1, 0, unit, array, &mut got)
+                            }
+                        }
                         rest = tail;
                     }
                     assert_eq!(
                         got, expected,
-                        "window {window} packed {packed} {mode} unit {u}: init HSPs"
+                        "{matrix:?} window {window} packed {packed} {mode} unit {u}: init HSPs"
                     );
                     assert_eq!(
                         branch_free.x_table(),
                         reference.x_table(),
-                        "window {window} packed {packed} {mode} unit {u}: table"
+                        "{matrix:?} window {window} packed {packed} {mode} unit {u}: table"
                     );
                     found += expected.len();
                     if mode != "cleared" {
@@ -1873,7 +2105,7 @@ mod tests {
                 }
             }
         }
-        assert!(found >= 200, "the units must give hits ({found})");
+        assert!(found >= 800, "the units must give hits ({found})");
         assert!(
             outcomes.iter().all(|&count| count > 0),
             "outcomes {outcomes:?}"
@@ -1891,7 +2123,8 @@ mod tests {
     // unit on one kept table (`exit` after each), the init HSPs and the diagonal table of the word
     // finder with the reference extension: on whole units and on units cut short (a chunk that ends
     // inside a frame), with stop codons and X among the subject letters, and with a context whose
-    // X-drop the byte table does not cover (the reference runs for its candidates).
+    // X-drop the byte table does not cover (the reference runs for its candidates); with every matrix
+    // (BLOSUM62's walks or the matrix's table).
     #[test]
     fn x_byte_table_walks_give_the_reference_hits_and_table() {
         let mut seed = 0x9e37_79b9_u64;
@@ -1933,7 +2166,10 @@ mod tests {
         let set: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
         let (query, offsets) = x_concatenated(&set);
         let cutoffs = [24, 24, 24];
-        for x_dropoffs in [[16, 16, 16], [16, 300, 7]] {
+        for (matrix, x_dropoffs) in ScoringMatrix::ALL
+            .into_iter()
+            .flat_map(|matrix| [(matrix, [16, 16, 16]), (matrix, [16, 300, 7])])
+        {
             let new = |fast: bool| {
                 let mut two_hit = XTwoHit::with_table(
                     None,
@@ -1941,11 +2177,13 @@ mod tests {
                     &offsets,
                     &x_dropoffs,
                     &cutoffs,
-                    ScoringMatrix::Blosum62,
+                    matrix,
                     40,
                     3,
                 );
                 two_hit.x_ungap_fast = fast;
+                two_hit.x_ungap_matrix = (fast && matrix != ScoringMatrix::Blosum62)
+                    .then(|| x_ungapped_fast::matrix_table(matrix).unwrap());
                 two_hit
             };
             let (mut fast, mut reference) = (new(true), new(false));
@@ -1957,10 +2195,10 @@ mod tests {
                     let (mut got, mut want) = (Vec::new(), Vec::new());
                     fast.pairs(1, 0, unit, &pairs, &mut got);
                     reference.pairs(1, 0, unit, &pairs, &mut want);
-                    assert_eq!(got, want, "X-drops {x_dropoffs:?}: init HSPs");
+                    assert_eq!(got, want, "{matrix:?} X-drops {x_dropoffs:?}: init HSPs");
                     assert_eq!(
                         fast.diagonals.entries, reference.diagonals.entries,
-                        "X-drops {x_dropoffs:?}: diagonal table"
+                        "{matrix:?} X-drops {x_dropoffs:?}: diagonal table"
                     );
                     found += got.len();
                     fast.exit(unit.len());
@@ -1969,10 +2207,17 @@ mod tests {
             }
             assert!(
                 found >= 60,
-                "X-drops {x_dropoffs:?}: the units must give hits ({found})"
+                "{matrix:?} X-drops {x_dropoffs:?}: the units must give hits ({found})"
             );
         }
-        // The rule: another matrix keeps the reference extension.
-        assert!(!x_tbn_ungap(ScoringMatrix::Blosum45));
+        // The rule: BLOSUM62 takes its own walks, another matrix the walks with its table; with
+        // the switch off (`LOSAT_X_TBNUNGAP=0`) every matrix takes the reference.
+        let on = crate::utils::xswitch::on("LOSAT_X_TBNUNGAP");
+        let (b62, b45) = (
+            x_tbn_ungap(ScoringMatrix::Blosum62),
+            x_tbn_ungap(ScoringMatrix::Blosum45),
+        );
+        assert_eq!((b62.0, b62.1.is_some()), (on, false));
+        assert_eq!((b45.0, b45.1.is_some()), (on, on));
     }
 }

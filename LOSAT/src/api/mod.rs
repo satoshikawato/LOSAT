@@ -85,8 +85,13 @@
 //!   the host can stop it, by ending the thread or the process.
 //! - The records are read before the search, so a reader error is an [`Error::Input`] before
 //!   any report, where the command line has reported the batches before the error.
-//! - Not in this API yet: outfmt 13 and 14 (their side files), `psiblast`, `makeblastdb`,
-//!   `blastdbcmd`.
+//! - Outfmt 13 and 14 write side files next to their report, so they come through
+//!   [`run_to_file`] only; a report in memory has no place for them.
+//! - [`Program::Psiblast`] is the search of LOSAT's `psiblast`: its first round, and the formats
+//!   it writes. The API writes no PSSM file, so it refuses `-out_ascii_pssm`,
+//!   `-save_pssm_after_last_round` and `-save_each_pssm` ([`validate`]).
+//! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs: the command line's
+//!   words, with the caller's writers for its standard streams.
 //!
 //! # Items
 //!
@@ -95,9 +100,10 @@
 //! - The inputs: [`read_input_file`], [`read_fasta`], [`read_inputs`], [`Role`], [`FastaRecord`],
 //!   [`Inputs`]
 //! - The options: [`validate`], [`Search`], [`API_OWNED`]
-//! - The search: [`run_collect`], [`run`](run()), [`run_batches`]
+//! - The search: [`run_collect`], [`run`](run()), [`run_to_file`], [`run_batches`]
 //! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`QueryStats`],
 //!   [`Strand`], [`QueryHits`], [`SubjectHits`]
+//! - The database programs: [`run_makeblastdb`], [`run_blastdbcmd`]
 //! - The failures: [`Error`]
 //! - The engine's version: [`VERSION`]
 
@@ -112,6 +118,7 @@ pub mod local_blast;
 mod program;
 mod run;
 mod search;
+mod tools;
 mod view;
 
 pub use crate::blastinput::fasta_reader::FastaRecord;
@@ -120,8 +127,9 @@ pub use describe::{describe, Description, Parameter, ValueKind};
 pub use error::Error;
 pub use input::{read_fasta, read_input_file, read_inputs, Inputs, Role};
 pub use program::Program;
-pub use run::{run, run_collect, HspRecord, Outcome, QueryStats, Report, Strand};
+pub use run::{run, run_collect, run_to_file, HspRecord, Outcome, QueryStats, Report, Strand};
 pub use search::{validate, Search, API_OWNED};
+pub use tools::{run_blastdbcmd, run_makeblastdb};
 pub use view::{QueryHits, SubjectHits};
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/version.hpp:49-57

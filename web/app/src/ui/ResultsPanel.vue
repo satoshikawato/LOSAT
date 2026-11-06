@@ -12,7 +12,7 @@ import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputSaver } from '../application/outputs';
 import { noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
-import { CUSTOM_OUTPUT, customOutfmt, type RunOutput } from '../domain/output-format';
+import { CUSTOM_OUTPUT, customOutfmt, FORMAT_NAMES, formatNumber, type RunOutput } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal } from '../domain/run';
 import { useStore } from './useStore';
@@ -59,12 +59,11 @@ const emptyPlot = computed(() => (state.value.hsps.length > 0 ? undefined : noHs
 
 /**
  * "Download All" lists the outputs of the run, as NCBI's lists its formats, by BLAST+'s names of
- * them (its -outfmt help), the output of the run's own -outfmt with its value (W10); the one
+ * them (its -outfmt help), the output of the run's own -outfmt with its value (W10, W11); the one
  * chosen is saved as one file (WA-RS-05). The list opens in the page's flow, under the run's line,
  * so that it fits a phone's width; an output that is not saved says why there, until the next
  * download or another run (WA2-BR-01).
  */
-const FORMAT_NAMES = { 0: 'Pairwise', 6: 'Tabular', 7: 'Tabular with comment lines' } as const;
 const downloads = computed(() => {
   const items: { readonly format: RunOutput; readonly label: string; readonly testid: string }[] = ([0, 6, 7] as const).map((format) => ({
     format,
@@ -73,7 +72,7 @@ const downloads = computed(() => {
   }));
   const custom = customOutfmt(loaded.value?.run.snapshot.argv ?? []);
   if (custom !== undefined) {
-    const name = FORMAT_NAMES[Number(custom.split(' ', 1)[0]) as 6 | 7];
+    const name = FORMAT_NAMES[formatNumber(custom) ?? 0];
     items.push({ format: CUSTOM_OUTPUT, label: `${name} (outfmt ${custom})`, testid: 'results-download-custom' });
   }
   return items;

@@ -1,6 +1,6 @@
 // ThreadHost (src/infra/engine-worker/thread-host.ts) with fake thread workers: preparing
-// them, starting a thread, and a thread worker that does not start in time. The real
-// thread workers run in the browsers (tests/e2e/engine.spec.ts).
+// them, starting a thread, a thread worker that does not start in time, and the keeper of
+// the shared memory. The real thread workers run in the browsers (tests/e2e/engine.spec.ts).
 import { Worker as NodeWorker } from 'node:worker_threads';
 import { describe, expect, it } from 'vitest';
 import {
@@ -10,6 +10,7 @@ import {
   START_ABANDONED,
   START_PENDING,
   START_TAKEN,
+  type KeeperCommand,
   type ThreadCommand,
   type ThreadFault,
 } from '../../src/infra/engine-worker/protocol';
@@ -53,14 +54,42 @@ class FakeThreadWorker {
   }
 }
 
+type KeeperBehaviour = 'ready' | 'never-ready' | 'fails';
+
+class FakeKeeper {
+  readonly received: KeeperCommand[] = [];
+  terminated = false;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: ((event: ErrorEvent) => void) | null = null;
+
+  constructor(private readonly behaviour: KeeperBehaviour) {}
+
+  postMessage(command: KeeperCommand): void {
+    this.received.push(command);
+    // As memory-keeper-worker.ts answers, after the message loop turns.
+    if (this.behaviour === 'ready') setTimeout(() => this.onmessage?.({ data: { type: 'ready' } } as MessageEvent), 1);
+    // A script that does not load fires a plain Event, without a message.
+    if (this.behaviour === 'fails') setTimeout(() => this.onerror?.({} as ErrorEvent), 1);
+  }
+
+  terminate(): void {
+    this.terminated = true;
+  }
+}
+
 /** `readyTimeoutMs` bounds only the cases that fail; a test whose worker must become ready in time raises it. */
-function host(behaviour: Behaviour, readyTimeoutMs = 100) {
+function host(behaviour: Behaviour, readyTimeoutMs = 100, keeperBehaviour: KeeperBehaviour = 'ready') {
   const workers: FakeThreadWorker[] = [];
+  const keepers: FakeKeeper[] = [];
   const faultChannel = `test-faults-${Math.random()}`;
+  const keeperChannel = `test-keeper-${Math.random()}`;
+  const memory = {} as WebAssembly.Memory;
   const threads = new ThreadHost({
     module: {} as WebAssembly.Module,
-    memory: {} as WebAssembly.Memory,
+    memory,
+    maximumPages: 65_535,
     faultChannel,
+    keeperChannel,
     readyTimeoutMs,
     startTimeoutMs: 50,
     createWorker: () => {
@@ -68,8 +97,13 @@ function host(behaviour: Behaviour, readyTimeoutMs = 100) {
       workers.push(worker);
       return worker as unknown as Worker;
     },
+    createKeeper: () => {
+      const keeper = new FakeKeeper(keeperBehaviour);
+      keepers.push(keeper);
+      return keeper as unknown as Worker;
+    },
   });
-  return { threads, workers, faultChannel };
+  return { threads, workers, keepers, memory, faultChannel, keeperChannel };
 }
 
 describe('ThreadHost', () => {
@@ -114,6 +148,26 @@ describe('ThreadHost', () => {
     expect(workers[0]!.starts).toEqual([1, 2]);
     await ready.terminate();
     threads.terminate();
+  });
+
+  it('gives the shared memory and its channel to a keeper, waits for it, and ends it with the thread workers', async () => {
+    const { threads, workers, keepers, memory, keeperChannel } = host('ready-and-start');
+    expect(keepers).toHaveLength(1);
+    const keeper = keepers[0]!;
+    expect(keeper.received).toEqual([{ type: 'keep', memory, maximumPages: 65_535, channel: keeperChannel }]);
+    await threads.prepare(1);
+    threads.terminate();
+    expect(keeper.terminated).toBe(true);
+    expect(workers.every((worker) => worker.terminated)).toBe(true);
+  });
+
+  it('fails to prepare when the keeper does not start in time, or fails', async () => {
+    const late = host('ready-and-start', 100, 'never-ready');
+    await expect(late.threads.prepare(1)).rejects.toThrow('the memory keeper did not start in time');
+    late.threads.terminate();
+    const failing = host('ready-and-start', 5_000, 'fails');
+    await expect(failing.threads.prepare(1)).rejects.toThrow('the memory keeper failed: its script did not load');
+    failing.threads.terminate();
   });
 
   it('fails to prepare when a thread worker does not become ready in time', async () => {

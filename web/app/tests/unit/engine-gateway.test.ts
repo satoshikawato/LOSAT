@@ -1,9 +1,9 @@
 // The Wasm EngineGateway's runtime generations (src/infra/engine-worker/gateway.ts) with a
-// fake Engine worker: runs, phases, cancel, renewal, faults and errors. The real Engine
-// worker runs in the browsers (tests/e2e/engine.spec.ts).
-import { afterEach, describe, expect, it } from 'vitest';
+// fake Engine worker: runs, phases, cancel, renewal, faults, errors and the memory keeper's
+// channel. The real Engine worker runs in the browsers (tests/e2e/engine.spec.ts).
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InputMismatchError, RunCancelledError, type EngineRunRequest, type RuntimeInfo } from '../../src/ports/engine';
-import { WasmEngine } from '../../src/infra/engine-worker/gateway';
+import { WasmEngine, type WasmEngineOptions } from '../../src/infra/engine-worker/gateway';
 import type { EngineCommand, EngineEvent, EngineInit, WorkerPrepare, WorkerRun, WorkerRunResult } from '../../src/infra/engine-worker/protocol';
 import type { EngineAssets } from '../../src/infra/reactor/assets';
 
@@ -49,9 +49,10 @@ afterEach(() => {
   for (const port of ports.splice(0)) port.close();
 });
 
-function setup(renewal?: { maxRuns?: number; highWaterBytes?: number }) {
+function setup(renewal?: { maxRuns?: number; highWaterBytes?: number }, extra: Partial<WasmEngineOptions> = {}) {
   const workers: FakeWorker[] = [];
   const engine = new WasmEngine({
+    ...extra,
     assets: ASSETS,
     control: { describe: () => Promise.reject(new Error('unused')), validate: () => Promise.reject(new Error('unused')) },
     hardwareConcurrency: 8,
@@ -75,6 +76,25 @@ function output(): MessagePort {
   const channel = new MessageChannel();
   ports.push(channel.port1, channel.port2);
   return channel.port1;
+}
+
+/**
+ * The keeper of `worker`'s generation on its channel: `answer` gets each message and returns
+ * what to post back, if anything.
+ */
+function fakeKeeper(worker: FakeWorker, answer: (message: unknown) => unknown): BroadcastChannel {
+  const channel = new BroadcastChannel(worker.init.keeperChannel);
+  channel.onmessage = (event: MessageEvent) => {
+    const reply = answer(event.data);
+    if (reply !== undefined) channel.postMessage(reply);
+  };
+  return channel;
+}
+
+/** Waits until `condition` holds. */
+async function until(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 1000 && !condition(); i++) await new Promise((resolve) => setTimeout(resolve, 1));
+  expect(condition()).toBe(true);
 }
 
 const RESULT: WorkerRunResult = {
@@ -142,27 +162,35 @@ describe('WasmEngine', () => {
     expect(workers).toHaveLength(1);
   });
 
-  it('grows the shared memory of the threaded instance to its maximum before it ends the worker', async () => {
-    const { engine, workers } = setup();
+  it('during a search on the threaded instance, ends the worker once the keeper of its memory grew it', async () => {
+    const ends: string[] = [];
+    // Far beyond the answer: only the keeper's answer can end the worker in this test.
+    const { engine, workers } = setup(undefined, { keeperTimeoutMs: 60_000, onRuntimeEnd: (end) => ends.push(end) });
     const run = engine.run(request('r1', 4), output(), () => {});
     const worker = await posted(() => workers[0], 1);
-    const memory = new WebAssembly.Memory({ initial: 1, maximum: 8, shared: true });
-    let pagesAtEnd = -1;
-    worker.terminate = () => {
-      pagesAtEnd = memory.buffer.byteLength / 65_536;
-      worker.terminated = true;
-    };
-    worker.send({ type: 'memory', generation: 1, memory, maximumPages: 8 });
+    const asked: Array<{ message: unknown; terminated: boolean }> = [];
+    const keeper = fakeKeeper(worker, (message) => {
+      asked.push({ message, terminated: worker.terminated });
+      return { type: 'grown' };
+    });
+    worker.send({ type: 'threaded-search', generation: 1 });
     engine.cancel('r1');
+    // The search settles at once; the worker ends after the keeper's answer.
     await expect(run).rejects.toBeInstanceOf(RunCancelledError);
-    expect(pagesAtEnd).toBe(8);
+    await until(() => worker.terminated);
+    expect(asked).toEqual([{ message: { type: 'grow' }, terminated: false }]);
+    expect(ends).toEqual(['grown']);
+    keeper.close();
 
-    // The memory is held only while its search runs: a cancel after another search ended
-    // ends the worker without growing it.
+    // After its search ended, a cancel of the next search before it runs on the threaded
+    // instance ends the worker at once.
     const next = engine.run(request('r2', 4), output(), () => {});
     const second = await posted(() => workers[1], 1);
-    const other = new WebAssembly.Memory({ initial: 1, maximum: 8, shared: true });
-    second.send({ type: 'memory', generation: 2, memory: other, maximumPages: 8 });
+    const other = fakeKeeper(second, () => {
+      asked.push({ message: 'second keeper asked', terminated: second.terminated });
+      return { type: 'grown' };
+    });
+    second.send({ type: 'threaded-search', generation: 2 });
     second.send({ type: 'done', generation: 2, runId: 'r2', ok: true, result: RESULT });
     await next;
     const third = engine.run(request('r3', 4), output(), () => {});
@@ -170,7 +198,82 @@ describe('WasmEngine', () => {
     engine.cancel('r3');
     await expect(third).rejects.toBeInstanceOf(RunCancelledError);
     expect(second.terminated).toBe(true);
-    expect(other.buffer.byteLength).toBe(65_536);
+    expect(ends).toEqual(['grown', 'at-once']);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(asked).toHaveLength(1);
+    other.close();
+  });
+
+  it('ends the worker after the timeout when the keeper does not answer, not before', async () => {
+    const ends: string[] = [];
+    const { engine, workers } = setup(undefined, { keeperTimeoutMs: 1_000, onRuntimeEnd: (end) => ends.push(end) });
+    const run = engine.run(request('r1', 4), output(), () => {});
+    const worker = await posted(() => workers[0], 1);
+    worker.send({ type: 'threaded-search', generation: 1 });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      engine.cancel('r1');
+      await expect(run).rejects.toBeInstanceOf(RunCancelledError);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(worker.terminated).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(worker.terminated).toBe(true);
+      expect(ends).toEqual(['timeout']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a thread fault during a threaded search ends the worker once the keeper grew the memory', async () => {
+    const { engine, workers } = setup(undefined, { keeperTimeoutMs: 60_000 });
+    const run = engine.run(request('r1', 4), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    let terminatedWhenAsked: boolean | undefined;
+    const keeper = fakeKeeper(worker, () => {
+      terminatedWhenAsked = worker.terminated;
+      return { type: 'grown' };
+    });
+    worker.send({ type: 'threaded-search', generation: 1 });
+    const faults = new BroadcastChannel(worker.init.faultChannel);
+    faults.postMessage({ type: 'fault', tid: 2, message: 'The engine stopped: thread 2 trapped' });
+    await expect(run).rejects.toThrow('The engine stopped: thread 2 trapped');
+    faults.close();
+    await until(() => worker.terminated);
+    expect(terminatedWhenAsked).toBe(false);
+    keeper.close();
+  });
+
+  it('ends the worker of a stopped instance at once: the Engine worker already ended its keeper', async () => {
+    const ends: string[] = [];
+    const { engine, workers } = setup(undefined, { keeperTimeoutMs: 60_000, onRuntimeEnd: (end) => ends.push(end) });
+    const run = engine.run(request('r1', 4), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    let asked = 0;
+    const keeper = fakeKeeper(worker, () => {
+      asked++;
+      return undefined;
+    });
+    worker.send({ type: 'threaded-search', generation: 1 });
+    worker.send({ type: 'done', generation: 1, runId: 'r1', ok: false, error: { name: 'EngineStoppedError', message: 'trapped', stopped: true } });
+    await expect(run).rejects.toThrow('trapped');
+    expect(worker.terminated).toBe(true);
+    expect(ends).toEqual(['at-once']);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(asked).toBe(0);
+    keeper.close();
+  });
+
+  it('an observer that throws does not keep a cancel from settling', async () => {
+    const { engine, workers } = setup(undefined, {
+      onRuntimeEnd: () => {
+        throw new Error('observer');
+      },
+    });
+    const run = engine.run(request('r1'), output(), () => {});
+    const worker = await posted(() => workers[0], 1);
+    engine.cancel('r1');
+    await expect(run).rejects.toBeInstanceOf(RunCancelledError);
+    expect(worker.terminated).toBe(true);
   });
 
   it('cancels by ending the worker; the next search starts a new generation and late messages are dropped', async () => {

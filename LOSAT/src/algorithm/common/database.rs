@@ -2669,7 +2669,7 @@ pub(crate) fn read_reported_taxonomy(
     let mut asked: std::collections::BTreeMap<i32, HitTaxonomy> = Default::default();
     // The lookup of a `Hit` description (`CSeqDB::GetTaxInfo`).
     let mut hit_lookup = |taxid: i32| -> Result<HitTaxonomy> {
-        if !asked.contains_key(&taxid) {
+        if let std::collections::btree_map::Entry::Vacant(slot) = asked.entry(taxid) {
             let mut messages = Vec::new();
             let found = taxdb
                 .names(taxid, &mut messages)
@@ -2689,7 +2689,7 @@ pub(crate) fn read_reported_taxonomy(
                 }
                 None => HitTaxonomy::NotFound(messages),
             };
-            asked.insert(taxid, answer);
+            slot.insert(answer);
         }
         Ok(asked[&taxid].clone())
     };
@@ -2820,7 +2820,13 @@ pub(crate) fn tabular_names<'t>(
 /// a volume looks the taxid of that error up once in the run unless it holds another taxid of
 /// that taxid's slot of NCBI's cache, which is refused (`TaxdbRun::cache_collision`, at the
 /// run's first call, before its subjects are looked at, so also in a first batch that reports
-/// nothing), so the order of the subjects does not change the bytes. The caller writes the
+/// nothing), so the order of the subjects does not change the bytes. The callers decide where
+/// they ask: BLASTX, which writes each batch's reports before it searches the next, and BLASTN
+/// (also where its report stream does not act) call it from their first batch on, unless no
+/// batch can fetch a subject (`prefetch_always_off` with rows that read none); TBLASTN, and
+/// TBLASTX, whose report stream is off for a run with this refusal, make every batch's lookups
+/// before any report and call it only where NCBI fetches a subject, so a run that fetches none
+/// is not refused. The caller writes the
 /// text after the reader's messages of the batch and before the warnings of its first query,
 /// where NCBI's prefetch comes. Empty, and nothing read, without `taxdb.bti` on the search
 /// path. A taxonomy database that LOSAT cannot read as NCBI does is refused as in
@@ -3261,9 +3267,9 @@ pub(crate) fn taxdb_may_refuse(db: &SeqDb, names: bool) -> bool {
     let sequences = u64::from(db.num_seqs());
     // An index that cannot be opened is left to the database side, which asks for a name only
     // when a sequence has a taxid.
-    let taxdb_first = taxdb.entry_count().map_or(false, |entries| {
-        entries <= TAXDB_ENTRIES_PER_SEQUENCE * sequences
-    });
+    let taxdb_first = taxdb
+        .entry_count()
+        .is_ok_and(|entries| entries <= TAXDB_ENTRIES_PER_SEQUENCE * sequences);
     if taxdb_first {
         if taxdb_side(&taxdb, names) == Some(false) {
             return false;

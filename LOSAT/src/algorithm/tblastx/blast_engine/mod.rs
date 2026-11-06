@@ -64,7 +64,7 @@ pub(crate) use std::collections::HashSet;
 pub(crate) use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 pub(crate) use std::sync::mpsc::channel;
-pub(crate) use std::time::{Duration, Instant};
+pub(crate) use std::time::Instant;
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
 // ```c

@@ -9,6 +9,8 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { findReactors } from '../../build/reactors';
 import { OUTPUT_FORMATS } from '../../src/domain/output-format';
+import { MemoryKeeper } from '../../src/infra/engine-worker/memory-keeper';
+import type { KeeperGrown } from '../../src/infra/engine-worker/protocol';
 import { ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports } from '../../src/infra/reactor/abi';
 import { instantiateSerial } from '../../src/infra/reactor/instance';
 import { candidateMaximums, createSharedMemory, growToMaximum, STEP_DOWN_PAGES } from '../../src/infra/reactor/shared-memory';
@@ -147,6 +149,27 @@ describe('growToMaximum', () => {
     const refused = memoryOf(23, 65_535, [], true);
     expect(() => growToMaximum(refused.shared)).not.toThrow();
     expect(refused.pages()).toBe(23);
+  });
+});
+
+describe('MemoryKeeper', () => {
+  it('grows the memory to its maximum when asked on its channel, and answers there', async () => {
+    const keeper = new MemoryKeeper();
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 6, shared: true });
+    const name = `test-keeper-${Math.random()}`;
+    expect(keeper.receive({ type: 'keep', memory, maximumPages: 6, channel: name })).toEqual({ type: 'ready' });
+    const gateway = new BroadcastChannel(name);
+    try {
+      const answer = new Promise<KeeperGrown>((resolve) => {
+        gateway.onmessage = (event: MessageEvent<KeeperGrown>) => resolve(event.data);
+      });
+      gateway.postMessage({ type: 'grow' });
+      expect(await answer).toEqual({ type: 'grown' });
+      expect(memory.buffer.byteLength).toBe(6 * PAGE);
+    } finally {
+      gateway.close();
+      keeper.close();
+    }
   });
 });
 

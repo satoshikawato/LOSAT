@@ -890,24 +890,27 @@ pub fn run_local(
         .iter()
         .any(|format| super::stage_e_report::format_number(format.outfmt) == 11);
     if archive_requested {
-        args.archive = super::archive::handle_for(&args, true)?;
+        args.archive = super::archive::handle_for(&args, true)?
+            .map(|handle| outputs.with_archive_outfmt(handle));
         super::archive::check_titles(subject_records, "subject")?;
         if let Some(handle) = args.archive.clone() {
-            return outputs.with_archive_diagnostics(handle, |view| {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(args, query_records, subject_records, view)
             });
+            return outputs.finish_archive(&handle, query_records.is_empty(), result);
         }
     }
     run_local_formats(args, query_records, subject_records, outputs)
 }
 
-/// The numbers of the requested formats, each read as on the command line.
-fn read_formats(outputs: &ReportOutputs<'_>) -> Result<Vec<i32>> {
+/// The numbers of the requested formats, each read as on the command line. `out`: the file of
+/// `api::run_to_file`.
+fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<Vec<i32>> {
     use crate::blastinput::app;
     let mut outfmts = Vec::with_capacity(outputs.formats.len());
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        if app::report_format(&choice, app::Program::Tblastn, None)?.is_none() {
+        if app::report_format(&choice, app::Program::Tblastn, out)?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastn)?;
             app::xinclude_check(&choice)?;
         }
@@ -977,7 +980,7 @@ fn search_database(
     let list = args
         .db_filter
         .resolve(&settings, &mut *outputs.diagnostics)?;
-    let outfmts = read_formats(outputs)?;
+    let outfmts = read_formats(outputs, args.out.as_deref())?;
     let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
     let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
@@ -1010,7 +1013,7 @@ fn run_local_formats(
 ) -> Result<()> {
     use crate::blastinput::app;
     use crate::blastinput::seq_range;
-    let outfmts = read_formats(outputs)?;
+    let outfmts = read_formats(outputs, args.out.as_deref())?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
     let subject_range = seq_range::parse_optional_range(
@@ -1571,7 +1574,7 @@ fn search(
             // if (CheckInternalData() != 0) each result in this Run() batch
             // receives an unsearched ancillary state and null align set.
             let skipped = batch_validity.iter().all(|&valid| !valid);
-            query_batch_skipped.extend(std::iter::repeat(skipped).take(batch_validity.len()));
+            query_batch_skipped.extend(std::iter::repeat_n(skipped, batch_validity.len()));
             query_validity.extend(batch_validity);
         }
         // A run without a searched query has no parameters of a query set.
@@ -1791,37 +1794,41 @@ fn search(
                     // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                     // (`shared::prefetch_off`), each query's report fetches the subjects it
                     // shows, after the query's own warnings, where the first format's rows read
-                    // their Bioseqs (`TabularSpec::subject_fetch`). A batch that fetches nothing
-                    // still asks for the run's refusal of NCBI's taxonomy cache before any byte,
-                    // unless no batch of the run prefetches (`shared::prefetch_always_off`). A
-                    // query whose rows read a subject only for its identities asks for it only
-                    // where they read one, NCBI's lookup: every batch's lookups are made here
-                    // before any report is written, so a later batch that prefetches still
-                    // refuses before any byte.
+                    // their Bioseqs (`TabularSpec::subject_fetch`; for `nident` alone the rows
+                    // with identities, `database::reads_subject`). NCBI looks the taxonomy up
+                    // only where it fetches a subject: in such a report, or in the prefetch of a
+                    // batch with Seq-aligns (one without them loads no id, below). Every batch's
+                    // lookups are made here before any report is written, so the run's refusal
+                    // of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
+                    // only there: a later batch that fetches still refuses before any byte.
                     if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                         let rows = first_spec.as_ref().map_or(SubjectFetch::Every, |spec| {
                             spec.subject_fetch(crate::blastinput::app::Program::Tblastn)
                         });
-                        let asks = match rows {
-                            SubjectFetch::Every => true,
-                            SubjectFetch::Never => {
-                                !crate::algorithm::common::database::prefetch_always_off()
-                            }
-                            SubjectFetch::WithIdentities => false,
-                        };
                         for (query, hitlist) in span.clone().zip(hitlists) {
                             let shown = std::slice::from_ref(hitlist);
-                            if asks
-                                || hitlist
-                                    .lists()
-                                    .iter()
-                                    .any(|list| super::database::reads_subject(list, rows))
+                            if hitlist
+                                .lists()
+                                .iter()
+                                .any(|list| super::database::reads_subject(list, rows))
                             {
                                 let messages = database.prefetch_messages(reported, shown, rows)?;
                                 query_warning_lines[query].extend(messages);
                             }
                             rows_open(shown)?;
                         }
+                        continue;
+                    }
+                    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
+                    // ```c++
+                    //        CScope::TIds ids;
+                    //        vector<TSeqRange> ranges;
+                    //        s_ExtractSeqidsAndRanges(results, ids, ranges);
+                    //        _TRACE("Prefetching " << ids.size() << " sequence lengths");
+                    //        LoadSequencesToScope(ids, ranges, scope);
+                    // ```
+                    // A batch without Seq-aligns prefetches no sequence.
+                    if seq_aligns == 0 {
                         continue;
                     }
                     let messages =

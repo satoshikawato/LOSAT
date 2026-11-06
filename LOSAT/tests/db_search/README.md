@@ -27,6 +27,12 @@ FASTA files:
 - `bx_title_later_q.fna`: the same first record; the second has a data line `EF-` (no nucleotide letter: a hyphen
   and two invalid letters, with their warnings), then a line that is not plausible data, which NCBI still checks
   because the record has no residues yet (`db.bxtitle.later.6`).
+- `bx_gap_first_q.fna`: a gap line `>?5` and 60 nucleotides, then the record `r1`, the BLASTX query of
+  `db.bxgap.first.6` (with `-parse_deflines` NCBI stops at line 1: `Input doesn't start with a defline or
+  comment`) and of the control `db.bxgap.first.nopd.6` (without it the gap line starts a record without a
+  defline). `bx_gap_comment_q.fna` is the same after a comment, a blank line and a `#` line
+  (`db.bxgap.comment.6`: NCBI names line 4), and `bx_gap_bad_q.fna` starts with `>?abc` instead
+  (`db.bxgap.bad.6`: NCBI stops at line 1 before it parses the gap).
 - `p3.faa`: records p01, p03 and p08 of `LOSAT/tests/seqdb/prot.faa`, in that order.
 - `d1_q.faa`: D1, a hit that `-db` keeps and `-subject` drops. Two proteins of `LOSAT/tests/fasta/WSSV.faa`
   (YP_009220551.1 and YP_009220614.1: for each, NCBI `blastp -db paja -outfmt 6` prints 2 rows and
@@ -859,6 +865,13 @@ most 9 in BLOSUM62).
   rows look nothing up (`q1` alone with `nident`, a positive `PRE_FETCH_SEQS_LIMIT` below the batch's Seq-aligns).
   BLASTX writes each batch before it searches the next, so it refuses such a run at its first batch also where no row
   looks a tax id up (`db.nz.bx.c150.*`, as before line L1).
+- Rows `db.nz.cq.*` (line DBID, L1b): TBLASTN and TBLASTX without the report stream make every batch's lookups before
+  any report, so they ask for that refusal only where NCBI fetches a subject: not for fields that read none (`6 qseqid
+  evalue`) where `PRE_FETCH_SEQS_LIMIT` turns the prefetch off, nor for a batch without hits, whose prefetch loads no
+  sequence. `nz_qx.faa` / `nz_qx.fna` hold `qx` (`M` and 70 random residues, no hit at `-evalue 1e-3`) and
+  `nz_qx2.*` `qx` then `q2`: with `BATCH_SIZE=1` the refusal of `q2`'s batch still comes before any byte. TBLASTX's
+  report stream (outfmt 7 in two batches), which would write `qx`'s block before `q2`'s lookups, is off for a run that
+  the taxonomy cache refuses, so `nz_qxy.fna` (`qx`, then `qy` without hits either) gets NCBI's bytes.
 - The sequences come from the line's probe script (kept outside the repository). The databases (version 4, every file
   makeblastdb writes; `nz_pc` and `nz_nc` alike with their maps), run from `LOSAT/`:
 

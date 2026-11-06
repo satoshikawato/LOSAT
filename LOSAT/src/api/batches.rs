@@ -123,8 +123,13 @@ fn batch_sizes(command: &Commands, inputs: Inputs<'_>) -> anyhow::Result<BatchSi
             "BLASTX",
             crate::algorithm::blastx::QUERY_BATCH_SIZE as u32,
         )?),
-        Commands::Psiblast(_) | Commands::Makedb(_) => {
-            unreachable!("Program::parse admits the five search programs only")
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:468-468
+        // ```c++
+        //             input.Reset(new CBlastInput(&*fasta, 1));
+        // ```
+        Commands::Psiblast(_) => BatchSizes::Fixed(1),
+        Commands::Makedb(_) => {
+            unreachable!("Program::parse admits the search programs only")
         }
     })
 }
@@ -255,8 +260,9 @@ impl Batches<'_> {
             Commands::Blastp(args) => args.first_query_ordinal = range.start,
             Commands::Tblastn(args) => args.first_query_ordinal = range.start,
             Commands::Tblastx(args) => args.first_query_ordinal = range.start,
+            Commands::Psiblast(args) => args.first_query_ordinal = range.start,
             // BLASTX's messages show the record's own id.
-            Commands::Blastx(_) | Commands::Psiblast(_) | Commands::Makedb(_) => {}
+            Commands::Blastx(_) | Commands::Makedb(_) => {}
         }
         let ordinals = searched_queries(query_range, inputs.query);
         let mut diagnostics = CountingWriter::new();

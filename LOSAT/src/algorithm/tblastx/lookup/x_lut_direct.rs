@@ -2783,6 +2783,10 @@ where
                     // So no two tasks write a position, and the backbone and the overflow are read
                     // or written by nothing else until the tasks end. A narrow table's offsets are
                     // below its lookup query's length, at most 65,535 (`x_is_narrow`).
+                    // SAFETY: `put`'s contract: `w < backbone_size` (`at[w]`, bounds-checked on
+                    // a chunk of `backbone_size` counts), `at[w] .. at[w] + offsets.len()` inside
+                    // cell `w`'s entries or its overflow part, and positions no other task writes
+                    // (the last two: paragraph above).
                     unsafe { out.put(w, at[w], offsets) };
                     at[w] += offsets.len() as u32;
                 }

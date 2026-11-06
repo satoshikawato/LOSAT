@@ -1,6 +1,7 @@
-// Messages between the main thread (gateway.ts), the Engine worker (engine-worker.ts) and
-// its thread workers (thread-worker.ts). Every message of the Engine worker carries the
-// runtime generation it belongs to; the main thread drops messages of an older one.
+// Messages between the main thread (gateway.ts), the Engine worker (engine-worker.ts), its
+// thread workers (thread-worker.ts) and the keeper of their shared memory (memory-keeper.ts).
+// Every message of the Engine worker carries the runtime generation it belongs to; the main
+// thread drops messages of an older one.
 import type { RecordKey } from '../../domain/dataset';
 import type { EnginePhase } from '../../ports/engine';
 import type { OutputStream } from '../../ports/run-output';
@@ -25,6 +26,8 @@ export interface EngineInit {
   readonly builds: { readonly serial: string; readonly threads: string };
   /** BroadcastChannel on which thread workers report a thread that stopped. */
   readonly faultChannel: string;
+  /** BroadcastChannel on which the Gateway asks the keeper of the shared memory to grow it (memory-keeper.ts). */
+  readonly keeperChannel: string;
 }
 
 export interface WorkerInput {
@@ -105,8 +108,11 @@ export type EngineEvent =
   | { readonly type: 'phase'; readonly generation: number; readonly runId: string; readonly phase: EnginePhase }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: true; readonly result: WorkerRunResult }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: false; readonly error: WorkerError }
-  /** The shared memory of the threaded instance, before a search runs on it (the Gateway grows it to its maximum if it ends the worker during the search). */
-  | { readonly type: 'memory'; readonly generation: number; readonly memory: WebAssembly.Memory; readonly maximumPages: number }
+  /**
+   * Before a search runs on the threaded instance: if the Gateway ends the worker during the
+   * search, it first has the keeper grow the shared memory to its maximum (memory-keeper.ts).
+   */
+  | { readonly type: 'threaded-search'; readonly generation: number }
   | { readonly type: 'test-reply'; readonly id: number; readonly ok: boolean; readonly value?: number; readonly error?: WorkerError };
 
 // --- thread workers -------------------------------------------------------------------
@@ -147,4 +153,32 @@ export interface ThreadFault {
   readonly type: 'fault';
   readonly tid: number;
   readonly message: string;
+}
+
+// --- the memory keeper ------------------------------------------------------------------
+
+/**
+ * From the ThreadHost to the keeper of its shared memory (memory-keeper.ts): the memory and
+ * the BroadcastChannel on which the Gateway asks the keeper to grow it.
+ */
+export interface KeeperCommand {
+  readonly type: 'keep';
+  readonly memory: WebAssembly.Memory;
+  readonly maximumPages: number;
+  readonly channel: string;
+}
+
+/** From the keeper to the ThreadHost: it holds the memory and listens (ThreadHost.prepare waits for it). */
+export interface KeeperReady {
+  readonly type: 'ready';
+}
+
+/** From the Gateway to the keeper on the channel: grow the memory to its maximum. */
+export interface KeeperGrow {
+  readonly type: 'grow';
+}
+
+/** The keeper's answer on the channel, after the grow. */
+export interface KeeperGrown {
+  readonly type: 'grown';
 }

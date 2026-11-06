@@ -522,7 +522,7 @@ fn extend_two_hit_impl<const BLOSUM62: bool>(
     let mut s_right_off = s_right_off as i32;
     let word_size = word_size as i32;
 
-    let mut left_d = 0i32;
+    let left_d: i32;
     let mut right_d = 0i32;
     let mut left_score = 0i32;
     let mut right_score = 0i32;

@@ -423,6 +423,48 @@ pub fn report_stage(program: &str, stage: &str, work_items: usize, parallel: boo
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1664
+// ```c++
+//     /* Use a local diagnostics structure, because the one passed in an input
+//       argument can be shared between multiple threads, so we don't want to pass
+//       it to the engine and have a lot of mutex contention. */
+//     BlastDiagnostics* local_diagnostics = Blast_DiagnosticsInit();
+//
+//     if ((status =
+// ```
+// Diagnostic-only host clock/worker identity; never read by search or reporting.
+#[cfg(feature = "blastx-worker-probe")]
+fn probe_lifecycle(event: &str, index: usize) {
+    probe_write(format!(
+        "[blastx-pool-probe] event={event} index={index} thread={:?}\n",
+        std::thread::current().id()
+    ));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1660-1664
+// ```c++
+//       argument can be shared between multiple threads, so we don't want to pass
+//       it to the engine and have a lot of mutex contention. */
+//     BlastDiagnostics* local_diagnostics = Blast_DiagnosticsInit();
+//
+//     if ((status =
+// ```
+// Diagnostic-only host recording uses a separate append file. Native reporting
+// owns stderr's lock throughout search; workers must never acquire that lock.
+#[cfg(feature = "blastx-worker-probe")]
+pub(crate) fn probe_write(message: String) {
+    use std::io::Write;
+    let path = std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+        .expect("diagnostic probe requires LOSAT_BLASTX_WORKER_LOG");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("diagnostic worker log must be writable");
+    file.write_all(message.as_bytes())
+        .expect("diagnostic worker log write");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -527,46 +569,4 @@ mod tests {
             )
         );
     }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1664
-// ```c++
-//     /* Use a local diagnostics structure, because the one passed in an input
-//       argument can be shared between multiple threads, so we don't want to pass
-//       it to the engine and have a lot of mutex contention. */
-//     BlastDiagnostics* local_diagnostics = Blast_DiagnosticsInit();
-//
-//     if ((status =
-// ```
-// Diagnostic-only host clock/worker identity; never read by search or reporting.
-#[cfg(feature = "blastx-worker-probe")]
-fn probe_lifecycle(event: &str, index: usize) {
-    probe_write(format!(
-        "[blastx-pool-probe] event={event} index={index} thread={:?}\n",
-        std::thread::current().id()
-    ));
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1660-1664
-// ```c++
-//       argument can be shared between multiple threads, so we don't want to pass
-//       it to the engine and have a lot of mutex contention. */
-//     BlastDiagnostics* local_diagnostics = Blast_DiagnosticsInit();
-//
-//     if ((status =
-// ```
-// Diagnostic-only host recording uses a separate append file. Native reporting
-// owns stderr's lock throughout search; workers must never acquire that lock.
-#[cfg(feature = "blastx-worker-probe")]
-pub(crate) fn probe_write(message: String) {
-    use std::io::Write;
-    let path = std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
-        .expect("diagnostic probe requires LOSAT_BLASTX_WORKER_LOG");
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .expect("diagnostic worker log must be writable");
-    file.write_all(message.as_bytes())
-        .expect("diagnostic worker log write");
 }

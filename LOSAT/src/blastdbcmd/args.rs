@@ -1217,11 +1217,11 @@ pub(super) fn printable_string(text: &str) -> String {
                 // `char` is signed: a byte above 0x7f is below '0'.
                 let reduce = bytes
                     .get(i + 1)
-                    .map_or(true, |&next| !(b'0'..=b'7').contains(&next));
+                    .is_none_or(|&next| !(b'0'..=b'7').contains(&next));
                 let digits = [byte >> 6, (byte >> 3) & 7, byte & 7];
-                let skip = if !reduce {
-                    0
-                } else if digits[0] != 0 {
+                // NCBI ncbistr.cpp:3817-3820: `if (v || !reduce)` writes the first digit (and
+                // then every digit).
+                let skip = if digits[0] != 0 || !reduce {
                     0
                 } else if digits[1] != 0 {
                     1

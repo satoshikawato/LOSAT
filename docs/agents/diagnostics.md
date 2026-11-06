@@ -212,9 +212,12 @@ LOSAT_X_NEWTONEXACT_PROF
   extension, `extension/two_hit.rs::x_two_hit_cells`) and `rescan` = cells / distinct subject positions
   per cell (positions past the furthest one an earlier extension of the cell reached). The statistics
   repeat every extension, so the run is slower; reports do not change.
-- `LOSAT_X_REACH=<directory>` records, at the decision points of the conditional switches of the strict set
+- `LOSAT_X_REACH=<absolute directory>` records, at the decision points of the conditional switches of the strict set
   (`utils/xreach.rs`, `x_reach!`), whether each took its own path or the reference path while it was on, and
   writes `reach-<pid>-<ns>.tsv` (`switch new ref program`) into the directory at exit; output unchanged.
+  A value that is not an absolute path (on Windows: with a drive or UNC prefix; values such as `0` or `1` once
+  left `LOSAT/0/` and `LOSAT/1/` in a checkout, #715) is ignored: the run writes no file and says so once on
+  stderr at its end (`[X_REACH] ignored: ...`).
   `LOSAT/tests/switch_reach_check.py` compares the folded files with `LOSAT/tests/switch_reach_expected.tsv`
   (one row per switch of the set and per graduated one, `GRADUATED`: class `always`, `platform` or
   `conditional`, never `always` for a graduated one; for a conditional switch each

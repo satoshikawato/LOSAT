@@ -410,8 +410,8 @@ impl XCompressedSide {
 /// (`x_scan_plan`), their concatenation and lookup segments as the standard table takes them (the
 /// coordinates of the word finder's query, `x_lookup_query_for_profile`), and
 /// blastp-fast's builders of NCBI's one table of the query batch (`x_tbn_build_compressed_lookup`:
-/// the flat table, or the reference one with `LOSAT_X_BPCLUT=0`) on this thread. The words of a
-/// matrix other than BLOSUM62 take the reference table (`try_build_compressed_lookup`).
+/// the flat table, or the reference one with `LOSAT_X_BPCLUT=0`) on this thread. A matrix other
+/// than BLOSUM62 takes the same builders with its own words (`x_tbn_build_compressed_lookup_of`).
 fn x_build_compressed(
     queries: &[&[u8]],
     seg: Option<&SegParams>,
@@ -422,8 +422,9 @@ fn x_build_compressed(
     // The query set's frames as the table's query, made once for the batch (`x_scan_plan`).
     x_frames: Option<&[QueryFrame]>,
 ) -> Result<XCompressedLookup> {
-    use crate::algorithm::tblastx::lookup::compressed::try_build_compressed_lookup;
-    use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_tbn_build_compressed_lookup;
+    use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
+        x_tbn_build_compressed_lookup, x_tbn_build_compressed_lookup_of,
+    };
     let query_frames: Vec<_> = match x_frames {
         Some(frames) => frames.iter().map(|frame| vec![frame.clone()]).collect(),
         None => queries
@@ -449,8 +450,14 @@ fn x_build_compressed(
     let built = if matrix == ScoringMatrix::Blosum62 {
         x_tbn_build_compressed_lookup(word_length, threshold, &query, &locations, &tables)
     } else {
-        try_build_compressed_lookup(matrix, word_length, threshold, &query, &locations, &tables)
-            .map(|built| built.map(XCompressedLookup::Reference))
+        x_tbn_build_compressed_lookup_of(
+            matrix,
+            word_length,
+            threshold,
+            &query,
+            &locations,
+            &tables,
+        )
     };
     built
         .ok_or_else(|| {
@@ -2522,7 +2529,7 @@ mod tests {
                     scope.spawn(|| {
                         barrier.wait();
                         assert!(side.keeps(slot, subject.len()));
-                        side.plan(slot, subject.len(), &build).unwrap()
+                        side.plan(slot, subject.len(), build).unwrap()
                     })
                 })
                 .collect();
@@ -2539,7 +2546,7 @@ mod tests {
         assert_eq!(side.kept_bytes(), bytes);
         // A later batch reads the same plan and adds nothing.
         assert!(side.keeps(slot, subject.len()));
-        let again = side.plan(slot, subject.len(), &build).unwrap();
+        let again = side.plan(slot, subject.len(), build).unwrap();
         assert!(std::sync::Arc::ptr_eq(&plans[0], &again));
         assert_eq!(
             (builds.load(Ordering::Relaxed), side.kept_bytes()),

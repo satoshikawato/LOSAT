@@ -219,6 +219,12 @@ impl GapAlignScratch {
     }
 }
 
+impl Default for GapAlignScratch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn gap_dp_reserve_initial(
     score_array: &mut Vec<BlastGapDP>,
     dp_mem_alloc: &mut usize,
@@ -1287,6 +1293,10 @@ fn extend_gapped_one_direction_with_scratch(
             &crate::utils::xstats::NT_SO_CELLS,
             (b_size - first_b_index) as u64,
         );
+        #[expect(
+            clippy::mut_range_bound,
+            reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:862,886-887)"
+        )]
         for b_index in first_b_index..b_size {
             dp_cells += 1;
 
@@ -1685,6 +1695,10 @@ fn blast_align_packed_nucl_scalar(
             &crate::utils::xstats::NT_SO_CELLS,
             (b_size - first_b_index) as u64,
         );
+        #[expect(
+            clippy::mut_range_bound,
+            reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:3146,3170-3171)"
+        )]
         for b_index in first_b_index..b_size {
             b_ptr_index += b_increment;
             let q_idx = query_offset + b_ptr_index;
@@ -1920,6 +1934,10 @@ fn extend_gapped_one_direction_ex_with_scratch(
             &crate::utils::xstats::NT_SO_CELLS,
             (b_size - first_b_index) as u64,
         );
+        #[expect(
+            clippy::mut_range_bound,
+            reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:862,886-887)"
+        )]
         for b_index in first_b_index..b_size {
             dp_cells += 1;
 
@@ -2558,6 +2576,10 @@ fn extend_gapped_one_direction_with_traceback_scalar(
             &crate::utils::xstats::NT_TB_CELLS,
             (b_size - first_b_index) as u64,
         );
+        #[expect(
+            clippy::mut_range_bound,
+            reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:563,603-604)"
+        )]
         for b_index in first_b_index..b_size {
             // NCBI reference: blast_gapalign.c:563-578 (b_size can reach N+1; no b_index < N guard).
             // NCBI reference: blast_util.c:826 (NULLB sentinel at sequence ends).
@@ -3267,6 +3289,10 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             &crate::utils::xstats::NT_TB_CELLS,
             (b_size - first_b_index) as u64,
         );
+        #[expect(
+            clippy::mut_range_bound,
+            reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:563,603-604)"
+        )]
         for b_index in first_b_index..b_size {
             let sc = get_s(s_seq, b_index, len2, reverse);
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:569-575

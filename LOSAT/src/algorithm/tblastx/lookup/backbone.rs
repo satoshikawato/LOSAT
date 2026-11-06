@@ -545,19 +545,12 @@ impl<C: XCell> BlastAaLookupTable<C> {
 }
 
 impl BlastAaLookupTable {
+    /// The hits of cell `index`: its own entries, or its run of `overflow` (`XCell::hits`).
+    /// Bounds-checked: an `index` past the backbone, or a cell whose count or cursor does not fit
+    /// the table (the fields are `pub`), panics instead of reading outside it.
     #[inline(always)]
     pub fn get_hits(&self, index: usize) -> &[i32] {
-        let cell = unsafe { self.backbone.get_unchecked(index) };
-        let num = cell.num_used as usize;
-        if num == 0 {
-            return &[];
-        }
-        if num <= AA_HITS_PER_CELL {
-            unsafe { std::slice::from_raw_parts(cell.entries.as_ptr(), num) }
-        } else {
-            let cursor = cell.entries[0] as usize;
-            unsafe { std::slice::from_raw_parts(self.overflow.as_ptr().add(cursor), num) }
-        }
+        self.backbone[index].hits(&self.overflow)
     }
 }
 
@@ -3345,6 +3338,32 @@ mod tests {
         ) & lookup.mask as usize;
 
         assert_eq!(lookup.get_hits(aaa_index), &[0]);
+    }
+
+    // No NCBI counterpart: `get_hits` is a safe function of a table whose fields are `pub`, so an
+    // index past the backbone, or a cell whose run does not fit `overflow`, panics instead of
+    // reading outside the table (it read with `get_unchecked` until the SWEBOK 2026-11-04 audit,
+    // KA4).
+    #[test]
+    fn get_hits_panics_outside_the_table() {
+        let lookup = build_lookup_for_test(
+            vec![vec![make_query_frame(
+                vec![ncbistdaa::A, ncbistdaa::A, ncbistdaa::A],
+                vec![],
+            )]],
+            0,
+        );
+        let past = lookup.backbone.len();
+        let read = |table: &BlastAaLookupTable, index: usize| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| table.get_hits(index).len()))
+        };
+        assert!(read(&lookup, past).is_err());
+        let mut broken = lookup;
+        broken.backbone[0].num_used = AA_HITS_PER_CELL as i32 + 1;
+        broken.backbone[0].entries[0] = broken.overflow.len() as i32;
+        assert!(read(&broken, 0).is_err());
+        broken.backbone[0].num_used = -1;
+        assert!(read(&broken, 0).is_err());
     }
 
     // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:222-244 DebruijnSequenceTest

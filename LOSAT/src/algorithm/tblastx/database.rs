@@ -148,6 +148,12 @@ impl TblastxDatabase {
         self.parsed && self.db.printed_num_seqs() > max_sequences
     }
 
+    /// Whether a prefetch of the run is refused because of NCBI's taxonomy cache
+    /// (`shared::TaxdbRun::prefetch_refused`), which turns the report stream off.
+    pub(crate) fn prefetch_refused(&self) -> bool {
+        self.taxdb.prefetch_refused(&self.db)
+    }
+
     /// Whether a report that names any sequence of the database could be refused by LOSAT
     /// (`common::database::reports_may_refuse`, with the reports `shown` and the batches'
     /// prefetch `prefetch`), read in `pool`.
@@ -457,7 +463,7 @@ pub(crate) fn reported_subjects(
             .iter()
             .filter(|hsp| {
                 let run = (hsp.hit.q_idx, hsp.hit.s_idx);
-                std::mem::replace(&mut previous, Some(run)) != Some(run)
+                previous.replace(run) != Some(run)
             })
             .filter(|hsp| hsp.hit.query_frame < 0 && hsp.subject_frame > 0)
             .map(|hsp| hsp.hit.s_idx)

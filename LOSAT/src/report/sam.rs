@@ -741,8 +741,8 @@ mod tests {
         for plain in ["sq", "foo SQ,SR", "std", "SQSR", "S R"] {
             assert_eq!(parse(plain), SamSpec::default(), "{plain}");
         }
-        assert_eq!(parse("foo SQ").sequence, true);
-        assert_eq!(parse("SQ  SQ").subject_as_reference, false);
+        assert!(parse("foo SQ").sequence);
+        assert!(!parse("SQ  SQ").subject_as_reference);
     }
 
     #[test]

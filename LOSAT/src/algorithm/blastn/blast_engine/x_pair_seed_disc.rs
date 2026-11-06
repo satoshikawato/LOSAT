@@ -2504,7 +2504,7 @@ mod tests {
                                     hash.offset = xc.diag_offset as i32;
                                     let mut hits = Vec::new();
                                     if stage {
-                                        let fold_part = (parts > 0).then(|| part::FoldPart {
+                                        let fold_part = (parts > 0).then_some(part::FoldPart {
                                             scratch: &mut scratch,
                                             parts,
                                         });
@@ -2726,7 +2726,7 @@ mod tests {
     // (window_size != 0) and the reference runs.
     #[test]
     fn scope_is_the_two_hit_discontiguous_stage() {
-        let mut rng = Lcg(0x5C0_9E);
+        let mut rng = Lcg(0x5C09E);
         let c = make_case(&mut rng, 5_000);
         let disc = build_disc_mb_lookup(
             &ctx_refs(&c),

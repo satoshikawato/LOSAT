@@ -1029,7 +1029,10 @@ pub(crate) struct XTrace {
 
 // SAFETY: the pointers of an `XTrace` point into the buffers of its own chunks (`t`), which do not
 // move when the `XTrace` moves; they are written only through `&mut self` and read through `&self`,
-// like the chunks themselves.
+// like the chunks themselves. The one place the chunks change hands is the pool: `x_purge_written`
+// gives every chunk after the scratch's own back to the pool and resets every cursor (`wp`,
+// `wend`, the best-row mark `best`, and `w0` with chunk 0's base) before any chunk reaches the
+// pool, so no cursor of one scratch points into a chunk another thread holds.
 unsafe impl Send for XTrace {}
 
 impl XTrace {
@@ -1048,6 +1051,19 @@ impl XTrace {
     /// The start of room for `n` bytes of the next row and its record, contiguous in one chunk
     /// (NCBI `s_GapGetState` with the row's cells). Only the test of the chunk being filled is
     /// inline, so that the kernels keep the rest of their state in registers.
+    ///
+    /// SAFETY note for the kernels (the bound is not checked in release builds: the rows are hot):
+    /// the returned pointer has `n` bytes after it and `X_ROW_BYTES` more for the record
+    /// (`wp + n <= wend = limit - X_ROW_BYTES`, `limit` at most the chunk's capacity). Each kernel
+    /// asks for `n = bend - first + num_extra + 96`, which covers every byte its row loop writes:
+    /// the loop starts at column `first`, runs in steps of one vector (16 or 32 columns, `b0 += 16`
+    /// or `32`), goes past `bend` only while the running score stays within X of the best (each
+    /// further column costs at least `gap_extend`, so at most `num_extra = x / gap_extend + 3`
+    /// columns, the same bound the H buffers rely on with `fits(b_size + num_extra + 64)`), and
+    /// stores one vector of trace bytes at `b0 - first` per step (half as many in the nibble
+    /// layout), so a row ends before `bend - first + num_extra + 32`, inside the 96 bytes of
+    /// slack. A write past the reservation would leave the chunk and, at its limit, the
+    /// allocation.
     #[inline(always)]
     pub(crate) fn x_row(&mut self, n: usize) -> *mut u8 {
         let wp = self.wp;
@@ -1146,6 +1162,11 @@ impl XTrace {
     }
 
     /// Row 0 (NCBI `edit_script_row[i] = SCRIPT_GAP_IN_A` for the first `b_size` cells).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:488
+    /// ```c
+    ///         edit_script_row[i] = SCRIPT_GAP_IN_A;
+    /// ```
     #[inline]
     pub(crate) fn x_row_zero(&mut self, nib: bool, b_size: usize) {
         let bytes = trace_bytes(nib, b_size);
@@ -1195,11 +1216,15 @@ impl XTrace {
         let c = c - 1;
         let chunk = &self.t[c];
         debug_assert!(chunk.len() >= X_ROW_BYTES);
-        (
-            c,
-            chunk.as_ptr(),
-            chunk[chunk.len() - X_ROW_BYTES..].as_ptr(),
-        )
+        let base = chunk.as_ptr();
+        // SAFETY: `chunk.len() >= X_ROW_BYTES`: the walk comes here from a row above row 0 (`a_index
+        // > 0`), and the rows 0 ..= `a_off` are in the chunks in order, each chunk before the one
+        // being filled was left (`x_row_room`) only after a row and its record were written to it,
+        // except that chunk 0 stays empty when row 0 is longer than a chunk and goes to chunk 1,
+        // which the walk never leaves upward (`a_index` is 0 there). The pointer comes from the
+        // whole chunk, not a subslice, because the walk then reads the rows before it.
+        let last = unsafe { base.add(chunk.len() - X_ROW_BYTES) };
+        (c, base, last)
     }
 
     /// NCBI `s_GapPurgeState` (every chunk's used part set to 0), and the chunks after the
@@ -2448,6 +2473,7 @@ mod kernel {
             *hr.add(first).sub(1) = 0;
 
             let tr = if TB {
+                // SAFETY: room for every byte of the row loop (see `XTrace::x_row`)
                 sc.trace.x_row(bend - first + num_extra + 96)
             } else {
                 core::ptr::null_mut()
@@ -2988,6 +3014,7 @@ mod kernel {
             *hr.add(first).sub(1) = 0;
 
             let tr = if TB {
+                // SAFETY: room for every byte of the row loop (see `XTrace::x_row`)
                 sc.trace.x_row(bend - first + num_extra + 96)
             } else {
                 core::ptr::null_mut()

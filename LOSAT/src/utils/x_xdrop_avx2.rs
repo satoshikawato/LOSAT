@@ -914,6 +914,7 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
         let mut hpm = lane0;
 
         let tr = if TB {
+            // SAFETY: room for every byte of the row loop (see `XTrace::x_row`)
             sc.trace.x_row(bend - first + num_extra + 96)
         } else {
             core::ptr::null_mut()
@@ -1485,6 +1486,7 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
         let mut hpm = lane0;
 
         let tr = if TB {
+            // SAFETY: room for every byte of the row loop (see `XTrace::x_row`)
             sc.trace.x_row(bend - first + num_extra + 96)
         } else {
             core::ptr::null_mut()

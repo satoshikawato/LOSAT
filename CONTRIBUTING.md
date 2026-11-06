@@ -98,6 +98,19 @@ cargo publish --dry-run --locked \
   --config 'build.target-dir="/tmp/losat-cargo-publish-target"'
 ```
 
+For changes to the library API (`LOSAT/src/api` and the types it re-exports, except `FastaRecord`, which
+rustdoc does not show yet: library plan §14): the CI job `public api`
+compares the public API of `LOSAT::api` with the reviewed listing `LOSAT/tests/public_api.txt`. After a
+deliberate change, update the listing and commit it with the change; when the job fails it also uploads
+the new listing as the artifact `public-api`. The script names the pinned tool and toolchain, and does not
+install them:
+
+```bash
+rustup toolchain install --no-self-update --profile minimal nightly-2026-05-24
+cargo install --locked cargo-public-api@0.52.0
+python3 LOSAT/tests/check_public_api.py update
+```
+
 ---
 
 ## Parity Evidence & Testing
@@ -146,7 +159,7 @@ Before opening a PR, please verify:
 - After the promotion is merged, the same session checks which switches graduate (on `dev` for 7 days and in two passing full-set runs after reaching `main`) and opens one pull request per graduation, into `dev`.
 - Pull requests of this repository get auto-merge (merge commit) when they are opened as ready or marked ready for review.
 - A pull request into `dev` merges when `rust`, `fast output regressions` and `web result` pass. The pull request into `main` merges when those and `platform checks result` pass (the rulesets are set by the repository owner).
-- `rust` (`.github/workflows/ci.yml`) passes when its jobs do: `rust lint` (the Python checks, `cargo fmt --check`, `cargo clippy`) and `cargo test (1/2)` and `cargo test (2/2)`, which run `cargo test --all-features` in two shards on two runners with cargo-nextest (`--partition count:k/2`; doc tests in the first). CI builds the test profile at opt-level 3 with line tables only (`CARGO_PROFILE_TEST_*`); debug assertions and overflow checks stay on.
+- `rust` (`.github/workflows/ci.yml`) passes when its jobs do: `rust lint` (the Python checks, `cargo fmt --check`, `cargo clippy`), `public api` (above) and `cargo test (1/2)` and `cargo test (2/2)`, which run `cargo test --all-features` in two shards on two runners with cargo-nextest (`--partition count:k/2`; doc tests in the first). CI builds the test profile at opt-level 3 with line tables only (`CARGO_PROFILE_TEST_*`); debug assertions and overflow checks stay on.
 - `rust` runs the tests with the performance switches as they are by default (`LOSAT/src/utils/xswitch.rs`); a switch's own tests compare it with `LOSAT_X_<NAME>=0`. `fast output regressions` (`.github/workflows/ci.yml`) records which side each conditional switch took (`LOSAT_X_REACH`), and `LOSAT/tests/switch_reach_check.py` fails the pull request when a side that `LOSAT/tests/switch_reach_expected.tsv` requires was not reached.
 - On a pull request into `main`, `platform checks result` (`.github/workflows/platform-checks.yml`) covers the outputs of the platform-check cases (the list is `LOSAT/tests/platform_check_cases.json`) at 1 and 4 threads on Linux x64, Linux arm64, Windows x64 and macOS arm64, and `cargo test --all-features` on Linux arm64 and Windows x64. Its platform jobs run only when the engine (`LOSAT/src/**`), the Cargo files, `LOSAT/build.rs` or the workflow's own files changed, and not on a draft or on a pull request into `dev` (a draft runs them when it is marked ready for review). macOS x64 and the macOS `cargo test` jobs run on each push to `main` (one run at a time) and weekly.
 - Once the pull request into `main` is ready and its checks run, push to it only to resolve a merge conflict or to fix a failed check: each push cancels its Platform checks run and queues it again behind the other pull requests. Neither `dev` nor `main` requires the branch to be up to date, so merging the base into a branch without conflicts is not needed.

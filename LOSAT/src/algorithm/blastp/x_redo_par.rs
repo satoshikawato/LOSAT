@@ -274,13 +274,21 @@ impl XScratch {
     //                     scoringParams->options->matrix
     //             );
     // ```
-    fn new(range_cache: BlastpKappaSubjectRangeCache) -> Self {
-        Self {
+    fn new(range_cache: BlastpKappaSubjectRangeCache, matrix: ScoringMatrix) -> Self {
+        let mut scratch = Self {
             composition_workspace: BlastCompositionWorkspace::new_blosum62(),
             gap_scratch: GapAlignScratch::new(),
             hits: Vec::new(),
             range_cache,
+        };
+        // Another matrix than BLOSUM62: its workspace (item SC2b).
+        if matrix != ScoringMatrix::Blosum62 {
+            super::blast_engine::blastp_use_matrix_workspace(
+                &mut scratch.composition_workspace,
+                matrix,
+            );
         }
+        scratch
     }
 }
 
@@ -824,9 +832,10 @@ where
             .collect()
     };
     let new_scratch = || {
-        XScratch::new(BlastpKappaSubjectRangeCache::x_with_shared(Some(
-            shared.clone(),
-        )))
+        XScratch::new(
+            BlastpKappaSubjectRangeCache::x_with_shared(Some(shared.clone())),
+            search.matrix,
+        )
     };
     let lpt = lpt && {
         let acts = search.pool.enabled() && search.threads > 1 && window.jobs.len() > 1;

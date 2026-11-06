@@ -53,7 +53,8 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
     /// .., false)` with the walks the sentinels stop.
     ///
     /// SAFETY: `self.x_sent_walks()`, `q_full` is a context buffer `sent_contexts` accepted and
-    /// `s_full` a frame buffer `sent_subject` accepted.
+    /// `s_full` a frame buffer `sent_subject` accepted; the word at `q_right_off` and
+    /// `s_right_off` lies in the letters (`extend_hit_two_hit_fitting`).
     // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
     #[inline(always)]
     unsafe fn sent_two_hit(
@@ -281,7 +282,8 @@ impl TbxScore for MatrixScore<'_> {
 }
 
 /// The calls `MatrixScore::sent_two_hit` leaves to `extend_hit_two_hit_with` (an X-drop outside
-/// 1..=127, a word that does not fit), out of the callers' code.
+/// 1..=127; a word past the letters is refused there too, which a lookup hit's is not), out of the
+/// callers' code.
 // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
 #[cold]
 #[inline(never)]

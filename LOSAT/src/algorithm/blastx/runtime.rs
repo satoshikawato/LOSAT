@@ -394,7 +394,7 @@ fn x_speculate_match(
     };
     Some((output, best_score, matrix))
 }
-pub fn search_internal<'a>(
+pub(crate) fn search_internal<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
@@ -453,8 +453,9 @@ impl Drop for XInnerSerial {
 // is search_internal run on one thread, whatever thread that is, so that several batches can run
 // side by side.
 /// `search_internal` as the one-thread search, whatever thread it is called on. The caller runs
-/// several of these side by side; each takes the serial path of every stage.
-pub fn x_search_internal_serial<'a>(
+/// several of these side by side; each takes the serial path of every stage (the Web's, `web.rs`).
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn x_search_internal_serial<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
@@ -489,7 +490,7 @@ pub(crate) fn x_search_unit_serial<'a>(
 // The search of one query batch (lcl_blast.Run()) on a pool that the caller keeps. The search
 // itself is search_internal.
 /// `search_internal` on a pool that the caller keeps for all its query batches.
-pub fn x_search_internal_in_pool<'a>(
+pub(crate) fn x_search_internal_in_pool<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
@@ -552,7 +553,7 @@ pub(crate) fn x_search_unit_in_pool<'a>(
 //                     }
 //
 // ```
-pub fn search_internal_observed<'a>(
+pub(crate) fn search_internal_observed<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,

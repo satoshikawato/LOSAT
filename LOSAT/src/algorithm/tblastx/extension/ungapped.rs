@@ -109,6 +109,8 @@ fn extend_left_ungapped_scalar(
     let mut i = 0usize;
 
     while i < max_left {
+        // SAFETY: `i < max_left <= q_off, s_off`, and `q_off <= q_seq.len()`, `s_off <=
+        // s_seq.len()` (`extend_left_ungapped`'s contract), so both reads are in bounds.
         let q_char = unsafe { *q_seq.get_unchecked(q_off - 1 - i) };
         let s_char = unsafe { *s_seq.get_unchecked(s_off - 1 - i) };
 
@@ -300,6 +302,9 @@ unsafe fn extend_left_ungapped_simd128(
     (max_score, left_disp)
 }
 
+/// Contract: `q_off <= q_seq.len()`, `s_off <= s_seq.len()`, and every letter of both slices is
+/// below 32 (the AVX2 and simd128 walks read a 32 x 32 table); its one caller,
+/// `extend_hit_ungapped`, tests all three.
 #[inline(always)]
 fn extend_left_ungapped(
     q_seq: &[u8],
@@ -312,6 +317,8 @@ fn extend_left_ungapped(
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") {
+            // SAFETY: AVX2 is detected on the line above; the reads stay in both slices and the
+            // gather in its table by this function's contract.
             unsafe {
                 return extend_left_ungapped_avx2(
                     q_seq,
@@ -341,6 +348,8 @@ fn extend_left_ungapped(
         // The `tblastx-wasm-scalar` feature is diagnostic-only: it keeps this
         // exact scalar NCBI control flow available for native-vs-Wasm parity
         // isolation while leaving production SIMD builds unchanged.
+        // SAFETY: simd128 is on at compile time (the `cfg` above); the loads stay in both slices
+        // and the table reads in the table by this function's contract.
         unsafe { extend_left_ungapped_simd128(q_seq, s_seq, q_off, s_off, initial_score, x_drop) }
     }
     #[cfg(not(all(
@@ -621,6 +630,8 @@ unsafe fn extend_right_ungapped_simd128(
     (max_score, right_disp, j)
 }
 
+/// Contract: `q_start <= q_seq.len()`, `s_start <= s_seq.len()`, and every letter of both slices
+/// is below 32; its one caller, `extend_hit_ungapped`, tests all three.
 #[inline(always)]
 fn extend_right_ungapped(
     q_seq: &[u8],
@@ -633,6 +644,8 @@ fn extend_right_ungapped(
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") {
+            // SAFETY: AVX2 is detected on the line above; the reads stay in both slices and the
+            // gather in its table by this function's contract.
             unsafe {
                 return extend_right_ungapped_avx2(
                     q_seq,
@@ -662,6 +675,8 @@ fn extend_right_ungapped(
         // The `tblastx-wasm-scalar` feature is diagnostic-only: it keeps this
         // exact scalar NCBI control flow available for native-vs-Wasm parity
         // isolation while leaving production SIMD builds unchanged.
+        // SAFETY: simd128 is on at compile time (the `cfg` above); the loads stay in both slices
+        // and the table reads in the table by this function's contract.
         unsafe {
             extend_right_ungapped_simd128(q_seq, s_seq, q_start, s_start, initial_score, x_drop)
         }
@@ -688,6 +703,10 @@ fn extend_right_ungapped(
 ///
 /// # Arguments
 /// * `x_drop` - X-drop threshold (LOSAT default: 11, NCBI standard: 7)
+///
+/// # Panics
+/// When the 3-letter word at `q_pos` or `s_pos` does not fit in its sequence, or a letter of
+/// either sequence is 32 or more (NCBIstdaa codes are below 28).
 pub fn extend_hit_ungapped(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -697,6 +716,22 @@ pub fn extend_hit_ungapped(
     x_drop: i32,
 ) -> (usize, usize, usize, usize, i32, usize) {
     let k_size = 3;
+    // No NCBI counterpart: NCBI's seeds are lookup hits whose word fits and its letters are
+    // NCBIstdaa codes; this public form tests both (no search calls this function).
+    assert!(
+        q_pos < q_seq.len()
+            && q_seq.len() - q_pos >= k_size
+            && s_pos < s_seq.len()
+            && s_seq.len() - s_pos >= k_size,
+        "extend_hit_ungapped: the word at ({q_pos}, {s_pos}) does not fit in sequences of {} and \
+         {} letters",
+        q_seq.len(),
+        s_seq.len()
+    );
+    assert!(
+        q_seq.iter().chain(s_seq).all(|&letter| letter < 32),
+        "extend_hit_ungapped: a letter is 32 or more (not an NCBIstdaa code)"
+    );
 
     // Step 1: Find the best scoring position within the word (NCBI BLAST style)
     // This handles cases where the score drops to 0 or below within the word
@@ -710,7 +745,7 @@ pub fn extend_hit_ungapped(
     // The lookup table and offset generation guarantee valid positions.
     // Reference: aa_ungapped.c does NOT have bounds checks in word scanning loop.
     for i in 0..k_size {
-        // SAFETY: Lookup table guarantees q_pos and s_pos have at least k_size valid positions
+        // SAFETY: the word fits in both sequences (the first assert above).
         let q_char = unsafe { *q_seq.get_unchecked(q_pos + i) };
         let s_char = unsafe { *s_seq.get_unchecked(s_pos + i) };
         // NCBI BLAST does NOT break on stop codons in word scanning
@@ -766,4 +801,40 @@ pub fn extend_hit_ungapped(
         max_score_total,
         s_last_off,
     )
+}
+
+// No NCBI counterpart: the public form refuses a word that does not fit and letters past the
+// 32 x 32 table of its SIMD walks (line LIB, P-S1).
+#[cfg(test)]
+mod extend_hit_ungapped_bounds_tests {
+    use super::extend_hit_ungapped;
+
+    #[test]
+    #[should_panic(expected = "does not fit")]
+    fn a_word_past_the_end_panics() {
+        // The word loop's third read was index 2 of 2-letter slices.
+        extend_hit_ungapped(&[1, 2], &[1, 2], 0, 0, 0, 7);
+    }
+
+    #[test]
+    #[should_panic(expected = "does not fit")]
+    fn a_seed_past_the_end_panics() {
+        extend_hit_ungapped(&[1, 2, 3], &[1, 2, 3], usize::MAX, 0, 0, 7);
+    }
+
+    #[test]
+    #[should_panic(expected = "32 or more")]
+    fn ascii_letters_panic() {
+        // ASCII letters index the AVX2 gather's 1,024-entry table at `(q << 5) | s` >= 2,048.
+        let seq = b"MKVLAAGIVGLLLAAGCSSHKEEAKSGGLW";
+        extend_hit_ungapped(seq, seq, 10, 10, 0, 7);
+    }
+
+    #[test]
+    fn ncbistdaa_letters_extend() {
+        let seq = [0u8, 1, 2, 3, 4, 5];
+        let (q_start, q_end, s_start, s_end, score, _) =
+            extend_hit_ungapped(&seq, &seq, 1, 1, 0, 7);
+        assert!(q_start <= 1 && q_end > 1 && s_start <= 1 && s_end > 1 && score > 0);
+    }
 }

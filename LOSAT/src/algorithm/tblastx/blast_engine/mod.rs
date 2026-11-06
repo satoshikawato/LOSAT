@@ -86,7 +86,9 @@ pub(crate) use super::constants::{GAP_TRIGGER_BIT_SCORE, X_DROP_UNGAPPED_BITS};
 pub(crate) use super::diagnostics::{
     diagnostics_enabled, print_summary as print_diagnostics_summary, DiagnosticCounters,
 };
-pub(crate) use super::extension::{convert_coords, extend_hit_two_hit, extend_hit_two_hit_with};
+pub(crate) use super::extension::{
+    convert_coords, extend_hit_two_hit_fitting, extend_hit_two_hit_with,
+};
 // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): extension/x_two_hit_fast.rs.
 pub(crate) use super::extension::{x_tbx_sent_contexts, x_tbx_sent_subject};
 #[cfg(test)]

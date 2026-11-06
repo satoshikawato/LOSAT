@@ -671,34 +671,6 @@ pub fn decode_base(code: u8) -> u8 {
     DECODE_TABLE[(code & BASE_MASK) as usize]
 }
 
-/// Encode a k-mer from an ASCII sequence (for compatibility with existing code)
-///
-/// # Arguments
-/// * `seq` - ASCII nucleotide sequence
-/// * `start` - Starting position
-/// * `k` - K-mer length
-///
-/// # Returns
-/// * `Some(u64)` - Encoded k-mer if all bases are valid
-/// * `None` - If any base is ambiguous or invalid
-#[inline]
-pub fn encode_kmer_from_ascii(seq: &[u8], start: usize, k: usize) -> Option<u64> {
-    if start + k > seq.len() {
-        return None;
-    }
-
-    let mut kmer: u64 = 0;
-    for i in 0..k {
-        let base = unsafe { *seq.get_unchecked(start + i) };
-        let code = ENCODE_TABLE[base as usize];
-        if code == 0xFF {
-            return None;
-        }
-        kmer = (kmer << 2) | (code as u64);
-    }
-    Some(kmer)
-}
-
 /// Decode a k-mer to ASCII sequence
 pub fn decode_kmer(kmer: u64, k: usize) -> Vec<u8> {
     let mut result = vec![0u8; k];
@@ -899,17 +871,6 @@ mod tests {
         // Should skip k-mers containing N
         // Valid k-mers start at positions 3, 4, 5
         assert!(kmers.iter().all(|(pos, _)| *pos >= 3));
-    }
-
-    #[test]
-    fn test_encode_kmer_from_ascii() {
-        let seq = b"ACGTACGT";
-
-        let kmer = encode_kmer_from_ascii(seq, 0, 4).unwrap();
-        assert_eq!(kmer, 0b00011011); // ACGT
-
-        let kmer = encode_kmer_from_ascii(seq, 1, 4).unwrap();
-        assert_eq!(kmer, 0b01101100); // CGTA
     }
 
     #[test]

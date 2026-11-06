@@ -182,10 +182,6 @@ dead_code = "allow"
 unused_imports = "allow"
 unused_variables = "allow"
 unused_mut = "allow"
-# TEMPORARY until the library line decides what the crate exports: a public item names a type
-# that is private to its module.
-private_interfaces = "allow"
-private_bounds = "allow"
 
 [lints.clippy]
 # NCBI's C functions are ported argument by argument (e.g. Blast_SemiGappedAlign,

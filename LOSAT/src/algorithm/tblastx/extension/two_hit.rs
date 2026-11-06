@@ -405,11 +405,49 @@ fn extend_right_ungapped<S: TbxScore>(
 ///
 /// # Arguments
 /// * `x_drop` - X-drop threshold (LOSAT default: 11, NCBI standard: 7)
+///
+/// # Panics
+/// When the 3-letter word at `q_right_off` or `s_right_off` does not fit in its sequence.
+#[inline]
+pub fn extend_hit_two_hit(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    x_drop: i32,
+    debug_ext: bool,
+) -> (usize, usize, usize, usize, i32, bool, usize) {
+    // No NCBI counterpart: NCBI's hits are lookup hits whose word fits; this public form tests it.
+    assert!(
+        q_right_off < q_seq.len()
+            && q_seq.len() - q_right_off >= 3
+            && s_right_off < s_seq.len()
+            && s_seq.len() - s_right_off >= 3,
+        "extend_hit_two_hit: the word at ({q_right_off}, {s_right_off}) does not fit in sequences \
+         of {} and {} letters",
+        q_seq.len(),
+        s_seq.len()
+    );
+    extend_hit_two_hit_fitting(
+        q_seq,
+        s_seq,
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        x_drop,
+        debug_ext,
+    )
+}
+
+/// `extend_hit_two_hit` for the searches, without its test: the word at `q_right_off` and
+/// `s_right_off` must fit in both sequences. The searches pass lookup hits on the letters; no
+/// lookup word holds a frame's NULLB (its matrix row is BLAST_SCORE_MIN).
 // The values come from the table walks of x_two_hit_fast.rs, which hand back to
 // `extend_hit_two_hit_reference` what they do not cover; the debug output (`debug_ext`) stays
 // with the reference.
 #[inline]
-pub fn extend_hit_two_hit(
+pub(crate) fn extend_hit_two_hit_fitting(
     q_seq: &[u8],
     s_seq: &[u8],
     s_left_off: usize,
@@ -437,7 +475,8 @@ pub fn extend_hit_two_hit(
     )
 }
 
-/// `extend_hit_two_hit` with the scores of `sc`: BLOSUM62's instance is `extend_hit_two_hit`,
+/// `extend_hit_two_hit_fitting` with the scores of `sc` (the word must fit, as there): BLOSUM62's
+/// instance is `extend_hit_two_hit_fitting`,
 /// another matrix's takes the table walks of TBXUNGAP with its byte table
 /// (`TbxScore::table_two_hit`), and the reference walks with its scores for the calls those do
 /// not cover.
@@ -453,7 +492,7 @@ pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
     debug_ext: bool,
 ) -> (usize, usize, usize, usize, i32, bool, usize) {
     if S::BLOSUM62 {
-        return extend_hit_two_hit(
+        return extend_hit_two_hit_fitting(
             q_seq,
             s_seq,
             s_left_off,
@@ -488,6 +527,8 @@ pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
 ///
 /// SAFETY: `q_full` is the buffer of a context of a batch `x_two_hit_fast::sent_contexts`
 /// accepted, and `s_full` the buffer of a subject frame `x_two_hit_fast::sent_subject` accepted.
+/// The word at `q_right_off` and `s_right_off` lies in the letters (the buffers without their
+/// sentinels), as for `extend_hit_two_hit_fitting`.
 // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
 #[inline(always)]
 pub(crate) unsafe fn extend_hit_two_hit_sent(
@@ -514,8 +555,9 @@ pub(crate) unsafe fn extend_hit_two_hit_sent(
     }
 }
 
-/// The calls `extend_hit_two_hit_sent` leaves to `extend_hit_two_hit` (an X-drop outside
-/// 1..=127, a word that does not fit), out of the callers' code.
+/// The calls `extend_hit_two_hit_sent` leaves to `extend_hit_two_hit_fitting` (an X-drop outside
+/// 1..=127; `two_hit_sent` also refuses a word past the letters, which a lookup hit's is not), out
+/// of the callers' code.
 // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
 #[cold]
 #[inline(never)]
@@ -527,7 +569,7 @@ fn extend_hit_two_hit_sent_refused(
     q_right_off: usize,
     x_drop: i32,
 ) -> (usize, usize, usize, usize, i32, bool, usize) {
-    extend_hit_two_hit(
+    extend_hit_two_hit_fitting(
         &q_full[1..q_full.len() - 1],
         &s_full[1..s_full.len() - 1],
         s_left_off,
@@ -807,5 +849,32 @@ mod x_cells_tests {
             }
             assert!(cells.s_lo <= s_right && cells.s_hi >= s_right + 3 && cells.s_hi <= s_len);
         }
+    }
+}
+
+// No NCBI counterpart: the public form refuses a word that does not fit (line LIB, P-S1).
+#[cfg(test)]
+mod extend_hit_two_hit_bounds_tests {
+    use super::extend_hit_two_hit;
+
+    #[test]
+    #[should_panic(expected = "does not fit")]
+    fn a_word_past_the_end_panics() {
+        // The table walks refuse this word, and the reference's third read was index 2 of
+        // 2-letter slices.
+        extend_hit_two_hit(&[1, 2], &[1, 2], 0, 0, 0, 7, false);
+    }
+
+    #[test]
+    #[should_panic(expected = "does not fit")]
+    fn an_offset_near_usize_max_panics() {
+        extend_hit_two_hit(&[1, 2, 3], &[1, 2, 3], 0, 0, usize::MAX - 1, 200, false);
+    }
+
+    #[test]
+    fn a_word_at_the_end_extends() {
+        let seq = [1u8, 2, 3, 4];
+        let r = extend_hit_two_hit(&seq, &seq, 1, 1, 1, 7, false);
+        assert!(r.4 > 0 && r.1 <= seq.len() && r.3 <= seq.len());
     }
 }

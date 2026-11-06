@@ -2907,7 +2907,6 @@ pub(crate) fn x_tbn_build_compressed_lookup_of(
 /// off. A build ahead of its block (`XFlatArgs::x_ahead`) is only the pool's build with the switch
 /// on; elsewhere it returns `None` at once. Out of line, so that BLOSUM62's build keeps its code.
 #[inline(never)]
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn x_bp_build_compressed_lookup_of(
     matrix: ScoringMatrix,
     word_size: usize,

@@ -23,7 +23,8 @@
 //! and `blastp_compressed_lookup` with the block's batches (`QueryInput::whole` of its records cut
 //! by the search's batch size, as the block loop gives them to `run_resolved_in_pool`) and lengths,
 //! and the same pool (the flat table and the Karlin blocks do not depend on the threads that
-//! compute them, `tblastx/lookup/x_clut_par.rs` and `x_query_blocks.rs`); for exact blastp the call
+//! compute them, `tblastx/lookup/x_clut_par.rs` and `x_query_blocks.rs`; another matrix's Karlin
+//! blocks, `prepare_matrix_lookup_query_for_word_size`, neither, item SC2c); for exact blastp the call
 //! of `blastp_aa_lookup` (`blastp_aa_lookup_ahead`: the same threshold, matrix, word length and
 //! `check_ideal`), the in-place builder on the block search's spare vectors
 //! (`tblastx/lookup/x_lut_direct.rs` `XAaSpares`: cleared and zero-filled to the table's sizes, as
@@ -67,7 +68,9 @@
 //! today, possibly before block i's rows are written.
 //!
 //! No deadlock: the task waits for nothing but its own nested parallel passes (the one-latch passes
-//! of the flat table and its Karlin tasks; the exact build has none), which wait for nothing else,
+//! of the flat table and its Karlin tasks, or, for another matrix than BLOSUM62, the plain nested
+//! join of its contexts' Karlin blocks before the passes; the exact build has none), which wait for
+//! nothing else,
 //! and block i's search waits for nothing of the task until the scope ends, after block i's search
 //! has returned. A thread that waits inside block i's nested parallel work may steal and run the
 //! task (or one of its passes) to the end, and a thread that waits inside the task's passes may run
@@ -1065,16 +1068,12 @@ mod tests {
         assert!(x_frames_difference(&[vec![frame]], &[]).is_some());
     }
 
-    /// The arguments of `losat blastp -task <task>` (SEG on) as the search resolves them.
+    /// The arguments of `losat blastp -task <task>` (SEG on), with `-matrix matrix` where given
+    /// (and the matrix's default gap costs), as the search resolves them.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    fn test_args(task: &str) -> ResolvedBlastpArgs {
-        test_args_of(task, None)
-    }
-
-    /// `test_args` with `-matrix matrix` (and the matrix's default gap costs).
     fn test_args_of(task: &str, matrix: Option<&str>) -> ResolvedBlastpArgs {
         BlastpArgs {
             query: PathBuf::from("query.faa"),

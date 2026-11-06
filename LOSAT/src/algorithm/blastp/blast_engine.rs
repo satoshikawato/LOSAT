@@ -9025,7 +9025,8 @@ fn run_resolved_in_pool(
                         .expect("NCBI BLAST two-hit query offset must be non-negative");
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1155
                     // (`x_ungapped_sent::two_hit`)
-                    // SAFETY: x_drop is a context's X-drop, which `XSentQuery::new` checked.
+                    // SAFETY: x_drop is a context's X-drop, which `XSentQuery::new` (or `new_of`)
+                    // checked.
                     let extended = unsafe {
                         super::x_ungapped_sent::two_hit(
                             $sent_query,

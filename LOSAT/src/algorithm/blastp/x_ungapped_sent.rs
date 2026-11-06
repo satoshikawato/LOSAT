@@ -137,12 +137,13 @@ impl XSentQuery {
             return None;
         }
         let table = super::x_ungapped_fast::matrix_table(matrix)?.sent_table()?;
-        let fits = lookup_word_size == WORD_SIZE as i32
-            && extension_word_size == WORD_SIZE
-            && x_drops.iter().all(|d| (1..=MAX_DROPOFF).contains(d))
-            && query.len() <= MAX_BLOCK_LEN_OF
-            && query.iter().fold(0u8, |a, &c| a | c) < CODES;
-        if !fits {
+        if !fits_of(
+            query,
+            x_drops,
+            lookup_word_size,
+            extension_word_size,
+            MAX_BLOCK_LEN_OF,
+        ) {
             return None;
         }
         let mut padded = Vec::with_capacity(query.len() + 2);
@@ -151,6 +152,22 @@ impl XSentQuery {
         padded.push(0);
         Some(Self { padded, table })
     }
+}
+
+/// The checks of [`XSentQuery::new_of`] on a block of at most `max_len` letters.
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+fn fits_of(
+    query: &[u8],
+    x_drops: &[i32],
+    lookup_word_size: i32,
+    extension_word_size: usize,
+    max_len: usize,
+) -> bool {
+    lookup_word_size == WORD_SIZE as i32
+        && extension_word_size == WORD_SIZE
+        && x_drops.iter().all(|d| (1..=MAX_DROPOFF).contains(d))
+        && query.len() <= max_len
+        && query.iter().fold(0u8, |a, &c| a | c) < CODES
 }
 
 /// A subject made ready for [`two_hit`]: its buffer with the sentinels, checked.
@@ -239,7 +256,8 @@ unsafe fn walk<const RIGHT: bool>(
 /// offsets, as `extend_two_hit_blosum62` takes them): the reference's result, `None` for its
 /// early return (a word that does not fit).
 ///
-/// SAFETY: `1 <= dropoff <= 127` (an X-drop that [`XSentQuery::new`] checked).
+/// SAFETY: `1 <= dropoff <= 127` (an X-drop that [`XSentQuery::new`] or
+/// [`XSentQuery::new_of`] checked).
 // NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
 #[inline(always)]
 pub(crate) unsafe fn two_hit(
@@ -267,8 +285,10 @@ pub(crate) unsafe fn two_hit(
 /// subject, which keep it). A const per caller keeps each caller's instance its own.
 ///
 /// SAFETY: `1 <= dropoff <= 127`; both buffers have a sentinel (code 0) at index 0 and at their
-/// last index, at most `i32::MAX / 16` letters in `query`, fewer than `i32::MAX` bytes in
-/// `subject`, and `TAIL` is 1 or 2.
+/// last index; `table` scores the sentinel -128 against every code, both ways, and with its
+/// largest score `M`, `M * (len + 3) < i32::MAX` for the `len` letters of `query` (BLOSUM62's 11
+/// and at most `i32::MAX / 16` letters, or `M <= 31` and at most `i32::MAX / 32`: module
+/// comment); fewer than `i32::MAX` bytes in `subject`; and `TAIL` is 1 or 2.
 // NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
 #[inline(always)]
 pub(crate) unsafe fn two_hit_in<const TAIL: usize>(
@@ -337,7 +357,8 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize>(
         // sentinel at offset qlen / slen. With TAIL 1 the last sentinel is at offset qlen - 1 /
         // slen - 1, and the walk starts at or before it: the word ends at that offset at most, and
         // a word whose last letter is a sentinel has right_d < 3 (that letter scores -128, the
-        // other two 11 each at most), so the start is past it only when it is not in the word.
+        // other two 11 each at most: BLASTX, the one caller with TAIL 1, scores with BLOSUM62),
+        // so the start is past it only when it is not in the word.
         let (best, len, end) = walk::<true>(
             tab,
             qb.add(q_right_off as usize),
@@ -742,6 +763,9 @@ mod tests {
             wide[7] = 32;
             assert!(XSentQuery::new_of(matrix, &wide, &x_drops, 3, 3).is_none());
         }
+        // The length bound (`MAX_BLOCK_LEN_OF` in `new_of`), here on a small bound.
+        assert!(fits_of(&block, &x_drops, 3, 3, block.len()));
+        assert!(!fits_of(&block, &x_drops, 3, 3, block.len() - 1));
     }
 
     /// The other matrices' tables on random, related and boundary inputs, as for BLOSUM62.

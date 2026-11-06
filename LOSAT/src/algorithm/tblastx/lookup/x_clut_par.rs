@@ -227,7 +227,6 @@ pub(super) fn x_try_build_flat_in_pool(
 /// SC2b, SC2c): the same passes, spare vectors and build ahead (`x_flat_args`; another matrix's
 /// build has no extra tasks, its contexts' Karlin blocks are computed before it); `pool` has more
 /// than one thread.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn x_try_build_flat_in_pool_of(
     matrix: ScoringMatrix,
     word_size: usize,
@@ -1656,8 +1655,12 @@ mod tests {
     //                                     query, locations);
     //     s_CompressedLookupFinalize(lookup);
     // ```
-    // The entry of blastp-fast with another matrix (`x_bp_build_compressed_lookup_of`, item SC2b): the
-    // serial builders at one thread and the pool's build at 3 threads give the matrix's serial table.
+    // The entry of blastp-fast with another matrix (`x_bp_build_compressed_lookup_of`, items SC2b,
+    // SC2c): the serial builders at one thread and the pool's build at 3 threads give the matrix's
+    // serial table, with rayon's passes and with the one-latch passes (LOSAT_X_BPLKPFLAT) on a spare
+    // of garbage, with and without the stripe fill's switch as it is set; a build ahead of its block
+    // (LOSAT_X_BPLKPAHEAD) gives it on the vectors `x_make_room` made ready, holding them, and gives
+    // nothing without a spare.
     #[test]
     fn the_entry_of_another_matrix_builds_its_serial_table_at_any_thread_count() {
         let mut rng = XorShift(0x6a09_e667_f3bc_c908);
@@ -1696,6 +1699,67 @@ mod tests {
                 };
                 x_assert_same_flat_tables(&built, &serial);
             }
+            let backbone_size = serial.starts.len() - 1;
+            let total = serial.hits.len();
+            let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
+            let build = |args: XFlatArgs<'_>| {
+                crate::utils::threading::with_search_pool(3, "blastp", |pool| {
+                    Ok(super::super::x_bp_build_compressed_lookup_of(
+                        matrix, 5, 1100, &query, &locations, &tables, pool, args,
+                    ))
+                })
+                .expect("pool")
+            };
+            // The one-latch passes on a spare of garbage.
+            let spare = garbage_spare(&mut rng);
+            let Some(Ok(XCompressedLookup::Flat(built))) = build(XFlatArgs {
+                mode: XLkpFlat::On,
+                spare: Some(&spare),
+                extra: None,
+                x_ahead: false,
+            }) else {
+                panic!("{matrix:?}: no flat table on the spare")
+            };
+            x_assert_same_flat_tables(&built, &serial);
+            // A build ahead of its block: every vector from the spare made ready.
+            let spare = XFlatSpare::default();
+            let mut hits = Vec::with_capacity(total + 5);
+            hits.extend((0..total / 2).map(|_| rng.below(1 << 20) as i32));
+            *spare.0.lock().unwrap() = (vec![u32::MAX - 3; backbone_size + 1], hits);
+            *spare.1.lock().unwrap() = vec![u32::MAX; pv_words];
+            let block = XFlatSpare::default();
+            assert_eq!(spare.x_make_room(&block, backbone_size, total, total), 0);
+            let given = spare_addresses(&spare);
+            let ahead = XFlatArgs {
+                mode: XLkpFlat::On,
+                spare: Some(&spare),
+                extra: None,
+                x_ahead: true,
+            };
+            let Some(Ok(XCompressedLookup::Flat(built))) = build(ahead) else {
+                panic!("{matrix:?}: no flat table built ahead")
+            };
+            x_assert_same_flat_tables(&built, &serial);
+            let held = [
+                built.starts.as_ptr() as usize,
+                built.hits.as_ptr() as usize,
+                built.pv.as_ptr() as usize,
+            ];
+            assert_eq!(
+                held, given,
+                "{matrix:?}: the table built ahead holds the spare's vectors"
+            );
+            // Without a spare a build ahead makes no table.
+            let no_spare = XFlatArgs {
+                mode: XLkpFlat::On,
+                spare: None,
+                extra: None,
+                x_ahead: true,
+            };
+            assert!(
+                build(no_spare).is_none(),
+                "{matrix:?}: a table built ahead without a spare"
+            );
         }
     }
 

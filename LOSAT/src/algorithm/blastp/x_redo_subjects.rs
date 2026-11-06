@@ -120,13 +120,19 @@ impl<'a> XRedoSubjects<'a> {
     }
 
     /// The number of residues of the subject `s_idx`, if there is one.
-    #[cfg(any(
-        test,
+    #[cfg_attr(
         all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            not(test),
+            not(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            ))
+        ),
+        expect(
+            dead_code,
+            reason = "used only with `parallel` threads (x_redo_par) and by unit tests; it keeps `XDbSubjects::lengths` read in every build"
         )
-    ))]
+    )]
     pub(crate) fn aa_len(&self, s_idx: usize) -> Option<usize> {
         match self {
             Self::Encoded(subjects) => subjects.get(s_idx).map(|subject| subject.aa_len),

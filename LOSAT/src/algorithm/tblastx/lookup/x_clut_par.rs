@@ -63,7 +63,8 @@
 //!   first offset (a chunk's offsets lie within 2^16 of it): nothing is lost.
 //! - `TooLarge` (the reference builder runs) when the appends pass `x_max_appends`, as the serial
 //!   builder's bound; the reference then decides the table or the refusal.
-//!   The cuts (chunks, stripes) depend on the thread count; by the above the table does not.
+//!
+//! The cuts (chunks, stripes) depend on the thread count; by the above the table does not.
 //!
 //! With `LOSAT_X_BPLKPFLAT` the same passes are scheduled otherwise and the table's vectors may come
 //! from an earlier table (`XParallelCuts::passes`, `XParallelCuts::spare`); the table is the same:

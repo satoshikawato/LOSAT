@@ -224,28 +224,28 @@ impl XLists<'_> {
 #[derive(Default)]
 struct XBuildTemps {
     counts: Vec<u32>,
-    #[cfg_attr(
-        not(feature = "parallel"),
-        expect(dead_code, reason = "used only with the `parallel` feature")
-    )]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     ranges: Vec<u32>,
     base: Vec<u32>,
     fill: Vec<u32>,
     chains: Option<LookupBackboneChains>,
-    #[cfg_attr(
-        not(feature = "parallel"),
-        expect(dead_code, reason = "used only with the `parallel` feature")
-    )]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     cells: Vec<u32>,
-    #[cfg_attr(
-        not(feature = "parallel"),
-        expect(dead_code, reason = "used only with the `parallel` feature")
-    )]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     starts: Vec<u32>,
-    #[cfg_attr(
-        not(feature = "parallel"),
-        expect(dead_code, reason = "used only with the `parallel` feature")
-    )]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     offsets: Vec<i32>,
 }
 
@@ -812,13 +812,6 @@ impl XAaSpares {
     /// `overflow`, for the overflow). Nothing is written into them. Also keeps this thread's
     /// neighbour lists for the builds ahead, if none are kept. Returns the number of vectors
     /// allocated.
-    #[cfg_attr(
-        all(not(feature = "parallel"), not(test)),
-        expect(
-            dead_code,
-            reason = "used only with the `parallel` feature (and by unit tests)"
-        )
-    )]
     pub(crate) fn x_make_room(
         &self,
         backbone_size: usize,
@@ -834,13 +827,6 @@ impl XAaSpares {
     /// (`backbone_size` and `overflow` count their padding, as the vectors of the table built
     /// before have it); the vectors of the other width are dropped. A block whose table turns out
     /// to have the other width builds on its own vectors.
-    #[cfg_attr(
-        all(not(feature = "parallel"), not(test)),
-        expect(
-            dead_code,
-            reason = "used only with the `parallel` feature (and by unit tests)"
-        )
-    )]
     pub(crate) fn x_make_room16(
         &self,
         backbone_size: usize,
@@ -938,13 +924,6 @@ impl XAaSpares {
     /// neighbour lists kept here (both taken while it builds and given back after, the vectors only
     /// where no table was made). `None` where no table was made: the vectors lack the room, or the
     /// in-place builder declines (the reference builder would build it).
-    #[cfg_attr(
-        all(not(feature = "parallel"), not(test)),
-        expect(
-            dead_code,
-            reason = "used only with the `parallel` feature (and by unit tests)"
-        )
-    )]
     pub(crate) fn x_build_ahead(
         &self,
         queries: &[Vec<QueryFrame>],
@@ -989,13 +968,6 @@ impl XAaSpares {
     /// chosen by the build (`x_bplk16_fits`): `u16` where the lookup query is at most 65,535
     /// letters, else `Int4` as before; `None` where no table was made (the kept vectors of the
     /// width lack the room, or the in-place builder declines).
-    #[cfg_attr(
-        all(not(feature = "parallel"), not(test)),
-        expect(
-            dead_code,
-            reason = "used only with the `parallel` feature (and by unit tests)"
-        )
-    )]
     pub(crate) fn x_build_ahead16(
         &self,
         queries: &[Vec<QueryFrame>],

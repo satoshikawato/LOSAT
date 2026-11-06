@@ -24,10 +24,11 @@
 //!    warnings before each query, the outfmt 7 headers and the last line stay on the loop's
 //!    thread, in the serial order. With the Web adapter's format observer (`FormatProbe`, which
 //!    flushes around every row) the rows are written by the serial function.
-//!    With a Seq-align format requested (outfmt 8, 12), the engine counts of the Seq-aligns
-//!    (`report::engine_counts`) run over chunks of the final list on the pool as item 1 does.
-//!    The outfmt 0 text (`write_tblastx_pairwise_report`) and the writes stay on the loop's thread
-//!    (the final order is made in each batch's search, `hit_collector.rs`).
+//!
+//! With a Seq-align format requested (outfmt 8, 12), the engine counts of the Seq-aligns
+//! (`report::engine_counts`) run over chunks of the final list on the pool as item 1 does.
+//! The outfmt 0 text (`write_tblastx_pairwise_report`) and the writes stay on the loop's thread
+//! (the final order is made in each batch's search, `hit_collector.rs`).
 //!
 //! Why the bytes are those of the serial stage: every value is computed by the serial code's
 //! function of one HSP (or of one row) on the same inputs (the HSP, the query and subject

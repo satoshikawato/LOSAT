@@ -285,10 +285,10 @@ impl XBatch {
 struct XGroups {
     sets: Mutex<Vec<Arc<XSet>>>,
     /// A helper job waits in a thread's queue (`x_spawn_group_helper`).
-    #[cfg_attr(
-        not(feature = "parallel"),
-        expect(dead_code, reason = "used only with the `parallel` feature")
-    )]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     queued: AtomicBool,
 }
 
@@ -313,10 +313,10 @@ impl XGroups {
     }
 
     /// An item of some set is left to take.
-    #[cfg_attr(
-        not(feature = "parallel"),
-        expect(dead_code, reason = "used only with the `parallel` feature")
-    )]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn any_left(&self) -> bool {
         self.sets
             .lock()
@@ -382,8 +382,11 @@ impl XBoard {
     /// set's units only, Why 3.), on the board's takers and, for a batch's only subject, on up to
     /// `threads - 1` helper jobs of the set. Returns when every unit has run.
     #[cfg_attr(
-        not(feature = "parallel"),
-        expect(dead_code, reason = "used only with the `parallel` feature")
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        expect(dead_code, reason = "used only with `parallel` threads")
     )]
     pub(crate) fn run_units(&self, batch: &XBatch, s: usize, n: usize, run: &Run<'_>) {
         let set = XSet::new(run, n);
@@ -422,8 +425,11 @@ impl XBoard {
     /// caller's order), on this thread, on the board's takers before any unit, and on the board's
     /// helper jobs. Returns when every group has run.
     #[cfg_attr(
-        not(feature = "parallel"),
-        expect(dead_code, reason = "used only with the `parallel` feature")
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        expect(dead_code, reason = "used only with `parallel` threads")
     )]
     pub(crate) fn run_groups(&self, n: usize, run: &Run<'_>) {
         self.run_set(n, run, true);
@@ -554,10 +560,10 @@ pub(crate) fn enter(board: &XBoard, batch: &XBatch) -> XEntered {
 }
 
 /// The board and batch of this thread's subject (`enter`), if any.
-#[cfg_attr(
-    not(feature = "parallel"),
-    expect(dead_code, reason = "used only with the `parallel` feature")
-)]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 pub(crate) fn current<'a>() -> Option<(&'a XBoard, &'a XBatch)> {
     // SAFETY: the pointers are set by `enter` from references that outlive its guard, and the
     // guard restores the value before them on drop; the subject's work that reads them runs

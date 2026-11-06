@@ -37,7 +37,7 @@
                   "num": 1,
                   "bit_score": 222.718,
                   "score": 120,
-                  "evalue": 6.8945e-63,
+                  "evalue": 8.58093e-63,
                   "identity": 120,
                   "query_from": 1,
                   "query_to": 120,
@@ -55,10 +55,10 @@
             }
           ],
           "stat": {
-            "db_num": 4,
-            "db_len": 735,
+            "db_num": 5,
+            "db_len": 915,
             "hsp_len": 10,
-            "eff_space": 76450,
+            "eff_space": 95150,
             "kappa": 0.46,
             "lambda": 1.28,
             "entropy": 0.85

@@ -48,7 +48,7 @@
                       <num>1</num>
                       <bit-score>91.2781</bit-score>
                       <score>225</score>
-                      <evalue>4.94966e-32</evalue>
+                      <evalue>6.16183e-32</evalue>
                       <identity>40</identity>
                       <positive>40</positive>
                       <query-from>1</query-from>
@@ -67,10 +67,10 @@
               </hits>
               <stat>
                 <Statistics>
-                  <db-num>4</db-num>
-                  <db-len>735</db-len>
-                  <hsp-len>9</hsp-len>
-                  <eff-space>6479</eff-space>
+                  <db-num>5</db-num>
+                  <db-len>915</db-len>
+                  <hsp-len>10</hsp-len>
+                  <eff-space>7650</eff-space>
                   <kappa>0.041</kappa>
                   <lambda>0.267</lambda>
                   <entropy>0.14</entropy>

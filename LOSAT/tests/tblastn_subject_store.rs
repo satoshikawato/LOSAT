@@ -26,7 +26,6 @@
 //! without letters (its warning comes from the length the store keeps). The queries are proteins
 //! of `tests/fasta/PemoMJNVA.faa`: ten of them (one query batch), or all 115 (four batches).
 
-#[allow(dead_code)]
 mod run_local_support;
 
 use std::path::{Path, PathBuf};

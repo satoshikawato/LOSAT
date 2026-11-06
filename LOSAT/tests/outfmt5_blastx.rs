@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! BLAST XML (outfmt 5) of BLASTX: the refusals of what NCBI BLAST+ 2.17.0 cannot write (a
 //! byte >= 0x80 in a title or in the `-db` name, DECISIONS 19, Q2) and the document across
 //! several query batches (one header, global Iteration numbers, one trailer), and the refusals

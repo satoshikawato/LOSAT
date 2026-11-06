@@ -130,7 +130,7 @@ Before opening a PR, please verify:
 - [ ] An issue was opened and approved by the maintainer for non-trivial changes.
 - [ ] Relevant NCBI C/C++ source citations are included in code comments for all ported algorithms.
 - [ ] No runtime, build, or fallback code invokes external NCBI binaries or libraries.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings` pass. Clippy runs, but `#![allow(warnings, clippy::all)]` at the top of `LOSAT/src/lib.rs` and `LOSAT/src/main.rs` (and of several test files) turns its lints and the compiler's warnings off for the whole library and command, so it reports nothing in `LOSAT/src` yet. Removing those lines is planned work (SW5 of the engineering-quality line).
+- [ ] `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings` pass. The lint levels of every target are in the `[lints]` table of `LOSAT/Cargo.toml`, where a lint is allowed only with a reason; one place that keeps a lint's shape on purpose uses `#[expect(lint, reason = "...")]` at that item. No file may silence every warning with `#![allow(warnings ...)]` (`LOSAT/tests/check_lint_allow_ratchet.py` in `rust lint`).
 - [ ] Parity comparison tests confirm bit-identical output with NCBI BLAST+ on affected profiles.
 
 ---

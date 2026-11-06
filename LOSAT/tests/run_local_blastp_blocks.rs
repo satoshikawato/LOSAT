@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! The blastp search in blocks of whole query batches (`LOSAT_X_BPQBLOCK`) for a `run_local` call
 //! with several outputs, the hit records and an observer (ABI v2 of the Web build;
 //! `src/algorithm/blastp/x_query_blocks.rs`).

@@ -141,10 +141,6 @@ impl<'a> Reader<'a> {
         self.text.get(self.pos + offset).copied().unwrap_or(0)
     }
 
-    fn at_end(&self) -> bool {
-        self.pos >= self.text.len()
-    }
-
     /// `SkipEndOfLine(c)` after the end-of-line byte `c` was taken.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:526-537
     // ```c++

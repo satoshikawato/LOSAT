@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! The shared TBLASTN entry `run_local` writes several output formats from one search.
 //! Every format must be byte-identical to the saved NCBI BLAST+ 2.17.0 bytes and to the
 //! CLI run that requests only that format, the warnings must be written once, and the

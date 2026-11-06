@@ -138,7 +138,7 @@ fn damage(orig: &[u8], rng: &mut Rng, round: usize) -> (Damage, Vec<u8>) {
         Damage::Word => {
             if bytes.len() >= 4 {
                 let at = rng.below(bytes.len() / 4) * 4;
-                let big_endian = rng.next() % 2 == 0;
+                let big_endian = rng.next().is_multiple_of(2);
                 let word: [u8; 4] = bytes[at..at + 4].try_into().unwrap();
                 let old = if big_endian {
                     u32::from_be_bytes(word)

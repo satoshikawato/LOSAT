@@ -286,7 +286,7 @@ fn parallel_buffer<L: QueryLetters + ?Sized, P: Fn() + Sync>(
 }
 
 /// The parallel blocks; the same blocks as `serial_blocks`. Only called when `on_pool`. `probe` is
-/// called once per context, on the thread that computes it (see `parallel_buffer`).
+/// called once per context, on the thread that computes it (see `parallel_fill`).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -442,7 +442,7 @@ fn buffer_with_probe<L: QueryLetters + ?Sized, P: Fn() + Sync>(
     buffer
 }
 
-/// The ungapped blocks of `contexts` as the switch `on` makes them (see `buffer_with_mode`).
+/// The ungapped blocks of `contexts` as the switch `on` makes them (see `fill_with_mode`).
 pub(super) fn blocks_with_mode(
     contexts: &[&[u8]],
     spec: &NuclScoringSpec,
@@ -719,6 +719,14 @@ mod tests {
                     let want = serial_buffer(&letters[..], &offsets, total);
                     let got = buffer_with_mode(&letters[..], &offsets, total, pool, true);
                     assert_eq!(got, want, "threads {threads} count {count} gap {gap:?}");
+                    // the batch loop's kept buffer, written again over other bytes
+                    let mut kept = got.clone();
+                    kept.fill(0xA5);
+                    fill_with_mode(&letters[..], &offsets, total, pool, true, &mut kept);
+                    assert_eq!(
+                        kept, want,
+                        "kept: threads {threads} count {count} gap {gap:?}"
+                    );
                     if gap.is_none() && count > 1 && pool.threads() > 1 {
                         let (got, on_the_pool) =
                             parallel_buffer(&letters[..], &offsets, total, pool, &|| {});

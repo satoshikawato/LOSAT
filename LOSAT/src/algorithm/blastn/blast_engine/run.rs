@@ -4847,13 +4847,18 @@ fn build_query_blastna_buffer<L: QueryLetters + ?Sized>(
 /// fit the hole once small blocks had split it, was mapped on its own, and the 8.5 MiB hole stayed
 /// resident (31,168 cDNAs x 3 Mb, dc-megablast `-db`, 1 thread: +9.5 MiB in half the runs, set off
 /// by the length of the output file's name). The kept buffer has the capacity of
-/// `x_mapped_capacity`, so from 1 MiB glibc maps it and its free at the end of the loop leaves the
-/// threshold as it is; it grows only for a batch longer than any before, and its pages are touched
-/// by the first batch and not again. Bytes past the batch's length are not read.
+/// `x_mapped_capacity`, so from 1 MiB glibc maps it and its free leaves the threshold as it is. A
+/// batch writes all of its bytes again when a new buffer of the batch's length would have the
+/// same capacity (any length from 1 MiB to glibc's 32 MiB ceiling), and otherwise takes a new
+/// block: a longer batch, one below 1 MiB, or one past the ceiling does not keep a longer batch's
+/// buffer, so the kept pages beyond a batch's length are at most those of the longest batch of
+/// that class (under 32 MiB). Bytes past the batch's length are not read.
 fn x_query_sentinels(buffer: &mut Vec<u8>, length: usize) {
-    if buffer.capacity() < length {
-        // The old contents are not kept: a new block, not a copy.
-        *buffer = Vec::with_capacity(crate::utils::x_mapped::x_mapped_capacity(length, 1));
+    let capacity = crate::utils::x_mapped::x_mapped_capacity(length, 1);
+    if buffer.capacity() < length || buffer.capacity() > capacity {
+        // The old contents are not kept: the old block is freed first, then a new one, not a copy.
+        drop(std::mem::take(buffer));
+        *buffer = Vec::with_capacity(capacity);
     } else {
         buffer.clear();
     }
@@ -9271,7 +9276,8 @@ fn run_in_pool(
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
     // (`lookup::x_mb_lut_keep`), freed when the loop ends.
     let x_lut_keep = x_mb_lut_keep::Keep::for_loop();
-    // The query buffer this loop keeps between its batches (`x_query_sentinels`), freed when the
+    // No NCBI counterpart (memory placement only; NCBI allocates the buffer of each batch,
+    // `x_query_sentinels`): the query buffer this loop keeps between its batches, freed when the
     // loop ends.
     let mut query_keep: Vec<u8> = Vec::new();
     let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(lengths.len());
@@ -19787,8 +19793,8 @@ fn search_query_chunks(
     // PD-LOSAT-NCBI-DEFECTS).
     let mut merged: PrelimHitLists = Vec::with_capacity(queries.count());
     merged.resize_with(queries.count(), || None);
-    // The chunks' query buffer, kept from chunk to chunk (`x_query_sentinels`; the batch's own
-    // buffer is in use until its traceback).
+    // No NCBI counterpart (memory placement only, `x_query_sentinels`): the chunks' query buffer,
+    // kept from chunk to chunk (the batch's own buffer is in use until its traceback).
     let mut query_keep: Vec<u8> = Vec::new();
     for chunk in &chunks {
         // NCBI fails to make the query factory of a chunk without a query ("Empty
@@ -20228,14 +20234,16 @@ mod tests {
             }
             (offsets, at - 1)
         };
-        let long = vec![b'G'; 3 << 20];
-        let batches: [Vec<&[u8]>; 4] = [
+        let (long, mid) = (vec![b'G'; 3 << 20], vec![b'c'; 1 << 20]);
+        let batches: [Vec<&[u8]>; 5] = [
             vec![&b"ACGTTGCAAC"[..], &b"acgtnRYKMSWBDHVNu-acgt"[..]],
             vec![&b"A"[..]],
             vec![&long[..], &b"TTTT"[..]],
+            vec![&mid[..], &b"GA"[..]],
             vec![&b"GGGGCCCCTTTTAAAAccgg*0"[..], &b""[..], &b"CA"[..]],
         ];
         let mut keep = Vec::new();
+        let mut blocks = Vec::new();
         for queries in &batches {
             let (offsets, concat_len) = layout(&queries[..]);
             fill_query_blastna_buffer(&queries[..], &offsets, concat_len, &mut keep);
@@ -20243,6 +20251,7 @@ mod tests {
                 keep,
                 build_query_blastna_buffer(&queries[..], &offsets, concat_len)
             );
+            blocks.push((keep.as_ptr(), keep.capacity()));
             for strand in [QueryStrand::Plus, QueryStrand::Minus] {
                 let mut kept = keep.clone();
                 kept.extend_from_slice(b"stale bytes past the length");
@@ -20259,9 +20268,12 @@ mod tests {
                 );
             }
         }
-        // the 3 MiB batch made the buffer mapped, and the shorter batch after it kept it
         if crate::utils::x_mapped::X_MAPPED_ALLOCATOR {
-            assert!(keep.capacity() > 32 << 20);
+            // the 3 MiB batch made a mapped buffer, the shorter one of the same class wrote the same
+            // block again, and the batch below 1 MiB took a block of its own
+            assert!(blocks[2].1 > 32 << 20);
+            assert_eq!(blocks[3], blocks[2]);
+            assert!(blocks[4].1 < 1 << 20);
         }
     }
 

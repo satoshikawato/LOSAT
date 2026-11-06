@@ -9,7 +9,8 @@
 /// +-2 % with the same instructions. A slot across a page is the costly case: its reload waits
 /// until the page-split store is written, 100 to 175 cycles a load, and dc-megablast of two
 /// E. coli genomes at one thread took 10 to 19 % more cycles in the runs whose stack put a hot
-/// slot of align8's traceback kernel there (one run in six to ten). Inlined, this function's
+/// slot of align8's traceback kernel there (with address-space randomisation, 16 of 97 runs; 4 of
+/// 97 before the kernel's trace rows carried their records). Inlined, this function's
 /// 64-byte-aligned local is a local of the kernel, so the kernel's frame is realigned and its
 /// spill slots lie on 32-byte boundaries, inside a line and a page; the volatile store of one byte
 /// (never read) keeps the local. It does not change any value NCBI computes.

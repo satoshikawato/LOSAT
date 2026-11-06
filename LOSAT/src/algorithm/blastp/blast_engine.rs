@@ -79,6 +79,9 @@ mod x_subject_runs;
 pub(super) mod x_subject_meta;
 // `-comp_based_stats 0`: NCBI's ordinary traceback in place of the composition-based redo.
 mod traceback;
+// psiblast `-in_pssm` (series PS, item PS4a): the stages of a PSSM search, reached through the
+// `psi_search` hooks of `run_resolved_in_pool`.
+mod pssm_hooks;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{
@@ -2257,6 +2260,7 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // BLASTP implements 3 only.
     if args.word_size != 3
         && args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable
+        && args.psi_search.is_none()
     {
         bail!(
             "-word_size {} (the lookup table) is not supported by LOSAT's {program}",
@@ -2296,9 +2300,10 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 gives different reports for the same search)"
         );
     }
-    // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`); psiblast's rounds keep mode 2.
+    // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`), and the PSSM's of psiblast
+    // `-in_pssm` (`pssm_search::traceback0`); psiblast's rounds without a PSSM keep mode 2.
     if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust
-        && !(args.app == BlastpApp::Blastp
+        && !((args.app == BlastpApp::Blastp || args.psi_search.is_some())
             && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats)
     {
         bail!(
@@ -5252,6 +5257,27 @@ fn search_cli(
     };
     let mut resolved = args.check_options(outputs.diagnostics)?;
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?;
+    // psiblast `-in_pssm`: the query is the PSSM's (read with the options, `check_options`);
+    // NCBI reads no query input (psiblast_app.cpp:452-471). LOSAT's limits of the PSSM search
+    // come when the options are processed and the subjects set up.
+    if let Some(psi) = resolved.psi_search.clone() {
+        crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, &psi)?;
+        let records = vec![psi.query().clone()];
+        let choice_to_standard_output = resolved
+            .out
+            .as_deref()
+            .is_none_or(|path| path.as_os_str() == "-");
+        return search(
+            resolved,
+            &records,
+            QueryReading::End,
+            subjects,
+            database.as_ref(),
+            "",
+            outputs,
+            choice_to_standard_output.then_some(&choice),
+        );
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:202-216
     // ```c++
     //         SDataLoaderConfig dlconfig =
@@ -5882,6 +5908,48 @@ fn psiblast_stop_at_invalid_query(
     batches
 }
 
+/// psiblast `-in_pssm`: a PSSM that NCBI's `CPsiBlastValidate::Pssm` refuses stops the run at its
+/// one query batch, after the outfmt 0 prolog, with NCBI's engine error (the PSSM is checked
+/// before the query's Karlin-Altschul parameters, `psiblast_stop_at_invalid_query`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:58-67
+/// ```c++
+/// CPsiBlastImpl::CPsiBlastImpl(CRef<objects::CPssmWithParameters> pssm,
+///                              CRef<CLocalDbAdapter> subject,
+///                              CConstRef<CPSIBlastOptionsHandle> options)
+/// : m_Pssm(pssm), m_Query(0), m_Subject(subject), m_OptsHandle(options),
+///     m_ResultType(eDatabaseSearch)
+/// {
+///     x_Validate();
+///     x_ExtractQueryFromPssm();
+///     x_CreatePssmScoresFromFrequencyRatios();
+/// }
+/// ```
+#[cold]
+#[inline(never)]
+fn psiblast_stop_at_invalid_pssm(
+    args: &ResolvedBlastpArgs,
+    mut batches: crate::blastinput::query_batch::QueryBatches,
+) -> crate::blastinput::query_batch::QueryBatches {
+    let Some(message) = args
+        .psi_search
+        .as_deref()
+        .and_then(|psi| psi.validation_error.as_deref())
+    else {
+        return batches;
+    };
+    let warnings = batches
+        .warnings
+        .first_mut()
+        .map(std::mem::take)
+        .unwrap_or_default();
+    batches.starts.clear();
+    batches.input_done = 0;
+    batches.searched_done = 0;
+    batches.stop = Some((warnings, crate::blastinput::app::engine_error(message)));
+    batches
+}
+
 /// The search of `run_local` and of the CLI, after NCBI's processing of the options and
 /// the reading of the subjects: `Query is Empty!` for records without a query, the query
 /// batch size, the subjects without letters, the XInclude formats (`xinclude`, the CLI's
@@ -6041,6 +6109,9 @@ fn search(
             ),
         ),
     };
+    // psiblast `-in_pssm`: NCBI's check of the PSSM stops the run at its query
+    // (`psiblast_stop_at_invalid_pssm`).
+    let batches = psiblast_stop_at_invalid_pssm(&args, batches);
     // NCBI reference: c++/src/app/blast/blastp_app.cpp:294-295
     // ```c++
     //         BLAST_PROF_START( APP.POST );
@@ -6585,6 +6656,7 @@ fn x_query_block_plan(
     // psiblast's PSSMs (`psiblast_ascii_pssms`) are written by the search of all queries.
     if args.query_range.is_some()
         || args.psi_pssm.is_some()
+        || args.psi_search.is_some()
         || outputs.formats.is_empty()
         || batches.stop.is_some()
         || batches.searched_done != queries.len()
@@ -7932,6 +8004,8 @@ fn run_resolved_in_pool(
         crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", false);
     }
     let (lookup, mut contexts) = match args.lookup_table_type {
+        // psiblast `-in_pssm`: the lookup table of the PSSM (`pssm_hooks::pssm_lookup`).
+        _ if args.psi_search.is_some() => pssm_hooks::pssm_lookup(&args, &query_frames),
         // `blastp_aa_lookup`. EXPERIMENT (LOSAT_X_BPLKPAHEAD): or the table and contexts built
         // ahead of this block by the same call on the block search's spare vectors
         // (`blast_engine/x_lookup_ahead.rs`). EXPERIMENT (LOSAT_X_BPLKREUSE): or, where nothing is
@@ -9529,7 +9603,52 @@ fn run_resolved_in_pool(
     ))]
     let use_parallel = false;
 
-    if let Some(database) = database {
+    // psiblast `-in_pssm`: the PSSM's preliminary search (`pssm_hooks::pssm_prelim`), into the
+    // same hit lists.
+    if let Some(psi) = args.psi_search.as_deref() {
+        pssm_hooks::pssm_prelim(
+            psi,
+            &args,
+            &lookup,
+            &pssm_hooks::PssmPrelimRun {
+                contexts: &contexts,
+                search_spaces: &search_spaces,
+                exact_search_spaces: &exact_search_spaces,
+                gapped_params: &gapped_params,
+                gumbel: gapped_gumbel.as_ref(),
+                cutoff_subject_length,
+                prelim_evalue,
+                window,
+                diag_mask,
+                offset_array_size,
+                diag_array_size,
+                total_query_span,
+                prelim_hitlist_size,
+            },
+            database,
+            subjects,
+            blastp_parallel_pool,
+            &mut x_compact_hit_lists,
+        )
+        .map_err(|error| match database {
+            // A sequence file that cannot be read: NCBI's error of the batch's preliminary
+            // search, as for blastp's database search below.
+            Some(database) => match error.downcast::<database::PreliminaryReadError>() {
+                Ok(read_error) => preliminary_search_error(
+                    &args,
+                    subject_source,
+                    subject_label,
+                    outputs,
+                    reports,
+                    chunk_prelim.is_some() || query_batch_skipped.first() == Some(&false),
+                    database.name(),
+                    read_error.0,
+                ),
+                Err(other) => other,
+            },
+            None => error,
+        })?;
+    } else if let Some(database) = database {
         // The preliminary stage of a database: its sequences are read in blocks and
         // searched in the order of their ordinal ids (`database::search_blocks`).
         let merge_sort_start = blastp_timing_start(timing_enabled);
@@ -9852,7 +9971,21 @@ fn run_resolved_in_pool(
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
-    let ordinary_hit_lists = if ordinary_traceback {
+    let ordinary_hit_lists = if ordinary_traceback && args.psi_search.is_some() {
+        // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`).
+        Some(pssm_hooks::pssm_traceback(
+            &args,
+            &contexts,
+            total_query_span,
+            subjects,
+            &gapped_params,
+            gapped_gumbel.as_ref(),
+            &search_spaces,
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            blastp_parallel_pool,
+        )?)
+    } else if ordinary_traceback {
         let ordinary = traceback::OrdinaryTraceback {
             contexts: &contexts,
             total_query_span,
@@ -12169,6 +12302,24 @@ fn run_resolved_in_pool(
                     program: args.app.ncbi_name().to_string(),
                     protein_matrix: args.scoring.matrix,
                 };
+                // psiblast `-in_pssm`: the footer prints the PSSM's `kbp_psi` and `kbp_gap_psi`
+                // (the file's values).
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:451-467
+                // ```c++
+                //     const Blast_KarlinBlk *kbp_ungap =
+                //         (m_Program == "psiblast" || m_Program == "deltablast")
+                //         ? summary.GetPsiUngappedKarlinBlk()
+                //         : summary.GetUngappedKarlinBlk();
+                //     ...
+                //     const Blast_KarlinBlk *kbp_gap =
+                //         (m_Program == "psiblast" || m_Program == "deltablast")
+                //         ? summary.GetPsiGappedKarlinBlk()
+                //         : summary.GetGappedKarlinBlk();
+                // ```
+                let psi_report_karlin = args
+                    .psi_search
+                    .as_deref()
+                    .map(|psi| pssm_hooks::psi_karlin(psi, &contexts, &gapped_params));
                 // The titles are written as bytes by query index (`query_titles`);
                 // `query_name` stays empty (`BlastpPairwiseQuery` is BLASTX's too).
                 let pairwise_queries: Vec<BlastpPairwiseQuery> = query_lengths
@@ -12191,7 +12342,8 @@ fn run_resolved_in_pool(
                         // s_InitializeKarlinBlk(sbp->kbp_std[ctx_index],
                         //                       &m_UngappedKarlinBlk);
                         // ```
-                        ungapped_karlin: contexts[q_idx].karlin_params,
+                        ungapped_karlin: psi_report_karlin
+                            .map_or(contexts[q_idx].karlin_params, |karlin| karlin.ungapped),
                         // (A database's or a `-dbsize` search's is kept in NCBI's `Int8`.)
                         effective_search_space: exact_search_spaces[q_idx]
                             .unwrap_or(search_spaces[q_idx].effective_space.round() as i64),
@@ -12210,7 +12362,7 @@ fn run_resolved_in_pool(
                     gap_extend: args.scoring.gap_extend,
                     word_threshold: args.threshold,
                     window_size: args.window_size as i32,
-                    gapped_karlin: gapped_params,
+                    gapped_karlin: psi_report_karlin.map_or(gapped_params, |karlin| karlin.gapped),
                     gumbel: gapped_gumbel,
                     // NCBI blast_args.cpp:2910-2927: 500 descriptions and 250 alignments,
                     // or the -num_descriptions / -num_alignments / -max_target_seqs values

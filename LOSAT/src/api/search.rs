@@ -40,12 +40,14 @@ pub const API_OWNED: &[&str] = &["query", "subject", "db", "out", "outfmt"];
 // `F.2`, ...; `CAutoOutputFileReset`) would start again at each call, and a PSSM file is an output
 // outside those the API owns (`API_OWNED`): a file the caller did not give. The command line
 // writes them (`algorithm::psiblast::pssm`).
-/// psiblast's options that write a PSSM file, which the library API refuses.
+/// psiblast's options that write a PSSM file, which the library API refuses, and `-in_pssm`, the
+/// query as a PSSM file (its queries are records; line PS, DECISIONS 11, as 8 and 10).
 const PSSM_FILES: &[&str] = &[
     "out_pssm",
     "out_ascii_pssm",
     "save_pssm_after_last_round",
     "save_each_pssm",
+    "in_pssm",
 ];
 
 /// The options of `program`'s command line that write a PSSM file: they are not in an argv that
@@ -157,7 +159,14 @@ fn parse(
 ) -> Result<Commands, Error> {
     for word in argv {
         let key = key(word);
-        if option_name(key).is_some_and(|name| pssm_file_options(program).contains(&name)) {
+        if let Some(name) =
+            option_name(key).filter(|name| pssm_file_options(program).contains(name))
+        {
+            if name == "in_pssm" {
+                return Err(Error::Argv(format!(
+                    "{key} is not accepted by the library API: the queries are given as records"
+                )));
+            }
             return Err(Error::Argv(format!(
                 "{key} is not accepted by the library API: the library API writes no PSSM file"
             )));

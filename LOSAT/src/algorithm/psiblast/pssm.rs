@@ -29,6 +29,8 @@ pub struct PsiblastPssmOptions {
     pub out_pssm: Option<String>,
     pub out_ascii_pssm: Option<String>,
     pub pseudocount: i32,
+    /// `-in_pssm`: the query as a PSSM file (`algorithm::psiblast::in_pssm`).
+    pub in_pssm: Option<std::path::PathBuf>,
 }
 
 /// A run that writes the PSSM of each query whose round-1 results have alignments.

@@ -3,18 +3,23 @@
 /// No NCBI counterpart (memory placement only): called first in a 256-bit kernel, it makes the
 /// compiler realign that kernel's stack frame to 64 bytes. With the ABI's 16-byte frame, LLVM
 /// spills 256-bit registers with unaligned moves at fixed offsets from `rsp`, so whether a spill
-/// crosses a cache line (a split load or store, slower) depends on `rsp mod 64`: on the callers'
-/// frames, and for the main thread on the stack offset that address-space randomisation sets per
-/// run. A change anywhere up the call chain moved blastp's X-drop DP by +-2 % with the same
-/// instructions. Inlined, this function's 64-byte-aligned local is a local of the kernel, so the
-/// kernel's frame is realigned and its spill slots lie on 32-byte boundaries; the volatile store
-/// of one byte (never read) keeps the local. It does not change any value NCBI computes.
+/// crosses a cache line (a split load or store, slower) or a 4 KiB page depends on `rsp mod 4096`:
+/// on the callers' frames, and for the main thread on the stack offset that address-space
+/// randomisation sets per run. A change anywhere up the call chain moved blastp's X-drop DP by
+/// +-2 % with the same instructions. A slot across a page is the costly case: its reload waits
+/// until the page-split store is written, 100 to 175 cycles a load, and dc-megablast of two
+/// E. coli genomes at one thread took 10 to 19 % more cycles in the runs whose stack put a hot
+/// slot of align8's traceback kernel there (one run in six to ten). Inlined, this function's
+/// 64-byte-aligned local is a local of the kernel, so the kernel's frame is realigned and its
+/// spill slots lie on 32-byte boundaries, inside a line and a page; the volatile store of one byte
+/// (never read) keeps the local. It does not change any value NCBI computes.
 ///
 /// The realigned frame takes `rbp` as its frame pointer, one general register less in the kernel.
-/// In align8's traceback kernel that meant stack loads and stores of general registers in the row
-/// code (1.65 % more instructions on dc-megablast, 1.003 of the cycles at one thread), and in
-/// megablast's greedy rows and blastp's restricted rows it cost more time than the splits saved,
-/// so those kernels keep the ABI's frame.
+/// In megablast's greedy rows and blastp's restricted rows it cost more time than the line splits
+/// saved, so those kernels keep the ABI's frame (whether a slot across a page slows them was not
+/// measured). align8's traceback kernel once ran 1.65 % more instructions with it; with the trace
+/// rows written behind two cursors (`XTrace`) it runs fewer (the kernel: dc-megablast -2.8 %,
+/// blastn -3.2 %).
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 pub(crate) fn x_frame_align() {

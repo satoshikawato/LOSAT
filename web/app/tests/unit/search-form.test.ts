@@ -417,8 +417,8 @@ describe("the selects of the protein modes: NCBI's values that LOSAT reads", () 
     expect(fieldChoices(field('tblastn', '-comp_based_stats'), optionsOf('tblastn').find((o) => o.flag === '-comp_based_stats'))).toEqual(COMPOSITION_MODES);
   });
 
-  it('gives TBLASTX word size 3', () => {
-    expect(list('tblastx', '-word_size')).toEqual(['3']);
+  it("gives TBLASTX NCBI's word sizes 2 and 3", () => {
+    expect(list('tblastx', '-word_size')).toEqual(['2', '3']);
     expect(list('tblastx', '-matrix')).toEqual(MATRICES);
   });
 

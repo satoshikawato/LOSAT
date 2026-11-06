@@ -480,11 +480,11 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: 'General Parameters',
         placement: 'algorithm',
-        // LOSAT's TBLASTX reads word size 3 only.
+        // NCBI's select (2 and 3); LOSAT's TBLASTX reads word sizes 2 to 4, as NCBI's (4 after "Other").
         fields: [
           maxTargetSeqs,
           evalue,
-          { ...wordSize, list: ['3'] },
+          { ...wordSize, list: ['2', '3'] },
           cullingLimit,
         ],
       },

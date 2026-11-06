@@ -155,7 +155,21 @@ pub fn read_fasta(program: Program, role: Role, bytes: &[u8]) -> Result<Vec<Fast
 
 /// Reads every record of an input source; a reader error is the command line's message: the
 /// subjects end as `GetAllSeqs` ends (`ReadError::into_all_seqs_error`), the queries as a batch of
-/// queries ends (`ReadError::into_app_error`).
+/// queries ends (`ReadError::into_app_error`, `GetNextSeqBatch` rethrows the reader's exception).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:205-214
+/// ```c++
+///         catch (const CObjReaderParseException& e) {
+///             auto err = e.GetErrCode();
+///             if (err == CObjReaderParseException::eEOF) {
+///                 break;
+///             } else if (err == CObjReaderParseException::eNoDefline) {
+///                 CNcbiStrstream ss;
+///                 ss << "Query input doesn't start with "
+///                     "a defline or comment, line " << e.GetPos() << ends;
+///                 NCBI_THROW(CInputException, eInvalidInput, ss.str());
+///             }
+/// ```
 fn read_source<R: std::io::Read>(
     mut source: FastaInputSource<R>,
     role: Role,

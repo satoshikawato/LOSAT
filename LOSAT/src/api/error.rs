@@ -36,7 +36,10 @@ pub enum Error {
     /// The argv: the parser's message (`cli::render_message`), or an option that the library
     /// API does not take (`validate`).
     Argv(String),
-    /// A FASTA input: the reader's message (`read_fasta`).
+    /// A FASTA input: the reader's message (`read_fasta`), without its last newline. It may hold
+    /// a NUL byte where NCBI writes one: a subject input that does not start with a defline ends
+    /// with `BLAST query/options error: Query input doesn't start with a defline or comment, line
+    /// N`, a NUL, a newline and `Please refer to the BLAST+ user manual.` (`read_inputs`).
     Input(String),
     /// The search or its reports: the engine's error and its causes, joined by `: `.
     Search(String),

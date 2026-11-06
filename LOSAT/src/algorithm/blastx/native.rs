@@ -99,6 +99,20 @@ pub(super) fn input_error(error: anyhow::Error) -> anyhow::Error {
 /// The error that ends the read of the `-subject` file (`ReadSequencesToBlast`, NCBI's
 /// `CBlastInput::GetAllSeqs`): the reader's `eNoDefline` is `GetAllSeqs`'s input error
 /// (`fasta_reader::no_defline_error`), every other error is `input_error`'s.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:205-214
+/// ```c++
+///         catch (const CObjReaderParseException& e) {
+///             auto err = e.GetErrCode();
+///             if (err == CObjReaderParseException::eEOF) {
+///                 break;
+///             } else if (err == CObjReaderParseException::eNoDefline) {
+///                 CNcbiStrstream ss;
+///                 ss << "Query input doesn't start with "
+///                     "a defline or comment, line " << e.GetPos() << ends;
+///                 NCBI_THROW(CInputException, eInvalidInput, ss.str());
+///             }
+/// ```
 pub(super) fn subject_input_error(error: anyhow::Error) -> anyhow::Error {
     match error.downcast_ref::<NoDeflineError>() {
         Some(NoDeflineError(line)) => crate::blastinput::fasta_reader::no_defline_error(*line),

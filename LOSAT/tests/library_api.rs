@@ -1833,8 +1833,10 @@ fn read_inputs_without_a_first_defline_end_with_the_command_line_message() {
         );
         // The subjects are read first: a bad query and a bad subject end with the subjects' error.
         let error = read_inputs(&search, bad_query.as_bytes(), bad_subject.as_bytes()).unwrap_err();
-        assert!(
-            message(error).starts_with("BLAST query/options error: "),
+        assert_eq!(
+            message(error),
+            "BLAST query/options error: Query input doesn't start with a defline or comment, \
+             line 2\0\nPlease refer to the BLAST+ user manual.",
             "{program:?}"
         );
         let error =

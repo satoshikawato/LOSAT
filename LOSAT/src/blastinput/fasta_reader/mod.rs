@@ -550,6 +550,20 @@ impl ReadError {
     /// The error as the programs end with it when it stops a read of all records
     /// (`CBlastInput::GetAllSeqs`, the subjects): `eNoDefline` is `GetAllSeqs`'s own input
     /// error (`no_defline_error`), every other error is `into_app_error`'s.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:205-214
+    /// ```c++
+    ///         catch (const CObjReaderParseException& e) {
+    ///             auto err = e.GetErrCode();
+    ///             if (err == CObjReaderParseException::eEOF) {
+    ///                 break;
+    ///             } else if (err == CObjReaderParseException::eNoDefline) {
+    ///                 CNcbiStrstream ss;
+    ///                 ss << "Query input doesn't start with "
+    ///                     "a defline or comment, line " << e.GetPos() << ends;
+    ///                 NCBI_THROW(CInputException, eInvalidInput, ss.str());
+    ///             }
+    /// ```
     pub fn into_all_seqs_error(self) -> anyhow::Error {
         match self {
             ReadError::Parse {

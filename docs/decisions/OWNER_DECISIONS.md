@@ -8,7 +8,7 @@ copies each cited decision: its date, the Owner's words as written (in Japanese)
 English, and where the repository cites it. A few entries that the repository does not cite are kept
 because a cited entry depends on them ("related entry").
 
-As of dev 3b29a422b (2026-11-06).
+As of dev 6ecdb2bf2 (2026-11-06).
 
 - Kind: Owner (the Owner's own words, or the Owner's answer to a question), Owner, in part (an entry
   that records both), Owner-delegated (a working session decided it under the Owner's standing
@@ -210,7 +210,7 @@ entry's number in that log. 123 entries: 15 Owner, 3 Owner in part,
 | 21 | 2026-10-30 | Owner-delegated |  | With a user list, measure the minimum subject length as NCBI does (otherwise the constant 10), because it enters the Spouge cutoff of the preliminary stage. | DI-8b list statistics | `LOSAT/src/algorithm/blastx/subjects.rs:181` |
 | 22 | 2026-10-30 | Owner-delegated |  | A negative list naming OIDs with only gi/ti definition lines is not refused up front; it is refused when a hit lands on such an OID, keeping hit-free searches byte-identical to NCBI. | negative seqid list (DI-8b) | `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md:332` |
 | 24 | 2026-10-31 | Owner-delegated |  | A database with 0 OIDs goes through the normal path with NCBI's statistics; the only refusal is -dbsize with -outfmt 11 and 0 OIDs. | empty subset databases (DI-8c) | `LOSAT/tests/db_search_manifest.tsv:1773`, `LOSAT/tests/db_search_manifest.tsv:1793` and 3 more |
-| 29 | 2026-11-01 | Owner-delegated |  | DI-8f: accept several names in -db for all five programs, resolved as NCBI does, with reports kept per name. | DI-8f multiple -db names | `LOSAT/src/seqdb/tests.rs:1181` |
+| 29 | 2026-11-01 | Owner-delegated |  | DI-8f: accept several names in -db for all five programs, resolved as NCBI does, with reports kept per name. | DI-8f multiple -db names | `LOSAT/src/seqdb/tests.rs:1180` |
 | 31 | 2026-11-01 | Owner-delegated |  | Mixing v5 databases with and without the accession table (no -parse_seqids) is refused before the search, because NCBI fails depending on the hits; the Owner is asked to confirm in the PR body. | mixed v5 accession tables (DI-8) | `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md:345` |
 
 ### `gzinput-20261103`: line GZ
@@ -275,10 +275,10 @@ entry's number in that log. 123 entries: 15 Owner, 3 Owner in part,
 | 8 | 2026-10-19 | Owner-delegated |  | Reproduce the outfmt 13 master file name (lists a nonexistent x.json_1.json, no final newline) as defined NCBI behaviour. | outfmt 13 master file, PD-LOSAT-NCBI-DEFECTS | `LOSAT/src/report/blast_xml2/files.rs:27`, `LOSAT/tests/db_search_manifest.tsv:485` and 1 more |
 | 13 | 2026-10-19 | Owner-delegated |  | Environment: ARCHIVE_FORMAT text and bin in OF8; registry values only at defaults (FastWriteDouble, LONG_SEQID) and refused otherwise. | outfmt environment and registry values | `LOSAT/src/report/serial/real.rs:21` |
 | 19 | 2026-10-20 | Owner-delegated |  | OF4 design: eight recommended answers adopted, including the OF4a/OF4b split, refusal of non-ASCII titles, shared XML encoder, and TBLASTX matrix/gap costs written as constants. | outfmt 5 (XML) design | `LOSAT/src/algorithm/tblastx/blast_xml.rs:66`, `LOSAT/tests/outfmt5_blastx.rs:4` and 8 more |
-| 20 | 2026-10-20 | Owner-delegated |  | BLASTN report streaming is off whenever outfmt 5 is requested, so every refusal comes before the first byte. | outfmt 5 and RPTSTREAM | `LOSAT/src/algorithm/blastn/blast_engine/run.rs:10205` |
+| 20 | 2026-10-20 | Owner-delegated |  | BLASTN report streaming is off whenever outfmt 5 is requested, so every refusal comes before the first byte. | outfmt 5 and RPTSTREAM | `LOSAT/src/algorithm/blastn/blast_engine/run.rs:10187` |
 | 21 | 2026-10-20 | Owner-delegated |  | BLASTX outfmt 5 pre-scans query titles before the search and holds the XML in memory only when a subject title would be refused, so every non-ASCII refusal comes before the first byte. | BLASTX outfmt 5 | `LOSAT/tests/outfmt5_blastx.rs:467`, `LOSAT/tests/outfmt5_blastx.rs:622` and 3 more |
 | 22 | 2026-10-20 | Owner-delegated |  | BLASTX outfmt 5 with a query that is not a regular file is refused before the search, because the pre-scan reads the file twice. | BLASTX outfmt 5 pipe queries | `LOSAT/src/algorithm/blastx/native.rs:663`, `LOSAT/tests/outfmt5_blastx.rs:466` and 3 more |
-| 23 | 2026-10-20 | Owner-delegated |  | Keep TBLASTX displayed_rows and TBLASTN aligned_sequences unchanged; XML gets its own _into copies so default paths stay identical. | outfmt 5 TBLASTX/TBLASTN row helpers | `LOSAT/src/algorithm/tblastn/stage_e_report.rs:1572` |
+| 23 | 2026-10-20 | Owner-delegated |  | Keep TBLASTX displayed_rows and TBLASTN aligned_sequences unchanged; XML gets its own _into copies so default paths stay identical. | outfmt 5 TBLASTX/TBLASTN row helpers | `LOSAT/src/algorithm/tblastn/stage_e_report.rs:1349` |
 | 26 | 2026-10-21 | Owner-delegated |  | OF5 design: Q1-Q2 and Q4-Q11 adopted as recommended (shared model, non-ASCII refusal, 13/14 CLI-only until ABI v2); Q3 was superseded by entry 27. | outfmt 13-16 design (OF5) | `LOSAT/src/report/blast_xml2/framing.rs:128`, `LOSAT/tests/outfmt13_14_files.rs:568` |
 | 28 | 2026-10-21 | Owner | 「入れてください。許可します。」 | LOSAT reads NCBI's taxdb and writes the taxonomy names NCBI writes (13-16 sciname, tabular name fields, 18), reproducing defined edge behaviour and refusing otherwise. | taxdb reader and names | `LOSAT/src/report/blast_xml/records.rs:127`, `LOSAT/tests/outfmt13_14_files.rs:962` and 4 more |
 | 30 | 2026-10-21 | Owner-delegated |  | The taxdb reader lands with its first consumer (outfmt 13-16 sciname); formats printing no names do not open taxdb; records past the last taxdb.btd page, empty taxdb.btd and non-ASCII scinames are refused. | taxdb reader, outfmt 13-16 | `LOSAT/tests/outfmt16_blastn.rs:6`, `LOSAT/tests/db_search_manifest.tsv:348` and 14 more |

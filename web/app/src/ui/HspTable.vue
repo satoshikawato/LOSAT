@@ -5,7 +5,7 @@
 import { computed, ref } from 'vue';
 import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../application/results';
 import type { HspSortKey } from '../domain/result-index';
-import { framesLabel, framesText } from './format';
+import { formatCount, framesLabel, framesText } from './format';
 import SortButton from './SortButton.vue';
 import { focusPressed } from './useSideScroll';
 import VirtualRows from './VirtualRows.vue';
@@ -47,10 +47,17 @@ const ORIENTATION: Readonly<Record<HspEntry['orientation'], string>> = {
   <div class="result-table hsp-table" data-testid="hsp-table">
     <h3>
       HSPs of {{ subject?.first.sseqid }}
-      <span class="muted small">{{ state.hsps.length }} shown</span>
+      <span class="muted small" data-testid="hsp-count">{{ formatCount(state.hsps.length) }} shown</span>
     </h3>
-    <div ref="scroller" class="table-scroll" :style="{ '--row-gutter': `${gutter}px` }">
-      <div class="table-head hsp-grid" :class="{ framed }" role="row">
+    <div
+      ref="scroller"
+      class="table-scroll"
+      role="grid"
+      aria-label="HSPs"
+      :aria-rowcount="state.hsps.length + 1"
+      :style="{ '--row-gutter': `${gutter}px` }"
+    >
+      <div class="table-head hsp-grid" :class="{ framed }" role="row" aria-rowindex="1">
         <SortButton class="num-head" data-col="rank" label="#" sort-key="rank" :sort="state.hspSort" scope="hsp" @sort="sortBy" />
         <SortButton
           class="num-head"
@@ -96,42 +103,44 @@ const ORIENTATION: Readonly<Record<HspEntry['orientation'], string>> = {
         :reveal="selectedPosition"
         :reveal-key="`${state.runId}:${state.hsp?.qIdx}:${state.hsp?.rank}`"
         :order-key="`${state.hspSort.key}:${state.hspSort.descending}`"
-        label="HSPs"
+        kind="grid"
         testid="hsp-list"
         @gutter="gutter = $event"
       >
-        <template #row="{ position }">
-          <button
+        <template #row="{ position, tabindex }">
+          <div
             v-for="hsp in [state.hsps[position]!]"
             :key="`${hsp.id.qIdx}:${hsp.id.rank}`"
-            type="button"
+            role="row"
+            :aria-rowindex="position + 2"
+            :aria-selected="position === selectedPosition"
+            :tabindex="tabindex"
             class="table-row hsp-grid"
             :class="{ framed, selected: position === selectedPosition }"
-            :aria-pressed="position === selectedPosition"
             :data-testid="`hsp-row-${hsp.id.qIdx}-${hsp.id.rank}`"
             :data-orientation="hsp.orientation"
             @mousedown="focusPressed"
             @click="choose(hsp.id)"
           >
-            <span class="num" data-field="rank" :title="String(hsp.id.rank + 1)">{{ hsp.id.rank + 1 }}</span>
-            <span class="num" data-field="bitscore" :title="hsp.fields.bitscore">{{ hsp.fields.bitscore }}</span>
-            <span class="num" data-field="evalue" :title="hsp.fields.evalue">{{ hsp.fields.evalue }}</span>
-            <span class="num" data-field="pident" :title="hsp.fields.pident">{{ hsp.fields.pident }}</span>
-            <span class="num" data-field="length" :title="hsp.fields.length">{{ hsp.fields.length }}</span>
-            <span class="num" data-field="mismatch" :title="hsp.fields.mismatch">{{ hsp.fields.mismatch }}</span>
-            <span class="num" data-field="gapopen" :title="hsp.fields.gapopen">{{ hsp.fields.gapopen }}</span>
-            <span class="num" data-field="query" :title="range(hsp.fields.qstart, hsp.fields.qend)">{{
+            <span role="gridcell" class="num" data-field="rank" :title="String(hsp.id.rank + 1)">{{ hsp.id.rank + 1 }}</span>
+            <span role="gridcell" class="num" data-field="bitscore" :title="hsp.fields.bitscore">{{ hsp.fields.bitscore }}</span>
+            <span role="gridcell" class="num" data-field="evalue" :title="hsp.fields.evalue">{{ hsp.fields.evalue }}</span>
+            <span role="gridcell" class="num" data-field="pident" :title="hsp.fields.pident">{{ hsp.fields.pident }}</span>
+            <span role="gridcell" class="num" data-field="length" :title="hsp.fields.length">{{ hsp.fields.length }}</span>
+            <span role="gridcell" class="num" data-field="mismatch" :title="hsp.fields.mismatch">{{ hsp.fields.mismatch }}</span>
+            <span role="gridcell" class="num" data-field="gapopen" :title="hsp.fields.gapopen">{{ hsp.fields.gapopen }}</span>
+            <span role="gridcell" class="num" data-field="query" :title="range(hsp.fields.qstart, hsp.fields.qend)">{{
               range(hsp.fields.qstart, hsp.fields.qend)
             }}</span>
-            <span class="num" data-field="subject" :title="range(hsp.fields.sstart, hsp.fields.send)">{{
+            <span role="gridcell" class="num" data-field="subject" :title="range(hsp.fields.sstart, hsp.fields.send)">{{
               range(hsp.fields.sstart, hsp.fields.send)
             }}</span>
-            <span v-if="framed" class="num" data-field="frames" :title="framesText(hsp)">{{ framesText(hsp) }}</span>
-            <span class="orientation" :data-orientation="hsp.orientation" data-field="orientation" :title="ORIENTATION[hsp.orientation]">{{
+            <span v-if="framed" role="gridcell" class="num" data-field="frames" :title="framesText(hsp)">{{ framesText(hsp) }}</span>
+            <span role="gridcell" class="orientation" :data-orientation="hsp.orientation" data-field="orientation" :title="ORIENTATION[hsp.orientation]">{{
               ORIENTATION[hsp.orientation]
             }}</span>
-            <span data-field="outfmt0" :title="hsp.inOutfmt0 ? 'shown' : 'not shown'">{{ hsp.inOutfmt0 ? 'shown' : 'not shown' }}</span>
-          </button>
+            <span role="gridcell" data-field="outfmt0" :title="hsp.inOutfmt0 ? 'shown' : 'not shown'">{{ hsp.inOutfmt0 ? 'shown' : 'not shown' }}</span>
+          </div>
         </template>
       </VirtualRows>
     </div>

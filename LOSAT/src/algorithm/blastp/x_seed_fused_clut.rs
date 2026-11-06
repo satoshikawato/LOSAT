@@ -121,7 +121,7 @@ pub(crate) fn x_bp_clut_scan_bf() -> bool {
 //             diag_coord = (query_offset - subject_offset) & diag_mask;
 // ```
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn x_scan_two_hit_compressed_flat<F>(
+pub(crate) fn x_scan_two_hit_compressed_flat<const CALLER: u8, F>(
     lookup: &XFlatCompressedLookup,
     subject: &[u8],
     subject_length: usize,
@@ -142,7 +142,7 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
             .then(|| x_fseed_test(diag_offset, subject_length, window, word_size))
             .flatten()
         {
-            x_scan_flat_fseed(
+            x_scan_flat_fseed::<CALLER, _>(
                 lookup,
                 subject,
                 subject_length,
@@ -234,7 +234,7 @@ fn x_fseed_test(
 /// (`x_pairs_fit`), else [`x_scan_flat_fseed_loop`].
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_scan_flat_fseed<F>(
+fn x_scan_flat_fseed<const CALLER: u8, F>(
     lookup: &XFlatCompressedLookup,
     subject: &[u8],
     subject_length: usize,
@@ -252,7 +252,7 @@ fn x_scan_flat_fseed<F>(
         crate::utils::xstats::add(&X_FLAT_SUBJECTS[0], 1);
         // SAFETY: x_pairs_fit holds (tested above).
         unsafe {
-            x_scan_flat_lean(
+            x_scan_flat_lean::<CALLER, _>(
                 lookup,
                 subject,
                 subject_length,
@@ -388,7 +388,7 @@ fn x_stage_test<F>(
 // `x_scan_two_hit_compressed_flat`)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-unsafe fn x_scan_flat_lean<F>(
+unsafe fn x_scan_flat_lean<const CALLER: u8, F>(
     lookup: &XFlatCompressedLookup,
     subject: &[u8],
     subject_length: usize,
@@ -405,7 +405,7 @@ unsafe fn x_scan_flat_lean<F>(
     assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
     let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
     // SAFETY: x_pairs_fit holds (this function's contract).
-    unsafe { lookup.x_list_pairs_lean(subject, subject_length, &mut cells) };
+    unsafe { lookup.x_list_pairs_lean::<CALLER>(subject, subject_length, &mut cells) };
     let listed = cells.len();
     cells.extend_from_slice(&[(0, 0); X_STARTS_AHEAD]);
     // The stage made here, not by a helper (#551 measured this code).
@@ -631,7 +631,7 @@ mod tests {
     use crate::algorithm::blastp::x_seed_fused_compressed::x_scan_two_hit_compressed;
     use crate::algorithm::tblastx::lookup::compressed::try_build_blosum62_compressed_lookup;
     use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-        x_try_build_flat_compressed_lookup, XFlatBuild,
+        x_try_build_flat_compressed_lookup, XFlatBuild, X_BLASTP,
     };
 
     // A small deterministic generator (xorshift64).
@@ -814,7 +814,7 @@ mod tests {
                     if length >= 5 {
                         // SAFETY: x_pairs_fit holds (asserted above).
                         unsafe {
-                            x_scan_flat_lean(
+                            x_scan_flat_lean::<X_BLASTP, _>(
                                 &flat,
                                 subject,
                                 length,
@@ -855,7 +855,7 @@ mod tests {
                     }
                     // The chooser, on every subject.
                     let mut chosen_log = Vec::new();
-                    x_scan_flat_fseed(
+                    x_scan_flat_fseed::<X_BLASTP, _>(
                         &flat,
                         subject,
                         length,
@@ -969,7 +969,7 @@ mod tests {
         assert!(flat.x_pairs_fit(&subject, length));
         let mut cells = Vec::new();
         // SAFETY: x_pairs_fit holds (asserted above).
-        unsafe { flat.x_list_pairs_lean(&subject, length, &mut cells) };
+        unsafe { flat.x_list_pairs_lean::<X_BLASTP>(&subject, length, &mut cells) };
         assert!(
             cells.iter().any(|&(_, index)| index as usize == last),
             "the subject reaches it"
@@ -982,7 +982,7 @@ mod tests {
         let (mut got, mut want) = (Vec::new(), Vec::new());
         // SAFETY: x_pairs_fit holds (asserted above).
         unsafe {
-            x_scan_flat_lean(
+            x_scan_flat_lean::<X_BLASTP, _>(
                 &flat,
                 &subject,
                 length,
@@ -1115,7 +1115,7 @@ mod tests {
                 );
                 // SAFETY: x_pairs_fit holds (asserted above).
                 unsafe {
-                    x_scan_flat_lean(
+                    x_scan_flat_lean::<X_BLASTP, _>(
                         &flat,
                         &subject,
                         length,
@@ -1205,7 +1205,7 @@ mod tests {
                 let mut got_diag = vec![DiagStruct::default(); diag_len];
                 let mut want_diag = got_diag.clone();
                 let mut got = Vec::new();
-                x_scan_two_hit_compressed_flat(
+                x_scan_two_hit_compressed_flat::<X_BLASTP, _>(
                     &flat,
                     &subject,
                     length,

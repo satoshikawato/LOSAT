@@ -78,6 +78,7 @@ mod seqalign;
 // nucleotide database (`-db`): its sequences, numbers and titles.
 mod database;
 // Web ABI v1's TBLASTN (`web_api::run_pair`): the CLI's parser and run over the call's bytes.
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod web;
 pub use args::{check_options, ResolvedTblastnArgs, TblastnArgs};
 pub use tblastn_app::{run_local, run_local_database};

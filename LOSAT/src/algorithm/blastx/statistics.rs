@@ -8,10 +8,7 @@ use super::{
 };
 use crate::{
     config::{ProteinScoringSpec, ScoringMatrix},
-    stats::{
-        lookup_protein_params,
-        spouge::{blast_spouge_stoe, lookup_protein_gumbel_params},
-    },
+    stats::{lookup_protein_params, spouge::blast_spouge_stoe},
 };
 use anyhow::{ensure, Result};
 

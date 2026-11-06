@@ -586,7 +586,7 @@ fn linked_sum_evalue(
     params: &LinkParameters,
 ) -> (f64, f64) {
     let context = work[head].value.hsp.context;
-    let adjustment = lengths[context].length_adjustment as i32;
+    let adjustment = lengths[context].length_adjustment;
     let query_eff_length = (query_lengths[context] - adjustment).max(1);
     let subject_eff_length = (subject_length - adjustment).max(1);
     let num = (work[head].value.num + work[candidate].value.num) as i16;

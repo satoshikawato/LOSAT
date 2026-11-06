@@ -67,7 +67,9 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
+#[cfg(any(feature = "parallel", test))]
+use std::sync::OnceLock;
+use std::sync::{Arc, Condvar, Mutex, Weak};
 
 use anyhow::Result;
 
@@ -186,6 +188,7 @@ pub(crate) struct XDbStream<'a> {
     /// The blocks that something holds or a thread reads, by their number in `grid` (`with_block`).
     blocks: XSharedReads<SequenceBlock>,
     /// The cuts made of the sequences, by their key (`x_kept_cut`).
+    #[cfg(any(feature = "parallel", test))]
     cuts: Mutex<Vec<(u64, Arc<[u32]>)>>,
     /// The blocks read (`with_block`).
     #[cfg(test)]
@@ -212,6 +215,7 @@ impl<'a> XDbStream<'a> {
             mapped: threads > 1,
             stores: XSharedReads::new(),
             blocks: XSharedReads::new(),
+            #[cfg(any(feature = "parallel", test))]
             cuts: Mutex::new(Vec::new()),
             #[cfg(test)]
             block_reads: AtomicUsize::new(0),
@@ -268,6 +272,7 @@ impl<'a> XDbStream<'a> {
     /// are given by the blocks of the grid: the first of a block with the bases of a whole block
     /// and the others with none. For a cut of the sequences that is scheduling only
     /// (`x_kept_cut`).
+    #[cfg(any(feature = "parallel", test))]
     pub(crate) fn x_approx_lengths(&self, mut visit: impl FnMut(u32)) {
         let count = u32::try_from(self.count()).expect("a database ordinal id fits Uint4");
         let mut visited = 0u32;
@@ -283,6 +288,7 @@ impl<'a> XDbStream<'a> {
     /// `x_approx_lengths` of the sequences from ordinal id `from` on that the index did not give:
     /// a block of the grid as its first sequence with the bases of a whole block and the others
     /// with none.
+    #[cfg(any(feature = "parallel", test))]
     fn x_grid_lengths(&self, from: u32, mut visit: impl FnMut(u32)) {
         let count = u32::try_from(self.count()).expect("a database ordinal id fits Uint4");
         let whole = u32::try_from(PLAN_BLOCK_BYTES * 4).unwrap_or(u32::MAX);
@@ -298,6 +304,7 @@ impl<'a> XDbStream<'a> {
     /// subjects for their bases, from `x_approx_lengths`), made by the first caller with `key`
     /// and kept for the run: every query batch of the search and every pool (each `key`) cuts
     /// the same sequences, which on core_nt read 1 GB of the index.
+    #[cfg(any(feature = "parallel", test))]
     pub(crate) fn x_kept_cut(&self, key: u64, make: impl FnOnce() -> Vec<u32>) -> Arc<[u32]> {
         let mut cuts = self
             .cuts
@@ -568,14 +575,17 @@ thread_local! {
 // LOSAT_X_TBNPLANCUT variable once.
 /// LOSAT_X_TBNPLANCUT, in the strict set (on unless `=0`): whether a thread's block goes with the
 /// chunk of subjects the thread searches (`x_plan_chunk`).
+#[cfg(any(feature = "parallel", test))]
 fn x_plan_cut() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNPLANCUT"))
 }
 
 /// A thread's search of a chunk of subjects (`x_plan_chunk`), until it is dropped.
+#[cfg(any(feature = "parallel", test))]
 pub(crate) struct XPlanChunk(());
 
+#[cfg(any(feature = "parallel", test))]
 impl Drop for XPlanChunk {
     fn drop(&mut self) {
         X_PLAN_CHUNKS.with(|chunks| chunks.set(chunks.get() - 1));
@@ -594,6 +604,7 @@ impl Drop for XPlanChunk {
 /// runs another flow's loop (query batches side by side): the inner one's end lets the outer block
 /// go, and the outer chunk takes the block of its next sequence again. `None` with
 /// `LOSAT_X_TBNPLANCUT=0`.
+#[cfg(any(feature = "parallel", test))]
 pub(crate) fn x_plan_chunk() -> Option<XPlanChunk> {
     x_plan_cut().then(|| {
         X_PLAN_CHUNKS.with(|chunks| chunks.set(chunks.get() + 1));

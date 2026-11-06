@@ -128,6 +128,7 @@ pub(crate) struct XStreamDb<'a> {
     x_first: std::sync::Mutex<Option<anyhow::Error>>,
     /// EXPERIMENT (LOSAT_X_BXTASKRES): the subject flow's task bounds by tasks' `k`, made once
     /// (`x_task_starts`).
+    #[cfg(feature = "parallel")]
     x_task_starts: std::sync::Mutex<Vec<(usize, std::sync::Arc<[u32]>)>>,
 }
 
@@ -150,6 +151,7 @@ impl<'a> XStreamDb<'a> {
             x_covered: std::sync::Mutex::new(Vec::new()),
             x_damaged: std::sync::OnceLock::new(),
             x_first: std::sync::Mutex::new(None),
+            #[cfg(feature = "parallel")]
             x_task_starts: std::sync::Mutex::new(Vec::new()),
         }
     }

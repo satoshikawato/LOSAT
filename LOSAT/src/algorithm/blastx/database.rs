@@ -89,6 +89,7 @@ impl BlastxDatabase {
 
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
+    #[cfg(test)]
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         Self::open_restricted(name, settings, None, &mut std::io::sink())
     }
@@ -494,7 +495,7 @@ impl ReportedSubjects {
         }
         if taxids {
             // The taxid of each reported sequence, read apart from the titles for the XML2 and
-            // JSON formats only (`algorithm::common::database::read_reported_taxids`); the
+            // JSON formats only (`algorithm::common::database::read_reported_taxonomy`); the
             // sequences with a title are the reported ones.
             // A sequence with parsed Seq-ids has the taxid of each definition line
             // (`shared::read_reported_taxonomy`).
@@ -757,11 +758,6 @@ impl ReportedSubjects {
     /// The sequence of rank `rank` when it has parsed Seq-ids.
     pub(crate) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
         self.parsed.get(rank).and_then(Option::as_deref)
-    }
-
-    /// The stored title of rank `rank` (`stitle`).
-    pub(crate) fn title(&self, rank: usize) -> &str {
-        &self.records[rank].title
     }
 
     /// The stored titles by rank (the outfmt 0 alignment headings).

@@ -4,7 +4,7 @@
 #![allow(
     dead_code,
     clippy::duplicate_mod,
-    reason = "each test binary that loads this module uses a different subset of it, and the blastp and tblastn suites load it through several #[path] files"
+    reason = "each test file that declares this module uses a different subset of it, and the blastp and tblastn suites load it through several #[path] files"
 )]
 
 use std::io::{self, Write};

@@ -103,8 +103,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     unexpected, stale = evaluate(found, allowed)
     for path in unexpected:
         print(
-            f"UNEXPECTED\t{path}\tnew `#![allow(warnings ...)]`: remove it and allow only the lints "
-            "the file needs, by name",
+            f"UNEXPECTED\t{path}\tnew `#![allow(warnings ...)]`: remove it; allow a lint in the "
+            "[lints] table of LOSAT/Cargo.toml with a reason, or put #[expect(lint, reason = ...)] "
+            "on the item",
         )
     for path in stale:
         print(f"STALE\t{path}\tno longer has the attribute: remove it from {allowlist_path.name}")

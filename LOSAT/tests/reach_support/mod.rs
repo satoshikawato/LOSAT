@@ -2,8 +2,11 @@
 //! `LOSAT/src/utils/xreach.rs`): a test passes `Reach::var()` with the variables of a run and
 //! asks `Reach::sides` whether the switch's own path ran on its input. It replaced the shadow
 //! counters as the proof that a path engaged (switch-tidy, 2026-10-24).
-#![allow(dead_code)]
-#![allow(clippy::duplicate_mod)]
+#![allow(
+    dead_code,
+    clippy::duplicate_mod,
+    reason = "each test file that declares this module uses a different subset of it, and the suites load it through several #[path] files"
+)]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -91,10 +91,10 @@ use super::encoding::{
     encode_protein_sequence, ncbistdaa_to_ascii, EncodedProtein,
 };
 #[cfg(test)]
-use super::extension::extend_one_hit;
+use super::extension::{extend_one_hit, extend_two_hit};
 use super::extension::{
-    extend_one_hit_blosum62, extend_one_hit_of, extend_two_hit, extend_two_hit_blosum62,
-    extend_two_hit_table, BlastpUngappedData,
+    extend_one_hit_blosum62, extend_one_hit_of, extend_two_hit_blosum62, extend_two_hit_table,
+    BlastpUngappedData,
 };
 use super::gapalign::{
     blastp_get_start_for_gapped_alignment, blastp_score_only_gapped_alignment_with_scratch,

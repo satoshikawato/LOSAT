@@ -937,6 +937,8 @@ pub(crate) fn x_try_build_flat_compressed_lookup(
 const X_COUNT_AHEAD: usize = 32;
 const X_FILL_STARTS_AHEAD: usize = 32;
 const X_FILL_HITS_AHEAD: usize = 16;
+// The fill reads a cursor for the hits hint after the starts hint has fetched its line.
+const _: () = assert!(X_FILL_HITS_AHEAD <= X_FILL_STARTS_AHEAD);
 
 // No NCBI counterpart: how many appends the count pass records before it counts them (and tests NCBI's
 // table, as the reference does after each query offset); it bounds the record kept before a refusal.
@@ -1201,10 +1203,9 @@ fn x_flat_with_capacity_of<S: CompressedScores>(
 
     // Fill pass: the appends again in order, each at the next slot of its cell (the cursor of cell
     // `index` is entry `index + 1`), so each cell holds o_0..o_{n-1}; a cursor ends at the next cell's
-    // start, so then entry `index` is cell `index`'s start, and the last entry the number of hits (the
-    // last cell, index `backbone_size - 1` = A^w, is never a word's index: its cursor stays at its
-    // start, `total`). Then each cell of more than 5 offsets puts o_k at `x_emission_position(k, n)`
-    // (cells of 5 or fewer: position k).
+    // start, so then entry `index` is cell `index`'s start and the last entry the number of hits. Then
+    // each cell of more than 5 offsets puts o_k at `x_emission_position(k, n)` (cells of 5 or fewer:
+    // position k).
     let mut hits = vec![0i32; total as usize];
     let mut at = 0usize;
     for &(query_offset, appends) in &per_offset {

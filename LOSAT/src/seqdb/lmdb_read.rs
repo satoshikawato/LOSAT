@@ -826,6 +826,12 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         self.psize
     }
 
+    /// Number of pages that can be read: `mm_last_pg + 1` of the meta page in use, at most the
+    /// whole pages of the file.
+    pub fn num_pages(&self) -> u64 {
+        self.npages
+    }
+
     /// Transaction id of the meta page in use.
     pub fn txnid(&self) -> u64 {
         self.txnid

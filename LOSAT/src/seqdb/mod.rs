@@ -57,6 +57,8 @@ pub use filter::{DbList, ListWarning, SeqidList, TaxidList};
 #[cfg(test)]
 mod mask_tests;
 #[cfg(test)]
+mod seqid_taxid_damaged_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod x_dbidxread_tests;

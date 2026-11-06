@@ -65,21 +65,15 @@ const busy = (set: ExampleSet) => {
   return progress !== undefined && progress !== 'failed';
 };
 
-/** The set being loaded, until its load ends: loaded (its files are in the inputs), failed or cancelled. */
-let loading: ExampleId | undefined;
-let cancelled = false;
+// A set put into the inputs, and a load that failed, are told (with the note on the set, if any).
+watch(
+  () => state.value.loaded,
+  (loaded) => {
+    if (loaded !== undefined) announce(`Example ${exampleById(loaded.id).label} loaded. ${note.value?.id === loaded.id ? note.value.text : ''}`);
+  },
+);
 watch(load, (now) => {
-  if (now !== undefined && now.progress.state !== 'failed') {
-    if (now.id !== loading) cancelled = false;
-    loading = now.id;
-    return;
-  }
-  const id = loading;
-  loading = undefined;
-  if (id === undefined) return;
   if (now?.progress.state === 'failed') announce(now.progress.message, 'alert');
-  else if (!cancelled) announce(`Example ${exampleById(id).label} loaded.${note.value?.id === id ? ` ${note.value.text}` : ''}`);
-  cancelled = false;
 });
 
 const buttons: Partial<Record<ExampleId, HTMLButtonElement>> = {};
@@ -92,7 +86,6 @@ function press(set: ExampleSet): void {
 }
 /** Cancel leaves with the load: the focus goes back to the set's button. */
 async function cancel(set: ExampleSet): Promise<void> {
-  cancelled = true;
   props.examples.cancel();
   await nextTick();
   buttons[set.id]?.focus();

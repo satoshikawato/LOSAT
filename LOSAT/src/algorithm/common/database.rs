@@ -2800,12 +2800,13 @@ pub(crate) fn tabular_names<'t>(
 /// that taxid's slot of NCBI's cache, which is refused (`TaxdbRun::cache_collision`, at the
 /// run's first call, before its subjects are looked at, so also in a first batch that reports
 /// nothing), so the order of the subjects does not change the bytes. The callers decide where
-/// they ask: BLASTX, which writes each batch's reports before it searches the next, and BLASTN
-/// (also where its report stream does not act) call it from their first batch on, unless no
-/// batch can fetch a subject (`prefetch_always_off` with rows that read none); TBLASTN, and
-/// TBLASTX, whose report stream is off for a run with this refusal, make every batch's lookups
-/// before any report and call it only where NCBI fetches a subject, so a run that fetches none
-/// is not refused. The caller writes the
+/// they ask: BLASTX, which writes each batch's reports before it searches the next, calls it
+/// from its first batch on, unless no batch can fetch a subject (`prefetch_always_off` with
+/// rows that read none); BLASTN, TBLASTN and TBLASTX call it only where NCBI fetches a subject,
+/// so a run that fetches none is not refused: TBLASTN, and TBLASTX, whose report stream is off
+/// for a run with this refusal, make every batch's lookups before any report, and BLASTN's
+/// report stream writes a later batch's refusal after the reports of the batches before, as
+/// its other refusals of a batch's reported subjects (`x_rpt_stream`). The caller writes the
 /// text after the reader's messages of the batch and before the warnings of its first query,
 /// where NCBI's prefetch comes. Empty, and nothing read, without `taxdb.bti` on the search
 /// path. A taxonomy database that LOSAT cannot read as NCBI does is refused as in

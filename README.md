@@ -419,7 +419,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 **Scoring and search settings**
 - `-matrix` and gap costs: `blastp` accepts only BLOSUM62, with any gap costs of NCBI's BLOSUM62 table; `blastx` accepts only BLOSUM62 with `-gapopen 11 -gapextend 1`; `tblastn` and `tblastx` accept every matrix.
 - `-comp_based_stats 1` and `3`: `blastp`, `blastx`, `tblastn` (`0` and `2` work).
-- `-word_size` 2 and 4: `blastp` (3 and 5 to 7 work). Other than 3 and 5: `blastx`. Other than 3: `tblastx`. `tblastn` takes 2 to 7.
+- `-word_size` 2 and 4: `blastp` (3 and 5 to 7 work). Other than 3 and 5: `blastx`. `tblastn` takes 2 to 7, `tblastx` 2 to 4.
 - `-task blastp-short`: `blastp`. `-task rmblastn`: `blastn`.
 - `-use_sw_tback`: `blastp`, `blastx`.
 - `-max_intron_length`: `tblastn`.

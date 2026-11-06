@@ -3,7 +3,9 @@
 
 use super::*;
 use crate::config::ScoringMatrix;
-use crate::core::psi::{create_pssm_with_diagnostics, PsiMsa, PsiMsaCell, PsiScoreBlk};
+use crate::core::psi::{
+    create_pssm_with_diagnostics, KarlinBlk, PsiDiagnosticsRequest, PsiMsa, PsiMsaCell, PsiScoreBlk,
+};
 use crate::utils::matrix::{protein_score, BLAST_SCORE_MIN};
 
 const PURGE_TEST_QUERY_LENGTH: usize = 232;
@@ -42,9 +44,31 @@ const GI_129296: [u8; 388] = [
     6, 6, 9, 16, 22, 13, 14, 18, 13, 1, 9, 11, 6, 6, 7, 16, 22, 20, 17, 14,
 ];
 
+/// BLOSUM62 11/1's gapped block (`Blast_KarlinBlkGappedCalc`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:268
+// ```c
+//     {11, 1, (double) INT2_MAX, 0.267, 0.041, 0.14, 1.9, -30, 0.669720, 42.602800, 43.636200},
+// ```
+const BLOSUM62_11_1: KarlinBlk = KarlinBlk {
+    lambda: 0.267,
+    k: 0.041,
+    h: 0.14,
+};
+
 fn blosum62() -> PsiScoreBlk {
-    crate::algorithm::psiblast::pssm::score_block(ScoringMatrix::Blosum62).unwrap()
+    crate::algorithm::psiblast::pssm::score_block(ScoringMatrix::Blosum62, BLOSUM62_11_1).unwrap()
 }
+
+/// psiblast's request without `-out_ascii_pssm` (`PSIDiagnosticsRequestNewEx(FALSE)`).
+const REQUEST: PsiDiagnosticsRequest = PsiDiagnosticsRequest {
+    information_content: false,
+    weighted_residue_frequencies: false,
+    frequency_ratios: true,
+    gapless_column_weights: false,
+    sigma: false,
+    interval_sizes: false,
+    num_matching_seqs: false,
+};
 
 /// An MSA whose rows hold `rows` (every cell aligned), the first of them the query.
 fn aligned_msa(rows: &[&[u8]]) -> PsiMsa {
@@ -197,7 +221,7 @@ fn a_query_aligned_with_internal_gaps_keeps_the_matrix_scores_at_the_gaps() {
         aligned[start..start + region.len()].copy_from_slice(&region);
     }
     let msa = aligned_msa(&[&query, &aligned]);
-    let pssm = create_pssm_with_diagnostics(&msa, 0, &blosum62()).unwrap();
+    let pssm = create_pssm_with_diagnostics(&msa, 0, &blosum62(), REQUEST).unwrap();
     assert_eq!(pssm.scores.len(), query.len());
     for (i, scores) in pssm.scores.iter().enumerate() {
         if aligned[i] != ncbistdaa::GAP {
@@ -394,7 +418,7 @@ fn flanking_gaps_are_rejected() {
     msa.rows[1][0].letter = ncbistdaa::GAP;
     msa.rows[2][0].letter = ncbistdaa::GAP;
     msa.rows[2][9].letter = ncbistdaa::GAP;
-    assert!(create_pssm_with_diagnostics(&msa, 0, &blosum62()).is_err());
+    assert!(create_pssm_with_diagnostics(&msa, 0, &blosum62(), REQUEST).is_err());
 }
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:1202-1206 testRejectGapInQuery
@@ -413,7 +437,7 @@ fn a_gap_in_the_query_is_rejected() {
         let mut msa = aligned_msa(&[&FLANKING_GAPS_QUERY[..]; 3]);
         msa.rows[0][gap_position].letter = ncbistdaa::GAP;
         assert!(
-            create_pssm_with_diagnostics(&msa, 0, &blosum62()).is_err(),
+            create_pssm_with_diagnostics(&msa, 0, &blosum62(), REQUEST).is_err(),
             "gap at {gap_position}"
         );
     }

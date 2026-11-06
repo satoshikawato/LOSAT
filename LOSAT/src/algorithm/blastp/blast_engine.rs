@@ -3020,11 +3020,14 @@ fn shift_hsp_to_records(hsp: &mut BlastpHsp, ranges: &BlastpRanges<'_>) {
     }
 }
 
-/// psiblast's ASCII PSSMs after its round (`-save_pssm_after_last_round -out_ascii_pssm`): one
-/// for each query whose results have alignments, in the order of the queries, from the query's
-/// whole record and its Seq-aligns before the formatter's cut (`algorithm::psiblast::pssm`).
-/// A query whose PSSM fails stops the run after its report (`PssmStop`, handled by `search`),
-/// with the PSSMs of the queries before it.
+/// psiblast's PSSMs after its round (`-save_pssm_after_last_round` with `-out_pssm` and/or
+/// `-out_ascii_pssm`): one for each query whose results have alignments, in the order of the
+/// queries, from the query's whole record and its Seq-aligns before the formatter's cut
+/// (`algorithm::psiblast::pssm`). Their files are made ready here, before the reports, and
+/// written after them (`PssmFiles`: the ASN.1 bytes staged beside each target, which is not
+/// changed before `commit`). A query whose PSSM fails or whose ASN.1 file cannot be written stops
+/// the run after its report (`PssmStop`, handled by `search`), with the PSSMs of the queries
+/// before it.
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:147-162
 // ```c++
 // s_GetQueryBioseq(CConstRef<CBlastQueryVector> query, CRef<CScope> scope,
@@ -3042,23 +3045,27 @@ fn shift_hsp_to_records(hsp: &mut BlastpHsp, ranges: &BlastpRanges<'_>) {
 //             _ASSERT(bh);
 //             retval.Reset(bh.GetBioseqCore());
 // ```
-// The query is its record's Bioseq, whole also with `-query_loc`; the ancillary data are the
-// query's (`CBlastAncillaryData`, blast_results.cpp:71-114: the ungapped block of its context and
-// the gapped one, and in the first round the PSI blocks are copies of them).
+// The query is its record's Bioseq, whole also with `-query_loc`; its Seq-align id is
+// `Query_<n>` (`n` its position in the input, as the reports name it); the ancillary data are
+// the query's (`CBlastAncillaryData`, blast_results.cpp:71-114: the ungapped block of its
+// context and the gapped one, and in the first round the PSI blocks are copies of them).
 #[cold]
 #[inline(never)]
-fn psiblast_ascii_pssms(
+#[allow(clippy::too_many_arguments)]
+fn psiblast_pssms(
     args: &ResolvedBlastpArgs,
     request: &crate::algorithm::psiblast::pssm::PssmRequest,
     hit_lists: &[Option<BlastpHitList>],
     ranges: &BlastpRanges<'_>,
     shown_subjects: ShownSubjects<'_>,
     contexts: &[QueryContext],
-    gapped: (f64, f64),
-) -> Result<Vec<Vec<u8>>> {
+    gapped: &KarlinParams,
+) -> Result<crate::algorithm::psiblast::pssm::PssmFiles> {
     use crate::algorithm::psiblast::pssm::{
-        ascii_pssm, ncbistdaa_letters, PssmAlignment, PssmAncillary, PssmStop,
+        ncbistdaa_letters, query_pssm, PssmAlignment, PssmAncillary, PssmFiles, PssmQueryRecord,
+        PssmScoring, PssmStop,
     };
+    use crate::core::psi::KarlinBlk;
     let subject = |s_idx: u32| -> Vec<u8> {
         match shown_subjects.letters(s_idx as usize) {
             Some(ShownLetters::Ascii(letters)) => ncbistdaa_letters(letters),
@@ -3066,7 +3073,18 @@ fn psiblast_ascii_pssms(
             None => Vec::new(),
         }
     };
-    let mut pssms = Vec::new();
+    let scoring = PssmScoring {
+        matrix: args.scoring.matrix,
+        matrix_name: &args.matrix_name,
+        gap_open: args.scoring.gap_open,
+        gap_extend: args.scoring.gap_extend,
+    };
+    let gapped = KarlinBlk {
+        lambda: gapped.lambda,
+        k: gapped.k,
+        h: gapped.h,
+    };
+    let mut files = PssmFiles::new(request);
     for (query, hit_list) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list else {
             continue;
@@ -3088,33 +3106,46 @@ fn psiblast_ascii_pssms(
         if alignments.is_empty() {
             continue;
         }
-        let record = &ranges.input_records[ranges.query_input.ordinal(query)];
+        let ordinal = ranges.query_input.ordinal(query);
+        let record = &ranges.input_records[ordinal];
+        let id = format!(
+            "Query_{}",
+            args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1
+        );
         let ungapped = &contexts[query].karlin_params;
         let ancillary = PssmAncillary {
-            ungapped: (ungapped.k, ungapped.lambda),
+            ungapped: KarlinBlk {
+                lambda: ungapped.lambda,
+                k: ungapped.k,
+                h: ungapped.h,
+            },
             gapped,
         };
-        match ascii_pssm(
+        let made = query_pssm(
             request,
-            args.scoring.matrix,
+            scoring,
+            gapped,
             args.inclusion_ethresh,
-            record.seq(),
+            PssmQueryRecord {
+                letters: record.seq(),
+                id: &id,
+                title: record.title(),
+            },
             &alignments,
             &subject,
             ancillary,
-        ) {
-            Ok(pssm) => pssms.push(pssm),
-            Err(error) => {
-                return Err(PssmStop {
-                    query,
-                    error,
-                    pssms,
-                }
-                .into())
+        )
+        .and_then(|pssm| files.add(pssm.asn.as_deref(), pssm.ascii));
+        if let Err(error) = made {
+            return Err(PssmStop {
+                query,
+                error,
+                files,
             }
+            .into());
         }
     }
-    Ok(pssms)
+    Ok(files)
 }
 
 /// The stored residue of pyrrolysine (O): the only code that `ncbistdaa_to_ascii` shows as O
@@ -5297,6 +5328,21 @@ fn search_cli(
     if args.archive.is_some() {
         super::archive::check_titles(&records, "query")?;
     }
+    // So does the refusal of a title that psiblast's ASN.1 PSSM cannot write, and of a PSSM file
+    // that LOSAT cannot write as NCBI does (one of the report streams, a named pipe).
+    if let Some(request) = resolved.psi_pssm.as_ref() {
+        if request.asn_path.is_some() {
+            crate::algorithm::psiblast::pssm::check_pssm_titles(&records)?;
+        }
+        crate::algorithm::psiblast::pssm::check_pssm_files(
+            request,
+            records.len(),
+            resolved
+                .out
+                .as_deref()
+                .filter(|path| path.as_os_str() != "-"),
+        )?;
+    }
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
         QueryEnd::EofError => QueryReading::BlankLines,
@@ -6079,9 +6125,9 @@ fn search(
                           searched_done: usize,
                           epilog: bool|
      -> Result<()> {
-        let Some(request) = args.psi_pssm.clone() else {
+        if args.psi_pssm.is_none() {
             return search_batches_once(args, outputs, pool, input_done, searched_done, epilog);
-        };
+        }
         let mut prefix_args = args.clone();
         prefix_args.psi_pssm = None;
         match search_batches_once(args, outputs, pool, input_done, searched_done, epilog) {
@@ -6097,10 +6143,7 @@ fn search(
                     .get(after)
                     .map_or(input_done, |&(input, _)| input.min(input_done));
                 search_batches_once(prefix_args, outputs, pool, input_end, stop.query + 1, false)?;
-                crate::algorithm::psiblast::pssm::write_ascii_pssm_files(
-                    &request,
-                    stop.pssms.iter().map(Vec::as_slice),
-                );
+                stop.files.commit()?;
                 Err(stop.error)
             }
             other => other,
@@ -11131,19 +11174,22 @@ fn run_resolved_in_pool(
     //                                      results_1st_query.GetAncillaryData());
     // ```
     // psiblast's PSSM is made from the Seq-aligns of the round's results, before the
-    // formatter's cut; it is written after the reports (below `output_result`).
-    let psiblast_pssms: Option<Vec<Vec<u8>>> = match args.psi_pssm.as_ref() {
-        Some(request) => Some(psiblast_ascii_pssms(
-            &args,
-            request,
-            &hit_lists,
-            ranges,
-            shown_subjects,
-            &contexts,
-            (gapped_params.k, gapped_params.lambda),
-        )?),
-        None => None,
-    };
+    // formatter's cut; its files are staged here (`psiblast_pssms`) and written after the
+    // reports (below `output_result`). A refusal between here and the reports (the database
+    // titles below) or a report write error drops them: no PSSM file has changed (`PssmFiles`).
+    let psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
+        match args.psi_pssm.as_ref() {
+            Some(request) => Some(psiblast_pssms(
+                &args,
+                request,
+                &hit_lists,
+                ranges,
+                shown_subjects,
+                &contexts,
+                &gapped_params,
+            )?),
+            None => None,
+        };
     let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
         hit_lists
             .iter_mut()
@@ -12428,11 +12474,10 @@ fn run_resolved_in_pool(
     //            SavePssmToFile(pssm, &itr);
     //        }
     // ```
-    if let (Some(request), Some(pssms)) = (args.psi_pssm.as_ref(), psiblast_pssms.as_ref()) {
-        crate::algorithm::psiblast::pssm::write_ascii_pssm_files(
-            request,
-            pssms.iter().map(Vec::as_slice),
-        );
+    // The files were staged before the reports (`psiblast_pssms`); an error before this point
+    // has dropped them, and no PSSM file has changed (`PssmFiles`).
+    if let Some(files) = psiblast_pssms {
+        files.commit()?;
     }
     // EXPERIMENT (LOSAT_X_BPLKPFLAT): the flat table's vectors kept for the next block's build
     // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed. EXPERIMENT

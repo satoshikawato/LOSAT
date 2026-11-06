@@ -43,7 +43,7 @@ const PSEUDO_MAX: f64 = 1000000.0;
 // ```c
 // #define NCBIMATH_LN2	0.69314718055994530941723212145818
 // ```
-const NCBIMATH_LN2: f64 = 0.693_147_180_559_945_309_417_232_121_458_18;
+const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_stat.h:122
 // ```c

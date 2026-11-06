@@ -1407,8 +1407,9 @@ enum TargetKind {
     Absent,
     /// A regular file, also through a symbolic link.
     Regular,
-    /// A character device (`/dev/null`, `/dev/full`): opened for writing as it is.
-    Device,
+    /// A character device (`/dev/null`, `/dev/full`): opened for writing as it is; `null`: it is
+    /// `/dev/null`.
+    Device { null: bool },
     /// A directory or a socket: `ofstream` cannot open it.
     Unopenable,
     /// A named pipe, a block device or a symbolic link to no file: not supported.
@@ -1420,7 +1421,7 @@ enum TargetKind {
 fn target_kind(path: &std::path::Path) -> TargetKind {
     match std::fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => TargetKind::Regular,
-        Ok(metadata) => special_target_kind(&metadata.file_type()),
+        Ok(metadata) => special_target_kind(&metadata),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             if std::fs::symlink_metadata(path).is_ok() {
                 TargetKind::Unsupported("a symbolic link to a missing file")
@@ -1433,22 +1434,56 @@ fn target_kind(path: &std::path::Path) -> TargetKind {
 }
 
 #[cfg(unix)]
-fn special_target_kind(file_type: &std::fs::FileType) -> TargetKind {
+fn special_target_kind(metadata: &std::fs::Metadata) -> TargetKind {
     use std::os::unix::fs::FileTypeExt;
+    let file_type = metadata.file_type();
     if file_type.is_fifo() {
         TargetKind::Unsupported("a named pipe")
     } else if file_type.is_block_device() {
         TargetKind::Unsupported("a block device")
     } else if file_type.is_char_device() {
-        TargetKind::Device
+        TargetKind::Device {
+            null: device_number(metadata).is_some_and(|rdev| Some(rdev) == null_device()),
+        }
     } else {
         TargetKind::Unopenable
     }
 }
 
 #[cfg(not(unix))]
-fn special_target_kind(_file_type: &std::fs::FileType) -> TargetKind {
+fn special_target_kind(_metadata: &std::fs::Metadata) -> TargetKind {
     TargetKind::Unopenable
+}
+
+/// The device number of a character device.
+#[cfg(unix)]
+fn device_number(metadata: &std::fs::Metadata) -> Option<u64> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    metadata
+        .file_type()
+        .is_char_device()
+        .then(|| metadata.rdev())
+}
+
+/// `/dev/null`'s device number.
+#[cfg(unix)]
+fn null_device() -> Option<u64> {
+    std::fs::metadata("/dev/null")
+        .ok()
+        .as_ref()
+        .and_then(device_number)
+}
+
+/// Whether the test open of an existing file failed with `EPERM`: an immutable or append-only file
+/// (`open(2)`), whose name cannot be removed either (`unlink(2)`, `EPERM`).
+#[cfg(unix)]
+fn immutable(error: &std::io::Error) -> bool {
+    rustix::io::Errno::from_io_error(error) == Some(rustix::io::Errno::PERM)
+}
+
+#[cfg(not(unix))]
+fn immutable(_error: &std::io::Error) -> bool {
+    false
 }
 
 /// Whether removing `path` succeeds, given that its directory takes a new file (the staging file
@@ -1492,9 +1527,10 @@ fn owner(_metadata: &std::fs::Metadata) -> u32 {
 /// must know before its first report byte whether each file can be written; and a run that fails
 /// before its reports are out (a report write error, a LOSAT refusal) must leave every file as it
 /// was, as NCBI's, which stops before `SavePssmToFile`. So `add` writes the ASN.1 bytes to a
-/// staging file beside the target (`.<name>.losat-<pid>-<n>`, a new file in the target's
-/// directory), which shows that the directory takes a file and the file system the bytes, and
-/// foresees NCBI's open of the target without changing it; only `commit` writes the targets.
+/// staging file beside the target (`.losat-<pid>-<n>`, a new file in the target's directory, whose
+/// name is short so that any name the target can have is no reason for its failure), which shows
+/// that the directory takes a file and the file system the bytes, and foresees NCBI's open of the
+/// target without changing it; only `commit` writes the targets.
 /// Dropped without `commit`, `PssmFiles` removes the staging files: no target has changed. A
 /// failure in `add` is the refusal of a file that NCBI cannot write either (its stop after that
 /// query's report, `PssmStop`) or that LOSAT cannot write as NCBI does; no partial file is left.
@@ -1502,22 +1538,25 @@ fn owner(_metadata: &std::fs::Metadata) -> u32 {
 /// The rule for a target, from what `GetStream` does with it (`PssmFile::open`):
 /// - no file of the name: made in its directory, which takes the staging file;
 /// - a regular file (also through a symbolic link): removed and made again (version 0) or
-///   truncated in place. LOSAT opens it for writing (without truncation); if that fails, version 0
-///   still succeeds when the name can be removed (`removable`), else NCBI's open fails there. An
-///   existing file beside which no staging file can be made is refused (NCBI may write it in place,
-///   but LOSAT cannot show that the bytes fit);
-/// - a character device (`/dev/null`, `/dev/full`): opened for writing and written zero bytes,
-///   which a device that takes no bytes refuses (`/dev/full`: ENOSPC), so the run stops at that
-///   query as NCBI's; the bytes are kept in memory and written by `commit`. A device that takes
-///   zero bytes but not the PSSM's would fail only after the reports;
+///   truncated in place. LOSAT opens it for writing (without truncation); if that fails with
+///   `EPERM` (an immutable or append-only file, whose name cannot be removed either), or fails and
+///   the name cannot be removed (`removable`) or the file is numbered, NCBI's open fails there.
+///   An existing file that opens for writing but beside which no staging file can be made (a
+///   directory that takes no new file) is written in place, as NCBI's version 0, which cannot remove
+///   its name, and a numbered file do: its bytes are kept in memory for `commit` (only the last
+///   query's with version 0), which cannot show before the reports that they fit;
+/// - a character device: opened for writing and written zero bytes, which a device that takes no
+///   bytes refuses (`/dev/full`: ENOSPC), so the run stops at that query as NCBI's. `/dev/null`
+///   gets nothing more; the PSSM of every query for another device is kept in memory (a few MB per
+///   query of some thousand residues) and written by `commit`. A device that takes zero bytes but
+///   not the PSSM's would fail only after the reports;
 /// - a directory or a socket: NCBI's open fails, and so does LOSAT's;
 /// - a named pipe, a block device, a symbolic link to no file: refused (also before the search,
 ///   `check_pssm_files`).
 ///
-/// Not foreseen: immutable or append-only attributes (which NCBI's version 0 can neither remove
-/// nor open, while LOSAT's test takes the name for removable) and a file system that fills between
-/// `add` and `commit` (LOSAT's peak use is the old file, at most two staged PSSMs of version 0 and
-/// every numbered one); such a failure comes after the reports (`commit`).
+/// Not foreseen: a file system that fills between `add` and `commit`, or that has no room for the
+/// bytes of a file written in place (LOSAT's peak use is the old file, at most two staged PSSMs of
+/// version 0 and every numbered one); such a failure comes after the reports (`commit`).
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-407
 // ```c++
 // CPsiBlastApp::SavePssmToFile(CRef<CPssmWithParameters> pssm,
@@ -1565,8 +1604,12 @@ struct PendingPssm {
 enum Staged {
     /// The bytes in a staging file beside the target.
     File(std::path::PathBuf),
+    /// The bytes of an existing file in a directory that takes no new file, written in place.
+    InPlace(Vec<u8>),
     /// The bytes for a character device.
-    Bytes(Vec<u8>),
+    Device(Vec<u8>),
+    /// Nothing: the target is `/dev/null`.
+    Null,
     /// Written, or replaced by a later query's file of the same name.
     Done,
 }
@@ -1643,7 +1686,7 @@ impl PssmFiles {
             }
             _ => None,
         };
-        if let Some((file, Staged::File(_))) = &asn {
+        if let Some((file, Staged::File(_) | Staged::InPlace(_))) = &asn {
             if file.replaced {
                 if let Some(previous) = self.last_replaced.replace(self.pending.len()) {
                     if let Some((_, staged)) = self.pending[previous].asn.as_mut() {
@@ -1670,41 +1713,39 @@ impl PssmFiles {
         let existing = match target_kind(path) {
             TargetKind::Absent => false,
             TargetKind::Regular => true,
-            TargetKind::Device | TargetKind::Unopenable => {
-                let mut device = std::fs::OpenOptions::new()
-                    .write(true)
-                    .open(path)
-                    .map_err(cannot_write)?;
-                // A write of zero bytes is passed to the device (`write(2)`).
-                let written = device.write(&[]).map_err(cannot_write)?;
-                debug_assert_eq!(written, 0);
-                return Ok(Staged::Bytes(asn.to_vec()));
+            TargetKind::Device { null } => {
+                return test_device(path, null, asn).map_err(cannot_write)
             }
+            TargetKind::Unopenable => return test_device(path, false, asn).map_err(cannot_write),
             TargetKind::Unsupported(kind) => return Err(unsupported_target(path, kind)),
             TargetKind::Unreachable(error) => return Err(cannot_write(error)),
         };
+        if path.file_name().is_none() {
+            return Err(cannot_write(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "not a file name",
+            )));
+        }
         let directory = match path.parent() {
             Some(parent) if !parent.as_os_str().is_empty() => parent,
             _ => std::path::Path::new("."),
         };
-        let (staging, uid) = match self.write_staging(path, directory, asn) {
+        let (staging, uid) = match self.write_staging(directory, asn) {
             Ok(staged) => staged,
-            Err(error) if existing => {
+            Err(_) if existing => {
                 // Where the directory takes no new file, NCBI's version 0 cannot remove the file
-                // either, and opens it in place, as a numbered file.
-                if let Err(open) = std::fs::OpenOptions::new().write(true).open(path) {
-                    return Err(cannot_write(open));
-                }
-                anyhow::bail!(
-                    "an existing -out_pssm file ({}) beside which LOSAT cannot write the PSSM first ({error}; LOSAT writes the target only after the reports, so that a run that fails before them leaves it as it was) is not supported by LOSAT's PSIBLAST",
-                    path.display()
-                )
+                // either and opens it in place, as a numbered file.
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(path)
+                    .map_err(cannot_write)?;
+                return Ok(Staged::InPlace(asn.to_vec()));
             }
             Err(error) => return Err(cannot_write(error)),
         };
         if existing {
             if let Err(error) = std::fs::OpenOptions::new().write(true).open(path) {
-                if !(file.replaced && removable(path, directory, uid)) {
+                if immutable(&error) || !(file.replaced && removable(path, directory, uid)) {
                     let _ = std::fs::remove_file(&staging);
                     return Err(cannot_write(error));
                 }
@@ -1713,26 +1754,20 @@ impl PssmFiles {
         Ok(Staged::File(staging))
     }
 
-    /// Writes `bytes` to a new staging file beside `target` in `directory`; its path and owner.
+    /// Writes `bytes` to a new staging file `.losat-<pid>-<n>` in the target's `directory`; its
+    /// path and owner.
     fn write_staging(
         &mut self,
-        target: &std::path::Path,
         directory: &std::path::Path,
         bytes: &[u8],
     ) -> std::io::Result<(std::path::PathBuf, u32)> {
-        let name = target.file_name().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a file name")
-        })?;
         loop {
             self.staging_count += 1;
-            let mut staging_name = std::ffi::OsString::from(".");
-            staging_name.push(name);
-            staging_name.push(format!(
+            let staging = directory.join(format!(
                 ".losat-{}-{}",
                 std::process::id(),
                 self.staging_count
             ));
-            let staging = directory.join(staging_name);
             let mut file = match std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -1769,8 +1804,8 @@ impl PssmFiles {
                         let _ = std::fs::remove_file(&staging);
                         Some(bytes)
                     }
-                    Staged::Bytes(bytes) => Some(Ok(bytes)),
-                    Staged::Done => None,
+                    Staged::InPlace(bytes) | Staged::Device(bytes) => Some(Ok(bytes)),
+                    Staged::Null | Staged::Done => None,
                 };
                 if let Some(bytes) = bytes {
                     bytes
@@ -1809,6 +1844,20 @@ impl Drop for PssmFiles {
     }
 }
 
+/// A character device's test (`PssmFiles`): opened for writing and written zero bytes; what
+/// `commit` writes to it.
+fn test_device(path: &std::path::Path, null: bool, asn: &[u8]) -> std::io::Result<Staged> {
+    let mut device = std::fs::OpenOptions::new().write(true).open(path)?;
+    // A write of zero bytes is passed to the device (`write(2)`).
+    let written = device.write(&[])?;
+    debug_assert_eq!(written, 0);
+    Ok(if null {
+        Staged::Null
+    } else {
+        Staged::Device(asn.to_vec())
+    })
+}
+
 fn unsupported_target(path: &std::path::Path, kind: &str) -> anyhow::Error {
     anyhow::anyhow!(
         "an -out_pssm file that is {kind} ({}) is not supported by LOSAT's PSIBLAST",
@@ -1825,13 +1874,14 @@ fn unsupported_target(path: &std::path::Path, kind: &str) -> anyhow::Error {
 /// file is the same device and inode (`metadata` follows `/dev/stdout` to the stream's file),
 /// or for a character device the same device number (`/dev/null` excepted: no order of its bytes
 /// shows); without inode numbers, the same canonical path as `-out`, or one of the names of the
-/// standard streams. Also refused, for `-out_pssm`: a
-/// named pipe, a block device and a symbolic link to no file (`PssmFiles`).
+/// standard streams (`ReportStreams`, taken once). Also refused, for `-out_pssm`: a named pipe, a
+/// block device and a symbolic link to no file (`PssmFiles`).
 pub(crate) fn check_pssm_files(
     request: &PssmRequest,
     queries: usize,
     out: Option<&std::path::Path>,
 ) -> Result<()> {
+    let streams = ReportStreams::new(out);
     for (option, path) in [
         ("-out_pssm", request.asn_path.as_deref()),
         ("-out_ascii_pssm", request.ascii_path.as_deref()),
@@ -1847,7 +1897,7 @@ pub(crate) fn check_pssm_files(
             vec![std::path::PathBuf::from(path)]
         };
         for name in &names {
-            if let Some(stream) = report_stream_of(name, out) {
+            if let Some(stream) = streams.stream_of(name) {
                 anyhow::bail!(
                     "an {option} file that is also {stream} ({}) is not supported by LOSAT's PSIBLAST",
                     name.display()
@@ -1863,59 +1913,83 @@ pub(crate) fn check_pssm_files(
     Ok(())
 }
 
-/// The report stream that the file `name` is (`check_pssm_files`); `/dev/null`, where no order of
-/// bytes shows, is none.
+/// The report streams (`check_pssm_files`): the standard output, the standard error (`fstat` of a
+/// copy of each descriptor) and the `-out` file, as files.
 #[cfg(unix)]
-fn report_stream_of(name: &std::path::Path, out: Option<&std::path::Path>) -> Option<&'static str> {
-    use std::os::fd::AsFd;
-    use std::os::unix::fs::{FileTypeExt, MetadataExt};
-    let target = std::fs::metadata(name).ok()?;
-    let device = |metadata: &std::fs::Metadata| {
-        metadata
-            .file_type()
-            .is_char_device()
-            .then(|| metadata.rdev())
-    };
-    let null = std::fs::metadata("/dev/null").ok();
-    if device(&target).is_some_and(|rdev| null.as_ref().and_then(device) == Some(rdev)) {
-        return None;
+struct ReportStreams {
+    streams: Vec<(&'static str, std::fs::Metadata)>,
+    null: Option<u64>,
+}
+
+#[cfg(unix)]
+impl ReportStreams {
+    fn new(out: Option<&std::path::Path>) -> Self {
+        use std::os::fd::AsFd;
+        let stream = |fd: std::os::fd::BorrowedFd<'_>| {
+            fd.try_clone_to_owned()
+                .ok()
+                .and_then(|fd| std::fs::File::from(fd).metadata().ok())
+        };
+        let streams = [
+            ("the standard output", stream(std::io::stdout().as_fd())),
+            ("the standard error", stream(std::io::stderr().as_fd())),
+            (
+                "the -out file",
+                out.and_then(|out| std::fs::metadata(out).ok()),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(name, metadata)| Some((name, metadata?)))
+        .collect();
+        Self {
+            streams,
+            null: null_device(),
+        }
     }
-    let same = |metadata: std::fs::Metadata| {
-        (metadata.dev(), metadata.ino()) == (target.dev(), target.ino())
-            || device(&target).is_some_and(|rdev| device(&metadata) == Some(rdev))
-    };
-    let stream = |fd: std::os::fd::BorrowedFd<'_>| {
-        fd.try_clone_to_owned()
-            .ok()
-            .and_then(|fd| std::fs::File::from(fd).metadata().ok())
-    };
-    if stream(std::io::stdout().as_fd()).is_some_and(same) {
-        Some("the standard output")
-    } else if stream(std::io::stderr().as_fd()).is_some_and(same) {
-        Some("the standard error")
-    } else if out
-        .and_then(|out| std::fs::metadata(out).ok())
-        .is_some_and(same)
-    {
-        Some("the -out file")
-    } else {
-        None
+
+    /// The report stream that the file `name` is; `/dev/null`, where no order of bytes shows, is
+    /// none.
+    fn stream_of(&self, name: &std::path::Path) -> Option<&'static str> {
+        use std::os::unix::fs::MetadataExt;
+        let target = std::fs::metadata(name).ok()?;
+        let device = device_number(&target);
+        if device.is_some() && device == self.null {
+            return None;
+        }
+        self.streams.iter().find_map(|(stream, metadata)| {
+            ((metadata.dev(), metadata.ino()) == (target.dev(), target.ino())
+                || device.is_some_and(|rdev| device_number(metadata) == Some(rdev)))
+            .then_some(*stream)
+        })
     }
 }
 
 #[cfg(not(unix))]
-fn report_stream_of(name: &std::path::Path, out: Option<&std::path::Path>) -> Option<&'static str> {
-    match name.to_str() {
-        Some("/dev/stdout" | "/dev/fd/1" | "/proc/self/fd/1") => {
-            return Some("the standard output")
+struct ReportStreams {
+    out: Option<std::path::PathBuf>,
+}
+
+#[cfg(not(unix))]
+impl ReportStreams {
+    fn new(out: Option<&std::path::Path>) -> Self {
+        Self {
+            out: out.and_then(|out| std::fs::canonicalize(out).ok()),
         }
-        Some("/dev/stderr" | "/dev/fd/2" | "/proc/self/fd/2") => return Some("the standard error"),
-        _ => {}
     }
-    let target = std::fs::canonicalize(name).ok()?;
-    out.and_then(|out| std::fs::canonicalize(out).ok())
-        .is_some_and(|out| out == target)
-        .then_some("the -out file")
+
+    fn stream_of(&self, name: &std::path::Path) -> Option<&'static str> {
+        match name.to_str() {
+            Some("/dev/stdout" | "/dev/fd/1" | "/proc/self/fd/1") => {
+                return Some("the standard output")
+            }
+            Some("/dev/stderr" | "/dev/fd/2" | "/proc/self/fd/2") => {
+                return Some("the standard error")
+            }
+            _ => {}
+        }
+        let target = std::fs::canonicalize(name).ok()?;
+        (self.out.as_ref() == Some(&target)).then_some("the -out file")
+    }
 }
 
 #[cfg(test)]

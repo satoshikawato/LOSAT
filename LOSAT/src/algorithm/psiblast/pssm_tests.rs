@@ -710,6 +710,83 @@ fn a_read_only_file_is_replaced_only_with_version_0() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+// The re-review of PS3 (RS1): the staging file's name is short, so a target name that NCBI can
+// make (up to NAME_MAX, 255 bytes here) is staged; a longer one fails as NCBI's open does
+// (`ENAMETOOLONG` from the target's `stat`).
+#[cfg(unix)]
+#[test]
+fn a_long_target_name_is_staged_and_a_too_long_one_refused() {
+    let dir = scratch("longname");
+    let long = dir.join("L".repeat(245));
+    write_files(&asn_request(&long, false), &[b"pssm\n"], &[]).unwrap();
+    assert_eq!(std::fs::read(&long).unwrap(), b"pssm\n");
+    let mut files = PssmFiles::new(&asn_request(&dir.join("L".repeat(300)), false));
+    assert!(files
+        .add(Some(b"pssm\n"), None)
+        .unwrap_err()
+        .to_string()
+        .starts_with("a -out_pssm file that cannot be written ("));
+    drop(files);
+    assert_eq!(names(&dir), ["L".repeat(245)]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// The re-review of PS3 (RS2): an existing file that opens for writing in a directory that takes no
+// new file is written in place after the reports, as NCBI's version 0 (which cannot remove its
+// name) and numbered files are (NCBI 2.17.0 `rodir`); nothing changes before the commit.
+#[cfg(unix)]
+#[test]
+fn an_existing_file_in_a_directory_that_takes_no_file_is_written_in_place() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let dir = scratch("rodir");
+    let ro = dir.join("ro");
+    std::fs::create_dir(&ro).unwrap();
+    for name in ["p.asn", "p.asn.1"] {
+        std::fs::write(ro.join(name), b"previous file\n").unwrap();
+    }
+    let inode = |name: &str| std::fs::metadata(ro.join(name)).unwrap().ino();
+    let (before, before_1) = (inode("p.asn"), inode("p.asn.1"));
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+    // Root makes files in any directory: then the files are staged as elsewhere.
+    let in_place = std::fs::File::create(ro.join("probe")).is_err();
+    let file = ro.join("p.asn");
+    let mut files = PssmFiles::new(&asn_request(&file, false));
+    files.add(Some(b"pssm 1\n"), None).unwrap();
+    files.add(Some(b"pssm 2\n"), None).unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"previous file\n");
+    drop(files);
+    assert_eq!(std::fs::read(&file).unwrap(), b"previous file\n");
+    write_files(&asn_request(&file, false), &[b"pssm 1\n", b"pssm 2\n"], &[]).unwrap();
+    write_files(&asn_request(&file, true), &[b"pssm 1\n"], &[]).unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"pssm 2\n");
+    assert_eq!(std::fs::read(ro.join("p.asn.1")).unwrap(), b"pssm 1\n");
+    assert_eq!(inode("p.asn.1"), before_1);
+    if in_place {
+        assert_eq!(inode("p.asn"), before);
+    }
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _ = std::fs::remove_file(ro.join("probe"));
+    assert_eq!(names(&ro), ["p.asn", "p.asn.1"]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// The re-review of PS3 (RN1): `/dev/null` keeps no PSSM bytes; another device keeps them for the
+// commit. RN2: `EPERM` from the test open (an immutable or append-only file) is not removable.
+#[cfg(target_os = "linux")]
+#[test]
+fn dev_null_keeps_no_bytes_and_eperm_is_immutable() {
+    let mut files = PssmFiles::new(&asn_request(std::path::Path::new("/dev/null"), false));
+    files.add(Some(b"pssm\n"), None).unwrap();
+    assert!(matches!(files.pending[0].asn, Some((_, Staged::Null))));
+    files.commit().unwrap();
+    let mut files = PssmFiles::new(&asn_request(std::path::Path::new("/dev/zero"), false));
+    files.add(Some(b"pssm\n"), None).unwrap();
+    assert!(matches!(files.pending[0].asn, Some((_, Staged::Device(_)))));
+    // Linux's EPERM and EACCES.
+    assert!(immutable(&std::io::Error::from_raw_os_error(1)));
+    assert!(!immutable(&std::io::Error::from_raw_os_error(13)));
+}
+
 // The review of PS3 (B2): NCBI writes a PSSM file that is also a report stream among the reports'
 // bytes, in an order of their buffers; refused before the search.
 #[test]

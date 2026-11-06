@@ -2020,6 +2020,7 @@ mod tests {
     #[test]
     fn x_packed_frames_read_from_the_bytes_are_the_frames_of_the_codes() {
         use crate::sequence::packed_subject::PackedNucleotide;
+        #[cfg(target_arch = "x86_64")]
         let mut vector_codons = 0usize;
         let lengths = (0..=400).chain([1_000, 4_999, 49_151, 49_153, 100_003]);
         for length in lengths {
@@ -2117,6 +2118,7 @@ mod tests {
     #[test]
     fn x_one_strand_of_a_phase_is_that_strand_of_both() {
         use crate::sequence::packed_subject::PackedNucleotide;
+        #[cfg(target_arch = "x86_64")]
         let mut vector_codons = 0usize;
         let lengths = (0..=400).chain([1_000, 4_999, 49_151, 49_153, 100_003]);
         for length in lengths {

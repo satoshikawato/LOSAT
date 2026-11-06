@@ -55,7 +55,11 @@ pub mod volume;
 pub use filter::{DbList, ListWarning, SeqidList, TaxidList};
 
 #[cfg(test)]
+mod damaged_files_tests;
+#[cfg(test)]
 mod mask_tests;
+#[cfg(test)]
+mod seqid_taxid_damaged_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -806,14 +810,6 @@ impl SeqDb {
         Self::open_tree(tree, name, seqtype, false)
     }
 
-    /// Resolves the one database at the path `name` as [`SeqDb::open_one_name`]
-    /// does, without opening its volumes: the alias files are read and the
-    /// index file of every volume they name is located. No volume file is
-    /// read, so the cost does not grow with the number of sequences.
-    pub(crate) fn locate_one_name(name: &str, seqtype: SeqType) -> Result<(), SeqDbError> {
-        alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir).map(|_| ())
-    }
-
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1613-1616
     // ```c++
     //     vector<string> paths;
@@ -824,11 +820,13 @@ impl SeqDb {
     // ```c++
     // 	m->SetDescription(GetTitle());
     // ```
-    /// Resolves the one database at `name` as [`SeqDb::locate_one_name`] does and
-    /// returns what `CSeqDB::GetDBMetaData` reads of its alias tree: the title
-    /// (`GetTitle`: the alias files' `TITLE`, else the volumes' titles, which
-    /// `volume_title` gives for a volume path), the volume paths and the paths of the
-    /// alias files (`FindVolumePaths(paths, alias, true)`). No volume file is read.
+    /// Resolves the one database at the path `name` as `SeqDb::open_one_name` does, without
+    /// opening its volumes (the alias files are read and the index file of every volume they name
+    /// is located), and returns what `CSeqDB::GetDBMetaData` reads of its alias tree: the title
+    /// (`GetTitle`: the alias files' `TITLE`, else the volumes' titles, which `volume_title` gives
+    /// for a volume path), the volume paths and the paths of the alias files
+    /// (`FindVolumePaths(paths, alias, true)`). No volume file is read, so the cost does not grow
+    /// with the number of sequences.
     pub(crate) fn locate_one_name_metadata(
         name: &str,
         seqtype: SeqType,

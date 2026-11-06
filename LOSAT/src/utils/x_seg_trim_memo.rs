@@ -35,6 +35,7 @@
 //! - BLASTX masks the frames of a long query and then, again, the frames of each of its chunks
 //!   (`split.rs`), whose segments are mostly those of the whole query (51 % of the trim work on
 //!   AP027131 x AP027133).
+//!
 //! Other maskers repeat few segments (TBLASTX d04: 2 %) and do not use it, so their threads
 //! keep no table.
 //!

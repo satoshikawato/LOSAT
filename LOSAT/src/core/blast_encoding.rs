@@ -127,7 +127,7 @@ impl PackedSequence {
         }
 
         let len = seq.len();
-        let packed_len = (len + COMPRESSION_RATIO - 1) / COMPRESSION_RATIO;
+        let packed_len = len.div_ceil(COMPRESSION_RATIO);
         let mut data = vec![0u8; packed_len];
         let mut ambiguous_positions: Vec<usize> = Vec::new();
 
@@ -760,7 +760,7 @@ mod tests {
                 let seq: Vec<u8> = (0..length)
                     .map(|_| {
                         let pick = next() as usize;
-                        if pick % 8 == 0 {
+                        if pick.is_multiple_of(8) {
                             alphabet[32 + pick / 8 % (alphabet.len() - 32)]
                         } else {
                             alphabet[pick / 8 % 32]

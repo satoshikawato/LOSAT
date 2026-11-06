@@ -996,7 +996,7 @@ fn bytes_read_as_a_file_with_the_same_bytes() {
         ReaderConfig::subject("BLASTP", true, false),
         ReaderConfig::query("TBLASTX", false, true),
     ];
-    let mut check = |bytes: &[u8], what: &str| {
+    let check = |bytes: &[u8], what: &str| {
         std::fs::write(&path, bytes).unwrap();
         for config in configs {
             let from_bytes = outcome(FastaInputSource::from_bytes(bytes, config));

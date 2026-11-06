@@ -826,6 +826,12 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         self.psize
     }
 
+    /// Number of pages that can be read: `mm_last_pg + 1` of the meta page in use, at most the
+    /// whole pages of the file.
+    pub fn num_pages(&self) -> u64 {
+        self.npages
+    }
+
     /// Transaction id of the meta page in use.
     pub fn txnid(&self) -> u64 {
         self.txnid
@@ -2037,7 +2043,7 @@ mod tests {
                 for _ in 0..1 + round % 4 {
                     let at = (rng.next() as usize) % b.len();
                     // aim half of the flips at the first bytes of pages (headers)
-                    let at = if rng.next() % 2 == 0 {
+                    let at = if rng.next().is_multiple_of(2) {
                         at & !4095 | (rng.next() as usize % 160)
                     } else {
                         at

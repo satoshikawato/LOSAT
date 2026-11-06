@@ -350,7 +350,11 @@ mod tests {
         let mut out = Vec::with_capacity(count);
         while out.len() < count {
             let context = random.range(0, contexts as i32 - 1) as usize;
-            let sign = if random.next() % 2 == 0 { 1 } else { -1 };
+            let sign = if random.next().is_multiple_of(2) {
+                1
+            } else {
+                -1
+            };
             let mut q = random.range(0, 300);
             let mut s = random.range(0, subject_aa - 2_000);
             let pieces = random.range(1, 6);
@@ -358,7 +362,7 @@ mod tests {
                 if out.len() == count {
                     break;
                 }
-                let length = if random.next() % 50 == 0 {
+                let length = if random.next().is_multiple_of(50) {
                     random.range(300, 1_500)
                 } else {
                     random.range(8, 60)
@@ -377,7 +381,7 @@ mod tests {
                 q = (hsp.q_end + random.range(-link.overlap_size - 2, link.gap_size + 2))
                     .clamp(0, 390);
                 s = hsp.s_end + random.range(-link.overlap_size - 2, link.longest_intron + 5);
-                if random.next() % 8 == 0 {
+                if random.next().is_multiple_of(8) {
                     // the same query offset again, elsewhere on the subject
                     s = random.range(0, subject_aa - 2_000);
                 }
@@ -417,7 +421,11 @@ mod tests {
             .collect();
         while out.len() < count {
             let (context, pieces) = &patterns[out.len() % families];
-            let sign = if random.next() % 2 == 0 { 1 } else { -1 };
+            let sign = if random.next().is_multiple_of(2) {
+                1
+            } else {
+                -1
+            };
             let frame = sign * random.range(1, 3) as i8;
             let mut s = random.range(0, subject_aa - 2_000);
             for (piece, &(q_start, q_end)) in pieces.iter().enumerate() {
@@ -440,7 +448,7 @@ mod tests {
                     },
                 ));
                 s = s_end
-                    + if random.next() % 6 == 0 {
+                    + if random.next().is_multiple_of(6) {
                         link.longest_intron + random.range(1, 5)
                     } else {
                         random.range(-link.overlap_size + 1, link.longest_intron)

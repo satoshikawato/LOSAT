@@ -89,6 +89,7 @@
 //!      the word start, the query slice ends there), so `s_last_off - s0 <= QL - q0`. A hit
 //!      (q', s') on d' has q' >= 0, so `s' - s0 = q' - q0 + m 2^k >= 2^k - q0 >= QL + window - q0`,
 //!      and `s' >= s_last_off + window`: the first d' hit is never masked; it resets the cell.
+//!
 //!    Hence no condition on the lengths: with LOSAT_X_TBXBAND (section below) the units take every
 //!    batch the gates let through and `last_hit_fits` holds. Without the switch the guard of the
 //!    earlier, weaker argument (`guard`: max context length <= slack, or longest subject chunk
@@ -4581,7 +4582,7 @@ mod tests {
                     );
                 }
                 if control.x_unit_mask(&unit, window).map(|m| m as usize + 1)
-                    == Some((mask as usize + 1) / 2)
+                    == Some((mask as usize).div_ceil(2))
                 {
                     let mut got: Vec<InitHSP> = Vec::new();
                     control.scan_unit_hits::<_, XNoProbe, false, false, false>(

@@ -612,7 +612,7 @@ impl SegParams {
         //     sparamsp->hicut = sparamsp->locut;
         // ```
         let window = if window > 0 { window } else { 12 };
-        let mut locut = if locut >= 0.0 { locut } else { 0.0 };
+        let locut = if locut >= 0.0 { locut } else { 0.0 };
         let mut hicut = if hicut >= 0.0 { hicut } else { 0.0 };
         if locut > hicut {
             hicut = locut;
@@ -663,7 +663,7 @@ impl SegMasker {
 
         // downset = (window+1)/2 - 1, upset = window - downset
         // Reference: blast_seg.c:2050-2051
-        let downset = (params.window + 1) / 2 - 1;
+        let downset = params.window.div_ceil(2) - 1;
         let upset = params.window - downset;
 
         Self {
@@ -697,7 +697,7 @@ impl SegMasker {
 
     /// Create with full parameters including maxbogus and maxtrim
     pub fn with_params(params: &SegParams) -> Self {
-        let downset = (params.window + 1) / 2 - 1;
+        let downset = params.window.div_ceil(2) - 1;
         let upset = params.window - downset;
 
         Self {

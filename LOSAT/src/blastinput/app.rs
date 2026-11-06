@@ -641,7 +641,7 @@ pub fn xinclude_check(choice: &FormatChoice) -> anyhow::Result<()> {
 /// not an error (`UseXInclude` returns true and the formatter takes the file name as the base of
 /// its side files).
 pub fn xinclude_check_for(choice: &FormatChoice, out: Option<&Path>) -> anyhow::Result<()> {
-    if !out.is_none_or(|path| path.as_os_str() == "-") {
+    if out.is_some_and(|path| path.as_os_str() != "-") {
         return Ok(());
     }
     match choice.number {
@@ -849,7 +849,7 @@ pub fn check_query_split_environment(
 ) -> anyhow::Result<anyhow::Result<()>> {
     let read = |variable: &str| read_query_split_variable(program, variable);
     if let Some(chunk_size) = read("CHUNK_SIZE")? {
-        if translated_query && (i64::from(chunk_size) as u64) % 3 != 0 {
+        if translated_query && !(i64::from(chunk_size) as u64).is_multiple_of(3) {
             return Ok(Err(NativeError {
                 exit: 3,
                 message: "BLAST engine error: Split query chunk size must be divisible by 3\n"

@@ -457,7 +457,7 @@ impl std::fmt::Display for PreliminaryReadError {
 impl std::error::Error for PreliminaryReadError {}
 
 /// A reader error of NCBI's own while the definition lines of the final hit lists are
-/// read (`read_title`): `query` is the query whose hit list reached it. NCBI fails that
+/// read (`stored_title`): `query` is the query whose hit list reached it. NCBI fails that
 /// query's batch, after the reports of the batches before.
 #[derive(Debug)]
 pub(crate) struct HeaderReadError {
@@ -504,7 +504,7 @@ pub(crate) fn pairwise_database(db: &SeqDb) -> PairwiseDatabase {
     )
 }
 
-/// The stored title of a database sequence, as the reports read it (`read_title`).
+/// The stored title of a database sequence, as the reports read it (`stored_title`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct StoredTitle {
     /// The title of the sequence's definition line, with a byte outside ' ' ..= '~' read
@@ -534,20 +534,10 @@ pub(crate) struct StoredTitle {
 // c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:970-1017 (`s_GetBioseqTitle`: the
 // title of the first definition line, the others appended as ` >id title`).
 /// Reads the definition line of the database sequence `ordinal` for a report, where the
-/// hit list of query `query` reaches it. A reader error of NCBI's own is a
-/// `HeaderReadError` that names the query (NCBI fails that query's batch); LOSAT's
-/// refusals (`program` names the program) are errors of their own.
-pub(crate) fn read_title(
-    db: &SeqDb,
-    ordinal: u32,
-    query: usize,
-    program: &str,
-) -> Result<StoredTitle> {
-    stored_title(db.deflines(ordinal), ordinal, query, program)
-}
-
-/// `read_title` of the sequence `ordinal` whose definition lines `deflines` were read
-/// (`SeqDb::deflines`, or `SeqDb::visit_deflines` with the same results).
+/// hit list of query `query` reaches it; `deflines` are its definition lines as read
+/// (`SeqDb::deflines`, or `SeqDb::visit_deflines` with the same results). A reader error of
+/// NCBI's own is a `HeaderReadError` that names the query (NCBI fails that query's batch);
+/// LOSAT's refusals (`program` names the program) are errors of their own.
 pub(crate) fn stored_title(
     deflines: std::result::Result<Vec<crate::seqdb::OrdinalDefline>, crate::seqdb::SeqDbError>,
     ordinal: u32,
@@ -588,13 +578,13 @@ fn header_read_error(error: SeqDbError, query: usize, program: &str) -> anyhow::
 /// The header of a reported database sequence (`read_header`).
 #[derive(Debug, Clone)]
 pub(crate) enum ReportedHeader {
-    /// A sequence of a database without parsed Seq-ids: its one title (`read_title`).
+    /// A sequence of a database without parsed Seq-ids: its one title (`stored_title`).
     Stored(StoredTitle),
     /// A sequence with parsed Seq-ids (`report::db_subject`).
     Parsed(std::sync::Arc<crate::report::db_subject::ParsedSubject>),
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 impl ReportedHeader {
     /// The stored title of a sequence without parsed Seq-ids.
     pub(crate) fn stored(&self) -> &StoredTitle {
@@ -1245,8 +1235,8 @@ impl<'a> HeaderReader<'a> {
     }
 }
 
-/// `read_title` of a program that also reads databases with parsed Seq-ids: the header of the
-/// sequence `ordinal`, read as `read_title` reads it, or with every Seq-id where the record has
+/// `stored_title` of a program that also reads databases with parsed Seq-ids: the header of the
+/// sequence `ordinal`, read as `stored_title` reads it, or with every Seq-id where the record has
 /// parsed ones (`SeqDb::read_header`), with what NCBI's lookup of its Seq-align id finds
 /// (`HeaderReader`). A parsed subject that LOSAT does not write as NCBI (`ParsedSubject::new`)
 /// is LOSAT's refusal.
@@ -1821,6 +1811,10 @@ pub(crate) fn reports_may_refuse(
         taxids: Vec<i32>,
     }
     impl Kept {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
         fn join(mut self, mut other: Kept) -> std::result::Result<Kept, ReportRefusal> {
             self.keys.append(&mut other.keys);
             self.taxids.append(&mut other.taxids);
@@ -2541,7 +2535,7 @@ impl TaxdbRun {
     }
 }
 
-/// LOSAT's refusal of a taxonomy database name or record (`read_reported_taxids`): a scientific
+/// LOSAT's refusal of a taxonomy database name or record (`read_reported_taxonomy`): a scientific
 /// name NCBI's XML stream cannot write, or a record NCBI reads from unmapped memory. A run that
 /// holds its XML2 or JSON document drops it on this error and no other (BLASTX,
 /// `XmlRefusal::of_taxonomy`); the other errors of the lookups (a read error of a file) are not
@@ -2595,28 +2589,13 @@ fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
 /// are in `taxonomy` and written at the hit ([`TaxdbPrinter::at_hit`]). `program` is the
 /// program that refuses, as LOSAT's refusals name it (`BLASTP`); its messages name it in lower
 /// case.
-pub(crate) fn read_reported_taxids(
-    db: &SeqDb,
-    run: &TaxdbRun,
-    ordinals: &[u32],
-    reported: &std::collections::BTreeSet<usize>,
-    program: &str,
-) -> Result<(
-    Vec<i32>,
-    Vec<crate::report::blast_xml::HitTaxonomy>,
-    TaxdbNotes,
-)> {
-    let (taxids, taxonomy, _, notes) =
-        read_reported_taxonomy(db, run, ordinals, reported, &[], program)?;
-    Ok((taxids, taxonomy, notes))
-}
-
-/// [`read_reported_taxids`] of a database whose reported sequences can have parsed Seq-ids
-/// (`parsed[rank]`, empty where none has): the third vector holds, by rank, what the taxonomy
-/// database said about the taxid of each definition line of such a sequence (empty where nothing
-/// was asked), as NCBI's `HitDescr` loop asks it (`SubjectNames::of_parsed`): `Unnamed` for a
-/// definition line without a taxid, and no answer after the first `NotFound` (NCBI's loop ends
-/// there). The volume's lookups are those of `ParsedSubject::volume_taxids`.
+///
+/// The database's reported sequences can have parsed Seq-ids (`parsed[rank]`, empty where none
+/// has): the third vector holds, by rank, what the taxonomy database said about the taxid of each
+/// definition line of such a sequence (empty where nothing was asked), as NCBI's `HitDescr` loop
+/// asks it (`SubjectNames::of_parsed`): `Unnamed` for a definition line without a taxid, and no
+/// answer after the first `NotFound` (NCBI's loop ends there). The volume's lookups are those of
+/// `ParsedSubject::volume_taxids`.
 pub(crate) fn read_reported_taxonomy(
     db: &SeqDb,
     run: &TaxdbRun,
@@ -3222,7 +3201,7 @@ const TAXDB_ENTRIES_PER_SEQUENCE: u64 = 2;
 /// a larger database is held without reading it.
 const PREPASS_DB_SEQUENCES_MAX: u64 = 1 << 22;
 
-/// Whether [`read_reported_taxids`] (`names`) or [`prefetch_messages`] (not `names`) could
+/// Whether [`read_reported_taxonomy`] (`names`) or [`prefetch_messages`] (not `names`) could
 /// refuse for some sequence of the database, which a run that writes its batches one by one
 /// cannot take back (OF5b BLASTX, DECISIONS 32): with `names` a scientific name NCBI's XML
 /// stream cannot write (the XML2 and JSON formats write the names; the prefetch of outfmt 0, 5,
@@ -3296,7 +3275,7 @@ fn taxdb_side(taxdb: &crate::seqdb::taxdb::LazyTaxDb, names: bool) -> Option<boo
 
 /// The database side of [`taxdb_may_refuse`]: whether the lookup of the first definition line's
 /// taxid of some sequence would be refused, looking each distinct non-zero taxid up with the
-/// `names` + `names::check_text` code `read_reported_taxids` uses (`names::check_text` only
+/// `names` + `names::check_text` code `read_reported_taxonomy` uses (`names::check_text` only
 /// with `names`). The headers are read in
 /// ranges of [`crate::seqdb::HEADER_RANGE_SEQS`] sequences, one read per MiB
 /// ([`SeqDb::visit_defline_taxids`]). A header that cannot be read answers `true`. Memory: the
@@ -3310,7 +3289,7 @@ fn database_side(db: &SeqDb, taxdb: &crate::seqdb::taxdb::LazyTaxDb, names: bool
                 refused = true;
                 return false;
             };
-            // One definition line per sequence (`read_reported_taxids`).
+            // One definition line per sequence (`read_reported_taxonomy`).
             let taxid = defline_taxids.first().copied().unwrap_or(0);
             if taxid == 0 || !seen.insert(taxid) {
                 return true;

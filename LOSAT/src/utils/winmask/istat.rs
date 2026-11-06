@@ -702,7 +702,7 @@ impl UnitCounts {
             return Err(WinMaskError::format(FormatSite::BinUnitSize));
         }
         let datalen = iflen - HEADER_LEN - TRAILER_LEN - adj;
-        if (datalen as u64) % 8 != 0 {
+        if !(datalen as u64).is_multiple_of(8) {
             return Err(WinMaskError::format(FormatSite::BinLength));
         }
         let mut entries = Vec::new();

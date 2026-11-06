@@ -109,6 +109,7 @@
 //! - k when n <= 5 or k < 3;
 //! - 3 + s when g = G - 1 (the head);
 //! - 3 + m + 4 (G - 2 - g) + s = n - 4 (g + 1) + s when g < G - 1.
+//!
 //! The head's positions are 3..3 + m and cell g's are n - 4 (g + 1)..n - 4 g, so the positions are a
 //! permutation of 0..n. For n = 6 and 7 there is one cell and every position is k.
 //!
@@ -171,6 +172,7 @@
 //!   packed appends (the record of the appends is not read again) in their order, each at its cell's
 //!   cursor, so a cell's slice holds o_0..o_{n-1} as the fill pass leaves it; then o_k goes to slot
 //!   `x_emission_position(k, n)` in each cell of more than 5 offsets, the fill pass's statements.
+//!
 //! The table is the count-and-fill builder's slot for slot; only the order of the memory accesses
 //! differs.
 //!
@@ -1108,14 +1110,14 @@ fn x_flat_with_capacity_of<S: CompressedScores>(
                 return true;
             }
             tested = true;
-            refused = !(words_before
-                && !x_table_fills_banks(
+            refused = !words_before
+                || x_table_fills_banks(
                     &words,
                     backbone_size,
                     query,
                     range_locations,
                     overflow_cell_capacity,
-                ));
+                );
             !refused
         };
         let completed = x_for_each_offset(word_size, query, range_locations, |offset, word| {

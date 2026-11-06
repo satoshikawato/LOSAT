@@ -270,7 +270,7 @@ fn control_and_non_ascii_bytes_make_a_local_id_invalid() {
     assert!(is_valid_local_id(b"a\x7fb"));
     assert!(is_valid_local_id(b"a!b~"));
     for c in 0u8..=255 {
-        let illegal = c < 0x20 || c >= 0x80 || b" >[]|\"".contains(&c);
+        let illegal = !(0x20..0x80).contains(&c) || b" >[]|\"".contains(&c);
         assert_eq!(has_invalid_local_char(&[b'a', c]), illegal, "byte {c:#x}");
     }
     for bare in [&b"a\x02b"[..], b"ab\xc3\xa9", b"M\xc3\xbcller_b"] {

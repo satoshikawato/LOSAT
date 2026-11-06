@@ -16,6 +16,7 @@
 //! - an ungapped translated search (TBLASTX, BLASTX `-ungapped`): one `diags` Seq-align per
 //!   subject, one Std-seg with its scores per HSP (`write_seq_align_diags`,
 //!   `BLASTUngappedHspListToSeqAlign` / `x_UngappedHSPToStdSeg`).
+//!
 //! The Dense-diag of an ungapped BLASTN or BLASTP search is not made: neither program runs an
 //! ungapped search (`writes`). A `-subject` search's Seq-aligns go through NCBI's mapper of
 //! `s_RemapToSubjectLoc` (`remap_strands` for a Dense-seg, `std_seg_kept` for Std-segs).
@@ -1294,7 +1295,7 @@ fn end_std_seg_locs<E: Encoder>(enc: &mut E) {
 ///     }
 /// ```
 fn std_seg_kept(seg: usize, numseg: usize, gap: impl Fn(usize) -> bool) -> bool {
-    !(seg == 0 && gap(0)) && !(seg + 1 == numseg && gap(seg))
+    (seg != 0 || !gap(0)) && (seg + 1 != numseg || !gap(seg))
 }
 
 /// The Std-segs of an HSP of a gapped translated search (`segs std`), one per segment, with

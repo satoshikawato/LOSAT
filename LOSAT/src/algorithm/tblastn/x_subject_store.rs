@@ -380,7 +380,7 @@ mod tests {
                     .wrapping_mul(6364136223846793005)
                     .wrapping_add(1442695040888963407);
                 let draw = (state >> 33) as usize;
-                fasta.push(if draw % 8 == 0 {
+                fasta.push(if draw.is_multiple_of(8) {
                     b"RYKMSWBDHVNrykmswbdhvn"[draw / 8 % 22]
                 } else {
                     b"ACGTacgt"[draw / 8 % 8]

@@ -428,6 +428,7 @@ mod tests {
 
     /// Names left in `directory` by this process's inflated inputs (`unnamed_temporary_file`):
     /// none on Unix, where the name goes as soon as the file is open.
+    #[cfg(unix)]
     fn inflated_names(directory: &std::path::Path) -> Vec<std::path::PathBuf> {
         let prefix = format!(".losat-query-{}-", std::process::id());
         std::fs::read_dir(directory)

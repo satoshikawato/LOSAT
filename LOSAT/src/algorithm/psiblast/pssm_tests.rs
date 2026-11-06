@@ -1,7 +1,18 @@
 //! Tests of psiblast's PSSM options, input, ASCII PSSM and files (`pssm.rs`).
 
 use super::*;
-use crate::core::psi::PsiPssm;
+use crate::core::psi::{PsiDiagnostics, PsiPssm};
+
+/// BLOSUM62 11/1's gapped block (`Blast_KarlinBlkGappedCalc`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:268
+// ```c
+//     {11, 1, (double) INT2_MAX, 0.267, 0.041, 0.14, 1.9, -30, 0.669720, 42.602800, 43.636200},
+// ```
+const BLOSUM62_11_1: KarlinBlk = KarlinBlk {
+    lambda: 0.267,
+    k: 0.041,
+    h: 0.14,
+};
 
 fn native(error: &anyhow::Error) -> (i32, String) {
     let native = error
@@ -14,6 +25,7 @@ fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPss
     PsiblastPssmOptions {
         save_pssm_after_last_round: save_last,
         save_each_pssm: save_each,
+        out_pssm: None,
         out_ascii_pssm: ascii.map(str::to_string),
         pseudocount: 0,
     }
@@ -48,23 +60,51 @@ fn saving_a_pssm_needs_a_pssm_file() {
     );
     assert!(options(true, true, Some("a.txt")).check().is_ok());
     assert!(options(false, false, Some("a.txt")).check().is_ok());
+    // `-out_pssm` satisfies both checks too.
+    let asn_only = PsiblastPssmOptions {
+        out_pssm: Some("p.asn".to_string()),
+        ..options(true, true, None)
+    };
+    assert!(asn_only.check().is_ok());
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:304-321 (quoted at
 // `PsiblastPssmOptions::request`): without `-save_pssm_after_last_round` one round makes no PSSM.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:591-608 (quoted at
+// `PsiDiagnosticsRequest`): the frequency ratios always, the rest with `-out_ascii_pssm`.
 #[test]
-fn only_the_last_rounds_pssm_with_an_ascii_file_is_a_request() {
+fn only_the_last_rounds_pssm_with_a_pssm_file_is_a_request() {
     assert_eq!(options(false, false, Some("a.txt")).request(), None);
     assert_eq!(options(false, true, Some("a.txt")).request(), None);
     assert_eq!(options(true, false, None).request(), None);
+    let request = options(true, true, Some("-")).request().unwrap();
     assert_eq!(
-        options(true, true, Some("-")).request(),
-        Some(PssmRequest {
-            ascii_path: "-".to_string(),
+        request,
+        PssmRequest {
+            asn_path: None,
+            ascii_path: Some("-".to_string()),
             save_each: true,
             pseudocount: 0,
-        })
+        }
     );
+    assert_eq!(request.diagnostics(), PsiDiagnosticsRequest::new_ex(true));
+    let with_asn = PsiblastPssmOptions {
+        out_pssm: Some("p.asn".to_string()),
+        ..options(true, false, None)
+    };
+    let request = with_asn.request().unwrap();
+    assert_eq!(request.asn_path.as_deref(), Some("p.asn"));
+    assert_eq!(request.ascii_path, None);
+    let diagnostics = request.diagnostics();
+    assert!(diagnostics.frequency_ratios);
+    assert!(
+        !diagnostics.information_content && !diagnostics.sigma && !diagnostics.num_matching_seqs
+    );
+    let no_asn_flag = PsiblastPssmOptions {
+        out_pssm: Some("p.asn".to_string()),
+        ..options(false, false, None)
+    };
+    assert_eq!(no_asn_flag.request(), None);
 }
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:1223-1227 testRejectUnsupportedMatrix
@@ -72,17 +112,17 @@ fn only_the_last_rounds_pssm_with_an_ascii_file_is_a_request() {
 // "TEST", which LOSAT's parser does not accept).
 #[test]
 fn a_matrix_without_frequency_ratios_has_no_score_block() {
-    assert!(score_block(ScoringMatrix::Identity).is_err());
+    assert!(score_block(ScoringMatrix::Identity, BLOSUM62_11_1).is_err());
 }
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:1239-1245 testPsiLowerCaseMatrix
 #[test]
 fn a_lower_case_matrix_name_has_frequency_ratios() {
     let matrix: ScoringMatrix = "blosum62".parse().unwrap();
-    let sbp = score_block(matrix).unwrap();
+    let sbp = score_block(matrix, BLOSUM62_11_1).unwrap();
     assert_eq!(sbp.bit_scale_factor, 2);
     assert_eq!(
-        score_block(ScoringMatrix::Blosum45)
+        score_block(ScoringMatrix::Blosum45, BLOSUM62_11_1)
             .unwrap()
             .bit_scale_factor,
         3
@@ -246,21 +286,18 @@ fn the_ascii_pssm_has_ncbis_columns() {
     scores[1][RESIDUE_ORDER[18]] = -12;
     let pssm = PsiPssm {
         scores,
-        information_content: vec![0.5, -0.004],
-        weighted_residue_freqs: freqs,
-        gapless_column_weights: vec![1.234, 9.0],
-        num_matching_seqs: vec![2, 2],
+        gapped: BLOSUM62_11_1,
+        ungapped: BLOSUM62_11_1,
+        diagnostics: PsiDiagnostics {
+            information_content: Some(vec![0.5, -0.004]),
+            weighted_residue_freqs: Some(freqs),
+            gapless_column_weights: Some(vec![1.234, 9.0]),
+            num_matching_seqs: Some(vec![2, 2]),
+            ..PsiDiagnostics::default()
+        },
     };
     let query = [ncbistdaa::A, ncbistdaa::X];
-    let text = String::from_utf8(print_ascii_pssm(
-        &pssm,
-        &query,
-        PssmAncillary {
-            ungapped: (0.13697, 0.31998),
-            gapped: (0.041, 0.267),
-        },
-    ))
-    .unwrap();
+    let text = String::from_utf8(print_ascii_pssm(&pssm, &query, ANCILLARY)).unwrap();
     let mut expected = String::from("\nLast position-specific scoring matrix computed, weighted observed percentages rounded down, information per position, and relative weight of gapless real matches to pseudocounts\n         ");
     for letter in "ARNDCQEGHILKMFPSTWYV".chars() {
         expected.push_str(&format!("{letter:>4}"));
@@ -299,19 +336,55 @@ const TK_1_40: &[u8] = b"MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGG";
 
 fn pssm_request(pseudocount: i32) -> PssmRequest {
     PssmRequest {
-        ascii_path: "-".to_string(),
+        asn_path: None,
+        ascii_path: Some("-".to_string()),
         save_each: false,
         pseudocount,
     }
 }
 
 const ANCILLARY: PssmAncillary = PssmAncillary {
-    ungapped: (0.13697, 0.31998),
-    gapped: (0.041, 0.267),
+    ungapped: KarlinBlk {
+        lambda: 0.31998,
+        k: 0.13697,
+        h: 0.4,
+    },
+    gapped: BLOSUM62_11_1,
 };
 
+const SCORING: PssmScoring<'static> = PssmScoring {
+    matrix: ScoringMatrix::Blosum62,
+    matrix_name: "BLOSUM62",
+    gap_open: 11,
+    gap_extend: 1,
+};
+
+/// `query_pssm` of a query of `letters` named `Query_1`.
+fn run_query_pssm(
+    request: &PssmRequest,
+    inclusion_ethresh: f64,
+    letters: &[u8],
+    alignments: &[PssmAlignment<'_>],
+    subject: &dyn Fn(u32) -> Vec<u8>,
+) -> Result<QueryPssm> {
+    query_pssm(
+        request,
+        SCORING,
+        BLOSUM62_11_1,
+        inclusion_ethresh,
+        PssmQueryRecord {
+            letters,
+            id: "Query_1",
+            title: b"a title",
+        },
+        alignments,
+        subject,
+        ANCILLARY,
+    )
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:894-903 and
-// psi_pssm_input.cpp:166-171 (quoted at `ascii_pssm`); NCBI 2.17.0 `db.ps.pssm.o.0`: an O of
+// psi_pssm_input.cpp:166-171 (quoted at `query_pssm`); NCBI 2.17.0 `db.ps.pssm.o.0`: an O of
 // the query record is X in the search's buffer, which is the PSSM's query, so the ASCII PSSM
 // prints X and the X branch of the gapless weight (`    0.00`) at that position.
 #[test]
@@ -330,20 +403,16 @@ fn an_o_in_the_query_prints_as_x() {
     let query = &query.aa_seq[1..=query.aa_len];
     assert_eq!(query[29], ncbistdaa::X);
     let msa = input_msa(query, &alignments, &subject, 0.002).unwrap();
-    let sbp = score_block(ScoringMatrix::Blosum62).unwrap();
-    let pssm = psi::create_pssm_with_diagnostics(&msa, 0, &sbp).unwrap();
-    assert!(pssm.num_matching_seqs[29] > 1);
+    let sbp = score_block(ScoringMatrix::Blosum62, BLOSUM62_11_1).unwrap();
+    let pssm =
+        psi::create_pssm_with_diagnostics(&msa, 0, &sbp, PsiDiagnosticsRequest::new_ex(true))
+            .unwrap();
+    assert!(pssm.diagnostics.num_matching_seqs.as_ref().unwrap()[29] > 1);
     let text = String::from_utf8(
-        ascii_pssm(
-            &pssm_request(0),
-            ScoringMatrix::Blosum62,
-            0.002,
-            &record,
-            &alignments,
-            &subject,
-            ANCILLARY,
-        )
-        .unwrap(),
+        run_query_pssm(&pssm_request(0), 0.002, &record, &alignments, &subject)
+            .unwrap()
+            .ascii
+            .unwrap(),
     )
     .unwrap();
     assert_eq!(text.as_bytes(), print_ascii_pssm(&pssm, query, ANCILLARY));
@@ -364,7 +433,7 @@ fn an_o_in_the_query_prints_as_x() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1577-1600 and
-// c++/src/algo/blast/api/pssm_engine.cpp:131-148 (quoted at `ascii_pssm`); NCBI 2.17.0
+// c++/src/algo/blast/api/pssm_engine.cpp:131-148 (quoted at `query_pssm`); NCBI 2.17.0
 // `db.ps.pssm.pcneg.7` and `db.ps.pssm.inc0.6`: the PSSM engine's options checks, the pseudocount
 // first, then the inclusion threshold.
 #[test]
@@ -372,14 +441,12 @@ fn the_pssm_engine_checks_the_pseudocount_then_the_inclusion_threshold() {
     let subject = |_: u32| ncbistdaa_letters(TK_1_40);
     let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
     let run = |pseudocount: i32, inclusion_ethresh: f64| {
-        ascii_pssm(
+        run_query_pssm(
             &pssm_request(pseudocount),
-            ScoringMatrix::Blosum62,
             inclusion_ethresh,
             TK_1_40,
             &alignments,
             &subject,
-            ANCILLARY,
         )
     };
     let pseudocount = (
@@ -409,14 +476,15 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 fn request(path: &std::path::Path, save_each: bool) -> PssmRequest {
     PssmRequest {
-        ascii_path: path.to_str().unwrap().to_string(),
+        asn_path: None,
+        ascii_path: Some(path.to_str().unwrap().to_string()),
         save_each,
         pseudocount: 0,
     }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:50-66 (quoted at
-// `write_ascii_pssm_files`); NCBI 2.17.0 `two.last`, `pre.nohit.keep`, `two.each.last`,
+// `OutputFileReset`); NCBI 2.17.0 `two.last`, `pre.nohit.keep`, `two.each.last`,
 // `err.baddir`.
 #[test]
 fn each_pssm_replaces_the_file_or_gets_a_numbered_one() {

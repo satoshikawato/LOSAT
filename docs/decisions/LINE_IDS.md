@@ -147,9 +147,10 @@ and `docs/`. State: 140 done, 12 in progress, 0 stopped.
 
 | ID | Meaning | State | Main pull requests | Record in this repository |
 | --- | --- | --- | --- | --- |
-| `PS` | Line PS: add psiblast and related tools (iterations, PSSM files, tblastn -in_pssm, rpsblast, rpstblastn, deltablast, makeprofiledb) to LOSAT. | in progress | #503 | [README.md](../../README.md), “7. PSI-BLAST (psiblast), first round” |
+| `PS` | Line PS: add psiblast and related tools (iterations, PSSM files, tblastn -in_pssm, rpsblast, rpstblastn, deltablast, makeprofiledb) to LOSAT. | in progress | #503, #874 | [README.md](../../README.md), “7. PSI-BLAST (psiblast), first round” |
 | `PS1` | PS stage 1: `losat psiblast` runs the first round (-num_iterations 1) of NCBI BLAST+ 2.17.0 psiblast with -subject or -db, for outfmt 0, 6 and 7, on the blastp engine. | done | #503 | changelog entry `feature-ps-ps1` |
-| `PS2` | PS stage 2: the PSSM engine (NCBI core/blast_psi.c and blast_psi_priv.c) and psiblast's -out_ascii_pssm after the first round (-save_pssm_after_last_round, -save_each_pssm), byte for byte as NCBI BLAST+ 2.17.0. | in progress | none | changelog entry `feature-ps-ps2` |
+| `PS2` | PS stage 2: the PSSM engine (NCBI core/blast_psi.c and blast_psi_priv.c) and psiblast's -out_ascii_pssm after the first round (-save_pssm_after_last_round, -save_each_pssm), byte for byte as NCBI BLAST+ 2.17.0. | done | #874 | changelog entry `feature-ps-ps2` |
+| `PS3` | PS stage 3: psiblast's -out_pssm, the PSSM as NCBI's ASN.1 text `PssmWithParameters` after the first round, byte for byte as NCBI BLAST+ 2.17.0, and the reader of that text (for -in_pssm, PS4). | in progress | none | changelog entry `feature-ps-ps3` |
 
 ### RL: the v0.2.0 release
 

@@ -72,7 +72,7 @@ use crate::blastinput::value_parsers::*;
 // psiblast's arguments are blastp's without `-task` (its task is "psiblast"), `-ungapped`
 // (no `CGappedArgs`), the database masks and `-mt_mode`, with the PSI-BLAST, PSSM engine and
 // PHI-BLAST arguments. LOSAT runs psiblast's first round (`-num_iterations 1`), which is blastp's
-// search (`run`), and writes the ASCII PSSM after it (`pssm.rs`); `-out_pssm`, `-in_msa`,
+// search (`run`), and writes the ASN.1 and ASCII PSSMs after it (`pssm.rs`); `-in_msa`,
 // `-in_pssm`, `-phi_pattern`, `-gap_trigger` and `-sum_stats` are refused by the parser
 // (`cli.rs` `is_unported_psiblast_arg`). The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
@@ -267,6 +267,22 @@ pub struct PsiblastArgs {
         help = "E-value inclusion threshold for pairwise alignments"
     )]
     pub inclusion_ethresh: f64,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1160
+    // ```c++
+    //         // checkpoint file
+    //         arg_desc.AddOptionalKey(kArgPSIOutputChkPntFile, "checkpoint_file",
+    //
+    //                                 "File name to store checkpoint file",
+    //                                 CArgDescriptions::eOutputFile);
+    // ```
+    // The file is opened when a PSSM is written (`pssm.rs` `AsnPssmWriter`, as
+    // `CAutoOutputFileReset`), not by the parser.
+    #[arg(
+        long = "out_pssm",
+        value_name = "checkpoint_file",
+        help = "File name to store checkpoint file"
+    )]
+    pub out_pssm: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1161-1170
     // ```c++
     //         // ASCII matrix file
@@ -381,6 +397,7 @@ impl PsiblastArgs {
             psiblast_pssm: Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {
                 save_pssm_after_last_round: self.save_pssm_after_last_round,
                 save_each_pssm: self.save_each_pssm,
+                out_pssm: self.out_pssm,
                 out_ascii_pssm: self.out_ascii_pssm,
                 pseudocount: self.pseudocount,
             }),
@@ -531,7 +548,6 @@ mod tests {
     fn psiblasts_arguments_that_losat_does_not_run_are_named() {
         for (option, value) in [
             ("-in_pssm", Some("x")),
-            ("-out_pssm", Some("x")),
             ("-in_msa", Some("x")),
             ("-msa_master_idx", Some("2")),
             ("-ignore_msa_master", None),

@@ -3,11 +3,13 @@
 //!
 //! The engine builds a position-specific scoring matrix from a multiple sequence alignment whose
 //! first row is the query. It is reached only where a PSSM is requested (psiblast's
-//! `-save_pssm_after_last_round` with `-out_ascii_pssm`, `algorithm::psiblast::pssm`); no search
-//! path calls it. It keeps only the diagnostics that the ASCII PSSM reads
-//! (`PrintAsciiPssm`, blastfmtutil.cpp:172-327): the information content, the weighted residue
-//! frequencies, the relative weight of gapless real matches to pseudocounts and the number of
-//! matching sequences of each position.
+//! `-save_pssm_after_last_round` with `-out_pssm` or `-out_ascii_pssm`, `algorithm::psiblast::pssm`);
+//! no search path calls it. It returns what `s_PSISavePssm` and `_PSISaveDiagnostics` keep: the
+//! scores, the Karlin-Altschul blocks of the scaling, and the diagnostics of psiblast's request
+//! (`PsiDiagnosticsRequest`): the frequency ratios always, and with `-out_ascii_pssm` the
+//! information content, the weighted residue frequencies, the relative weight of gapless real
+//! matches to pseudocounts, sigma, the interval sizes and the number of matching sequences of each
+//! position.
 
 mod stages;
 
@@ -64,14 +66,44 @@ impl PsiMsa {
     }
 }
 
+/// A Karlin-Altschul block (`Blast_KarlinBlk`): the Lambda, K and H that the PSSM keeps.
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_stat.h:66-72
+// ```c
+// typedef struct Blast_KarlinBlk {
+//       double   Lambda; /**< Lambda value used in statistics */
+//       double   K; /**< K value used in statistics */
+//       double   logK; /**< natural log of K value used in statistics */
+//       double   H; /**< H value used in statistics */
+//       double   paramC;  /**< for use in seed. */
+//    } Blast_KarlinBlk;
+// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct KarlinBlk {
+    pub(crate) lambda: f64,
+    pub(crate) k: f64,
+    pub(crate) h: f64,
+}
+
 /// The score block the engine reads (`BlastScoreBlk` as `CPssmEngine::x_InitializeScoreBlock`
-/// sets it up for psiblast): the matrix (`sbp->matrix->data`), the ideal Lambda
-/// (`sbp->kbp_ideal->Lambda`), and the matrix's frequency ratios and background frequencies
-/// (`_PSIMatrixFrequencyRatiosNew`, `Blast_GetMatrixBackgroundFreq`).
+/// sets it up for psiblast and `SetUngappedStatisticalParams` updates it): the matrix
+/// (`sbp->matrix->data`), the ideal block (`sbp->kbp_ideal`), the standard gapped K
+/// (`sbp->kbp_gap_std[0]->K`), the gapped PSI block before the scaling (`sbp->kbp_gap_psi[0]`),
+/// and the matrix's frequency ratios and background frequencies (`_PSIMatrixFrequencyRatiosNew`,
+/// `Blast_GetMatrixBackgroundFreq`).
 pub(crate) struct PsiScoreBlk {
     /// `sbp->matrix->data[i][j]`, NCBIstdaa by NCBIstdaa.
     pub(crate) matrix: [[i32; BLASTAA_SIZE]; BLASTAA_SIZE],
     pub(crate) ideal_lambda: f64,
+    /// `sbp->kbp_ideal->K`.
+    pub(crate) ideal_k: f64,
+    /// `sbp->kbp_gap_std[0]->K`: the gapped K of the matrix and gap costs
+    /// (`Blast_KarlinBlkGappedCalc`).
+    pub(crate) gap_std_k: f64,
+    /// `sbp->kbp_gap_psi[0]` before the scaling: a copy of `kbp_gap_std[0]`
+    /// (`Blast_ScoreBlkKbpGappedCalc`, blast_setup.c:114-120) that
+    /// `SetUngappedStatisticalParams` replaces by the round's PSI gapped block
+    /// (`set_ungapped_statistical_params`). The scaling changes only its K.
+    pub(crate) gap_psi: KarlinBlk,
     /// `SFreqRatios::data`, NCBIstdaa by NCBIstdaa.
     pub(crate) freq_ratios: &'static [[f64; BLASTAA_SIZE]; BLASTAA_SIZE],
     /// `SFreqRatios::bit_scale_factor`.
@@ -80,19 +112,133 @@ pub(crate) struct PsiScoreBlk {
     pub(crate) background: &'static [f64; 20],
 }
 
-/// The PSSM and the diagnostics the ASCII PSSM reads, by query position.
+impl PsiScoreBlk {
+    /// `CPssmEngine::SetUngappedStatisticalParams` with the round's ancillary data, whose PSI
+    /// gapped block is `psi_gapped`. Its PSI ungapped block replaces `kbp_psi[0]`, which the
+    /// scaling computes again before anything reads it (`_PSIUpdateLambdaK` at every factor of
+    /// `_PSIScaleMatrix`), so it is not kept.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:483-509
+    // ```c++
+    //     if (ancillary_data->GetPsiUngappedKarlinBlk()) {
+    //         _ASSERT(m_ScoreBlk->kbp_psi && m_ScoreBlk->kbp_psi[0]);
+    //         m_ScoreBlk->kbp_psi[0]->Lambda =
+    //             ancillary_data->GetPsiUngappedKarlinBlk()->Lambda;
+    //         ...
+    //     if (ancillary_data->GetPsiGappedKarlinBlk()) {
+    //         _ASSERT(m_ScoreBlk->kbp_gap_psi && m_ScoreBlk->kbp_gap_psi[0]);
+    //         m_ScoreBlk->kbp_gap_psi[0]->Lambda =
+    //             ancillary_data->GetPsiGappedKarlinBlk()->Lambda;
+    //         m_ScoreBlk->kbp_gap_psi[0]->K =
+    //             ancillary_data->GetPsiGappedKarlinBlk()->K;
+    //         m_ScoreBlk->kbp_gap_psi[0]->logK = log(m_ScoreBlk->kbp_gap_psi[0]->K);
+    //         m_ScoreBlk->kbp_gap_psi[0]->H =
+    //             ancillary_data->GetPsiGappedKarlinBlk()->H;
+    //     }
+    // ```
+    pub(crate) fn set_ungapped_statistical_params(&mut self, psi_gapped: KarlinBlk) {
+        self.gap_psi = psi_gapped;
+    }
+}
+
+/// The diagnostics the engine is asked for (`PSIDiagnosticsRequest`), as psiblast asks for them.
+/// psiblast never asks for the residue frequencies or the independent observations, which are
+/// not modelled.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:591-608
+// ```c
+// PSIDiagnosticsRequestNewEx(Boolean save_ascii_pssm)
+// {
+//     PSIDiagnosticsRequest* retval = PSIDiagnosticsRequestNew();
+//     if ( !retval ) {
+//         return NULL;
+//     }
+//
+//     retval->frequency_ratios = TRUE;
+//     if (save_ascii_pssm) {
+//         retval->information_content = TRUE;
+//         retval->weighted_residue_frequencies = TRUE;
+//         retval->gapless_column_weights = TRUE;
+//         retval->sigma = TRUE;
+//         retval->interval_sizes = TRUE;
+//         retval->num_matching_seqs = TRUE;
+//     }
+//     return retval;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:175-176
+// ```c++
+//     CPSIDiagnosticsRequest
+//         diags(PSIDiagnosticsRequestNewEx(m_CmdLineArgs->SaveAsciiPssm()));
+// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PsiDiagnosticsRequest {
+    pub(crate) information_content: bool,
+    pub(crate) weighted_residue_frequencies: bool,
+    pub(crate) frequency_ratios: bool,
+    pub(crate) gapless_column_weights: bool,
+    pub(crate) sigma: bool,
+    pub(crate) interval_sizes: bool,
+    pub(crate) num_matching_seqs: bool,
+}
+
+impl PsiDiagnosticsRequest {
+    /// `PSIDiagnosticsRequestNewEx(save_ascii_pssm)`.
+    pub(crate) fn new_ex(save_ascii_pssm: bool) -> Self {
+        Self {
+            information_content: save_ascii_pssm,
+            weighted_residue_frequencies: save_ascii_pssm,
+            frequency_ratios: true,
+            gapless_column_weights: save_ascii_pssm,
+            sigma: save_ascii_pssm,
+            interval_sizes: save_ascii_pssm,
+            num_matching_seqs: save_ascii_pssm,
+        }
+    }
+}
+
+/// The diagnostics that were asked for (`PSIDiagnosticsResponse`), by query position; `None`
+/// where the request did not ask.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct PsiDiagnostics {
+    /// `information_content`.
+    pub(crate) information_content: Option<Vec<f64>>,
+    /// `weighted_residue_freqs[position][residue]`.
+    pub(crate) weighted_residue_freqs: Option<Vec<[f64; BLASTAA_SIZE]>>,
+    /// `frequency_ratios[position][residue]`.
+    pub(crate) frequency_ratios: Option<Vec<[f64; BLASTAA_SIZE]>>,
+    /// `gapless_column_weights`.
+    pub(crate) gapless_column_weights: Option<Vec<f64>>,
+    /// `sigma`.
+    pub(crate) sigma: Option<Vec<f64>>,
+    /// `interval_sizes`.
+    pub(crate) interval_sizes: Option<Vec<u32>>,
+    /// `num_matching_seqs`.
+    pub(crate) num_matching_seqs: Option<Vec<u32>>,
+}
+
+/// The PSSM (`PSIMatrix`) and its diagnostics.
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_psi.h:150-160
+// ```c
+// typedef struct PSIMatrix {
+//     Uint4   ncols;      /**< Number of columns in PSSM (query_length) */
+//     Uint4   nrows;      /**< Number of rows in PSSM (alphabet_size) */
+//     int**   pssm;       /**< Position-specific score matrix */
+//     double  lambda;     /**< Lambda Karlin-Altschul parameter */
+//     double  kappa;      /**< Kappa Karlin-Altschul parameter */
+//     double  h;          /**< H Karlin-Altschul parameter */
+//     double  ung_lambda; /**< Ungapped Lambda Karlin-Altschul parameter */
+//     double  ung_kappa;  /**< Ungapped Kappa Karlin-Altschul parameter */
+//     double  ung_h;      /**< Ungapped H Karlin-Altschul parameter */
+// } PSIMatrix;
+// ```
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PsiPssm {
-    /// `PSIMatrix::pssm[position][residue]`.
+    /// `pssm[position][residue]`.
     pub(crate) scores: Vec<[i32; BLASTAA_SIZE]>,
-    /// `PSIDiagnosticsResponse::information_content`.
-    pub(crate) information_content: Vec<f64>,
-    /// `PSIDiagnosticsResponse::weighted_residue_freqs[position][residue]`.
-    pub(crate) weighted_residue_freqs: Vec<[f64; BLASTAA_SIZE]>,
-    /// `PSIDiagnosticsResponse::gapless_column_weights`.
-    pub(crate) gapless_column_weights: Vec<f64>,
-    /// `PSIDiagnosticsResponse::num_matching_seqs`.
-    pub(crate) num_matching_seqs: Vec<u32>,
+    /// `lambda`, `kappa`, `h`: `kbp_gap_psi[0]` after the scaling.
+    pub(crate) gapped: KarlinBlk,
+    /// `ung_lambda`, `ung_kappa`, `ung_h`: `kbp_psi[0]` after the scaling.
+    pub(crate) ungapped: KarlinBlk,
+    pub(crate) diagnostics: PsiDiagnostics,
 }
 
 /// The engine's failures that its stages can return for psiblast's input (`PSIERR_*`).
@@ -169,12 +315,32 @@ pub(crate) enum PsiError {
 //    options->impala_scaling_factor = kPSSM_NoImpalaScaling;
 //    options->ignore_unaligned_positions = FALSE;
 // ```
-// The Karlin-Altschul blocks that the scaling updates (`kbp_psi`, `kbp_gap_psi`) are not kept:
-// the ASCII PSSM prints those of the round's ancillary data (`PrintAsciiPssm`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:440-457
+// ```c
+// s_PSISavePssm(const _PSIInternalPssmData* internal_pssm,
+//              const BlastScoreBlk* sbp,
+//              PSIMatrix* pssm)
+// {
+//     ...
+//     _PSICopyMatrix_int(pssm->pssm, internal_pssm->pssm,
+//                        pssm->ncols, pssm->nrows);
+//
+//     pssm->lambda = sbp->kbp_gap_psi[0]->Lambda;
+//     pssm->kappa = sbp->kbp_gap_psi[0]->K;
+//     pssm->h = sbp->kbp_gap_psi[0]->H;
+//     pssm->ung_lambda = sbp->kbp_psi[0]->Lambda;
+//     pssm->ung_kappa = sbp->kbp_psi[0]->K;
+//     pssm->ung_h = sbp->kbp_psi[0]->H;
+// }
+// ```
+// `kbp_psi[0]` is the block of the scaling's last `_PSIUpdateLambdaK` (`stages::scale_matrix`),
+// and `kbp_gap_psi[0]` the score block's (`PsiScoreBlk::gap_psi`) with the K that the same call
+// sets (`stages::gapped_psi_k`).
 pub(crate) fn create_pssm_with_diagnostics(
     msa: &PsiMsa,
     pseudo_count: i32,
     sbp: &PsiScoreBlk,
+    request: PsiDiagnosticsRequest,
 ) -> Result<PsiPssm, PsiError> {
     let mut packed = stages::PackedMsa::new(msa);
     stages::purge_biased_segments(&mut packed);
@@ -202,11 +368,17 @@ pub(crate) fn create_pssm_with_diagnostics(
     //         status = _PSIScaleMatrix(query, std_prob, internal_pssm, sbp);
     // ```
     stages::convert_freq_ratios_to_pssm(&mut internal, &msa.query, sbp, &seq_weights.std_prob);
-    stages::scale_matrix(&msa.query, &seq_weights.std_prob, &mut internal, sbp)?;
-    Ok(stages::save_diagnostics(
-        &msa,
-        &aligned_block,
-        &seq_weights,
-        internal,
-    ))
+    let ungapped = stages::scale_matrix(&msa.query, &seq_weights.std_prob, &mut internal, sbp)?;
+    let gapped = KarlinBlk {
+        k: stages::gapped_psi_k(ungapped, sbp),
+        ..sbp.gap_psi
+    };
+    let diagnostics =
+        stages::save_diagnostics(&msa, &aligned_block, &seq_weights, &internal, request);
+    Ok(PsiPssm {
+        scores: internal.into_scores(),
+        gapped,
+        ungapped,
+        diagnostics,
+    })
 }

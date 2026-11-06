@@ -123,6 +123,43 @@ impl X87 {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1159-1161
+    // ```c++
+    //     if ( first_mul > 1 ) {
+    //         _ASSERT(first);
+    //         ret = ((long double)first * first_mul + second)* second_mul + third;
+    // ```
+    // No NCBI counterpart: the 80-bit value of an integer below 2^64 (`StringToDoublePosix`'s
+    // mantissa of up to 18 digits, `blastinput::pssm_text`), which the 64-bit significand holds
+    // exactly.
+    /// An unsigned integer, exactly.
+    pub(crate) fn from_u64(v: u64) -> X87 {
+        if v == 0 {
+            return X87::ZERO;
+        }
+        let lz = v.leading_zeros() as i32;
+        X87 {
+            negative: false,
+            exponent: 63 - lz,
+            significand: v << lz,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1271-1273
+    // ```c++
+    //     if ( sign < 0 ) {
+    //         ret = -ret;
+    //     }
+    // ```
+    // No NCBI counterpart: `fchs`, exact.
+    /// The value with its sign changed.
+    pub(crate) fn neg(self) -> X87 {
+        X87 {
+            negative: !self.negative,
+            ..self
+        }
+    }
+
     /// `fmul` with precision control 64 bits and round to nearest, ties to even: the exact
     /// 128-bit product of the significands rounded once to 64 bits.
     pub(crate) fn mul(self, rhs: X87) -> X87 {

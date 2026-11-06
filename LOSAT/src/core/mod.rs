@@ -16,7 +16,7 @@
 //! - **HSP filters** (`blast_hits`: `-max_hsps`, `-qcov_hsp_perc`; `hspfilter_culling`:
 //!   `-culling_limit`)
 //! - **PSI-BLAST's PSSM engine** (`psi`, NCBI core/blast_psi.c and blast_psi_priv.c): psiblast's
-//!   `-out_ascii_pssm`
+//!   `-out_ascii_pssm` and `-out_pssm`
 
 // Statistics
 pub mod blast_stat;

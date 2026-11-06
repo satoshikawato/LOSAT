@@ -492,3 +492,113 @@ fn a_subject_without_a_first_defline_ends_with_the_input_error_of_get_all_seqs()
         );
     }
 }
+
+/// BLASTX reads its query file once before the search with outfmt 5, 11 and 13 to 16, to refuse a
+/// title its writers cannot write before any byte (`blast_xml::prescan_queries`,
+/// `archive::prescan_query_titles`). Under `-parse_deflines` that read stops where the search's
+/// does, so a reader error that NCBI meets before it writes a title comes first: a first line
+/// that is not a defline (any format, NCBI 2.17.0, probe `SM/prescan/probe.py`), or a Seq-id NCBI
+/// cannot make in the batch of the record with the title. With `BATCH_SIZE=1` that record is its
+/// own batch, which NCBI writes before it reads the bad Seq-id: LOSAT refuses its title before any
+/// byte (NCBI stops with an exception).
+#[test]
+fn blastx_reads_its_query_before_the_search_as_the_search_does() {
+    let dir = temp_dir("prescan");
+    let write = |name: &str, text: String| {
+        let path = dir.join(format!("blastx.{name}"));
+        std::fs::write(&path, text).unwrap();
+        path
+    };
+    let subject = write("s", format!(">s1 b\n{PROTEIN}\n"));
+    let later = format!(">r1 caf\u{e9} x\n{NUCLEOTIDES}\n");
+    let no_defline = [
+        (write("q_data", format!("{NUCLEOTIDES}\n{later}")), 1),
+        (write("q_gap", format!(">?5\n{NUCLEOTIDES}\n{later}")), 1),
+        (write("q_cdata", format!(";c\n\n{NUCLEOTIDES}\n{later}")), 3),
+        (
+            write("q_cgap", format!(";c\n\n#x\n>?5\n{NUCLEOTIDES}\n{later}")),
+            4,
+        ),
+    ];
+    let bad_gi = write(
+        "q_badgi",
+        format!(">r0 caf\u{e9} x\n{NUCLEOTIDES}\n>gi|abc plain\n{NUCLEOTIDES}\n"),
+    );
+    // A query with the id of the subject (LOSAT's refusal, which the search makes as it reads the
+    // record) before a record with a title the XML cannot write: the read before the search stops
+    // where the search does, so the search's refusal comes first.
+    let same_id = write(
+        "q_same",
+        format!(">s1 a\n{NUCLEOTIDES}\n>r1 caf\u{e9} x\n{NUCLEOTIDES}\n"),
+    );
+    let search = |query: &std::path::Path, outfmt: &str, threads: &str, batch: Option<&str>| {
+        let mut command = losat();
+        command
+            .arg("blastx")
+            .arg("-query")
+            .arg(query)
+            .arg("-subject")
+            .arg(&subject)
+            .args([
+                "-parse_deflines",
+                "-outfmt",
+                outfmt,
+                "-num_threads",
+                threads,
+            ])
+            .env_remove("BATCH_SIZE");
+        if let Some(batch) = batch {
+            command.env("BATCH_SIZE", batch);
+        }
+        let output = command.output().unwrap();
+        (
+            output.status.code().unwrap_or(-1),
+            output.stdout,
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    for threads in ["1", "4"] {
+        for (query, line) in &no_defline {
+            let message = format!(
+                "BLAST query error: CFastaReader: Input doesn't start with a defline or comment \
+                 around line {line}\n"
+            );
+            for outfmt in ["5", "11", "15", "16"] {
+                let (status, stdout, stderr) = search(query, outfmt, threads, None);
+                assert_eq!(
+                    (status, stderr.as_str()),
+                    (1, message.as_str()),
+                    "line {line} outfmt {outfmt} n{threads}"
+                );
+                if outfmt == "5" {
+                    assert!(stdout.is_empty(), "line {line} n{threads}");
+                }
+            }
+        }
+        let (status, stdout, stderr) = search(&bad_gi, "5", threads, None);
+        assert_eq!(
+            (status, stdout.as_slice(), stderr.as_str()),
+            (
+                1,
+                &b""[..],
+                "BLAST query error: Could not construct seq-id from 'gi|abc'\n"
+            ),
+            "gi|abc n{threads}"
+        );
+        let (status, stdout, stderr) = search(&same_id, "5", threads, None);
+        assert_eq!(status, 1, "s1 n{threads}: {stderr}");
+        assert!(stdout.is_empty(), "s1 n{threads}");
+        assert!(
+            stderr.contains("a query and a subject record have the Seq-id lcl|s1"),
+            "s1 n{threads}: {stderr}"
+        );
+        let (status, stdout, stderr) = search(&bad_gi, "5", threads, Some("1"));
+        assert_eq!(status, 1, "gi|abc BATCH_SIZE=1 n{threads}: {stderr}");
+        assert!(stdout.is_empty(), "gi|abc BATCH_SIZE=1 n{threads}");
+        assert!(
+            stderr.contains("a query title with a character outside the US-ASCII range")
+                && stderr.contains("not supported by LOSAT"),
+            "gi|abc BATCH_SIZE=1 n{threads}: {stderr}"
+        );
+    }
+}

@@ -16,7 +16,7 @@ use super::{
     // ```
     input::{
         parse_fasta_stream_keeping, stream_is_empty, FastaParseError, FastaStream, InputWarning,
-        NoDeflineError,
+        NoDeflineError, QueryStreamSettings,
     },
     query_setup::BATCH_SIZE,
     report,
@@ -679,6 +679,17 @@ fn run_inner(
     if let (Some(database), true) = (database.as_ref(), structured_xml) {
         super::blast_xml::check_database_name(database.name())?;
     }
+    // How the search reads the query file (`-parse_deflines`, its ids, `-strand`), which the
+    // reads of the file before the search share (`QueryStreamSettings`).
+    let query_settings = QueryStreamSettings {
+        parse_deflines: args.parse_deflines,
+        id_scope: id_scope.clone(),
+        strand: crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand),
+    };
+    // The letters of a reader batch (below, where NCBI reads `BATCH_SIZE`, after the check of
+    // an empty query), which the reads before the search take too.
+    let batch_size = crate::blastinput::app::query_batch_size("BLASTX", BATCH_SIZE as u32)
+        .map(|size| size as usize);
     // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
     // come before the first byte, though the query file is read batch by batch: the query
     // titles are checked by a read of the file before the search, and a run in which a
@@ -704,11 +715,15 @@ fn run_inner(
         let start = (&query_file)
             .stream_position()
             .map_err(|_| inaccessible("query", &args.query))?;
+        // A `BATCH_SIZE` that the run refuses (below, before any query is read) leaves no title
+        // to check, as a batch size of 0 does.
         let messages_may_be_refused = super::blast_xml::prescan_queries(
             query_file
                 .try_clone()
                 .map_err(|_| inaccessible("query", &args.query))?,
+            &query_settings,
             args.lcase_masking,
+            batch_size.as_ref().map_or(0, |&size| size),
             query_range.as_ref(),
         )?;
         (&query_file)
@@ -776,10 +791,7 @@ fn run_inner(
     } else {
         None
     };
-    let mut query_stream = FastaStream::from_file(query_file);
-    query_stream.parse_deflines = args.parse_deflines;
-    query_stream.id_scope = id_scope.clone();
-    query_stream.strand = crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand);
+    let mut query_stream = query_settings.stream(query_file);
     if stream_is_empty(&mut query_stream) {
         stderr.write_all(b"Warning: [blastx] Query is Empty!\n")?;
         // NCBI returns before the formatter exists: no archive carries the message.
@@ -807,9 +819,8 @@ fn run_inner(
     // search itself keeps units of at most 10002 letters (`BATCH_SIZE` the constant), however
     // large a reader batch is: a reader batch is split into units that are searched as the
     // batches of a run without `BATCH_SIZE` are, and its report is written when its last unit
-    // is searched.
-    let batch_size =
-        crate::blastinput::app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
+    // is searched. (`batch_size` is read above, for the reads before the search.)
+    let batch_size = batch_size?;
     // LOSAT's refusal of a query title the archive cannot write comes before its first byte,
     // though the query file is read batch by batch: the titles are checked by a read of the
     // file before the search.
@@ -821,6 +832,7 @@ fn run_inner(
             query_prescan
                 .as_ref()
                 .expect("the second handle of a regular query"),
+            &query_settings,
             args.lcase_masking,
             batch_size,
             query_range.as_ref(),

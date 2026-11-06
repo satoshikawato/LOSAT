@@ -3,8 +3,8 @@
 // Searching" page while a job runs): its phase and elapsed time (not progress by query, DW-5),
 // what it waits for, and its Cancel. The run's record (engine path, threads, phases) is in Run
 // details once it completes. A screen reader is told the phase when it changes (not the elapsed
-// time, nor the phase of a run that the page just shows); a run that ends is told by
-// run-announcements.ts.
+// time, nor the phase of a run that the page just shows, unless it waits for another run: that
+// says why it has not started); a run that ends is told by run-announcements.ts.
 import { computed, onBeforeUnmount, onBeforeUpdate, onUnmounted, onUpdated, ref, watch, watchEffect } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { isTerminal, type RunStatus } from '../domain/run';
@@ -63,8 +63,10 @@ const phase = computed(() => (ahead.value ? `Waiting for run ${ahead.value.snaps
 watch(
   [() => props.run.snapshot.runId, phase],
   ([runId, text], [before]) => {
-    if (runId === before && !isTerminal(props.run.status)) announce(`Status: ${text}`);
+    const shown = before === undefined ? ahead.value !== undefined : runId === before;
+    if (shown && !isTerminal(props.run.status)) announce(`Status: ${text}`);
   },
+  { immediate: true },
 );
 
 const hasFocus = () => root.value?.contains(document.activeElement) === true;

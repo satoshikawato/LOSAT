@@ -117,6 +117,29 @@ test('a cancelled run is told; Cancel leaves the focus on the Results heading, a
   expect(await focused(page)).toBe('results-run');
 });
 
+test('a run that waits for another run says so when its page opens', async ({ page }) => {
+  test.skip(BUILD_HAS_ENGINE, "the FakeEngine's runs wait on the page's timers, which the test holds");
+  await listen(page);
+  await page.clock.install();
+  await openSearch(page);
+  await program(page, 'blastp');
+  await paste(page, 'query', `>q1\n${PROTEIN}\n`);
+  await paste(page, 'subject', THREE_SUBJECTS);
+  // Run 1 stays in progress until the clock goes on; run 2 waits for it.
+  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
+  await submit(page);
+  await expect(page.getByTestId('run-status')).toHaveAttribute('data-run', '1');
+  await page.getByTestId('tab-search').click();
+  await forget(page);
+  await submit(page);
+  await expect(page.getByTestId('run-status')).toHaveAttribute('data-run', '2');
+  await expect(page.getByTestId('run-status-phase')).toHaveText('Waiting for run 1');
+  await expect.poll(() => told(page, 'status')).toContainEqual('Status: Waiting for run 1');
+  await page.clock.resume();
+  await waitStatus(page, 1, 'completed');
+  await waitStatus(page, 2, 'completed');
+});
+
 test('"Run LOSAT" that cannot start says why in an alert, and keeps the focus', async ({ page }) => {
   await start(page);
   await program(page, 'blastn');
@@ -153,7 +176,8 @@ test("the engine's check of an input, its warnings and a refusal to read it are 
 
 const SIXTEEN_S = exampleById('refseq-16s-bacteria');
 
-test('an Example that loads is told, and its button keeps the focus', async ({ page }) => {
+/** The 16S set's host, stubbed at its real address (examples.spec.ts). */
+async function stubSixteenS(page: Page): Promise<void> {
   const gz = gzipSync('>NR_102783.2 Bacillus subtilis 16S\nACGTACGTACGTACGTACGT\n>NR_114042.1 Escherichia coli 16S\nACGTTCGTACGTACGTTCGT\n');
   await page.route(/^https:\/\/ftp\.ncbi\.nlm\.nih\.gov\//, (route) =>
     route.fulfill({
@@ -163,6 +187,10 @@ test('an Example that loads is told, and its button keeps the focus', async ({ p
       body: gz,
     }),
   );
+}
+
+test('an Example that loads is told, and its button keeps the focus', async ({ page }) => {
+  await stubSixteenS(page);
   await start(page);
   await forget(page);
   const button = page.getByTestId(`example-${SIXTEEN_S.id}`);
@@ -172,14 +200,20 @@ test('an Example that loads is told, and its button keeps the focus', async ({ p
   await settled(page, 'subject');
   await expect.poll(() => told(page, 'status')).toContainEqual(expect.stringContaining(`Example ${SIXTEEN_S.label} loaded.`));
   expect(await focused(page)).toBe(`example-${SIXTEEN_S.id}`);
-  // Delete (with a copy saved in this browser: OPFS) leaves with the copy; the focus goes to the set's button.
+});
+
+test("Delete of an Example's saved copy leaves with the copy; the focus goes to the set's button", async ({ page }) => {
+  await stubSixteenS(page);
+  await start(page);
+  const backend = await page.getByTestId('storage-status').getAttribute('data-backend');
+  test.skip(backend !== 'opfs', `Delete is offered for a copy saved in this browser (OPFS); this browser keeps the files in ${backend}`);
+  await page.getByTestId(`example-${SIXTEEN_S.id}`).click();
+  await settled(page, 'subject');
   const remove = page.getByTestId(`example-${SIXTEEN_S.id}-delete`);
-  if ((await page.getByTestId('storage-status').getAttribute('data-backend')) === 'opfs') {
-    await remove.focus();
-    await page.keyboard.press('Enter');
-    await expect(remove).toHaveCount(0);
-    expect(await focused(page)).toBe(`example-${SIXTEEN_S.id}`);
-  }
+  await remove.focus();
+  await page.keyboard.press('Enter');
+  await expect(remove).toHaveCount(0);
+  expect(await focused(page)).toBe(`example-${SIXTEEN_S.id}`);
 });
 
 test("an Example's Cancel that leaves as the load ends gives the focus back to the set's button", async ({ page }) => {

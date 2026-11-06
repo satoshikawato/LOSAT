@@ -105,7 +105,8 @@ const verdict = computed(() => {
  * Told when it changes: not again after each check of the same input (each pause in typing, each
  * change of mode) that finds what the last one found.
  */
-let toldKey: string | undefined;
+/** A card that shows an input already checked (mounted again) does not tell it again. */
+let toldKey = verdict.value?.key;
 watch(verdict, (now) => {
   if (now === undefined || now.key === toldKey) return;
   toldKey = now.key;

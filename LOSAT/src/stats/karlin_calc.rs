@@ -721,8 +721,8 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
     let mut low_alignment_score = 0;
     let mut high_alignment_score = 0;
     let mut inner_sum = 1.0;
-    let mut oldsum = 1.0;
-    let mut oldsum2 = 1.0;
+    // NCBI's `oldsum` and `oldsum2` (blast_stat.c:2266, 2344, 2379-2380) are read only under
+    // `#ifdef ADD_GEOMETRIC_TERMS_TO_K` (blast_stat.c:2383-2410), which nothing defines.
     alignment_score_probabilities[0] = 1.0;
 
     let mut iter_counter = 0;
@@ -812,9 +812,6 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
             inner_sum += alignment_score_probabilities[ptr_p_idx as usize];
             i += 1;
         }
-
-        oldsum2 = oldsum;
-        oldsum = inner_sum;
 
         iter_counter += 1;
         inner_sum /= iter_counter as f64;

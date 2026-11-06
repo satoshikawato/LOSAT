@@ -335,15 +335,10 @@ fn on_helpers(helpers: usize, failed: &std::sync::atomic::AtomicBool, work: impl
             .map(|_| std::thread::Builder::new().spawn_scoped(scope, work))
             .collect();
         work();
-        for handle in spawned {
-            match handle {
-                Ok(handle) => {
-                    if handle.join().is_err() {
-                        failed.store(true, std::sync::atomic::Ordering::Relaxed);
-                    }
-                }
-                // A helper that could not start leaves its parts to the others.
-                Err(_) => {}
+        // A helper that could not start leaves its parts to the others.
+        for handle in spawned.into_iter().flatten() {
+            if handle.join().is_err() {
+                failed.store(true, std::sync::atomic::Ordering::Relaxed);
             }
         }
     });

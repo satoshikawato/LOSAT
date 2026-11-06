@@ -2529,7 +2529,7 @@ mod tests {
                     scope.spawn(|| {
                         barrier.wait();
                         assert!(side.keeps(slot, subject.len()));
-                        side.plan(slot, subject.len(), &build).unwrap()
+                        side.plan(slot, subject.len(), build).unwrap()
                     })
                 })
                 .collect();
@@ -2546,7 +2546,7 @@ mod tests {
         assert_eq!(side.kept_bytes(), bytes);
         // A later batch reads the same plan and adds nothing.
         assert!(side.keeps(slot, subject.len()));
-        let again = side.plan(slot, subject.len(), &build).unwrap();
+        let again = side.plan(slot, subject.len(), build).unwrap();
         assert!(std::sync::Arc::ptr_eq(&plans[0], &again));
         assert_eq!(
             (builds.load(Ordering::Relaxed), side.kept_bytes()),

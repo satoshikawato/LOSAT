@@ -163,3 +163,55 @@ opt-level = 3
 # tests ran 5 % faster than at level 1, and line tables cut the build by a fifth.
 [profile.test]
 opt-level = 1
+
+# Lint levels of every target of the package (lib, bins, tests, examples).
+# A lint is allowed here only with a reason. A single place that keeps a lint's shape on purpose
+# uses `#[expect(lint, reason = "...")]` at that item instead of an entry here.
+
+[lints.rust]
+# The library crate is named LOSAT, the product's name (`use LOSAT::...` in web/adapter, examples
+# and the binaries). Renaming the crate is the library line's decision.
+non_snake_case = "allow"
+# TEMPORARY: each entry is removed by the PR that fixes its last finding.
+dead_code = "allow"
+unused_imports = "allow"
+unused_variables = "allow"
+unused_mut = "allow"
+# TEMPORARY until the library line decides what the crate exports: a public item names a type
+# that is private to its module.
+private_interfaces = "allow"
+private_bounds = "allow"
+
+[lints.clippy]
+# NCBI's C functions are ported argument by argument (e.g. Blast_SemiGappedAlign,
+# blast_gapalign.c), so a reviewer reads the Rust call next to the C one.
+too_many_arguments = "allow"
+# Per-thread and per-batch results are nested tuples and vectors that follow NCBI's structures.
+type_complexity = "allow"
+# Index loops address several arrays with one index, as NCBI's C does; iterators change the
+# generated code of the lookup, scan and extension loops.
+needless_range_loop = "allow"
+explicit_counter_loop = "allow"
+# NCBI's tables keep NCBI's digits so they diff against NCBI's source; each literal rounds to
+# the same f64.
+excessive_precision = "allow"
+# The NCBI C/C++ snippets (AGENTS.md rule 4) are quoted with NCBI's own tabs.
+tabs_in_doc_comments = "allow"
+# Functions that take a list of ranges are given the whole span as one range.
+single_range_in_vec_init = "allow"
+# TEMPORARY: each entry is removed by the PR that fixes its last finding.
+unnecessary_cast = "allow"
+doc_lazy_continuation = "allow"
+useless_vec = "allow"
+assertions_on_constants = "allow"
+manual_range_contains = "allow"
+len_zero = "allow"
+manual_is_multiple_of = "allow"
+needless_borrow = "allow"
+implicit_saturating_sub = "allow"
+collapsible_if = "allow"
+manual_div_ceil = "allow"
+nonminimal_bool = "allow"
+clone_on_copy = "allow"
+needless_option_as_deref = "allow"
+int_plus_one = "allow"

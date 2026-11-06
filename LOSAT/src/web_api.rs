@@ -855,7 +855,7 @@ fn run_pair(
             "subject",
         )
         .map_err(engine_error),
-        other => return Err(format!("unsupported LOSAT program: {other}")),
+        other => Err(format!("unsupported LOSAT program: {other}")),
     }
 }
 

@@ -9,7 +9,6 @@
 //! function. They are `pub` so that the command line, the web adapters and the tests reach them,
 //! but they are hidden from this documentation and outside the compatibility promise of the
 //! version number: their items change as the port advances.
-#![allow(warnings, clippy::all)]
 
 #[doc(hidden)]
 pub mod algorithm;

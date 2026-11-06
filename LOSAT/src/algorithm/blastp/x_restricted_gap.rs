@@ -1148,6 +1148,10 @@ fn row_nogap_scalar(
     let mut score = MININT;
     let mut gk = first.div_ceil(RESTRICT_SIZE);
     let mut b_gap = gk * RESTRICT_SIZE;
+    #[expect(
+        clippy::mut_range_bound,
+        reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:1112,1124-1125)"
+    )]
     for b_index in first..b_size {
         let next_score = prev[PAD + b_index] + row[(col[b_index + 1] & 31) as usize];
         if b_index != b_gap {
@@ -1257,6 +1261,10 @@ fn row_gap_scalar(
     let mut score_gap_row = MININT;
     let mut gk = first.div_ceil(RESTRICT_SIZE);
     let mut b_gap = gk * RESTRICT_SIZE;
+    #[expect(
+        clippy::mut_range_bound,
+        reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:1177,1192-1193)"
+    )]
     for b_index in first..b_size {
         let next_score = prev[PAD + b_index] + row[(col[b_index + 1] & 31) as usize];
         if b_index != b_gap {
@@ -2553,7 +2561,7 @@ mod tests {
         // band after a few cells, so the arrays keep the first rows' cells (without the switch
         // they hold the subject's letters); a related pair of 3,000 letters grows them to its
         // band. Both give the reference's result.
-        let mut rng = Rng(0x5EED_0F_BA4D_0001);
+        let mut rng = Rng(0x5E_ED0F_BA4D_0001);
         let mut scratch = GapAlignScratch::new();
         let m = MATRICES[0];
         let fast = cpu_has_avx2();

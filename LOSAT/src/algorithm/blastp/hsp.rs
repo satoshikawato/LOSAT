@@ -864,10 +864,12 @@ impl BlastCompoHeap {
         if self.heap_array.is_none() {
             self.convert_to_heap();
         }
-        let mut record = BlastCompoHeapRecord::default();
-        record.best_evalue = evalue;
-        record.best_score = score;
-        record.subject_index = subject_index;
+        let record = BlastCompoHeapRecord {
+            best_evalue: evalue,
+            best_score: score,
+            subject_index,
+            ..Default::default()
+        };
         let heap_array = self
             .heap_array
             .as_ref()

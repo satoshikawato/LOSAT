@@ -1591,10 +1591,8 @@ mod tests {
             (b"-N-\xE9!", '\u{e9}'),
         ] {
             let expected = format!("TBLASTN subject base '{named}' is not implemented");
-            let ours = x_subject_ncbi2na(subject).err().expect("no letter");
-            let theirs = resolve_local_subject_ncbi2na(subject)
-                .err()
-                .expect("no letter");
+            let ours = x_subject_ncbi2na(subject).expect_err("no letter");
+            let theirs = resolve_local_subject_ncbi2na(subject).expect_err("no letter");
             assert_eq!(ours.to_string(), expected);
             assert_eq!(theirs.to_string(), expected);
         }

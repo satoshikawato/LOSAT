@@ -918,6 +918,10 @@ pub fn blastn_real(value: &str) -> Result<f64, String> {
 /// ```
 fn ncbi_threshold(value: &str, program: &str) -> Result<f64, String> {
     let threshold = ncbi_double(value, program)?;
+    #[expect(
+        clippy::neg_cmp_op_on_partial_ord,
+        reason = "NCBI accepts the value when `value >= m_MinValue` (blast_input_aux.hpp:111-112), so NaN fails; `threshold < 0.0` would accept NaN"
+    )]
     if !(threshold >= 0.0) {
         return Err("Illegal value, expected greater or equal to 0".into());
     }

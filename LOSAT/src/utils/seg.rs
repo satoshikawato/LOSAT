@@ -22,10 +22,14 @@ const K_LN20: f64 = 2.9957322735539909;
 /// NCBI BLAST ln(2) constant.
 /// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h
 /// #define NCBIMATH_LN2 0.69314718055994530941723212145818
-const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
 /// Natural log values for 0.1, 0.2, 0.3, ... 1.0 used by NCBI when window total=10.
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1305-1311
+#[expect(
+    clippy::approx_constant,
+    reason = "NCBI's log_win10[] digits (blast_seg.c:1307-1311): -2.30258509 is not the f64 of -LN_10, and the std constant would change SEG's entropy"
+)]
 const LOG_WIN10: [f64; 11] = [
     0.0,
     -2.30258509,
@@ -214,7 +218,7 @@ impl<'a> SegWindow<'a> {
     }
 
     fn has_dash(&self) -> bool {
-        self.slice().iter().any(|&letter| letter == b'-')
+        self.slice().contains(&b'-')
     }
 
     fn shift_win1(&mut self) -> bool {

@@ -136,8 +136,8 @@ pub(super) fn format_number(outfmt: &str) -> i32 {
 }
 
 /// The XML2 / JSON document of a checked `-outfmt` value (16, 15, 14 or 13; `None` for the
-/// others). Outfmt 13 and 14 write side files next to `-out`: only the command line reaches them
-/// (`run_local` stops at NCBI's XInclude check).
+/// others). Outfmt 13 and 14 write side files next to `-out`, or to the caller's receiver of them
+/// (`OutputSink::Files`); a `run_local` call with neither stops at NCBI's XInclude check.
 pub(super) fn xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind> {
     use crate::blastinput::app::ReportFormat;
     crate::report::blast_xml2::Xml2Kind::of(ReportFormat::from_number(format_number(outfmt))?)

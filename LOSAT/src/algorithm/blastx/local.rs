@@ -896,7 +896,8 @@ fn read_format_options(
     for &(outfmt, side_files) in outfmts {
         let choice = app::parse_formatting_string(outfmt)?;
         app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
-        // No NCBI counterpart: the side files of outfmt 13 and 14 have no writer in memory.
+        // No NCBI counterpart: the side files of outfmt 13 and 14 have nowhere to go without a file
+        // or a receiver of them.
         if !side_files && matches!(choice.number, 13 | 14) {
             bail!(
                 "output format {} is not supported in memory for BLASTX",

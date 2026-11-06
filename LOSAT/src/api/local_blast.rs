@@ -140,6 +140,7 @@ pub use crate::algorithm::blastx::run_local_database as run_local_database_blast
 //                CArgDescriptions::eOutputFile, "-");
 // ```
 /// Where one requested output format is written.
+#[non_exhaustive]
 pub enum OutputSink<'a> {
     /// Standard output, buffered (the CLI without `-out`, NCBI's default `-`).
     Stdout,

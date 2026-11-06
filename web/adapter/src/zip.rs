@@ -3,7 +3,8 @@
 //! entries are stored (method 0, no compression), each with its CRC-32 and sizes in its local
 //! header, and the same modification time (1980-01-01 00:00, the first time that MS-DOS dates
 //! hold), so that the archive of a run is the same bytes every time. ZIP64 records come only where
-//! the classic fields cannot hold a value: more than 65,534 entries, or offsets of 4 GiB or more.
+//! the classic fields cannot hold a value: 65,535 entries or more, or an offset or the central
+//! directory's size of 4 GiB - 1 or more.
 
 use std::io::{self, Write};
 
@@ -78,8 +79,8 @@ impl<W: Write> ZipStream<W> {
         Ok(())
     }
 
-    /// Adds the file `name` with the contents `bytes` (stored). A file of 4 GiB or more is
-    /// refused: a browser's memory cannot hold one.
+    /// Adds the file `name` with the contents `bytes` (stored). A file of 4 GiB - 1 bytes or more
+    /// (a size that needs ZIP64's) is refused: a browser's memory cannot hold one.
     pub fn add(&mut self, name: &[u8], bytes: &[u8]) -> io::Result<()> {
         let size = u32::try_from(bytes.len())
             .ok()
@@ -91,7 +92,13 @@ impl<W: Write> ZipStream<W> {
         let offset = self.written;
         let mut header = Vec::with_capacity(30 + name.len());
         header.extend_from_slice(&LOCAL_HEADER.to_le_bytes());
-        header.extend_from_slice(&VERSION.to_le_bytes());
+        // The version that its central header gives (ZIP64 for an offset that needs it).
+        let version = if offset >= u64::from(u32::MAX) {
+            VERSION_ZIP64
+        } else {
+            VERSION
+        };
+        header.extend_from_slice(&version.to_le_bytes());
         header.extend_from_slice(&0u16.to_le_bytes()); // flags
         header.extend_from_slice(&0u16.to_le_bytes()); // stored
         header.extend_from_slice(&DOS_TIME.to_le_bytes());
@@ -271,6 +278,53 @@ mod tests {
         let empty = ZipStream::new(Vec::new()).finish().unwrap();
         assert_eq!(empty.len(), 22);
         assert!(read(&empty).is_empty());
+    }
+
+    // An entry whose local header starts at 4 GiB - 1 or later has its offset in a ZIP64 extra field
+    // of its central header, and the central directory there needs the ZIP64 end records (an
+    // archive that starts 16 bytes before that point; only its own bytes are kept).
+    #[test]
+    fn offsets_of_4_gib_take_zip64_fields() {
+        let base = u64::from(u32::MAX) - 16;
+        let mut zip = ZipStream {
+            out: Vec::new(),
+            written: base,
+            entries: Vec::new(),
+        };
+        zip.add(b"a", b"").unwrap(); // at base: 31 bytes
+        zip.add(b"b", b"xyz").unwrap(); // at base + 31
+        let bytes = zip.finish().unwrap();
+        let u16_at = |at: usize| u16::from_le_bytes(bytes[at..at + 2].try_into().unwrap());
+        let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+        let u64_at = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
+        // The local headers: version 2.0, then 4.5 for the one past the point.
+        assert_eq!((u16_at(4), u16_at(31 + 4)), (VERSION, VERSION_ZIP64));
+        // The central headers: the first with its offset, the second with 0xFFFFFFFF and the
+        // ZIP64 extra field (id 1, 8 bytes, the offset).
+        let first = 31 + 34;
+        assert_eq!(u32_at(first), CENTRAL_HEADER);
+        assert_eq!((u16_at(first + 30), u32_at(first + 42)), (0, (base) as u32));
+        let second = first + 46 + 1;
+        assert_eq!(u32_at(second), CENTRAL_HEADER);
+        assert_eq!(
+            (u16_at(second + 6), u16_at(second + 30)),
+            (VERSION_ZIP64, 12)
+        );
+        assert_eq!(u32_at(second + 42), u32::MAX);
+        let extra = second + 46 + 1;
+        assert_eq!((u16_at(extra), u16_at(extra + 2)), (1, 8));
+        assert_eq!(u64_at(extra + 4), base + 31);
+        // The ZIP64 end record and its locator, then the end record with 0xFFFFFFFF offsets.
+        let record = extra + 12;
+        assert_eq!(u32_at(record), ZIP64_END_OF_CENTRAL_DIRECTORY);
+        assert_eq!((u64_at(record + 24), u64_at(record + 48)), (2, base + 65));
+        let locator = record + 56;
+        assert_eq!(u32_at(locator), ZIP64_END_LOCATOR);
+        assert_eq!(u64_at(locator + 8), base + record as u64);
+        let end = locator + 20;
+        assert_eq!(u32_at(end), END_OF_CENTRAL_DIRECTORY);
+        assert_eq!((u16_at(end + 10), u32_at(end + 16)), (u16::MAX, u32::MAX));
+        assert_eq!(bytes.len(), end + 22);
     }
 
     // 65,535 entries or more need the ZIP64 end records: the classic count field holds 65,534 at

@@ -232,6 +232,8 @@ pub struct ReceivedSideFiles {
 }
 
 impl SideFiles for ReceivedSideFiles {
+    /// A writer that hands the side file over when it is flushed or dropped (the trait's other
+    /// callers; a run writes through `write_file`).
     fn create(&mut self, n: u32) -> io::Result<Box<dyn Write + '_>> {
         Ok(Box::new(Received {
             receiver: &*self.receiver,
@@ -244,10 +246,18 @@ impl SideFiles for ReceivedSideFiles {
     fn listed(&self, n: u32) -> Vec<u8> {
         self.names.listed(n)
     }
+
+    /// The report goes to the receiver as it is, without a copy; a receiver that fails is the
+    /// side-file write error of every program (`side_file_write_error`).
+    fn write_file(&mut self, n: u32, report: &[u8]) -> anyhow::Result<()> {
+        self.receiver
+            .receive(&self.names.path_bytes(n), report)
+            .map_err(|_| super::framing::side_file_write_error())
+    }
 }
 
-/// One side file for a receiver: the bytes are kept and handed over at the flush that ends the
-/// report's write (`Xml2Document::write`), or when it is dropped without one.
+/// One side file for a receiver from `create`: the bytes are kept and handed over at the first
+/// flush, or when it is dropped without one.
 struct Received<'a> {
     receiver: &'a dyn SideFileReceiver,
     name: Vec<u8>,

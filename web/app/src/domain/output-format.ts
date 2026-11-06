@@ -108,6 +108,19 @@ export function outputNumber(argv: readonly string[], output: RunOutput): number
   return output === CUSTOM_OUTPUT ? (formatNumber(customOutfmt(argv) ?? '') ?? 0) : output;
 }
 
+/**
+ * The `-out` of the files of outfmt 13 and 14 (the adapter's `run::SIDE_FILE_BASE`): the archive holds
+ * the files that the CLI writes with `-out results` (the side files `results_<n>.json|xml`, the master
+ * file as `results.json|xml`), so the command of that output names it.
+ */
+export const FILES_OUT = 'results';
+
+/** Whether an output of a run of `argv` is the archive of the files of outfmt 13 or 14. */
+export function isFilesOutput(argv: readonly string[], output: RunOutput): boolean {
+  const number = outputNumber(argv, output);
+  return output === CUSTOM_OUTPUT && (number === 13 || number === 14);
+}
+
 /** The formats whose output is binary: outfmt 9, and the ZIP archive of the files of 13 and 14. */
 const BINARY: ReadonlySet<number> = new Set([9, 13, 14]);
 

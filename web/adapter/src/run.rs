@@ -135,7 +135,7 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 /// the CLI does (`parse_formatting_string`, `report_format`, with the CLI's messages; the
 /// formatting handler's check of a custom delimiter comes later, `custom_handler_check`). A run
 /// writes the program's formats 0, 6 and 7 whatever the value; every other format that the CLI
-/// writes (5, 8 to 12, 15, 16, 20, BLASTN's 17), and 6 and 7 with words after the number (fields,
+/// writes (5, 8 to 16, 20, BLASTN's 17), and 6 and 7 with words after the number (fields,
 /// `delim=`), add an output of their own, the third value returned (docs/web/abi_v2.md §7). The
 /// rule reads the words, not the fields they make, so that the application reads it from the argv
 /// alike: `6 std` adds an output with the bytes of outfmt 6. 0 with words adds none (the CLI writes

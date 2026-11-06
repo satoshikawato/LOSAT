@@ -58,20 +58,50 @@ function withoutCl(document) {
   return Buffer.concat([document.subarray(0, start), document.subarray(end)]);
 }
 
-// The entries of a ZIP archive of stored files (the adapter's archive of outfmt 13 and 14), as
-// [name, bytes] in order, each checked against its CRC-32 in the central directory's place.
-function storedZipEntries(archive) {
-  const entries = [];
-  let at = 0;
-  while (at + 4 <= archive.length && archive.readUInt32LE(at) === 0x04034b50) {
-    assert.equal(archive.readUInt16LE(at + 8), 0, "a stored entry");
-    const size = archive.readUInt32LE(at + 18);
-    const name = archive.readUInt16LE(at + 26);
-    const data = at + 30 + name + archive.readUInt16LE(at + 28);
-    entries.push([archive.subarray(at + 30, at + 30 + name).toString("utf8"), archive.subarray(data, data + size)]);
-    at = data + size;
+// The CRC-32 of ZIP (ISO-HDLC).
+function crc32(bytes) {
+  let crc = ~0;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let k = 0; k < 8; k++) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
   }
-  assert.equal(archive.readUInt32LE(at), 0x02014b50, "the central directory follows the entries");
+  return ~crc >>> 0;
+}
+
+// The entries of a ZIP archive of stored files (the adapter's archive of outfmt 13 and 14), as
+// [name, bytes] in the order of its central directory, read as a ZIP reader reads them: the end
+// record (or the ZIP64 end record), each central header, its local header with the same CRC-32 and
+// sizes, and the bytes, whose CRC-32 is checked.
+function storedZipEntries(archive) {
+  const end = archive.length - 22;
+  assert.equal(archive.readUInt32LE(end), 0x06054b50, "the end of central directory record");
+  let count = archive.readUInt16LE(end + 10);
+  let at = archive.readUInt32LE(end + 16);
+  if (count === 0xffff) {
+    const record = Number(archive.readBigUInt64LE(end - 20 + 8));
+    assert.equal(archive.readUInt32LE(record), 0x06064b50, "the ZIP64 end of central directory record");
+    count = Number(archive.readBigUInt64LE(record + 32));
+    at = Number(archive.readBigUInt64LE(record + 48));
+  }
+  const entries = [];
+  for (let i = 0; i < count; i++) {
+    assert.equal(archive.readUInt32LE(at), 0x02014b50, "a central header");
+    const [crc, size, nameLength, extraLength] = [archive.readUInt32LE(at + 16), archive.readUInt32LE(at + 24),
+                                                  archive.readUInt16LE(at + 28), archive.readUInt16LE(at + 30)];
+    assert.equal(archive.readUInt16LE(at + 10), 0, "a stored entry");
+    assert.equal(archive.readUInt32LE(at + 20), size, "stored: the compressed size is the size");
+    const name = archive.subarray(at + 46, at + 46 + nameLength).toString("utf8");
+    let local = archive.readUInt32LE(at + 42);
+    if (local === 0xffffffff) local = Number(archive.readBigUInt64LE(at + 46 + nameLength + 4));
+    assert.equal(archive.readUInt32LE(local), 0x04034b50, `${name}: a local header`);
+    assert.equal(archive.readUInt32LE(local + 14), crc, `${name}: the local CRC-32`);
+    assert.equal(archive.readUInt32LE(local + 22), size, `${name}: the local size`);
+    const data = local + 30 + archive.readUInt16LE(local + 26) + archive.readUInt16LE(local + 28);
+    const bytes = archive.subarray(data, data + size);
+    assert.equal(crc32(bytes), crc, `${name}: the CRC-32 of its bytes`);
+    entries.push([name, bytes]);
+    at += 46 + nameLength + extraLength;
+  }
   return entries;
 }
 
@@ -480,6 +510,13 @@ async function main() {
         if (search.files) {
           const sent = run.streams.get(CUSTOM_STREAM) || Buffer.alloc(0);
           const entries = storedZipEntries(sent);
+          // A standard reader (Python's zipfile) reads it too, every CRC-32 checked.
+          const archive = path.join(scratch, "archive.zip");
+          fs.writeFileSync(archive, sent);
+          const checked = require("node:child_process").spawnSync("python3", ["-I", "-c",
+            "import sys, zipfile\nwith zipfile.ZipFile(sys.argv[1]) as z:\n    sys.exit(z.testzip() is not None)", archive]);
+          assert.equal(checked.status, 0, `${label}: zipfile reads the archive: ${checked.stderr}`);
+          fs.rmSync(archive, { force: true });
           const cli = expected.outputs.get(CUSTOM_STREAM);
           assert.deepEqual(entries.map(([name]) => name), cli.map(([name]) => name), `${label}: -outfmt ${search.outfmt} files`);
           for (const [index, [name, bytes]] of entries.entries()) {

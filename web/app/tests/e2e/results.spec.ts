@@ -2135,17 +2135,42 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
   await expect(page.getByTestId('results-download-menu').getByRole('button')).toHaveCount(3);
 });
 
-/** The entries of a ZIP archive of stored files (the adapter's archive of outfmt 13 and 14), as name and bytes, in order. */
+/** The CRC-32 of ZIP (ISO-HDLC). */
+function crc32(bytes: Uint8Array): number {
+  let crc = ~0;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let k = 0; k < 8; k++) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  }
+  return ~crc >>> 0;
+}
+
+/**
+ * The entries of a ZIP archive of stored files (the adapter's archive of outfmt 13 and 14), as name and bytes in the order
+ * of its central directory, read as a ZIP reader reads them: the end record, each central header, its local header with
+ * the same CRC-32 and size, and the bytes, whose CRC-32 is checked.
+ */
 function storedZipEntries(archive: Buffer): Array<readonly [string, Buffer]> {
+  const end = archive.length - 22;
+  expect(archive.readUInt32LE(end), 'the end of central directory record').toBe(0x06054b50);
+  const count = archive.readUInt16LE(end + 10);
+  let at = archive.readUInt32LE(end + 16);
   const entries: Array<readonly [string, Buffer]> = [];
-  let at = 0;
-  while (archive.readUInt32LE(at) === 0x04034b50) {
-    expect(archive.readUInt16LE(at + 8), 'stored').toBe(0);
-    const size = archive.readUInt32LE(at + 18);
-    const name = archive.readUInt16LE(at + 26);
-    const data = at + 30 + name + archive.readUInt16LE(at + 28);
-    entries.push([archive.subarray(at + 30, at + 30 + name).toString('utf8'), archive.subarray(data, data + size)]);
-    at = data + size;
+  for (let i = 0; i < count; i++) {
+    expect(archive.readUInt32LE(at), 'a central header').toBe(0x02014b50);
+    expect(archive.readUInt16LE(at + 10), 'stored').toBe(0);
+    const crc = archive.readUInt32LE(at + 16);
+    const size = archive.readUInt32LE(at + 24);
+    const nameLength = archive.readUInt16LE(at + 28);
+    const name = archive.subarray(at + 46, at + 46 + nameLength).toString('utf8');
+    const local = archive.readUInt32LE(at + 42);
+    expect(archive.readUInt32LE(local), name).toBe(0x04034b50);
+    expect([archive.readUInt32LE(local + 14), archive.readUInt32LE(local + 22)], name).toEqual([crc, size]);
+    const data = local + 30 + archive.readUInt16LE(local + 26) + archive.readUInt16LE(local + 28);
+    const bytes = archive.subarray(data, data + size);
+    expect(crc32(bytes), name).toBe(crc);
+    entries.push([name, bytes]);
+    at += 46 + nameLength + archive.readUInt16LE(at + 30);
   }
   return entries;
 }
@@ -2251,7 +2276,7 @@ test("Additional options' -outfmt of another format adds its output to the Outpu
     // Run details: the command of the output.
     await page.getByTestId('results-view-details').click();
     await expect(page.getByTestId('run-command-custom')).toHaveText(
-      `losat ${id} -query query.fa -subject subject.fa -outfmt ${outfmt.includes(' ') ? `'${outfmt}'` : outfmt}`,
+      `losat ${id} -query query.fa -subject subject.fa -outfmt ${outfmt.includes(' ') ? `'${outfmt}'` : outfmt}${files ? ' -out results' : ''}`,
     );
   }
 });

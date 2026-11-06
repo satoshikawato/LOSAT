@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! TBLASTX `-matrix` (series SCT, SC7): the runs that stop, which the frozen-fixture rows
 //! (`score.tblastx.*` of `outfmt0_manifest.tsv`, exit status 0) cannot hold. The bytes of NCBI
 //! BLAST+ 2.17.0 are in `tests/fixtures/tblastx_matrix` (`<case>.out`, `<case>.err`: `tblastx

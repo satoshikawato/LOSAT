@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! BLAST XML (outfmt 5) of BLASTP and BLASTN when no query is formatted (an empty standard
 //! input as the query): NCBI writes the epilog's end of line alone, one newline.
 //!

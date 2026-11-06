@@ -17,7 +17,8 @@
 //! (`lmdb_read.rs`), and the index files on the `LOSAT_X_DBIDXREAD=0` path by
 //! `open_gives_the_errors_of_parse` (`x_dbidxread_tests.rs`). The form follows those tests and
 //! `damaged_files_never_panic` (`tax_sqlite.rs`); the generator is the xorshift of
-//! `isam_tests.rs`.
+//! `isam_tests.rs`. The generator, the damage and the temporary directory are shared with
+//! `seqid_taxid_damaged_tests.rs`.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -38,12 +39,12 @@ fn fixture_dir() -> PathBuf {
 }
 
 /// Marsaglia's xorshift64, as in `isam_tests.rs`.
-struct Rng(u64);
+pub(super) struct Rng(u64);
 
 impl Rng {
     /// A generator seeded from the bytes of `name`: the v4 and v5 fixtures have files of the
     /// same bytes and the same length of name, which then get different damage.
-    fn seeded(name: &str) -> Self {
+    pub(super) fn seeded(name: &str) -> Self {
         let seed = name.bytes().fold(0x5eed_0000_0000_0001u64, |seed, byte| {
             seed.rotate_left(7) ^ u64::from(byte)
         });
@@ -64,10 +65,10 @@ impl Rng {
 
 /// A directory of its own for each test (memory `parallel-test-shared-file-race`), removed at
 /// the end.
-struct TempDir(PathBuf);
+pub(super) struct TempDir(pub(super) PathBuf);
 
 impl TempDir {
-    fn new(tag: &str) -> Self {
+    pub(super) fn new(tag: &str) -> Self {
         static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let dir = std::env::temp_dir().join(format!(
             "losat-damaged-{tag}-{}-{}",
@@ -78,10 +79,10 @@ impl TempDir {
         Self(dir)
     }
 
-    /// Copies every fixture file whose name starts with one of `stems` followed by a dot.
-    fn copy_fixtures(&self, stems: &[&str]) {
+    /// Copies every file of `from` whose name starts with one of `stems` followed by a dot.
+    pub(super) fn copy_fixtures(&self, from: &Path, stems: &[&str]) {
         let mut copied = 0;
-        for entry in std::fs::read_dir(fixture_dir()).unwrap() {
+        for entry in std::fs::read_dir(from).unwrap() {
             let entry = entry.unwrap();
             let name = entry.file_name().into_string().unwrap();
             if stems.iter().any(|stem| {
@@ -95,7 +96,7 @@ impl TempDir {
         assert!(copied > 0, "no fixture files for {stems:?}");
     }
 
-    fn name(&self, stem: &str) -> String {
+    pub(super) fn name(&self, stem: &str) -> String {
         self.0.join(stem).to_str().unwrap().to_string()
     }
 }
@@ -108,7 +109,7 @@ impl Drop for TempDir {
 
 /// How a seeded round damages a file.
 #[derive(Clone, Copy, Debug)]
-enum Damage {
+pub(super) enum Damage {
     /// The file cut to a length drawn below its length.
     Cut,
     /// One to four bits flipped anywhere.
@@ -138,7 +139,7 @@ fn damage(orig: &[u8], rng: &mut Rng, round: usize) -> (Damage, Vec<u8>) {
         Damage::Word => {
             if bytes.len() >= 4 {
                 let at = rng.below(bytes.len() / 4) * 4;
-                let big_endian = rng.next() % 2 == 0;
+                let big_endian = rng.next().is_multiple_of(2);
                 let word: [u8; 4] = bytes[at..at + 4].try_into().unwrap();
                 let old = if big_endian {
                     u32::from_be_bytes(word)
@@ -177,6 +178,43 @@ fn damage(orig: &[u8], rng: &mut Rng, round: usize) -> (Damage, Vec<u8>) {
         }
     }
     (kind, bytes)
+}
+
+/// A damaged copy of a target file.
+pub(super) struct Case {
+    /// `None` for a cut of the intact file, else the seeded round and its damage.
+    pub(super) round: Option<(usize, Damage)>,
+    pub(super) bytes: Vec<u8>,
+}
+
+impl Case {
+    pub(super) fn describe(&self) -> String {
+        match self.round {
+            None => format!("cut to {} bytes", self.bytes.len()),
+            Some((round, kind)) => format!("round {round} ({kind:?})"),
+        }
+    }
+}
+
+/// The cases of a target file: every cut length of a small file and a spread of them for a
+/// larger one, then `ROUNDS` seeded rounds of damage.
+pub(super) fn cases(orig: &[u8], rng: &mut Rng) -> Vec<Case> {
+    let step = orig.len().div_ceil(256).max(1);
+    let mut cases: Vec<Case> = (0..orig.len())
+        .step_by(step)
+        .map(|cut| Case {
+            round: None,
+            bytes: orig[..cut].to_vec(),
+        })
+        .collect();
+    for round in 0..ROUNDS {
+        let (kind, bytes) = damage(orig, rng, round);
+        cases.push(Case {
+            round: Some((round, kind)),
+            bytes,
+        });
+    }
+    cases
 }
 
 /// What the cases of one target file gave.
@@ -358,7 +396,7 @@ fn read_letters(block: &SequenceBlock, seqtype: SeqType, tally: &mut Tally) {
 /// every target whose damage did not reach the reader.
 fn sweep(tag: &str, stems: &[&str], open: &str, seqtype: SeqType, masks: bool, targets: &[&str]) {
     let dir = TempDir::new(tag);
-    dir.copy_fixtures(stems);
+    dir.copy_fixtures(&fixture_dir(), stems);
     let name = dir.name(open);
     let mut intact = Tally::default();
     exercise(&dir.0, &name, seqtype, masks, &mut intact);
@@ -368,37 +406,22 @@ fn sweep(tag: &str, stems: &[&str], open: &str, seqtype: SeqType, masks: bool, t
         let path = dir.0.join(target);
         let orig = std::fs::read(&path).unwrap();
         let mut rng = Rng::seeded(&format!("{tag}/{target}"));
-        // Every cut length of the small files, a spread of them for the larger ones, then the
-        // seeded rounds.
-        let step = orig.len().div_ceil(256).max(1);
-        let mut cases: Vec<(Option<(usize, Damage)>, Vec<u8>)> = (0..orig.len())
-            .step_by(step)
-            .map(|cut| (None, orig[..cut].to_vec()))
-            .collect();
-        for round in 0..ROUNDS {
-            let (kind, bytes) = damage(&orig, &mut rng, round);
-            cases.push((Some((round, kind)), bytes));
-        }
         let mut tally = Tally::default();
         let (mut seeded_opened, mut seeded_changed) = (0, 0);
-        for (case, bytes) in cases {
-            std::fs::write(&path, &bytes).unwrap();
+        for case in cases(&orig, &mut rng) {
+            std::fs::write(&path, &case.bytes).unwrap();
             let (opened, errors) = (tally.opened, tally.errors);
             let outcome = catch_unwind(AssertUnwindSafe(|| {
                 exercise(&dir.0, &name, seqtype, masks, &mut tally)
             }));
-            if case.is_some() {
+            if case.round.is_some() {
                 seeded_opened += usize::from(tally.opened > opened);
                 if tally.opened == opened || tally.errors - errors != intact.errors {
                     seeded_changed += 1;
                 }
             }
             if outcome.is_err() {
-                let what = match case {
-                    None => format!("cut to {} bytes", bytes.len()),
-                    Some((round, kind)) => format!("round {round} ({kind:?})"),
-                };
-                problems.push(format!("{target}: {what} panicked"));
+                problems.push(format!("{target}: {} panicked", case.describe()));
             }
         }
         std::fs::write(&path, &orig).unwrap();

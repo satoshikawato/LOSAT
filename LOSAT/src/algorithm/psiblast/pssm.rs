@@ -1409,6 +1409,10 @@ enum TargetKind {
     Regular,
     /// A character device (`/dev/null`, `/dev/full`): opened for writing as it is; `null`: it is
     /// `/dev/null`.
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "constructed only on unix (special_target_kind)")
+    )]
     Device { null: bool },
     /// A directory or a socket: `ofstream` cannot open it.
     Unopenable,

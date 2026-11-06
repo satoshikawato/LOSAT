@@ -17,7 +17,7 @@ fn test_generate_frames_basic() {
     // Check frame numbers
     let frame_numbers: Vec<i8> = frames.iter().map(|f| f.frame).collect();
     for frame_num in frame_numbers {
-        assert!(frame_num >= -3 && frame_num <= 3 && frame_num != 0);
+        assert!((-3..=3).contains(&frame_num) && frame_num != 0);
     }
 }
 

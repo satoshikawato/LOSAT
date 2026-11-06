@@ -8,7 +8,7 @@
 //!   - ncbi_math.c: BLAST_LnFactorial, BLAST_LnGammaInt
 
 use LOSAT::stats::sum_statistics::{
-    e_to_p, large_gap_sum_e, ln_factorial, ln_gamma_int, normalize_score, p_to_e, small_gap_sum_e,
+    e_to_p, ln_factorial, normalize_score, p_to_e, small_gap_sum_e,
 };
 
 /// Test ln_factorial_int precision for small n (typical case: 2-10 HSPs)
@@ -226,7 +226,7 @@ fn test_xsum_accumulation_precision() {
     // Simulate accumulating xsum for 400 HSPs
     let num_hsps = 400;
     let mut xsum = 0.0;
-    let scores: Vec<i32> = (0..num_hsps).map(|i| 50 + (i % 20) as i32).collect();
+    let scores: Vec<i32> = (0..num_hsps).map(|i| 50 + (i % 20)).collect();
 
     for score in &scores {
         xsum += normalize_score(*score, lambda, log_k);

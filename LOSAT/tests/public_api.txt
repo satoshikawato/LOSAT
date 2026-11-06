@@ -1,0 +1,430 @@
+pub mod LOSAT
+pub mod LOSAT::api
+#[non_exhaustive] pub enum LOSAT::api::Error
+pub LOSAT::api::Error::Argv(alloc::string::String)
+pub LOSAT::api::Error::Input(alloc::string::String)
+pub LOSAT::api::Error::Search(alloc::string::String)
+impl LOSAT::api::Error
+pub fn LOSAT::api::Error::message(&self) -> &str
+impl core::clone::Clone for LOSAT::api::Error
+pub fn LOSAT::api::Error::clone(&self) -> LOSAT::api::Error
+impl core::cmp::Eq for LOSAT::api::Error
+impl core::cmp::PartialEq for LOSAT::api::Error
+pub fn LOSAT::api::Error::eq(&self, &LOSAT::api::Error) -> bool
+impl core::error::Error for LOSAT::api::Error
+impl core::fmt::Debug for LOSAT::api::Error
+pub fn LOSAT::api::Error::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for LOSAT::api::Error
+pub fn LOSAT::api::Error::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for LOSAT::api::Error
+impl core::marker::Freeze for LOSAT::api::Error
+impl core::marker::Send for LOSAT::api::Error
+impl core::marker::Sync for LOSAT::api::Error
+impl core::marker::Unpin for LOSAT::api::Error
+impl core::marker::UnsafeUnpin for LOSAT::api::Error
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::Error
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::Error
+#[non_exhaustive] pub enum LOSAT::api::Program
+pub LOSAT::api::Program::Blastn
+pub LOSAT::api::Program::Blastp
+pub LOSAT::api::Program::Blastx
+pub LOSAT::api::Program::Psiblast
+pub LOSAT::api::Program::Tblastn
+pub LOSAT::api::Program::Tblastx
+impl LOSAT::api::Program
+pub const LOSAT::api::Program::ALL: [LOSAT::api::Program; 6]
+pub fn LOSAT::api::Program::name(self) -> &'static str
+pub fn LOSAT::api::Program::parse(&str) -> core::result::Result<Self, LOSAT::api::Error>
+impl core::clone::Clone for LOSAT::api::Program
+pub fn LOSAT::api::Program::clone(&self) -> LOSAT::api::Program
+impl core::cmp::Eq for LOSAT::api::Program
+impl core::cmp::PartialEq for LOSAT::api::Program
+pub fn LOSAT::api::Program::eq(&self, &LOSAT::api::Program) -> bool
+impl core::fmt::Debug for LOSAT::api::Program
+pub fn LOSAT::api::Program::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for LOSAT::api::Program
+pub fn LOSAT::api::Program::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for LOSAT::api::Program
+pub fn LOSAT::api::Program::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for LOSAT::api::Program
+impl core::marker::StructuralPartialEq for LOSAT::api::Program
+impl core::str::traits::FromStr for LOSAT::api::Program
+pub type LOSAT::api::Program::Err = LOSAT::api::Error
+pub fn LOSAT::api::Program::from_str(&str) -> core::result::Result<Self, LOSAT::api::Error>
+impl core::marker::Freeze for LOSAT::api::Program
+impl core::marker::Send for LOSAT::api::Program
+impl core::marker::Sync for LOSAT::api::Program
+impl core::marker::Unpin for LOSAT::api::Program
+impl core::marker::UnsafeUnpin for LOSAT::api::Program
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::Program
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::Program
+pub enum LOSAT::api::Role
+pub LOSAT::api::Role::Query
+pub LOSAT::api::Role::Subject
+impl core::clone::Clone for LOSAT::api::Role
+pub fn LOSAT::api::Role::clone(&self) -> LOSAT::api::Role
+impl core::cmp::Eq for LOSAT::api::Role
+impl core::cmp::PartialEq for LOSAT::api::Role
+pub fn LOSAT::api::Role::eq(&self, &LOSAT::api::Role) -> bool
+impl core::fmt::Debug for LOSAT::api::Role
+pub fn LOSAT::api::Role::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for LOSAT::api::Role
+pub fn LOSAT::api::Role::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for LOSAT::api::Role
+impl core::marker::StructuralPartialEq for LOSAT::api::Role
+impl core::marker::Freeze for LOSAT::api::Role
+impl core::marker::Send for LOSAT::api::Role
+impl core::marker::Sync for LOSAT::api::Role
+impl core::marker::Unpin for LOSAT::api::Role
+impl core::marker::UnsafeUnpin for LOSAT::api::Role
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::Role
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::Role
+pub enum LOSAT::api::Strand
+pub LOSAT::api::Strand::Minus
+pub LOSAT::api::Strand::Plus
+impl core::clone::Clone for LOSAT::api::Strand
+pub fn LOSAT::api::Strand::clone(&self) -> LOSAT::api::Strand
+impl core::cmp::Eq for LOSAT::api::Strand
+impl core::cmp::PartialEq for LOSAT::api::Strand
+pub fn LOSAT::api::Strand::eq(&self, &LOSAT::api::Strand) -> bool
+impl core::fmt::Debug for LOSAT::api::Strand
+pub fn LOSAT::api::Strand::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for LOSAT::api::Strand
+pub fn LOSAT::api::Strand::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for LOSAT::api::Strand
+impl core::marker::StructuralPartialEq for LOSAT::api::Strand
+impl core::marker::Freeze for LOSAT::api::Strand
+impl core::marker::Send for LOSAT::api::Strand
+impl core::marker::Sync for LOSAT::api::Strand
+impl core::marker::Unpin for LOSAT::api::Strand
+impl core::marker::UnsafeUnpin for LOSAT::api::Strand
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::Strand
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::Strand
+#[non_exhaustive] pub enum LOSAT::api::ValueKind
+pub LOSAT::api::ValueKind::Boolean
+pub LOSAT::api::ValueKind::Flag
+pub LOSAT::api::ValueKind::Integer
+pub LOSAT::api::ValueKind::Path
+pub LOSAT::api::ValueKind::Real
+pub LOSAT::api::ValueKind::Text
+impl core::clone::Clone for LOSAT::api::ValueKind
+pub fn LOSAT::api::ValueKind::clone(&self) -> LOSAT::api::ValueKind
+impl core::cmp::Eq for LOSAT::api::ValueKind
+impl core::cmp::PartialEq for LOSAT::api::ValueKind
+pub fn LOSAT::api::ValueKind::eq(&self, &LOSAT::api::ValueKind) -> bool
+impl core::fmt::Debug for LOSAT::api::ValueKind
+pub fn LOSAT::api::ValueKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for LOSAT::api::ValueKind
+pub fn LOSAT::api::ValueKind::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for LOSAT::api::ValueKind
+impl core::marker::StructuralPartialEq for LOSAT::api::ValueKind
+impl core::marker::Freeze for LOSAT::api::ValueKind
+impl core::marker::Send for LOSAT::api::ValueKind
+impl core::marker::Sync for LOSAT::api::ValueKind
+impl core::marker::Unpin for LOSAT::api::ValueKind
+impl core::marker::UnsafeUnpin for LOSAT::api::ValueKind
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::ValueKind
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::ValueKind
+#[non_exhaustive] pub struct LOSAT::api::Batch
+pub LOSAT::api::Batch::diagnostics: alloc::vec::Vec<u8>
+pub LOSAT::api::Batch::hsps: alloc::vec::Vec<LOSAT::api::HspRecord>
+pub LOSAT::api::Batch::query_indices: core::ops::range::Range<usize>
+pub LOSAT::api::Batch::query_stats: alloc::vec::Vec<core::option::Option<LOSAT::api::QueryStats>>
+impl LOSAT::api::Batch
+pub fn LOSAT::api::Batch::queries(&self) -> impl core::iter::traits::iterator::Iterator<Item = LOSAT::api::QueryHits<'_>> + '_
+impl core::clone::Clone for LOSAT::api::Batch
+pub fn LOSAT::api::Batch::clone(&self) -> LOSAT::api::Batch
+impl core::cmp::PartialEq for LOSAT::api::Batch
+pub fn LOSAT::api::Batch::eq(&self, &LOSAT::api::Batch) -> bool
+impl core::fmt::Debug for LOSAT::api::Batch
+pub fn LOSAT::api::Batch::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for LOSAT::api::Batch
+impl core::marker::Freeze for LOSAT::api::Batch
+impl core::marker::Send for LOSAT::api::Batch
+impl core::marker::Sync for LOSAT::api::Batch
+impl core::marker::Unpin for LOSAT::api::Batch
+impl core::marker::UnsafeUnpin for LOSAT::api::Batch
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::Batch
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::Batch
+pub struct LOSAT::api::Batches<'a>
+impl LOSAT::api::Batches<'_>
+pub fn LOSAT::api::Batches<'_>::query_count(&self) -> usize
+impl core::iter::traits::iterator::Iterator for LOSAT::api::Batches<'_>
+pub type LOSAT::api::Batches<'_>::Item = core::result::Result<LOSAT::api::Batch, LOSAT::api::Error>
+pub fn LOSAT::api::Batches<'_>::next(&mut self) -> core::option::Option<Self::Item>
+impl<'a> core::marker::Freeze for LOSAT::api::Batches<'a>
+impl<'a> core::marker::Send for LOSAT::api::Batches<'a>
+impl<'a> core::marker::Sync for LOSAT::api::Batches<'a>
+impl<'a> core::marker::Unpin for LOSAT::api::Batches<'a>
+impl<'a> core::marker::UnsafeUnpin for LOSAT::api::Batches<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::Batches<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for LOSAT::api::Batches<'a>
+#[non_exhaustive] pub struct LOSAT::api::Description
+pub LOSAT::api::Description::parameters: alloc::vec::Vec<LOSAT::api::Parameter>
+pub LOSAT::api::Description::program: LOSAT::api::Program
+pub LOSAT::api::Description::query_gencodes: alloc::vec::Vec<u32>
+pub LOSAT::api::Description::subject_gencodes: alloc::vec::Vec<u32>
+impl core::clone::Clone for LOSAT::api::Description
+pub fn LOSAT::api::Description::clone(&self) -> LOSAT::api::Description
+impl core::cmp::Eq for LOSAT::api::Description
+impl core::cmp::PartialEq for LOSAT::api::Description
+pub fn LOSAT::api::Description::eq(&self, &LOSAT::api::Description) -> bool
+impl core::fmt::Debug for LOSAT::api::Description
+pub fn LOSAT::api::Description::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for LOSAT::api::Description
+impl core::marker::Freeze for LOSAT::api::Description
+impl core::marker::Send for LOSAT::api::Description
+impl core::marker::Sync for LOSAT::api::Description
+impl core::marker::Unpin for LOSAT::api::Description
+impl core::marker::UnsafeUnpin for LOSAT::api::Description
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::Description
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::Description
+#[non_exhaustive] pub struct LOSAT::api::FastaRecord
+pub LOSAT::api::FastaRecord::local_id: alloc::string::String
+pub LOSAT::api::FastaRecord::sequence: alloc::vec::Vec<u8>
+pub LOSAT::api::FastaRecord::title: alloc::vec::Vec<u8>
+pub LOSAT::api::FastaRecord::warnings: alloc::vec::Vec<u8>
+impl LOSAT::api::FastaRecord
+pub fn LOSAT::api::FastaRecord::new(impl core::convert::Into<alloc::string::String>, &[u8], &[u8]) -> Self
+pub fn LOSAT::api::FastaRecord::seq(&self) -> &[u8]
+pub fn LOSAT::api::FastaRecord::title(&self) -> &[u8]
+impl core::clone::Clone for LOSAT::api::FastaRecord
+pub fn LOSAT::api::FastaRecord::clone(&self) -> LOSAT::api::FastaRecord
+impl core::cmp::Eq for LOSAT::api::FastaRecord
+impl core::cmp::PartialEq for LOSAT::api::FastaRecord
+pub fn LOSAT::api::FastaRecord::eq(&self, &LOSAT::api::FastaRecord) -> bool
+impl core::default::Default for LOSAT::api::FastaRecord
+pub fn LOSAT::api::FastaRecord::default() -> LOSAT::api::FastaRecord
+impl core::fmt::Debug for LOSAT::api::FastaRecord
+pub fn LOSAT::api::FastaRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for LOSAT::api::FastaRecord
+impl core::marker::Freeze for LOSAT::api::FastaRecord
+impl core::marker::Send for LOSAT::api::FastaRecord
+impl core::marker::Sync for LOSAT::api::FastaRecord
+impl core::marker::Unpin for LOSAT::api::FastaRecord
+impl core::marker::UnsafeUnpin for LOSAT::api::FastaRecord
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::FastaRecord
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::FastaRecord
+#[non_exhaustive] pub struct LOSAT::api::HspRecord
+pub LOSAT::api::HspRecord::bit_score: f64
+pub LOSAT::api::HspRecord::comp_adjust_method: core::option::Option<u8>
+pub LOSAT::api::HspRecord::e_value: f64
+pub LOSAT::api::HspRecord::gap_open: usize
+pub LOSAT::api::HspRecord::gaps: usize
+pub LOSAT::api::HspRecord::index: usize
+pub LOSAT::api::HspRecord::length: usize
+pub LOSAT::api::HspRecord::mismatch: i64
+pub LOSAT::api::HspRecord::num_ident: usize
+pub LOSAT::api::HspRecord::num_positives: usize
+pub LOSAT::api::HspRecord::q_end: usize
+pub LOSAT::api::HspRecord::q_idx: usize
+pub LOSAT::api::HspRecord::q_start: usize
+pub LOSAT::api::HspRecord::query_aligned: core::option::Option<alloc::string::String>
+pub LOSAT::api::HspRecord::query_frame: core::option::Option<i32>
+pub LOSAT::api::HspRecord::query_id: alloc::sync::Arc<str>
+pub LOSAT::api::HspRecord::query_length: usize
+pub LOSAT::api::HspRecord::query_strand: core::option::Option<LOSAT::api::Strand>
+pub LOSAT::api::HspRecord::rank: usize
+pub LOSAT::api::HspRecord::raw_score: i32
+pub LOSAT::api::HspRecord::s_end: usize
+pub LOSAT::api::HspRecord::s_idx: usize
+pub LOSAT::api::HspRecord::s_start: usize
+pub LOSAT::api::HspRecord::subject_aligned: core::option::Option<alloc::string::String>
+pub LOSAT::api::HspRecord::subject_frame: core::option::Option<i32>
+pub LOSAT::api::HspRecord::subject_id: alloc::sync::Arc<str>
+pub LOSAT::api::HspRecord::subject_length: usize
+pub LOSAT::api::HspRecord::subject_strand: core::option::Option<LOSAT::api::Strand>
+pub LOSAT::api::HspRecord::sum_n: core::option::Option<i32>
+impl LOSAT::api::HspRecord
+pub fn LOSAT::api::HspRecord::percent_identity(&self) -> f64
+pub fn LOSAT::api::HspRecord::query_range(&self) -> core::ops::range::Range<usize>
+pub fn LOSAT::api::HspRecord::subject_range(&self) -> core::ops::range::Range<usize>
+impl core::clone::Clone for LOSAT::api::HspRecord
+pub fn LOSAT::api::HspRecord::clone(&self) -> LOSAT::api::HspRecord
+impl core::cmp::PartialEq for LOSAT::api::HspRecord
+pub fn LOSAT::api::HspRecord::eq(&self, &LOSAT::api::HspRecord) -> bool
+impl core::fmt::Debug for LOSAT::api::HspRecord
+pub fn LOSAT::api::HspRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for LOSAT::api::HspRecord
+impl core::marker::Freeze for LOSAT::api::HspRecord
+impl core::marker::Send for LOSAT::api::HspRecord
+impl core::marker::Sync for LOSAT::api::HspRecord
+impl core::marker::Unpin for LOSAT::api::HspRecord
+impl core::marker::UnsafeUnpin for LOSAT::api::HspRecord
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::HspRecord
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::HspRecord
+pub struct LOSAT::api::Inputs<'a>
+impl<'a> LOSAT::api::Inputs<'a>
+pub fn LOSAT::api::Inputs<'a>::database(&'a [LOSAT::api::FastaRecord], &'a str) -> Self
+pub fn LOSAT::api::Inputs<'a>::named(self, &'a str, &'a str) -> Self
+pub fn LOSAT::api::Inputs<'a>::new(&'a [LOSAT::api::FastaRecord], &'a [LOSAT::api::FastaRecord]) -> Self
+impl<'a> core::clone::Clone for LOSAT::api::Inputs<'a>
+pub fn LOSAT::api::Inputs<'a>::clone(&self) -> LOSAT::api::Inputs<'a>
+impl<'a> core::fmt::Debug for LOSAT::api::Inputs<'a>
+pub fn LOSAT::api::Inputs<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for LOSAT::api::Inputs<'a>
+impl<'a> core::marker::Freeze for LOSAT::api::Inputs<'a>
+impl<'a> core::marker::Send for LOSAT::api::Inputs<'a>
+impl<'a> core::marker::Sync for LOSAT::api::Inputs<'a>
+impl<'a> core::marker::Unpin for LOSAT::api::Inputs<'a>
+impl<'a> core::marker::UnsafeUnpin for LOSAT::api::Inputs<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::Inputs<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for LOSAT::api::Inputs<'a>
+#[non_exhaustive] pub struct LOSAT::api::Outcome
+pub LOSAT::api::Outcome::diagnostics: alloc::vec::Vec<u8>
+pub LOSAT::api::Outcome::hsps: alloc::vec::Vec<LOSAT::api::HspRecord>
+pub LOSAT::api::Outcome::query_stats: alloc::vec::Vec<core::option::Option<LOSAT::api::QueryStats>>
+pub LOSAT::api::Outcome::reports: alloc::vec::Vec<LOSAT::api::Report>
+impl LOSAT::api::Outcome
+pub fn LOSAT::api::Outcome::queries(&self) -> impl core::iter::traits::iterator::Iterator<Item = LOSAT::api::QueryHits<'_>> + '_
+pub fn LOSAT::api::Outcome::query(&self, usize) -> core::option::Option<LOSAT::api::QueryHits<'_>>
+impl core::clone::Clone for LOSAT::api::Outcome
+pub fn LOSAT::api::Outcome::clone(&self) -> LOSAT::api::Outcome
+impl core::cmp::PartialEq for LOSAT::api::Outcome
+pub fn LOSAT::api::Outcome::eq(&self, &LOSAT::api::Outcome) -> bool
+impl core::fmt::Debug for LOSAT::api::Outcome
+pub fn LOSAT::api::Outcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for LOSAT::api::Outcome
+impl core::marker::Freeze for LOSAT::api::Outcome
+impl core::marker::Send for LOSAT::api::Outcome
+impl core::marker::Sync for LOSAT::api::Outcome
+impl core::marker::Unpin for LOSAT::api::Outcome
+impl core::marker::UnsafeUnpin for LOSAT::api::Outcome
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::Outcome
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::Outcome
+#[non_exhaustive] pub struct LOSAT::api::Parameter
+pub LOSAT::api::Parameter::choices: alloc::vec::Vec<alloc::string::String>
+pub LOSAT::api::Parameter::default: core::option::Option<alloc::string::String>
+pub LOSAT::api::Parameter::flag: alloc::string::String
+pub LOSAT::api::Parameter::help: alloc::string::String
+pub LOSAT::api::Parameter::takes_value: bool
+pub LOSAT::api::Parameter::value_kind: LOSAT::api::ValueKind
+impl core::clone::Clone for LOSAT::api::Parameter
+pub fn LOSAT::api::Parameter::clone(&self) -> LOSAT::api::Parameter
+impl core::cmp::Eq for LOSAT::api::Parameter
+impl core::cmp::PartialEq for LOSAT::api::Parameter
+pub fn LOSAT::api::Parameter::eq(&self, &LOSAT::api::Parameter) -> bool
+impl core::fmt::Debug for LOSAT::api::Parameter
+pub fn LOSAT::api::Parameter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for LOSAT::api::Parameter
+impl core::marker::Freeze for LOSAT::api::Parameter
+impl core::marker::Send for LOSAT::api::Parameter
+impl core::marker::Sync for LOSAT::api::Parameter
+impl core::marker::Unpin for LOSAT::api::Parameter
+impl core::marker::UnsafeUnpin for LOSAT::api::Parameter
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::Parameter
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::Parameter
+#[non_exhaustive] pub struct LOSAT::api::QueryHits<'a>
+pub LOSAT::api::QueryHits::hsps: &'a [LOSAT::api::HspRecord]
+pub LOSAT::api::QueryHits::q_idx: usize
+pub LOSAT::api::QueryHits::stats: core::option::Option<&'a LOSAT::api::QueryStats>
+impl<'a> LOSAT::api::QueryHits<'a>
+pub fn LOSAT::api::QueryHits<'a>::subject(&self, usize) -> core::option::Option<LOSAT::api::SubjectHits<'a>>
+pub fn LOSAT::api::QueryHits<'a>::subjects(&self) -> impl core::iter::traits::iterator::Iterator<Item = LOSAT::api::SubjectHits<'a>> + 'a
+impl<'a> core::clone::Clone for LOSAT::api::QueryHits<'a>
+pub fn LOSAT::api::QueryHits<'a>::clone(&self) -> LOSAT::api::QueryHits<'a>
+impl<'a> core::cmp::PartialEq for LOSAT::api::QueryHits<'a>
+pub fn LOSAT::api::QueryHits<'a>::eq(&self, &LOSAT::api::QueryHits<'a>) -> bool
+impl<'a> core::fmt::Debug for LOSAT::api::QueryHits<'a>
+pub fn LOSAT::api::QueryHits<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for LOSAT::api::QueryHits<'a>
+impl<'a> core::marker::StructuralPartialEq for LOSAT::api::QueryHits<'a>
+impl<'a> core::marker::Freeze for LOSAT::api::QueryHits<'a>
+impl<'a> core::marker::Send for LOSAT::api::QueryHits<'a>
+impl<'a> core::marker::Sync for LOSAT::api::QueryHits<'a>
+impl<'a> core::marker::Unpin for LOSAT::api::QueryHits<'a>
+impl<'a> core::marker::UnsafeUnpin for LOSAT::api::QueryHits<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::QueryHits<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for LOSAT::api::QueryHits<'a>
+#[non_exhaustive] pub struct LOSAT::api::QueryStats
+pub LOSAT::api::QueryStats::eff_space: i64
+pub LOSAT::api::QueryStats::entropy: f64
+pub LOSAT::api::QueryStats::hsp_len: i32
+pub LOSAT::api::QueryStats::kappa: f64
+pub LOSAT::api::QueryStats::lambda: f64
+impl core::clone::Clone for LOSAT::api::QueryStats
+pub fn LOSAT::api::QueryStats::clone(&self) -> LOSAT::api::QueryStats
+impl core::cmp::PartialEq for LOSAT::api::QueryStats
+pub fn LOSAT::api::QueryStats::eq(&self, &LOSAT::api::QueryStats) -> bool
+impl core::fmt::Debug for LOSAT::api::QueryStats
+pub fn LOSAT::api::QueryStats::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for LOSAT::api::QueryStats
+impl core::marker::StructuralPartialEq for LOSAT::api::QueryStats
+impl core::marker::Freeze for LOSAT::api::QueryStats
+impl core::marker::Send for LOSAT::api::QueryStats
+impl core::marker::Sync for LOSAT::api::QueryStats
+impl core::marker::Unpin for LOSAT::api::QueryStats
+impl core::marker::UnsafeUnpin for LOSAT::api::QueryStats
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::QueryStats
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::QueryStats
+#[non_exhaustive] pub struct LOSAT::api::Report
+pub LOSAT::api::Report::bytes: alloc::vec::Vec<u8>
+pub LOSAT::api::Report::outfmt: alloc::string::String
+pub LOSAT::api::Report::spans: alloc::vec::Vec<core::option::Option<core::ops::range::Range<usize>>>
+pub LOSAT::api::Report::subject_headings: alloc::vec::Vec<core::option::Option<core::ops::range::Range<usize>>>
+impl core::clone::Clone for LOSAT::api::Report
+pub fn LOSAT::api::Report::clone(&self) -> LOSAT::api::Report
+impl core::cmp::Eq for LOSAT::api::Report
+impl core::cmp::PartialEq for LOSAT::api::Report
+pub fn LOSAT::api::Report::eq(&self, &LOSAT::api::Report) -> bool
+impl core::fmt::Debug for LOSAT::api::Report
+pub fn LOSAT::api::Report::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for LOSAT::api::Report
+impl core::marker::Freeze for LOSAT::api::Report
+impl core::marker::Send for LOSAT::api::Report
+impl core::marker::Sync for LOSAT::api::Report
+impl core::marker::Unpin for LOSAT::api::Report
+impl core::marker::UnsafeUnpin for LOSAT::api::Report
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::Report
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::Report
+pub struct LOSAT::api::Search
+impl LOSAT::api::Search
+pub fn LOSAT::api::Search::argv(&self) -> &[alloc::string::String]
+pub fn LOSAT::api::Search::program(&self) -> LOSAT::api::Program
+impl core::clone::Clone for LOSAT::api::Search
+pub fn LOSAT::api::Search::clone(&self) -> LOSAT::api::Search
+impl core::cmp::Eq for LOSAT::api::Search
+impl core::cmp::PartialEq for LOSAT::api::Search
+pub fn LOSAT::api::Search::eq(&self, &LOSAT::api::Search) -> bool
+impl core::fmt::Debug for LOSAT::api::Search
+pub fn LOSAT::api::Search::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for LOSAT::api::Search
+impl core::marker::Freeze for LOSAT::api::Search
+impl core::marker::Send for LOSAT::api::Search
+impl core::marker::Sync for LOSAT::api::Search
+impl core::marker::Unpin for LOSAT::api::Search
+impl core::marker::UnsafeUnpin for LOSAT::api::Search
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::Search
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::Search
+#[non_exhaustive] pub struct LOSAT::api::SubjectHits<'a>
+pub LOSAT::api::SubjectHits::hsps: &'a [LOSAT::api::HspRecord]
+pub LOSAT::api::SubjectHits::q_idx: usize
+pub LOSAT::api::SubjectHits::s_idx: usize
+impl<'a> core::clone::Clone for LOSAT::api::SubjectHits<'a>
+pub fn LOSAT::api::SubjectHits<'a>::clone(&self) -> LOSAT::api::SubjectHits<'a>
+impl<'a> core::cmp::PartialEq for LOSAT::api::SubjectHits<'a>
+pub fn LOSAT::api::SubjectHits<'a>::eq(&self, &LOSAT::api::SubjectHits<'a>) -> bool
+impl<'a> core::fmt::Debug for LOSAT::api::SubjectHits<'a>
+pub fn LOSAT::api::SubjectHits<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for LOSAT::api::SubjectHits<'a>
+impl<'a> core::marker::StructuralPartialEq for LOSAT::api::SubjectHits<'a>
+impl<'a> core::marker::Freeze for LOSAT::api::SubjectHits<'a>
+impl<'a> core::marker::Send for LOSAT::api::SubjectHits<'a>
+impl<'a> core::marker::Sync for LOSAT::api::SubjectHits<'a>
+impl<'a> core::marker::Unpin for LOSAT::api::SubjectHits<'a>
+impl<'a> core::marker::UnsafeUnpin for LOSAT::api::SubjectHits<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::SubjectHits<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for LOSAT::api::SubjectHits<'a>
+pub const LOSAT::api::API_OWNED: &[&str]
+pub const LOSAT::api::VERSION: &str
+pub fn LOSAT::api::describe(LOSAT::api::Program) -> LOSAT::api::Description
+pub fn LOSAT::api::read_fasta(LOSAT::api::Program, LOSAT::api::Role, &[u8]) -> core::result::Result<alloc::vec::Vec<LOSAT::api::FastaRecord>, LOSAT::api::Error>
+pub fn LOSAT::api::read_input_file(LOSAT::api::Role, &std::path::Path) -> core::result::Result<alloc::vec::Vec<u8>, LOSAT::api::Error>
+pub fn LOSAT::api::read_inputs(&LOSAT::api::Search, &[u8], &[u8]) -> core::result::Result<(alloc::vec::Vec<LOSAT::api::FastaRecord>, alloc::vec::Vec<LOSAT::api::FastaRecord>), LOSAT::api::Error>
+pub fn LOSAT::api::run(&LOSAT::api::Search, LOSAT::api::Inputs<'_>, &mut [(&str, &mut (dyn std::io::Write + core::marker::Send))], &mut (dyn std::io::Write + core::marker::Send)) -> core::result::Result<(), LOSAT::api::Error>
+pub fn LOSAT::api::run_batches<'a>(&'a LOSAT::api::Search, LOSAT::api::Inputs<'a>) -> core::result::Result<LOSAT::api::Batches<'a>, LOSAT::api::Error>
+pub fn LOSAT::api::run_blastdbcmd(&[&str], &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), LOSAT::api::Error>
+pub fn LOSAT::api::run_collect(&LOSAT::api::Search, LOSAT::api::Inputs<'_>, &[&str]) -> core::result::Result<LOSAT::api::Outcome, LOSAT::api::Error>
+pub fn LOSAT::api::run_makeblastdb(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), LOSAT::api::Error>
+pub fn LOSAT::api::run_to_file(&LOSAT::api::Search, LOSAT::api::Inputs<'_>, &str, &std::path::Path, &mut (dyn std::io::Write + core::marker::Send)) -> core::result::Result<(), LOSAT::api::Error>
+pub fn LOSAT::api::validate(LOSAT::api::Program, &[&str]) -> core::result::Result<LOSAT::api::Search, LOSAT::api::Error>

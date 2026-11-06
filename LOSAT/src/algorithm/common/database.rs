@@ -2348,8 +2348,9 @@ mod tests {
 /// a volume looks a taxid up again after another taxid of its slot. The only lookup whose
 /// repetition writes a text is that of the taxid of the offset error
 /// (`TaxDb::offset_error_taxid`), so the set gives NCBI's bytes unless a volume holds that taxid
-/// and another of its slot; such a run is refused at its first prefetch
-/// ([`TaxdbRun::cache_collision`]).
+/// and another of its slot; such a run is refused where NCBI first fetches a subject: a prefetch
+/// ([`prefetch_messages`]) or, in the XML2 and JSON formats, a report with a subject that has a
+/// positive taxid ([`read_reported_taxonomy`]) ([`TaxdbRun::cache_collision`]).
 ///
 /// It lives on the database of the search, so a `run_local` call that writes outfmt 15 and 16
 /// of one `-db` search shares it: the open and the volume-lookup messages are written for the
@@ -2362,7 +2363,7 @@ pub(crate) struct TaxdbRun {
     found: std::sync::OnceLock<bool>,
     /// What the lookups of the run can write ([`TaxdbRun::prefetch_texts`]).
     texts: std::sync::OnceLock<PrefetchTexts>,
-    /// The refusal of a run whose prefetch NCBI's cache makes write the offset error more than
+    /// The refusal of a run whose fetches NCBI's cache makes write the offset error more than
     /// once, as a reader's refusal ([`TaxdbRun::cache_collision`]).
     collision: std::sync::OnceLock<Option<(std::path::PathBuf, String)>>,
     /// The texts of opening the database when the rows of a tabular report opened it, kept for
@@ -2456,16 +2457,18 @@ impl TaxdbRun {
     // reports nor that of the ordinal ids (review 1 of item T: one query on a volume of the taxids
     // 99990, 150, 99990 writes the message twice, two queries once; fix 1: the same query once
     // with a version 4 database or an absolute `BLASTDB`), so LOSAT does not model it.
-    /// LOSAT's refusal of a run whose prefetch NCBI would make write the offset error more than
-    /// once in a volume: the taxonomy database has the offset error of a positive taxid `L`
-    /// ([`TaxdbRun::prefetch_texts`]), and a volume of the database holds `L` and another
+    /// LOSAT's refusal of a run whose fetches (a prefetch, or the reports of outfmt 13 to 16)
+    /// NCBI would make write the offset error more than once in a volume: the taxonomy database
+    /// has the offset error of a positive taxid `L` ([`TaxdbRun::prefetch_texts`]), and a volume
+    /// of the database holds `L` and another
     /// positive taxid of the same cache slot (`T & 255 == L & 255`), in any definition line of any
     /// sequence, whether or not a search reports them. One pass over the headers
     /// ([`SeqDb::visit_defline_set_taxids`] in ranges of [`crate::seqdb::HEADER_RANGE_SEQS`]), made
     /// only for such a damaged taxonomy database and once for the run; a header whose taxids do
     /// not decode is left to the lookups of the batches, which fail on it where it is reported.
-    /// `(path of taxdb.bti, reason)` of the refusal, which [`prefetch_messages`] makes as a
-    /// reader's refusal ([`TaxonomyRefusal`]) at the run's first prefetch.
+    /// `(path of taxdb.bti, reason)` of the refusal, which [`prefetch_messages`] and
+    /// [`read_reported_taxonomy`] make as a reader's refusal ([`TaxonomyRefusal`]) where NCBI
+    /// fetches ([`TaxdbRun::refuse_cache_collision`]).
     fn cache_collision(&self, db: &SeqDb) -> Option<&(std::path::PathBuf, String)> {
         self.collision
             .get_or_init(|| {
@@ -2492,11 +2495,27 @@ impl TaxdbRun {
             .as_ref()
     }
 
-    /// Whether a prefetch of the run is refused because of NCBI's taxonomy cache
-    /// ([`TaxdbRun::cache_collision`]): BLASTX holds its outfmt 5 document then, which the refusal
-    /// drops.
+    /// Whether a fetch of the run is refused because of NCBI's taxonomy cache
+    /// ([`TaxdbRun::cache_collision`]): BLASTX holds its XML document (outfmt 5, and 13 to 16)
+    /// then, which the refusal drops.
     pub(crate) fn prefetch_refused(&self, db: &SeqDb) -> bool {
         self.cache_collision(db).is_some()
+    }
+
+    /// LOSAT's refusal of a fetch of the run where NCBI's taxonomy cache would repeat the offset
+    /// error ([`TaxdbRun::cache_collision`]), as a reader's refusal ([`TaxonomyRefusal`]) that names
+    /// `program`; `Ok` for any other run. The callers ask it only where NCBI fetches a subject.
+    fn refuse_cache_collision(&self, db: &SeqDb, program: &str) -> Result<()> {
+        match self.cache_collision(db) {
+            Some((path, message)) => Err(taxdb_error(
+                SeqDbError::Unsupported {
+                    path: path.clone(),
+                    message: message.clone(),
+                },
+                program,
+            )),
+            None => Ok(()),
+        }
     }
 
     /// The open of the database by the rows of a query batch whose report looks names up, made
@@ -2580,7 +2599,8 @@ fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
 /// not know the taxid (the description is the id alone). Without `taxdb.bti`, or without a
 /// taxid, `taxonomy` is empty. A scientific name that NCBI's XML stream cannot write, and a
 /// taxonomy database that LOSAT cannot read as NCBI does, are refusals made here, before any
-/// byte is written.
+/// byte is written; so is a run whose fetches NCBI's taxonomy cache would make repeat the
+/// offset error ([`TaxdbRun::cache_collision`]), when a reported subject has a positive taxid.
 ///
 /// NCBI's messages about the taxonomy database go to standard error, and not here: those of
 /// opening and of the lookup that the volume makes for each taxid of a fetched subject
@@ -2620,9 +2640,13 @@ pub(crate) fn read_reported_taxonomy(
     };
     let mut taxids = vec![0; ordinals.len()];
     let mut any_taxid = false;
+    // Whether a volume looks a taxid up when NCBI fetches the reported subjects (a positive one,
+    // `x_GetTaxonomy`; `ParsedSubject::volume_taxids`).
+    let mut volume_lookup = false;
     for &rank in reported {
         if let Some(subject) = parsed_subject(rank) {
             any_taxid |= defline_taxids(subject).iter().any(|&taxid| taxid != 0);
+            volume_lookup |= !subject.volume_taxids().is_empty();
             continue;
         }
         let defline_taxids = db
@@ -2631,6 +2655,7 @@ pub(crate) fn read_reported_taxonomy(
         // One definition line per reported sequence (`stored_title`).
         taxids[rank] = defline_taxids.first().copied().unwrap_or(0);
         any_taxid |= taxids[rank] != 0;
+        volume_lookup |= taxids[rank] > 0;
     }
     if !any_taxid || !db.taxdb_found() {
         return Ok((taxids, Vec::new(), Vec::new(), TaxdbNotes::default()));
@@ -2638,6 +2663,13 @@ pub(crate) fn read_reported_taxonomy(
     let Some(search_path) = db.search_path() else {
         return Ok((taxids, Vec::new(), Vec::new(), TaxdbNotes::default()));
     };
+    // NCBI fetches every reported subject of these formats (`s_IsPrefetchFormat` is true for
+    // them; with the prefetch off the report fetches each one), so a volume's lookups can repeat
+    // the offset error as in the prefetch of the other formats: the same refusal, asked where a
+    // volume looks a taxid up.
+    if volume_lookup {
+        run.refuse_cache_collision(db, program)?;
+    }
     let taxdb = run.taxdb(search_path);
     let mut notes = TaxdbNotes {
         program: program.to_ascii_lowercase(),
@@ -2800,12 +2832,13 @@ pub(crate) fn tabular_names<'t>(
 /// that taxid's slot of NCBI's cache, which is refused (`TaxdbRun::cache_collision`, at the
 /// run's first call, before its subjects are looked at, so also in a first batch that reports
 /// nothing), so the order of the subjects does not change the bytes. The callers decide where
-/// they ask: BLASTX, which writes each batch's reports before it searches the next, and BLASTN
-/// (also where its report stream does not act) call it from their first batch on, unless no
-/// batch can fetch a subject (`prefetch_always_off` with rows that read none); TBLASTN, and
-/// TBLASTX, whose report stream is off for a run with this refusal, make every batch's lookups
-/// before any report and call it only where NCBI fetches a subject, so a run that fetches none
-/// is not refused. The caller writes the
+/// they ask: BLASTX, which writes each batch's reports before it searches the next, calls it
+/// from its first batch on, unless no batch can fetch a subject (`prefetch_always_off` with
+/// rows that read none); BLASTN, TBLASTN and TBLASTX call it only where NCBI fetches a subject,
+/// so a run that fetches none is not refused: TBLASTN, and TBLASTX, whose report stream is off
+/// for a run with this refusal, make every batch's lookups before any report, and BLASTN's
+/// report stream writes a later batch's refusal after the reports of the batches before, as
+/// its other refusals of a batch's reported subjects (`x_rpt_stream`). The caller writes the
 /// text after the reader's messages of the batch and before the warnings of its first query,
 /// where NCBI's prefetch comes. Empty, and nothing read, without `taxdb.bti` on the search
 /// path. A taxonomy database that LOSAT cannot read as NCBI does is refused as in
@@ -2848,15 +2881,7 @@ pub(crate) fn prefetch_messages<'s>(
     let Some(search_path) = db.search_path() else {
         return Ok(Vec::new());
     };
-    if let Some((path, message)) = run.cache_collision(db) {
-        return Err(taxdb_error(
-            SeqDbError::Unsupported {
-                path: path.clone(),
-                message: message.clone(),
-            },
-            program,
-        ));
-    }
+    run.refuse_cache_collision(db, program)?;
     let taxdb = run.taxdb(search_path);
     let lower = program.to_ascii_lowercase();
     let mut text = String::new();
@@ -3208,9 +3233,9 @@ const PREPASS_DB_SEQUENCES_MAX: u64 = 1 << 22;
 /// 6, 7 and 17 asks for none), and in both a record past the last mapped page of `taxdb.btd`,
 /// or a header or the taxonomy database that cannot be read. A superset of what a search
 /// reports: limits (`-gilist`, `-taxidlist`) and the hits themselves are ignored. `false`
-/// without `taxdb.bti` on the search path and for a database without taxids. The prefetch's
-/// refusal of NCBI's cache (`TaxdbRun::cache_collision`) comes at the run's first prefetch,
-/// before the first batch's reports, and is not asked here.
+/// without `taxdb.bti` on the search path and for a database without taxids. The refusal of
+/// NCBI's cache (`TaxdbRun::cache_collision`) is not asked here: it is a property of the run
+/// (`TaxdbRun::prefetch_refused`), which BLASTX and BLASTP's block search ask apart.
 ///
 /// The answer comes from whichever side is cheaper: the taxonomy side when the entries of
 /// `taxdb.bti` (from its header) number at most [`TAXDB_ENTRIES_PER_SEQUENCE`] times the
@@ -4235,6 +4260,67 @@ mod taxdb_prepass_tests {
         // The two volumes of tm_2vol hold 99990 alone.
         let db = db_search("tm_2vol", Some(&variant("offset_last_past_end")), &cwd);
         assert!(!TaxdbRun::default().prefetch_refused(&db));
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    /// `read_reported_taxonomy` (XML2 and JSON, line DBID L1d): NCBI fetches every reported
+    /// subject, so a run whose volume has the cache collision is refused where a reported subject
+    /// has a positive taxid (`nz_rep`: a1 99990, b1 150, c1 99990, d1 without a taxid, e1 -5;
+    /// `nz_repo`: a1 to d1 without parsed Seq-ids), and not for d1 or e1 alone or for nothing
+    /// reported; the taxonomy databases without the offset error read the same subjects.
+    #[test]
+    fn the_xml2_lookups_ask_for_the_cache_refusal_where_a_subject_has_a_taxid() {
+        let cwd = empty_cwd("xml2_cache");
+        let open = |taxdb: &str| {
+            let search = SearchPath::new(&cwd, Some(variant(taxdb).as_os_str()), None).unwrap();
+            let path = root().join("db_search/nz_rep");
+            SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap()
+        };
+        let read = |db: &SeqDb, run: &TaxdbRun, ranks: &[usize]| {
+            let parsed: Vec<_> = parsed_subjects(db)
+                .into_iter()
+                .map(|subject| Some(std::sync::Arc::new(subject)))
+                .collect();
+            let ordinals: Vec<u32> = (0..db.num_seqs()).collect();
+            let reported: std::collections::BTreeSet<usize> = ranks.iter().copied().collect();
+            read_reported_taxonomy(db, run, &ordinals, &reported, &parsed, "BLASTN").map(|_| ())
+        };
+        let db = open("offset_last_past_end");
+        for ranks in [&[0][..], &[1], &[3, 2], &[0, 1, 2, 3]] {
+            let run = TaxdbRun::default();
+            let error = read(&db, &run, ranks).unwrap_err();
+            assert!(error.is::<TaxonomyRefusal>(), "{ranks:?} {error:#}");
+            let text = format!("{error:#}");
+            assert!(text.contains("256-slot taxonomy cache"), "{text}");
+            assert!(text.contains("LOSAT's BLASTN"), "{text}");
+            // Refused before any lookup: the run's own handle is not open.
+            assert!(run.lazy.lock().unwrap().is_none());
+        }
+        // Nothing reported, d1 (no taxid), e1 (taxid -5: a volume looks a positive taxid up only).
+        for ranks in [&[][..], &[3], &[4], &[3, 4]] {
+            assert!(read(&db, &TaxdbRun::default(), ranks).is_ok(), "{ranks:?}");
+        }
+        for taxdb in ["good", "bad_magic"] {
+            assert!(
+                read(&open(taxdb), &TaxdbRun::default(), &[0, 1, 2, 3, 4]).is_ok(),
+                "{taxdb}"
+            );
+        }
+        // nz_repo: a1 to d1 without parsed Seq-ids (the taxid of the definition line).
+        let taxdb = variant("offset_last_past_end");
+        let search = SearchPath::new(&cwd, Some(taxdb.as_os_str()), None).unwrap();
+        let path = root().join("db_search/nz_repo");
+        let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+        let ordinals: Vec<u32> = (0..db.num_seqs()).collect();
+        for (ranks, refused) in [(&[0][..], true), (&[1, 3], true), (&[3], false)] {
+            let reported: std::collections::BTreeSet<usize> = ranks.iter().copied().collect();
+            let run = TaxdbRun::default();
+            let result = read_reported_taxonomy(&db, &run, &ordinals, &reported, &[], "BLASTN");
+            assert_eq!(result.is_err(), refused, "{ranks:?}");
+            if let Err(error) = result {
+                assert!(error.is::<TaxonomyRefusal>(), "{ranks:?} {error:#}");
+            }
+        }
         std::fs::remove_dir_all(&cwd).unwrap();
     }
 

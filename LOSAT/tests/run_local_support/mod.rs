@@ -1,6 +1,11 @@
 //! The harness shared by the `run_local` tests of every program: one sink per requested
 //! format, the collected hit records, and the byte range that the observer reports for
 //! every HSP in every format.
+#![allow(
+    dead_code,
+    clippy::duplicate_mod,
+    reason = "each test file that declares this module uses a different subset of it, and the blastp and tblastn suites load it through several #[path] files"
+)]
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};

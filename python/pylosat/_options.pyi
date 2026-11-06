@@ -30,7 +30,7 @@ class BlastnOptions(TypedDict, total=False):
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
-    task: str
+    task: Literal['megablast', 'dc-megablast', 'blastn', 'blastn-short']
     """Task to execute: megablast, blastn, dc-megablast or blastn-short"""
     template_type: str
     """Discontiguous MegaBLAST template type: coding, optimal or coding_and_optimal"""

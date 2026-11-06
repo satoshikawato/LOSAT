@@ -2592,9 +2592,10 @@ fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
 ///
 /// The database's reported sequences can have parsed Seq-ids (`parsed[rank]`, empty where none
 /// has): the third vector holds, by rank, what the taxonomy database said about the taxid of each
-/// definition line of such a sequence (empty where nothing was asked), as NCBI's `HitDescr` loop asks it (`SubjectNames::of_parsed`): `Unnamed` for a
-/// definition line without a taxid, and no answer after the first `NotFound` (NCBI's loop ends
-/// there). The volume's lookups are those of `ParsedSubject::volume_taxids`.
+/// definition line of such a sequence (empty where nothing was asked), as NCBI's `HitDescr` loop
+/// asks it (`SubjectNames::of_parsed`): `Unnamed` for a definition line without a taxid, and no
+/// answer after the first `NotFound` (NCBI's loop ends there). The volume's lookups are those of
+/// `ParsedSubject::volume_taxids`.
 pub(crate) fn read_reported_taxonomy(
     db: &SeqDb,
     run: &TaxdbRun,

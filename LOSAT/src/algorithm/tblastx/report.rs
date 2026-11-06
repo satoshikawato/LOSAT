@@ -2116,7 +2116,8 @@ mod tests {
         }
         let row = b"MKV".to_vec();
         let pointer = row.as_ptr();
-        assert_eq!(row_string(row).as_ptr(), pointer);
+        let text = row_string(row);
+        assert_eq!(text.as_ptr(), pointer);
     }
 
     // NCBI c++/src/algo/blast/core/blast_filter.c:925-931: a minus-frame run starts one

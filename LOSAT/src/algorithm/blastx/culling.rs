@@ -551,6 +551,10 @@ impl Node {
     //     return q;
     // }
     // ```
+    #[expect(
+        clippy::boxed_local,
+        reason = "the recursion hands the children over as boxes; a by-value `self` would copy a whole node into every frame of a tree that can be deep"
+    )]
     fn rip(self: Box<Self>, out: &mut Vec<Entry>) {
         out.extend(self.list);
         if let Some(l) = self.left {

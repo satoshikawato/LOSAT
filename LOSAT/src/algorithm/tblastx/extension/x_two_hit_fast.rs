@@ -140,6 +140,10 @@ const MAX_MATRIX_SCORE: i32 = 63;
 const MATRIX_LETTERS: usize = 32;
 /// `q << 5 | s` for every two bytes (`MatrixWalkTable`).
 const MATRIX_TABLE_LEN: usize = 256 * MATRIX_LETTERS;
+#[expect(
+    clippy::ineffective_bit_mask,
+    reason = "the assertion spells the largest index `q << 5 | s` of two bytes as the walks compute it"
+)]
 const _: () = assert!((255 << 5 | 255) < MATRIX_TABLE_LEN);
 
 type Table = [i8; TABLE_LEN];

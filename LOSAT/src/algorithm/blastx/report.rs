@@ -1881,7 +1881,7 @@ pub(super) fn pairwise_hits(
                         // title alone (`ReportedSubjects::descriptions`).
                         subject_title: match shown {
                             ShownSubjects::Fasta { parsed, .. }
-                                if parsed.shown(usize::try_from(list.oid)?).is_some() =>
+                                if parsed.shown(list.oid).is_some() =>
                             {
                                 None
                             }

@@ -1574,7 +1574,7 @@ fn search(
             // if (CheckInternalData() != 0) each result in this Run() batch
             // receives an unsearched ancillary state and null align set.
             let skipped = batch_validity.iter().all(|&valid| !valid);
-            query_batch_skipped.extend(std::iter::repeat(skipped).take(batch_validity.len()));
+            query_batch_skipped.extend(std::iter::repeat_n(skipped, batch_validity.len()));
             query_validity.extend(batch_validity);
         }
         // A run without a searched query has no parameters of a query set.

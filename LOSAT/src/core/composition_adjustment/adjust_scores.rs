@@ -2825,6 +2825,10 @@ fn optimize_target_frequencies_reference(
             constrain_rel_entropy,
             relative_entropy,
         );
+        #[expect(
+            clippy::neg_cmp_op_on_partial_ord,
+            reason = "NCBI's convergence test `!(rnorm > tol)` stops on a NaN rnorm (optimize_target_freq.c:760-762); `<=` would not"
+        )]
         if !(rnorm > K_COMPO_ADJUST_ERR_TOLERANCE) {
             break;
         }
@@ -3219,6 +3223,10 @@ pub(crate) fn x_newton_input(
         }
         _ => return None,
     }
+    #[expect(
+        clippy::neg_cmp_op_on_partial_ord,
+        reason = "NCBI constrains the relative entropy only when desired_re > 0.0 (composition_adjustment.c:1396); `desired_re <= 0.0` would let NaN through"
+    )]
     if !(desired_re > 0.0) {
         return None;
     }

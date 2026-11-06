@@ -845,14 +845,14 @@ fn optimize(
         for i in 0..N {
             let xr = &x[i * N..i * N + N];
             for j in 0..N {
-                resids_z[j] += -1.0 * xr[j];
+                resids_z[j] += -xr[j];
             }
         }
         for i in 1..N {
             let xr = &x[i * N..i * N + N];
             let mut s = resids_z[i + N - 1];
             for &v in xr {
-                s += -1.0 * v;
+                s += -v;
             }
             resids_z[i + N - 1] = s;
         }
@@ -880,6 +880,10 @@ fn optimize(
         //                and start a new iteration */
         //             if (++its <= maxits) {
         // ```
+        #[expect(
+            clippy::neg_cmp_op_on_partial_ord,
+            reason = "NCBI's convergence test `!(rnorm > tol)` stops on a NaN rnorm (optimize_target_freq.c:760-762); `<=` would not"
+        )]
         if !(rnorm > K_COMPO_ADJUST_ERR_TOLERANCE) {
             break;
         }
@@ -994,8 +998,8 @@ fn optimize(
                     let k = base + j;
                     let ws = resids_x[k] * dinv[k];
                     workspace[k] = ws;
-                    resids_z[j] += -1.0 * ws;
-                    srow += -1.0 * ws;
+                    resids_z[j] += -ws;
+                    srow += -ws;
                     s39 -= grads1[k] * ws;
                 }
                 if i > 0 {

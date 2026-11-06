@@ -1333,11 +1333,11 @@ mod tests {
                     }
                     4 => {
                         let base = bases[rng.below(4) as usize];
-                        seq.extend(std::iter::repeat(base).take(piece));
+                        seq.extend(std::iter::repeat_n(base, piece));
                     }
                     5 => {
                         let n = 1 + rng.below(12) as usize;
-                        seq.extend(std::iter::repeat(b'N').take(n));
+                        seq.extend(std::iter::repeat_n(b'N', n));
                     }
                     _ => {
                         // other IUPAC letters and lower case

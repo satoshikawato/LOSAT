@@ -859,7 +859,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     let mut results: Vec<UngappedHit> = if allow_parallel && frame_groups.len() > 1 {
         // Use thread_local! macro for thread-local storage (rayon doesn't have ThreadLocal)
         thread_local! {
-            static POOLS: RefCell<Option<BufferPools>> = RefCell::new(None);
+            static POOLS: RefCell<Option<BufferPools>> = const { RefCell::new(None) };
         }
 
         let mut indexed_results: Vec<(usize, Vec<UngappedHit>)> = frame_groups
@@ -1840,8 +1840,10 @@ fn link_hsp_group_ncbi(
         let path_changed_at_loop_start = path_changed;
         // NCBI lines 607-625: Initialize max sums each pass
         // CRITICAL: must reset to -cutoff each pass to allow all HSPs to be candidates
+        // (`best_sum` is reset where the sums are recomputed, below; with `use_current_max`
+        // only `best` is read, as NCBI's max0/max1 are local to the `if (!first_pass)` block)
         let mut best: [Option<usize>; 2] = [None, None];
-        let mut best_sum: [i64; 2] = [-i64::from(cutoff_small), -i64::from(cutoff_big)];
+        let mut best_sum: [i64; 2];
         let mut use_current_max = false;
 
         // NCBI lines 603-652: Try to reuse previous max
@@ -1863,7 +1865,7 @@ fn link_hsp_group_ncbi(
             // if(sum0>=max0) { max0=sum0; best[0]=H; }
             // if(sum1>=max1) { max1=sum1; best[1]=H; }
             // Read the exact stored-score maxima before unchanged path validation.
-            (best, best_sum) = maximum_tree.maxima([cutoff_small, cutoff_big], ignore_small_gaps);
+            (best, _) = maximum_tree.maxima([cutoff_small, cutoff_big], ignore_small_gaps);
 
             // NCBI line 635: if(path_changed==0) use_current_max=1
             if !path_changed {
@@ -2639,7 +2641,7 @@ fn link_hsp_group_ncbi(
         }
 
         let chain_contains_trace_target = chain_target_hsp_idx
-            .map(|target| chain_members.iter().any(|&idx| idx == target))
+            .map(|target| chain_members.contains(&target))
             .unwrap_or(false);
 
         if trace_link_selections || chain_contains_trace_target {

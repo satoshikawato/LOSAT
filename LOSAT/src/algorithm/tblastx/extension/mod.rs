@@ -82,7 +82,7 @@ pub fn get_score(a: u8, b: u8) -> i32 {
 ///   Output +1: start = len - (3*offset + shift + 1) + 1 = len - 3*offset - shift
 ///   Output +1: end = len - (3*end + shift) + 1
 pub fn convert_coords(aa_start: usize, aa_end: usize, frame: i8, dna_len: usize) -> (usize, usize) {
-    let f_abs = frame.abs() as usize;
+    let f_abs = frame.unsigned_abs() as usize;
     let shift = f_abs - 1;
 
     if frame > 0 {

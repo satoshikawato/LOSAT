@@ -308,6 +308,10 @@ fn first_end_at_or_after(
     offset: i32,
 ) -> usize {
     let (mut begin, mut end) = (0, order.len());
+    #[expect(
+        clippy::if_same_then_else,
+        reason = "NCBI's binary search sets end = left_index in two branches (link_hsps.c:1291-1299, s_HSPOffsetEndBinarySearch)"
+    )]
     while begin < end {
         let right = (begin + end) / 2;
         let left = end_index[right];

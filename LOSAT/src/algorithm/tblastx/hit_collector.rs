@@ -331,6 +331,10 @@ impl HitCollector {
     /// `-evalue -nan`, keeps every HSP), then query by query, each query's HSPs in the order of
     /// the subject's list.
     fn add_subject(&mut self, oid: usize, mut hits: Vec<TblastxHsp>) {
+        #[expect(
+            clippy::neg_cmp_op_on_partial_ord,
+            reason = "NCBI removes an HSP only when evalue > cutoff (blast_hits.c:1996); `<=` would drop NaN values"
+        )]
         hits.retain(|hsp| !(hsp.hit.e_value > self.evalue_threshold));
         if hits.is_empty() {
             return;
@@ -502,6 +506,10 @@ mod tests {
         hitlist_size: usize,
         filters: &HitFilters<'_>,
     ) -> Vec<TblastxHsp> {
+        #[expect(
+            clippy::neg_cmp_op_on_partial_ord,
+            reason = "the same filter as NCBI's evalue > cutoff removal (blast_hits.c:1996); `<=` would drop NaN values"
+        )]
         let hits: Vec<TblastxHsp> = lists
             .iter()
             .flat_map(|(_, hsps)| hsps.iter().cloned())
@@ -621,6 +629,10 @@ mod tests {
         let subjects = 60;
         let lists = subject_lists(subjects);
         let query_lengths = vec![300usize, 90];
+        #[expect(
+            clippy::neg_cmp_op_on_partial_ord,
+            reason = "the same filter as NCBI's evalue > cutoff removal (blast_hits.c:1996); `<=` would drop NaN values"
+        )]
         let hits: Vec<TblastxHsp> = lists
             .iter()
             .flat_map(|(_, hsps)| hsps.iter().cloned())

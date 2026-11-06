@@ -589,7 +589,6 @@ mod tests {
             ),
         }
         .unwrap();
-        drop(warnings);
         drop((report, sink));
         Arc::try_unwrap(log).unwrap().into_inner().unwrap()
     }

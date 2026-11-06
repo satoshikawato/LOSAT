@@ -85,9 +85,9 @@ pub(crate) fn build_pssm_lookup<R: PssmRows>(
     backbone_size += 1;
     let mask = (1usize << (word_length * charsize)) - 1;
     let mut thin = ThinBackbone {
-        // Built through an iterator of this module rather than `vec![...; n]`, whose
-        // `SpecFromElem` instance blastp's and tblastx's builders share (a new caller of a shared
-        // generic instance changes its inlining in their code).
+        // Built through an iterator of this module rather than `vec![...; n]`, so that the PSSM
+        // table shares no `SpecFromElem` instance with blastp's and tblastx's builders (design
+        // §4.3: no generic helper shared with the default path).
         chains: (0..backbone_size).map(|_| Vec::new()).collect(),
     };
     add_pssm_neighboring_words(&mut thin, rows, word_length, charsize, threshold);

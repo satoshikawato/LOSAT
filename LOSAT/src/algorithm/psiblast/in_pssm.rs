@@ -645,7 +645,10 @@ mod tests {
     #[test]
     fn the_text_asn_test_is_ncbis() {
         assert!(text_asn(b"PssmWithParameters ::= {\n  pssm {\n"));
-        assert!(text_asn(b"-- a comment\n\nSeq-entry ::= set {\n"));
+        assert!(text_asn(b"-- a comment\nSeqentry ::= set {\n"));
+        // 27 of 34 bytes letters, digits, spaces or braces (the dash, the colons, the blank
+        // line's end are not): under 80 %.
+        assert!(!text_asn(b"-- a comment\n\nSeq-entry ::= set {\n"));
         assert!(!text_asn(b">tk\nMKTAYIAKQR\n"));
         assert!(!text_asn(b"PssmWithParameters {\n"));
         // Under 80 % letters, digits, spaces and braces.

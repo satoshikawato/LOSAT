@@ -577,7 +577,6 @@ mod tests {
     #[test]
     fn psiblasts_arguments_that_losat_does_not_run_are_named() {
         for (option, value) in [
-            ("-in_pssm", Some("x")),
             ("-in_msa", Some("x")),
             ("-msa_master_idx", Some("2")),
             ("-ignore_msa_master", None),
@@ -598,6 +597,10 @@ mod tests {
                 "{option}: {error}"
             );
         }
+        // `-in_pssm` (PS4a) is an argument: with `-query` it is the parser's exclusion
+        // (blast_args.cpp:1240-1247).
+        let error = parse(&["-in_pssm", "x"]).unwrap_err();
+        assert!(error.contains("cannot be used with"), "{error}");
         // Arguments that psiblast does not have are unknown, as in NCBI's parser.
         for option in ["-task", "-ungapped", "-db_soft_mask", "-mt_mode"] {
             let error = parse(&[option, "1"]).unwrap_err();

@@ -595,8 +595,9 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 //                                 "File name to store ASCII version of PSSM",
 //                                 CArgDescriptions::eOutputFile);
 // ```
-/// psiblast's NCBI arguments that LOSAT does not run: the PSSM and MSA inputs (series PS4 to PS6;
-/// the ASCII and ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`), PHI-BLAST (PS8), `-gap_trigger`, `-sum_stats`, `-culling_limit` (blastp runs it since
+/// psiblast's NCBI arguments that LOSAT does not run: the MSA inputs (series PS6; the ASCII and
+/// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
+/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), `-gap_trigger`, `-sum_stats`, `-culling_limit` (blastp runs it since
 /// O3b; psiblast's first round is not compared with NCBI's under it yet), and the arguments that blastp's engine
 /// does not run either (`is_unported_blastp_arg`; psiblast has no database masks and no
 /// `-mt_mode`).
@@ -607,7 +608,6 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
             | "gap_trigger"
             | "ignore_msa_master"
             | "in_msa"
-            | "in_pssm"
             // Line NP ported it to BLASTP's search, not to PSIBLAST's rounds.
             | "lcase_masking"
             | "msa_master_idx"

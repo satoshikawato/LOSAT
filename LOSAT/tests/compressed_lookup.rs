@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 use LOSAT::algorithm::tblastx::lookup::compressed::{
     build_blosum62_compressed_lookup, build_blosum62_compressed_score_matrix, compressed_pv_test,
     compute_compressed_index, compute_encoded_compressed_index, BlastCompressedAaLookupTable,

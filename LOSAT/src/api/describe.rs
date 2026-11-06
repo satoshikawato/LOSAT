@@ -77,7 +77,8 @@ pub struct Parameter {
     /// option without a parser default (an `Option` of the arguments, "given or not" to NCBI)
     /// has none here even when its help text names NCBI's default.
     pub default: Option<String>,
-    /// The values the parser accepts, when it lists them (`-task` of blastp); empty otherwise.
+    /// The values the parser accepts, when it lists them (`-task` of every program that has
+    /// one); empty otherwise.
     pub choices: Vec<String>,
 }
 
@@ -248,6 +249,54 @@ mod tests {
                 .iter()
                 .any(|parameter| !parameter.help.is_empty()));
         }
+    }
+
+    #[test]
+    fn task_choices_are_the_tasks_the_parser_accepts() {
+        let parses = |program: Program, task: &str| {
+            let argv = [
+                "losat",
+                program.name(),
+                "-query",
+                "q",
+                "-subject",
+                "s",
+                "-task",
+                task,
+            ];
+            crate::cli::try_parse_from::<Cli, _, _>(argv).is_ok()
+        };
+        // Every -task lists its tasks: the default among them, each one accepted.
+        for program in Program::ALL {
+            let description = describe(program);
+            let Some(task) = description
+                .parameters
+                .iter()
+                .find(|parameter| parameter.flag == "-task")
+            else {
+                continue;
+            };
+            let default = task.default.as_deref().unwrap();
+            assert!(
+                task.choices.iter().any(|choice| choice == default),
+                "{program}"
+            );
+            for choice in &task.choices {
+                assert!(parses(program, choice), "{program} -task {choice}");
+            }
+        }
+        let blastn = describe(Program::Blastn);
+        let task = blastn
+            .parameters
+            .iter()
+            .find(|parameter| parameter.flag == "-task")
+            .unwrap();
+        assert_eq!(
+            task.choices,
+            ["megablast", "dc-megablast", "blastn", "blastn-short"]
+        );
+        // NCBI's rmblastn stays a refusal and is not offered.
+        assert!(!parses(Program::Blastn, "rmblastn"));
     }
 
     #[test]

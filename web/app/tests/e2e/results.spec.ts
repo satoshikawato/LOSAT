@@ -24,6 +24,7 @@ import { REPOSITORY } from './support/harness-server';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { chooseRun, fasta, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
 import { repeats } from './support/synthetic';
+import { axeViolations } from './support/axe';
 
 type ProgramId = 'blastn' | 'blastp' | 'blastx' | 'tblastn' | 'tblastx';
 type Unit = 'nt' | 'aa';
@@ -313,10 +314,10 @@ async function expectSelected(page: Page, id: string, sIdx: number): Promise<voi
   await expect(page.getByTestId('alignments-subject')).toHaveAttribute('data-subject', String(sIdx));
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', id);
   await expect(page.getByTestId(`range-${id.replace(':', '-')}`).getByTestId('hsp-detail')).toHaveCount(1);
-  await expect(page.getByTestId(`hsp-row-${id.replace(':', '-')}`)).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('hsp-list').locator('[aria-pressed="true"]')).toHaveCount(1);
-  await expect(page.getByTestId(`subject-row-${sIdx}`)).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('subject-list').locator('[aria-pressed="true"]')).toHaveCount(1);
+  await expect(page.getByTestId(`hsp-row-${id.replace(':', '-')}`)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('hsp-list').locator('[aria-selected="true"]')).toHaveCount(1);
+  await expect(page.getByTestId(`subject-row-${sIdx}`)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('subject-list').locator('[aria-selected="true"]')).toHaveCount(1);
 }
 
 /**
@@ -685,7 +686,7 @@ for (const c of PROGRAM_CASES) {
         await show(page, 'hits');
         const subject = subjectRows(page).nth(i);
         await subject.click();
-        await expect(subject).toHaveAttribute('aria-pressed', 'true');
+        await expect(subject).toHaveAttribute('aria-selected', 'true');
         const sIdx = await subjectIndex(subject);
         const sseqid = sseqids[i]!;
         const pairRanks = queryRows.flatMap((fields, rank) => (fields[1] === sseqid ? [rank] : []));
@@ -736,7 +737,7 @@ for (const c of PROGRAM_CASES) {
 
         // The detail of the subject's first HSP (selected with the subject), in its Range.
         const first = hspRows(page).first();
-        await expect(first).toHaveAttribute('aria-pressed', 'true');
+        await expect(first).toHaveAttribute('aria-selected', 'true');
         const id = await hspId(first);
         await expect(detail).toHaveAttribute('data-hsp', id);
         await expect(detail).toHaveAttribute('data-state', 'ready');
@@ -928,7 +929,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   const subjectList = page.getByTestId('subject-list');
   await expect.poll(() => subjectList.evaluate((element) => element.scrollTop)).toBe(0);
   await subjectList.evaluate((element) => (element.scrollTop = element.scrollHeight));
-  await expect(subjectRows(page).and(page.locator('[aria-pressed="true"]'))).toHaveAttribute('data-order', '1');
+  await expect(subjectRows(page).and(page.locator('[aria-selected="true"]'))).toHaveAttribute('data-order', '1');
   await show(page, 'hits');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', selected!);
   await show(page, 'hits');
@@ -938,7 +939,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   await expect(last.locator('[data-field="description"]')).toHaveText('not in outfmt 0');
   const sseqid = await text(last.locator('[data-field="sseqid"]'));
   await last.click();
-  await expect(last).toHaveAttribute('aria-pressed', 'true');
+  await expect(last).toHaveAttribute('aria-selected', 'true');
   await show(page, 'hits');
   for (const row of await hspRows(page).all()) await expect(row.locator('[data-field="outfmt0"]')).toHaveText('not shown');
   await expect(page.getByTestId('detail-not-in-outfmt0')).toContainText(
@@ -1061,12 +1062,12 @@ test("BLASTN: an HSP of one letter has no orientation in its record; the note po
   // "Results for" only for the FakeEngine's three queries.
   if (BUILD_HAS_ENGINE) await expect(page.getByTestId('query-list')).toHaveCount(0);
   else await page.getByTestId(`query-row-${qIdx}`).click();
-  await expect(page.getByTestId('subject-row-0')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('subject-row-0')).toHaveAttribute('aria-selected', 'true');
   await show(page, 'hits');
   const single = page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"][data-orientation="unknown"]');
   await expect(single).toHaveCount(1);
   await single.click();
-  await expect(single).toHaveAttribute('aria-pressed', 'true');
+  await expect(single).toHaveAttribute('aria-selected', 'true');
   expect(await text(single.locator('[data-field="query"]'))).toMatch(/^(\d+)–\1$/);
   expect(await text(single.locator('[data-field="subject"]'))).toMatch(/^(\d+)–\1$/);
   await expect(single.locator('[data-field="orientation"]')).toHaveText('Not in the record');
@@ -1099,7 +1100,7 @@ async function subjectWithTwoHsps(page: Page): Promise<number> {
   for (const row of await subjectRows(page).all()) {
     if ((await text(row.locator('[data-field="hsps"]'))).trim() === '2') {
       await row.click();
-      await expect(row).toHaveAttribute('aria-pressed', 'true');
+      await expect(row).toHaveAttribute('aria-selected', 'true');
       return subjectIndex(row);
     }
   }
@@ -1145,10 +1146,10 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   }
 
   // Another subject: the selection moves to its first HSP in the current order.
-  const unselected = page.getByTestId('subject-list').locator('[data-testid^="subject-row-"][aria-pressed="false"]').first();
+  const unselected = page.getByTestId('subject-list').locator('[data-testid^="subject-row-"][aria-selected="false"]').first();
   const otherIdx = await subjectIndex(unselected);
   await page.getByTestId(`subject-row-${otherIdx}`).click();
-  await expect(page.getByTestId(`subject-row-${otherIdx}`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(`subject-row-${otherIdx}`)).toHaveAttribute('aria-selected', 'true');
   await show(page, 'hits');
   const firstOfOther = await hspId(hspRows(page).first());
   expect(firstOfOther).not.toBe(id);
@@ -1184,7 +1185,7 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   await first.getByTestId('range-next').click();
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', secondId);
   await expect(second.getByTestId('hsp-detail')).toHaveCount(1);
-  await expect(page.getByTestId(`hsp-row-${secondId.replace(':', '-')}`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(`hsp-row-${secondId.replace(':', '-')}`)).toHaveAttribute('aria-selected', 'true');
   await expect(second.getByTestId('range-label')).toBeFocused();
   // The first Range shows its section, read when it came into view.
   await expect(first.getByTestId('range-section')).toHaveAttribute('data-state', 'ready');
@@ -1214,7 +1215,7 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   }
   // The Descriptions are on the same page, above the Alignments, with the selected subject marked.
   await expect(page.getByTestId('section-descriptions')).toBeVisible();
-  await expect(page.getByTestId(`subject-row-${sIdx}`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(`subject-row-${sIdx}`)).toHaveAttribute('aria-selected', 'true');
 
   if (!BUILD_HAS_ENGINE) return;
   // A pair of many HSPs (a repeated unit searched against itself, about two HSPs a copy): the
@@ -1347,6 +1348,9 @@ test('many queries; view filters change the view, not the search; the notices te
   await list.evaluate((element) => (element.scrollTop = element.scrollHeight));
   await expect(page.getByTestId('query-row-149')).toBeVisible();
   await expect(page.getByTestId('query-row-0')).toHaveCount(0);
+  // The selected query (#4) stays drawn out of view: the list's Tab stop (WA2-AX-01).
+  await expect(page.getByTestId('query-row-3')).toBeAttached();
+  await expect(page.getByTestId('query-row-3')).not.toBeInViewport();
   // The selected query (#4, no hits) leaves the list: the first query listed is selected.
   await page.getByTestId('filter-hits-only').check();
   await expect(page.getByTestId('query-count')).toHaveText('113 of 150 queries');
@@ -1578,8 +1582,8 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   const target = targets.find((t) => t.hsp === firstId)!;
   await canvas.click({ position: { x: target.x, y: target.y } });
   await expect(canvas).toHaveAttribute('data-selected', firstId);
-  await expect(dotRows(page).nth(0)).toHaveAttribute('aria-pressed', 'true');
-  await expect(dotRows(page).nth(1)).toHaveAttribute('aria-pressed', 'false');
+  await expect(dotRows(page).nth(0)).toHaveAttribute('aria-selected', 'true');
+  await expect(dotRows(page).nth(1)).toHaveAttribute('aria-selected', 'false');
   const firstQuery = await text(dotRows(page).nth(0).locator('[data-field="query"]'));
   await expect(page.getByTestId('dotplot-selected')).toContainText(`query ${firstQuery} nt`);
   const popup = page.getByTestId('dotplot-popup');
@@ -1604,7 +1608,7 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   // closes it and gives the focus back to the plot.
   await page.keyboard.press('n');
   await expect(canvas).toHaveAttribute('data-selected', secondId);
-  await expect(dotRows(page).nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(dotRows(page).nth(1)).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Enter');
   await expect(popup).toHaveAttribute('data-hsp', secondId);
   await expect(popup).toBeFocused();
@@ -1747,13 +1751,247 @@ test('the dot plot: its Subject list chooses the plotted subject, the same selec
   await select.selectOption(second);
   await expect(page.getByTestId('dotplot-title')).toHaveText(`Plot of q1 vs ${secondId}`);
   await show(page, 'hits');
-  await expect(page.getByTestId(`subject-row-${second}`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(`subject-row-${second}`)).toHaveAttribute('aria-selected', 'true');
 
   // And back: a Descriptions row chooses the plotted subject too.
   await page.getByTestId(`subject-row-${first}`).click();
   await show(page, 'dotplot');
   await expect(select).toHaveValue(first);
 });
+/** The test ID of the element that has the focus (its tag name without one). */
+const focusedId = (page: Page) => page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? document.activeElement?.tagName ?? '');
+/** The focus left the rows whose test IDs start with `prefix`, for another element than the page. */
+async function expectFocusLeft(page: Page, prefix: string): Promise<void> {
+  const id = await focusedId(page);
+  expect(id).not.toMatch(new RegExp(`^${prefix}`));
+  expect(id).not.toBe('BODY');
+}
+
+test('the Descriptions and HSP tables are grids: one Tab stop each, arrow keys between rows, Enter or Space selects; axe finds nothing in them', async ({
+  page,
+}) => {
+  // WA2-AX-01 (a Tab stop per row), WA2-AX-02 (rows without a table), WA2-SC-04 (the HSP count).
+  await panelRun(page);
+  await show(page, 'hits');
+  const grid = page.getByRole('grid', { name: 'Subjects' });
+  const rows = subjectRows(page);
+  const count = Number(await page.getByTestId('subject-list').getAttribute('data-count'));
+  expect(count).toBeGreaterThanOrEqual(2);
+  await expect(grid).toHaveAttribute('aria-rowcount', String(count + 1));
+  const columns = await grid.getByRole('columnheader').count();
+  expect(columns).toBe(7);
+  for (const [i, row] of (await rows.all()).entries()) {
+    await expect(row).toHaveAttribute('aria-rowindex', String(i + 2));
+    await expect(row.getByRole('gridcell')).toHaveCount(columns);
+  }
+
+  // One Tab stop: from the last sort button to the selected row, and on out of the table.
+  const selected = rows.and(page.locator('[aria-selected="true"]'));
+  const first = await subjectIndex(selected);
+  await page.getByTestId('subject-sort-length').focus();
+  await page.keyboard.press('Tab');
+  await expect(selected).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expectFocusLeft(page, 'subject-row-');
+  await page.keyboard.press('Shift+Tab');
+  await expect(selected).toBeFocused();
+  // Down moves the focus, not the selection; Enter selects; Home and Space select the first again.
+  await page.keyboard.press('ArrowDown');
+  await expect(rows.nth(1)).toBeFocused();
+  await expect(rows.nth(1)).toHaveAttribute('aria-selected', 'false');
+  await page.keyboard.press('Enter');
+  await expect(rows.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId(`subject-row-${first}`)).toHaveAttribute('aria-selected', 'false');
+  await expect(rows.nth(1)).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(rows.first()).toBeFocused();
+  await page.keyboard.press(' ');
+  await expect(rows.first()).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('End');
+  await expect(rows.last()).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(rows.last()).toBeFocused();
+
+  // The HSP table of the Alignments: the same, and Space chooses the HSP that the Alignments show.
+  await subjectWithTwoHsps(page);
+  const hsps = page.getByTestId('results-hits').getByRole('grid', { name: 'HSPs' });
+  await expect(hsps).toHaveAttribute('aria-rowcount', '3');
+  await expect(page.getByTestId('results-hits').getByTestId('hsp-count')).toHaveText('2 shown');
+  await page.getByTestId('results-hits').getByTestId('hsp-sort-sStart').focus();
+  await page.keyboard.press('Tab');
+  await expect(hspRows(page).nth(0)).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(hspRows(page).nth(1)).toBeFocused();
+  await page.keyboard.press(' ');
+  await expect(hspRows(page).nth(1)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', await hspId(hspRows(page).nth(1)));
+  await expect(hspRows(page).nth(1)).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expectFocusLeft(page, 'hsp-row-');
+
+  expect(await axeViolations(page, ['[data-testid="subject-table"]', '[data-testid="hsp-table"]', '[data-testid="query-list"]'])).toEqual([]);
+  await show(page, 'dotplot');
+  await expect(page.getByTestId('results-dotplot').getByRole('grid', { name: 'HSPs' })).toHaveAttribute('aria-rowcount', '3');
+  expect(await axeViolations(page, ['[data-testid="results-dotplot"] [data-testid="hsp-table"]'])).toEqual([]);
+});
+
+test('the query list: one Tab stop; the keys move the focus beyond the drawn rows, and a focused row scrolled out of view keeps it', async ({
+  page,
+}) => {
+  // WA2-AX-01, WA2-SC-02 (the focus fell to the page), WA2-SC-03 (the place among all items).
+  await panelRun(page);
+  const list = page.getByTestId('query-list');
+  const item = (qIdx: number) => page.getByTestId(`query-row-${qIdx}`);
+  await expect(item(0)).toHaveAttribute('aria-pressed', 'true');
+  await expect(list.getByRole('listitem').first()).toHaveAttribute('aria-setsize', '150');
+  await expect(item(0).locator('..')).toHaveAttribute('aria-posinset', '1');
+
+  // The whole list in the window: the keys then move the list only.
+  await list.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await item(0).focus();
+  await page.keyboard.press('End');
+  await expect(item(149)).toBeFocused();
+  await expect(item(149)).toBeInViewport();
+  await expect(item(149).locator('..')).toHaveAttribute('aria-posinset', '150');
+  await expect(item(149)).toHaveAttribute('aria-pressed', 'false');
+  // A page is the rows in view (8) less one.
+  await page.keyboard.press('PageUp');
+  await expect(item(142)).toBeFocused();
+  // The list scrolled back to its first rows: the focused row stays drawn, with the focus.
+  const pageY = await page.evaluate(() => window.scrollY);
+  await list.evaluate((element) => (element.scrollTop = 0));
+  await expect(item(0)).toBeInViewport();
+  await expect(item(142)).toBeFocused();
+  await expect(item(142)).not.toBeInViewport();
+  // The next key moves the list, not the page, and brings the row into view.
+  await page.keyboard.press('PageDown');
+  await expect(item(149)).toBeFocused();
+  await expect(item(149)).toBeInViewport();
+  expect(await page.evaluate(() => window.scrollY)).toBe(pageY);
+  await page.keyboard.press('ArrowUp');
+  await expect(item(148)).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(item(148)).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Tab');
+  await expectFocusLeft(page, 'query-row-');
+  await page.keyboard.press('Shift+Tab');
+  await expect(item(148)).toBeFocused();
+});
+
+test('over a thousand subjects: the Descriptions show a subject chosen in the Dot Plot; the keys reach every row, and the rows are the CLI outfmt 6', async ({
+  page,
+}, testInfo) => {
+  test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine has three subjects');
+  // WA2-SC-01 (a reveal while the Hits were hidden), WA2-SC-02, WA2-AX-01 with 1,100 subjects:
+  // each holds 60 to 109 letters of the query.
+  const query = `>q1\n${dna(500, 300)}\n`;
+  const subjects = Array.from({ length: 1100 }, (_, i) => {
+    const at = (i * 13) % 190;
+    return `>s${i + 1} subject ${i + 1}\n${dna(2000 + i, 20 + (i % 7))}${query.slice(4 + at, 4 + at + 60 + (i % 50))}${dna(5000 + i, 30)}\n`;
+  }).join('');
+  await program(page, 'blastn');
+  await openFiles(page, 'query', [{ name: 'query.fa', text: query }]);
+  await openFiles(page, 'subject', [{ name: 'subject.fa', text: subjects }]);
+  await openParameters(page);
+  await page.getByTestId('param-max_target_seqs').selectOption('other');
+  await page.getByTestId('param-max_target_seqs-other').fill('5000');
+  await run(page, 1);
+  await openRun(page, 1);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-max_target_seqs 5000');
+  const list = page.getByTestId('subject-list');
+  await expect(list).toHaveAttribute('data-count', '1100');
+
+  // The first HSP of each subject in the CLI's outfmt 6, in its order (the Descriptions' order).
+  let firstRows: string[][] | undefined;
+  if (NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The rows' values: ${NO_NATIVE_REASON}` });
+  else {
+    const directory = testInfo.outputPath('many-subjects');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'query.fa'), query);
+    writeFileSync(join(directory, 'subject.fa'), subjects);
+    const cli = spawnSync(NATIVE, ['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-max_target_seqs', '5000', '-outfmt', '6', '-num_threads', '1'], {
+      cwd: directory,
+      maxBuffer: 1 << 28,
+    });
+    expect(cli.status, String(cli.stderr)).toBe(0);
+    const seen = new Set<string>();
+    firstRows = [];
+    for (const line of String(cli.stdout).split('\n')) {
+      const fields = line.split('\t');
+      if (fields.length < 12 || seen.has(fields[1]!)) continue;
+      seen.add(fields[1]!);
+      firstRows.push(fields);
+    }
+    expect(firstRows).toHaveLength(1100);
+  }
+  const expectRow = async (row: Locator) => {
+    const order = Number(await row.getAttribute('data-order'));
+    if (firstRows === undefined) return;
+    const fields = firstRows[order - 1]!;
+    await expect(row.locator('[data-field="sseqid"]')).toHaveText(fields[1]!);
+    await expect(row.locator('[data-field="evalue"]')).toHaveText(fields[10]!);
+    await expect(row.locator('[data-field="bitscore"]')).toHaveText(fields[11]!.trim());
+  };
+  const byOrder = (order: number) => subjectRows(page).and(page.locator(`[data-order="${order}"]`));
+
+  // The Dot Plot chooses the last subject while the Descriptions are hidden; back in the Hits, its row is in view.
+  await show(page, 'dotplot');
+  const options = page.getByTestId('dotplot-subject').locator('option');
+  await expect(options).toHaveCount(1100);
+  const lastIdx = (await options.nth(1099).getAttribute('value'))!;
+  await page.getByTestId('dotplot-subject').selectOption(lastIdx);
+  await show(page, 'hits');
+  const chosen = page.getByTestId(`subject-row-${lastIdx}`);
+  await expect(chosen).toHaveAttribute('aria-selected', 'true');
+  // The Graphic Summary of 1,100 subjects is above: the whole table in the window (its list keeps its scroll).
+  await page.getByTestId('subject-table').evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  await expect(chosen).toBeInViewport();
+  await expect(chosen).toHaveAttribute('data-order', '1100');
+  await expectRow(chosen);
+
+  // One Tab stop, at the chosen row; the keys reach the first rows and the last.
+  await page.getByTestId('subject-sort-length').focus();
+  await page.keyboard.press('Tab');
+  await expect(chosen).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(byOrder(1)).toBeFocused();
+  await expect(byOrder(1)).toBeInViewport();
+  await expectRow(byOrder(1));
+  // A page is the rows in view (10) less one.
+  await page.keyboard.press('PageDown');
+  await page.keyboard.press('PageDown');
+  await expect(byOrder(19)).toBeFocused();
+  await expectRow(byOrder(19));
+  // The list scrolled away with the wheel's distance (WA2-SC-02): the row keeps the focus, and the
+  // next key moves the list, not the page.
+  const pageY = await page.evaluate(() => window.scrollY);
+  await list.evaluate((element) => (element.scrollTop += 900));
+  await expect(byOrder(19)).toBeFocused();
+  await expect(byOrder(19)).not.toBeInViewport();
+  await page.keyboard.press('ArrowDown');
+  await expect(byOrder(20)).toBeFocused();
+  await expect(byOrder(20)).toBeInViewport();
+  expect(await page.evaluate(() => window.scrollY)).toBe(pageY);
+  await expectRow(byOrder(20));
+  await page.keyboard.press('End');
+  await expect(byOrder(1100)).toBeFocused();
+  await expect(byOrder(1100)).toBeInViewport();
+  await page.keyboard.press('Enter');
+  await expect(byOrder(1100)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('grid', { name: 'Subjects' })).toHaveAttribute('aria-rowcount', '1101');
+  await expect(byOrder(1100)).toHaveAttribute('aria-rowindex', '1101');
+
+  // The list scrolled to rows 500 to 509, the Dot Plot and back, the selection unchanged: the same rows.
+  await list.evaluate((element) => (element.scrollTop = 499 * 28));
+  await expect(byOrder(500)).toBeVisible();
+  await show(page, 'dotplot');
+  await show(page, 'hits');
+  await page.getByTestId('subject-table').evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(499 * 28);
+  await expect(byOrder(500)).toBeInViewport();
+  await expect(byOrder(509)).toBeInViewport();
+});
+
 test('narrow screens: the results are no wider than the screen; "Run LOSAT" opens them; the tables show the key values first', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   // A translated search (frames) of files with long names: the run's label in the run picker is long.
@@ -1790,7 +2028,7 @@ test('narrow screens: the results are no wider than the screen; "Run LOSAT" open
   /**
    * The table's sideways scroll after a click on a row (W4 screen review middle 2: Firefox scrolled
    * it). The mouse presses the row where it is in view: Playwright's click() would first scroll the
-   * whole row's button into view itself.
+   * whole row into view itself.
    */
   const clickKeepsScroll = async (table: string, row: Locator) => {
     const scroll = page.getByTestId(table).locator('.table-scroll');
@@ -1799,7 +2037,7 @@ test('narrow screens: the results are no wider than the screen; "Run LOSAT" open
     await scroll.evaluate((element) => (element.scrollLeft = 0));
     const box = (await row.boundingBox())!;
     await page.mouse.click(box.x + 24, box.y + box.height / 2);
-    await expect(row).toHaveAttribute('aria-pressed', 'true');
+    await expect(row).toHaveAttribute('aria-selected', 'true');
     await page.waitForTimeout(100);
     expect(await scroll.evaluate((element) => element.scrollLeft), `${table}: scrolled sideways by a click`).toBe(0);
   };

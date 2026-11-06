@@ -6,7 +6,6 @@ use super::super::helpers::{
 use LOSAT::algorithm::common::evalue::{
     bit_score, calculate_evalue_alignment_length, calculate_evalue_database_search,
 };
-use LOSAT::stats::tables::KarlinParams;
 
 #[test]
 fn test_bit_score_calculation() {
@@ -83,7 +82,7 @@ fn test_evalue_database_search_large_database() {
     let db_len = 1_000_000;
     let db_num_seqs = 100;
 
-    let (bit_score, e_value) =
+    let (_bit_score, e_value) =
         calculate_evalue_database_search(score, q_len, db_len, db_num_seqs, &params);
 
     // E-value should increase with larger database

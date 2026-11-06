@@ -31,7 +31,7 @@ parser checks every option, so an option means, and fails, as it does there (`Ar
 
 `-query`, `-subject`, `-db`, `-out` and `-outfmt` are not options here: the inputs and the formats
 are arguments of `run`. Nor are psiblast's `-out_pssm`, `-out_ascii_pssm`, `-save_pssm_after_last_round`
-and `-save_each_pssm`: the library writes no PSSM file.
+and `-save_each_pssm`: the library writes no PSSM file; nor `-in_pssm`: the queries are records.
 
 ## Inputs
 

@@ -198,7 +198,7 @@ async function search(page: Page, id: string, number: number, query: string, sub
 
 /**
  * Presses a table's row with the mouse at its part in view, as a finger would (W4b screen review
- * L5): Playwright's click() scrolls the whole row's button into view first, which scrolled a
+ * L5): Playwright's click() scrolls the whole row into view first, which scrolled a
  * phone's table sideways in the records, though the app keeps it where it is (results.spec.ts).
  */
 async function pressRow(page: Page, row: Locator): Promise<void> {
@@ -248,7 +248,7 @@ for (const size of SIZES) {
     // The Alignments: the first subject's block, an HSP selected with its section of outfmt 0.
     await openResults(page, 1);
     await pressRow(page, hspRows.first());
-    await expect(hspRows.first()).toHaveAttribute('aria-pressed', 'true');
+    await expect(hspRows.first()).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId('detail-section')).toBeVisible();
     await shoot(page, browserName, size.name, '07-results-hits-alignment');
 
@@ -272,7 +272,7 @@ for (const size of SIZES) {
     const last = page.getByTestId('subject-list').locator('[data-testid^="subject-row-"]').first();
     await expect(last).toHaveAttribute('data-order', '260');
     await last.click();
-    await expect(last).toHaveAttribute('aria-pressed', 'true');
+    await expect(last).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId('detail-not-in-outfmt0')).toBeVisible();
     await shoot(page, browserName, size.name, '09-results-hsp-not-in-outfmt0');
 

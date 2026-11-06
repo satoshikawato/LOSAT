@@ -152,8 +152,9 @@ impl BlastxDatabase {
         shared::taxdb_may_refuse(&self.db, names)
     }
 
-    /// Whether the batches' prefetch of the run is refused for NCBI's taxonomy cache
-    /// (`shared::TaxdbRun::prefetch_refused`), which an outfmt 5 run holds its document for.
+    /// Whether the batches' fetches of the run are refused for NCBI's taxonomy cache
+    /// (`shared::TaxdbRun::prefetch_refused`): outfmt 5's prefetch, and the XML2 and JSON lookups
+    /// (`shared::read_reported_taxonomy`), which an XML run holds its document for.
     pub(crate) fn prefetch_refused(&self) -> bool {
         self.taxdb.prefetch_refused(&self.db)
     }

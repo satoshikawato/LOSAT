@@ -29,6 +29,8 @@ pub struct PsiblastPssmOptions {
     pub out_pssm: Option<String>,
     pub out_ascii_pssm: Option<String>,
     pub pseudocount: i32,
+    /// `-in_pssm`: the query as a PSSM file (`algorithm::psiblast::in_pssm`).
+    pub in_pssm: Option<std::path::PathBuf>,
 }
 
 /// A run that writes the PSSM of each query whose round-1 results have alignments.
@@ -1409,6 +1411,10 @@ enum TargetKind {
     Regular,
     /// A character device (`/dev/null`, `/dev/full`): opened for writing as it is; `null`: it is
     /// `/dev/null`.
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "constructed only on unix (special_target_kind)")
+    )]
     Device { null: bool },
     /// A directory or a socket: `ofstream` cannot open it.
     Unopenable,

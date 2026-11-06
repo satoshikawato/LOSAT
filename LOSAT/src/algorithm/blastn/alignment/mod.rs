@@ -42,7 +42,6 @@ pub use gapped::{
     extend_gapped_heuristic_with_traceback_with_scratch,
     extend_gapped_one_direction,
     extend_gapped_one_direction_with_traceback,
-    AlnStats,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     GapAlignScratch,
 };

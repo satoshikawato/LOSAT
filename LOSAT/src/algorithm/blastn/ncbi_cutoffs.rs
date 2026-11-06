@@ -406,7 +406,7 @@ mod tests {
         // = 17.82337575547674 / 0.625
         // = 28.517401208762784
         // ≈ 28 or 29
-        assert!(gap_trigger >= 28 && gap_trigger <= 29);
+        assert!((28..=29).contains(&gap_trigger));
     }
 
     #[test]
@@ -507,7 +507,7 @@ mod tests {
             alpha: 0.8,
             beta: -2.0,
         };
-        let gapped_params = ungapped_params.clone(); // Same for blastn
+        let gapped_params = ungapped_params; // Same for blastn
 
         let query_len = 1000i64 * 2; // Both strands
         let subject_len = 10000i64;

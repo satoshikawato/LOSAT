@@ -738,7 +738,7 @@ fn choose_na_lookup_table(
         return (LookupTableKind::Mb, word_size);
     }
 
-    let (mut lut_kind, mut lut_width) = match word_size {
+    let (mut lut_kind, lut_width) = match word_size {
         4..=6 => (LookupTableKind::Small, word_size),
         7 => {
             if approx_table_entries < 250 {

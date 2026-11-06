@@ -199,7 +199,11 @@ impl Narrow {
     }
 
     /// Tests only: the words of the heads.
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     pub(super) fn heads(&self) -> &[u32] {
         &self.heads
     }
@@ -279,6 +283,7 @@ pub(super) fn set_spill(words: &mut [u32], i: usize, value: u32) {
 }
 
 /// The address of element `i` of the words at `base` (for a prefetch; nothing is read).
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 pub(super) fn at(base: *const u32, i: usize) -> *const i8 {
     base.cast::<i8>().wrapping_add(3 * i)

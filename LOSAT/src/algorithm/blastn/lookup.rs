@@ -258,8 +258,6 @@ pub struct NaLookupTable {
     overflow: Vec<u32>,
     pv: Vec<PvArrayType>,
     longest_chain: usize,
-    word_length: usize,
-    lut_word_length: usize,
 }
 
 impl NaLookupTable {
@@ -841,6 +839,7 @@ impl PvDirectLookup {
 /// Two-stage lookup table (like NCBI BLAST)
 /// - lut_word_length: Used for indexing (e.g., 8 for megablast)
 /// - word_length: Used for extension triggering (e.g., 28 for megablast)
+///
 /// This allows O(1) direct array access even for large word_length values
 pub struct TwoStageLookup {
     /// Megablast lookup table using NCBI hashtable/next_pos chains.
@@ -1059,7 +1058,11 @@ impl MbLookupTable {
 
     /// Tests only: the head table's words, as the batch loop's keep holds them (LOSAT_X_MB24: the
     /// words of the 3-byte heads).
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn x_table(&self) -> &[u32] {
         self.x_narrow
             .as_ref()
@@ -1425,7 +1428,7 @@ pub fn build_pv_direct_lookup(
 
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
-    let mut dust_skipped = 0usize;
+    let dust_skipped = 0usize;
 
     debug_assert_eq!(queries_blastna.len(), query_offsets.len());
 
@@ -1723,7 +1726,7 @@ pub fn build_na_lookup(
     let mut counts: Vec<u32> = vec![0; table_size];
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
-    let mut dust_skipped = 0usize;
+    let dust_skipped = 0usize;
 
     let kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
 
@@ -1921,14 +1924,13 @@ pub fn build_na_lookup(
         overflow,
         pv,
         longest_chain,
-        word_length,
-        lut_word_length,
     }
 }
 
 /// Build two-stage lookup table (like NCBI BLAST)
 /// - lut_word_length: Used for indexing (typically 8 for megablast)
 /// - word_length: Used for extension triggering (typically 28 for megablast)
+///
 /// This allows O(1) direct array access even for large word_length values
 fn build_mb_lookup(
     queries_blastna: &[&[u8]],
@@ -2027,8 +2029,7 @@ fn build_mb_lookup(
     };
     let mut pv_array = vec![0u32; pv_size];
     const K_COMPRESSION_FACTOR: usize = 2048;
-    let mut helper_array =
-        vec![0u32; ((table_size + K_COMPRESSION_FACTOR - 1) / K_COMPRESSION_FACTOR).max(1)];
+    let mut helper_array = vec![0u32; table_size.div_ceil(K_COMPRESSION_FACTOR).max(1)];
     let mut words: Vec<(u32, u32)> = Vec::new();
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;

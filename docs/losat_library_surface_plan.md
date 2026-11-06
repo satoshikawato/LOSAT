@@ -406,6 +406,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 - 報告つきの検索は止まらない。`run_collect` は engine の 1 回の呼び出しで、バッチの境界を外に見せない。gbdraw は outfmt 6 の text が要るのでこの形になる。
 - 1 query は 1 バッチなので、ゲノム 2 本の比較には境界が無い。gbdraw の検索はほぼこれで、subprocess なら kill できたものが、process の中では終わるまで待つことになる。NCBI の `SetInterruptCallback` に当たるものがエンジンに入れば解ける（文書の「後回し」のまま）。gbdraw が移るかどうかの判断材料になる。
 - BLASTN の `-task` は `Parameter::choices` に出ない。parser が `String` で受け、engine が後で断るため（BLASTP は parser の list）。gbdraw の `losat_task_values` は `--help` を読んでいて、binding では検索の開始時のエラーになる。
+  → 2026-11-06 解消（branch `fix/lib-blastn-task-choices`）：BLASTN の `-task` も他の program と同じ `task_parser`（表 `BLASTN_TASKS`）になり、`Parameter::choices` に megablast、dc-megablast、blastn、blastn-short が出る（pylosat の stub は `Literal`、Web の form は describe の一覧を使う）。
 - 警告は `diagnostics` の text のままで、深刻度も query の番号も無い（文書の「後回し」）。Python の `warnings` には流さない。
 
 ### 12.3 関門

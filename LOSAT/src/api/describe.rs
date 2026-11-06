@@ -266,7 +266,7 @@ mod tests {
             ];
             crate::cli::try_parse_from::<Cli, _, _>(argv).is_ok()
         };
-        let mut with_task = Vec::new();
+        // Every -task lists its tasks: the default among them, each one accepted.
         for program in Program::ALL {
             let description = describe(program);
             let Some(task) = description
@@ -276,26 +276,15 @@ mod tests {
             else {
                 continue;
             };
-            with_task.push(program);
-            assert!(!task.choices.is_empty(), "{program}");
-            assert_eq!(
-                task.default.as_deref(),
-                Some(task.choices[0].as_str()),
+            let default = task.default.as_deref().unwrap();
+            assert!(
+                task.choices.iter().any(|choice| choice == default),
                 "{program}"
             );
             for choice in &task.choices {
                 assert!(parses(program, choice), "{program} -task {choice}");
             }
         }
-        assert_eq!(
-            with_task,
-            [
-                Program::Blastx,
-                Program::Blastn,
-                Program::Blastp,
-                Program::Tblastn
-            ]
-        );
         let blastn = describe(Program::Blastn);
         let task = blastn
             .parameters

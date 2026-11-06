@@ -1,10 +1,11 @@
 //! Checks how the files of `LOSAT/tests/` are built into test binaries. `Cargo.toml` turns
-//! automatic test discovery off and lists eight binaries: six suites (`tests/suites/<name>.rs`,
-//! one `#[path]` module per file) and two files that change the process environment and so stay
-//! alone. A file that no binary lists would silently not build, a file in two binaries would run
-//! twice, and a suite member that changes the process environment or process-wide state (the panic
-//! hook, rayon's global pool) would disturb the other tests of its process. Each test below names
-//! every offender and says how to fix it. Standard library only.
+//! automatic test discovery off and lists nine binaries: six suites (`tests/suites/<name>.rs`,
+//! one `#[path]` module per file) and three files that change the process environment or
+//! process-wide state and so stay alone. A file that no binary lists would silently not build, a
+//! file in two binaries would run twice, and a suite member that changes the process environment
+//! or process-wide state (the panic hook, rayon's global pool, the global allocator) would disturb
+//! the other tests of its process. Each test below names every offender and says how to fix it.
+//! Standard library only.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -23,6 +24,10 @@ const PROCESS_CALLS: [&str; 6] = [
     "take_hook",
     "build_global",
 ];
+
+/// The attributes that set process-wide state: the global allocator, through which every test of
+/// the binary allocates.
+const PROCESS_ATTRIBUTES: [&str; 1] = ["global_allocator"];
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -372,23 +377,32 @@ fn declarations(tokens: &[Token]) -> Vec<Decl> {
     decls
 }
 
-/// The calls of `PROCESS_CALLS` in a token stream, written `name(`.
-fn process_calls(tokens: &[Token]) -> Vec<String> {
-    let mut calls = Vec::new();
-    for pair in tokens.windows(2) {
-        if let [Token::Ident(word), Token::Punct('(')] = pair {
-            if PROCESS_CALLS.contains(&word.as_str()) {
-                calls.push(format!("{word}("));
+/// The calls of `PROCESS_CALLS` in a token stream, written `name(`, as `name(...)`, and the
+/// attributes of `PROCESS_ATTRIBUTES`, written `#[name]`.
+fn process_changes(tokens: &[Token]) -> Vec<String> {
+    let mut changes = Vec::new();
+    for (at, pair) in tokens.windows(2).enumerate() {
+        match pair {
+            [Token::Ident(word), Token::Punct('(')] if PROCESS_CALLS.contains(&word.as_str()) => {
+                changes.push(format!("{word}(...)"));
             }
+            [Token::Punct('#'), Token::Punct('[')] => {
+                if let Some([Token::Ident(word), Token::Punct(']')]) = tokens.get(at + 2..at + 4) {
+                    if PROCESS_ATTRIBUTES.contains(&word.as_str()) {
+                        changes.push(format!("#[{word}]"));
+                    }
+                }
+            }
+            _ => {}
         }
     }
-    calls
+    changes
 }
 
 #[derive(Default)]
 struct Walk {
     visited: Vec<PathBuf>,
-    /// (file, call) for every environment or process-wide change found.
+    /// (file, call or attribute) for every environment or process-wide change found.
     changes: Vec<(PathBuf, String)>,
     /// Declarations that resolve to no file or to two.
     unresolved: Vec<String>,
@@ -409,8 +423,8 @@ fn walk_module_tree(file: &Path, own_dir: bool, walk: &mut Walk) {
         dir.join(file.file_stem().expect("a file stem"))
     };
     let tokens = tokenize(&read(file));
-    for call in process_calls(&tokens) {
-        walk.changes.push((file.to_path_buf(), call));
+    for change in process_changes(&tokens) {
+        walk.changes.push((file.to_path_buf(), change));
     }
     for decl in declarations(&tokens) {
         let name = &decl.name;
@@ -622,9 +636,9 @@ fn suite_members_are_top_level_files_named_like_their_module() {
                 decl.inline.join("::")
             ));
         }
-        for call in process_calls(&tokens) {
+        for change in process_changes(&tokens) {
             problems.push(format!(
-                "{root}: calls {call}...) in the suite root itself, which changes the process environment or \
+                "{root}: uses {change} in the suite root itself, which changes the process environment or \
                  process-wide state for every test of the suite: a suite root holds only member declarations"
             ));
         }
@@ -688,7 +702,7 @@ fn suite_members_do_not_change_the_process_environment() {
                 member.suite_root
             ));
         }
-        for (changing, call) in &walk.changes {
+        for (changing, change) in &walk.changes {
             let fix = if *changing == root_file {
                 "give the file its own `[[test]]` in LOSAT/Cargo.toml, as blastn_report_stream_api"
                     .to_string()
@@ -700,7 +714,7 @@ fn suite_members_do_not_change_the_process_environment() {
                 )
             };
             problems.push(format!(
-                "member {file}: {} calls {call}...), which changes the process environment or process-wide \
+                "member {file}: {} uses {change}, which changes the process environment or process-wide \
                  state, and the tests of a suite share one process: {fix}",
                 shown(changing)
             ));

@@ -439,13 +439,13 @@ input[type='radio'] {
    width (one token too, a delim= value): its tab, its command, Export and its "Download All" item. */
 .tabs button.custom-output,
 .outputs-view .command,
-.outputs-view > button,
+.outputs-panel > button,
 .download-list button {
   overflow-wrap: anywhere;
 }
 
-.tabs button[aria-pressed='true'],
-.tabs button[aria-pressed='true']:hover:not(:disabled) {
+.tabs button[aria-selected='true'],
+.tabs button[aria-selected='true']:hover:not(:disabled) {
   border-color: var(--accent);
   color: #fff;
   background: var(--accent);

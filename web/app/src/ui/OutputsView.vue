@@ -4,13 +4,14 @@
 // formats of every run, and the output of the run's own -outfmt (W10, W11). A binary output
 // (outfmt 9, and the ZIP archive of the files of 13 and 14) is exported, not shown. An output that cannot be read, or an export that is not
 // saved, says why (application/outputs.ts).
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputReader } from '../application/outputs';
 import { toShellCommand } from '../domain/argv';
 import { outputChunks } from '../domain/output-chunks';
 import { CUSTOM_OUTPUT, isBinaryOutput, outfmtOf, runOutputs, type RunOutput } from '../domain/output-format';
 import { vScrollFocus } from './scroll-focus';
+import TabList from './TabList.vue';
 import { useStore } from './useStore';
 
 const props = defineProps<{ coordinator: Coordinator; run: RunView }>();
@@ -19,6 +20,19 @@ const outputs = computed(() => runOutputs(props.run.snapshot.argv));
 /** The output shown: the one chosen, or outfmt 6 for a run that does not write it. */
 const format = computed(() => (outputs.value.includes(chosen.value) ? chosen.value : 6));
 const binary = computed(() => isBinaryOutput(props.run.snapshot.argv, format.value));
+/** The formats: tabs of one panel, the output shown (WA2-AX-12). */
+const ids = useId();
+const shown = computed({ get: () => format.value, set: (value: RunOutput) => (chosen.value = value) });
+const tabs = computed(() =>
+  outputs.value.map((f) => ({
+    value: f,
+    label: `outfmt ${outfmtOf(props.run.snapshot.argv, f)}`,
+    testid: f === CUSTOM_OUTPUT ? 'format-custom' : `format-${f}`,
+    id: `${ids}-tab-${f}`,
+    panel: `${ids}-panel`,
+    ...(f === CUSTOM_OUTPUT ? { class: 'custom-output' } : {}),
+  })),
+);
 const reader = new OutputReader(props.coordinator);
 const output = useStore(reader.state);
 const chunks = computed(() => outputChunks(output.value.text));
@@ -60,27 +74,18 @@ watch(() => output.value.text, () => generation.value++);
 
 <template>
   <div class="outputs-view" data-testid="results-outputs">
-    <nav class="tabs" aria-label="Output format">
-      <button
-        v-for="f in outputs"
-        :key="f"
-        :class="{ 'custom-output': f === CUSTOM_OUTPUT }"
-        :aria-pressed="format === f"
-        :data-testid="f === CUSTOM_OUTPUT ? 'format-custom' : `format-${f}`"
-        @click="chosen = f"
-      >
-        outfmt {{ outfmtOf(run.snapshot.argv, f) }}
+    <TabList v-model="shown" label="Output format" :tabs="tabs" />
+    <div :id="`${ids}-panel`" role="tabpanel" :aria-labelledby="`${ids}-tab-${format}`" class="outputs-panel">
+      <p class="command">
+        Command: <code data-testid="result-command">{{ toShellCommand(run.snapshot.argv, format) }}</code>
+      </p>
+      <!-- A Tab stop that the arrow keys scroll, also in WebKit (WA2-AX-08). -->
+      <pre v-if="!output.failed && !binary" ref="view" v-scroll-focus="`outfmt ${outfmtOf(run.snapshot.argv, format)} output`" class="output" data-testid="result-output" :data-shown="output.shown"><span v-for="(chunk, index) in chunks" :key="`${generation}:${index}`" class="output-chunk" :style="{ '--output-chunk-lines': chunk.lines }">{{ chunk.text }}</span></pre>
+      <!-- Next to Export, whose failure it also tells; where the text would be when the text could not be read. -->
+      <p v-if="output.problem" class="results-message error" role="alert" data-testid="outputs-problem" :data-failed="output.failed">{{ output.problem }}</p>
+      <button data-testid="export-output" @click="reader.export(run, format)">
+        Export outfmt {{ outfmtOf(run.snapshot.argv, format) }}
       </button>
-    </nav>
-    <p class="command">
-      Command: <code data-testid="result-command">{{ toShellCommand(run.snapshot.argv, format) }}</code>
-    </p>
-    <!-- A Tab stop that the arrow keys scroll, also in WebKit (WA2-AX-08). -->
-    <pre v-if="!output.failed && !binary" ref="view" v-scroll-focus="`outfmt ${outfmtOf(run.snapshot.argv, format)} output`" class="output" data-testid="result-output" :data-shown="output.shown"><span v-for="(chunk, index) in chunks" :key="`${generation}:${index}`" class="output-chunk" :style="{ '--output-chunk-lines': chunk.lines }">{{ chunk.text }}</span></pre>
-    <!-- Next to Export, whose failure it also tells; where the text would be when the text could not be read. -->
-    <p v-if="output.problem" class="results-message error" role="alert" data-testid="outputs-problem" :data-failed="output.failed">{{ output.problem }}</p>
-    <button data-testid="export-output" @click="reader.export(run, format)">
-      Export outfmt {{ outfmtOf(run.snapshot.argv, format) }}
-    </button>
+    </div>
   </div>
 </template>

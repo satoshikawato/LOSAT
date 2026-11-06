@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref, useId } from 'vue';
 import type { Attention } from '../application/attention';
 import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
@@ -13,6 +13,7 @@ import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
 import { useRunAnnouncements } from './run-announcements';
 import StorageStatus from './StorageStatus.vue';
+import TabList from './TabList.vue';
 
 const props = defineProps<{
   coordinator: Coordinator;
@@ -26,8 +27,13 @@ const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
 const tab = ref<'search' | 'results'>('search');
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
-const searchTab = ref<HTMLButtonElement>();
-const resultsTab = ref<HTMLButtonElement>();
+const mainTabs = ref<{ focus: () => void }>();
+/** Search and Results: tabs, each with its panel (WA2-AX-12). */
+const ids = useId();
+const MAIN_TABS = [
+  { value: 'search', label: 'Search', testid: 'tab-search', id: `${ids}-search-tab`, panel: `${ids}-search` },
+  { value: 'results', label: 'Results', testid: 'tab-results', id: `${ids}-results-tab`, panel: `${ids}-results` },
+] as const;
 useRunAnnouncements(state, useStore(props.results.state));
 /** The results tab's view, kept while the search tab is shown and when another run opens. */
 const resultsView = ref<ResultsView>('hits');
@@ -52,7 +58,7 @@ async function dismissResume(): Promise<void> {
   props.attention.dismissResume();
   await nextTick();
   const active = document.activeElement;
-  if (active === null || active === document.body || !active.isConnected) (tab.value === 'search' ? searchTab : resultsTab).value?.focus();
+  if (active === null || active === document.body || !active.isConnected) mainTabs.value?.focus();
 }
 
 // A file dropped outside an input's drop zone would make the browser open it in place of
@@ -79,15 +85,18 @@ onUnmounted(() => {
     Development build: a fake engine is in use. Outputs are not search results.
   </p>
   <ResumeNotice v-if="attentionState.resume" :report="attentionState.resume" @dismiss="dismissResume" />
-  <nav class="tabs main-tabs" aria-label="Main">
-    <button ref="searchTab" :aria-pressed="tab === 'search'" data-testid="tab-search" @click="tab = 'search'">Search</button>
-    <button ref="resultsTab" :aria-pressed="tab === 'results'" data-testid="tab-results" @click="tab = 'results'">Results</button>
+  <!-- The tabs stay in the page's navigation landmark, which they were before they were tabs (WA2-AX-12). -->
+  <nav aria-label="Main">
+    <TabList ref="mainTabs" v-model="tab" class="main-tabs" label="Main" :tabs="MAIN_TABS" />
   </nav>
   <main class="layout">
     <section class="primary">
       <!-- The search form stays mounted, so the next search keeps its edits while results are viewed. -->
       <SearchPanel
         v-show="tab === 'search'"
+        :id="MAIN_TABS[0].panel"
+        role="tabpanel"
+        :aria-labelledby="MAIN_TABS[0].id"
         :draft="draft"
         :examples="examples"
         :attention="attention"
@@ -96,6 +105,9 @@ onUnmounted(() => {
       />
       <ResultsPanel
         v-if="tab === 'results'"
+        :id="MAIN_TABS[1].panel"
+        role="tabpanel"
+        :aria-labelledby="MAIN_TABS[1].id"
         ref="resultsPanel"
         v-model:view="resultsView"
         :coordinator="coordinator"

@@ -31,6 +31,7 @@ import ResultNotices from './ResultNotices.vue';
 import RunDetails from './RunDetails.vue';
 import RunStatus from './RunStatus.vue';
 import SubjectTable from './SubjectTable.vue';
+import TabList from './TabList.vue';
 import VerificationBadge from './VerificationBadge.vue';
 
 export type ResultsView = 'hits' | 'dotplot' | 'details' | 'outputs';
@@ -46,14 +47,20 @@ const alignments = ref<InstanceType<typeof AlignmentsView>>();
 
 /**
  * The hits (Graphic Summary, Descriptions and Alignments on one page), NCBI's Dot Plot, then
- * LOSAT's views. The test IDs are W4's (the hits view, the dot plot's pane, the run's views).
+ * LOSAT's views: tabs, each with its panel (WA2-AX-12). The test IDs are W4's (the hits view, the
+ * dot plot's pane, the run's views).
  */
-const TABS: readonly { readonly view: ResultsView; readonly label: string; readonly testid: string }[] = [
-  { view: 'hits', label: 'Hits', testid: 'results-view-hits' },
-  { view: 'dotplot', label: 'Dot Plot', testid: 'pane-dotplot' },
-  { view: 'details', label: 'Run details', testid: 'results-view-details' },
-  { view: 'outputs', label: 'Outputs', testid: 'results-view-outputs' },
-];
+const ids = useId();
+const TABS = (
+  [
+    { value: 'hits', label: 'Hits', testid: 'results-view-hits' },
+    { value: 'dotplot', label: 'Dot Plot', testid: 'pane-dotplot' },
+    { value: 'details', label: 'Run details', testid: 'results-view-details' },
+    { value: 'outputs', label: 'Outputs', testid: 'results-view-outputs' },
+  ] as const
+).map((tab) => ({ ...tab, id: `${ids}-${tab.value}-tab`, panel: `${ids}-${tab.value}` }));
+/** The attributes of a view's panel. */
+const panel = (value: ResultsView) => ({ id: `${ids}-${value}`, role: 'tabpanel', 'aria-labelledby': `${ids}-${value}-tab` });
 
 const emptyPlot = computed(() => (state.value.hsps.length > 0 ? undefined : noHspReason(state.value)));
 
@@ -300,22 +307,11 @@ async function toAlignments(id: HspId): Promise<void> {
         <QueryPicker v-if="multiQuery" :results="results" :state="state" />
         <ResultNotices :state="state" @clear="results.setFilters({ queriesWithHitsOnly: state.filters.queriesWithHitsOnly ?? false })" />
 
-        <nav class="tabs results-tabs" aria-label="Results view">
-          <button
-            v-for="tab in TABS"
-            :key="tab.view"
-            type="button"
-            :aria-pressed="view === tab.view"
-            :data-testid="tab.testid"
-            @click="view = tab.view"
-          >
-            {{ tab.label }}
-          </button>
-        </nav>
+        <TabList v-model="view" class="results-tabs" label="Results view" :tabs="TABS" />
 
         <!-- NCBI's classic results page: the three sections on one page, in its order. The Alignments
              show the selected subject; a row of the Descriptions or a bar of the Graphic Summary selects it. -->
-        <div v-show="view === 'hits'" class="hits-view" data-testid="results-hits" :data-run="loaded.run.snapshot.number">
+        <div v-show="view === 'hits'" v-bind="panel('hits')" class="hits-view" data-testid="results-hits" :data-run="loaded.run.snapshot.number">
           <template v-if="state.subjects.length > 0">
             <section class="hits-section" data-testid="section-graphic">
               <h3 class="section-heading">Graphic Summary</h3>
@@ -331,17 +327,17 @@ async function toAlignments(id: HspId): Promise<void> {
             </section>
           </template>
         </div>
-        <div v-if="view === 'dotplot' && state.hsps.length > 0" class="hits-view results-group" data-testid="results-dotplot">
+        <div v-if="view === 'dotplot' && state.hsps.length > 0" v-bind="panel('dotplot')" class="hits-view results-group" data-testid="results-dotplot">
           <DotPlot :results="results" :state="state" @show-alignment="toAlignments" />
           <HspTable :results="results" :state="state" />
         </div>
-        <p v-else-if="view === 'dotplot' && emptyPlot" class="results-message" data-testid="results-dotplot-empty" :data-kind="emptyPlot">
+        <p v-else-if="view === 'dotplot' && emptyPlot" v-bind="panel('dotplot')" class="results-message" data-testid="results-dotplot-empty" :data-kind="emptyPlot">
           {{ NO_HSP_TEXT[emptyPlot] }}
         </p>
-        <div v-if="view === 'details'" class="results-group">
+        <div v-if="view === 'details'" v-bind="panel('details')" class="results-group">
           <RunDetails :run="loaded.run" :loaded="loaded" />
         </div>
-        <div v-if="view === 'outputs'" class="results-group">
+        <div v-if="view === 'outputs'" v-bind="panel('outputs')" class="results-group">
           <OutputsView :coordinator="coordinator" :run="loaded.run" />
         </div>
       </template>

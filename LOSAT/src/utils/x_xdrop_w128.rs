@@ -1359,13 +1359,19 @@ unsafe fn body16_rows<const TB: bool, const NIB: bool>(
         }
         wend[wi] = proc_end;
         cur = wi;
+        let rec = if TB {
+            sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first)
+        } else {
+            core::ptr::null()
+        };
         if rs.slow {
             b_off = rs.rec_b + sc.x_sh;
             a_off = a;
             best_rel = lane0(rs.bestv) - bias;
-        }
-        if TB {
-            sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first);
+            if TB {
+                // No NCBI counterpart: the walk starts at this row's record (`XTrace::x_best`)
+                sc.trace.x_best(rec);
+            }
         }
         if fence_row {
             fence_hit = true;
@@ -1844,13 +1850,19 @@ unsafe fn body8_rows<const TB: bool, const NIB: bool>(
         }
         wend[wi] = proc_end;
         cur = wi;
+        let rec = if TB {
+            sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first)
+        } else {
+            core::ptr::null()
+        };
         if rs.slow {
             b_off = rs.rec_b + sc.x_sh;
             a_off = a;
             best_rel = lane0_u8(rs.bestv) - bias;
-        }
-        if TB {
-            sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first);
+            if TB {
+                // No NCBI counterpart: the walk starts at this row's record (`XTrace::x_best`)
+                sc.trace.x_best(rec);
+            }
         }
         if fence_row {
             fence_hit = true;

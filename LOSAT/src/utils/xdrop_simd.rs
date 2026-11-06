@@ -917,31 +917,51 @@ fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
 // list of chunks, as NCBI keeps them: a row is written whole into the free part of the chunk being
 // filled; a row that does not fit there goes to the next chunk (rows never straddle two chunks), a
 // row longer than a chunk to a chunk of its own of `length + length/3` bytes; a purge only sets
-// the chunks' used part to 0. The row records (NCBI's `edit_start_offset` and the row pointers of
-// `edit_script`, here the first column and the cells of each row) are kept in chunks of the same
-// size.
+// the chunks' used part to 0.
 //
-// No NCBI counterpart: memory placement only. NCBI keeps every chunk in its `gap_align` until the
-// search ends; here a scratch keeps its first trace chunk and its first record chunk (each grows
-// as `Vec::reserve` does, up to one chunk, so a scratch that only ran short tracebacks holds what
-// they needed), and the chunks after them come from one pool that every scratch of the process
-// shares (`X_CHUNKS`) and go back to it when the traceback call ends (`XdropScratch::x_trace_release`)
-// or the next call starts (`reset`). Any thread takes any chunk given back, so long tracebacks
-// never grow a buffer by copying it to one twice its size, and the pool holds the most chunks in
-// use at one time. The pool is freed when the last scratch goes (`X_SCRATCHES`). Rows go forward
-// only (NCBI looks for room from the head of its list again for each row), and the kernels write
-// and the walk reads the same cells either way.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:446-450,520-533,730-731
+// ```c
+//     edit_script_num_rows = 100;
+//     edit_script = (Uint1**) malloc(sizeof(Uint1*) * edit_script_num_rows);
+//     edit_start_offset = (Int4*) malloc(sizeof(Int4) * edit_script_num_rows);
+// ...
+//         if (a_index == edit_script_num_rows) {
+//             edit_script_num_rows = edit_script_num_rows * 2;
+// ...
+//         edit_script[a_index] = state_struct->state_array +
+//                                 state_struct->used + 1;
+//         edit_start_offset[a_index] = first_b_index;
+// ...
+//     sfree(edit_start_offset);
+//     sfree(edit_script);
+// ```
+// No NCBI counterpart: memory placement only. NCBI keeps the row records (`edit_start_offset` and
+// the row pointers of `edit_script`) in two arrays that double as rows are added and are freed when
+// the call ends; here each row is followed in its chunk by its record (`X_ROW_BYTES`: its first
+// column and its cells), so that the kernels write a row and its record through one pointer
+// (`XTrace::wp`), and the walk, which goes from the best row up one row at a time, finds each row's
+// record just before the row below it (or at the used end of the chunk before). The kernels mark
+// the record of the best row (`XTrace::x_best`), where the walk starts. NCBI keeps every chunk in
+// its `gap_align` until the search ends; here a scratch keeps its first chunk (it grows as
+// `Vec::reserve` does, up to one chunk, so a scratch that only ran short tracebacks holds what they
+// needed), and the chunks after it come from one pool that every scratch of the process shares
+// (`X_CHUNKS`) and go back to it when the traceback call ends (`XdropScratch::x_trace_release`) or
+// the next call starts (`reset`). Any thread takes any chunk given back, so long tracebacks never
+// grow a buffer by copying it to one twice its size, and the pool holds the most chunks in use at
+// one time. The pool is freed when the last scratch goes (`X_SCRATCHES`). Rows go forward only
+// (NCBI looks for room from the head of its list again for each row), and the kernels write and the
+// walk reads the same cells either way.
 //
 // The chunk size: NCBI's `CHUNKSIZE` cells in the four-bit rows (`LOSAT_X_DPNIBBLE`), the layout
 // of every scratch of a search on two threads or more, where chunks pass between threads (one byte
-// per cell, the layout of a one-thread search, fits half NCBI's cells in a chunk); the same size
-// for the record chunks, so that one pool serves both. A power of two, so that a record is found
-// by a shift and a mask.
+// per cell, the layout of a one-thread search, fits half NCBI's cells in a chunk). A power of two
+// (`x_chunk_shift`).
 const X_CHUNK: usize = 2_097_152 / 2;
 const _: () = assert!(X_CHUNK.is_power_of_two() && X_CHUNK >= 64 * X_ROW_BYTES);
-// No NCBI counterpart: the bytes of a row record (first column and cells, two `u32`).
+// No NCBI counterpart: the bytes of a row record (first column and cells, two `u32`), after the
+// row's bytes in its chunk.
 const X_ROW_BYTES: usize = 8;
-// No NCBI counterpart: the least bytes a scratch's own chunk takes when it first grows (32 records).
+// No NCBI counterpart: the least bytes a scratch's own chunk takes when it first grows.
 const X_CHUNK_MIN: usize = 256;
 
 // No NCBI counterpart: the chunks given back (`X_CHUNK`; `x_chunk_take` enlarges a shorter one).
@@ -984,102 +1004,145 @@ fn x_chunk_take(size: usize) -> Vec<u8> {
     c
 }
 
-/// No NCBI counterpart (memory placement only): the traceback rows of a scratch and their records
-/// in chunks (`X_CHUNK`, NCBI's `GapStateArrayStruct` list). Empty until a traceback runs.
+/// No NCBI counterpart (memory placement only): the traceback rows of a scratch, each followed by
+/// its record, in chunks (`X_CHUNK`, NCBI's `GapStateArrayStruct` list). Empty until a traceback
+/// runs. The kernels write through two cursors (`wp`, `wend`); the length of a chunk is set when
+/// the next chunk is taken, so the used part of `t[tc]` ends at `wp`.
 pub(crate) struct XTrace {
     /// The trace chunks of this call: `t[0]` the scratch's own, the rest from the pool.
     t: Vec<Vec<u8>>,
     /// The chunk being filled (the last of `t`).
     tc: usize,
-    /// The bytes of it that rows may use.
-    lim: usize,
-    /// The first row of each trace chunk after `t[0]` (`t[c]` holds rows `starts[c - 1] ..`).
-    starts: Vec<u32>,
-    /// The row records, `1 << (shift - 3)` in each chunk: `r[0]` the scratch's own, the rest from
-    /// the pool. Record `i` is bytes `(i & mask) * 8 ..` of `r[i >> (shift - 3)]`.
-    r: Vec<Vec<u8>>,
-    /// The rows written in this call.
-    n: usize,
+    /// Where the next row starts in `t[tc]` (NCBI `state_array + used`).
+    wp: *mut u8,
+    /// The last place in `t[tc]` where a row may end: its record fits after it.
+    wend: *mut u8,
+    /// `wp` after a purge (the start of `t[0]`), so that a purge knows whether anything was
+    /// written since.
+    w0: *mut u8,
+    /// The record of the row of the best score so far (the kernels' `a_off`, `x_best`); null until
+    /// a row sets it in this call.
+    best: *const u8,
     /// log2 of a chunk's bytes (`x_chunk_shift`).
     shift: u32,
 }
+
+// SAFETY: the pointers of an `XTrace` point into the buffers of its own chunks (`t`), which do not
+// move when the `XTrace` moves; they are written only through `&mut self` and read through `&self`,
+// like the chunks themselves.
+unsafe impl Send for XTrace {}
 
 impl XTrace {
     fn new() -> Self {
         Self {
             t: Vec::new(),
             tc: 0,
-            lim: 0,
-            starts: Vec::new(),
-            r: Vec::new(),
-            n: 0,
+            wp: std::ptr::null_mut(),
+            wend: std::ptr::null_mut(),
+            w0: std::ptr::null_mut(),
+            best: std::ptr::null(),
             shift: x_chunk_shift(),
         }
     }
 
-    /// The start of room for `n` bytes of the next row, contiguous in one chunk (NCBI
-    /// `s_GapGetState` with the row's cells). Only the test of the chunk being filled is inline, so
-    /// that the kernels keep the rest of their state in registers.
+    /// The start of room for `n` bytes of the next row and its record, contiguous in one chunk
+    /// (NCBI `s_GapGetState` with the row's cells). Only the test of the chunk being filled is
+    /// inline, so that the kernels keep the rest of their state in registers.
     #[inline(always)]
     pub(crate) fn x_row(&mut self, n: usize) -> *mut u8 {
-        let lim = self.lim;
-        if let Some(c) = self.t.get_mut(self.tc) {
-            let used = c.len();
-            if used + n <= lim {
-                // SAFETY: `used + n <= lim <= c.capacity()`: the pointer stays in `c`'s buffer.
-                return unsafe { c.as_mut_ptr().add(used) };
-            }
+        let wp = self.wp;
+        if wp as usize + n <= self.wend as usize {
+            return wp;
         }
         self.x_row_room(n)
     }
 
+    // No NCBI counterpart: `wp` and `wend` in chunk `c`, `used` of its first `lim` bytes used.
+    fn x_at(&mut self, c: usize, used: usize, lim: usize) {
+        let base = self.t[c].as_mut_ptr();
+        debug_assert!(used <= lim && lim <= self.t[c].capacity());
+        self.tc = c;
+        // SAFETY: `used <= lim` and `lim - X_ROW_BYTES < lim` lie in the chunk's buffer (`lim` at
+        // most its capacity); a chunk shorter than a record gets `wend` = its start, which no row
+        // fits.
+        unsafe {
+            self.wp = base.add(used);
+            self.wend = base.add(lim.saturating_sub(X_ROW_BYTES));
+        }
+    }
+
     // No NCBI counterpart: the growth of `x_row`. The scratch's own chunk grows while it is the one
-    // being filled and the row fits in one chunk; otherwise the row goes to the next chunk.
+    // being filled and the row and its record fit in one chunk; otherwise the row goes to the next
+    // chunk.
     #[cold]
     #[inline(never)]
     fn x_row_room(&mut self, n: usize) -> *mut u8 {
         let size = 1usize << self.shift;
-        if self.tc == 0 {
-            if self.t.is_empty() {
-                self.t.push(Vec::new());
-            }
-            let c = &mut self.t[0];
-            if c.len() + n <= size {
-                let want = (2 * c.capacity())
-                    .max(c.len() + n)
-                    .max(X_CHUNK_MIN)
-                    .min(size);
-                c.reserve_exact(want - c.len());
-                self.lim = c.capacity().min(size);
-                // SAFETY: `c.len() + n <= c.capacity()`.
-                return unsafe { c.as_mut_ptr().add(c.len()) };
-            }
+        let need = n + X_ROW_BYTES;
+        if self.t.is_empty() {
+            self.t.push(Vec::new());
+            self.x_at(0, 0, 0);
+            self.w0 = self.wp;
         }
-        let (c, lim) = if n > size {
-            let c = Vec::with_capacity(n + n / 3);
+        let used = self.wp as usize - self.t[self.tc].as_ptr() as usize;
+        if self.tc == 0 && used + need <= size {
+            // the best row's record moves with the rows
+            let best =
+                (!self.best.is_null()).then(|| self.best as usize - self.t[0].as_ptr() as usize);
+            let c = &mut self.t[0];
+            // SAFETY: the first `used` bytes were written (rows and their records); `reserve_exact`
+            // copies them.
+            unsafe { c.set_len(used) };
+            let want = (2 * c.capacity())
+                .max(used + need)
+                .max(X_CHUNK_MIN)
+                .min(size);
+            c.reserve_exact(want - used);
+            let lim = c.capacity().min(size);
+            if let Some(off) = best {
+                // SAFETY: the record lies in the `used` bytes copied.
+                self.best = unsafe { c.as_ptr().add(off) };
+            }
+            self.x_at(0, used, lim);
+            self.w0 = self.t[0].as_mut_ptr();
+            return self.wp;
+        }
+        // SAFETY: as above, for the chunk being filled; its used part ends at `wp`.
+        unsafe { self.t[self.tc].set_len(used) };
+        let (c, lim) = if need > size {
+            let c = Vec::with_capacity((n + n / 3).max(need));
             let lim = c.capacity();
             (c, lim)
         } else {
             (x_chunk_take(size), size)
         };
         self.t.push(c);
-        self.tc = self.t.len() - 1;
-        self.lim = lim;
-        self.starts.push(self.n as u32);
-        self.t[self.tc].as_mut_ptr()
+        self.x_at(self.t.len() - 1, 0, lim);
+        self.wp
     }
 
     /// The row just written at `x_row`: `cells` cells from column `start` (NCBI `used +=`,
-    /// `edit_start_offset[a_index] = first_b_index`), `trace_bytes(nib, cells)` bytes.
+    /// `edit_start_offset[a_index] = first_b_index`), `trace_bytes(nib, cells)` bytes, then its
+    /// record. Returns the record (`x_best`).
     #[inline(always)]
-    pub(crate) fn x_row_done(&mut self, nib: bool, start: usize, cells: usize) {
-        let c = &mut self.t[self.tc];
-        let used = c.len() + trace_bytes(nib, cells);
-        debug_assert!(used <= self.lim);
-        // SAFETY: the kernel reserved at least these bytes with `x_row` (so `used <= c.capacity()`)
-        // and wrote every one of them.
-        unsafe { c.set_len(used) };
-        self.x_push_row(start as u32, cells as u32);
+    pub(crate) fn x_row_done(&mut self, nib: bool, start: usize, cells: usize) -> *const u8 {
+        // SAFETY: the kernel wrote the row's bytes in the room `x_row` gave, which leaves
+        // `X_ROW_BYTES` after them (`wend`); the record is two unaligned `u32`.
+        unsafe {
+            let p = self.wp.add(trace_bytes(nib, cells));
+            debug_assert!(p as usize <= self.wend as usize);
+            (p as *mut u32).write_unaligned(start as u32);
+            (p.add(4) as *mut u32).write_unaligned(cells as u32);
+            self.wp = p.add(X_ROW_BYTES);
+            p
+        }
+    }
+
+    /// No NCBI counterpart: the record (`x_row_done`) of the row where the best score was found
+    /// (NCBI `*a_offset = a_index`), where the walk starts.
+    #[inline(always)]
+    pub(crate) fn x_best(&mut self, rec: *const u8) {
+        self.best = rec;
     }
 
     /// Row 0 (NCBI `edit_script_row[i] = SCRIPT_GAP_IN_A` for the first `b_size` cells).
@@ -1092,191 +1155,134 @@ impl XTrace {
         self.x_row_done(nib, 0, b_size);
     }
 
+    /// The first column and the cells of the row whose record is at `p` (NCBI
+    /// `edit_start_offset[i]`).
+    ///
+    /// # Safety
+    /// `p` is a record written by `x_row_done` in a chunk of this call.
     #[inline(always)]
-    fn x_push_row(&mut self, start: u32, cells: u32) {
-        let rec = ((start as u64) | ((cells as u64) << 32)).to_ne_bytes();
-        if let Some(c) = self.r.get_mut(self.n >> (self.shift - 3)) {
-            if c.capacity() - c.len() >= X_ROW_BYTES {
-                c.extend_from_slice(&rec);
-                self.n += 1;
-                return;
-            }
+    unsafe fn x_rec(p: *const u8) -> (usize, usize) {
+        // SAFETY: the caller's.
+        unsafe {
+            (
+                (p as *const u32).read_unaligned() as usize,
+                (p.add(4) as *const u32).read_unaligned() as usize,
+            )
         }
-        self.x_push_row_room(rec);
     }
 
-    // No NCBI counterpart: the growth of `x_push_row`: the scratch's own record chunk grows up to one
-    // chunk; a full chunk is followed by one from the pool.
+    // No NCBI counterpart: the start of the walk: the record of the best row (`x_best`), the chunk
+    // that holds it and that chunk's start; `None` when no row of this call set it.
+    #[inline(never)]
+    fn x_walk_start(&self) -> Option<(usize, *const u8, *const u8)> {
+        let p = self.best;
+        if p.is_null() {
+            return None;
+        }
+        (0..self.t.len()).rev().find_map(|c| {
+            let base = self.t[c].as_ptr();
+            let off = (p as usize).wrapping_sub(base as usize);
+            (off < self.t[c].capacity()).then_some((c, base, p))
+        })
+    }
+
+    // No NCBI counterpart: the walk passes from the first row of chunk `c` to the last row of the
+    // chunk before (its used part was set when chunk `c` was taken): that chunk, its start and the
+    // record of its last row.
     #[cold]
     #[inline(never)]
-    fn x_push_row_room(&mut self, rec: [u8; X_ROW_BYTES]) {
-        let size = 1usize << self.shift;
-        let ci = self.n >> (self.shift - 3);
-        if ci == self.r.len() {
-            self.r.push(if ci == 0 {
-                Vec::new()
-            } else {
-                x_chunk_take(size)
-            });
-        }
-        let c = &mut self.r[ci];
-        if c.capacity() - c.len() < X_ROW_BYTES {
-            let want = (2 * c.capacity())
-                .max(c.len() + X_ROW_BYTES)
-                .max(X_CHUNK_MIN)
-                .min(size);
-            c.reserve_exact(want - c.len());
-        }
-        c.extend_from_slice(&rec);
-        self.n += 1;
-    }
-
-    /// The first column and the cells of row `i` (NCBI `edit_start_offset[i]`).
-    #[inline(always)]
-    fn x_rec(&self, i: usize) -> (usize, usize) {
-        let s = self.shift - 3;
-        let off = (i & ((1 << s) - 1)) * X_ROW_BYTES;
-        let b = &self.r[i >> s][off..off + X_ROW_BYTES];
-        let rec = u64::from_ne_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
-        (rec as u32 as usize, (rec >> 32) as usize)
-    }
-
-    /// The first row of trace chunk `c`.
-    #[inline(always)]
-    fn x_first_row(&self, c: usize) -> usize {
-        if c == 0 {
-            0
-        } else {
-            self.starts[c - 1] as usize
-        }
-    }
-
-    /// The row `a` of the walk: its chunk, its first byte in it, its first column and its cells.
-    /// `prev` is the row the walk read before, `a + 1` in chunk `c` from byte `off`, or
-    /// `usize::MAX` at the start (the walk moves up one row at a time). A row's bytes end where the
-    /// next row's begin, or at the used end of its chunk when the next row is in a later one.
-    #[inline(always)]
-    fn x_walk_row(
-        &self,
-        nib: bool,
-        a: usize,
-        prev: usize,
-        c: usize,
-        off: usize,
-    ) -> (usize, usize, usize, usize) {
-        let (start, cells) = self.x_rec(a);
-        let bytes = trace_bytes(nib, cells);
-        let (c, off) = if prev == a + 1 && a >= self.x_first_row(c) {
-            (c, off - bytes)
-        } else {
-            self.x_walk_seek(nib, a, prev, c, bytes)
-        };
-        (c, off, start, cells)
-    }
-
-    // No NCBI counterpart: the slow part of `x_walk_row`, the chunk and first byte of row `a` (of
-    // `bytes` bytes): at the start of the walk its chunk is the last one whose first row is at most
-    // `a`, and the bytes of the rows after it in that chunk are taken from the chunk's used end;
-    // after the first row of chunk `c` it is the last row of the chunk before.
-    #[cold]
-    #[inline(never)]
-    fn x_walk_seek(
-        &self,
-        nib: bool,
-        a: usize,
-        prev: usize,
-        c: usize,
-        bytes: usize,
-    ) -> (usize, usize) {
-        let mut c = if prev == a + 1 { c } else { self.tc };
-        while a < self.x_first_row(c) {
-            c -= 1;
-        }
-        let end = if c == self.tc {
-            self.n
-        } else {
-            self.x_first_row(c + 1)
-        };
-        let after: usize = (a + 1..end)
-            .map(|i| trace_bytes(nib, self.x_rec(i).1))
-            .sum();
-        (c, self.t[c].len() - after - bytes)
-    }
-
-    /// Trace chunk `c` (its used part).
-    #[inline(always)]
-    fn x_chunk(&self, c: usize) -> &[u8] {
-        &self.t[c]
+    fn x_walk_prev(&self, c: usize) -> (usize, *const u8, *const u8) {
+        let c = c - 1;
+        let chunk = &self.t[c];
+        debug_assert!(chunk.len() >= X_ROW_BYTES);
+        (
+            c,
+            chunk.as_ptr(),
+            chunk[chunk.len() - X_ROW_BYTES..].as_ptr(),
+        )
     }
 
     /// NCBI `s_GapPurgeState` (every chunk's used part set to 0), and the chunks after the
-    /// scratch's own go back to the pool (`X_CHUNKS`).
-    #[inline]
+    /// scratch's own go back to the pool (`X_CHUNKS`). One test when nothing was written since the
+    /// last purge.
+    #[inline(always)]
     fn x_purge(&mut self) {
-        if self.t.len() > 1 || self.r.len() > 1 {
-            self.x_give_back();
+        if self.wp != self.w0 {
+            self.x_purge_written();
         }
-        self.lim = match self.t.first_mut() {
-            Some(c) => {
-                c.clear();
-                c.capacity().min(1 << self.shift)
-            }
-            None => 0,
-        };
-        if let Some(c) = self.r.first_mut() {
-            c.clear();
-        }
-        self.tc = 0;
-        self.n = 0;
     }
 
     // No NCBI counterpart: the slow part of `x_purge`. A chunk longer than one chunk (a row longer
     // than a chunk) is freed.
     #[cold]
     #[inline(never)]
-    fn x_give_back(&mut self) {
-        let kt = self.t.len().min(1);
-        let kr = self.r.len().min(1);
-        let mut big = Vec::new();
-        {
-            let mut pool = x_chunk_lock();
-            for mut c in self.t.drain(kt..).chain(self.r.drain(kr..)) {
-                if c.capacity() > X_CHUNK {
-                    big.push(c);
-                } else {
-                    c.clear();
-                    pool.push(c);
+    fn x_purge_written(&mut self) {
+        if self.t.len() > 1 {
+            let mut big = Vec::new();
+            {
+                let mut pool = x_chunk_lock();
+                for mut c in self.t.drain(1..) {
+                    if c.capacity() > X_CHUNK {
+                        big.push(c);
+                    } else {
+                        c.clear();
+                        pool.push(c);
+                    }
                 }
             }
+            drop(big);
         }
-        drop(big);
-        self.starts.clear();
+        self.best = std::ptr::null();
+        if let Some(c) = self.t.first_mut() {
+            c.clear();
+            let lim = c.capacity().min(1 << self.shift);
+            self.x_at(0, 0, lim);
+        } else {
+            (self.tc, self.wp, self.wend) = (0, std::ptr::null_mut(), std::ptr::null_mut());
+        }
+        self.w0 = self.wp;
     }
 }
 
 #[cfg(test)]
 impl XTrace {
     /// Test only: each row's trace chunk, first byte in it, first column and cells, in row order
-    /// (`nib`: the scratch's layout).
+    /// (`nib`: the scratch's layout), read back from the records at the end of each chunk's used
+    /// part.
     pub(crate) fn x_test_layout(&self, nib: bool) -> Vec<(usize, usize, usize, usize)> {
-        let mut at = vec![0usize; self.t.len()];
-        let mut c = 0;
-        (0..self.n)
-            .map(|i| {
-                while c < self.tc && i >= self.x_first_row(c + 1) {
-                    c += 1;
+        let used = self.x_test_used();
+        let mut rows = Vec::new();
+        for (c, &end) in used.iter().enumerate() {
+            let mut chunk = Vec::new();
+            let mut end = end;
+            while end > 0 {
+                let rec = end - X_ROW_BYTES;
+                // SAFETY: the record of the chunk's last row not read yet (`x_row_done`).
+                let (start, cells) = unsafe { Self::x_rec(self.t[c].as_ptr().add(rec)) };
+                end = rec - trace_bytes(nib, cells);
+                chunk.push((c, end, start, cells));
+            }
+            rows.extend(chunk.into_iter().rev());
+        }
+        rows
+    }
+
+    /// Test only: the used bytes of each trace chunk (rows and their records).
+    pub(crate) fn x_test_used(&self) -> Vec<usize> {
+        (0..self.t.len())
+            .map(|c| {
+                if c == self.tc {
+                    self.wp as usize - self.t[c].as_ptr() as usize
+                } else {
+                    self.t[c].len()
                 }
-                let (start, cells) = self.x_rec(i);
-                let row = (c, at[c], start, cells);
-                at[c] += trace_bytes(nib, cells);
-                row
             })
             .collect()
     }
 
-    /// Test only: the used bytes of each trace chunk.
-    pub(crate) fn x_test_used(&self) -> Vec<usize> {
-        self.t.iter().map(|c| c.len()).collect()
+    /// Test only: whether nothing was written since the last purge.
+    pub(crate) fn x_test_empty(&self) -> bool {
+        self.wp == self.w0 && self.best.is_null()
     }
 }
 
@@ -1293,8 +1299,8 @@ impl Drop for XdropScratch {
 }
 
 impl XdropScratch {
-    /// No NCBI counterpart: the end of a traceback call (`X_CHUNK`): the trace chunks and record
-    /// chunks after the scratch's own go back to the pool (the walk has written `ops`).
+    /// No NCBI counterpart: the end of a traceback call (`X_CHUNK`): the trace chunks after the
+    /// scratch's own go back to the pool (the walk has written `ops`).
     #[inline]
     pub(crate) fn x_trace_release(&mut self) {
         self.trace.x_purge();
@@ -2515,13 +2521,19 @@ mod kernel {
             }
             wend[wi] = proc_end;
             cur = wi;
+            let rec = if TB {
+                sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first)
+            } else {
+                core::ptr::null()
+            };
             if rs.slow != 0 {
                 b_off = rs.rec_b + sc.x_sh;
                 a_off = a;
                 best_rel = lane0(rs.bestv) - bias;
-            }
-            if TB {
-                sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first);
+                if TB {
+                    // No NCBI counterpart: the walk starts at this row's record (`XTrace::x_best`)
+                    sc.trace.x_best(rec);
+                }
             }
             if fence_row {
                 fence_hit = true;
@@ -3047,13 +3059,19 @@ mod kernel {
             }
             wend[wi] = proc_end;
             cur = wi;
+            let rec = if TB {
+                sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first)
+            } else {
+                core::ptr::null()
+            };
             if rs.slow != 0 {
                 b_off = rs.rec_b + sc.x_sh;
                 a_off = a;
                 best_rel = lane0_u8(rs.bestv) - bias;
-            }
-            if TB {
-                sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first);
+                if TB {
+                    // No NCBI counterpart: the walk starts at this row's record (`XTrace::x_best`)
+                    sc.trace.x_best(rec);
+                }
             }
             if fence_row {
                 fence_hit = true;
@@ -3167,63 +3185,71 @@ mod kernel {
         let mut a_index = a_off;
         let mut b_index = b_off;
         let mut script = const { script_codes(NIB).0 };
-        // the rows in chunks (`XTrace`): the row read last (`row`), its chunk (`c`, `chunk`), its
-        // first byte there (`off`), first column (`start`, NCBI `edit_start_offset`) and cells
+        // the rows in chunks, each followed by its record (`XTrace`): the walk starts at the
+        // record of the best row (`p`, `XTrace::x_best`; none: no row, as `a_off` past the rows),
+        // and each row up is the one whose record ends just before the row below, or the last row
+        // of the chunk before (`base`, the start of chunk `c`). `start` = NCBI
+        // `edit_start_offset[a_index]`, `len` its cells, `row` its first byte. `a_index` moves up
+        // one row at a time, so the rows read are always written ones.
         let tr = &sc.trace;
-        let (mut row, mut c, mut off, mut start, mut len) = (usize::MAX, 0, 0, 0, 0);
-        let mut chunk: &[u8] = &[];
-        while a_index > 0 || b_index > 0 {
-            if a_index >= tr.n {
-                break;
-            }
-            if a_index != row {
-                (c, off, start, len) = tr.x_walk_row(NIB, a_index, row, c, off);
-                chunk = tr.x_chunk(c);
-                row = a_index;
-            }
-            if b_index < start {
-                break;
-            }
-            let b_rel = b_index - start;
-            if b_rel >= len {
-                break;
-            }
-            // SAFETY: the row's `trace_bytes(NIB, len)` bytes from `off` lie in the chunk's used
-            // part (`XTrace::x_row_done`), and `b_rel < len`.
-            let next = if NIB {
-                let pair = *chunk.get_unchecked(off + (b_rel >> 1));
-                (pair >> ((b_rel & 1) << 2)) & 15
-            } else {
-                *chunk.get_unchecked(off + b_rel)
-            };
-            match script & op_mask {
-                x if x == gap_a => {
-                    script = next & op_mask;
-                    if next & ext_a != 0 {
-                        script = gap_a;
+        if let Some((mut c, mut base, mut p)) = tr.x_walk_start() {
+            // SAFETY: `p` is the record of row `a_off`, written in this call (`x_best`).
+            let (mut start, mut len) = XTrace::x_rec(p);
+            let mut row = p.sub(trace_bytes(NIB, len));
+            while a_index > 0 || b_index > 0 {
+                // `b_index < start` (wraps past every `len`) or past the row's cells
+                let b_rel = b_index.wrapping_sub(start);
+                if b_rel >= len {
+                    break;
+                }
+                // SAFETY: the row's `trace_bytes(NIB, len)` bytes from `row` lie in its chunk's
+                // used part (`XTrace::x_row_done`), and `b_rel < len`.
+                let next = if NIB {
+                    let pair = *row.add(b_rel >> 1);
+                    (pair >> ((b_rel & 1) << 2)) & 15
+                } else {
+                    *row.add(b_rel)
+                };
+                match script & op_mask {
+                    x if x == gap_a => {
+                        script = next & op_mask;
+                        if next & ext_a != 0 {
+                            script = gap_a;
+                        }
+                    }
+                    x if x == gap_b => {
+                        script = next & op_mask;
+                        if next & ext_b != 0 {
+                            script = gap_b;
+                        }
+                    }
+                    _ => {
+                        script = next & op_mask;
                     }
                 }
-                x if x == gap_b => {
-                    script = next & op_mask;
-                    if next & ext_b != 0 {
-                        script = gap_b;
+                let op = script & op_mask;
+                if op == gap_a {
+                    b_index = b_index.saturating_sub(1);
+                } else {
+                    if op != gap_b {
+                        b_index = b_index.saturating_sub(1);
+                    }
+                    if a_index > 0 {
+                        a_index -= 1;
+                        // the row above (rows 0 ..= a_off were written; row 0 starts its chunk)
+                        if row == base {
+                            (c, base, p) = tr.x_walk_prev(c);
+                        } else {
+                            p = row.sub(X_ROW_BYTES);
+                        }
+                        // SAFETY: the record of row `a_index` (above).
+                        (start, len) = XTrace::x_rec(p);
+                        row = p.sub(trace_bytes(NIB, len));
                     }
                 }
-                _ => {
-                    script = next & op_mask;
-                }
+                // the NCBI operation: a code's operation times SCRIPT_SUB (0, 3, 6)
+                push_op(&mut sc.ops, if NIB { op * SCRIPT_SUB } else { op });
             }
-            let op = script & op_mask;
-            if op == gap_a {
-                b_index = b_index.saturating_sub(1);
-            } else if op == gap_b {
-                a_index = a_index.saturating_sub(1);
-            } else {
-                a_index = a_index.saturating_sub(1);
-                b_index = b_index.saturating_sub(1);
-            }
-            // the NCBI operation: a code's operation times SCRIPT_SUB (0, 3, 6)
-            push_op(&mut sc.ops, if NIB { op * SCRIPT_SUB } else { op });
         }
         Some(XdropResult {
             a_offset: a_off,
@@ -4425,16 +4451,23 @@ mod tests {
                 r.iter().map(|x| (x.2, x.3)).collect::<Vec<_>>()
             };
             assert_eq!(bands(&lon), bands(&loff), "case {case} rows");
+            // each row is followed by its record (`X_ROW_BYTES`)
             for w in lon.windows(2).filter(|w| w[0].0 == w[1].0) {
-                assert_eq!(w[1].1 - w[0].1, (w[0].3 + 1) / 2, "case {case} row bytes");
+                assert_eq!(
+                    w[1].1 - w[0].1,
+                    (w[0].3 + 1) / 2 + X_ROW_BYTES,
+                    "case {case} row bytes"
+                );
             }
             assert_eq!(
                 off.trace.x_test_used().iter().sum::<usize>(),
-                loff.iter().map(|r| r.3).sum::<usize>()
+                loff.iter().map(|r| r.3 + X_ROW_BYTES).sum::<usize>()
             );
             assert_eq!(
                 on.trace.x_test_used().iter().sum::<usize>(),
-                lon.iter().map(|r| (r.3 + 1) / 2).sum::<usize>(),
+                lon.iter()
+                    .map(|r| (r.3 + 1) / 2 + X_ROW_BYTES)
+                    .sum::<usize>(),
                 "case {case} trace bytes"
             );
         }
@@ -4448,24 +4481,26 @@ mod tests {
     }
 
     // No NCBI counterpart: the rows in chunks (`XTrace`, NCBI `s_GapGetState`). With chunks of
-    // 512 bytes (64 records), rows are written whole into the free part of the chunk being filled,
-    // a row that does not fit there goes to the next chunk, a row longer than a chunk to a chunk of
-    // its own of `length + length/3` bytes, the records pass from one chunk to the next, the
-    // scratch's own chunk keeps its rows when it grows, and a purge keeps only the scratch's own
-    // chunks, emptied.
+    // 512 bytes, rows (each followed by its 8-byte record) are written whole into the free part of
+    // the chunk being filled, a row that does not fit there goes to the next chunk, a row longer
+    // than a chunk to a chunk of its own of `length + length/3` bytes, the scratch's own chunk keeps
+    // its rows and the best row's record when it grows, the walk passes from a chunk's first row to
+    // the last row of the chunk before, and a purge keeps only the scratch's own chunk, emptied.
     #[test]
     fn rows_that_do_not_fit_go_to_the_next_chunk() {
         X_TEST_SHIFT.with(|c| c.set(Some(9)));
         let mut t = XTrace::new();
         X_TEST_SHIFT.with(|c| c.set(None));
+        assert!(t.x_walk_start().is_none());
         let row = |t: &mut XTrace, n: usize, cells: usize, v: u8| {
             let p = t.x_row(n);
             // SAFETY: `x_row` gave room for `n >= cells` bytes at `p`.
             unsafe { std::ptr::write_bytes(p, v, cells) };
-            t.x_row_done(false, v as usize, cells);
+            t.x_row_done(false, v as usize, cells)
         };
-        row(&mut t, 300, 200, 1);
-        row(&mut t, 300, 250, 2);
+        let r1 = row(&mut t, 300, 200, 1);
+        t.x_best(r1);
+        row(&mut t, 250, 250, 2);
         row(&mut t, 100, 100, 3);
         row(&mut t, 600, 600, 4);
         row(&mut t, 10, 10, 5);
@@ -4473,29 +4508,47 @@ mod tests {
             t.x_test_layout(false),
             vec![
                 (0, 0, 1, 200),
-                (0, 200, 2, 250),
+                (0, 208, 2, 250),
                 (1, 0, 3, 100),
                 (2, 0, 4, 600),
-                (2, 600, 5, 10)
+                (2, 608, 5, 10)
             ]
         );
-        assert_eq!(t.x_test_used(), vec![450, 100, 610]);
+        assert_eq!(t.x_test_used(), vec![466, 108, 626]);
         assert!(t.t[0].capacity() <= 512 && t.t[1].capacity() >= 512);
         assert!(t.t[2].capacity() >= 600 + 600 / 3);
-        assert!(t.t[0][..200].iter().all(|&b| b == 1) && t.t[0][200..450].iter().all(|&b| b == 2));
-        assert_eq!(t.r.len(), 1);
+        assert!(t.t[0][..200].iter().all(|&b| b == 1) && t.t[0][208..458].iter().all(|&b| b == 2));
+        // the best row's record moved with chunk 0 when it grew for row 2
+        let (c, base, p) = t.x_walk_start().expect("best row");
+        assert_eq!(
+            (c, base, p as usize - base as usize),
+            (0, t.t[0].as_ptr(), 200)
+        );
+        // SAFETY: `p` and the records below are records of this call.
+        unsafe {
+            assert_eq!(XTrace::x_rec(p), (1, 200));
+            let (c, base, p) = t.x_walk_prev(2);
+            assert_eq!((c, base, XTrace::x_rec(p)), (1, t.t[1].as_ptr(), (3, 100)));
+            let (c, base, p) = t.x_walk_prev(1);
+            assert_eq!((c, base, XTrace::x_rec(p)), (0, t.t[0].as_ptr(), (2, 250)));
+        }
         for i in 0..130 {
             row(&mut t, 1, 1, i as u8);
         }
-        assert_eq!(t.n, 135);
-        assert_eq!(t.r.len(), 3);
-        assert_eq!(t.r[0].len(), 512);
+        let layout = t.x_test_layout(false);
+        assert_eq!(layout.len(), 135);
+        assert!(t.t.len() >= 5);
         for i in 0..130 {
-            assert_eq!(t.x_rec(5 + i), (i % 256, 1), "record {}", 5 + i);
+            assert_eq!(
+                (layout[5 + i].2, layout[5 + i].3),
+                (i % 256, 1),
+                "row {}",
+                5 + i
+            );
         }
         t.x_purge();
-        assert_eq!((t.t.len(), t.r.len(), t.n, t.tc), (1, 1, 0, 0));
-        assert!(t.starts.is_empty() && t.t[0].is_empty() && t.r[0].is_empty());
+        assert_eq!((t.t.len(), t.tc), (1, 0));
+        assert!(t.x_test_empty() && t.t[0].is_empty() && t.x_walk_start().is_none());
         row(&mut t, 300, 300, 6);
         assert_eq!(t.x_test_layout(false), vec![(0, 0, 6, 300)]);
     }
@@ -4555,7 +4608,7 @@ mod tests {
             for &(c, off, _, cells) in &layout {
                 let end = off + trace_bytes(sc.x_nib, cells);
                 assert!(
-                    end <= used[c],
+                    end + X_ROW_BYTES <= used[c],
                     "case {case}: row past its chunk's used part"
                 );
                 assert!(end <= 512 || (c > 0 && sc.trace.t[c].capacity() > 512));
@@ -4563,7 +4616,7 @@ mod tests {
             spanned += (sc.trace.t.len() >= 3) as usize;
             sc.x_trace_release();
             assert!(
-                sc.trace.t.len() <= 1 && sc.trace.r.len() <= 1 && sc.trace.n == 0,
+                sc.trace.t.len() <= 1 && sc.trace.x_test_empty(),
                 "case {case}: chunks kept after the call"
             );
             assert!(sc.trace.t.first().map_or(0, |c| c.capacity()) <= 512);

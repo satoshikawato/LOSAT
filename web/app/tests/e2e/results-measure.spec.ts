@@ -474,7 +474,8 @@ async function repetition(page: Page, count: number): Promise<Repetition> {
 
   const scrollToEnd = await step(page, { kind: 'scroll', testid: 'query-list', to: 'end' }, [{ testid: `query-row-${count - 1}` }]);
   const rowsDrawnAtEnd = await rowsDrawn(page, 'query-row-');
-  const scrollToStart = await step(page, { kind: 'scroll', testid: 'query-list', to: 'start' }, [{ testid: 'query-row-0' }]);
+  // Row 1: the selected row 0 stays drawn at the end (the list's Tab stop).
+  const scrollToStart = await step(page, { kind: 'scroll', testid: 'query-list', to: 'start' }, [{ testid: 'query-row-1' }]);
 
   // A query far down, by its ID: the filter lists it alone and moves the selection to it (the
   // query selected before is hidden; decision 10), whose first HSP is read.
@@ -785,7 +786,7 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
   ]);
 
   await page.getByTestId('results-view-hits').click();
-  const row = page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"][aria-pressed="false"]').nth(2);
+  const row = page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"][aria-selected="false"]').nth(2);
   await quiet(page);
   const rowId = (await row.getAttribute('data-testid'))!.replace('hsp-row-', '').replace('-', ':');
   const selectInList = await step(page, { kind: 'click', testid: `hsp-row-${rowId.replace(':', '-')}` }, [
@@ -801,7 +802,8 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
       changed: true,
     },
   ]);
-  const firstRow = '[data-testid="hsp-list"] [data-testid^="hsp-row-"]';
+  // Not the list's Tab stop (tabindex 0, the selected HSP), which stays drawn out of view.
+  const firstRow = '[data-testid="hsp-list"] [data-testid^="hsp-row-"][tabindex="-1"]';
   const lastRow = await step(
     page,
     { kind: 'scroll', testid: 'hsp-list', to: 'end' },

@@ -881,6 +881,17 @@ most 9 in BLOSUM62).
   `qx` before it, and `tests/blastn_report_stream.rs` checks that outfmt 0 and 7 write `qx`'s report first where the
   report stream acts (and only outfmt 0's prolog where it does not). The rows use `-task blastn -dust no -evalue 1e-3`
   (megablast and dc-megablast find no hit of these queries).
+- Rows `db.nz.cq.x.*` (line DBID, L1d): the XML2 and JSON formats (outfmt 13 to 16), whose reports fetch every reported
+  subject, ask for that refusal too, where a reported subject has a positive taxid. `nz_rep.fna` holds `a1` (the
+  letters of `sN` as in `nz_n`), `b1` (`sZ`) and `c1` (`sI`) with the taxids 99990, 150 and 99990 (`nz_rep.map`), and
+  `d1` (the codons of 60 random residues) without a taxid: one volume where NCBI really writes the offset error again
+  (for `c1` after `b1`; `nz_nc`'s only 99990 is `sN`, whose entry NCBI keeps loaded, so it writes the message once
+  there). `nz_rep_q.fna` / `nz_rep_q.faa` hold `qN`, `qZ` and `qI` (the first 80 letters, or the first residues, of
+  `a1`, `b1` and `c1`): NCBI writes the message 3 to 5 times in outfmt 15 / 16 and LOSAT refuses before any byte, as in
+  outfmt 6 with `BATCH_SIZE=1` (twice). `nz_rep_qd.*` (`qD`, the start of `d1`) hit `d1` alone: no volume looks a taxid
+  up, so the `ncbi` rows are not refused. `tm_cache_qx.fna` is `nz_qx.fna`'s `qx` then `x16_bx_taxid_q.fna`'s `bq1`:
+  BLASTX writes each batch's XML2 report before it searches the next, so it holds the document of a run with this
+  refusal and drops it at `bq1`'s batch (no byte of `qx`'s).
 - The sequences come from the line's probe script (kept outside the repository). The databases (version 4, every file
   makeblastdb writes; `nz_pc` and `nz_nc` alike with their maps), run from `LOSAT/`:
 
@@ -890,3 +901,5 @@ most 9 in BLOSUM62).
           -blastdb_version 4 -title "nz n" -out tests/db_search/nz_n
       makeblastdb -in tests/db_search/nz_psi.faa -dbtype prot -parse_seqids -taxid_map tests/db_search/nz_psi.map \
           -blastdb_version 4 -title "nz psi" -out tests/db_search/nz_psi
+      makeblastdb -in tests/db_search/nz_rep.fna -dbtype nucl -parse_seqids -taxid_map tests/db_search/nz_rep.map \
+          -blastdb_version 4 -title "nz rep" -out tests/db_search/nz_rep

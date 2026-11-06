@@ -1,0 +1,71 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "db": "tests/db_search/nz_rep"
+      },
+      "params": {
+        "expect": 0.001,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "m;"
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "qD",
+          "query_len": 120,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "d1",
+                  "accession": "d1",
+                  "title": "nz rep d1"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 222.718,
+                  "score": 120,
+                  "evalue": 6.8945e-63,
+                  "identity": 120,
+                  "query_from": 1,
+                  "query_to": 120,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 120,
+                  "hit_strand": "Plus",
+                  "align_len": 120,
+                  "gaps": 0,
+                  "qseq": "ATGTGCGACTTCATCGCTTACATGCCAAAGGCTGCTGAACACAAGTTCGGTCTGTGGTTCATGGCTATCACCGCTGACTGGACCTCCACCATCCACGACAACCAGGTTCAGGACGGTCAG",
+                  "hseq": "ATGTGCGACTTCATCGCTTACATGCCAAAGGCTGCTGAACACAAGTTCGGTCTGTGGTTCATGGCTATCACCGCTGACTGGACCTCCACCATCCACGACAACCAGGTTCAGGACGGTCAG",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 4,
+            "db_len": 735,
+            "hsp_len": 10,
+            "eff_space": 76450,
+            "kappa": 0.46,
+            "lambda": 1.28,
+            "entropy": 0.85
+          }
+        }
+      }
+    }
+  }
+]
+}

@@ -971,7 +971,7 @@ mod tests {
             }
             let s_len = subject.len();
             let packed = encode_subject_ncbi2na_packed(&subject);
-            let ctx_seqs = vec![
+            let ctx_seqs = [
                 encode_iupac_to_blastna(&query),
                 encode_iupac_to_blastna(&minus),
             ];

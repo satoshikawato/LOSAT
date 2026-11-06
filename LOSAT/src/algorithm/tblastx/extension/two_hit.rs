@@ -558,7 +558,16 @@ pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
     // DEBUG: Print sequence segment for tracing
     static DEBUG_PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-    let k_size = 3;
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:1104-1108 (the word length of the
+    // lookup table, `-word_size`: 3 for BLOSUM62's instance, `TbxScore::word`)
+    // ```c
+    //     /* find one beyond the position (up to word_size-1 letters to the right)
+    //        that gives the largest starting score */
+    //     /* Use "one beyond" to make the numbering consistent with how it's done
+    //        for BlastAaExtendOneHit and the "Extend" functions called here. */
+    //     for (i = 0; i < word_size; i++) {
+    // ```
+    let k_size = sc.word();
 
     // First, find the best scoring position within the word at R
     // NCBI BLAST assumes caller provides valid coordinates within bounds.

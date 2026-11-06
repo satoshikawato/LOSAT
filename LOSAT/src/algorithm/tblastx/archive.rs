@@ -423,8 +423,8 @@ mod tests {
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTX refuses some of these options at the command line
     // (`-sum_stats`, `-strand`, `-subject_besthit`, `-xdrop_ungap`,
-    // `-parse_deflines`) or in its limits (`-word_size` other than 3): the list that NCBI would
-    // record is what the archive's model knows about them, pinned here.
+    // `-parse_deflines`): the list that NCBI would record is what the archive's model knows
+    // about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
         ("def_sub", &[], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 QueryGeneticCode=integer:1 DbGeneticCode=integer:1 HitlistSize=integer:500"),
         ("seg_no_sub", &["-seg", "no"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFiltering=boolean:False WordThreshold=integer:13 WindowSize=integer:40 QueryGeneticCode=integer:1 DbGeneticCode=integer:1 HitlistSize=integer:500"),

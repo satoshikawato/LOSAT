@@ -1979,7 +1979,8 @@ pub(super) struct XPairPar<M: TbxScore = Blosum62Score> {
     extents: Vec<usize>,
     /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the batch's extensions may take the walks the
     /// sentinels stop (`x_tbx_sent_contexts`); a unit takes them where its chunk is the whole frame.
-    /// Another matrix's needs its byte table (`TbxScore::x_sent_walks`).
+    /// Another matrix's needs its byte table (`TbxScore::x_sent_walks`); only for words of 3
+    /// letters (`TbxScore::sent_two_hit_3`).
     sent: bool,
     /// The search's matrix (`-matrix`; no data for BLOSUM62's instance).
     sc: M,
@@ -2124,8 +2125,11 @@ impl<M: TbxScore> XPairPar<M> {
             Vec::new()
         };
         debug_assert!(extents.is_empty() || extents.len() == groups.len());
-        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): checked once for the batch's contexts.
-        let sent = b.sc.x_sent_walks()
+        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): checked once for the batch's contexts. The units'
+        // extensions take the walks of 3-letter words (`TbxScore::sent_two_hit_3`; the units build
+        // words of 3 letters, `TbxScore::word`, 3 for BLOSUM62's instance).
+        let sent = b.sc.word() == 3
+            && b.sc.x_sent_walks()
             && x_tbx_sent_contexts(b.contexts.iter().map(|c| c.aa_seq.as_slice()));
         Some(Self {
             groups,
@@ -3290,9 +3294,10 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
             } else {
                 // SAFETY: `SENT` runs on the units `x_unit_sent` accepts (`scan_unit_cells`): the
                 // batch's contexts passed `x_tbx_sent_contexts` (XPairPar::sent), and `h.subject_sent`
-                // is the buffer of a frame `x_tbx_sent_subject` accepted.
+                // is the buffer of a frame `x_tbx_sent_subject` accepted; `XPairPar::sent` holds only
+                // for words of 3 letters.
                 unsafe {
-                    h.sc.sent_two_hit(
+                    h.sc.sent_two_hit_3(
                         query_full,
                         h.subject_sent,
                         (last_hit + wordsize) as usize,

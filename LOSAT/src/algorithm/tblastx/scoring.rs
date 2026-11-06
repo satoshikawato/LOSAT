@@ -22,12 +22,15 @@
 //! The other instance also runs every search of a word length other than 3 (`-word_size` 2 or
 //! 4, NCBI's 2..=4; BLOSUM62 too): it holds the word length ([`TbxScore::word`]), which BLOSUM62's
 //! instance fixes at 3. Such a search takes the reference frame loop with NCBI's table of that
-//! word length (`build_ncbi_lookup_for_profile`) and the reference two-hit extension, whose loop
-//! over the word reads the length; the unit path and the table walks are for 3-letter words.
+//! word length (`build_ncbi_lookup_for_profile`); its two-hit extensions take the table walks and
+//! the sentinel walks with the word loop over that length (`two_hit_in2`, `two_hit_in4`,
+//! `two_hit_sent_in::<W>` for `W` in 2..=4, the matrix's byte table), and the reference two-hit
+//! extension, whose loop over the word reads the length, for the calls those do not cover. The
+//! unit path is for 3-letter words.
 
 use super::extension::{
-    extend_hit_two_hit_sent, extend_hit_two_hit_with, matrix_walk_table, two_hit_in,
-    two_hit_sent_in, MatrixWalkTable, TwoHit,
+    extend_hit_two_hit_sent, extend_hit_two_hit_with, matrix_walk_table, two_hit_in, two_hit_in2,
+    two_hit_in4, two_hit_sent_in, MatrixWalkTable, TwoHit,
 };
 use crate::config::ScoringMatrix;
 use crate::utils::matrix::{blosum62_score, protein_score, BLASTAA_SIZE};
@@ -92,6 +95,26 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
             x_drop,
             false,
         )
+    }
+
+    /// `sent_two_hit` for a search of 3-letter words, without the choice of the word length: the
+    /// unit path's extensions (`x_hit`, the batched `resolve`), whose units build 3-letter words
+    /// only (`XPairPar::sent` holds only for `word` 3).
+    ///
+    /// SAFETY: those of `sent_two_hit`, and `self.word() == 3`.
+    // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (`word_size` 3).
+    #[inline(always)]
+    unsafe fn sent_two_hit_3(
+        self,
+        q_full: &[u8],
+        s_full: &[u8],
+        s_left_off: usize,
+        s_right_off: usize,
+        q_right_off: usize,
+        x_drop: i32,
+    ) -> TwoHit {
+        // SAFETY: the caller's.
+        unsafe { self.sent_two_hit(q_full, s_full, s_left_off, s_right_off, q_right_off, x_drop) }
     }
 
     /// `extend_hit_two_hit_reference(self, ..)` (debug output off) from the table walks of
@@ -252,10 +275,10 @@ impl TbxScore for MatrixScore<'_> {
         self.word
     }
 
-    // The walks score 3-letter words (`x_two_hit_fast::WORD`).
+    // The walks take words of 2..=4 letters (`sent_two_hit`).
     #[inline(always)]
     fn x_sent_walks(self) -> bool {
-        self.word == 3 && self.walk.is_some_and(MatrixWalkTable::x_sentinels_stop)
+        (2..=4).contains(&self.word) && self.walk.is_some_and(MatrixWalkTable::x_sentinels_stop)
     }
 
     #[inline(always)]
@@ -268,9 +291,72 @@ impl TbxScore for MatrixScore<'_> {
         q_right_off: usize,
         x_drop: i32,
     ) -> TwoHit {
+        // SAFETY: the caller's; `x_sent_walks` holds, so the table exists and stops at a sentinel
+        // (and the word has 2..=4 letters).
+        let walks = unsafe {
+            let t = self.walk.unwrap_unchecked();
+            // The walks with the word loop over `self.word` letters (`TbxScore::word`), as in
+            // `table_two_hit`.
+            match self.word {
+                3 => two_hit_sent_in::<3>(
+                    t,
+                    q_full,
+                    s_full,
+                    s_left_off,
+                    s_right_off,
+                    q_right_off,
+                    x_drop,
+                ),
+                2 => two_hit_sent_in::<2>(
+                    t,
+                    q_full,
+                    s_full,
+                    s_left_off,
+                    s_right_off,
+                    q_right_off,
+                    x_drop,
+                ),
+                4 => two_hit_sent_in::<4>(
+                    t,
+                    q_full,
+                    s_full,
+                    s_left_off,
+                    s_right_off,
+                    q_right_off,
+                    x_drop,
+                ),
+                _ => None,
+            }
+        };
+        match walks {
+            Some(r) => r,
+            None => x_matrix_sent_refused(
+                self,
+                q_full,
+                s_full,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                x_drop,
+            ),
+        }
+    }
+
+    // The walks of 3-letter words (`two_hit_sent_in::<3>`) without the choice in `sent_two_hit`.
+    #[inline(always)]
+    unsafe fn sent_two_hit_3(
+        self,
+        q_full: &[u8],
+        s_full: &[u8],
+        s_left_off: usize,
+        s_right_off: usize,
+        q_right_off: usize,
+        x_drop: i32,
+    ) -> TwoHit {
+        debug_assert_eq!(self.word, 3);
         // SAFETY: the caller's; `x_sent_walks` holds, so the table exists and stops at a sentinel.
         let walks = unsafe {
-            two_hit_sent_in(
+            two_hit_sent_in::<3>(
                 self.walk.unwrap_unchecked(),
                 q_full,
                 s_full,
@@ -304,20 +390,48 @@ impl TbxScore for MatrixScore<'_> {
         q_right_off: usize,
         x_drop: i32,
     ) -> Option<TwoHit> {
-        // The walks score 3-letter words (`x_two_hit_fast::WORD`); another word length takes the
-        // reference.
-        if self.word != 3 {
-            return None;
+        // The walks with the word loop over `self.word` letters (`TbxScore::word`); another word
+        // length takes the reference.
+        // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:1104-1108 (`word_size`, the lookup
+        // table's word length)
+        // ```c
+        //     /* find one beyond the position (up to word_size-1 letters to the right)
+        //        that gives the largest starting score */
+        //     /* Use "one beyond" to make the numbering consistent with how it's done
+        //        for BlastAaExtendOneHit and the "Extend" functions called here. */
+        //     for (i = 0; i < word_size; i++) {
+        // ```
+        let t = self.walk?;
+        match self.word {
+            3 => two_hit_in(
+                t,
+                q_seq,
+                s_seq,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                x_drop,
+            ),
+            2 => two_hit_in2(
+                t,
+                q_seq,
+                s_seq,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                x_drop,
+            ),
+            4 => two_hit_in4(
+                t,
+                q_seq,
+                s_seq,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                x_drop,
+            ),
+            _ => None,
         }
-        two_hit_in(
-            self.walk?,
-            q_seq,
-            s_seq,
-            s_left_off,
-            s_right_off,
-            q_right_off,
-            x_drop,
-        )
     }
 }
 

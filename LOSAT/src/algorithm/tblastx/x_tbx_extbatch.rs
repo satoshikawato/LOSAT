@@ -223,7 +223,7 @@ unsafe fn resolve<M: TbxScore, const SENT: bool>(
         } else {
             // SAFETY: as in `x_hit` (the caller's).
             unsafe {
-                h.sc.sent_two_hit(
+                h.sc.sent_two_hit_3(
                     query_full,
                     h.subject_sent,
                     c.s_left as usize,

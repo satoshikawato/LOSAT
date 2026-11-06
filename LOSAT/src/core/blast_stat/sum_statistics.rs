@@ -36,6 +36,10 @@ pub fn ln_gamma_int(n: i32) -> f64 {
 
 /// Convert P-value to E-value.
 pub fn p_to_e(p: f64) -> f64 {
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if p < 0.0 || p > 1.0 {
         return i32::MIN as f64;
     }
@@ -116,10 +120,8 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
         if s <= -3.4 * rf {
             return 1.0;
         }
-    } else if r < 101 {
-        if s <= -4.0 * rf {
-            return 1.0;
-        }
+    } else if r < 101 && s <= -4.0 * rf {
+        return 1.0;
     }
 
     let stddev = rf.sqrt();
@@ -148,7 +150,7 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
     let adj1 = (r - 2) as f64 * logr - ln_gamma_int(r1) - ln_gamma_int(r);
     let num_hsps_minus_2 = r - 2;
 
-    let mut outer_integral = |x: f64, adj2: f64, sdvir: f64| -> f64 {
+    let outer_integral = |x: f64, adj2: f64, sdvir: f64| -> f64 {
         let y = (x - sdvir).exp();
         if !y.is_finite() {
             return 0.0;

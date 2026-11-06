@@ -2037,7 +2037,7 @@ mod tests {
                 for _ in 0..1 + round % 4 {
                     let at = (rng.next() as usize) % b.len();
                     // aim half of the flips at the first bytes of pages (headers)
-                    let at = if rng.next() % 2 == 0 {
+                    let at = if rng.next().is_multiple_of(2) {
                         at & !4095 | (rng.next() as usize % 160)
                     } else {
                         at

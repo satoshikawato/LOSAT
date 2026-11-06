@@ -2957,7 +2957,7 @@ impl BitVector {
 
     /// `x_Resize`.
     fn resize(&mut self, num: u32) {
-        let need = (u64::from(num) + 31) / 32;
+        let need = u64::from(num).div_ceil(32);
         if (self.bitmap.len() as u64) < need {
             let mut new_size: u64 = 1024;
             while new_size < need {

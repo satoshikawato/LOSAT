@@ -123,7 +123,7 @@ fn chain_hsps_for_pair(hits: Vec<Hit>, config: &ChainConfig) -> Vec<Hit> {
             let s_gap = hit.s_start.saturating_sub(chain.s_end);
             let gap = q_gap.max(s_gap);
 
-            if diag_diff <= config.max_diag_drift as isize && gap <= config.max_gap {
+            if diag_diff <= config.max_diag_drift && gap <= config.max_gap {
                 // Merge into this chain
                 chain.extend(&hit);
                 merged = true;

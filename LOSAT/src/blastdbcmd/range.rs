@@ -14,12 +14,6 @@ pub(super) struct SeqRange {
 }
 
 impl SeqRange {
-    /// `TSeqRange::GetEmpty()`.
-    pub const EMPTY: SeqRange = SeqRange {
-        from: u32::MAX,
-        to: u32::MAX,
-    };
-
     /// `TSeqRange::Empty()`: `from` above `to`. The empty range has `from == to`
     /// (`GetEmpty` is `[max, max)` with the open end as `max - 1`: `TSeqRange::GetToOpen`
     /// unset); NCBI's `NotEmpty` is what `-range` tests, and the range of no `-range` holds

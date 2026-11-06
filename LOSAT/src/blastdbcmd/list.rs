@@ -28,10 +28,6 @@ impl FoundDb {
     }
 }
 
-fn bytes_of(path: &Path) -> Vec<u8> {
-    path.as_os_str().as_encoded_bytes().to_vec()
-}
-
 fn path_of(bytes: &[u8]) -> std::path::PathBuf {
     std::path::PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
 }
@@ -818,7 +814,7 @@ mod tests {
 
     #[test]
     fn the_list_sorts_on_the_quoted_names() {
-        let mut dbs = vec![
+        let mut dbs = [
             found("d/a!", SeqType::Nucleotide),
             found("d/zz", SeqType::Protein),
             found("d/x.00", SeqType::Protein),

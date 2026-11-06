@@ -287,7 +287,7 @@ fn obinary_file(
     vt: &[u16],
 ) -> Vec<u8> {
     let mut b = Vec::new();
-    let mut w = |b: &mut Vec<u8>, x: u32| b.extend_from_slice(&x.to_ne_bytes());
+    let w = |b: &mut Vec<u8>, x: u32| b.extend_from_slice(&x.to_ne_bytes());
     if let Some(md) = metadata {
         let mut block = Vec::new();
         for line in md {

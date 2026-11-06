@@ -146,7 +146,7 @@ fn residues(bioseq: &Bioseq) -> String {
         }
         SeqData::Ncbi2na(bytes) => {
             assert_eq!(bytes.len(), length.div_ceil(4));
-            if length % 4 != 0 {
+            if !length.is_multiple_of(4) {
                 assert_eq!(bytes[length / 4] << (2 * (length % 4)), 0);
             }
             (0..length)
@@ -155,7 +155,7 @@ fn residues(bioseq: &Bioseq) -> String {
         }
         SeqData::Ncbi4na(bytes) => {
             assert_eq!(bytes.len(), length.div_ceil(2));
-            if length % 2 != 0 {
+            if !length.is_multiple_of(2) {
                 assert_eq!(bytes[length / 2] & 15, 0);
             }
             (0..length)

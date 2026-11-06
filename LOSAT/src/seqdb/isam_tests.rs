@@ -474,7 +474,7 @@ fn damaged_headers_are_format_errors() {
         (6, -1, "negative longest line"),
     ] {
         let mut bad = index.clone();
-        bad[4 * field..4 * field + 4].copy_from_slice(&(value as i32).to_be_bytes());
+        bad[4 * field..4 * field + 4].copy_from_slice(&i32::to_be_bytes(value));
         let name = format!("bad{field}_{value}");
         std::fs::write(dir.0.join(format!("{name}.nsi")), &bad).unwrap();
         std::fs::write(dir.0.join(format!("{name}.nsd")), &data).unwrap();

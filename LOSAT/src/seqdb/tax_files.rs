@@ -1239,7 +1239,7 @@ mod tests {
     /// Every OID list, taxid list and seqid list of every fixture against the dump.py values.
     fn check_lookup_files(prefix: &str, n: char, name: &str) {
         {
-            let f = files(&prefix, n);
+            let f = files(prefix, n);
             let ex = expected(name);
             let ndb = Env::open(&f.ndb).unwrap();
             let ntf = Env::open(&f.ntf).unwrap();
@@ -1380,7 +1380,7 @@ mod tests {
                 let mut req = BTreeSet::new();
                 for _ in 0..size {
                     // mostly present taxids, sometimes an absent one
-                    if next() % 5 == 0 {
+                    if next().is_multiple_of(5) {
                         req.insert(1_000_000 + (next() % 50) as i32);
                     } else {
                         req.insert(ex.t[next() % ex.t.len()].0);

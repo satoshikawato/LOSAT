@@ -321,6 +321,10 @@ pub fn compute_score_freq_profile(
     sfp.obs_max = obs_max;
 
     let mut score_avg = 0.0;
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if score_sum > 0.0001 || score_sum < -0.0001 {
         for score in obs_min..=obs_max {
             let prob = sfp.get_prob(score) / score_sum;

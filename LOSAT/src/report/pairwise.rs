@@ -1329,7 +1329,7 @@ fn format_count_with_commas(value: i64) -> String {
     let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
     let len = digits.len();
     for (index, ch) in digits.chars().enumerate() {
-        if index > 0 && (len - index) % 3 == 0 {
+        if index > 0 && (len - index).is_multiple_of(3) {
             formatted.push(',');
         }
         formatted.push(ch);
@@ -1385,7 +1385,7 @@ fn format_ncbi_ka_value(value: f64) -> String {
     let exponent: i32 = exponent
         .parse()
         .expect("Rust exponent formatting has an integer exponent");
-    if PRECISION > exponent && exponent >= -4 {
+    if (-4..PRECISION).contains(&exponent) {
         let mut formatted = format!("{:.*}", (PRECISION - 1 - exponent) as usize, value);
         if !formatted.contains('.') {
             formatted.push('.');
@@ -3883,7 +3883,7 @@ pub fn write_pairwise<W: Write>(
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
-    query_ids: &[Arc<str>],
+    _query_ids: &[Arc<str>],
     subject_ids: &[Arc<str>],
     context: &ReportContext,
 ) -> io::Result<()> {

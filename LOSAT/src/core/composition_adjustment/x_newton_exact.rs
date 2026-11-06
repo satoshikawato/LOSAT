@@ -145,6 +145,7 @@ fn prof_add(i: usize, t0: u64, on: bool) -> u64 {
     }
 }
 // No NCBI counterpart: prints the profile counters; it does not change any value NCBI computes.
+#[cfg(test)]
 pub(crate) fn prof_print() {
     if !prof_enabled() {
         return;

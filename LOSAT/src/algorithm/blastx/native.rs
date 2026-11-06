@@ -720,13 +720,14 @@ fn run_inner(
         // batch's subjects up in its prefetch, `ReportedSubjects::prefetch_messages`, DBID item
         // T). The taxids of every sequence are looked up here, once, and the output is held only
         // when one of them would be refused (DECISIONS 32; outfmt 5 asks no scientific name); the
-        // usual run, in which none is, writes batch by batch. Outfmt 5's prefetch is also refused
-        // at the run's first prefetch where NCBI's taxonomy cache would repeat the offset error
-        // (`BlastxDatabase::prefetch_refused`), after the prolog: the run holds then too.
+        // usual run, in which none is, writes batch by batch. Where NCBI's taxonomy cache would
+        // repeat the offset error (`BlastxDatabase::prefetch_refused`) outfmt 5's prefetch, and the
+        // XML2 and JSON lookups of a batch with a subject that has a taxid
+        // (`read_reported_taxonomy`), are refused after the prolog: the run holds then too.
         let prefetch = prefetches_subjects(Some(choice.number));
         let taxdb_may_refuse = database.as_ref().is_some_and(|database| {
             database.taxdb_found()
-                && (database.taxdb_may_refuse(!prefetch) || prefetch && database.prefetch_refused())
+                && (database.taxdb_may_refuse(!prefetch) || database.prefetch_refused())
         });
         // A database with parsed Seq-ids: a later batch can still refuse one of its subjects
         // (`ReportedSubjects::for_batch`), which only the batch's hits show.

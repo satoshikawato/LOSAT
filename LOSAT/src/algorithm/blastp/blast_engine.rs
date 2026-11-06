@@ -6366,9 +6366,15 @@ fn search(
                         XBlockReport::Tabular | XBlockReport::Pairwise | XBlockReport::Xml
                     ) && database.is_some_and(|database| database.taxdb_found())
                 };
+                // Outfmt 13 to 16 ask for the same refusal of NCBI's taxonomy cache at the first
+                // batch that reports a subject with a positive taxid (`read_reported_taxonomy`),
+                // which can be in a later block too: the search of all queries, which refuses
+                // before any byte.
                 let titles_allowed = |x_kind: XBlockReport| match (database, x_kind) {
                     (Some(database), _)
-                        if x_prefetch_taxids(x_kind) && database.prefetch_refused() =>
+                        if (x_prefetch_taxids(x_kind)
+                            || matches!(x_kind, XBlockReport::Xml2) && database.taxdb_found())
+                            && database.prefetch_refused() =>
                     {
                         false
                     }

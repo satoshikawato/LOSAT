@@ -396,3 +396,99 @@ fn the_same_files_without_the_option_are_searched() {
         );
     }
 }
+
+/// NCBI BLAST+ 2.17.0's error archive (outfmt 11) of a `-subject` file that stops at `line`
+/// (probe `ncbi-parity-20261019/SM/subnodef`, the `*.s.*.pd.f11` runs of the five programs).
+fn no_defline_archive(line: u64) -> String {
+    format!(
+        "Blast4-archive ::= {{\n  request {{\n    body get-request-info {{\n      request-id \"Error\"\n    }}\n  }},\n  results {{\n  }},\n  messages {{\n    {{\n      code 2,\n      message \"BLAST query/options error: Query input doesn't start with a\n defline or comment, line {line}\"\n    }},\n    {{\n      code 2,\n      message \"Please refer to the BLAST+ user manual.\"\n    }}\n  }}\n}}\n"
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 and
+// c++/src/app/blast/blast_app_util.hpp:172-176: the subjects' `GetAllSeqs` turns the reader's
+// `eNoDefline` into a `CInputException` (the NUL of `ends` stays in the text on standard error,
+// the archive drops it); the queries keep the reader's `BLAST query error` (blast_app_util.hpp:
+// 181-184). The subjects are read first. Expected bytes: NCBI 2.17.0 n1 (probe `SM/subnodef`).
+#[test]
+fn a_subject_without_a_first_defline_ends_with_the_input_error_of_get_all_seqs() {
+    for (program, query_letters, subject_letters) in PROGRAMS {
+        let dir = temp_dir("nodef");
+        let clean_query = dir.join(format!("{program}.q"));
+        let clean_subject = dir.join(format!("{program}.s"));
+        std::fs::write(&clean_query, format!(">q1 a\n{query_letters}\n")).unwrap();
+        std::fs::write(&clean_subject, format!(">s1 b\n{subject_letters}\n")).unwrap();
+        let bad = |name: &str, text: String| {
+            let path = dir.join(format!("{program}.{name}"));
+            std::fs::write(&path, text).unwrap();
+            path
+        };
+        let subjects = [
+            (
+                bad(
+                    "s_data",
+                    format!(";c\n\n{subject_letters}\n>s2\n{subject_letters}\n"),
+                ),
+                3,
+            ),
+            (bad("s_gap", format!(">?5\n{subject_letters}\n")), 1),
+        ];
+        let bad_query = bad("q_data", format!("{query_letters}\n"));
+        let search = |query: &std::path::Path, subject: &std::path::Path, outfmt: &str, threads| {
+            let output = losat()
+                .arg(program)
+                .arg("-query")
+                .arg(query)
+                .arg("-subject")
+                .arg(subject)
+                .args([
+                    "-parse_deflines",
+                    "-outfmt",
+                    outfmt,
+                    "-num_threads",
+                    threads,
+                ])
+                .output()
+                .unwrap();
+            (
+                output.status.code().unwrap_or(-1),
+                String::from_utf8_lossy(&output.stdout).into_owned(),
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            )
+        };
+        for (subject, line) in &subjects {
+            let message = format!(
+                "BLAST query/options error: Query input doesn't start with a defline or comment, \
+                 line {line}\0\nPlease refer to the BLAST+ user manual.\n"
+            );
+            for threads in ["1", "4"] {
+                for query in [&clean_query, &bad_query] {
+                    let got = search(query, subject, "6", threads);
+                    assert_eq!(
+                        got,
+                        (1, String::new(), message.clone()),
+                        "{program} n{threads}"
+                    );
+                }
+                let got = search(&clean_query, subject, "11", threads);
+                assert_eq!(
+                    got,
+                    (1, no_defline_archive(*line), message.clone()),
+                    "{program} n{threads} outfmt 11"
+                );
+            }
+        }
+        let got = search(&bad_query, &clean_subject, "6", "1");
+        assert_eq!(
+            got,
+            (
+                1,
+                String::new(),
+                "BLAST query error: CFastaReader: Input doesn't start with a defline or comment \
+                 around line 1\n"
+                    .to_string()
+            ),
+            "{program} query"
+        );
+    }
+}

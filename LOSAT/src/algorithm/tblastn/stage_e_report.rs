@@ -25,7 +25,6 @@ use crate::report::pairwise::{
     PairwiseDatabase, PairwiseHit,
 };
 use crate::sequence::packed_subject::SubjectNt;
-use crate::stats::spouge::lookup_protein_gumbel_params;
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::seg::SegParams;
@@ -136,8 +135,8 @@ pub(super) fn format_number(outfmt: &str) -> i32 {
 }
 
 /// The XML2 / JSON document of a checked `-outfmt` value (16, 15, 14 or 13; `None` for the
-/// others). Outfmt 13 and 14 write side files next to `-out`: only the command line reaches them
-/// (`run_local` stops at NCBI's XInclude check).
+/// others). Outfmt 13 and 14 write side files next to `-out`, or to the caller's receiver of them
+/// (`OutputSink::Files`); a `run_local` call with neither stops at NCBI's XInclude check.
 pub(super) fn xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind> {
     use crate::blastinput::app::ReportFormat;
     crate::report::blast_xml2::Xml2Kind::of(ReportFormat::from_number(format_number(outfmt))?)
@@ -360,6 +359,8 @@ pub(super) fn render(
             before: warning_lines.take().unwrap_or(&[]),
             sink: &mut *outputs.diagnostics,
         });
+        // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
+        let side_sink = format.sink.side_files().cloned();
         let mut writer = format.sink.open()?;
         match format_number(format.outfmt) {
             // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
@@ -443,7 +444,12 @@ pub(super) fn render(
                     .as_ref()
                     .expect("XML prepared for TBLASTN outfmt 13 to 16");
                 xml.write(
-                    &mut crate::report::blast_xml2::Xml2Writer::for_run(kind, xml.xml2_run(), out),
+                    &mut crate::report::blast_xml2::Xml2Writer::for_run(
+                        kind,
+                        xml.xml2_run(),
+                        out,
+                        side_sink.as_ref(),
+                    ),
                     &mut writer,
                     query_records,
                     subject_letters,
@@ -608,7 +614,7 @@ fn write_tabular(
         }
         for list in hitlist.lists() {
             let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
-            let subject = subject_records
+            let _subject = subject_records
                 .get(oid)
                 .context("TBLASTN subject OID out of range")?;
             ensure!(

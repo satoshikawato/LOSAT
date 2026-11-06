@@ -242,7 +242,7 @@ impl TabularField {
 /// ```
 pub fn parse_fields(spec: &str) -> Vec<TabularField> {
     let mut fields: Vec<TabularField> = Vec::new();
-    let mut add = |fields: &mut Vec<TabularField>, field| {
+    let add = |fields: &mut Vec<TabularField>, field| {
         if !fields.contains(&field) {
             fields.push(field);
         }

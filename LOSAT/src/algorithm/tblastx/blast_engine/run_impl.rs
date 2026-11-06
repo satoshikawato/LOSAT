@@ -1657,8 +1657,9 @@ fn search_database(
 /// Each requested format as NCBI reads `-outfmt`: NCBI's errors, and a rejection of a
 /// format that LOSAT's TBLASTX does not write.
 ///
-/// `out` is the run's `-out`: outfmt 13 and 14 write side files next to it, and fail on standard
-/// output (`xinclude_check_for`).
+/// `out` is the run's `-out` (a format with the caller's receiver of side files takes that
+/// receiver's, `FormatOutput::side_out`): outfmt 13 and 14 write side files next to it, and fail
+/// on standard output (`xinclude_check_for`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
 /// ```c++
@@ -1670,6 +1671,7 @@ fn check_report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Pat
     use crate::blastinput::app;
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
+        let out = format.side_out(out);
         if app::report_format(&choice, app::Program::Tblastx, out)?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastx)?;
             app::xinclude_check_for(&choice, out)?;
@@ -2261,6 +2263,8 @@ fn write_tblastx_outputs(
         //     : m_FormatType(format_type), ..., m_Outfile(outfile),
         // ```
         let prolog = !prolog_before_search(&format.sink);
+        // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
+        let side_sink = format.sink.side_files().cloned();
         let mut writer = format.sink.open()?;
         match output_format {
             report::TblastxOutputFormat::Pairwise => {
@@ -2515,6 +2519,7 @@ fn write_tblastx_outputs(
                     kind,
                     super::super::blast_xml::xml2_run(run),
                     run.args.out.as_deref(),
+                    side_sink.as_ref(),
                 ),
                 true,
                 &mut writer,
@@ -2853,6 +2858,7 @@ fn run_in_pool(
         observer.queries_begin();
     }
     let query_records = query_runs.records;
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let input = query_runs.input;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
     // (`s_ReplaceLocalId`)
@@ -4748,6 +4754,7 @@ fn search_query_batch<S: TbxScore>(
         crate::utils::xreach::x_reach!("LOSAT_X_TBXBOARD", x_board_batch.is_some());
     }
     // Whether the batch puts units on the board (`x_board_help` below).
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let x_board_unit_path = x_pair_par_batch.is_some();
     let x_seed_batch = x_seed_release::XSeedBatch::new(lookup, x_pair_par_batch, subjects.count());
     let x_worker_diag_cells = x_seed_batch.worker_table_cells(diag_array_size as usize);
@@ -5989,10 +5996,10 @@ fn search_query_batch<S: TbxScore>(
                                         // Compute outfmt coords for this candidate init-hsp (same logic as trace_init_hsp_if_match).
                                         // NCBI offsets are 0-based in query/subject->sequence buffers.
                                         // Reference: blast_gapalign.c:4756-4768, blast_aascan.c:110-113.
-                                        let q_aa_start = hsp_q_u as usize;
-                                        let q_aa_end = hsp_qe_u as usize;
-                                        let s_aa_start = hsp_s_u as usize + chunk.offset;
-                                        let s_aa_end = _hsp_se_u as usize + chunk.offset;
+                                        let q_aa_start = hsp_q_u;
+                                        let q_aa_end = hsp_qe_u;
+                                        let s_aa_start = hsp_s_u + chunk.offset;
+                                        let s_aa_end = _hsp_se_u + chunk.offset;
                                         let (q_start_dna, q_end_dna) = convert_coords(
                                             q_aa_start,
                                             q_aa_end,
@@ -7402,7 +7409,7 @@ fn search_query_batch<S: TbxScore>(
                         stats_score_distribution.iter().filter(|&&s| s < 30).count();
                     eprintln!("[DEBUG HSP_SAVING] score_distribution: min={}, max={}, median={}, low_score(<30)={}/{} ({:.2}%)", 
                             min_score, max_score, median_score, low_score_count, stats_score_distribution.len(),
-                            if stats_score_distribution.len() > 0 { (low_score_count as f64 / stats_score_distribution.len() as f64) * 100.0 } else { 0.0 });
+                            if !stats_score_distribution.is_empty() { (low_score_count as f64 / stats_score_distribution.len() as f64) * 100.0 } else { 0.0 });
                 }
             }
 
@@ -7956,6 +7963,7 @@ fn search_query_batch<S: TbxScore>(
 
     // EXPERIMENT (LOSAT_X_TBXBOARD): a thread of the subject loop without a subject helps with the
     // batch's units (tblastx/x_work_board.rs `XBoard::help`).
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let x_board_help = x_board_batch.as_ref().map(|(board, batch)| {
         move |stopped: &std::sync::atomic::AtomicBool| {
             board.help(batch, stopped);

@@ -369,7 +369,7 @@ pub(super) fn serial(
     x_offsets: Vec<u32>,
 ) -> Csr {
     // Once per table: the bounds the unchecked writes below rely on.
-    assert!(cells % 2048 == 0 && pv_array_bts >= 5);
+    assert!(cells.is_multiple_of(2048) && pv_array_bts >= 5);
     assert_eq!(helper_array.len(), cells >> 11);
     let ascending = words.ascending_cells;
     if x_packed(ascending) {
@@ -401,7 +401,7 @@ pub(super) fn x_serial_unpacked(
     helper_array: &mut [u32],
     x_offsets: Vec<u32>,
 ) -> Csr {
-    assert!(cells % 2048 == 0 && pv_array_bts >= 5);
+    assert!(cells.is_multiple_of(2048) && pv_array_bts >= 5);
     assert_eq!(helper_array.len(), cells >> 11);
     let ascending = words.ascending_cells;
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
@@ -493,7 +493,7 @@ pub(super) fn x_serial_packed(
     helper_array: &mut [u32],
     x_offsets: Vec<u32>,
 ) -> Csr {
-    assert!(cells % 2048 == 0 && pv_array_bts >= 5 && !words.ascending_cells);
+    assert!(cells.is_multiple_of(2048) && pv_array_bts >= 5 && !words.ascending_cells);
     assert_eq!(helper_array.len(), cells >> 11);
     let blocks = cells >> 6;
     // `qs` has room for every position the loop reads (each word ends at one) and for the counts,

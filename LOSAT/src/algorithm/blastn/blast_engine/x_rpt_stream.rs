@@ -154,7 +154,7 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
 
-use crate::api::local_blast::{FormatOutput, OutputSink, ReportOutputs};
+use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::seq_range::{next_ranged_batch, Placements, QueryInput};
 use crate::config::NuclScoringSpec;
 use crate::report::sam::SamDocument;
@@ -582,6 +582,7 @@ fn check(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::local_blast::FormatOutput;
     use crate::blastinput::seq_range::RecordPlacement;
 
     // EXPERIMENT (LOSAT_X_RPTSTREAM): a batch's part of the query input numbers its queries from

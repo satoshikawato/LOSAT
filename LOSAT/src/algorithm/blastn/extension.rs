@@ -1,6 +1,5 @@
 use super::constants::X_DROP_UNGAPPED;
 use crate::core::blast_encoding::COMPRESSION_RATIO;
-use crate::utils::dust::MaskedInterval;
 
 /// BLASTNA alphabet size.
 /// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_encoding.h:91-92
@@ -785,7 +784,7 @@ pub fn extend_hit_ungapped_approx_ncbi(
 
     let mut q_idx = q_ext as isize;
     let mut s_idx = (s_ext / COMPRESSION_RATIO) as isize;
-    let left_len = (q_ext.min(s_ext) / COMPRESSION_RATIO) as usize;
+    let left_len = q_ext.min(s_ext) / COMPRESSION_RATIO;
 
     let mut score = 0i32;
     let mut sum = 0i32;
@@ -825,7 +824,7 @@ pub fn extend_hit_ungapped_approx_ncbi(
     // Right extension in 4-base blocks.
     let mut q_idx = q_ext as isize;
     let mut s_idx = (s_ext / COMPRESSION_RATIO) as isize;
-    let right_len = ((q_len - q_ext).min(subject_len - s_ext) / COMPRESSION_RATIO) as usize;
+    let right_len = (q_len - q_ext).min(subject_len - s_ext) / COMPRESSION_RATIO;
     sum = 0;
     new_q = q_idx;
 

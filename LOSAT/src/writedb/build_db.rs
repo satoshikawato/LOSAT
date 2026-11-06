@@ -65,7 +65,7 @@ pub struct BuildDatabase<'a> {
 // ```
 /// `CDirEntry::NormalizePath` of an absolute Unix path, without following
 /// links: `.` and empty components go, `..` takes its parent with it.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "wasi")))]
 fn normalize_absolute_path(path: &str) -> String {
     let current = path.trim_end_matches('/');
     if current.is_empty() {
@@ -1109,7 +1109,7 @@ impl<'a> BuildDatabase<'a> {
 mod tests {
     use super::*;
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "wasi")))]
     #[test]
     fn absolute_paths_are_normalized_as_ncbi_does() {
         assert_eq!(normalize_absolute_path("/a//b/./c/../d/"), "/a/b/d");

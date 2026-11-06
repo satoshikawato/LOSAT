@@ -11,9 +11,7 @@ use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_bx_build_compressed_lookup, x_bx_clut_pool, x_give_back_flat, x_give_back_wide_flat,
     XBxCompressedLookup, X_BLASTX,
 };
-use crate::algorithm::tblastx::lookup::compressed::{
-    x_compressed_scaled_threshold, BlastCompressedAaLookupTable,
-};
+use crate::algorithm::tblastx::lookup::compressed::x_compressed_scaled_threshold;
 use crate::algorithm::tblastx::lookup::{
     build_ncbi_lookup_from_prepared, BackboneCell16, BlastAaLookupTable, QueryContext, XBxTable,
 };

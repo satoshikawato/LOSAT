@@ -210,6 +210,10 @@ describe('toShellCommand', () => {
     expect(commandWords(joined, CUSTOM_OUTPUT)).toEqual(['losat', ...joined]);
     // -outfmt 6 adds no output, and the commands of the formats leave it out too.
     expect(commandWords(['blastp', '-outfmt', '6'], 0)).toEqual(['losat', 'blastp', '-outfmt', '0']);
+    // The CLI writes 13 and 14 as files: the command names the -out of the archive's files.
+    expect(toShellCommand(['blastp', '-query', 'q.fa', '-outfmt', '13'], CUSTOM_OUTPUT)).toBe('losat blastp -query q.fa -outfmt 13 -out results');
+    expect(toShellCommand(['blastp', '-outfmt=+014 x'], CUSTOM_OUTPUT)).toBe("losat blastp '-outfmt=+014 x' -out results");
+    expect(toShellCommand(['blastp', '-outfmt', '14'], 6)).toBe('losat blastp -outfmt 6');
   });
 });
 

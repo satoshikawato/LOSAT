@@ -7,7 +7,9 @@ files, side_sha256; xinclude_fixtures.py says what they mean: the run gets `-out
 master is <row_id>.out, the side files <row_id>.out_<n>.json|xml; a row without them has 12 cells; a psiblast row
 whose files column is `pssm` gets `-out_ascii_pssm <tmp>/<row_id>.pssm`, and the files it writes are frozen as
 <row_id>.pssm and <row_id>.pssm.<n>, listed in side_sha256, none when the cell is empty; `{pssm_dir}` in its
-extra_args is that <tmp>, where any other file the run writes is reported). Every row runs from LOSAT/ as
+extra_args is that <tmp>, where any other file the run writes is reported; `pssm-asn` gets `-out_pssm
+<tmp>/<row_id>.asn` instead and `pssm-both` both, and in these two kinds only a file of 64 KB or less is frozen,
+a larger one being compared by its SHA-256 in side_sha256). Every row runs from LOSAT/ as
 `PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT`, PROGRAM being the row's `program` cell
 (`blastp`, `blastn`, `tblastn`, `blastx`, `tblastx` or `psiblast`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
 argument `-db ""`; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/); `outfmt` is one argument, so a custom
@@ -17,10 +19,14 @@ LOSAT/tests/db_search (README.md there says how they were built).
 - kind `ncbi`: the expectation is NCBI's stdout, stderr and exit status (`rc`) of a run with
   `-num_threads 1`, every byte, nothing normalised. The frozen bytes are
   LOSAT/tests/fixtures/db_search/<row_id>.out and <row_id>.err (only when stderr is not empty).
-- kind `losat-rejection`: NCBI is not run. LOSAT must exit with `rc`, write nothing to stdout, and
-  its stderr must contain the text that follows `expect: ` in the `covers` cell (up to the end of
-  the cell or a ` | ` separator). The hash columns stay empty. A rejection row whose files column is
-  `pssm` must also write no PSSM file.
+- kind `losat-rejection`: LOSAT must exit with `rc`, write nothing to stdout, and its stderr must
+  contain the text that follows `expect: ` in the `covers` cell (up to the end of the cell or a
+  ` | ` separator). The hash columns stay empty. A rejection row with a PSSM files kind must also
+  write no PSSM file. A rejection that LOSAT makes after reports that NCBI writes too (psiblast's
+  `-out_pssm` file that cannot be written: NCBI stops after that query's report with its own error)
+  has a non-empty `stdout_bytes` cell: its stdout must be NCBI's of the same command, frozen as
+  <row_id>.out by `freeze` (which runs NCBI for such a row and keeps only its stdout) and checked
+  against `stdout_sha256`. Its `rc` and stderr are LOSAT's.
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
@@ -39,7 +45,7 @@ With `--library` BIN is `examples/library_command_line`, the same search through
 failure's exit status counts as any other failure's, a row whose query the reader refuses is
 `library-input-error` when the message is the command line's (the library reads the whole query
 before it searches, so the reports of the batches before the error do not exist), and the rows that
-write PSSM files (the `pssm` kind) or pass a PSSM file option are `library-skip`: the library API
+write PSSM files (the PSSM kinds) or pass a PSSM file option are `library-skip`: the library API
 writes no PSSM file and refuses those options (`LIBRARY_REFUSED`).
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
@@ -206,9 +212,23 @@ def freeze(args: argparse.Namespace) -> int:
     home = tempfile.TemporaryDirectory(prefix="db_search_home_")
     env = clean_env(dict(os.environ), home.name)
     for row in rows:
-        if row["kind"] != "ncbi" or not selected(row, args):
+        if not selected(row, args):
             continue
         command = [str(Path(args.ncbi_bin) / row["program"]), *search_argv(row), "-num_threads", "1"]
+        if row["kind"] == "losat-rejection" and row["stdout_bytes"]:
+            # NCBI's stdout of the command that LOSAT refuses after the reports NCBI writes too.
+            if xinclude.wants_pssm(row):
+                run = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
+                                             timeout=TIMEOUT, env=row_env(row, env)).run
+            else:
+                run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
+                                     env=row_env(row, env))
+            (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
+            row.update(stdout_sha256=sha256(run.stdout), stdout_bytes=str(len(run.stdout)))
+            print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(run.stdout)} (rejection row: stdout only)")
+            continue
+        if row["kind"] != "ncbi":
+            continue
         files = xinclude.wants_files(row)
         pssm = xinclude.wants_pssm(row)
         if files:
@@ -217,10 +237,10 @@ def freeze(args: argparse.Namespace) -> int:
             run = written.run
             xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
         elif pssm:
-            pssms = xinclude.run_with_pssm(command, row["row_id"], cwd=ENGINE, timeout=TIMEOUT,
-                                           env=row_env(row, env))
+            pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
+                                           timeout=TIMEOUT, env=row_env(row, env))
             run = pssms.run
-            xinclude.freeze_pssm(pssms, FROZEN, row["row_id"])
+            xinclude.freeze_pssm(pssms, FROZEN, row["row_id"], xinclude.files_kind(row))
             (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
@@ -236,7 +256,7 @@ def freeze(args: argparse.Namespace) -> int:
         if files:
             row.update(xinclude.observed(written))
         if pssm:
-            row.update(xinclude.observed_pssm(pssms, row["row_id"]))
+            row.update(xinclude.observed_pssm(pssms, row["row_id"], xinclude.files_kind(row)))
         print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(run.stdout)}\tstderr={len(run.stderr)}"
               + (f"\tsides={len(written.sides)}" if files else "")
               + (f"\tpssm_files={len(pssms.files)}" if pssm else ""))
@@ -252,7 +272,7 @@ def status_differs(observed: int, expected: int, library: bool) -> bool:
 
 # psiblast's PSSM file options, which the library API refuses before any search
 # (`api::search::pssm_file_options`).
-LIBRARY_REFUSED = {"-out_ascii_pssm", "-save_pssm_after_last_round", "-save_each_pssm"}
+LIBRARY_REFUSED = {"-out_pssm", "-out_ascii_pssm", "-save_pssm_after_last_round", "-save_each_pssm"}
 
 
 def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False) -> tuple[str, str]:
@@ -266,8 +286,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
                                           env=row_env(row, env), timeout=TIMEOUT)
         run = written.run
     elif pssm:
-        pssms = xinclude.run_with_pssm(command, row["row_id"], cwd=ENGINE, env=row_env(row, env),
-                                       timeout=TIMEOUT)
+        pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
+                                       env=row_env(row, env), timeout=TIMEOUT)
         run = pssms.run
     else:
         run = subprocess.run(command, cwd=ENGINE, capture_output=True, env=row_env(row, env), timeout=TIMEOUT)
@@ -277,7 +297,14 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
             problems.append(f"exit {run.returncode}, expected {row['rc']}")
         # The library writes as the search goes (`api::run`): nothing holds the bytes before a
         # refusal, as the command line holds them.
-        if run.stdout and not library:
+        if row["stdout_bytes"]:
+            out_path = FROZEN / f"{row['row_id']}.out"
+            out = out_path.read_bytes() if out_path.exists() else b""
+            if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
+                problems.append("frozen .out does not match the manifest")
+            if run.stdout != out:
+                problems.append("stdout " + first_difference(out, run.stdout))
+        elif run.stdout and not library:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
         if expected_text(row).encode() not in run.stderr:
             problems.append(f"stderr lacks {expected_text(row)!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")

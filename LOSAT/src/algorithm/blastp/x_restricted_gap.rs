@@ -203,9 +203,20 @@ pub(super) struct XRestrictedScratch {
     col: Vec<u8>,
     /// LOSAT_X_BPGAP16: `best` of the previous and the current row in 16 bits (`PAD` cells before
     /// cell 0; `i16::MIN` stands for `MININT`).
+    #[cfg_attr(
+        all(not(target_arch = "x86_64"), not(test)),
+        expect(
+            dead_code,
+            reason = "read only by the x86_64 AVX2 16-bit rows (and a unit test)"
+        )
+    )]
     h16: [Vec<i16>; 2],
     /// LOSAT_X_BPGAP16: `best_gap` per column in 16 bits; `i16::MIN` in every column that is not
     /// a multiple of `RESTRICT_SIZE` (never written there).
+    #[cfg_attr(
+        not(target_arch = "x86_64"),
+        expect(dead_code, reason = "read only by the x86_64 AVX2 16-bit rows")
+    )]
     e16: Vec<i16>,
 }
 
@@ -832,7 +843,7 @@ fn restricted_rows<const AVX2: bool>(
         } else {
             while score_gap_row >= band.best - x_dropoff && band.b_size <= len2 {
                 cur[PAD + band.b_size] = score_gap_row;
-                if band.b_size % RESTRICT_SIZE == 0 {
+                if band.b_size.is_multiple_of(RESTRICT_SIZE) {
                     e10[band.b_size / RESTRICT_SIZE] = score_gap_row - gap_open_extend;
                 }
                 score_gap_row -= gap_extend;
@@ -841,7 +852,7 @@ fn restricted_rows<const AVX2: bool>(
         }
         if band.b_size <= len2 {
             cur[PAD + band.b_size] = MININT;
-            if band.b_size % RESTRICT_SIZE == 0 {
+            if band.b_size.is_multiple_of(RESTRICT_SIZE) {
                 e10[band.b_size / RESTRICT_SIZE] = MININT;
             }
             band.b_size += 1;
@@ -969,8 +980,8 @@ fn band_grow16(
 /// `col[c]` for `c` in `from..to`: the letter the reference reads for `next_score` at
 /// `b_index = c - 1` (`blastp_subject_residue`, sentinels included); 0 for cell 0 and past cell
 /// `len2 + 1`, which no cell of the reference reads. The cells whose letter lies inside `subject`
-/// are one slice copy (forward: `subject[subject_base + c]`; reverse: `subject[subject_base + len2
-/// - c]`, the indices that function computes); the others go through that function. False: a
+/// are one slice copy (forward: `subject[subject_base + c]`; reverse: `subject[subject_base + len2 -
+/// c]`, the indices that function computes); the others go through that function. False: a
 /// letter code of 28 or more (not taken).
 ///
 /// `NARROW`: one instance per row kernel (false: the 32-bit rows, true: the sixteen-bit rows), each
@@ -1717,7 +1728,7 @@ unsafe fn restricted_rows16_avx2(
             // Written values are at least `best - x_dropoff` and at most `best + max`: 16 bits.
             while score_gap_row >= band.best - x_dropoff && band.b_size <= len2 {
                 cur[PAD + band.b_size] = score_gap_row as i16;
-                if band.b_size % RESTRICT_SIZE == 0 {
+                if band.b_size.is_multiple_of(RESTRICT_SIZE) {
                     e16[band.b_size] = (score_gap_row - gap_open_extend) as i16;
                 }
                 score_gap_row -= gap_extend;
@@ -1726,7 +1737,7 @@ unsafe fn restricted_rows16_avx2(
         }
         if band.b_size <= len2 {
             cur[PAD + band.b_size] = i16::MIN;
-            if band.b_size % RESTRICT_SIZE == 0 {
+            if band.b_size.is_multiple_of(RESTRICT_SIZE) {
                 e16[band.b_size] = i16::MIN;
             }
             band.b_size += 1;
@@ -2186,6 +2197,14 @@ mod tests {
     /// where they stop and the 32-bit rows give the reference's result; forward and reverse, with
     /// gap_extend 1 and 256 (the `16 * gap_extend` headroom).
     #[test]
+    #[cfg_attr(
+        not(target_arch = "x86_64"),
+        expect(
+            unused_variables,
+            unused_mut,
+            reason = "the comparison with the AVX2 rows below exists only on x86_64"
+        )
+    )]
     fn x_bpgap16_falls_back_past_the_16_bit_bound() {
         let mut scratch = GapAlignScratch::new();
         for (go, ge, x, lens) in [
@@ -2266,6 +2285,14 @@ mod tests {
     /// `gap_extend` of 256 (the sixteen-bit rows run), one more (they do not), with gap and stop
     /// letters, whose entries (down to -32,768) saturate the 16-bit sums.
     #[test]
+    #[cfg_attr(
+        not(target_arch = "x86_64"),
+        expect(
+            unused_variables,
+            unused_mut,
+            reason = "the comparison with the AVX2 rows below exists only on x86_64"
+        )
+    )]
     fn x_bpgap16_matches_at_the_edges_of_its_costs() {
         let mut rng = Rng(0x0BAD_5EED_1616_0001);
         let mut scratch = GapAlignScratch::new();

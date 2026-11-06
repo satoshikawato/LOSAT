@@ -26,3 +26,8 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
 - `x1800.faa`: a record of 1,800 X (no valid Karlin-Altschul parameters). With `CHUNK_SIZE=1001` it is
   not split (1,800 < 2 x (1,001 - 100)) and psiblast stops with the BLAST engine error; with
   `CHUNK_SIZE=1000` NCBI 2.17.0 splits it and crashes (LOSAT rejects it).
+- `notitle.faa`, `quote.faa`, `long.faa`, `lc.faa`, `tab.faa`, `utf8.faa` (PS3, `-out_pssm`): `tk.faa`'s letters
+  under other definition lines, for the title of the PSSM's query Bioseq: none (`>` alone: `title ""`), quotes
+  (doubled in the ASN.1 string), a 685-byte title (wrapped at word ends), `tk tab<TAB>here` (the reader keeps
+  `tk tab`), `tk café title` in UTF-8 (LOSAT refuses it with `-out_pssm`; NCBI writes `#` for each byte with an
+  error message); `lc.faa` has letters 61-120 in lower case (the PSSM's query is the search's buffer, upper case).

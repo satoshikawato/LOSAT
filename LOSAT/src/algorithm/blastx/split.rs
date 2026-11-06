@@ -213,7 +213,7 @@ pub fn calculate_num_chunks(
 // ```
 pub fn validate_chunk_size(size: u64) -> Result<()> {
     ensure!(
-        size % 3 == 0,
+        size.is_multiple_of(3),
         "Split query chunk size must be divisible by 3"
     );
     Ok(())
@@ -514,7 +514,7 @@ pub fn split_queries(
     // multiple of 3 starts the chunks after the first out of the query's reading frames
     // (split_query_aux_priv.cpp:62-64: "this value must be divisible by 3 to work with
     // translated queries"), and NCBI then moves their HSPs onto contexts of other frames.
-    if sizes.overlap % 3 != 0 {
+    if !sizes.overlap.is_multiple_of(3) {
         return Err(refusal(format!(
             "OVERLAP_CHUNK_SIZE={}, which is not a multiple of 3, splits this query in chunks out of its reading frames (NCBI BLAST+ requires a multiple of 3 for a translated query); this is not supported by LOSAT's BLASTX",
             sizes.overlap

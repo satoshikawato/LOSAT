@@ -231,10 +231,14 @@ pub fn print_summary() {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "parallel")]
     use super::*;
+    #[cfg(feature = "parallel")]
     use crate::utils::threading::with_search_pool;
 
+    #[cfg(feature = "parallel")]
     struct Rng(u64);
+    #[cfg(feature = "parallel")]
     impl Rng {
         fn next(&mut self) -> u64 {
             self.0 ^= self.0 << 13;
@@ -248,6 +252,7 @@ mod tests {
     }
 
     /// A random sequence with low-complexity runs, `N`s, lower case and other IUPAC letters.
+    #[cfg(feature = "parallel")]
     fn sequence(rng: &mut Rng) -> Vec<u8> {
         let len = match rng.below(6) {
             0 => rng.below(4) as usize,

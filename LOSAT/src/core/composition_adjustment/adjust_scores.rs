@@ -1133,7 +1133,7 @@ const X_WC_STRIDE: usize = 2 * COMPO_NUM_TRUE_AA;
 // or square root.
 fn x_factor_ltriang_pos_def_cols(a: &mut [Vec<f64>], n: usize, wc: &mut [f64]) {
     let s = X_WC_STRIDE;
-    debug_assert!(n <= s && wc.len() >= s * s && s % 2 == 0);
+    debug_assert!(n <= s && wc.len() >= s * s && s.is_multiple_of(2));
     // Column-major copy. Slots above a column's diagonal and below row n are
     // scratch: they are written by the padded loops below but never read as
     // matrix elements.

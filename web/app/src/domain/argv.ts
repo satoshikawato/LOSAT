@@ -1,6 +1,6 @@
 // Search conditions are represented only as a LOSAT CLI argv (plan §5.3). The same argv
 // is validated and run by the engine, shown as the CLI command, and stored in sessions.
-import { CUSTOM_OUTPUT, OUTFMT_FLAG, outfmtOption, type RunOutput } from './output-format';
+import { CUSTOM_OUTPUT, FILES_OUT, isFilesOutput, OUTFMT_FLAG, outfmtOption, type RunOutput } from './output-format';
 import type { ProgramId } from './programs';
 
 /**
@@ -127,7 +127,8 @@ export function splitOptions(text: string): readonly string[] {
  * Renders the CLI command that reproduces one output of a run, as a copyable POSIX shell
  * command. `-outfmt` is always written: several programs reject their CLI default format, so a
  * command without it may not run. The command of a format that every run writes has the
- * format's -outfmt in place of the argv's; that of the argv's own -outfmt is the argv.
+ * format's -outfmt in place of the argv's; that of the argv's own -outfmt is the argv, with
+ * `-out results` for 13 and 14, which the CLI writes as files (the files of the archive).
  */
 export function toShellCommand(argv: readonly string[], output: RunOutput): string {
   return shellWords(commandWords(argv, output));
@@ -135,7 +136,7 @@ export function toShellCommand(argv: readonly string[], output: RunOutput): stri
 
 /** The words of `toShellCommand`'s command. */
 export function commandWords(argv: readonly string[], output: RunOutput): readonly string[] {
-  if (output === CUSTOM_OUTPUT) return ['losat', ...argv];
+  if (output === CUSTOM_OUTPUT) return isFilesOutput(argv, output) ? ['losat', ...argv, '-out', FILES_OUT] : ['losat', ...argv];
   const option = outfmtOption(argv);
   const words = option === undefined ? argv : [...argv.slice(0, option.at), ...argv.slice(option.at + option.words)];
   return ['losat', ...words, '-outfmt', String(output)];

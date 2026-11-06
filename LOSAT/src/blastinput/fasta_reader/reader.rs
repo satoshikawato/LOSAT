@@ -46,8 +46,6 @@ const IGNORED_PROBLEMS: [Problem; 3] = [
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum GapType {
     Unknown,
-    Fragment,
-    Clone,
     ShortArm,
     Heterochromatin,
     Centromere,
@@ -215,10 +213,9 @@ struct Gap {
     length: u32,
 }
 
-/// The title of a defline and its line number (`SLineTextAndLoc`).
+/// The title of a defline (`SLineTextAndLoc`; its line number is not read).
 struct LineText {
     text: Vec<u8>,
-    line: u64,
 }
 
 /// What a residue byte of a data line is (`ParseDataLine`'s `ECharType`, with the
@@ -914,13 +911,14 @@ impl<R: Read> FastaReader<R> {
                 if self.config.parse_deflines {
                     let line_number = self.line_number();
                     self.lines.put_line(raw);
-                    return Err(self.fasta_error(
-                        super::ParseErrorCode::Format,
-                        format!(
+                    return Err(ReadError::Parse {
+                        code: super::ParseErrorCode::NoDefline,
+                        message: format!(
                             "CFastaReader: Input doesn't start with a defline or comment around \
                              line {line_number}"
                         ),
-                    ));
+                        line: line_number,
+                    });
                 }
                 self.parse_def_line(b">");
                 need_defline = false;
@@ -1044,7 +1042,6 @@ impl<R: Read> FastaReader<R> {
                         .unwrap_or(len - title_start - 1);
                 self.titles.push(LineText {
                     text: defline[title_start..end].to_vec(),
-                    line: self.line_number(),
                 });
             }
         }
@@ -1098,7 +1095,6 @@ impl<R: Read> FastaReader<R> {
                     .unwrap_or(len - title_start - 1);
             self.titles.push(LineText {
                 text: defline[title_start..end].to_vec(),
-                line: line_number,
             });
         }
         if parsed.range && self.config.keep_defline && self.config.archive_known {

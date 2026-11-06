@@ -37,7 +37,6 @@
 //! identities again (`report::tabular::TabularWriter::row`). BLASTN's formatter reads no other
 //! sequence data (`SetNoFetch(true)`) and has no scoring matrix: positives are identities.
 
-use std::borrow::Cow;
 use std::io::Write;
 use std::sync::Arc;
 
@@ -50,12 +49,10 @@ use crate::algorithm::common::tabular::TabularSubjects;
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::common::GapEditOp;
-use crate::report::db_subject::ParsedSubject;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, TabularField,
-    TabularHsp, TabularKind, TabularNames, TabularQuery, TabularSpec, TabularSubject,
-    TabularTaxonomy, TabularWriter,
+    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularHsp, TabularKind,
+    TabularNames, TabularQuery, TabularSpec, TabularWriter,
 };
 
 const PROGRAM: &str = "BLASTN";
@@ -346,7 +343,7 @@ pub(crate) fn write_blastn_tabular(
     //         return;
     // ```
     if let (TabularKind::Commented, Some(num_queries)) = (spec.kind, tab.epilog) {
-        warn(&mut *writer, warnings.as_deref_mut())?;
+        warn(&mut *writer, warnings)?;
         table.epilog(writer, num_queries)?;
     }
     Ok(())
@@ -477,11 +474,7 @@ impl SeqRange {
     }
 
     fn length(self) -> u32 {
-        if self.to_open <= self.from {
-            0
-        } else {
-            self.to_open - self.from
-        }
+        self.to_open.saturating_sub(self.from)
     }
 
     /// `CombineWith`.

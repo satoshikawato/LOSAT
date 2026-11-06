@@ -9,7 +9,23 @@
 //! - ncbi-blast/c++/src/algo/blast/core/blast_hits.c:675-733
 
 use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
+#[cfg(any(
+    target_arch = "x86_64",
+    all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )
+))]
 use crate::utils::matrix::blosum62_score;
+#[cfg(any(
+    target_arch = "x86_64",
+    all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )
+))]
 use std::sync::OnceLock;
 
 // ---------------------------------------------------------------------------
@@ -43,8 +59,24 @@ use std::sync::OnceLock;
 // the exact per-residue control flow (sum updates, branches) to preserve
 // 1-bit parity with NCBI.
 
+#[cfg(any(
+    target_arch = "x86_64",
+    all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )
+))]
 static REEVALUATE_SCORE_TABLE_32: OnceLock<[i32; 32 * 32]> = OnceLock::new();
 
+#[cfg(any(
+    target_arch = "x86_64",
+    all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )
+))]
 #[inline(always)]
 fn reevaluate_score_table_32() -> &'static [i32; 32 * 32] {
     REEVALUATE_SCORE_TABLE_32.get_or_init(|| {
@@ -160,6 +192,7 @@ unsafe fn gather_scores8_reevaluate_avx2(
 /// - `query_raw` / `subject_raw` start at the first residue (sequence_start + 1)
 /// - `q_off_raw` / `s_off_raw` are 0-based offsets from those starts
 /// - `hsp_len` is the ungapped alignment length in residues
+///
 /// Reference: blast_util.c:112-116, blast_hits.c:675-733.
 ///
 /// Returns updated (q_off_raw, s_off_raw, hsp_len, score) if kept, else `None`.

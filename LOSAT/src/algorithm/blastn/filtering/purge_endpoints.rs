@@ -423,6 +423,7 @@ pub fn cut_off_gap_edit_script(
 /// For blastn:
 /// - context = query index + strand (q_idx * 2 + {0,1})
 /// - subject.frame is always +1 (blastn subject only), so strand is encoded by context.
+///
 /// IMPORTANT: Use internal offsets (query.offset/subject.offset), not output coordinates.
 ///
 /// # Returns

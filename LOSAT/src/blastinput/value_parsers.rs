@@ -695,15 +695,6 @@ pub fn blastp_word_size(value: &str) -> Result<usize, String> {
     }
     Ok(n)
 }
-// NCBI aa lookup word size is resolved before lookup construction; LOSAT's
-// TBLASTX port currently constructs only 3-residue words (run_impl.rs).
-pub fn tblastx_word_size(value: &str) -> Result<usize, String> {
-    let n = positive_usize(value)?;
-    if n != 3 {
-        return Err("unsupported TBLASTX word_size: only 3 is implemented".into());
-    }
-    Ok(n)
-}
 // NCBI core/blast_options.c:1301-1308: threshold must be greater than zero.
 pub fn positive_f64(value: &str) -> Result<f64, String> {
     let n = nonnegative_f64(value)?;

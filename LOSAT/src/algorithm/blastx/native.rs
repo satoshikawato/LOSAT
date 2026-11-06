@@ -592,7 +592,7 @@ fn run_inner(
     app::formatting_handler_check(&choice, Program::Blastx)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
-    stderr.write_all(&warnings_of(&args, choice.number))?;
+    stderr.write_all(&warnings_of(args, choice.number))?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
     // ```c++
     //     catch (const blast::CInputException& e) {                               \
@@ -716,7 +716,7 @@ fn run_inner(
             .map_err(|_| inaccessible("query", &args.query))?;
         // The documents of a `-db` search with a taxonomy database on the search path: a later
         // batch can still refuse the scientific name of a taxid (XML2 and JSON), or the damaged
-        // database (`read_reported_taxids`, which needs the batch's hits; outfmt 5 looks the
+        // database (`read_reported_taxonomy`, which needs the batch's hits; outfmt 5 looks the
         // batch's subjects up in its prefetch, `ReportedSubjects::prefetch_messages`, DBID item
         // T). The taxids of every sequence are looked up here, once, and the output is held only
         // when one of them would be refused (DECISIONS 32; outfmt 5 asks no scientific name); the

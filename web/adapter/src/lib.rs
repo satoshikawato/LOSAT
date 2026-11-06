@@ -13,6 +13,7 @@ pub mod json;
 pub mod run;
 pub mod scan;
 pub mod store;
+pub mod zip;
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};

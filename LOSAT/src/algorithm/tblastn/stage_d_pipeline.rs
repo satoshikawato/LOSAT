@@ -10,9 +10,9 @@ use anyhow::{ensure, Context, Result};
 use rayon::prelude::*;
 
 use super::kappa::{
-    convert_distinct_alignments, normalize_postredo_scores, postredo_converted_stats,
-    postredo_converted_stats_with_matrix, postredo_engine_positives, reap_contained_postredo_hsps,
-    redo_preliminary_match, ConvertedKappaHsp,
+    convert_distinct_alignments, normalize_postredo_scores, postredo_converted_stats_with_matrix,
+    postredo_engine_positives, reap_contained_postredo_hsps, redo_preliminary_match,
+    ConvertedKappaHsp,
 };
 use super::kappa_heap::{compo_early_termination, CompoHeap, CompoHeapRecord};
 use super::search_gapped::{
@@ -51,7 +51,6 @@ use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, BlastCompoAdjustMode, BlastCompoQueryInfo, BlastCompoSequenceData,
     EMatrixAdjustRule,
 };
-use crate::sequence::packed_subject::SubjectNt;
 use crate::stats::karlin::evalue_from_raw_score;
 use crate::stats::spouge::{blast_spouge_stoe, lookup_protein_gumbel_params, BlastGumbelBlk};
 use crate::stats::tables::{
@@ -305,6 +304,7 @@ struct LocalBatchSetup {
 // BLAST_CalcEffLengths(...); BlastHitSavingParametersUpdate(...);
 // x_PrintOneQueryFooter(*results.GetAncillaryData());
 // Formatting consumes the same initial context lengths computed before search.
+#[cfg(test)]
 pub(super) fn run_local_for_report(
     queries: &[Vec<u8>],
     subjects: &[&[u8]],
@@ -830,7 +830,15 @@ pub(super) fn x_search_batches<'p>(
         }
         Ok(Some(searched))
     })?;
-    let Some(mut searched) = searched else {
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(
+            unused_mut,
+            reason = "extended only by the own-pool batches (parallel)"
+        )
+    )]
+    let Some(mut searched) = searched
+    else {
         return Ok(None);
     };
     // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): each of the last batches on a pool of its own with its

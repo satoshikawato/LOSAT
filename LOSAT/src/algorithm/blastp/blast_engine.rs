@@ -5738,7 +5738,8 @@ fn resolve_for_formats(
         requested.outfmt = format.outfmt.to_string();
         let choice = crate::blastinput::app::parse_formatting_string(&requested.outfmt)?;
         let program = crate::blastinput::app::Program::Blastp;
-        if crate::blastinput::app::report_format(&choice, program, args.out.as_deref())?.is_none() {
+        let out = format.side_out(args.out.as_deref());
+        if crate::blastinput::app::report_format(&choice, program, out)?.is_none() {
             crate::blastinput::app::formatting_handler_check(&choice, program)?;
             crate::blastinput::app::xinclude_check(&choice)?;
         }
@@ -6331,6 +6332,12 @@ fn search(
                     x_bp_encode_block_subjects(&subjects.records, args.num_threads, pool)?;
                 crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
                 let pool = &pool.x_with_ext(&x_subjects);
+                // The caller's receivers of the side files of outfmt 13 and 14, which every
+                // block's output keeps.
+                let side_sinks: Vec<_> = formats
+                    .iter()
+                    .map(|format| format.sink.side_files().cloned())
+                    .collect();
                 let mut sinks: Vec<XBlockSink<'_>> = formats
                     .iter_mut()
                     .map(|format| XBlockSink::new(&mut format.sink))
@@ -6365,9 +6372,15 @@ fn search(
                         formats: sinks
                             .iter_mut()
                             .zip(&outfmts)
-                            .map(|(output, &outfmt)| crate::api::local_blast::FormatOutput {
-                                outfmt,
-                                sink: OutputSink::Writer(output),
+                            .zip(&side_sinks)
+                            .map(|((output, &outfmt), side)| {
+                                crate::api::local_blast::FormatOutput {
+                                    outfmt,
+                                    sink: match side {
+                                        Some(side) => OutputSink::Files(output, side.clone()),
+                                        None => OutputSink::Writer(output),
+                                    },
+                                }
                             })
                             .collect(),
                         diagnostics: &mut **diagnostics,
@@ -6602,10 +6615,7 @@ fn x_query_block_plan(
         && (subject_source.database().is_some()
             || (outputs.observer.is_some() && outputs.hits.is_none())
             || (outputs.formats.len() > 1
-                && !outputs
-                    .formats
-                    .iter()
-                    .all(|format| matches!(format.sink, OutputSink::Writer(_)))))
+                && !outputs.formats.iter().all(|format| format.sink.is_writer())))
     {
         return None;
     }
@@ -7004,10 +7014,16 @@ fn write_reports_without_queries(
         // (`PrintProlog`, `PrintEpilog`: an empty pipe), and nothing for a query file that is
         // empty (`Query is Empty!`, before the formatter).
         if let Some(kind) = blastp_xml2_kind(format.outfmt) {
+            let sink = format.sink.side_files().cloned();
             let mut writer = format.sink.open()?;
             let mut bytes = Vec::new();
-            crate::report::blast_xml2::Xml2Document::for_run(kind, false, args.out.as_deref())
-                .epilog(&mut bytes)?;
+            crate::report::blast_xml2::Xml2Document::for_run(
+                kind,
+                false,
+                args.out.as_deref(),
+                sink.as_ref(),
+            )
+            .epilog(&mut bytes)?;
             writer.write_all(&bytes)?;
             writer.flush()?;
             continue;
@@ -11708,6 +11724,8 @@ fn run_resolved_in_pool(
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
+        // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
+        let side_sink = format.sink.side_files().cloned();
         // The taxonomy database's messages of XML2 and JSON go to the diagnostics at every
         // format, and the archive saves the warnings of its batches' queries.
         let mut warnings = (warning_lines.is_some()
@@ -11884,6 +11902,7 @@ fn run_resolved_in_pool(
                                 kind,
                                 false,
                                 args.out.as_deref(),
+                                side_sink.as_ref(),
                             )
                             .epilog(&mut bytes)?;
                             writer.write_all(&bytes)?;
@@ -12117,6 +12136,7 @@ fn run_resolved_in_pool(
                             kind,
                             params,
                             args.out.as_deref(),
+                            side_sink.as_ref(),
                         );
                         // EXPERIMENT (LOSAT_X_BPQBLOCK): a block continues the document
                         // of the blocks before it and hands its state on.

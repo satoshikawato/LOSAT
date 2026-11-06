@@ -795,6 +795,7 @@ impl XSubjectSide {
     /// True when the plans of subjects of these lengths are all kept: a plan
     /// has six frames of at most `length / 3` residues and two sentinels, so
     /// `2 * length + 12` bounds `plan_bytes`.
+    #[cfg(any(feature = "parallel", test))]
     pub(super) fn all_fit(total: usize, subjects: usize) -> bool {
         total
             .saturating_mul(2)
@@ -1296,7 +1297,7 @@ pub(super) fn x_scan_unit(
         // scan_range[2] = subject->seq_ranges[0].right - wordsize;
         // if (scan_range[2] < scan_range[1])
         //     scan_range[2] = scan_range[1];
-        let mut end = right - lookup.word_length as i32;
+        let mut end = right - lookup.word_length;
         if range_index == 0 && end < left {
             end = left;
         }
@@ -2194,7 +2195,7 @@ mod tests {
                 candidate_counts[call] += 1;
                 Seed {
                     frame: frame_order[call / 2],
-                    chunk_offset: if call % 2 == 0 { 0 } else { 4_999_900 },
+                    chunk_offset: if call.is_multiple_of(2) { 0 } else { 4_999_900 },
                     query_offset: f[3].parse().unwrap(),
                     subject_offset: f[4].parse().unwrap(),
                 }
@@ -2296,7 +2297,7 @@ mod tests {
                     let call: usize = f[1].parse().unwrap();
                     Seed {
                         frame: frame_order[call / 2],
-                        chunk_offset: if call % 2 == 0 { 0 } else { 4_999_900 },
+                        chunk_offset: if call.is_multiple_of(2) { 0 } else { 4_999_900 },
                         query_offset: f[3].parse().unwrap(),
                         subject_offset: f[4].parse().unwrap(),
                     }

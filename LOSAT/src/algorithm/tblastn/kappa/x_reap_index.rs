@@ -168,7 +168,7 @@ mod tests {
             let context = (random.next() % shape.contexts as u64) as usize;
             let frame = shape.frames[(random.next() % shape.frames.len() as u64) as usize];
             let score = random.range(1, shape.scores);
-            let row = if shape.nested && !list.is_empty() && random.next() % 2 == 0 {
+            let row = if shape.nested && !list.is_empty() && random.next().is_multiple_of(2) {
                 // Inside (or at the edges of) an earlier HSP, any score, sometimes another frame
                 // or context.
                 let (outer_context, outer) = list[(random.next() % list.len() as u64) as usize];
@@ -205,7 +205,7 @@ mod tests {
                 let s = (s0, (s0 + random.range(0, shape.longest)).min(shape.span));
                 (context, hsp(frame, score, q, s))
             };
-            let row = if shape.reversed && random.next() % 6 == 0 {
+            let row = if shape.reversed && random.next().is_multiple_of(6) {
                 let (context, mut h) = row;
                 let which = random.next() % 3;
                 if which != 1 {

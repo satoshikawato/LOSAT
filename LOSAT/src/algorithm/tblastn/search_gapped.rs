@@ -8,8 +8,7 @@ use super::search_seed::{encode_tblastn_lookup_query, TranslatedChunk};
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::blastp::gapalign::{
-    blast_gapped_alignment_with_traceback_in_window,
-    blast_gapped_alignment_with_traceback_with_scratch, blastp_get_start_for_gapped_alignment,
+    blast_gapped_alignment_with_traceback_in_window, blastp_get_start_for_gapped_alignment,
     blastp_score_only_gapped_alignment_with_scratch, protein_identities_from_edit_ops,
     BlastpGappedAlignmentMode, GapAlignScratch,
 };
@@ -755,8 +754,8 @@ fn x_preliminary_protein_hsps_by_unit(
         UnitState {
             two_hit: XTwoHit::with_table(
                 table,
-                &query_sequence,
-                &init_context_offsets,
+                query_sequence,
+                init_context_offsets,
                 profile.word_xdrop,
                 profile.word_cutoff,
                 profile.matrix,
@@ -850,8 +849,8 @@ fn x_preliminary_protein_hsps_by_unit(
         }
         let gapped = score_gapped_chunk(
             queries,
-            &query_frames,
-            &context_offsets,
+            query_frames,
+            context_offsets,
             total_query_length,
             frame,
             chunk,
@@ -1664,6 +1663,7 @@ pub(super) struct TargetTranslation<'a> {
 }
 
 impl<'a> TargetTranslation<'a> {
+    #[cfg(test)]
     pub(super) fn new(subject: &'a [u8], code: &'a GeneticCode) -> Self {
         Self::of(SubjectNt::Letters(subject), code)
     }
@@ -2497,6 +2497,7 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::blastp::gapalign::blast_gapped_alignment_with_traceback_with_scratch;
     use crate::algorithm::tblastn::stage_d_linking::{
         link_preliminary_hsps, reap_by_evalue, LinkedHspList,
     };
@@ -3744,7 +3745,7 @@ mod tests {
                 },
             )
         };
-        let input = vec![
+        let input = [
             hsp(0, 100, 1, 100),
             hsp(0, 80, 1, 300),
             hsp(0, 60, 1, 500),
@@ -4050,7 +4051,7 @@ mod tests {
                     .wrapping_mul(6364136223846793005)
                     .wrapping_add(1442695040888963407);
                 let draw = (state >> 33) as usize;
-                if draw % 16 == 0 {
+                if draw.is_multiple_of(16) {
                     b"RYKMSWBDHVN-rykmswbdhvn"[draw / 16 % 23]
                 } else {
                     b"ACGTacgt"[draw / 16 % 8]
@@ -5098,7 +5099,7 @@ mod tests {
                 let call: usize = f[1].parse().unwrap();
                 InitHsp {
                     frame: [1, 2, 3, -1, -2, -3][call / 2],
-                    chunk_offset: if call % 2 == 0 { 0 } else { 4_999_900 },
+                    chunk_offset: if call.is_multiple_of(2) { 0 } else { 4_999_900 },
                     q_seed: f[3].parse().unwrap(),
                     s_seed: f[4].parse().unwrap(),
                     q_start: f[5].parse().unwrap(),
@@ -5209,7 +5210,7 @@ mod tests {
             let call: usize = f[1].parse().unwrap();
             candidate_by_call[call].push(Seed {
                 frame: frame_order[call / 2],
-                chunk_offset: if call % 2 == 0 { 0 } else { 4_999_900 },
+                chunk_offset: if call.is_multiple_of(2) { 0 } else { 4_999_900 },
                 query_offset: f[3].parse().unwrap(),
                 subject_offset: f[4].parse().unwrap(),
             });
@@ -5230,7 +5231,7 @@ mod tests {
                         (*frame, *offset),
                         (
                             frame_order[call / 2],
-                            if call % 2 == 0 { 0 } else { 4_999_900 }
+                            if call.is_multiple_of(2) { 0 } else { 4_999_900 }
                         )
                     );
                     assert_eq!(seeds, &candidate_by_call[call], "candidate call {call}");

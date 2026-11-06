@@ -914,13 +914,14 @@ impl<R: Read> FastaReader<R> {
                 if self.config.parse_deflines {
                     let line_number = self.line_number();
                     self.lines.put_line(raw);
-                    return Err(self.fasta_error(
-                        super::ParseErrorCode::Format,
-                        format!(
+                    return Err(ReadError::Parse {
+                        code: super::ParseErrorCode::NoDefline,
+                        message: format!(
                             "CFastaReader: Input doesn't start with a defline or comment around \
                              line {line_number}"
                         ),
-                    ));
+                        line: line_number,
+                    });
                 }
                 self.parse_def_line(b">");
                 need_defline = false;

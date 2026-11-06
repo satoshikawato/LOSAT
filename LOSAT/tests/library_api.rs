@@ -1803,3 +1803,47 @@ fn the_api_owns_the_inputs_and_the_outputs() {
     let error = Program::parse("makeblastdb").unwrap_err();
     assert!(error.message().contains("run_makeblastdb"), "{error}");
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 (the subjects'
+// `GetAllSeqs` turns the reader's `eNoDefline` into its own input error, with the NUL of `ends`);
+// the queries keep the reader's error. `read_inputs` ends with the command line's message for the
+// programs of either reader of the command line (BLASTX reads its files with its own).
+#[test]
+fn read_inputs_without_a_first_defline_end_with_the_command_line_message() {
+    for (program, query, subject) in [
+        (Program::Blastn, "ACGTACGTAC", "ACGTACGTAC"),
+        (Program::Blastx, "ACGTACGTAC", "MKLVEFMKLV"),
+    ] {
+        let search = validate(program, &["-parse_deflines"]).unwrap();
+        let clean_query = format!(">q1\n{query}\n");
+        let clean_subject = format!(">s1\n{subject}\n");
+        let bad_subject = format!(";c\n{subject}\n>s2\n{subject}\n");
+        let bad_query = format!(";c\n\n{query}\n");
+        let message = |error: Error| match error {
+            Error::Input(message) => message,
+            other => panic!("{program:?}: not an input error: {other}"),
+        };
+        let error =
+            read_inputs(&search, clean_query.as_bytes(), bad_subject.as_bytes()).unwrap_err();
+        assert_eq!(
+            message(error),
+            "BLAST query/options error: Query input doesn't start with a defline or comment, \
+             line 2\0\nPlease refer to the BLAST+ user manual.",
+            "{program:?}"
+        );
+        // The subjects are read first: a bad query and a bad subject end with the subjects' error.
+        let error = read_inputs(&search, bad_query.as_bytes(), bad_subject.as_bytes()).unwrap_err();
+        assert!(
+            message(error).starts_with("BLAST query/options error: "),
+            "{program:?}"
+        );
+        let error =
+            read_inputs(&search, bad_query.as_bytes(), clean_subject.as_bytes()).unwrap_err();
+        assert_eq!(
+            message(error),
+            "BLAST query error: CFastaReader: Input doesn't start with a defline or comment \
+             around line 3",
+            "{program:?}"
+        );
+    }
+}

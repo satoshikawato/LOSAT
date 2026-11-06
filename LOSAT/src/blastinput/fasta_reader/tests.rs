@@ -1108,6 +1108,85 @@ fn read_subjects_writes_messages_per_record_and_stops_at_a_range_past_the_end() 
     assert_eq!(without_range, records);
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 and
+// c++/src/app/blast/blast_app_util.hpp:172-176 (`GetAllSeqs` turns the reader's `eNoDefline`
+// into a `CInputException`: `BLAST query/options error: ... line N`, the NUL of `ends`, then the
+// manual's line, exit 1); c++/src/objtools/readers/fasta.cpp:391-396 (N is the reader's line).
+// A query read keeps the reader's own error (`GetNextSeqBatch` rethrows it).
+#[test]
+fn subjects_without_a_first_defline_end_with_the_input_error_of_get_all_seqs() {
+    for (input, line) in [
+        (&b"ACGT\n>s1\nACGT\n"[..], 1),
+        (b"ACGT", 1),
+        (b";c\n\n#x\nACGT\n>s1\nACGT\n", 4),
+        (b"   \nACGT\n>s1\nACGT\n", 2),
+        (b"  ACGT\r\n>s1\r\nACGT\r\n", 1),
+        (b">?5\nACGT\n>s1\nACGT\n", 1),
+        (b";c\n>?5\nACGT\n", 2),
+    ] {
+        let text = String::from_utf8_lossy(input);
+        for data_loaders in [false, true] {
+            let subject =
+                ReaderConfig::subject("BLASTN", false, data_loaders).with_parse_deflines(true);
+            let error = read_subjects(
+                &mut FastaInputSource::from_bytes(input, subject),
+                None,
+                &mut |_| Ok(()),
+            )
+            .unwrap_err();
+            assert_eq!(
+                native(&error),
+                (
+                    1,
+                    format!(
+                        "BLAST query/options error: Query input doesn't start with a defline or \
+                         comment, line {line}\0\nPlease refer to the BLAST+ user manual.\n"
+                    )
+                ),
+                "{text:?}"
+            );
+            let query =
+                ReaderConfig::query("BLASTN", false, data_loaders).with_parse_deflines(true);
+            let error = FastaInputSource::from_bytes(input, query)
+                .next_sequence(&mut |_| Ok(()))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    &error,
+                    ReadError::Parse {
+                        code: ParseErrorCode::NoDefline,
+                        line: at,
+                        ..
+                    } if *at == line
+                ),
+                "{text:?} {error:?}"
+            );
+            assert_eq!(
+                native(&error.into_app_error()),
+                (
+                    1,
+                    format!(
+                        "BLAST query error: CFastaReader: Input doesn't start with a defline or \
+                         comment around line {line}\n"
+                    )
+                ),
+                "{text:?}"
+            );
+        }
+    }
+    // Without -parse_deflines the first letters are a record without a defline.
+    let records = read_subjects(
+        &mut FastaInputSource::from_bytes(
+            b"ACGT\n>s1\nACGT\n",
+            ReaderConfig::subject("BLASTN", false, false),
+        ),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(records.len(), 2);
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184 (a reader
 // exception while the subjects are read is `BLAST query error: <msg>`, exit 1; the
 // messages of the records before it were written).

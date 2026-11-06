@@ -139,7 +139,7 @@ ABI v2 §7 を基にするが、入力の渡し方が違う。
 
 ### 3.4 隠すもの
 
-- `lib.rs` の `api` 以外の `pub mod` に `#[doc(hidden)]` を付ける。項目は今までどおり使えるが、docs.rs に出ず、semver の保証外（README と crate の doc に書く）。`api` が再 export する `FastaRecord` 等は `blastinput` の中にあるので、再 export の側だけを文書化する。
+- `lib.rs` の `api` 以外の `pub mod` に `#[doc(hidden)]` を付ける。項目は今までどおり使えるが、docs.rs に出ず、semver の保証外（README と crate の doc に書く）。`api` が再 export する `FastaRecord` 等は `blastinput` の中にあるので、再 export の側だけを文書化する（これは rustdoc に出なかった。`FastaRecord` は §14.1 の P-D1 で crate 直下の private module に移した）。
 - 進捗バーは `ReportOutputs` に `progress: Option<...>` を足して CLI（`main.rs`）だけが渡すか、indicatif を optional dependency にして CLI の feature だけで有効にする（LIB-1 で決める）。
 - `anyhow::Error` は `api::Error` に包む。`clap` は argv が API なので必須 dependency のまま。
 
@@ -520,4 +520,4 @@ binding は API が持つものを Python の形にするだけで、engine の�
 | semver | `semver checks (report)`：PR の base の commit と cargo-semver-checks 0.51.0 で比べ、結果を job summary と warning に書く。最初の公開までは報告だけ（版は `0.2.0` のままで、比べる相手の版が無い）。公開の後は、公開した版を基準にした gate にする |
 | toolchain | 両方 `nightly-2026-05-24`。cargo-public-api は stable を `nightly` に切り替え、rustdoc JSON の形式 57 だけを読む（形式 57 を書くのは 2025-11-22〜2026-06-23 の nightly）。cargo-semver-checks 0.51 は形式 57、60、61 を読み、1.92.0 の形式 56 は読めない。版の組は script と `ci.yml` の 2 か所にあり、`test_check_public_api.py` が一致を見る。script は何も入れない（無ければ入れ方を示して終わる） |
 
-見つかったこと：`api` が再公開する `FastaRecord` は、定義が `#[doc(hidden)]` の `blastinput` にあるため、rustdoc（HTML と JSON）から型ごと消える（`#[doc(inline)]` を付けても戻らない、2026-11-06 に確認）。一覧には `pub use LOSAT::api::FastaRecord` の 1 行だけで、`read_fasta` と `read_inputs` の型には `crate::blastinput::fasta_reader::FastaRecord` が出る。docs.rs では入力の型の説明が出ず、2 つの検査もその型の変更を見ない。直すのは別の PR（定義を `api` に移し、`blastinput` はそれを使う）。
+見つかったこと：`api` が再公開する `FastaRecord` は、定義が `#[doc(hidden)]` の `blastinput` にあるため、rustdoc（HTML と JSON）から型ごと消える（`#[doc(inline)]` を付けても戻らない、2026-11-06 に確認）。一覧には `pub use LOSAT::api::FastaRecord` の 1 行だけで、`read_fasta` と `read_inputs` の型には `crate::blastinput::fasta_reader::FastaRecord` が出る。docs.rs では入力の型の説明が出ず、2 つの検査もその型の変更を見ない。P-D1（PR `fix/lib-fastarecord-docs`）で直した：定義（struct と `new`、`seq`、`title`）を crate 直下の private module `record` に移し、`api` と `blastinput::fasta_reader` の両方から再公開する。rustdoc は private module の項目の再公開を inline するので、`api::FastaRecord` の頁と一覧の行（4 つの field、3 つの method、derive と auto trait の impl）ができ、`read_fasta` と `read_inputs` の型は `LOSAT::api::FastaRecord` になる。engine の method（`#[doc(hidden)]` の impl）と `RecordSource` は隠しモジュールの `fasta_reader` に残る。`api` に定義して `blastinput` が import する形は、下位の module が `api` に依存するので取らなかった。

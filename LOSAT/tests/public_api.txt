@@ -1,6 +1,5 @@
 pub mod LOSAT
 pub mod LOSAT::api
-pub use LOSAT::api::FastaRecord
 #[non_exhaustive] pub enum LOSAT::api::Error
 pub LOSAT::api::Error::Argv(alloc::string::String)
 pub LOSAT::api::Error::Input(alloc::string::String)
@@ -180,6 +179,32 @@ impl core::marker::Unpin for LOSAT::api::Description
 impl core::marker::UnsafeUnpin for LOSAT::api::Description
 impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::Description
 impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::Description
+#[non_exhaustive] pub struct LOSAT::api::FastaRecord
+pub LOSAT::api::FastaRecord::local_id: alloc::string::String
+pub LOSAT::api::FastaRecord::sequence: alloc::vec::Vec<u8>
+pub LOSAT::api::FastaRecord::title: alloc::vec::Vec<u8>
+pub LOSAT::api::FastaRecord::warnings: alloc::vec::Vec<u8>
+impl LOSAT::api::FastaRecord
+pub fn LOSAT::api::FastaRecord::new(impl core::convert::Into<alloc::string::String>, &[u8], &[u8]) -> Self
+pub fn LOSAT::api::FastaRecord::seq(&self) -> &[u8]
+pub fn LOSAT::api::FastaRecord::title(&self) -> &[u8]
+impl core::clone::Clone for LOSAT::api::FastaRecord
+pub fn LOSAT::api::FastaRecord::clone(&self) -> LOSAT::api::FastaRecord
+impl core::cmp::Eq for LOSAT::api::FastaRecord
+impl core::cmp::PartialEq for LOSAT::api::FastaRecord
+pub fn LOSAT::api::FastaRecord::eq(&self, &LOSAT::api::FastaRecord) -> bool
+impl core::default::Default for LOSAT::api::FastaRecord
+pub fn LOSAT::api::FastaRecord::default() -> LOSAT::api::FastaRecord
+impl core::fmt::Debug for LOSAT::api::FastaRecord
+pub fn LOSAT::api::FastaRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for LOSAT::api::FastaRecord
+impl core::marker::Freeze for LOSAT::api::FastaRecord
+impl core::marker::Send for LOSAT::api::FastaRecord
+impl core::marker::Sync for LOSAT::api::FastaRecord
+impl core::marker::Unpin for LOSAT::api::FastaRecord
+impl core::marker::UnsafeUnpin for LOSAT::api::FastaRecord
+impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::FastaRecord
+impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::FastaRecord
 #[non_exhaustive] pub struct LOSAT::api::HspRecord
 pub LOSAT::api::HspRecord::bit_score: f64
 pub LOSAT::api::HspRecord::comp_adjust_method: core::option::Option<u8>
@@ -230,9 +255,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for LOSAT::api::HspRecord
 impl core::panic::unwind_safe::UnwindSafe for LOSAT::api::HspRecord
 pub struct LOSAT::api::Inputs<'a>
 impl<'a> LOSAT::api::Inputs<'a>
-pub fn LOSAT::api::Inputs<'a>::database(&'a [FastaRecord], &'a str) -> Self
+pub fn LOSAT::api::Inputs<'a>::database(&'a [LOSAT::api::FastaRecord], &'a str) -> Self
 pub fn LOSAT::api::Inputs<'a>::named(self, &'a str, &'a str) -> Self
-pub fn LOSAT::api::Inputs<'a>::new(&'a [FastaRecord], &'a [FastaRecord]) -> Self
+pub fn LOSAT::api::Inputs<'a>::new(&'a [LOSAT::api::FastaRecord], &'a [LOSAT::api::FastaRecord]) -> Self
 impl<'a> core::clone::Clone for LOSAT::api::Inputs<'a>
 pub fn LOSAT::api::Inputs<'a>::clone(&self) -> LOSAT::api::Inputs<'a>
 impl<'a> core::fmt::Debug for LOSAT::api::Inputs<'a>
@@ -393,9 +418,9 @@ impl<'a> core::panic::unwind_safe::UnwindSafe for LOSAT::api::SubjectHits<'a>
 pub const LOSAT::api::API_OWNED: &[&str]
 pub const LOSAT::api::VERSION: &str
 pub fn LOSAT::api::describe(LOSAT::api::Program) -> LOSAT::api::Description
-pub fn LOSAT::api::read_fasta(LOSAT::api::Program, LOSAT::api::Role, &[u8]) -> core::result::Result<alloc::vec::Vec<crate::blastinput::fasta_reader::FastaRecord>, LOSAT::api::Error>
+pub fn LOSAT::api::read_fasta(LOSAT::api::Program, LOSAT::api::Role, &[u8]) -> core::result::Result<alloc::vec::Vec<LOSAT::api::FastaRecord>, LOSAT::api::Error>
 pub fn LOSAT::api::read_input_file(LOSAT::api::Role, &std::path::Path) -> core::result::Result<alloc::vec::Vec<u8>, LOSAT::api::Error>
-pub fn LOSAT::api::read_inputs(&LOSAT::api::Search, &[u8], &[u8]) -> core::result::Result<(alloc::vec::Vec<crate::blastinput::fasta_reader::FastaRecord>, alloc::vec::Vec<crate::blastinput::fasta_reader::FastaRecord>), LOSAT::api::Error>
+pub fn LOSAT::api::read_inputs(&LOSAT::api::Search, &[u8], &[u8]) -> core::result::Result<(alloc::vec::Vec<LOSAT::api::FastaRecord>, alloc::vec::Vec<LOSAT::api::FastaRecord>), LOSAT::api::Error>
 pub fn LOSAT::api::run(&LOSAT::api::Search, LOSAT::api::Inputs<'_>, &mut [(&str, &mut (dyn std::io::Write + core::marker::Send))], &mut (dyn std::io::Write + core::marker::Send)) -> core::result::Result<(), LOSAT::api::Error>
 pub fn LOSAT::api::run_batches<'a>(&'a LOSAT::api::Search, LOSAT::api::Inputs<'a>) -> core::result::Result<LOSAT::api::Batches<'a>, LOSAT::api::Error>
 pub fn LOSAT::api::run_blastdbcmd(&[&str], &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), LOSAT::api::Error>

@@ -6,8 +6,8 @@ The working records of those lines (plans, state, decision logs) are kept outsid
 This file gives each cited ID one row: what it is, its state, its main pull requests, and the document
 in this repository that holds its fullest record ("external" when there is none).
 
-As of dev 48648ac76 (2026-11-05): 152 IDs cited in the tree, 97 of them in `CHANGELOG.md`, `changelog.d/`
-and `docs/`. State: 140 done, 12 in progress, 0 stopped.
+As of dev 17bf5086a (2026-11-05): 154 IDs cited in the tree, 99 of them in `CHANGELOG.md`, `changelog.d/`
+and `docs/`. State: 141 done, 13 in progress, 0 stopped.
 
 - `python3 scripts/line_ids.py list --all` lists the IDs the tree cites, with the number of citing
   lines and the first one; `python3 scripts/line_ids.py check` names the IDs that `CHANGELOG.md`,
@@ -55,6 +55,7 @@ and `docs/`. State: 140 done, 12 in progress, 0 stopped.
 | `DBID ID4f` | Made blastn's outfmt 0 build its alignment rows for a window of queries at a time, as NCBI does, cutting memory on databases with parsed Seq-ids. | done | #598 | changelog entry `fix-dbid-pairwise-rows` |
 | `DBID ID4t` | tblastx -db memory fixes: hit lists kept inside the batch search (#604), outfmt 0 rows built per query window (#607), reports written as each batch is taken (fix 2b, #619). | done | #604, #607, #619, #673 | changelog entry `feature-dbid-tbxstream` |
 | `DBID L1` | Made a tabular report whose only alignment field is nident read a subject, and so write taxonomy messages, only on rows with identities, as NCBI does with the prefetch off. | done | #830 | [LOSAT/tests/db_search/README.md](../../LOSAT/tests/db_search/README.md), “`nident` alone and HSPs without identities (line DBID, L1)” |
+| `DBID L1b` | Made tblastn and tblastx without the report stream refuse a run for NCBI's taxonomy cache only where NCBI fetches a subject, not for fields that read none or for batches without hits. | done | #864 | [LOSAT/tests/db_search/README.md](../../LOSAT/tests/db_search/README.md), “Rows `db.nz.cq.*` (line DBID, L1b)” |
 | `DBID N1` | Made -db searches refuse a reported subject whose Seq-align id NCBI's lookup finds in another sequence first, instead of printing the wrong sequence's names. | done | #683 | [LOSAT/tests/db_search/README.md](../../LOSAT/tests/db_search/README.md), “Databases with parsed Seq-ids (line DBID, ID2a)” |
 | `DBID N1b` | Made the same record with other tax ids in databases read together refuse only where reports show the copies apart; later also for titles made from tax ids. | done | #765, #785 | [LOSAT/tests/db_search/README.md](../../LOSAT/tests/db_search/README.md), “Databases with parsed Seq-ids (line DBID, ID2a)” |
 | `DBID N2a` | Made -db searches refuse a stored gnl\|BL_ORD_ID\|n whose n is not the sequence's own number, since NCBI looks it up by that id and reads another sequence. | done | #730 | [LOSAT/tests/db_search/README.md](../../LOSAT/tests/db_search/README.md), “Databases with parsed Seq-ids (line DBID, ID2a)” |

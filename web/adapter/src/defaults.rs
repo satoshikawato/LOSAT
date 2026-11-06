@@ -28,16 +28,6 @@ const HIT_LIST: [(&str, &[&str]); 3] = [
     ("-num_alignments", &["-max_target_seqs"]),
 ];
 
-/// The tasks of BLASTN's parser, which has no possible values to list (NCBI's task names
-/// for nucleotide-nucleotide searches; the engine accepts those it runs).
-const BLASTN_TASK_NAMES: [&str; 5] = [
-    "megablast",
-    "dc-megablast",
-    "blastn",
-    "blastn-short",
-    "rmblastn",
-];
-
 /// The word sizes tried for the values that a given word size changes (`by`): the
 /// engine's own resolution decides which it accepts and what changes.
 const WORD_SIZE_PROBES: std::ops::RangeInclusive<u32> = 1..=32;
@@ -227,12 +217,6 @@ fn tasks(program: Program) -> Vec<String> {
         .iter()
         .map(|value| value.get_name().to_string())
         .collect();
-    if names.is_empty() {
-        names = BLASTN_TASK_NAMES
-            .iter()
-            .map(|name| name.to_string())
-            .collect();
-    }
     names.retain(|name| resolved(&words(program, name, &[])).is_ok());
     names
 }

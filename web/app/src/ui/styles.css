@@ -1816,10 +1816,11 @@ label.inline {
   right: 0;
 }
 
-/* Rows are buttons: none of the button look, and the tables' weight, so that the rows' ch are
-   the header's ch (the columns are sized in ch). */
+/* The query list's rows are buttons and the tables' rows are grid rows: none of the button look,
+   and the tables' weight, so that the rows' ch are the header's ch (the columns are sized in ch). */
 .pick-row,
 .table-row {
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
   border: none;
@@ -1831,7 +1832,18 @@ label.inline {
   padding: 0 8px;
   color: var(--fg);
   font-weight: 400;
+  cursor: pointer;
+  /* As the buttons they were: a long press on a phone does not select the cells' text. */
+  -webkit-user-select: none;
+  user-select: none;
   transition: background-color 0.15s;
+}
+
+/* The rows' focus ring is inside the row: the list's scroll box would cut a ring outside it. */
+.pick-row:focus-visible,
+.table-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .pick-row:active:not(:disabled),
@@ -1975,8 +1987,9 @@ label.inline {
   white-space: nowrap;
 }
 
+/* 5.1:1 on the selected row's background (the error colour #b84f00 is 4.4:1 there; axe, W6). */
 .orientation[data-orientation='reverse'] {
-  color: #b84f00;
+  color: #a84800;
 }
 
 .orientation[data-orientation='unknown'] {

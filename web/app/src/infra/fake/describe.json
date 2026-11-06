@@ -86,7 +86,13 @@
     "flag": "-task",
     "help": "Task to execute: megablast, blastn, dc-megablast or blastn-short",
     "takes_value": true,
-    "default": "megablast"
+    "default": "megablast",
+    "choices": [
+     "megablast",
+     "dc-megablast",
+     "blastn",
+     "blastn-short"
+    ]
    },
    {
     "flag": "-template_type",

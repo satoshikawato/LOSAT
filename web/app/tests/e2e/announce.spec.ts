@@ -9,6 +9,7 @@ import { gzipSync } from 'node:zlib';
 import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';
 import { exampleById } from '../../src/domain/examples';
+import { axeViolations } from './support/axe';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { focused, forget, listen, told } from './support/live';
 import { chooseRun, fasta, openFiles, openSearch, paste, program, settled, submit, waitStatus } from './support/search';
@@ -323,4 +324,50 @@ test('"Show all" of the Graphic Summary moves the focus to the first subject tha
   await expect(canvas).toHaveAttribute('data-rows', '120');
   expect(await focused(page)).toBe('graphic-canvas');
   await expect.poll(() => told(page, 'status')).toContainEqual(expect.stringMatching(/^Subject 101 of 120: /));
+});
+
+/** The development build's banner (the FakeEngine) is outside the page's landmarks; the engine build has none. */
+const NOT_THE_APP = ['[data-testid="fake-engine-banner"]'];
+
+/** axe's violations in the page, once the colours of a tab just chosen have ended their short transition. */
+async function violations(page: Page) {
+  await page.evaluate(() =>
+    Promise.all(document.getAnimations().filter((animation) => animation instanceof CSSTransition).map((animation) => animation.finished)),
+  );
+  return axeViolations(page, ['body'], NOT_THE_APP);
+}
+
+test('axe finds nothing on the pages that these changes touch', async ({ page }) => {
+  await start(page);
+  await program(page, 'blastp');
+  await paste(page, 'query', `>q1\n${PROTEIN}\n`);
+  await openFiles(page, 'subject', [
+    { name: 'a.fa', text: THREE_SUBJECTS },
+    { name: 'b.fa', text: `>b\n${dna(5, 40)}\n` },
+  ]);
+  expect(await violations(page)).toEqual([]);
+  const queries = Array.from({ length: 60 }, (_, i) => `>q${i + 1}\n${letters('ACDEFGHIKLMNPQRSTVWY', 300 + i, 40)}${PROTEIN}\n`).join('');
+  await paste(page, 'query', queries);
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  expect(await violations(page)).toEqual([]);
+  for (const [tab, shown] of [
+    ['pane-dotplot', 'dotplot-canvas'],
+    ['results-view-details', 'run-record'],
+    ['results-view-outputs', 'result-output'],
+  ] as const) {
+    await page.getByTestId(tab).click();
+    await expect(page.getByTestId(shown)).toBeVisible();
+    if (tab === 'results-view-outputs') {
+      await page.getByTestId('format-0').click();
+      await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:0');
+    }
+    expect(await violations(page), tab).toEqual([]);
+  }
+  // A phone's width: the alignment texts scroll sideways.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByTestId('results-view-hits').click();
+  await expect(page.getByTestId('detail-section')).toBeVisible();
+  expect(await violations(page)).toEqual([]);
 });

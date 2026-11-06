@@ -105,19 +105,13 @@ impl XRedoSubject<'_> {
 
 impl<'a> XRedoSubjects<'a> {
     /// The number of subjects.
-    #[cfg_attr(
+    #[cfg(any(
+        test,
         all(
-            not(test),
-            not(all(
-                feature = "parallel",
-                any(not(target_arch = "wasm32"), feature = "wasm-threads")
-            ))
-        ),
-        expect(
-            dead_code,
-            reason = "used only with `parallel` threads: called only by the parallel redo (x_redo_par) and by unit tests"
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
         )
-    )]
+    ))]
     pub(crate) fn len(&self) -> usize {
         match self {
             Self::Encoded(subjects) => subjects.len(),
@@ -126,19 +120,13 @@ impl<'a> XRedoSubjects<'a> {
     }
 
     /// The number of residues of the subject `s_idx`, if there is one.
-    #[cfg_attr(
+    #[cfg(any(
+        test,
         all(
-            not(test),
-            not(all(
-                feature = "parallel",
-                any(not(target_arch = "wasm32"), feature = "wasm-threads")
-            ))
-        ),
-        expect(
-            dead_code,
-            reason = "used only with `parallel` threads: called only by the parallel redo (x_redo_par) and by unit tests"
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
         )
-    )]
+    ))]
     pub(crate) fn aa_len(&self, s_idx: usize) -> Option<usize> {
         match self {
             Self::Encoded(subjects) => subjects.get(s_idx).map(|subject| subject.aa_len),

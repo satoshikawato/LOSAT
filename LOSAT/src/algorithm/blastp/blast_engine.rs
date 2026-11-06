@@ -2642,7 +2642,7 @@ struct SubjectIdFields<'a> {
 }
 
 impl<'a> SubjectIdFields<'a> {
-    /// One id for the three fields.
+    /// The fields of one id.
     fn same(id: &'a [u8]) -> Self {
         SubjectIdFields {
             accession_version: id,
@@ -12991,7 +12991,7 @@ mod tests {
         assert_eq!(plain_diag.last_hit(), 90);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:554-561
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:566-573
     // ```c
     // if (query_offset - diff <
     //     query_info->contexts[curr_context].query_offset) {
@@ -13002,7 +13002,7 @@ mod tests {
     // ```
     #[test]
     fn test_blastp_two_hit_cross_query_reject_uses_context_start() {
-        // aa_ungapped.c:554: the hit is rejected when `query_offset - diff` lies before the
+        // aa_ungapped.c:566: the hit is rejected when `query_offset - diff` lies before the
         // context's start. The two cases are checked when the test is compiled.
         const fn rejected(query_offset: i32, diff: i32, context_start: i32) -> bool {
             query_offset - diff < context_start

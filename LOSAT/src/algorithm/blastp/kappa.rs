@@ -341,7 +341,7 @@ impl XSharedSubjectRanges {
         )),
         expect(
             dead_code,
-            reason = "used only with `parallel` threads: called only by the parallel redo (x_redo_par)"
+            reason = "used only with `parallel` threads: by the parallel redo (x_redo_par) and the parallel kappa redo of run_resolved_in_pool"
         )
     )]
     pub(crate) fn new() -> Self {
@@ -422,16 +422,10 @@ impl BlastpKappaSubjectRangeCache {
     // No NCBI counterpart: constructor that selects the search-wide store (see
     // XSharedSubjectRanges); it does not change any value NCBI computes.
     /// A cache backed by the search-wide store (`None`: the cache keeps its own map).
-    #[cfg_attr(
-        not(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )),
-        expect(
-            dead_code,
-            reason = "used only with `parallel` threads: called only by the parallel redo (x_redo_par)"
-        )
-    )]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     pub(crate) fn x_with_shared(shared: Option<std::sync::Arc<XSharedSubjectRanges>>) -> Self {
         Self {
             masked_ranges: HashMap::new(),

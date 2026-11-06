@@ -301,7 +301,6 @@ impl Default for BlastCompoHeapRecord {
 #[derive(Debug, Clone)]
 pub(crate) struct BlastCompoHeap {
     pub n: usize,
-    pub capacity: usize,
     pub heap_threshold: usize,
     pub ecutoff: f64,
     pub worst_evalue: f64,
@@ -312,12 +311,10 @@ pub(crate) struct BlastCompoHeap {
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:50-57
 // ```c
 // #define HEAP_INITIAL_CAPACITY 100
-// #define HEAP_RESIZE_FACTOR 1.5
-// #define HEAP_MIN_RESIZE 100
 // ```
+// (`HEAP_RESIZE_FACTOR` 1.5 and `HEAP_MIN_RESIZE` 100 size the C array's growth; the `Vec` grows
+// by itself.)
 const COMPO_HEAP_INITIAL_CAPACITY: usize = 100;
-const COMPO_HEAP_MIN_RESIZE: usize = 100;
-const COMPO_HEAP_RESIZE_FACTOR: f64 = 1.5;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:53-54
 // ```c
@@ -449,6 +446,7 @@ fn compo_heapify_up(heap_array: &mut [BlastCompoHeapRecord], mut i: usize) {
 //    return result;
 // }
 // ```
+#[cfg(test)]
 pub(crate) fn score_compare_hits(a: &Hit, b: &Hit) -> Ordering {
     let (a_q_offset, a_q_end) = (a.q_start.saturating_sub(1), a.q_end);
     let (b_q_offset, b_q_end) = (b.q_start.saturating_sub(1), b.q_end);
@@ -814,7 +812,6 @@ impl BlastCompoHeap {
         array.push(BlastCompoHeapRecord::default());
         Self {
             n: 0,
-            capacity,
             heap_threshold,
             ecutoff,
             worst_evalue: 0.0,
@@ -1286,6 +1283,7 @@ impl<H: HitListHsp> BlastpHitList<H> {
 //    ...
 // }
 // ```
+#[cfg(test)]
 pub(crate) fn purge_hits_with_common_endpoints(hits: Vec<Hit>) -> Vec<Hit> {
     let (hits, _) = purge_hits_with_common_endpoints_ex(hits, true);
     hits
@@ -1770,6 +1768,7 @@ fn purge_hits_for_subject_ex(hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usize) {
 //    return hsp_count;
 // }
 // ```
+#[cfg(test)]
 fn purge_hits_for_subject_ex_with_stats(
     hits: Vec<Hit>,
     purge: bool,
@@ -1878,18 +1877,6 @@ fn purge_hits_for_subject_ex_impl<const TRACK_STATS: bool>(
     hits.extend(trimmed_hits);
     debug_assert!(!TRACK_STATS || extra_start + purged_count == len);
     (hits, extra_start, stats)
-}
-
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-180
-// ```c
-// typedef struct BlastHSPList { ... } BlastHSPList;
-// typedef struct BlastHitList { ... } BlastHitList;
-// ```
-pub(crate) fn collect_hits_from_hit_lists(hit_lists: &[Option<BlastpHitList>]) -> Vec<Hit> {
-    collect_hits_and_methods_from_hit_lists(hit_lists)
-        .into_iter()
-        .map(|(hit, _)| hit)
-        .collect()
 }
 
 /// `collect_hits_from_hit_lists` with each HSP's `comp_adjustment_method`, which the

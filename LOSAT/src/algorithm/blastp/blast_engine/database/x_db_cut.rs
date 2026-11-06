@@ -68,8 +68,8 @@ use crate::seqdb::SeqDb;
 use crate::utils::threading::SearchPool;
 
 use super::{
-    read_search_block, search_blocks_of, BlastpDatabase, BlastpHitList, BlastpSubjectRef,
-    BlastpSubjectResult, BlastpSubjectScratch, PrelimSink, XPrelimHsp, BLOCK_BYTES,
+    read_search_block, search_blocks_of, BlastpDatabase, BlastpSubjectRef, BlastpSubjectResult,
+    BlastpSubjectScratch, PrelimSink, BLOCK_BYTES,
 };
 
 // No NCBI counterpart: reads the LOSAT_X_BPDBCUT switch once; it does not change any value NCBI
@@ -116,6 +116,7 @@ pub(super) fn x_sequence_bytes(database: &BlastpDatabase) -> u64 {
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
 /// The block size of the search of `database` on `pool`: the cut when the pool searches the rounds
 /// with more than one thread, else `BLOCK_BYTES`.
+#[cfg(test)]
 pub(super) fn x_db_cut_block_bytes(database: &BlastpDatabase, pool: &SearchPool<'_>) -> u64 {
     x_keep_cap(x_db_cut_bytes(database, pool))
 }

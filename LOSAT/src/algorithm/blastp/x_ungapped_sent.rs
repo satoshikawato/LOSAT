@@ -432,7 +432,7 @@ mod tests {
                 2 => 100 + rng.below(600) as usize,
                 _ => 600 + rng.below(3000) as usize,
             };
-            let dmax = [4, 16, 40, 127][(round / 4 % 4) as usize];
+            let dmax = [4, 16, 40, 127][round / 4 % 4];
             // residues 1..=27, so every code except the sentinel appears
             let q = random_seq(&mut rng, len, 1, 28);
             let rate = 2 + rng.below(12);

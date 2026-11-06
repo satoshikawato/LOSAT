@@ -3,15 +3,16 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
 
-use crate::common::{GapEditOp, Hit};
+use crate::common::GapEditOp;
+#[cfg(test)]
+use crate::common::Hit;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::AdjustedProteinMatrix;
-use crate::stats::karlin::{bit_score as calc_bit_score, evalue_from_raw_score};
-use crate::stats::KarlinParams;
 use crate::utils::matrix::{
     blosum62_ncbistdaa_score_row, blosum62_score_ncbistdaa_direct, protein_score,
 };
 
+#[cfg(test)]
 use super::alignment::build_alignment_view_with_matrix;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:363-371
@@ -436,11 +437,6 @@ pub(crate) struct BlastpGapAlignResult {
     pub subject_stop: i32,
     pub score: i32,
     pub edit_script: Vec<GapEditOp>,
-    pub num_ident: usize,
-    pub num_positives: usize,
-    pub mismatches: usize,
-    pub gap_opens: usize,
-    pub gap_letters: usize,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4077-4091
@@ -2610,20 +2606,12 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
 
         let op_type = script & SCRIPT_OP_MASK;
         if op_type == SCRIPT_GAP_IN_A {
-            if b_index > 0 {
-                b_index -= 1;
-            }
+            b_index = b_index.saturating_sub(1);
         } else if op_type == SCRIPT_GAP_IN_B {
-            if a_index > 0 {
-                a_index -= 1;
-            }
+            a_index = a_index.saturating_sub(1);
         } else {
-            if a_index > 0 {
-                a_index -= 1;
-            }
-            if b_index > 0 {
-                b_index -= 1;
-            }
+            a_index = a_index.saturating_sub(1);
+            b_index = b_index.saturating_sub(1);
         }
         push_trace_op(&mut scratch.trace_ops_reversed, op_type);
     }
@@ -2664,6 +2652,7 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
 // ```c
 // Int2 BLAST_GappedAlignmentWithTraceback(...);
 // ```
+#[cfg(test)]
 pub(crate) fn blast_gapped_alignment_with_traceback(
     query: &[u8],
     subject: &[u8],
@@ -2803,7 +2792,7 @@ fn gapped_alignment_with_traceback(
     gap_extend: i32,
     x_drop: i32,
     scratch: &mut GapAlignScratch,
-    mut fence_hit_out: Option<&mut bool>,
+    fence_hit_out: Option<&mut bool>,
 ) -> Option<BlastpGapAlignResult> {
     let subject_length = window_length.unwrap_or(subject.len());
     if q_start >= query.len() || s_start >= subject_length {
@@ -2927,7 +2916,7 @@ fn gapped_alignment_with_traceback(
     // NCBI c++/src/algo/blast/core/blast_gapalign.c:4620-4643:
     // if ((! (fence_hit && *fence_hit)) && ...) { /* right extension */ }
     // The caller must see the fence flag before deciding whether to retry.
-    if let Some(out) = fence_hit_out.as_deref_mut() {
+    if let Some(out) = fence_hit_out {
         *out = fence_hit;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4714-4718
@@ -2943,18 +2932,6 @@ fn gapped_alignment_with_traceback(
     // cutoff/reap decisions; preserve that payload here.
     let score = score_left + score_right;
 
-    let (num_ident, num_positives, mismatches, gap_opens, gap_letters) =
-        stats_from_edit_ops_protein(
-            query,
-            subject,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:764-765: q = (Uint1*) &query[q_off]; s = (Uint1*) &subject[s_off];
-            // ALIGN_EX's consumed left extents never exceed start+1; starts remain valid array offsets.
-            usize::try_from(query_start).expect("NCBI traceback query start is non-negative"),
-            usize::try_from(subject_start).expect("NCBI traceback subject start is non-negative"),
-            &edit_script,
-            matrix,
-        );
-
     Some(BlastpGapAlignResult {
         query_start,
         query_stop,
@@ -2962,11 +2939,6 @@ fn gapped_alignment_with_traceback(
         subject_stop,
         score,
         edit_script,
-        num_ident,
-        num_positives,
-        mismatches,
-        gap_opens,
-        gap_letters,
     })
 }
 
@@ -3199,108 +3171,6 @@ pub(crate) fn blastp_score_only_gapped_alignment(
     )
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1935-1948
-// ```c
-// BLAST_GappedAlignmentWithTraceback(context->prog_number,
-//                                    query_data->data,
-//                                    subject_data->data, gapAlign,
-//                                    context->scoringParams,
-//                                    q_start, s_start,
-//                                    query_data->length,
-//                                    subject_data->length,
-//                                    &fence_hit);
-// ```
-pub(crate) fn traceback_preliminary_blastp_hsp(
-    preliminary_hsp: &BlastpPreliminaryHsp,
-    query: &[u8],
-    subject: &[u8],
-    matrix: ScoringMatrix,
-    gap_open: i32,
-    gap_extend: i32,
-    x_drop: i32,
-    params: &KarlinParams,
-    effective_space: f64,
-) -> Hit {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1924-1946
-    // ```c
-    // q_start = hsp->query.gapped_start - query_range->begin;
-    // s_start = hsp->subject.gapped_start - subject_range->begin;
-    // status = BLAST_GappedAlignmentWithTraceback(..., q_start, s_start, ...);
-    // ```
-    let q_start = usize::try_from(preliminary_hsp.gapped_query_start)
-        .expect("NCBI BLAST traceback requires non-negative preliminary gapped query start");
-    let s_start = usize::try_from(preliminary_hsp.gapped_subject_start)
-        .expect("NCBI BLAST traceback requires non-negative preliminary gapped subject start");
-    let aligned = blast_gapped_alignment_with_traceback(
-        query, subject, q_start, s_start, matrix, None, gap_open, gap_extend, x_drop,
-    )
-    .expect("NCBI BLAST traceback helper must produce a gapped alignment");
-
-    let alignment_len = aligned
-        .edit_script
-        .iter()
-        .map(|op| op.num() as usize)
-        .sum::<usize>();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:151-182
-    // ```c
-    // Blast_HSPInit(Int4 query_start, Int4 query_end, Int4 subject_start,
-    //               Int4 subject_end, ...)
-    // {
-    //    new_hsp->query.offset = query_start;
-    //    new_hsp->query.end = query_end;
-    //    new_hsp->subject.offset = subject_start;
-    //    new_hsp->subject.end = subject_end;
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:151-178
-    // ```c
-    // new_hsp->query.offset = query_start;
-    // new_hsp->subject.offset = subject_start;
-    // new_hsp->query.end = query_end;
-    // new_hsp->subject.end = subject_end;
-    // ```
-    assert!(
-        alignment_len > 0,
-        "NCBI BLAST traceback helper must not discard zero-length alignments as None"
-    );
-
-    let identity = 100.0 * (aligned.num_ident as f64) / (alignment_len as f64);
-    Hit {
-        identity,
-        length: alignment_len,
-        mismatch: aligned.mismatches as i64,
-        gapopen: aligned.gap_opens,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-520,583: fence_error is handled before Blast_HSPUpdateWithTraceback.
-        // This full-sequence BLASTP caller has no translation fence and converts only report coordinates.
-        q_start: usize::try_from(aligned.query_start + 1).expect("BLASTP report query start"),
-        q_end: usize::try_from(aligned.query_stop).expect("BLASTP report query end"),
-        s_start: usize::try_from(aligned.subject_start + 1).expect("BLASTP report subject start"),
-        s_end: usize::try_from(aligned.subject_stop).expect("BLASTP report subject end"),
-        e_value: evalue_from_raw_score(aligned.score, params, effective_space),
-        bit_score: calc_bit_score(aligned.score, params),
-        num_ident: aligned.num_ident,
-        query_frame: preliminary_hsp.query_frame,
-        query_length: preliminary_hsp.query_length,
-        q_idx: preliminary_hsp.q_idx,
-        s_idx: preliminary_hsp.s_idx,
-        raw_score: aligned.score,
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
-        // ```c
-        // typedef struct BlastHSP {
-        //    BlastSeg query;
-        //    BlastSeg subject;
-        // } BlastHSP;
-        // ```
-        sort_query_offset: 0,
-        sort_query_end: 0,
-        sort_subject_offset: 0,
-        sort_subject_end: 0,
-        has_sort_offsets: false,
-        gap_info: Some(aligned.edit_script),
-        num_positives: aligned.num_positives,
-    }
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:647-662
 // ```c
 // for (index=extra_start; index < hsp_list->hspcnt; index++) {
@@ -3320,6 +3190,7 @@ pub(crate) fn traceback_preliminary_blastp_hsp(
 // ...
 // Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
 // ```
+#[cfg(test)]
 fn refresh_blastp_hit_statistics(
     hit: &mut Hit,
     query_nomask: &[u8],
@@ -3369,6 +3240,7 @@ fn refresh_blastp_hit_statistics(
 // ```c
 // matrix = gap_align->sbp->matrix->data;
 // ```
+#[cfg(test)]
 pub(crate) fn reevaluate_blastp_hit_with_traceback(
     hit: &mut Hit,
     query: &[u8],
@@ -3422,6 +3294,7 @@ pub(crate) fn reevaluate_blastp_hit_with_traceback(
 //     op_index++;
 // }
 // ```
+#[cfg(test)]
 fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
     hit: &mut Hit,
     query: &[u8],

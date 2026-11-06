@@ -714,7 +714,8 @@ export function unreadableResults(run: RunView, error: unknown): string {
   return `The results of run ${run.snapshot.number} could not be read: ${errorMessage(error)}`;
 }
 
-function unavailableMessage(run: RunView): string {
+/** Why a run that has not completed has no results: the results page's sentence, also told to a screen reader as the run ends. */
+export function unavailableMessage(run: RunView): string {
   const n = run.snapshot.number;
   switch (run.status) {
     case 'cancelled':

@@ -3,11 +3,14 @@
 // mode, each with its in-place sentence: what pressing it sends ("Downloads 8.0 MB from
 // ftp.ncbi.nlm.nih.gov"), or the copy saved in this browser with "Save to folder…" (or
 // "Download", line WF-3) and Delete, or the download's progress with Cancel. The rest waits
-// behind "?" (stop-describing-ui).
-import { computed, watch } from 'vue';
+// behind "?" (stop-describing-ui). A set that loads, or that cannot, is told to a screen reader
+// (WA2-AX-03), and a button that cannot be pressed for a while is marked aria-disabled, so that it
+// keeps the focus (WA2-AX-04).
+import { computed, nextTick, watch } from 'vue';
 import type { ExampleLoader } from '../application/examples';
-import { exampleHost, examplesFor, type ExampleSet } from '../domain/examples';
+import { exampleById, exampleHost, examplesFor, type ExampleId, type ExampleSet } from '../domain/examples';
 import type { ProgramId } from '../domain/programs';
+import { announce } from './announcer';
 import { formatBytes } from './format';
 import HelpTip from './HelpTip.vue';
 import LosatLoader from './LosatLoader.vue';
@@ -61,6 +64,45 @@ const busy = (set: ExampleSet) => {
   const progress = load.value?.id === set.id ? load.value.progress.state : undefined;
   return progress !== undefined && progress !== 'failed';
 };
+
+/** The set being loaded, until its load ends: loaded (its files are in the inputs), failed or cancelled. */
+let loading: ExampleId | undefined;
+let cancelled = false;
+watch(load, (now) => {
+  if (now !== undefined && now.progress.state !== 'failed') {
+    if (now.id !== loading) cancelled = false;
+    loading = now.id;
+    return;
+  }
+  const id = loading;
+  loading = undefined;
+  if (id === undefined) return;
+  if (now?.progress.state === 'failed') announce(now.progress.message, 'alert');
+  else if (!cancelled) announce(`Example ${exampleById(id).label} loaded.${note.value?.id === id ? ` ${note.value.text}` : ''}`);
+  cancelled = false;
+});
+
+const buttons: Partial<Record<ExampleId, HTMLButtonElement>> = {};
+function keepButton(id: ExampleId, element: unknown): void {
+  if (element instanceof HTMLButtonElement) buttons[id] = element;
+  else delete buttons[id];
+}
+function press(set: ExampleSet): void {
+  if (!busy(set)) props.examples.load(set.id);
+}
+/** Cancel leaves with the load: the focus goes back to the set's button. */
+async function cancel(set: ExampleSet): Promise<void> {
+  cancelled = true;
+  props.examples.cancel();
+  await nextTick();
+  buttons[set.id]?.focus();
+}
+function save(set: ExampleSet): void {
+  if (state.value.copying !== set.id) props.examples.saveCopy(set.id);
+}
+function remove(set: ExampleSet): void {
+  if (state.value.copying !== set.id) void props.examples.delete(set.id);
+}
 </script>
 
 <template>
@@ -68,7 +110,13 @@ const busy = (set: ExampleSet) => {
     <span class="example-title">Example</span>
     <ul class="example-sets">
       <li v-for="set in sets" :key="set.id" :data-testid="`example-${set.id}-row`">
-        <button type="button" :disabled="busy(set)" :data-testid="`example-${set.id}`" @click="examples.load(set.id)">
+        <button
+          :ref="(element) => keepButton(set.id, element)"
+          type="button"
+          :aria-disabled="busy(set) || undefined"
+          :data-testid="`example-${set.id}`"
+          @click="press(set)"
+        >
           {{ set.label }}
         </button>
         <span class="hint" :data-testid="`example-${set.id}-note`"><LosatLoader v-if="busy(set)" />{{ sentence(set) }}</span>
@@ -77,7 +125,7 @@ const busy = (set: ExampleSet) => {
           type="button"
           class="link"
           :data-testid="`example-${set.id}-cancel`"
-          @click="examples.cancel()"
+          @click="cancel(set)"
         >
           Cancel
         </button>
@@ -86,18 +134,18 @@ const busy = (set: ExampleSet) => {
             v-if="examples.copyTo"
             type="button"
             class="link"
-            :disabled="state.copying === set.id"
+            :aria-disabled="state.copying === set.id || undefined"
             :data-testid="`example-${set.id}-save`"
-            @click="examples.saveCopy(set.id)"
+            @click="save(set)"
           >
             {{ examples.copyTo === 'folder' ? 'Save to folder…' : 'Download' }}
           </button>
           <button
             type="button"
             class="link"
-            :disabled="state.copying === set.id"
+            :aria-disabled="state.copying === set.id || undefined"
             :data-testid="`example-${set.id}-delete`"
-            @click="examples.delete(set.id)"
+            @click="remove(set)"
           >
             Delete
           </button>
@@ -105,7 +153,7 @@ const busy = (set: ExampleSet) => {
       </li>
     </ul>
     <HelpTip id="example" label="About the examples" :text="help" />
-    <p v-if="load?.progress.state === 'failed'" class="error" role="alert" data-testid="example-error">
+    <p v-if="load?.progress.state === 'failed'" class="error" data-testid="example-error">
       {{ load.progress.message }}
     </p>
     <p v-if="note" class="muted" data-testid="example-note">{{ note.text }}</p>

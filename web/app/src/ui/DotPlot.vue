@@ -146,6 +146,19 @@ const selectedIndex = computed(() => {
   return id === undefined ? -1 : segments.value.list.findIndex((hsp) => hsp.id.qIdx === id.qIdx && hsp.id.rank === id.rank);
 });
 const selected = computed(() => (selectedIndex.value < 0 ? undefined : segments.value.list[selectedIndex.value]));
+/** The line under the plot that names the selected HSP. */
+const selectedText = computed(() => {
+  const hsp = selected.value;
+  if (hsp === undefined) return '';
+  const { qstart, qend, sstart, send } = hsp.fields;
+  const frames = framesPhrase(hsp);
+  return `Selected: HSP ${hsp.id.rank + 1}, query ${qstart}–${qend} ${units.value.query}, subject ${sstart}–${send} ${units.value.subject}${frames ? `, ${frames}` : ''}.`;
+});
+/**
+ * n and p on the plot select an HSP: with the popup closed, which tells its HSP itself, the line
+ * is told to a screen reader (WA2-AX-06), as the Graphic Summary tells its arrow keys.
+ */
+const stepped = ref(false);
 const hasUnknown = computed(() => hsps.value.some((hsp) => hsp.orientation === 'unknown'));
 
 // --- the view and the frame loop ---------------------------------------------------------------
@@ -559,8 +572,14 @@ function onKey(event: KeyboardEvent): void {
     ArrowRight: () => pan(-40, 0),
     ArrowUp: () => pan(0, 40),
     ArrowDown: () => pan(0, -40),
-    n: () => step(1),
-    p: () => step(-1),
+    n: () => {
+      stepped.value = true;
+      step(1);
+    },
+    p: () => {
+      stepped.value = true;
+      step(-1);
+    },
     Enter: () => openPopup(true),
   };
   if (event.key === 'Escape' && popupOpen.value) actions.Escape = () => closePopup(false);
@@ -596,6 +615,7 @@ let revealPopup = false;
 /** Opens the popup of the selected HSP; opened from the keyboard, the focus moves into it. */
 function openPopup(byKeyboard: boolean): void {
   if (selected.value === undefined) return;
+  stepped.value = false;
   popupOpen.value = true;
   revealPopup = true;
   schedule(false);
@@ -765,6 +785,7 @@ function pickSubject(event: Event): void {
           @pointercancel="drag = undefined"
           @pointerleave="onPointerLeave"
           @keydown="onKey"
+          @blur="stepped = false"
         />
         <canvas ref="overlay" class="plot-overlay" aria-hidden="true" :style="{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }" />
         <dialog
@@ -826,11 +847,7 @@ function pickSubject(event: Event): void {
       </li>
       <li v-if="selected" data-testid="dotplot-legend-selected"><span class="plot-swatch plot-swatch-selected" />Yellow halo: the selected HSP</li>
     </ul>
-    <p v-if="selected" class="muted small" data-testid="dotplot-selected">
-      Selected: HSP {{ selected.id.rank + 1 }}, query {{ selected.fields.qstart }}–{{ selected.fields.qend }} {{ units.query }}, subject
-      {{ selected.fields.sstart }}–{{ selected.fields.send }} {{ units.subject }}<template v-if="framesPhrase(selected)"
-        >, {{ framesPhrase(selected) }}</template
-      >.
-    </p>
+    <p v-if="selected" class="muted small" data-testid="dotplot-selected">{{ selectedText }}</p>
+    <p class="visually-hidden" aria-live="polite" data-testid="dotplot-spoken">{{ stepped && !popupOpen ? selectedText : '' }}</p>
   </figure>
 </template>

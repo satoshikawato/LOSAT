@@ -6,10 +6,12 @@ import type { SearchDraft } from '../application/draft';
 import type { ExampleLoader } from '../application/examples';
 import type { ResultsBrowser } from '../application/results';
 import { useStore } from './useStore';
+import LiveAnnouncer from './LiveAnnouncer.vue';
 import LosatLogo from './LosatLogo.vue';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
+import { useRunAnnouncements } from './run-announcements';
 import StorageStatus from './StorageStatus.vue';
 
 const props = defineProps<{
@@ -24,6 +26,9 @@ const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
 const tab = ref<'search' | 'results'>('search');
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
+const searchTab = ref<HTMLButtonElement>();
+const resultsTab = ref<HTMLButtonElement>();
+useRunAnnouncements(state, useStore(props.results.state));
 /** The results tab's view, kept while the search tab is shown and when another run opens. */
 const resultsView = ref<ResultsView>('hits');
 
@@ -37,6 +42,17 @@ async function openResults(runId: string): Promise<void> {
   void props.results.open(runId);
   await nextTick();
   resultsPanel.value?.showHeading();
+}
+
+/**
+ * "Dismiss" leaves the page with its notice: the focus goes to the tab shown, the next control
+ * (WA2-AX-04), and not to the page's body, from where Tab would start again at the top.
+ */
+async function dismissResume(): Promise<void> {
+  props.attention.dismissResume();
+  await nextTick();
+  const active = document.activeElement;
+  if (active === null || active === document.body || !active.isConnected) (tab.value === 'search' ? searchTab : resultsTab).value?.focus();
 }
 
 // A file dropped outside an input's drop zone would make the browser open it in place of
@@ -62,10 +78,10 @@ onUnmounted(() => {
   <p v-if="usesFakeEngine" class="banner" data-testid="fake-engine-banner">
     Development build: a fake engine is in use. Outputs are not search results.
   </p>
-  <ResumeNotice v-if="attentionState.resume" :report="attentionState.resume" @dismiss="attention.dismissResume()" />
+  <ResumeNotice v-if="attentionState.resume" :report="attentionState.resume" @dismiss="dismissResume" />
   <nav class="tabs main-tabs" aria-label="Main">
-    <button :aria-pressed="tab === 'search'" data-testid="tab-search" @click="tab = 'search'">Search</button>
-    <button :aria-pressed="tab === 'results'" data-testid="tab-results" @click="tab = 'results'">Results</button>
+    <button ref="searchTab" :aria-pressed="tab === 'search'" data-testid="tab-search" @click="tab = 'search'">Search</button>
+    <button ref="resultsTab" :aria-pressed="tab === 'results'" data-testid="tab-results" @click="tab = 'results'">Results</button>
   </nav>
   <main class="layout">
     <section class="primary">
@@ -93,4 +109,5 @@ onUnmounted(() => {
       <StorageStatus :storage="state.storage" />
     </aside>
   </main>
+  <LiveAnnouncer />
 </template>

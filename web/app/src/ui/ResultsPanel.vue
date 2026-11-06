@@ -278,7 +278,13 @@ async function toAlignments(id: HspId): Promise<void> {
       </div>
 
       <p v-if="state.phase === 'loading'" class="muted" data-testid="results-status" data-phase="loading"><LosatLoader />Reading the results…</p>
-      <RunStatus v-else-if="state.phase === 'unavailable' && active && selected" :coordinator="coordinator" :run="selected" :runs="runs" />
+      <RunStatus
+        v-else-if="state.phase === 'unavailable' && active && selected"
+        :coordinator="coordinator"
+        :run="selected"
+        :runs="runs"
+        @focus-lost="heading?.focus({ preventScroll: true })"
+      />
       <p
         v-else-if="state.phase === 'unavailable' || state.phase === 'failed'"
         class="results-message"

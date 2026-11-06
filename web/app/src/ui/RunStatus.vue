@@ -2,14 +2,19 @@
 // The status of a run that has not finished, on its own results page (NCBI's "Status:
 // Searching" page while a job runs): its phase and elapsed time (not progress by query, DW-5),
 // what it waits for, and its Cancel. The run's record (engine path, threads, phases) is in Run
-// details once it completes.
-import { computed, onUnmounted, ref, watchEffect } from 'vue';
+// details once it completes. A screen reader is told the phase as it changes (not the elapsed
+// time); a run that ends is told by run-announcements.ts.
+import { computed, onBeforeUnmount, onBeforeUpdate, onUnmounted, onUpdated, ref, watch, watchEffect } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { isTerminal, type RunStatus } from '../domain/run';
+import { announce } from './announcer';
 import { formatDuration } from './format';
 import LosatLoader from './LosatLoader.vue';
 
 const props = defineProps<{ coordinator: Coordinator; run: RunView; runs: readonly RunView[] }>();
+/** The focus was on a button that left (Cancel, or the whole block as the run ended): the panel moves it (WA2-AX-04). */
+const emit = defineEmits<{ 'focus-lost': [] }>();
+const root = ref<HTMLElement>();
 
 const PHASE_LABELS: Readonly<Record<RunStatus, string>> = {
   queued: 'Waiting',
@@ -53,6 +58,25 @@ const groupCancellable = computed(() => {
   return props.runs.some((other) => other.snapshot.group?.groupId === group.groupId && other !== props.run && cancellable(other));
 });
 
+const phase = computed(() => (ahead.value ? `Waiting for run ${ahead.value.snapshot.number}` : PHASE_LABELS[props.run.status]));
+watch(
+  phase,
+  (text) => {
+    if (!isTerminal(props.run.status)) announce(`Status: ${text}`);
+  },
+  { immediate: true },
+);
+
+const hasFocus = () => root.value?.contains(document.activeElement) === true;
+let focusInside = false;
+onBeforeUpdate(() => (focusInside = hasFocus()));
+onUpdated(() => {
+  if (focusInside && !hasFocus() && (document.activeElement === null || document.activeElement === document.body)) emit('focus-lost');
+});
+onBeforeUnmount(() => {
+  if (hasFocus()) emit('focus-lost');
+});
+
 const phaseTimes = computed(() => {
   const { startedAt, phaseTimes: times } = props.run.record;
   if (startedAt === undefined || times === undefined) return '';
@@ -64,10 +88,10 @@ const phaseTimes = computed(() => {
 </script>
 
 <template>
-  <div class="run-status" :data-status="run.status" data-testid="run-status" :data-run="run.snapshot.number">
+  <div ref="root" class="run-status" :data-status="run.status" data-testid="run-status" :data-run="run.snapshot.number">
     <p class="run-status-line">
       <span class="muted">Status:</span>
-      <span class="phase" data-testid="run-status-phase"><LosatLoader v-if="!isTerminal(run.status)" />{{ ahead ? `Waiting for run ${ahead.snapshot.number}` : PHASE_LABELS[run.status] }}</span>
+      <span class="phase" data-testid="run-status-phase"><LosatLoader v-if="!isTerminal(run.status)" />{{ phase }}</span>
       <span v-if="elapsed" class="elapsed muted" data-testid="run-status-elapsed">{{ elapsed }}</span>
       <span class="run-status-actions">
         <button v-if="groupCancellable" type="button" class="link" data-testid="run-status-cancel-group" @click="coordinator.cancelGroup(run.snapshot.group!.groupId)">

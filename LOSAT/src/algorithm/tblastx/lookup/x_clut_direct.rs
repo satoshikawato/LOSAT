@@ -1438,6 +1438,10 @@ fn x_zeroed_on<T: Copy + Default>(mut vector: Vec<T>, n: usize) -> Vec<T> {
 // entries cut to `n`. Zero-filling them again cost the small searches 1-5 % of their user cycles.
 // `S` is the bucket fill's matrix type (`x_buckets_with`), so that BLOSUM62's builders keep the
 // callers, and the inlining, of their own instances.
+#[expect(
+    clippy::extra_unused_type_parameters,
+    reason = "S only keeps one instance per bucket-fill matrix type (see above)"
+)]
 fn x_sized_on<S, T: Copy + Default>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
     if vector.capacity() < n {
         let mut fresh = vec![T::default(); if slack { n + n / 4 } else { n }];
@@ -3477,7 +3481,11 @@ mod tests {
                         }
                         XBucketBuild::Built(_) => panic!("{what}: buckets refused"),
                     }
-                    if capacity == NCBI_OVERFLOW_CELL_CAPACITY && reference.is_ok() {
+                    if let Some(reference) = reference
+                        .as_ref()
+                        .ok()
+                        .filter(|_| capacity == NCBI_OVERFLOW_CELL_CAPACITY)
+                    {
                         let Some(Ok(XCompressedLookup::Flat(flat))) =
                             x_tbn_build_compressed_lookup_of(
                                 matrix, word, threshold, &query, &locations, &tables,
@@ -3485,7 +3493,7 @@ mod tests {
                         else {
                             panic!("{what}: no flat table")
                         };
-                        x_assert_same_compressed_table(&flat, reference.as_ref().unwrap());
+                        x_assert_same_compressed_table(&flat, reference);
                     }
                 }
             }

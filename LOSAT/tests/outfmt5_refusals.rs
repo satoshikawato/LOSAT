@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! BLAST XML (outfmt 5) of BLASTP and BLASTN: the searches whose XML NCBI BLAST+ 2.17.0 cannot
 //! write (a byte >= 0x80 in a title or in the `-db` name: an exception, rc 255 with no output
 //! for the first query, a document cut after the failed element for a later one) are refused

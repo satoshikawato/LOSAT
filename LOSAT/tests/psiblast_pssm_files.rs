@@ -12,15 +12,19 @@
 //!        }
 //! ```
 
+#[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
 use std::process::{Command, Output};
 
+#[cfg(target_os = "linux")]
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 
 /// One `losat psiblast -db tests/db_search/paja -query tests/fasta/psiblast/<query>
 /// -save_pssm_after_last_round <args>` from `LOSAT/`, with `HOME` the empty directory `home` and
 /// without the variables that change a search (`LOSAT_BLASTX_WORKER_LOG` stays: an
 /// `--all-features` binary writes its probe there).
+#[cfg(target_os = "linux")]
 fn psiblast(query: &str, args: &[&str], home: &Path) -> Output {
     let mut command = Command::new(BIN);
     command
@@ -48,6 +52,7 @@ fn psiblast(query: &str, args: &[&str], home: &Path) -> Output {
 }
 
 /// An empty directory of the test's own for the PSSM files, and one for HOME.
+#[cfg(target_os = "linux")]
 fn scratch(tag: &str) -> (PathBuf, PathBuf) {
     let base =
         std::env::temp_dir().join(format!("losat_psiblast_pssm_{tag}_{}", std::process::id()));
@@ -58,6 +63,7 @@ fn scratch(tag: &str) -> (PathBuf, PathBuf) {
     (files, home)
 }
 
+#[cfg(target_os = "linux")]
 fn names(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
@@ -67,6 +73,7 @@ fn names(dir: &Path) -> Vec<String> {
     names
 }
 
+#[cfg(target_os = "linux")]
 fn path(path: &Path) -> &str {
     path.to_str().unwrap()
 }

@@ -1,9 +1,7 @@
-#![allow(warnings, clippy::all)]
-
 //! BLAST XML2 and JSON (outfmt 16 and 15) of BLASTX: what the frozen-fixture rows cannot show.
 //! The `-subject` report that NCBI holds back one query (a failed batch loses it), the run that stops
-//! at its first batch (the prolog alone), and the searches LOSAT refuses before the first byte (a byte
-//! >= 0x80 in a title or the `-db` name, DECISIONS 19 Q2; a taxonomy database scientific name, DECISIONS
+//! at its first batch (the prolog alone), and the searches LOSAT refuses before the first byte (a byte >=
+//! 0x80 in a title or the `-db` name, DECISIONS 19 Q2; a taxonomy database scientific name, DECISIONS
 //! 30; a query that is not a regular file, DECISIONS 22), with the output held in memory when a later
 //! batch can still refuse (DECISIONS 21), and the taxonomy database of a `-db` taxid (DECISIONS 28).
 //! BLASTX reads its queries in batches of 10,002 bases and not `BATCH_SIZE`, so the queries of the
@@ -16,10 +14,11 @@
 //! (the `-subject` result is written when the next query's arrives, or by `PrintEpilog`, which a
 //! failed batch does not reach).
 
-use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+#[cfg(unix)]
+use std::process::Stdio;
+use std::process::{Command, Output};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/outfmt16")
@@ -73,19 +72,6 @@ fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
         .args(args)
         .output()
         .expect("run LOSAT")
-}
-
-fn run_with_stdin(args: &[&str], stdin: &[u8]) -> Output {
-    use std::io::Write;
-    let mut child = command(&[])
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("run LOSAT");
-    child.stdin.take().unwrap().write_all(stdin).unwrap();
-    child.wait_with_output().expect("wait for LOSAT")
 }
 
 const PROTEIN: &str = "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";

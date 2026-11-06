@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! BLAST JSON and XML2 as files (outfmt 13 and 14): what the frozen-fixture rows of the manifests
 //! (`files` column) cannot show. BLASTP and BLASTN first (OF5c part 1), then BLASTX, TBLASTN and TBLASTX
 //! (part 2: the last section of this file). The names of the side files and of the entries of

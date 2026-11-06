@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! The shared BLASTX entry `run_local` writes outfmt 0, 6 and 7 from one search. Every format
 //! must be byte-identical to the CLI run that requests only that format and to the frozen NCBI
 //! BLAST+ 2.17.0 bytes (`outfmt0_manifest.tsv`), the warnings must be written once, as the CLI
@@ -14,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use run_local_support::{
-    assert_observer_ranges, assert_tabular_ranges, cli_out_path, fixture_sequence, run_formats,
+    assert_observer_ranges, assert_tabular_ranges, cli_out_path, fixture_sequence,
     run_formats_with, temp_path, Run,
 };
 use LOSAT::algorithm::blastx::BlastxArgs;

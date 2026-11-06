@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! BLAST XML (outfmt 5) of TBLASTN: the refusals of what NCBI BLAST+ 2.17.0 cannot write (a
 //! byte >= 0x80 in a title or in the `-db` name, DECISIONS 19, Q2), made before the first byte
 //! of stdout or `-out` at 1 and 4 threads, and the document across several query batches (one

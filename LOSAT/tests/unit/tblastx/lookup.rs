@@ -1,7 +1,7 @@
 //! Unit tests for tblastx/lookup.rs
 
 use LOSAT::algorithm::tblastx::lookup::{build_direct_lookup, encode_aa_kmer};
-use LOSAT::algorithm::tblastx::lookup::{build_ncbi_lookup, pv_test, BlastAaLookupTable};
+use LOSAT::algorithm::tblastx::lookup::{build_ncbi_lookup, pv_test};
 use LOSAT::algorithm::tblastx::translation::generate_frames;
 use LOSAT::stats::KarlinParams;
 use LOSAT::utils::genetic_code::GeneticCode;
@@ -199,8 +199,8 @@ fn test_build_direct_lookup_with_seg_masking() {
     // Mask first few logical AA positions; seeds should not be generated from them.
     frames_masked[0].seg_masks.push((0, 3));
 
-    let lookup_nomask = build_direct_lookup(&vec![frames_nomask]);
-    let lookup_masked = build_direct_lookup(&vec![frames_masked]);
+    let lookup_nomask = build_direct_lookup(&[frames_nomask]);
+    let lookup_masked = build_direct_lookup(&[frames_masked]);
 
     let total_hits_nomask: usize = lookup_nomask.iter().map(|bucket| bucket.len()).sum();
     let total_hits_masked: usize = lookup_masked.iter().map(|bucket| bucket.len()).sum();

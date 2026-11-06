@@ -84,7 +84,7 @@ fn test_evalue_with_fixed_alignment() {
 
     // Fixed alignment: q_start=100, q_end=200, s_start=100, s_end=200
     // This represents a perfect 100bp match
-    let fixed_alignment_length = 100;
+    let _fixed_alignment_length = 100;
     let fixed_raw_score = 100; // reward=1, perfect match
 
     let q_len = 1000;

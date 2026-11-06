@@ -645,7 +645,9 @@ impl<'a> XBlockSink<'a> {
         match sink {
             OutputSink::Stdout => Self::Stdout(BufWriter::new(io::stdout())),
             OutputSink::File(path) => Self::File { path, file: None },
-            OutputSink::Writer(writer) => Self::Writer(&mut **writer),
+            OutputSink::Writer(writer) | OutputSink::Files(writer, _) => {
+                Self::Writer(&mut **writer)
+            }
         }
     }
 

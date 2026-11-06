@@ -140,6 +140,7 @@ pub use crate::algorithm::blastx::run_local_database as run_local_database_blast
 //                CArgDescriptions::eOutputFile, "-");
 // ```
 /// Where one requested output format is written.
+#[non_exhaustive]
 pub enum OutputSink<'a> {
     /// Standard output, buffered (the CLI without `-out`, NCBI's default `-`).
     Stdout,
@@ -148,6 +149,15 @@ pub enum OutputSink<'a> {
     /// A writer provided by the caller. It is not buffered here, so that every byte a
     /// formatter has written reaches it before each `FormatObserver` call.
     Writer(&'a mut (dyn Write + Send)),
+    /// A writer provided by the caller, as `Writer`, and the caller's receiver of the side files
+    /// of outfmt 13 and 14 (a caller without files: LOSAT Web). The writer gets the master file,
+    /// the receiver each side file, named as next to the receiver's `-out`
+    /// (`SideFileSink::out`), which the format takes as its `-out`: its XInclude check passes.
+    /// For any other format it is `Writer`.
+    Files(
+        &'a mut (dyn Write + Send),
+        crate::report::blast_xml2::SideFileSink,
+    ),
 }
 
 impl OutputSink<'_> {
@@ -165,8 +175,21 @@ impl OutputSink<'_> {
         Ok(match self {
             OutputSink::Stdout => Box::new(BufWriter::new(io::stdout())),
             OutputSink::File(path) => Box::new(BufWriter::new(File::create(path)?)),
-            OutputSink::Writer(writer) => Box::new(&mut **writer),
+            OutputSink::Writer(writer) | OutputSink::Files(writer, _) => Box::new(&mut **writer),
         })
+    }
+
+    /// The caller's receiver of the side files of outfmt 13 and 14 (`OutputSink::Files`).
+    pub fn side_files(&self) -> Option<&crate::report::blast_xml2::SideFileSink> {
+        match self {
+            OutputSink::Files(_, sink) => Some(sink),
+            _ => None,
+        }
+    }
+
+    /// Whether the output is a writer of the caller (`Writer` or `Files`).
+    pub(crate) fn is_writer(&self) -> bool {
+        matches!(self, OutputSink::Writer(_) | OutputSink::Files(..))
     }
 }
 
@@ -184,6 +207,16 @@ pub struct FormatOutput<'a> {
 }
 
 impl FormatOutput<'_> {
+    /// The `-out` of this format: the one that the caller's receiver of side files names them by
+    /// (`OutputSink::Files`), else the run's `out`. Outfmt 13 and 14 write their side files next
+    /// to it and fail without one (`blastinput::app::xinclude_check_for`).
+    pub(crate) fn side_out<'s>(&'s self, out: Option<&'s Path>) -> Option<&'s Path> {
+        self.sink
+            .side_files()
+            .map(crate::report::blast_xml2::SideFileSink::out)
+            .or(out)
+    }
+
     /// Whether this output is the BLAST archive (outfmt 11).
     fn is_archive(&self) -> bool {
         use crate::blastinput::app::{parse_formatting_string, ReportFormat};
@@ -545,6 +578,9 @@ impl ReportOutputs<'_> {
                         OutputSink::Stdout => OutputSink::Stdout,
                         OutputSink::File(path) => OutputSink::File(path),
                         OutputSink::Writer(writer) => OutputSink::Writer(&mut **writer),
+                        OutputSink::Files(writer, sink) => {
+                            OutputSink::Files(&mut **writer, sink.clone())
+                        }
                     },
                 })
                 .collect(),

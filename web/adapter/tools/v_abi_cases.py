@@ -8,7 +8,11 @@ and for each supported output format the frozen SHA-256 where one exists. A sear
 §7) to the argv; the output of it (stream 4) is compared with the CLI's for the same argv, and
 its frozen SHA-256 is `frozen["custom"]`. For SAM (`"sam": true`) both sides are compared
 without the CL tag of the @PG line, where each writes its own command line, and the frozen
-SHA-256 is that of NCBI's fixture without it (`db_search_fixtures.strip_sam_cl`).
+SHA-256 is that of NCBI's fixture without it (`db_search_fixtures.strip_sam_cl`). Outfmt 13 and 14
+(`"files": true`) write a ZIP archive on stream 4 (abi_v2.md §5): its entries are compared with the
+files of the CLI's run with `-out results`, and the frozen SHA-256 are those of NCBI's master file
+with the names of `-out results` (`frozen["custom"]`) and of its side files (`frozen["sides"]`,
+joined with `,`).
 
 - full: the regression cases of docs/evidence/losat_web_e1a/capture_outputs.py (Gate A,
   the Stage G matrix, the BLASTP manifest in outfmt 0/6/7), grouped into searches.
@@ -70,13 +74,6 @@ def custom_outfmt(outfmt: str) -> bool:
     return number is not None and number != 0 and (has_words or number not in (6, 7))
 
 
-def written_in_browser(program: str, outfmt: str) -> bool:
-    """Whether a run writes the -outfmt value: not yet 13 and 14 (side files) and BLASTX's 11
-    (`run::parse_run`)."""
-    number = format_number(outfmt)
-    return number not in (13, 14) and not (number == 11 and program == "blastx")
-
-
 # Of the other formats, the quick suite takes this many rows of each program and format, and the
 # archive rows whose Bioseqs are the whole records or show the deflines as read.
 QUICK_PER_FORMAT = 2
@@ -133,8 +130,9 @@ def outfmt0_fixtures(every_format: bool = True) -> list[dict]:
             continue
         outfmt = run_oracle.outfmt(row)
         # The rows of outfmt 13 and 14 (the `files` column: side files and a master file next to
-        # `-out`) and BLASTX's archive: the browser does not write them yet (W11b).
-        if row.get("files") or not written_in_browser(row["program"], outfmt):
+        # `-out`) are searches whose output is the ZIP archive of those files.
+        files = row.get("files") == "xinclude"
+        if row.get("files") and not files:
             continue
         argv = run_oracle.search_argv(row)
         # A hit list of 0 (-num_alignments 0) fails the CLI's outfmt 6 and 7 while the Web run
@@ -166,13 +164,20 @@ def outfmt0_fixtures(every_format: bool = True) -> list[dict]:
         search = searches.setdefault(key, {"program": row["program"], "argv": [row["program"], *argv[:-2]],
                                            "cwd": str(run_oracle.ENGINE), "cases": [], "frozen": {},
                                            **({"outfmt": outfmt} if custom else {}),
-                                           **({"sam": True} if sam else {})})
+                                           **({"sam": True} if sam else {}),
+                                           **({"files": True} if files and custom else {})})
         search["cases"].append(row["fixture_id"])
         if frozen_kept and row.get("contract") != run_oracle.DEVIATION:
             frozen = row["stdout_sha256"]
+            fixture = run_oracle.ENGINE / "tests/fixtures/outfmt0" / f"{row['fixture_id']}.out"
             if sam:
-                fixture = run_oracle.ENGINE / "tests/fixtures/outfmt0" / f"{row['fixture_id']}.out"
                 frozen = hashlib.sha256(run_oracle.strip_sam_cl(fixture.read_bytes())).hexdigest()
+            if files:
+                # The master lists the side files by the base of `-out`: `<fixture_id>.out_<n>` in
+                # NCBI's run, `results_<n>` in the CLI's and the browser's.
+                master = fixture.read_bytes().replace(f"{row['fixture_id']}.out_".encode(), b"results_")
+                frozen = hashlib.sha256(master).hexdigest()
+                search["frozen"]["sides"] = row["side_sha256"]
             search["frozen"]["custom" if custom else outfmt] = frozen
     return list(searches.values())
 

@@ -816,13 +816,13 @@ impl SeqDb {
     // ```c++
     // 	m->SetDescription(GetTitle());
     // ```
-    /// Resolves the one database at the path `name` as `SeqDb::open_one_name` does,
-    /// without opening its volumes (the alias files are read and the index file of
-    /// every volume they name is located), and
-    /// returns what `CSeqDB::GetDBMetaData` reads of its alias tree: the title
-    /// (`GetTitle`: the alias files' `TITLE`, else the volumes' titles, which
-    /// `volume_title` gives for a volume path), the volume paths and the paths of the
-    /// alias files (`FindVolumePaths(paths, alias, true)`). No volume file is read.
+    /// Resolves the one database at the path `name` as `SeqDb::open_one_name` does, without
+    /// opening its volumes (the alias files are read and the index file of every volume they name
+    /// is located), and returns what `CSeqDB::GetDBMetaData` reads of its alias tree: the title
+    /// (`GetTitle`: the alias files' `TITLE`, else the volumes' titles, which `volume_title` gives
+    /// for a volume path), the volume paths and the paths of the alias files
+    /// (`FindVolumePaths(paths, alias, true)`). No volume file is read, so the cost does not grow
+    /// with the number of sequences.
     pub(crate) fn locate_one_name_metadata(
         name: &str,
         seqtype: SeqType,

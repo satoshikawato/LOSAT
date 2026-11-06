@@ -127,7 +127,7 @@ fn build_isam(dir: &Path, name: &str, records: &[(Vec<u8>, u32)], page_size: usi
         0,
         0,
     ] {
-        index.extend_from_slice(&i32::to_be_bytes(value));
+        index.extend_from_slice(&value.to_be_bytes());
     }
     for off in &page_offs {
         index.extend_from_slice(&off.to_be_bytes());

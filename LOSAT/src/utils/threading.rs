@@ -301,15 +301,7 @@ where
 /// threads that run its work change, as for the batches of `x_with_search_pool_local`. When the
 /// pool cannot be built (a thread count that `validate_threads` rejects, or threads that do not
 /// start), `work` runs without it, and its first search fails as it does without a run.
-pub fn with_run_pool<F, R>(
-    #[cfg_attr(
-        not(feature = "parallel"),
-        expect(unused_variables, reason = "used only with the parallel feature")
-    )]
-    requested: usize,
-    program: &str,
-    work: F,
-) -> R
+pub fn with_run_pool<F, R>(requested: usize, program: &str, work: F) -> R
 where
     F: FnOnce() -> R,
 {
@@ -338,7 +330,7 @@ where
             return done;
         }
     }
-    let _ = program;
+    let _ = (requested, program);
     work.take().expect("work not run")()
 }
 

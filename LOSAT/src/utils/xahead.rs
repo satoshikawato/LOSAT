@@ -305,7 +305,7 @@ impl<R> Ahead<R> {
         )),
         expect(
             dead_code,
-            reason = "used only with the pool of helper threads (the parallel feature)"
+            reason = "used only where the helper pool runs (parallel, and wasm-threads on wasm32)"
         )
     )]
     pub(crate) fn work<S>(&self, scratch: &mut S, compute: &impl Fn(usize, &mut S) -> R) {
@@ -414,7 +414,7 @@ impl<R> Ahead<R> {
         )),
         expect(
             dead_code,
-            reason = "used only with the pool of helper threads (the parallel feature)"
+            reason = "used only where the helper pool runs (parallel, and wasm-threads on wasm32)"
         )
     )]
     fn finish(&self) {
@@ -440,7 +440,7 @@ impl<R> Ahead<R> {
     )),
     expect(
         dead_code,
-        reason = "used only with the pool of helper threads (the parallel feature)"
+        reason = "used only where the helper pool runs (parallel, and wasm-threads on wasm32)"
     )
 )]
 struct Finish<'a, R>(&'a Ahead<R>);

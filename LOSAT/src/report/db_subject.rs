@@ -9,7 +9,7 @@
 //! the XML `Hit_def`, the XML2 and JSON `HitDescr` list, `stitle`).
 //!
 //! A database without parsed Seq-ids keeps its own path (the title and `gnl|BL_ORD_ID|n`,
-//! `algorithm::common::database::read_title`); `SeqDb::read_header` tells the two apart.
+//! `algorithm::common::database::stored_title`); `SeqDb::read_header` tells the two apart.
 //!
 //! LOSAT writes the names of the sequence it searched. NCBI's formatters look the Seq-align id
 //! up again in the database, and where the lookup finds another sequence first (an accession

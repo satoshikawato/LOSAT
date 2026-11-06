@@ -2865,6 +2865,70 @@ pub(crate) fn x_tbn_build_compressed_lookup_of(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310,1352-1354 (see
+// `x_tbn_build_compressed_lookup_of`)
+// ```c
+//     new_alphabet = SCompressedAlphabetNew(sbp,
+//                                 lookup->compressed_alphabet_size,
+//                                 kMatrixScale);
+//     ...
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+// ```
+/// blastp-fast's compressed lookup table with the words of the search matrix `matrix`, any but
+/// BLOSUM62 (item SC2b): `x_bp_build_compressed_lookup` without the spare vectors and the build
+/// ahead. The flat table by `pool`'s threads where `x_pool_builds` (`x_try_build_flat_in_pool_of`;
+/// the reference builder where it declines), else `x_tbn_build_compressed_lookup_of` on this
+/// thread; the reference table with the switch off. Out of line, so that BLOSUM62's build keeps
+/// its code.
+#[inline(never)]
+pub(crate) fn x_bp_build_compressed_lookup_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    pool: &SearchPool<'_>,
+) -> Option<Result<XCompressedLookup, ()>> {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if x_bpclut_on() && x_pool_builds(pool) {
+        return match x_clut_par::x_try_build_flat_in_pool_of(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            pool,
+        )? {
+            XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
+            XFlatBuild::Refused => Some(Err(())),
+            XFlatBuild::TooLarge => try_build_compressed_lookup(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+            )
+            .map(|built| built.map(XCompressedLookup::Reference)),
+        };
+    }
+    let _ = pool;
+    x_tbn_build_compressed_lookup_of(
+        matrix,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+    )
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
 // `x_tbn_build_compressed_lookup`)
 // ```c

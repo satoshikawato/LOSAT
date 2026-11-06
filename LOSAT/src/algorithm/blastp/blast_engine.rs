@@ -7812,10 +7812,10 @@ fn blastp_compressed_lookup(
 /// [`blastp_compressed_lookup`] of a matrix other than BLOSUM62 (item SC2b): the contexts with the
 /// Karlin blocks of the matrix's scores (`prepare_matrix_lookup_query_for_word_size`, on the
 /// search's pool where it has more than one thread), NCBI's tables of the query batches
-/// (`ncbi_compressed_lookup_tables`) and the compressed table of the matrix's words from TBLASTN's
-/// builders of another matrix (`x_tbn_build_compressed_lookup_of`, on this thread: the flat table,
-/// the reference one where the flat builders decline or with `LOSAT_X_BPCLUT=0`; it takes no spare
-/// vectors), with the refusals of the BLOSUM62 table.
+/// (`ncbi_compressed_lookup_tables`) and the compressed table of the matrix's words
+/// (`x_bp_build_compressed_lookup_of`: the flat table, by the search's pool where it has more than
+/// one thread, the reference one where the flat builders decline or with `LOSAT_X_BPCLUT=0`; it
+/// takes no spare vectors), with the refusals of the BLOSUM62 table.
 #[inline(never)]
 fn blastp_matrix_compressed_lookup(
     args: &ResolvedBlastpArgs,
@@ -7841,13 +7841,14 @@ fn blastp_matrix_compressed_lookup(
         &locations,
         query_chunk,
     )?;
-    let lookup = crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_tbn_build_compressed_lookup_of(
+    let lookup = crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bp_build_compressed_lookup_of(
         args.scoring.matrix,
         args.word_size,
         crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
         &query,
         &locations,
         &ncbi_tables,
+        blastp_parallel_pool,
     )
     .ok_or_else(|| {
         anyhow::anyhow!(

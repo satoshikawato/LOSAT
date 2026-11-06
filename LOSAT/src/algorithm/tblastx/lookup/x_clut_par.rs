@@ -214,6 +214,49 @@ pub(super) fn x_try_build_flat_in_pool(
     built
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+// `x_try_build_flat_in_pool`)
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// `x_try_build_flat_in_pool` with the words of the search matrix `matrix`, any but BLOSUM62 (item
+/// SC2b): the passes of rayon on fresh vectors (no spare vectors, extra tasks or build ahead, which
+/// are BLOSUM62's); `pool` has more than one thread.
+pub(super) fn x_try_build_flat_in_pool_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    pool: &SearchPool<'_>,
+) -> Option<XFlatBuild> {
+    let threads = pool.threads();
+    pool.install(|| {
+        x_try_build_flat_parallel_of(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            XParallelCuts {
+                overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                max_appends: None,
+                threads,
+                chunk_sizes: &[],
+                stripe_shift: None,
+                passes: XPasses::Rayon,
+                spare: None,
+                x_ahead: false,
+                stripe_fill: false,
+            },
+        )
+    })
+}
+
 // No NCBI counterpart: reads the LOSAT_X_BPSTRIPEFILL switch once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPSTRIPEFILL): a strict-set switch, on unless it is `0`: the one-latch
@@ -798,6 +841,84 @@ fn x_try_build_flat_parallel_with(
     tables: &[std::ops::Range<usize>],
     cuts: XParallelCuts<'_>,
 ) -> Option<XFlatBuild> {
+    x_flat_parallel_on(
+        Blosum62Compressed,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        cuts,
+        |capacity| {
+            x_try_build_flat_with_capacity(
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                capacity,
+                X_COUNT_CHUNK,
+            )
+        },
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310 (see
+// `x_clut_direct::x_tbn_build_compressed_lookup_of`)
+// ```c
+//     new_alphabet = SCompressedAlphabetNew(sbp,
+//                                 lookup->compressed_alphabet_size,
+//                                 kMatrixScale);
+// ```
+/// `x_try_build_flat_parallel_with` with the words of the search matrix `matrix`, any but BLOSUM62
+/// (`build_compressed_score_matrix`, item SC2b): the same passes, and the serial builder of the
+/// matrix's words (`x_try_build_flat_of`) where the parallel build takes the serial one.
+fn x_try_build_flat_parallel_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    cuts: XParallelCuts<'_>,
+) -> Option<XFlatBuild> {
+    x_flat_parallel_on(
+        matrix,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        cuts,
+        |capacity| {
+            x_try_build_flat_of(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                capacity,
+                X_COUNT_CHUNK,
+            )
+        },
+    )
+}
+
+// The body of both builders above, so that BLOSUM62's keeps its constant matrix (as
+// `x_flat_with_capacity_of`); `serial` is the serial builder of the same words, with the capacity.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn x_flat_parallel_on<S: CompressedScores>(
+    scores: S,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    cuts: XParallelCuts<'_>,
+    serial: impl FnOnce(usize) -> Option<XFlatBuild>,
+) -> Option<XFlatBuild> {
     let header = XHeader::new(word_size)?;
     let backbone_size = header.backbone_size;
     let largest_pv_shift = x_largest_pv_shift(backbone_size);
@@ -806,17 +927,9 @@ fn x_try_build_flat_parallel_with(
         // spare's vectors): a build ahead would allocate its table here, on the pool thread. This
         // is unreachable for blastp-fast's compressed backbones (759,375 cells for word size 5,
         // far below 2^32), and the table would have the same values.
-        return x_try_build_flat_with_capacity(
-            word_size,
-            scaled_threshold,
-            query,
-            locations,
-            tables,
-            cuts.overflow_cell_capacity,
-            X_COUNT_CHUNK,
-        );
+        return serial(cuts.overflow_cell_capacity);
     }
-    let matrix = build_blosum62_compressed_score_matrix(header.alphabet)?;
+    let matrix = scores.score_matrix(header.alphabet)?;
     let info = CompressedNeighborInfo::new(&matrix, header.alphabet);
     let words = XWords::new(&header, scaled_threshold, &matrix, &info);
     let threads = cuts.threads.max(1);
@@ -1339,6 +1452,82 @@ mod tests {
             }
         }
         assert!(overflow_seen, "cells with overflow lists");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310
+    // ```c
+    //     new_alphabet = SCompressedAlphabetNew(sbp,
+    //                                 lookup->compressed_alphabet_size,
+    //                                 kMatrixScale);
+    // ```
+    // Every search matrix but BLOSUM62 and IDENTITY (item SC2b), random queries with NCBI's tables, word
+    // size 5 and (BLOSUM45, PAM30) 6, at 2, 3 and 7 threads with even and uneven chunks: the pool's
+    // table of the matrix's words (`x_try_build_flat_in_pool_of`'s build) is the serial builder's of
+    // those words (`x_try_build_flat_of`) slot for slot, and the reference's cell by cell.
+    #[test]
+    fn parallel_tables_of_each_matrix_equal_its_serial_tables() {
+        let mut rng = XorShift(0x1f83_d9ab_fb41_bd6b);
+        for matrix in ScoringMatrix::ALL {
+            if matches!(matrix, ScoringMatrix::Blosum62 | ScoringMatrix::Identity) {
+                continue;
+            }
+            let words: &[(usize, i32)] = match matrix {
+                ScoringMatrix::Blosum45 | ScoringMatrix::Pam30 => &[(5, 1100), (6, 2100)],
+                _ => &[(5, 1100)],
+            };
+            for &(word, threshold) in words {
+                let lengths: Vec<usize> =
+                    (0..2 + rng.below(4)).map(|_| 1 + rng.below(200)).collect();
+                let (query, locations, first) = queries(&mut rng, &lengths, &LETTERS[..], 1);
+                let tables = vec![first[0]..first[lengths.len()]];
+                let serial = match x_try_build_flat_of(
+                    matrix,
+                    word,
+                    threshold,
+                    &query,
+                    &locations,
+                    &tables,
+                    NCBI_OVERFLOW_CELL_CAPACITY,
+                    X_COUNT_CHUNK,
+                ) {
+                    Some(XFlatBuild::Table(table)) => table,
+                    _ => panic!("{matrix:?} word size {word}: no serial table"),
+                };
+                let reference = try_build_compressed_lookup(
+                    matrix, word, threshold, &query, &locations, &tables,
+                )
+                .expect("word size")
+                .expect("not refused");
+                x_assert_same_compressed_table(&serial, &reference);
+                for (threads, chunk_sizes) in [(2, &[][..]), (3, &[7, 50][..]), (7, &[1][..])] {
+                    let built = in_pool(threads, || {
+                        x_try_build_flat_parallel_of(
+                            matrix,
+                            word,
+                            threshold,
+                            &query,
+                            &locations,
+                            &tables,
+                            XParallelCuts {
+                                overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                                max_appends: None,
+                                threads,
+                                chunk_sizes,
+                                stripe_shift: None,
+                                passes: XPasses::Rayon,
+                                spare: None,
+                                x_ahead: false,
+                                stripe_fill: false,
+                            },
+                        )
+                    });
+                    let Some(XFlatBuild::Table(built)) = built else {
+                        panic!("{matrix:?} word size {word} n{threads}: no parallel table")
+                    };
+                    x_assert_same_flat_tables(&built, &serial);
+                }
+            }
+        }
     }
 
     fn flat(build: Option<XFlatBuild>) -> XFlatCompressedLookup {

@@ -3377,14 +3377,18 @@ fn finish_local_mode0_no_sum_stats(
     //         	   ext_params, query_info, default_db_genetic_code, has_been_interrupted, interrupt_search, progress_info, actual_num_threads)
     //         for (i = 0; i < batches->num_batches; i++) {
     // ```
-    // NCBI traces the lists of the subjects on its threads, each into the results of its thread,
-    // which are joined afterward (SThreadLocalDataArrayConsolidateResults). The lists of a batch
-    // are traced on the search pool and their results put in the hit lists in the order of the
-    // lists, as the serial loop puts them; a list's result is a function of the list alone.
+    // NCBI traces the batches of its HSP stream (the lists of one subject) on its threads
+    // (`schedule(guided)`), each into the results of its thread, which are joined afterward
+    // (SThreadLocalDataArrayConsolidateResults). Here the lists of a batch are traced on the search
+    // pool and their results put in the hit lists in the order of the lists, as the serial loop
+    // puts them; a list's result is a function of the list alone.
     #[cfg(feature = "parallel")]
     let parallel = pool.is_some_and(SearchPool::enabled) && preliminary_lists.len() > 1;
     #[cfg(not(feature = "parallel"))]
-    let parallel = false;
+    let parallel = {
+        let _ = pool;
+        false
+    };
     // No NCBI counterpart: stage report for the thread-use statistics; it does not change any value
     // NCBI computes.
     crate::utils::threading::report_stage(

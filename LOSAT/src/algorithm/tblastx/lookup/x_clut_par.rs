@@ -223,9 +223,11 @@ pub(super) fn x_try_build_flat_in_pool(
 //                                     query, locations);
 //     s_CompressedLookupFinalize(lookup);
 // ```
-/// `x_try_build_flat_in_pool` with the words of the search matrix `matrix`, any but BLOSUM62 (item
-/// SC2b): the passes of rayon on fresh vectors (no spare vectors, extra tasks or build ahead, which
-/// are BLOSUM62's); `pool` has more than one thread.
+/// `x_try_build_flat_in_pool` with the words of the search matrix `matrix`, any but BLOSUM62 (items
+/// SC2b, SC2c): the same passes, spare vectors and build ahead (`x_flat_args`; another matrix's
+/// build has no extra tasks, its contexts' Karlin blocks are computed before it); `pool` has more
+/// than one thread.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn x_try_build_flat_in_pool_of(
     matrix: ScoringMatrix,
     word_size: usize,
@@ -234,29 +236,49 @@ pub(super) fn x_try_build_flat_in_pool_of(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     pool: &SearchPool<'_>,
+    x_flat_args: XFlatArgs<'_>,
 ) -> Option<XFlatBuild> {
     let threads = pool.threads();
-    pool.install(|| {
-        x_try_build_flat_parallel_of(
-            matrix,
-            word_size,
-            scaled_threshold,
-            query,
-            locations,
-            tables,
-            XParallelCuts {
-                overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
-                max_appends: None,
-                threads,
-                chunk_sizes: &[],
-                stripe_shift: None,
-                passes: XPasses::Rayon,
-                spare: None,
-                x_ahead: false,
-                stripe_fill: false,
-            },
-        )
-    })
+    let build = |passes, spare, x_ahead, stripe_fill| {
+        pool.install(|| {
+            x_try_build_flat_parallel_of(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                XParallelCuts {
+                    overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                    max_appends: None,
+                    threads,
+                    chunk_sizes: &[],
+                    stripe_shift: None,
+                    passes,
+                    spare,
+                    x_ahead,
+                    stripe_fill,
+                },
+            )
+        })
+    };
+    if x_flat_args.mode == XLkpFlat::Off {
+        // LOSAT_X_BPLKPAHEAD: a build ahead of its block takes only the switch's passes.
+        if x_flat_args.x_ahead {
+            return None;
+        }
+        return build(XPasses::Rayon, None, false, false);
+    }
+    let built = build(
+        XPasses::OneLatch(x_flat_args.extra),
+        x_flat_args.spare,
+        x_flat_args.x_ahead,
+        x_bpstripefill_on(),
+    );
+    if matches!(built, Some(XFlatBuild::Table(_))) {
+        X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
+    }
+    built
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BPSTRIPEFILL switch once; it does not change any value NCBI
@@ -1658,7 +1680,14 @@ mod tests {
             for threads in [1, 3] {
                 let built = crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                     Ok(super::super::x_bp_build_compressed_lookup_of(
-                        matrix, 5, 1100, &query, &locations, &tables, pool,
+                        matrix,
+                        5,
+                        1100,
+                        &query,
+                        &locations,
+                        &tables,
+                        pool,
+                        XFlatArgs::default(),
                     ))
                 })
                 .expect("pool");

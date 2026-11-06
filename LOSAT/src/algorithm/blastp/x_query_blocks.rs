@@ -873,6 +873,30 @@ pub(crate) enum XLookupFor {
     Ahead,
 }
 
+// No NCBI counterpart: chooses LOSAT's build and its buffers; it changes no value NCBI computes.
+/// The flat build's arguments for a matrix other than BLOSUM62 (item SC2c): those of
+/// `XLookupFlat::lookup_query` for `x_for` (the switch's mode; the search's spare vectors, none for a
+/// query chunk, the second spare's for the build ahead of its block), without extra tasks: another
+/// matrix's contexts have their Karlin blocks before the build
+/// (`prepare_matrix_lookup_query_for_word_size`).
+pub(crate) fn x_flat_args_of<'p>(pool: &SearchPool<'p>, x_for: XLookupFor) -> XFlatArgs<'p> {
+    let mode = x_lkpflat_mode_for_pool(pool);
+    if x_bplkpflat_mode() != XLkpFlat::Off {
+        crate::utils::xreach::x_reach!("LOSAT_X_BPLKPFLAT", mode != XLkpFlat::Off);
+    }
+    let spare = match x_for {
+        XLookupFor::Search => x_bp_lookup_spare(pool),
+        XLookupFor::QueryChunk => None,
+        XLookupFor::Ahead => x_bp_lookup_spares(pool).map(|(_, ahead)| ahead),
+    };
+    XFlatArgs {
+        mode,
+        spare,
+        extra: None,
+        x_ahead: x_for == XLookupFor::Ahead,
+    }
+}
+
 /// EXPERIMENT (LOSAT_X_BPLKPFLAT): the lookup query of blastp-fast's compressed table and what the
 /// pool's build of its flat table gets with the switch (`lookup/x_clut_par.rs`): the block search's
 /// spare vectors, and with `LOSAT_X_BPQBLOCK` the contexts' Karlin blocks as extra tasks of the

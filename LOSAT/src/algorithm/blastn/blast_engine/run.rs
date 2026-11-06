@@ -9838,28 +9838,36 @@ fn run_in_pool(
                     }
                     Ok(())
                 };
-                let seq_aligns: usize = batch_hit_lists
-                    .iter()
-                    .flatten()
-                    .flat_map(|hit_list| {
-                        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                        &hit_list.hsplist_array[..count]
-                    })
-                    .map(|hsp_list| {
-                        crate::algorithm::common::database::subject_seq_aligns(
-                            hsp_list.hsps.len(),
-                            !args.ungapped,
-                        )
-                    })
-                    .sum();
+                let seq_aligns_of = |hit_lists: &[Option<BlastnHitList>]| -> usize {
+                    hit_lists
+                        .iter()
+                        .flatten()
+                        .flat_map(|hit_list| {
+                            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                            &hit_list.hsplist_array[..count]
+                        })
+                        .map(|hsp_list| {
+                            crate::algorithm::common::database::subject_seq_aligns(
+                                hsp_list.hsps.len(),
+                                !args.ungapped,
+                            )
+                        })
+                        .sum()
+                };
+                let seq_aligns = seq_aligns_of(&batch_hit_lists);
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                 // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
                 // after the query's own warnings (`query_fetches`, added after them below), where
                 // the first format reads their Bioseqs (`TabularSpec::subject_fetch`; BLASTN's
                 // formatter does not fetch for the identities, so every row reads them or none
-                // does). A batch that fetches nothing still
-                // asks for the run's refusal of NCBI's taxonomy cache before its first byte, unless
-                // no batch of the run prefetches (`shared::prefetch_always_off`).
+                // does). NCBI looks the taxonomy up only where it fetches a subject: in such a
+                // report, or in the prefetch of a batch with Seq-aligns (one without them loads
+                // no id, below). The run's refusal of NCBI's taxonomy cache
+                // (`shared::TaxdbRun::cache_collision`) is asked only there, so a run that fetches
+                // no subject is not refused. Where the report stream acts (`x_rpt_stream`), a
+                // later batch's refusal comes after the reports of the batches before, as the
+                // stream's other refusals of a batch's reported subjects; without it every
+                // report is written after the loop, so the refusal comes before any report.
                 let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                     let fetches = match output_formats.first() {
                         Some(BlastnOutputFormat::CustomTabular(spec)) => {
@@ -9868,15 +9876,12 @@ fn run_in_pool(
                         }
                         _ => true,
                     };
-                    let asks =
-                        fetches || !crate::algorithm::common::database::prefetch_always_off();
                     batch_hit_lists
                         .iter()
                         .map(|hit_list| {
                             let shown = std::slice::from_ref(hit_list);
-                            let messages = if asks {
-                                database
-                                    .prefetch_messages(&titles, if fetches { shown } else { &[] })?
+                            let messages = if fetches && seq_aligns_of(shown) > 0 {
+                                database.prefetch_messages(&titles, shown)?
                             } else {
                                 Vec::new()
                             };
@@ -9888,6 +9893,17 @@ fn run_in_pool(
                             query_fetches = messages;
                             Vec::new()
                         })
+                } else if seq_aligns == 0 {
+                    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
+                    // ```c++
+                    //        CScope::TIds ids;
+                    //        vector<TSeqRange> ranges;
+                    //        s_ExtractSeqidsAndRanges(results, ids, ranges);
+                    //        _TRACE("Prefetching " << ids.size() << " sequence lengths");
+                    //        LoadSequencesToScope(ids, ranges, scope);
+                    // ```
+                    // A batch without Seq-aligns prefetches no sequence.
+                    rows_open(&batch_hit_lists).map(|()| Vec::new())
                 } else {
                     database
                         .prefetch_messages(&titles, &batch_hit_lists)

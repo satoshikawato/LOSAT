@@ -6,7 +6,7 @@ The working records of those lines (plans, state, decision logs) are kept outsid
 This file gives each cited ID one row: what it is, its state, its main pull requests, and the document
 in this repository that holds its fullest record ("external" when there is none).
 
-As of dev 17bf5086a (2026-11-05): 154 IDs cited in the tree, 99 of them in `CHANGELOG.md`, `changelog.d/`
+As of dev 193657f3a (2026-11-06): 154 IDs cited in the tree, 99 of them in `CHANGELOG.md`, `changelog.d/`
 and `docs/`. State: 141 done, 13 in progress, 0 stopped.
 
 - `python3 scripts/line_ids.py list --all` lists the IDs the tree cites, with the number of citing

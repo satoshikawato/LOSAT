@@ -5,7 +5,7 @@ The stop rule for conditional switches ([`AGENTS.md`](../../AGENTS.md), "Speed-u
 and the Owner approves". Twenty switches entered `STRICT_SET` after the rule reached `dev` with PR
 #556 (merged 2026-10-27 05:00 UTC) and have the class `conditional` in
 [`LOSAT/tests/switch_reach_expected.tsv`](../../LOSAT/tests/switch_reach_expected.tsv). As of dev
-17bf5086a (2026-11-05): 1 approved by the Owner as a deadline fallback, whose deadline is its fold
+193657f3a (2026-11-06): 1 approved by the Owner as a deadline fallback, whose deadline is its fold
 into the default form in stage S3 (Owner, 2026-11-06), 14 inside an existing rule, 5 without an
 Owner approval, which the Owner chose to fold into the default form (Owner, 2026-11-05).
 

@@ -6,7 +6,7 @@ kept outside the repository. This file copies each cited decision: its date, the
 written (in Japanese) with a summary in English, and where the repository cites it. A few entries
 that the repository does not cite are kept because a cited entry depends on them ("related entry").
 
-As of dev 17bf5086a (2026-11-05).
+As of dev 193657f3a (2026-11-06).
 
 - Kind: Owner (the Owner's own words, or the Owner's answer to a question), Owner, in part (an entry
   that records both), Owner-delegated (a working session decided it under the Owner's standing
@@ -62,7 +62,7 @@ As of dev 17bf5086a (2026-11-05).
 | 2026-10-17 | Speed-ups land default ON in their own PR | Owner | 「てか速くする改善、実装する時opt-inじゃなくてデフォルトでONにしてくれない？毎回二重にCI通すじゃん。みんなに伝えて。」 | An exact speed-up joins the strict set in the pull request that adds it, with LOSAT_X_<NAME>=0 as the off path; no opt-in PR followed by a default-set PR. | speed-up switches (LOSAT_X_*) | 3: .claude/skills/losat-ship-pr/SKILL.md:40, AGENTS.md:211 | the Owner's chat with a working session (no task-folder record) |
 | 2026-10-17 | A speed-up that cannot be default ON is still adopted | Owner | 「改善策、基本デフォルトでONにしてとは言ったけどデフォルトでONにできなければ採用しないとは言ってないからね」 | Default ON is the normal form, not a condition of acceptance: a speed-up that loses on a measured condition lands opt-in with its win and loss conditions recorded. | speed-up switches (LOSAT_X_*) | 1: .claude/skills/losat-ship-pr/SKILL.md:51 | the Owner's chat with a working session (no task-folder record) |
 | 2026-10-17 | dev is the integration branch | Owner | 「gbdrawみたいに、あるていどブランチ？ごとにまとめてからPRしようよ」「devって必要？」「ごめん必要だわ、続けて」 | dev is the integration branch as in gbdraw: work PRs target dev and merge there, and dev goes to main in one promotion pull request. | branch model, pull requests | 1: .claude/skills/losat-ship-pr/SKILL.md:13 | followups-20261014/DECISIONS.md:626 |
-| 2026-10-16 | BPCLUT and BPLKPFLAT join the default set | Owner | 「メリットがあるなら入れてください」 | The two blastp-fast lookup-table switches that were added after the default changed join the strict default set when they show a merit. | blastp-fast lookup table switches | 1: docs/agents/diagnostics.md:649 | perf-mb-20261014/DECISIONS.md:299 |
+| 2026-10-16 | BPCLUT and BPLKPFLAT join the default set | Owner | 「メリットがあるなら入れてください」 | The two blastp-fast lookup-table switches that were added after the default changed join the strict default set when they show a merit. | blastp-fast lookup table switches | 1: docs/agents/diagnostics.md:652 | perf-mb-20261014/DECISIONS.md:299 |
 | 2026-10-15 | Reading of NCBI-parity rules 8 and 9 for performance work | Not found | (not found) | Performance work may reorder or parallelise when every value and decision behind the output is unchanged (rule 8), and may do less work than NCBI if complexity does not get worse (rule 9). | performance paths, AGENTS.md rules 8 and 9 | 2: AGENTS.md:201, AGENTS.md:205 | speedup-plan-v4-20261017/PLAN_v4.md:48, v4-P0/pr/AGENTS_md_proposal.md |
 | 2026-10-14 | Build for aarch64 and other common platforms (Linux arm64 target) | Owner | 「今後はaarch64とか、ほかにもユーザーが多そうなプラットフォーム向けに作らなきゃね」 | LOSAT is also built for aarch64 and other platforms with many users; Linux arm64 is a required v0.2.0 release target, built natively on an arm64 runner. | platform support, v0.2.0 targets | 2: docs/release/v0.2.0.md:23, docs/release/v0.2.0.md:35 | followups-20261014/DECISIONS.md:11 |
 | 2026-10-13 | -db output equals NCBI -num_threads 1 at every thread count | Owner | 「DB-3: NCBI の 1 スレッド。LOSAT はどのスレッド数でも同じ出力」 | LOSAT output is the same at every thread count and for every -mt_mode value, and equals NCBI's -num_threads 1 output. | all programs, -db and -subject | 4: LOSAT/src/algorithm/blastn/args.rs:237, LOSAT/src/algorithm/blastp/args.rs:401 | dbsearch-20261012/DECISIONS.md:290-292 |
@@ -236,7 +236,7 @@ entry's number in that log. 123 entries: 15 Owner, 3 Owner in part,
 
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
-| 175 | 2026-10-17 | Owner | 「LOSAT_X_TBNSCANBF を既定の組に入れる。同じ分岐なしの走査を blastp / blastx / tblastx にも入れる」 | LOSAT_X_TBNSCANBF joins the strict set, and the scalar branch-free scan is added to blastp, blastx and tblastx, each opt-in first, measured against its own scan, then strict set. | branch-free scan (TBNSCANBF, BXSCANBF) | `docs/agents/diagnostics.md:7088` |
+| 175 | 2026-10-17 | Owner | 「LOSAT_X_TBNSCANBF を既定の組に入れる。同じ分岐なしの走査を blastp / blastx / tblastx にも入れる」 | LOSAT_X_TBNSCANBF joins the strict set, and the scalar branch-free scan is added to blastp, blastx and tblastx, each opt-in first, measured against its own scan, then strict set. | branch-free scan (TBNSCANBF, BXSCANBF) | `docs/agents/diagnostics.md:7091` |
 
 ### `release-v020-20261025`: line RL (the v0.2.0 release)
 
@@ -256,49 +256,49 @@ entry's number in that log. 123 entries: 15 Owner, 3 Owner in part,
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
 | 19 | 2026-10-19 | Owner-delegated |  | x_unit_records keeps its own body and the sliced path calls a copy, because a call into a shared helper changed inlining of the default scan. | tblastx unit scan, x_records_for | `LOSAT/src/algorithm/tblastx/x_pair_par.rs:1613` |
-| 53 | 2026-10-26 | Owner-delegated |  | Session 14 opens with its own PR for the MEM s19 n1 row, LOSAT_X_BXPOOLN1: a one-thread BLASTX search builds lookup tables without the pool; emptying the pool after the last batch was rejected. | LOSAT_X_BXPOOLN1 | `docs/agents/diagnostics.md:7282` |
+| 53 | 2026-10-26 | Owner-delegated |  | Session 14 opens with its own PR for the MEM s19 n1 row, LOSAT_X_BXPOOLN1: a one-thread BLASTX search builds lookup tables without the pool; emptying the pool after the last batch was rejected. | LOSAT_X_BXPOOLN1 | `docs/agents/diagnostics.md:7285` |
 
 ### `v4-A14`: plan v4 item A14
 
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
-| 14 | 2026-10-23 | Owner-delegated |  | The cross scan (Avx2Cross) becomes the default for fused tables on AVX2+POPCNT CPUs: LOSAT_X_BXCROSS joins the strict set; =0 or LOSAT_X_DEFAULT=0 restores the old form. | LOSAT_X_BXCROSS | `docs/agents/diagnostics.md:7006` |
-| 26 | 2026-10-24 | Owner-delegated |  | Deferred candidate calls with an in-band marker (variant B) are a go after the probe counts, proceeding to a prototype. | LOSAT_X_BXCROSSDEFER probe | `docs/agents/diagnostics.md:7054` |
-| 27 | 2026-10-24 | Owner-delegated |  | The prototype is a go and a default-on PR follows; form r3 (marker handled without calls in the batch path) is chosen. | LOSAT_X_BXCROSSDEFER PR | `docs/agents/diagnostics.md:7054` |
+| 14 | 2026-10-23 | Owner-delegated |  | The cross scan (Avx2Cross) becomes the default for fused tables on AVX2+POPCNT CPUs: LOSAT_X_BXCROSS joins the strict set; =0 or LOSAT_X_DEFAULT=0 restores the old form. | LOSAT_X_BXCROSS | `docs/agents/diagnostics.md:7009` |
+| 26 | 2026-10-24 | Owner-delegated |  | Deferred candidate calls with an in-band marker (variant B) are a go after the probe counts, proceeding to a prototype. | LOSAT_X_BXCROSSDEFER probe | `docs/agents/diagnostics.md:7057` |
+| 27 | 2026-10-24 | Owner-delegated |  | The prototype is a go and a default-on PR follows; form r3 (marker handled without calls in the batch path) is chosen. | LOSAT_X_BXCROSSDEFER PR | `docs/agents/diagnostics.md:7057` |
 
 ### `v4-C`: plan v4 line C
 
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
-| 25 | 2026-10-19 | Record |  | Probe numbers of the blastp composition redo on WSSV x PajaWSV: erfc, composition reads and Karlin parameter costs and repeated inputs, the basis for step C4. | blastp redo C4 probe | `docs/agents/diagnostics.md:1008`, `docs/agents/diagnostics.md:1143` |
-| 31 | 2026-10-19 | Record |  | Record of probe counts for tblastn/blastx redo (SEG trim dominates, repeated trim inputs 118,765 calls of 12,584 kinds). | C5 SEG trim memo evidence | `LOSAT/src/utils/x_seg_trim_memo.rs:33`, `docs/agents/diagnostics.md:950` |
-| 32 | 2026-10-19 | Record |  | Record of the trim memo sizing: cap at 32,768 entries, doubled as needed, cleared at the cap. | LOSAT_X_SEGTRIMMEMO size | `LOSAT/src/utils/x_seg_trim_memo.rs:56`, `docs/agents/diagnostics.md:950` |
-| 33 | 2026-10-19 | Owner-delegated |  | Go for step C5 = LOSAT_X_SEGTRIMMEMO: a per-thread memo of SEG trim results keyed by the whole byte string. | SEG trim memo (C5) | `docs/agents/diagnostics.md:950` |
-| 34 | 2026-10-19 | Owner-delegated |  | After review the SEG trim memo is opt-in per masker (tblastn redo windows, blastx query) so other maskers keep no table and RSS stays at or below NCBI. | SEG trim memo scope | `docs/agents/diagnostics.md:950` |
+| 25 | 2026-10-19 | Record |  | Probe numbers of the blastp composition redo on WSSV x PajaWSV: erfc, composition reads and Karlin parameter costs and repeated inputs, the basis for step C4. | blastp redo C4 probe | `docs/agents/diagnostics.md:1011`, `docs/agents/diagnostics.md:1146` |
+| 31 | 2026-10-19 | Record |  | Record of probe counts for tblastn/blastx redo (SEG trim dominates, repeated trim inputs 118,765 calls of 12,584 kinds). | C5 SEG trim memo evidence | `LOSAT/src/utils/x_seg_trim_memo.rs:33`, `docs/agents/diagnostics.md:953` |
+| 32 | 2026-10-19 | Record |  | Record of the trim memo sizing: cap at 32,768 entries, doubled as needed, cleared at the cap. | LOSAT_X_SEGTRIMMEMO size | `LOSAT/src/utils/x_seg_trim_memo.rs:56`, `docs/agents/diagnostics.md:953` |
+| 33 | 2026-10-19 | Owner-delegated |  | Go for step C5 = LOSAT_X_SEGTRIMMEMO: a per-thread memo of SEG trim results keyed by the whole byte string. | SEG trim memo (C5) | `docs/agents/diagnostics.md:953` |
+| 34 | 2026-10-19 | Owner-delegated |  | After review the SEG trim memo is opt-in per masker (tblastn redo windows, blastx query) so other maskers keep no table and RSS stays at or below NCBI. | SEG trim memo scope | `docs/agents/diagnostics.md:953` |
 
 ### `v4-D12`: plan v4 item D12
 
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
-| 59 | 2026-10-27 | Owner-delegated |  | bp_wssv -subject n1 stays outside the memory floor after #576, so the u16-hit block-table prototype (BPLK16) goes ahead; the floor is recounted as 12,365 KiB. | blastp memory, BPLK16 | `docs/agents/diagnostics.md:1997` |
-| 60 | 2026-10-27 | Owner-delegated |  | The remaining ur50e3 n32 memory is live data (thread scratch, window block results, lookup tables), not freed arena space. | blastp memory census | `docs/agents/diagnostics.md:1997` |
-| 61 | 2026-10-27 | Owner-delegated |  | LOSAT_X_BPLK16 wins and goes into the strict set in the same PR (perf/bp-lk16, default on, =0 restores the old path). | LOSAT_X_BPLK16 | `docs/agents/diagnostics.md:1997` |
-| 62 | 2026-10-28 | Owner-delegated |  | No-go on shrinking init-HSP capacity after a large subject; the peak is the sum of per-thread maxima, so next borrow large arrays from a shared pool. | blastp memory (init HSP arrays) | `LOSAT/src/algorithm/blastp/blast_engine/x_ih_pool.rs:25`, `docs/agents/diagnostics.md:1904` |
-| 63 | 2026-10-28 | Owner-delegated |  | The shared initial-HSP pool saves 15-22 MiB on ur50e3 n32 at no time cost, so LOSAT_X_BPIHPOOL proceeds to the strict set. | LOSAT_X_BPIHPOOL | `docs/agents/diagnostics.md:1904` |
-| 66 | 2026-10-28 | Owner-delegated |  | Restricted-gap arrays grow to the reached band as NCBI's dp_mem does (about 18-20 MiB saved on ur50e3 n32), so LOSAT_X_BPGAPBAND proceeds to the strict set. | LOSAT_X_BPGAPBAND | `docs/agents/diagnostics.md:5928` |
-| 67 | 2026-10-28 | Record |  | The board's "O0 cycles x1.057 after #601" splits into x1.005-1.01 from #601 and binary placement. | BPIHPOOL cost analysis | `docs/agents/diagnostics.md:5928` |
-| 68 | 2026-10-29 | Owner-delegated |  | The first BPGAPBAND form is not made a PR (O0 n1 cycles x1.0019); the comparison moves into the existing column-copy branch to keep the row loop identical to dev. | BPGAPBAND implementation form | `docs/agents/diagnostics.md:5928` |
-| 69 | 2026-10-29 | Owner-delegated |  | Row functions stay character-identical to dev; the band limit is passed through the col length and the arrays double when a row stops. | BPGAPBAND implementation form | `docs/agents/diagnostics.md:5928` |
-| 70 | 2026-10-30 | Owner-delegated |  | The d78bb8a8 form passes the rule, so a docs commit and a draft PR (perf/bp-gap-band) follow. | BPGAPBAND PR | `docs/agents/diagnostics.md:5928` |
-| 71 | 2026-10-30 | Owner-delegated |  | Census shows small thread residues of trees and per-query lists; first implement LOSAT_X_BPHITSFLAT (counting sort, no per-query lists), trees later. | blastp memory (prelim hit lists) | `LOSAT/src/algorithm/blastp/blast_engine/x_hits_flat.rs:24`, `docs/agents/diagnostics.md:1938` |
-| 72 | 2026-10-30 | Owner-delegated |  | LOSAT_X_BPHITSFLAT works and goes to a full gate and draft PR in the strict set; the n1 instruction increase of x1.0003 is accepted. | LOSAT_X_BPHITSFLAT | `docs/agents/diagnostics.md:1938` |
+| 59 | 2026-10-27 | Owner-delegated |  | bp_wssv -subject n1 stays outside the memory floor after #576, so the u16-hit block-table prototype (BPLK16) goes ahead; the floor is recounted as 12,365 KiB. | blastp memory, BPLK16 | `docs/agents/diagnostics.md:2000` |
+| 60 | 2026-10-27 | Owner-delegated |  | The remaining ur50e3 n32 memory is live data (thread scratch, window block results, lookup tables), not freed arena space. | blastp memory census | `docs/agents/diagnostics.md:2000` |
+| 61 | 2026-10-27 | Owner-delegated |  | LOSAT_X_BPLK16 wins and goes into the strict set in the same PR (perf/bp-lk16, default on, =0 restores the old path). | LOSAT_X_BPLK16 | `docs/agents/diagnostics.md:2000` |
+| 62 | 2026-10-28 | Owner-delegated |  | No-go on shrinking init-HSP capacity after a large subject; the peak is the sum of per-thread maxima, so next borrow large arrays from a shared pool. | blastp memory (init HSP arrays) | `LOSAT/src/algorithm/blastp/blast_engine/x_ih_pool.rs:25`, `docs/agents/diagnostics.md:1907` |
+| 63 | 2026-10-28 | Owner-delegated |  | The shared initial-HSP pool saves 15-22 MiB on ur50e3 n32 at no time cost, so LOSAT_X_BPIHPOOL proceeds to the strict set. | LOSAT_X_BPIHPOOL | `docs/agents/diagnostics.md:1907` |
+| 66 | 2026-10-28 | Owner-delegated |  | Restricted-gap arrays grow to the reached band as NCBI's dp_mem does (about 18-20 MiB saved on ur50e3 n32), so LOSAT_X_BPGAPBAND proceeds to the strict set. | LOSAT_X_BPGAPBAND | `docs/agents/diagnostics.md:5931` |
+| 67 | 2026-10-28 | Record |  | The board's "O0 cycles x1.057 after #601" splits into x1.005-1.01 from #601 and binary placement. | BPIHPOOL cost analysis | `docs/agents/diagnostics.md:5931` |
+| 68 | 2026-10-29 | Owner-delegated |  | The first BPGAPBAND form is not made a PR (O0 n1 cycles x1.0019); the comparison moves into the existing column-copy branch to keep the row loop identical to dev. | BPGAPBAND implementation form | `docs/agents/diagnostics.md:5931` |
+| 69 | 2026-10-29 | Owner-delegated |  | Row functions stay character-identical to dev; the band limit is passed through the col length and the arrays double when a row stops. | BPGAPBAND implementation form | `docs/agents/diagnostics.md:5931` |
+| 70 | 2026-10-30 | Owner-delegated |  | The d78bb8a8 form passes the rule, so a docs commit and a draft PR (perf/bp-gap-band) follow. | BPGAPBAND PR | `docs/agents/diagnostics.md:5931` |
+| 71 | 2026-10-30 | Owner-delegated |  | Census shows small thread residues of trees and per-query lists; first implement LOSAT_X_BPHITSFLAT (counting sort, no per-query lists), trees later. | blastp memory (prelim hit lists) | `LOSAT/src/algorithm/blastp/blast_engine/x_hits_flat.rs:24`, `docs/agents/diagnostics.md:1941` |
+| 72 | 2026-10-30 | Owner-delegated |  | LOSAT_X_BPHITSFLAT works and goes to a full gate and draft PR in the strict set; the n1 instruction increase of x1.0003 is accepted. | LOSAT_X_BPHITSFLAT | `docs/agents/diagnostics.md:1941` |
 
 ### `v4-W`: plan v4 line W
 
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
-| 33 | 2026-10-20 | Record |  | TBXHITBF wins on Wasm in all cases (scan x0.62-0.75), so neither a rule nor a PR is needed. | TBXHITBF on Wasm | `docs/agents/diagnostics.md:6287` |
-| 36 | 2026-10-20 | Record |  | Same-process pair measurement of the wasm32 split of x_hits_bf: scan stage x0.92-0.95, no losing case, so a PR follows. | wasm32 x_hits_bf split | `docs/agents/diagnostics.md:6287` |
+| 33 | 2026-10-20 | Record |  | TBXHITBF wins on Wasm in all cases (scan x0.62-0.75), so neither a rule nor a PR is needed. | TBXHITBF on Wasm | `docs/agents/diagnostics.md:6290` |
+| 36 | 2026-10-20 | Record |  | Same-process pair measurement of the wasm32 split of x_hits_bf: scan stage x0.92-0.95, no losing case, so a PR follows. | wasm32 x_hits_bf split | `docs/agents/diagnostics.md:6290` |
 
 ### `wasm-oob-20261101`: line WO
 

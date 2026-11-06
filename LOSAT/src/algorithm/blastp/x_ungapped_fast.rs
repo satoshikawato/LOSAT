@@ -1,6 +1,7 @@
-//! The BLOSUM62 protein ungapped extension (`s_BlastAaExtendOneHit`,
-//! `s_BlastAaExtendTwoHit` and the `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks they share)
-//! with a tighter inner loop.
+//! The protein ungapped extension (`s_BlastAaExtendOneHit`, `s_BlastAaExtendTwoHit` and the
+//! `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks they share) with a tighter inner loop:
+//! both extensions with BLOSUM62 (`one_hit`, `two_hit`), the two-hit one with another matrix
+//! (`two_hit_of`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883
 //! ```c
@@ -44,11 +45,23 @@
 //!   sentinel (-128) is not made positive again by the others (<= 11 each), as -32768 is not,
 //!   so every comparison with a score >= 0 has the same outcome; longer words run the
 //!   reference.
+//!
+//! Another matrix (`matrix_table`, `two_hit_of`). The same walks with a table of the matrix's
+//! scores (`protein_score`, the function the reference calls for a matrix other than BLOSUM62),
+//! when every score other than `BLAST_SCORE_MIN` is within -127..=127. The arguments above hold
+//! with the matrix's largest score `M` in place of BLOSUM62's 11: the bounds, the codes and the
+//! walks' sentinel steps do not depend on the scores, and in a word of `w` residues with
+//! `w * M <= 127` the scores after a sentinel add up to at most `(w - 1) * M < 128`. In the two-hit
+//! word loop a score after a sentinel is then at most the score before it (itself at most
+//! `left_score`), with -128 as with -32768, so `left_score` is not raised in either. A longer
+//! word (`MatrixTable::max_word_size`) runs the reference. (There is no one-hit extension with
+//! another matrix's table.)
 
 use super::extension::{
     BlastpOneHitUngappedResult, BlastpTwoHitUngappedResult, BlastpUngappedData,
 };
-use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, BLAST_SCORE_MIN};
+use crate::config::ScoringMatrix;
+use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score, BLAST_SCORE_MIN};
 use std::sync::OnceLock;
 
 /// Codes below this index the table; `q << 5 | s` is the index.
@@ -88,6 +101,52 @@ pub(crate) fn build_table() -> Option<Box<Table>> {
 fn table() -> Option<&'static Table> {
     static TABLE: OnceLock<Option<Box<Table>>> = OnceLock::new();
     TABLE.get_or_init(build_table).as_deref()
+}
+
+/// Sum that the scores of a word may reach after a sentinel (module comment, another matrix).
+const WORD_SCORE_ROOM: i32 = 127;
+
+/// Another matrix's table of the walks (`two_hit_of`) and the longest word the walks take with it.
+pub(crate) struct MatrixTable {
+    table: Box<Table>,
+    /// `WORD_SCORE_ROOM / M`, `M` the matrix's largest score (module comment).
+    max_word_size: usize,
+}
+
+/// The table of the walks for `matrix`, `None` if a score other than `BLAST_SCORE_MIN` does not
+/// fit a byte.
+// NCBI reference: aa_ungapped.c:804-883 `matrix[q[i]][s[i]]`; the scores are those of the
+// function the reference walks call for a matrix other than BLOSUM62 (`protein_score`).
+fn build_matrix_table(matrix: ScoringMatrix) -> Option<MatrixTable> {
+    let mut table = Box::new([0i8; TABLE_LEN]);
+    let mut max_score = 1i32;
+    for q in 0..CODES {
+        for s in 0..CODES {
+            let v = protein_score(matrix, q as u8, s as u8);
+            table[q << 5 | s] = if v == BLAST_SCORE_MIN {
+                -128
+            } else if (-127..=127).contains(&v) {
+                max_score = max_score.max(v);
+                v as i8
+            } else {
+                return None;
+            };
+        }
+    }
+    Some(MatrixTable {
+        table,
+        max_word_size: (WORD_SCORE_ROOM / max_score) as usize,
+    })
+}
+
+/// The table of the walks for `matrix`, built at the first call for the matrix; `None` if a score
+/// does not fit a byte (the reference then runs).
+pub(crate) fn matrix_table(matrix: ScoringMatrix) -> Option<&'static MatrixTable> {
+    static TABLES: [OnceLock<Option<MatrixTable>>; ScoringMatrix::ALL.len()] =
+        [const { OnceLock::new() }; ScoringMatrix::ALL.len()];
+    TABLES[matrix as usize]
+        .get_or_init(|| build_matrix_table(matrix))
+        .as_ref()
 }
 
 /// What one walk returns: best score, length, step at which the loop left, and the OR of every
@@ -223,6 +282,82 @@ fn supported(query: &[u8], subject: &[u8], dropoff: i32, word_size: usize) -> bo
         && subject.len() <= i32::MAX as usize
 }
 
+/// The steps of [`two_hit`] and [`two_hit_of`] after their checks, on the table `$tab`: one text
+/// for both, expanded in place, so that BLOSUM62's `two_hit` compiles as it did before `two_hit_of`
+/// (an `#[inline(always)]` function in its place changed `two_hit`'s register allocation).
+// NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
+macro_rules! two_hit_steps {
+    ($tab:ident, $query:ident, $subject:ident, $s_left_off:ident, $s_right_off:ident,
+     $q_right_off:ident, $dropoff:ident, $word_size:ident) => {{
+        let mut q_right_off = $q_right_off as i32;
+        let s_left_off = $s_left_off as i32;
+        let mut s_right_off = $s_right_off as i32;
+        let word_size = $word_size as i32;
+
+        let mut right_d = 0i32;
+        let mut left_score = 0i32;
+        let mut score = 0i32;
+        let mut codes = 0u8;
+        for i in 0..word_size {
+            // the word fits in both sequences (checked above)
+            let qc = $query[(q_right_off + i) as usize];
+            let sc = $subject[(s_right_off + i) as usize];
+            codes |= qc | sc;
+            score += $tab[(qc as usize) << 5 | sc as usize] as i32;
+            if score > left_score {
+                left_score = score;
+                right_d = i + 1;
+            }
+        }
+        q_right_off += right_d;
+        s_right_off += right_d;
+
+        let (left_score, left_d, c) = extend_left(
+            $tab,
+            $query,
+            $subject,
+            q_right_off - 1,
+            s_right_off - 1,
+            $dropoff,
+            0,
+        );
+        codes |= c;
+
+        let mut right_extend = false;
+        let mut s_last_off = s_right_off;
+        let mut right_score = 0i32;
+        let mut right_d = 0i32;
+        if left_d >= (s_right_off - s_left_off) {
+            right_extend = true;
+            let (rs, rd, last, c) = extend_right(
+                $tab,
+                $query,
+                $subject,
+                q_right_off,
+                s_right_off,
+                $dropoff,
+                left_score,
+            );
+            (right_score, right_d, s_last_off) = (rs, rd, last);
+            codes |= c;
+        }
+        if codes >= CODES as u8 {
+            return None;
+        }
+
+        Some(Some(BlastpTwoHitUngappedResult {
+            ungapped_data: BlastpUngappedData {
+                q_start: q_right_off - left_d,
+                s_start: s_right_off - left_d,
+                length: left_d + right_d,
+                score: left_score.max(right_score),
+            },
+            right_extend,
+            s_last_off,
+        }))
+    }};
+}
+
 /// `Some(result)` when the fast path handled the call (`result` may be `None`, the reference's
 /// early return), `None` when the reference has to run.
 // NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
@@ -243,72 +378,54 @@ pub(crate) fn two_hit(
         return None;
     }
     let tab = table()?;
-    let mut q_right_off = q_right_off as i32;
-    let s_left_off = s_left_off as i32;
-    let mut s_right_off = s_right_off as i32;
-    let word_size = word_size as i32;
-
-    let mut right_d = 0i32;
-    let mut left_score = 0i32;
-    let mut score = 0i32;
-    let mut codes = 0u8;
-    for i in 0..word_size {
-        // the word fits in both sequences (checked above)
-        let qc = query[(q_right_off + i) as usize];
-        let sc = subject[(s_right_off + i) as usize];
-        codes |= qc | sc;
-        score += tab[(qc as usize) << 5 | sc as usize] as i32;
-        if score > left_score {
-            left_score = score;
-            right_d = i + 1;
-        }
-    }
-    q_right_off += right_d;
-    s_right_off += right_d;
-
-    let (left_score, left_d, c) = extend_left(
+    two_hit_steps!(
         tab,
         query,
         subject,
-        q_right_off - 1,
-        s_right_off - 1,
+        s_left_off,
+        s_right_off,
+        q_right_off,
         dropoff,
-        0,
-    );
-    codes |= c;
+        word_size
+    )
+}
 
-    let mut right_extend = false;
-    let mut s_last_off = s_right_off;
-    let mut right_score = 0i32;
-    let mut right_d = 0i32;
-    if left_d >= (s_right_off - s_left_off) {
-        right_extend = true;
-        let (rs, rd, last, c) = extend_right(
-            tab,
-            query,
-            subject,
-            q_right_off,
-            s_right_off,
-            dropoff,
-            left_score,
-        );
-        (right_score, right_d, s_last_off) = (rs, rd, last);
-        codes |= c;
+/// [`two_hit`] with another matrix's table ([`matrix_table`]), for words of up to
+/// `matrix.max_word_size` residues.
+// NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn two_hit_of(
+    matrix: &MatrixTable,
+    query: &[u8],
+    subject: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<Option<BlastpTwoHitUngappedResult>> {
+    // The early return of the reference wrapper (a word that does not fit).
+    if q_right_off + word_size > query.len() || s_right_off + word_size > subject.len() {
+        return Some(None);
     }
-    if codes >= CODES as u8 {
+    if !((1..=MAX_DROPOFF).contains(&dropoff)
+        && (1..=matrix.max_word_size).contains(&word_size)
+        && query.len() <= i32::MAX as usize
+        && subject.len() <= i32::MAX as usize)
+    {
         return None;
     }
-
-    Some(Some(BlastpTwoHitUngappedResult {
-        ungapped_data: BlastpUngappedData {
-            q_start: q_right_off - left_d,
-            s_start: s_right_off - left_d,
-            length: left_d + right_d,
-            score: left_score.max(right_score),
-        },
-        right_extend,
-        s_last_off,
-    }))
+    let tab: &Table = &matrix.table;
+    two_hit_steps!(
+        tab,
+        query,
+        subject,
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        dropoff,
+        word_size
+    )
 }
 
 /// As [`two_hit`], for `s_BlastAaExtendOneHit`.
@@ -655,5 +772,160 @@ mod tests {
             }
         }
         assert!(t[CODES * CODES..].iter().all(|&b| b == 0));
+    }
+
+    /// Every matrix's table holds the scores of the function the reference calls for that matrix
+    /// (the sentinel stored as -128), and its longest word is `127 / M`; BLOSUM62's is the table
+    /// and the longest word of [`two_hit`].
+    #[test]
+    fn matrix_tables_hold_the_reference_scores() {
+        for matrix in ScoringMatrix::ALL {
+            let m = matrix_table(matrix).expect("every matrix fits bytes");
+            let mut max = 1;
+            for q in 0..32usize {
+                for s in 0..32usize {
+                    let v = protein_score(matrix, q as u8, s as u8);
+                    let expect = if v == BLAST_SCORE_MIN {
+                        -128
+                    } else {
+                        max = max.max(v);
+                        v
+                    };
+                    assert_eq!(m.table[q << 5 | s] as i32, expect, "{matrix:?} q={q} s={s}");
+                }
+            }
+            assert!(m.table[CODES * CODES..].iter().all(|&b| b == 0));
+            assert_eq!(
+                m.max_word_size,
+                (WORD_SCORE_ROOM / max) as usize,
+                "{matrix:?}"
+            );
+            assert!(
+                m.max_word_size >= 7,
+                "{matrix:?}: words of up to 7 residues (tblastn)"
+            );
+        }
+        let b62 = matrix_table(ScoringMatrix::Blosum62).unwrap();
+        assert_eq!(&b62.table[..], &build_table().unwrap()[..]);
+        assert_eq!(b62.max_word_size, MAX_WORD_SIZE);
+    }
+
+    /// `two_hit_of` with each matrix's table gives the reference's result for that matrix: random
+    /// and related sequences with sentinels and the matrix's best pair inside them, words of every
+    /// size the table takes with a sentinel at each place among best pairs, and a longer word goes
+    /// to the reference.
+    #[test]
+    fn matrix_walks_equal_the_reference_for_every_matrix() {
+        let mut rng = Rng(0x5851_F42D_4C95_7F2D);
+        for matrix in ScoringMatrix::ALL {
+            let m = matrix_table(matrix).unwrap();
+            let (bq, bs) = (1..28u8)
+                .flat_map(|q| (1..28u8).map(move |s| (q, s)))
+                .max_by_key(|&(q, s)| protein_score(matrix, q, s))
+                .unwrap();
+            let mut compared = 0u64;
+            for round in 0..300 {
+                let len = 12 + rng.below(if round % 2 == 0 { 40 } else { 400 }) as usize;
+                // every fifth round also codes 28..=31, which the table holds (`CODES`)
+                let hi = if round % 5 == 4 { 32 } else { 28 };
+                let mut q = random_seq(&mut rng, len, 1, hi);
+                let mut s = if round % 3 == 0 {
+                    random_seq(&mut rng, len + 3, 1, hi)
+                } else {
+                    let rate = 2 + rng.below(10);
+                    mutate(&mut rng, &q, rate)
+                };
+                for _ in 0..rng.below(10) {
+                    let at = rng.below(q.len().min(s.len()) as u64) as usize;
+                    match rng.below(3) {
+                        0 => q[at] = 0,
+                        1 => (q[at], s[at]) = (bq, bs),
+                        _ => s[at] = 0,
+                    }
+                }
+                for _ in 0..40 {
+                    let w = 1 + rng.below(m.max_word_size as u64) as usize;
+                    let d = 1 + rng.below(127) as i32;
+                    let qr = rng.below(q.len() as u64) as usize;
+                    let sr = rng.below(s.len() as u64) as usize;
+                    let sl = sr.saturating_sub(rng.below(8) as usize);
+                    let expect = extend_two_hit(matrix, &q, &s, sl, sr, qr, d, w);
+                    let got = two_hit_of(m, &q, &s, sl, sr, qr, d, w)
+                        .expect("fast path handles the call");
+                    assert_eq!(
+                        got, expect,
+                        "{matrix:?} sl={sl} sr={sr} qr={qr} d={d} w={w}"
+                    );
+                    compared += 1;
+                }
+            }
+            // Words of best pairs with one sentinel at each place, at the longest word too.
+            for w in 1..=m.max_word_size {
+                for k in 0..w {
+                    let n = 2 * w + 12;
+                    let mut q = vec![bq; n];
+                    let s = vec![bs; n];
+                    q[0] = 0;
+                    q[n - 1] = 0;
+                    let p = 5;
+                    q[p + k] = 0;
+                    for d in [1, 30, 127] {
+                        let expect = extend_two_hit(matrix, &q, &s, p - 3, p, p, d, w);
+                        let got = two_hit_of(m, &q, &s, p - 3, p, p, d, w)
+                            .expect("fast path handles the call");
+                        assert_eq!(got, expect, "{matrix:?} w={w} k={k} d={d}");
+                        compared += 1;
+                    }
+                }
+            }
+            assert!(compared >= 12_000, "{matrix:?}: {compared}");
+            let q = random_seq(&mut rng, 40, 1, 28);
+            assert_eq!(
+                two_hit_of(m, &q, &q, 2, 6, 6, 16, m.max_word_size + 1),
+                None
+            );
+            assert_eq!(two_hit_of(m, &q, &q, 2, 6, 6, 128, 3), None);
+            // the other inputs `fast_path_hands_unsupported_inputs_to_the_reference` gives
+            // `two_hit`: X-drops outside 1..=127, no word, and a code >= 32 in the word or only
+            // in the walk; the early return of a word that does not fit is the reference's
+            for d in [i32::MIN, -5, 0, 8193, i32::MAX] {
+                assert_eq!(
+                    two_hit_of(m, &q, &q, 2, 6, 6, d, 3),
+                    None,
+                    "{matrix:?} d={d}"
+                );
+            }
+            assert_eq!(two_hit_of(m, &q, &q, 0, 2, 2, 16, 0), None, "{matrix:?}");
+            let mut wide = vec![0u8; 80];
+            let mut other = vec![0u8; 80];
+            for i in 1..79 {
+                wide[i] = 1 + (i % 20) as u8;
+                other[i] = 1 + ((i * 3) % 20) as u8;
+            }
+            wide[36] = 200;
+            assert_eq!(
+                two_hit_of(m, &wide, &other, 30, 35, 35, 16, 3),
+                None,
+                "{matrix:?}"
+            );
+            let mut deep = other.clone();
+            deep[20] = 77;
+            assert_eq!(
+                two_hit_of(m, &other, &deep, 28, 30, 30, 100, 3),
+                None,
+                "{matrix:?}"
+            );
+            let short: Vec<u8> = [0].into_iter().chain(1..=20).chain([0]).collect();
+            assert_eq!(
+                two_hit_of(m, &short, &short, 0, 21, 3, 16, 3),
+                Some(extend_two_hit(matrix, &short, &short, 0, 21, 3, 16, 3)),
+                "{matrix:?}"
+            );
+            assert_eq!(
+                two_hit_of(m, &short, &short, 0, 21, 3, 16, 3),
+                Some(None),
+                "{matrix:?}"
+            );
+        }
     }
 }

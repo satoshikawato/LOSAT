@@ -287,6 +287,9 @@ impl NaLookupTable {
         if num_hits == 0 {
             return &[];
         }
+        // SAFETY: the union field read must hold written data; `build_na_lookup` (the only
+        // constructor) writes `entries[..num_used]` when `num_used <= NA_HITS_PER_CELL` (its second
+        // pass visits the words its first pass counted) and `overflow_cursor` otherwise.
         unsafe {
             // SAFETY: The payload field is accessed according to num_used,
             // matching the NCBI union layout (entries for small chains,
@@ -1818,7 +1821,8 @@ pub fn build_na_lookup(
         pv_set(&mut pv, idx);
         if num_hits > NA_HITS_PER_CELL {
             // Chains larger than NA_HITS_PER_CELL store overflow_cursor, matching NCBI union
-            // usage (writing a union field needs no `unsafe`).
+            // usage (writing a `Copy` union field needs no `unsafe`). It sets the cursor that the
+            // fill below and `get_hits_checked` read for this chain.
             backbone[idx].payload.overflow_cursor = overflow_size as u32;
             overflow_size += num_hits;
         }
@@ -1878,6 +1882,9 @@ pub fn build_na_lookup(
                 let pos_idx = write_pos[idx] as usize;
                 let q_off_1 = (query_offset + kmer_start + 1) as u32;
                 if counts[idx] as usize > NA_HITS_PER_CELL {
+                    // SAFETY: reading `overflow_cursor` needs it written; the `0..table_size`
+                    // loop set it for every cell with `counts[idx] > NA_HITS_PER_CELL`, and
+                    // `counts` has not changed since; the `overflow` index is bounds-checked.
                     unsafe {
                         // SAFETY: overflow_cursor is initialized for large chains.
                         let start = backbone[idx].payload.overflow_cursor as usize;

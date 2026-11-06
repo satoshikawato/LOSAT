@@ -1,0 +1,27 @@
+# The Rust files that may keep a blanket `#![allow(warnings ...)]` (LOSAT/tests/check_lint_allow_ratchet.py).
+# Fixed at dev 8a5656f7f (2026-11-05): lib.rs, main.rs and 23 test files. Remove a row when its file drops
+# the attribute; never add one.
+path
+LOSAT/tests/cli_smoke.rs
+LOSAT/tests/compressed_lookup.rs
+LOSAT/tests/outfmt13_14_files.rs
+LOSAT/tests/outfmt16_blastn.rs
+LOSAT/tests/outfmt16_blastp.rs
+LOSAT/tests/outfmt16_blastx.rs
+LOSAT/tests/outfmt16_tblastn.rs
+LOSAT/tests/outfmt16_tblastx.rs
+LOSAT/tests/outfmt17_blastn.rs
+LOSAT/tests/outfmt5_blastx.rs
+LOSAT/tests/outfmt5_no_query.rs
+LOSAT/tests/outfmt5_refusals.rs
+LOSAT/tests/outfmt5_tblastn.rs
+LOSAT/tests/outfmt5_tblastx.rs
+LOSAT/tests/run_local_blastn.rs
+LOSAT/tests/run_local_blastp.rs
+LOSAT/tests/run_local_blastp_blocks.rs
+LOSAT/tests/run_local_blastx.rs
+LOSAT/tests/run_local_tblastn.rs
+LOSAT/tests/run_local_tblastx.rs
+LOSAT/tests/seqalign_samples.rs
+LOSAT/tests/tblastx_matrix.rs
+LOSAT/tests/unit_tests.rs

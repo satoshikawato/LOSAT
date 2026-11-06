@@ -11,7 +11,7 @@ import { fastaParser, programById, type InputRole, type ProgramId } from '../../
 import { isTerminal, type RunRecord, type RunStatus } from '../../../src/domain/run';
 import { sha256Hex } from '../../../src/infra/browser/platform';
 import { startDataWorker } from '../../../src/infra/data-worker/gateway';
-import { WasmEngine } from '../../../src/infra/engine-worker/gateway';
+import { WasmEngine, type RuntimeEnd } from '../../../src/infra/engine-worker/gateway';
 import type { RenewalLimits } from '../../../src/infra/engine-worker/policy';
 import type { EngineEvent, WorkerTestCommand } from '../../../src/infra/engine-worker/protocol';
 import type { EngineGateway, EngineInput, RuntimeInfo } from '../../../src/ports/engine';
@@ -60,6 +60,7 @@ export interface SearchResult {
 
 export interface SessionOptions {
   readonly renewal?: Partial<RenewalLimits>;
+  readonly onRuntimeEnd?: (end: RuntimeEnd) => void;
 }
 
 const FORMATS: readonly OutputFormat[] = [0, 6, 7];
@@ -97,6 +98,7 @@ export class SearchSession {
     this.app = createApp({
       downloader: { save: (fileName, bytes) => this.exported.set(fileName, bytes) },
       ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
+      ...(options.onRuntimeEnd === undefined ? {} : { onRuntimeEnd: options.onRuntimeEnd }),
     });
   }
 
@@ -224,11 +226,14 @@ export interface CancelResult {
   readonly cancelMs: number;
   /** Milliseconds of the next search from its start to its search phase (worker, instance, inputs). */
   readonly nextPrepareMs: number;
+  /** How the runtimes ended until the next search completed, or until the first one ended (gateway.ts, RuntimeEnd). */
+  readonly runtimeEnds: readonly RuntimeEnd[];
 }
 
 /** Cancels `long` once it runs, then runs `next` in the same application. */
 export async function cancelThenSearch(long: SearchCase, next: SearchCase, afterMs = 300): Promise<CancelResult> {
-  const session = new SearchSession();
+  const runtimeEnds: RuntimeEnd[] = [];
+  const session = new SearchSession({ onRuntimeEnd: (end) => runtimeEnds.push(end) });
   const runId = await session.enqueue(long);
   await session.until(runId, ['running']);
   await new Promise((resolve) => setTimeout(resolve, afterMs));
@@ -238,9 +243,12 @@ export async function cancelThenSearch(long: SearchCase, next: SearchCase, after
   const cancelMs = performance.now() - cancelAt;
   const cancelled = await session.describe(long.id, cancelledView, 0);
   const result = await session.search(next);
+  // The cancelled runtime ends once its keeper grew the memory, which may come after the next search.
+  const deadline = performance.now() + 5_000;
+  while (runtimeEnds.length === 0 && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
   const phase = result.record.phaseTimes;
   const nextPrepareMs = (phase?.running ?? 0) - (result.record.startedAt ?? 0);
-  return { cancelled, next: result, cancelMs, nextPrepareMs };
+  return { cancelled, next: result, cancelMs, nextPrepareMs, runtimeEnds: [...runtimeEnds] };
 }
 
 export interface RetentionResult {

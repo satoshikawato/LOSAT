@@ -380,7 +380,7 @@ let outcome = run_collect(&search, Inputs::new(&query, &subject), &["6", "0"])?;
 // outcome.queries(): the same results by query, and .subjects() of each by subject
 ```
 
-`run_batches` gives the same records one of NCBI's query batches at a time, so a caller keeps one batch in memory, reports progress between batches and stops by not asking for the next. The inputs are records, or a BLAST database by its name (`Inputs::database(&query, "core_nt")`, the command line's `-db`; `-query`, `-subject`, `-db`, `-out` and `-outfmt` are not argv options of the API), the search writes nothing to standard output or error, and errors carry the command line's messages. `cargo run --release --example library_search -- blastp query.faa subject.faa -evalue 1e-5` prints the outfmt 6 report; `cargo doc --no-deps --open` shows the API. The crate is not on crates.io yet (the plan's LIB-3).
+`run_batches` gives the same records one of NCBI's query batches at a time, so a caller keeps one batch in memory, reports progress between batches and stops by not asking for the next. The inputs are records, or a BLAST database by its name (`Inputs::database(&query, "core_nt")`, the command line's `-db`; `-query`, `-subject`, `-db`, `-out` and `-outfmt` are not argv options of the API, nor are psiblast's PSSM files, `-out_ascii_pssm`, `-save_pssm_after_last_round` and `-save_each_pssm`: the library writes no PSSM file), `run_to_file` is `-out` (and the way to outfmt 13 and 14, with their side files), `run_makeblastdb` and `run_blastdbcmd` run the two database programs with the caller's writers, the search writes nothing to standard output or error, and errors carry the command line's messages. `cargo run --release --example library_search -- blastp query.faa subject.faa -evalue 1e-5` prints the outfmt 6 report; `cargo doc --no-deps --open` shows the API. The crate is not on crates.io yet (the plan's LIB-3).
 
 ## Library use (Python)
 
@@ -449,8 +449,8 @@ LOSAT stops with an error for each option and value below; it does not run somet
 **Strategy files**
 - `-import_search_strategy` and `-export_search_strategy`: all five programs.
 
-**psiblast** runs the first round only.
-- Refused: `-num_iterations` above 1, `-in_pssm`, `-out_pssm`, `-out_ascii_pssm`, `-save_each_pssm`, `-save_pssm_after_last_round`, `-in_msa`, `-msa_master_idx`, `-ignore_msa_master`, `-phi_pattern`, `-gap_trigger`, `-sum_stats`, `-culling_limit`, `-lcase_masking`, `-searchsp`, `-show_gis`, `-parse_deflines`, `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist`, `-no_taxid_expansion`, and `-outfmt` other than 0, 6, 7, 10 and 20.
+**psiblast** runs the first round only. With `-save_pssm_after_last_round -out_ascii_pssm FILE` (and `-save_each_pssm`) it writes the round's PSSM in NCBI's ASCII form.
+- Refused: `-num_iterations` above 1, `-in_pssm`, `-out_pssm`, `-in_msa`, `-msa_master_idx`, `-ignore_msa_master`, `-phi_pattern`, `-gap_trigger`, `-sum_stats`, `-culling_limit`, `-lcase_masking`, `-searchsp`, `-show_gis`, `-parse_deflines`, `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist`, `-no_taxid_expansion`, and `-outfmt` other than 0, 6, 7, 10 and 20.
 - It also refuses the `blastp` entries above that apply to it, and `-comp_based_stats 0`, `-word_size 2` and `4`, and every matrix and gap cost but BLOSUM62 with 11/1.
 
 **makeblastdb**

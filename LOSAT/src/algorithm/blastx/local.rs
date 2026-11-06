@@ -48,9 +48,9 @@ use std::io::{self, Write};
 /// Each requested `-outfmt` is read as on the command line, and NCBI's checks of the options and
 /// of the subjects come in the command line's order, before the search. The `-query` and
 /// `-subject` values of `args` are used only as display names. Each format is the command line's
-/// writer of it (`report::render_queries`); the BLAST archive (outfmt 11), the side files of outfmt
-/// 13 and 14, `-db`, and `-parse_deflines` for records without their ids are refused. LOSAT Web
-/// asks for outfmt 0, 6 and 7, 6 and 7 with a custom field list or delimiter too. `-subject_loc` and `-query_loc` cut the records as the command line cuts them: each
+/// writer of it (`report::render_queries`); the side files of outfmt 13 and 14, `-db`, and
+/// `-parse_deflines` for records without their ids are refused. LOSAT Web asks for outfmt 0, 6 and
+/// 7, 6 and 7 with a custom field list or delimiter too. `-subject_loc` and `-query_loc` cut the records as the command line cuts them: each
 /// subject as it is read, each query as its batch is read (`native::run_inner`).
 ///
 /// The records are those of NCBI's reader (`fasta_reader`): the queries as its nucleotide reader
@@ -71,13 +71,50 @@ pub fn run_local(
         .iter()
         .chain(subject_records)
         .any(|record| record.believed().is_some());
-    let (choices, resolutions) = read_options(&args, &requested, ids_read)?;
+    let (choices, resolutions) = read_options(&args, &requested, ids_read, side_files(&args))?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
+    let archive_requested = choices.iter().any(|choice| choice.number == 11);
+    let archive = archive::handle_for(&args, archive_requested)?
+        .map(|handle| outputs.with_archive_outfmt(handle));
+    match archive {
+        Some(handle) => {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
+                search_records(
+                    &args,
+                    query_records,
+                    subject_records,
+                    (choices, resolutions),
+                    Some(&handle),
+                    view,
+                )
+            });
+            outputs.finish_archive(&handle, query_records.is_empty(), result)
+        }
+        None => search_records(
+            &args,
+            query_records,
+            subject_records,
+            (choices, resolutions),
+            None,
+            outputs,
+        ),
+    }
+}
+
+/// `run_local` from the reading of the subjects on.
+fn search_records(
+    args: &BlastxArgs,
+    query_records: &[fasta_reader::FastaRecord],
+    subject_records: &[fasta_reader::FastaRecord],
+    (choices, resolutions): (Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>),
+    archive: Option<&crate::report::archive::ArchiveHandle>,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
     let Some(subject_path) = args.subject.as_deref() else {
         return Err(app::missing_subject_error());
     };
     let diagnostics = &mut outputs.diagnostics;
-    let subject_range = parse_subject_range(&args)?;
+    let subject_range = parse_subject_range(args)?;
     // NCBI reads the subjects before the queries, each record's messages as it is read, and cuts
     // each to its `-subject_loc` interval: a record whose interval starts more than one letter
     // past its end stops the reading after its messages (`native::run_inner`).
@@ -88,8 +125,9 @@ pub fn run_local(
         if let Some(range) = &subject_range {
             let (from, to_exclusive) = record_cut(range, subject.sequence.len())?;
             // The lower case of the whole record, which outfmt 0's Sbjct rows and the hits show
-            // (`x_soft_subject::x_masked_subject_rows`).
-            let keep_whole = args.lcase_masking && !subject.lowercase_masks.is_empty();
+            // (`x_soft_subject::x_masked_subject_rows`), and the archive's Bioseqs.
+            let keep_whole =
+                archive.is_some() || (args.lcase_masking && !subject.lowercase_masks.is_empty());
             subject.cut_in_place(from, to_exclusive, keep_whole);
         }
         subjects.push(subject);
@@ -103,11 +141,15 @@ pub fn run_local(
     //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
     //     }
     // ```
+    // LOSAT's refusal of a title the archive cannot write, before its first byte.
+    if archive.is_some() {
+        archive::check_titles(&subjects, "subject")?;
+    }
     if subjects.is_empty() {
         return Err(engine("Empty CBlastQueryVector"));
     }
-    let query_range = parse_query_range(&args)?;
-    let mut resolved = check_resolutions(&args, &choices, resolutions, &mut **diagnostics)?;
+    let query_range = parse_query_range(args)?;
+    let mut resolved = check_resolutions(args, &choices, resolutions, &mut **diagnostics)?;
     for options in &mut resolved {
         options.query_range = query_range;
     }
@@ -125,9 +167,13 @@ pub fn run_local(
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
     write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
+    // LOSAT's refusal of a query title the archive cannot write, before its first byte.
+    if archive.is_some() {
+        crate::report::archive::check_titles(query_records, "query", "BLASTX")?;
+    }
     // The environment of a search of subject records, after the subjects' warnings
-    // (`native::run_inner`); none of the formats written here is the archive.
-    app::check_search_environment("BLASTX", true, false)?;
+    // (`native::run_inner`).
+    app::check_search_environment("BLASTX", true, outputs.only_archive())?;
     let records_parsed = if args.parse_deflines {
         let pairwise = resolved.iter().any(|options| options.outfmt == 0);
         RecordsParsed::of(&subjects, args.show_gis, pairwise)?
@@ -162,6 +208,8 @@ pub fn run_local(
             search_subjects: Subjects::Fasta(&subjects),
             serial_batches: args.parse_deflines,
             database: None,
+            archive,
+            out: args.out.as_deref(),
             search_error: &search_error,
         },
         outputs,
@@ -172,8 +220,6 @@ pub fn run_local(
 struct DatabaseReports<'a> {
     database: &'a BlastxDatabase,
     pairwise: &'a crate::report::pairwise::PairwiseDatabase,
-    /// The BLAST archive (outfmt 11), when it is requested.
-    archive: Option<&'a crate::report::archive::ArchiveHandle>,
 }
 
 /// What `report_batches` reports: the checks of the options and of the inputs are done.
@@ -194,6 +240,10 @@ struct RunReports<'a> {
     /// `run_query_batches`.
     serial_batches: bool,
     database: Option<DatabaseReports<'a>>,
+    /// The BLAST archive (outfmt 11), when it is requested.
+    archive: Option<&'a crate::report::archive::ArchiveHandle>,
+    /// The file of `api::run_to_file`, next to which outfmt 13 and 14 write their side files.
+    out: Option<&'a std::path::Path>,
     search_error: &'a dyn Fn(anyhow::Error) -> anyhow::Error,
 }
 
@@ -237,6 +287,8 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         search_subjects,
         serial_batches,
         ref database,
+        archive,
+        out,
         search_error,
     } = run;
     let ReportOutputs {
@@ -255,8 +307,11 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         .iter()
         .map(|options| {
             super::blast_xml::xml2_kind(options.outfmt).map(|kind| {
-                let files: crate::report::blast_xml2::RunSideFiles =
-                    Box::new(crate::report::blast_xml2::NoSideFiles);
+                use crate::report::blast_xml2::{FsSideFiles, NoSideFiles, RunSideFiles};
+                let files: RunSideFiles = match out.filter(|_| kind.is_files()) {
+                    Some(out) => Box::new(FsSideFiles::new(out, kind)),
+                    None => Box::new(NoSideFiles),
+                };
                 super::blast_xml::xml2_writer(kind, options, subjects, &shown, files)
             })
         })
@@ -295,7 +350,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     // CBlastQueryVector`). Only the batch being read is kept.
     let mut batch = Vec::new();
     // The archive's Bioseq of a cut record holds its whole letters (`FastaRecord::cut_in_place`).
-    let keep_whole = database.as_ref().is_some_and(|run| run.archive.is_some());
+    let keep_whole = archive.is_some();
     let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
                     warn: &mut dyn FnMut(&[u8]) -> Result<()>|
      -> Result<Vec<FastaRecord>> {
@@ -433,23 +488,31 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
             }
             // The BLAST archive (outfmt 11): one document per query batch, written from the
             // data of outfmt 8's Seq-aligns.
-            if let (Some(run), Some(reported), Some(handle), 11) = (
-                database,
-                reported.as_ref(),
-                database.as_ref().and_then(|run| run.archive),
-                options.outfmt,
-            ) {
+            if let (Some(handle), 11) = (archive, options.outfmt) {
+                let (subject_records, names, call_subjects): (_, _, &[FastaRecord]) =
+                    match (database, reported.as_ref()) {
+                        (Some(run), Some(reported)) => (
+                            None,
+                            super::seqalign::SeqalignSubjects::Database {
+                                reported,
+                                title: &run.pairwise.definition,
+                            },
+                            reported.records(),
+                        ),
+                        _ => (
+                            Some(subjects),
+                            super::seqalign::SeqalignSubjects::Records,
+                            subjects,
+                        ),
+                    };
                 archive::write_blastx_archive(
                     &archive::ArchiveCall {
                         handle,
                         options,
                         queries,
-                        subjects: reported.records(),
-                        names: super::seqalign::SeqalignSubjects::Database {
-                            reported,
-                            title: &run.pairwise.definition,
-                        },
-                        subject_records: None,
+                        subjects: call_subjects,
+                        names,
+                        subject_records,
                         batches: results,
                     },
                     writer,
@@ -578,7 +641,7 @@ pub fn run_local_database(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     let requested: Vec<&str> = outputs.formats.iter().map(|format| format.outfmt).collect();
-    let (choices, resolutions) = read_format_options(&args, &requested, &[13, 14])?;
+    let (choices, resolutions) = read_format_options(&args, &requested, side_files(&args))?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
     let archive = archive::handle_for(&args, archive_requested)?
         .map(|handle| outputs.with_archive_outfmt(handle));
@@ -724,8 +787,9 @@ fn search_database(
             database: Some(DatabaseReports {
                 database: &database,
                 pairwise: &pairwise,
-                archive,
             }),
+            archive,
+            out: args.out.as_deref(),
             search_error: &search_error,
         },
         outputs,
@@ -738,7 +802,7 @@ fn search_database(
 /// options, with the messages of a run. A run reports NCBI's errors after the subjects are read,
 /// so for an argv and records that both fail the run reports the records' error.
 pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
-    let (choices, resolutions) = read_options(args, outfmts, false)?;
+    let (choices, resolutions) = read_options(args, outfmts, false, side_files(args))?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     parse_subject_range(args)?;
     parse_query_range(args)?;
@@ -782,6 +846,7 @@ fn read_options(
     args: &BlastxArgs,
     outfmts: &[&str],
     ids_read: bool,
+    unwritten: &[i32],
 ) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
@@ -792,7 +857,15 @@ fn read_options(
     if args.parse_deflines && !ids_read {
         bail!("-parse_deflines is not supported in the browser yet");
     }
-    read_format_options(args, outfmts, &[11, 13, 14])
+    read_format_options(args, outfmts, unwritten)
+}
+
+/// The formats that have no writer without a file for their side files (`api::run_to_file`).
+fn side_files(args: &BlastxArgs) -> &'static [i32] {
+    match args.out {
+        Some(_) => &[],
+        None => &[13, 14],
+    }
 }
 
 /// `read_options` without its refusals of what a search of records in memory cannot do:
@@ -806,8 +879,8 @@ fn read_format_options(
     let mut choices = Vec::with_capacity(outfmts.len());
     for outfmt in outfmts {
         let choice = app::parse_formatting_string(outfmt)?;
-        app::report_format(&choice, Program::Blastx, None)?;
-        // No NCBI counterpart: the archive and the side files have no writer in memory here.
+        app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
+        // No NCBI counterpart: the side files of outfmt 13 and 14 have no writer in memory.
         if unwritten.contains(&choice.number) {
             bail!(
                 "output format {} is not supported in memory for BLASTX",

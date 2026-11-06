@@ -225,6 +225,38 @@ impl ScoreFreqProfile {
         self.score_avg
     }
 
+    /// A profile whose fields are given as NCBI's caller sets them, without the normalization of
+    /// `BlastScoreFreqCalc`: `sprob[0]` is the probability of `score_min`.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2700-2726
+    // ```c
+    //     score_freqs = Blast_ScoreFreqNew(min_score, max_score);
+    //     ...
+    //     score_freqs->obs_min = min_score;
+    //     score_freqs->obs_max = max_score;
+    //     ...
+    //             score_freqs->sprob[kScore] +=
+    //                 (std_probs[aa_alphabet[r]]/effective_length);
+    //     ...
+    //     for (s = min_score; s <= max_score; s++) {
+    //         score_freqs->score_avg += (s * score_freqs->sprob[s]);
+    //     }
+    // ```
+    pub(crate) fn from_ncbi_parts(
+        score_min: i32,
+        sprob: Vec<f64>,
+        obs_min: i32,
+        obs_max: i32,
+        score_avg: f64,
+    ) -> Self {
+        Self {
+            sprob,
+            obs_min,
+            obs_max,
+            score_avg,
+            score_min,
+        }
+    }
+
     pub fn sprob(&self) -> &[f64] {
         &self.sprob
     }

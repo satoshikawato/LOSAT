@@ -114,5 +114,8 @@ fn _pylosat(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(describe, module)?)?;
     module.add_function(wrap_pyfunction!(validate, module)?)?;
     module.add_function(wrap_pyfunction!(search::run, module)?)?;
+    module.add_function(wrap_pyfunction!(search::run_to_file, module)?)?;
+    module.add_function(wrap_pyfunction!(search::makeblastdb, module)?)?;
+    module.add_function(wrap_pyfunction!(search::blastdbcmd, module)?)?;
     Ok(())
 }

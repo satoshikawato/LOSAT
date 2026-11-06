@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   CUSTOM_OUTPUT,
   customOutfmt,
+  FORMAT_NAMES,
+  formatNumber,
+  isBinaryOutput,
   OUTPUT_FORMATS,
   outfmtOf,
   outfmtOption,
   outputFileName,
+  outputMediaType,
   runOutputs,
 } from '../../src/domain/output-format';
 
@@ -19,7 +23,23 @@ describe('customOutfmt', () => {
     expect(runOutputs(argv('-outfmt', value))).toEqual(OUTPUT_FORMATS);
   });
 
-  it.each(['6 qseqid sseqid pident', '7 std qcovs', '6 std', '6 delim=,', ' 6 -qseqid ', '+7 sseqid', '06 qseqid'])(
+  it.each([
+    '6 qseqid sseqid pident',
+    '7 std qcovs',
+    '6 std',
+    '6 delim=,',
+    ' 6 -qseqid ',
+    '+7 sseqid',
+    '06 qseqid',
+    // Every other format (W11), with or without words.
+    '5',
+    ' 11 ',
+    '+010',
+    '10 qseqid',
+    '20 delim=| std',
+    '17 SQ',
+    '5 qseqid',
+  ])(
     'adds an output for -outfmt %j, without the white space around it',
     (value) => {
       expect(customOutfmt(argv('-outfmt', value))).toBe(value.trim());
@@ -28,11 +48,15 @@ describe('customOutfmt', () => {
     },
   );
 
-  it('adds none without -outfmt, and for the values that the engine refuses', () => {
+  it('adds none without -outfmt, and for the values that are not numbers', () => {
     expect(customOutfmt(argv())).toBeUndefined();
-    expect(customOutfmt(argv('-outfmt', '10 qseqid'))).toBeUndefined();
     expect(customOutfmt(argv('-outfmt', '6\tqseqid'))).toBeUndefined();
+    expect(customOutfmt(argv('-outfmt', 'abc'))).toBeUndefined();
     expect(customOutfmt(argv('-evalue', '1'))).toBeUndefined();
+  });
+
+  it('reads the format number as NCBI does', () => {
+    expect(['5', ' +05 ', '10 qseqid', '0', '6\tqseqid', 'x', ''].map(formatNumber)).toEqual([5, 5, 10, 0, undefined, undefined, undefined]);
   });
 
   it('reads -outfmt where the argv gives it, in either form', () => {
@@ -60,6 +84,38 @@ describe('outputFileName', () => {
       'losat-run3-blastn-megablast-20251104T111640Z.outfmt7-custom.txt',
     );
     expect(outputFileName({ ...run, argv: argv('-outfmt', '7 std') }, 7)).toBe('losat-run3-blastn-megablast-20251104T111640Z.outfmt7.txt');
+  });
+
+  // W11: each format's extension (NCBI's Web BLAST downloads), "-custom" where words follow the number.
+  it.each([
+    ['5', 'outfmt5.xml', 'application/xml'],
+    ['8', 'outfmt8.asn', 'text/plain'],
+    ['9', 'outfmt9.asnb', 'application/octet-stream'],
+    ['10', 'outfmt10.csv', 'text/csv'],
+    ['10 qseqid sseqid', 'outfmt10-custom.csv', 'text/csv'],
+    ['11', 'outfmt11.asn', 'text/plain'],
+    ['12', 'outfmt12.json', 'application/json'],
+    ['15', 'outfmt15.json', 'application/json'],
+    ['16', 'outfmt16.xml', 'application/xml'],
+    ['17', 'outfmt17.sam', 'text/plain'],
+    ['17 SQ', 'outfmt17-custom.sam', 'text/plain'],
+    ['+020', 'outfmt20.csv', 'text/csv'],
+    // Words that the format ignores (NCBI clears them) configure nothing.
+    ['5 qseqid', 'outfmt5.xml', 'application/xml'],
+  ])('names the output of -outfmt %j …%s (%s)', (value, name, type) => {
+    const custom = argv('-outfmt', value);
+    expect(outputFileName({ ...run, argv: custom }, CUSTOM_OUTPUT)).toBe(`losat-run3-blastn-megablast-20251104T111640Z.${name}`);
+    expect(outputMediaType(custom, CUSTOM_OUTPUT)).toBe(type);
+    expect(outputMediaType(custom, 0)).toBe('text/plain');
+    expect(isBinaryOutput(custom, CUSTOM_OUTPUT)).toBe(value === '9');
+    expect(isBinaryOutput(custom, 6)).toBe(false);
+  });
+});
+
+describe('FORMAT_NAMES', () => {
+  it("has BLAST+'s name of every format that a run writes", () => {
+    for (const number of [0, 5, 6, 7, 8, 9, 10, 11, 12, 15, 16, 17, 20]) expect(FORMAT_NAMES[number]).toBeTruthy();
+    expect(FORMAT_NAMES[20]).toBe('Comma-separated values with header lines');
   });
 });
 

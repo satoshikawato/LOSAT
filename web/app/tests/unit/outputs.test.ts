@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RunView } from '../../src/application/coordinator';
 import { OutputReader, OutputSaver, saveOutput, type OutputPort } from '../../src/application/outputs';
-import type { OutputFormat } from '../../src/domain/output-format';
+import type { RunOutput } from '../../src/domain/output-format';
 import { RESULTS_REMOVED_MESSAGE, StorageRemovedError } from '../../src/infra/data/block-store';
 
 function run(number: number): RunView {
@@ -18,7 +18,7 @@ function run(number: number): RunView {
 
 interface Pending<T> {
   readonly runId: string;
-  readonly format: OutputFormat;
+  readonly format: RunOutput;
   resolve(value: T): void;
   reject(error: unknown): void;
 }
@@ -26,13 +26,18 @@ interface Pending<T> {
 /** Reads and exports that end when the test says so. */
 class Outputs implements OutputPort {
   readonly reads: Pending<string>[] = [];
+  readonly checks: Pending<void>[] = [];
   readonly exports: Pending<void>[] = [];
 
-  readOutput(runId: string, format: OutputFormat): Promise<string> {
+  readOutput(runId: string, format: RunOutput): Promise<string> {
     return new Promise((resolve, reject) => this.reads.push({ runId, format, resolve, reject }));
   }
 
-  exportOutput(runId: string, format: OutputFormat): Promise<void> {
+  checkOutput(runId: string, format: RunOutput): Promise<void> {
+    return new Promise((resolve, reject) => this.checks.push({ runId, format, resolve, reject }));
+  }
+
+  exportOutput(runId: string, format: RunOutput): Promise<void> {
     return new Promise((resolve, reject) => this.exports.push({ runId, format, resolve, reject }));
   }
 }
@@ -83,6 +88,21 @@ describe('OutputReader', () => {
     outputs.reads[3]!.resolve('# BLASTN\n');
     await settle();
     expect(state()).toEqual({ shown: '1:7', text: '# BLASTN\n', failed: '', problem: '' });
+  });
+
+  // W11: a binary output (outfmt 9) is opened to know that it can be read, not read, and shows no text.
+  it('a binary output shows no text, and says why when it cannot be read', async () => {
+    const { outputs, reader, state } = setup();
+    void reader.show(run(1), 4, false);
+    expect(outputs.checks[0]).toMatchObject({ runId: 'r1', format: 4 });
+    expect(outputs.reads).toHaveLength(0);
+    outputs.checks[0]!.resolve();
+    await settle();
+    expect(state()).toEqual({ shown: '1:4', text: '', failed: '', problem: '' });
+    void reader.show(run(1), 4, false);
+    outputs.checks[1]!.reject(removed());
+    await settle();
+    expect(state()).toEqual({ shown: '', text: '', failed: '1:4', problem: UNREADABLE });
   });
 
   it('a listener that throws on a read output is not told as a read that failed', async () => {

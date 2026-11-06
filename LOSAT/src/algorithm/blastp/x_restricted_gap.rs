@@ -1064,6 +1064,9 @@ fn run_row<const AVX2: bool>(
         // `restricted_fast` for `cells` = `len2`, or with LOSAT_X_BPGAPBAND for `cells` where the
         // letters `col` holds keep `b_size + ahead` within `cells`, `band_col`; `b_size <= cells +
         // 1`).
+        // SAFETY: `x_avx2::row`'s contract: AVX2, BMI1 and LZCNT, and `prev`, `cur`, `col` and
+        // `e10` long enough for `band.b_size` (paragraph above; `col`: `fill_col` succeeded up to
+        // `b_size + 9`, which it does only when `to + 2 + TAIL <= col.len()`).
         unsafe {
             return if gap_row {
                 x_avx2::row::<true>(band, p, a_index, row, lut, prev, cur, col, e10)

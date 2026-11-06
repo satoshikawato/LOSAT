@@ -1087,6 +1087,7 @@ pub fn extend_hit_ungapped(
     let mut j = 1;
 
     while (q_pos + j) < q_seq.len() && (s_pos + j) < s_seq.len() {
+        // SAFETY: `q_pos + j < q_seq.len()` and `s_pos + j < s_seq.len()` by the loop guard.
         let q = unsafe { *q_seq.get_unchecked(q_pos + j) };
         let s = unsafe { *s_seq.get_unchecked(s_pos + j) };
         let sc = if q == s { reward } else { penalty };

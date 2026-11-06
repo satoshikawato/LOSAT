@@ -219,6 +219,7 @@ pub unsafe extern "C" fn losat_web2_run(
             program,
             query_handle,
             subject_handle,
+            run::writes_archive(&argv),
             |queries, subjects| run::run(&argv, queries, subjects),
         )??;
         Ok(0)

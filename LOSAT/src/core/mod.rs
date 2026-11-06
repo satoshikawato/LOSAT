@@ -15,6 +15,8 @@
 //! - **Composition adjustment** (`composition_adjustment`, NCBI algo/blast/composition_adjustment/)
 //! - **HSP filters** (`blast_hits`: `-max_hsps`, `-qcov_hsp_perc`; `hspfilter_culling`:
 //!   `-culling_limit`)
+//! - **PSI-BLAST's PSSM engine** (`psi`, NCBI core/blast_psi.c and blast_psi_priv.c): psiblast's
+//!   `-out_ascii_pssm`
 
 // Statistics
 pub mod blast_stat;
@@ -37,3 +39,6 @@ pub mod composition_adjustment;
 // HSP Management
 pub mod blast_hits;
 pub mod hspfilter_culling;
+
+// PSI-BLAST's PSSM engine (NCBI core/blast_psi.c, blast_psi_priv.c)
+pub(crate) mod psi;

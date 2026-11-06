@@ -415,3 +415,53 @@ class TblastxOptions(TypedDict, total=False):
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""
     subject_loc: str
     """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
+
+class PsiblastOptions(TypedDict, total=False):
+    dbsize: int
+    """Effective length of the database"""
+    evalue: float
+    """Expectation value (E) threshold for saving hits [default: 10]"""
+    threshold: float
+    """Minimum word score such that the word is added to the BLAST lookup table [default: 11, or
+    the matrix's suggestion]"""
+    word_size: int
+    """Word size for wordfinder algorithm [default: 3]"""
+    num_threads: int
+    max_target_seqs: int
+    """Maximum number of aligned sequences to keep [default: 500]"""
+    num_descriptions: int
+    """Number of database sequences to show one-line descriptions for. Not applicable for outfmt
+    > 4 [default: 500]"""
+    num_alignments: int
+    """Number of database sequences to show alignments for [default: 250]"""
+    max_hsps: int
+    qcov_hsp_perc: float
+    """Percent query coverage per hsp"""
+    window_size: int
+    """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's
+    suggestion]"""
+    matrix: str
+    """Scoring matrix name [default: BLOSUM62]"""
+    gapopen: int
+    """Cost to open a gap [default: 11, or the matrix's best value]"""
+    gapextend: int
+    """Cost to extend a gap [default: 1, or the matrix's best value]"""
+    comp_based_stats: str
+    """Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d,
+    T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score
+    matrix adjustment"""
+    seg: str
+    """SEG: no, yes, or 'WINDOW LOCUT HICUT' [default: no]"""
+    soft_masking: bool
+    """Apply filtering locations as soft masks [default: false]"""
+    use_sw_tback: Literal['true', 'false']
+    query_loc: str
+    """Location on the query sequence in 1-based offsets (Format: start-stop)"""
+    subject_loc: str
+    """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
+    num_iterations: int
+    """Number of iterations to perform (0 means run until convergence); LOSAT runs 1"""
+    pseudocount: int
+    """Pseudo-count value used when constructing PSSM"""
+    inclusion_ethresh: float
+    """E-value inclusion threshold for pairwise alignments"""

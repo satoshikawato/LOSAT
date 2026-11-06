@@ -58,13 +58,20 @@ def test_what_is_not_an_option_here_is_refused(option):
             Search.from_argv("blastn", [f"-{option}", "x"])
 
 
+@pytest.mark.parametrize("option", ["out_ascii_pssm", "save_pssm_after_last_round", "save_each_pssm"])
+def test_psiblast_writes_no_pssm_file_here(option):
+    with pytest.raises(TypeError, match=option):
+        Search("psiblast", **{option: "p.txt" if option == "out_ascii_pssm" else True})
+    words = [f"-{option}", "p.txt"] if option == "out_ascii_pssm" else [f"-{option}"]
+    with pytest.raises(ArgumentError, match="writes no PSSM file"):
+        Search.from_argv("psiblast", words)
+
+
 def test_the_parser_refuses_as_on_the_command_line():
     with pytest.raises(ArgumentError):
         Search.from_argv("blastp", ["-evalue"])
     with pytest.raises(ArgumentError, match="unknown program"):
         Search("nosuchprogram")  # type: ignore[call-overload]
-    with pytest.raises(ArgumentError, match="command line only"):
-        Search("psiblast")  # type: ignore[call-overload]
 
 
 def test_an_error_survives_pickle():
@@ -85,7 +92,7 @@ def test_a_search_is_a_value():
 
 
 def test_describe_is_the_engines_table():
-    assert pylosat.PROGRAMS == ("blastn", "blastp", "blastx", "tblastn", "tblastx")
+    assert pylosat.PROGRAMS == ("blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast")
     description = pylosat.describe("blastp")
     parameters = {parameter.name: parameter for parameter in description.parameters}
     assert parameters["evalue"].flag == "-evalue"

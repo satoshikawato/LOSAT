@@ -24,9 +24,31 @@ import {
 import { engineBuildName, type EngineAssets } from '../reactor/assets';
 import type { EngineControl } from '../reactor/control';
 import { loadReactor } from '../reactor/instance';
-import { growToMaximum, type SharedMemory } from '../reactor/shared-memory';
 import { chooseThreads, DEFAULT_RENEWAL, renewalReason, type RenewalLimits } from './policy';
-import type { EngineCommand, EngineEvent, EngineInit, ModuleSource, ThreadFault, WorkerError, WorkerInput, WorkerRun } from './protocol';
+import type {
+  EngineCommand,
+  EngineEvent,
+  EngineInit,
+  KeeperGrow,
+  KeeperGrown,
+  ModuleSource,
+  ThreadFault,
+  WorkerError,
+  WorkerInput,
+  WorkerRun,
+} from './protocol';
+
+/**
+ * How long a runtime that ends during a search waits for the keeper to grow its memory
+ * (retire). The keeper answers in milliseconds; it does not answer only if it is gone.
+ */
+const KEEPER_TIMEOUT_MS = 1_000;
+
+/**
+ * How a runtime ended (retire): at once (no search ran on its threaded instance), once the
+ * keeper grew the shared memory, or after KEEPER_TIMEOUT_MS without the keeper's answer.
+ */
+export type RuntimeEnd = 'at-once' | 'grown' | 'timeout';
 
 export interface WasmEngineOptions {
   readonly assets: EngineAssets;
@@ -38,6 +60,10 @@ export interface WasmEngineOptions {
   readonly createWorker?: () => Worker;
   /** Loads the two modules; by default they are fetched, checked and compiled (tests replace it). */
   readonly loadModules?: () => Promise<{ readonly serial: ModuleSource; readonly threads: ModuleSource }>;
+  /** KEEPER_TIMEOUT_MS by default (tests change it). */
+  readonly keeperTimeoutMs?: number;
+  /** Told how each runtime ended (tests record it). */
+  readonly onRuntimeEnd?: (end: RuntimeEnd) => void;
 }
 
 interface Generation {
@@ -49,10 +75,13 @@ interface Generation {
   /** The threads and argv of the last preparation posted since the last search (prepare). */
   prepared: string | undefined;
   /**
-   * The shared memory of the threaded instance while a search runs on it (retire). Held only
-   * then: a reference here keeps the memory, and so its pages, until this thread collects it.
+   * The channel to the keeper of the threaded instance's shared memory (memory-keeper.ts).
+   * The main thread holds no shared memory: a reference here would keep the memory until this
+   * thread collects it.
    */
-  memory: SharedMemory | undefined;
+  readonly keeper: BroadcastChannel;
+  /** Whether a search runs on the threaded instance, whose threads may grow the memory (retire). */
+  threadedSearch: boolean;
 }
 
 interface ActiveRun {
@@ -190,7 +219,8 @@ export class WasmEngine implements EngineGateway {
       this.options.createWorker?.() ??
       new Worker(new URL('./engine-worker.ts', import.meta.url), { type: 'module', name: 'losat-engine' });
     const faults = new BroadcastChannel(`losat-web:engine-faults:${crypto.randomUUID()}`);
-    const generation: Generation = { id, worker, faults, renew: undefined, prepared: undefined, memory: undefined };
+    const keeper = new BroadcastChannel(`losat-web:engine-keeper:${crypto.randomUUID()}`);
+    const generation: Generation = { id, worker, faults, keeper, renew: undefined, prepared: undefined, threadedSearch: false };
     worker.onmessage = (event: MessageEvent<EngineEvent>) => this.receive(generation, event.data);
     worker.onerror = (event) => {
       event.preventDefault();
@@ -205,6 +235,7 @@ export class WasmEngine implements EngineGateway {
       modules,
       builds: { serial: engineBuildName('serial', assets.serial), threads: engineBuildName('threads', assets.threads) },
       faultChannel: faults.name,
+      keeperChannel: keeper.name,
     };
     try {
       this.post(worker, init);
@@ -222,10 +253,14 @@ export class WasmEngine implements EngineGateway {
 
   private receive(generation: Generation, event: EngineEvent): void {
     if (generation !== this.current || !('generation' in event) || event.generation !== generation.id) return;
-    if (event.type === 'memory') {
-      generation.memory = { memory: event.memory, maximumPages: event.maximumPages };
+    if (event.type === 'threaded-search') {
+      generation.threadedSearch = true;
       return;
     }
+    // A search ended: no thread of it runs. A stopped instance's Engine worker has also ended
+    // its thread workers and the keeper, or the search's threads never started, so the
+    // worker can end at once.
+    if (event.type === 'done') generation.threadedSearch = false;
     const active = this.active;
     if (active === undefined || active.settled || active.generation !== generation || active.runId !== event.runId) return;
     if (event.type === 'phase') {
@@ -235,11 +270,9 @@ export class WasmEngine implements EngineGateway {
     if (event.type !== 'done') return;
     if (!event.ok) {
       if (event.error.stopped === true) this.retire();
-      generation.memory = undefined;
       this.settle(active, toError(event.error));
       return;
     }
-    generation.memory = undefined;
     const { result } = event;
     generation.renew = renewalReason(result.memory, this.renewal);
     this.settle(active, undefined, {
@@ -261,7 +294,15 @@ export class WasmEngine implements EngineGateway {
     if (active !== undefined && active.generation === generation) this.settle(active, new Error(message));
   }
 
-  /** Ends the current generation: its worker and, with it, its thread workers. */
+  /**
+   * Ends the current generation: its worker and, with it, its thread workers and the keeper.
+   * During a search on the threaded instance, its threads may be growing the shared memory,
+   * and WebKit crashes the page when workers with instances on a shared memory end while a
+   * thread grows it (growToMaximum). The generation then ends once the keeper has grown the
+   * memory to its maximum, where no thread can grow it, or after KEEPER_TIMEOUT_MS if the
+   * keeper does not answer. Until then the ended search may still run and write to its output
+   * port, whose Data worker side the coordinator discards.
+   */
   private retire(): void {
     const generation = this.current;
     if (generation === undefined) return;
@@ -269,12 +310,32 @@ export class WasmEngine implements EngineGateway {
     generation.worker.onmessage = null;
     generation.worker.onerror = null;
     generation.worker.onmessageerror = null;
-    // Its threads may be growing the memory: at its maximum it is not grown while they end
-    // (WebKit crashes the page otherwise, growToMaximum).
-    if (generation.memory !== undefined) growToMaximum(generation.memory);
-    generation.memory = undefined;
-    generation.worker.terminate();
-    generation.faults.close();
+    const { keeper } = generation;
+    let ended = false;
+    const end = (how: RuntimeEnd) => {
+      if (ended) return;
+      ended = true;
+      generation.worker.terminate();
+      generation.faults.close();
+      keeper.close();
+      try {
+        this.options.onRuntimeEnd?.(how);
+      } catch {
+        // An observer does not change how the runtime ends.
+      }
+    };
+    if (!generation.threadedSearch) {
+      end('at-once');
+      return;
+    }
+    const timer = setTimeout(() => end('timeout'), this.options.keeperTimeoutMs ?? KEEPER_TIMEOUT_MS);
+    keeper.onmessage = (event: MessageEvent<KeeperGrown>) => {
+      if (event.data?.type !== 'grown') return;
+      clearTimeout(timer);
+      end('grown');
+    };
+    const grow: KeeperGrow = { type: 'grow' };
+    keeper.postMessage(grow);
   }
 
   private settle(active: ActiveRun, error: Error | undefined, info?: RuntimeInfo): void {

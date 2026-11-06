@@ -148,6 +148,12 @@ impl TblastxDatabase {
         self.parsed && self.db.printed_num_seqs() > max_sequences
     }
 
+    /// Whether a prefetch of the run is refused because of NCBI's taxonomy cache
+    /// (`shared::TaxdbRun::prefetch_refused`), which turns the report stream off.
+    pub(crate) fn prefetch_refused(&self) -> bool {
+        self.taxdb.prefetch_refused(&self.db)
+    }
+
     /// Whether a report that names any sequence of the database could be refused by LOSAT
     /// (`common::database::reports_may_refuse`, with the reports `shown` and the batches'
     /// prefetch `prefetch`), read in `pool`.
@@ -577,6 +583,21 @@ impl ReportedSubjects {
     /// the id of a sequence with parsed Seq-ids (`common::database::tabular_subject_ids`).
     pub(crate) fn tabular_subject_ids(&self) -> Result<Vec<Arc<[u8]>>> {
         shared::tabular_subject_ids(&self.records, &self.ordinals, &self.parsed, false, PROGRAM)
+    }
+
+    /// The reported sequences as the library's records name them (`shared::library_subjects`).
+    pub(crate) fn library_subjects(
+        &self,
+        database: &TblastxDatabase,
+    ) -> Vec<crate::api::local_blast::ReportedSubject> {
+        shared::library_subjects(
+            &database.db,
+            &self.records,
+            &self.ordinals,
+            &self.parsed,
+            |rank| self.lengths[rank] as usize,
+            PROGRAM,
+        )
     }
 }
 

@@ -61,7 +61,7 @@ link, invoke, or fall back to NCBI BLAST+.
    with the observed archive SHA-256.
 4. Copy `build.sh` alongside `meta.yaml`.
 5. Run the current Bioconda lint/build workflow without changing LOSAT's
-   certified program scope.
+   supported program scope.
 6. Submit the recipe to `bioconda/bioconda-recipes`.
 
 ## Recipe design constraints
@@ -72,8 +72,8 @@ The proposed recipe deliberately stays small:
 - use the Bioconda/conda-forge Rust compiler toolchain;
 - install the CLI with `cargo install --locked`;
 - generate third-party license metadata with `cargo-bundle-licenses`;
-- smoke-test `losat --version`, top-level help, and the three certified program
-  subcommands;
+- smoke-test `losat --version`, top-level help, and the help of the `blastn`,
+  `blastp` and `tblastx` subcommands;
 - opt in to `linux-aarch64` and `osx-arm64` in addition to Bioconda's default
   x86_64 Linux/macOS builds.
 

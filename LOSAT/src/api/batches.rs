@@ -29,7 +29,9 @@ use std::sync::Arc;
 
 use super::error::Error;
 use super::input::Inputs;
-use super::local_blast::{FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs};
+use super::local_blast::{
+    FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs, ReportedSubject,
+};
 use super::run::{
     check_inputs, query_ordinal, query_range_of, records, run_local, searched_queries,
     CountingWriter, HspRecord, QueryStats,
@@ -38,6 +40,7 @@ use super::search::Search;
 use super::view::{self, QueryHits};
 use crate::algorithm::blastn::blast_engine::QueryBatchSizes;
 use crate::blastinput::app::query_batch_size;
+use crate::blastinput::ncbi_environment::check_ncbi_application_settings;
 use crate::blastinput::seq_range::{next_ranged_batch_end, record_interval, RecordInterval};
 use crate::cli::Commands;
 use crate::report::blast_xml::XmlStats;
@@ -105,7 +108,14 @@ impl BatchSizes {
 /// The batch sizes of `command`, as each program's application reads them (`GetQueryBatchSize`).
 fn batch_sizes(command: &Commands, inputs: Inputs<'_>) -> anyhow::Result<BatchSizes> {
     Ok(match command {
-        Commands::Blastn(args) => BatchSizes::Blastn(QueryBatchSizes::new(args, inputs.subject)?),
+        Commands::Blastn(args) => BatchSizes::Blastn(match args.database_name() {
+            Some(name) => {
+                let settings =
+                    check_ncbi_application_settings("blastn").map_err(anyhow::Error::msg)?;
+                QueryBatchSizes::of_database(args, name, &settings)?
+            }
+            None => QueryBatchSizes::new(args, inputs.subject)?,
+        }),
         Commands::Blastp(_) => BatchSizes::Fixed(query_batch_size("BLASTP", 10000)?),
         Commands::Tblastn(_) => BatchSizes::Fixed(query_batch_size("TBLASTN", 20000)?),
         Commands::Tblastx(_) => BatchSizes::Fixed(query_batch_size("TBLASTX", 10002)?),
@@ -113,8 +123,13 @@ fn batch_sizes(command: &Commands, inputs: Inputs<'_>) -> anyhow::Result<BatchSi
             "BLASTX",
             crate::algorithm::blastx::QUERY_BATCH_SIZE as u32,
         )?),
-        Commands::Psiblast(_) | Commands::Makedb(_) => {
-            unreachable!("Program::parse admits the five search programs only")
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:468-468
+        // ```c++
+        //             input.Reset(new CBlastInput(&*fasta, 1));
+        // ```
+        Commands::Psiblast(_) => BatchSizes::Fixed(1),
+        Commands::Makedb(_) => {
+            unreachable!("Program::parse admits the search programs only")
         }
     })
 }
@@ -126,6 +141,8 @@ struct BatchObserver {
     queries_begin: Option<usize>,
     query_stats: Vec<Option<QueryStats>>,
     extensions: Option<i32>,
+    /// The sequences that a database search's hit list names.
+    database_subjects: Option<Vec<ReportedSubject>>,
 }
 
 impl FormatObserver for BatchObserver {
@@ -146,6 +163,10 @@ impl FormatObserver for BatchObserver {
 
     fn batch_extensions(&mut self, extensions: i32) {
         self.extensions = Some(extensions);
+    }
+
+    fn database_subjects(&mut self, subjects: Vec<ReportedSubject>) {
+        self.database_subjects = Some(subjects);
     }
 }
 
@@ -176,10 +197,11 @@ pub struct Batches<'a> {
 /// asking for the next batch. A batch that fails gives its error (`Error::Search`) and ends the
 /// iterator: the batches before it stand, as the reports that the command line has written by
 /// then do. A batch is searched by one `run_local` call, each with its own thread pool of
-/// `-num_threads` threads.
+/// `-num_threads` threads; of a database, each opens the database again, so what NCBI writes once
+/// per run about a taxonomy database comes with every batch that reads one.
 pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches<'a>, Error> {
     check_inputs(search, inputs)?;
-    let command = search.command(inputs.query_name, inputs.subject_name);
+    let command = search.command(inputs)?;
     let sizes = batch_sizes(&command, inputs).map_err(|error| Error::search(&error))?;
     let query_range = query_range_of(&command);
     let lengths: Vec<usize> = inputs
@@ -228,7 +250,7 @@ impl Batches<'_> {
             query: &self.inputs.query[range.clone()],
             ..self.inputs
         };
-        let mut command = self.search.command(inputs.query_name, inputs.subject_name);
+        let mut command = self.search.command(inputs)?;
         let query_range = query_range_of(&command);
         match &mut command {
             Commands::Blastn(args) => {
@@ -238,8 +260,9 @@ impl Batches<'_> {
             Commands::Blastp(args) => args.first_query_ordinal = range.start,
             Commands::Tblastn(args) => args.first_query_ordinal = range.start,
             Commands::Tblastx(args) => args.first_query_ordinal = range.start,
+            Commands::Psiblast(args) => args.first_query_ordinal = range.start,
             // BLASTX's messages show the record's own id.
-            Commands::Blastx(_) | Commands::Psiblast(_) | Commands::Makedb(_) => {}
+            Commands::Blastx(_) | Commands::Makedb(_) => {}
         }
         let ordinals = searched_queries(query_range, inputs.query);
         let mut diagnostics = CountingWriter::new();
@@ -248,6 +271,7 @@ impl Batches<'_> {
             queries_begin: None,
             query_stats: Vec::new(),
             extensions: None,
+            database_subjects: None,
         };
         let mut collected: Option<Arc<Vec<PairwiseHit>>> = None;
         let mut report = io::sink();
@@ -262,12 +286,19 @@ impl Batches<'_> {
                 hits: Some(&mut on_hits),
                 observer: Some(&mut observer),
             };
-            run_local(command, inputs.query, inputs.subject, &mut outputs)
+            run_local(command, inputs, &mut outputs)
         };
         result.map_err(|error| Error::search(&error))?;
         let ordinals = ordinals.as_deref();
         let mut hsps = match &collected {
-            Some(hits) => records(self.search.program(), inputs, hits, query_range, ordinals),
+            Some(hits) => records(
+                self.search.program(),
+                inputs,
+                hits,
+                query_range,
+                ordinals,
+                observer.database_subjects.as_deref(),
+            ),
             None => Vec::new(),
         };
         for hsp in &mut hsps {

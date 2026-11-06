@@ -3,7 +3,7 @@
 設計書 §11.2 の対応表のうち、結果画面（W4、Session S13）の列とフィルターを定める。計画 §4.4・§5.7 と `PD-LOSAT-WEB-APP-BOUNDARY` の不変条件 2.3 に従い、表に出す BLAST の値は outfmt 6 の該当行（HSP レコードの `out6` の範囲）か outfmt 0 の原文から取り、並べ替えにはエンジンの原値（HSP レコードの数値）を使う。E value と bit score のフィルターは、表に出した値（outfmt 6 の行の文字列が表す数）で比べる（下の「表示用のフィルター」）。`web/` で BLAST の値を計算・整形しない。
 
 - 作成：2026-10-06（S13）。状態の「採用」は S13 で画面に出すもの、「採用・エンジン待ち」は採用を決めたがエンジンが値を出すまで画面に出さないもの（設計書 §11.2「未対応項目は通常画面に出さず」）。
-- 採否は保守者の確認待ち（S13 は推奨の案で進めた。[W4 のゲート記録](../evidence/losat_web_w4/README.md)の判断 1）。
+- 保守者が 2026-10-10 に承認した（計画 DW-27 の (4)。S13 は推奨の案で進めた。[W4 のゲート記録](../evidence/losat_web_w4/README.md)の判断 1）。
 - 単位の nt / aa は、その役割のレコードの種類（`src/domain/programs.ts` の `query` / `subject`）。outfmt 6 の座標は、TBLASTN の subject、TBLASTX の両方、BLASTX の query で核酸の座標である（レコードの長さと同じ単位）。
 
 ## Subject 一覧（選んだ query の subject ごとに 1 行）

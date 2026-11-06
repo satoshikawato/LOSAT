@@ -4,7 +4,10 @@
 LOSAT/tests/db_search_manifest.tsv lists the rows (columns: row_id, program, kind, db, query, extra_args,
 outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers, and for the rows of outfmt 13 and 14 two more:
 files, side_sha256; xinclude_fixtures.py says what they mean: the run gets `-out <tmp>/<row_id>.out`, the frozen
-master is <row_id>.out, the side files <row_id>.out_<n>.json|xml; a row without them has 12 cells). Every row runs from LOSAT/ as
+master is <row_id>.out, the side files <row_id>.out_<n>.json|xml; a row without them has 12 cells; a psiblast row
+whose files column is `pssm` gets `-out_ascii_pssm <tmp>/<row_id>.pssm`, and the files it writes are frozen as
+<row_id>.pssm and <row_id>.pssm.<n>, listed in side_sha256, none when the cell is empty; `{pssm_dir}` in its
+extra_args is that <tmp>, where any other file the run writes is reported). Every row runs from LOSAT/ as
 `PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT`, PROGRAM being the row's `program` cell
 (`blastp`, `blastn`, `tblastn`, `blastx`, `tblastx` or `psiblast`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
 argument `-db ""`; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/); `outfmt` is one argument, so a custom
@@ -16,7 +19,8 @@ LOSAT/tests/db_search (README.md there says how they were built).
   LOSAT/tests/fixtures/db_search/<row_id>.out and <row_id>.err (only when stderr is not empty).
 - kind `losat-rejection`: NCBI is not run. LOSAT must exit with `rc`, write nothing to stdout, and
   its stderr must contain the text that follows `expect: ` in the `covers` cell (up to the end of
-  the cell or a ` | ` separator). The hash columns stay empty.
+  the cell or a ` | ` separator). The hash columns stay empty. A rejection row whose files column is
+  `pssm` must also write no PSSM file.
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
@@ -31,6 +35,12 @@ taxonomy database or a BLASTDB), compares stdout,
 stderr and exit status with the frozen files (and checks that each frozen file's sha256 is the
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
 line), writes the same lines to --out, and exits 0 only when every row is `same` or `rejection`.
+With `--library` BIN is `examples/library_command_line`, the same search through the library API: a
+failure's exit status counts as any other failure's, a row whose query the reader refuses is
+`library-input-error` when the message is the command line's (the library reads the whole query
+before it searches, so the reports of the batches before the error do not exist), and the rows that
+write PSSM files (the `pssm` kind) or pass a PSSM file option are `library-skip`: the library API
+writes no PSSM file and refuses those options (`LIBRARY_REFUSED`).
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
@@ -200,11 +210,18 @@ def freeze(args: argparse.Namespace) -> int:
             continue
         command = [str(Path(args.ncbi_bin) / row["program"]), *search_argv(row), "-num_threads", "1"]
         files = xinclude.wants_files(row)
+        pssm = xinclude.wants_pssm(row)
         if files:
             written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
                                               timeout=TIMEOUT, env=row_env(row, env))
             run = written.run
             xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
+        elif pssm:
+            pssms = xinclude.run_with_pssm(command, row["row_id"], cwd=ENGINE, timeout=TIMEOUT,
+                                           env=row_env(row, env))
+            run = pssms.run
+            xinclude.freeze_pssm(pssms, FROZEN, row["row_id"])
+            (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
                                  env=row_env(row, env))
@@ -218,33 +235,63 @@ def freeze(args: argparse.Namespace) -> int:
                    stderr_sha256=sha256(run.stderr) if run.stderr else "")
         if files:
             row.update(xinclude.observed(written))
+        if pssm:
+            row.update(xinclude.observed_pssm(pssms, row["row_id"]))
         print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(run.stdout)}\tstderr={len(run.stderr)}"
-              + (f"\tsides={len(written.sides)}" if files else ""))
+              + (f"\tsides={len(written.sides)}" if files else "")
+              + (f"\tpssm_files={len(pssms.files)}" if pssm else ""))
     write_manifest(comments, rows)
     return 0
 
 
-def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str]) -> tuple[str, str]:
-    command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
+def status_differs(observed: int, expected: int, library: bool) -> bool:
+    """Whether a run's exit status is not the frozen one. `examples/library_command_line.rs` ends every
+    failure with status 1: the library API's errors carry the command line's message, not its status."""
+    return (observed != 0) != (expected != 0) if library else observed != expected
+
+
+# psiblast's PSSM file options, which the library API refuses before any search
+# (`api::search::pssm_file_options`).
+LIBRARY_REFUSED = {"-out_ascii_pssm", "-save_pssm_after_last_round", "-save_each_pssm"}
+
+
+def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False) -> tuple[str, str]:
     files = xinclude.wants_files(row)
+    pssm = xinclude.wants_pssm(row)
+    if library and (pssm or LIBRARY_REFUSED.intersection(search_argv(row))):
+        return "library-skip", ""
+    command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     if files:
         written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
                                           env=row_env(row, env), timeout=TIMEOUT)
         run = written.run
+    elif pssm:
+        pssms = xinclude.run_with_pssm(command, row["row_id"], cwd=ENGINE, env=row_env(row, env),
+                                       timeout=TIMEOUT)
+        run = pssms.run
     else:
         run = subprocess.run(command, cwd=ENGINE, capture_output=True, env=row_env(row, env), timeout=TIMEOUT)
     if row["kind"] == "losat-rejection":
         problems = []
-        if run.returncode != int(row["rc"]):
+        if status_differs(run.returncode, int(row["rc"]), library):
             problems.append(f"exit {run.returncode}, expected {row['rc']}")
-        if run.stdout:
+        # The library writes as the search goes (`api::run`): nothing holds the bytes before a
+        # refusal, as the command line holds them.
+        if run.stdout and not library:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
         if expected_text(row).encode() not in run.stderr:
             problems.append(f"stderr lacks {expected_text(row)!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
+        if pssm and (pssms.files or pssms.stray):
+            problems.append(f"a refused run wrote {[name for name, _ in pssms.files] + pssms.stray}")
         return ("differs", "; ".join(problems)) if problems else ("rejection", "")
     out = (FROZEN / f"{row['row_id']}.out").read_bytes()
     err_path = FROZEN / f"{row['row_id']}.err"
     err = err_path.read_bytes() if row["stderr_sha256"] else b""
+    # The library reads the whole query before it searches: a reader error ends the call there,
+    # with the command line's message of it, before the reports of the batches before it.
+    if library and run.returncode != 0 and int(row["rc"]) != 0 and run.stdout == b"" \
+            and run.stderr.startswith(b"BLAST query error:") and run.stderr in err:
+        return "library-input-error", ""
     problems = []
     if files:
         problems += xinclude.problems(written, row, FROZEN, first_difference)
@@ -252,7 +299,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         problems.append("frozen .out does not match the manifest")
     if (sha256(err) if err else "") != row["stderr_sha256"] or err_path.exists() != bool(row["stderr_sha256"]):
         problems.append("frozen .err does not match the manifest")
-    if run.returncode != int(row["rc"]):
+    if status_differs(run.returncode, int(row["rc"]), library):
         problems.append(f"exit {run.returncode}, expected {row['rc']}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
     # A SAM row differs in the command line of the @PG line only (`strip_sam_cl`).
     if not files:
@@ -263,6 +310,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
             problems.append("stdout " + first_difference(expected_out, observed_out))
     if run.stderr != err:
         problems.append("stderr " + first_difference(err, run.stderr))
+    if pssm:
+        problems += xinclude.pssm_problems(pssms, row, FROZEN, first_difference)
     return ("differs", "; ".join(problems)) if problems else ("same", "")
 
 
@@ -274,7 +323,7 @@ def check(args: argparse.Namespace) -> int:
     for row in read_manifest()[1]:
         if not selected(row, args):
             continue
-        status, detail = check_row(row, losat, args.threads, env)
+        status, detail = check_row(row, losat, args.threads, env, args.library)
         bad += status == "differs"
         lines.append(f"{row['row_id']}\t{status}\t{detail}")
     text = "".join(line + "\n" for line in lines)
@@ -298,6 +347,8 @@ def main() -> int:
     ck.add_argument("--program", choices=PROGRAMS, default="", help="only the rows of this program (default: all)")
     ck.add_argument("--only", default="")
     ck.add_argument("--out", type=Path)
+    ck.add_argument("--library", action="store_true",
+                    help="--losat is examples/library_command_line (the search through the library API)")
     args = parser.parse_args()
     return freeze(args) if args.command == "freeze" else check(args)
 

@@ -14,7 +14,7 @@ import { BrowserFileDownloader } from './infra/browser/example-downloader';
 import { browserPage } from './infra/browser/page';
 import { browserDownloader, browserFileSaver } from './infra/browser/platform';
 import { startDataWorker } from './infra/data-worker/gateway';
-import { WasmEngine } from './infra/engine-worker/gateway';
+import { WasmEngine, type RuntimeEnd } from './infra/engine-worker/gateway';
 import type { RenewalLimits } from './infra/engine-worker/policy';
 import { FakeEngine } from './infra/fake/fake-engine';
 
@@ -37,6 +37,8 @@ export interface AppOptions {
   readonly downloader?: Downloader;
   /** When the engine runtime is renewed (src/infra/engine-worker/policy.ts); tests lower it. */
   readonly renewal?: Partial<RenewalLimits>;
+  /** Told how each engine runtime ended (src/infra/engine-worker/gateway.ts); tests record it. */
+  readonly onRuntimeEnd?: (end: RuntimeEnd) => void;
 }
 
 /**
@@ -52,6 +54,7 @@ export function createApp(options: AppOptions = {}): App {
           assets: ENGINE_ASSETS,
           control: data,
           ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
+          ...(options.onRuntimeEnd === undefined ? {} : { onRuntimeEnd: options.onRuntimeEnd }),
         });
   const coordinator = new Coordinator({
     engine,

@@ -198,7 +198,7 @@ class ExtractTests(unittest.TestCase):
         fixture = collections.Counter(case.module for case in cases.cases if case.kind == "FIXTURE")
         expected = {
             "optionshandle": 75, "blastfilter": 67, "bl2seq": 98, "blastinput": 96,
-            "blasthits": 25, "blastsetup": 59, "split_query": 33,
+            "blasthits": 25, "blastsetup": 59, "split_query": 33, "pssmcreate": 17,
         }
         for module, count in expected.items():
             self.assertEqual(total[module], count, module)
@@ -206,7 +206,7 @@ class ExtractTests(unittest.TestCase):
         self.assertEqual(disabled["blastfilter"], 1)
         self.assertEqual(disabled["bl2seq"], 3)
         self.assertEqual(fixture["optionshandle"], 61)
-        self.assertEqual(len(cases.cases), 679)
+        self.assertEqual(len(cases.cases), 696)
         self.assertEqual(total["ntscan"], 2)  # DiscontigTwoSubjects + the DECLARE_TEST macro
         macro = cases.by_module_case[("ntscan", "DECLARE_TEST")]
         self.assertEqual((macro.line_start, macro.line_end, macro.kind), (846, 905, "MACRO"))

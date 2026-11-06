@@ -2276,9 +2276,24 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             args.word_size
         );
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:258-271
+    // ```c
+    // static array_of_8 blosum62_values[BLOSUM62_VALUES_MAX] = {
+    //     {(double) INT2_MAX, (double) INT2_MAX, (double) INT2_MAX, 0.3176, 0.134, 0.4012, 0.7916, -3.2, 0.623757, 4.964660, 4.964660},
+    //     {11, 2, (double) INT2_MAX, 0.297, 0.082, 0.27, 1.1, -10, 0.641766, 12.673800, 12.757600},
+    // ...
+    //     {9, 1, (double) INT2_MAX, 0.206, 0.010, 0.052, 4.0, -87, 0.731887, 210.333000, 214.842000},
+    // };
+    // ```
+    // BLASTP reads the gap costs of the search at run time (the gapped alignments, the chaining
+    // and the composition-based redo) and their Karlin and Gumbel values from NCBI's table
+    // (`lookup_protein_params`, `lookup_protein_gumbel_params`), and the options handler has
+    // checked them against the table (`validate_protein_options`): BLOSUM62 runs with any of its
+    // rows. psiblast's first round is BLASTP's search; its later rounds, whose PSSM scores take
+    // the gap costs too, are not ported, and it keeps 11/1.
     if !args.matrix_name.eq_ignore_ascii_case("BLOSUM62")
-        || args.scoring.gap_open != 11
-        || args.scoring.gap_extend != 1
+        || (args.app == BlastpApp::Psiblast
+            && (args.scoring.gap_open != 11 || args.scoring.gap_extend != 1))
     {
         bail!(
             "the matrix {} with gap costs {}/{} is not supported by LOSAT's {program}",
@@ -3061,6 +3076,103 @@ fn shift_hsp_to_records(hsp: &mut BlastpHsp, ranges: &BlastpRanges<'_>) {
     if let Some(length) = ranges.query_input.range_length {
         hsp.query_length = length;
     }
+}
+
+/// psiblast's ASCII PSSMs after its round (`-save_pssm_after_last_round -out_ascii_pssm`): one
+/// for each query whose results have alignments, in the order of the queries, from the query's
+/// whole record and its Seq-aligns before the formatter's cut (`algorithm::psiblast::pssm`).
+/// A query whose PSSM fails stops the run after its report (`PssmStop`, handled by `search`),
+/// with the PSSMs of the queries before it.
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:147-162
+// ```c++
+// s_GetQueryBioseq(CConstRef<CBlastQueryVector> query, CRef<CScope> scope,
+//                  CRef<CPssmWithParameters> pssm)
+// {
+//     CConstRef<CBioseq> retval;
+//
+//     if (pssm) {
+//         retval.Reset(&pssm->SetQuery().SetSeq());
+//     } else {
+//         _ASSERT(query.NotEmpty());
+//         if (query->GetQuerySeqLoc(0)->GetId()) {
+//             CBioseq_Handle bh =
+//                 scope->GetBioseqHandle(*query->GetQuerySeqLoc(0)->GetId());
+//             _ASSERT(bh);
+//             retval.Reset(bh.GetBioseqCore());
+// ```
+// The query is its record's Bioseq, whole also with `-query_loc`; the ancillary data are the
+// query's (`CBlastAncillaryData`, blast_results.cpp:71-114: the ungapped block of its context and
+// the gapped one, and in the first round the PSI blocks are copies of them).
+#[cold]
+#[inline(never)]
+fn psiblast_ascii_pssms(
+    args: &ResolvedBlastpArgs,
+    request: &crate::algorithm::psiblast::pssm::PssmRequest,
+    hit_lists: &[Option<BlastpHitList>],
+    ranges: &BlastpRanges<'_>,
+    shown_subjects: ShownSubjects<'_>,
+    contexts: &[QueryContext],
+    gapped: (f64, f64),
+) -> Result<Vec<Vec<u8>>> {
+    use crate::algorithm::psiblast::pssm::{
+        ascii_pssm, ncbistdaa_letters, PssmAlignment, PssmAncillary, PssmStop,
+    };
+    let subject = |s_idx: u32| -> Vec<u8> {
+        match shown_subjects.letters(s_idx as usize) {
+            Some(ShownLetters::Ascii(letters)) => ncbistdaa_letters(letters),
+            Some(ShownLetters::Stored(residues)) => residues.to_vec(),
+            None => Vec::new(),
+        }
+    };
+    let mut pssms = Vec::new();
+    for (query, hit_list) in hit_lists.iter().enumerate() {
+        let Some(hit_list) = hit_list else {
+            continue;
+        };
+        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+        let q_shift = ranges.query_input.placements.offset(query);
+        let alignments: Vec<PssmAlignment<'_>> = hit_list.hsplist_array[..count]
+            .iter()
+            .flat_map(|hsp_list| &hsp_list.hsps)
+            .map(|hsp| PssmAlignment {
+                subject: hsp.s_idx,
+                e_value: crate::report::serial::seqalign::seqalign_evalue(hsp.e_value),
+                q_start: hsp.q_start - 1 + q_shift,
+                s_start: hsp.s_start - 1,
+                q_length: hsp.q_end + 1 - hsp.q_start,
+                ops: hsp.gap_info.as_deref(),
+            })
+            .collect();
+        if alignments.is_empty() {
+            continue;
+        }
+        let record = &ranges.input_records[ranges.query_input.ordinal(query)];
+        let ungapped = &contexts[query].karlin_params;
+        let ancillary = PssmAncillary {
+            ungapped: (ungapped.k, ungapped.lambda),
+            gapped,
+        };
+        match ascii_pssm(
+            request,
+            args.scoring.matrix,
+            args.inclusion_ethresh,
+            record.seq(),
+            &alignments,
+            &subject,
+            ancillary,
+        ) {
+            Ok(pssm) => pssms.push(pssm),
+            Err(error) => {
+                return Err(PssmStop {
+                    query,
+                    error,
+                    pssms,
+                }
+                .into())
+            }
+        }
+    }
+    Ok(pssms)
 }
 
 /// The stored residue of pyrrolysine (O): the only code that `ncbistdaa_to_ascii` shows as O
@@ -5051,21 +5163,16 @@ pub fn check_options(args: &BlastpArgs) -> Result<()> {
     crate::utils::threading::validate_threads(args.num_threads)
 }
 
-/// The part of `run` after the files are opened: NCBI's processing of the options,
-/// `Query is Empty!`, the reading of the queries and the search.
-fn search_cli(
-    args: BlastpArgs,
-    list: Option<crate::seqdb::DbList>,
-    query_file: std::fs::File,
-    subjects: &SubjectSet<'_>,
+/// What `search_cli` and `run_local_database` do after the options are processed and before the
+/// query: the opening of the database of `-db` (`list`: its taxid or seqid list, `None` for a
+/// search without `-db`), and what the requested reports ask of it.
+fn open_search_database(
+    args: &BlastpArgs,
+    resolved: &mut ResolvedBlastpArgs,
+    list: Option<&crate::seqdb::DbList>,
+    settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
-    choice: crate::blastinput::app::FormatChoice,
-    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
-) -> Result<()> {
-    use crate::blastinput::fasta_reader::{
-        read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
-    };
-    let mut resolved = args.check_options(outputs.diagnostics)?;
+) -> Result<Option<database::BlastpDatabase>> {
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:194-199
     // ```c++
     //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
@@ -5091,9 +5198,9 @@ fn search_cli(
         Some(name) => {
             let database = database::BlastpDatabase::open_restricted(
                 name,
-                &settings,
+                settings,
                 args.app.name(),
-                list.as_ref(),
+                list,
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis)
@@ -5131,22 +5238,44 @@ fn search_cli(
             .any(|spec| spec.needs().taxonomy_names)
     {
         resolved.subject_taxdb_found =
-            crate::algorithm::common::database::subject_taxdb_found(&settings, args.app.name())?;
+            crate::algorithm::common::database::subject_taxdb_found(settings, args.app.name())?;
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
-    if let (Some(database), Some(serial)) = (
-        database.as_ref(),
-        crate::blastinput::app::ReportFormat::from_number(choice.number)
-            .and_then(crate::report::serial::SerialFormat::of),
-    ) {
-        crate::report::serial::seqalign::check_database(
-            serial,
-            database.name(),
-            &database.pairwise_database().definition,
-            crate::blastinput::app::Program::Blastp,
-        )?;
+    if let Some(database) = database.as_ref() {
+        for format in &outputs.formats {
+            let choice = crate::blastinput::app::parse_formatting_string(format.outfmt)?;
+            if let Some(serial) = crate::blastinput::app::ReportFormat::from_number(choice.number)
+                .and_then(crate::report::serial::SerialFormat::of)
+            {
+                crate::report::serial::seqalign::check_database(
+                    serial,
+                    database.name(),
+                    &database.pairwise_database().definition,
+                    crate::blastinput::app::Program::Blastp,
+                )?;
+            }
+        }
     }
+    Ok(database)
+}
+
+/// The part of `run` after the files are opened: NCBI's processing of the options,
+/// `Query is Empty!`, the reading of the queries and the search.
+fn search_cli(
+    args: BlastpArgs,
+    list: Option<crate::seqdb::DbList>,
+    query_file: std::fs::File,
+    subjects: &SubjectSet<'_>,
+    outputs: &mut ReportOutputs<'_>,
+    choice: crate::blastinput::app::FormatChoice,
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+) -> Result<()> {
+    use crate::blastinput::fasta_reader::{
+        read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
+    };
+    let mut resolved = args.check_options(outputs.diagnostics)?;
+    let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:202-216
     // ```c++
     //         SDataLoaderConfig dlconfig =
@@ -5319,11 +5448,12 @@ pub fn run_local(
         .iter()
         .any(|format| blastp_is_archive(format.outfmt));
     if archive_requested {
-        args.archive = super::archive::handle_for(&args, true)?;
+        args.archive = super::archive::handle_for(&args, true)?
+            .map(|handle| outputs.with_archive_outfmt(handle));
         super::archive::check_titles(query_records, "query")?;
         super::archive::check_titles(subject_records, "subject")?;
         if let Some(handle) = args.archive.clone() {
-            return outputs.with_archive_diagnostics(handle, |view| {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(
                     args,
                     query_records,
@@ -5333,6 +5463,7 @@ pub fn run_local(
                     view,
                 )
             });
+            return outputs.finish_archive(&handle, query_records.is_empty(), result);
         }
     }
     run_local_formats(
@@ -5394,6 +5525,82 @@ fn run_local_formats(
         &subjects,
         None,
         subject_label,
+        outputs,
+        None,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:194-199
+// ```c++
+//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
+//         CRef<CLocalDbAdapter> db_adapter;
+//         CRef<CScope> scope;
+//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+//                          db_adapter, scope);
+//         _ASSERT(db_adapter && scope);
+// ```
+/// Runs one BLASTP search of the records `query_records` against the database of `args` and
+/// writes every requested output format from the same result (the library API's entry; the
+/// command line's is `run`). `settings` are the NCBI application settings, which find the
+/// database. The steps are `run`'s and `search_cli`'s, in their order; what differs is what they
+/// read: the records are read already, and the outputs are the caller's. An archive (outfmt 11)
+/// ends as the command line's does (`ReportOutputs::finish_archive`).
+pub fn run_local_database(
+    mut args: BlastpArgs,
+    query_records: &[FastaRecord],
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    let archive_requested = outputs
+        .formats
+        .iter()
+        .any(|format| blastp_is_archive(format.outfmt));
+    args.archive = super::archive::handle_for(&args, archive_requested)?
+        .map(|handle| outputs.with_archive_outfmt(handle));
+    crate::utils::threading::validate_threads(args.num_threads)?;
+    args.id_scope = crate::algorithm::common::database::database_id_scope(
+        args.parse_deflines,
+        query_records,
+        args.app.name(),
+    )?;
+    match args.archive.clone() {
+        Some(handle) => {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
+                search_database(args, query_records, settings, view)
+            });
+            outputs.finish_archive(&handle, query_records.is_empty(), result)
+        }
+        None => search_database(args, query_records, settings, outputs),
+    }
+}
+
+/// `run_local_database` from the taxid or seqid list on.
+fn search_database(
+    args: BlastpArgs,
+    query_records: &[FastaRecord],
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    // The handler of the database arguments reads the list before the other handlers (`run`).
+    let list = args
+        .db_filter
+        .resolve(&settings, &mut *outputs.diagnostics)?;
+    let mut resolved = resolve_for_formats(&args, outputs)?;
+    let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?
+        .ok_or_else(crate::blastinput::app::missing_subject_error)?;
+    if args.archive.is_some() {
+        super::archive::check_titles(query_records, "query")?;
+    }
+    search(
+        resolved,
+        query_records,
+        QueryReading::Records,
+        &SubjectSet {
+            records: std::borrow::Cow::Borrowed(&[]),
+            placements: seq_range::Placements::default(),
+        },
+        Some(&database),
+        "",
         outputs,
         None,
     )
@@ -5531,7 +5738,7 @@ fn resolve_for_formats(
         requested.outfmt = format.outfmt.to_string();
         let choice = crate::blastinput::app::parse_formatting_string(&requested.outfmt)?;
         let program = crate::blastinput::app::Program::Blastp;
-        if crate::blastinput::app::report_format(&choice, program, None)?.is_none() {
+        if crate::blastinput::app::report_format(&choice, program, args.out.as_deref())?.is_none() {
             crate::blastinput::app::formatting_handler_check(&choice, program)?;
             crate::blastinput::app::xinclude_check(&choice)?;
         }
@@ -5852,12 +6059,12 @@ fn search(
     let epilog = batches.stop.is_none();
     // The searches and reports of the batches up to the input record `input_done` and
     // the searched query `searched_done`.
-    let search_batches = |args: ResolvedBlastpArgs,
-                          outputs: &mut ReportOutputs<'_>,
-                          pool: &crate::utils::threading::SearchPool<'_>,
-                          input_done: usize,
-                          searched_done: usize,
-                          epilog: bool|
+    let search_batches_once = |args: ResolvedBlastpArgs,
+                               outputs: &mut ReportOutputs<'_>,
+                               pool: &crate::utils::threading::SearchPool<'_>,
+                               input_done: usize,
+                               searched_done: usize,
+                               epilog: bool|
      -> Result<()> {
         let done_input = seq_range::QueryInput {
             placements: seq_range::Placements(
@@ -5900,6 +6107,58 @@ fn search(
             &reports,
             x_lookup_ahead::XAheadBlock::none(),
         )
+    };
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523
+    // ```c++
+    //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    //
+    // 		CRef<CBlastQueryVector> query_batch(input->GetNextSeqBatch(*scope));
+    //
+    //                 const bool converged = DoIterations(opts_hndl,
+    //                            query_batch,
+    //                            pssm,
+    //                            db_args,
+    //                            db_adapter,
+    //                            scope,
+    //                            formatter);
+    // ```
+    // psiblast makes each query's PSSM after its report: a PSSM that fails
+    // (`psiblast::pssm::PssmStop`) stops the run there, after the reports of the queries up to
+    // it (without the epilog) and the PSSMs of those before it. LOSAT searches all queries
+    // together, so those queries are searched again and reported alone.
+    let search_batches = |args: ResolvedBlastpArgs,
+                          outputs: &mut ReportOutputs<'_>,
+                          pool: &crate::utils::threading::SearchPool<'_>,
+                          input_done: usize,
+                          searched_done: usize,
+                          epilog: bool|
+     -> Result<()> {
+        let Some(request) = args.psi_pssm.clone() else {
+            return search_batches_once(args, outputs, pool, input_done, searched_done, epilog);
+        };
+        let mut prefix_args = args.clone();
+        prefix_args.psi_pssm = None;
+        match search_batches_once(args, outputs, pool, input_done, searched_done, epilog) {
+            Err(error) if error.is::<crate::algorithm::psiblast::pssm::PssmStop>() => {
+                let stop = error
+                    .downcast::<crate::algorithm::psiblast::pssm::PssmStop>()
+                    .expect("the error was checked to be a PssmStop");
+                let after = batches
+                    .starts
+                    .partition_point(|&(_, searched)| searched <= stop.query);
+                let input_end = batches
+                    .starts
+                    .get(after)
+                    .map_or(input_done, |&(input, _)| input.min(input_done));
+                search_batches_once(prefix_args, outputs, pool, input_end, stop.query + 1, false)?;
+                crate::algorithm::psiblast::pssm::write_ascii_pssm_files(
+                    &request,
+                    stop.pssms.iter().map(Vec::as_slice),
+                );
+                Err(stop.error)
+            }
+            other => other,
+        }
     };
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries in blocks of whole batches, each block a search
     // of its own whose report is written before the next block is searched
@@ -6330,7 +6589,9 @@ fn x_query_block_plan(
 )> {
     use super::x_query_blocks::XBlockReport;
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
+    // psiblast's PSSMs (`psiblast_ascii_pssms`) are written by the search of all queries.
     if args.query_range.is_some()
+        || args.psi_pssm.is_some()
         || outputs.formats.is_empty()
         || batches.stop.is_some()
         || batches.searched_done != queries.len()
@@ -10829,6 +11090,7 @@ fn run_resolved_in_pool(
         let residues = if !x_listed_lean {
             database::XShownResidues::Listed
         } else if outputs.hits.is_none()
+            && args.psi_pssm.is_none()
             && requested_formats.iter().all(|outfmt| {
                 matches!(
                     outfmt,
@@ -10971,6 +11233,37 @@ fn run_resolved_in_pool(
                 })
                 .collect()
         });
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:291-309
+    // ```c++
+    //                 CSearchResults& results_1st_query = (*results)[0];
+    //                 if ( !results_1st_query.HasAlignments() ) {
+    //                     break;
+    //                 }
+    //
+    //                 if (run_token & 2)
+    //                 {
+    //                         CConstRef<CSeq_align_set> aln(results_1st_query.GetSeqAlign());
+    //                         ...
+    //                         if (itr || m_CmdLineArgs->GetSaveLastPssm()) {
+    //                         ...
+    //                         pssm =
+    //                          ComputePssmForNextIteration(*seq, aln, psi_opts, scope,
+    //                                      results_1st_query.GetAncillaryData());
+    // ```
+    // psiblast's PSSM is made from the Seq-aligns of the round's results, before the
+    // formatter's cut; it is written after the reports (below `output_result`).
+    let psiblast_pssms: Option<Vec<Vec<u8>>> = match args.psi_pssm.as_ref() {
+        Some(request) => Some(psiblast_ascii_pssms(
+            &args,
+            request,
+            &hit_lists,
+            ranges,
+            shown_subjects,
+            &contexts,
+            (gapped_params.k, gapped_params.lambda),
+        )?),
+        None => None,
+    };
     let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
         hit_lists
             .iter_mut()
@@ -11122,6 +11415,15 @@ fn run_resolved_in_pool(
     if let (Some(hits_sink), Some(pairwise_hits)) = (outputs.hits.as_mut(), pairwise_hits.as_ref())
     {
         hits_sink(std::sync::Arc::clone(pairwise_hits));
+    }
+    // The library's records name a database's sequences through this event.
+    if let (Some(titles), Some(database), true, Some(observer)) = (
+        listed_titles.as_ref(),
+        database,
+        outputs.hits.is_some(),
+        outputs.observer.as_deref_mut(),
+    ) {
+        observer.database_subjects(titles.library_subjects(database));
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1553-1554
@@ -12236,6 +12538,18 @@ fn run_resolved_in_pool(
     // formatting and writing of every report, after the search. No NCBI counterpart.
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, output_format_start);
     output_result?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:319-321
+    // ```c++
+    //        if (m_CmdLineArgs->GetSaveLastPssm()) {
+    //            SavePssmToFile(pssm, &itr);
+    //        }
+    // ```
+    if let (Some(request), Some(pssms)) = (args.psi_pssm.as_ref(), psiblast_pssms.as_ref()) {
+        crate::algorithm::psiblast::pssm::write_ascii_pssm_files(
+            request,
+            pssms.iter().map(Vec::as_slice),
+        );
+    }
     // EXPERIMENT (LOSAT_X_BPLKPFLAT): the flat table's vectors kept for the next block's build
     // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed. EXPERIMENT
     // (LOSAT_X_BPLKPAHEAD): exact blastp's, for the build of a later block's table ahead of it
@@ -12485,6 +12799,7 @@ mod tests {
             app: BlastpApp::Blastp,
             inclusion_ethresh: None,
             first_query_ordinal: 0,
+            psiblast_pssm: None,
         }
     }
 
@@ -13390,6 +13705,47 @@ mod tests {
         let resolved = args.resolve().expect("resolved blastp args");
         let err = validate_requested_blastp_support(&resolved).expect_err("unsupported scoring");
         assert!(err.to_string().contains("not supported by LOSAT's BLASTP"));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:258-271 (BLOSUM62's rows)
+    #[test]
+    fn test_validate_requested_blastp_support_takes_blosum62_gap_costs_of_the_table() {
+        for (gap_open, gap_extend) in [
+            (11, 2),
+            (10, 2),
+            (9, 2),
+            (8, 2),
+            (7, 2),
+            (6, 2),
+            (13, 1),
+            (12, 1),
+            (11, 1),
+            (10, 1),
+            (9, 1),
+            (32767, 32767),
+        ] {
+            let mut args = make_blastp_args();
+            args.gap_open = Some(gap_open);
+            args.gap_extend = Some(gap_extend);
+            let resolved = args.resolve().expect("resolved blastp args");
+            validate_requested_blastp_support(&resolved)
+                .unwrap_or_else(|err| panic!("{gap_open}/{gap_extend}: {err}"));
+            // psiblast keeps 11/1 (its later rounds are not ported).
+            let mut args = make_blastp_args();
+            args.app = BlastpApp::Psiblast;
+            args.gap_open = Some(gap_open);
+            args.gap_extend = Some(gap_extend);
+            let resolved = args.resolve().expect("resolved psiblast args");
+            let result = validate_requested_blastp_support(&resolved);
+            if (gap_open, gap_extend) == (11, 1) {
+                result.expect("psiblast 11/1");
+            } else {
+                let err = result.expect_err("psiblast other gap costs");
+                assert!(err.to_string().contains(&format!(
+                    "the matrix BLOSUM62 with gap costs {gap_open}/{gap_extend} is not supported by LOSAT's PSIBLAST"
+                )));
+            }
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2387-2415

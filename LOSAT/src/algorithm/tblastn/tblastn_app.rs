@@ -555,26 +555,15 @@ fn cli_report_stream(
     }
 }
 
-/// The part of `run` after the files are opened: NCBI's processing of the options,
-/// `Query is Empty!`, the query batch size and the subjects without letters, the reading of
-/// the queries and the search.
-#[allow(clippy::too_many_arguments)]
-fn search_cli(
-    mut args: TblastnArgs,
-    list: Option<crate::seqdb::DbList>,
-    query_input: Input<'_>,
-    subjects: &[FastaRecord],
-    subject_placements: &crate::blastinput::seq_range::Placements,
-    // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects' letters, packed (the records keep none).
-    x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
+/// What `search_cli` and `run_local_database` do after the options are processed and before the
+/// query: the opening of the database of `-db` (`list`: its taxid or seqid list, `None` for a
+/// search without `-db`), and what the requested reports ask of it.
+fn open_search_database(
+    args: &mut TblastnArgs,
+    list: Option<&crate::seqdb::DbList>,
+    settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
-    choice: &crate::blastinput::app::FormatChoice,
-    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
-) -> Result<()> {
-    use crate::blastinput::fasta_reader::{
-        read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
-    };
-    let resolved = args.check_options(outputs.diagnostics)?;
+) -> Result<Option<TblastnDatabase>> {
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193
     // ```c++
     //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
@@ -589,8 +578,8 @@ fn search_cli(
         Some(name) => {
             let database = super::database::TblastnDatabase::open_restricted(
                 name,
-                &settings,
-                list.as_ref(),
+                settings,
+                list,
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis)
@@ -627,23 +616,50 @@ fn search_cli(
     {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
-            None => crate::algorithm::common::database::subject_taxdb_found(&settings, "TBLASTN")?,
+            None => crate::algorithm::common::database::subject_taxdb_found(settings, "TBLASTN")?,
         });
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
-    if let (Some(database), Some(serial)) = (
-        database.as_ref(),
-        crate::blastinput::app::ReportFormat::from_number(choice.number)
-            .and_then(crate::report::serial::SerialFormat::of),
-    ) {
-        crate::report::serial::seqalign::check_database(
-            serial,
-            database.name(),
-            &database.pairwise_database().definition,
-            crate::blastinput::app::Program::Tblastn,
-        )?;
+    if let Some(database) = database.as_ref() {
+        for format in &outputs.formats {
+            let choice = crate::blastinput::app::parse_formatting_string(format.outfmt)?;
+            if let Some(serial) = crate::blastinput::app::ReportFormat::from_number(choice.number)
+                .and_then(crate::report::serial::SerialFormat::of)
+            {
+                crate::report::serial::seqalign::check_database(
+                    serial,
+                    database.name(),
+                    &database.pairwise_database().definition,
+                    crate::blastinput::app::Program::Tblastn,
+                )?;
+            }
+        }
     }
+    Ok(database)
+}
+
+/// The part of `run` after the files are opened: NCBI's processing of the options,
+/// `Query is Empty!`, the query batch size and the subjects without letters, the reading of
+/// the queries and the search.
+#[allow(clippy::too_many_arguments)]
+fn search_cli(
+    mut args: TblastnArgs,
+    list: Option<crate::seqdb::DbList>,
+    query_input: Input<'_>,
+    subjects: &[FastaRecord],
+    subject_placements: &crate::blastinput::seq_range::Placements,
+    // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects' letters, packed (the records keep none).
+    x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
+    outputs: &mut ReportOutputs<'_>,
+    choice: &crate::blastinput::app::FormatChoice,
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+) -> Result<()> {
+    use crate::blastinput::fasta_reader::{
+        read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
+    };
+    let resolved = args.check_options(outputs.diagnostics)?;
+    let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:200-221
     // ```c++
     //         SDataLoaderConfig dlconfig =
@@ -874,29 +890,27 @@ pub fn run_local(
         .iter()
         .any(|format| super::stage_e_report::format_number(format.outfmt) == 11);
     if archive_requested {
-        args.archive = super::archive::handle_for(&args, true)?;
+        args.archive = super::archive::handle_for(&args, true)?
+            .map(|handle| outputs.with_archive_outfmt(handle));
         super::archive::check_titles(subject_records, "subject")?;
         if let Some(handle) = args.archive.clone() {
-            return outputs.with_archive_diagnostics(handle, |view| {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(args, query_records, subject_records, view)
             });
+            return outputs.finish_archive(&handle, query_records.is_empty(), result);
         }
     }
     run_local_formats(args, query_records, subject_records, outputs)
 }
 
-fn run_local_formats(
-    args: TblastnArgs,
-    query_records: &[FastaRecord],
-    subject_records: &[FastaRecord],
-    outputs: &mut ReportOutputs<'_>,
-) -> Result<()> {
+/// The numbers of the requested formats, each read as on the command line. `out`: the file of
+/// `api::run_to_file`.
+fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<Vec<i32>> {
     use crate::blastinput::app;
-    use crate::blastinput::seq_range;
     let mut outfmts = Vec::with_capacity(outputs.formats.len());
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        if app::report_format(&choice, app::Program::Tblastn, None)?.is_none() {
+        if app::report_format(&choice, app::Program::Tblastn, out)?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastn)?;
             app::xinclude_check(&choice)?;
         }
@@ -909,6 +923,97 @@ fn run_local_formats(
         app::formatting_handler_check(&choice, app::Program::Tblastn)?;
         outfmts.push(choice.number);
     }
+    Ok(outfmts)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193
+// ```c++
+//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
+//         CRef<CLocalDbAdapter> db_adapter;
+//         CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
+//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+//                          db_adapter, scope);
+// ```
+/// Runs one TBLASTN search of the records `query_records` against the database of `args` and
+/// writes every requested output format from the same result (the library API's entry; the
+/// command line's is `run`). `settings` are the NCBI application settings, which find the
+/// database. The steps are `run`'s and `search_cli`'s, in their order; what differs is what they
+/// read: the records are read already, and the outputs are the caller's. An archive (outfmt 11)
+/// ends as the command line's does (`ReportOutputs::finish_archive`).
+pub fn run_local_database(
+    mut args: TblastnArgs,
+    query_records: &[FastaRecord],
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    let archive_requested = outputs
+        .formats
+        .iter()
+        .any(|format| super::stage_e_report::format_number(format.outfmt) == 11);
+    args.archive = super::archive::handle_for(&args, archive_requested)?
+        .map(|handle| outputs.with_archive_outfmt(handle));
+    crate::utils::threading::validate_threads(args.num_threads)?;
+    args.id_scope = crate::algorithm::common::database::database_id_scope(
+        args.parse_deflines,
+        query_records,
+        "TBLASTN",
+    )?;
+    match args.archive.clone() {
+        Some(handle) => {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
+                search_database(args, query_records, settings, view)
+            });
+            outputs.finish_archive(&handle, query_records.is_empty(), result)
+        }
+        None => search_database(args, query_records, settings, outputs),
+    }
+}
+
+/// `run_local_database` from the taxid or seqid list on.
+fn search_database(
+    mut args: TblastnArgs,
+    query_records: &[FastaRecord],
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    // The handler of the database arguments reads the list before the other handlers (`run`).
+    let list = args
+        .db_filter
+        .resolve(&settings, &mut *outputs.diagnostics)?;
+    let outfmts = read_formats(outputs, args.out.as_deref())?;
+    let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
+    let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?
+        .ok_or_else(crate::blastinput::app::missing_subject_error)?;
+    if query_records.is_empty() {
+        outputs
+            .diagnostics
+            .write_all(b"Warning: [tblastn] Query is Empty!\n")?;
+        return Ok(());
+    }
+    let batch_size = before_prolog(&[], None, outputs.diagnostics)?;
+    search(
+        &args,
+        resolved,
+        batch_size,
+        query_records,
+        QueryReading::Records,
+        &[],
+        &crate::blastinput::seq_range::Placements::default(),
+        None,
+        Some(&database),
+        outputs,
+    )
+}
+
+fn run_local_formats(
+    args: TblastnArgs,
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    use crate::blastinput::app;
+    use crate::blastinput::seq_range;
+    let outfmts = read_formats(outputs, args.out.as_deref())?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
     let subject_range = seq_range::parse_optional_range(
@@ -1594,6 +1699,15 @@ fn search(
             ),
             None => None,
         };
+        // The library's records name a database's sequences through this event.
+        if let (Some(reported), Some(database), true, Some(observer)) = (
+            &reported,
+            database,
+            outputs.hits.is_some(),
+            outputs.observer.as_deref_mut(),
+        ) {
+            observer.database_subjects(reported.library_subjects(database));
+        }
         drop(database_stores);
         // The query batches that were read and searched, by their searched queries (the batches
         // before a database failure or a reader stop): each is reported.
@@ -1680,37 +1794,41 @@ fn search(
                     // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                     // (`shared::prefetch_off`), each query's report fetches the subjects it
                     // shows, after the query's own warnings, where the first format's rows read
-                    // their Bioseqs (`TabularSpec::subject_fetch`). A batch that fetches nothing
-                    // still asks for the run's refusal of NCBI's taxonomy cache before any byte,
-                    // unless no batch of the run prefetches (`shared::prefetch_always_off`). A
-                    // query whose rows read a subject only for its identities asks for it only
-                    // where they read one, NCBI's lookup: every batch's lookups are made here
-                    // before any report is written, so a later batch that prefetches still
-                    // refuses before any byte.
+                    // their Bioseqs (`TabularSpec::subject_fetch`; for `nident` alone the rows
+                    // with identities, `database::reads_subject`). NCBI looks the taxonomy up
+                    // only where it fetches a subject: in such a report, or in the prefetch of a
+                    // batch with Seq-aligns (one without them loads no id, below). Every batch's
+                    // lookups are made here before any report is written, so the run's refusal
+                    // of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
+                    // only there: a later batch that fetches still refuses before any byte.
                     if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                         let rows = first_spec.as_ref().map_or(SubjectFetch::Every, |spec| {
                             spec.subject_fetch(crate::blastinput::app::Program::Tblastn)
                         });
-                        let asks = match rows {
-                            SubjectFetch::Every => true,
-                            SubjectFetch::Never => {
-                                !crate::algorithm::common::database::prefetch_always_off()
-                            }
-                            SubjectFetch::WithIdentities => false,
-                        };
                         for (query, hitlist) in span.clone().zip(hitlists) {
                             let shown = std::slice::from_ref(hitlist);
-                            if asks
-                                || hitlist
-                                    .lists()
-                                    .iter()
-                                    .any(|list| super::database::reads_subject(list, rows))
+                            if hitlist
+                                .lists()
+                                .iter()
+                                .any(|list| super::database::reads_subject(list, rows))
                             {
                                 let messages = database.prefetch_messages(reported, shown, rows)?;
                                 query_warning_lines[query].extend(messages);
                             }
                             rows_open(shown)?;
                         }
+                        continue;
+                    }
+                    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
+                    // ```c++
+                    //        CScope::TIds ids;
+                    //        vector<TSeqRange> ranges;
+                    //        s_ExtractSeqidsAndRanges(results, ids, ranges);
+                    //        _TRACE("Prefetching " << ids.size() << " sequence lengths");
+                    //        LoadSequencesToScope(ids, ranges, scope);
+                    // ```
+                    // A batch without Seq-aligns prefetches no sequence.
+                    if seq_aligns == 0 {
                         continue;
                     }
                     let messages =

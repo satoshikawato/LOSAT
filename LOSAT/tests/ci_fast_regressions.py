@@ -18,7 +18,8 @@ selected program the FASTA-input fixtures of fasta_input_fixtures.py (`check --r
 hashes, and LOSAT's explicit rejections where it rejects an input or option); for BLASTP,
 BLASTN, TBLASTN, BLASTX, TBLASTX and PSIBLAST the `-db` fixtures of db_search_fixtures.py (`check --program <program>`: stdout,
 stderr and exit status against the frozen NCBI `<program> -db -num_threads 1` bytes, at 1 and
-4 threads); and, whenever a program is selected, the command lines of the downstream tools and
+4 threads), with --library-example the `-subject` and `-db` rows through the library API (at 1
+thread); and, whenever a program is selected, the command lines of the downstream tools and
 the common forms of each program (dropin_corpus.py `check`: every row).
 
 Programs are selected from the changed paths (--changed-from): a program's own
@@ -29,6 +30,7 @@ nightly workflow passes --all-cases.
 
 Usage:
   ci_fast_regressions.py --losat BIN --out DIR [--programs all|LIST | --changed-from REV] [--all-cases] [--jobs N]
+      [--library-example BIN]
   ci_fast_regressions.py --select-only --changed-from REV
 """
 from __future__ import annotations
@@ -284,6 +286,33 @@ def run_fixtures(losat: Path, programs: set[str], out: Path) -> list[str]:
     return failures
 
 
+def run_library_fixtures(example: Path, programs: set[str], out: Path) -> list[str]:
+    """The `-subject` and `-db` fixtures through the library API (`check_losat.py` and
+    `db_search_fixtures.py check --library` with `examples/library_command_line`)."""
+    failures = []
+    selected = [program for program in OUTFMT0_PROGRAMS if program in programs]
+    if selected:
+        log = out / "outfmt0-fixtures-library.tsv"
+        result = subprocess.run([sys.executable, str(FIXTURE_DIR / "check_losat.py"), "--losat", str(example),
+                                 "--programs", ",".join(selected), "--threads", "1", "--library"],
+                                cwd=FIXTURE_DIR, capture_output=True, text=True)
+        log.write_text(result.stdout + result.stderr)
+        if result.returncode != 0:
+            failures.append(f"outfmt 0 fixtures differ through the library: see {log.name}")
+    for program in DB_SEARCH_PROGRAMS:
+        if program not in programs:
+            continue
+        log = out / f"db-search-library-{program}.tsv"
+        result = subprocess.run([sys.executable, str(TESTS / "db_search_fixtures.py"), "check", "--library",
+                                 "--losat", str(example), "--program", program, "--out", str(log)],
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            failures += [f"{program.upper()} -db fixture through the library {line}"
+                         for line in result.stdout.splitlines() if "\tdiffers\t" in line][:20]
+            failures.append(f"{program.upper()} -db fixtures differ through the library: see {log.name}")
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--losat", type=Path)
@@ -293,6 +322,8 @@ def main() -> int:
     parser.add_argument("--all-cases", action="store_true")
     parser.add_argument("--select-only", action="store_true")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
+    parser.add_argument("--library-example", type=Path,
+                        help="examples/library_command_line: the fixtures through the library API too")
     args = parser.parse_args()
 
     if args.changed_from:
@@ -330,6 +361,8 @@ def main() -> int:
         started = time.perf_counter()
         failures += check_startup_trace_notice(losat)
         failures += run_fixtures(losat, programs, out)
+        if args.library_example:
+            failures += run_library_fixtures(args.library_example.resolve(), programs, out)
         summary["fixture_seconds"] = round(time.perf_counter() - started, 1)
         fasta_failures, fasta_seconds = run_fasta_input_fixtures(losat, programs, out, args.jobs)
         failures += fasta_failures

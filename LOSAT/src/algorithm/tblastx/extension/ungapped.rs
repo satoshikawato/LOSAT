@@ -332,6 +332,8 @@ fn extend_right_ungapped_scalar(
     let mut j = 0usize;
 
     while q_start + j < q_limit && s_start + j < s_limit {
+        // SAFETY: `q_start + j` and `s_start + j` are in bounds; the loop condition
+        // tests both against `q_limit` and `s_limit`, the lengths of the two slices.
         let q_char = unsafe { *q_seq.get_unchecked(q_start + j) };
         let s_char = unsafe { *s_seq.get_unchecked(s_start + j) };
 

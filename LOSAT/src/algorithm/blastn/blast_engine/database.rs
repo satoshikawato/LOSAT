@@ -1475,6 +1475,22 @@ impl ReportedSubjects {
     pub(super) fn tabular_subject_ids(&self) -> Result<Vec<Arc<[u8]>>> {
         shared::tabular_subject_ids(&self.records, &self.ordinals, &self.parsed, false, PROGRAM)
     }
+
+    /// The reported sequences as the library's records name them (`shared::library_subjects`).
+    pub(super) fn library_subjects(
+        &self,
+        database: &BlastnDatabase,
+    ) -> Result<Vec<crate::api::local_blast::ReportedSubject>> {
+        let lengths = database.sam_lengths(&self.ordinals)?;
+        Ok(shared::library_subjects(
+            &database.db,
+            &self.records,
+            &self.ordinals,
+            &self.parsed,
+            |rank| lengths[rank],
+            PROGRAM,
+        ))
+    }
 }
 
 #[cfg(test)]

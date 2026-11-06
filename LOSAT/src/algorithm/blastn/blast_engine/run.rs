@@ -7533,24 +7533,16 @@ fn read_cli_subjects(
     })
 }
 
-/// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`,
-/// `-window_masker_db`), the
-/// processing of the options, the opening of the database of `-db`, `Query is Empty!`, the
-/// reading of the queries and the search. `list` is the taxid or seqid list of `-db`, read
-/// before the output is opened; `subjects` are those of `-subject` (`None` with `-db`).
-fn search_cli(
-    mut args: BlastnArgs,
-    list: Option<crate::seqdb::DbList>,
-    query_file: std::fs::File,
-    subjects: Option<(Subjects<'_>, SubjectRanges<'_>)>,
+/// What `search_cli` and `run_local_database` do after the processing of the options and before
+/// the query: the opening of the database of `-db` (`list`: its taxid or seqid list, `None` for a
+/// search without `-db`), and the two questions that its reports ask of it.
+fn open_search_database(
+    args: &mut BlastnArgs,
+    list: Option<&crate::seqdb::DbList>,
+    output_formats: &[BlastnOutputFormat],
+    settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
-    output_formats: Vec<BlastnOutputFormat>,
-    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
-) -> Result<()> {
-    args.resolve_dust()?;
-    args.resolve_window_masker()?;
-    let query_range = parse_query_range(&args)?;
-    process_options(&mut args, outputs)?;
+) -> Result<Option<database::BlastnDatabase>> {
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
     // ```c++
     //         /*** Initialize the database/subject ***/
@@ -7577,8 +7569,8 @@ fn search_cli(
         Some(name) => {
             let database = database::BlastnDatabase::open_restricted(
                 name,
-                &settings,
-                list.as_ref(),
+                settings,
+                list,
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis)
@@ -7614,7 +7606,7 @@ fn search_cli(
     {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
-            None => super::super::tabular::subject_taxdb_found(&settings)?,
+            None => super::super::tabular::subject_taxdb_found(settings)?,
         });
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
@@ -7629,6 +7621,34 @@ fn search_cli(
             )?;
         }
     }
+    Ok(database)
+}
+
+/// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`,
+/// `-window_masker_db`), the
+/// processing of the options, the opening of the database of `-db`, `Query is Empty!`, the
+/// reading of the queries and the search. `list` is the taxid or seqid list of `-db`, read
+/// before the output is opened; `subjects` are those of `-subject` (`None` with `-db`).
+fn search_cli(
+    mut args: BlastnArgs,
+    list: Option<crate::seqdb::DbList>,
+    query_file: std::fs::File,
+    subjects: Option<(Subjects<'_>, SubjectRanges<'_>)>,
+    outputs: &mut ReportOutputs<'_>,
+    output_formats: Vec<BlastnOutputFormat>,
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+) -> Result<()> {
+    args.resolve_dust()?;
+    args.resolve_window_masker()?;
+    let query_range = parse_query_range(&args)?;
+    process_options(&mut args, outputs)?;
+    let database = open_search_database(
+        &mut args,
+        list.as_ref(),
+        &output_formats,
+        &settings,
+        outputs,
+    )?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:201-214
     // ```c++
     //         SDataLoaderConfig dlconfig =
@@ -7932,15 +7952,16 @@ fn cli_output_formats(
 
 /// The requested output formats of `run_local`, each read as the CLI reads its single
 /// `-outfmt` (`cli_output_formats`); a format that NCBI rejects later fails here with NCBI's
-/// error, as in the other programs' `run_local` (they have no output file).
+/// error, as in the other programs' `run_local`. `out`: the file of `api::run_to_file`.
 fn parse_output_formats<'a>(
     formats: impl IntoIterator<Item = &'a str>,
+    out: Option<&std::path::Path>,
 ) -> Result<Vec<BlastnOutputFormat>> {
     formats
         .into_iter()
         .map(|outfmt| {
             let choice = app::parse_formatting_string(outfmt)?;
-            match app::report_format(&choice, Program::Blastn, None)? {
+            match app::report_format(&choice, Program::Blastn, out)? {
                 Some(format) => BlastnOutputFormat::of(format, &choice),
                 None => {
                     app::formatting_handler_check(&choice, Program::Blastn)?;
@@ -8050,13 +8071,15 @@ pub fn run_local(
     });
     if archive_requested && args.db.is_none() {
         QueryStrand::parse(&args.strand)?;
-        args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), true)?;
+        args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), true)?
+            .map(|handle| outputs.with_archive_outfmt(handle));
         archive::check_titles(query_records, "query")?;
         archive::check_titles(subject_records, "subject")?;
         if let Some(handle) = args.archive.clone() {
-            return outputs.with_archive_diagnostics(handle, |view| {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(args, query_records, subject_records, view)
             });
+            return outputs.finish_archive(&handle, query_records.is_empty(), result);
         }
     }
     run_local_formats(args, query_records, subject_records, outputs)
@@ -8082,7 +8105,10 @@ fn run_local_formats(
     }
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
     QueryStrand::parse(&args.strand)?;
-    let output_formats = parse_output_formats(outputs.formats.iter().map(|format| format.outfmt))?;
+    let output_formats = parse_output_formats(
+        outputs.formats.iter().map(|format| format.outfmt),
+        args.out.as_deref(),
+    )?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
     let subject_range =
@@ -8112,6 +8138,112 @@ fn run_local_formats(
             },
         },
         Subjects::Records(SubjectLetters::new(searched_subjects, None)),
+        outputs,
+        output_formats,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
+// ```c++
+//         /*** Initialize the database/subject ***/
+//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
+//         CRef<CLocalDbAdapter> db_adapter;
+//         CRef<CScope> scope;
+//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+//                          db_adapter, scope);
+//         _ASSERT(db_adapter && scope);
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
+// ```c++
+//     } CATCH_ALL(status)
+//
+//     if(!m_Bah.GetMessages().empty()) {
+//     	const CArgs & a = GetArgs();
+//     	PrintErrorArchive(a, m_Bah.GetMessages());
+//     }
+// ```
+/// Runs one BLASTN search of the records `query_records` against the database of `args` and
+/// writes every requested output format from the same result (the library API's entry; the
+/// command line's is `run`). `settings` are the NCBI application settings, which find the
+/// database. The steps are `run`'s and `search_cli`'s, in their order; what differs is what they
+/// read: the records are read already, and the outputs are the caller's. An archive (outfmt 11)
+/// ends as the command line's does: an error archive follows a failure and messages that no
+/// archive carried.
+pub fn run_local_database(
+    mut args: BlastnArgs,
+    query_records: &[FastaRecord],
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
+    QueryStrand::parse(&args.strand)?;
+    let output_formats = parse_output_formats(
+        outputs.formats.iter().map(|format| format.outfmt),
+        args.out.as_deref(),
+    )?;
+    args.archive = archive::handle_for(
+        &args,
+        args.dust_filtering.as_deref(),
+        output_formats.contains(&BlastnOutputFormat::Archive),
+    )?
+    .map(|handle| outputs.with_archive_outfmt(handle));
+    crate::utils::threading::validate_threads(args.num_threads)?;
+    args.id_scope = crate::algorithm::common::database::database_id_scope(
+        args.parse_deflines,
+        query_records,
+        "BLASTN",
+    )?;
+    match args.archive.clone() {
+        Some(handle) => {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
+                search_database(args, query_records, output_formats, settings, view)
+            });
+            outputs.finish_archive(&handle, query_records.is_empty(), result)
+        }
+        None => search_database(args, query_records, output_formats, settings, outputs),
+    }
+}
+
+/// `run_local_database` from the taxid or seqid list on.
+fn search_database(
+    mut args: BlastnArgs,
+    query_records: &[FastaRecord],
+    output_formats: Vec<BlastnOutputFormat>,
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    // The handler of the database arguments reads the list before the other handlers (`run`).
+    let list = args
+        .db_filter
+        .resolve(&settings, &mut *outputs.diagnostics)?;
+    args.resolve_dust()?;
+    args.resolve_window_masker()?;
+    let query_range = parse_query_range(&args)?;
+    process_options(&mut args, outputs)?;
+    let database = open_search_database(
+        &mut args,
+        list.as_ref(),
+        &output_formats,
+        &settings,
+        outputs,
+    )?
+    .ok_or_else(app::missing_subject_error)?;
+    if args.archive.is_some() {
+        archive::check_titles(query_records, "query")?;
+    }
+    let no_placements = Placements::default();
+    search(
+        args,
+        SearchQueries::Records(query_records),
+        QueryReading::Records,
+        Ranges {
+            query: query_range,
+            subjects: SubjectRanges {
+                placements: &no_placements,
+                records: None,
+            },
+        },
+        Subjects::Database(&database),
         outputs,
         output_formats,
     )
@@ -8393,24 +8525,54 @@ pub(crate) struct QueryBatchSizes {
 
 impl QueryBatchSizes {
     pub(crate) fn new(args: &BlastnArgs, subjects: &[FastaRecord]) -> Result<Self> {
+        use crate::blastinput::seq_range::{record_interval, RecordInterval};
+        let subject_range =
+            parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTN")?;
+        let total_length: i64 = subjects
+            .iter()
+            .map(|record| match subject_range.as_ref() {
+                Some(range) => match record_interval(range, record.seq().len()) {
+                    RecordInterval::Letters { from, to } => (to - from + 1) as i64,
+                    RecordInterval::Empty | RecordInterval::PastEnd => 0,
+                },
+                None => record.seq().len() as i64,
+            })
+            .sum();
+        Self::of_total_length(args, total_length)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:338-345
+    // ```c++
+    // CBlastFormat::GetDbTotalLength()
+    // {
+    //     Int8 retv = 0L;
+    //     for (size_t i = 0; i < m_DbInfo.size(); i++) {
+    //         retv += m_DbInfo[i].total_length;
+    //     }
+    //     return retv;
+    // }
+    // ```
+    /// The sizes of a search of the database `name`. A database's total is the `Int8` of its index
+    /// files (`GetDbTotalLength` sums `m_DbInfo`, `GetBlastDbInfo`: the whole database's, also with
+    /// a list, as `run_in_pool` reads it). A database that does not open has no total here: the
+    /// search of the first batch fails with NCBI's error.
+    pub(crate) fn of_database(
+        args: &BlastnArgs,
+        name: &str,
+        settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
+    ) -> Result<Self> {
+        let total_length = database::BlastnDatabase::open(name, settings).map_or(0, |database| {
+            database.pairwise_database().total_letters as i64
+        });
+        Self::of_total_length(args, total_length)
+    }
+
+    fn of_total_length(args: &BlastnArgs, total_length: i64) -> Result<Self> {
         let mut batching = query_batching_from_environment(
             super::super::coordination::task_uses_megablast_chunks(&args.task),
         )?;
         let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
         if batching.fixed_batch_size == 0 {
-            use crate::blastinput::seq_range::{record_interval, RecordInterval};
-            let subject_range =
-                parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTN")?;
-            let total_length: i64 = subjects
-                .iter()
-                .map(|record| match subject_range.as_ref() {
-                    Some(range) => match record_interval(range, record.seq().len()) {
-                        RecordInterval::Letters { from, to } => (to - from + 1) as i64,
-                        RecordInterval::Empty | RecordInterval::PastEnd => 0,
-                    },
-                    None => record.seq().len() as i64,
-                })
-                .sum();
             if total_length > 0 {
                 mixer.set_target_hits((total_length / 3000) as i32);
             }
@@ -10369,6 +10531,15 @@ fn write_reports_untimed(
             )?)
         }
     };
+    // The library's records name a database's sequences through this event.
+    if let (Some(reported), SubjectSource::Database(database), true, Some(observer)) = (
+        &reported,
+        subjects.source,
+        outputs.hits.is_some(),
+        outputs.observer.as_deref_mut(),
+    ) {
+        observer.database_subjects(reported.library_subjects(database)?);
+    }
     let database_subject_ids = match &reported {
         Some(reported) if output_formats.iter().any(|format| format.is_tabular()) => {
             Some(reported.tabular_subject_ids()?)
@@ -21013,13 +21184,13 @@ mod tests {
             ("21", "FASTA output format is only applicable to magicblast"),
         ] {
             assert_eq!(
-                native(parse_output_formats(["6", outfmt]).unwrap_err()),
+                native(parse_output_formats(["6", outfmt], None).unwrap_err()),
                 options(error),
                 "{outfmt}"
             );
         }
         assert_eq!(
-            parse_output_formats(["0", "6", "07"]).unwrap(),
+            parse_output_formats(["0", "6", "07"], None).unwrap(),
             [
                 BlastnOutputFormat::Pairwise,
                 BlastnOutputFormat::Tabular,
@@ -21027,7 +21198,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            parse_output_formats(["17", "17 SQ SR"]).unwrap(),
+            parse_output_formats(["17", "17 SQ SR"], None).unwrap(),
             [
                 BlastnOutputFormat::Sam(crate::report::sam::SamSpec::default()),
                 BlastnOutputFormat::Sam(crate::report::sam::SamSpec {

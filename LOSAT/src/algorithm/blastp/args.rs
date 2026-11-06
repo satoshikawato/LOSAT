@@ -548,6 +548,10 @@ pub struct BlastpArgs {
     // line, whose records are the whole input.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// psiblast's PSSM options (`-save_pssm_after_last_round`, `-save_each_pssm`,
+    /// `-out_ascii_pssm`, `-pseudocount`); `None` for blastp.
+    #[arg(skip)]
+    pub psiblast_pssm: Option<crate::algorithm::psiblast::pssm::PsiblastPssmOptions>,
 }
 
 // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:381-402
@@ -739,6 +743,8 @@ pub struct ResolvedBlastpArgs {
     pub inclusion_ethresh: f64,
     /// `BlastpArgs::first_query_ordinal`.
     pub first_query_ordinal: usize,
+    /// The ASCII PSSMs that psiblast writes after its round (`algorithm::psiblast::pssm`).
+    pub psi_pssm: Option<crate::algorithm::psiblast::pssm::PssmRequest>,
     /// `traceback_hitlist_size`, computed once (psiblast's reads `ADAPTIVE_CBS`).
     traceback_hitlist: usize,
     /// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search whose custom tabular
@@ -1043,6 +1049,9 @@ impl BlastpArgs {
             self.app == BlastpApp::Blastp,
             self.ungapped,
         )?;
+        if let Some(pssm) = &self.psiblast_pssm {
+            pssm.check()?;
+        }
         // NCBI's `Validate` (`BLAST_ValidateOptions`), shared with TBLASTN.
         crate::stats::protein_options::validate_protein_options(&ProteinOptionsCheck {
             gapped: !self.ungapped,
@@ -1061,6 +1070,10 @@ impl BlastpArgs {
             .matrix_name
             .parse::<ScoringMatrix>()
             .unwrap_or(ScoringMatrix::Blosum62);
+        let psi_pssm = self
+            .psiblast_pssm
+            .as_ref()
+            .and_then(crate::algorithm::psiblast::pssm::PsiblastPssmOptions::request);
         let mut resolved = ResolvedBlastpArgs {
             query: self.query.clone(),
             subject: self.subject.clone().unwrap_or_default(),
@@ -1143,6 +1156,7 @@ impl BlastpArgs {
             outfmt: self.outfmt.clone(),
             archive: self.archive.clone(),
             first_query_ordinal: self.first_query_ordinal,
+            psi_pssm,
             app: self.app,
             inclusion_ethresh: self
                 .inclusion_ethresh

@@ -2,7 +2,7 @@
 // Its outputs are not search results and say so on every line. It exists so that the
 // application layer and UI can be built and tested against the EngineGateway contract.
 import { recordMismatch } from '../../domain/dataset';
-import { CUSTOM_OUTPUT, customOutfmt, OUTFMT_FLAG, outfmtOption, OUTPUT_FORMATS } from '../../domain/output-format';
+import { CUSTOM_OUTPUT, customOutfmt, formatNumber, OUTFMT_FLAG, outfmtOption, OUTPUT_FORMATS } from '../../domain/output-format';
 import { PROGRAMS, type ProgramId } from '../../domain/programs';
 import {
   InputMismatchError,
@@ -51,18 +51,17 @@ export class FakeEngine implements EngineGateway {
   /**
    * Refuses an unknown program, a word that is neither an option of the program's `describe`
    * nor the value of the option before it, with the CLI's message, and an -outfmt of a format
-   * that a run does not write, with the adapter's (`run::parse_run`); the engine's other checks
-   * are not imitated.
+   * that the browser does not write yet (13 and 14, BLASTX's 11), with the adapter's
+   * (`run::parse_run`); the engine's other checks are not imitated.
    */
   async validate(argv: readonly string[]): Promise<ValidationResult> {
     const program = argv[0];
     if (!PROGRAMS.some((p) => p.id === program)) return { ok: false, message: `unknown program: ${program}` };
     const { parameters } = await this.describe(program as ProgramId);
     const outfmt = outfmtOption(argv);
-    const head = outfmt?.value.trim().split(' ', 1)[0] ?? '';
-    const number = /^\+?\d+$/.test(head) ? Number(head) : undefined;
-    if (number !== undefined && !(OUTPUT_FORMATS as readonly number[]).includes(number)) {
-      return { ok: false, message: `-outfmt ${number}: the browser writes outfmt 0, 6 and 7 (6 and 7 with any fields); other formats need the CLI` };
+    const number = outfmt === undefined ? undefined : formatNumber(outfmt.value);
+    if (number === 13 || number === 14 || (number === 11 && program === 'blastx')) {
+      return { ok: false, message: `-outfmt ${number} is not supported in the browser yet` };
     }
     for (let i = 1; i < argv.length; i++) {
       const word = argv[i]!;
@@ -188,7 +187,8 @@ export class FakeEngine implements EngineGateway {
     writer.write(0, encoder.encode(out0));
     writer.write(6, encoder.encode(out6));
     writer.write(7, encoder.encode(`${out7}# ${index} hits found\n`));
-    // The output of the argv's -outfmt (6 or 7 with fields): the rows of outfmt 6, marked.
+    // The output of the argv's -outfmt (a format besides 0, 6 and 7, or 6 or 7 with fields): the
+    // rows of outfmt 6, marked.
     const custom = customOutfmt(request.argv);
     if (custom !== undefined) writer.write(CUSTOM_OUTPUT, encoder.encode(`# ${FAKE_MARKER}\n# ${OUTFMT_FLAG} ${custom}\n${out6.slice(out6.indexOf('\n') + 1)}`));
     writer.write(HITS_STREAM, encoder.encode(hits));

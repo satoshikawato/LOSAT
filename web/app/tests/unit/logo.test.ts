@@ -66,7 +66,7 @@ function pngSize(name: string): [number, number] {
   return [png.readUInt32BE(16), png.readUInt32BE(20)];
 }
 
-describe('the web app manifest (DW-45)', () => {
+describe('the web app manifest (DW-50)', () => {
   const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../public/manifest.webmanifest'), 'utf8')) as {
     theme_color: string;
     background_color: string;

@@ -257,7 +257,7 @@
 use crate::algorithm::tblastn::x_scan_bf::{x_block_candidates, X_BLOCK};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::{
-    BlastAaLookupTable, XCell, XHit, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK,
+    BlastAaLookupTable, XCell, XHit, PV_ARRAY_BTS, PV_ARRAY_MASK,
 };
 use crate::utils::matrix::BLASTAA_SIZE;
 use std::mem::MaybeUninit;
@@ -297,6 +297,7 @@ pub(crate) fn x_bp_diag() -> bool {
 // computes.
 /// EXPERIMENT (LOSAT_X_BPDEFER): a strict-set switch, on unless it is `0`.
 /// It acts on the AVX2 batches only.
+#[cfg(target_arch = "x86_64")]
 pub(crate) fn x_bp_defer() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -307,6 +308,7 @@ pub(crate) fn x_bp_defer() -> bool {
 // computes.
 /// EXPERIMENT (LOSAT_X_BPMASKED): a strict-set switch, on unless it is `0`.
 /// It acts on LOSAT_X_BPDEFER's deferred calls only.
+#[cfg(target_arch = "x86_64")]
 pub(crate) fn x_bp_masked() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -2051,6 +2053,7 @@ unsafe fn x_batch_avx2<H: XHit>(
 
 /// EXPERIMENT (LOSAT_X_BPDEFER): for each mask of eight lanes, the set lanes in order, then zeros:
 /// the permutation that moves a batch's candidates to the front of its register.
+#[cfg(any(target_arch = "x86_64", test))]
 const X_PACK_LANES: [[u8; X_DIAG_LANES]; 256] = {
     let mut table = [[0u8; X_DIAG_LANES]; 256];
     let mut mask = 0;
@@ -3853,7 +3856,7 @@ mod tests {
                     let entries: Vec<DiagStruct> = (0..size)
                         .map(|_| {
                             let r = next(&mut seed);
-                            let last = if r % 4 == 0 {
+                            let last = if r.is_multiple_of(4) {
                                 lowest + (next(&mut seed) % (highest - lowest + 1) as u32) as i32
                             } else {
                                 let back = (next(&mut seed) % (window as u32 + 20)) as i32 - 8;
@@ -4617,6 +4620,7 @@ mod tests {
 
     /// Entries near `s0`'s diagonal values (flag set or not) for half the table and any bits for
     /// the other half, so that every outcome of the test occurs.
+    #[cfg(target_arch = "x86_64")]
     fn entries_near(seed: &mut u64, size: usize, s0: i32, test: XDiagTest) -> Vec<DiagStruct> {
         (0..size)
             .map(|_| {
@@ -4740,7 +4744,7 @@ mod tests {
                         let mut hits: Vec<i32> = Vec::new();
                         if let Some((_, before)) = cells.last() {
                             for &q in before {
-                                if hits.len() < n && next(&mut seed) % 2 == 0 {
+                                if hits.len() < n && next(&mut seed).is_multiple_of(2) {
                                     // The next offset of the diagonal, at most the mask (as the
                                     // lookup's offsets are).
                                     hits.push((q + 1) & mask);

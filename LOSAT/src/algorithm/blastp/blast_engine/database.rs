@@ -33,12 +33,12 @@ use crate::algorithm::common::database as shared;
 pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use crate::cli::NativeError;
 use crate::report::blast_xml::HitTaxonomy;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
-use crate::seqdb::{BlockRange, SeqDb, SeqDbError, SeqType, SequenceBlock};
+use crate::seqdb::{BlockRange, SeqDb, SeqType, SequenceBlock};
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{compute_length_adjustment_ncbi, KarlinParams};
 use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
@@ -135,6 +135,7 @@ impl BlastpDatabase {
 
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors, which name `program`.
+    #[cfg(test)]
     pub(super) fn open(
         name: &str,
         settings: &ApplicationSettings,
@@ -230,11 +231,6 @@ impl BlastpDatabase {
     /// list (`SeqDb::printed_num_seqs`).
     pub(super) fn printed_num_sequences(&self) -> u32 {
         self.db.printed_num_seqs()
-    }
-
-    /// The total length the reports print (`SeqDb::printed_total_length`).
-    pub(super) fn printed_total_letters(&self) -> u64 {
-        self.db.printed_total_length()
     }
 
     /// The total length as the engine holds it.
@@ -1779,7 +1775,7 @@ pub(super) fn x_titles_read_allow_blocks(
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search of outfmt 15 and 16. Besides what outfmt 5
 // reads (`x_titles_read_allow_blocks`) they read, for each subject with hits, the Blast-def-line
 // taxid (`SeqDb::defline_taxids`, a decode apart from the titles') and, when `taxdb.bti` is on the
-// search path, the taxonomy database (`shared::read_reported_taxids`): its opening, the lookup of
+// search path, the taxonomy database (`shared::read_reported_taxonomy`): its opening, the lookup of
 // the taxid, and a scientific name that NCBI's stream can write (`names::check_text`). The search
 // of all queries makes those refusals before its first byte; a block would make them after the
 // earlier blocks' bytes. So the block search is taken only where none can fail for any subject
@@ -1814,7 +1810,7 @@ pub(super) fn x_titles_taxids_allow_blocks(
     }
     let readable_range = |range: &BlockRange| -> bool {
         db.visit_deflines_taxids(*range, |_ordinal, deflines| match deflines {
-            // The taxid `read_reported_taxids` takes of a sequence: its first definition
+            // The taxid `read_reported_taxonomy` takes of a sequence: its first definition
             // line's.
             Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
             Err(_) => false,
@@ -1882,6 +1878,8 @@ mod tests {
     use super::*;
     use crate::algorithm::blastp::hsp::{BlastpHsp, BlastpHspList};
     use crate::config::{ProteinScoringSpec, ScoringMatrix};
+    #[cfg(unix)]
+    use crate::seqdb::SeqDbError;
     use crate::stats::lookup_protein_params;
 
     fn fixture(name: &str) -> String {
@@ -2536,13 +2534,11 @@ mod tests {
             Kept(u64),
             /// `search_blocks_made` (without LOSAT_X_BPDBKEEP) with blocks of this many bytes.
             Made(u64),
-            /// `Kept` with the kernel's hook.
-            KeptWith(u64, XHook),
             /// `x_db_keep::x_search_window` with blocks of this many bytes, the window and the hook.
             Window(u64, super::super::x_db_keep::XWindowSize, Option<XHook>),
         }
 
-        /// What the kernel does before it records a sequence (`Driver::KeptWith`).
+        /// What the kernel does before it records a sequence (`Driver::Window`).
         #[derive(Clone, Copy, Debug)]
         enum XHook {
             /// Sleeps 50 ms at this ordinal id.
@@ -2587,7 +2583,6 @@ mod tests {
             crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                 let new_scratch = || BlastpSubjectScratch::new(16, 64, window, 21);
                 let hook = match driver {
-                    Driver::KeptWith(_, hook) => Some(hook),
                     Driver::Window(_, _, hook) => hook,
                     _ => None,
                 };
@@ -2616,18 +2611,16 @@ mod tests {
                         &kernel,
                         &mut sink,
                     ),
-                    Driver::Kept(block_bytes) | Driver::KeptWith(block_bytes, _) => {
-                        super::super::x_db_keep::x_search_blocks_kept(
-                            database,
-                            pool,
-                            window,
-                            block_bytes,
-                            blocks_per_thread,
-                            &new_scratch,
-                            &kernel,
-                            &mut sink,
-                        )
-                    }
+                    Driver::Kept(block_bytes) => super::super::x_db_keep::x_search_blocks_kept(
+                        database,
+                        pool,
+                        window,
+                        block_bytes,
+                        blocks_per_thread,
+                        &new_scratch,
+                        &kernel,
+                        &mut sink,
+                    ),
                     Driver::Made(block_bytes) => search_blocks_made(
                         database,
                         pool,
@@ -2640,7 +2633,7 @@ mod tests {
                     ),
                     Driver::Window(block_bytes, size, _) => {
                         super::super::x_db_keep::x_search_window(
-                            &database,
+                            database,
                             pool,
                             window,
                             block_bytes,

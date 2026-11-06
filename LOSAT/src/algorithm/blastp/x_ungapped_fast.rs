@@ -33,9 +33,9 @@
 //! * Table. `T[q << 5 | s]` is `blosum62_score_ncbistdaa_direct(q, s)` (the function the
 //!   reference calls) for `q, s < 32`, with the one change that `BLAST_SCORE_MIN` (-32768, the
 //!   score of the sentinel code 0 against anything) is stored as -128 so that an entry is one
-//!   byte; the table is used only if every other entry is within -127..=127. A residue code
-//!   >= 32 would index a part of the 8 KiB table that holds zeros, so each extension ORs
-//!   together every code it reads and is handed to the reference when the OR is >= 32.
+//!   byte; the table is used only if every other entry is within -127..=127. A residue code >= 32
+//!   would index a part of the 8 KiB table that holds zeros, so each extension ORs together every
+//!   code it reads and is handed to the reference when the OR is >= 32.
 //! * Sentinel. Take `1 <= dropoff <= 127` (otherwise the reference runs). The score before a
 //!   step is never above the best (`best` is raised whenever `score` exceeds it, and both start
 //!   equal), so a sentinel step makes `best - score >= 128 > dropoff` with the stored -128 as it

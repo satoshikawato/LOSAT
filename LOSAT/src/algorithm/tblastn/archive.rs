@@ -43,7 +43,6 @@ use crate::report::archive::{
 };
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
-use crate::report::seqid::SeqId;
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 use crate::stats::tables::KarlinParams;
 use crate::utils::seg::SegParams;
@@ -404,7 +403,7 @@ pub(super) fn write_tblastn_archives(
         let context = if data.query_validity[first] {
             let length = &data.parameters.lengths[first];
             FirstContext {
-                karlin: Some((data.ungapped_karlin[first].clone(), data.gapped.clone())),
+                karlin: Some((data.ungapped_karlin[first], data.gapped)),
                 search_space: length.eff_searchsp,
                 length_adjustment: length.length_adjustment,
                 context0_space: length.eff_searchsp,

@@ -25,7 +25,6 @@ use crate::report::pairwise::{
     PairwiseDatabase, PairwiseHit,
 };
 use crate::sequence::packed_subject::SubjectNt;
-use crate::stats::spouge::lookup_protein_gumbel_params;
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::seg::SegParams;
@@ -608,7 +607,7 @@ fn write_tabular(
         }
         for list in hitlist.lists() {
             let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
-            let subject = subject_records
+            let _subject = subject_records
                 .get(oid)
                 .context("TBLASTN subject OID out of range")?;
             ensure!(

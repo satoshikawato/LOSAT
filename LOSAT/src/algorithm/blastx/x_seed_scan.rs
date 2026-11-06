@@ -805,6 +805,10 @@ mod tests {
     /// candidate loop.
     fn arms() -> Vec<(XScanByte, bool)> {
         let plain = XScanByte::On { avx2: false };
+        #[cfg_attr(
+            not(target_arch = "x86_64"),
+            expect(unused_mut, reason = "the AVX2 arms are pushed on x86_64 only")
+        )]
         let mut arms = vec![
             (XScanByte::Off, false),
             (XScanByte::Off, true),
@@ -1352,6 +1356,10 @@ mod tests {
             state ^= state << 17;
             (state % n as u64) as usize
         };
+        #[cfg_attr(
+            not(target_arch = "x86_64"),
+            expect(unused_mut, reason = "the AVX2 form is pushed on x86_64 only")
+        )]
         let mut forms = vec![XScanByte::On { avx2: false }];
         #[cfg(target_arch = "x86_64")]
         if std::is_x86_feature_detected!("avx2") {

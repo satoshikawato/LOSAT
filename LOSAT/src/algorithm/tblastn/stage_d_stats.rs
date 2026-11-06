@@ -90,7 +90,6 @@ pub(super) enum LocalParameterCall {
         min_subject_length: i32,
         composition_based_stats: i32,
     },
-    OneSubjectUpdate,
 }
 
 // NCBI c++/src/algo/blast/core/blast_setup.c:729-735,770-847:
@@ -303,7 +302,6 @@ pub(super) fn local_parameters_for_call(
             min_subject_length,
             composition_based_stats,
         } => (min_subject_length, composition_based_stats),
-        LocalParameterCall::OneSubjectUpdate => (subject_nt_length as i32, 0),
     };
     let mut link = if options.do_sum_stats {
         // NCBI c++/src/algo/blast/core/blast_parameters.c:774-815;

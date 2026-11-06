@@ -304,7 +304,7 @@ pub(crate) fn ordinary_traceback_observed(
         h.s_end = aligned.subject_stop + i32::try_from(shift)?;
         let node = tree_hsp(&h, batch);
         tree.add_hsp(
-            node.clone(),
+            node,
             node.query_context_offset,
             IndexMethod::QueryAndSubject,
         );
@@ -471,7 +471,7 @@ pub(crate) fn ordinary_traceback_observed(
             continue;
         }
         tree.add_hsp(
-            node.clone(),
+            node,
             node.query_context_offset,
             IndexMethod::QueryAndSubject,
         );

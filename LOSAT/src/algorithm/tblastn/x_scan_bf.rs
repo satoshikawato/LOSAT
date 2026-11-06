@@ -410,11 +410,11 @@ mod tests {
             let mut subject: Vec<u8> = (0..len).map(|_| 1 + rng.below(25) as u8).collect();
             subject.push(0);
             let wl = lookup.word_length;
-            let last = len as i32 - wl;
+            let last = len - wl;
             let ranges = [
                 (0, last.max(0)),
                 (1.min(last.max(0)), last.max(0)),
-                (len as i32 / 3, last.max(len as i32 / 3)),
+                (len / 3, last.max(len / 3)),
             ];
             for &range in &ranges {
                 // The pairs of the range in scan order, the same at every array size.

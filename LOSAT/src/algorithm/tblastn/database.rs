@@ -81,6 +81,7 @@ impl TblastnDatabase {
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`) with
     /// the command line's errors. The total length is NCBI's `Int8`; one that the engine
     /// cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
+    #[cfg(test)]
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         Self::open_restricted(name, settings, None, &mut std::io::sink())
     }

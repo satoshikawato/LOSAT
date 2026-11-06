@@ -200,6 +200,7 @@ pub(crate) fn run(stage: Run, start: Option<Instant>) -> u64 {
 
 // No NCBI counterpart: adds `n` to a run count or interval.
 #[inline]
+#[cfg(feature = "parallel")]
 pub(crate) fn run_add(stage: Run, n: u64) {
     if on() {
         RUN[stage as usize].fetch_add(n, Ordering::Relaxed);
@@ -233,6 +234,7 @@ impl SubjectWave {
 
     // No NCBI counterpart: runs one task of the wave, timing it when the wave has a clock.
     #[inline]
+    #[cfg(feature = "parallel")]
     pub(crate) fn task<T>(&self, f: impl FnOnce() -> T) -> T {
         let Some(wave_start) = self.start else {
             return f();
@@ -273,6 +275,7 @@ impl SubjectWave {
 }
 
 // No NCBI counterpart: adds one subject flow (`x_subject_flow::run`) to the run's counters.
+#[cfg(feature = "parallel")]
 pub(crate) fn subject_flow(start: Option<Instant>, tasks: u64, (ahead, taken): (u64, u64)) {
     if start.is_none() {
         return;

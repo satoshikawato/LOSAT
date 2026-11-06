@@ -109,6 +109,7 @@
 //! - k when n <= 5 or k < 3;
 //! - 3 + s when g = G - 1 (the head);
 //! - 3 + m + 4 (G - 2 - g) + s = n - 4 (g + 1) + s when g < G - 1.
+//!
 //! The head's positions are 3..3 + m and cell g's are n - 4 (g + 1)..n - 4 g, so the positions are a
 //! permutation of 0..n. For n = 6 and 7 there is one cell and every position is k.
 //!
@@ -171,6 +172,7 @@
 //!   packed appends (the record of the appends is not read again) in their order, each at its cell's
 //!   cursor, so a cell's slice holds o_0..o_{n-1} as the fill pass leaves it; then o_k goes to slot
 //!   `x_emission_position(k, n)` in each cell of more than 5 offsets, the fill pass's statements.
+//!
 //! The table is the count-and-fill builder's slot for slot; only the order of the memory accesses
 //! differs.
 //!
@@ -471,6 +473,10 @@ impl XQueryOffset for u16 {
 pub(crate) const X_U16_LETTERS: usize = 1 << 16;
 
 /// What the flat builder made.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
+)]
 pub(crate) enum XFlatBuild<H: XQueryOffset = i32> {
     Table(XFlatCompressedLookup<H>),
     /// One of NCBI's tables fills its overflow banks (the reference's `Err(())`).
@@ -932,6 +938,14 @@ pub(crate) fn x_try_build_flat_compressed_lookup(
     )
 }
 
+// No NCBI counterpart: how many appends ahead the count pass reads the count of a cell, and the fill
+// pass the cursor of a cell and then the slot it points to (cache hints only, `x_prefetch`).
+const X_COUNT_AHEAD: usize = 32;
+const X_FILL_STARTS_AHEAD: usize = 32;
+const X_FILL_HITS_AHEAD: usize = 16;
+// The fill reads a cursor for the hits hint after the starts hint has fetched its line.
+const _: () = assert!(X_FILL_HITS_AHEAD <= X_FILL_STARTS_AHEAD);
+
 // No NCBI counterpart: how many appends the count pass records before it counts them (and tests NCBI's
 // table, as the reference does after each query offset); it bounds the record kept before a refusal.
 const X_COUNT_CHUNK: usize = 1 << 20;
@@ -979,7 +993,11 @@ impl XCount {
     // ```
     /// Counts the appends recorded since the last call, in order.
     fn count_new(&mut self) {
-        for &index in &self.targets[self.counted..] {
+        let new = &self.targets[self.counted..];
+        for (k, &index) in new.iter().enumerate() {
+            if let Some(&ahead) = new.get(k + X_COUNT_AHEAD) {
+                x_prefetch(self.counts.as_ptr().wrapping_add(ahead as usize));
+            }
             let c = self.counts[index as usize];
             self.cells += usize::from(x_takes_overflow_cell(c));
             self.counts[index as usize] = c + 1;
@@ -1092,14 +1110,14 @@ fn x_flat_with_capacity_of<S: CompressedScores>(
                 return true;
             }
             tested = true;
-            refused = !(words_before
-                && !x_table_fills_banks(
+            refused = !words_before
+                || x_table_fills_banks(
                     &words,
                     backbone_size,
                     query,
                     range_locations,
                     overflow_cell_capacity,
-                ));
+                );
             !refused
         };
         let completed = x_for_each_offset(word_size, query, range_locations, |offset, word| {
@@ -1158,8 +1176,9 @@ fn x_flat_with_capacity_of<S: CompressedScores>(
     //             PV_SET(pv, i, pv_array_bts);
     //             longest_chain = MAX(count, longest_chain);
     // ```
-    // The statements of `finalize` on the counts (`num_used`); then each count becomes its cell's start
-    // (the sum of the counts before it), the last entry the number of hits.
+    // The statements of `finalize` on the counts (`num_used`); then each cell's start (the sum of the
+    // counts before it) goes to the entry after the cell's, where the fill pass uses it as the cell's
+    // cursor, and the first entry becomes 0.
     let nonempty_count = starts[..backbone_size]
         .iter()
         .filter(|&&count| count > 0)
@@ -1173,9 +1192,10 @@ fn x_flat_with_capacity_of<S: CompressedScores>(
     // The cells whose scan order is not the order of their appends (more than 5 offsets).
     let mut overflowed: Vec<u32> = Vec::new();
     let mut total = 0u32;
-    for (index, entry) in starts[..backbone_size].iter_mut().enumerate() {
-        let count = *entry;
-        *entry = total;
+    // Entry `index + 1` holds cell `index + 1`'s count until cell `index`'s start replaces it.
+    let mut count = std::mem::take(&mut starts[0]);
+    for index in 0..backbone_size {
+        let next = std::mem::replace(&mut starts[index + 1], total);
         if count > 0 {
             compressed_pv_set(&mut pv, index, pv_array_bts);
             longest_chain = longest_chain.max(count as i32);
@@ -1184,19 +1204,28 @@ fn x_flat_with_capacity_of<S: CompressedScores>(
             }
         }
         total += count;
+        count = next;
     }
-    starts[backbone_size] = total;
 
-    // Fill pass: the appends again in order, each at the next slot of its cell (the starts serve as the
-    // cells' cursors), so each cell holds o_0..o_{n-1}; a cursor ends at the next cell's start, so the
-    // starts are then those of the cells after them, moved back by one entry. Then each cell of more
-    // than 5 offsets puts o_k at `x_emission_position(k, n)` (cells of 5 or fewer: position k).
+    // Fill pass: the appends again in order, each at the next slot of its cell (the cursor of cell
+    // `index` is entry `index + 1`), so each cell holds o_0..o_{n-1}; a cursor ends at the next cell's
+    // start, so then entry `index` is cell `index`'s start and the last entry the number of hits. Then
+    // each cell of more than 5 offsets puts o_k at `x_emission_position(k, n)` (cells of 5 or fewer:
+    // position k).
     let mut hits = vec![0i32; total as usize];
     let mut at = 0usize;
     for &(query_offset, appends) in &per_offset {
         let end = at + appends as usize;
-        for &index in &targets[at..end] {
-            let cursor = &mut starts[index as usize];
+        for (k, &index) in targets[at..end].iter().enumerate() {
+            if let Some(&ahead) = targets.get(at + k + X_FILL_STARTS_AHEAD) {
+                x_prefetch(starts.as_ptr().wrapping_add(ahead as usize + 1));
+            }
+            if let Some(&near) = targets.get(at + k + X_FILL_HITS_AHEAD) {
+                if let Some(&slot) = starts.get(near as usize + 1) {
+                    x_prefetch(hits.as_ptr().wrapping_add(slot as usize));
+                }
+            }
+            let cursor = &mut starts[index as usize + 1];
             hits[*cursor as usize] = query_offset;
             *cursor += 1;
         }
@@ -1204,10 +1233,6 @@ fn x_flat_with_capacity_of<S: CompressedScores>(
     }
     drop(targets);
     drop(per_offset);
-    // The last cell (index `backbone_size - 1` = A^w) is never a word's index, so its cursor stayed at
-    // `total`, the last entry.
-    starts.copy_within(0..backbone_size, 1);
-    starts[0] = 0;
     let mut appended: Vec<i32> = Vec::new();
     for &index in &overflowed {
         let index = index as usize;
@@ -1255,6 +1280,10 @@ fn x_bucket_packs(letters: usize) -> bool {
 }
 
 /// What the bucket fill made.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
+)]
 enum XBucketBuild<H: XQueryOffset = i32> {
     /// `x_try_build_flat_with_capacity`'s outcome: its table, its `TooLarge`, or `None` where the
     /// table's header cannot be made.
@@ -1426,6 +1455,10 @@ fn x_zeroed_on<T: Copy + Default>(mut vector: Vec<T>, n: usize) -> Vec<T> {
 // entries cut to `n`. Zero-filling them again cost the small searches 1-5 % of their user cycles.
 // `S` is the bucket fill's matrix type (`x_buckets_with`), so that BLOSUM62's builders keep the
 // callers, and the inlining, of their own instances.
+#[expect(
+    clippy::extra_unused_type_parameters,
+    reason = "S only keeps one instance per bucket-fill matrix type (see above)"
+)]
 fn x_sized_on<S, T: Copy + Default>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
     if vector.capacity() < n {
         let mut fresh = vec![T::default(); if slack { n + n / 4 } else { n }];
@@ -3465,7 +3498,11 @@ mod tests {
                         }
                         XBucketBuild::Built(_) => panic!("{what}: buckets refused"),
                     }
-                    if capacity == NCBI_OVERFLOW_CELL_CAPACITY && reference.is_ok() {
+                    if let Some(reference) = reference
+                        .as_ref()
+                        .ok()
+                        .filter(|_| capacity == NCBI_OVERFLOW_CELL_CAPACITY)
+                    {
                         let Some(Ok(XCompressedLookup::Flat(flat))) =
                             x_tbn_build_compressed_lookup_of(
                                 matrix, word, threshold, &query, &locations, &tables,
@@ -3473,7 +3510,7 @@ mod tests {
                         else {
                             panic!("{what}: no flat table")
                         };
-                        x_assert_same_compressed_table(&flat, reference.as_ref().unwrap());
+                        x_assert_same_compressed_table(&flat, reference);
                     }
                 }
             }

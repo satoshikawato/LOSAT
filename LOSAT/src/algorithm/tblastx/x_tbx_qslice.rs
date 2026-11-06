@@ -86,6 +86,7 @@
 //! next hit on its cell is tested, from whichever slice); the batch is flushed at the end of the
 //! unit.
 
+#[cfg(test)]
 use super::x_kmerge::XUnitSort;
 use super::x_tbx_extbatch::{self, XPendBatch, BATCH};
 use super::*;

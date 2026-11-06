@@ -47,7 +47,7 @@ pub(crate) fn redo_calc_lambda(
 // /** The natural log of 2 ... */
 // #define LOCAL_LN2 0.69314718055994530941723212145818
 // ```
-pub(crate) const LOCAL_LN2: f64 = 0.6931471805599453;
+pub(crate) const LOCAL_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:791-797
 // ```c
@@ -995,16 +995,6 @@ fn list_to_vec(mut list: Option<Box<BlastCompoAlignment>>) -> Vec<BlastCompoAlig
         out.push(*node);
     }
     out
-}
-
-#[cfg(test)]
-fn vec_to_list(mut values: Vec<BlastCompoAlignment>) -> Option<Box<BlastCompoAlignment>> {
-    let mut head = None;
-    while let Some(mut value) = values.pop() {
-        value.next = head;
-        head = Some(Box::new(value));
-    }
-    head
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:214-280
@@ -3093,7 +3083,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
             let near_identical = if hsp_index == 0 || subject_maybe_biased {
                 preliminary_test_near_identical(
                     query_info,
-                    &window,
+                    window,
                     current,
                     params.near_identical_cutoff,
                 )
@@ -4278,7 +4268,7 @@ mod tests {
 
         let query_info = BlastCompoQueryInfo {
             origin: 0,
-            seq: BlastCompoSequenceData::from_ncbistdaa(&vec![1u8; 100]),
+            seq: BlastCompoSequenceData::from_ncbistdaa(&[1u8; 100]),
             composition: BlastAminoAcidComposition::empty(),
             eff_search_space: 1.0,
             words: None,
@@ -4409,7 +4399,7 @@ mod tests {
     fn test_preliminary_test_near_identical_uses_cutoff_branch() {
         let query_info = BlastCompoQueryInfo {
             origin: 0,
-            seq: BlastCompoSequenceData::from_ncbistdaa(&vec![1u8; 60]),
+            seq: BlastCompoSequenceData::from_ncbistdaa(&[1u8; 60]),
             composition: BlastAminoAcidComposition::empty(),
             eff_search_space: 1.0,
             words: None,
@@ -4491,8 +4481,8 @@ mod tests {
 
     #[test]
     fn test_test_near_identical_rejects_low_identity_alignment() {
-        let query = BlastCompoSequenceData::from_ncbistdaa(&vec![1u8; 80]);
-        let subject = BlastCompoSequenceData::from_ncbistdaa(&vec![2u8; 80]);
+        let query = BlastCompoSequenceData::from_ncbistdaa(&[1u8; 80]);
+        let subject = BlastCompoSequenceData::from_ncbistdaa(&[2u8; 80]);
         let align = make_align(20, 0, 80, 0, 80, 0);
         let words = build_query_word_hashes(query.data());
         assert!(!test_near_identical(
@@ -4522,11 +4512,11 @@ mod tests {
         // hashes left to inspect.
         let mut query_residues = vec![1u8; 48];
         query_residues.extend_from_slice(&[3, 4, 5, 6]);
-        query_residues.extend_from_slice(&vec![1u8; 48]);
+        query_residues.extend_from_slice(&[1u8; 48]);
 
         let mut subject_residues = vec![1u8; 48];
         subject_residues.extend_from_slice(&[7, 8, 9, 10]);
-        subject_residues.extend_from_slice(&vec![1u8; 48]);
+        subject_residues.extend_from_slice(&[1u8; 48]);
 
         let query = BlastCompoSequenceData::from_ncbistdaa(&query_residues);
         let subject = BlastCompoSequenceData::from_ncbistdaa(&subject_residues);

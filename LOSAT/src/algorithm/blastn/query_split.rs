@@ -328,7 +328,7 @@ pub fn split_query_batch(
     let mut chunk_start = 0usize;
     for (chunk_num, range) in chunk_ranges.iter_mut().enumerate() {
         let mut chunk_end = chunk_start + chunk_size;
-        if chunk_end >= total_length || (chunk_end < total_length && chunk_num + 1 == num_chunks) {
+        if chunk_end >= total_length || chunk_num + 1 == num_chunks {
             chunk_end = total_length;
         }
         *range = (chunk_start, chunk_end);

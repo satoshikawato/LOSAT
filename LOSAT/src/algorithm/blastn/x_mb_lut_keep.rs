@@ -263,7 +263,12 @@ pub(super) fn print_summary() {
 #[cfg(test)]
 mod tests {
     use super::super::x_mb_lookup_par::tests::{random_case, Lcg};
-    use super::super::{build_mb_lookup, x_mb_narrow, MbLookupTable};
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    use super::super::x_mb_narrow;
+    use super::super::{build_mb_lookup, MbLookupTable};
     use super::*;
 
     /// The kept table's length and the number of its first elements that may be dirty.

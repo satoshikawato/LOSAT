@@ -523,7 +523,7 @@ mod tests {
                 .map(|_| match draws.next() % 8 {
                     0 if case % 4 != 3 => others[(draws.next() % others.len() as u64) as usize],
                     _ if case % 3 == 0 => b"acgt"[(draws.next() & 3) as usize],
-                    _ if case % 3 == 1 && draws.next() % 64 == 0 => {
+                    _ if case % 3 == 1 && draws.next().is_multiple_of(64) => {
                         b"acgt"[(draws.next() & 3) as usize]
                     }
                     _ => b"ACGT"[(draws.next() & 3) as usize],

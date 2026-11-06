@@ -186,7 +186,7 @@ pub struct ScoreFreqProfile {
 impl ScoreFreqProfile {
     pub fn new(score_min: i32, score_max: i32) -> Self {
         let range = (score_max - score_min + 1) as usize;
-        let mut sprob = vec![0.0; range];
+        let sprob = vec![0.0; range];
 
         Self {
             sprob,
@@ -306,6 +306,10 @@ pub fn score_freq_profile_from_probabilities(
         }
     }
 
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if score_sum > 0.0001 || score_sum < -0.0001 {
         for score in obs_min..=obs_max {
             let prob = sfp.get_prob(score) / score_sum;
@@ -401,6 +405,10 @@ pub fn compute_score_freq_profile_for_matrix(
 
     // Compute average score (also normalize probabilities)
     let mut score_avg = 0.0;
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if score_sum > 0.0001 || score_sum < -0.0001 {
         for score in obs_min..=obs_max {
             let prob = sfp.get_prob(score) / score_sum;
@@ -721,8 +729,8 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
     let mut low_alignment_score = 0;
     let mut high_alignment_score = 0;
     let mut inner_sum = 1.0;
-    let mut oldsum = 1.0;
-    let mut oldsum2 = 1.0;
+    // NCBI's `oldsum` and `oldsum2` (blast_stat.c:2266, 2344, 2379-2380) are read only under
+    // `#ifdef ADD_GEOMETRIC_TERMS_TO_K` (blast_stat.c:2383-2410), which nothing defines.
     alignment_score_probabilities[0] = 1.0;
 
     let mut iter_counter = 0;
@@ -812,9 +820,6 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
             inner_sum += alignment_score_probabilities[ptr_p_idx as usize];
             i += 1;
         }
-
-        oldsum2 = oldsum;
-        oldsum = inner_sum;
 
         iter_counter += 1;
         inner_sum /= iter_counter as f64;

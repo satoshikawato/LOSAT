@@ -285,7 +285,7 @@ mod tests {
                 &|calls: &mut u32, ordinal: u32, _subject: BlastnSubjectRef<'_>| {
                     *calls += 1;
                     searched.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    (ordinal % 3 == 0).then_some(ordinal)
+                    ordinal.is_multiple_of(3).then_some(ordinal)
                 },
                 &mut |ordinal, kept| {
                     assert_eq!(ordinal, kept);

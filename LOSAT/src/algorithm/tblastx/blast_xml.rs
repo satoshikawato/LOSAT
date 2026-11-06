@@ -45,6 +45,7 @@ use std::io::Write;
 use anyhow::Result;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats, TblastxReportRun};
+#[cfg(test)]
 use super::ncbi_cutoffs::try_compute_eff_lengths_tblastx;
 use super::subjects::SubjectSetNumbers;
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -479,7 +480,7 @@ mod tests {
             )
             .expect("fits");
             let stats = TblastxQueryStats {
-                karlin: Some(karlin.clone()),
+                karlin: Some(karlin),
                 eff_searchsp: lengths.eff_searchsp,
                 aa_len: 130,
                 context0_search_space: 0,

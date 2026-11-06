@@ -6,15 +6,6 @@
 use super::greedy::{greedy_align_one_direction, greedy_align_one_direction_ex};
 use crate::common::GapEditOp;
 
-/// Alignment statistics propagated alongside DP scores
-#[derive(Clone, Copy, Default)]
-pub struct AlnStats {
-    matches: u32,
-    mismatches: u32,
-    gap_opens: u32,
-    gap_letters: u32, // Total gap characters (for alignment length calculation)
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign_priv.h:120
 const HSP_MAX_WINDOW: usize = 11;
 
@@ -216,6 +207,12 @@ impl GapAlignScratch {
             edit_ops.reverse();
         }
         edit_ops
+    }
+}
+
+impl Default for GapAlignScratch {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1217,9 +1214,9 @@ fn extend_gapped_one_direction_with_scratch(
     // score = -gap_open_extend;
     // score_array[0].best = 0;
     // score_array[0].best_gap = -gap_open_extend;
-    let mut score = -(gap_open_extend as i32);
+    let mut score = -gap_open_extend;
     score_array[0].best = 0;
-    score_array[0].best_gap = -(gap_open_extend as i32);
+    score_array[0].best_gap = -gap_open_extend;
 
     // NCBI reference: blast_gapalign.c:815-822
     // for (i = 1; i <= N; i++) {
@@ -1234,8 +1231,8 @@ fn extend_gapped_one_direction_with_scratch(
             break;
         }
         score_array[i].best = score;
-        score_array[i].best_gap = score - (gap_open_extend as i32);
-        score -= gap_extend as i32;
+        score_array[i].best_gap = score - gap_open_extend;
+        score -= gap_extend;
         b_size = i + 1;
     }
 
@@ -1287,6 +1284,10 @@ fn extend_gapped_one_direction_with_scratch(
             &crate::utils::xstats::NT_SO_CELLS,
             (b_size - first_b_index) as u64,
         );
+        #[expect(
+            clippy::mut_range_bound,
+            reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:862,886-887)"
+        )]
         for b_index in first_b_index..b_size {
             dp_cells += 1;
 
@@ -1338,12 +1339,12 @@ fn extend_gapped_one_direction_with_scratch(
                 // score_gap_col -= gap_extend;
                 // score_array[b_index].best_gap = MAX(score - gap_open_extend, score_gap_col);
                 // score_gap_row = MAX(score - gap_open_extend, score_gap_row);
-                score_gap_row -= gap_extend as i32;
-                let score_gap_col_ext = score_gap_col - (gap_extend as i32);
-                let open_gap_col = score_val - (gap_open_extend as i32);
+                score_gap_row -= gap_extend;
+                let score_gap_col_ext = score_gap_col - gap_extend;
+                let open_gap_col = score_val - gap_open_extend;
                 score_array[b_index].best_gap = open_gap_col.max(score_gap_col_ext);
 
-                let open_gap_row = score_val - (gap_open_extend as i32);
+                let open_gap_row = score_val - gap_open_extend;
                 score_gap_row = open_gap_row.max(score_gap_row);
 
                 // NCBI reference: blast_gapalign.c:908
@@ -1376,8 +1377,8 @@ fn extend_gapped_one_direction_with_scratch(
             // Extend window with gaps
             while score_gap_row >= best_score - x_dropoff && b_size <= n && b_size < *dp_mem_alloc {
                 score_array[b_size].best = score_gap_row;
-                score_array[b_size].best_gap = score_gap_row - (gap_open_extend as i32);
-                score_gap_row -= gap_extend as i32;
+                score_array[b_size].best_gap = score_gap_row - gap_open_extend;
+                score_gap_row -= gap_extend;
                 b_size += 1;
             }
         }
@@ -1611,9 +1612,9 @@ fn blast_align_packed_nucl_scalar(
     gap_dp_reserve_initial(score_array, dp_mem_alloc, num_extra_cells);
 
     // NCBI reference: blast_gapalign.c:3095-3105 (row 0 init)
-    let mut score = -(gap_open_extend as i32);
+    let mut score = -gap_open_extend;
     score_array[0].best = 0;
-    score_array[0].best_gap = -(gap_open_extend as i32);
+    score_array[0].best_gap = -gap_open_extend;
 
     let mut b_size = 1usize;
     for i in 1..=query_len {
@@ -1621,8 +1622,8 @@ fn blast_align_packed_nucl_scalar(
             break;
         }
         score_array[i].best = score;
-        score_array[i].best_gap = score - (gap_open_extend as i32);
-        score -= gap_extend as i32;
+        score_array[i].best_gap = score - gap_open_extend;
+        score -= gap_extend;
         b_size = i + 1;
     }
 
@@ -1685,6 +1686,10 @@ fn blast_align_packed_nucl_scalar(
             &crate::utils::xstats::NT_SO_CELLS,
             (b_size - first_b_index) as u64,
         );
+        #[expect(
+            clippy::mut_range_bound,
+            reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:3146,3170-3171)"
+        )]
         for b_index in first_b_index..b_size {
             b_ptr_index += b_increment;
             let q_idx = query_offset + b_ptr_index;
@@ -1721,12 +1726,12 @@ fn blast_align_packed_nucl_scalar(
                     b_offset = b_index;
                 }
 
-                score_gap_row -= gap_extend as i32;
-                let score_gap_col_ext = score_gap_col - (gap_extend as i32);
-                let open_gap_col = score_val - (gap_open_extend as i32);
+                score_gap_row -= gap_extend;
+                let score_gap_col_ext = score_gap_col - gap_extend;
+                let open_gap_col = score_val - gap_open_extend;
                 score_array[b_index].best_gap = open_gap_col.max(score_gap_col_ext);
 
-                let open_gap_row = score_val - (gap_open_extend as i32);
+                let open_gap_row = score_val - gap_open_extend;
                 score_gap_row = open_gap_row.max(score_gap_row);
 
                 score_array[b_index].best = score_val;
@@ -1748,8 +1753,8 @@ fn blast_align_packed_nucl_scalar(
         } else {
             while score_gap_row >= best_score - x_dropoff && b_size <= query_len {
                 score_array[b_size].best = score_gap_row;
-                score_array[b_size].best_gap = score_gap_row - (gap_open_extend as i32);
-                score_gap_row -= gap_extend as i32;
+                score_array[b_size].best_gap = score_gap_row - gap_open_extend;
+                score_gap_row -= gap_extend;
                 b_size += 1;
             }
         }
@@ -1879,9 +1884,9 @@ fn extend_gapped_one_direction_ex_with_scratch(
     gap_dp_reserve_initial(score_array, dp_mem_alloc, num_extra_cells);
 
     // NCBI reference: blast_gapalign.c:811-822
-    let mut score = -(gap_open_extend as i32);
+    let mut score = -gap_open_extend;
     score_array[0].best = 0;
-    score_array[0].best_gap = -(gap_open_extend as i32);
+    score_array[0].best_gap = -gap_open_extend;
 
     // NCBI reference: blast_gapalign.c:815-822
     let mut b_size = 1usize;
@@ -1890,8 +1895,8 @@ fn extend_gapped_one_direction_ex_with_scratch(
             break;
         }
         score_array[i].best = score;
-        score_array[i].best_gap = score - (gap_open_extend as i32);
-        score -= gap_extend as i32;
+        score_array[i].best_gap = score - gap_open_extend;
+        score -= gap_extend;
         b_size = i + 1;
     }
 
@@ -1920,6 +1925,10 @@ fn extend_gapped_one_direction_ex_with_scratch(
             &crate::utils::xstats::NT_SO_CELLS,
             (b_size - first_b_index) as u64,
         );
+        #[expect(
+            clippy::mut_range_bound,
+            reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:862,886-887)"
+        )]
         for b_index in first_b_index..b_size {
             dp_cells += 1;
 
@@ -1961,12 +1970,12 @@ fn extend_gapped_one_direction_ex_with_scratch(
                 }
 
                 // NCBI reference: blast_gapalign.c:903-907
-                score_gap_row -= gap_extend as i32;
-                let score_gap_col_ext = score_gap_col - (gap_extend as i32);
-                let open_gap_col = score_val - (gap_open_extend as i32);
+                score_gap_row -= gap_extend;
+                let score_gap_col_ext = score_gap_col - gap_extend;
+                let open_gap_col = score_val - gap_open_extend;
                 score_array[b_index].best_gap = open_gap_col.max(score_gap_col_ext);
 
-                let open_gap_row = score_val - (gap_open_extend as i32);
+                let open_gap_row = score_val - gap_open_extend;
                 score_gap_row = open_gap_row.max(score_gap_row);
 
                 // NCBI reference: blast_gapalign.c:908
@@ -1994,8 +2003,8 @@ fn extend_gapped_one_direction_ex_with_scratch(
             // NCBI reference: blast_gapalign.c:946-951
             while score_gap_row >= best_score - x_dropoff && b_size <= n && b_size < *dp_mem_alloc {
                 score_array[b_size].best = score_gap_row;
-                score_array[b_size].best_gap = score_gap_row - (gap_open_extend as i32);
-                score_gap_row -= gap_extend as i32;
+                score_array[b_size].best_gap = score_gap_row - gap_open_extend;
+                score_gap_row -= gap_extend;
                 b_size += 1;
             }
         }
@@ -2340,8 +2349,8 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
 fn extend_gapped_one_direction_with_traceback_scalar(
     q_seq: &[u8],
     s_seq: &[u8],
-    reward: i32,
-    penalty: i32,
+    _reward: i32,
+    _penalty: i32,
     score_matrix: &BlastnaMatrix,
     gap_open: i32,
     gap_extend: i32,
@@ -2408,9 +2417,9 @@ fn extend_gapped_one_direction_with_traceback_scalar(
 
     // NCBI reference: blast_gapalign.c:476-489
     // Initialize row 0 (gaps in subject at start)
-    let mut score = -(gap_open_extend as i32);
+    let mut score = -gap_open_extend;
     score_array[0].best = 0;
-    score_array[0].best_gap = -(gap_open_extend as i32);
+    score_array[0].best_gap = -gap_open_extend;
 
     // First edit script row for initial gap extension
     let row0 = gap_alloc_trace_row(trace_rows, trace_offsets, trace_rows_used, 1, 0);
@@ -2442,8 +2451,8 @@ fn extend_gapped_one_direction_with_traceback_scalar(
             break;
         }
         score_array[i].best = score;
-        score_array[i].best_gap = score - (gap_open_extend as i32);
-        score -= gap_extend as i32;
+        score_array[i].best_gap = score - gap_open_extend;
+        score -= gap_extend;
         if i < row0.len() {
             row0[i] = SCRIPT_GAP_IN_A;
         } else {
@@ -2559,6 +2568,10 @@ fn extend_gapped_one_direction_with_traceback_scalar(
             &crate::utils::xstats::NT_TB_CELLS,
             (b_size - first_b_index) as u64,
         );
+        #[expect(
+            clippy::mut_range_bound,
+            reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:563,603-604)"
+        )]
         for b_index in first_b_index..b_size {
             // NCBI reference: blast_gapalign.c:563-578 (b_size can reach N+1; no b_index < N guard).
             // NCBI reference: blast_util.c:826 (NULLB sentinel at sequence ends).
@@ -2604,8 +2617,8 @@ fn extend_gapped_one_direction_with_traceback_scalar(
             // script_col = SCRIPT_EXTEND_GAP_B;
             // script_row = SCRIPT_EXTEND_GAP_A;
             let mut script = SCRIPT_SUB;
-            let mut script_col = SCRIPT_EXTEND_GAP_B;
-            let mut script_row = SCRIPT_EXTEND_GAP_A;
+            let script_col = SCRIPT_EXTEND_GAP_B;
+            let script_row = SCRIPT_EXTEND_GAP_A;
 
             // NCBI reference: blast_gapalign.c:592-598
             // if (score < score_gap_col) { script = SCRIPT_GAP_IN_B; score = score_gap_col; }
@@ -2641,9 +2654,9 @@ fn extend_gapped_one_direction_with_traceback_scalar(
 
                 // NCBI reference: blast_gapalign.c:616-628
                 // Update gap scores with extend flags
-                score_gap_row -= gap_extend as i32;
-                let score_gap_col_ext = score_gap_col - (gap_extend as i32);
-                let open_gap_col = score_val - (gap_open_extend as i32);
+                score_gap_row -= gap_extend;
+                let score_gap_col_ext = score_gap_col - gap_extend;
+                let open_gap_col = score_val - gap_open_extend;
 
                 if score_gap_col_ext < open_gap_col {
                     cell.best_gap = open_gap_col;
@@ -2652,7 +2665,7 @@ fn extend_gapped_one_direction_with_traceback_scalar(
                     script += script_col; // Mark as extending existing gap
                 }
 
-                let open_gap_row = score_val - (gap_open_extend as i32);
+                let open_gap_row = score_val - gap_open_extend;
                 if score_gap_row < open_gap_row {
                     score_gap_row = open_gap_row;
                 } else {
@@ -2703,8 +2716,8 @@ fn extend_gapped_one_direction_with_traceback_scalar(
                 // the allocated score_array length maintained by gap_dp_reserve_band.
                 let cell = unsafe { &mut *score_ptr.add(b_size) };
                 cell.best = score_gap_row;
-                cell.best_gap = score_gap_row - (gap_open_extend as i32);
-                score_gap_row -= gap_extend as i32;
+                cell.best_gap = score_gap_row - gap_open_extend;
+                score_gap_row -= gap_extend;
                 // NCBI reference: blast_gapalign.c:661
                 let row_idx = b_size.saturating_sub(orig_b_index);
                 if row_idx < edit_script_row.len() {
@@ -2853,22 +2866,14 @@ fn extend_gapped_one_direction_with_traceback_scalar(
         let op_type = script & SCRIPT_OP_MASK;
         if op_type == SCRIPT_GAP_IN_A {
             // Gap in query (deletion) - only subject advances
-            if b_index > 0 {
-                b_index -= 1;
-            }
+            b_index = b_index.saturating_sub(1);
         } else if op_type == SCRIPT_GAP_IN_B {
             // Gap in subject (insertion) - only query advances
-            if a_index > 0 {
-                a_index -= 1;
-            }
+            a_index = a_index.saturating_sub(1);
         } else {
             // Substitution - both advance
-            if a_index > 0 {
-                a_index -= 1;
-            }
-            if b_index > 0 {
-                b_index -= 1;
-            }
+            a_index = a_index.saturating_sub(1);
+            b_index = b_index.saturating_sub(1);
         }
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:726
@@ -3144,9 +3149,9 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     let mut edit_script_num_rows = 100usize;
 
     // NCBI reference: blast_gapalign.c:476-489
-    let mut score = -(gap_open_extend as i32);
+    let mut score = -gap_open_extend;
     score_array[0].best = 0;
-    score_array[0].best_gap = -(gap_open_extend as i32);
+    score_array[0].best_gap = -gap_open_extend;
 
     let row0 = gap_alloc_trace_row(trace_rows, trace_offsets, trace_rows_used, 1, 0);
     row0.reserve(num_extra_cells);
@@ -3169,8 +3174,8 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             break;
         }
         score_array[i].best = score;
-        score_array[i].best_gap = score - (gap_open_extend as i32);
-        score -= gap_extend as i32;
+        score_array[i].best_gap = score - gap_open_extend;
+        score -= gap_extend;
         if i < row0.len() {
             row0[i] = SCRIPT_GAP_IN_A;
         } else {
@@ -3269,6 +3274,10 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             &crate::utils::xstats::NT_TB_CELLS,
             (b_size - first_b_index) as u64,
         );
+        #[expect(
+            clippy::mut_range_bound,
+            reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:563,603-604)"
+        )]
         for b_index in first_b_index..b_size {
             let sc = get_s(s_seq, b_index, len2, reverse);
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:569-575
@@ -3306,8 +3315,8 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             let next_score = cell.best + match_score;
 
             let mut script = SCRIPT_SUB;
-            let mut script_col = SCRIPT_EXTEND_GAP_B;
-            let mut script_row = SCRIPT_EXTEND_GAP_A;
+            let script_col = SCRIPT_EXTEND_GAP_B;
+            let script_row = SCRIPT_EXTEND_GAP_A;
 
             if score_val < score_gap_col {
                 script = SCRIPT_GAP_IN_B;
@@ -3333,9 +3342,9 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
                     b_offset = b_index;
                 }
 
-                score_gap_row -= gap_extend as i32;
-                let score_gap_col_ext = score_gap_col - (gap_extend as i32);
-                let open_gap_col = score_val - (gap_open_extend as i32);
+                score_gap_row -= gap_extend;
+                let score_gap_col_ext = score_gap_col - gap_extend;
+                let open_gap_col = score_val - gap_open_extend;
 
                 if score_gap_col_ext < open_gap_col {
                     cell.best_gap = open_gap_col;
@@ -3344,7 +3353,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
                     script += script_col;
                 }
 
-                let open_gap_row = score_val - (gap_open_extend as i32);
+                let open_gap_row = score_val - gap_open_extend;
                 if score_gap_row < open_gap_row {
                     score_gap_row = open_gap_row;
                 } else {
@@ -3385,8 +3394,8 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
                 // the allocated score_array length maintained by gap_dp_reserve_band.
                 let cell = unsafe { &mut *score_ptr.add(b_size) };
                 cell.best = score_gap_row;
-                cell.best_gap = score_gap_row - (gap_open_extend as i32);
-                score_gap_row -= gap_extend as i32;
+                cell.best_gap = score_gap_row - gap_open_extend;
+                score_gap_row -= gap_extend;
                 let row_idx = b_size.saturating_sub(orig_b_index);
                 if row_idx < edit_script_row.len() {
                     edit_script_row[row_idx] = SCRIPT_GAP_IN_A;
@@ -3503,20 +3512,12 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
 
         let op_type = script & SCRIPT_OP_MASK;
         if op_type == SCRIPT_GAP_IN_A {
-            if b_index > 0 {
-                b_index -= 1;
-            }
+            b_index = b_index.saturating_sub(1);
         } else if op_type == SCRIPT_GAP_IN_B {
-            if a_index > 0 {
-                a_index -= 1;
-            }
+            a_index = a_index.saturating_sub(1);
         } else {
-            if a_index > 0 {
-                a_index -= 1;
-            }
-            if b_index > 0 {
-                b_index -= 1;
-            }
+            a_index = a_index.saturating_sub(1);
+            b_index = b_index.saturating_sub(1);
         }
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:726

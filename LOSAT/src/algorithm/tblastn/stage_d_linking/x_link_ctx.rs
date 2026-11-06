@@ -151,7 +151,11 @@ mod tests {
         while out.len() < count {
             let a = random.range(0, contexts as i32 - 1);
             let context = a.min(random.range(0, contexts as i32 - 1)) as usize;
-            let sign = if random.next() % 2 == 0 { 1 } else { -1 };
+            let sign = if random.next().is_multiple_of(2) {
+                1
+            } else {
+                -1
+            };
             let mut q = random.range(0, 300);
             let mut s = random.range(0, subject_aa - 2_000);
             for _ in 0..random.range(1, 6) {
@@ -173,7 +177,7 @@ mod tests {
                 q = (hsp.q_end + random.range(-link.overlap_size - 2, link.gap_size + 2))
                     .clamp(0, 390);
                 s = hsp.s_end + random.range(-link.overlap_size - 2, link.longest_intron + 5);
-                if random.next() % 8 == 0 {
+                if random.next().is_multiple_of(8) {
                     s = random.range(0, subject_aa - 2_000);
                 }
             }

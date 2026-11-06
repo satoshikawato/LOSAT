@@ -1,4 +1,4 @@
-use crate::config::{ProteinScoringSpec, ScoringMatrix};
+use crate::config::ProteinScoringSpec;
 use crate::utils::x87::X87;
 
 use super::protein_options::{gap_costs_row, scoring_matrix_table};
@@ -756,6 +756,7 @@ mod tests {
     }
 
     use super::*;
+    use crate::config::ScoringMatrix;
 
     #[test]
     fn x_erfc_memo_keeps_the_reference_bits_as_it_grows() {

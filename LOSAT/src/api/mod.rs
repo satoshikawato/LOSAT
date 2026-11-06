@@ -86,9 +86,10 @@
 //! - The records are read before the search, so a reader error is an [`Error::Input`] before
 //!   any report, where the command line has reported the batches before the error.
 //! - Outfmt 13 and 14 write side files next to their report, so they come through
-//!   [`run_to_file`] only; a report in memory has no place for them.
+//!   [`run_to_file`] only; a report in memory has no place for them (the in-memory search under
+//!   the API, `local_blast`, takes a receiver of them, `OutputSink::Files`, which LOSAT Web gives).
 //! - [`Program::Psiblast`] is the search of LOSAT's `psiblast`: its first round, and the formats
-//!   it writes. The API writes no PSSM file, so it refuses `-out_ascii_pssm`,
+//!   it writes. The API writes no PSSM file, so it refuses `-out_pssm`, `-out_ascii_pssm`,
 //!   `-save_pssm_after_last_round` and `-save_each_pssm` ([`validate`]).
 //! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs: the command line's
 //!   words, with the caller's writers for its standard streams.

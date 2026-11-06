@@ -3,26 +3,6 @@
 //! This module provides functions for calculating alignment statistics
 //! and performing full region alignments (for cluster-then-extend chaining).
 
-use crate::algorithm::common::evalue::calculate_evalue_database_search;
-use crate::stats::KarlinParams;
-
-fn calculate_evalue(
-    score: i32,
-    q_len: usize,
-    db_len: usize,
-    db_num_seqs: usize,
-    params: &KarlinParams,
-) -> (f64, f64) {
-    calculate_evalue_database_search(score, q_len, db_len, db_num_seqs, params)
-}
-
-/// Merge overlapping HSPs and filter redundant hits.
-///
-/// This function:
-/// 1. Groups hits by query-subject pair
-/// 2. Sorts hits by bit score (descending)
-/// 3. Removes hits that overlap significantly with higher-scoring hits
-/// 4. Returns the filtered list of non-redundant hits
 /// Align a region using banded Smith-Waterman (for cluster-then-extend chaining).
 /// Unlike extend_gapped_heuristic which extends from a seed, this aligns the entire region.
 /// Returns: (q_start, q_end, s_start, s_end, score, matches, mismatches, gap_opens, gap_letters)
@@ -107,7 +87,7 @@ pub fn align_region(
         }
 
         // Determine valid k range
-        let k_min = if i > BAND_WIDTH { 0 } else { BAND_WIDTH - i };
+        let k_min = BAND_WIDTH.saturating_sub(i);
         let k_max = if n + BAND_WIDTH >= i {
             (n + BAND_WIDTH - i).min(band_size - 1)
         } else {

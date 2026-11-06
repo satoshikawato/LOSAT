@@ -1207,6 +1207,10 @@ fn solve_lanes_body<V: LaneVec>(
                 continue;
             }
             let lane_rnorm = rnorm[l];
+            #[expect(
+                clippy::neg_cmp_op_on_partial_ord,
+                reason = "NCBI's convergence test `!(rnorm > tol)` stops on a NaN rnorm (optimize_target_freq.c:760-762); `<=` would not"
+            )]
             let finished = if !(lane_rnorm > K_COMPO_ADJUST_ERR_TOLERANCE) {
                 true
             } else {

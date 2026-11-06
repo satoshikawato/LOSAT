@@ -28,6 +28,21 @@ expectation that the run writes no file. A check compares the names and the byte
 argument of the row may name that `<tmp>` as `{pssm_dir}` (`-out_pssm {pssm_dir}/p.asn`), so that any
 other file the run writes there is seen: every name in `<tmp>` other than the PSSM files is reported.
 
+The kinds `pssm-asn` and `pssm-both` (line PS, PS3: psiblast's ASN.1 PSSM, `-out_pssm`) are the same
+with `-out_pssm <tmp>/<fixture_id>.asn` added instead of the ASCII file, or with both added. Their
+files are `<fixture_id>.asn` (`.asn.<n>`) and `<fixture_id>.pssm` (`.pssm.<n>`), listed in
+`side_sha256` in that order as `<name without the fixture id>=<SHA-256>:<bytes>`. In these two kinds a
+file is frozen (committed) exactly when it is 64 KB or less (`FREEZE_LIMIT`; the size in the cell says
+which); a larger one is compared by its SHA-256 in `side_sha256` alone, which is a comparison of all
+of its bytes, without a first differing line in the report (the ASN.1 PSSM of a 400-letter query is
+441 KB, 729 KB with the diagnostics of `-out_ascii_pssm`). The `pssm` kind freezes every file, as
+before.
+
+An argument `{pre:<suffix>}` of a row of these kinds is not passed to the program: before the run the
+file `<tmp>/<fixture_id><suffix>` is written with the bytes `previous file\n` (`PRE_BYTES`), a file
+that the run finds there (`{pre:.asn}`, `{pre:.asn.1}`). It is collected after the run like the files
+the run writes, so `side_sha256` shows whether the run kept it or replaced it.
+
 This module has no manifest of its own: `run_oracle.py` / `check_losat.py` (outfmt 0 manifest) and
 `db_search_fixtures.py` call it.
 """
@@ -42,6 +57,11 @@ from pathlib import Path
 
 XINCLUDE = "xinclude"
 PSSM = "pssm"
+PSSM_ASN = "pssm-asn"
+PSSM_BOTH = "pssm-both"
+PSSM_KINDS = (PSSM, PSSM_ASN, PSSM_BOTH)
+# The largest PSSM file of the kinds pssm-asn and pssm-both that is frozen (bytes).
+FREEZE_LIMIT = 64 * 1024
 FILES_COLUMNS = ["files", "side_sha256"]
 EXTENSIONS = {"13": "json", "14": "xml"}
 
@@ -51,10 +71,10 @@ def sha256(data: bytes) -> str:
 
 
 def files_kind(row: dict[str, str]) -> str:
-    """The row's `files` column: empty, `xinclude` or `pssm`."""
+    """The row's `files` column: empty, `xinclude`, `pssm`, `pssm-asn` or `pssm-both`."""
     files = row.get("files", "") or ""
-    if files not in ("", XINCLUDE, PSSM):
-        raise SystemExit(f"unknown files column {files!r} (empty, {XINCLUDE!r} or {PSSM!r})")
+    if files not in ("", XINCLUDE, *PSSM_KINDS):
+        raise SystemExit(f"unknown files column {files!r} (empty, {XINCLUDE!r} or one of {PSSM_KINDS})")
     return files
 
 
@@ -64,8 +84,8 @@ def wants_files(row: dict[str, str]) -> bool:
 
 
 def wants_pssm(row: dict[str, str]) -> bool:
-    """Whether the row is a psiblast run whose ASCII PSSM files are compared (the `files` column)."""
-    return files_kind(row) == PSSM
+    """Whether the row is a psiblast run whose PSSM files are compared (the `files` column)."""
+    return files_kind(row) in PSSM_KINDS
 
 
 def extension(outfmt: str) -> str:
@@ -189,13 +209,13 @@ def problems(result: Result, row: dict[str, str], frozen: Path, first_difference
     return out
 
 
-# --- psiblast's ASCII PSSM files (`files` = pssm) ------------------------------------------------
+# --- psiblast's PSSM files (`files` = pssm, pssm-asn, pssm-both) ----------------------------------
 
 
 @dataclass
 class PssmResult:
-    """A run with `-out_ascii_pssm`: the process, the files it wrote as (name, bytes) in the order of
-    `side_sha256`, and the names that do not belong."""
+    """A run with `-out_ascii_pssm` and/or `-out_pssm`: the process, the files it wrote as (name, bytes)
+    in the order of `side_sha256`, and the names that do not belong."""
 
     run: subprocess.CompletedProcess
     files: list[tuple[str, bytes]]
@@ -203,74 +223,141 @@ class PssmResult:
 
 
 def pssm_files(directory: Path, row_id: str) -> tuple[list[tuple[str, bytes]], list[str]]:
-    """The PSSM files of `row_id` in `directory` (`<row_id>.pssm`, then `<row_id>.pssm.<n>` by n) and
-    the other names."""
-    base = f"{row_id}.pssm"
-    numbered = re.compile(re.escape(base) + r"\.([1-9][0-9]*)$")
-    found: list[tuple[int, str]] = []
+    """The PSSM files of `row_id` in `directory` (`<row_id>.asn`, `<row_id>.asn.<n>` by n, then
+    `<row_id>.pssm`, `<row_id>.pssm.<n>`) and the other names."""
+    found: list[tuple[int, int, str]] = []
     stray = []
     for path in directory.iterdir():
-        match = numbered.match(path.name)
-        if path.name == base:
-            found.append((0, path.name))
-        elif match:
-            found.append((int(match.group(1)), path.name))
+        for group, extension in enumerate(("asn", "pssm")):
+            base = f"{row_id}.{extension}"
+            match = re.match(re.escape(base) + r"\.([1-9][0-9]*)$", path.name)
+            if path.name == base:
+                found.append((group, 0, path.name))
+                break
+            if match:
+                found.append((group, int(match.group(1)), path.name))
+                break
         else:
             stray.append(path.name)
-    return [(name, (directory / name).read_bytes()) for _, name in sorted(found)], sorted(stray)
+    return [(name, (directory / name).read_bytes()) for _, _, name in sorted(found)], sorted(stray)
 
 
 PSSM_DIR = "{pssm_dir}"
+# `{pre:<suffix>}`: a file `<tmp>/<row_id><suffix>` that exists before the run, with these bytes.
+PRE_TOKEN = re.compile(r"\{pre:([^{}/]+)\}")
+PRE_BYTES = b"previous file\n"
 
 
-def run_with_pssm(command: list[str], row_id: str, **kwargs) -> PssmResult:
-    """Runs `command` with `-out_ascii_pssm <tmp>/<row_id>.pssm` added and collects the files it wrote;
-    `{pssm_dir}` in an argument is `<tmp>`. `kwargs` go to `subprocess.run` (cwd, env, timeout); the
-    output is captured."""
+def pssm_options(kind: str, directory: Path, row_id: str) -> list[str]:
+    """The PSSM file options that a row of `kind` gets."""
+    asn = ["-out_pssm", str(directory / f"{row_id}.asn")]
+    ascii_pssm = ["-out_ascii_pssm", str(directory / f"{row_id}.pssm")]
+    return {PSSM: ascii_pssm, PSSM_ASN: asn, PSSM_BOTH: asn + ascii_pssm}[kind]
+
+
+def run_with_pssm(command: list[str], row_id: str, kind: str = PSSM, **kwargs) -> PssmResult:
+    """Runs `command` with the PSSM file options of `kind` added (`<tmp>/<row_id>.pssm`, `.asn`) and
+    collects the files it wrote; `{pssm_dir}` in an argument is `<tmp>`, and an argument
+    `{pre:<suffix>}` is taken out and writes `PRE_BYTES` to `<tmp>/<row_id><suffix>` before the run.
+    `kwargs` go to `subprocess.run` (cwd, env, timeout); the output is captured."""
     with tempfile.TemporaryDirectory(prefix="losat_pssm_") as tmp:
         directory = Path(tmp)
-        command = [word.replace(PSSM_DIR, tmp) for word in command]
-        run = subprocess.run([*command, "-out_ascii_pssm", str(directory / f"{row_id}.pssm")],
+        words = []
+        for word in command:
+            pre = PRE_TOKEN.fullmatch(word)
+            if pre:
+                (directory / f"{row_id}{pre.group(1)}").write_bytes(PRE_BYTES)
+            else:
+                words.append(word.replace(PSSM_DIR, tmp))
+        run = subprocess.run([*words, *pssm_options(kind, directory, row_id)],
                              capture_output=True, **kwargs)
         files, stray = pssm_files(directory, row_id)
     return PssmResult(run, files, stray)
 
 
-def pssm_cell(files: list[tuple[str, bytes]], row_id: str) -> str:
-    """The `side_sha256` cell of PSSM files."""
-    return ",".join(f"{name.removeprefix(row_id)}={sha256(data)}" for name, data in files)
+def pssm_cell(files: list[tuple[str, bytes]], row_id: str, kind: str = PSSM) -> str:
+    """The `side_sha256` cell of PSSM files: `<suffix>=<SHA-256>`, with `:<bytes>` in the kinds
+    `pssm-asn` and `pssm-both`."""
+    size = (lambda data: "") if kind == PSSM else (lambda data: f":{len(data)}")
+    return ",".join(f"{name.removeprefix(row_id)}={sha256(data)}{size(data)}" for name, data in files)
 
 
-def observed_pssm(result: PssmResult, row_id: str) -> dict[str, str]:
+def observed_pssm(result: PssmResult, row_id: str, kind: str = PSSM) -> dict[str, str]:
     """The `side_sha256` column of a PSSM run."""
-    return {"side_sha256": pssm_cell(result.files, row_id)}
+    return {"side_sha256": pssm_cell(result.files, row_id, kind)}
 
 
-def freeze_pssm(result: PssmResult, frozen: Path, row_id: str) -> None:
-    """Writes the PSSM files under their names; removes those of an older freeze."""
+def frozen(kind: str, data: bytes) -> bool:
+    """Whether a PSSM file of a row of `kind` is frozen (`FREEZE_LIMIT`)."""
+    return kind == PSSM or len(data) <= FREEZE_LIMIT
+
+
+def freeze_pssm(result: PssmResult, frozen_dir: Path, row_id: str, kind: str = PSSM) -> None:
+    """Writes the PSSM files that are frozen under their names; removes those of an older freeze."""
     if result.stray:
         raise SystemExit(f"{row_id}: unexpected files {result.stray}")
-    for old in frozen.glob(f"{row_id}.pssm*"):
-        old.unlink()
+    old, _ = pssm_files(frozen_dir, row_id) if frozen_dir.is_dir() else ([], [])
+    for name, _ in old:
+        (frozen_dir / name).unlink()
     for name, data in result.files:
-        (frozen / name).write_bytes(data)
+        if frozen(kind, data):
+            (frozen_dir / name).write_bytes(data)
 
 
-def pssm_problems(result: PssmResult, row: dict[str, str], frozen: Path, first_difference) -> list[str]:
-    """What differs between a run's PSSM files and the frozen ones of `row` (empty: the same), and
-    whether the frozen files agree with `side_sha256`."""
+def parse_pssm_cell(cell: str, row_id: str) -> list[tuple[str, str, int | None]]:
+    """The (file name, SHA-256, size or None) of each item of a `side_sha256` cell."""
+    items = []
+    for item in filter(None, cell.split(",")):
+        suffix, _, value = item.partition("=")
+        digest, _, size = value.partition(":")
+        items.append((row_id + suffix, digest, int(size) if size.isdigit() else None))
+    return items
+
+
+def frozen_pssm_agrees(row: dict[str, str], frozen_dir: Path) -> bool:
+    """Whether the frozen PSSM files of `row` agree with its `side_sha256`: each one is listed with its
+    SHA-256; in the `pssm` kind every listed file is frozen; in the other kinds every listed file has
+    its size, it is frozen exactly when that size is `FREEZE_LIMIT` or less, and its frozen bytes are
+    that size."""
     row_id = row.get("fixture_id") or row["row_id"]
-    expected, _ = pssm_files(frozen, row_id) if frozen.is_dir() else ([], [])
+    kind = files_kind(row)
+    listed = {name: (digest, size) for name, digest, size in parse_pssm_cell(row.get("side_sha256", ""), row_id)}
+    stored = dict(pssm_files(frozen_dir, row_id)[0] if frozen_dir.is_dir() else [])
+    if any(listed.get(name, ("", None))[0] != sha256(data) for name, data in stored.items()):
+        return False
+    if kind == PSSM:
+        return len(stored) == len(listed)
+    for name, (_, size) in listed.items():
+        if size is None or (size <= FREEZE_LIMIT) != (name in stored):
+            return False
+        if name in stored and len(stored[name]) != size:
+            return False
+    return True
+
+
+def pssm_problems(result: PssmResult, row: dict[str, str], frozen_dir: Path, first_difference) -> list[str]:
+    """What differs between a run's PSSM files and those of `row` (empty: the same): the names and
+    SHA-256 of `side_sha256`, with the first differing line where the file is frozen; and whether the
+    frozen files agree with `side_sha256` (every file of the `pssm` kind is frozen)."""
+    row_id = row.get("fixture_id") or row["row_id"]
+    expected = [(name, digest) for name, digest, _ in parse_pssm_cell(row.get("side_sha256", ""), row_id)]
+    digests = dict(expected)
+    stored, _ = pssm_files(frozen_dir, row_id) if frozen_dir.is_dir() else ([], [])
+    stored_bytes = dict(stored)
     out = []
-    if pssm_cell(expected, row_id) != row.get("side_sha256", ""):
+    if not frozen_pssm_agrees(row, frozen_dir):
         out.append("frozen PSSM files do not match side_sha256")
     names = [name for name, _ in result.files]
     if names != [name for name, _ in expected]:
         out.append(f"PSSM files {names}, expected {[name for name, _ in expected]}")
     else:
-        for (name, want), (_, got) in zip(expected, result.files):
-            if want != got:
-                out.append(f"{name} " + first_difference(want, got))
+        for name, got in result.files:
+            if sha256(got) == digests[name]:
+                continue
+            if name in stored_bytes:
+                out.append(f"{name} " + first_difference(stored_bytes[name], got))
+            else:
+                out.append(f"{name} differs (sha256 {sha256(got)}, expected {digests[name]}; not frozen)")
     if result.stray:
         out.append(f"unexpected files {result.stray}")
     return out

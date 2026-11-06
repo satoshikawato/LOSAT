@@ -2030,7 +2030,7 @@ mod tests {
         let mut accepted = 0usize;
         for _ in 0..3000 {
             let rare = rng.below(8) == 0;
-            let mut pick = |rng: &mut Rng| {
+            let pick = |rng: &mut Rng| {
                 if rare && rng.below(50) == 0 {
                     special[rng.below(special.len() as u64) as usize]
                 } else if rng.below(10) == 0 {

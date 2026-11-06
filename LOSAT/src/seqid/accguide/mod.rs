@@ -1282,7 +1282,7 @@ impl<'a> RangeLines<'a> {
 
     fn next_nibble(&mut self) -> u8 {
         let byte = self.data.get(self.nibble / 2).copied().unwrap_or(0xdd);
-        let value = if self.nibble % 2 == 0 {
+        let value = if self.nibble.is_multiple_of(2) {
             byte >> 4
         } else {
             byte & 15
@@ -1509,6 +1509,10 @@ pub fn x_identify_accession(
                 && alnum(at(2))
                 && alnum(at(3))
             {
+                #[expect(
+                    clippy::if_same_then_else,
+                    reason = "NCBI returns eAcc_pdb both for a delimited ID and in its switch's case 4 (Seq_id.cpp:1683-1710)"
+                )]
                 if main_size > 4
                     && main_size <= 17
                     && matches!(at(4), b'|' | b'-' | b'_' | 0)
@@ -1520,6 +1524,10 @@ pub fn x_identify_accession(
                 }
             }
             let oqp = matches!(at(0), b'O' | b'P' | b'Q');
+            #[expect(
+                clippy::if_same_then_else,
+                reason = "NCBI has the two UniProt patterns as two branches that both return eAcc_swissprot (Seq_id.cpp:1713-1727)"
+            )]
             if digit_pos == 1
                 && main_size == 6
                 && (oqp || alpha(at(2)))

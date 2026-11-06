@@ -1009,15 +1009,15 @@ impl BlastIntervalTree {
             // First perform matching endpoint tests on all of the HSPs in the
             // midpoint tree for the current node
             let midptr = self.nodes[root_idx].midptr;
-            if midptr != 0 {
-                if self.midpoint_tree_has_hsp_endpoint(
+            if midptr != 0
+                && self.midpoint_tree_has_hsp_endpoint(
                     midptr as usize,
                     in_hsp,
                     in_q_start,
                     which_end,
-                ) {
-                    return true;
-                }
+                )
+            {
+                return true;
             }
 
             // NCBI reference: blast_itree.c:466-471
@@ -1750,15 +1750,15 @@ impl BlastIntervalTree {
 
         // Internal node - first check midpoint subtree
         let midptr = node.midptr;
-        if midptr > 0 {
-            if self.midpoint_tree_contains_hsp(
+        if midptr > 0
+            && self.midpoint_tree_contains_hsp(
                 midptr as usize,
                 hsp,
                 query_context_offset,
                 min_diag_separation,
-            ) {
-                return true;
-            }
+            )
+        {
+            return true;
         }
 
         // Descend to appropriate subtree

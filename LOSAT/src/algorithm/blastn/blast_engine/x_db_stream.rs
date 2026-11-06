@@ -464,7 +464,7 @@ mod tests {
                         segment,
                         &|| (),
                         &|_: &mut (), ordinal: u32, _: BlastnSubjectRef<'_>| {
-                            (ordinal % 2 == 0).then_some(ordinal)
+                            ordinal.is_multiple_of(2).then_some(ordinal)
                         },
                         &mut |ordinal, kept| {
                             assert_eq!(ordinal, kept);

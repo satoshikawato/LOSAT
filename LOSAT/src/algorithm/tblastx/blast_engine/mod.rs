@@ -64,7 +64,7 @@ pub(crate) use std::collections::HashSet;
 pub(crate) use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 pub(crate) use std::sync::mpsc::channel;
-pub(crate) use std::time::{Duration, Instant};
+pub(crate) use std::time::Instant;
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
 // ```c
@@ -74,8 +74,7 @@ pub(crate) use std::time::{Duration, Instant};
 // Blast_HSPListSortByEvalue(hsp_list);
 // ```
 pub(crate) use crate::api::local_blast::{FormatProbe, OutputSink, ReportOutputs};
-pub(crate) use crate::blastinput::value_parsers::tblastx_outfmt;
-pub(crate) use crate::common::{write_output_ncbi_order_evalue_hsp_order_to_writer, Hit};
+pub(crate) use crate::common::Hit;
 pub(crate) use crate::config::ScoringMatrix;
 pub(crate) use crate::stats::{lookup_protein_params_ungapped, KarlinParams};
 pub(crate) use crate::utils::genetic_code::GeneticCode;
@@ -89,16 +88,16 @@ pub(crate) use super::diagnostics::{
 };
 pub(crate) use super::extension::{convert_coords, extend_hit_two_hit, extend_hit_two_hit_with};
 // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): extension/x_two_hit_fast.rs.
-pub(crate) use super::extension::{
-    extend_hit_two_hit_sent, x_tbx_sent_contexts, x_tbx_sent_subject,
-};
-pub(crate) use super::lookup::{build_ncbi_lookup, QueryContext};
+pub(crate) use super::extension::{x_tbx_sent_contexts, x_tbx_sent_subject};
+#[cfg(test)]
+pub(crate) use super::lookup::build_ncbi_lookup;
+pub(crate) use super::lookup::QueryContext;
 pub(crate) use super::ncbi_cutoffs::{
-    compute_eff_lengths_tblastx, cutoff_score_for_update_tblastx, cutoff_score_max_for_tblastx,
-    gap_trigger_raw_score, x_drop_raw_score, BLAST_GAP_DECAY_RATE,
+    cutoff_score_for_update_tblastx, cutoff_score_max_for_tblastx, gap_trigger_raw_score,
+    x_drop_raw_score, BLAST_GAP_DECAY_RATE,
 };
 pub(crate) use super::reevaluate::{
-    get_num_identities_and_positives_ungapped, hsp_test, reevaluate_ungapped_hit_ncbi_translated,
+    get_num_identities_and_positives_ungapped, hsp_test,
     reevaluate_ungapped_hit_ncbi_translated_with,
 };
 pub(crate) use super::report;
@@ -135,6 +134,7 @@ pub(crate) use super::blast_gapalign::{
 };
 
 // Import subject scanning functions from blast_aascan module (NCBI blast_aascan.c equivalent)
+#[cfg(test)]
 pub(crate) use super::blast_aascan::s_blast_aa_scan_subject;
 
 // ---------------------------------------------------------------------------

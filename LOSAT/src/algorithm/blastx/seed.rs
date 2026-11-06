@@ -11,9 +11,7 @@ use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_bx_build_compressed_lookup, x_bx_clut_pool, x_give_back_flat, x_give_back_wide_flat,
     XBxCompressedLookup, X_BLASTX,
 };
-use crate::algorithm::tblastx::lookup::compressed::{
-    x_compressed_scaled_threshold, BlastCompressedAaLookupTable,
-};
+use crate::algorithm::tblastx::lookup::compressed::x_compressed_scaled_threshold;
 use crate::algorithm::tblastx::lookup::{
     build_ncbi_lookup_from_prepared, BackboneCell16, BlastAaLookupTable, QueryContext, XBxTable,
 };
@@ -289,6 +287,10 @@ pub struct InitHsp {
 // ```
 // EXPERIMENT (LOSAT_X_BXSCANBYTE): the standard table carries the presence bytes of the direct
 // loop's scan, built the first time that loop scans with it (x_seed_scan.rs).
+#[expect(
+    clippy::large_enum_variant,
+    reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
+)]
 pub enum Lookup {
     Standard(BlastAaLookupTable, x_seed_scan::XKeptPresence),
     // EXPERIMENT (LOSAT_X_BPCLUT): the compressed table as the reference builds it or flat
@@ -321,6 +323,10 @@ impl Drop for Lookup {
 // has at least LOSAT_X_BXDIAGMIN hits per used cell). It is a type of its own, so that no loop of
 // `Int4` hits can be given one: the fused loop is generic over the table's cell and scans either,
 // and the reference scan reads either.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
+)]
 pub enum BxLookup {
     Wide(Lookup),
     Narrow(NarrowLookup),

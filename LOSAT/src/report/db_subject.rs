@@ -9,7 +9,7 @@
 //! the XML `Hit_def`, the XML2 and JSON `HitDescr` list, `stitle`).
 //!
 //! A database without parsed Seq-ids keeps its own path (the title and `gnl|BL_ORD_ID|n`,
-//! `algorithm::common::database::read_title`); `SeqDb::read_header` tells the two apart.
+//! `algorithm::common::database::stored_title`); `SeqDb::read_header` tells the two apart.
 //!
 //! LOSAT writes the names of the sequence it searched. NCBI's formatters look the Seq-align id
 //! up again in the database, and where the lookup finds another sequence first (an accession
@@ -22,7 +22,7 @@
 use crate::seqid::defline_set::{
     alignment_line_id, compare, description_id, seq_id_list, tabular_id, Sic, TabularId,
 };
-use crate::seqid::model::{ObjectId, PatentNumber};
+use crate::seqid::model::PatentNumber;
 use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{label, BlastDefline, DeflineSet, ParsedSeqId};
 
@@ -1536,6 +1536,7 @@ pub fn scope_keys(subject: &ParsedSubject, keys: &mut Vec<u64>) {
 mod tests {
     use super::*;
     use crate::seqdb::{SeqDb, SeqType};
+    use crate::seqid::model::ObjectId;
     use crate::seqid::model::{Dbtag, PdbSeqId};
 
     /// The subjects of `tests/db_search/ids/prot_v4` (`make_ids.py`), by the FASTA form of the

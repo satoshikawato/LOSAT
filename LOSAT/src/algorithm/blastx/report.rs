@@ -1253,7 +1253,8 @@ pub fn render(
     };
     let mut stderr = std::io::stderr().lock();
     write_prolog(writer, &mut stderr, options, subjects, &shown)?;
-    // The library entry has no output file: outfmt 13 and 14 are the command line's.
+    // This entry has no output file and no receiver of side files: outfmt 13 and 14 fail at their
+    // first report (`NoSideFiles`).
     let mut xml2 = super::blast_xml::xml2_kind(options.outfmt).map(|kind| {
         super::blast_xml::xml2_writer(
             kind,
@@ -1881,7 +1882,7 @@ pub(super) fn pairwise_hits(
                         // title alone (`ReportedSubjects::descriptions`).
                         subject_title: match shown {
                             ShownSubjects::Fasta { parsed, .. }
-                                if parsed.shown(usize::try_from(list.oid)?).is_some() =>
+                                if parsed.shown(list.oid).is_some() =>
                             {
                                 None
                             }

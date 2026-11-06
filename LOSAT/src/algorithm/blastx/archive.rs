@@ -37,7 +37,6 @@ use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
 };
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
-use crate::report::seqid::SeqId;
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 use crate::stats::tables::KarlinParams;
 
@@ -230,7 +229,7 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
     let parameters = &batch.parameters[..6];
     let valid = parameters.iter().find(|parameters| parameters.valid);
     FirstContext {
-        karlin: valid.map(|parameters| (parameters.ungapped.clone(), gapped)),
+        karlin: valid.map(|parameters| (parameters.ungapped, gapped)),
         search_space: valid.map_or(0, |parameters| parameters.search_space),
         length_adjustment: valid.map_or(0, |parameters| i64::from(parameters.length_adjustment)),
         // An invalid context keeps `-searchsp`, else 0 (`effective_lengths`).

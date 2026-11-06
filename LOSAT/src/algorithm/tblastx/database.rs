@@ -79,6 +79,7 @@ impl TblastxDatabase {
     /// Opens the nucleotide database `name` as NCBI's `CSearchDatabase` opens it
     /// (`common::database::open_database`). A total length that LOSAT cannot hold as an index
     /// (above `usize`) or as NCBI's `Int8` is LOSAT's refusal.
+    #[cfg(test)]
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         Self::open_restricted(name, settings, None, &mut std::io::sink())
     }
@@ -463,7 +464,7 @@ pub(crate) fn reported_subjects(
             .iter()
             .filter(|hsp| {
                 let run = (hsp.hit.q_idx, hsp.hit.s_idx);
-                std::mem::replace(&mut previous, Some(run)) != Some(run)
+                previous.replace(run) != Some(run)
             })
             .filter(|hsp| hsp.hit.query_frame < 0 && hsp.subject_frame > 0)
             .map(|hsp| hsp.hit.s_idx)

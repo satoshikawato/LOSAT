@@ -62,7 +62,7 @@ fn entry_program(argv0: &std::ffi::OsStr) -> Option<&'static str> {
     let path = std::path::Path::new(argv0);
     if !path
         .extension()
-        .map_or(true, |extension| extension.eq_ignore_ascii_case("exe"))
+        .is_none_or(|extension| extension.eq_ignore_ascii_case("exe"))
     {
         return None;
     }
@@ -140,7 +140,7 @@ pub fn install_shims(dir: Option<&std::ffi::OsStr>) -> Result<Vec<std::path::Pat
             .map_err(|error| format!("cannot replace {}: {error}", path.display()))?;
     }
     for path in missing.into_iter().chain(stale) {
-        make_shim(&exe, &exe_dir == &dir, &path)
+        make_shim(&exe, exe_dir == dir, &path)
             .map_err(|error| format!("cannot make {}: {error}", path.display()))?;
     }
     Ok(paths)
@@ -595,8 +595,8 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 //                                 "File name to store ASCII version of PSSM",
 //                                 CArgDescriptions::eOutputFile);
 // ```
-/// psiblast's NCBI arguments that LOSAT does not run: the ASN.1 PSSM file and the PSSM and MSA
-/// inputs (series PS3 to PS6; the ASCII PSSM is PS2's, `algorithm::psiblast::pssm`), PHI-BLAST (PS8), `-gap_trigger`, `-sum_stats`, `-culling_limit` (blastp runs it since
+/// psiblast's NCBI arguments that LOSAT does not run: the PSSM and MSA inputs (series PS4 to PS6;
+/// the ASCII and ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`), PHI-BLAST (PS8), `-gap_trigger`, `-sum_stats`, `-culling_limit` (blastp runs it since
 /// O3b; psiblast's first round is not compared with NCBI's under it yet), and the arguments that blastp's engine
 /// does not run either (`is_unported_blastp_arg`; psiblast has no database masks and no
 /// `-mt_mode`).
@@ -611,7 +611,8 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
             // Line NP ported it to BLASTP's search, not to PSIBLAST's rounds.
             | "lcase_masking"
             | "msa_master_idx"
-            | "out_pssm"
+            // Line DI-7 ported it to BLASTP's queries, not to PSIBLAST's.
+            | "parse_deflines"
             | "phi_pattern"
             | "sum_stats"
             // Line DI-8 ported these to BLASTP's database search, not to PSIBLAST's.

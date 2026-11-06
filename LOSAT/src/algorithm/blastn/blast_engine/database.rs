@@ -131,6 +131,7 @@ impl XWaitingBytes for u64 {
 // };
 // ```
 /// The IUPAC letter of a BLASTNA code.
+#[cfg(test)]
 const BLASTNA_TO_IUPACNA: [u8; 16] = *b"ACGTRYMKWSBDHVN-";
 
 /// `SeqDb::read_block`, mapped with LOSAT_X_BNMAPPED.
@@ -1438,6 +1439,10 @@ type Reported = (
 
 // No NCBI counterpart: NCBI's formatters read the sequence of each alignment when they write it.
 /// The sequences of a report that one read at a time cost more than a task of the pool.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 const X_REPORTED_RECORDS_MIN: usize = 64;
 
 /// `record` of each of `ordinals`, in their order, on `pool` while the search's threads wait
@@ -1497,6 +1502,7 @@ impl ReportedSubjects {
 mod tests {
     use super::*;
     use crate::algorithm::blastn::hsp::{BlastnHsp, BlastnHspList};
+    #[cfg(unix)]
     use crate::cli::NativeError;
 
     fn fixture(name: &str) -> String {
@@ -1997,8 +2003,7 @@ mod tests {
             hit_list(vec![(last, 1e-9), (first_volume_ordinal, 1e-5)], 2),
         ];
         let error = read_titles(&database, &batch, &mut titles)
-            .err()
-            .expect("a missing header file")
+            .expect_err("a missing header file")
             .downcast::<HeaderReadError>()
             .expect("NCBI's error, with the query that reached it");
         assert_eq!(error.query, 1);
@@ -2190,16 +2195,12 @@ mod tests {
         crate::utils::threading::with_search_pool(4, "BLASTN", |pool| {
             let parallel = x_reported_records(&ordinals[..300], Some(pool), &record).unwrap();
             assert_eq!(ids(parallel), ids(serial));
-            let error = x_reported_records(&ordinals, Some(pool), &record)
-                .err()
-                .expect("refused");
+            let error = x_reported_records(&ordinals, Some(pool), &record).expect_err("refused");
             assert_eq!(format!("{error}"), "refused 300");
             Ok(())
         })
         .unwrap();
-        let error = x_reported_records(&ordinals, None, &record)
-            .err()
-            .expect("refused");
+        let error = x_reported_records(&ordinals, None, &record).expect_err("refused");
         assert_eq!(format!("{error}"), "refused 300");
     }
 

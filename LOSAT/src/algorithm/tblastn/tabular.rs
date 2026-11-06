@@ -509,7 +509,7 @@ pub(super) fn write_tblastn_tabular(
     // ```
     // A search that stops at a query batch writes no epilog (`write_tabular`).
     if spec.kind == TabularKind::Commented && tab.ranges.epilog {
-        warn(&mut *writer, warnings.as_deref_mut())?;
+        warn(&mut *writer, warnings)?;
         table.epilog(writer, tab.queries.len())?;
     }
     Ok(())

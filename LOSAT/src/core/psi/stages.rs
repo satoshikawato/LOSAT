@@ -3,7 +3,9 @@
 //! keep NCBI's types (`Uint4` sizes wrap as NCBI's do); the floating-point operations are NCBI's,
 //! in NCBI's order, with the C library's `log`, `exp` and `pow`.
 
-use super::{PsiError, PsiMsa, PsiMsaCell, PsiPssm, PsiScoreBlk};
+use super::{
+    KarlinBlk, PsiDiagnostics, PsiDiagnosticsRequest, PsiError, PsiMsa, PsiMsaCell, PsiScoreBlk,
+};
 use crate::stats::karlin_calc::{compute_karlin_params_ungapped, ScoreFreqProfile};
 use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
 
@@ -43,7 +45,7 @@ const PSEUDO_MAX: f64 = 1000000.0;
 // ```c
 // #define NCBIMATH_LN2	0.69314718055994530941723212145818
 // ```
-const NCBIMATH_LN2: f64 = 0.693_147_180_559_945_309_417_232_121_458_18;
+const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_stat.h:122
 // ```c
@@ -268,8 +270,8 @@ impl AlignedBlock {
     }
 }
 
-/// `_PSISequenceWeights`, without the fields that only the diagnostics the ASCII PSSM does not
-/// read keep (`independent_observations`).
+/// `_PSISequenceWeights`, without the field that only the diagnostics psiblast does not ask for
+/// keep (`independent_observations`).
 pub(super) struct SequenceWeights {
     row_sigma: Vec<f64>,
     norm_seq_weights: Vec<f64>,
@@ -1804,21 +1806,24 @@ pub(super) fn convert_freq_ratios_to_pssm(
 //         }
 //     }
 // ```
+/// Returns `kbp_psi[0]` after the scaling: the block of its last `_PSIUpdateLambdaK`.
 pub(super) fn scale_matrix(
     query: &[u8],
     std_probs: &[f64; BLASTAA_SIZE],
     internal: &mut InternalPssm,
     sbp: &PsiScoreBlk,
-) -> Result<(), PsiError> {
+) -> Result<KarlinBlk, PsiError> {
     let ideal_lambda = sbp.ideal_lambda;
     let mut first_time = true;
     let mut factor = 1.0;
     let mut factor_low = 1.0;
     let mut factor_high = 1.0;
     let mut too_high = true;
+    let mut kbp_psi;
     loop {
         rescale(internal, factor);
-        let new_lambda = update_lambda(&internal.pssm, query, std_probs);
+        kbp_psi = update_lambda_k(&internal.pssm, query, std_probs);
+        let new_lambda = kbp_psi.lambda;
         if new_lambda > ideal_lambda {
             if first_time {
                 factor_high = 1.0 + K_POSIT_SCALING_PERCENT;
@@ -1854,14 +1859,15 @@ pub(super) fn scale_matrix(
     for _ in 0..K_POSIT_SCALING_NUM_ITERATIONS {
         factor = (factor_high + factor_low) / 2.0;
         rescale(internal, factor);
-        let new_lambda = update_lambda(&internal.pssm, query, std_probs);
+        kbp_psi = update_lambda_k(&internal.pssm, query, std_probs);
+        let new_lambda = kbp_psi.lambda;
         if new_lambda > ideal_lambda {
             factor_low = factor;
         } else {
             factor_high = factor;
         }
     }
-    Ok(())
+    Ok(kbp_psi)
 }
 
 /// The rescaling of `_PSIScaleMatrix`'s loops (quoted above `scale_matrix`).
@@ -1877,7 +1883,7 @@ fn rescale(internal: &mut InternalPssm, factor: f64) {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2732-2747
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2732-2753
 // ```c
 //     Blast_ScoreFreq* score_freqs =
 //         _PSIComputeScoreProbabilities(pssm, query, query_length,
@@ -1885,6 +1891,15 @@ fn rescale(internal: &mut InternalPssm, factor: f64) {
 //
 //     /* Calculate lambda and K */
 //     Blast_KarlinBlkUngappedCalc(sbp->kbp_psi[0], score_freqs);
+//
+//     ASSERT(sbp->kbp_ideal);
+//     ASSERT(sbp->kbp_psi[0]);
+//     ASSERT(sbp->kbp_gap_std[0]);
+//     ASSERT(sbp->kbp_gap_psi[0]);
+//
+//     sbp->kbp_gap_psi[0]->K =
+//         sbp->kbp_psi[0]->K * sbp->kbp_gap_std[0]->K / sbp->kbp_ideal->K;
+//     sbp->kbp_gap_psi[0]->logK = log(sbp->kbp_gap_psi[0]->K);
 // ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2699-2734
 // ```c
@@ -1903,18 +1918,32 @@ fn rescale(internal: &mut InternalPssm, factor: f64) {
 // ErrExit:
 //    kbp->Lambda = kbp->H = kbp->K = -1.;
 // ```
-// The scaling reads only the Lambda (`sbp->kbp_psi[0]->Lambda`), -1 when any of the three
-// cannot be computed. The gapped PSI K that `_PSIUpdateLambdaK` also sets is not read here.
-fn update_lambda(
+/// `kbp_psi[0]` after `_PSIUpdateLambdaK`: Lambda, K and H, all -1 when any of them cannot be
+/// computed. The gapped PSI K that the call also sets depends on this block only
+/// (`gapped_psi_k`), so it is computed once, from the last block.
+fn update_lambda_k(
     pssm: &[[i32; BLASTAA_SIZE]],
     query: &[u8],
     std_probs: &[f64; BLASTAA_SIZE],
-) -> f64 {
+) -> KarlinBlk {
     let sfp = compute_score_probabilities(pssm, query, std_probs);
     match compute_karlin_params_ungapped(&sfp) {
-        Ok(params) => params.lambda,
-        Err(_) => -1.0,
+        Ok(params) => KarlinBlk {
+            lambda: params.lambda,
+            k: params.k,
+            h: params.h,
+        },
+        Err(_) => KarlinBlk {
+            lambda: -1.0,
+            k: -1.0,
+            h: -1.0,
+        },
     }
+}
+
+/// `sbp->kbp_gap_psi[0]->K` after `_PSIUpdateLambdaK` (quoted above `update_lambda_k`).
+pub(super) fn gapped_psi_k(kbp_psi: KarlinBlk, sbp: &PsiScoreBlk) -> f64 {
+    kbp_psi.k * sbp.gap_std_k / sbp.ideal_k
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1795-1815
@@ -2053,7 +2082,7 @@ fn compute_score_probabilities(
 // Diagnostics
 // ---------------------------------------------------------------------------------------------
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2826-2895
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2826-2898
 // ```c
 //     if (diagnostics->information_content) {
 //         double* info = _PSICalculateInformationContentFromFreqRatios(
@@ -2069,7 +2098,16 @@ fn compute_score_probabilities(
 //             }
 //         }
 //     }
-//     ...
+//
+//     if (diagnostics->frequency_ratios) {
+//         for (p = 0; p < diagnostics->query_length; p++) {
+//             for (r = 0; r < diagnostics->alphabet_size; r++) {
+//                 diagnostics->frequency_ratios[p][r] =
+//                     internal_pssm->freq_ratios[p][r];
+//             }
+//         }
+//     }
+//
 //     if (diagnostics->gapless_column_weights) {
 //         for (p = 0; p < diagnostics->query_length; p++) {
 //             if (msa->num_matching_seqs[p] > 1
@@ -2087,7 +2125,19 @@ fn compute_score_probabilities(
 //             }
 //         }
 //     }
-//     ...
+//
+//     if (diagnostics->sigma) {
+//         for (p = 0; p < diagnostics->query_length; p++) {
+//             diagnostics->sigma[p] = seq_weights->sigma[p];
+//         }
+//     }
+//
+//     if (diagnostics->interval_sizes) {
+//         for (p = 0; p < diagnostics->query_length; p++) {
+//             diagnostics->interval_sizes[p] = aligned_block->size[p];
+//         }
+//     }
+//
 //     if (diagnostics->num_matching_seqs) {
 //         for (p = 0; p < diagnostics->query_length; p++) {
 //             diagnostics->num_matching_seqs[p] = msa->num_matching_seqs[p];
@@ -2116,49 +2166,67 @@ fn compute_score_probabilities(
 //         retval[p] = info_sum;
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:451-452
-// ```c
-//     _PSICopyMatrix_int(pssm->pssm, internal_pssm->pssm,
-//                        pssm->ncols, pssm->nrows);
-// ```
+// Each diagnostic is computed only when `request` asks for it (`PSIDiagnosticsResponseNew`
+// allocates only those, blast_psi.c:618-714).
 pub(super) fn save_diagnostics(
     msa: &Msa,
     aligned_block: &AlignedBlock,
     seq_weights: &SequenceWeights,
-    internal: InternalPssm,
-) -> PsiPssm {
-    let information_content = internal
-        .freq_ratios
-        .iter()
-        .map(|ratios| {
-            let mut info_sum = 0.0;
-            for r in 0..BLASTAA_SIZE {
-                if seq_weights.std_prob[r] > K_EPSILON {
-                    let q_over_p_estimate = ratios[r] / seq_weights.std_prob[r];
-                    if q_over_p_estimate > K_EPSILON {
-                        info_sum += ratios[r] * q_over_p_estimate.ln() / NCBIMATH_LN2;
+    internal: &InternalPssm,
+    request: PsiDiagnosticsRequest,
+) -> PsiDiagnostics {
+    let information_content = request.information_content.then(|| {
+        internal
+            .freq_ratios
+            .iter()
+            .map(|ratios| {
+                let mut info_sum = 0.0;
+                for r in 0..BLASTAA_SIZE {
+                    if seq_weights.std_prob[r] > K_EPSILON {
+                        let q_over_p_estimate = ratios[r] / seq_weights.std_prob[r];
+                        if q_over_p_estimate > K_EPSILON {
+                            info_sum += ratios[r] * q_over_p_estimate.ln() / NCBIMATH_LN2;
+                        }
                     }
                 }
-            }
-            info_sum
-        })
-        .collect();
-    let gapless_column_weights = (0..msa.query_length)
-        .map(|p| {
-            if msa.num_matching_seqs[p] > 1 && msa.cell[0][p].letter != X {
-                let weight = seq_weights.gapless_column_weights[p] / internal.pseudocounts[p];
-                weight * (seq_weights.sigma[p] / aligned_block.size[p] as f64 - 1.0)
-            } else {
-                0.0
-            }
-        })
-        .collect();
-    PsiPssm {
-        scores: internal.pssm,
+                info_sum
+            })
+            .collect()
+    });
+    let gapless_column_weights = request.gapless_column_weights.then(|| {
+        (0..msa.query_length)
+            .map(|p| {
+                if msa.num_matching_seqs[p] > 1 && msa.cell[0][p].letter != X {
+                    let weight = seq_weights.gapless_column_weights[p] / internal.pseudocounts[p];
+                    weight * (seq_weights.sigma[p] / aligned_block.size[p] as f64 - 1.0)
+                } else {
+                    0.0
+                }
+            })
+            .collect()
+    });
+    PsiDiagnostics {
         information_content,
-        weighted_residue_freqs: seq_weights.match_weights.clone(),
+        weighted_residue_freqs: request
+            .weighted_residue_frequencies
+            .then(|| seq_weights.match_weights.clone()),
+        frequency_ratios: request
+            .frequency_ratios
+            .then(|| internal.freq_ratios.clone()),
         gapless_column_weights,
-        num_matching_seqs: msa.num_matching_seqs.clone(),
+        sigma: request.sigma.then(|| seq_weights.sigma.clone()),
+        interval_sizes: request.interval_sizes.then(|| aligned_block.size.clone()),
+        num_matching_seqs: request
+            .num_matching_seqs
+            .then(|| msa.num_matching_seqs.clone()),
+    }
+}
+
+impl InternalPssm {
+    /// `internal_pssm->pssm`, which `s_PSISavePssm` copies (`_PSICopyMatrix_int`,
+    /// blast_psi.c:451-452).
+    pub(super) fn into_scores(self) -> Vec<[i32; BLASTAA_SIZE]> {
+        self.pssm
     }
 }
 

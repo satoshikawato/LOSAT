@@ -519,7 +519,6 @@ mod tests {
             let len = [3, 4, 255, 256, 257, 1_000, 20_000][case % 7];
             let mut subject: Vec<u8> = (0..len).map(|_| 1 + rng.below(25) as u8).collect();
             subject.push(0);
-            let len = len as i32;
             // One range; three ranges, the middle one shorter than a word; ranges every ~300
             // letters with gaps between them.
             let mut cuts = vec![(0, len)];

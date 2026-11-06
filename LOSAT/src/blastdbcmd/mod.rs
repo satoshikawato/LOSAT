@@ -27,7 +27,7 @@ use std::io::Write;
 
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
 
-use args::{Args, ArgsError};
+use args::ArgsError;
 
 /// The name in LOSAT's refusals.
 const PROGRAM: &str = "BLASTDBCMD";
@@ -737,7 +737,7 @@ fn with_commas(n: u64) -> String {
     let digits = n.to_string();
     let mut text = String::with_capacity(digits.len() + digits.len() / 3);
     for (at, digit) in digits.chars().enumerate() {
-        if at > 0 && (digits.len() - at) % 3 == 0 {
+        if at > 0 && (digits.len() - at).is_multiple_of(3) {
             text.push(',');
         }
         text.push(digit);

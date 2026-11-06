@@ -246,19 +246,10 @@ impl Default for NaLookupPayload {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct NaLookupBackboneCell {
     num_used: u32,
     payload: NaLookupPayload,
-}
-
-impl Default for NaLookupBackboneCell {
-    fn default() -> Self {
-        NaLookupBackboneCell {
-            num_used: 0,
-            payload: NaLookupPayload::default(),
-        }
-    }
 }
 
 /// Compact array-backed lookup table for blastn (NCBI BlastNaLookupTable).
@@ -267,8 +258,6 @@ pub struct NaLookupTable {
     overflow: Vec<u32>,
     pv: Vec<PvArrayType>,
     longest_chain: usize,
-    word_length: usize,
-    lut_word_length: usize,
 }
 
 impl NaLookupTable {
@@ -617,7 +606,7 @@ fn compute_mb_pv_params(
         && (approx_table_entries <= K_SMALL_QUERY_CUTOFF
             || approx_table_entries >= K_LARGE_QUERY_CUTOFF)
     {
-        pv_size = pv_size / 2;
+        pv_size /= 2;
     }
 
     if pv_size == 0 {
@@ -850,6 +839,7 @@ impl PvDirectLookup {
 /// Two-stage lookup table (like NCBI BLAST)
 /// - lut_word_length: Used for indexing (e.g., 8 for megablast)
 /// - word_length: Used for extension triggering (e.g., 28 for megablast)
+///
 /// This allows O(1) direct array access even for large word_length values
 pub struct TwoStageLookup {
     /// Megablast lookup table using NCBI hashtable/next_pos chains.
@@ -1068,7 +1058,11 @@ impl MbLookupTable {
 
     /// Tests only: the head table's words, as the batch loop's keep holds them (LOSAT_X_MB24: the
     /// words of the 3-byte heads).
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn x_table(&self) -> &[u32] {
         self.x_narrow
             .as_ref()
@@ -1434,7 +1428,7 @@ pub fn build_pv_direct_lookup(
 
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
-    let mut dust_skipped = 0usize;
+    let dust_skipped = 0usize;
 
     debug_assert_eq!(queries_blastna.len(), query_offsets.len());
 
@@ -1732,7 +1726,7 @@ pub fn build_na_lookup(
     let mut counts: Vec<u32> = vec![0; table_size];
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
-    let mut dust_skipped = 0usize;
+    let dust_skipped = 0usize;
 
     let kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
 
@@ -1829,13 +1823,10 @@ pub fn build_na_lookup(
         backbone[idx].num_used = num_hits as u32;
         pv_set(&mut pv, idx);
         if num_hits > NA_HITS_PER_CELL {
-            // SAFETY: a write of a `Copy` union field (no read, no drop); it sets the
-            // `overflow_cursor` that the fill below and `get_hits_checked` read for this chain.
-            unsafe {
-                // SAFETY: Storing overflow_cursor is valid for chains larger
-                // than NA_HITS_PER_CELL, matching NCBI union usage.
-                backbone[idx].payload.overflow_cursor = overflow_size as u32;
-            }
+            // Chains larger than NA_HITS_PER_CELL store overflow_cursor, matching NCBI union
+            // usage (writing a `Copy` union field needs no `unsafe`). It sets the cursor that the
+            // fill below and `get_hits_checked` read for this chain.
+            backbone[idx].payload.overflow_cursor = overflow_size as u32;
             overflow_size += num_hits;
         }
     }
@@ -1933,14 +1924,13 @@ pub fn build_na_lookup(
         overflow,
         pv,
         longest_chain,
-        word_length,
-        lut_word_length,
     }
 }
 
 /// Build two-stage lookup table (like NCBI BLAST)
 /// - lut_word_length: Used for indexing (typically 8 for megablast)
 /// - word_length: Used for extension triggering (typically 28 for megablast)
+///
 /// This allows O(1) direct array access even for large word_length values
 fn build_mb_lookup(
     queries_blastna: &[&[u8]],
@@ -2039,8 +2029,7 @@ fn build_mb_lookup(
     };
     let mut pv_array = vec![0u32; pv_size];
     const K_COMPRESSION_FACTOR: usize = 2048;
-    let mut helper_array =
-        vec![0u32; ((table_size + K_COMPRESSION_FACTOR - 1) / K_COMPRESSION_FACTOR).max(1)];
+    let mut helper_array = vec![0u32; table_size.div_ceil(K_COMPRESSION_FACTOR).max(1)];
     let mut words: Vec<(u32, u32)> = Vec::new();
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;

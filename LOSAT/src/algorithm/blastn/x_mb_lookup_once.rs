@@ -378,7 +378,7 @@ struct Entry {
 
 const ENTRY_BYTES: usize = std::mem::size_of::<Entry>();
 const LINE_BYTES: usize = std::mem::size_of::<Line>();
-const _: () = assert!(ENTRY_BYTES == 8 && LINE_BYTES % ENTRY_BYTES == 0);
+const _: () = assert!(ENTRY_BYTES == 8 && LINE_BYTES.is_multiple_of(ENTRY_BYTES));
 /// Entries per 64-byte line.
 const LINE_ENTRIES: usize = LINE_BYTES / ENTRY_BYTES;
 /// Row values (u32) per 64-byte line.
@@ -610,7 +610,7 @@ impl Fill<'_, '_, '_> {
                     // SAFETY: reader `a`'s bits; the pages are `hashtable`'s (the element's bytes
                     // lie in its words).
                     unsafe {
-                        marks.mark(a, (cells + (3 * cell >> 2)) >> PAGE_ELEMS_SHIFT);
+                        marks.mark(a, (cells + ((3 * cell) >> 2)) >> PAGE_ELEMS_SHIFT);
                         marks.mark(a, (cells + ((3 * cell + 2) >> 2)) >> PAGE_ELEMS_SHIFT);
                     }
                 } else if MARK {
@@ -1262,6 +1262,10 @@ impl Fill<'_, '_, '_> {
     ///
     /// SAFETY: reader `a` wrote its row and region in a phase that has ended, and no job writes
     /// them until the slice is dropped.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     #[inline(always)]
     unsafe fn subrange(&self, a: usize, o: usize) -> &[Entry] {
         let row = self.arena.row(a);
@@ -1392,7 +1396,7 @@ fn csr_on_pool(
     // Once per table: the owners' cells cover the table (every count is written), and the
     // positions, which bound the words, fit the `u32` offsets.
     assert_eq!(own.iter().map(|&(c0, c1)| c1 - c0).sum::<usize>(), cells);
-    assert!(cells % 2048 == 0 && pv_array_bts >= 5 && helper_array.len() == cells >> 11);
+    assert!(cells.is_multiple_of(2048) && pv_array_bts >= 5 && helper_array.len() == cells >> 11);
     let (segments, total) = segments(words);
     assert!(
         total <= u32::MAX as usize,
@@ -1911,6 +1915,10 @@ mod tests {
         /// LOSAT_X_MB24: the read-once fill from zero start values into 3-byte elements of `cells`
         /// cells (newest first), with LOSAT_X_MBLUTPREFAULT given (`prefault`) and checked on the
         /// words of the heads (`check_prefault`); the tables widened, and the pages touched.
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
         fn once_h24(
             &self,
             reference: &Built,
@@ -2051,7 +2059,7 @@ mod tests {
     // chunks are `ceil(positions / chunk)`.
     #[test]
     fn once_fill_builds_the_loops_tables() {
-        let mut rng = Lcg(0x0E_CE_5EED);
+        let mut rng = Lcg(0x0ECE_5EED);
         let mut multi_chunk = 0;
         for case in 0..40 {
             let c = Case::random(&mut rng, case % 2 == 1);

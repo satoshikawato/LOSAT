@@ -3,13 +3,18 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
 
 use super::get_score;
-use super::ungapped::extend_hit_ungapped;
 use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
 // The table walks of the two-hit extension (x_two_hit_fast.rs).
 use super::x_two_hit_fast;
 
 // Import the internal extension functions from ungapped module
 // These are used for left/right extension
+// The wasm simd128 build extends with `extend_left_ungapped_simd128` instead.
+#[cfg(not(all(
+    target_arch = "wasm32",
+    target_feature = "simd128",
+    not(feature = "tblastx-wasm-scalar")
+)))]
 #[inline(always)]
 fn extend_left_ungapped_scalar<S: TbxScore>(
     sc: S,
@@ -89,6 +94,10 @@ unsafe fn extend_left_ungapped_simd128<S: TbxScore>(
     let mut left_disp = 0usize;
     let mut i = 0usize;
 
+    #[expect(
+        unused_assignments,
+        reason = "the lane macro steps pos after every lane, the last one too; the next block starts again from its own offset"
+    )]
     while i + 16 <= max_left {
         let q_ptr = q_seq.as_ptr().add(q_off - i - 16);
         let s_ptr = s_seq.as_ptr().add(s_off - i - 16);
@@ -180,20 +189,25 @@ fn extend_left_ungapped<S: TbxScore>(
         // exact scalar NCBI control flow available for native-vs-Wasm parity
         // isolation while leaving production SIMD builds unchanged.
         unsafe {
-            return extend_left_ungapped_simd128(
-                sc,
-                q_seq,
-                s_seq,
-                q_off,
-                s_off,
-                initial_score,
-                x_drop,
-            );
+            extend_left_ungapped_simd128(sc, q_seq, s_seq, q_off, s_off, initial_score, x_drop)
         }
     }
-    extend_left_ungapped_scalar(sc, q_seq, s_seq, q_off, s_off, initial_score, x_drop)
+    #[cfg(not(all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )))]
+    {
+        extend_left_ungapped_scalar(sc, q_seq, s_seq, q_off, s_off, initial_score, x_drop)
+    }
 }
 
+// The wasm simd128 build extends with `extend_right_ungapped_simd128` instead.
+#[cfg(not(all(
+    target_arch = "wasm32",
+    target_feature = "simd128",
+    not(feature = "tblastx-wasm-scalar")
+)))]
 #[inline(always)]
 fn extend_right_ungapped_scalar<S: TbxScore>(
     sc: S,
@@ -272,6 +286,10 @@ unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
     let mut right_disp = 0usize;
     let mut j = 0usize;
 
+    #[expect(
+        unused_assignments,
+        reason = "the lane macro steps pos after every lane, the last one too; the next block starts again from its own offset"
+    )]
     while j + 16 <= n {
         let base = j;
         let q_ptr = q_seq.as_ptr().add(q_start + base);
@@ -362,18 +380,17 @@ fn extend_right_ungapped<S: TbxScore>(
         // exact scalar NCBI control flow available for native-vs-Wasm parity
         // isolation while leaving production SIMD builds unchanged.
         unsafe {
-            return extend_right_ungapped_simd128(
-                sc,
-                q_seq,
-                s_seq,
-                q_start,
-                s_start,
-                initial_score,
-                x_drop,
-            );
+            extend_right_ungapped_simd128(sc, q_seq, s_seq, q_start, s_start, initial_score, x_drop)
         }
     }
-    extend_right_ungapped_scalar(sc, q_seq, s_seq, q_start, s_start, initial_score, x_drop)
+    #[cfg(not(all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )))]
+    {
+        extend_right_ungapped_scalar(sc, q_seq, s_seq, q_start, s_start, initial_score, x_drop)
+    }
 }
 
 /// Two-hit ungapped extension: NCBI BLAST style.

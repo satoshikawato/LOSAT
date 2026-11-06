@@ -1133,7 +1133,7 @@ const X_WC_STRIDE: usize = 2 * COMPO_NUM_TRUE_AA;
 // or square root.
 fn x_factor_ltriang_pos_def_cols(a: &mut [Vec<f64>], n: usize, wc: &mut [f64]) {
     let s = X_WC_STRIDE;
-    debug_assert!(n <= s && wc.len() >= s * s && s % 2 == 0);
+    debug_assert!(n <= s && wc.len() >= s * s && s.is_multiple_of(2));
     // Column-major copy. Slots above a column's diagonal and below row n are
     // scratch: they are written by the padded loops below but never read as
     // matrix elements.
@@ -2825,6 +2825,10 @@ fn optimize_target_frequencies_reference(
             constrain_rel_entropy,
             relative_entropy,
         );
+        #[expect(
+            clippy::neg_cmp_op_on_partial_ord,
+            reason = "NCBI's convergence test `!(rnorm > tol)` stops on a NaN rnorm (optimize_target_freq.c:760-762); `<=` would not"
+        )]
         if !(rnorm > K_COMPO_ADJUST_ERR_TOLERANCE) {
             break;
         }
@@ -3219,6 +3223,10 @@ pub(crate) fn x_newton_input(
         }
         _ => return None,
     }
+    #[expect(
+        clippy::neg_cmp_op_on_partial_ord,
+        reason = "NCBI constrains the relative entropy only when desired_re > 0.0 (composition_adjustment.c:1396); `desired_re <= 0.0` would let NaN through"
+    )]
     if !(desired_re > 0.0) {
         return None;
     }

@@ -131,6 +131,7 @@ fn read_u64_at<R: ReadAt + ?Sized>(src: &R, off: u64) -> Result<u64, String> {
 /// The OIDs of volume `i` start at the sum of the counts before it.
 ///
 /// Errors: [`NO_VOLUME_INFO`], "Volinfo error " (the two tables have different entry counts),
+/// "Volinfo error : N volumes" (LOSAT: a count larger than the tables' leaf pages can hold),
 /// "No volinfo for <name>".
 pub fn volumes<R: ReadAt + ?Sized>(ndb: &Env<R>) -> Result<Vec<(Vec<u8>, u32)>, String> {
     let volname = ndb
@@ -142,8 +143,20 @@ pub fn volumes<R: ReadAt + ?Sized>(ndb: &Env<R>) -> Result<Vec<(Vec<u8>, u32)>, 
     if volinfo.entries != volname.entries {
         return Err("Volinfo error ".to_string());
     }
+    // LOSAT: each entry is a leaf node of at least 14 bytes (8-byte node header, 4-byte key,
+    // 2-byte pointer) on one of the table's leaf pages (`md_leaf_pages`, exact for these tables,
+    // which have no duplicates; at most the pages of the file), and a page holds at most its
+    // size less the 16-byte page header. A larger count is damage; NCBI would size `vol_names`
+    // and `vol_num_oids` to it and look up every number.
+    let leaf_pages = volname
+        .leaf_pages
+        .min(volinfo.leaf_pages)
+        .min(ndb.num_pages());
+    let room = leaf_pages.saturating_mul(ndb.page_size().saturating_sub(16) as u64) / 14;
     let n = u32::try_from(volinfo.entries)
-        .map_err(|_| format!("Volinfo error : {} volumes", volinfo.entries))?;
+        .ok()
+        .filter(|&n| u64::from(n) <= room)
+        .ok_or_else(|| format!("Volinfo error : {} volumes", volinfo.entries))?;
     let mut out = Vec::with_capacity((n as usize).min(1 << 16));
     for i in 0..n {
         let key = i.to_le_bytes();
@@ -1239,7 +1252,7 @@ mod tests {
     /// Every OID list, taxid list and seqid list of every fixture against the dump.py values.
     fn check_lookup_files(prefix: &str, n: char, name: &str) {
         {
-            let f = files(&prefix, n);
+            let f = files(prefix, n);
             let ex = expected(name);
             let ndb = Env::open(&f.ndb).unwrap();
             let ntf = Env::open(&f.ntf).unwrap();
@@ -1380,7 +1393,7 @@ mod tests {
                 let mut req = BTreeSet::new();
                 for _ in 0..size {
                     // mostly present taxids, sometimes an absent one
-                    if next() % 5 == 0 {
+                    if next().is_multiple_of(5) {
                         req.insert(1_000_000 + (next() % 50) as i32);
                     } else {
                         req.insert(ex.t[next() % ex.t.len()].0);
@@ -1615,8 +1628,10 @@ mod tests {
         let mut tax =
             WriteDbTaxId::new(&ptf, linux.default_taxid_map_size, &platform, &settings).unwrap();
         for (oid, (acc, taxids)) in oids.iter().enumerate() {
-            lmdb.insert_entry(acc.as_bytes(), oid as u32, false);
-            lmdb.insert_entry(format!("{acc}.1").as_bytes(), oid as u32, true);
+            lmdb.insert_entry(acc.as_bytes(), oid as u32, false)
+                .unwrap();
+            lmdb.insert_entry(format!("{acc}.1").as_bytes(), oid as u32, true)
+                .unwrap();
             tax.insert_entries(taxids, oid as u32);
         }
         lmdb.insert_volumes_info(&["db.00".to_string(), "db.01".to_string()], &[3, 2])

@@ -6,8 +6,8 @@ The working records of those lines (plans, state, decision logs) are kept outsid
 This file gives each cited ID one row: what it is, its state, its main pull requests, and the document
 in this repository that holds its fullest record ("external" when there is none).
 
-As of dev 48648ac76 (2026-11-05): 152 IDs cited in the tree, 97 of them in `CHANGELOG.md`, `changelog.d/`
-and `docs/`. State: 140 done, 12 in progress, 0 stopped.
+As of dev 193657f3a (2026-11-06): 154 IDs cited in the tree, 99 of them in `CHANGELOG.md`, `changelog.d/`
+and `docs/`. State: 142 done, 12 in progress, 0 stopped.
 
 - `python3 scripts/line_ids.py list --all` lists the IDs the tree cites, with the number of citing
   lines and the first one; `python3 scripts/line_ids.py check` names the IDs that `CHANGELOG.md`,
@@ -55,6 +55,7 @@ and `docs/`. State: 140 done, 12 in progress, 0 stopped.
 | `DBID ID4f` | Made blastn's outfmt 0 build its alignment rows for a window of queries at a time, as NCBI does, cutting memory on databases with parsed Seq-ids. | done | #598 | changelog entry `fix-dbid-pairwise-rows` |
 | `DBID ID4t` | tblastx -db memory fixes: hit lists kept inside the batch search (#604), outfmt 0 rows built per query window (#607), reports written as each batch is taken (fix 2b, #619). | done | #604, #607, #619, #673 | changelog entry `feature-dbid-tbxstream` |
 | `DBID L1` | Made a tabular report whose only alignment field is nident read a subject, and so write taxonomy messages, only on rows with identities, as NCBI does with the prefetch off. | done | #830 | [LOSAT/tests/db_search/README.md](../../LOSAT/tests/db_search/README.md), “`nident` alone and HSPs without identities (line DBID, L1)” |
+| `DBID L1b` | Made tblastn and tblastx without the report stream refuse a run for NCBI's taxonomy cache only where NCBI fetches a subject, not for fields that read none or for batches without hits. | done | #864 | [LOSAT/tests/db_search/README.md](../../LOSAT/tests/db_search/README.md), “Rows `db.nz.cq.*` (line DBID, L1b)” |
 | `DBID N1` | Made -db searches refuse a reported subject whose Seq-align id NCBI's lookup finds in another sequence first, instead of printing the wrong sequence's names. | done | #683 | [LOSAT/tests/db_search/README.md](../../LOSAT/tests/db_search/README.md), “Databases with parsed Seq-ids (line DBID, ID2a)” |
 | `DBID N1b` | Made the same record with other tax ids in databases read together refuse only where reports show the copies apart; later also for titles made from tax ids. | done | #765, #785 | [LOSAT/tests/db_search/README.md](../../LOSAT/tests/db_search/README.md), “Databases with parsed Seq-ids (line DBID, ID2a)” |
 | `DBID N2a` | Made -db searches refuse a stored gnl\|BL_ORD_ID\|n whose n is not the sequence's own number, since NCBI looks it up by that id and reads another sequence. | done | #730 | [LOSAT/tests/db_search/README.md](../../LOSAT/tests/db_search/README.md), “Databases with parsed Seq-ids (line DBID, ID2a)” |
@@ -116,7 +117,7 @@ and `docs/`. State: 140 done, 12 in progress, 0 stopped.
 | `NP SC2a` | Stage SC2a: blastp accepts BLOSUM62 with every gap-cost pair of NCBI's table, with -comp_based_stats 2 and 0, -task blastp and blastp-fast, -subject and -db. | done | #824 | [LOSAT/tests/outfmt0_manifest.tsv](../../LOSAT/tests/outfmt0_manifest.tsv) |
 | `NP SC4a` | Stage SC4a: blastp -comp_based_stats 0 runs NCBI ordinary traceback (no composition adjustment), also for -db. | done | #624 | [LOSAT/tests/outfmt0_manifest.tsv](../../LOSAT/tests/outfmt0_manifest.tsv) |
 | `NP SC8a` | Stage SC8a: blastp -word_size 6 and 7 with NCBI compressed lookup table (BLOSUM62). | done | #822 | [LOSAT/tests/outfmt0_manifest.tsv](../../LOSAT/tests/outfmt0_manifest.tsv) |
-| `NP SC11` | Stage SC11: tblastn compressed lookup table (tblastn-fast, word size 5-7) for every matrix except IDENTITY. | done | #823 | [LOSAT/tests/outfmt0_manifest.tsv](../../LOSAT/tests/outfmt0_manifest.tsv) |
+| `NP SC11` | Stage SC11: tblastn compressed lookup table (tblastn-fast, word size 5-7) for every matrix except IDENTITY. | done | #823, #871 | [LOSAT/tests/outfmt0_manifest.tsv](../../LOSAT/tests/outfmt0_manifest.tsv) |
 | `NP SM-1` | Stage SM-1: blastp -soft_masking true/false (SEG masks only the lookup table when true), matching NCBI BLAST+ 2.17.0. | done | #492 | [LOSAT/tests/outfmt0_manifest.tsv](../../LOSAT/tests/outfmt0_manifest.tsv) |
 | `NP SM-2` | Stage SM-2: tblastx -soft_masking true/false, matching NCBI BLAST+ 2.17.0 including sum statistics. | done | #499 | [LOSAT/tests/outfmt0_manifest.tsv](../../LOSAT/tests/outfmt0_manifest.tsv) |
 | `NP SM-3` | Stage SM-3: blastn -soft_masking, with false writing DUST, lower-case and WindowMasker masks as N into the searched query. | done | #656 | changelog entry `feat-blastn-soft-masking` |
@@ -147,9 +148,10 @@ and `docs/`. State: 140 done, 12 in progress, 0 stopped.
 
 | ID | Meaning | State | Main pull requests | Record in this repository |
 | --- | --- | --- | --- | --- |
-| `PS` | Line PS: add psiblast and related tools (iterations, PSSM files, tblastn -in_pssm, rpsblast, rpstblastn, deltablast, makeprofiledb) to LOSAT. | in progress | #503 | [README.md](../../README.md), “7. PSI-BLAST (psiblast), first round” |
+| `PS` | Line PS: add psiblast and related tools (iterations, PSSM files, tblastn -in_pssm, rpsblast, rpstblastn, deltablast, makeprofiledb) to LOSAT. | in progress | #503, #874 | [README.md](../../README.md), “7. PSI-BLAST (psiblast), first round” |
 | `PS1` | PS stage 1: `losat psiblast` runs the first round (-num_iterations 1) of NCBI BLAST+ 2.17.0 psiblast with -subject or -db, for outfmt 0, 6 and 7, on the blastp engine. | done | #503 | changelog entry `feature-ps-ps1` |
-| `PS2` | PS stage 2: the PSSM engine (NCBI core/blast_psi.c and blast_psi_priv.c) and psiblast's -out_ascii_pssm after the first round (-save_pssm_after_last_round, -save_each_pssm), byte for byte as NCBI BLAST+ 2.17.0. | in progress | none | changelog entry `feature-ps-ps2` |
+| `PS2` | PS stage 2: the PSSM engine (NCBI core/blast_psi.c and blast_psi_priv.c) and psiblast's -out_ascii_pssm after the first round (-save_pssm_after_last_round, -save_each_pssm), byte for byte as NCBI BLAST+ 2.17.0. | done | #874 | changelog entry `feature-ps-ps2` |
+| `PS3` | PS stage 3: psiblast's -out_pssm, the PSSM as NCBI's ASN.1 text `PssmWithParameters` after the first round, byte for byte as NCBI BLAST+ 2.17.0, and the reader of that text (for -in_pssm, PS4). | in progress | none | changelog entry `feature-ps-ps3` |
 
 ### RL: the v0.2.0 release
 
@@ -211,7 +213,7 @@ and `docs/`. State: 140 done, 12 in progress, 0 stopped.
 
 | ID | Meaning | State | Main pull requests | Record in this repository |
 | --- | --- | --- | --- | --- |
-| `WA` | Line WA: a browser audit of LOSAT Web at one dev commit (input, form, run, results), a second audit round, and pull requests that fix the findings. | in progress | #799, #800, #805, #806, #808, #809, #810, #811, #812, #816, #818, #820, #831 | [docs/web/ncbi_ui_mapping.md](../../docs/web/ncbi_ui_mapping.md), “4. 文言の方針（stop-describing-ui、2026-11-02）” |
+| `WA` | Line WA: a browser audit of LOSAT Web at one dev commit (input, form, run, results), a second audit round, and pull requests that fix the findings. | in progress | #799, #800, #805, #806, #808, #809, #810, #811, #812, #816, #818, #820, #831, #867 | [docs/web/ncbi_ui_mapping.md](../../docs/web/ncbi_ui_mapping.md), “4. 文言の方針（stop-describing-ui、2026-11-02）” |
 | `WA2-BR-01` | Second-audit finding (P2): when stored results were removed while open, Outputs kept the previous format's text and Export did nothing; it now says why the results cannot be read. | done | #818 | [docs/web/ncbi_ui_mapping.md](../../docs/web/ncbi_ui_mapping.md), “4. 文言の方針（stop-describing-ui、2026-11-02）” |
 | `WA2-OP-03` | Second-audit finding: -outfmt with column fields in Additional options was refused though the CLI takes it; Web now writes outfmt 6 or 7 with fields as an extra output. | done | #831 | [docs/web/ncbi_ui_mapping.md](../../docs/web/ncbi_ui_mapping.md), “4. 文言の方針（stop-describing-ui、2026-11-02）” |
 | `WA2-SC-05` | Second-audit finding (P2): after a tab hidden during a run returned, the notice said results were stored but the run said they were removed; the notice now checks the store. | done | #820 | [docs/web/ncbi_ui_mapping.md](../../docs/web/ncbi_ui_mapping.md), “4. 文言の方針（stop-describing-ui、2026-11-02）” |

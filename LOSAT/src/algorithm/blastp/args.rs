@@ -5,7 +5,6 @@ use clap::Args;
 use std::path::PathBuf;
 
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
-use crate::utils::seg::SegParams;
 
 pub use crate::blastinput::value_parsers::SegSpec as BlastpSegSpec;
 use crate::blastinput::value_parsers::*;
@@ -850,7 +849,7 @@ impl BlastpArgs {
         &self,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<ResolvedBlastpArgs> {
-        use crate::blastinput::app::{options_error, CompositionMode};
+        use crate::blastinput::app::CompositionMode;
         use crate::stats::protein_options::{
             protein_gap_existence_extend_params, suggested_threshold, suggested_window_size,
             ProteinOptionsCheck, SuggestionProgram,
@@ -1172,7 +1171,6 @@ impl BlastpArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3152-3171 (`s_TruncateSpaces`
     // with `eTrunc_Both`: `isspace` at both ends; `seqdb::db_argument_name`).

@@ -3344,6 +3344,10 @@ mod tests {
     /// One query of 60,000 letters: random letters with ten runs of 600 letters, each a repeat of
     /// period 1 to 5 (unmasked), so a few cells get hundreds of words (counters far above zero)
     /// and most blocks get no repeated cell (counters that stay where they start).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn counter_case() -> Case {
         let mut rng = Lcg(0xC0DE_0C01);
         let mut seq: Vec<u8> = (0..60_000).map(|_| rng.below(4) as u8).collect();
@@ -3734,7 +3738,7 @@ mod tests {
         let touched = check_prefault(&got, &stats);
         let cells = touched[HASHTABLE].len();
         assert!(
-            cells + 2 * 512 >= pages && cells % 512 == 0 && cells > 0,
+            cells + 2 * 512 >= pages && cells.is_multiple_of(512) && cells > 0,
             "{cells} of {pages}"
         );
         assert!(touched[PV_ARRAY].is_empty());
@@ -3857,7 +3861,7 @@ mod tests {
         for (pages, parts) in [(1usize, 1usize), (4097, 16), (16385, 3), (33, 255)] {
             let mut marks = PageBits::new(pages, parts);
             let shared = marks.shared();
-            assert!(shared.stride % 8 == 0 && shared.stride * 64 >= pages);
+            assert!(shared.stride.is_multiple_of(8) && shared.stride * 64 >= pages);
             for r in 0..parts {
                 assert_eq!(shared.ptr.wrapping_add(r * shared.stride) as usize % 64, 0);
             }

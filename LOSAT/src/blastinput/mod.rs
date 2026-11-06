@@ -18,6 +18,8 @@ pub mod fasta_reader;
 pub mod input_files;
 // NCBI corelib/ncbiapp.cpp, metareg.cpp: the application layer's environment and registry.
 pub mod ncbi_environment;
+// NCBI serial/objistrasn.cpp: psiblast's PSSM in ASN.1 text (`-out_pssm`, `-in_pssm`).
+pub mod pssm_text;
 pub mod query_batch;
 // NCBI blastinput/blast_args.cpp:2894-2978: the hit list size and the numbers of descriptions
 // and alignments of a run.
@@ -31,3 +33,6 @@ pub mod value_parsers;
 // NCBI api/blast_objmgr_tools.cpp:515-520 (`GetCompressedPlusStrand`): EXPERIMENT (LOSAT_X_TBNSTORE,
 // LOSAT_X_TBXSTORE), the records of `-subject` packed as read.
 pub(crate) mod x_packed_subjects;
+
+#[cfg(test)]
+mod damaged_input_tests;

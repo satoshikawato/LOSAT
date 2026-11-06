@@ -474,6 +474,10 @@ mod rows {
     /// store forwards). The values and the lengths are those of the `Vec` before. The fields are
     /// private to `rows`, so that only `new` and `resize` set `ptr` and `len`.
     pub(super) struct Rows<T> {
+        #[expect(
+            dead_code,
+            reason = "owns the buffer that `ptr` points into: it is only dropped, never read"
+        )]
         v: Vec<T>,
         /// `v`'s element on the boundary (`v` is never pushed to, so its buffer does not move).
         ptr: *mut T,
@@ -4482,7 +4486,7 @@ mod tests {
             for w in lon.windows(2).filter(|w| w[0].0 == w[1].0) {
                 assert_eq!(
                     w[1].1 - w[0].1,
-                    (w[0].3 + 1) / 2 + X_ROW_BYTES,
+                    w[0].3.div_ceil(2) + X_ROW_BYTES,
                     "case {case} row bytes"
                 );
             }
@@ -4493,7 +4497,7 @@ mod tests {
             assert_eq!(
                 on.trace.x_test_used().iter().sum::<usize>(),
                 lon.iter()
-                    .map(|r| (r.3 + 1) / 2 + X_ROW_BYTES)
+                    .map(|r| r.3.div_ceil(2) + X_ROW_BYTES)
                     .sum::<usize>(),
                 "case {case} trace bytes"
             );

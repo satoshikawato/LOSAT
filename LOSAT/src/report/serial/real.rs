@@ -120,6 +120,16 @@ const fn ld(n: i32) -> X87 {
     panic!("no long double literal 1e<n> in LONG_DOUBLE_POW10");
 }
 
+/// `__NLG(1.e<n>)` / `NCBI_CONST_LONGDOUBLE(1e<n>)` for an `n` of `LONG_DOUBLE_POW10` (the
+/// literals of `NStr::StringToDoublePosix` are among them: `1e-15` to `1e15`, and the multiples
+/// of 16 up to 256 of either sign). `None` for another `n`.
+pub(crate) fn long_double_pow10(n: i32) -> Option<X87> {
+    LONG_DOUBLE_POW10
+        .iter()
+        .find(|&&(k, _, _)| k == n)
+        .map(|&(_, significand, exponent)| X87::from_parts(significand, exponent))
+}
+
 #[cfg(test)]
 pub(super) fn long_double_pow10_table() -> &'static [(i32, u64, i32)] {
     &LONG_DOUBLE_POW10

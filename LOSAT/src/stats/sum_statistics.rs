@@ -9,8 +9,8 @@
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:152-163
 const LOGDERIV_ORDER_MAX: usize = 4;
 const POLYGAMMA_ORDER_MAX: usize = LOGDERIV_ORDER_MAX;
-const NCBIMATH_PI: f64 = 3.1415926535897932384626433832795;
-const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+const NCBIMATH_PI: f64 = std::f64::consts::PI; // the same f64 as NCBI's literal
+const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 const NCBIMATH_LNPI: f64 = 1.1447298858494001741434273513531;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:60-62
@@ -267,7 +267,7 @@ fn s_poly_gamma(x: f64, order: i32) -> f64 {
             value = -value;
         }
         if order == 0 {
-            let mut sx = (NCBIMATH_PI * x).sin().abs();
+            let sx = (NCBIMATH_PI * x).sin().abs();
             if (x < -0.1 && ((x.ceil() == x) || sx < 2.0 * DBL_EPSILON)) || sx == 0.0 {
                 return f64::INFINITY;
             }
@@ -369,6 +369,10 @@ pub fn ln_gamma_int(n: i32) -> f64 {
 ///
 /// E = -ln(1 - P)
 pub fn p_to_e(p: f64) -> f64 {
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if p < 0.0 || p > 1.0 {
         return i32::MIN as f64;
     }
@@ -460,10 +464,8 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
         if s <= -3.4 * rf {
             return 1.0;
         }
-    } else if r < 101 {
-        if s <= -4.0 * rf {
-            return 1.0;
-        }
+    } else if r < 101 && s <= -4.0 * rf {
+        return 1.0;
     }
 
     let stddev = rf.sqrt();
@@ -497,7 +499,7 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
     let num_hsps_minus_2 = r - 2;
 
     // Callback for outer integral
-    let mut outer_integral = |x: f64, adj2: f64, sdvir: f64| -> f64 {
+    let outer_integral = |x: f64, adj2: f64, sdvir: f64| -> f64 {
         let y = (x - sdvir).exp();
         if !y.is_finite() {
             return 0.0;
@@ -690,7 +692,7 @@ where
 ///
 /// # Arguments
 /// * `starting_points` - Number of starting points permitted between adjacent alignments
-///                       (typically max_overlap + max_gap + 1)
+///   (typically max_overlap + max_gap + 1)
 /// * `num_hsps` - Number of distinct alignments in this collection
 /// * `xsum` - Sum of normalized scores (each weighted by lambda and logK)
 /// * `query_length` - Effective length of the query sequence

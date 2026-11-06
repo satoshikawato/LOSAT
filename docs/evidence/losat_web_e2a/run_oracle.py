@@ -37,6 +37,9 @@ be empty) and the side files are DIR/<fixture_id>.out_<n>.json|xml (`side_sha256
 A psiblast row whose `files` column is `pssm` runs with `-out_ascii_pssm <tmp>/<fixture_id>.pssm`
 added; the report is DIR/<fixture_id>.out as usual and the PSSM files it writes are
 DIR/<fixture_id>.pssm and DIR/<fixture_id>.pssm.<n> (`side_sha256`; empty when it writes none).
+The kinds `pssm-asn` (`-out_pssm <tmp>/<fixture_id>.asn`) and `pssm-both` (both options) write
+DIR/<fixture_id>.asn too; in these two kinds a file over 64 KB is not frozen, only its SHA-256 is
+kept in `side_sha256` (LOSAT/tests/xinclude_fixtures.py, `FREEZE_LIMIT`).
 
 - default: compare the outputs with the manifest's hash columns; exit 1 on a difference.
 - --freeze: write the hash and size columns of the manifest instead (run with
@@ -205,7 +208,7 @@ def main() -> int:
             written = xinclude.run_with_files(command, row["fixture_id"], outfmt(row), cwd=ENGINE)
             run = written.run
         elif pssm:
-            pssms = xinclude.run_with_pssm(command, row["fixture_id"], cwd=ENGINE)
+            pssms = xinclude.run_with_pssm(command, row["fixture_id"], xinclude.files_kind(row), cwd=ENGINE)
             run = pssms.run
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True)
@@ -222,7 +225,7 @@ def main() -> int:
         else:
             (args.out / f"{row['fixture_id']}.out").write_bytes(run.stdout)
         if pssm and args.freeze:
-            xinclude.freeze_pssm(pssms, args.out, row["fixture_id"])
+            xinclude.freeze_pssm(pssms, args.out, row["fixture_id"], xinclude.files_kind(row))
         elif pssm:
             defects = [f"stray files {pssms.stray}"] if pssms.stray else []
         err = args.out / f"{row['fixture_id']}.err"
@@ -237,7 +240,7 @@ def main() -> int:
             observed.update(xinclude.observed(written))
             hashes.append("side_sha256")
         if pssm:
-            observed.update(xinclude.observed_pssm(pssms, row["fixture_id"]))
+            observed.update(xinclude.observed_pssm(pssms, row["fixture_id"], xinclude.files_kind(row)))
             hashes.append("side_sha256")
         if row.get("contract") == DEVIATION:
             # outfmt 7 prints the -db argument, so the database has a fixed path.

@@ -10,9 +10,9 @@ use anyhow::{ensure, Context, Result};
 use rayon::prelude::*;
 
 use super::kappa::{
-    convert_distinct_alignments, normalize_postredo_scores, postredo_converted_stats,
-    postredo_converted_stats_with_matrix, postredo_engine_positives, reap_contained_postredo_hsps,
-    redo_preliminary_match, ConvertedKappaHsp,
+    convert_distinct_alignments, normalize_postredo_scores, postredo_converted_stats_with_matrix,
+    postredo_engine_positives, reap_contained_postredo_hsps, redo_preliminary_match,
+    ConvertedKappaHsp,
 };
 use super::kappa_heap::{compo_early_termination, CompoHeap, CompoHeapRecord};
 use super::search_gapped::{
@@ -51,7 +51,6 @@ use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, BlastCompoAdjustMode, BlastCompoQueryInfo, BlastCompoSequenceData,
     EMatrixAdjustRule,
 };
-use crate::sequence::packed_subject::SubjectNt;
 use crate::stats::karlin::evalue_from_raw_score;
 use crate::stats::spouge::{blast_spouge_stoe, lookup_protein_gumbel_params, BlastGumbelBlk};
 use crate::stats::tables::{
@@ -305,6 +304,7 @@ struct LocalBatchSetup {
 // BLAST_CalcEffLengths(...); BlastHitSavingParametersUpdate(...);
 // x_PrintOneQueryFooter(*results.GetAncillaryData());
 // Formatting consumes the same initial context lengths computed before search.
+#[cfg(test)]
 pub(super) fn run_local_for_report(
     queries: &[Vec<u8>],
     subjects: &[&[u8]],
@@ -601,12 +601,11 @@ fn x_batches_on_own_pools(
     } else {
         threads / 2
     };
-    let own_pools = if few_subjects && left >= 2 && left <= most {
+    if few_subjects && left >= 2 && left <= most {
         left
     } else {
         0
-    };
-    own_pools
+    }
 }
 
 /// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): the threads of the `index`-th of `pools` pools that share
@@ -831,7 +830,15 @@ pub(super) fn x_search_batches<'p>(
         }
         Ok(Some(searched))
     })?;
-    let Some(mut searched) = searched else {
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(
+            unused_mut,
+            reason = "extended only by the own-pool batches (parallel)"
+        )
+    )]
+    let Some(mut searched) = searched
+    else {
         return Ok(None);
     };
     // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): each of the last batches on a pool of its own with its
@@ -1341,6 +1348,7 @@ fn run_local_search_with_pool(
             link.as_ref(),
             scoring,
             observer.as_deref_mut(),
+            pool,
         );
     }
     // With a `-db` stream, the subjects of the lists, each read
@@ -1804,7 +1812,6 @@ fn run_local_search_with_pool(
             keep_item(context, &mut heaps, item);
         }
     }
-    drop(keep_item);
 
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // c++/src/algo/blast/core/blast_hits.c:3243-3297,3383-3400,3420-3437:
@@ -3203,6 +3210,7 @@ fn finish_local_mode0_no_sum_stats(
     link: Option<&super::stage_d_stats::LocalLinkParameters>,
     scoring: LocalStageDScoring,
     mut observer: Option<&mut StageDBoundaryTrace>,
+    pool: Option<&SearchPool<'_>>,
 ) -> Result<Vec<KappaResultHitList>> {
     let mut results: Vec<_> = (0..queries.len())
         .map(|_| KappaResultHitList::new(profile.max_target_seqs))
@@ -3228,12 +3236,18 @@ fn finish_local_mode0_no_sum_stats(
         subjects,
         preliminary_lists.iter().map(|(_, oid, _)| *oid),
     );
-    for (context, oid, preliminary) in preliminary_lists {
+    // The traceback of one list and what its result keeps: the posttraceback subject length, and
+    // the HSPs with their statistics and report counts unless none is left. A function of the list
+    // alone (its query, its subject and the search's parameters).
+    let item = |context: usize,
+                oid: usize,
+                preliminary: &LinkedHspList|
+     -> Result<(i32, Option<KappaResultList>)> {
         // The subject as the readers of windows take it: the record's letters, or its store (every
         // `-db` sequence; with EXPERIMENT LOSAT_X_TBNSTORE every `-subject` record), whose windows
-        // the translations make when they read them (`TargetTranslation`). The whole subject's
-        // letters are made only for a list retried after a fence, whose frames NCBI translates
-        // whole (one window for all of them). A `-db` sequence is
+        // the translations make when they read them (`TargetTranslation`), also for a list retried
+        // after a fence, whose frames NCBI translates whole (windows of the whole translation,
+        // `TargetTranslation::x_whole_window`). A `-db` sequence is
         // read once for the traceback (`x_stage`); EXPERIMENT (LOSAT_X_TBNSTAGEDROP): the stage
         // lets it go after its last list (`_done`, declared before `held`).
         let _done = x_stage.x_match(oid);
@@ -3280,13 +3294,8 @@ fn finish_local_mode0_no_sum_stats(
                 None,
                 None,
             )?;
-        if let Some(ref mut trace) = observer {
-            trace
-                .posttraceback_lengths
-                .push((context, oid, stat_length));
-        }
         if traced.is_empty() {
-            continue;
+            return Ok((stat_length, None));
         }
         let input: Vec<_> = traced.iter().map(|row| (context, row.hsp)).collect();
         // NCBI c++/src/algo/blast/core/blast_traceback.c:213-250,717-719:
@@ -3316,7 +3325,7 @@ fn finish_local_mode0_no_sum_stats(
         };
         reap_by_evalue(&mut post, profile.expect_value);
         if post.hsps.is_empty() {
-            continue;
+            return Ok((stat_length, None));
         }
         let mut target = TargetTranslation::of(subject, code);
         let mut owned: Vec<Option<TracebackOwnedHsp>> = traced.into_iter().map(Some).collect();
@@ -3358,11 +3367,74 @@ fn finish_local_mode0_no_sum_stats(
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        results[context].update(KappaResultList {
-            oid: i32::try_from(oid)?,
-            hsps: post,
-            payloads,
-        })?;
+        Ok((
+            stat_length,
+            Some(KappaResultList {
+                oid: i32::try_from(oid)?,
+                hsps: post,
+                payloads,
+            }),
+        ))
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1518-1521
+    // ```c
+    // #pragma omp parallel for default(none) num_threads(actual_num_threads) schedule(guided) if (actual_num_threads > 1) \
+    //         shared(retval, thread_data, batches, score_params, program_number, sbp, hit_params, pattern_blk, query, \
+    //         	   ext_params, query_info, default_db_genetic_code, has_been_interrupted, interrupt_search, progress_info, actual_num_threads)
+    //         for (i = 0; i < batches->num_batches; i++) {
+    // ```
+    // NCBI traces the batches of its HSP stream (the lists of one subject) on its threads
+    // (`schedule(guided)`), each into the results of its thread, which are joined afterward
+    // (SThreadLocalDataArrayConsolidateResults). Here the lists of a batch are traced on the search
+    // pool and their results put in the hit lists in the order of the lists, as the serial loop
+    // puts them; a list's result is a function of the list alone.
+    #[cfg(feature = "parallel")]
+    let parallel = pool.is_some_and(SearchPool::enabled) && preliminary_lists.len() > 1;
+    #[cfg(not(feature = "parallel"))]
+    let parallel = {
+        let _ = pool;
+        false
+    };
+    // No NCBI counterpart: stage report for the thread-use statistics; it does not change any value
+    // NCBI computes.
+    crate::utils::threading::report_stage(
+        "tblastn",
+        "traceback",
+        preliminary_lists.len(),
+        parallel,
+    );
+    let mut keep = |context: usize, oid: usize, (stat_length, result)| -> Result<()> {
+        if let Some(ref mut trace) = observer {
+            trace
+                .posttraceback_lengths
+                .push((context, oid, stat_length));
+        }
+        if let Some(result) = result {
+            results[context].update(result)?;
+        }
+        Ok(())
+    };
+    if parallel {
+        #[cfg(feature = "parallel")]
+        {
+            let pool = pool.expect("parallel pool selected");
+            let batch_size = pool.threads().saturating_mul(32).max(64);
+            for batch in preliminary_lists.chunks(batch_size) {
+                let traced: Vec<_> = pool.install(|| {
+                    batch
+                        .par_iter()
+                        .map(|(context, oid, list)| item(*context, *oid, list))
+                        .collect()
+                });
+                for ((context, oid, _), result) in batch.iter().zip(traced) {
+                    keep(*context, *oid, result?)?;
+                }
+            }
+        }
+    } else {
+        for (context, oid, list) in &preliminary_lists {
+            keep(*context, *oid, item(*context, *oid, list)?)?;
+        }
     }
     // NCBI c++/src/algo/blast/core/blast_traceback.c:1763-1776:
     // if (BlastSeqSrcGetTotLen(seq_src) > 0)
@@ -4519,7 +4591,7 @@ mod tests {
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
-                    &[query.clone()],
+                    std::slice::from_ref(&query),
                     &[subject.as_slice()],
                     profile,
                     mode == 2,

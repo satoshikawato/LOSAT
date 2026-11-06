@@ -456,7 +456,7 @@ mod tests {
         let (seq1, len1, seq2, len2) = related(rng, len, reverse);
         let band_len = match rng.below(6) {
             0 => 1 + rng.below(8),
-            1 | 2 | 3 => 9 + rng.below(250),
+            1..=3 => 9 + rng.below(250),
             _ => 250 + rng.below(350),
         } as usize;
         // seq1_index = seq2_index + first + cell

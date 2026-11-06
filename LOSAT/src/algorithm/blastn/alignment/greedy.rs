@@ -627,6 +627,12 @@ impl GreedyAlignScratch {
     }
 }
 
+impl Default for GreedyAlignScratch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Greedy edit script container.
 /// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:56-61 (GapEditScript)
 struct GapEditScript {
@@ -726,9 +732,6 @@ fn debug_greedy_traceback_enabled(q_off: usize, s_off: usize) -> bool {
     q_filter.trim().parse::<usize>().ok() == Some(q_off)
         && s_filter.trim().parse::<usize>().ok() == Some(s_off)
 }
-
-/// Signal that a diagonal/offset is invalid
-// INVALID_OFFSET and INVALID_DIAG are imported from constants
 
 /// Greedy alignment for high-identity nucleotide sequences.
 ///
@@ -960,11 +963,7 @@ pub fn greedy_align_one_direction_with_max_dist(
             // NCBI initializes max_score[0..xdrop_offset] to 0, so negative index access returns 0
             // LOSAT uses: mem.max_score[xdrop_idx + xdrop_offset] where xdrop_idx = max(0, d - xdrop_offset)
             // This is equivalent: when d < xdrop_offset, we use max_score[xdrop_offset] = 0 (initialized)
-            let xdrop_idx = if d >= xdrop_offset {
-                d - xdrop_offset
-            } else {
-                0 // When d < xdrop_offset, use index 0 which maps to max_score[xdrop_offset] = 0
-            };
+            let xdrop_idx = d.saturating_sub(xdrop_offset);
             let xdrop_score =
                 mem.max_score[xdrop_idx + xdrop_offset] + (op_cost * d as i32) - scaled_xdrop;
             // NCBI uses ceil division: (Int4)ceil((double)xdrop_score / (match_cost / 2))
@@ -1390,11 +1389,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
         // NCBI initializes max_score[0..xdrop_offset] to 0, so negative index access returns 0
         // LOSAT uses: max_score[xdrop_idx + xdrop_offset] where xdrop_idx = max(0, d - xdrop_offset)
         // This is equivalent: when d < xdrop_offset, we use max_score[xdrop_offset] = 0 (initialized)
-        let xdrop_idx = if d as usize >= xdrop_offset {
-            (d as usize) - xdrop_offset
-        } else {
-            0 // When d < xdrop_offset, use index 0 which maps to max_score[xdrop_offset] = 0
-        };
+        let xdrop_idx = (d as usize).saturating_sub(xdrop_offset);
         let xdrop_score_raw =
             max_score[xdrop_idx + xdrop_offset] + score_common_factor * d - xdrop_threshold;
         // NCBI: (Int4)ceil((double)xdrop_score / match_score_half)
@@ -1437,7 +1432,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
                 let dl = get_diag_lower(&diag_lower_arr, d_open, max_penalty_usize);
                 let du = get_diag_upper(&diag_upper_arr, d_open, max_penalty_usize);
                 // NCBI: k + 1 <= diag_upper && k + 1 >= diag_lower
-                if k + 1 >= dl && k + 1 <= du && (d_open as usize) < last_seq2_off.len() {
+                if k + 1 >= dl && k < du && (d_open as usize) < last_seq2_off.len() {
                     let ku1 = (k + 1) as usize;
                     if ku1 < array_size {
                         seq2_index_del = last_seq2_off[d_open as usize][ku1].match_off;
@@ -1452,7 +1447,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             if d_ext >= 0 {
                 let dl = get_diag_lower(&diag_lower_arr, d_ext, max_penalty_usize);
                 let du = get_diag_upper(&diag_upper_arr, d_ext, max_penalty_usize);
-                if k + 1 >= dl && k + 1 <= du && (d_ext as usize) < last_seq2_off.len() {
+                if k + 1 >= dl && k < du && (d_ext as usize) < last_seq2_off.len() {
                     let ku1 = (k + 1) as usize;
                     if ku1 < array_size {
                         let ext_off = last_seq2_off[d_ext as usize][ku1].delete_off;
@@ -1493,7 +1488,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
                 let dl = get_diag_lower(&diag_lower_arr, d_open, max_penalty_usize);
                 let du_bound = get_diag_upper(&diag_upper_arr, d_open, max_penalty_usize);
                 // NCBI: k - 1 <= diag_upper && k - 1 >= diag_lower
-                if k - 1 >= dl && k - 1 <= du_bound && (d_open as usize) < last_seq2_off.len() {
+                if k > dl && k - 1 <= du_bound && (d_open as usize) < last_seq2_off.len() {
                     let km1 = (k - 1) as usize;
                     if km1 < array_size {
                         seq2_index_ins = last_seq2_off[d_open as usize][km1].match_off;
@@ -1507,7 +1502,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             if d_ext >= 0 && k >= 1 {
                 let dl = get_diag_lower(&diag_lower_arr, d_ext, max_penalty_usize);
                 let du_bound = get_diag_upper(&diag_upper_arr, d_ext, max_penalty_usize);
-                if k - 1 >= dl && k - 1 <= du_bound && (d_ext as usize) < last_seq2_off.len() {
+                if k > dl && k - 1 <= du_bound && (d_ext as usize) < last_seq2_off.len() {
                     let km1 = (k - 1) as usize;
                     if km1 < array_size {
                         let ext_off = last_seq2_off[d_ext as usize][km1].insert_off;
@@ -2169,8 +2164,6 @@ fn reduce_gaps(
 
     let mut q_pos: isize = 0;
     let mut s_pos: isize = 0;
-    let q_len = q_end as isize - q_start;
-    let s_len = s_end as isize - s_start;
 
     for i in 0..esp.size {
         if esp.op_type[i] == GapAlignOpType::Sub {
@@ -2332,23 +2325,26 @@ fn get_next_affine_tback_from_match(
     op_cost: i32,
     seq2_index: &mut i32,
 ) -> GapAlignOpType {
-    let mut new_seq2_index;
+    let new_seq2_index;
 
     let idx = (*d) - op_cost;
     let dl_idx = idx + diag_offset;
-    if idx >= 0 && dl_idx >= 0 && (dl_idx as usize) < diag_lower.len() {
-        if diag >= diag_lower[dl_idx as usize] && diag <= diag_upper[dl_idx as usize] {
-            new_seq2_index = last_seq2_off.get(idx, diag).match_off;
-            if new_seq2_index
-                >= last_seq2_off
-                    .get(*d, diag)
-                    .insert_off
-                    .max(last_seq2_off.get(*d, diag).delete_off)
-            {
-                *d -= op_cost;
-                *seq2_index = new_seq2_index;
-                return GapAlignOpType::Sub;
-            }
+    if idx >= 0
+        && dl_idx >= 0
+        && (dl_idx as usize) < diag_lower.len()
+        && diag >= diag_lower[dl_idx as usize]
+        && diag <= diag_upper[dl_idx as usize]
+    {
+        new_seq2_index = last_seq2_off.get(idx, diag).match_off;
+        if new_seq2_index
+            >= last_seq2_off
+                .get(*d, diag)
+                .insert_off
+                .max(last_seq2_off.get(*d, diag).delete_off)
+        {
+            *d -= op_cost;
+            *seq2_index = new_seq2_index;
+            return GapAlignOpType::Sub;
         }
     }
 
@@ -2384,26 +2380,30 @@ fn get_next_affine_tback_from_indel(
     let last_d = (*d) - gap_extend;
     let mut new_seq2_index = INVALID_OFFSET;
     let dl_idx = last_d + diag_offset;
-    if last_d >= 0 && dl_idx >= 0 && (dl_idx as usize) < diag_lower.len() {
-        if new_diag >= diag_lower[dl_idx as usize] && new_diag <= diag_upper[dl_idx as usize] {
-            new_seq2_index = if state == GapAlignOpType::Ins {
-                last_seq2_off.get(last_d, new_diag).insert_off
-            } else {
-                last_seq2_off.get(last_d, new_diag).delete_off
-            };
-        }
+    if last_d >= 0
+        && dl_idx >= 0
+        && (dl_idx as usize) < diag_lower.len()
+        && new_diag >= diag_lower[dl_idx as usize]
+        && new_diag <= diag_upper[dl_idx as usize]
+    {
+        new_seq2_index = if state == GapAlignOpType::Ins {
+            last_seq2_off.get(last_d, new_diag).insert_off
+        } else {
+            last_seq2_off.get(last_d, new_diag).delete_off
+        };
     }
 
     let last_d = (*d) - gap_open_extend;
     let dl_idx = last_d + diag_offset;
-    if last_d >= 0 && dl_idx >= 0 && (dl_idx as usize) < diag_lower.len() {
-        if new_diag >= diag_lower[dl_idx as usize]
-            && new_diag <= diag_upper[dl_idx as usize]
-            && new_seq2_index < last_seq2_off.get(last_d, new_diag).match_off
-        {
-            *d -= gap_open_extend;
-            return GapAlignOpType::Sub;
-        }
+    if last_d >= 0
+        && dl_idx >= 0
+        && (dl_idx as usize) < diag_lower.len()
+        && new_diag >= diag_lower[dl_idx as usize]
+        && new_diag <= diag_upper[dl_idx as usize]
+        && new_seq2_index < last_seq2_off.get(last_d, new_diag).match_off
+    {
+        *d -= gap_open_extend;
+        return GapAlignOpType::Sub;
     }
 
     *d -= gap_extend;
@@ -2762,6 +2762,7 @@ const X_GREEDY_BLOCK: usize = 256;
 ///      * the byte the slide stops at in `seq2` is not the fence sentry,
 ///      * the slide is not longer than the longest run when the block
 ///        started (no seed update: the longest run only grows).
+///
 ///    This pass reads the sequences only and keeps no state between
 ///    diagonals.
 /// 3. The diagonals in the reference order: dropped diagonals as in the
@@ -3460,7 +3461,6 @@ fn blast_greedy_align_rows(
     let mut converged = false;
     for d_val in 1..=max_dist {
         d = d_val;
-        let mut curr_score: i32;
         let mut curr_extent: i32 = 0;
         let mut curr_seq2_index: i32 = 0;
         let mut curr_diag: i32 = 0;
@@ -3658,7 +3658,7 @@ fn blast_greedy_align_rows(
                 }
             }
         }
-        curr_score = curr_extent * (match_cost / 2) - d * (match_cost + mismatch_cost);
+        let curr_score: i32 = curr_extent * (match_cost / 2) - d * (match_cost + mismatch_cost);
         let prev_max = non_affine_mem.max_score[(d as usize - 1) + max_score_offset];
         if curr_score >= prev_max {
             non_affine_mem.max_score[(d as usize) + max_score_offset] = curr_score;
@@ -3757,7 +3757,7 @@ fn blast_greedy_align_rows(
     while d > 0 {
         let mut new_seq2_index: i32 = 0;
         let new_diag = get_next_non_affine_tback(
-            &last_seq2_off,
+            last_seq2_off,
             non_affine_mem,
             d,
             best_diag,
@@ -3940,7 +3940,7 @@ fn blast_affine_greedy_align(
         return index * match_score;
     }
 
-    let diag0_idx = (0 + diag_offset) as usize;
+    let diag0_idx = diag_offset as usize;
     diag_lower[diag0_idx] = diag_origin;
     diag_upper[diag0_idx] = diag_origin;
 
@@ -3982,21 +3982,26 @@ fn blast_affine_greedy_align(
             let mut seq2_index_del = INVALID_OFFSET;
             let d_open = d - gap_open_extend;
             let idx_open = d_open + diag_offset;
-            if d_open >= 0 && idx_open >= 0 && (idx_open as usize) < diag_lower.len() {
-                if k + 1 >= diag_lower[idx_open as usize] && k + 1 <= diag_upper[idx_open as usize]
-                {
-                    seq2_index_del = last_seq2_off.get(d_open, k + 1).match_off;
-                }
+            if d_open >= 0
+                && idx_open >= 0
+                && (idx_open as usize) < diag_lower.len()
+                && k + 1 >= diag_lower[idx_open as usize]
+                && k < diag_upper[idx_open as usize]
+            {
+                seq2_index_del = last_seq2_off.get(d_open, k + 1).match_off;
             }
 
             let d_ext = d - gap_extend;
             let idx_ext = d_ext + diag_offset;
-            if d_ext >= 0 && idx_ext >= 0 && (idx_ext as usize) < diag_lower.len() {
-                if k + 1 >= diag_lower[idx_ext as usize] && k + 1 <= diag_upper[idx_ext as usize] {
-                    let ext_off = last_seq2_off.get(d_ext, k + 1).delete_off;
-                    if ext_off > seq2_index_del {
-                        seq2_index_del = ext_off;
-                    }
+            if d_ext >= 0
+                && idx_ext >= 0
+                && (idx_ext as usize) < diag_lower.len()
+                && k + 1 >= diag_lower[idx_ext as usize]
+                && k < diag_upper[idx_ext as usize]
+            {
+                let ext_off = last_seq2_off.get(d_ext, k + 1).delete_off;
+                if ext_off > seq2_index_del {
+                    seq2_index_del = ext_off;
                 }
             }
 
@@ -4007,18 +4012,23 @@ fn blast_affine_greedy_align(
             }
 
             let mut seq2_index_ins = INVALID_OFFSET;
-            if d_open >= 0 && idx_open >= 0 && (idx_open as usize) < diag_lower.len() {
-                if k - 1 >= diag_lower[idx_open as usize] && k - 1 <= diag_upper[idx_open as usize]
-                {
-                    seq2_index_ins = last_seq2_off.get(d_open, k - 1).match_off;
-                }
+            if d_open >= 0
+                && idx_open >= 0
+                && (idx_open as usize) < diag_lower.len()
+                && k > diag_lower[idx_open as usize]
+                && k - 1 <= diag_upper[idx_open as usize]
+            {
+                seq2_index_ins = last_seq2_off.get(d_open, k - 1).match_off;
             }
-            if d_ext >= 0 && idx_ext >= 0 && (idx_ext as usize) < diag_lower.len() {
-                if k - 1 >= diag_lower[idx_ext as usize] && k - 1 <= diag_upper[idx_ext as usize] {
-                    let ext_off = last_seq2_off.get(d_ext, k - 1).insert_off;
-                    if ext_off > seq2_index_ins {
-                        seq2_index_ins = ext_off;
-                    }
+            if d_ext >= 0
+                && idx_ext >= 0
+                && (idx_ext as usize) < diag_lower.len()
+                && k > diag_lower[idx_ext as usize]
+                && k - 1 <= diag_upper[idx_ext as usize]
+            {
+                let ext_off = last_seq2_off.get(d_ext, k - 1).insert_off;
+                if ext_off > seq2_index_ins {
+                    seq2_index_ins = ext_off;
                 }
             }
             if seq2_index_ins == INVALID_OFFSET {
@@ -4034,10 +4044,13 @@ fn blast_affine_greedy_align(
 
             let d_match = d - op_cost;
             let idx_match = d_match + diag_offset;
-            if d_match >= 0 && idx_match >= 0 && (idx_match as usize) < diag_lower.len() {
-                if k >= diag_lower[idx_match as usize] && k <= diag_upper[idx_match as usize] {
-                    seq2_index = seq2_index.max(last_seq2_off.get(d_match, k).match_off + 1);
-                }
+            if d_match >= 0
+                && idx_match >= 0
+                && (idx_match as usize) < diag_lower.len()
+                && k >= diag_lower[idx_match as usize]
+                && k <= diag_upper[idx_match as usize]
+            {
+                seq2_index = seq2_index.max(last_seq2_off.get(d_match, k).match_off + 1);
             }
 
             seq1_index = seq2_index + k - diag_origin;
@@ -4171,8 +4184,8 @@ fn blast_affine_greedy_align(
                 let mut new_seq2_index = 0;
                 state = get_next_affine_tback_from_match(
                     &last_seq2_off,
-                    &diag_lower,
-                    &diag_upper,
+                    diag_lower,
+                    diag_upper,
                     diag_offset,
                     &mut d,
                     best_diag,
@@ -4185,8 +4198,8 @@ fn blast_affine_greedy_align(
                 block.add(GapAlignOpType::Ins, 1);
                 state = get_next_affine_tback_from_indel(
                     &last_seq2_off,
-                    &diag_lower,
-                    &diag_upper,
+                    diag_lower,
+                    diag_upper,
                     diag_offset,
                     &mut d,
                     best_diag,
@@ -4199,8 +4212,8 @@ fn blast_affine_greedy_align(
                 block.add(GapAlignOpType::Del, 1);
                 state = get_next_affine_tback_from_indel(
                     &last_seq2_off,
-                    &diag_lower,
-                    &diag_upper,
+                    diag_lower,
+                    diag_upper,
                     diag_offset,
                     &mut d,
                     best_diag,
@@ -4220,55 +4233,6 @@ fn blast_affine_greedy_align(
     }
 
     max_score_base[(best_dist as usize) + max_score_offset]
-}
-
-/// Compute alignment stats from a gap edit script.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:745-818 (identity counting)
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1055-1074 (gap counts)
-fn stats_from_edit_ops(
-    q_seq: &[u8],
-    s_seq: &[u8],
-    q_start: usize,
-    s_start: usize,
-    edit_ops: &[GapEditOp],
-) -> (usize, usize, usize, usize) {
-    let mut matches = 0usize;
-    let mut mismatches = 0usize;
-    let mut gap_opens = 0usize;
-    let mut gap_letters = 0usize;
-
-    let mut qi = q_start;
-    let mut si = s_start;
-
-    for op in edit_ops {
-        match *op {
-            GapEditOp::Sub(n) => {
-                for _ in 0..n {
-                    if qi < q_seq.len() && si < s_seq.len() {
-                        if q_seq[qi] == s_seq[si] {
-                            matches += 1;
-                        } else {
-                            mismatches += 1;
-                        }
-                    }
-                    qi += 1;
-                    si += 1;
-                }
-            }
-            GapEditOp::Del(n) => {
-                gap_opens += 1;
-                gap_letters += n as usize;
-                si += n as usize;
-            }
-            GapEditOp::Ins(n) => {
-                gap_opens += 1;
-                gap_letters += n as usize;
-                qi += n as usize;
-            }
-        }
-    }
-
-    (matches, mismatches, gap_opens, gap_letters)
 }
 
 /// Core greedy gapped alignment result (internal).

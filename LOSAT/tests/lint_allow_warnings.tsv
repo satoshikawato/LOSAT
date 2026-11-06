@@ -2,8 +2,6 @@
 # Fixed at dev 8a5656f7f (2026-11-05): lib.rs, main.rs and 23 test files. Remove a row when its file drops
 # the attribute; never add one.
 path
-LOSAT/src/lib.rs
-LOSAT/src/main.rs
 LOSAT/tests/cli_smoke.rs
 LOSAT/tests/compressed_lookup.rs
 LOSAT/tests/outfmt13_14_files.rs

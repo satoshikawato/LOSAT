@@ -1615,8 +1615,10 @@ mod tests {
         let mut tax =
             WriteDbTaxId::new(&ptf, linux.default_taxid_map_size, &platform, &settings).unwrap();
         for (oid, (acc, taxids)) in oids.iter().enumerate() {
-            lmdb.insert_entry(acc.as_bytes(), oid as u32, false);
-            lmdb.insert_entry(format!("{acc}.1").as_bytes(), oid as u32, true);
+            lmdb.insert_entry(acc.as_bytes(), oid as u32, false)
+                .unwrap();
+            lmdb.insert_entry(format!("{acc}.1").as_bytes(), oid as u32, true)
+                .unwrap();
             tax.insert_entries(taxids, oid as u32);
         }
         lmdb.insert_volumes_info(&["db.00".to_string(), "db.01".to_string()], &[3, 2])

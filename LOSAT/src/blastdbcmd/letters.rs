@@ -207,7 +207,7 @@ mod tests {
         assert_eq!(crc32_zip(b"123456789"), 0xCBF4_3926);
         assert_eq!(sequence_hash(b"1234\n56789"), !0xCBF4_3926);
         assert_eq!(hash_text(0), "0");
-        assert_eq!(hash_text(0x9E5E_1FA), "0X9E5E1FA");
+        assert_eq!(hash_text(0x09E5_E1FA), "0X9E5E1FA");
     }
 
     #[test]

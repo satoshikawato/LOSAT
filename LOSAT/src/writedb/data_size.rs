@@ -454,12 +454,12 @@ pub fn string_to_uint8_data_size(text: &str) -> Result<u64, DataSizeError> {
     if suff_idx < S_NUM_SUFFIXES {
         str_ptr += 1;
         if str_ptr + 1 < str_end
-            && str_[str_ptr].to_ascii_uppercase() == b'I'
-            && str_[str_ptr + 1].to_ascii_uppercase() == b'B'
+            && str_[str_ptr].eq_ignore_ascii_case(&b'I')
+            && str_[str_ptr + 1].eq_ignore_ascii_case(&b'B')
         {
             str_ptr += 2;
             binary_suff = true;
-        } else if str_ptr < str_end && str_[str_ptr].to_ascii_uppercase() == b'B' {
+        } else if str_ptr < str_end && str_[str_ptr].eq_ignore_ascii_case(&b'B') {
             str_ptr += 1;
         }
     } else if suff_c == b'B' {

@@ -380,7 +380,7 @@ cd LOSAT && cargo fmt
   shared parts): two lines in `LOSAT/tests/suites/<suite>.rs`; run it as
   `cargo test --test <suite> <file>::`. A file that changes the process environment or process-wide
   state (`set_var`, `remove_var`, `set_current_dir`, `set_hook`, `take_hook`, rayon's
-  `build_global`) gets its own `[[test]]` in `LOSAT/Cargo.toml` instead, since the tests of a suite
+  `build_global`, the global allocator `#[global_allocator]`) gets its own `[[test]]` in `LOSAT/Cargo.toml` instead, since the tests of a suite
   share one process; `tests/suite_layout.rs` checks both.
 - Integration tests must compare output with NCBI BLAST+ and verify hit counts,
   bit scores, E-values, and coordinates, on real short and long sequences.
@@ -435,7 +435,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 └── tests/
     ├── suites/            # Six test targets (five programs and common); each includes its files by `#[path]`
     ├── unit/              # Unit tests, in the `unit_tests` target
-    ├── *.rs               # Test files of the suites, and two targets of their own (`suite_layout.rs` checks)
+    ├── *.rs               # Test files of the suites, and three targets of their own: `blastn_report_stream_api`, `unit_tests`, `thread_memory` (`suite_layout.rs` checks)
     ├── fixtures/ db_search/ blastdbcmd/ seqdb/ fasta/ ...   # Inputs and frozen NCBI outputs
     ├── *.py               # Gate scripts (fast regressions, platform checks, switch reach)
     └── *.sh               # Older comparison scripts (run_comparison.sh, run_all_tests.sh)

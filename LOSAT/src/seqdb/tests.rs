@@ -622,13 +622,12 @@ fn databases_that_need_unread_data_are_rejected() {
     }
     let db = SeqDb::open(&db_name("prot_v4"), SeqType::Protein).unwrap();
     assert!(!db.has_parsed_seqids().unwrap());
-    for (name, key) in [("alias_gilist", "GILIST")] {
-        let error = open_error(name, SeqType::Protein);
-        assert!(
-            matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains(key)),
-            "{name}: {error}"
-        );
-    }
+    let (name, key) = ("alias_gilist", "GILIST");
+    let error = open_error(name, SeqType::Protein);
+    assert!(
+        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains(key)),
+        "{name}: {error}"
+    );
     // NCBI counts prot_v4 twice here (30 sequences reported, 20 read).
     let error = open_error("alias_twice", SeqType::Protein);
     assert!(

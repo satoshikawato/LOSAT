@@ -1997,8 +1997,7 @@ mod tests {
             hit_list(vec![(last, 1e-9), (first_volume_ordinal, 1e-5)], 2),
         ];
         let error = read_titles(&database, &batch, &mut titles)
-            .err()
-            .expect("a missing header file")
+            .expect_err("a missing header file")
             .downcast::<HeaderReadError>()
             .expect("NCBI's error, with the query that reached it");
         assert_eq!(error.query, 1);
@@ -2190,16 +2189,12 @@ mod tests {
         crate::utils::threading::with_search_pool(4, "BLASTN", |pool| {
             let parallel = x_reported_records(&ordinals[..300], Some(pool), &record).unwrap();
             assert_eq!(ids(parallel), ids(serial));
-            let error = x_reported_records(&ordinals, Some(pool), &record)
-                .err()
-                .expect("refused");
+            let error = x_reported_records(&ordinals, Some(pool), &record).expect_err("refused");
             assert_eq!(format!("{error}"), "refused 300");
             Ok(())
         })
         .unwrap();
-        let error = x_reported_records(&ordinals, None, &record)
-            .err()
-            .expect("refused");
+        let error = x_reported_records(&ordinals, None, &record).expect_err("refused");
         assert_eq!(format!("{error}"), "refused 300");
     }
 

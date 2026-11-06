@@ -538,7 +538,9 @@ fn convert_scores(
     num_columns: usize,
     by_row: bool,
 ) -> Vec<[i32; BLASTAA_SIZE]> {
-    let mut rows = vec![[BLAST_SCORE_MIN; BLASTAA_SIZE]; num_columns];
+    let mut rows: Vec<[i32; BLASTAA_SIZE]> = (0..num_columns)
+        .map(|_| [BLAST_SCORE_MIN; BLASTAA_SIZE])
+        .collect();
     let mut values = scores.iter().copied();
     if by_row {
         for r in 0..num_rows {

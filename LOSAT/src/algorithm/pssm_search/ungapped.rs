@@ -345,9 +345,8 @@ mod tests {
                 score: 40,
             }
         );
-        // The right walk stops at the second W after the run (score 32 <= 40 - ... no: it breaks
-        // when maxscore - score >= dropoff or score <= 0): 40 - 4 - 4 - 4 - 4 = 24, drop 16 at
-        // s 13 = past the subject's end, so it runs to the end: s_last_off 12.
+        // The right walk from s 9 reaches 40 at s 9 and drops by 4 at s 10 and 11 (8 < 16): it
+        // ends at the subject's end, s_last_off 9 + 3 = 12.
         assert_eq!(hit.s_last_off, 12);
     }
 

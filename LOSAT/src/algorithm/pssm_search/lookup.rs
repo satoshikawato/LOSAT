@@ -85,7 +85,10 @@ pub(crate) fn build_pssm_lookup<R: PssmRows>(
     backbone_size += 1;
     let mask = (1usize << (word_length * charsize)) - 1;
     let mut thin = ThinBackbone {
-        chains: vec![Vec::new(); backbone_size],
+        // Built through an iterator of this module rather than `vec![...; n]`, whose
+        // `SpecFromElem` instance blastp's and tblastx's builders share (a new caller of a shared
+        // generic instance changes its inlining in their code).
+        chains: (0..backbone_size).map(|_| Vec::new()).collect(),
     };
     add_pssm_neighboring_words(&mut thin, rows, word_length, charsize, threshold);
     finalize(thin, rows.len(), word_length, charsize, mask, threshold)
@@ -340,7 +343,10 @@ fn finalize(
         }
         longest_chain = longest_chain.max(chain.len());
     }
-    let mut backbone = vec![BackboneCell::default(); backbone_size];
+    // Built through an iterator of this module (see `ThinBackbone`'s chains).
+    let mut backbone: Vec<BackboneCell> = (0..backbone_size)
+        .map(|_| BackboneCell::default())
+        .collect();
     let mut pv = vec![0u32; (backbone_size >> PV_ARRAY_BTS) + 1];
     let mut overflow = vec![0i32; overflow_cells_needed];
     let mut overflow_cursor = 0usize;

@@ -22,12 +22,6 @@ use indicatif::{ProgressBar, ProgressStyle};
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 use rayon::prelude::*;
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783
-// ```c
-// BLAST_PreliminarySearchEngine(..., hsp_stream, ...);
-// ...
-// BLAST_ComputeTraceback(..., hsp_stream, ..., results, ...);
-// ```
 use std::sync::Arc;
 
 use crate::config::NuclScoringSpec;
@@ -14558,7 +14552,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                         // per cell, so its scan (`$pv` false) tests the word there only, not first
                         // in the coarser presence vector, whose bit stands for several cells; for
                         // a head whose bits fit the cache (`x_bn_pv_once`).
-                        // The trait's methods are named in two of the three scans below only, so
+                        // The trait's methods are called in two of the three scans below only, so
                         // it is imported here and not in the macro's body.
                         use x_dc_csr::XRing as _;
                         macro_rules! x_scan_csr {

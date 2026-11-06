@@ -872,6 +872,15 @@ most 9 in BLOSUM62).
   `nz_qx2.*` `qx` then `q2`: with `BATCH_SIZE=1` the refusal of `q2`'s batch still comes before any byte. TBLASTX's
   report stream (outfmt 7 in two batches), which would write `qx`'s block before `q2`'s lookups, is off for a run that
   the taxonomy cache refuses, so `nz_qxy.fna` (`qx`, then `qy` without hits either) gets NCBI's bytes.
+- Rows `db.nz.cq.bn.*` (line DBID, L1c): BLASTN asks for that refusal only where NCBI fetches a subject too: not for
+  fields that read none (`6 qseqid evalue`) where a positive `PRE_FETCH_SEQS_LIMIT` below the batch's Seq-aligns turns
+  the prefetch off, not for queries without hits whose reports would fetch (`PRE_FETCH_SEQS_LIMIT=0`, outfmt 6), and not
+  for a batch without hits (`nz_qx.fna` in outfmt 0; `nz_qxy.fna` with `BATCH_SIZE=1` in outfmt 7, where the report
+  stream writes each batch's reports). `nz_qx2.fna` with `BATCH_SIZE=1` is refused at `q2`'s batch, whose subjects
+  (taxids 562 and 10090) NCBI fetches without a message (the superset kept since L1b); outfmt 6 writes nothing for
+  `qx` before it, and `tests/blastn_report_stream.rs` checks that outfmt 0 and 7 write `qx`'s report first where the
+  report stream acts (and only outfmt 0's prolog where it does not). The rows use `-task blastn -dust no -evalue 1e-3`
+  (megablast and dc-megablast find no hit of these queries).
 - The sequences come from the line's probe script (kept outside the repository). The databases (version 4, every file
   makeblastdb writes; `nz_pc` and `nz_nc` alike with their maps), run from `LOSAT/`:
 

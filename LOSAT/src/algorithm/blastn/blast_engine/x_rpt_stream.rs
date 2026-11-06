@@ -128,8 +128,10 @@
 //! the taxonomy database writes its messages there; the batch loop adds them to the warnings of
 //! the batch's first query (`run_in_pool`), so both paths write them before that query's report.
 //! Their lookups can be refused (a taxonomy database or a taxid that LOSAT cannot read as NCBI
-//! does), in the batch that first reports the sequence, which writes the refusal after the
-//! reports of the batches before (above).
+//! does), in the batch that first reports the sequence, and so can the run for NCBI's taxonomy
+//! cache (`TaxdbRun::cache_collision`), in the first batch that fetches a subject (NCBI looks
+//! nothing up before it); either writes the refusal after the reports of the batches before
+//! (above).
 //!
 //! `finish_sam` at NCBI's five error sites writes the document of the batches before as in the off
 //! path. Memory: the records of the batches before are rendered text, and each batch's lists are

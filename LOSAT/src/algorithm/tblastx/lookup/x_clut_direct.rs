@@ -491,8 +491,9 @@ pub(crate) enum XFlatBuild<H: XQueryOffset = i32> {
 //                 Int4 first_cell_entries = (numhits - 3) & COMPRESSED_HITS_CELL_MASK;
 // ```
 /// The position in NCBI's scan order of the offset appended with rank `k` (0-based) to a cell that
-/// ends with `n` offsets (module header).
-#[inline(always)]
+/// ends with `n` offsets (module header). The builders put a cell in that order with
+/// `x_to_scan_order`; this is the statement of the order that the unit tests check it against.
+#[cfg(test)]
 pub(crate) fn x_emission_position(k: u32, n: u32) -> u32 {
     if n <= (COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1) || k < 3 {
         return k;
@@ -515,23 +516,24 @@ pub(crate) fn x_emission_position(k: u32, n: u32) -> u32 {
 //                 Int4 first_cell_entries = (numhits - 3) & COMPRESSED_HITS_CELL_MASK;
 // ```
 /// A cell's offsets, given in the order of their appends (o_0..o_{n-1}), put in NCBI's scan order in
-/// place: o_k at `x_emission_position(k, n)`. That order keeps o_0..o_2 and takes the groups of four
-/// after them (the last one short where n - 3 is not a multiple of four) last group first, each
-/// group in its own order; so the slots after the third are reversed, and then the first group of
-/// the reversed slots (the short one) and each group of four after it are reversed back. No copy of
+/// place: o_k at `x_emission_position(k, n)`. That order keeps o_0..o_2 and takes the n >> 2 groups
+/// after them (groups of four, the last one of (n & 3) + 1 offsets) last group first, each group in
+/// its own order; so the slots after the third are reversed, and then the first group of the
+/// reversed slots (the last group's) and each group of four after it are reversed back. No copy of
 /// the cell is made (the unit test `scan_order_in_place_is_the_emission_positions` compares it with
 /// `x_emission_position` for 0 to 300 offsets).
 #[inline(always)]
 pub(crate) fn x_to_scan_order<T>(cell: &mut [T]) {
-    // `x_emission_position`'s `cells`: one group is the identity.
+    // `x_emission_position`'s `cells`: with one group (n <= 7, the cells of 5 or fewer offsets
+    // among them) the order is the order of the appends.
     let groups = cell.len() >> 2;
-    if cell.len() <= COMPRESSED_HITS_PER_BACKBONE_CELL + 1 || groups < 2 {
+    if groups < 2 {
         return;
     }
     let tail = &mut cell[3..];
     tail.reverse();
-    let short = tail.len() - 4 * (groups - 1);
-    let (last, full) = tail.split_at_mut(short);
+    let last_len = tail.len() - 4 * (groups - 1);
+    let (last, full) = tail.split_at_mut(last_len);
     last.reverse();
     for group in full.chunks_exact_mut(4) {
         group.reverse();
@@ -3235,7 +3237,7 @@ mod tests {
     }
 
     // `x_to_scan_order` puts o_k at `x_emission_position(k, n)` for cells of 0 to 300 offsets, of
-    // both offset types.
+    // both offset types of the tables (`i32`, `u16`).
     #[test]
     fn scan_order_in_place_is_the_emission_positions() {
         for n in 0..=300u32 {
@@ -3243,9 +3245,12 @@ mod tests {
             for k in 0..n {
                 expected[x_emission_position(k, n) as usize] = k;
             }
-            let mut cell: Vec<u32> = (0..n).collect();
+            let mut cell: Vec<i32> = (0..n as i32).collect();
             x_to_scan_order(&mut cell);
-            assert_eq!(cell, expected, "n {n}");
+            assert!(
+                cell.iter().map(|&v| v as u32).eq(expected.iter().copied()),
+                "n {n}"
+            );
             let mut narrow: Vec<u16> = (0..n as u16).collect();
             x_to_scan_order(&mut narrow);
             assert!(

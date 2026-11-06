@@ -119,7 +119,7 @@ pub fn extend_gapped_one_direction(
         let mut row_gap_opens = gap_opens;
         let mut row_alignment_len = alignment_len;
 
-        let diag_start = if i > band { i - band } else { 0 };
+        let diag_start = i.saturating_sub(band);
         let diag_end = (i + band + 1).min(s_len);
 
         for j in diag_start..diag_end {

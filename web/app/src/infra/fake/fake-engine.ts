@@ -2,7 +2,7 @@
 // Its outputs are not search results and say so on every line. It exists so that the
 // application layer and UI can be built and tested against the EngineGateway contract.
 import { recordMismatch } from '../../domain/dataset';
-import { CUSTOM_OUTPUT, customOutfmt, formatNumber, OUTFMT_FLAG, outfmtOption, OUTPUT_FORMATS } from '../../domain/output-format';
+import { CUSTOM_OUTPUT, customOutfmt, OUTFMT_FLAG, outfmtOption, OUTPUT_FORMATS } from '../../domain/output-format';
 import { PROGRAMS, type ProgramId } from '../../domain/programs';
 import {
   InputMismatchError,
@@ -49,20 +49,15 @@ export class FakeEngine implements EngineGateway {
   }
 
   /**
-   * Refuses an unknown program, a word that is neither an option of the program's `describe`
-   * nor the value of the option before it, with the CLI's message, and an -outfmt of a format
-   * that the browser does not write yet (13 and 14, BLASTX's 11), with the adapter's
-   * (`run::parse_run`); the engine's other checks are not imitated.
+   * Refuses an unknown program, and a word that is neither an option of the program's `describe`
+   * nor the value of the option before it, with the CLI's message; the engine's other checks are
+   * not imitated.
    */
   async validate(argv: readonly string[]): Promise<ValidationResult> {
     const program = argv[0];
     if (!PROGRAMS.some((p) => p.id === program)) return { ok: false, message: `unknown program: ${program}` };
     const { parameters } = await this.describe(program as ProgramId);
     const outfmt = outfmtOption(argv);
-    const number = outfmt === undefined ? undefined : formatNumber(outfmt.value);
-    if (number === 13 || number === 14 || (number === 11 && program === 'blastx')) {
-      return { ok: false, message: `-outfmt ${number} is not supported in the browser yet` };
-    }
     for (let i = 1; i < argv.length; i++) {
       const word = argv[i]!;
       if (i === outfmt?.at) {

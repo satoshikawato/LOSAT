@@ -160,6 +160,7 @@ pub(crate) struct LmdbPlatform {
 
 impl LmdbPlatform {
     /// [`Platform::LINUX_X86_64`]'s.
+    #[cfg(test)]
     pub(crate) const LINUX_X86_64: LmdbPlatform = LmdbPlatform {
         os_page_size: 4096,
         file_length_is_map_size: false,

@@ -1261,6 +1261,10 @@ pub(super) mod tests {
     // The tables of one case, built by the fill of this module in one part (the loop's
     // statements in reading order; the tests above check it against `build_two_stage_lookup`),
     // from start values `helper0` / `pv0` of the counters and presence-vector words.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     struct Built {
         hashtable: Vec<u32>,
         next_pos: Vec<u32>,
@@ -1269,6 +1273,10 @@ pub(super) mod tests {
         stats: FillStats,
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn build_with(
         parts: usize,
         in_pool: bool,
@@ -1305,6 +1313,10 @@ pub(super) mod tests {
         b
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn assert_same(a: &Built, b: &Built, what: &str) {
         assert_eq!(a.hashtable, b.hashtable, "{what}: hashtable");
         assert_eq!(a.next_pos, b.next_pos, "{what}: next_pos");
@@ -1374,7 +1386,7 @@ pub(super) mod tests {
             let mb = &reference.mb_lookup;
             let (cells, next_len) = (
                 1usize << (2 * lut_word_length),
-                next_len_of(&queries, offsets),
+                next_len_of(queries, offsets),
             );
             // (a table of 3-byte elements, LOSAT_X_MB24, gives its chains back as 4-byte arrays)
             let (mb_hashtable, mb_next_pos) = reference.x_chain_arrays(next_len);
@@ -1576,7 +1588,7 @@ pub(super) mod tests {
             (12, true, 400_000),
         ] {
             let q = repeat_case(&mut rng, 25_000);
-            let queries = vec![q];
+            let queries = [q];
             let refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
             let offsets = vec![0i32];
             let masks = vec![Vec::new()];

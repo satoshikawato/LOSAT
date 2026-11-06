@@ -296,6 +296,7 @@ where
         }
     }
     let _ = stage;
+    let _ = pool;
     let mut state = new_state();
     for &query in order {
         results[query as usize] = Some(task(&mut state, query));

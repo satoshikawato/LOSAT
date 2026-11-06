@@ -31,3 +31,6 @@ pub mod value_parsers;
 // NCBI api/blast_objmgr_tools.cpp:515-520 (`GetCompressedPlusStrand`): EXPERIMENT (LOSAT_X_TBNSTORE,
 // LOSAT_X_TBXSTORE), the records of `-subject` packed as read.
 pub(crate) mod x_packed_subjects;
+
+#[cfg(test)]
+mod damaged_input_tests;

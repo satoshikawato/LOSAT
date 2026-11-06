@@ -8,9 +8,8 @@ use anyhow::{bail, Context, Result};
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 use rayon::prelude::*;
-use std::fs::File;
-use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::io::Write;
+use std::path::Path;
 use std::sync::{
     atomic::{AtomicU64, Ordering as AtomicOrdering},
     Arc,
@@ -51,14 +50,13 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoAdjustMode, BlastCompoGappingParams,
 };
 use crate::report::{
-    format_bitscore_ncbi, format_evalue_ncbi_tabular, format_percent_identity_ncbi,
     write_blastp_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport, OutputConfig,
     OutputFormat, PairwiseConfig, PairwiseHit, ReportContext,
 };
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{
     blast_spouge_etos, blast_spouge_stoe, lookup_protein_gumbel_params, lookup_protein_params,
-    lookup_protein_params_ungapped, protein_scoring_supported, BlastGumbelBlk, KarlinParams,
+    lookup_protein_params_ungapped, BlastGumbelBlk, KarlinParams,
 };
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score, BLASTAA_SIZE};
 
@@ -104,9 +102,8 @@ use super::gapalign::{
 };
 use super::hsp::{
     blast_compo_early_termination, collect_hits_and_methods_from_hit_lists,
-    collect_hits_from_hit_lists, fill_results_from_compo_heaps, hit_list_to_seqalign_order,
-    reap_hsplist_by_evalue, trim_by_max_hsps, update_best_evalue, BlastCompoHeap, BlastpHitList,
-    BlastpHsp, BlastpHspList,
+    fill_results_from_compo_heaps, hit_list_to_seqalign_order, reap_hsplist_by_evalue,
+    trim_by_max_hsps, update_best_evalue, BlastCompoHeap, BlastpHitList, BlastpHsp, BlastpHspList,
 };
 #[cfg(all(
     feature = "parallel",
@@ -1857,16 +1854,6 @@ fn blastp_context_idx_for_query_offset_with_bounds(
     lo
 }
 
-#[cfg(test)]
-#[inline]
-fn blastp_get_ungapped_hsp_context(contexts: &[QueryContext], init_hsp: &InitHSP) -> usize {
-    blastp_get_ungapped_hsp_context_with_bounds(
-        contexts,
-        blastp_context_lookup_bounds(contexts),
-        init_hsp,
-    )
-}
-
 #[inline]
 fn blastp_get_ungapped_hsp_context_with_bounds(
     contexts: &[QueryContext],
@@ -2759,34 +2746,29 @@ fn x_tabular_subject_ids_cached<'m>(
     check_tabular_subject_ids(hit_lists, subjects, meta.ids()).map(|()| meta.shown())
 }
 
-/// The tabular subject id fields of one subject: `sseqid`, `sacc` and `saccver`. They are the
-/// same id for a `-subject` record and for a database sequence without parsed Seq-ids; a
-/// database sequence with parsed Seq-ids has its own three (`ParsedSubject::tabular_ids`).
+/// The tabular subject id field of one subject that the default fields print: `saccver`. It is
+/// the same id as `sseqid` and `sacc` for a `-subject` record and for a database sequence without
+/// parsed Seq-ids; a database sequence with parsed Seq-ids has its own three
+/// (`ParsedSubject::tabular_ids`).
 #[derive(Clone, Copy)]
 struct SubjectIdFields<'a> {
-    seq_id: &'a [u8],
-    accession: &'a [u8],
     accession_version: &'a [u8],
 }
 
 impl<'a> SubjectIdFields<'a> {
-    /// One id for the three fields.
+    /// The fields of one id.
     fn same(id: &'a [u8]) -> Self {
         SubjectIdFields {
-            seq_id: id,
-            accession: id,
             accession_version: id,
         }
     }
 
-    /// The fields of subject `s_idx`: its id among `ids` (empty for none), and its `sacc` and
-    /// `saccver` among `accessions` where it has them.
+    /// The fields of subject `s_idx`: its id among `ids` (empty for none), and its
+    /// `saccver` among `accessions` where it has one.
     fn of(ids: &'a [Arc<[u8]>], accessions: &'a [Option<[Arc<[u8]>; 2]>], s_idx: usize) -> Self {
         let id = ids.get(s_idx).map_or(&b""[..], |id| id.as_ref());
         match accessions.get(s_idx).and_then(Option::as_ref) {
-            Some([accession, version]) => SubjectIdFields {
-                seq_id: id,
-                accession,
+            Some([_, version]) => SubjectIdFields {
                 accession_version: version,
             },
             None => SubjectIdFields::same(id),
@@ -2938,46 +2920,6 @@ fn write_blastp_tabular_hit_lists(
         )?;
     }
     Ok(())
-}
-
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:2122-2149
-// ```c
-// if(sequence_standard[i]==sequence[i]){
-//     match ++;
-// } else {
-//     if ((m_AlignType&eProt)
-//         && m_Matrix[(int)sequence_standard[i]][(int)sequence[i]] > 0){
-//         positive ++;
-//     }
-// }
-// ```
-fn count_identities_and_positives(
-    query: &[u8],
-    subject: &[u8],
-    q_off: usize,
-    s_off: usize,
-    len: usize,
-    matrix: ScoringMatrix,
-) -> Option<(usize, usize)> {
-    if q_off + len > query.len() || s_off + len > subject.len() {
-        return None;
-    }
-
-    let mut identities = 0usize;
-    let mut positives = 0usize;
-
-    for i in 0..len {
-        let q = query[q_off + i];
-        let s = subject[s_off + i];
-        if q == s {
-            identities += 1;
-            positives += 1;
-        } else if blastp_standard_score(matrix, q, s) > 0 {
-            positives += 1;
-        }
-    }
-
-    Some((identities, positives))
 }
 
 fn decode_alignment(seq: &[u8], start: usize, end: usize) -> Option<String> {
@@ -3795,6 +3737,7 @@ fn compute_diag_table_shape(query_length: i32, window: i32) -> (i32, i32) {
 // if (init_hsp->ungapped_data && init_hsp->ungapped_data->score <
 //     (Int4)(kRestrictedMult * hit_params->cutoffs[contxt].cutoff_score)) {
 // ```
+#[cfg(test)]
 fn build_restricted_align_array(
     init_hsps: &[InitHSP],
     contexts: &[QueryContext],
@@ -4488,6 +4431,7 @@ fn purge_preliminary_hits_with_common_endpoints(
 // ...
 // *pStatusCode = s_ResultHspToDistinctAlign(...);
 // ```
+#[cfg(test)]
 fn prepare_preliminary_hits_for_kappa(
     mut hits: Vec<BlastpPreliminaryHsp>,
 ) -> Vec<BlastpPreliminaryHsp> {
@@ -4516,6 +4460,7 @@ fn prepare_preliminary_hits_for_kappa_in_place(hits: &mut Vec<BlastpPreliminaryH
 // ...
 // Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
 // ```
+#[cfg(test)]
 fn split_preliminary_hits_by_query(
     preliminary_hits: Vec<BlastpPreliminaryHsp>,
     contexts: &[QueryContext],
@@ -5852,7 +5797,8 @@ fn resolve_for_formats(
         requested.outfmt = format.outfmt.to_string();
         let choice = crate::blastinput::app::parse_formatting_string(&requested.outfmt)?;
         let program = crate::blastinput::app::Program::Blastp;
-        if crate::blastinput::app::report_format(&choice, program, args.out.as_deref())?.is_none() {
+        let out = format.side_out(args.out.as_deref());
+        if crate::blastinput::app::report_format(&choice, program, out)?.is_none() {
             crate::blastinput::app::formatting_handler_check(&choice, program)?;
             crate::blastinput::app::xinclude_check(&choice)?;
         }
@@ -6445,6 +6391,12 @@ fn search(
                     x_bp_encode_block_subjects(&subjects.records, args.num_threads, pool)?;
                 crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
                 let pool = &pool.x_with_ext(&x_subjects);
+                // The caller's receivers of the side files of outfmt 13 and 14, which every
+                // block's output keeps.
+                let side_sinks: Vec<_> = formats
+                    .iter()
+                    .map(|format| format.sink.side_files().cloned())
+                    .collect();
                 let mut sinks: Vec<XBlockSink<'_>> = formats
                     .iter_mut()
                     .map(|format| XBlockSink::new(&mut format.sink))
@@ -6479,9 +6431,15 @@ fn search(
                         formats: sinks
                             .iter_mut()
                             .zip(&outfmts)
-                            .map(|(output, &outfmt)| crate::api::local_blast::FormatOutput {
-                                outfmt,
-                                sink: OutputSink::Writer(output),
+                            .zip(&side_sinks)
+                            .map(|((output, &outfmt), side)| {
+                                crate::api::local_blast::FormatOutput {
+                                    outfmt,
+                                    sink: match side {
+                                        Some(side) => OutputSink::Files(output, side.clone()),
+                                        None => OutputSink::Writer(output),
+                                    },
+                                }
                             })
                             .collect(),
                         diagnostics: &mut **diagnostics,
@@ -6716,10 +6674,7 @@ fn x_query_block_plan(
         && (subject_source.database().is_some()
             || (outputs.observer.is_some() && outputs.hits.is_none())
             || (outputs.formats.len() > 1
-                && !outputs
-                    .formats
-                    .iter()
-                    .all(|format| matches!(format.sink, OutputSink::Writer(_)))))
+                && !outputs.formats.iter().all(|format| format.sink.is_writer())))
     {
         return None;
     }
@@ -6827,7 +6782,7 @@ fn x_query_block_plan(
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 fn x_block_search_refuses_nothing(
     args: &ResolvedBlastpArgs,
-    queries: &[FastaRecord],
+    _queries: &[FastaRecord],
     query_batches: &[seq_range::RangedBatch],
     lengths: &[usize],
 ) -> bool {
@@ -7120,10 +7075,16 @@ fn write_reports_without_queries(
         // (`PrintProlog`, `PrintEpilog`: an empty pipe), and nothing for a query file that is
         // empty (`Query is Empty!`, before the formatter).
         if let Some(kind) = blastp_xml2_kind(format.outfmt) {
+            let sink = format.sink.side_files().cloned();
             let mut writer = format.sink.open()?;
             let mut bytes = Vec::new();
-            crate::report::blast_xml2::Xml2Document::for_run(kind, false, args.out.as_deref())
-                .epilog(&mut bytes)?;
+            crate::report::blast_xml2::Xml2Document::for_run(
+                kind,
+                false,
+                args.out.as_deref(),
+                sink.as_ref(),
+            )
+            .epilog(&mut bytes)?;
             writer.write_all(&bytes)?;
             writer.flush()?;
             continue;
@@ -8540,7 +8501,7 @@ fn run_resolved_in_pool(
     // the scanned shortest length, line DI-8); a FASTA subject set answers its real minimum,
     // raised to 10.
     let cutoff_subject_length = match database {
-        None => blastp_preliminary_cutoff_subject_length(&subjects),
+        None => blastp_preliminary_cutoff_subject_length(subjects),
         Some(database) => database.cutoff_subject_length(),
     };
     let hit_cutoff_scores: Vec<i32> = contexts
@@ -9816,7 +9777,7 @@ fn run_resolved_in_pool(
                 if preliminary_hits.is_empty() {
                     continue;
                 }
-                let ctx = &contexts[q_idx as usize];
+                let ctx = &contexts[q_idx];
                 // The compact list, with the E-values of `Blast_HSPListGetEvalues` and the reap by the
                 // preliminary E-value (`x_prelim_compact.rs`); a list that keeps HSPs gives back the
                 // room of the reaped ones (`x_prelim_free.rs`).
@@ -9966,7 +9927,7 @@ fn run_resolved_in_pool(
             // aux_arg->hsp_stream = BlastHSPStreamNew(...);
             // status = Blast_RunPreliminarySearchWithInterrupt_MT(...);
             // ```
-            let subject_diag_offsets = blastp_subject_diag_offsets(&subjects, window);
+            let subject_diag_offsets = blastp_subject_diag_offsets(subjects, window);
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
             // ```c
             // BlastScoringParameters* score_params = NULL;
@@ -10003,7 +9964,7 @@ fn run_resolved_in_pool(
                 crate::utils::xreach::x_reach!("LOSAT_X_BPSUBJRUN", true);
                 x_subject_runs::x_search_subject_runs(
                     pool,
-                    &subjects,
+                    subjects,
                     &subject_diag_offsets,
                     &new_scratch,
                     &process_subject,
@@ -10149,7 +10110,7 @@ fn run_resolved_in_pool(
         None => None,
     };
     // The subject set of a `-subject` search, which the reports read after the redo.
-    let subject_set: &[EncodedProtein] = &subjects;
+    let subject_set: &[EncodedProtein] = subjects;
     let subjects = match (listed_subjects.as_ref(), database) {
         (Some(listed), Some(database)) => listed.redo_subjects(database),
         _ => super::x_redo_subjects::XRedoSubjects::Encoded(subject_set),
@@ -11677,7 +11638,7 @@ fn run_resolved_in_pool(
         Some(build_pairwise_hits(
             collect_hits_and_methods_from_hit_lists(&hit_lists),
             &contexts,
-            &subjects,
+            subjects,
             args.scoring.matrix,
             true,
             query_records,
@@ -12098,6 +12059,8 @@ fn run_resolved_in_pool(
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
+        // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
+        let side_sink = format.sink.side_files().cloned();
         // The taxonomy database's messages of XML2 and JSON go to the diagnostics at every
         // format, and the archive saves the warnings of its batches' queries.
         let mut warnings = (warning_lines.is_some()
@@ -12274,6 +12237,7 @@ fn run_resolved_in_pool(
                                 kind,
                                 false,
                                 args.out.as_deref(),
+                                side_sink.as_ref(),
                             )
                             .epilog(&mut bytes)?;
                             writer.write_all(&bytes)?;
@@ -12507,6 +12471,7 @@ fn run_resolved_in_pool(
                             kind,
                             params,
                             args.out.as_deref(),
+                            side_sink.as_ref(),
                         );
                         // EXPERIMENT (LOSAT_X_BPQBLOCK): a block continues the document
                         // of the blocks before it and hands its state on.
@@ -12913,6 +12878,7 @@ fn run_resolved_in_pool(
 mod tests {
     use super::*;
     use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
+    use std::path::PathBuf;
 
     // EXPERIMENT (LOSAT_X_BPQBLOCK): all four documents (outfmt 13 to 16) get a block plan; a
     // kind added to `Xml2Kind` is not admitted until `x_xml2_kind_takes_blocks` names it.
@@ -12990,10 +12956,13 @@ mod tests {
         assert!(listed.letters(1).is_none());
     }
 
-    use crate::algorithm::blastp::args::{BlastpCompBasedStats, BlastpSegSpec};
     use crate::stats::KarlinParams;
     use crate::utils::matrix::ncbistdaa;
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn make_test_blastp_hsp_list(oid: u32, raw_score: i32) -> BlastpHspList<XPrelimHsp> {
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
         // ```c
@@ -13029,6 +12998,10 @@ mod tests {
         }
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn make_test_subject_result(oid: usize, raw_score: i32) -> BlastpSubjectResult {
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1553-1554
         // ```c
@@ -13432,7 +13405,7 @@ mod tests {
         assert_eq!(plain_diag.last_hit(), 90);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:554-561
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:566-573
     // ```c
     // if (query_offset - diff <
     //     query_info->contexts[curr_context].query_offset) {
@@ -13443,8 +13416,13 @@ mod tests {
     // ```
     #[test]
     fn test_blastp_two_hit_cross_query_reject_uses_context_start() {
-        assert!(105 - 10 < 100);
-        assert!(!(105 - 5 < 100));
+        // aa_ungapped.c:566: the hit is rejected when `query_offset - diff` lies before the
+        // context's start. The two cases are checked when the test is compiled.
+        const fn rejected(query_offset: i32, diff: i32, context_start: i32) -> bool {
+            query_offset - diff < context_start
+        }
+        const { assert!(rejected(105, 10, 100)) };
+        const { assert!(!rejected(105, 5, 100)) };
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:358-372
@@ -14992,7 +14970,7 @@ mod tests {
                     state ^= state << 13;
                     state ^= state >> 7;
                     state ^= state << 17;
-                    if index % 2 == 1 && state % 97 == 0 {
+                    if index % 2 == 1 && state.is_multiple_of(97) {
                         let run = (length - sequence.len()).min(30);
                         sequence.extend(std::iter::repeat_n(b'Q', run));
                     } else {

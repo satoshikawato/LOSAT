@@ -17,7 +17,9 @@ use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::protein_display_score;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats};
-use super::hit_collector::{QueryLists, TblastxHspList};
+#[cfg(test)]
+use super::hit_collector::QueryLists;
+use super::hit_collector::TblastxHspList;
 use super::scoring::{Blosum62Score, TbxScore};
 
 /// The version that NCBI's TBLASTX reports print.
@@ -192,6 +194,7 @@ impl DisplayCode {
 /// The displayed residue of codon `offset` of `frame` (+1..+3, -1..-3) of `sequence`: the
 /// codon's bases read on the frame's strand (the IUPAC complement on the minus strand) and
 /// translated with the display's table (`display_codon`, which merges D/N, E/Q and I/L).
+#[cfg(test)]
 pub(crate) fn display_residue(sequence: &[u8], frame: i8, offset: usize, code: &GeneticCode) -> u8 {
     DisplayCode::new(code).residue(sequence, frame, offset)
 }
@@ -1170,13 +1173,9 @@ impl<'a> PairwiseRows<'a> {
         // ```
         // The frames that the report prints come from the records' coordinates and
         // lengths (`seq_range::record_frame`); without ranges they are the search's.
-        let query_frame =
-            record_frame(hit.query_frame > 0, hit.q_start as usize - 1, query_length) as i8;
-        let subject_frame = record_frame(
-            hsp.subject_frame > 0,
-            hit.s_start as usize - 1,
-            subject_length,
-        ) as i8;
+        let query_frame = record_frame(hit.query_frame > 0, hit.q_start - 1, query_length) as i8;
+        let subject_frame =
+            record_frame(hsp.subject_frame > 0, hit.s_start - 1, subject_length) as i8;
         lowercase_query_row(
             &mut query_row,
             query_frame,

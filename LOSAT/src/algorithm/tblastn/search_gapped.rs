@@ -8,12 +8,13 @@ use super::search_seed::{encode_tblastn_lookup_query, TranslatedChunk};
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::blastp::gapalign::{
-    blast_gapped_alignment_with_traceback_in_window,
-    blast_gapped_alignment_with_traceback_with_scratch, blastp_get_start_for_gapped_alignment,
+    blast_gapped_alignment_with_traceback_in_window, blastp_get_start_for_gapped_alignment,
     blastp_score_only_gapped_alignment_with_scratch, protein_identities_from_edit_ops,
     BlastpGappedAlignmentMode, GapAlignScratch,
 };
-use crate::algorithm::tblastx::translation::{translate_frame, QueryFrame};
+use crate::algorithm::tblastx::translation::{
+    frame_length, translate_frame_into, x_codon_residues, x_codons_into, QueryFrame,
+};
 use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
 use crate::sequence::packed_subject::SubjectNt;
@@ -755,8 +756,8 @@ fn x_preliminary_protein_hsps_by_unit(
         UnitState {
             two_hit: XTwoHit::with_table(
                 table,
-                &query_sequence,
-                &init_context_offsets,
+                query_sequence,
+                init_context_offsets,
                 profile.word_xdrop,
                 profile.word_cutoff,
                 profile.matrix,
@@ -850,8 +851,8 @@ fn x_preliminary_protein_hsps_by_unit(
         }
         let gapped = score_gapped_chunk(
             queries,
-            &query_frames,
-            &context_offsets,
+            query_frames,
+            context_offsets,
             total_query_length,
             frame,
             chunk,
@@ -1661,9 +1662,13 @@ pub(super) struct TargetTranslation<'a> {
     window: Vec<u8>,
     /// The bases `[from, to)` whose letters `window` holds.
     window_range: Option<(usize, usize)>,
+    /// The residue of every codon of the code (`x_codon_residues`), taken at the first
+    /// translation.
+    residues: Option<std::rc::Rc<[u8; 4096]>>,
 }
 
 impl<'a> TargetTranslation<'a> {
+    #[cfg(test)]
     pub(super) fn new(subject: &'a [u8], code: &'a GeneticCode) -> Self {
         Self::of(SubjectNt::Letters(subject), code)
     }
@@ -1690,6 +1695,7 @@ impl<'a> TargetTranslation<'a> {
             frames: std::array::from_fn(|_| TargetFrameTranslation::default()),
             window: Vec::new(),
             window_range: None,
+            residues: None,
         }
     }
 
@@ -1757,9 +1763,22 @@ impl<'a> TargetTranslation<'a> {
                         &self.window[..]
                     }
                 };
-                // NCBI translates only the HSP's frame (blast_hits.c:1216-1218, `translate_frame`).
-                let (aa_seq, aa_len) = translate_frame(letters, frame, self.code)
-                    .context("missing translated subject frame")?;
+                let code = self.code;
+                let residues = self.residues.get_or_insert_with(|| x_codon_residues(code));
+                // NCBI translates only the HSP's frame (blast_hits.c:1216-1218,
+                // `BLAST_GetTranslation`); `translate_frame_into` writes its residues between the
+                // window's ends (below) in the frame's buffer.
+                target.sequence.clear();
+                if offset >= 0 {
+                    target.sequence.push(201);
+                }
+                let Some(aa_len) =
+                    translate_frame_into(letters, frame, residues, &mut target.sequence)
+                else {
+                    *target = TargetFrameTranslation::default();
+                    bail!("missing translated subject frame");
+                };
+                target.sequence.push(if offset >= 0 { 201 } else { 0 });
                 target.start = start_shift;
                 target.stop = start_shift + aa_len;
                 // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1224-1228
@@ -1782,17 +1801,107 @@ impl<'a> TargetTranslation<'a> {
                 } else {
                     0
                 };
-                target.sequence = Vec::with_capacity(aa_len + 2);
-                if offset >= 0 {
-                    target.sequence.push(201);
-                }
-                target.sequence.extend_from_slice(&aa_seq[1..1 + aa_len]);
-                target.sequence.push(if offset >= 0 { 201 } else { 0 });
             }
         }
         Ok((&target.sequence, target.stop, target.base))
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1648-1677
+    // ```c
+    //                         if (fence_hit) {
+    //                             /* Disable range support and refetch the
+    //                             (whole) subject sequence */
+    //
+    //                             seq_arg.reset_ranges = TRUE;
+    // ...
+    //                             /* Retry the alignment with fence_hit set*/
+    //                             Blast_TracebackFromHSPList(program_number, hsp_list,
+    // ```
+    // After a fence NCBI aligns every HSP of the list again in the whole translation of its frame
+    // (`get` with offset -1: the residues, no byte before the first, a 0 after the last). No NCBI
+    // counterpart: LOSAT's speed (a whole frame of a chromosome is millions of residues, translated
+    // again for every list retried). The traceback reads a window of that translation with a fence
+    // where the window ends before the translation does, and grows the window when it reads one.
+    // Why the window's traceback is the whole translation's when it reads no fence: each extension
+    // reads the subject from the HSP outward, one column further at a time, and a column past the
+    // window is read only after the column of the fence before it; the band never reaches past
+    // the window's letters without reading that column (`b_size` passes the window's last letter
+    // only to a column the next row reads). So a traceback that reads no fence reads only residues
+    // of the whole translation, the same cells as in it, and its subject length (the window's end)
+    // stops no band that the whole length would let go on. The gapped start
+    // (`blast_get_offsets_for_gapped_alignment_protein`) reads the HSP's residues and tests its
+    // window of `HSP_MAX_WINDOW` residues against the subject's ends, and with at least that many
+    // residues on either side of the HSP its reads and tests are those of the whole translation;
+    // the identities read the alignment's residues.
+    /// The residues `[from, to)` of the whole translation of `frame` (`get(frame, -1, _)`) around
+    /// the HSP `[offset, end)` (`margin` residues on either side, at least `HSP_MAX_WINDOW`, cut at
+    /// the translation's ends), as (residues, the whole translation's length, the subject position
+    /// of the first byte). The residues end as the whole translation does where the window
+    /// reaches its ends (no byte before its first residue, a 0 after its last) and with a fence
+    /// elsewhere. A subject of fewer than 12 letters gives what `get(frame, -1, end)` gives.
+    pub(super) fn x_whole_window(
+        &mut self,
+        frame: i8,
+        offset: i32,
+        end: i32,
+        margin: usize,
+    ) -> Result<(&[u8], usize, isize)> {
+        debug_assert!(margin >= HSP_MAX_WINDOW, "margin {margin}");
+        let n = self.subject.len();
+        // `get` translates nothing for a subject of fewer than 12 letters (`stop < n / 3 - 3` is
+        // `0 < 0`) and gives an empty window, as it did after a fence.
+        if n / 3 <= 3 {
+            return self.get(frame, -1, end);
+        }
+        let context = if frame > 0 { frame - 1 } else { 2 - frame };
+        let context = usize::try_from(context).context("invalid subject frame")?;
+        if context >= self.frames.len() || frame == 0 {
+            bail!("invalid subject frame {frame}");
+        }
+        let length = frame_length(n, frame).context("missing translated subject frame")?;
+        let from = usize::try_from(offset)?.saturating_sub(margin);
+        let to = usize::try_from(end)?.saturating_add(margin).min(length);
+        let target = &mut self.frames[context];
+        if target.sequence.is_empty() || from < target.start || to > target.stop {
+            // The letters of codons `[from, to)`: those of frame `i + 1` start at letter
+            // `i + 3 * from`; codon k of frame `-(i + 1)` is the reverse complement of the letters
+            // `[n - i - 3k - 3, n - i - 3k)`.
+            let i = usize::from(frame.unsigned_abs()) - 1;
+            let bases = if frame > 0 {
+                (i + 3 * from, i + 3 * to)
+            } else {
+                (n - i - 3 * to, n - i - 3 * from)
+            };
+            let letters = match self.subject {
+                SubjectNt::Letters(letters) => &letters[bases.0..bases.1],
+                SubjectNt::Packed(store) => {
+                    if self.window_range != Some(bases) {
+                        store.letters_into(bases.0, bases.1, &mut self.window);
+                        self.window_range = Some(bases);
+                    }
+                    &self.window[..]
+                }
+            };
+            let code = self.code;
+            let residues = self.residues.get_or_insert_with(|| x_codon_residues(code));
+            target.sequence.clear();
+            if from > 0 {
+                target.sequence.push(201);
+            }
+            x_codons_into(letters, frame < 0, residues, &mut target.sequence);
+            target.sequence.push(if to == length { 0 } else { 201 });
+            target.start = from;
+            target.stop = to;
+            target.base = if from > 0 { from as isize - 1 } else { 0 };
+        }
+        Ok((&target.sequence, length, target.base))
+    }
 }
+
+/// The residues on either side of an HSP in the windows of the whole translation
+/// (`x_whole_window`) that the traceback reads after a fence; when one is too narrow, the list is
+/// traced again with windows 8 times as wide.
+const X_WHOLE_MARGIN: usize = 1 << 10;
 
 // NCBI c++/src/algo/blast/core/blast_hits.c:1330-1382:
 // compare score DESC, subject.offset ASC, subject.end DESC,
@@ -1971,6 +2080,13 @@ fn blast_hsp_test(
         || (align_length as i64) < i64::from(min_hit_length)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign_priv.h:120
+// ```c
+// #define HSP_MAX_WINDOW 11
+// ```
+/// The window of residues in which the traceback's gapped start is looked for.
+const HSP_MAX_WINDOW: usize = 11;
+
 // NCBI c++/src/algo/blast/core/blast_gapalign.c:3248-3321:
 // if (q_length <= HSP_MAX_WINDOW) { *q_retval = q_start + q_length/2;
 //     *s_retval = s_start + q_length/2; return TRUE; }
@@ -1990,7 +2106,6 @@ fn blast_get_offsets_for_gapped_alignment_protein(
     s_end: usize,
     matrix: ScoringMatrix,
 ) -> Option<(usize, usize)> {
-    const HSP_MAX_WINDOW: usize = 11;
     let q_length = q_end.checked_sub(q_start)?;
     let s_length = s_end.checked_sub(s_start)?;
     if q_end > query.len() || s_end > subject.len() {
@@ -2203,11 +2318,58 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
     seg: Option<&SegParams>,
     soft_masking: bool,
     mask_lowercase: bool,
+    test_events: Option<&mut Vec<(bool, usize, usize, usize, usize, usize)>>,
+    start_events: Option<&mut Vec<(bool, i32, i32, i32, i32, i32, i32)>>,
+    containment_events: Option<&mut Vec<(bool, i8, i32, i32, i32, i32)>>,
+    identity_events: Option<&mut Vec<(usize, usize)>>,
+) -> Result<(Vec<TracebackOwnedHsp>, i32)> {
+    x_traceback_in_windows(
+        query,
+        subject,
+        db_gencode,
+        gapped,
+        matrix,
+        gap_open,
+        gap_extend,
+        x_drop_final,
+        percent_identity,
+        min_hit_length,
+        seg,
+        soft_masking,
+        mask_lowercase,
+        test_events,
+        start_events,
+        containment_events,
+        identity_events,
+        X_WHOLE_MARGIN,
+    )
+    .map(|(results, stat_length, _)| (results, stat_length))
+}
+
+/// `full_translation_traceback_with_matrix_and_events_with_mask_mode_owned` whose first windows
+/// of the whole translation after a fence hold `first_margin` residues (at least
+/// `HSP_MAX_WINDOW`) on either side of an HSP, and the number of times the list was traced in
+/// such windows (0 when no fence was read).
+fn x_traceback_in_windows(
+    query: &[u8],
+    subject: SubjectNt<'_>,
+    db_gencode: u8,
+    gapped: &[GappedHsp],
+    matrix: ScoringMatrix,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop_final: i32,
+    percent_identity: f64,
+    min_hit_length: i32,
+    seg: Option<&SegParams>,
+    soft_masking: bool,
+    mask_lowercase: bool,
     mut test_events: Option<&mut Vec<(bool, usize, usize, usize, usize, usize)>>,
     mut start_events: Option<&mut Vec<(bool, i32, i32, i32, i32, i32, i32)>>,
     mut containment_events: Option<&mut Vec<(bool, i8, i32, i32, i32, i32)>>,
     mut identity_events: Option<&mut Vec<(usize, usize)>>,
-) -> Result<(Vec<TracebackOwnedHsp>, i32)> {
+    first_margin: usize,
+) -> Result<(Vec<TracebackOwnedHsp>, i32, usize)> {
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     // NCBI c++/src/algo/blast/core/blast_traceback.c:380-391,583-596:
     // query = query_blk->sequence + context_offset;
@@ -2252,7 +2414,19 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
     let query_length = i32::try_from(query.len())?;
     let subject_limit = i32::try_from(subject.len() / 3)? + 1;
     let mut target = TargetTranslation::of(subject, &code);
-    for pass in 0..2 {
+    // After a fence (pass 1) each HSP is traced in a window of the whole translation, `margin`
+    // residues on either side (`x_whole_window`).
+    let mut margin = first_margin.max(HSP_MAX_WINDOW);
+    let mut pass = 0;
+    let mut attempts = 0;
+    loop {
+        // The events before this pass, kept when a window of pass 1 turns out too narrow.
+        let marks = [
+            test_events.as_deref().map_or(0, Vec::len),
+            start_events.as_deref().map_or(0, Vec::len),
+            containment_events.as_deref().map_or(0, Vec::len),
+            identity_events.as_deref().map_or(0, Vec::len),
+        ];
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:294,425-433: initialized from raw subject
         // length, then overwritten by each positive translated_length.
         let mut stat_length = i32::try_from(subject.len())?;
@@ -2285,11 +2459,11 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
             if contained {
                 continue;
             }
-            let (subject_sequence, translated_length, subject_base) = target.get(
-                hit.frame,
-                if pass == 0 { hit.s_start } else { -1 },
-                hit.s_end,
-            )?;
+            let (subject_sequence, translated_length, subject_base) = if pass == 0 {
+                target.get(hit.frame, hit.s_start, hit.s_end)?
+            } else {
+                target.x_whole_window(hit.frame, hit.s_start, hit.s_end, margin)?
+            };
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:425-433:
             // if (subject_length > 0) stat_length = subject_length;
             if translated_length > 0 {
@@ -2484,19 +2658,39 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
                     true
                 }
             });
-            return Ok((results, stat_length));
+            return Ok((results, stat_length, attempts));
         }
         if pass == 1 {
-            bail!("NCBI full-subject TBLASTN traceback reached a fence");
+            // A window of the whole translation was too narrow: the list again with wider
+            // windows, its events as if this attempt had not been made. With a margin of a
+            // frame's length every window is the whole translation, which has no fence.
+            if margin >= subject.len() / 3 {
+                bail!("NCBI full-subject TBLASTN traceback reached a fence");
+            }
+            margin = margin.saturating_mul(8);
+            if let Some(events) = test_events.as_deref_mut() {
+                events.truncate(marks[0]);
+            }
+            if let Some(events) = start_events.as_deref_mut() {
+                events.truncate(marks[1]);
+            }
+            if let Some(events) = containment_events.as_deref_mut() {
+                events.truncate(marks[2]);
+            }
+            if let Some(events) = identity_events.as_deref_mut() {
+                events.truncate(marks[3]);
+            }
         }
+        pass = 1;
+        attempts += 1;
         target = TargetTranslation::of(subject, &code);
     }
-    unreachable!("NCBI traceback retries at most once")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::blastp::gapalign::blast_gapped_alignment_with_traceback_with_scratch;
     use crate::algorithm::tblastn::stage_d_linking::{
         link_preliminary_hsps, reap_by_evalue, LinkedHspList,
     };
@@ -3744,7 +3938,7 @@ mod tests {
                 },
             )
         };
-        let input = vec![
+        let input = [
             hsp(0, 100, 1, 100),
             hsp(0, 80, 1, 300),
             hsp(0, 60, 1, 500),
@@ -4050,7 +4244,7 @@ mod tests {
                     .wrapping_mul(6364136223846793005)
                     .wrapping_add(1442695040888963407);
                 let draw = (state >> 33) as usize;
-                if draw % 16 == 0 {
+                if draw.is_multiple_of(16) {
                     b"RYKMSWBDHVN-rykmswbdhvn"[draw / 16 % 23]
                 } else {
                     b"ACGTacgt"[draw / 16 % 8]
@@ -4181,6 +4375,223 @@ mod tests {
         assert!(
             rows > 0 && retried && minus,
             "{rows} rows, retried {retried}, minus {minus}"
+        );
+    }
+
+    // No NCBI counterpart: the windows of the whole translation that the traceback reads after a
+    // fence (`x_whole_window`) hold the bytes of the whole translation (`get` with offset -1)
+    // between their ends, end as it does at its ends and with a fence elsewhere, and give its
+    // length; windows of every frame, at the subject's ends, read again, inside a wider one and
+    // wider than the frame, of the letters and of the store, under genetic codes 1 and 4; a subject
+    // of fewer than 12 letters gives what `get(frame, -1, _)` gives it (no residues).
+    #[test]
+    fn whole_windows_hold_the_whole_translation() {
+        let mut state = 23u64;
+        let letters: Vec<u8> = (0..9_001)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                let draw = (state >> 33) as usize;
+                if draw % 16 == 0 {
+                    b"RYKMSWBDHVN-rykmswbdhvn"[draw / 16 % 23]
+                } else {
+                    b"ACGTacgt"[draw / 16 % 8]
+                }
+            })
+            .collect();
+        let store =
+            crate::sequence::packed_subject::PackedNucleotide::from_subject_letters(&letters)
+                .expect("letters with ncbi4na codes");
+        let requests: [(i32, i32, usize); 9] = [
+            (1_000, 1_100, HSP_MAX_WINDOW),
+            (1_000, 1_100, HSP_MAX_WINDOW),
+            (1_005, 1_090, 12),
+            (0, 40, 13),
+            (2_950, 2_985, HSP_MAX_WINDOW),
+            (2_980, 2_999, 64),
+            (1_500, 1_600, 300),
+            (30, 2_950, HSP_MAX_WINDOW),
+            (1_200, 1_300, usize::MAX),
+        ];
+        for id in [1, 4] {
+            let code = GeneticCode::try_from_id(id).unwrap();
+            for subject in [SubjectNt::Letters(&letters), SubjectNt::Packed(&store)] {
+                let mut whole = TargetTranslation::of(subject, &code);
+                let mut windows = TargetTranslation::of(subject, &code);
+                for frame in [1, 2, 3, -1, -2, -3] {
+                    let (residues, length, base) = whole
+                        .get(frame, -1, 0)
+                        .map(|(sequence, stop, base)| (sequence.to_vec(), stop, base))
+                        .unwrap();
+                    assert_eq!((residues.len(), base), (length + 1, 0));
+                    for (offset, end, margin) in requests {
+                        let (sequence, got_length, got_base) = windows
+                            .x_whole_window(frame, offset, end, margin)
+                            .map(|(sequence, stop, base)| (sequence.to_vec(), stop, base))
+                            .unwrap();
+                        let what = format!("code {id} frame {frame} {offset}..{end} +-{margin}");
+                        assert_eq!(got_length, length, "{what}");
+                        // A fence (201, never a residue) before the window's first residue
+                        // (subject position `got_base`), or the first residue of the frame.
+                        let left = usize::from(sequence[0] == 201);
+                        let first = if left == 1 {
+                            usize::try_from(got_base + 1).unwrap()
+                        } else {
+                            assert_eq!(got_base, 0, "{what}");
+                            0
+                        };
+                        let last = first + sequence.len() - left - 1;
+                        assert!(
+                            first <= (offset as usize).saturating_sub(margin)
+                                && last >= (end as usize).saturating_add(margin).min(length),
+                            "{what}: [{first}, {last})"
+                        );
+                        assert_eq!(
+                            sequence[left..sequence.len() - 1],
+                            residues[first..last],
+                            "{what}"
+                        );
+                        let right = if last == length { 0 } else { 201 };
+                        assert_eq!(*sequence.last().unwrap(), right, "{what}");
+                    }
+                }
+            }
+        }
+        let short = b"ATGGCCAAATT".to_vec();
+        let code = GeneticCode::try_from_id(1).unwrap();
+        for frame in [1, 2, 3, -1, -2, -3] {
+            let mut whole = TargetTranslation::new(&short, &code);
+            let mut windows = TargetTranslation::new(&short, &code);
+            let expected = whole
+                .get(frame, -1, 2)
+                .map(|(sequence, stop, base)| (sequence.to_vec(), stop, base))
+                .unwrap();
+            let got = windows
+                .x_whole_window(frame, 0, 2, HSP_MAX_WINDOW)
+                .map(|(sequence, stop, base)| (sequence.to_vec(), stop, base))
+                .unwrap();
+            assert_eq!(got, expected, "frame {frame}");
+            assert_eq!(got, (Vec::new(), 0, 0), "frame {frame}");
+        }
+    }
+
+    // No NCBI counterpart: after a fence the traceback reads windows of the whole translation
+    // (`x_whole_window`), traced again with wider windows when one is too narrow. Its HSPs,
+    // `stat_length` and events are those of the whole translation (`usize::MAX`: every window is
+    // the whole frame, the layout of `get(frame, -1, _)`, `whole_windows_hold_the_whole_translation`)
+    // whatever the first windows: from `HSP_MAX_WINDOW` residues on either side of an HSP (a list
+    // retried after a fence is traced again in wider windows) to the default. The subjects of the
+    // post-fence and multi-HSP runs, and the same between long random flanks (where the default
+    // windows end inside the frame), letters and store, under genetic codes 1 and 4.
+    #[test]
+    fn whole_windows_trace_as_the_whole_translation() {
+        let evidence = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/"
+        );
+        let mut state = 31u64;
+        let mut flank = |length: usize| -> Vec<u8> {
+            (0..length)
+                .map(|_| {
+                    state = state
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    b"ACGT"[(state >> 33) as usize % 4]
+                })
+                .collect()
+        };
+        let (mut retried, mut rows, mut flanked, mut widened) = (false, 0, false, false);
+        for run in ["run_20260923", "multi_hsp_20260924"] {
+            let query = &read_fasta(&format!("{evidence}{run}/query.faa"))[0].1;
+            for (id, subject) in read_fasta(&format!("{evidence}{run}/subjects.fna")) {
+                let mut padded = flank(9_001);
+                padded.extend_from_slice(&subject);
+                padded.extend(flank(8_999));
+                for (letters, long) in [(subject.clone(), false), (padded, true)] {
+                    let store =
+                        crate::sequence::packed_subject::PackedNucleotide::from_subject_letters(
+                            &letters,
+                        )
+                        .expect("letters with ncbi4na codes");
+                    for db_gencode in [1, 4] {
+                        let profile = PreliminaryProfile {
+                            seg: None,
+                            soft_masking: false,
+                            threshold: 13,
+                            window: 40,
+                            word_xdrop: &[16],
+                            word_cutoff: &[0],
+                            mask_lowercase: false,
+                            matrix: ScoringMatrix::Blosum62,
+                            word_size: 3,
+                            gap_open: 11,
+                            gap_extend: 1,
+                            gap_xdrop: 38,
+                            gapped_cutoff: &[0],
+                            hsp_num_max: i32::MAX as usize,
+                        };
+                        let stages =
+                            preliminary_stages(&[query], &letters, db_gencode, profile).unwrap();
+                        let mut gapped = stages
+                            .gapped
+                            .iter()
+                            .map(|(_, hsp, _)| *hsp)
+                            .collect::<Vec<_>>();
+                        sort_gapped_score_if_needed(&mut gapped);
+                        let traceback = |subject, margin| {
+                            let mut events = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+                            let (rows, stat_length, attempts) = x_traceback_in_windows(
+                                query,
+                                subject,
+                                db_gencode,
+                                &gapped,
+                                ScoringMatrix::Blosum62,
+                                11,
+                                1,
+                                64,
+                                0.0,
+                                0,
+                                None,
+                                false,
+                                false,
+                                Some(&mut events.0),
+                                Some(&mut events.1),
+                                Some(&mut events.2),
+                                Some(&mut events.3),
+                                margin,
+                            )
+                            .unwrap();
+                            (format!("{rows:?} {stat_length} {events:?}"), rows, attempts)
+                        };
+                        let (expected, whole, once) =
+                            traceback(SubjectNt::Letters(&letters), usize::MAX);
+                        // whole frames are traced once after a fence
+                        assert!(once <= 1, "{run} {id}: {once} attempts in whole frames");
+                        for subject in [SubjectNt::Letters(&letters), SubjectNt::Packed(&store)] {
+                            for margin in [HSP_MAX_WINDOW, 12, 33, 300, X_WHOLE_MARGIN, usize::MAX]
+                            {
+                                let (got, _, attempts) = traceback(subject, margin);
+                                assert_eq!(
+                                    got, expected,
+                                    "{run} {id} long {long}, code {db_gencode}, margin {margin}"
+                                );
+                                assert_eq!(attempts > 0, once > 0, "{run} {id} margin {margin}");
+                                widened |= attempts > 1;
+                            }
+                        }
+                        rows += whole.len();
+                        if whole.iter().any(|row| row.retried) {
+                            retried = true;
+                            flanked |= long;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            rows > 0 && retried && flanked && widened,
+            "{rows} rows, retried {retried}, retried with flanks {flanked}, windows widened {widened}"
         );
     }
 
@@ -5098,7 +5509,7 @@ mod tests {
                 let call: usize = f[1].parse().unwrap();
                 InitHsp {
                     frame: [1, 2, 3, -1, -2, -3][call / 2],
-                    chunk_offset: if call % 2 == 0 { 0 } else { 4_999_900 },
+                    chunk_offset: if call.is_multiple_of(2) { 0 } else { 4_999_900 },
                     q_seed: f[3].parse().unwrap(),
                     s_seed: f[4].parse().unwrap(),
                     q_start: f[5].parse().unwrap(),
@@ -5209,7 +5620,7 @@ mod tests {
             let call: usize = f[1].parse().unwrap();
             candidate_by_call[call].push(Seed {
                 frame: frame_order[call / 2],
-                chunk_offset: if call % 2 == 0 { 0 } else { 4_999_900 },
+                chunk_offset: if call.is_multiple_of(2) { 0 } else { 4_999_900 },
                 query_offset: f[3].parse().unwrap(),
                 subject_offset: f[4].parse().unwrap(),
             });
@@ -5230,7 +5641,7 @@ mod tests {
                         (*frame, *offset),
                         (
                             frame_order[call / 2],
-                            if call % 2 == 0 { 0 } else { 4_999_900 }
+                            if call.is_multiple_of(2) { 0 } else { 4_999_900 }
                         )
                     );
                     assert_eq!(seeds, &candidate_by_call[call], "candidate call {call}");

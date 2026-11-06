@@ -1080,11 +1080,11 @@ mod tests {
             let len = [3, 4, 255, 256, 257, 271, 1_000, 20_000][case % 8];
             let mut subject: Vec<u8> = (0..len).map(|_| rng.below(28) as u8).collect();
             subject.push(0);
-            let last = len as i32 - 3;
+            let last = len - 3;
             let ranges = [
                 (0, last.max(0)),
                 (1.min(last.max(0)), last.max(0)),
-                (len as i32 / 3, last.max(len as i32 / 3)),
+                (len / 3, last.max(len / 3)),
                 (5.min(last.max(0)), (last - 7).max(5.min(last.max(0)))),
             ];
             for &range in &ranges {
@@ -1233,7 +1233,7 @@ mod tests {
             };
             let hits = cell.num_used as usize;
             let cursor = cell.entries[0] as usize;
-            if cursor + hits != lookup.overflow.len() || hits % 4 == 0 {
+            if cursor + hits != lookup.overflow.len() || hits.is_multiple_of(4) {
                 continue;
             }
             tails += 1;

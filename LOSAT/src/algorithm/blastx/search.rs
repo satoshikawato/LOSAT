@@ -5,7 +5,7 @@ use super::{
     parameters::{
         effective_lengths, ka_once_on, score_block, subject_parameters, ContextParameters,
     },
-    preliminary::{gapped, purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
+    preliminary::{purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
     query_setup::{batch_ranges, PreparedQueryBatch, BATCH_SIZE},
     reader_batch::{prepare_reader_batch, UnitPrep},
     seed::{word_finder_bx, BxLookup, Diagonals, InitHsp},
@@ -1734,7 +1734,7 @@ fn compute_subject(
             batch,
             params,
             options,
-            &encoded,
+            encoded,
             lookup,
             diagonals,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:494-500
@@ -1764,7 +1764,7 @@ fn compute_subject(
             batch,
             params,
             options,
-            &encoded,
+            encoded,
             &initial,
             xdrop,
             &mut |h, contained| {

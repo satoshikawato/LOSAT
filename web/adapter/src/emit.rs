@@ -74,14 +74,25 @@ impl StreamWriter {
 }
 
 impl Write for StreamWriter {
+    /// Sends whole chunks as they fill. A write of a chunk or more is not copied past the chunk
+    /// that the buffer completes: its whole chunks are sent from `data` (a side file of outfmt 13
+    /// or 14 comes in one write). The chunks are the same as with every byte buffered.
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        self.buffer.extend_from_slice(data);
         self.position.fetch_add(data.len() as u64, Ordering::SeqCst);
-        if self.buffer.len() >= CHUNK {
-            let full = self.buffer.len() / CHUNK * CHUNK;
-            emit(self.stream, &self.buffer[..full]);
-            self.buffer.drain(..full);
+        let mut rest = data;
+        if !self.buffer.is_empty() {
+            let take = rest.len().min(CHUNK - self.buffer.len());
+            self.buffer.extend_from_slice(&rest[..take]);
+            rest = &rest[take..];
+            if self.buffer.len() < CHUNK {
+                return Ok(data.len());
+            }
+            emit(self.stream, &self.buffer);
+            self.buffer.clear();
         }
+        let full = rest.len() / CHUNK * CHUNK;
+        emit(self.stream, &rest[..full]);
+        self.buffer.extend_from_slice(&rest[full..]);
         Ok(data.len())
     }
 

@@ -86,8 +86,8 @@ pub fn s_blast_aa_scan_subject(
     // word_length = lookup->word_length;
     // ```
     let word_length = lookup.word_length as usize;
-    let word_length_i32 = lookup.word_length as i32;
-    let lut_word_length_i32 = lookup.word_length as i32;
+    let word_length_i32 = lookup.word_length;
+    let lut_word_length_i32 = lookup.word_length;
     let charsize = lookup.charsize as usize;
     let mask = lookup.mask as usize;
     let pv = lookup.pv.as_ptr();

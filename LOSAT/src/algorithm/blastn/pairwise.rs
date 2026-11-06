@@ -7,6 +7,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use anyhow::{ensure, Context, Result};
 
 use crate::common::GapEditOp;
+#[cfg(test)]
 use crate::core::blast_encoding::encode_iupac_to_blastna;
 use crate::report::pairwise::PairwiseHit;
 use crate::stats::{

@@ -607,7 +607,7 @@ fn seed_of_pair<O: SeedOut>(
             }
             // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by max_ext_left.
             let s_byte = unsafe { *search_seq_packed.get_unchecked(s_idx) };
-            let s_base = ((s_byte << (2 * (s_off % COMPRESSION_RATIO))) >> 6) as u8;
+            let s_base = (s_byte << (2 * (s_off % COMPRESSION_RATIO))) >> 6;
             // SAFETY: q_left is bounded by the outer-sentinel query buffer.
             let q_base =
                 unsafe { *encoded_query_concat_blastna_with_sentinels.get_unchecked(q_left) };
@@ -631,7 +631,7 @@ fn seed_of_pair<O: SeedOut>(
             while ext_right < (ext_to - ext_left) {
                 // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by s_len check above.
                 let s_byte = unsafe { *search_seq_packed.get_unchecked(s_idx) };
-                let s_base = ((s_byte << (2 * (s_off % COMPRESSION_RATIO))) >> 6) as u8;
+                let s_base = (s_byte << (2 * (s_off % COMPRESSION_RATIO))) >> 6;
                 // SAFETY: q_right is bounded by the outer-sentinel query buffer.
                 let q_base =
                     unsafe { *encoded_query_concat_blastna_with_sentinels.get_unchecked(q_right) };
@@ -641,7 +641,7 @@ fn seed_of_pair<O: SeedOut>(
                 ext_right += 1;
                 q_right += 1;
                 s_off += 1;
-                if s_off % COMPRESSION_RATIO == 0 {
+                if s_off.is_multiple_of(COMPRESSION_RATIO) {
                     s_idx += 1;
                 }
             }
@@ -1107,8 +1107,16 @@ impl<T> Drop for Producing<'_, T> {
 
 // No NCBI counterpart: when the owner leaves its loop (at the end, or unwinding), the helpers
 // that wait for it to take a strip (`ahead > 0`) stop waiting.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 struct Closing<'a, T>(&'a Strips<T>);
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl<T> Drop for Closing<'_, T> {
     fn drop(&mut self) {
         self.0.failed.store(true, Ordering::Release);
@@ -1166,6 +1174,10 @@ impl<T> Strips<T> {
         guard.done = true;
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn helper(&self, produce: &impl Fn(usize, &mut Vec<T>)) {
         loop {
             if self.ahead > 0 {
@@ -1540,6 +1552,10 @@ fn seed_stage_of(
 }
 
 // No NCBI counterpart: a copy of the diagonal hash, for the unit tests.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 #[cfg(test)]
 fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
     DiagHashTable {
@@ -1666,16 +1682,44 @@ pub(super) fn summary() {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use super::super::{
         build_blastna_matrix, build_nucl_score_table, build_query_blastna_buffer,
         diag_hash_insert_window, scan_subject_kmers_with_ranges,
     };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use super::*;
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use crate::algorithm::blastn::lookup::{build_two_stage_lookup, reverse_complement};
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use crate::core::blast_encoding::{encode_iupac_to_blastna, encode_subject_ncbi2na_packed};
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use crate::utils::dust::MaskedInterval;
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     struct Lcg(u64);
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     impl Lcg {
         fn next(&mut self) -> u64 {
             self.0 = self
@@ -1689,8 +1733,16 @@ mod tests {
         }
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     type HashState = (Vec<u32>, Vec<(i32, i32, bool, i32, u32)>, u32, u32, i32);
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn hash_state(h: &DiagHashTable) -> HashState {
         (
             h.backbone.clone(),
@@ -1720,6 +1772,10 @@ mod tests {
     // `level = -window` (a table reset with a window, the round-1 sign-extension case) and
     // the subject offsets start below zero around them. The stream folded from strips
     // scanned on 1..8 threads must give the decisions and the table of the serial fold.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     #[derive(Clone, Copy, Debug)]
     struct Op {
         diag: i32,
@@ -1729,6 +1785,10 @@ mod tests {
         ungapped_end: i32,
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn apply(hash: &mut DiagHashTable, op: &Op, window: i32, decisions: &mut Vec<u8>) {
         let last_hit = hash.retrieve(op.diag).map_or(0, |(level, _, _)| level);
         if op.s_off_pos < last_hit {
@@ -1836,6 +1896,10 @@ mod tests {
         }
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn random_dna(rng: &mut Lcg, len: usize) -> Vec<u8> {
         (0..len).map(|_| b"ACGT"[rng.below(4) as usize]).collect()
     }
@@ -1910,7 +1974,7 @@ mod tests {
             }
             let s_len = subject.len();
             let packed = encode_subject_ncbi2na_packed(&subject);
-            let ctx_seqs = vec![
+            let ctx_seqs = [
                 encode_iupac_to_blastna(&query),
                 encode_iupac_to_blastna(&minus),
             ];

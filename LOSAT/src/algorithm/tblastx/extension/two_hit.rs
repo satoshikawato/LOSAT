@@ -3,7 +3,6 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
 
 use super::get_score;
-use super::ungapped::extend_hit_ungapped;
 use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
 // The table walks of the two-hit extension (x_two_hit_fast.rs).
 use super::x_two_hit_fast;

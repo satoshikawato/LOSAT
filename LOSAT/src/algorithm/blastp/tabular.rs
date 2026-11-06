@@ -575,7 +575,7 @@ pub(super) fn write_blastp_tabular(
     //         return;
     // ```
     if let (TabularKind::Commented, Some(num_queries)) = (spec.kind, tab.epilog) {
-        warn(&mut *writer, warnings.as_deref_mut())?;
+        warn(&mut *writer, warnings)?;
         table.epilog(writer, num_queries)?;
     }
     Ok(())

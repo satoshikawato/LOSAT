@@ -138,7 +138,7 @@ impl OidFilter {
     /// are cleared).
     fn new(mut words: Vec<u64>, num_oids: u32) -> Self {
         words.resize((num_oids as usize).div_ceil(64), 0);
-        if num_oids % 64 != 0 {
+        if !num_oids.is_multiple_of(64) {
             if let Some(last) = words.last_mut() {
                 *last &= (1u64 << (num_oids % 64)) - 1;
             }

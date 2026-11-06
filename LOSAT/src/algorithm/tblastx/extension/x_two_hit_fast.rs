@@ -176,7 +176,17 @@ struct State {
 /// SAFETY: `i < TABLE_LEN`.
 // NCBI reference: aa_ungapped.c:846-921 `matrix[q[i]][s[i]]` (the table of `build_table`).
 #[inline(always)]
-unsafe fn score_at(tab: &Table, i: usize) -> i32 {
+unsafe fn score_at(
+    #[cfg_attr(
+        target_arch = "wasm32",
+        expect(
+            unused_variables,
+            reason = "wasm32 reads `FIXED_TABLE` at its static address"
+        )
+    )]
+    tab: &Table,
+    i: usize,
+) -> i32 {
     #[cfg(target_arch = "wasm32")]
     let tab: &Table = &*FIXED_TABLE.0.get();
     *tab.get_unchecked(i) as i32
@@ -451,11 +461,15 @@ pub(super) fn two_hit(
     {
         return None;
     }
+    #[cfg(not(target_arch = "wasm32"))]
     let tab: &Table = state().table.as_deref()?;
     // SAFETY: `state().table` is set, so FIXED_TABLE holds the table (FixedTable). wasm32: the word
     // loop below reads it at its static address, as `score_at` does.
     #[cfg(target_arch = "wasm32")]
-    let tab: &Table = unsafe { &*FIXED_TABLE.0.get() };
+    let tab: &Table = {
+        state().table?;
+        unsafe { &*FIXED_TABLE.0.get() }
+    };
 
     // The best end of the word at R (two_hit.rs, the `k_size` loop).
     let mut score = 0i32;
@@ -750,6 +764,13 @@ unsafe fn walk_sent<const RIGHT: bool, const SHIFT: u32>(
 /// `MAX_SENT_LEN` bytes).
 // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
 #[inline(always)]
+#[cfg_attr(
+    target_arch = "wasm32",
+    expect(
+        clippy::needless_option_as_deref,
+        reason = "wasm32's `State::table` is an `Option<&Table>` (the native one holds a `Box`)"
+    )
+)]
 pub(super) unsafe fn two_hit_sent(
     q_full: &[u8],
     s_full: &[u8],

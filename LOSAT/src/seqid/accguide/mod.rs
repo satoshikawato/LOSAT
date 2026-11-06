@@ -1282,7 +1282,7 @@ impl<'a> RangeLines<'a> {
 
     fn next_nibble(&mut self) -> u8 {
         let byte = self.data.get(self.nibble / 2).copied().unwrap_or(0xdd);
-        let value = if self.nibble % 2 == 0 {
+        let value = if self.nibble.is_multiple_of(2) {
             byte >> 4
         } else {
             byte & 15

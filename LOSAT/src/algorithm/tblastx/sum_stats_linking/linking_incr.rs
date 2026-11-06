@@ -858,6 +858,7 @@ fn verify_pass(
 // n * 2^32 < 2^63). The u64 key when the group fits it, else the u128 key (module documentation,
 // "Sums"); both run the same kernel.
 /// Links one group with the u64 key when it fits, else with the u128 key.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn link_hsp_group_incr_with(
     mut group_hits: Vec<UngappedHit>,
@@ -1398,17 +1399,17 @@ impl<K: LinkKey> LinkRounds<'_, K> {
             &mut fen[..],
         );
         let [sum0, sum1] = sum;
-        let mut sum = [&mut sum0[..], &mut sum1[..]];
+        let sum = [&mut sum0[..], &mut sum1[..]];
         let [xsum0, xsum1] = xsum;
-        let mut xsum = [&mut xsum0[..], &mut xsum1[..]];
+        let xsum = [&mut xsum0[..], &mut xsum1[..]];
         let [num0, num1] = num;
-        let mut num = [&mut num0[..], &mut num1[..]];
+        let num = [&mut num0[..], &mut num1[..]];
         let [link0, link1] = link;
-        let mut link = [&mut link0[..], &mut link1[..]];
+        let link = [&mut link0[..], &mut link1[..]];
         let [queued0, queued1] = queued;
-        let mut queued = [&mut queued0[..], &mut queued1[..]];
+        let queued = [&mut queued0[..], &mut queued1[..]];
         let [changed0, changed1] = sum_changed;
-        let mut sum_changed = [&mut changed0[..], &mut changed1[..]];
+        let sum_changed = [&mut changed0[..], &mut changed1[..]];
 
         stats.rounds += 1;
         let mut best: [Option<usize>; 2] = [None, None];
@@ -1799,18 +1800,8 @@ impl<K: LinkKey> LinkRounds<'_, K> {
             sum_changed_list.clear();
 
             if options.verify {
-                let (expected, expected_indeg) = verify_pass(
-                    &alive,
-                    &score,
-                    &qo,
-                    &so,
-                    &qe,
-                    &se,
-                    &sl,
-                    &lk,
-                    c,
-                    ignore_small_gaps,
-                );
+                let (expected, expected_indeg) =
+                    verify_pass(alive, score, qo, so, qe, se, sl, lk, c, ignore_small_gaps);
                 let mut cur = active_head;
                 while cur != NONE {
                     let i = cur as usize;

@@ -17,7 +17,6 @@ use super::{
         evaluate_gapped, identity_and_positive, normalize_scores, reap_final, reap_preliminary,
     },
     subjects::Subjects,
-    traceback::ordinary_traceback,
 };
 use crate::core::blast_hits::{reap_by_query_coverage, trim_by_max_hsps};
 use anyhow::Result;
@@ -406,6 +405,7 @@ pub fn search_internal<'a>(
 // a flow instead of waves); the reports, their order and the values in them are those of the waves.
 /// EXPERIMENT (LOSAT_X_BXFLOW): a switch of the strict set, on unless `LOSAT_X_BXFLOW=0`
 ///  (acts with several query batches at 2+ threads).
+#[cfg(feature = "parallel")]
 pub(crate) fn x_bx_flow() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -1822,6 +1822,10 @@ impl PreliminarySink for Runtime<'_> {
             let mut x_reused = 0usize;
             let mut x_serial = 0usize;
             let x_t_loop = super::x_timing::lap();
+            #[cfg_attr(
+                not(feature = "parallel"),
+                expect(unused_variables, reason = "used only with parallel")
+            )]
             for (match_index, list) in matches.iter().enumerate() {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
                 // ```c

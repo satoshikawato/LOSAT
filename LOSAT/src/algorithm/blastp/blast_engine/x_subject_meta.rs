@@ -57,7 +57,7 @@
 //! NCBI makes a subject's ID from its Bioseq each time a row is written; the ID depends on the
 //! record only, so one value per subject serves every block. Reuse only.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use crate::blastinput::fasta_reader::FastaRecord;
 

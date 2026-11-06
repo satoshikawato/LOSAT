@@ -388,8 +388,39 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
             if h[19] > 2 {
                 return Err(notdb());
             }
+            if h[21] != 64 || h[22] != 32 || h[23] != 32 {
+                return Err(notdb());
+            }
             let usable = ps - h[20] as usize;
-            if usable < 480 || h[21] != 64 || h[22] != 32 || h[23] != 32 {
+            // header size in pages is valid only when the change counter matches
+            let counter = be_uint(&h[24..28]);
+            let dbsize = be_uint(&h[28..32]);
+            let valid_for = be_uint(&h[92..96]);
+            let page_count = if dbsize > 0 && counter == valid_for {
+                dbsize
+            } else {
+                len / ps as u64
+            };
+            // SQLite reference (version-3.51.1): src/btree.c:3401-3408 (lockBtree)
+            // ```c
+            //     if( nPage>nPageFile ){
+            //       if( sqlite3WritableSchema(pBt->db)==0 ){
+            //         rc = SQLITE_CORRUPT_BKPT;
+            //         goto page1_init_failed;
+            //       }else{
+            //         nPage = nPageFile;
+            //       }
+            //     }
+            // ```
+            // `nPageFile` is the file size in pages rounded up (src/pager.c:3303). SQLite makes
+            // this check after the bytes 21..24 and the page size and before `usableSize<480`
+            // (btree.c:3361-3412). A larger size in the header would also set the page budget
+            // of the tree walks, which then no longer ends a tree whose pages are shared many
+            // times over.
+            if page_count > len.div_ceil(ps as u64) {
+                return Err(corrupt("the header gives more pages than the file holds"));
+            }
+            if usable < 480 {
                 return Err(notdb());
             }
             me.enc = match be_uint(&h[56..60]) {
@@ -401,17 +432,9 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
             if be_uint(&h[44..48]) > 4 {
                 return Err(notdb());
             }
-            // header size in pages is valid only when the change counter matches
-            let counter = be_uint(&h[24..28]);
-            let dbsize = be_uint(&h[28..32]);
-            let valid_for = be_uint(&h[92..96]);
             me.page_size = ps;
             me.usable = usable;
-            me.page_count = if dbsize > 0 && counter == valid_for {
-                dbsize
-            } else {
-                len / ps as u64
-            };
+            me.page_count = page_count;
             if me.page_count == 0 {
                 return Err(notdb());
             }

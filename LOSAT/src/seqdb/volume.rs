@@ -498,7 +498,7 @@ impl Volume {
         let seq_offsets = self.index.sequence_offsets(first, end)?;
         let amb_offsets = self.index.ambiguity_offsets(first, end)?;
         let (start, amb_start, next) = (seq_offsets[0], amb_offsets[0], seq_offsets[1]);
-        if !self.index.holds_offsets() && !(start < amb_start && amb_start <= next) {
+        if !self.index.holds_offsets() && (start >= amb_start || amb_start > next) {
             return Err(self.index.ambiguity_changed(first, amb_offsets.len()));
         }
         let file = self.seq_file()?;
@@ -692,36 +692,6 @@ impl Volume {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1838
-    // ```c++
-    //         int whole_bytes = int(end_offset - start_offset - 1);
-    //
-    //         char last_char = (*buffer)[whole_bytes];
-    //
-    //         int remainder = last_char & 3;
-    //         length = (whole_bytes * 4) + remainder;
-    // ```
-    /// The packed bytes of nucleotide `oid` (volume-relative) from `skip` bytes in, `count`
-    /// of them, with the offsets of its sequence and its ambiguity data: `(bytes, packed
-    /// start, ambiguity start, next sequence's start)`.
-    fn packed_part(
-        &self,
-        oid: u32,
-        ordinal: u32,
-        skip: u64,
-        count: Option<u64>,
-    ) -> Result<(Vec<u8>, u32, u32, u32), SeqDbError> {
-        let (start, amb_start, next) = self.part_offsets(oid, ordinal)?;
-        let file = self.seq_file()?;
-        let packed = u64::from(amb_start - start);
-        let from = u64::from(start) + skip.min(packed);
-        let to = match count {
-            Some(count) => (from + count).min(u64::from(amb_start)),
-            None => u64::from(amb_start),
-        };
-        Ok((file.read_range(from, to)?, start, amb_start, next))
-    }
-
     /// The offsets in the sequence file of nucleotide `oid` (volume-relative): `(start of its
     /// packed bases, start of its ambiguity data, start of the next sequence)`.
     fn part_offsets(&self, oid: u32, ordinal: u32) -> Result<(u32, u32, u32), SeqDbError> {
@@ -852,6 +822,7 @@ impl Volume {
     /// sequence whose record passes the end of the header file, and every
     /// sequence of a range or piece that cannot be read, goes through
     /// `deflines`, which gives its own result.
+    #[cfg(test)]
     pub(super) fn visit_deflines(
         &self,
         first: u32,
@@ -1878,7 +1849,7 @@ mod tests {
         assert!(check(length, runs.clone(), &mut rng, 5000));
         // Ranges that start inside a run, end inside one, or lie between two.
         for run in runs.iter().step_by(97) {
-            let mut one = vec![b'A'; 2];
+            let mut one = [b'A'; 2];
             let ambiguity = NucleotideAmbiguity::new(length, 0, runs.clone());
             ambiguity.overlay(run.offset as usize, run.offset as usize + 1, &mut one[..1]);
             assert_ne!(one[0], b'A');

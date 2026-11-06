@@ -23,7 +23,6 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks, BlastRedoAlignParams,
     BlastRedoOneMatchResult, EMatrixAdjustRule,
 };
-use crate::utils::genetic_code::GeneticCode;
 
 mod x_reap_index;
 
@@ -278,6 +277,7 @@ pub(super) fn postredo_num_ident(
 // align_length += esp->num[index];
 // if (*q == *s) num_ident++; else if (matrix[*q][*s] > 0) num_pos++;
 // *num_pos_ptr = num_pos + num_ident;
+#[cfg(test)]
 pub(super) fn postredo_converted_stats(
     converted: &ConvertedKappaHsp,
     query_sequence: &[u8],
@@ -653,6 +653,7 @@ mod tests {
         local_extension_final_xdrop, local_kappa_redo_params,
     };
     use crate::common::GapEditOp;
+    use crate::utils::genetic_code::GeneticCode;
     use crate::utils::matrix::BLASTAA_SIZE;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:770-803,1896-1957,3577-3689
@@ -664,14 +665,9 @@ mod tests {
     // ```
     #[test]
     fn hard_seg_preliminary_hsp_redoes_to_ncbi_alignment() {
-        use crate::core::composition_adjustment::adjust_scores::{
-            build_matrix_info, read_aa_composition,
-        };
-        use crate::core::composition_adjustment::redo_alignment::{
-            build_query_word_hashes, BlastCompoGappingParams,
-        };
+        use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
+        use crate::core::composition_adjustment::redo_alignment::build_query_word_hashes;
         use crate::utils::matrix::aa_char_to_ncbistdaa;
-        use std::cell::Cell;
         let root = format!(
             "{}/../docs/evidence/tlosan_stage_d",
             env!("CARGO_MANIFEST_DIR")
@@ -943,17 +939,14 @@ mod tests {
         };
         use crate::config::ProteinScoringSpec;
         use crate::core::composition_adjustment::adjust_scores::{
-            blast_adjust_scores, build_matrix_info, read_aa_composition,
+            blast_adjust_scores, read_aa_composition,
         };
-        use crate::core::composition_adjustment::redo_alignment::{
-            build_query_word_hashes, BlastCompoGappingParams,
-        };
+        use crate::core::composition_adjustment::redo_alignment::build_query_word_hashes;
         use crate::stats::spouge::lookup_protein_gumbel_params;
         use crate::stats::tables::{
             lookup_protein_params_gapped, lookup_protein_params_ungapped, KarlinParams,
         };
         use crate::utils::matrix::aa_char_to_ncbistdaa;
-        use std::cell::Cell;
 
         let root = concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -1362,14 +1355,9 @@ mod tests {
     // ```
     #[test]
     fn multi_query_preliminary_hsps_redo_to_ncbi_alignment_order() {
-        use crate::core::composition_adjustment::adjust_scores::{
-            build_matrix_info, read_aa_composition,
-        };
-        use crate::core::composition_adjustment::redo_alignment::{
-            build_query_word_hashes, BlastCompoGappingParams,
-        };
+        use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
+        use crate::core::composition_adjustment::redo_alignment::build_query_word_hashes;
         use crate::utils::matrix::aa_char_to_ncbistdaa;
-        use std::cell::Cell;
         let root = format!(
             "{}/../docs/evidence/tlosan_stage_d",
             env!("CARGO_MANIFEST_DIR")
@@ -2390,15 +2378,10 @@ mod tests {
         use crate::algorithm::tblastn::stage_d_results::{
             KappaHspPayload, KappaResultHitList, KappaResultList,
         };
-        use crate::core::composition_adjustment::adjust_scores::{
-            build_matrix_info, read_aa_composition,
-        };
-        use crate::core::composition_adjustment::redo_alignment::{
-            build_query_word_hashes, BlastCompoGappingParams,
-        };
+        use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
+        use crate::core::composition_adjustment::redo_alignment::build_query_word_hashes;
         use crate::stats::tables::KarlinParams;
         use crate::utils::matrix::aa_char_to_ncbistdaa;
-        use std::cell::Cell;
         let mode_trace = std::fs::read_to_string(format!(
             "{root}/tlosan_stage_d/kappa_mode2_20260924/run_20260923_default.tsv"
         ))

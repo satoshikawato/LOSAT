@@ -154,6 +154,13 @@ pub(super) fn serial_subjects(
 /// searches on a pool of `threads` threads, searches its chunks one at a time (the caller has
 /// checked that the strips would run and that the subject has no lowercase mask): two chunks or
 /// more, and `serial` with the longest chunk.
+#[cfg(any(
+    test,
+    all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )
+))]
 pub(super) fn serial_chunks(
     lengths: impl Iterator<Item = usize>,
     threads: usize,

@@ -233,6 +233,11 @@ impl PartOut {
 /// `insert_inl::<false>`). With partitions (`PT`) it also records
 /// the diagonal's bucket and, when the insert appended a cell, the seed's key with the cell's
 /// number in the partition's table.
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 pub(super) fn insert<const PT: bool, const LEAN: bool, const MEMO: bool>(
@@ -1950,7 +1955,7 @@ mod tests {
                 // a strip of `seeds` seeds in scan order, a third of them without a hit
                 let seeds = rng.next() % 40;
                 for pos in 0..seeds {
-                    if rng.next() % 3 == 0 {
+                    if rng.next().is_multiple_of(3) {
                         continue;
                     }
                     let mut p = (rng.next() % parts as u64) as usize;
@@ -2449,7 +2454,7 @@ mod tests {
                                 // and with or without LOSAT_X_DCSEEDLEAN's lists and untracked
                                 // folds: every pairing with the above, for each `levels`, over
                                 // two neighbouring cases' stages
-                                (case / 2 + stage / 2) % 2 == 0,
+                                (case / 2 + stage / 2).is_multiple_of(2),
                             );
                             most_folders = most_folders.max(folders);
                             assert_eq!(got, expected, "{at}: hits");

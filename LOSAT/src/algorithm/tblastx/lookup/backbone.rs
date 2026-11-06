@@ -31,8 +31,13 @@ pub(crate) use x_lut_direct::XAaSpares;
 // EXPERIMENT (LOSAT_X_BPLK16): the table of a blastp block, `u16` hits or `Int4` hits
 // (x_lut_direct.rs); no NCBI counterpart for the re-export itself.
 pub(crate) use x_lut_direct::XBpLookup;
-// The comparison of two tables, for the unit tests (x_lut_direct.rs).
-#[cfg(test)]
+// The comparison of two tables (x_lut_direct.rs), for blastp's unit tests with `parallel`
+// threads (blast_engine/x_lookup_ahead.rs).
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 pub(crate) use x_lut_direct::{x_assert_same_table_as, x_same_table};
 // The BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
 // by searches of two threads or more).
@@ -2994,7 +2999,7 @@ mod tests {
             output: &mut Vec<u8>,
         ) {
             if t > order {
-                if order % p == 0 {
+                if order.is_multiple_of(p) {
                     for j in 1..=p {
                         output.push(a[j] as u8);
                     }

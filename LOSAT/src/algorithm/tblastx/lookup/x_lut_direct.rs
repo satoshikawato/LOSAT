@@ -224,12 +224,28 @@ impl XLists<'_> {
 #[derive(Default)]
 struct XBuildTemps {
     counts: Vec<u32>,
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     ranges: Vec<u32>,
     base: Vec<u32>,
     fill: Vec<u32>,
     chains: Option<LookupBackboneChains>,
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     cells: Vec<u32>,
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     starts: Vec<u32>,
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     offsets: Vec<i32>,
 }
 
@@ -1410,6 +1426,7 @@ fn x_lean_target_list(
 /// The table `build_lookup_from_prepared` returns, built without chains (see the module
 /// comment). `Err(prepared)` when the reference builder must run (diagnostics mode, or a
 /// backbone index wider than 16 bits).
+#[cfg(test)]
 pub(super) fn x_build_direct(
     prepared: PreparedLookupQuery,
     threshold: i32,
@@ -1605,6 +1622,16 @@ fn x_build_direct_sel(
     memo: &mut Option<XNeighborMemo>,
     room: Option<&mut XAaVectors>,
     pooled: bool,
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        expect(
+            unused_variables,
+            reason = "the passes run on `parts` tasks only with `parallel` threads"
+        )
+    )]
     parts: usize,
     x_unthresholded: bool,
     width: XWidth,
@@ -3719,7 +3746,6 @@ mod tests {
     /// `x_bp_build_lookup(..)`'s table and contexts are those of `got`: every table field,
     /// and every context field (the Karlin blocks by their bits).
     fn assert_same_bp(got: &(BlastAaLookupTable, Vec<QueryContext>), queries: &[Vec<QueryFrame>]) {
-        let params = blosum62_ideal_karlin_params();
         let (want, want_contexts) = x_bp_build_lookup(queries, 11, false);
         x_assert_same_table_as("ahead:", &got.0, &want);
         assert!(x_same_table(&got.0, &want));
@@ -3944,7 +3970,6 @@ mod tests {
     fn same_table_finds_one_cell_entry_bit_or_field() {
         let mut seed = 47u64;
         let queries = bp_queries(&mut seed);
-        let params = blosum62_ideal_karlin_params();
         let build = || x_bp_build_lookup(&queries, 11, false).0;
         let want = build();
         assert!(x_same_table(&build(), &want));

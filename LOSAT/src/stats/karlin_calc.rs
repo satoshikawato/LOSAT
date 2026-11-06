@@ -186,7 +186,7 @@ pub struct ScoreFreqProfile {
 impl ScoreFreqProfile {
     pub fn new(score_min: i32, score_max: i32) -> Self {
         let range = (score_max - score_min + 1) as usize;
-        let mut sprob = vec![0.0; range];
+        let sprob = vec![0.0; range];
 
         Self {
             sprob,
@@ -306,6 +306,10 @@ pub fn score_freq_profile_from_probabilities(
         }
     }
 
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if score_sum > 0.0001 || score_sum < -0.0001 {
         for score in obs_min..=obs_max {
             let prob = sfp.get_prob(score) / score_sum;
@@ -401,6 +405,10 @@ pub fn compute_score_freq_profile_for_matrix(
 
     // Compute average score (also normalize probabilities)
     let mut score_avg = 0.0;
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if score_sum > 0.0001 || score_sum < -0.0001 {
         for score in obs_min..=obs_max {
             let prob = sfp.get_prob(score) / score_sum;

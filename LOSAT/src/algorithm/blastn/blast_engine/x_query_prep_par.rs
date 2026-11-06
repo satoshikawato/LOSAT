@@ -73,10 +73,22 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use crate::algorithm::blastn::coordination::QueryLetters;
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 use crate::algorithm::blastn::lookup::encode_reverse_complement_blastna_into;
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 use crate::algorithm::blastn::pairwise::query_ungapped_karlin_blastna;
 use crate::algorithm::blastn::scoring::context_ungapped_blocks;
 use crate::config::NuclScoringSpec;
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 use crate::core::blast_encoding::encode_iupac_to_blastna_into;
 use crate::stats::KarlinParams;
 use crate::utils::threading::SearchPool;
@@ -134,6 +146,10 @@ fn serial_blocks(contexts: &[&[u8]], spec: &NuclScoringSpec) -> Vec<Option<Karli
 // Copy of the `place` closure in `build_query_blastna_buffer` (run.rs): the serial function stays
 // untouched with the switch off, so a change of its rule must be made here too; the random
 // pool-vs-serial tests compare the two.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 fn place(offset: i32, length: usize, query_concat_length: usize) -> Option<std::ops::Range<usize>> {
     let start = offset.max(0) as usize;
     let end = start.saturating_add(length);
@@ -424,9 +440,12 @@ pub fn print_summary() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "parallel")]
     use crate::utils::threading::with_search_pool;
 
+    #[cfg(feature = "parallel")]
     struct Rng(u64);
+    #[cfg(feature = "parallel")]
     impl Rng {
         fn next(&mut self) -> u64 {
             self.0 ^= self.0 << 13;
@@ -441,6 +460,7 @@ mod tests {
 
     /// A random query with N, IUPAC letters, lower case, low-complexity runs, and now and then
     /// no letters at all.
+    #[cfg(feature = "parallel")]
     fn sequence(rng: &mut Rng) -> Vec<u8> {
         let len = match rng.below(6) {
             0 => rng.below(3) as usize,
@@ -470,6 +490,7 @@ mod tests {
     /// empty query), plus context then minus context of each query, and the
     /// `query_concat_length` formula of run.rs (the last context's offset and length plus 2, or
     /// plus 1 when it is empty, less the two end sentinels).
+    #[cfg(feature = "parallel")]
     fn production_layout(queries: &[Vec<u8>]) -> (Vec<i32>, usize) {
         let room = |length: usize| if length == 0 { 0 } else { length + 1 };
         let mut offsets = Vec::new();
@@ -493,6 +514,7 @@ mod tests {
 
     /// A batch of `count` random queries in the production layout (`production_layout`): the
     /// letters, the context offsets and the length of the block.
+    #[cfg(feature = "parallel")]
     fn batch(rng: &mut Rng, count: usize) -> (Vec<Vec<u8>>, Vec<i32>, usize) {
         let queries: Vec<Vec<u8>> = (0..count).map(|_| sequence(rng)).collect();
         let (offsets, total) = production_layout(&queries);
@@ -503,6 +525,7 @@ mod tests {
     /// the plus context with no sentinel between them, and the next query follows at once (`gap`
     /// is 0) or after `gap` sentinels. It tests spans that touch each other, which the production
     /// layout (a sentinel after every context) never has.
+    #[cfg(feature = "parallel")]
     fn compact_batch(rng: &mut Rng, count: usize, gap: usize) -> (Vec<Vec<u8>>, Vec<i32>, usize) {
         let queries: Vec<Vec<u8>> = (0..count).map(|_| sequence(rng)).collect();
         let mut offsets = Vec::new();
@@ -517,6 +540,7 @@ mod tests {
 
     /// The contexts (slices of the block without its end sentinels) of a batch, in context order
     /// (an empty query gives two empty slices).
+    #[cfg(feature = "parallel")]
     fn contexts_of<'a>(block: &'a [u8], queries: &[Vec<u8>], offsets: &[i32]) -> Vec<&'a [u8]> {
         queries
             .iter()
@@ -533,6 +557,7 @@ mod tests {
             .collect()
     }
 
+    #[cfg(feature = "parallel")]
     fn spec() -> NuclScoringSpec {
         NuclScoringSpec {
             reward: 1,
@@ -832,6 +857,7 @@ mod tests {
     /// A random query of 0 to `max` letters: often empty, one letter or very short, with bytes of
     /// every value, IUPAC letters and lower case (the reviewer's generator, for the production
     /// layout tests).
+    #[cfg(feature = "parallel")]
     fn varied_sequence(rng: &mut Rng, max: usize) -> Vec<u8> {
         let len = match rng.below(7) {
             0 => 0,

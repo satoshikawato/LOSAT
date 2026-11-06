@@ -23,7 +23,7 @@
 //! A line is `T0 "<file>", line <n>: Error: (<class>::<error code>) <function>() - <message>`
 //! (`CException::ReportStd`); the file is the path of the source file in NCBI's build tree.
 
-use super::{FormatSite, WinMaskError};
+use super::WinMaskError;
 
 /// The build tree that NCBI's reports name: that of the official Linux x64 release of BLAST+
 /// 2.17.0 (`ncbi-blast-2.17.0+-x64-linux.tar.gz`). Other builds of 2.17.0 name their own tree
@@ -151,6 +151,7 @@ impl WinMaskError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::winmask::FormatSite;
 
     // The texts of NCBI BLAST+ 2.17.0 (the official Linux x64 release) blastn
     // `-window_masker_db` with hand-made counts files (line NP, M/STATE.md "M2 の実機確認").

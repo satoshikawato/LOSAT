@@ -330,7 +330,7 @@ where
             return done;
         }
     }
-    let _ = program;
+    let _ = (requested, program);
     work.take().expect("work not run")()
 }
 

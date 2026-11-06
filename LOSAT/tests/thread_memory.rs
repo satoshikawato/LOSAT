@@ -72,6 +72,11 @@
 //! same (blastn at 64 units: extra 6,253 and 6,049 KiB; the four-thread median moves by up to 0.9 MiB
 //! between runs). No size is above 2.1 MiB per added thread. The binary takes 4 s on an idle
 //! workstation of 32 CPUs and up to 11 s under load.
+//!
+//! The file is built with the `parallel` feature only: without it `-num_threads 4` is rejected
+//! (`threading.rs:121-130`).
+
+#![cfg(feature = "parallel")]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::io::Write;
@@ -128,7 +133,9 @@ static RESERVED: Counter = Counter::new();
 
 /// No NCBI counterpart: the sizes of the blocks that LOSAT asks glibc to map on 64-bit Linux:
 /// `(32 << 20) + 4096` bytes (`X_MAPPED_BYTES`, `lines_capacity`) rounded up to a whole element of
-/// at most 64 bytes (BLASTN's elements: letters, ungapped hits of 44 bytes, lines of 64).
+/// at most 64 bytes (BLASTN's elements: letters, ungapped hits of 44 bytes, lines of 64). A copy of
+/// private constants of the library, which this file cannot read: `X_MAPPED_BYTES`
+/// (`src/utils/x_mapped.rs:37`) and `lines_capacity` (`src/algorithm/blastn/x_mb_lookup_par.rs:403-405`).
 const RESERVE: Range<usize> = (32 << 20) + 4096..(32 << 20) + 4096 + 64;
 
 fn counter(bytes: usize) -> &'static Counter {
@@ -342,7 +349,11 @@ enum Shape {
     Grows,
 }
 
-/// The shape of each task on dev (module header).
+/// The shape of each task on dev (module header). A `Grows` row guards only the cap per added
+/// thread (`PER_THREAD`): the test passes while the extra grows. dc-megablast's `Grows` rests on
+/// the step from 4 to 16 units (4,443 KiB against a threshold of about 3,240 KiB), so a later
+/// change can turn it either way. A change of memory per thread should read the printed table, not
+/// only pass or fail.
 const TASKS: [(&str, Shape); 3] = [
     ("blastn", Shape::Grows),
     ("dc-megablast", Shape::Grows),
@@ -479,7 +490,9 @@ fn check(task: &str, expected: Shape) {
     for row in &rows {
         assert!(
             row.extra() <= 3 * PER_THREAD,
-            "{task}, {} units: {} KiB per added thread, more than {} KiB\n{table}",
+            "{task}, {} units: {} KiB per added thread, more than {} KiB\n\
+             If a padded block's size or count changed (`X_MAPPED_BYTES`, `lines_capacity`), check \
+             `RESERVE` first: a block it no longer matches is counted in the peak.\n{table}",
             row.units,
             kib(row.extra() / 3),
             kib(PER_THREAD)
@@ -489,11 +502,18 @@ fn check(task: &str, expected: Shape) {
         .windows(2)
         .any(|pair| pair[1].extra() as f64 > GROWTH * pair[0].extra() as f64 + SLACK as f64);
     let measured = if grows { Shape::Grows } else { Shape::Flat };
-    assert!(
-        measured == expected,
-        "{task}: the extra per thread is {measured:?} with the input, and TASKS says {expected:?}: \
-         if a change made it so, change the task's row in TASKS\n{table}"
-    );
+    match (expected, measured) {
+        (Shape::Flat, Shape::Grows) => panic!(
+            "{task}: a regression of memory per thread: the extra, flat on dev, now grows with the \
+             input. Do not edit the row of TASKS; find the change that made the extra grow.\n{table}"
+        ),
+        (Shape::Grows, Shape::Flat) => panic!(
+            "{task}: the extra no longer grows with the input. Set the task's row in TASKS to \
+             `Flat`, and update the table and the prose of the module header with the new \
+             numbers.\n{table}"
+        ),
+        _ => {}
+    }
 }
 
 fn expected(task: &str) -> Shape {

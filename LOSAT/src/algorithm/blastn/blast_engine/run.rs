@@ -4783,15 +4783,17 @@ fn diag_container_query_length(query_contexts: &[QueryContext]) -> usize {
 /// `context_offsets[2 * q]` (plus) and `context_offsets[2 * q + 1]` (minus), the plus
 /// context is the BLASTNA code of the letters and the minus context that of their reverse
 /// complement. The searched block (`query_concat_length` bytes) is `[1..n + 1]` of it
-/// (LOSAT's memory: no second copy of the block, no IUPAC copy of either strand).
-fn build_query_blastna_buffer<L: QueryLetters + ?Sized>(
+/// (LOSAT's memory: no second copy of the block, no IUPAC copy of either strand). The buffer is
+/// `with_sentinels`, the one that the batch loop keeps (`x_query_sentinels`).
+fn fill_query_blastna_buffer<L: QueryLetters + ?Sized>(
     query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
-) -> Vec<u8> {
+    with_sentinels: &mut Vec<u8>,
+) {
     debug_assert_eq!(2 * query_letters.count(), context_offsets.len());
 
-    let mut with_sentinels = vec![NUCL_SENTINEL; query_concat_length + 2];
+    x_query_sentinels(with_sentinels, query_concat_length + 2);
 
     for (q, offsets) in context_offsets.chunks_exact(2).enumerate() {
         query_letters.read(q, |letters| {
@@ -4799,7 +4801,7 @@ fn build_query_blastna_buffer<L: QueryLetters + ?Sized>(
             // A context that is empty or does not end inside the block stays sentinels.
             // (Twin: `place` and the two encoder calls below are copied in x_query_prep_par.rs
             // (LOSAT_X_QPREPPAR) and, with the strand switches, in
-            // `build_strand_query_blastna_buffer`; change them there too.)
+            // `fill_strand_query_blastna_buffer`; change them there too.)
             let place = |offset: i32| -> Option<std::ops::Range<usize>> {
                 let start = offset.max(0) as usize;
                 let end = start.saturating_add(length);
@@ -4813,8 +4815,49 @@ fn build_query_blastna_buffer<L: QueryLetters + ?Sized>(
             }
         });
     }
+}
 
+/// `fill_query_blastna_buffer` into a buffer of its own (the tests).
+#[cfg(test)]
+fn build_query_blastna_buffer<L: QueryLetters + ?Sized>(
+    query_letters: &L,
+    context_offsets: &[i32],
+    query_concat_length: usize,
+) -> Vec<u8> {
+    let mut with_sentinels = Vec::new();
+    fill_query_blastna_buffer(
+        query_letters,
+        context_offsets,
+        query_concat_length,
+        &mut with_sentinels,
+    );
     with_sentinels
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603
+// ```c
+// int buflen = QueryInfo_GetSeqBufLen(qinfo);
+// TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
+// ```
+/// `buffer` as `length` sentinels: the query buffer of a batch before its contexts are written.
+/// NCBI allocates the buffer of each batch; LOSAT's batch loop keeps one buffer from batch to
+/// batch and each batch writes all of it again (LOSAT's memory). A buffer freed by each batch
+/// leaves a hole of its size under the blocks allocated after it, and glibc raises its mmap
+/// threshold to the size of the freed buffer: the next batch's buffer, a few KiB larger, did not
+/// fit the hole once small blocks had split it, was mapped on its own, and the 8.5 MiB hole stayed
+/// resident (31,168 cDNAs x 3 Mb, dc-megablast `-db`, 1 thread: +9.5 MiB in half the runs, set off
+/// by the length of the output file's name). The kept buffer has the capacity of
+/// `x_mapped_capacity`, so from 1 MiB glibc maps it and its free at the end of the loop leaves the
+/// threshold as it is; it grows only for a batch longer than any before, and its pages are touched
+/// by the first batch and not again. Bytes past the batch's length are not read.
+fn x_query_sentinels(buffer: &mut Vec<u8>, length: usize) {
+    if buffer.capacity() < length {
+        // The old contents are not kept: a new block, not a copy.
+        *buffer = Vec::with_capacity(crate::utils::x_mapped::x_mapped_capacity(length, 1));
+    } else {
+        buffer.clear();
+    }
+    buffer.resize(length, NUCL_SENTINEL);
 }
 
 /// `-soft_masking false`: writes the masks of the contexts into the searched BLASTNA copy of the
@@ -4880,7 +4923,7 @@ fn mask_query_letters(
 }
 
 /// The query buffer of a search of one strand (`-strand plus` or `minus`): as
-/// `build_query_blastna_buffer`, but a context is written only when its length is above 0,
+/// `fill_query_blastna_buffer`, but a context is written only when its length is above 0,
 /// with its own length (the strand that is not searched has a context of length 0 and takes no
 /// room, so it must not be written over the next query).
 ///
@@ -4890,16 +4933,17 @@ fn mask_query_letters(
 ///
 ///         qinfo->contexts[index].query_offset = prev_loc + shift;
 /// ```
-fn build_strand_query_blastna_buffer<L: QueryLetters + ?Sized>(
+fn fill_strand_query_blastna_buffer<L: QueryLetters + ?Sized>(
     query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
     strand: QueryStrand,
-) -> Vec<u8> {
+    with_sentinels: &mut Vec<u8>,
+) {
     debug_assert_eq!(2 * query_letters.count(), context_offsets.len());
     let (plus_on, minus_on) = strand.searched();
 
-    let mut with_sentinels = vec![NUCL_SENTINEL; query_concat_length + 2];
+    x_query_sentinels(with_sentinels, query_concat_length + 2);
 
     for (q, offsets) in context_offsets.chunks_exact(2).enumerate() {
         query_letters.read(q, |letters| {
@@ -4920,7 +4964,24 @@ fn build_strand_query_blastna_buffer<L: QueryLetters + ?Sized>(
             }
         });
     }
+}
 
+/// `fill_strand_query_blastna_buffer` into a buffer of its own (the tests).
+#[cfg(test)]
+fn build_strand_query_blastna_buffer<L: QueryLetters + ?Sized>(
+    query_letters: &L,
+    context_offsets: &[i32],
+    query_concat_length: usize,
+    strand: QueryStrand,
+) -> Vec<u8> {
+    let mut with_sentinels = Vec::new();
+    fill_strand_query_blastna_buffer(
+        query_letters,
+        context_offsets,
+        query_concat_length,
+        strand,
+        &mut with_sentinels,
+    );
     with_sentinels
 }
 
@@ -9210,6 +9271,9 @@ fn run_in_pool(
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
     // (`lookup::x_mb_lut_keep`), freed when the loop ends.
     let x_lut_keep = x_mb_lut_keep::Keep::for_loop();
+    // The query buffer this loop keeps between its batches (`x_query_sentinels`), freed when the
+    // loop ends.
+    let mut query_keep: Vec<u8> = Vec::new();
     let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(lengths.len());
     let mut batch_spans: Vec<std::ops::Range<usize>> = Vec::new();
     let mut unsearched = Vec::with_capacity(lengths.len());
@@ -9594,6 +9658,7 @@ fn run_in_pool(
                     lower_case_before: &lower_case_before,
                 },
                 x_lut_keep.as_ref(),
+                &mut query_keep,
             )
         } else {
             search_query_batch::<false>(
@@ -9610,6 +9675,7 @@ fn run_in_pool(
                     lower_case_before: &lower_case_before,
                 },
                 x_lut_keep.as_ref(),
+                &mut query_keep,
             )
         };
         let batch = match searched {
@@ -10072,6 +10138,8 @@ fn run_in_pool(
     }
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop's kept table is freed with the loop.
     drop(x_lut_keep);
+    // So is its query buffer (the reports below do not read it).
+    drop(query_keep);
 
     let reports = |outputs: &mut ReportOutputs<'_>| {
         write_batch_reports(
@@ -10810,6 +10878,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     first_batch: bool,
     stage: BatchStage<'_>,
     x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
+    query_keep: &mut Vec<u8>,
 ) -> Result<QueryBatch> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
@@ -11259,22 +11328,26 @@ fn search_query_batch<const UNGAPPED: bool>(
     // (utils/xtiming.rs). No NCBI counterpart.
     let t_encode = crate::utils::xtiming::clock();
     // `-strand plus` or `minus` builds the buffer serially from the contexts that are searched
-    // (`build_strand_query_blastna_buffer`); `both` is the code of the search without the option.
-    let mut encoded_query_buffer = if strand == QueryStrand::Both {
+    // (`fill_strand_query_blastna_buffer`); `both` is the code of the search without the option.
+    // The buffer is the one the caller keeps from batch to batch (`x_query_sentinels`).
+    let encoded_query_buffer: &mut Vec<u8> = query_keep;
+    if strand == QueryStrand::Both {
         x_query_prep_par::query_buffer(
             &letters,
             &query_context_offsets,
             query_concat_length,
             parallel_pool,
-        )
+            encoded_query_buffer,
+        );
     } else {
-        build_strand_query_blastna_buffer(
+        fill_strand_query_blastna_buffer(
             &letters,
             &query_context_offsets,
             query_concat_length,
             strand,
-        )
-    };
+            encoded_query_buffer,
+        );
+    }
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:609-619
     // ```c
@@ -11292,12 +11365,12 @@ fn search_query_batch<const UNGAPPED: bool>(
         None
     } else {
         mask_query_letters(
-            &mut encoded_query_buffer,
+            encoded_query_buffer,
             &mut query_contexts,
             &query_context_masks,
         )
     };
-    let encoded_query_concat_blastna_with_sentinels: &[u8] = &encoded_query_buffer;
+    let encoded_query_concat_blastna_with_sentinels: &[u8] = encoded_query_buffer;
     let encoded_query_concat_blastna: &[u8] = &encoded_query_buffer[1..query_concat_length + 1];
     let encoded_queries_blastna: Vec<&[u8]> = query_contexts
         .iter()
@@ -19714,6 +19787,9 @@ fn search_query_chunks(
     // PD-LOSAT-NCBI-DEFECTS).
     let mut merged: PrelimHitLists = Vec::with_capacity(queries.count());
     merged.resize_with(queries.count(), || None);
+    // The chunks' query buffer, kept from chunk to chunk (`x_query_sentinels`; the batch's own
+    // buffer is in use until its traceback).
+    let mut query_keep: Vec<u8> = Vec::new();
     for chunk in &chunks {
         // NCBI fails to make the query factory of a chunk without a query ("Empty
         // CBlastQueryVector"); `split_query_batch` makes none.
@@ -19755,6 +19831,7 @@ fn search_query_chunks(
                 batch_eff_searchsp,
             },
             x_keep,
+            &mut query_keep,
         )?;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:174-178
         // ```c
@@ -20136,6 +20213,58 @@ mod tests {
 
     // One buffer written context by context equals the two buffers of the IUPAC copies,
     // with an empty query (no room) between queries and letters of both cases.
+    #[test]
+    fn kept_query_buffer_equals_a_new_one() {
+        // (letters, offsets, concatenated length) of a batch of `queries`, laid out as above.
+        let layout = |queries: &[&[u8]]| {
+            let mut offsets = Vec::new();
+            let mut at = 0usize;
+            let room = |length: usize| if length == 0 { 0 } else { length + 1 };
+            for seq in queries {
+                offsets.push(at as i32);
+                at += room(seq.len());
+                offsets.push(at as i32);
+                at += room(seq.len());
+            }
+            (offsets, at - 1)
+        };
+        let long = vec![b'G'; 3 << 20];
+        let batches: [Vec<&[u8]>; 4] = [
+            vec![&b"ACGTTGCAAC"[..], &b"acgtnRYKMSWBDHVNu-acgt"[..]],
+            vec![&b"A"[..]],
+            vec![&long[..], &b"TTTT"[..]],
+            vec![&b"GGGGCCCCTTTTAAAAccgg*0"[..], &b""[..], &b"CA"[..]],
+        ];
+        let mut keep = Vec::new();
+        for queries in &batches {
+            let (offsets, concat_len) = layout(&queries[..]);
+            fill_query_blastna_buffer(&queries[..], &offsets, concat_len, &mut keep);
+            assert_eq!(
+                keep,
+                build_query_blastna_buffer(&queries[..], &offsets, concat_len)
+            );
+            for strand in [QueryStrand::Plus, QueryStrand::Minus] {
+                let mut kept = keep.clone();
+                kept.extend_from_slice(b"stale bytes past the length");
+                fill_strand_query_blastna_buffer(
+                    &queries[..],
+                    &offsets,
+                    concat_len,
+                    strand,
+                    &mut kept,
+                );
+                assert_eq!(
+                    kept,
+                    build_strand_query_blastna_buffer(&queries[..], &offsets, concat_len, strand)
+                );
+            }
+        }
+        // the 3 MiB batch made the buffer mapped, and the shorter batch after it kept it
+        if crate::utils::x_mapped::X_MAPPED_ALLOCATOR {
+            assert!(keep.capacity() > 32 << 20);
+        }
+    }
+
     #[test]
     fn query_buffer_equals_the_buffers_of_the_context_copies() {
         let queries: [&[u8]; 5] = [

@@ -138,7 +138,7 @@ fn chain_hsps_for_pair(hits: Vec<Hit>, config: &ChainConfig) -> Vec<Hit> {
     }
 
     // Convert chains back to hits
-    chains.into_iter().map(|c| c.to_hit()).collect()
+    chains.into_iter().map(|c| c.into_hit()).collect()
 }
 
 /// Filter overlapping HSPs, keeping higher-scoring ones
@@ -273,7 +273,7 @@ impl HspChain {
         self.diagonal = (self.diagonal + hit_diag) / 2;
     }
 
-    fn to_hit(self) -> Hit {
+    fn into_hit(self) -> Hit {
         let length = (self.q_end - self.q_start + 1).max(self.s_end - self.s_start + 1);
         let identity = if length > 0 {
             100.0 * self.total_matches as f64 / length as f64

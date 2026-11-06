@@ -404,7 +404,6 @@ pub(crate) fn run_pair(
     } else {
         x_run_batches(None)?;
     }
-    drop(x_run_batches);
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
     // ```c++
     //         formatter.PrintEpilog(opt);

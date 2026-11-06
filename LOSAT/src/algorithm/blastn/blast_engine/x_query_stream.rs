@@ -425,6 +425,13 @@ struct State {
 }
 
 /// How the second reading reads the records.
+#[cfg_attr(
+    all(unix, feature = "parallel"),
+    expect(
+        clippy::large_enum_variant,
+        reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
+    )
+)]
 enum Second {
     /// One reader over the file, record after record (`State::read_one`), where the first reading
     /// was not read in parts.
@@ -832,6 +839,13 @@ impl State {
             return Err(anyhow::anyhow!("{failed}"));
         }
         let index = self.next;
+        #[cfg_attr(
+            not(all(unix, feature = "parallel")),
+            expect(
+                clippy::infallible_destructuring_match,
+                reason = "Second has a second variant (Parts) on unix with the parallel feature"
+            )
+        )]
         let source = match &mut self.second {
             Second::Serial(source) => source,
             #[cfg(all(unix, feature = "parallel"))]

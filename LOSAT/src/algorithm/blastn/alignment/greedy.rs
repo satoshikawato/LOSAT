@@ -627,6 +627,12 @@ impl GreedyAlignScratch {
     }
 }
 
+impl Default for GreedyAlignScratch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Greedy edit script container.
 /// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:56-61 (GapEditScript)
 struct GapEditScript {
@@ -726,9 +732,6 @@ fn debug_greedy_traceback_enabled(q_off: usize, s_off: usize) -> bool {
     q_filter.trim().parse::<usize>().ok() == Some(q_off)
         && s_filter.trim().parse::<usize>().ok() == Some(s_off)
 }
-
-/// Signal that a diagonal/offset is invalid
-// INVALID_OFFSET and INVALID_DIAG are imported from constants
 
 /// Greedy alignment for high-identity nucleotide sequences.
 ///
@@ -3940,7 +3943,7 @@ fn blast_affine_greedy_align(
         return index * match_score;
     }
 
-    let diag0_idx = (0 + diag_offset) as usize;
+    let diag0_idx = diag_offset as usize;
     diag_lower[diag0_idx] = diag_origin;
     diag_upper[diag0_idx] = diag_origin;
 

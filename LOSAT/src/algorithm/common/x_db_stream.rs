@@ -371,7 +371,9 @@ impl<'a> XDbStream<'a> {
             })
         };
         if !holds(&kept) {
-            kept = None;
+            // Release the thread's previous block before the next one (or a long sequence) is
+            // read, which keeps the peak memory down.
+            drop(kept.take());
             let number = self.grid.partition_point(|&first| first <= ordinal) - 1;
             let (first, end) = (self.grid[number], self.grid[number + 1]);
             if end - first == 1 {

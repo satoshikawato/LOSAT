@@ -860,7 +860,8 @@ mod tests {
                     .map(|&f| frame(f, &residues(&mut rng, s_len, abc, &source)))
                     .collect()
             };
-            let (lookup, contexts) = build_ncbi_lookup(&[frames.clone()], 11, &params, true);
+            let (lookup, contexts) =
+                build_ncbi_lookup(std::slice::from_ref(&frames), 11, &params, true);
             let cutoff_scores: Vec<i32> = (0..contexts.len())
                 .map(|i| 10 + (i as i32 % 4) * 3)
                 .collect();

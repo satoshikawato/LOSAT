@@ -337,6 +337,10 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
             && alnum(main[2])
             && alnum(main[3])
         {
+            #[expect(
+                clippy::if_same_then_else,
+                reason = "NCBI returns eAcc_pdb both for a delimited ID and in its switch's case 4 (Seq_id.cpp:1683-1710)"
+            )]
             if main_size > 4
                 && main_size <= 17
                 && matches!(main[4], b'|' | b'-' | b'_' | 0)
@@ -389,6 +393,10 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
         //     }
         // ```
         let oqp = matches!(main[0], b'O' | b'P' | b'Q');
+        #[expect(
+            clippy::if_same_then_else,
+            reason = "NCBI has the two UniProt patterns as two branches that both return eAcc_swissprot (Seq_id.cpp:1713-1727)"
+        )]
         if digit_pos == 1
             && main_size == 6
             && (oqp || alpha(main[2]))
@@ -573,7 +581,7 @@ pub(super) fn classify(line: &[u8]) -> SeqIdLine {
     }
     if let Some(colon) = line.iter().position(|&byte| byte == b':') {
         let db = line[..colon].to_ascii_uppercase();
-        if RAW_DBTAGS.iter().any(|&known| known == db.as_slice()) {
+        if RAW_DBTAGS.contains(&db.as_slice()) {
             return SeqIdLine::General;
         }
     }

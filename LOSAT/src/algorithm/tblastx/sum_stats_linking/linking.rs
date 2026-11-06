@@ -7,6 +7,10 @@ use crate::stats::sum_statistics::{
     gap_decay_divisor, ncbi_large_gap_sum_e, normalize_score, small_gap_sum_e,
 };
 use crate::stats::KarlinParams;
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::sync::OnceLock;
@@ -94,14 +98,6 @@ pub(crate) use x_link_slices::x_helped as x_link_helped;
 
 const WINDOW_SIZE: i32 = GAP_SIZE + OVERLAP_SIZE + 1;
 const TRIM_SIZE: i32 = (OVERLAP_SIZE + 1) / 2;
-
-/// Ordering method indices (NCBI ELinkOrderingMethod)
-const LINK_SMALL_GAPS: usize = 0;
-const LINK_LARGE_GAPS: usize = 1;
-
-/// NCBI BLAST_GAP_PROB (ungapped search default)
-/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:66
-const BLAST_GAP_PROB: f64 = 0.5;
 
 /// Sentinel index indicating end of active list or "not in list"
 const SENTINEL_IDX: usize = usize::MAX;
@@ -251,22 +247,6 @@ fn trace_hit_matches_target(target: TraceHspTarget, h: &UngappedHit) -> bool {
         h.s_orig_len as usize,
     );
     trace_match_target(target, q_start, q_end, s_start, s_end)
-}
-
-/// NCBI BLAST_Nint - round to nearest integer
-/// Reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:437-441
-///
-/// ```c
-/// long BLAST_Nint(double x)
-/// {
-///    x += (x >= 0. ? 0.5 : -0.5);
-///    return (long)x;
-/// }
-/// ```
-#[inline]
-fn blast_nint(x: f64) -> i32 {
-    let rounded = if x >= 0.0 { x + 0.5 } else { x - 0.5 };
-    rounded as i32
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:343-349
@@ -1598,8 +1578,8 @@ fn link_hsp_group_ncbi(
     let ignore_small_gaps = cutoffs.ignore_small_gaps;
 
     // Statistics for filtering analysis (long sequences only)
-    let mut stats_index0_filtered = 0usize;
-    let mut stats_index0_passed = 0usize;
+    let stats_index0_filtered = 0usize;
+    let stats_index0_passed = 0usize;
     let mut stats_index1_filtered = 0usize;
     let mut stats_index1_passed = 0usize;
     let is_long_sequence = subject_len_nucl > 600_000;
@@ -2379,7 +2359,7 @@ fn link_hsp_group_ncbi(
                     xsum,
                     eff_query_len as i32,
                     eff_subject_len as i32,
-                    eff_search_space as i64,
+                    eff_search_space,
                     divisor,
                 );
                 // NCBI `link_hsps.c` lines 918-922:
@@ -2405,7 +2385,7 @@ fn link_hsp_group_ncbi(
                     xsum,
                     eff_query_len as i32,
                     eff_subject_len as i32,
-                    eff_search_space as i64,
+                    eff_search_space,
                     divisor,
                 );
                 if num > 1 {
@@ -2436,7 +2416,7 @@ fn link_hsp_group_ncbi(
                     xsum,
                     eff_query_len as i32,
                     eff_subject_len as i32,
-                    eff_search_space as i64,
+                    eff_search_space,
                     divisor,
                 );
                 if num > 1 {
@@ -3146,7 +3126,7 @@ mod tests {
             for round in 0..160 {
                 for index in 0..size {
                     seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
-                    if round % 11 == 0 || seed % 7 == 0 {
+                    if round % 11 == 0 || seed.is_multiple_of(7) {
                         scores[index] = [(seed % 101) as i64 - 50, ((seed >> 8) % 101) as i64 - 50];
                         active[index] = seed & 8 != 0;
                         tree.update(
@@ -3371,7 +3351,7 @@ mod tests {
         // 2. q_off=100, q_end=150, s_off=150, s_end=200 (ID=2) - same q_*, smaller s_off
         // 3. q_off=100, q_end=140, s_off=200, s_end=250 (ID=3) - same q_off, smaller q_end
         // 4. q_off=50,  q_end=100, s_off=300, s_end=350 (ID=4) - smallest q_off
-        let mut hits = vec![
+        let mut hits = [
             mock_hit(50, 100, 300, 350, 4),  // Should be 4th (smallest q_off)
             mock_hit(100, 140, 200, 250, 3), // Should be 3rd (smaller q_end)
             mock_hit(100, 150, 200, 250, 1), // Should be 1st (largest all)
@@ -3417,7 +3397,7 @@ mod tests {
     #[test]
     fn test_hsp_sort_identical_coords() {
         // Two hits with identical coordinates but different IDs
-        let mut hits = vec![
+        let mut hits = [
             mock_hit(100, 150, 200, 250, 1),
             mock_hit(100, 150, 200, 250, 2),
         ];
@@ -3468,7 +3448,7 @@ mod tests {
 
         // Test: same query coords, different subject offsets
         // NCBI descending: larger s_off should come first
-        let mut hits = vec![
+        let mut hits = [
             mock_hit(100, 150, 50, 100, 1),  // s_off=50 (smaller)
             mock_hit(100, 150, 200, 250, 2), // s_off=200 (larger)
         ];

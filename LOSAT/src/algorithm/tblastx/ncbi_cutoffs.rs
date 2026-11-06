@@ -1078,7 +1078,6 @@ mod tests {
 
         // For long sequences, cutoff_score_max should typically be > gap_trigger (41)
         // because eff_searchsp is very large
-        let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);
         // Note: cutoff_score_max may be > gap_trigger for very long sequences
         // The final cutoff will be MIN(update_cutoff, gap_trigger, cutoff_score_max)
     }
@@ -1190,7 +1189,7 @@ mod tests {
                 subject_len_nucl / 3
             };
 
-            let result = compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, 1, &ungapped);
+            let _result = compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, 1, &ungapped);
 
             // Verify the internal calculation matches
             let computed_db_length = subject_len_nucl / 3;

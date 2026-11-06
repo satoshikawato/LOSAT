@@ -2858,6 +2858,7 @@ fn run_in_pool(
         observer.queries_begin();
     }
     let query_records = query_runs.records;
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let input = query_runs.input;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
     // (`s_ReplaceLocalId`)
@@ -4753,6 +4754,7 @@ fn search_query_batch<S: TbxScore>(
         crate::utils::xreach::x_reach!("LOSAT_X_TBXBOARD", x_board_batch.is_some());
     }
     // Whether the batch puts units on the board (`x_board_help` below).
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let x_board_unit_path = x_pair_par_batch.is_some();
     let x_seed_batch = x_seed_release::XSeedBatch::new(lookup, x_pair_par_batch, subjects.count());
     let x_worker_diag_cells = x_seed_batch.worker_table_cells(diag_array_size as usize);
@@ -5994,10 +5996,10 @@ fn search_query_batch<S: TbxScore>(
                                         // Compute outfmt coords for this candidate init-hsp (same logic as trace_init_hsp_if_match).
                                         // NCBI offsets are 0-based in query/subject->sequence buffers.
                                         // Reference: blast_gapalign.c:4756-4768, blast_aascan.c:110-113.
-                                        let q_aa_start = hsp_q_u as usize;
-                                        let q_aa_end = hsp_qe_u as usize;
-                                        let s_aa_start = hsp_s_u as usize + chunk.offset;
-                                        let s_aa_end = _hsp_se_u as usize + chunk.offset;
+                                        let q_aa_start = hsp_q_u;
+                                        let q_aa_end = hsp_qe_u;
+                                        let s_aa_start = hsp_s_u + chunk.offset;
+                                        let s_aa_end = _hsp_se_u + chunk.offset;
                                         let (q_start_dna, q_end_dna) = convert_coords(
                                             q_aa_start,
                                             q_aa_end,
@@ -7407,7 +7409,7 @@ fn search_query_batch<S: TbxScore>(
                         stats_score_distribution.iter().filter(|&&s| s < 30).count();
                     eprintln!("[DEBUG HSP_SAVING] score_distribution: min={}, max={}, median={}, low_score(<30)={}/{} ({:.2}%)", 
                             min_score, max_score, median_score, low_score_count, stats_score_distribution.len(),
-                            if stats_score_distribution.len() > 0 { (low_score_count as f64 / stats_score_distribution.len() as f64) * 100.0 } else { 0.0 });
+                            if !stats_score_distribution.is_empty() { (low_score_count as f64 / stats_score_distribution.len() as f64) * 100.0 } else { 0.0 });
                 }
             }
 
@@ -7961,6 +7963,7 @@ fn search_query_batch<S: TbxScore>(
 
     // EXPERIMENT (LOSAT_X_TBXBOARD): a thread of the subject loop without a subject helps with the
     // batch's units (tblastx/x_work_board.rs `XBoard::help`).
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let x_board_help = x_board_batch.as_ref().map(|(board, batch)| {
         move |stopped: &std::sync::atomic::AtomicBool| {
             board.help(batch, stopped);

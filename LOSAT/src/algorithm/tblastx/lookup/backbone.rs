@@ -2921,7 +2921,7 @@ mod tests {
             output: &mut Vec<u8>,
         ) {
             if t > order {
-                if order % p == 0 {
+                if order.is_multiple_of(p) {
                     for j in 1..=p {
                         output.push(a[j] as u8);
                     }

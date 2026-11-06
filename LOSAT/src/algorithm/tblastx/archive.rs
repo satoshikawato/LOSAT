@@ -52,7 +52,6 @@ use crate::report::archive::{
 };
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
-use crate::report::seqid::SeqId;
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the

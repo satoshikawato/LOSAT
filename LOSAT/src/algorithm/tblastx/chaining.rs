@@ -172,75 +172,6 @@ pub struct UngappedHit {
 pub type SequenceKey = (u32, u32, i8, i8); // (q_idx, s_idx, q_frame, s_frame)
 pub type SequenceData = (Vec<u8>, Vec<u8>); // (query_aa_seq, subject_aa_seq)
 
-/// NCBI BLAST-style HSP domination test.
-/// Based on s_DominateTest() from hspfilter_culling.c (lines 79-120).
-///
-/// Returns true if `p` dominates `y`, meaning `y` should be culled.
-///
-/// Key criteria:
-/// 1. HSPs must be in the same frame combination (critical for TBLASTX)
-/// 2. Overlap must be > 50% of the candidate HSP's length
-/// 3. Main criterion: weighted score/length comparison
-///    d = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2
-///    If d > 0, p dominates y
-fn hsp_dominates(p: &ExtendedHit, y: &ExtendedHit) -> bool {
-    // Critical: Only compare HSPs within the same frame combination
-    // Without this check, HSPs from different frames would incorrectly dominate each other
-    if p.q_frame != y.q_frame || p.s_frame != y.s_frame {
-        return false;
-    }
-
-    // Must be same query-subject pair
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-    // ```c
-    // typedef struct BlastHSPList {
-    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-    //                       Set to 0 if not applicable */
-    // } BlastHSPList;
-    // ```
-    if p.hit.q_idx != y.hit.q_idx || p.hit.s_idx != y.hit.s_idx {
-        return false;
-    }
-
-    // Normalize coordinates to plus strand (like NCBI BLAST's LinkedHSP.begin/end)
-    // For reverse-strand hits, q_start > q_end, so we use min/max to ensure b < e
-    let b1 = p.hit.q_start.min(p.hit.q_end) as i64;
-    let e1 = p.hit.q_start.max(p.hit.q_end) as i64;
-    let b2 = y.hit.q_start.min(y.hit.q_end) as i64;
-    let e2 = y.hit.q_start.max(y.hit.q_end) as i64;
-
-    let l1 = e1 - b1;
-    let l2 = e2 - b2;
-
-    // Calculate overlap
-    let overlap = e1.min(e2) - b1.max(b2);
-
-    // If not overlap by more than 50% of candidate's length, don't dominate
-    if 2 * overlap < l2 {
-        return false;
-    }
-
-    // Use bit_score as the score metric (higher is better)
-    let s1 = (p.hit.bit_score * 100.0) as i64;
-    let s2 = (y.hit.bit_score * 100.0) as i64;
-
-    // Main criterion: 2 * (%diff in score) + 1 * (%diff in length)
-    // Formula: d = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2
-    let d = 4 * s1 * l1 + 2 * s1 * l2 - 2 * s2 * l1 - 4 * s2 * l2;
-
-    // Tie-breaker for identical HSPs
-    if (s1 == s2 && b1 == b2 && l1 == l2) || d == 0 {
-        if s1 != s2 {
-            return s1 > s2;
-        }
-        // Use subject start as tie-breaker (like NCBI uses OID/subject.offset)
-        return p.hit.s_start < y.hit.s_start;
-    }
-
-    d > 0
-}
-
 /// Chain and filter HSPs for protein/translated sequences.
 ///
 /// This implements a cluster-then-extend approach similar to BLASTN:
@@ -284,7 +215,7 @@ pub fn chain_and_filter_hsps_protein(
     //
     // NCBI reference: tblastx uses ungapped search only, no clustering/chaining
     // is performed. HSPs are output directly after sum-statistics linking.
-    for (_key, mut group_hits) in groups {
+    for (_key, group_hits) in groups {
         if group_hits.is_empty() {
             continue;
         }

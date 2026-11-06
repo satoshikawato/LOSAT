@@ -10,7 +10,7 @@
 //
 // Every program that LOSAT Web runs is covered: BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { expect, type Download, type Locator, type Page } from '@playwright/test';
 import { test } from './support/test';
@@ -2048,17 +2048,13 @@ test('after the browser removed the stored results, the Outputs, Export and Down
 
 // The output of the argv's own -outfmt (WA2-OP-03, Owner 2026-11-05): -outfmt 6 or 7 with fields in Additional
 // options adds it to the Outputs, Export and "Download All", named by its value, and to the commands of Run details; the
-// formats of every run keep their commands. The formats that the browser does not write yet are refused. With the engine,
-// its text is the native CLI's for the same argv (the same commit, one thread), in BLASTN and BLASTP.
+// formats of every run keep their commands. With the engine, its text is the native CLI's for the same argv (the same
+// commit, one thread), in BLASTN and BLASTP.
 test("Additional options' -outfmt with fields adds its output to the Outputs, Export and Download All", async ({ page }, testInfo) => {
   const extra = page.getByTestId('param-extra');
   const validation = page.getByTestId('argv-validation');
   await openParameters(page);
   await program(page, 'blastn');
-  for (const value of ['13', '14']) {
-    await extra.fill(`-outfmt ${value}`);
-    await expect(validation).toHaveText(`-outfmt ${value} is not supported in the browser yet`);
-  }
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is set in the form: Threads');
   const protein = '>q protein query\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n';
@@ -2139,20 +2135,32 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
   await expect(page.getByTestId('results-download-menu').getByRole('button')).toHaveCount(3);
 });
 
+/** The entries of a ZIP archive of stored files (the adapter's archive of outfmt 13 and 14), as name and bytes, in order. */
+function storedZipEntries(archive: Buffer): Array<readonly [string, Buffer]> {
+  const entries: Array<readonly [string, Buffer]> = [];
+  let at = 0;
+  while (archive.readUInt32LE(at) === 0x04034b50) {
+    expect(archive.readUInt16LE(at + 8), 'stored').toBe(0);
+    const size = archive.readUInt32LE(at + 18);
+    const name = archive.readUInt16LE(at + 26);
+    const data = at + 30 + name + archive.readUInt16LE(at + 28);
+    entries.push([archive.subarray(at + 30, at + 30 + name).toString('utf8'), archive.subarray(data, data + size)]);
+    at = data + size;
+  }
+  return entries;
+}
+
 /** A SAM document without the CL tag of its @PG line, where the CLI writes its own command line (the SAM rows' rule). */
 const withoutCl = (sam: string) => sam.replace(/(\n@PG\tID:0\tVN:[^\t\n]*)\tCL:[^\n]*?(\tPN:blastn\n)/, '$1$2');
 
 // Every other format that the CLI writes (W11, Owner 2026-11-05 "all output formats"): Additional options' -outfmt adds
 // its output to the Outputs, Export (with the format's extension) and "Download All" (BLAST+'s name of the format). A
-// binary output (outfmt 9) is saved, not shown. With the engine, the output is the native CLI's for the same argv (SAM
-// without the command line of its @PG line, which is each one's own), in BLASTN, BLASTP and BLASTX.
+// binary output (outfmt 9, and the ZIP archive of the files of 13 and 14) is saved, not shown. With the engine, the output
+// is the native CLI's for the same argv (SAM without the command line of its @PG line, which is each one's own; for 13 and
+// 14 the files of `-out results`, the master file as results.json or results.xml), in BLASTN, BLASTP and BLASTX.
 test("Additional options' -outfmt of another format adds its output to the Outputs, Export and Download All", async ({ page }, testInfo) => {
   const extra = page.getByTestId('param-extra');
   const validation = page.getByTestId('argv-validation');
-  await openParameters(page);
-  await program(page, 'blastx');
-  await extra.fill('-outfmt 11');
-  await expect(validation).toHaveText('-outfmt 11 is not supported in the browser yet');
   const protein = '>q protein query\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n';
   const inputs = {
     blastn: [`>q1 first query\n${A}\n`, `>s1 first subject\n${S1}\n`],
@@ -2167,18 +2175,22 @@ test("Additional options' -outfmt of another format adds its output to the Outpu
     ['blastn', '11', 'outfmt11.asn', 'BLAST archive (ASN.1)'],
     ['blastn', '17 SQ', 'outfmt17-custom.sam', 'Sequence Alignment/Map (SAM)'],
     ['blastp', '10 qseqid sseqid evalue', 'outfmt10-custom.csv', 'Comma-separated values'],
+    ['blastn', '13', 'outfmt13.zip', 'Multiple-file BLAST JSON'],
     ['blastp', '12', 'outfmt12.json', 'Seqalign (JSON)'],
+    ['blastp', '14', 'outfmt14.zip', 'Multiple-file BLAST XML2'],
+    ['blastx', '11', 'outfmt11.asn', 'BLAST archive (ASN.1)'],
     ['blastx', '15', 'outfmt15.json', 'Single-file BLAST JSON'],
     ['blastx', '20', 'outfmt20.csv', 'Comma-separated values with header lines'],
   ];
-  const cases = BUILD_HAS_ENGINE ? all : all.filter(([, outfmt]) => outfmt === '5' || outfmt === '9');
+  const cases = BUILD_HAS_ENGINE ? all : all.filter(([, outfmt]) => ['5', '9', '13'].includes(outfmt));
   if (BUILD_HAS_ENGINE && NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The bytes of the outputs: ${NO_NATIVE_REASON}` });
   const downloads: Download[] = [];
   page.on('download', (download) => downloads.push(download));
   const output = page.getByTestId('result-output');
   for (const [index, [id, outfmt, extension, name]] of cases.entries()) {
     const run = index + 1;
-    const binary = outfmt === '9';
+    const binary = ['9', '13', '14'].includes(outfmt);
+    const files = outfmt === '13' || outfmt === '14';
     if (run > 1) await page.getByTestId('tab-search').click();
     await program(page, id);
     await paste(page, 'query', inputs[id][0]);
@@ -2215,10 +2227,22 @@ test("Additional options' -outfmt of another format adds its output to the Outpu
       mkdirSync(directory, { recursive: true });
       writeFileSync(join(directory, 'query.fa'), inputs[id][0]);
       writeFileSync(join(directory, 'subject.fa'), inputs[id][1]);
-      const cli = spawnSync(NATIVE, [id, '-query', 'query.fa', '-subject', 'subject.fa', '-outfmt', outfmt, '-num_threads', '1'], { cwd: directory });
+      const out = files ? ['-out', 'results'] : [];
+      const cli = spawnSync(NATIVE, [id, '-query', 'query.fa', '-subject', 'subject.fa', '-outfmt', outfmt, '-num_threads', '1', ...out], { cwd: directory });
       expect(cli.status, String(cli.stderr)).toBe(0);
       expect(saved[0]!.length).toBeGreaterThan(0);
-      if (outfmt.startsWith('17')) {
+      if (files) {
+        const ext = outfmt === '13' ? 'json' : 'xml';
+        const entries = storedZipEntries(saved[0]!);
+        const expected: Array<readonly [string, Buffer]> = [];
+        for (let n = 1; existsSync(join(directory, `results_${n}.${ext}`)); n++) {
+          expected.push([`results_${n}.${ext}`, readFileSync(join(directory, `results_${n}.${ext}`))]);
+        }
+        expected.push([`results.${ext}`, readFileSync(join(directory, 'results'))]);
+        expect(expected.length).toBeGreaterThan(1);
+        expect(entries.map(([name]) => name)).toEqual(expected.map(([name]) => name));
+        for (const [index, [name, bytes]] of entries.entries()) expect(bytes.equals(expected[index]![1]), name).toBe(true);
+      } else if (outfmt.startsWith('17')) {
         // The run's own command line: the argv that the engine ran, with the form's threads.
         expect(text).toContain(`\tCL:losat ${id} -query query.fa -subject subject.fa -outfmt ${outfmt} -num_threads `);
         expect(withoutCl(text), `${id} -outfmt '${outfmt}'`).toBe(withoutCl(String(cli.stdout)));

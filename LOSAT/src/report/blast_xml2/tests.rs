@@ -856,7 +856,7 @@ fn a_side_file_that_cannot_be_opened_is_ncbis_argument_error_and_earlier_files_s
 
 #[test]
 fn no_files_means_no_side_file_for_a_caller_that_has_no_output_file() {
-    let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, None);
+    let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, None, None);
     let error = document
         .report(&mut b"q1\n".to_vec(), &mut Vec::new())
         .unwrap_err();
@@ -864,11 +864,116 @@ fn no_files_means_no_side_file_for_a_caller_that_has_no_output_file() {
     // outfmt 15 and 16 have no side files, with or without a name
     for kind in [Xml2Kind::Single16, Xml2Kind::Single15] {
         let mut out = Vec::new();
-        let mut document = Xml2Document::for_run(kind, false, Some(std::path::Path::new("o.out")));
+        let mut document =
+            Xml2Document::for_run(kind, false, Some(std::path::Path::new("o.out")), None);
         document.report(&mut b"x\n".to_vec(), &mut out).unwrap();
         document.epilog(&mut out).unwrap();
         assert!(String::from_utf8(out).unwrap().contains("x\n"));
     }
+}
+
+/// A receiver of side files (`SideFileReceiver`) that keeps them in memory, failing at a name.
+#[derive(Default)]
+struct Received {
+    files: std::sync::Mutex<Vec<(Vec<u8>, Vec<u8>)>>,
+    fail_at: Option<&'static [u8]>,
+}
+
+impl super::SideFileReceiver for Received {
+    fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+        if self.fail_at == Some(name) {
+            return Err(std::io::Error::other("full"));
+        }
+        self.files
+            .lock()
+            .unwrap()
+            .push((name.to_vec(), bytes.to_vec()));
+        Ok(())
+    }
+}
+
+/// The caller's receiver (`SideFileSink`) gets each side file whole, named as `FsSideFiles` names
+/// it for the sink's `-out`, and the master lists those names; it takes the place of the run's
+/// `-out`, and outfmt 15 and 16 ignore it.
+#[test]
+fn a_receiver_gets_the_side_files_that_the_master_lists() {
+    let received = std::sync::Arc::new(Received::default());
+    let sink = super::SideFileSink::new("results", received.clone());
+    for (kind, ext, master) in [
+        (
+            Xml2Kind::Files13,
+            "json",
+            "{\n\t\"BlastJSON\": [\n\t\t{\"File\": \"results_1.json\" },\n\t\t{\"File\": \"results_2.json\" }\n\t]\n}",
+        ),
+        (
+            Xml2Kind::Files14,
+            "xml",
+            &*format!("{MASTER14_HEAD_TEXT}\t<xi:include href=\"results_1.xml\"/>\n\t<xi:include href=\"results_2.xml\"/>\n</BlastXML2>\n"),
+        ),
+    ] {
+        received.files.lock().unwrap().clear();
+        // The sink wins over a `-out` of the run: no file is written next to it.
+        let mut document =
+            Xml2Document::for_run(kind, false, Some(std::path::Path::new("/nonexistent/o.out")), Some(&sink));
+        let mut out = Vec::new();
+        document.report(&mut b"q1\n".to_vec(), &mut out).unwrap();
+        document.report(&mut b"q2\n".to_vec(), &mut out).unwrap();
+        assert!(out.is_empty());
+        document.epilog(&mut out).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), master);
+        assert_eq!(
+            *received.files.lock().unwrap(),
+            [
+                (format!("results_1.{ext}").into_bytes(), b"q1\n".to_vec()),
+                (format!("results_2.{ext}").into_bytes(), b"q2\n".to_vec()),
+            ]
+        );
+    }
+    // A `-out` with a directory and an extension names the side files as `FsSideFiles` does.
+    received.files.lock().unwrap().clear();
+    let named = super::SideFileSink::new("d/Y.Json", received.clone());
+    let mut document = Xml2Document::for_run(Xml2Kind::Files13, false, None, Some(&named));
+    let mut out = Vec::new();
+    document.report(&mut b"q\n".to_vec(), &mut out).unwrap();
+    document.epilog(&mut out).unwrap();
+    assert_eq!(received.files.lock().unwrap()[0].0, b"d/Y_1.json");
+    assert!(String::from_utf8(out)
+        .unwrap()
+        .contains("\"Y.Json_1.json\""));
+    // Outfmt 15 and 16 have no side files.
+    received.files.lock().unwrap().clear();
+    for kind in [Xml2Kind::Single16, Xml2Kind::Single15] {
+        let mut out = Vec::new();
+        let mut document = Xml2Document::for_run(kind, false, None, Some(&sink));
+        document.report(&mut b"x\n".to_vec(), &mut out).unwrap();
+        document.epilog(&mut out).unwrap();
+        assert!(String::from_utf8(out).unwrap().contains("x\n"));
+    }
+    assert!(received.files.lock().unwrap().is_empty());
+}
+
+/// A side file that the receiver refuses is the side-file write error of every program
+/// (`side_file_write_error`): the files before it were received, the master stays empty.
+#[test]
+fn a_receiver_that_fails_is_the_side_file_write_error() {
+    let received = std::sync::Arc::new(Received {
+        fail_at: Some(b"r_2.json"),
+        ..Received::default()
+    });
+    let sink = super::SideFileSink::new("r", received.clone());
+    let mut document = Xml2Document::for_run(Xml2Kind::Files13, false, None, Some(&sink));
+    let mut master = Vec::new();
+    document.report(&mut b"q1\n".to_vec(), &mut master).unwrap();
+    let error = document
+        .report(&mut b"q2\n".to_vec(), &mut master)
+        .unwrap_err();
+    let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
+    assert_eq!(
+        (native.exit, native.message.as_str()),
+        (6, "BLAST failed to write output\n")
+    );
+    assert_eq!(received.files.lock().unwrap().len(), 1);
+    assert!(master.is_empty());
 }
 
 /// The eight naming probes of `S/probe5/out/naming` (DESIGN_OF5 1.7): the `-out` argument, the
@@ -939,7 +1044,7 @@ fn side_files_on_the_file_system_are_truncated_and_numbered() {
     std::fs::write(dir.join("o.out_1.xml"), "stale stale stale stale\n").unwrap();
     std::fs::write(dir.join("o.out_3.xml"), "stale\n").unwrap();
     let out = dir.join("o.out");
-    let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, Some(&out));
+    let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, Some(&out), None);
     let mut master = Vec::new();
     document
         .report(&mut b"one\n".to_vec(), &mut master)
@@ -958,7 +1063,7 @@ fn side_files_on_the_file_system_are_truncated_and_numbered() {
     // a directory of the name of a side file: NCBI's error
     let blocked = dir.join("p.out");
     std::fs::create_dir_all(dir.join("p.out_2.xml")).unwrap();
-    let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, Some(&blocked));
+    let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, Some(&blocked), None);
     document
         .report(&mut b"one\n".to_vec(), &mut Vec::new())
         .unwrap();

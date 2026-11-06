@@ -64,14 +64,14 @@ pub fn run_local(
     subject_records: &[fasta_reader::FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    let requested: Vec<&str> = outputs.formats.iter().map(|format| format.outfmt).collect();
+    let requested = requested_formats(&args, outputs);
     // LOSAT Web registers records before it knows the options: they keep no ids of their
     // deflines. The library API's `read_inputs` reads them.
     let ids_read = query_records
         .iter()
         .chain(subject_records)
         .any(|record| record.believed().is_some());
-    let (choices, resolutions) = read_options(&args, &requested, ids_read, side_files(&args))?;
+    let (choices, resolutions) = read_options(&args, &requested, ids_read)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
     let archive = archive::handle_for(&args, archive_requested)?
@@ -297,21 +297,24 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         hits: hits_sink,
         observer,
     } = outputs;
+    // The caller's receivers of the side files of outfmt 13 and 14.
+    let side_sinks: Vec<_> = formats
+        .iter()
+        .map(|format| format.sink.side_files().cloned())
+        .collect();
     let mut writers = formats
         .iter_mut()
         .map(|format| format.sink.open())
         .collect::<io::Result<Vec<_>>>()?;
-    // The writer of each XML2 or JSON document (outfmt 15 and 16), which the run keeps across the
-    // query batches (`native::run_inner`).
+    // The writer of each XML2 or JSON document (outfmt 13 to 16), which the run keeps across the
+    // query batches (`native::run_inner`). The side files of 13 and 14 go next to `out` or to the
+    // caller's receiver.
     let mut documents: Vec<_> = resolved
         .iter()
-        .map(|options| {
+        .zip(&side_sinks)
+        .map(|(options, sink)| {
             super::blast_xml::xml2_kind(options.outfmt).map(|kind| {
-                use crate::report::blast_xml2::{FsSideFiles, NoSideFiles, RunSideFiles};
-                let files: RunSideFiles = match out.filter(|_| kind.is_files()) {
-                    Some(out) => Box::new(FsSideFiles::new(out, kind)),
-                    None => Box::new(NoSideFiles),
-                };
+                let files = crate::report::blast_xml2::run_side_files(kind, out, sink.as_ref());
                 super::blast_xml::xml2_writer(kind, options, subjects, &shown, files)
             })
         })
@@ -640,8 +643,8 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    let requested: Vec<&str> = outputs.formats.iter().map(|format| format.outfmt).collect();
-    let (choices, resolutions) = read_format_options(&args, &requested, side_files(&args))?;
+    let requested = requested_formats(&args, outputs);
+    let (choices, resolutions) = read_format_options(&args, &requested)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
     let archive = archive::handle_for(&args, archive_requested)?
         .map(|handle| outputs.with_archive_outfmt(handle));
@@ -801,8 +804,12 @@ fn search_database(
 /// thread count, the syntax of `-subject_loc` and `-query_loc`, then NCBI's errors of the
 /// options, with the messages of a run. A run reports NCBI's errors after the subjects are read,
 /// so for an argv and records that both fail the run reports the records' error.
+///
+/// Outfmt 13 and 14 are read as in a run that gives them the caller's receiver of their side files
+/// (`OutputSink::Files`, which LOSAT Web gives them).
 pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
-    let (choices, resolutions) = read_options(args, outfmts, false, side_files(args))?;
+    let requested: Vec<(&str, bool)> = outfmts.iter().map(|&outfmt| (outfmt, true)).collect();
+    let (choices, resolutions) = read_options(args, &requested, false)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     parse_subject_range(args)?;
     parse_query_range(args)?;
@@ -844,9 +851,8 @@ fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 /// subjects are read (`native::run_inner`).
 fn read_options(
     args: &BlastxArgs,
-    outfmts: &[&str],
+    outfmts: &[(&str, bool)],
     ids_read: bool,
-    unwritten: &[i32],
 ) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
@@ -857,31 +863,41 @@ fn read_options(
     if args.parse_deflines && !ids_read {
         bail!("-parse_deflines is not supported in the browser yet");
     }
-    read_format_options(args, outfmts, unwritten)
+    read_format_options(args, outfmts)
 }
 
-/// The formats that have no writer without a file for their side files (`api::run_to_file`).
-fn side_files(args: &BlastxArgs) -> &'static [i32] {
-    match args.out {
-        Some(_) => &[],
-        None => &[13, 14],
-    }
+/// The `-outfmt` value of each output of `outputs`, and whether the side files of outfmt 13 and 14
+/// have somewhere to go: a file next to which they are written (`api::run_to_file`), or the
+/// caller's receiver of them (`FormatOutput::side_out`).
+fn requested_formats<'o>(
+    args: &BlastxArgs,
+    outputs: &'o ReportOutputs<'_>,
+) -> Vec<(&'o str, bool)> {
+    outputs
+        .formats
+        .iter()
+        .map(|format| {
+            (
+                format.outfmt,
+                format.side_out(args.out.as_deref()).is_some(),
+            )
+        })
+        .collect()
 }
 
-/// `read_options` without its refusals of what a search of records in memory cannot do:
-/// `unwritten` are the formats that have no writer in memory.
+/// `read_options` without its refusals of what a search of records in memory cannot do: each
+/// format comes with whether its side files have somewhere to go (`requested_formats`).
 fn read_format_options(
     args: &BlastxArgs,
-    outfmts: &[&str],
-    unwritten: &[i32],
+    outfmts: &[(&str, bool)],
 ) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
     // NCBI parses -outfmt before its option handlers read the subjects (`native::run_inner`).
     let mut choices = Vec::with_capacity(outfmts.len());
-    for outfmt in outfmts {
+    for &(outfmt, side_files) in outfmts {
         let choice = app::parse_formatting_string(outfmt)?;
         app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
         // No NCBI counterpart: the side files of outfmt 13 and 14 have no writer in memory.
-        if unwritten.contains(&choice.number) {
+        if !side_files && matches!(choice.number, 13 | 14) {
             bail!(
                 "output format {} is not supported in memory for BLASTX",
                 choice.number

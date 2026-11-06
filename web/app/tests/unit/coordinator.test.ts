@@ -347,10 +347,6 @@ describe('Coordinator', () => {
       expect(await coordinator.readOutput(runId, format)).toBe(await coordinator.readOutput(plain, format));
     }
     await expect(data.readOutput(plain, CUSTOM_OUTPUT)).rejects.toThrow('does not write output 4');
-    expect(await coordinator.enqueue({ ...request, extra: ['-outfmt', '13'] })).toEqual({
-      ok: false,
-      message: '-outfmt 13 is not supported in the browser yet',
-    });
   });
 
   // Every other format that the CLI writes is the output of the argv's -outfmt too (W11), saved
@@ -369,6 +365,12 @@ describe('Coordinator', () => {
     expect(saved[1]!.type).toBe('text/plain');
     // An output is opened without being read (a binary one, which the Outputs do not show).
     await expect(coordinator.checkOutput(runId, CUSTOM_OUTPUT)).resolves.toBeUndefined();
+    // The files of 13 and 14 are one ZIP archive.
+    const files = (await coordinator.enqueue({ ...request, extra: ['-outfmt', '13'] })).runId!;
+    await waitFor(coordinator, files, 'completed');
+    await coordinator.exportOutput(files, CUSTOM_OUTPUT);
+    expect(saved[2]!.fileName).toBe('losat-run2-blastn-megablast-19700101T000001Z.outfmt13.zip');
+    expect(saved[2]!.type).toBe('application/zip');
   });
 
   it('queues a group in order, numbered without gaps, and cancels the group together', async () => {

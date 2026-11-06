@@ -360,6 +360,8 @@ pub(super) fn render(
             before: warning_lines.take().unwrap_or(&[]),
             sink: &mut *outputs.diagnostics,
         });
+        // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
+        let side_sink = format.sink.side_files().cloned();
         let mut writer = format.sink.open()?;
         match format_number(format.outfmt) {
             // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
@@ -443,7 +445,12 @@ pub(super) fn render(
                     .as_ref()
                     .expect("XML prepared for TBLASTN outfmt 13 to 16");
                 xml.write(
-                    &mut crate::report::blast_xml2::Xml2Writer::for_run(kind, xml.xml2_run(), out),
+                    &mut crate::report::blast_xml2::Xml2Writer::for_run(
+                        kind,
+                        xml.xml2_run(),
+                        out,
+                        side_sink.as_ref(),
+                    ),
                     &mut writer,
                     query_records,
                     subject_letters,

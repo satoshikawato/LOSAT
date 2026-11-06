@@ -2,7 +2,7 @@
 // The compatibility outputs of a run, byte for byte as the engine wrote them, with the CLI
 // command of each format and their export (plan §5.8; the view filters never apply here): the
 // formats of every run, and the output of the run's own -outfmt (W10, W11). A binary output
-// (outfmt 9) is exported, not shown. An output that cannot be read, or an export that is not
+// (outfmt 9, and the ZIP archive of the files of 13 and 14) is exported, not shown. An output that cannot be read, or an export that is not
 // saved, says why (application/outputs.ts).
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';

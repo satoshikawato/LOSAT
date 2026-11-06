@@ -93,6 +93,9 @@ const FILE_TYPES: Readonly<Record<number, { readonly extension: string; readonly
   10: { extension: 'csv', type: 'text/csv' },
   11: { extension: 'asn', type: 'text/plain' },
   12: { extension: 'json', type: 'application/json' },
+  // The master file and the side files of 13 and 14, as one ZIP archive (the adapter's).
+  13: { extension: 'zip', type: 'application/zip' },
+  14: { extension: 'zip', type: 'application/zip' },
   15: { extension: 'json', type: 'application/json' },
   16: { extension: 'xml', type: 'application/xml' },
   17: { extension: 'sam', type: 'text/plain' },
@@ -105,9 +108,12 @@ export function outputNumber(argv: readonly string[], output: RunOutput): number
   return output === CUSTOM_OUTPUT ? (formatNumber(customOutfmt(argv) ?? '') ?? 0) : output;
 }
 
-/** Whether an output of a run of `argv` is binary (outfmt 9), which the Outputs do not show as text. */
+/** The formats whose output is binary: outfmt 9, and the ZIP archive of the files of 13 and 14. */
+const BINARY: ReadonlySet<number> = new Set([9, 13, 14]);
+
+/** Whether an output of a run of `argv` is binary (BINARY), which the Outputs do not show as text. */
 export function isBinaryOutput(argv: readonly string[], output: RunOutput): boolean {
-  return outputNumber(argv, output) === 9;
+  return BINARY.has(outputNumber(argv, output));
 }
 
 /** The media type of an output's file. */
@@ -130,7 +136,7 @@ export function outfmtOf(argv: readonly string[], output: RunOutput): string {
  * without tasks), and the UTC time of its "Run LOSAT" in ISO 8601's basic format, so that the
  * runs of the four BLASTN tasks, and runs of the same number in other tabs, get other names
  * (`losat-run3-blastn-megablast-20261104T111530Z.outfmt6.txt`). The output of the argv's -outfmt
- * has the extension of its format (`…outfmt5.xml`, `…outfmt10.csv`, `…outfmt9.asnb`), and
+ * has the extension of its format (`…outfmt5.xml`, `…outfmt10.csv`, `…outfmt9.asnb`, `…outfmt13.zip`), and
  * `-custom` after the number where words configure it (`…outfmt6-custom.txt`, BLAST+'s "custom
  * format" of its -outfmt help; outfmt 5 ignores words).
  */

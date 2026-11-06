@@ -53,7 +53,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use super::files::FsSideFiles;
+use super::files::{run_side_files, SideFileSink};
 use crate::report::serial::xml::XML2_ROOT_ATTRIBUTES;
 
 /// Which of NCBI's four document forms a run writes.
@@ -221,14 +221,16 @@ impl Xml2Document<NoSideFiles> {
 
 impl Xml2Document<RunSideFiles> {
     /// The document of a run with `-out` `out`: the side files of outfmt 13 and 14 are written
-    /// next to it (`FsSideFiles`); outfmt 15 and 16 have none. A caller with outfmt 13 or 14
-    /// and no file name (`out` is `None`) gets an error when the first report is written.
-    pub fn for_run(kind: Xml2Kind, delayed: bool, out: Option<&Path>) -> Self {
-        let files: RunSideFiles = match out {
-            Some(out) if kind.is_files() => Box::new(FsSideFiles::new(out, kind)),
-            _ => Box::new(NoSideFiles),
-        };
-        Self::with_files(kind, delayed, files)
+    /// next to it (`FsSideFiles`), or handed to the caller's receiver when the format's output
+    /// gives one (`sink`, `files::run_side_files`); outfmt 15 and 16 have none. A caller with
+    /// outfmt 13 or 14 and neither gets an error when the first report is written.
+    pub fn for_run(
+        kind: Xml2Kind,
+        delayed: bool,
+        out: Option<&Path>,
+        sink: Option<&SideFileSink>,
+    ) -> Self {
+        Self::with_files(kind, delayed, run_side_files(kind, out, sink))
     }
 }
 

@@ -854,7 +854,10 @@ fn numeric_values_are_validated_before_io() {
         ("2", None),
         ("3", None),
         ("4", None),
-        ("5", Some("Word-size must be less than 6 for protein comparison")),
+        (
+            "5",
+            Some("Word-size must be less than 6 for protein comparison"),
+        ),
     ] {
         let Commands::Tblastx(args) = parse("tblastx", &["-outfmt", "6", "-word_size", value])
             .unwrap()

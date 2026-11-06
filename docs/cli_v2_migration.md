@@ -122,7 +122,7 @@ paths beginning with a dash. `-help`/`--help` display canonical names; top-level
 | `-comp_based_stats` | Entire-token grammar 0/1/2/3/F/f/D/d/T/t; lowercase `u` only with enabled modes |
 | BLASTN tasks | megablast, blastn; engine task-specific scoring resolution preserved |
 | BLASTN word size | 4..100 |
-| TBLASTX word size | 3 only; other sizes were never implemented by this engine |
+| TBLASTX word size | 2..4, as NCBI (2 and 4 since line NP SC10) |
 | Genetic codes | NCBI valid IDs; query_gencode and db_gencode default 1 |
 
 BLASTN `hitlist_size`, `scan_step`, and `min_diag_separation` are internal fields,

@@ -50,8 +50,8 @@ const PSSM_FILES: &[&str] = &[
     "in_pssm",
 ];
 
-/// The options of `program`'s command line that write a PSSM file: they are not in an argv that
-/// `validate` accepts, and `describe` leaves them out.
+/// The options of `program`'s command line that write a PSSM file or read the query from one
+/// (`PSSM_FILES`): they are not in an argv that `validate` accepts, and `describe` leaves them out.
 pub(super) fn pssm_file_options(program: Program) -> &'static [&'static str] {
     match program {
         Program::Psiblast => PSSM_FILES,

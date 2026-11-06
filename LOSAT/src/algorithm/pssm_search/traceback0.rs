@@ -53,10 +53,8 @@ pub(crate) struct PssmTraceback0<'a, R: PssmRows> {
     pub(crate) x_drop_final: i32,
     /// `kbp_gap_psi[0]`.
     pub(crate) karlin: &'a KarlinParams,
-    /// None with `-searchsp`: the e-values then come from the context's search space.
-    pub(crate) gumbel: Option<&'a BlastGumbelBlk>,
-    /// The context's effective search space.
-    pub(crate) search_space: f64,
+    /// `sbp->gbp` (a PSSM search always has one: LOSAT's psiblast takes no `-searchsp`).
+    pub(crate) gumbel: &'a BlastGumbelBlk,
     pub(crate) expect_value: f64,
     pub(crate) hitlist_size: usize,
 }
@@ -374,24 +372,14 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
     /// ```
     fn post_traceback_update(&self, hsp_list: &mut BlastpHspList, subject_length: usize) {
         let query_length = self.context.aa_len as i32;
-        match self.gumbel {
-            Some(gumbel) => {
-                for hsp in &mut hsp_list.hsps {
-                    hsp.e_value = blast_spouge_stoe(
-                        hsp.raw_score,
-                        self.karlin,
-                        gumbel,
-                        query_length,
-                        subject_length as i32,
-                    );
-                }
-            }
-            None => {
-                for hsp in &mut hsp_list.hsps {
-                    hsp.e_value = self.search_space
-                        * (-self.karlin.lambda * hsp.raw_score as f64 + self.karlin.k.ln()).exp();
-                }
-            }
+        for hsp in &mut hsp_list.hsps {
+            hsp.e_value = blast_spouge_stoe(
+                hsp.raw_score,
+                self.karlin,
+                self.gumbel,
+                query_length,
+                subject_length as i32,
+            );
         }
         reap_hsplist_by_evalue(hsp_list, self.expect_value);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1926-1928

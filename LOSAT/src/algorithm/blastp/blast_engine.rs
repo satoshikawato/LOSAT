@@ -5975,7 +5975,9 @@ fn resolve_for_formats(
 /// queries before and the reader's messages of the batch. A query long enough to be split into
 /// chunks (`split_protein_batch`) takes the split search instead, which ignores the chunks' error,
 /// and NCBI's psiblast crashes in the traceback (exit 139; 2.17.0, 20,000 X letters at the default
-/// CHUNK_SIZE): LOSAT rejects it. Each batch of `batches` holds one query
+/// CHUNK_SIZE): LOSAT rejects it. NCBI's psiblast also crashes, after the prolog, on such a PSSM
+/// query (`-in_pssm`, which is never split): LOSAT rejects that too. Each batch of `batches` holds
+/// one query
 /// (`read_psiblast_query_batches`); its validity is that of the search's contexts (the query with
 /// its SEG masks, or its letters with `-soft_masking true`: `blastp_query_frames`).
 fn psiblast_stop_at_invalid_query(
@@ -5998,6 +6000,13 @@ fn psiblast_stop_at_invalid_query(
     let (input_start, searched_start) = batches.starts[batch];
     let query_length = searched_queries[searched_start].seq().len();
     let error = match crate::blastinput::app::protein_query_split_sizes(args.app.name(), 10000) {
+        // A PSSM query (`-in_pssm`, never split: `check_in_pssm_options`) whose letters give no
+        // Karlin-Altschul parameters: NCBI's psiblast crashes (2.17.0, exit 139) where
+        // `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc`
+        // did not make (psiblast_aux_priv.cpp:89-107, blast_stat.c:2783-2799).
+        Ok(_) if args.psi_search.is_some() => anyhow::anyhow!(
+            "a PSSM query whose letters give no Karlin-Altschul parameters (with which NCBI BLAST+'s psiblast crashes) is not supported by LOSAT's PSIBLAST"
+        ),
         Ok(sizes)
             if crate::algorithm::common::protein_query_split::split_protein_batch(
                 &[query_length],
@@ -9989,8 +9998,6 @@ fn run_resolved_in_pool(
             &lookup,
             &pssm_hooks::PssmPrelimRun {
                 contexts: &contexts,
-                search_spaces: &search_spaces,
-                exact_search_spaces: &exact_search_spaces,
                 gapped_params: &gapped_params,
                 gumbel: gapped_gumbel.as_ref(),
                 cutoff_subject_length,
@@ -10357,7 +10364,6 @@ fn run_resolved_in_pool(
             subjects,
             &gapped_params,
             gapped_gumbel.as_ref(),
-            &search_spaces,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
             blastp_parallel_pool,
@@ -11941,14 +11947,24 @@ fn run_resolved_in_pool(
                 .cloned()
                 .unwrap_or_default();
             if result_warnings {
-                lines.extend(crate::report::query_warnings::query_warning(
-                    args.app.ncbi_name(),
-                    args.first_query_ordinal
-                        + ranges.x_ordinal_base
-                        + ranges.query_input.ordinal(q_idx),
-                    record,
-                    &messages,
-                ));
+                lines.extend(if args.psi_search.is_some() {
+                    // psiblast `-in_pssm`: the label is the PSSM's Seq-id, the record's local id.
+                    crate::report::query_warnings::query_warning_with_seq_id(
+                        args.app.ncbi_name(),
+                        record.local_id.as_bytes(),
+                        record,
+                        &messages,
+                    )
+                } else {
+                    crate::report::query_warnings::query_warning(
+                        args.app.ncbi_name(),
+                        args.first_query_ordinal
+                            + ranges.x_ordinal_base
+                            + ranges.query_input.ordinal(q_idx),
+                        record,
+                        &messages,
+                    )
+                });
             }
             lines
         })

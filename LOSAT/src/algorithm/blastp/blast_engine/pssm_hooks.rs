@@ -44,7 +44,6 @@ use crate::algorithm::tblastx::lookup::{
 };
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
-use crate::stats::search_space::SearchSpace;
 use crate::stats::{blast_spouge_etos, BlastGumbelBlk, KarlinParams};
 
 /// The lookup table of the PSSM and the query's contexts (with `kbp_std`, the query's
@@ -86,6 +85,14 @@ pub(super) struct PsiKarlin {
     pub(super) gapped: KarlinParams,
 }
 
+/// The Gumbel block of a PSSM search (`sbp->gbp`), which the e-values and the hit-saving cutoff
+/// read (Spouge's finite-size correction). blastp's search has none only with `-searchsp`, which
+/// LOSAT's psiblast does not take (its parser refuses it, and `PsiblastArgs` sets
+/// `BlastpArgs::searchsp` to `None`), so a PSSM search always has one.
+fn psi_gumbel(gumbel: Option<&BlastGumbelBlk>) -> &BlastGumbelBlk {
+    gumbel.expect("a psiblast search has a Gumbel block (LOSAT's psiblast takes no -searchsp)")
+}
+
 /// `kbp_psi[0]` from the query's `kbp_std[0]` and `kbp_gap_psi[0]` from `kbp_gap_std[0]` (the
 /// table's BLOSUM62 values, `gapped_params`), as `PsiBlastSetupScoreBlock` sets them.
 pub(super) fn psi_karlin(
@@ -108,9 +115,8 @@ thread_local! {
 /// The per-run values of the preliminary search that `run_resolved_in_pool` computed for blastp.
 pub(super) struct PssmPrelimRun<'a> {
     pub(super) contexts: &'a [QueryContext],
-    pub(super) search_spaces: &'a [SearchSpace],
-    pub(super) exact_search_spaces: &'a [Option<i64>],
     pub(super) gapped_params: &'a KarlinParams,
+    /// `sbp->gbp` (`psi_gumbel`).
     pub(super) gumbel: Option<&'a BlastGumbelBlk>,
     pub(super) cutoff_subject_length: i32,
     pub(super) prelim_evalue: f64,
@@ -204,21 +210,14 @@ pub(super) fn pssm_prelim(
     }
     let karlin = psi_karlin(psi, run.contexts, run.gapped_params);
     let x_dropoff = x_drop_raw_score(X_DROP_UNGAPPED_BITS, &karlin.ungapped, 1.0);
-    let hit_cutoff = match run.gumbel {
-        Some(gumbel) => blast_spouge_etos(
-            run.prelim_evalue,
-            &karlin.gapped,
-            gumbel,
-            ctx.aa_len as i32,
-            run.cutoff_subject_length,
-        ),
-        None => crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_from_evalue(
-            args.evalue,
-            run.exact_search_spaces[0].unwrap_or(0),
-            &karlin.gapped,
-        )
-        .max(1),
-    };
+    let gumbel = psi_gumbel(run.gumbel);
+    let hit_cutoff = blast_spouge_etos(
+        run.prelim_evalue,
+        &karlin.gapped,
+        gumbel,
+        ctx.aa_len as i32,
+        run.cutoff_subject_length,
+    );
     let word_cutoff =
         gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, &ctx.karlin_params).min(hit_cutoff);
     let window = run.window;
@@ -237,8 +236,7 @@ pub(super) fn pssm_prelim(
             karlin.gapped.lambda,
         ),
         karlin: &karlin.gapped,
-        gumbel: run.gumbel,
-        search_space: run.search_spaces[0].effective_space,
+        gumbel,
         prelim_evalue: run.prelim_evalue,
     };
     let diag_mask = run.diag_mask;
@@ -340,7 +338,6 @@ pub(super) fn pssm_traceback(
     subjects: XRedoSubjects<'_>,
     gapped_params: &KarlinParams,
     gumbel: Option<&BlastGumbelBlk>,
-    search_spaces: &[SearchSpace],
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     pool: &crate::utils::threading::SearchPool<'_>,
@@ -364,8 +361,7 @@ pub(super) fn pssm_traceback(
         gap_extend: args.scoring.gap_extend,
         x_drop_final,
         karlin: &karlin.gapped,
-        gumbel,
-        search_space: search_spaces[0].effective_space,
+        gumbel: psi_gumbel(gumbel),
         expect_value: args.evalue,
         hitlist_size: args.traceback_hitlist_size(),
     }

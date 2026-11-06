@@ -88,10 +88,8 @@ pub(crate) struct PssmPrelim<'a, R: PssmRows> {
     pub(crate) x_drop_gapped: i32,
     /// `kbp_gap_psi[0]`, for the preliminary e-values.
     pub(crate) karlin: &'a KarlinParams,
-    /// `sbp->gbp`; `None` with `-searchsp`.
-    pub(crate) gumbel: Option<&'a BlastGumbelBlk>,
-    /// The context's effective search space (the e-values without a Gumbel block).
-    pub(crate) search_space: f64,
+    /// `sbp->gbp` (a PSSM search always has one: LOSAT's psiblast takes no `-searchsp`).
+    pub(crate) gumbel: &'a BlastGumbelBlk,
     /// `hit_params->prelim_evalue`.
     pub(crate) prelim_evalue: f64,
 }
@@ -386,20 +384,13 @@ impl<R: PssmRows> PssmPrelim<'_, R> {
                 .iter()
                 .map(|hsp| XPrelimHsp {
                     hsp: *hsp,
-                    e_value: match self.gumbel {
-                        Some(gumbel) => blast_spouge_stoe(
-                            hsp.raw_score,
-                            self.karlin,
-                            gumbel,
-                            query_length,
-                            aa_len as i32,
-                        ),
-                        None => {
-                            self.search_space
-                                * (-self.karlin.lambda * hsp.raw_score as f64 + self.karlin.k.ln())
-                                    .exp()
-                        }
-                    },
+                    e_value: blast_spouge_stoe(
+                        hsp.raw_score,
+                        self.karlin,
+                        self.gumbel,
+                        query_length,
+                        aa_len as i32,
+                    ),
                 })
                 .collect(),
             best_evalue: f64::MAX,

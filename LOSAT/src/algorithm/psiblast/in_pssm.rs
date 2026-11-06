@@ -50,6 +50,9 @@ use crate::report::serial::pssm::{ObjectId, PssmSeqId, PssmWithParameters, SeqDa
 /// NCBISTDAA's letters (`NCBISTDAA_TO_AMINOACID`, blast_encoding.c:115-118).
 const NCBISTDAA_LETTERS: [u8; BLASTAA_SIZE] = *b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
 
+/// `BLAST_SCORE_MAX` (`INT2_MAX`, blast_stat.h:122): the largest score of one letter pair.
+const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
+
 /// What `CFormatGuess::Format` makes of the file, as far as `-in_pssm` reads it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PssmFileFormat {
@@ -228,7 +231,23 @@ pub(crate) fn read_in_pssm(path: &Path) -> Result<PsiSearch> {
     //         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
     //             "File is not accessible",AsString()));
     // ```
-    let bytes = std::fs::read(path).map_err(|_| crate::cli::inaccessible("in_pssm", path))?;
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-721
+    // ```c++
+    //     if (AsString() == "-") {
+    // #if defined(NCBI_OS_MSWIN)
+    //         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+    // #endif
+    //         m_Ios  = &cin;
+    // ```
+    // `-in_pssm -` is the standard input (`kArgPSIInputChkPntFile` is an `eInputFile`), as
+    // `-query -` is; NCBI's messages name the file `-`.
+    let bytes = if path.as_os_str() == "-" {
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut bytes).map(|_| bytes)
+    } else {
+        std::fs::read(path)
+    }
+    .map_err(|_| crate::cli::inaccessible("in_pssm", path))?;
     match guess_format(&bytes) {
         PssmFileFormat::TextAsn => {}
         PssmFileFormat::Unsupported => {
@@ -378,25 +397,24 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
             ))
         }
     };
-    // The query: one local string Seq-id (`Query_N` of a psiblast PSSM), its first title, its
-    // letters.
+    // The query: one local Seq-id (`local str "Query_N"` in a psiblast PSSM), its title, its
+    // letters. The record's local id is the Seq-id's `GetSeqIdString()`: the string, or the
+    // integer's decimal digits (`CObject_id::AsString`); the reports show it where they show the
+    // local id of a FASTA query, and NCBI's warnings of the query start with it
+    // (`report::query_warnings::query_warning_with_seq_id`).
     let local_id = match query.ids.as_slice() {
         [PssmSeqId::Local(ObjectId::Str(id))] if visible(id) && !id.is_empty() => {
             String::from_utf8_lossy(id).into_owned()
         }
+        [PssmSeqId::Local(ObjectId::Id(id))] => id.to_string(),
         _ => {
             return Err(refuse(
-                "a PSSM query whose Seq-id is not one local string id (an accession, gi or other id is shown through the parsed Seq-ids of the query)",
+                "a PSSM query whose Seq-id is not one local id (an accession, gi or other id is shown through the parsed Seq-ids of the query)",
             ))
         }
     };
-    let title: &[u8] = query
-        .titles
-        .as_ref()
-        .and_then(|titles| titles.first())
-        .map_or(&[], |title| title.as_slice());
-    if !visible(title)
-        || query.titles.iter().flatten().any(|title| !visible(title))
+    let titles: &[Vec<u8>] = query.titles.as_deref().unwrap_or(&[]);
+    if titles.iter().any(|title| !visible(title))
         || pssm
             .pssm
             .row_labels
@@ -406,6 +424,37 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
     {
         return Err(refuse(
             "a PSSM whose strings hold a byte outside the visible ASCII range (NCBI reads it as '#' with an error message)",
+        ));
+    }
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:669-683
+    // ```c++
+    //         ITERATE(CBioseq::TDescr::Tdata, iter, data) {
+    //             if((*iter)->IsTitle()) {
+    //                 all_descr_str += (*iter)->GetTitle();
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:732-734
+    // ```c++
+    //     string all_id_str = GetSeqIdString(cbs, believe_query);
+    //     all_id_str += " ";
+    //     all_id_str = NStr::TruncateSpaces(all_id_str + GetSeqDescrString(cbs));
+    // ```
+    // NCBI's `Query=` and `# Query:` lines join every title of the Bioseq and trim the spaces at
+    // the line's ends, while `qseqid` and the warnings read the first title as it is (and a title
+    // that starts with a space has an empty first word, so `qseqid` is the local id). A FASTA
+    // defline gives one title without white space at its ends (psiblast's own PSSMs hold such a
+    // title); the PSSM search reads that one only.
+    if titles.len() > 1 {
+        return Err(refuse(format!(
+            "a PSSM query with {} titles (NCBI's Query= line joins them, its tabular query id and warnings read the first)",
+            titles.len()
+        )));
+    }
+    let title: &[u8] = titles.first().map_or(&[], |title| title.as_slice());
+    if title.first().is_some_and(u8::is_ascii_whitespace)
+        || title.last().is_some_and(u8::is_ascii_whitespace)
+    {
+        return Err(refuse(
+            "a PSSM query whose title starts or ends with white space (NCBI's Query= line trims it, its tabular query id and warnings keep it)",
         ));
     }
     if query.inst.mol.1 != 3 || query.inst.repr.1 != 2 {
@@ -469,6 +518,24 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
             scores.len(),
             letters.len()
         )));
+    }
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_stat.h:121-122
+    // ```c
+    // #define BLAST_SCORE_MIN INT2_MIN   /**< minimum allowed score (for one letter comparison). */
+    // #define BLAST_SCORE_MAX INT2_MAX   /**< maximum allowed score (for one letter comparison). */
+    // ```
+    // NCBI copies the scores into the matrix without a check; its kernels add them in `Int4`, which
+    // a score far outside one letter's range overflows (undefined behaviour). Within the range,
+    // the sums of a query that is not split (under 19,800 letters) stay inside `Int4`.
+    if validation_error.is_none() {
+        if let Some(score) = scores
+            .iter()
+            .find(|&&score| !(BLAST_SCORE_MIN..=BLAST_SCORE_MAX).contains(&score))
+        {
+            return Err(refuse(format!(
+                "a PSSM score of {score}, outside BLAST_SCORE_MIN..BLAST_SCORE_MAX ({BLAST_SCORE_MIN}..{BLAST_SCORE_MAX}), where NCBI BLAST+'s sums overflow,"
+            )));
+        }
     }
     let rows = if validation_error.is_none() {
         convert_scores(
@@ -767,6 +834,82 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("dimensions (28 rows, 29 columns)"));
+    }
+
+    fn rnd() -> PssmWithParameters {
+        crate::blastinput::pssm_text::read_pssm_with_parameters(&fixture(
+            "db_search/db.ps.asn.rnd.6.asn",
+        ))
+        .unwrap()
+    }
+
+    // The review of PS4a, S1: titles that NCBI's Query= line and its tabular query id read
+    // differently (several titles; white space at a title's ends) are refused; one title is read.
+    #[test]
+    fn query_titles_that_ncbi_reads_two_ways_are_refused() {
+        let with_titles = |titles: &[&[u8]]| {
+            let mut pssm = rnd();
+            pssm.pssm.query.as_mut().unwrap().titles =
+                Some(titles.iter().map(|title| title.to_vec()).collect());
+            psi_search_of(pssm).map(|search| search.query.title)
+        };
+        assert_eq!(with_titles(&[b"rnd random"]).unwrap(), b"rnd random");
+        assert_eq!(with_titles(&[b""]).unwrap(), b"");
+        let error = with_titles(&[b"rnd", b"second"]).unwrap_err().to_string();
+        assert!(error.contains("a PSSM query with 2 titles"), "{error}");
+        for title in [&b" rnd"[..], b"rnd ", b"  sp1  two  words  "] {
+            let error = with_titles(&[title]).unwrap_err().to_string();
+            assert!(error.contains("starts or ends with white space"), "{error}");
+        }
+    }
+
+    // The review of PS4a, S2 and N3: the record's local id is the Seq-id's `GetSeqIdString()`
+    // (NCBI 2.17.0: `local id 5` shows as `5`, `local id -3` as `-3`, in `qseqid` and the warnings).
+    #[test]
+    fn the_local_id_is_the_seq_id_string() {
+        for (id, shown) in [
+            (ObjectId::Str(b"myq".to_vec()), "myq"),
+            (ObjectId::Id(5), "5"),
+            (ObjectId::Id(-3), "-3"),
+        ] {
+            let mut pssm = rnd();
+            pssm.pssm.query.as_mut().unwrap().ids = vec![PssmSeqId::Local(id)];
+            assert_eq!(psi_search_of(pssm).unwrap().query.local_id, shown);
+        }
+        let mut gi = rnd();
+        gi.pssm.query.as_mut().unwrap().ids = vec![PssmSeqId::Gi(7)];
+        let error = psi_search_of(gi).unwrap_err().to_string();
+        assert!(
+            error.contains("whose Seq-id is not one local id"),
+            "{error}"
+        );
+    }
+
+    // The review of PS4a, N8: a score outside one letter pair's range (`Int2`) is refused;
+    // `BLAST_SCORE_MIN` and `BLAST_SCORE_MAX` are scores.
+    #[test]
+    fn scores_outside_int2_are_refused() {
+        let with_score = |score: i32| {
+            let mut pssm = rnd();
+            pssm.pssm.final_data.as_mut().unwrap().scores[5] = score;
+            psi_search_of(pssm)
+        };
+        for score in [BLAST_SCORE_MIN, BLAST_SCORE_MAX] {
+            assert_eq!(with_score(score).unwrap().pssm.rows[0][5], score);
+        }
+        for score in [BLAST_SCORE_MIN - 1, BLAST_SCORE_MAX + 1, i32::MAX] {
+            let error = with_score(score).unwrap_err().to_string();
+            assert!(
+                error.contains(&format!("a PSSM score of {score}, outside")),
+                "{error}"
+            );
+        }
+        // A PSSM that NCBI's check refuses keeps NCBI's error (after the prolog).
+        let mut scaled = rnd();
+        let data = scaled.pssm.final_data.as_mut().unwrap();
+        data.scaling_factor = Some(2);
+        data.scores[5] = i32::MAX;
+        assert!(psi_search_of(scaled).unwrap().validation_error.is_some());
     }
 
     #[test]

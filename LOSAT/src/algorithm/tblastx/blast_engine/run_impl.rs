@@ -1527,7 +1527,7 @@ pub fn run_local(
     }
     // NCBI parses -outfmt before its option handlers read the subjects (BLASTN's
     // `run_local`); `search` checks the formats again.
-    check_report_formats(outputs, None)?;
+    check_report_formats(outputs, args.out.as_deref())?;
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
     // cannot write, and a diagnostics stream that saves the messages. The records' deflines are
     // those the caller's reader kept; records without one get `>` and their title.
@@ -1536,11 +1536,13 @@ pub fn run_local(
         .iter()
         .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Archive);
     if archive_requested && args.archive.is_none() {
-        args.archive = super::super::archive::handle_for(&args, true)?;
+        args.archive = super::super::archive::handle_for(&args, true)?
+            .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
-            return outputs.with_archive_diagnostics(handle, |view| {
+            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local(args, query_records, subject_records, view)
             });
+            return outputs.finish_archive(&handle, query_records.is_empty(), result);
         }
     }
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
@@ -1599,7 +1601,7 @@ pub fn run_local_database(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     // NCBI parses -outfmt before its option handlers run; `search` checks the formats again.
-    check_report_formats(outputs, None)?;
+    check_report_formats(outputs, args.out.as_deref())?;
     let archive_requested = outputs
         .formats
         .iter()
@@ -1656,7 +1658,7 @@ fn search_database(
 /// format that LOSAT's TBLASTX does not write.
 ///
 /// `out` is the run's `-out`: outfmt 13 and 14 write side files next to it, and fail on standard
-/// output (`xinclude_check_for`). `run_local` has no output file.
+/// output (`xinclude_check_for`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
 /// ```c++
@@ -5660,6 +5662,9 @@ fn search_query_batch<S: TbxScore>(
                                     HashSet::with_capacity(hits as usize);
                                 let mut duplicate_count = 0usize;
                                 for i in 0..hits as usize {
+                                    // SAFETY: `i < hits`; a scan call returns at most
+                                    // `offset_array_size` pairs, and `offset_pairs` was made with
+                                    // `offset_pairs_len` (>= `offset_array_size`) entries.
                                     let pair = unsafe { &*offset_pairs.as_ptr().add(i) };
                                     if !seen.insert((pair.q_off, pair.s_off)) {
                                         duplicate_count += 1;
@@ -5800,6 +5805,11 @@ fn search_query_batch<S: TbxScore>(
                                 // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
                                 //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:590
                                 let ctx_idx = lookup_ref.get_context_idx(query_offset as i32);
+                                // SAFETY: `ctx_idx < contexts_ref.len()`: `get_context_idx`
+                                // gives at most `max(num_contexts, 1) - 1`, the builders set
+                                // `num_contexts` to `contexts.len()`, and `contexts` is not empty
+                                // (a batch without a valid context returns before the subject
+                                // loop).
                                 let ctx = unsafe { contexts_ref.get_unchecked(ctx_idx) };
                                 let q_raw =
                                     query_offset.wrapping_sub(ctx.frame_base as u32) as usize;
@@ -5841,9 +5851,13 @@ fn search_query_batch<S: TbxScore>(
                                 // ```c
                                 // Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
                                 // ```
+                                // SAFETY: `ctx_idx < contexts_ref.len()` (the `ctx` comment above),
+                                // and `cutoff_scores` is `vec![0; contexts_ref.len()]`.
                                 let cutoff = unsafe { *cutoff_scores.get_unchecked(ctx_idx) };
                                 // [C] cutoffs->x_dropoff (per-context x_dropoff)
                                 // Reference: aa_ungapped.c:579
+                                // SAFETY: `ctx_idx < contexts_ref.len()` (the `ctx` comment above),
+                                // and `x_dropoff_per_context` maps `contexts`, one entry each.
                                 let x_dropoff =
                                     unsafe { *x_dropoff_per_context.get_unchecked(ctx_idx) };
 
@@ -6315,6 +6329,11 @@ fn search_query_batch<S: TbxScore>(
                                 // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
                                 //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:590
                                 let ctx_idx = lookup_ref.get_context_idx(query_offset as i32);
+                                // SAFETY: `ctx_idx < contexts_ref.len()`: `get_context_idx`
+                                // gives at most `max(num_contexts, 1) - 1`, the builders set
+                                // `num_contexts` to `contexts.len()`, and `contexts` is not empty
+                                // (a batch without a valid context returns before the subject
+                                // loop).
                                 let ctx = unsafe { contexts_ref.get_unchecked(ctx_idx) };
                                 let q_raw =
                                     query_offset.wrapping_sub(ctx.frame_base as u32) as usize;
@@ -6356,9 +6375,13 @@ fn search_query_batch<S: TbxScore>(
                                 // ```c
                                 // Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
                                 // ```
+                                // SAFETY: `ctx_idx < contexts_ref.len()` (the `ctx` comment above),
+                                // and `cutoff_scores` is `vec![0; contexts_ref.len()]`.
                                 let cutoff = unsafe { *cutoff_scores.get_unchecked(ctx_idx) };
                                 // [C] cutoffs->x_dropoff (per-context x_dropoff)
                                 // Reference: aa_ungapped.c:579
+                                // SAFETY: `ctx_idx < contexts_ref.len()` (the `ctx` comment above),
+                                // and `x_dropoff_per_context` maps `contexts`, one entry each.
                                 let x_dropoff =
                                     unsafe { *x_dropoff_per_context.get_unchecked(ctx_idx) };
 
@@ -6698,6 +6721,9 @@ fn search_query_batch<S: TbxScore>(
                                     HashSet::with_capacity(hits as usize);
                                 let mut duplicate_count = 0usize;
                                 for i in 0..hits as usize {
+                                    // SAFETY: `i < hits`; a scan call returns at most
+                                    // `offset_array_size` pairs, and `offset_pairs` was made with
+                                    // `offset_pairs_len` (>= `offset_array_size`) entries.
                                     let pair = unsafe { &*offset_pairs.as_ptr().add(i) };
                                     if !seen.insert((pair.q_off, pair.s_off)) {
                                         duplicate_count += 1;

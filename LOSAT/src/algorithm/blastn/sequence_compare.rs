@@ -182,6 +182,8 @@ pub fn compare_sequences_simd(query: &[u8], subject: &[u8], len: usize) -> bool 
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("sse2") {
+            // SAFETY: the CPU has SSE2 (checked on the line above); the 16-byte loads stay below
+            // `len` (`i + 16 <= len`), and the check at the top keeps `len` within both slices.
             unsafe {
                 return compare_sequences_sse2(query, subject, len);
             }
@@ -191,6 +193,8 @@ pub fn compare_sequences_simd(query: &[u8], subject: &[u8], len: usize) -> bool 
     #[cfg(target_arch = "aarch64")]
     {
         if is_aarch64_feature_detected!("neon") {
+            // SAFETY: the CPU has NEON (checked on the line above); the 16-byte loads stay below
+            // `len` (`i + 16 <= len`), and the check at the top keeps `len` within both slices.
             unsafe {
                 return compare_sequences_neon(query, subject, len);
             }
@@ -321,6 +325,8 @@ pub fn find_first_mismatch_ex(
         while count < max_len && i1 > 0 && i2 > 0 {
             i1 -= 1;
             i2 -= 1;
+            // SAFETY: `i1 < s1.len()` and `i2 < s2.len()`: both start at their slice's length, and
+            // the loop guard (`i1 > 0 && i2 > 0`) lets them drop by one just before this read.
             if unsafe { *s1.get_unchecked(i1) != *s2.get_unchecked(i2) } {
                 break;
             }

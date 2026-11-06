@@ -8,6 +8,10 @@ artifacts/
 # unless explicitly documented as canonical fixture data.
 losat_out/
 tests/*_out/
+# LOSAT_X_REACH output (LOSAT/src/utils/xreach.rs), and the directories a relative value such as
+# `0` or `1` made under LOSAT/ before it took only absolute paths (#715).
+reach-*.tsv
+LOSAT/[0-9]*/
 
 # Python caches.
 __pycache__/

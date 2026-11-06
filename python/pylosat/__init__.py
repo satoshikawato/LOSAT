@@ -15,6 +15,7 @@ from ._api import (
     PROGRAMS,
     Batch,
     Batches,
+    Database,
     Description,
     Outcome,
     Parameter,
@@ -24,7 +25,10 @@ from ._api import (
     Search,
     Sequences,
     SubjectHits,
+    ToolOutput,
+    blastdbcmd,
     describe,
+    makeblastdb,
 )
 from ._pylosat import (
     ENGINE_VERSION,
@@ -47,6 +51,7 @@ __all__ = [
     "ArgumentError",
     "Batch",
     "Batches",
+    "Database",
     "Description",
     "Hsp",
     "HspTable",
@@ -61,6 +66,9 @@ __all__ = [
     "SearchError",
     "Sequences",
     "SubjectHits",
+    "ToolOutput",
     "__version__",
+    "blastdbcmd",
     "describe",
+    "makeblastdb",
 ]

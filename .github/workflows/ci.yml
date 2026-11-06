@@ -40,6 +40,12 @@ jobs:
         run: python3 LOSAT/tests/check_pure_rust_runtime_boundary.py --root .
       - name: Pure-Rust boundary checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_pure_rust_runtime_boundary.py'
+      # No new blanket `#![allow(warnings ...)]`: it silences the clippy `-D warnings` gate below in
+      # its crate or module (SWEBOK 2026-11-04 audit, KA4). LOSAT/tests/lint_allow_warnings.tsv only shrinks.
+      - name: Lint-allow ratchet
+        run: python3 LOSAT/tests/check_lint_allow_ratchet.py --root .
+      - name: Lint-allow ratchet tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_lint_allow_ratchet.py'
       - name: Release-candidate tooling tests
         run: python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v010.py
       - name: Release-candidate v0.2.0 tooling tests
@@ -175,7 +181,7 @@ jobs:
           workspaces: LOSAT -> target
       - name: Build release binary
         if: steps.select.outputs.programs != 'none'
-        run: cd LOSAT && cargo build --release --locked --bin losat --example library_database
+        run: cd LOSAT && cargo build --release --locked --bin losat --example library_command_line
       # FMA instructions and references to fma only where mul_add is (docs/agents/diagnostics.md,
       # "Floating-point contract").
       - name: Floating-point contract (release binary)
@@ -196,7 +202,7 @@ jobs:
           LOSAT_X_REACH: ${{ github.workspace }}/.tmp/switch-reach
         run: |
           python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/losat \
-            --library-example LOSAT/target/release/examples/library_database \
+            --library-example LOSAT/target/release/examples/library_command_line \
             --out .tmp/fast-regressions --programs "${{ steps.select.outputs.programs }}"
       # Every side of a conditional switch that switch_reach_expected.tsv requires was taken by
       # some fixture above (a switch's own path and its reference path while it is on).

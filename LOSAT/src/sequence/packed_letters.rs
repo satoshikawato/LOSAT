@@ -603,6 +603,8 @@ mod tests {
             );
             #[cfg(target_arch = "x86_64")]
             if std::arch::is_x86_feature_detected!("avx2") {
+                // SAFETY: `pack_blocks_avx2` needs only AVX2, detected by this `if`; `avx2` is
+                // called only by `pack_with` in the next statement, inside the same `if`.
                 let avx2: Blocks =
                     |letters, packed, rest| unsafe { pack_blocks_avx2(letters, packed, rest) };
                 assert_eq!(pack_with(&letters, avx2), expected, "{letters:?}");
@@ -624,6 +626,8 @@ mod tests {
                 }
                 done += 4;
             }
+            // SAFETY: every slot of `table` was made by `MaybeUninit::new(0u8)` and then only
+            // overwritten by `slot.write`, so each slot read here is initialized.
             let table: Vec<u8> = table[..done]
                 .iter()
                 .map(|slot| unsafe { slot.assume_init() })
@@ -631,6 +635,8 @@ mod tests {
             let mut out = vec![std::mem::MaybeUninit::new(0u8); letters.len()];
             let written = unpack_blocks(&store.packed, &mut out);
             assert!(written <= done && done - written < 32);
+            // SAFETY: every slot of `out` was made by `MaybeUninit::new(0u8)`, and `unpack_blocks`
+            // only writes letters into it, so each slot read here is initialized.
             let out: Vec<u8> = out[..written]
                 .iter()
                 .map(|slot| unsafe { slot.assume_init() })

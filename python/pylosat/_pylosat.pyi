@@ -22,7 +22,7 @@ class Hsp:
         """0-based index of the query record."""
     @property
     def s_idx(self) -> int:
-        """0-based index of the subject record."""
+        """0-based index of the subject record; of a database, the sequence's ordinal id."""
     @property
     def rank(self) -> int:
         """0-based position among the HSPs of its query."""
@@ -138,7 +138,7 @@ class Batches:
         program: str,
         argv: list[str],
         query: tuple[bytes | str, str],
-        subject: tuple[bytes | str, str],
+        subject: tuple[bytes | str | None, str],
     ) -> Batches: ...
     @property
     def query_count(self) -> int: ...
@@ -155,7 +155,7 @@ def run(
     program: str,
     argv: list[str],
     query: tuple[bytes | str, str],
-    subject: tuple[bytes | str, str],
+    subject: tuple[bytes | str | None, str],
     formats: list[str],
 ) -> tuple[
     list[tuple[str, bytes, list[slice | None], list[slice | None]]],
@@ -163,3 +163,13 @@ def run(
     list[tuple[int, int, float, float, float] | None],
     str,
 ]: ...
+def run_to_file(
+    program: str,
+    argv: list[str],
+    query: tuple[bytes | str, str],
+    subject: tuple[bytes | str | None, str],
+    outfmt: str,
+    path: str,
+) -> str: ...
+def makeblastdb(argv: list[str], input: bytes) -> tuple[bytes, str]: ...
+def blastdbcmd(argv: list[str]) -> tuple[bytes, str]: ...

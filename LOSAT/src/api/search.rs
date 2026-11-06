@@ -32,8 +32,29 @@ use crate::cli::{Cli, Commands};
 // ```
 /// The options that the library API sets itself and does not take in an argv: the inputs
 /// (`Inputs` gives the records and their names), the output file and the output format
-/// (arguments of `run_collect` and `run`).
+/// (arguments of `run_collect`, `run` and `run_to_file`).
 pub const API_OWNED: &[&str] = &["query", "subject", "db", "out", "outfmt"];
+
+// No NCBI counterpart: NCBI has no library API. LOSAT's library runs psiblast one query per call
+// (`api::batches`, `psiblast_app.cpp:468`), so the numbers of `-save_each_pssm`'s files (`F.1`,
+// `F.2`, ...; `CAutoOutputFileReset`) would start again at each call, and a PSSM file is an output
+// outside those the API owns (`API_OWNED`): a file the caller did not give. The command line
+// writes them (`algorithm::psiblast::pssm`).
+/// psiblast's options that write a PSSM file, which the library API refuses.
+const PSSM_FILES: &[&str] = &[
+    "out_ascii_pssm",
+    "save_pssm_after_last_round",
+    "save_each_pssm",
+];
+
+/// The options of `program`'s command line that write a PSSM file: they are not in an argv that
+/// `validate` accepts, and `describe` leaves them out.
+pub(super) fn pssm_file_options(program: Program) -> &'static [&'static str] {
+    match program {
+        Program::Psiblast => PSSM_FILES,
+        _ => &[],
+    }
+}
 
 /// A program and an argv that the command line's parser accepted.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,11 +74,13 @@ impl Search {
         &self.argv
     }
 
-    /// The parsed arguments, with either kind of subject: `validate` accepted one of them.
+    /// The parsed arguments, with either kind of subject: `validate` accepted one of them. The
+    /// reader's options come from here before the search refuses what the API does not take
+    /// (`parse`).
     fn any_subject(&self) -> Commands {
         let names = ["query", "subject"];
-        parse(self.program, &self.argv, names[0], SUBJECT, names[1])
-            .or_else(|_| parse(self.program, &self.argv, names[0], DATABASE, names[1]))
+        parse_words(self.program, &self.argv, names[0], SUBJECT, names[1])
+            .or_else(|_| parse_words(self.program, &self.argv, names[0], DATABASE, names[1]))
             .expect("validated argv")
     }
 
@@ -116,9 +139,35 @@ fn key(word: &str) -> &str {
     word.split('=').next().unwrap_or("")
 }
 
+/// The option that an argv key names, without its one or two dashes; `None` for a value.
+fn option_name(key: &str) -> Option<&str> {
+    let name = key.strip_prefix('-')?;
+    Some(name.strip_prefix('-').unwrap_or(name))
+}
+
+/// `parse_words` after the refusal of the options that the library API does not take
+/// (`pssm_file_options`). `validate` and every search (`Search::command`) come here.
+fn parse(
+    program: Program,
+    argv: &[String],
+    query: &str,
+    subject_flag: &str,
+    subject: &str,
+) -> Result<Commands, Error> {
+    for word in argv {
+        let key = key(word);
+        if option_name(key).is_some_and(|name| pssm_file_options(program).contains(&name)) {
+            return Err(Error::Argv(format!(
+                "{key} is not accepted by the library API: the library API writes no PSSM file"
+            )));
+        }
+    }
+    parse_words(program, argv, query, subject_flag, subject)
+}
+
 /// Parses the argv with the command line's parser, as `losat <program> -query <query>
 /// <subject_flag> <subject> <argv...>`.
-fn parse(
+fn parse_words(
     program: Program,
     argv: &[String],
     query: &str,
@@ -144,18 +193,18 @@ fn parse(
 /// option means, and fails, exactly as there; the error is the parser's message.
 ///
 /// The library API sets the inputs and the outputs itself, so `-query`, `-subject`, `-db`,
-/// `-out` and `-outfmt` are refused (`API_OWNED`). BLASTX's in-memory entry does not take
-/// `-parse_deflines` yet. The checks of the options that the command line makes
-/// before it searches (ranges, scoring, the hit list size of each format) come with `run` and
-/// `run_collect`, which know the formats and the inputs, and report them with the command
-/// line's messages.
+/// `-out` and `-outfmt` are refused (`API_OWNED`). It writes no PSSM file, so psiblast's
+/// `-out_ascii_pssm`, `-save_pssm_after_last_round` and `-save_each_pssm` are refused too, here
+/// and by every search. The checks of the options that the command line makes before it
+/// searches (ranges, scoring, the hit list size of each format) come with `run` and
+/// `run_collect`, which know the formats and the inputs, and report them with the command line's
+/// messages.
 pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
     for word in argv {
         let key = key(word);
-        let Some(name) = key.strip_prefix('-') else {
+        let Some(name) = option_name(key) else {
             continue;
         };
-        let name = name.strip_prefix('-').unwrap_or(name);
         if API_OWNED.contains(&name) {
             return Err(Error::Argv(format!(
                 "{key} is not accepted by the library API: the inputs are given as records and the outputs as formats"
@@ -182,6 +231,7 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::Role;
 
     #[test]
     fn the_argv_is_parsed_as_on_the_command_line() {
@@ -236,5 +286,100 @@ mod tests {
         }
         // A value that looks like an option is a value.
         validate(Program::Blastp, &["-matrix", "BLOSUM62"]).unwrap();
+    }
+
+    /// The refusal of psiblast's PSSM files, with the word as the caller wrote it.
+    fn writes_no_pssm_file(key: &str) -> Error {
+        Error::Argv(format!(
+            "{key} is not accepted by the library API: the library API writes no PSSM file"
+        ))
+    }
+
+    #[test]
+    fn psiblast_pssm_files_are_refused_by_validate() {
+        for argv in [
+            &["-out_ascii_pssm", "p.txt"][..],
+            &["-out_ascii_pssm=p.txt"],
+            &["-evalue", "1", "-save_pssm_after_last_round"],
+            &["-save_each_pssm"],
+        ] {
+            // The command line takes each of them.
+            let words = ["losat", "psiblast", "-query", "q", "-subject", "s"];
+            crate::cli::try_parse_from::<Cli, _, _>(words.iter().chain(argv)).unwrap();
+            let refused = argv.iter().find(|word| word.contains("pssm")).unwrap();
+            assert_eq!(
+                validate(Program::Psiblast, argv),
+                Err(writes_no_pssm_file(key(refused))),
+                "{argv:?}"
+            );
+        }
+        // The first of them is named.
+        assert_eq!(
+            validate(
+                Program::Psiblast,
+                &[
+                    "-save_each_pssm",
+                    "-out_ascii_pssm",
+                    "-save_pssm_after_last_round"
+                ]
+            ),
+            Err(writes_no_pssm_file("-save_each_pssm"))
+        );
+        // As the options the API owns, before the parser (which takes one dash only).
+        assert_eq!(
+            validate(Program::Psiblast, &["--save_each_pssm"]),
+            Err(writes_no_pssm_file("--save_each_pssm"))
+        );
+        validate(Program::Psiblast, &["-pseudocount", "2"]).unwrap();
+        // blastp has no such option: the parser's message.
+        let error = validate(Program::Blastp, &["-save_each_pssm"]).unwrap_err();
+        assert!(!error.message().contains("PSSM"), "{error}");
+    }
+
+    #[test]
+    fn psiblast_pssm_files_are_refused_by_every_search_before_it_runs() {
+        // `validate` makes every `Search`; this one is made without it, so the search's own
+        // refusal (`Search::command`) is what stops it.
+        let search = Search {
+            program: Program::Psiblast,
+            argv: vec![
+                "-save_pssm_after_last_round".to_string(),
+                "-out_ascii_pssm".to_string(),
+                "p.txt".to_string(),
+            ],
+        };
+        let refused = writes_no_pssm_file("-save_pssm_after_last_round");
+        let query = crate::api::read_fasta(
+            Program::Psiblast,
+            Role::Query,
+            b">q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n",
+        )
+        .unwrap();
+        let inputs = Inputs::new(&query, &query).named("q.faa", "s.faa");
+        assert_eq!(search.command(inputs).unwrap_err(), refused);
+        assert_eq!(
+            crate::api::run_collect(&search, inputs, &["6"]).unwrap_err(),
+            refused
+        );
+        let mut report = Vec::new();
+        let mut diagnostics = Vec::new();
+        assert_eq!(
+            crate::api::run(&search, inputs, &mut [("6", &mut report)], &mut diagnostics)
+                .unwrap_err(),
+            refused
+        );
+        assert!(report.is_empty() && diagnostics.is_empty());
+        assert_eq!(
+            crate::api::run_batches(&search, inputs).err(),
+            Some(refused.clone())
+        );
+        let path =
+            std::env::temp_dir().join(format!("losat-api-pssm-refusal-{}.out", std::process::id()));
+        assert_eq!(
+            crate::api::run_to_file(&search, inputs, "6", &path, &mut diagnostics).unwrap_err(),
+            refused
+        );
+        assert!(!path.exists());
+        assert!(!std::path::Path::new("p.txt").exists());
     }
 }

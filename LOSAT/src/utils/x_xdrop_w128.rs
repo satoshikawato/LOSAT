@@ -2701,6 +2701,8 @@ mod neon_ext_tests {
             let w32 = |l: [i32; 4]| -> [u8; 16] {
                 core::array::from_fn(|i| l[i / 4].to_le_bytes()[i % 4])
             };
+            // SAFETY: NEON is part of every aarch64 build (`arch` layer comment in `xdrop_simd.rs`)
+            // and the `ext` functions take registers only; `v` and `b` touch one `[u8; 16]` each.
             unsafe {
                 let (vx, vy) = (v(x), v(y));
                 assert_eq!(

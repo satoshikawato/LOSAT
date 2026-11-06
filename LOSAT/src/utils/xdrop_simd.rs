@@ -4699,6 +4699,8 @@ mod neon_arch_tests {
         for _ in 0..20_000 {
             let (x, y, z) = (rng.bytes(), rng.bytes(), rng.bytes());
             let (xw, yw) = (w(x), w(y));
+            // SAFETY: NEON is part of every aarch64 build (`arch` layer comment); the block passes
+            // pointers only through `v` and `b`, which load and store one `[u8; 16]`.
             unsafe {
                 let (vx, vy, vz) = (v(x), v(y), v(z));
                 let m = x

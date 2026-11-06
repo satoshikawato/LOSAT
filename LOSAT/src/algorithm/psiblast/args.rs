@@ -72,8 +72,9 @@ use crate::blastinput::value_parsers::*;
 // psiblast's arguments are blastp's without `-task` (its task is "psiblast"), `-ungapped`
 // (no `CGappedArgs`), the database masks and `-mt_mode`, with the PSI-BLAST, PSSM engine and
 // PHI-BLAST arguments. LOSAT runs psiblast's first round (`-num_iterations 1`), which is blastp's
-// search (`run`); the PSSM files, `-in_msa`, `-in_pssm`, `-phi_pattern`, `-gap_trigger` and
-// `-sum_stats` are refused by the parser (`cli.rs` `is_unported_psiblast_arg`). The values are
+// search (`run`), and writes the ASCII PSSM after it (`pssm.rs`); `-out_pssm`, `-in_msa`,
+// `-in_pssm`, `-phi_pattern`, `-gap_trigger` and `-sum_stats` are refused by the parser
+// (`cli.rs` `is_unported_psiblast_arg`). The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
 // after reading them are blastp's (`BlastpArgs::check_options`, with psiblast's program).
 #[derive(Args, Debug, Clone)]
@@ -239,9 +240,9 @@ pub struct PsiblastArgs {
     //                            CArgDescriptions::eInteger,
     //                            NStr::IntToString(PSI_PSEUDO_COUNT_CONST));
     // ```
-    // Only the PSSM engine reads it (`PSIBlastOptions::pseudo_count`), which one round without a
-    // PSSM file does not run: the value changes nothing (NCBI 2.17.0: the same reports with 5 and
-    // -1).
+    // Only the PSSM engine reads it (`PSIBlastOptions::pseudo_count`), which one round runs only
+    // for `-save_pssm_after_last_round` (`pssm.rs`); without it the value changes nothing (NCBI
+    // 2.17.0: the same reports with 5 and -1).
     #[arg(
         long,
         default_value = "0",
@@ -266,6 +267,42 @@ pub struct PsiblastArgs {
         help = "E-value inclusion threshold for pairwise alignments"
     )]
     pub inclusion_ethresh: f64,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1161-1170
+    // ```c++
+    //         // ASCII matrix file
+    //         arg_desc.AddOptionalKey(kArgAsciiPssmOutputFile, "ascii_mtx_file",
+    //                                 "File name to store ASCII version of PSSM",
+    //                                 CArgDescriptions::eOutputFile);
+    //
+    //         arg_desc.AddFlag(kArgSaveLastPssm, "Save PSSM after the last database "
+    //                          "search");
+    //         arg_desc.AddFlag(kArgSaveAllPssms, "Save PSSM after each iteration "
+    //                          "(file name is given in -save_pssm or "
+    //                          "-save_ascii_pssm options)");
+    // ```
+    // The file is opened when a PSSM is written (`pssm.rs` `write_ascii_pssm_files`, as
+    // `CAutoOutputFileReset`), not by the parser.
+    #[arg(
+        long = "out_ascii_pssm",
+        value_name = "ascii_mtx_file",
+        help = "File name to store ASCII version of PSSM"
+    )]
+    pub out_ascii_pssm: Option<String>,
+    #[arg(
+        long = "save_pssm_after_last_round",
+        help = "Save PSSM after the last database search"
+    )]
+    pub save_pssm_after_last_round: bool,
+    #[arg(
+        long = "save_each_pssm",
+        help = "Save PSSM after each iteration (file name is given in -save_pssm or -save_ascii_pssm options)"
+    )]
+    pub save_each_pssm: bool,
+
+    /// `BlastpArgs::first_query_ordinal`: the number of the first query of the records of a call
+    /// that starts there (`api::run_batches`). 0 on the command line.
+    #[arg(skip)]
+    pub first_query_ordinal: usize,
 }
 
 impl PsiblastArgs {
@@ -286,37 +323,7 @@ impl PsiblastArgs {
                 self.num_iterations
             );
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2744-2748
-        // ```c++
-        // CFormattingArgs::ArchiveFormatRequested(const CArgs& args) const
-        // {
-        //     EOutputFormat output_fmt;
-        //     string ignore1, ignore2;
-        //     ParseFormattingString(args, output_fmt, ignore1, ignore2);
-        // ```
-        // NCBI parses `-outfmt` before the option handlers; its own errors come from that parse
-        // and from blastp's (`run`). The formats that NCBI runs and LOSAT's psiblast does not
-        // write yet are refused here. The tabular reports with a field list, and outfmt 10 and
-        // 20, are blastp's (`blastp::tabular`), without a custom delimiter, which psiblast's
-        // formatter does not get (psiblast_app.cpp:482-505, `blast_engine.rs` `run`).
-        let choice = crate::blastinput::app::parse_formatting_string(&self.outfmt)?;
-        if let Some(format) = crate::blastinput::app::ReportFormat::from_number(choice.number) {
-            use crate::blastinput::app::ReportFormat;
-            if !matches!(
-                format,
-                ReportFormat::Pairwise
-                    | ReportFormat::Tabular
-                    | ReportFormat::TabularWithComments
-                    | ReportFormat::CommaSeparatedValues
-                    | ReportFormat::CommaSeparatedValuesWithHeader
-                    | ReportFormat::Sam
-            ) {
-                bail!(
-                    "output format {} is not supported by LOSAT's PSIBLAST",
-                    choice.number
-                );
-            }
-        }
+        Self::check_outfmt(&self.outfmt)?;
         Ok(BlastpArgs {
             query: self.query,
             subject: self.subject,
@@ -370,8 +377,49 @@ impl PsiblastArgs {
             archive: None,
             app: BlastpApp::Psiblast,
             inclusion_ethresh: Some(self.inclusion_ethresh),
-            first_query_ordinal: 0,
+            first_query_ordinal: self.first_query_ordinal,
+            psiblast_pssm: Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {
+                save_pssm_after_last_round: self.save_pssm_after_last_round,
+                save_each_pssm: self.save_each_pssm,
+                out_ascii_pssm: self.out_ascii_pssm,
+                pseudocount: self.pseudocount,
+            }),
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2744-2748
+    // ```c++
+    // CFormattingArgs::ArchiveFormatRequested(const CArgs& args) const
+    // {
+    //     EOutputFormat output_fmt;
+    //     string ignore1, ignore2;
+    //     ParseFormattingString(args, output_fmt, ignore1, ignore2);
+    // ```
+    /// NCBI parses `-outfmt` before the option handlers; its own errors come from that parse
+    /// and from blastp's (`run`). The formats that NCBI runs and LOSAT's psiblast does not
+    /// write yet are refused here. The tabular reports with a field list, and outfmt 10 and
+    /// 20, are blastp's (`blastp::tabular`), without a custom delimiter, which psiblast's
+    /// formatter does not get (psiblast_app.cpp:482-505, `blast_engine.rs` `run`).
+    pub fn check_outfmt(outfmt: &str) -> Result<()> {
+        let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
+        if let Some(format) = crate::blastinput::app::ReportFormat::from_number(choice.number) {
+            use crate::blastinput::app::ReportFormat;
+            if !matches!(
+                format,
+                ReportFormat::Pairwise
+                    | ReportFormat::Tabular
+                    | ReportFormat::TabularWithComments
+                    | ReportFormat::CommaSeparatedValues
+                    | ReportFormat::CommaSeparatedValuesWithHeader
+                    | ReportFormat::Sam
+            ) {
+                bail!(
+                    "output format {} is not supported by LOSAT's PSIBLAST",
+                    choice.number
+                );
+            }
+        }
+        Ok(())
     }
 }
 
@@ -484,12 +532,9 @@ mod tests {
         for (option, value) in [
             ("-in_pssm", Some("x")),
             ("-out_pssm", Some("x")),
-            ("-out_ascii_pssm", Some("x")),
             ("-in_msa", Some("x")),
             ("-msa_master_idx", Some("2")),
             ("-ignore_msa_master", None),
-            ("-save_pssm_after_last_round", None),
-            ("-save_each_pssm", None),
             ("-phi_pattern", Some("x")),
             ("-gap_trigger", Some("22")),
             ("-sum_stats", Some("false")),

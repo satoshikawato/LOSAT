@@ -326,6 +326,8 @@ test('a cancelled search ends its runtime; the next search runs in a new one wit
     expect(result.next.sha256[0]).toBe(next.frozen[0]!.sha256);
     expect(result.next.record.runtimeGeneration).toBe(2);
     expect(result.next.record.runtimePath).toBe(threads === 1 ? 'serial' : 'threaded');
+    // A cancel during a threaded search ends the runtime once the keeper grew its memory.
+    expect(result.runtimeEnds).toEqual([threads === 1 ? 'at-once' : 'grown']);
     if (NATIVE !== undefined) expectOutputs(next, result.next);
     rows.push({ threads, cancelMs: Math.round(result.cancelMs), nextPrepareMs: Math.round(result.nextPrepareMs) });
     console.log(`cancel n=${threads}: cancelled in ${Math.round(result.cancelMs)} ms; next search prepared in ${Math.round(result.nextPrepareMs)} ms`);
@@ -354,6 +356,24 @@ test('a runtime renewed after every search gives the same bytes and registers th
     expect(result.sha256[0], result.id).toBe(vbr.frozen[0]!.sha256);
     if (NATIVE !== undefined) expectOutputs(vbr, result);
   }
+});
+
+test('threaded runtimes started one after another in one page all run threaded: an ended runtime does not keep its shared memory alive', async ({ context }) => {
+  const page = await openHarness(context, isolated);
+  const vbr = vbrCases()[1]!;
+  // More runtimes than one page of WebKit 26.5 (Playwright, Linux) held shared memories of the
+  // threaded module at once (15 of 4 GiB): a memory that an ended runtime leaves alive until a
+  // thread collects it takes the place of a later one.
+  const list: SearchCase[] = Array.from({ length: 32 }, (_, i) => ({ ...searchOf(vbr, 2), id: `runtime ${i + 1} n=2` }));
+  const renewed: RetentionResult[] = await page.evaluate(
+    (cases) => window.losatHarness!.engine.retention(cases, { renewal: { maxRuns: 1 } }),
+    list,
+  );
+  expect(renewed.map((result) => `${result.id}: ${result.error ?? result.runtime?.fallbackReason ?? result.runtime?.path}`)).toEqual(
+    list.map((search) => `${search.id}: threaded`),
+  );
+  expect(renewed.map((result) => result.runtime?.runtimeGeneration)).toEqual(list.map((_, i) => i + 1));
+  for (const result of renewed) expect(result.sha256[0], result.id).toBe(vbr.frozen[0]!.sha256);
 });
 
 test('without cross-origin isolation, a threaded search runs on the serial module with the reason', async ({ context }) => {

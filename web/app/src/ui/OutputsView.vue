@@ -1,14 +1,15 @@
 <script setup lang="ts">
 // The compatibility outputs of a run, byte for byte as the engine wrote them, with the CLI
 // command of each format and their export (plan §5.8; the view filters never apply here): the
-// formats of every run, and the output of the run's own -outfmt with fields (W10). An output
-// that cannot be read, or an export that is not saved, says why (application/outputs.ts).
+// formats of every run, and the output of the run's own -outfmt (W10, W11). A binary output
+// (outfmt 9) is exported, not shown. An output that cannot be read, or an export that is not
+// saved, says why (application/outputs.ts).
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputReader } from '../application/outputs';
 import { toShellCommand } from '../domain/argv';
 import { outputChunks } from '../domain/output-chunks';
-import { CUSTOM_OUTPUT, outfmtOf, runOutputs, type RunOutput } from '../domain/output-format';
+import { CUSTOM_OUTPUT, isBinaryOutput, outfmtOf, runOutputs, type RunOutput } from '../domain/output-format';
 import { useStore } from './useStore';
 
 const props = defineProps<{ coordinator: Coordinator; run: RunView }>();
@@ -16,6 +17,7 @@ const chosen = ref<RunOutput>(6);
 const outputs = computed(() => runOutputs(props.run.snapshot.argv));
 /** The output shown: the one chosen, or outfmt 6 for a run that does not write it. */
 const format = computed(() => (outputs.value.includes(chosen.value) ? chosen.value : 6));
+const binary = computed(() => isBinaryOutput(props.run.snapshot.argv, format.value));
 const reader = new OutputReader(props.coordinator);
 const output = useStore(reader.state);
 const chunks = computed(() => outputChunks(output.value.text));
@@ -51,7 +53,7 @@ watch(generation, onSelectionChange, { flush: 'post' });
 onUnmounted(() => document.removeEventListener('selectionchange', onSelectionChange));
 
 // The reader keeps the latest choice: a later one may be read first.
-watch([() => props.run, format], ([run, fmt]) => void reader.show(run, fmt), { immediate: true });
+watch([() => props.run, format], ([run, fmt]) => void reader.show(run, fmt, !isBinaryOutput(run.snapshot.argv, fmt)), { immediate: true });
 watch(() => output.value.text, () => generation.value++);
 </script>
 
@@ -72,7 +74,7 @@ watch(() => output.value.text, () => generation.value++);
     <p class="command">
       Command: <code data-testid="result-command">{{ toShellCommand(run.snapshot.argv, format) }}</code>
     </p>
-    <pre v-if="!output.failed" ref="view" class="output" data-testid="result-output" :data-shown="output.shown"><span v-for="(chunk, index) in chunks" :key="`${generation}:${index}`" class="output-chunk" :style="{ '--output-chunk-lines': chunk.lines }">{{ chunk.text }}</span></pre>
+    <pre v-if="!output.failed && !binary" ref="view" class="output" data-testid="result-output" :data-shown="output.shown"><span v-for="(chunk, index) in chunks" :key="`${generation}:${index}`" class="output-chunk" :style="{ '--output-chunk-lines': chunk.lines }">{{ chunk.text }}</span></pre>
     <!-- Next to Export, whose failure it also tells; where the text would be when the text could not be read. -->
     <p v-if="output.problem" class="results-message error" role="alert" data-testid="outputs-problem" :data-failed="output.failed">{{ output.problem }}</p>
     <button data-testid="export-output" @click="reader.export(run, format)">

@@ -3256,12 +3256,18 @@ mod defline_tests {
 mod query_settings_tests {
     use super::*;
 
+    /// The directory of this test's files (removed at its end).
+    fn dir() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "losat-blastx-query-settings-{}",
+            std::process::id()
+        ))
+    }
+
     /// A file of this test with the bytes `text`, open for reading.
     fn file(tag: &str, text: &[u8]) -> std::fs::File {
-        let path = std::env::temp_dir().join(format!(
-            "losat-blastx-query-settings-{tag}-{}",
-            std::process::id()
-        ));
+        std::fs::create_dir_all(dir()).unwrap();
+        let path = dir().join(tag);
         std::fs::write(&path, text).unwrap();
         std::fs::File::open(&path).unwrap()
     }
@@ -3319,5 +3325,6 @@ mod query_settings_tests {
                 .contains("a query and a subject record have the Seq-id lcl|q1"),
             "{error}"
         );
+        std::fs::remove_dir_all(dir()).unwrap();
     }
 }

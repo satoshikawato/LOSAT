@@ -723,7 +723,7 @@ fn run_inner(
                 .map_err(|_| inaccessible("query", &args.query))?,
             &query_settings,
             args.lcase_masking,
-            batch_size.as_ref().map_or(0, |&size| size),
+            *batch_size.as_ref().unwrap_or(&0),
             query_range.as_ref(),
         )?;
         (&query_file)

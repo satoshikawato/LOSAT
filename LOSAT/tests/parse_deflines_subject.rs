@@ -575,16 +575,20 @@ fn blastx_reads_its_query_before_the_search_as_the_search_does() {
                 }
             }
         }
-        let (status, stdout, stderr) = search(&bad_gi, "5", threads, None);
-        assert_eq!(
-            (status, stdout.as_slice(), stderr.as_str()),
-            (
-                1,
-                &b""[..],
-                "BLAST query error: Could not construct seq-id from 'gi|abc'\n"
-            ),
-            "gi|abc n{threads}"
-        );
+        for outfmt in ["5", "11", "16"] {
+            let (status, stdout, stderr) = search(&bad_gi, outfmt, threads, None);
+            assert_eq!(
+                (status, stderr.as_str()),
+                (
+                    1,
+                    "BLAST query error: Could not construct seq-id from 'gi|abc'\n"
+                ),
+                "gi|abc outfmt {outfmt} n{threads}"
+            );
+            if outfmt == "5" {
+                assert!(stdout.is_empty(), "gi|abc n{threads}");
+            }
+        }
         let (status, stdout, stderr) = search(&same_id, "5", threads, None);
         assert_eq!(status, 1, "s1 n{threads}: {stderr}");
         assert!(stdout.is_empty(), "s1 n{threads}");

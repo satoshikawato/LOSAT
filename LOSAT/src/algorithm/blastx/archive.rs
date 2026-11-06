@@ -164,8 +164,12 @@ pub(crate) fn refuse_irregular_query() -> Result<()> {
 /// never written and need no check. The file must be a regular file (`query_is_regular`). It is
 /// read as the search reads it (`settings`: under `-parse_deflines`, a first line that is not a
 /// defline is the reader error), and the records are cut to `range` as the search cuts them: a
-/// record the range skips is never written and is not checked. A batch size of 0 reads no query
-/// (NCBI's first batch is empty and the search stops at it): nothing is checked.
+/// record the range skips is never written and is not checked. It keeps no defline, so LOSAT's
+/// refusal of a Seq-id range in a defline (`refuse_range_in_archive`, which the search with the
+/// archive makes) does not stop it, and a later title may be refused first: both refusals come
+/// before any byte, and keeping the deflines would keep whole records under `-query_loc`. A
+/// batch size of 0 reads no query (NCBI's first batch is empty and the search stops at it):
+/// nothing is checked.
 pub(crate) fn prescan_query_titles(
     file: &std::fs::File,
     settings: &super::input::QueryStreamSettings,

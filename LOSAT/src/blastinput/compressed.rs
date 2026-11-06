@@ -107,11 +107,15 @@ impl<R: Read> Read for NonEmptySource<R> {
 
 /// The frames of a zstd file, read one after the other. ruzstd's `StreamingDecoder` reads one
 /// frame and stops; pzstd and `cat a.zst b.zst` write several, pzstd with a skippable frame
-/// before each, which this reader passes over (`ReadFrameHeaderError::SkipFrame`).
+/// before each, which this reader passes over (`ReadFrameHeaderError::SkipFrame`). At the end of
+/// each frame the bytes are checked against the frame's `Content_Checksum` and
+/// `Frame_Content_Size` (`check_frame`), which ruzstd reads but does not compare.
 pub struct ZstdFrames<R: BufRead> {
     source: R,
     decoder: ruzstd::decoding::FrameDecoder,
     in_frame: bool,
+    /// Bytes of the current frame given out so far.
+    produced: u64,
 }
 
 impl<R: BufRead> ZstdFrames<R> {
@@ -120,7 +124,39 @@ impl<R: BufRead> ZstdFrames<R> {
             source,
             decoder: ruzstd::decoding::FrameDecoder::new(),
             in_frame: false,
+            produced: 0,
         }
+    }
+
+    /// LOSAT: the checks of a frame's end that the zstd CLI makes (RFC 8878 3.1.1: the
+    /// `Content_Checksum` is the low 4 bytes of XXH64 of the decoded data, and
+    /// 3.1.1.1.4: `Frame_Content_Size` is the size of the decoded data). `zstd -d` refuses a
+    /// mismatch ("Restored data doesn't match checksum", "Data corruption detected"); without
+    /// the checks a damaged frame would be read as other letters, without a message.
+    /// `content_size` is 0 when the header has no size or gives 0 (ruzstd does not tell them
+    /// apart), which then is not compared: a frame without a checksum whose size reads 0 but
+    /// that holds data passes, where `zstd -d` refuses it. The zstd CLI writes the checksum by
+    /// default, and a frame with one is checked whatever its size field says.
+    fn check_frame(&self) -> io::Result<()> {
+        if let Some(stored) = self.decoder.get_checksum_from_data() {
+            if self.decoder.get_calculated_checksum() != Some(stored) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "a zstd frame's checksum does not match its data",
+                ));
+            }
+        }
+        let declared = self.decoder.content_size();
+        if declared != 0 && declared != self.produced {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "a zstd frame holds {} bytes where its header gives {declared}",
+                    self.produced
+                ),
+            ));
+        }
+        Ok(())
     }
 
     /// Starts the next frame, skipping skippable frames; `false` at the end of the source.
@@ -166,11 +202,15 @@ impl<R: BufRead> Read for ZstdFrames<R> {
                     return Ok(0);
                 }
                 self.in_frame = true;
+                self.produced = 0;
             }
             if self.decoder.can_collect() > 0 {
-                return self.decoder.read(buf);
+                let count = self.decoder.read(buf)?;
+                self.produced += count as u64;
+                return Ok(count);
             }
             if self.decoder.is_finished() {
+                self.check_frame()?;
                 self.in_frame = false;
                 continue;
             }

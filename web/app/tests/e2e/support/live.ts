@@ -1,6 +1,7 @@
 // What a screen reader is told (WA2-AX-03): the new text of each live region (aria-live, role
 // status, alert or log) that was in the page before its text changed, and is rendered. A region
-// inserted together with its text is not counted: screen readers usually do not read it.
+// inserted together with its text is not counted: screen readers usually do not read it. The same
+// text in a new node (the announcer's way to tell a text again) counts as told again.
 import type { Page } from '@playwright/test';
 
 export interface Spoken {
@@ -21,16 +22,17 @@ export async function listen(page: Page): Promise<void> {
     const spoken: Spoken[] = [];
     window.__spoken = spoken;
     const selector = '[aria-live], [role="status"], [role="alert"], [role="log"]';
-    const last = new WeakMap<Element, string>();
+    const last = new WeakMap<Element, { text: string; node: Node | null }>();
     const textOf = (element: Element) => (element.textContent ?? '').replace(/\s+/g, ' ').trim();
     const scan = () => {
       for (const region of document.querySelectorAll(selector)) {
         const live = region.getAttribute('aria-live');
         if (live === 'off') continue;
         const text = textOf(region);
+        const node = region.firstChild;
         const before = last.get(region);
-        last.set(region, text);
-        if (before === undefined || before === text || text === '') continue;
+        last.set(region, { text, node });
+        if (before === undefined || text === '' || (before.text === text && before.node === node)) continue;
         if (region.closest('[aria-hidden="true"]') !== null || region.getClientRects().length === 0) continue;
         const kind = region.getAttribute('role') === 'alert' || live === 'assertive' ? 'alert' : 'status';
         spoken.push({ kind, text });

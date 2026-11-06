@@ -6,7 +6,7 @@
 // behind "?" (stop-describing-ui). A set that loads, or that cannot, is told to a screen reader
 // (WA2-AX-03), and a button that cannot be pressed for a while is marked aria-disabled, so that it
 // keeps the focus (WA2-AX-04).
-import { computed, nextTick, watch } from 'vue';
+import { computed, onBeforeUpdate, onUpdated, watch } from 'vue';
 import type { ExampleLoader } from '../application/examples';
 import { exampleById, exampleHost, examplesFor, type ExampleId, type ExampleSet } from '../domain/examples';
 import type { ProgramId } from '../domain/programs';
@@ -84,12 +84,21 @@ function keepButton(id: ExampleId, element: unknown): void {
 function press(set: ExampleSet): void {
   if (!busy(set)) props.examples.load(set.id);
 }
-/** Cancel leaves with the load: the focus goes back to the set's button. */
-async function cancel(set: ExampleSet): Promise<void> {
-  props.examples.cancel();
-  await nextTick();
-  buttons[set.id]?.focus();
-}
+
+/**
+ * Cancel leaves when the load ends (pressed, or the load done), and Save / Delete when the copy is
+ * deleted: the focus on one of them goes back to its set's button, not to the page's body (WA2-AX-04).
+ */
+let focusedSet: string | undefined;
+onBeforeUpdate(() => {
+  const row = document.activeElement?.closest<HTMLElement>('[data-example-set]');
+  focusedSet = row?.dataset['exampleSet'];
+});
+onUpdated(() => {
+  const active = document.activeElement;
+  if (focusedSet !== undefined && (active === null || active === document.body)) buttons[focusedSet as ExampleId]?.focus();
+  focusedSet = undefined;
+});
 function save(set: ExampleSet): void {
   if (state.value.copying !== set.id) props.examples.saveCopy(set.id);
 }
@@ -102,7 +111,7 @@ function remove(set: ExampleSet): void {
   <div v-if="sets.length > 0" class="example-line" data-testid="example-line">
     <span class="example-title">Example</span>
     <ul class="example-sets">
-      <li v-for="set in sets" :key="set.id" :data-testid="`example-${set.id}-row`">
+      <li v-for="set in sets" :key="set.id" :data-testid="`example-${set.id}-row`" :data-example-set="set.id">
         <button
           :ref="(element) => keepButton(set.id, element)"
           type="button"
@@ -118,7 +127,7 @@ function remove(set: ExampleSet): void {
           type="button"
           class="link"
           :data-testid="`example-${set.id}-cancel`"
-          @click="cancel(set)"
+          @click="examples.cancel()"
         >
           Cancel
         </button>

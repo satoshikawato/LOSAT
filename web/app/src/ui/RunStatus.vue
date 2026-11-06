@@ -2,8 +2,9 @@
 // The status of a run that has not finished, on its own results page (NCBI's "Status:
 // Searching" page while a job runs): its phase and elapsed time (not progress by query, DW-5),
 // what it waits for, and its Cancel. The run's record (engine path, threads, phases) is in Run
-// details once it completes. A screen reader is told the phase as it changes (not the elapsed
-// time); a run that ends is told by run-announcements.ts.
+// details once it completes. A screen reader is told the phase when it changes (not the elapsed
+// time, nor the phase of a run that the page just shows); a run that ends is told by
+// run-announcements.ts.
 import { computed, onBeforeUnmount, onBeforeUpdate, onUnmounted, onUpdated, ref, watch, watchEffect } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { isTerminal, type RunStatus } from '../domain/run';
@@ -60,11 +61,10 @@ const groupCancellable = computed(() => {
 
 const phase = computed(() => (ahead.value ? `Waiting for run ${ahead.value.snapshot.number}` : PHASE_LABELS[props.run.status]));
 watch(
-  phase,
-  (text) => {
-    if (!isTerminal(props.run.status)) announce(`Status: ${text}`);
+  [() => props.run.snapshot.runId, phase],
+  ([runId, text], [before]) => {
+    if (runId === before && !isTerminal(props.run.status)) announce(`Status: ${text}`);
   },
-  { immediate: true },
 );
 
 const hasFocus = () => root.value?.contains(document.activeElement) === true;

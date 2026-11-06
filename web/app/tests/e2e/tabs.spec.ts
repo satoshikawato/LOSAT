@@ -1,7 +1,8 @@
 // WA2-AX-12 (W7): the tabs that look like tabs are tabs in ARIA's pattern: Search / Results, the
 // results' views (Hits, Dot Plot, Run details, Outputs) and the Outputs' formats. A tablist of
 // tabs, the chosen one aria-selected and the only Tab stop of its list, each controlling a
-// tabpanel that the chosen tab labels; Left and Right (around the ends), Home and End choose.
+// tabpanel that the chosen tab labels; Left and Right (around the ends), Home and End choose (the
+// output formats: move the focus, and Enter or Space chooses).
 import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';
 import { focused } from './support/live';
@@ -40,7 +41,7 @@ const VIEWS = ['results-view-hits', 'pane-dotplot', 'results-view-details', 'res
 const FORMATS = ['format-0', 'format-6', 'format-7'];
 const PROTEIN = 'MKLVVLAAGGHHKLMKLVVLAAGGHHKLMSTNPKPQRKTKRNTNRRPQDVKFPGG';
 
-test('Search and Results, the results views and the output formats are tabs that the arrow keys choose', async ({ page }) => {
+test('Search and Results, the results views and the output formats are tabs that the arrow keys reach', async ({ page }) => {
   await openSearch(page);
   await expectTabs(page, 'Main', MAIN, 'tab-search');
   await page.getByTestId('tab-search').focus();
@@ -81,13 +82,23 @@ test('Search and Results, the results views and the output formats are tabs that
   await page.getByTestId('results-view-outputs').click();
   await expectTabs(page, 'Output format', FORMATS, 'format-6');
   await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:6');
+  // The formats are chosen by Enter or Space (each output is read from storage): the keys move the focus only.
+  const output = page.getByTestId('result-output');
   await page.getByTestId('format-6').focus();
-  await press(page, 'ArrowLeft', 'format-0');
-  await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:0');
+  await page.keyboard.press('ArrowLeft');
+  expect(await focused(page)).toBe('format-0');
+  await expectTabs(page, 'Output format', FORMATS, 'format-6');
+  await expect(output).toHaveAttribute('data-shown', '1:6');
+  await page.keyboard.press('Enter');
   await expectTabs(page, 'Output format', FORMATS, 'format-0');
-  await press(page, 'ArrowLeft', 'format-7');
-  await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:7');
-  await press(page, 'Home', 'format-0');
-  await press(page, 'End', 'format-7');
+  await expect(output).toHaveAttribute('data-shown', '1:0');
+  await page.keyboard.press('ArrowLeft');
+  expect(await focused(page)).toBe('format-7');
+  await page.keyboard.press('Home');
+  expect(await focused(page)).toBe('format-0');
+  await page.keyboard.press('End');
+  expect(await focused(page)).toBe('format-7');
+  await page.keyboard.press('Space');
+  await expect(output).toHaveAttribute('data-shown', '1:7');
   await expectTabs(page, 'Output format', FORMATS, 'format-7');
 });

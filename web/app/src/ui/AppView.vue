@@ -61,6 +61,13 @@ async function dismissResume(): Promise<void> {
   if (active === null || active === document.body || !active.isConnected) mainTabs.value?.focus();
 }
 
+/** "Run a search" of the empty Results tab leaves with the tab: the focus goes to the Search tab (WA2-AX-04). */
+async function showSearch(): Promise<void> {
+  tab.value = 'search';
+  await nextTick();
+  mainTabs.value?.focus();
+}
+
 // A file dropped outside an input's drop zone would make the browser open it in place of
 // the application (and end the searches of this tab).
 const keep = (event: DragEvent) => {
@@ -113,7 +120,7 @@ onUnmounted(() => {
         :coordinator="coordinator"
         :results="results"
         :runs="state.runs"
-        @search="tab = 'search'"
+        @search="showSearch"
       />
     </section>
     <!-- Under the page: the storage's warnings, when there are any (design §3.4). -->

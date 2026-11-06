@@ -49,6 +49,8 @@ export function useRunAnnouncements(app: Readonly<Ref<AppState>>, results: Reado
   watch(
     () => app.value.runs,
     (runs) => {
+      const now = new Set(runs.map((run) => run.snapshot.runId));
+      for (const runId of seen.keys()) if (!now.has(runId)) seen.delete(runId);
       for (const run of runs) {
         const { runId, number } = run.snapshot;
         const before = seen.get(runId) ?? (started ? 'queued' : run.status);
@@ -66,5 +68,5 @@ export function useRunAnnouncements(app: Readonly<Ref<AppState>>, results: Reado
     },
     { immediate: true },
   );
-  watch(() => [results.value.runId, results.value.phase], settle);
+  watch([() => results.value.runId, () => results.value.phase], settle);
 }

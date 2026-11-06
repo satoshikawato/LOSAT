@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // One input of a role: its name, its records, and what the engine's check says of it. The check's
-// verdict and the warnings are told to a screen reader when they come (WA2-AX-03), in the
+// verdict and the warnings are told to a screen reader when they change (WA2-AX-03), in the
 // card's words after its name; "Remove" asks the role's block, which moves the focus on.
 import { computed, watch } from 'vue';
 import type { DraftSource, DraftState, SearchDraft } from '../application/draft';
@@ -64,20 +64,33 @@ const formatName = computed(() => {
 const testid = computed(() => `${props.role}-source-${props.index}`);
 
 const recordsText = (count: number) => `${formatCount(count)} ${count === 1 ? 'record' : 'records'}`;
-/** What the card says once the input is read and checked (undefined until then), as the screen shows it. */
+/**
+ * What the card says once the input is read and checked (undefined until then), as the screen shows
+ * it, and its facts without the mode's name (`key`).
+ */
 const verdict = computed(() => {
   const source = props.source;
   const parts: string[] = [];
-  if (source.status === 'indexing') return undefined;
+  const check = source.check;
+  if (source.status === 'indexing' || (source.status !== 'failed' && (check === undefined || check.state === 'pending'))) return undefined;
+  const key = JSON.stringify([
+    source.status,
+    source.error,
+    markHint.value,
+    check?.state,
+    check === undefined ? undefined : check.state === 'ok' ? check.records : 'message' in check ? check.message : undefined,
+    otherKind.value,
+    otherKind.value > 0 ? kind.value : '',
+    duplicateCount.value,
+    formatName.value,
+  ]);
   if (source.status === 'failed') {
     parts.push(`This input cannot be read: ${source.error ?? ''}`);
     if (markHint.value) parts.push(markHint.value);
-  } else {
-    const check = source.check;
-    if (check === undefined || check.state === 'pending') return undefined;
+  } else if (check !== undefined) {
     if (check.state === 'ok') parts.push(`Accepted by the ${programLabel.value} engine: ${recordsText(check.records)}`);
     else if (check.state === 'refused') parts.push(`The ${programLabel.value} engine refuses this input: ${check.message}`);
-    else parts.push(`The input could not be checked here (${check.message}).`);
+    else if (check.state === 'error') parts.push(`The input could not be checked here (${check.message}).`);
     if (otherKind.value > 0) {
       parts.push(
         `${formatCount(otherKind.value)} ${otherKind.value === 1 ? 'record looks' : 'records look'} like ${otherKindName.value} sequences, but ${programLabel.value} reads the ${props.role} as ${kind.value}.`,
@@ -86,10 +99,17 @@ const verdict = computed(() => {
     if (duplicateCount.value > 0) parts.push(`${formatCount(duplicateCount.value)} records share an ID with another record.`);
   }
   if (formatName.value) parts.push(`This looks like ${formatName.value}. LOSAT reads it as FASTA, so its text becomes sequence. Convert it to FASTA first.`);
-  return `${title.value}: ${parts.join(' ')}`;
+  return { text: `${title.value}: ${parts.join(' ')}`, key };
 });
-watch(verdict, (text) => {
-  if (text !== undefined) announce(text);
+/**
+ * Told when it changes: not again after each check of the same input (each pause in typing, each
+ * change of mode) that finds what the last one found.
+ */
+let toldKey: string | undefined;
+watch(verdict, (now) => {
+  if (now === undefined || now.key === toldKey) return;
+  toldKey = now.key;
+  announce(now.text);
 });
 </script>
 

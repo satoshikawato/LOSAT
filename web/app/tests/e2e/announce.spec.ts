@@ -56,8 +56,15 @@ test('a run is told as it goes and when it completes, without the elapsed time; 
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
   await expect.poll(() => told(page, 'status')).toContainEqual(expect.stringMatching(/^Run 1 completed: \d+ HSPs? on 3 subjects\.$/));
   const texts = await told(page);
+  expect(texts).toContainEqual(expect.stringMatching(/^Status: (Preparing|Searching|Organizing results)$/));
   expect(texts.filter((text) => /\d:\d\d/.test(text))).toEqual([]);
   expect(await focused(page)).toBe('results-heading');
+  // A run that the page only shows again (another tab, then back) is not told again.
+  await forget(page);
+  await page.getByTestId('tab-search').click();
+  await page.getByTestId('tab-results').click();
+  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
+  expect(await told(page)).toEqual([]);
 });
 
 test('a failed run is told as an alert, with its reason', async ({ page }) => {
@@ -98,7 +105,6 @@ test('a cancelled run is told; Cancel leaves the focus on the Results heading, a
   await submit(page);
   const cancel = page.getByTestId('run-status-cancel');
   await expect(cancel).toBeVisible();
-  await expect.poll(() => told(page, 'status')).toContainEqual(expect.stringMatching(/^Status: (Waiting|Preparing|Searching)/));
   await cancel.focus();
   await page.keyboard.press('Enter');
   if (!BUILD_HAS_ENGINE) await page.clock.resume();
@@ -128,6 +134,14 @@ test("the engine's check of an input, its warnings and a refusal to read it are 
   await forget(page);
   await paste(page, 'query', `>q1\n${dna(3, 60)}\n`);
   await expect.poll(() => told(page, 'status')).toContainEqual(expect.stringContaining('Accepted by the BLASTN engine: 1 record'));
+  // Another check that finds the same (the text edited, then another nucleotide mode) is not told again.
+  await page.getByTestId('query-input').fill(`>q1\n${dna(3, 90)}\n`);
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('90 nt');
+  await settled(page, 'query');
+  await program(page, 'tblastx');
+  await expect(page.getByTestId('query-source-0-check')).toContainText('Accepted by the TBLASTX engine: 1 record');
+  expect((await told(page, 'status')).filter((text) => text.includes('Accepted by the'))).toHaveLength(1);
+  await program(page, 'blastn');
   await paste(page, 'query', `>p1\n${PROTEIN}\n`);
   await expect
     .poll(() => told(page, 'status'))
@@ -158,6 +172,41 @@ test('an Example that loads is told, and its button keeps the focus', async ({ p
   await settled(page, 'subject');
   await expect.poll(() => told(page, 'status')).toContainEqual(expect.stringContaining(`Example ${SIXTEEN_S.label} loaded.`));
   expect(await focused(page)).toBe(`example-${SIXTEEN_S.id}`);
+  // Delete (with a copy saved in this browser: OPFS) leaves with the copy; the focus goes to the set's button.
+  const remove = page.getByTestId(`example-${SIXTEEN_S.id}-delete`);
+  if ((await page.getByTestId('storage-status').getAttribute('data-backend')) === 'opfs') {
+    await remove.focus();
+    await page.keyboard.press('Enter');
+    await expect(remove).toHaveCount(0);
+    expect(await focused(page)).toBe(`example-${SIXTEEN_S.id}`);
+  }
+});
+
+test("an Example's Cancel that leaves as the load ends gives the focus back to the set's button", async ({ page }) => {
+  const gz = gzipSync('>NR_102783.2 Bacillus subtilis 16S\nACGTACGTACGTACGTACGT\n');
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(/^https:\/\/ftp\.ncbi\.nlm\.nih\.gov\//, async (route) => {
+    await held;
+    await route.fulfill({ status: 200, contentType: 'application/x-gzip', headers: { 'Access-Control-Allow-Origin': '*' }, body: gz });
+  });
+  await start(page);
+  await page.getByTestId(`example-${SIXTEEN_S.id}`).click();
+  const cancel = page.getByTestId(`example-${SIXTEEN_S.id}-cancel`);
+  await cancel.focus();
+  release();
+  await expect(cancel).toHaveCount(0);
+  await expect(page.getByTestId('subject-source-0')).toContainText(SIXTEEN_S.fileName);
+  expect(await focused(page)).toBe(`example-${SIXTEEN_S.id}`);
+});
+
+test('"Run a search" of the empty Results tab moves the focus to the Search tab', async ({ page }) => {
+  await start(page);
+  await page.getByTestId('tab-results').click();
+  await page.getByTestId('results-run-a-search').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('search-panel')).toBeVisible();
+  expect(await focused(page)).toBe('tab-search');
 });
 
 test('Remove moves the focus to the next input, then to "Open FASTA files…"', async ({ page }) => {
@@ -270,6 +319,7 @@ test('the output text of the Outputs view is a Tab stop and scrolls with the key
   const output = page.getByTestId('result-output');
   await expect(output).toHaveAttribute('data-shown', '1:0');
   await expect(page.getByRole('region', { name: 'outfmt 0 output' })).toBeVisible();
+  await expect(output).toHaveAttribute('tabindex', '0');
   await page.getByTestId('format-7').focus();
   expect(await tabTo(page, 'result-output', 1)).toBe(true);
   await page.keyboard.press('PageDown');
@@ -290,6 +340,7 @@ test.describe('on a phone', () => {
     const section = page.getByTestId('detail-section');
     await expect(section).toBeVisible();
     expect(await section.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+    await expect(section).toHaveAttribute('tabindex', '0');
     await page.getByTestId('results-heading').focus();
     expect(await tabTo(page, 'detail-section')).toBe(true);
     await page.keyboard.press('ArrowRight');

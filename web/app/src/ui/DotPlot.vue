@@ -511,6 +511,8 @@ function canvasPoint(event: MouseEvent): { x: number; y: number } {
   return { x: event.clientX - rect.left, y: event.clientY - rect.top };
 }
 function onPointerDown(event: PointerEvent): void {
+  // A line chosen with the pointer is not told as n and p's (its popup shows it).
+  stepped.value = false;
   drag = { x: event.clientX, y: event.clientY, moved: false, id: event.pointerId };
   base.value?.setPointerCapture(event.pointerId);
 }

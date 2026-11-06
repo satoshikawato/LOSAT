@@ -2,8 +2,10 @@
 // A row of tabs in ARIA's tabs pattern (WA2-AX-12): a tablist of tabs, the chosen one
 // aria-selected, each naming the panel it shows (aria-controls). One Tab stop, the chosen tab
 // (roving tabindex); Left and Right move to the tab before and after it (around the ends), Home
-// and End to the first and the last, and a tab reached so is chosen at once (its panel shows at
-// once). The look stays NCBI's tab strip (styles.css .tabs).
+// and End to the first and the last. A tab reached so is chosen at once, as its panel shows at
+// once; with `manual` (a panel that takes a while to show, as an output read from storage), the
+// keys move only the focus, and Enter or Space chooses (ARIA APG). The look stays NCBI's tab
+// strip (styles.css .tabs).
 import { nextTick } from 'vue';
 
 const props = defineProps<{
@@ -20,6 +22,8 @@ const props = defineProps<{
     readonly class?: string;
   }[];
   label: string;
+  /** The arrow keys move the focus only; Enter or Space chooses the tab. */
+  manual?: boolean;
 }>();
 const chosen = defineModel<T>({ required: true });
 const buttons: HTMLButtonElement[] = [];
@@ -37,11 +41,16 @@ function focusChosen(): void {
 async function onKey(event: KeyboardEvent): Promise<void> {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   const count = props.tabs.length;
-  const at = props.tabs.findIndex((tab) => tab.value === chosen.value);
+  const focused = buttons.findIndex((button, index) => index < count && button === document.activeElement);
+  const at = focused >= 0 ? focused : props.tabs.findIndex((tab) => tab.value === chosen.value);
   const next: Record<string, number> = { ArrowRight: (at + 1) % count, ArrowLeft: (at - 1 + count) % count, Home: 0, End: count - 1 };
   const index = next[event.key];
   if (index === undefined || count === 0) return;
   event.preventDefault();
+  if (props.manual) {
+    buttons[index]?.focus();
+    return;
+  }
   chosen.value = props.tabs[index]!.value;
   await nextTick();
   focusChosen();

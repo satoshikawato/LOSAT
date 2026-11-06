@@ -74,7 +74,8 @@ watch(() => output.value.text, () => generation.value++);
 
 <template>
   <div class="outputs-view" data-testid="results-outputs">
-    <TabList v-model="shown" label="Output format" :tabs="tabs" />
+    <!-- Chosen by Enter or Space: each output shown is read from storage, the largest first (WA2-AX-12). -->
+    <TabList v-model="shown" label="Output format" :tabs="tabs" manual />
     <div :id="`${ids}-panel`" role="tabpanel" :aria-labelledby="`${ids}-tab-${format}`" class="outputs-panel">
       <p class="command">
         Command: <code data-testid="result-command">{{ toShellCommand(run.snapshot.argv, format) }}</code>

@@ -334,6 +334,16 @@ pub(crate) struct XSharedSubjectRanges {
 }
 
 impl XSharedSubjectRanges {
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        expect(
+            dead_code,
+            reason = "used only with `parallel` threads: called only by the parallel redo (x_redo_par)"
+        )
+    )]
     pub(crate) fn new() -> Self {
         Self {
             shards: (0..64)
@@ -357,6 +367,16 @@ impl XSharedSubjectRanges {
     // no value NCBI computes.
     /// Drops every entry and the maps' room. A range looked up afterwards is masked again, into the
     /// value it had: an entry depends on its key only.
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        expect(
+            dead_code,
+            reason = "used only with `parallel` threads: called only by the parallel redo (x_redo_par)"
+        )
+    )]
     pub(crate) fn x_clear(&self) {
         for shard in &self.shards {
             *shard
@@ -368,6 +388,16 @@ impl XSharedSubjectRanges {
     // No NCBI counterpart: memory only (LOSAT_X_BPSEGWIN's size rule); it changes no value NCBI
     // computes.
     /// The number of entries (LOSAT_X_BPSEGWIN's rule, after a window: the sum of the shards').
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        expect(
+            dead_code,
+            reason = "used only with `parallel` threads: called only by the parallel redo (x_redo_par)"
+        )
+    )]
     pub(crate) fn x_len(&self) -> usize {
         self.shards
             .iter()
@@ -392,6 +422,16 @@ impl BlastpKappaSubjectRangeCache {
     // No NCBI counterpart: constructor that selects the search-wide store (see
     // XSharedSubjectRanges); it does not change any value NCBI computes.
     /// A cache backed by the search-wide store (`None`: the cache keeps its own map).
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        expect(
+            dead_code,
+            reason = "used only with `parallel` threads: called only by the parallel redo (x_redo_par)"
+        )
+    )]
     pub(crate) fn x_with_shared(shared: Option<std::sync::Arc<XSharedSubjectRanges>>) -> Self {
         Self {
             masked_ranges: HashMap::new(),
@@ -534,10 +574,6 @@ fn build_incoming_alignment_list(
 #[derive(Debug, Clone)]
 struct RedoneBlastpHit {
     hit: Hit,
-    query_start: i32,
-    query_end: i32,
-    subject_start: i32,
-    subject_end: i32,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1755-1770
@@ -918,10 +954,6 @@ fn redone_hit_from_alignment_owned(
             gap_info,
             num_positives: 0,
         },
-        query_start: align.query_start,
-        query_end: align.query_end,
-        subject_start: align.match_start,
-        subject_end: align.match_end,
     })
 }
 
@@ -1339,7 +1371,7 @@ fn blast_nint(x: f64) -> i32 {
 // ```
 fn scaled_karlin_params(params: &KarlinParams, score_divisor: f64) -> KarlinParams {
     if score_divisor == 1.0 {
-        return params.clone();
+        return *params;
     }
     KarlinParams {
         lambda: params.lambda / score_divisor,
@@ -1883,7 +1915,7 @@ pub(crate) fn postprocess_preliminary_hits(
     }
 
     let incoming_aligns =
-        build_incoming_alignment_list(&preliminary_hits, redo_align_params.score_divisor);
+        build_incoming_alignment_list(preliminary_hits, redo_align_params.score_divisor);
     let matching_seq = BlastCompoMatchingSequence::new(preliminary_hits[0].s_idx as i32, subject);
     if let Some(target) = blastp_trace_hsp_target() {
         if blastp_trace_matches_pair(target, preliminary_hits[0].q_idx, preliminary_hits[0].s_idx) {
@@ -2356,17 +2388,9 @@ mod tests {
     fn test_reap_contained_hits_uses_internal_offsets_ncbi_style() {
         let outer = RedoneBlastpHit {
             hit: make_hit(200, 101, 150, 201, 250),
-            query_start: 100,
-            query_end: 150,
-            subject_start: 200,
-            subject_end: 250,
         };
         let inner = RedoneBlastpHit {
             hit: make_hit(180, 101, 149, 201, 249),
-            query_start: 100,
-            query_end: 149,
-            subject_start: 200,
-            subject_end: 249,
         };
 
         let kept_hits = vec![outer.clone(), inner];
@@ -2376,22 +2400,6 @@ mod tests {
         assert_eq!(hsp_list.hsps[0].raw_score, outer.hit.raw_score);
         assert_eq!(hsp_list.hsps[0].q_start, outer.hit.q_start);
         assert_eq!(hsp_list.hsps[0].s_start, outer.hit.s_start);
-    }
-
-    fn make_redone_hit(
-        score: i32,
-        q_start: usize,
-        q_end: usize,
-        s_start: usize,
-        s_end: usize,
-    ) -> RedoneBlastpHit {
-        RedoneBlastpHit {
-            hit: make_hit(score, q_start, q_end, s_start, s_end),
-            query_start: q_start.saturating_sub(1) as i32,
-            query_end: q_end as i32,
-            subject_start: s_start.saturating_sub(1) as i32,
-            subject_end: s_end as i32,
-        }
     }
 
     #[test]
@@ -2542,7 +2550,7 @@ mod tests {
 
     #[test]
     fn test_adjust_evalues_for_composition_matches_ncbi_sequence_scaling() {
-        let query_workspace = build_query_workspace(&vec![1u8; 100], 100, 10, 9000.0);
+        let query_workspace = build_query_workspace(&[1u8; 100], 100, 10, 9000.0);
         let mut hsp_list = BlastpHspList {
             oid: 0,
             query_index: 0,
@@ -2624,7 +2632,7 @@ mod tests {
             hsps: vec![BlastpHsp::from_hit(make_hit(1062, 1, 10, 1, 10))],
             best_evalue: f64::MAX,
         };
-        let query_workspace = build_query_workspace(&vec![1u8; 100], 100, 0, 100000.0);
+        let query_workspace = build_query_workspace(&[1u8; 100], 100, 0, 100000.0);
 
         let (_best_score, best_evalue) = evaluate_and_purge(
             &mut hsp_list,
@@ -2673,7 +2681,7 @@ mod tests {
             hsps: vec![BlastpHsp::from_hit(make_hit(1062, 1, 10, 1, 10))],
             best_evalue: f64::MAX,
         };
-        let query_workspace = build_query_workspace(&vec![1u8; 100], 100, 0, 100000.0);
+        let query_workspace = build_query_workspace(&[1u8; 100], 100, 0, 100000.0);
 
         let (_best_score, best_evalue) = evaluate_and_purge(
             &mut hsp_list,
@@ -2701,8 +2709,8 @@ mod tests {
 
     #[test]
     fn test_redo_preliminary_blastp_hit_preserves_internal_offsets_with_ranges() {
-        let full_query = BlastCompoSequenceData::from_ncbistdaa(&vec![1u8; 12]);
-        let full_subject = BlastCompoSequenceData::from_ncbistdaa(&vec![1u8; 11]);
+        let full_query = BlastCompoSequenceData::from_ncbistdaa(&[1u8; 12]);
+        let full_subject = BlastCompoSequenceData::from_ncbistdaa(&[1u8; 11]);
         let query_range = BlastCompoSequenceRange {
             begin: 4,
             end: 12,
@@ -2771,7 +2779,7 @@ mod tests {
         };
         let params = test_redo_align_params();
 
-        let query = BlastCompoSequenceData::from_ncbistdaa(&vec![2u8; 80]);
+        let query = BlastCompoSequenceData::from_ncbistdaa(&[2u8; 80]);
         let query_range = BlastCompoSequenceRange {
             begin: 0,
             end: 80,
@@ -2825,7 +2833,7 @@ mod tests {
             context: 0,
         };
         let params = test_redo_align_params();
-        let query = BlastCompoSequenceData::from_ncbistdaa(&vec![2u8; 80]);
+        let query = BlastCompoSequenceData::from_ncbistdaa(&[2u8; 80]);
         let query_range = subject_range;
         let align = blast_compo_alignment_new(
             80,
@@ -3022,7 +3030,7 @@ mod tests {
             end: 84,
             context: 0,
         };
-        let query = BlastCompoSequenceData::from_ncbistdaa(&vec![1u8; 80]);
+        let query = BlastCompoSequenceData::from_ncbistdaa(&[1u8; 80]);
         let query_range = BlastCompoSequenceRange {
             begin: 0,
             end: 80,
@@ -3129,24 +3137,12 @@ mod tests {
         let hits = vec![
             RedoneBlastpHit {
                 hit: make_hit(100, 11, 50, 101, 140),
-                query_start: 10,
-                query_end: 50,
-                subject_start: 100,
-                subject_end: 140,
             },
             RedoneBlastpHit {
                 hit: make_hit(90, 21, 40, 111, 130),
-                query_start: 20,
-                query_end: 40,
-                subject_start: 110,
-                subject_end: 130,
             },
             RedoneBlastpHit {
                 hit: make_hit(80, 61, 80, 151, 170),
-                query_start: 60,
-                query_end: 80,
-                subject_start: 150,
-                subject_end: 170,
             },
         ];
         let mut hsp_list = hsp_list_of(&hits);
@@ -3195,10 +3191,6 @@ mod tests {
         let mut hits = vec![
             RedoneBlastpHit {
                 hit: make_hit(100, 1, 40, 101, 140),
-                query_start: 0,
-                query_end: 40,
-                subject_start: 100,
-                subject_end: 140,
             },
             RedoneBlastpHit {
                 hit: {
@@ -3206,10 +3198,6 @@ mod tests {
                     hit.query_frame = 1;
                     hit
                 },
-                query_start: 10,
-                query_end: 30,
-                subject_start: 110,
-                subject_end: 130,
             },
         ];
         hits[0].hit.query_frame = 1;

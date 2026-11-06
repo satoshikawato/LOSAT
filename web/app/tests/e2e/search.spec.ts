@@ -449,12 +449,13 @@ test("the engine's refusals of option values are shown as the engine writes them
     "error: the NCBI BLAST+ option -version is not supported by LOSAT's TBLASTX",
   );
   await expect(page.getByTestId('run-1-option')).toHaveCount(0);
-  // A value that LOSAT does not support (typed after "Other"), and one that NCBI refuses.
+  // A value that LOSAT does not support (typed after "Other": IDENTITY, which NCBI's page does
+  // not list, with its gap costs 15/2), and one that NCBI refuses.
   await program(page, 'blastp');
   await page.getByTestId('param-matrix').selectOption('other');
-  await page.getByTestId('param-matrix-other').fill('BLOSUM45');
+  await page.getByTestId('param-matrix-other').fill('IDENTITY');
   await expect(page.getByTestId('argv-validation')).toHaveText(
-    "the matrix BLOSUM45 with gap costs 14/2 is not supported by LOSAT's BLASTP",
+    "the matrix IDENTITY with gap costs 15/2 is not supported by LOSAT's BLASTP",
   );
   await page.getByTestId('param-matrix').selectOption('BLOSUM62');
   await page.getByTestId('param-evalue').fill('0');

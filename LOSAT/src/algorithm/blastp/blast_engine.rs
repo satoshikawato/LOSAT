@@ -28,6 +28,7 @@ use crate::algorithm::tblastx::constants::{
 };
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_bp_build_compressed_lookup, x_bpclut_on, XCompressedLookup, XFlatCompressedLookup, X_BLASTP,
+    X_BLASTP_MATRIX,
 };
 use crate::algorithm::tblastx::lookup::compressed::BlastCompressedAaLookupTable;
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
@@ -95,7 +96,7 @@ use super::encoding::{
 use super::extension::extend_one_hit;
 use super::extension::{
     extend_one_hit_blosum62, extend_one_hit_of, extend_two_hit, extend_two_hit_blosum62,
-    BlastpUngappedData,
+    extend_two_hit_table, BlastpUngappedData,
 };
 use super::gapalign::{
     blastp_get_start_for_gapped_alignment, blastp_score_only_gapped_alignment_with_scratch,
@@ -2215,10 +2216,9 @@ fn blastp_for_each_offset_pair<F>(
 // while (scan_range[1] <= scan_range[2]) {
 //     hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
 // ```
-/// [`blastp_for_each_offset_pair`] for the tables of another matrix than BLOSUM62 (item SC2b): the
-/// standard table and the reference compressed one (`blastp_matrix_compressed_lookup`), with the
-/// same statements. The flat compressed table is BLOSUM62's; leaving its scan out keeps that scan
-/// with BLOSUM62's one caller.
+/// [`blastp_for_each_offset_pair`] for the tables of another matrix than BLOSUM62 (item SC2b), with
+/// the same statements: the scan of the flat compressed table is a copy of its own
+/// (`X_BLASTP_MATRIX`), so that BLOSUM62's keeps its one caller.
 fn blastp_for_each_offset_pair_of<F>(
     lookup: &BlastpRuntimeLookup,
     subject_sequence: &[u8],
@@ -2250,6 +2250,9 @@ fn blastp_for_each_offset_pair_of<F>(
                 blastp_visit_scanned_offset_pairs(offset_pairs, hits, &mut visit);
             }
         }
+        BlastpRuntimeLookup::Aa16(_) => {
+            unreachable!("a table of 16-bit hits is built only for a search with a window")
+        }
         BlastpRuntimeLookup::Compressed(lookup) => {
             while scan_range[1] <= scan_range[2] {
                 let hits = lookup.scan_subject(
@@ -2262,9 +2265,18 @@ fn blastp_for_each_offset_pair_of<F>(
                 blastp_visit_scanned_offset_pairs(offset_pairs, hits, &mut visit);
             }
         }
-        BlastpRuntimeLookup::Aa16(_) | BlastpRuntimeLookup::CompressedFlat(_) => unreachable!(
-            "another matrix's one-hit search has a table of Int4 hits or the reference compressed one"
-        ),
+        BlastpRuntimeLookup::CompressedFlat(lookup) => {
+            while scan_range[1] <= scan_range[2] {
+                let hits = lookup.scan_subject::<X_BLASTP_MATRIX>(
+                    subject_sequence,
+                    &seq_ranges,
+                    offset_pairs,
+                    array_size,
+                    &mut scan_range,
+                );
+                blastp_visit_scanned_offset_pairs(offset_pairs, hits, &mut visit);
+            }
+        }
     }
 }
 
@@ -7800,9 +7812,10 @@ fn blastp_compressed_lookup(
 /// [`blastp_compressed_lookup`] of a matrix other than BLOSUM62 (item SC2b): the contexts with the
 /// Karlin blocks of the matrix's scores (`prepare_matrix_lookup_query_for_word_size`, on the
 /// search's pool where it has more than one thread), NCBI's tables of the query batches
-/// (`ncbi_compressed_lookup_tables`) and the compressed table of the matrix's words from the
-/// reference builder (`try_build_compressed_lookup`; the flat builder and its spare vectors are
-/// BLOSUM62's), with the refusals of the BLOSUM62 table.
+/// (`ncbi_compressed_lookup_tables`) and the compressed table of the matrix's words from TBLASTN's
+/// builders of another matrix (`x_tbn_build_compressed_lookup_of`, on this thread: the flat table,
+/// the reference one where the flat builders decline or with `LOSAT_X_BPCLUT=0`; it takes no spare
+/// vectors), with the refusals of the BLOSUM62 table.
 #[inline(never)]
 fn blastp_matrix_compressed_lookup(
     args: &ResolvedBlastpArgs,
@@ -7828,7 +7841,7 @@ fn blastp_matrix_compressed_lookup(
         &locations,
         query_chunk,
     )?;
-    let lookup = crate::algorithm::tblastx::lookup::compressed::try_build_compressed_lookup(
+    let lookup = crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_tbn_build_compressed_lookup_of(
         args.scoring.matrix,
         args.word_size,
         crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
@@ -7849,11 +7862,20 @@ fn blastp_matrix_compressed_lookup(
             args.word_size
         )
     })?;
-    // The reference table with the switch on (as where the flat build declines).
-    if x_bpclut_on() {
-        crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", false);
-    }
-    Ok((BlastpRuntimeLookup::Compressed(lookup), contexts))
+    let lookup = match lookup {
+        XCompressedLookup::Reference(lookup) => {
+            // The flat builders declined: the reference builder ran.
+            if x_bpclut_on() {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", false);
+            }
+            BlastpRuntimeLookup::Compressed(lookup)
+        }
+        XCompressedLookup::Flat(lookup) => {
+            crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", true);
+            BlastpRuntimeLookup::CompressedFlat(lookup)
+        }
+    };
+    Ok((lookup, contexts))
 }
 
 // No NCBI counterpart: memory only; it changes no value NCBI computes.
@@ -7865,6 +7887,7 @@ fn blastp_matrix_compressed_lookup(
 /// redo, instead of at the search's end.
 fn x_lookup_after_prelim(
     lookup: BlastpRuntimeLookup,
+    matrix: ScoringMatrix,
     pool: &crate::utils::threading::SearchPool<'_>,
     ahead: &x_lookup_ahead::XAheadBlock<'_>,
 ) -> Option<BlastpRuntimeLookup> {
@@ -7874,8 +7897,11 @@ fn x_lookup_after_prelim(
     }
     let taken_later = ahead.x_table_taken_later()
         && match &lookup {
+            // Only BLOSUM62's build takes the flat table's vectors (another matrix's flat builders
+            // take none: `blastp_matrix_compressed_lookup`).
             BlastpRuntimeLookup::CompressedFlat(_) => {
-                super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
+                matrix == ScoringMatrix::Blosum62
+                    && super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
             }
             BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {
                 super::x_query_blocks::x_bp_aa_spares(pool).is_some()
@@ -8736,7 +8762,7 @@ fn run_resolved_in_pool(
         // EXPERIMENT (LOSAT_X_BPDIAG): inside it the hits of a cell are tested in batches.
         // The two-hit test of a hit that needs the context check and the extension, with the
         // extension `$extend` (and its leading arguments): `extend_two_hit_blosum62` for BLOSUM62,
-        // the reference `extend_two_hit` of the search's matrix for another one (item SC2b). Each
+        // `extend_two_hit_table` of the search's matrix for another one (item SC2b). Each
         // expansion is a closure type of its own, so BLOSUM62's loops keep their own instances.
         macro_rules! x_candidate_of {
             ($extend:path $(, $lead:expr)?) => {
@@ -8953,12 +8979,18 @@ fn run_resolved_in_pool(
                 }
             };
         }
-        // Another matrix than BLOSUM62 (item SC2b): the same tests with the reference extensions
-        // of the search's matrix on the same scans (BPUNGAPSENT's byte tables are BLOSUM62's), in
-        // a function of their own (`x_outlined`), so that this kernel only gains its call.
+        // Another matrix than BLOSUM62 (item SC2b): the same tests on the same scans, with the
+        // two-hit extension of the matrix's byte-table walks (`extend_two_hit_table`; the reference
+        // where they do not cover a call) and the one-hit reference extension
+        // (BPUNGAPSENT's byte tables are BLOSUM62's), in a function of their own (`x_outlined`), so
+        // that this kernel only gains its call.
         if args.window_size != 0 && args.scoring.matrix != ScoringMatrix::Blosum62 {
             x_outlined(|| {
-                let x_candidate = x_candidate_of!(extend_two_hit, args.scoring.matrix);
+                let x_of = (
+                    args.scoring.matrix,
+                    super::x_ungapped_fast::matrix_table(args.scoring.matrix),
+                );
+                let x_candidate = x_candidate_of!(extend_two_hit_table, x_of);
                 if let Some(ranges) = x_soft {
                     x_soft_subject::x_scan_two_hit_ranges(
                         &lookup,
@@ -8975,9 +9007,8 @@ fn run_resolved_in_pool(
                     );
                 } else {
                     // The tables of another matrix: the standard table (either width) or the
-                    // reference compressed one (`blastp_matrix_compressed_lookup`). The flat
-                    // compressed table is BLOSUM62's; leaving its scan out keeps that scan's helpers
-                    // with BLOSUM62's one caller.
+                    // compressed one (`blastp_matrix_compressed_lookup`: the flat table, the
+                    // reference one where the flat build declines or LOSAT_X_BPCLUT is off).
                     match &lookup {
                         BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
                             aa_lookup,
@@ -9016,9 +9047,24 @@ fn run_resolved_in_pool(
                                 x_candidate,
                             )
                         }
-                        BlastpRuntimeLookup::CompressedFlat(_) => unreachable!(
-                            "the compressed table of another matrix than BLOSUM62 is the reference one"
-                        ),
+                        // A copy of its own of the flat scan (`X_BLASTP_MATRIX`), so that
+                        // BLOSUM62's keeps its one caller.
+                        BlastpRuntimeLookup::CompressedFlat(flat_lookup) => {
+                            super::x_seed_fused_clut::x_scan_two_hit_compressed_flat::<
+                                X_BLASTP_MATRIX,
+                                _,
+                            >(
+                                flat_lookup,
+                                subject_sequence,
+                                subject.aa_len,
+                                &mut scratch.diag_array,
+                                diag_mask,
+                                subject_diag_offset,
+                                window,
+                                word_size,
+                                x_candidate,
+                            )
+                        }
                     }
                 }
             });
@@ -9211,7 +9257,7 @@ fn run_resolved_in_pool(
                     // EXPERIMENT (LOSAT_X_BPCLUT): the same loop on the flat table, each cell read as one
                     // slice (`x_seed_fused_clut.rs`).
                     BlastpRuntimeLookup::CompressedFlat(flat_lookup) => {
-                        super::x_seed_fused_clut::x_scan_two_hit_compressed_flat(
+                        super::x_seed_fused_clut::x_scan_two_hit_compressed_flat::<X_BLASTP, _>(
                             flat_lookup,
                             subject_sequence,
                             subject.aa_len,
@@ -10170,7 +10216,7 @@ fn run_resolved_in_pool(
     // ```
     // EXPERIMENT (LOSAT_X_BPLKDROP): nothing reads the lookup table after the preliminary stage;
     // it is dropped here unless a later block's build may take its vectors (at the end below).
-    let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
+    let lookup = x_lookup_after_prelim(lookup, args.scoring.matrix, blastp_parallel_pool, &x_ahead);
     // EXPERIMENT (LOSAT_X_BPIHPOOL): no subject scan runs any more; the pool's arrays of initial
     // hits are freed, as the subject loop's scratches freed theirs.
     x_ih_pool::release();
@@ -12819,7 +12865,10 @@ fn run_resolved_in_pool(
     // build (`x_query_blocks::x_bp_aa_block_spare`). EXPERIMENT (LOSAT_X_BPLKDROP): `None` when the
     // table was dropped before the redo.
     match lookup {
-        Some(BlastpRuntimeLookup::CompressedFlat(table)) => {
+        // Another matrix's flat table is not taken by a later build (`x_lookup_after_prelim`).
+        Some(BlastpRuntimeLookup::CompressedFlat(table))
+            if args.scoring.matrix == ScoringMatrix::Blosum62 =>
+        {
             if let Some(spare) = super::x_query_blocks::x_bp_lookup_spare(blastp_parallel_pool) {
                 spare.give(table);
             }
@@ -12840,7 +12889,8 @@ fn run_resolved_in_pool(
                 spares.give16(table);
             }
         }
-        Some(BlastpRuntimeLookup::Compressed(_)) | None => {}
+        Some(BlastpRuntimeLookup::Compressed(_) | BlastpRuntimeLookup::CompressedFlat(_))
+        | None => {}
     }
 
     if let Some(timing) = timing.as_ref() {

@@ -489,8 +489,8 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         )) && x_bp_lkp_ahead()
             && match args.lookup_table_type {
-                // The flat table's (BLOSUM62's; another matrix's compressed table is the
-                // reference one, which keeps no spare vectors: item SC2b).
+                // The flat table's (BLOSUM62's; another matrix's flat builders take no spare
+                // vectors: item SC2b).
                 BlastpLookupTableType::CompressedAaLookupTable => {
                     x_bpclut_on()
                         && args.scoring.matrix == crate::config::ScoringMatrix::Blosum62

@@ -402,6 +402,9 @@ pub(crate) const X_BLASTX: u8 = 2;
 /// BLASTP's scan of a `-subject` with lower-case letters (`-lcase_masking`), a copy of its own so
 /// that `X_BLASTP` keeps its one caller.
 pub(crate) const X_BLASTP_SOFT: u8 = 3;
+/// BLASTP's scans with a matrix other than BLOSUM62 (item SC2b; `scan_subject` and
+/// `x_list_pairs_lean`), copies of their own so that `X_BLASTP` keeps its one caller.
+pub(crate) const X_BLASTP_MATRIX: u8 = 4;
 
 /// EXPERIMENT (LOSAT_X_BPCLUT): the compressed lookup table with each cell's hits in one slice of
 /// `hits` (`starts[index]..starts[index + 1]`), in NCBI's scan order. The other fields are those of
@@ -2498,9 +2501,10 @@ impl XFlatCompressedLookup {
     /// # Safety
     ///
     /// [`Self::x_pairs_fit`]`(subject, subject_length)` holds: the scan reads the subject's bytes
-    /// and the presence bits without bounds checks.
+    /// and the presence bits without bounds checks. `CALLER` gives each caller a copy of its own,
+    /// as in [`Self::scan_subject`] (`X_BLASTP`, `X_BLASTP_MATRIX`).
     #[inline(never)]
-    pub(crate) unsafe fn x_list_pairs_lean(
+    pub(crate) unsafe fn x_list_pairs_lean<const CALLER: u8>(
         &self,
         subject: &[u8],
         subject_length: usize,
@@ -3829,7 +3833,7 @@ mod tests {
                 let want_list = cells.clone();
                 let mut lean = Vec::new();
                 // SAFETY: x_pairs_fit holds (asserted above).
-                unsafe { flat.x_list_pairs_lean(subject, length, &mut lean) };
+                unsafe { flat.x_list_pairs_lean::<X_BLASTP>(subject, length, &mut lean) };
                 assert_eq!(lean, want_list, "subject {n}: x_list_pairs_lean's list");
                 assert!(
                     lean.capacity() >= lean.len() + X_STARTS_AHEAD,
@@ -3907,7 +3911,7 @@ mod tests {
                 let want_list = cells.clone();
                 let mut lean = Vec::new();
                 // SAFETY: x_pairs_fit holds (asserted above).
-                unsafe { flat6.x_list_pairs_lean(&subject, length, &mut lean) };
+                unsafe { flat6.x_list_pairs_lean::<X_BLASTP>(&subject, length, &mut lean) };
                 assert_eq!(lean, want_list, "length {length}: list");
                 found += want.len();
                 let got: Vec<(i32, i32)> = lean

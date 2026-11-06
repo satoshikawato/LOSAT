@@ -98,6 +98,18 @@ cargo publish --dry-run --locked \
   --config 'build.target-dir="/tmp/losat-cargo-publish-target"'
 ```
 
+For changes to the library API (`LOSAT/src/api` and the types it re-exports): the CI job `public api`
+compares the public API of `LOSAT::api` with the reviewed listing `LOSAT/tests/public_api.txt`. After a
+deliberate change, update the listing and commit it with the change; when the job fails it also uploads
+the new listing as the artifact `public-api`. The script names the pinned tool and toolchain, and does not
+install them:
+
+```bash
+rustup toolchain install --no-self-update --profile minimal nightly-2026-05-24
+cargo install --locked cargo-public-api@0.52.0
+python3 LOSAT/tests/check_public_api.py update
+```
+
 ---
 
 ## Parity Evidence & Testing

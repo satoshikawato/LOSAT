@@ -1,6 +1,6 @@
 # LOSAT ライブラリ化計画（公開面の設計メモ）
 
-状態：**LIB-1 は `dev` に入った（#845）。段階 1（公開面を固める）は `dev` に入った（#846）。段階 2（結果と実行制御）と段階 3（`pylosat`）は `dev` に入った（#851）。今の段は §13（全機能をライブラリに）で、公開はその後（保守者の決定、2026-11-05）。** 設計メモは LIB-0（2026-10-31、保守者「OK」）。v0.2.0 自体は crates.io に出さない（release の決定 5、2026-10-25）。LIB-1 で決めたことは §9、順番の変更と段階 1 で決めたことは §10、段階 2 は §11、段階 3 は §12、全機能の段は §13。
+状態：**LIB-1 は `dev` に入った（#845）。段階 1（公開面を固める）は `dev` に入った（#846）。段階 2（結果と実行制御）と段階 3（`pylosat`）は `dev` に入った（#851）。§13（全機能をライブラリに）も `dev` に入り（#852、#859、#860、#861）、今の段は §14（公開の準備）で、公開はその後（保守者の決定、2026-11-05、2026-11-06）。** 設計メモは LIB-0（2026-10-31、保守者「OK」）。v0.2.0 自体は crates.io に出さない（release の決定 5、2026-10-25）。LIB-1 で決めたことは §9、順番の変更と段階 1 で決めたことは §10、段階 2 は §11、段階 3 は §12、全機能の段は §13、公開の準備は §14。
 
 | 項目 | 内容 |
 |---|---|
@@ -500,3 +500,24 @@ binding は API が持つものを Python の形にするだけで、engine の�
 
 ### 13.7 残ること
 - `-db` のバッチごとの再利用：`run_batches` はバッチごとにデータベースを開き直す（§11.3 の測定の続き）。taxonomy データベースについて NCBI が 1 回だけ書くメッセージも、読むバッチごとに出る。
+
+## 14. 公開の準備（2026-11-06）
+
+保守者の決定（2026-11-06）：「推奨通りに進めましょう」。公開（§10.1 の段階 4）の前に次の 3 つをこの順で行う。記録は `losat-baselines/library-20261031/`（DECISIONS 7、8）。
+
+| 段 | 内容 | 始める時 |
+|---|---|---|
+| P-S1 | crate の外から安全に呼べる `pub fn` が範囲外を読まないようにする（`#[doc(hidden)]` は呼び出しを止めない）。可視性を狭めるのが先で、テストが呼ぶ物は検査つきの `pub` と検査なしの `pub(crate)` に分ける | すぐ |
+| P-CI1 | 公開面の差分検査を CI に（§14.1） | すぐ |
+| P-R1 | crate 名を `losat` に（LIB-3、§4.1） | P-S1 と P-CI1 の後 |
+
+### 14.1 公開面の検査（P-CI1、PR `ci/lib-public-api`）
+
+| 項目 | 実装 |
+|---|---|
+| 一覧 | `LOSAT/tests/public_api.txt`：cargo-public-api 0.52.0 の `--simplified`（blanket impl を除く。auto trait と derive の impl は残す：無くなると呼び出し側が壊れる）。`LOSAT/tests/check_public_api.py check` が一致を見る。意図した変更は `update` で書き直し、同じ PR で commit する |
+| CI | `ci.yml` の `public api`。必須の `rust` が待つ job に入れた。失敗すると新しい一覧を artifact `public-api` に置き、差分を job summary に書く |
+| semver | `semver checks (report)`：PR の base の commit と cargo-semver-checks 0.51.0 で比べ、結果を job summary と warning に書く。最初の公開までは報告だけ（版は `0.2.0` のままで、比べる相手の版が無い）。公開の後は、公開した版を基準にした gate にする |
+| toolchain | 両方 `nightly-2026-05-24`。cargo-public-api は stable を `nightly` に切り替え、rustdoc JSON の形式 57 だけを読む（形式 57 を書くのは 2025-11-22〜2026-06-23 の nightly）。cargo-semver-checks 0.51 は形式 57、60、61 を読み、1.92.0 の形式 56 は読めない。版の組は script と `ci.yml` の 2 か所にあり、`test_check_public_api.py` が一致を見る。script は何も入れない（無ければ入れ方を示して終わる） |
+
+見つかったこと：`api` が再公開する `FastaRecord` は、定義が `#[doc(hidden)]` の `blastinput` にあるため、rustdoc（HTML と JSON）から型ごと消える（`#[doc(inline)]` を付けても戻らない、2026-11-06 に確認）。一覧には `pub use LOSAT::api::FastaRecord` の 1 行だけで、`read_fasta` と `read_inputs` の型には `crate::blastinput::fasta_reader::FastaRecord` が出る。docs.rs では入力の型の説明が出ず、2 つの検査もその型の変更を見ない。直すのは別の PR（定義を `api` に移し、`blastinput` はそれを使う）。

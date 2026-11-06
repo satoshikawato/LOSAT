@@ -524,16 +524,17 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
     // #define BLAST_SCORE_MIN INT2_MIN   /**< minimum allowed score (for one letter comparison). */
     // #define BLAST_SCORE_MAX INT2_MAX   /**< maximum allowed score (for one letter comparison). */
     // ```
-    // NCBI copies the scores into the matrix without a check; its kernels add them in `Int4`, which
-    // a score far outside one letter's range overflows (undefined behaviour). Within the range,
-    // the sums of a query that is not split (under 19,800 letters) stay inside `Int4`.
+    // NCBI copies the scores into the matrix without a check and adds them in `Int4` (a score of
+    // 40,000 runs; one near `INT4_MAX` would overflow, undefined behaviour). LOSAT keeps the scores
+    // to one letter's range, so that the sums of a query that is not split (under 19,800 letters)
+    // stay inside `i32`: a range rule of LOSAT's, not an NCBI error.
     if validation_error.is_none() {
         if let Some(score) = scores
             .iter()
             .find(|&&score| !(BLAST_SCORE_MIN..=BLAST_SCORE_MAX).contains(&score))
         {
             return Err(refuse(format!(
-                "a PSSM score of {score}, outside BLAST_SCORE_MIN..BLAST_SCORE_MAX ({BLAST_SCORE_MIN}..{BLAST_SCORE_MAX}), where NCBI BLAST+'s sums overflow,"
+                "a PSSM score of {score}, outside BLAST_SCORE_MIN..BLAST_SCORE_MAX ({BLAST_SCORE_MIN}..{BLAST_SCORE_MAX}, one letter's score range in NCBI BLAST+),"
             )));
         }
     }

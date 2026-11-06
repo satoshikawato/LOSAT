@@ -253,18 +253,10 @@ impl ExtensionConfig {
 }
 
 /// Statistics configuration
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct StatsConfig {
     /// Whether to use length adjustment for effective search space
     pub use_length_adjustment: bool,
-}
-
-impl Default for StatsConfig {
-    fn default() -> Self {
-        Self {
-            use_length_adjustment: false,
-        }
-    }
 }
 
 impl StatsConfig {

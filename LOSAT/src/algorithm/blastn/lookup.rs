@@ -246,19 +246,10 @@ impl Default for NaLookupPayload {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct NaLookupBackboneCell {
     num_used: u32,
     payload: NaLookupPayload,
-}
-
-impl Default for NaLookupBackboneCell {
-    fn default() -> Self {
-        NaLookupBackboneCell {
-            num_used: 0,
-            payload: NaLookupPayload::default(),
-        }
-    }
 }
 
 /// Compact array-backed lookup table for blastn (NCBI BlastNaLookupTable).
@@ -617,7 +608,7 @@ fn compute_mb_pv_params(
         && (approx_table_entries <= K_SMALL_QUERY_CUTOFF
             || approx_table_entries >= K_LARGE_QUERY_CUTOFF)
     {
-        pv_size = pv_size / 2;
+        pv_size /= 2;
     }
 
     if pv_size == 0 {
@@ -1829,13 +1820,10 @@ pub fn build_na_lookup(
         backbone[idx].num_used = num_hits as u32;
         pv_set(&mut pv, idx);
         if num_hits > NA_HITS_PER_CELL {
-            // SAFETY: a write of a `Copy` union field (no read, no drop); it sets the
-            // `overflow_cursor` that the fill below and `get_hits_checked` read for this chain.
-            unsafe {
-                // SAFETY: Storing overflow_cursor is valid for chains larger
-                // than NA_HITS_PER_CELL, matching NCBI union usage.
-                backbone[idx].payload.overflow_cursor = overflow_size as u32;
-            }
+            // Chains larger than NA_HITS_PER_CELL store overflow_cursor, matching NCBI union
+            // usage (writing a `Copy` union field needs no `unsafe`). It sets the cursor that the
+            // fill below and `get_hits_checked` read for this chain.
+            backbone[idx].payload.overflow_cursor = overflow_size as u32;
             overflow_size += num_hits;
         }
     }

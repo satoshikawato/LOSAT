@@ -429,6 +429,10 @@ unsafe fn reevaluate_ungapped_hit_ncbi_translated_wasm_simd128(
     }
 
     let mut idx = 0usize;
+    #[expect(
+        unused_assignments,
+        reason = "the lane macro steps pos after every lane, the last one too; the next block starts again from its own offset"
+    )]
     while idx + 16 <= hsp_len {
         let qv = v128_load(q_ptr.add(idx) as *const v128);
         let sv = v128_load(s_ptr.add(idx) as *const v128);

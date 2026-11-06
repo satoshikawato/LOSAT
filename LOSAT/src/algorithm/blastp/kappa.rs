@@ -3014,8 +3014,8 @@ mod tests {
         // int sEnd = align->matchEnd - seqOffset - 1;
         // ```
         let mut residues = vec![9u8; 4];
-        residues.extend(std::iter::repeat(1u8).take(80));
-        residues.extend(std::iter::repeat(9u8).take(4));
+        residues.extend(std::iter::repeat_n(1u8, 80));
+        residues.extend(std::iter::repeat_n(9u8, 4));
         let matching_seq = BlastCompoMatchingSequence::new(0, &residues);
         let subject_range = BlastCompoSequenceRange {
             begin: 4,

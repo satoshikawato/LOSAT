@@ -271,7 +271,7 @@ fn file_name(path: &str) -> &str {
 /// `CFile(path).Exists()` and `GetLength()`: the length of the regular file `path`.
 fn file_length(path: &str) -> Option<i64> {
     let meta = std::fs::metadata(path).ok()?;
-    meta.is_file().then(|| meta.len() as i64)
+    meta.is_file().then_some(meta.len() as i64)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1611-1702

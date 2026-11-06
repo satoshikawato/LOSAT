@@ -147,6 +147,10 @@ pub fn extend_gapped_one_direction(
                 band_size // Invalid
             };
 
+            #[expect(
+                clippy::if_same_then_else,
+                reason = "nothing calls src/align; the module is left as it is for the stage that removes dead modules"
+            )]
             let diag_score = if i > 0 && j > 0 && prev_band_idx < band_size {
                 h_prev[prev_band_idx] + match_score
             } else if i == 0 && j == 0 {

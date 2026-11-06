@@ -1832,9 +1832,11 @@ impl SeqDb {
         mut visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
     ) -> bool {
         let Some(vol) = self.volumes.get(range.volume) else {
-            return range.is_empty().then_some(true).unwrap_or_else(|| {
+            return if range.is_empty() {
+                true
+            } else {
                 visit(range.first_ordinal, Err(volume_range_error(range, self)))
-            });
+            };
         };
         if self.excludes_all(range) {
             return true;
@@ -1865,9 +1867,11 @@ impl SeqDb {
         mut visit: impl FnMut(u32, Result<Vec<i32>, SeqDbError>) -> bool,
     ) -> bool {
         let Some(vol) = self.volumes.get(range.volume) else {
-            return range.is_empty().then_some(true).unwrap_or_else(|| {
+            return if range.is_empty() {
+                true
+            } else {
                 visit(range.first_ordinal, Err(volume_range_error(range, self)))
-            });
+            };
         };
         if self.excludes_all(range) {
             return true;
@@ -1892,9 +1896,11 @@ impl SeqDb {
         mut visit: impl FnMut(u32, Result<Vec<i32>, SeqDbError>) -> bool,
     ) -> bool {
         let Some(vol) = self.volumes.get(range.volume) else {
-            return range.is_empty().then_some(true).unwrap_or_else(|| {
+            return if range.is_empty() {
+                true
+            } else {
                 visit(range.first_ordinal, Err(volume_range_error(range, self)))
-            });
+            };
         };
         if self.excludes_all(range) {
             return true;
@@ -1920,9 +1926,11 @@ impl SeqDb {
         mut visit: impl FnMut(u32, Result<SequenceHeader, SeqDbError>) -> bool,
     ) -> bool {
         let Some(vol) = self.volumes.get(range.volume) else {
-            return range.is_empty().then_some(true).unwrap_or_else(|| {
+            return if range.is_empty() {
+                true
+            } else {
                 visit(range.first_ordinal, Err(volume_range_error(range, self)))
-            });
+            };
         };
         if self.excludes_all(range) {
             return true;

@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 use anyhow::Result;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
 // ```c++

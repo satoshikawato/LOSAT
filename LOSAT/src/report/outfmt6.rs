@@ -7,20 +7,15 @@ use std::sync::Arc;
 // =============================================================================
 
 /// Output format enum matching NCBI BLAST -outfmt options
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OutputFormat {
     /// 0 = Pairwise alignment view (traditional BLAST output)
     Pairwise = 0,
     /// 6 = Tabular output (tab-separated values)
+    #[default]
     Tabular = 6,
     /// 7 = Tabular output with comment lines (headers)
     TabularWithComments = 7,
-}
-
-impl Default for OutputFormat {
-    fn default() -> Self {
-        OutputFormat::Tabular
-    }
 }
 
 impl OutputFormat {
@@ -199,13 +194,11 @@ fn format_scientific_ncbi(value: f64, precision: usize) -> String {
     }
 
     let has_sign = matches!(raw.as_bytes()[exp_start], b'+' | b'-');
-    let mut digits_start = exp_start;
     if !has_sign {
         raw.insert(exp_start, '+');
-        digits_start = exp_start + 1;
-    } else {
-        digits_start = exp_start + 1;
     }
+    // The exponent's digits start after its sign, whether inserted or already there.
+    let digits_start = exp_start + 1;
 
     let digits_len = raw.len().saturating_sub(digits_start);
     if digits_len < 2 {
@@ -386,9 +379,9 @@ pub fn percent_identity_ncbi(num_ident: usize, alignment_length: usize) -> f64 {
 fn write_evalue_ncbi_base<W: Write>(writer: &mut W, e_value: f64) -> io::Result<()> {
     if e_value == 0.0 || e_value < 1.0e-180 {
         write!(writer, "0.0")
-    } else if e_value < 1.0e-99 {
-        write_scientific_ncbi(writer, e_value, 0)
     } else if e_value < 0.0009 {
+        // NCBI's `%2.0le` (below 1.0e-99) and `%3.0le` (below 0.0009) print the same bytes: the
+        // `%.0le` text (`de-XX`, at least 5 characters) is wider than either width.
         write_scientific_ncbi(writer, e_value, 0)
     } else if e_value < 0.1 {
         write!(writer, "{:.3}", e_value)

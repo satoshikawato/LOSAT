@@ -14,7 +14,7 @@ use crate::stats::KarlinParams;
 /// ln(2) constant used in NCBI BLAST
 /// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h
 /// #define NCBIMATH_LN2 0.69314718055994530941723212145818
-const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
 /// Smallest float to avoid floating point exception in BlastKarlinEtoS_simple
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4049

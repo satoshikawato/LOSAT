@@ -79,7 +79,7 @@ impl PackedSequence {
         }
 
         let len = seq.len();
-        let packed_len = (len + COMPRESSION_RATIO - 1) / COMPRESSION_RATIO;
+        let packed_len = len.div_ceil(COMPRESSION_RATIO);
         let mut data = vec![0u8; packed_len];
         let mut ambiguous_positions: Vec<usize> = Vec::new();
 

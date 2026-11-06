@@ -89,8 +89,8 @@ const BEST_IS_NCBI4NA: [u8; 256] = {
 /// 4,294,967,292, which the reader never packs).
 fn bytes_needed(coding: Coding, length: u32) -> u64 {
     match coding {
-        Coding::Ncbi2na => (u64::from(length) + 3) / 4,
-        Coding::Ncbi4na => (u64::from(length) + 1) / 2,
+        Coding::Ncbi2na => u64::from(length).div_ceil(4),
+        Coding::Ncbi4na => u64::from(length).div_ceil(2),
     }
 }
 

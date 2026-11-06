@@ -127,7 +127,7 @@ fn build_isam(dir: &Path, name: &str, records: &[(Vec<u8>, u32)], page_size: usi
         0,
         0,
     ] {
-        index.extend_from_slice(&value.to_be_bytes());
+        index.extend_from_slice(&i32::to_be_bytes(value));
     }
     for off in &page_offs {
         index.extend_from_slice(&off.to_be_bytes());
@@ -474,7 +474,7 @@ fn damaged_headers_are_format_errors() {
         (6, -1, "negative longest line"),
     ] {
         let mut bad = index.clone();
-        bad[4 * field..4 * field + 4].copy_from_slice(&(value as i32).to_be_bytes());
+        bad[4 * field..4 * field + 4].copy_from_slice(&i32::to_be_bytes(value));
         let name = format!("bad{field}_{value}");
         std::fs::write(dir.0.join(format!("{name}.nsi")), &bad).unwrap();
         std::fs::write(dir.0.join(format!("{name}.nsd")), &data).unwrap();

@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import re
 import sys
 import tempfile
 import unittest
@@ -78,8 +79,13 @@ class WorkflowPinTests(unittest.TestCase):
         self.workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
     def test_ci_installs_the_pinned_tool_and_toolchain(self) -> None:
-        self.assertIn(f"tool: {check.TOOL}@{check.TOOL_VERSION}", self.workflow)
+        self.assertIn(check.INSTALL_TOOL, self.workflow)
         self.assertIn(f"toolchain: {check.TOOLCHAIN}", self.workflow)
+
+    def test_no_other_nightly_or_tool_version_is_left_in_ci(self) -> None:
+        # A partial bump would leave one job (or its RUSTUP_TOOLCHAIN line) on another nightly.
+        self.assertEqual(set(re.findall(r"nightly-\d{4}-\d{2}-\d{2}", self.workflow)), {check.TOOLCHAIN})
+        self.assertEqual(set(re.findall(r"cargo-public-api@([0-9.]+)", self.workflow)), {check.TOOL_VERSION})
 
     def test_ci_runs_this_check(self) -> None:
         self.assertIn("python3 LOSAT/tests/check_public_api.py check", self.workflow)
@@ -101,11 +107,17 @@ class MainTests(unittest.TestCase):
             root = Path(tmp)
             (root / check.SNAPSHOT).parent.mkdir(parents=True)
             (root / check.SNAPSHOT).write_text("pub mod LOSAT\n", encoding="utf-8")
-            with mock.patch.object(check, "environment_error", return_value=None), mock.patch.object(
+            summary = root / "summary.md"
+            # CI sets GITHUB_STEP_SUMMARY for every step: the test writes its fake diff to its own file.
+            with mock.patch.dict(check.os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}), mock.patch.object(
+                check, "environment_error", return_value=None
+            ), mock.patch.object(
                 check, "current_listing", side_effect=["pub mod LOSAT\n", "pub mod LOSAT\npub mod LOSAT::x\n"]
             ), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(check.main(["check", "--root", tmp]), 0)
+                self.assertFalse(summary.exists())
                 self.assertEqual(check.main(["check", "--root", tmp]), 1)
+            self.assertIn("+pub mod LOSAT::x\n", summary.read_text(encoding="utf-8"))
 
     def test_update_writes_the_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

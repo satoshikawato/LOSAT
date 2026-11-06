@@ -19,8 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The checks of `rust` other than cargo test; the tests run in `rust-tests`, and `rust` (the check
-  # the rulesets require) passes when both jobs do.
+  # The checks of `rust` other than cargo test; the tests run in `rust-tests`, the public API check in
+  # `public-api`, and `rust` (the check the rulesets require) passes when all three jobs do.
   rust-lint:
     name: rust lint
     runs-on: ubuntu-latest
@@ -155,9 +155,11 @@ jobs:
         with:
           workspaces: LOSAT -> target
           key: public-api
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
-        with:
-          tool: cargo-public-api@0.52.0
+      # Built from its crates.io source: the release has no binaries and install-action has no
+      # manifest for it (its fallback would take a third-party binary or rebuild with --force).
+      # rust-cache keeps ~/.cargo/bin, so a cached run finds it installed.
+      - name: cargo-public-api
+        run: cargo install --locked cargo-public-api@0.52.0
       - name: Public API of LOSAT::api
         run: python3 LOSAT/tests/check_public_api.py check --out "$RUNNER_TEMP/public_api.txt"
       # The listing to commit when the change is deliberate (or run the script's `update`).
@@ -201,7 +203,7 @@ jobs:
         run: |
           set +e
           cargo +nightly-2026-05-24 semver-checks --manifest-path LOSAT/Cargo.toml --baseline-rev "$BASE" \
-            > "$RUNNER_TEMP/semver.txt" 2>&1
+            --color never > "$RUNNER_TEMP/semver.txt" 2>&1
           status=$?
           set -e
           cat "$RUNNER_TEMP/semver.txt"

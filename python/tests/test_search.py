@@ -68,6 +68,13 @@ def test_psiblast_writes_no_pssm_file_here(option):
         Search.from_argv("psiblast", words)
 
 
+def test_psiblast_takes_no_pssm_query_here():
+    with pytest.raises(TypeError, match="in_pssm"):
+        Search("psiblast", in_pssm="q.asn")
+    with pytest.raises(ArgumentError, match="the queries are given as records"):
+        Search.from_argv("psiblast", ["-in_pssm", "q.asn"])
+
+
 def test_the_parser_refuses_as_on_the_command_line():
     with pytest.raises(ArgumentError):
         Search.from_argv("blastp", ["-evalue"])

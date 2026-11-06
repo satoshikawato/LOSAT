@@ -109,8 +109,10 @@ def outfmt(row: dict[str, str]) -> str:
 def search_argv(row: dict[str, str]) -> list[str]:
     """The search arguments after the program name (the same for NCBI and LOSAT)."""
     task = ["-task", row["task"]] if row["task"] else []
-    return ["-query", row["query"], "-subject", row["subject"], *task, *shlex.split(row["extra_args"]),
-            "-outfmt", outfmt(row)]
+    # A psiblast query cell `pssm-gz:PATH` or `pssm:PATH` is a PSSM query (`-in_pssm`;
+    # LOSAT/tests/xinclude_fixtures.py `query_argv`).
+    return [*xinclude.query_argv(row["query"], ENGINE), "-subject", row["subject"], *task,
+            *shlex.split(row["extra_args"]), "-outfmt", outfmt(row)]
 
 
 def oracle_argv(row: dict[str, str]) -> list[str]:

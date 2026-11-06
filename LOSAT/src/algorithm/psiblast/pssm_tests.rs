@@ -28,6 +28,7 @@ fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPss
         out_pssm: None,
         out_ascii_pssm: ascii.map(str::to_string),
         pseudocount: 0,
+        in_pssm: None,
     }
 }
 

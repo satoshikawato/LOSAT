@@ -223,10 +223,9 @@ pub(super) fn x_try_build_flat_in_pool(
 //                                     query, locations);
 //     s_CompressedLookupFinalize(lookup);
 // ```
-/// `x_try_build_flat_in_pool` with the words of the search matrix `matrix`, any but BLOSUM62 (items
-/// SC2b, SC2c): the same passes, spare vectors and build ahead (`x_flat_args`; another matrix's
-/// build has no extra tasks, its contexts' Karlin blocks are computed before it); `pool` has more
-/// than one thread.
+/// `x_try_build_flat_in_pool` with the words of the search matrix `matrix`, any but BLOSUM62 (item
+/// SC2b): the passes of rayon on fresh vectors (no spare vectors, extra tasks or build ahead, which
+/// are BLOSUM62's); `pool` has more than one thread.
 pub(super) fn x_try_build_flat_in_pool_of(
     matrix: ScoringMatrix,
     word_size: usize,
@@ -235,49 +234,29 @@ pub(super) fn x_try_build_flat_in_pool_of(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     pool: &SearchPool<'_>,
-    x_flat_args: XFlatArgs<'_>,
 ) -> Option<XFlatBuild> {
     let threads = pool.threads();
-    let build = |passes, spare, x_ahead, stripe_fill| {
-        pool.install(|| {
-            x_try_build_flat_parallel_of(
-                matrix,
-                word_size,
-                scaled_threshold,
-                query,
-                locations,
-                tables,
-                XParallelCuts {
-                    overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
-                    max_appends: None,
-                    threads,
-                    chunk_sizes: &[],
-                    stripe_shift: None,
-                    passes,
-                    spare,
-                    x_ahead,
-                    stripe_fill,
-                },
-            )
-        })
-    };
-    if x_flat_args.mode == XLkpFlat::Off {
-        // LOSAT_X_BPLKPAHEAD: a build ahead of its block takes only the switch's passes.
-        if x_flat_args.x_ahead {
-            return None;
-        }
-        return build(XPasses::Rayon, None, false, false);
-    }
-    let built = build(
-        XPasses::OneLatch(x_flat_args.extra),
-        x_flat_args.spare,
-        x_flat_args.x_ahead,
-        x_bpstripefill_on(),
-    );
-    if matches!(built, Some(XFlatBuild::Table(_))) {
-        X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
-    }
-    built
+    pool.install(|| {
+        x_try_build_flat_parallel_of(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            XParallelCuts {
+                overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                max_appends: None,
+                threads,
+                chunk_sizes: &[],
+                stripe_shift: None,
+                passes: XPasses::Rayon,
+                spare: None,
+                x_ahead: false,
+                stripe_fill: false,
+            },
+        )
+    })
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BPSTRIPEFILL switch once; it does not change any value NCBI
@@ -1655,12 +1634,8 @@ mod tests {
     //                                     query, locations);
     //     s_CompressedLookupFinalize(lookup);
     // ```
-    // The entry of blastp-fast with another matrix (`x_bp_build_compressed_lookup_of`, items SC2b,
-    // SC2c): the serial builders at one thread and the pool's build at 3 threads give the matrix's
-    // serial table, with rayon's passes and with the one-latch passes (LOSAT_X_BPLKPFLAT) on a spare
-    // of garbage, with and without the stripe fill's switch as it is set; a build ahead of its block
-    // (LOSAT_X_BPLKPAHEAD) gives it on the vectors `x_make_room` made ready, holding them, and gives
-    // nothing without a spare.
+    // The entry of blastp-fast with another matrix (`x_bp_build_compressed_lookup_of`, item SC2b): the
+    // serial builders at one thread and the pool's build at 3 threads give the matrix's serial table.
     #[test]
     fn the_entry_of_another_matrix_builds_its_serial_table_at_any_thread_count() {
         let mut rng = XorShift(0x6a09_e667_f3bc_c908);
@@ -1683,14 +1658,7 @@ mod tests {
             for threads in [1, 3] {
                 let built = crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                     Ok(super::super::x_bp_build_compressed_lookup_of(
-                        matrix,
-                        5,
-                        1100,
-                        &query,
-                        &locations,
-                        &tables,
-                        pool,
-                        XFlatArgs::default(),
+                        matrix, 5, 1100, &query, &locations, &tables, pool,
                     ))
                 })
                 .expect("pool");
@@ -1699,67 +1667,6 @@ mod tests {
                 };
                 x_assert_same_flat_tables(&built, &serial);
             }
-            let backbone_size = serial.starts.len() - 1;
-            let total = serial.hits.len();
-            let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
-            let build = |args: XFlatArgs<'_>| {
-                crate::utils::threading::with_search_pool(3, "blastp", |pool| {
-                    Ok(super::super::x_bp_build_compressed_lookup_of(
-                        matrix, 5, 1100, &query, &locations, &tables, pool, args,
-                    ))
-                })
-                .expect("pool")
-            };
-            // The one-latch passes on a spare of garbage.
-            let spare = garbage_spare(&mut rng);
-            let Some(Ok(XCompressedLookup::Flat(built))) = build(XFlatArgs {
-                mode: XLkpFlat::On,
-                spare: Some(&spare),
-                extra: None,
-                x_ahead: false,
-            }) else {
-                panic!("{matrix:?}: no flat table on the spare")
-            };
-            x_assert_same_flat_tables(&built, &serial);
-            // A build ahead of its block: every vector from the spare made ready.
-            let spare = XFlatSpare::default();
-            let mut hits = Vec::with_capacity(total + 5);
-            hits.extend((0..total / 2).map(|_| rng.below(1 << 20) as i32));
-            *spare.0.lock().unwrap() = (vec![u32::MAX - 3; backbone_size + 1], hits);
-            *spare.1.lock().unwrap() = vec![u32::MAX; pv_words];
-            let block = XFlatSpare::default();
-            assert_eq!(spare.x_make_room(&block, backbone_size, total, total), 0);
-            let given = spare_addresses(&spare);
-            let ahead = XFlatArgs {
-                mode: XLkpFlat::On,
-                spare: Some(&spare),
-                extra: None,
-                x_ahead: true,
-            };
-            let Some(Ok(XCompressedLookup::Flat(built))) = build(ahead) else {
-                panic!("{matrix:?}: no flat table built ahead")
-            };
-            x_assert_same_flat_tables(&built, &serial);
-            let held = [
-                built.starts.as_ptr() as usize,
-                built.hits.as_ptr() as usize,
-                built.pv.as_ptr() as usize,
-            ];
-            assert_eq!(
-                held, given,
-                "{matrix:?}: the table built ahead holds the spare's vectors"
-            );
-            // Without a spare a build ahead makes no table.
-            let no_spare = XFlatArgs {
-                mode: XLkpFlat::On,
-                spare: None,
-                extra: None,
-                x_ahead: true,
-            };
-            assert!(
-                build(no_spare).is_none(),
-                "{matrix:?}: a table built ahead without a spare"
-            );
         }
     }
 

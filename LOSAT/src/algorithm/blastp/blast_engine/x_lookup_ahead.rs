@@ -23,8 +23,7 @@
 //! and `blastp_compressed_lookup` with the block's batches (`QueryInput::whole` of its records cut
 //! by the search's batch size, as the block loop gives them to `run_resolved_in_pool`) and lengths,
 //! and the same pool (the flat table and the Karlin blocks do not depend on the threads that
-//! compute them, `tblastx/lookup/x_clut_par.rs` and `x_query_blocks.rs`; another matrix's Karlin
-//! blocks, `prepare_matrix_lookup_query_for_word_size`, neither, item SC2c); for exact blastp the call
+//! compute them, `tblastx/lookup/x_clut_par.rs` and `x_query_blocks.rs`); for exact blastp the call
 //! of `blastp_aa_lookup` (`blastp_aa_lookup_ahead`: the same threshold, matrix, word length and
 //! `check_ideal`), the in-place builder on the block search's spare vectors
 //! (`tblastx/lookup/x_lut_direct.rs` `XAaSpares`: cleared and zero-filled to the table's sizes, as
@@ -68,9 +67,7 @@
 //! today, possibly before block i's rows are written.
 //!
 //! No deadlock: the task waits for nothing but its own nested parallel passes (the one-latch passes
-//! of the flat table and its Karlin tasks, or, for another matrix than BLOSUM62, the plain nested
-//! join of its contexts' Karlin blocks before the passes; the exact build has none), which wait for
-//! nothing else,
+//! of the flat table and its Karlin tasks; the exact build has none), which wait for nothing else,
 //! and block i's search waits for nothing of the task until the scope ends, after block i's search
 //! has returned. A thread that waits inside block i's nested parallel work may steal and run the
 //! task (or one of its passes) to the end, and a thread that waits inside the task's passes may run
@@ -547,9 +544,12 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         )) && x_bp_lkp_ahead()
             && match args.lookup_table_type {
-                // The flat table's (of every matrix: item SC2c).
+                // The flat table's (BLOSUM62's; another matrix's flat builders take no spare
+                // vectors: item SC2b).
                 BlastpLookupTableType::CompressedAaLookupTable => {
-                    x_bpclut_on() && x_bp_lookup_spares(pool).is_some()
+                    x_bpclut_on()
+                        && args.scoring.matrix == crate::config::ScoringMatrix::Blosum62
+                        && x_bp_lookup_spares(pool).is_some()
                 }
                 BlastpLookupTableType::AaLookupTable => x_bp_aa_spares(pool).is_some(),
             };
@@ -1068,13 +1068,12 @@ mod tests {
         assert!(x_frames_difference(&[vec![frame]], &[]).is_some());
     }
 
-    /// The arguments of `losat blastp -task <task>` (SEG on), with `-matrix matrix` where given
-    /// (and the matrix's default gap costs), as the search resolves them.
+    /// The arguments of `losat blastp -task <task>` (SEG on) as the search resolves them.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    fn test_args_of(task: &str, matrix: Option<&str>) -> ResolvedBlastpArgs {
+    fn test_args(task: &str) -> ResolvedBlastpArgs {
         BlastpArgs {
             query: PathBuf::from("query.faa"),
             subject: Some(PathBuf::from("subject.faa")),
@@ -1100,7 +1099,7 @@ mod tests {
             culling_limit: None,
             ungapped: false,
             window_size: None,
-            matrix: matrix.map(str::to_string),
+            matrix: None,
             gap_open: None,
             gap_extend: None,
             comp_based_stats: "2".to_string(),
@@ -1181,8 +1180,7 @@ mod tests {
     // vectors made ready as the block loop makes them, once the block before it has its table) are
     // the values the block's own search builds: the query frames, the table and the contexts, with
     // the Karlin blocks bit for bit, for blastp-fast (the flat table) and for exact blastp, on a
-    // pool of three threads, SEG masks included; blastp-fast also with two other matrices (item
-    // SC2c).
+    // pool of three threads, SEG masks included.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1190,14 +1188,8 @@ mod tests {
     #[test]
     fn values_built_ahead_are_the_values_the_block_builds_itself() {
         let batch_size = 3000;
-        for (task, matrix) in [
-            ("blastp-fast", None),
-            ("blastp", None),
-            ("blastp-fast", Some("BLOSUM45")),
-            ("blastp-fast", Some("PAM30")),
-        ] {
-            let args = test_args_of(task, matrix);
-            let task = format!("{task} {}", matrix.unwrap_or("BLOSUM62"));
+        for task in ["blastp-fast", "blastp"] {
+            let args = test_args(task);
             let first = protein_records(0x9e37_79b9_7f4a_7c15, 24);
             let next = protein_records(0xd1b5_4a32_d192_ed03, 30);
             crate::utils::threading::with_search_pool(3, "blastp", |pool| {

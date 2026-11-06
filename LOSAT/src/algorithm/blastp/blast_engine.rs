@@ -7813,14 +7813,13 @@ fn blastp_compressed_lookup(
 //                                 lookup->compressed_alphabet_size,
 //                                 kMatrixScale);
 // ```
-/// [`blastp_compressed_lookup`] of a matrix other than BLOSUM62 (items SC2b, SC2c): the contexts
-/// with the Karlin blocks of the matrix's scores (`prepare_matrix_lookup_query_for_word_size`, on
-/// the search's pool where it has more than one thread), NCBI's tables of the query batches
+/// [`blastp_compressed_lookup`] of a matrix other than BLOSUM62 (item SC2b): the contexts with the
+/// Karlin blocks of the matrix's scores (`prepare_matrix_lookup_query_for_word_size`, on the
+/// search's pool where it has more than one thread), NCBI's tables of the query batches
 /// (`ncbi_compressed_lookup_tables`) and the compressed table of the matrix's words
 /// (`x_bp_build_compressed_lookup_of`: the flat table, by the search's pool where it has more than
-/// one thread, on the spare vectors of `x_for` and, for `XLookupFor::Ahead`, ahead of its block
-/// (`x_query_blocks::x_flat_args_of`); the reference one where the flat builders decline or with
-/// `LOSAT_X_BPCLUT=0`), with the refusals of the BLOSUM62 table.
+/// one thread, the reference one where the flat builders decline or with `LOSAT_X_BPCLUT=0`; it
+/// takes no spare vectors), with the refusals of the BLOSUM62 table.
 #[inline(never)]
 fn blastp_matrix_compressed_lookup(
     args: &ResolvedBlastpArgs,
@@ -7854,7 +7853,6 @@ fn blastp_matrix_compressed_lookup(
         &locations,
         &ncbi_tables,
         blastp_parallel_pool,
-        super::x_query_blocks::x_flat_args_of(blastp_parallel_pool, x_for),
     )
     .ok_or_else(|| {
         anyhow::anyhow!(
@@ -7894,6 +7892,7 @@ fn blastp_matrix_compressed_lookup(
 /// redo, instead of at the search's end.
 fn x_lookup_after_prelim(
     lookup: BlastpRuntimeLookup,
+    matrix: ScoringMatrix,
     pool: &crate::utils::threading::SearchPool<'_>,
     ahead: &x_lookup_ahead::XAheadBlock<'_>,
 ) -> Option<BlastpRuntimeLookup> {
@@ -7903,8 +7902,11 @@ fn x_lookup_after_prelim(
     }
     let taken_later = ahead.x_table_taken_later()
         && match &lookup {
+            // Only BLOSUM62's build takes the flat table's vectors (another matrix's flat builders
+            // take none: `blastp_matrix_compressed_lookup`).
             BlastpRuntimeLookup::CompressedFlat(_) => {
-                super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
+                matrix == ScoringMatrix::Blosum62
+                    && super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
             }
             BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {
                 super::x_query_blocks::x_bp_aa_spares(pool).is_some()
@@ -10278,7 +10280,7 @@ fn run_resolved_in_pool(
     // ```
     // EXPERIMENT (LOSAT_X_BPLKDROP): nothing reads the lookup table after the preliminary stage;
     // it is dropped here unless a later block's build may take its vectors (at the end below).
-    let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
+    let lookup = x_lookup_after_prelim(lookup, args.scoring.matrix, blastp_parallel_pool, &x_ahead);
     // EXPERIMENT (LOSAT_X_BPIHPOOL): no subject scan runs any more; the pool's arrays of initial
     // hits are freed, as the subject loop's scratches freed theirs.
     x_ih_pool::release();
@@ -12933,7 +12935,10 @@ fn run_resolved_in_pool(
     // build (`x_query_blocks::x_bp_aa_block_spare`). EXPERIMENT (LOSAT_X_BPLKDROP): `None` when the
     // table was dropped before the redo.
     match lookup {
-        Some(BlastpRuntimeLookup::CompressedFlat(table)) => {
+        // Another matrix's flat table is not taken by a later build (`x_lookup_after_prelim`).
+        Some(BlastpRuntimeLookup::CompressedFlat(table))
+            if args.scoring.matrix == ScoringMatrix::Blosum62 =>
+        {
             if let Some(spare) = super::x_query_blocks::x_bp_lookup_spare(blastp_parallel_pool) {
                 spare.give(table);
             }
@@ -12954,7 +12959,8 @@ fn run_resolved_in_pool(
                 spares.give16(table);
             }
         }
-        Some(BlastpRuntimeLookup::Compressed(_)) | None => {}
+        Some(BlastpRuntimeLookup::Compressed(_) | BlastpRuntimeLookup::CompressedFlat(_))
+        | None => {}
     }
 
     if let Some(timing) = timing.as_ref() {

@@ -2900,12 +2900,11 @@ pub(crate) fn x_tbn_build_compressed_lookup_of(
 //                                     query, locations);
 // ```
 /// blastp-fast's compressed lookup table with the words of the search matrix `matrix`, any but
-/// BLOSUM62 (items SC2b, SC2c): `x_bp_build_compressed_lookup` with the matrix's words. The flat
-/// table by `pool`'s threads where `x_pool_builds` (`x_try_build_flat_in_pool_of`, with
-/// `x_flat_args`: the spare vectors and the build ahead; the reference builder where it declines),
-/// else `x_tbn_build_compressed_lookup_of` on this thread; the reference table with the switch
-/// off. A build ahead of its block (`XFlatArgs::x_ahead`) is only the pool's build with the switch
-/// on; elsewhere it returns `None` at once. Out of line, so that BLOSUM62's build keeps its code.
+/// BLOSUM62 (item SC2b): `x_bp_build_compressed_lookup` without the spare vectors and the build
+/// ahead. The flat table by `pool`'s threads where `x_pool_builds` (`x_try_build_flat_in_pool_of`;
+/// the reference builder where it declines), else `x_tbn_build_compressed_lookup_of` on this
+/// thread; the reference table with the switch off. Out of line, so that BLOSUM62's build keeps
+/// its code.
 #[inline(never)]
 pub(crate) fn x_bp_build_compressed_lookup_of(
     matrix: ScoringMatrix,
@@ -2915,11 +2914,7 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     pool: &SearchPool<'_>,
-    x_flat_args: XFlatArgs<'_>,
 ) -> Option<Result<XCompressedLookup, ()>> {
-    if x_flat_args.x_ahead && (!x_bpclut_on() || !x_pool_builds(pool)) {
-        return None;
-    }
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -2933,13 +2928,9 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
             locations,
             tables,
             pool,
-            x_flat_args,
         )? {
             XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
             XFlatBuild::Refused => Some(Err(())),
-            // LOSAT_X_BPLKPAHEAD: a build ahead of its block runs no reference builder; the block
-            // builds its table itself (`XFlatArgs::x_ahead`).
-            XFlatBuild::TooLarge if x_flat_args.x_ahead => None,
             XFlatBuild::TooLarge => try_build_compressed_lookup(
                 matrix,
                 word_size,
@@ -2951,7 +2942,7 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
             .map(|built| built.map(XCompressedLookup::Reference)),
         };
     }
-    let _ = (pool, x_flat_args);
+    let _ = pool;
     x_tbn_build_compressed_lookup_of(
         matrix,
         word_size,

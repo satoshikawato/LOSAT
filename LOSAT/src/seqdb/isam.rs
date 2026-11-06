@@ -2072,8 +2072,11 @@ impl StringIsam {
             path: self.data.path().to_path_buf(),
             message: format!("string ISAM data page: {what}"),
         };
-        let mut keys = Vec::with_capacity(num_keys);
-        let mut vals = Vec::with_capacity(num_keys);
+        // LOSAT: `num_keys` comes from the index header; a record takes at least 3 bytes of the
+        // page (the key end, a digit, the line end), so no more are reserved than fit.
+        let room = num_keys.min(page.len() / 3);
+        let mut keys = Vec::with_capacity(room);
+        let mut vals = Vec::with_capacity(room);
         let mut at = 0;
         for _ in 0..num_keys {
             let key_end = page[at..]

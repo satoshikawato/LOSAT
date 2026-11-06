@@ -437,4 +437,86 @@ mod tests {
         assert_eq!(table.longest_chain, 5);
         assert_eq!(table.query_length, 7);
     }
+
+    /// The de Bruijn sequence of order 3 over the 28 letters, unwrapped (`debruijn` of the unit
+    /// test below): every word of 3 letters appears once.
+    fn debruijn3() -> Vec<u8> {
+        fn db(t: usize, p: usize, a: &mut [usize; 7], out: &mut Vec<u8>) {
+            if t > 3 {
+                if 3 % p == 0 {
+                    out.extend(a[1..=p].iter().map(|&letter| letter as u8));
+                }
+                return;
+            }
+            a[t] = a[t - p];
+            db(t + 1, p, a, out);
+            for letter in a[t - p] + 1..BLASTAA_SIZE {
+                a[t] = letter;
+                db(t + 1, t, a, out);
+            }
+        }
+        let mut out = Vec::new();
+        db(1, 1, &mut [0; 7], &mut out);
+        let wrap: Vec<u8> = out[..2].to_vec();
+        out.extend(wrap);
+        out
+    }
+
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:310-421 testDebruijnPSSM
+    // NCBI compiles the case out (`#if 0`, "Needs to be fixed to actually use a PSSM"); this port
+    // runs it on the PSSM table: the query is the de Bruijn sequence of order 3 (every word once),
+    // the PSSM row of each position BLOSUM62's column of its letter (`posMatrix[i][j] =
+    // matrix[j][sequence[i+1]]`), threshold 11, word size 3. Every word's cell holds exactly the
+    // query words whose score with it reaches 11 (the brute-force count of the test): the PSSM
+    // table has no exact-word rule.
+    #[test]
+    fn debruijn_pssm_cells_hold_the_brute_force_neighbours() {
+        let sequence = debruijn3();
+        assert_eq!(sequence.len(), BLASTAA_SIZE.pow(3) + 2);
+        let matrix = |q: usize, s: usize| crate::core::blast_util::blosum62_score(q as u8, s as u8);
+        let rows = pssm(
+            sequence
+                .iter()
+                .map(|&letter| {
+                    let mut row = [0i32; BLASTAA_SIZE];
+                    for (j, cell) in row.iter_mut().enumerate() {
+                        *cell = matrix(j, letter as usize);
+                    }
+                    row
+                })
+                .collect(),
+        );
+        let table = build_pssm_lookup(&rows, 3, 11);
+        // count(i, j, k) = #{(x, y, z): m[i][x] + m[j][y] + m[k][z] >= 11}, by the number of z of
+        // each row k reaching each threshold.
+        let sorted: Vec<Vec<i32>> = (0..BLASTAA_SIZE)
+            .map(|k| {
+                let mut row: Vec<i32> = (0..BLASTAA_SIZE).map(|z| matrix(k, z)).collect();
+                row.sort_unstable();
+                row
+            })
+            .collect();
+        let reaching = |k: usize, t: i32| BLASTAA_SIZE - sorted[k].partition_point(|&v| v < t);
+        for i in 0..BLASTAA_SIZE {
+            for j in 0..BLASTAA_SIZE {
+                let mut pairs = Vec::with_capacity(BLASTAA_SIZE * BLASTAA_SIZE);
+                for x in 0..BLASTAA_SIZE {
+                    for y in 0..BLASTAA_SIZE {
+                        pairs.push(matrix(i, x).saturating_add(matrix(j, y)));
+                    }
+                }
+                for k in 0..BLASTAA_SIZE {
+                    let count: usize = pairs
+                        .iter()
+                        .map(|&pair| reaching(k, 11i32.saturating_sub(pair)))
+                        .sum();
+                    let index = (i << 10) | (j << 5) | k;
+                    assert_eq!(
+                        table.backbone[index].num_used as usize, count,
+                        "word ({i}, {j}, {k})"
+                    );
+                }
+            }
+        }
+    }
 }

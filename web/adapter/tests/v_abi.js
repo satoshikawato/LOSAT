@@ -15,7 +15,10 @@
 // error. A search with `"outfmt"` (a format besides 0, 6 and 7, or 6 or 7 with fields) runs
 // with that -outfmt: its output, stream 4, is compared with the CLI's run of the same argv,
 // whose standard error is then stream 3 (abi_v2.md §5, §7); SAM's (`"sam": true`) without the
-// CL tag of its @PG line, where each writes its own command line.
+// CL tag of its @PG line, where each writes its own command line. The output of outfmt 13 and 14
+// (`"files": true`) is a ZIP archive, whose entries are compared with the files of the CLI's run
+// with `-out results`: the side files `results_<n>.json|xml`, and the master file as
+// `results.json|xml`.
 //
 // Usage: node v_abi.js --native losat --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
@@ -53,6 +56,65 @@ function withoutCl(document) {
   const end = document.indexOf(Buffer.from("\tPN:blastn\n"), start);
   if (end < 0) return document;
   return Buffer.concat([document.subarray(0, start), document.subarray(end)]);
+}
+
+// The CRC-32 of ZIP (ISO-HDLC).
+function crc32(bytes) {
+  let crc = ~0;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let k = 0; k < 8; k++) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  }
+  return ~crc >>> 0;
+}
+
+// The entries of a ZIP archive of stored files (the adapter's archive of outfmt 13 and 14), as
+// [name, bytes] in the order of its central directory, read as a ZIP reader reads them: the end
+// record (or the ZIP64 end record), each central header, its local header with the same CRC-32 and
+// sizes, and the bytes, whose CRC-32 is checked.
+function storedZipEntries(archive) {
+  const end = archive.length - 22;
+  assert.equal(archive.readUInt32LE(end), 0x06054b50, "the end of central directory record");
+  let count = archive.readUInt16LE(end + 10);
+  let at = archive.readUInt32LE(end + 16);
+  if (count === 0xffff) {
+    const record = Number(archive.readBigUInt64LE(end - 20 + 8));
+    assert.equal(archive.readUInt32LE(record), 0x06064b50, "the ZIP64 end of central directory record");
+    count = Number(archive.readBigUInt64LE(record + 32));
+    at = Number(archive.readBigUInt64LE(record + 48));
+  }
+  const entries = [];
+  for (let i = 0; i < count; i++) {
+    assert.equal(archive.readUInt32LE(at), 0x02014b50, "a central header");
+    const [crc, size, nameLength, extraLength] = [archive.readUInt32LE(at + 16), archive.readUInt32LE(at + 24),
+                                                  archive.readUInt16LE(at + 28), archive.readUInt16LE(at + 30)];
+    assert.equal(archive.readUInt16LE(at + 10), 0, "a stored entry");
+    assert.equal(archive.readUInt32LE(at + 20), size, "stored: the compressed size is the size");
+    const name = archive.subarray(at + 46, at + 46 + nameLength).toString("utf8");
+    let local = archive.readUInt32LE(at + 42);
+    if (local === 0xffffffff) local = Number(archive.readBigUInt64LE(at + 46 + nameLength + 4));
+    assert.equal(archive.readUInt32LE(local), 0x04034b50, `${name}: a local header`);
+    assert.equal(archive.readUInt32LE(local + 14), crc, `${name}: the local CRC-32`);
+    assert.equal(archive.readUInt32LE(local + 22), size, `${name}: the local size`);
+    const data = local + 30 + archive.readUInt16LE(local + 26) + archive.readUInt16LE(local + 28);
+    const bytes = archive.subarray(data, data + size);
+    assert.equal(crc32(bytes), crc, `${name}: the CRC-32 of its bytes`);
+    entries.push([name, bytes]);
+    at += 46 + nameLength + extraLength;
+  }
+  return entries;
+}
+
+// The files of the CLI's run of outfmt 13 or 14 with `-out <dir>/results`, as the adapter's archive
+// names them: the side files in order, then the master file as results.json or results.xml.
+function nativeFiles(directory, outfmt) {
+  const extension = outfmt.trim().startsWith("13") ? "json" : "xml";
+  const files = [];
+  for (let n = 1; fs.existsSync(path.join(directory, `results_${n}.${extension}`)); n++) {
+    files.push([`results_${n}.${extension}`, fs.readFileSync(path.join(directory, `results_${n}.${extension}`))]);
+  }
+  files.push([`results.${extension}`, fs.readFileSync(path.join(directory, "results"))]);
+  return files;
 }
 
 // The -outfmt numbers whose warnings are those of outfmt 6 (the tabular writer's): the structured
@@ -184,12 +246,13 @@ function nativeOutputs(native, search, scratch) {
     }
   }
   if (search.outfmt !== undefined) {
-    const out = path.join(scratch, "native.custom.out");
+    const directory = fs.mkdtempSync(path.join(scratch, "native.custom."));
+    const out = path.join(directory, search.files ? "results" : "native.custom.out");
     const argv = [...search.argv, "-outfmt", search.outfmt, "-num_threads", "1", "-out", out];
     const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, maxBuffer: 1 << 30 });
     if (result.status !== 0) throw new Error(`native ${argv.join(" ")} failed (exit ${result.status}): ${result.error ?? result.stderr}`);
-    outputs.set(CUSTOM_STREAM, fs.readFileSync(out));
-    fs.rmSync(out, { force: true });
+    outputs.set(CUSTOM_STREAM, search.files ? nativeFiles(directory, search.outfmt) : fs.readFileSync(out));
+    fs.rmSync(directory, { recursive: true, force: true });
     // The warnings of outfmt 6, and those of the fields' writer (NCBI's taxdb warning).
     if (TABULAR.has(Number(search.outfmt.trim().split(" ")[0]))) {
       for (const line of lines(6)) assert.ok(result.stderr.toString().split("\n").includes(line), `-outfmt ${search.outfmt}: ${line} is in its warnings`);
@@ -300,10 +363,13 @@ function checkSurface(reactor, native) {
     const cli = require("node:child_process").spawnSync(native, argv);
     assert.equal(validated.error, cli.stderr.toString(), `${argv.join(" ")}: the CLI's error`);
   }
-  // -outfmt (WA2-OP-03, W11): the formats that the CLI writes and 6 and 7 with fields are valid, the CLI's errors
-  // have the CLI's words, and 13, 14 and BLASTX's 11 are refused.
-  for (const outfmt of ["6", "0", "6 qseqid sseqid pident", "7 std qcovs", "5", "9", "10 qseqid", "11", "16", "17 SQ", "20"]) {
+  // -outfmt (WA2-OP-03, W11): the formats that the CLI writes and 6 and 7 with fields are valid (13 and 14 without
+  // the CLI's -out), and the CLI's errors have the CLI's words.
+  for (const outfmt of ["6", "0", "6 qseqid sseqid pident", "7 std qcovs", "5", "9", "10 qseqid", "11", "13", "14", "16", "17 SQ", "20"]) {
     assert.equal(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-outfmt", outfmt].join("\0")).status, 0, outfmt);
+  }
+  for (const [program, outfmt] of [["blastp", "13"], ["blastx", "11"], ["blastx", "14"]]) {
+    assert.equal(reactor.call("losat_web2_validate", [program, "-query", "q", "-subject", "s", "-outfmt", outfmt].join("\0")).status, 0, `${program} ${outfmt}`);
   }
   // The CLI reads the files before its formatting handler checks the delimiter: real files.
   const files = ["-query", path.join(ROOT, "LOSAT/tests/fasta/outfmt0/mask_query.fasta"),
@@ -315,10 +381,6 @@ function checkSurface(reactor, native) {
     const cli = require("node:child_process").spawnSync(native, argv);
     assert.equal(validated.error, cli.stderr.toString(), `-outfmt ${outfmt}: the CLI's message`);
   }
-  assert.equal(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-outfmt", "13"].join("\0")).error,
-               "-outfmt 13 is not supported in the browser yet");
-  assert.equal(reactor.call("losat_web2_validate", ["blastx", "-query", "q", "-subject", "s", "-outfmt", "11"].join("\0")).error,
-               "-outfmt 11 is not supported in the browser yet");
   assert.match(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-out", "x"].join("\0")).error, /not accepted/);
   // The tasks of Session SD and NCBI's option check of a template (blast_options.c:1247-1261).
   for (const task of ["dc-megablast", "blastn-short"]) {
@@ -445,7 +507,27 @@ async function main() {
           row.formats[format] = sha256(actual);
           if (search.frozen[format]) row.frozen[format] = sha256(actual) === search.frozen[format];
         }
-        if (search.outfmt !== undefined) {
+        if (search.files) {
+          const sent = run.streams.get(CUSTOM_STREAM) || Buffer.alloc(0);
+          const entries = storedZipEntries(sent);
+          // A standard reader (Python's zipfile) reads it too, every CRC-32 checked.
+          const archive = path.join(scratch, "archive.zip");
+          fs.writeFileSync(archive, sent);
+          const checked = require("node:child_process").spawnSync("python3", ["-I", "-c",
+            "import sys, zipfile\nwith zipfile.ZipFile(sys.argv[1]) as z:\n    sys.exit(z.testzip() is not None)", archive]);
+          assert.equal(checked.status, 0, `${label}: zipfile reads the archive: ${checked.stderr}`);
+          fs.rmSync(archive, { force: true });
+          const cli = expected.outputs.get(CUSTOM_STREAM);
+          assert.deepEqual(entries.map(([name]) => name), cli.map(([name]) => name), `${label}: -outfmt ${search.outfmt} files`);
+          for (const [index, [name, bytes]] of entries.entries()) {
+            assert.equal(sha256(bytes), sha256(cli[index][1]), `${label}: -outfmt ${search.outfmt} ${name}`);
+          }
+          row.formats.custom = sha256(sent);
+          const master = sha256(entries[entries.length - 1][1]);
+          const sides = entries.slice(0, -1).map(([, bytes]) => sha256(bytes)).join(",");
+          if (search.frozen.custom) row.frozen.custom = master === search.frozen.custom;
+          if (search.frozen.sides !== undefined) row.frozen.sides = sides === search.frozen.sides;
+        } else if (search.outfmt !== undefined) {
           const sent = run.streams.get(CUSTOM_STREAM) || Buffer.alloc(0);
           const actual = search.sam ? withoutCl(sent) : sent;
           const cli = expected.outputs.get(CUSTOM_STREAM);

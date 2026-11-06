@@ -904,13 +904,14 @@ pub fn run_local(
 }
 
 /// The numbers of the requested formats, each read as on the command line. `out`: the file of
-/// `api::run_to_file`.
+/// `api::run_to_file` (a format with the caller's receiver of side files takes that receiver's,
+/// `FormatOutput::side_out`).
 fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<Vec<i32>> {
     use crate::blastinput::app;
     let mut outfmts = Vec::with_capacity(outputs.formats.len());
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        if app::report_format(&choice, app::Program::Tblastn, out)?.is_none() {
+        if app::report_format(&choice, app::Program::Tblastn, format.side_out(out))?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastn)?;
             app::xinclude_check(&choice)?;
         }

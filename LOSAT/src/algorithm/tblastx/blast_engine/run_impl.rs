@@ -1657,8 +1657,9 @@ fn search_database(
 /// Each requested format as NCBI reads `-outfmt`: NCBI's errors, and a rejection of a
 /// format that LOSAT's TBLASTX does not write.
 ///
-/// `out` is the run's `-out`: outfmt 13 and 14 write side files next to it, and fail on standard
-/// output (`xinclude_check_for`).
+/// `out` is the run's `-out` (a format with the caller's receiver of side files takes that
+/// receiver's, `FormatOutput::side_out`): outfmt 13 and 14 write side files next to it, and fail
+/// on standard output (`xinclude_check_for`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
 /// ```c++
@@ -1670,6 +1671,7 @@ fn check_report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Pat
     use crate::blastinput::app;
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
+        let out = format.side_out(out);
         if app::report_format(&choice, app::Program::Tblastx, out)?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastx)?;
             app::xinclude_check_for(&choice, out)?;
@@ -2261,6 +2263,8 @@ fn write_tblastx_outputs(
         //     : m_FormatType(format_type), ..., m_Outfile(outfile),
         // ```
         let prolog = !prolog_before_search(&format.sink);
+        // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
+        let side_sink = format.sink.side_files().cloned();
         let mut writer = format.sink.open()?;
         match output_format {
             report::TblastxOutputFormat::Pairwise => {
@@ -2515,6 +2519,7 @@ fn write_tblastx_outputs(
                     kind,
                     super::super::blast_xml::xml2_run(run),
                     run.args.out.as_deref(),
+                    side_sink.as_ref(),
                 ),
                 true,
                 &mut writer,

@@ -55,6 +55,8 @@ pub mod volume;
 pub use filter::{DbList, ListWarning, SeqidList, TaxidList};
 
 #[cfg(test)]
+mod damaged_files_tests;
+#[cfg(test)]
 mod mask_tests;
 #[cfg(test)]
 mod tests;

@@ -253,12 +253,19 @@ class XincludeFixtureTests(unittest.TestCase):
             self.assertEqual([name for name, _ in files], ["r.asn", "r.asn.1", "r.asn.2", "r.pssm"])
             self.assertEqual(stray, ["other"])
             result = xinclude.PssmResult(None, files)
-            row = {"row_id": "r", "files": xinclude.PSSM_BOTH, "side_sha256": xinclude.pssm_cell(files, "r")}
+            cell = xinclude.pssm_cell(files, "r", xinclude.PSSM_BOTH)
+            self.assertTrue(cell.startswith(f".asn={xinclude.sha256(b'asn')}:3,"), cell)
+            row = {"row_id": "r", "files": xinclude.PSSM_BOTH, "side_sha256": cell}
             frozen = directory / "frozen"
             frozen.mkdir()
             xinclude.freeze_pssm(result, frozen, "r", xinclude.PSSM_BOTH)
             self.assertEqual(sorted(path.name for path in frozen.iterdir()), ["r.asn", "r.asn.2", "r.pssm"])
             self.assertTrue(xinclude.frozen_pssm_agrees(row, frozen))
+            # Every listed file of 64 KB or less must be frozen, and the cell must give the sizes.
+            (frozen / "r.asn.2").unlink()
+            self.assertFalse(xinclude.frozen_pssm_agrees(row, frozen))
+            (frozen / "r.asn.2").write_bytes(b"two")
+            self.assertFalse(xinclude.frozen_pssm_agrees({**row, "side_sha256": xinclude.pssm_cell(files, "r")}, frozen))
             first_difference = lambda want, got: "differs"  # noqa: E731
             self.assertEqual(xinclude.pssm_problems(result, row, frozen, first_difference), [])
             changed = xinclude.PssmResult(None, [(name, b"y" if name == "r.asn.1" else data) for name, data in files])
@@ -268,6 +275,16 @@ class XincludeFixtureTests(unittest.TestCase):
             self.assertIn("not frozen", problems[0])
             # The `pssm` kind freezes every file, so the big one must be frozen too.
             self.assertFalse(xinclude.frozen_pssm_agrees({**row, "files": xinclude.PSSM}, frozen))
+
+    def test_pssm_pre_files_exist_before_the_run(self):
+        # `{pre:<suffix>}` writes `<tmp>/<row_id><suffix>` before the run and is not passed on.
+        check = "import sys; from pathlib import Path; assert not any('{pre' in a for a in sys.argv); " \
+                "assert Path(sys.argv[2]).with_suffix('.asn.1').read_bytes() == b'previous file\\n'"
+        result = xinclude.run_with_pssm([sys.executable, "-c", check, "{pre:.asn.1}", "{pre:.pssm}"], "r",
+                                        xinclude.PSSM_ASN)
+        self.assertEqual(result.run.returncode, 0, result.run.stderr)
+        self.assertEqual(result.files, [("r.asn.1", xinclude.PRE_BYTES), ("r.pssm", xinclude.PRE_BYTES)])
+        self.assertEqual(result.stray, [])
 
     def test_side_files_are_collected_in_the_order_of_their_numbers(self):
         with tempfile.TemporaryDirectory() as tmp:

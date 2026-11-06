@@ -256,7 +256,7 @@ def freeze(args: argparse.Namespace) -> int:
         if files:
             row.update(xinclude.observed(written))
         if pssm:
-            row.update(xinclude.observed_pssm(pssms, row["row_id"]))
+            row.update(xinclude.observed_pssm(pssms, row["row_id"], xinclude.files_kind(row)))
         print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(run.stdout)}\tstderr={len(run.stderr)}"
               + (f"\tsides={len(written.sides)}" if files else "")
               + (f"\tpssm_files={len(pssms.files)}" if pssm else ""))

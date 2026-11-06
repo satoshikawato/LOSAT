@@ -1245,10 +1245,19 @@ fn ldexp(x: f64, exp: i32) -> f64 {
     f64::from_bits(sign | (kept + up as u64))
 }
 
+/// The refusal of a decimal REAL whose exponent leaves the range of `int` in
+/// `StringToDoublePosix`'s arithmetic (`dot_position - digits`, `exponent - expvalue`): NCBI's
+/// result is then undefined behaviour, which LOSAT does not reproduce.
+fn exponent_out_of_range() -> String {
+    "a REAL whose exponent is outside the range of NCBI's int arithmetic is not supported by LOSAT's PSSM reader"
+        .to_string()
+}
+
 /// `NStr::StringToDoublePosix(text, &endptr, flags)`: the value and the bytes of `text` that it
 /// read (`endptr - text`); `finite` is `fDecimalPosixFinite`. The 80-bit `long double` arithmetic
 /// of NCBI's x86-64 build is `X87`'s. A number of more than 18 significant digits, which NCBI
-/// adds up in `long double` (`third`), is refused.
+/// adds up in `long double` (`third`), is refused, and so is one whose exponent overflows NCBI's
+/// `int` (`exponent_out_of_range`).
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:985-1278
 // ```c++
 //     const char* start = ptr;
@@ -1554,7 +1563,9 @@ pub(crate) fn string_to_double_posix(
                 if first == 0 {
                     digits -= 1;
                     if dot {
-                        dot_position -= 1;
+                        dot_position = dot_position
+                            .checked_sub(1)
+                            .ok_or_else(exponent_out_of_range)?;
                     }
                 }
             } else if digits <= 9 {
@@ -1614,7 +1625,13 @@ pub(crate) fn string_to_double_posix(
     if !anydigits {
         return Ok((0.0, 0));
     }
-    let mut exponent: i32 = if dot { dot_position - digits } else { 0 };
+    let mut exponent: i32 = if dot {
+        dot_position
+            .checked_sub(digits)
+            .ok_or_else(exponent_out_of_range)?
+    } else {
+        0
+    };
     if expn && at(ptr) != 0 {
         let (mut expvalue, mut expsign, mut expnegate, mut expdigits) = (0i32, false, false, 0);
         loop {
@@ -1645,10 +1662,11 @@ pub(crate) fn string_to_double_posix(
             }
         } else {
             exponent = if expnegate {
-                exponent - expvalue
+                exponent.checked_sub(expvalue)
             } else {
-                exponent + expvalue
-            };
+                exponent.checked_add(expvalue)
+            }
+            .ok_or_else(exponent_out_of_range)?;
         }
     }
     // The integer of up to 18 digits is exact in the 64-bit significand.

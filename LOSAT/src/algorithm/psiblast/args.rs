@@ -556,6 +556,7 @@ mod tests {
             ("-sum_stats", Some("false")),
             ("-culling_limit", Some("1")),
             ("-html", None),
+            ("-parse_deflines", None),
         ] {
             let mut extra = vec![option];
             extra.extend(value);

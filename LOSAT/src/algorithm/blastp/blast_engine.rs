@@ -3081,10 +3081,11 @@ fn shift_hsp_to_records(hsp: &mut BlastpHsp, ranges: &BlastpRanges<'_>) {
 /// psiblast's PSSMs after its round (`-save_pssm_after_last_round` with `-out_pssm` and/or
 /// `-out_ascii_pssm`): one for each query whose results have alignments, in the order of the
 /// queries, from the query's whole record and its Seq-aligns before the formatter's cut
-/// (`algorithm::psiblast::pssm`). The ASN.1 files are written here, before the reports
-/// (`AsnPssmWriter`); the ASCII PSSMs are returned, to be written after them. A query whose PSSM
-/// fails or whose ASN.1 file cannot be written stops the run after its report (`PssmStop`,
-/// handled by `search`), with the PSSMs of the queries before it.
+/// (`algorithm::psiblast::pssm`). Their files are made ready here, before the reports, and
+/// written after them (`PssmFiles`: the ASN.1 bytes staged beside each target, which is not
+/// changed before `commit`). A query whose PSSM fails or whose ASN.1 file cannot be written stops
+/// the run after its report (`PssmStop`, handled by `search`), with the PSSMs of the queries
+/// before it.
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:147-162
 // ```c++
 // s_GetQueryBioseq(CConstRef<CBlastQueryVector> query, CRef<CScope> scope,
@@ -3117,10 +3118,10 @@ fn psiblast_pssms(
     shown_subjects: ShownSubjects<'_>,
     contexts: &[QueryContext],
     gapped: &KarlinParams,
-) -> Result<PsiblastPssms> {
+) -> Result<crate::algorithm::psiblast::pssm::PssmFiles> {
     use crate::algorithm::psiblast::pssm::{
-        ncbistdaa_letters, query_pssm, AsnPssmWriter, PssmAlignment, PssmAncillary,
-        PssmQueryRecord, PssmScoring, PssmStop,
+        ncbistdaa_letters, query_pssm, PssmAlignment, PssmAncillary, PssmFiles, PssmQueryRecord,
+        PssmScoring, PssmStop,
     };
     use crate::core::psi::KarlinBlk;
     let subject = |s_idx: u32| -> Vec<u8> {
@@ -3141,8 +3142,7 @@ fn psiblast_pssms(
         k: gapped.k,
         h: gapped.h,
     };
-    let mut asn_writer = AsnPssmWriter::new(request);
-    let mut ascii = Vec::new();
+    let mut files = PssmFiles::new(request);
     for (query, hit_list) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list else {
             continue;
@@ -3193,41 +3193,17 @@ fn psiblast_pssms(
             &subject,
             ancillary,
         )
-        .and_then(|pssm| {
-            if let (Some(writer), Some(asn)) = (asn_writer.as_mut(), pssm.asn.as_deref()) {
-                writer.write(asn)?;
+        .and_then(|pssm| files.add(pssm.asn.as_deref(), pssm.ascii));
+        if let Err(error) = made {
+            return Err(PssmStop {
+                query,
+                error,
+                files,
             }
-            Ok(pssm.ascii)
-        });
-        match made {
-            Ok(Some(pssm)) => ascii.push(pssm),
-            Ok(None) => {}
-            Err(error) => {
-                return Err(PssmStop {
-                    query,
-                    error,
-                    ascii,
-                    asn_files: asn_writer
-                        .map(AsnPssmWriter::into_files)
-                        .unwrap_or_default(),
-                }
-                .into())
-            }
+            .into());
         }
     }
-    Ok(PsiblastPssms {
-        ascii,
-        asn_files: asn_writer
-            .map(AsnPssmWriter::into_files)
-            .unwrap_or_default(),
-    })
-}
-
-/// The PSSMs of a psiblast run (`psiblast_pssms`): the ASCII ones to write after the reports,
-/// and the ASN.1 files already written.
-struct PsiblastPssms {
-    ascii: Vec<Vec<u8>>,
-    asn_files: crate::algorithm::psiblast::pssm::AsnFiles,
+    Ok(files)
 }
 
 /// The stored residue of pyrrolysine (O): the only code that `ncbistdaa_to_ascii` shows as O
@@ -5407,13 +5383,20 @@ fn search_cli(
     if args.archive.is_some() {
         super::archive::check_titles(&records, "query")?;
     }
-    // So does the refusal of a title that psiblast's ASN.1 PSSM cannot write.
-    if resolved
-        .psi_pssm
-        .as_ref()
-        .is_some_and(|request| request.asn_path.is_some())
-    {
-        crate::algorithm::psiblast::pssm::check_pssm_titles(&records)?;
+    // So does the refusal of a title that psiblast's ASN.1 PSSM cannot write, and of a PSSM file
+    // that LOSAT cannot write as NCBI does (one of the report streams, a named pipe).
+    if let Some(request) = resolved.psi_pssm.as_ref() {
+        if request.asn_path.is_some() {
+            crate::algorithm::psiblast::pssm::check_pssm_titles(&records)?;
+        }
+        crate::algorithm::psiblast::pssm::check_pssm_files(
+            request,
+            records.len(),
+            resolved
+                .out
+                .as_deref()
+                .filter(|path| path.as_os_str() != "-"),
+        )?;
     }
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
@@ -6196,9 +6179,9 @@ fn search(
                           searched_done: usize,
                           epilog: bool|
      -> Result<()> {
-        let Some(request) = args.psi_pssm.clone() else {
+        if args.psi_pssm.is_none() {
             return search_batches_once(args, outputs, pool, input_done, searched_done, epilog);
-        };
+        }
         let mut prefix_args = args.clone();
         prefix_args.psi_pssm = None;
         match search_batches_once(args, outputs, pool, input_done, searched_done, epilog) {
@@ -6214,11 +6197,7 @@ fn search(
                     .get(after)
                     .map_or(input_done, |&(input, _)| input.min(input_done));
                 search_batches_once(prefix_args, outputs, pool, input_end, stop.query + 1, false)?;
-                crate::algorithm::psiblast::pssm::write_ascii_pssm_files(
-                    &request,
-                    stop.ascii.iter().map(Vec::as_slice),
-                );
-                stop.asn_files.keep();
+                stop.files.commit()?;
                 Err(stop.error)
             }
             other => other,
@@ -11234,20 +11213,22 @@ fn run_resolved_in_pool(
     //                                      results_1st_query.GetAncillaryData());
     // ```
     // psiblast's PSSM is made from the Seq-aligns of the round's results, before the
-    // formatter's cut; its ASN.1 file is written here (`psiblast_pssms`), its ASCII file after
-    // the reports (below `output_result`).
-    let psiblast_pssms: Option<PsiblastPssms> = match args.psi_pssm.as_ref() {
-        Some(request) => Some(psiblast_pssms(
-            &args,
-            request,
-            &hit_lists,
-            ranges,
-            shown_subjects,
-            &contexts,
-            &gapped_params,
-        )?),
-        None => None,
-    };
+    // formatter's cut; its files are staged here (`psiblast_pssms`) and written after the
+    // reports (below `output_result`). A refusal between here and the reports (the database
+    // titles below) or a report write error drops them: no PSSM file has changed (`PssmFiles`).
+    let psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
+        match args.psi_pssm.as_ref() {
+            Some(request) => Some(psiblast_pssms(
+                &args,
+                request,
+                &hit_lists,
+                ranges,
+                shown_subjects,
+                &contexts,
+                &gapped_params,
+            )?),
+            None => None,
+        };
     let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
         hit_lists
             .iter_mut()
@@ -12528,14 +12509,10 @@ fn run_resolved_in_pool(
     //            SavePssmToFile(pssm, &itr);
     //        }
     // ```
-    // The ASN.1 files were written before the reports (`psiblast_pssms`); an error before this
-    // point has removed them again (`AsnFiles`).
-    if let (Some(request), Some(pssms)) = (args.psi_pssm.as_ref(), psiblast_pssms) {
-        crate::algorithm::psiblast::pssm::write_ascii_pssm_files(
-            request,
-            pssms.ascii.iter().map(Vec::as_slice),
-        );
-        pssms.asn_files.keep();
+    // The files were staged before the reports (`psiblast_pssms`); an error before this point
+    // has dropped them, and no PSSM file has changed (`PssmFiles`).
+    if let Some(files) = psiblast_pssms {
+        files.commit()?;
     }
     // EXPERIMENT (LOSAT_X_BPLKPFLAT): the flat table's vectors kept for the next block's build
     // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed. EXPERIMENT

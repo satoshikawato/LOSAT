@@ -611,6 +611,8 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
             // Line NP ported it to BLASTP's search, not to PSIBLAST's rounds.
             | "lcase_masking"
             | "msa_master_idx"
+            // Line DI-7 ported it to BLASTP's queries, not to PSIBLAST's.
+            | "parse_deflines"
             | "phi_pattern"
             | "sum_stats"
             // Line DI-8 ported these to BLASTP's database search, not to PSIBLAST's.

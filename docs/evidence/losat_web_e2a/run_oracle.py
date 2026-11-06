@@ -240,7 +240,7 @@ def main() -> int:
             observed.update(xinclude.observed(written))
             hashes.append("side_sha256")
         if pssm:
-            observed.update(xinclude.observed_pssm(pssms, row["fixture_id"]))
+            observed.update(xinclude.observed_pssm(pssms, row["fixture_id"], xinclude.files_kind(row)))
             hashes.append("side_sha256")
         if row.get("contract") == DEVIATION:
             # outfmt 7 prints the -db argument, so the database has a fixed path.

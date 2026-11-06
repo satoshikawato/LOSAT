@@ -132,10 +132,9 @@ impl PsiblastPssmOptions {
 pub(crate) struct PssmStop {
     pub(crate) query: usize,
     pub(crate) error: anyhow::Error,
-    /// The ASCII PSSMs of the queries before it, which NCBI has written.
-    pub(crate) ascii: Vec<Vec<u8>>,
-    /// The ASN.1 files of the queries before it, written already (`psiblast_pssms`).
-    pub(crate) asn_files: AsnFiles,
+    /// The PSSM files of the queries before it, which NCBI has written: LOSAT writes them after
+    /// the reports of the queries up to it (`PssmFiles::commit`).
+    pub(crate) files: PssmFiles,
 }
 
 impl std::fmt::Display for PssmStop {
@@ -1323,6 +1322,7 @@ pub(crate) fn check_pssm_titles(
 //     CAutoOutputFileReset(const string& file_name, bool use_versions = false)
 //         : m_FileName(file_name), m_Version(use_versions ? 1 : 0) {}
 // ```
+#[derive(Debug)]
 pub(crate) struct OutputFileReset {
     file_name: String,
     version: u32,
@@ -1336,72 +1336,189 @@ impl OutputFileReset {
         }
     }
 
-    /// `GetStream`: the next file, opened (made empty); `existed` is whether a file of its name
-    /// was there before.
-    fn open(&mut self) -> (String, bool, std::io::Result<std::fs::File>) {
-        let filename = if self.version == 0 {
-            let path = std::path::Path::new(&self.file_name);
-            if path.is_file() {
-                let _ = std::fs::remove_file(path);
-                let file = std::fs::File::create(path);
-                return (self.file_name.clone(), true, file);
-            }
-            self.file_name.clone()
-        } else {
-            let filename = format!("{}.{}", self.file_name, self.version);
-            self.version += 1;
-            filename
-        };
-        let existed = std::fs::symlink_metadata(&filename).is_ok();
-        let file = std::fs::File::create(&filename);
-        (filename, existed, file)
-    }
-}
-
-/// Writes the ASCII PSSMs of the queries whose round-1 results have alignments, in the order of
-/// the queries (`OutputFileReset`). A file that cannot be opened or written is not reported, as
-/// NCBI's `ofstream` is not checked.
-// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:398-407
-// ```c++
-//     if (m_CmdLineArgs->SaveAsciiPssm() &&
-//         (itr == NULL || // this is true in the case of remote PSI-BLAST
-//          itr->GetIterationNumber() >= 1)) {
-//         ...
-//         CBlastFormatUtil::PrintAsciiPssm(*pssm,
-//                                          m_AncillaryData,
-//                                          *m_CmdLineArgs->GetAsciiPssmStream());
-//     }
-// ```
-#[cold]
-#[inline(never)]
-pub(crate) fn write_ascii_pssm_files<'a>(
-    request: &PssmRequest,
-    pssms: impl Iterator<Item = &'a [u8]>,
-) {
-    let Some(path) = request.ascii_path.as_deref() else {
-        return;
-    };
-    let mut stream = OutputFileReset::new(path, request.save_each);
-    for pssm in pssms {
-        if let (_, _, Ok(mut file)) = stream.open() {
-            let _ = file.write_all(pssm);
+    /// `GetStream`'s file: `F`, or `F.<version>` (the version counts the writes).
+    pub(crate) fn next_file(&mut self) -> PssmFile {
+        if self.version == 0 {
+            return PssmFile {
+                path: std::path::PathBuf::from(&self.file_name),
+                replaced: true,
+            };
+        }
+        let path = std::path::PathBuf::from(format!("{}.{}", self.file_name, self.version));
+        self.version += 1;
+        PssmFile {
+            path,
+            replaced: false,
         }
     }
 }
 
-/// The ASN.1 PSSM files of a run (`-out_pssm`), which psiblast writes for each query after its
-/// report, before the ASCII one (`SavePssmToFile`). LOSAT writes them when it makes the PSSMs,
-/// before the reports, because a file that cannot be written ends NCBI's run after that query's
-/// report: a failure is known before the first report byte, and the queries up to it are
-/// reported again without the epilog (`PssmStop`), as for the other failures of a PSSM. The
-/// ASCII files are written after the reports, as before.
+/// One file of `CAutoOutputFileReset::GetStream`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PssmFile {
+    pub(crate) path: std::path::PathBuf,
+    /// Version 0 (no `-save_each_pssm`): an existing regular file of the name is removed before
+    /// the file is opened, so the file is made again; a numbered file is only truncated, which
+    /// keeps an existing file's inode and mode.
+    pub(crate) replaced: bool,
+}
+
+impl PssmFile {
+    /// `GetStream`: with version 0, `CFile::Exists` (a regular file, through symbolic links) and
+    /// `Remove` (the name itself, `remove(3)`; a failure is neither checked nor, by default,
+    /// logged), then `ofstream` (made or truncated, through symbolic links).
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbifile.hpp:4039-4042
+    // ```c++
+    // bool CFile::Exists(void) const
+    // {
+    //     return IsFile();
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:2595-2610
+    // ```c++
+    // bool CDirEntry::Remove(TRemoveFlags flags) const
+    // {
+    //     // Is this a directory ? (and processing not entry only)
+    //     if ( (flags & (fDir_All | fDir_Recursive)) != eEntryOnly  &&  IsDir(eIgnoreLinks) ) {
+    //         return CDir(GetPath()).Remove(flags);
+    //     }
+    //     // Other entries
+    //     return RemoveEntry(flags);
+    // }
+    //
+    //
+    // bool CDirEntry::RemoveEntry(TRemoveFlags flags) const
+    // {
+    //
+    //     if ( NcbiSys_remove(_T_XCSTRING(GetPath())) != 0 ) {
+    // ```
+    pub(crate) fn open(&self) -> std::io::Result<std::fs::File> {
+        if self.replaced && self.path.is_file() {
+            let _ = std::fs::remove_file(&self.path);
+        }
+        std::fs::File::create(&self.path)
+    }
+}
+
+/// What a PSSM file's name is before the run, for NCBI's `GetStream` on it (`PssmFile::open`).
+#[derive(Debug)]
+enum TargetKind {
+    /// No file: `ofstream` makes it in its directory.
+    Absent,
+    /// A regular file, also through a symbolic link.
+    Regular,
+    /// A character device (`/dev/null`, `/dev/full`): opened for writing as it is.
+    Device,
+    /// A directory or a socket: `ofstream` cannot open it.
+    Unopenable,
+    /// A named pipe, a block device or a symbolic link to no file: not supported.
+    Unsupported(&'static str),
+    /// A name whose directories cannot be read: `ofstream` fails the same way.
+    Unreachable(std::io::Error),
+}
+
+fn target_kind(path: &std::path::Path) -> TargetKind {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => TargetKind::Regular,
+        Ok(metadata) => special_target_kind(&metadata.file_type()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if std::fs::symlink_metadata(path).is_ok() {
+                TargetKind::Unsupported("a symbolic link to a missing file")
+            } else {
+                TargetKind::Absent
+            }
+        }
+        Err(error) => TargetKind::Unreachable(error),
+    }
+}
+
+#[cfg(unix)]
+fn special_target_kind(file_type: &std::fs::FileType) -> TargetKind {
+    use std::os::unix::fs::FileTypeExt;
+    if file_type.is_fifo() {
+        TargetKind::Unsupported("a named pipe")
+    } else if file_type.is_block_device() {
+        TargetKind::Unsupported("a block device")
+    } else if file_type.is_char_device() {
+        TargetKind::Device
+    } else {
+        TargetKind::Unopenable
+    }
+}
+
+#[cfg(not(unix))]
+fn special_target_kind(_file_type: &std::fs::FileType) -> TargetKind {
+    TargetKind::Unopenable
+}
+
+/// Whether removing `path` succeeds, given that its directory takes a new file (the staging file
+/// made there by the user `uid`): in a directory with the sticky bit only the owner of the file or
+/// of the directory, or root, removes a name (`unlink(2)`, `EPERM`).
+#[cfg(unix)]
+fn removable(path: &std::path::Path, directory: &std::path::Path, uid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let (Ok(entry), Ok(directory)) = (
+        std::fs::symlink_metadata(path),
+        std::fs::metadata(directory),
+    ) else {
+        return false;
+    };
+    directory.mode() & 0o1000 == 0 || uid == 0 || entry.uid() == uid || directory.uid() == uid
+}
+
+/// Elsewhere a file that cannot be opened for writing is taken as one that cannot be removed
+/// either (a refusal where NCBI might remove it).
+#[cfg(not(unix))]
+fn removable(_path: &std::path::Path, _directory: &std::path::Path, _uid: u32) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn owner(metadata: &std::fs::Metadata) -> u32 {
+    std::os::unix::fs::MetadataExt::uid(metadata)
+}
+
+#[cfg(not(unix))]
+fn owner(_metadata: &std::fs::Metadata) -> u32 {
+    0
+}
+
+/// The PSSM files of a psiblast run (`-out_pssm`, `-out_ascii_pssm`): made with the PSSMs, before
+/// the reports (`add`), and written after them (`commit`), each query's ASN.1 file then its ASCII
+/// one, as psiblast's `SavePssmToFile` after the query's report. The ASCII PSSMs, whose writes
+/// NCBI does not check, are kept in memory.
 ///
-/// A run that fails before its reports are written (a report write error, a refusal) has written
-/// no PSSM file in NCBI (it stops before `SavePssmToFile`). `AsnFiles` removes the ASN.1 files it
-/// made, unless `keep` is called once the reports are written; a file of the same name that was
-/// there before has been replaced and is not brought back (a run that fails before its reports
-/// keeps it in NCBI).
-// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-396
+/// NCBI ends a run whose ASN.1 file cannot be opened or written after that query's report, so LOSAT
+/// must know before its first report byte whether each file can be written; and a run that fails
+/// before its reports are out (a report write error, a LOSAT refusal) must leave every file as it
+/// was, as NCBI's, which stops before `SavePssmToFile`. So `add` writes the ASN.1 bytes to a
+/// staging file beside the target (`.<name>.losat-<pid>-<n>`, a new file in the target's
+/// directory), which shows that the directory takes a file and the file system the bytes, and
+/// foresees NCBI's open of the target without changing it; only `commit` writes the targets.
+/// Dropped without `commit`, `PssmFiles` removes the staging files: no target has changed. A
+/// failure in `add` is the refusal of a file that NCBI cannot write either (its stop after that
+/// query's report, `PssmStop`) or that LOSAT cannot write as NCBI does; no partial file is left.
+///
+/// The rule for a target, from what `GetStream` does with it (`PssmFile::open`):
+/// - no file of the name: made in its directory, which takes the staging file;
+/// - a regular file (also through a symbolic link): removed and made again (version 0) or
+///   truncated in place. LOSAT opens it for writing (without truncation); if that fails, version 0
+///   still succeeds when the name can be removed (`removable`), else NCBI's open fails there. An
+///   existing file beside which no staging file can be made is refused (NCBI may write it in place,
+///   but LOSAT cannot show that the bytes fit);
+/// - a character device (`/dev/null`, `/dev/full`): opened for writing and written zero bytes,
+///   which a device that takes no bytes refuses (`/dev/full`: ENOSPC), so the run stops at that
+///   query as NCBI's; the bytes are kept in memory and written by `commit`. A device that takes
+///   zero bytes but not the PSSM's would fail only after the reports;
+/// - a directory or a socket: NCBI's open fails, and so does LOSAT's;
+/// - a named pipe, a block device, a symbolic link to no file: refused (also before the search,
+///   `check_pssm_files`).
+///
+/// Not foreseen: immutable or append-only attributes (which NCBI's version 0 can neither remove
+/// nor open, while LOSAT's test takes the name for removable) and a file system that fills between
+/// `add` and `commit` (LOSAT's peak use is the old file, at most two staged PSSMs of version 0 and
+/// every numbered one); such a failure comes after the reports (`commit`).
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-407
 // ```c++
 // CPsiBlastApp::SavePssmToFile(CRef<CPssmWithParameters> pssm,
 //                              const CPsiBlastIterationState* itr)
@@ -1415,57 +1532,67 @@ pub(crate) fn write_ascii_pssm_files<'a>(
 //          itr->GetIterationNumber() >= 1)) {
 //         *m_CmdLineArgs->GetCheckpointStream() << MSerial_AsnText << *pssm;
 //     }
+//
+//     if (m_CmdLineArgs->SaveAsciiPssm() &&
+//         (itr == NULL || // this is true in the case of remote PSI-BLAST
+//          itr->GetIterationNumber() >= 1)) {
+//         ...
+//         CBlastFormatUtil::PrintAsciiPssm(*pssm,
+//                                          m_AncillaryData,
+//                                          *m_CmdLineArgs->GetAsciiPssmStream());
+//     }
 // ```
-pub(crate) struct AsnPssmWriter {
-    stream: OutputFileReset,
-    files: AsnFiles,
+#[derive(Debug)]
+pub(crate) struct PssmFiles {
+    asn: Option<OutputFileReset>,
+    ascii: Option<OutputFileReset>,
+    pending: Vec<PendingPssm>,
+    /// The entry whose staging file holds the last version-0 ASN.1 PSSM, which the next one
+    /// replaces: of NCBI's writes of one name only the last one's bytes stay, made or truncated
+    /// as each of them would make or truncate it.
+    last_replaced: Option<usize>,
+    staging_count: u64,
 }
 
-/// The ASN.1 files that a run made (`AsnPssmWriter`): removed when dropped, unless kept.
-#[derive(Debug, Default)]
-pub(crate) struct AsnFiles {
-    created: Vec<std::path::PathBuf>,
-    kept: bool,
+/// One query's PSSM files, to be written after the reports.
+#[derive(Debug)]
+struct PendingPssm {
+    asn: Option<(PssmFile, Staged)>,
+    ascii: Option<Vec<u8>>,
 }
 
-impl AsnFiles {
-    /// The reports are written: the files stay.
-    pub(crate) fn keep(mut self) {
-        self.kept = true;
-    }
+#[derive(Debug)]
+enum Staged {
+    /// The bytes in a staging file beside the target.
+    File(std::path::PathBuf),
+    /// The bytes for a character device.
+    Bytes(Vec<u8>),
+    /// Written, or replaced by a later query's file of the same name.
+    Done,
 }
 
-impl Drop for AsnFiles {
-    // Out of line: it runs where the blastp engine's function that holds the files
-    // (`run_resolved_in_pool`) returns.
-    #[cold]
-    #[inline(never)]
-    fn drop(&mut self) {
-        if !self.kept {
-            for path in &self.created {
-                let _ = std::fs::remove_file(path);
-            }
+impl PssmFiles {
+    pub(crate) fn new(request: &PssmRequest) -> Self {
+        let stream =
+            |path: Option<&str>| path.map(|path| OutputFileReset::new(path, request.save_each));
+        Self {
+            asn: stream(request.asn_path.as_deref()),
+            ascii: stream(request.ascii_path.as_deref()),
+            pending: Vec::new(),
+            last_replaced: None,
+            staging_count: 0,
         }
     }
-}
 
-impl AsnPssmWriter {
-    pub(crate) fn new(request: &PssmRequest) -> Option<Self> {
-        let path = request.asn_path.as_deref()?;
-        Some(Self {
-            stream: OutputFileReset::new(path, request.save_each),
-            files: AsnFiles::default(),
-        })
-    }
-
-    /// Writes one query's ASN.1 PSSM; `Err` is LOSAT's refusal of a file that cannot be opened
-    /// or written.
+    /// One query's PSSM: its ASN.1 file staged and its ASCII PSSM kept. `Err` is LOSAT's refusal
+    /// of an ASN.1 file that cannot be written as NCBI does (NCBI stops after that query's report).
     // NCBI's stream writes through a 4 KiB buffer (`COStreamBuffer`); the first write that fails
     // throws a `CIOException` (`eWrite`, "write fault"), the object stream reports it once as an
     // error of its own (`SetFailFlags`: `Error: (802.5) [psiblast] CObjectOStream: error at byte
     // N: stack is empty: write fault`, N being where the buffer first overflowed), and psiblast's
     // `CATCH_ALL` ends the run with status 0, without the epilog and the later queries. LOSAT
-    // stops at the same place, with its own refusal instead of NCBI's message and status.
+    // stops at the same place, with its own refusal instead of NCBI's message and status, and
+    // without NCBI's partial file.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:871-904 and 921-924
     // ```c++
     // void COStreamBuffer::FlushBuffer(bool fullBuffer)
@@ -1507,25 +1634,288 @@ impl AsnPssmWriter {
     //         }                                                                   \
     //     }                                                                       \
     // ```
-    pub(crate) fn write(&mut self, asn: &[u8]) -> Result<()> {
-        let (filename, existed, file) = self.stream.open();
-        let written = file.and_then(|mut file| {
-            if !existed {
-                self.files.created.push(std::path::PathBuf::from(&filename));
+    pub(crate) fn add(&mut self, asn: Option<&[u8]>, ascii: Option<Vec<u8>>) -> Result<()> {
+        let file = asn.and(self.asn.as_mut()).map(OutputFileReset::next_file);
+        let asn = match (file, asn) {
+            (Some(file), Some(bytes)) => {
+                let staged = self.stage(&file, bytes)?;
+                Some((file, staged))
             }
-            file.write_all(asn)
-        });
-        written.map_err(|error| {
-            anyhow::anyhow!(
-                "a -out_pssm file that cannot be written ({filename}: {error}), where NCBI BLAST+'s psiblast stops after the query's report with a serial-stream write error, is not supported by LOSAT's PSIBLAST"
-            )
-        })
+            _ => None,
+        };
+        if let Some((file, Staged::File(_))) = &asn {
+            if file.replaced {
+                if let Some(previous) = self.last_replaced.replace(self.pending.len()) {
+                    if let Some((_, staged)) = self.pending[previous].asn.as_mut() {
+                        if let Staged::File(staging) = std::mem::replace(staged, Staged::Done) {
+                            let _ = std::fs::remove_file(staging);
+                        }
+                    }
+                }
+            }
+        }
+        self.pending.push(PendingPssm { asn, ascii });
+        Ok(())
     }
 
-    /// The files written so far.
-    pub(crate) fn into_files(self) -> AsnFiles {
-        self.files
+    /// The ASN.1 bytes of `file`, staged (`PssmFiles`).
+    fn stage(&mut self, file: &PssmFile, asn: &[u8]) -> Result<Staged> {
+        let path = &file.path;
+        let cannot_write = |error: std::io::Error| {
+            anyhow::anyhow!(
+                "a -out_pssm file that cannot be written ({}: {error}), where NCBI BLAST+'s psiblast stops after the query's report with a serial-stream write error, is not supported by LOSAT's PSIBLAST",
+                path.display()
+            )
+        };
+        let existing = match target_kind(path) {
+            TargetKind::Absent => false,
+            TargetKind::Regular => true,
+            TargetKind::Device | TargetKind::Unopenable => {
+                let mut device = std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(path)
+                    .map_err(cannot_write)?;
+                // A write of zero bytes is passed to the device (`write(2)`).
+                let written = device.write(&[]).map_err(cannot_write)?;
+                debug_assert_eq!(written, 0);
+                return Ok(Staged::Bytes(asn.to_vec()));
+            }
+            TargetKind::Unsupported(kind) => return Err(unsupported_target(path, kind)),
+            TargetKind::Unreachable(error) => return Err(cannot_write(error)),
+        };
+        let directory = match path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent,
+            _ => std::path::Path::new("."),
+        };
+        let (staging, uid) = match self.write_staging(path, directory, asn) {
+            Ok(staged) => staged,
+            Err(error) if existing => {
+                // Where the directory takes no new file, NCBI's version 0 cannot remove the file
+                // either, and opens it in place, as a numbered file.
+                if let Err(open) = std::fs::OpenOptions::new().write(true).open(path) {
+                    return Err(cannot_write(open));
+                }
+                anyhow::bail!(
+                    "an existing -out_pssm file ({}) beside which LOSAT cannot write the PSSM first ({error}; LOSAT writes the target only after the reports, so that a run that fails before them leaves it as it was) is not supported by LOSAT's PSIBLAST",
+                    path.display()
+                )
+            }
+            Err(error) => return Err(cannot_write(error)),
+        };
+        if existing {
+            if let Err(error) = std::fs::OpenOptions::new().write(true).open(path) {
+                if !(file.replaced && removable(path, directory, uid)) {
+                    let _ = std::fs::remove_file(&staging);
+                    return Err(cannot_write(error));
+                }
+            }
+        }
+        Ok(Staged::File(staging))
     }
+
+    /// Writes `bytes` to a new staging file beside `target` in `directory`; its path and owner.
+    fn write_staging(
+        &mut self,
+        target: &std::path::Path,
+        directory: &std::path::Path,
+        bytes: &[u8],
+    ) -> std::io::Result<(std::path::PathBuf, u32)> {
+        let name = target.file_name().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a file name")
+        })?;
+        loop {
+            self.staging_count += 1;
+            let mut staging_name = std::ffi::OsString::from(".");
+            staging_name.push(name);
+            staging_name.push(format!(
+                ".losat-{}-{}",
+                std::process::id(),
+                self.staging_count
+            ));
+            let staging = directory.join(staging_name);
+            let mut file = match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&staging)
+            {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            };
+            let written = file
+                .write_all(bytes)
+                .and_then(|()| file.metadata())
+                .map(|metadata| owner(&metadata));
+            return match written {
+                Ok(uid) => Ok((staging, uid)),
+                Err(error) => {
+                    drop(file);
+                    let _ = std::fs::remove_file(&staging);
+                    Err(error)
+                }
+            };
+        }
+    }
+
+    /// After the reports: each query's ASN.1 file (`GetStream` on the target, then the staged
+    /// bytes), then its ASCII file (not checked, as NCBI's `ofstream`). `Err`: an ASN.1 file that
+    /// `add` found writable failed, after the reports (see `PssmFiles`).
+    pub(crate) fn commit(mut self) -> Result<()> {
+        for index in 0..self.pending.len() {
+            if let Some((file, staged)) = self.pending[index].asn.as_mut() {
+                let bytes = match std::mem::replace(staged, Staged::Done) {
+                    Staged::File(staging) => {
+                        let bytes = std::fs::read(&staging);
+                        let _ = std::fs::remove_file(&staging);
+                        Some(bytes)
+                    }
+                    Staged::Bytes(bytes) => Some(Ok(bytes)),
+                    Staged::Done => None,
+                };
+                if let Some(bytes) = bytes {
+                    bytes
+                        .and_then(|bytes| file.open()?.write_all(&bytes))
+                        .map_err(|error| {
+                            anyhow::anyhow!(
+                                "a -out_pssm file that could not be written after the reports ({}: {error}), although LOSAT found it writable before them, is not supported by LOSAT's PSIBLAST",
+                                file.path.display()
+                            )
+                        })?;
+                }
+            }
+            if let (Some(stream), Some(ascii)) =
+                (self.ascii.as_mut(), self.pending[index].ascii.take())
+            {
+                if let Ok(mut out) = stream.next_file().open() {
+                    let _ = out.write_all(&ascii);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PssmFiles {
+    // Out of line: it runs where the blastp engine's function that holds the files
+    // (`run_resolved_in_pool`) returns.
+    #[cold]
+    #[inline(never)]
+    fn drop(&mut self) {
+        for pending in &self.pending {
+            if let Some((_, Staged::File(staging))) = &pending.asn {
+                let _ = std::fs::remove_file(staging);
+            }
+        }
+    }
+}
+
+fn unsupported_target(path: &std::path::Path, kind: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "an -out_pssm file that is {kind} ({}) is not supported by LOSAT's PSIBLAST",
+        path.display()
+    )
+}
+
+/// Before the search: refuses PSSM files that LOSAT cannot write as NCBI does. NCBI writes each
+/// query's files after its report through streams of their own, so a PSSM file that is also the
+/// standard output, the standard error or the `-out` file gets its bytes among the reports' in an
+/// order that their buffers make, which LOSAT does not reproduce (it writes the PSSM files after
+/// all reports). Every name the run can write is checked: `F`, or with `-save_each_pssm` `F.1` to
+/// `F.<number of queries>`; a name that does not exist cannot be one of those streams. The same
+/// file is the same device and inode (`metadata` follows `/dev/stdout` to the stream's file),
+/// or for a character device the same device number (`/dev/null` excepted: no order of its bytes
+/// shows); without inode numbers, the same canonical path as `-out`, or one of the names of the
+/// standard streams. Also refused, for `-out_pssm`: a
+/// named pipe, a block device and a symbolic link to no file (`PssmFiles`).
+pub(crate) fn check_pssm_files(
+    request: &PssmRequest,
+    queries: usize,
+    out: Option<&std::path::Path>,
+) -> Result<()> {
+    for (option, path) in [
+        ("-out_pssm", request.asn_path.as_deref()),
+        ("-out_ascii_pssm", request.ascii_path.as_deref()),
+    ] {
+        let Some(path) = path else {
+            continue;
+        };
+        let names: Vec<std::path::PathBuf> = if request.save_each {
+            (1..=queries)
+                .map(|n| std::path::PathBuf::from(format!("{path}.{n}")))
+                .collect()
+        } else {
+            vec![std::path::PathBuf::from(path)]
+        };
+        for name in &names {
+            if let Some(stream) = report_stream_of(name, out) {
+                anyhow::bail!(
+                    "an {option} file that is also {stream} ({}) is not supported by LOSAT's PSIBLAST",
+                    name.display()
+                );
+            }
+            if option == "-out_pssm" {
+                if let TargetKind::Unsupported(kind) = target_kind(name) {
+                    return Err(unsupported_target(name, kind));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The report stream that the file `name` is (`check_pssm_files`); `/dev/null`, where no order of
+/// bytes shows, is none.
+#[cfg(unix)]
+fn report_stream_of(name: &std::path::Path, out: Option<&std::path::Path>) -> Option<&'static str> {
+    use std::os::fd::AsFd;
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let target = std::fs::metadata(name).ok()?;
+    let device = |metadata: &std::fs::Metadata| {
+        metadata
+            .file_type()
+            .is_char_device()
+            .then(|| metadata.rdev())
+    };
+    let null = std::fs::metadata("/dev/null").ok();
+    if device(&target).is_some_and(|rdev| null.as_ref().and_then(device) == Some(rdev)) {
+        return None;
+    }
+    let same = |metadata: std::fs::Metadata| {
+        (metadata.dev(), metadata.ino()) == (target.dev(), target.ino())
+            || device(&target).is_some_and(|rdev| device(&metadata) == Some(rdev))
+    };
+    let stream = |fd: std::os::fd::BorrowedFd<'_>| {
+        fd.try_clone_to_owned()
+            .ok()
+            .and_then(|fd| std::fs::File::from(fd).metadata().ok())
+    };
+    if stream(std::io::stdout().as_fd()).is_some_and(same) {
+        Some("the standard output")
+    } else if stream(std::io::stderr().as_fd()).is_some_and(same) {
+        Some("the standard error")
+    } else if out
+        .and_then(|out| std::fs::metadata(out).ok())
+        .is_some_and(same)
+    {
+        Some("the -out file")
+    } else {
+        None
+    }
+}
+
+#[cfg(not(unix))]
+fn report_stream_of(name: &std::path::Path, out: Option<&std::path::Path>) -> Option<&'static str> {
+    match name.to_str() {
+        Some("/dev/stdout" | "/dev/fd/1" | "/proc/self/fd/1") => {
+            return Some("the standard output")
+        }
+        Some("/dev/stderr" | "/dev/fd/2" | "/proc/self/fd/2") => return Some("the standard error"),
+        _ => {}
+    }
+    let target = std::fs::canonicalize(name).ok()?;
+    out.and_then(|out| std::fs::canonicalize(out).ok())
+        .is_some_and(|out| out == target)
+        .then_some("the -out file")
 }
 
 #[cfg(test)]

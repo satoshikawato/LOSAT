@@ -88,11 +88,18 @@ fn reals_are_read_with_ncbis_arithmetic() {
     assert_eq!(real_of("0.5"), 0.5);
     assert_eq!(real_of("-2.5e3"), -2500.0);
     assert_eq!(real_of("00.25"), 0.25);
+    // -3 + 2147483647 is in range: far above DBL_MAX, which the word form clamps
+    // (`fDecimalPosixFinite`).
+    assert_eq!(real_of("0.005e2147483647"), f64::MAX);
+    assert_eq!(real_of("-0.005e2147483647"), -f64::MAX);
+    // -3 - 2147483647 is not (NCBI's `int` overflows): the reader's error, no panic.
     for bad in [
         "{ 1, 3, 0 }",
         "{ -, 10, 0 }",
         "{ 1, 10 }",
         "{ 1234567890123456789, 10, 0 }",
+        "0.005e-2147483647",
+        "-0.005e-2147483647",
     ] {
         let document = format!(
             "PssmWithParameters ::= {{ pssm {{ numRows 1, numColumns 1, finalData {{ scores {{ 1 }}, lambda {bad}, kappa {{ 0, 10, 0 }}, h {{ 0, 10, 0 }} }} }} }}"

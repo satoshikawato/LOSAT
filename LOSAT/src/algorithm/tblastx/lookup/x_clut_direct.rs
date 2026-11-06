@@ -392,8 +392,10 @@ pub(crate) struct XFlatArgs<'a> {
 // ```
 const X_TARGET_PV_BYTES: usize = 262_144;
 
-// No NCBI counterpart: the callers of `XFlatCompressedLookup::scan_subject`, one copy each.
-/// BLASTP's caller of `XFlatCompressedLookup::scan_subject` (and the tests').
+// No NCBI counterpart: the callers of `XFlatCompressedLookup::scan_subject` and
+// `XFlatCompressedLookup::x_list_pairs_lean`, one copy each.
+/// BLASTP's caller of `XFlatCompressedLookup::scan_subject` and `x_list_pairs_lean` (BLOSUM62's
+/// scans, `blastp/x_seed_fused_clut.rs`; and the tests').
 pub(crate) const X_BLASTP: u8 = 0;
 /// TBLASTN's caller of `XFlatCompressedLookup::scan_subject` (`tblastn/search_seed.rs`).
 pub(crate) const X_TBLASTN: u8 = 1;
@@ -2115,8 +2117,9 @@ impl<H: XQueryOffset> XFlatCompressedLookup<H> {
     // }
     // ```
     /// `BlastCompressedAaLookupTable::scan_subject` on the flat table: the same statements, a cell's
-    /// hits copied from its slice. `CALLER` gives each program's caller a copy of its own (`X_BLASTP`,
-    /// `X_TBLASTN`), so that the compiler inlines BLASTP's as it did when that was the only caller.
+    /// hits copied from its slice. `CALLER` gives each caller a copy of its own (`X_BLASTP`,
+    /// `X_TBLASTN`, `X_BLASTX`, `X_BLASTP_SOFT`, `X_BLASTP_MATRIX`), so that the compiler inlines
+    /// BLASTP's as it did when that was the only caller.
     pub(crate) fn scan_subject<const CALLER: u8>(
         &self,
         subject: &[u8],

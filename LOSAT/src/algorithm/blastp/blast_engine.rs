@@ -27,8 +27,8 @@ use crate::algorithm::tblastx::constants::{
     GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
 };
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_bp_build_compressed_lookup, x_bpclut_on, XCompressedLookup, XFlatCompressedLookup, X_BLASTP,
-    X_BLASTP_MATRIX,
+    x_bp_build_compressed_lookup, x_bp_build_compressed_lookup_of, x_bpclut_on, XCompressedLookup,
+    XFlatCompressedLookup, X_BLASTP, X_BLASTP_MATRIX,
 };
 use crate::algorithm::tblastx::lookup::compressed::BlastCompressedAaLookupTable;
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
@@ -7841,7 +7841,7 @@ fn blastp_matrix_compressed_lookup(
         &locations,
         query_chunk,
     )?;
-    let lookup = crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bp_build_compressed_lookup_of(
+    let lookup = x_bp_build_compressed_lookup_of(
         args.scoring.matrix,
         args.word_size,
         crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
@@ -8859,7 +8859,7 @@ fn run_resolved_in_pool(
         }
         // The one-hit test of a hit (`-window_size 0`) with the extension `$extend` (and its
         // leading arguments): `extend_one_hit_blosum62` for BLOSUM62, the reference
-        // `extend_one_hit` of the search's matrix for another one (item SC2b).
+        // `extend_one_hit_of` of the search's matrix for another one (item SC2b).
         macro_rules! x_one_hit_of {
             ($extend:path $(, $lead:expr)?) => {
                 |pair: OffsetPair| {
@@ -8980,11 +8980,11 @@ fn run_resolved_in_pool(
                 }
             };
         }
-        // Another matrix than BLOSUM62 (item SC2b): the same tests on the same scans, with the
-        // two-hit extension of the matrix's byte-table walks (`extend_two_hit_table`; the reference
-        // where they do not cover a call) and the one-hit reference extension
-        // (BPUNGAPSENT's byte tables are BLOSUM62's), in a function of their own (`x_outlined`), so
-        // that this kernel only gains its call.
+        // Another matrix than BLOSUM62 (item SC2b): the same two-hit tests on the same scans, with
+        // the extension of the matrix's byte-table walks (`extend_two_hit_table`; the reference
+        // where they do not cover a call; BPUNGAPSENT's byte tables are BLOSUM62's), in a function
+        // of their own (`x_outlined`), so that this kernel only gains its call. Its one-hit search
+        // is the branch below.
         if args.window_size != 0 && args.scoring.matrix != ScoringMatrix::Blosum62 {
             x_outlined(|| {
                 let x_of = (

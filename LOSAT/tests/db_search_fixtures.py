@@ -15,7 +15,8 @@ a larger one being compared by its SHA-256 in side_sha256). Every row runs from 
 `-query QUERY`, the gzipped file PATH inflated into a temporary directory, or PATH as it is;
 xinclude_fixtures.py `query_argv`)
 (`blastp`, `blastn`, `tblastn`, `blastx`, `tblastx` or `psiblast`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
-argument `-db ""`; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/); `outfmt` is one argument, so a custom
+argument `-db ""`, and a cell `subject:PATH` runs `-subject PATH` in place of `-db DB`: psiblast's refusal of a
+subject set whose sequences all have no letters, which only a subject set reaches; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/); `outfmt` is one argument, so a custom
 `7 qseqid sseqid ...` spec stays whole). The databases are under LOSAT/tests/seqdb/db and
 LOSAT/tests/db_search (README.md there says how they were built).
 
@@ -134,10 +135,17 @@ def is_env_token(token: str) -> bool:
     return token.partition("=")[0] in ENV_NAMES
 
 
+def subjects_argv(cell: str) -> list[str]:
+    """The arguments of a `db` cell: `-db DB`, or `-subject PATH` for a cell `subject:PATH`."""
+    if cell.startswith("subject:"):
+        return ["-subject", cell.removeprefix("subject:")]
+    return ["-db", cell]
+
+
 def search_argv(row: dict[str, str]) -> list[str]:
     """The arguments after the program name (the same for NCBI and LOSAT)."""
     extra = [token for token in extra_tokens(row) if not is_env_token(token)]
-    return ["-db", row["db"], *xinclude.query_argv(row["query"], ENGINE), *extra, "-outfmt", row["outfmt"]]
+    return [*subjects_argv(row["db"]), *xinclude.query_argv(row["query"], ENGINE), *extra, "-outfmt", row["outfmt"]]
 
 
 def row_env(row: dict[str, str], base: dict[str, str]) -> dict[str, str]:

@@ -5371,6 +5371,10 @@ fn search_cli(
     };
     let mut resolved = args.check_options(outputs.diagnostics)?;
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?;
+    // psiblast sets its subjects up here, before the query (`psiblast_check_subject_letters`).
+    if resolved.app == BlastpApp::Psiblast && database.is_none() {
+        psiblast_check_subject_letters(&subjects.records)?;
+    }
     // psiblast `-in_pssm`: the query is the PSSM's (read with the options, `check_options`);
     // NCBI reads no query input (psiblast_app.cpp:452-471). LOSAT's limits of the PSSM search
     // come when the options are processed and the subjects set up.
@@ -5649,6 +5653,9 @@ fn run_local_formats(
         return Err(crate::blastinput::app::empty_subjects_error());
     }
     let args = resolve_for_formats(&args, outputs)?;
+    if args.app == BlastpApp::Psiblast {
+        psiblast_check_subject_letters(&subjects.records)?;
+    }
     search(
         args,
         query_records,
@@ -6029,6 +6036,50 @@ fn psiblast_stop_at_invalid_query(
     batches.searched_done = searched_start;
     batches.stop = Some((warnings, error));
     batches
+}
+
+/// psiblast: LOSAT's refusal of a subject set (`-subject`) none of whose sequences has letters
+/// (records without residues, `-subject_loc` intervals that start just past their records' ends).
+/// NCBI's psiblast checks its subjects as one sequence block when it sets them up, after the
+/// options are processed (the PSSM read too) and before the query is read or anything is written
+/// (`InitializeSubject`, psiblast_app.cpp:444-445). The block of such a set is not made, and the
+/// check reads through a null pointer: NCBI 2.17.0 exits 139 with empty standard output and error
+/// (with `-query` and with `-in_pssm`; one empty record, two, or a cut to no letters), while a set
+/// with one sequence that has letters runs with the warning of each empty one, as blastp runs
+/// every set (`CBl2Seq`, without this check).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_db_adapter.cpp:73-76
+/// ```c++
+///     if (opts_handle->GetOptions().GetProgram() == ePSIBlast) {
+///         CPsiBlastValidate::QueryFactory(subject_sequences, *opts_handle,
+///                                         CPsiBlastValidate::eQFT_Subject);
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:651-663
+/// ```c++
+///     BLAST_SequenceBlk* sblk = NULL;
+///     try { sblk = query_data->GetSequenceBlk(); }
+///     catch (const CBlastException& e) {
+///         if (e.GetMsg().find("Incompatible sequence codings") != NPOS) {
+///             NCBI_THROW(CBlastException, eInvalidArgument, excpt_msg);
+///         }
+///     }
+///     _ASSERT(sblk);
+///     _ASSERT(sblk->length > 0);
+///
+///     CFormatGuess::ESequenceType sequence_type =
+///         CFormatGuess::SequenceType((const char*)sblk->sequence_start,
+///                                    static_cast<unsigned>(sblk->length));
+/// ```
+#[cold]
+#[inline(never)]
+fn psiblast_check_subject_letters(subjects: &[FastaRecord]) -> Result<()> {
+    if !subjects.is_empty() && subjects.iter().all(|record| record.seq().is_empty()) {
+        bail!(
+            "a subject set whose sequences all have no letters (with which NCBI BLAST+'s psiblast crashes) is not supported by LOSAT's PSIBLAST"
+        );
+    }
+    Ok(())
 }
 
 /// psiblast `-in_pssm`: a PSSM that NCBI's `CPsiBlastValidate::Pssm` refuses stops the run at its

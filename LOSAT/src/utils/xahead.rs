@@ -407,16 +407,10 @@ impl<R> Ahead<R> {
 
     // No NCBI counterpart: tells the helpers that the loop has ended; it does not change any
     // value NCBI computes.
-    #[cfg_attr(
-        not(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )),
-        expect(
-            dead_code,
-            reason = "used only where the helper pool runs (parallel, and wasm-threads on wasm32)"
-        )
-    )]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn finish(&self) {
         self.finished.store(true, Ordering::Release);
     }
@@ -433,18 +427,16 @@ impl<R> Ahead<R> {
 }
 
 // No NCBI counterpart: ends the helpers when the loop exits, also on a panic.
-#[cfg_attr(
-    not(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    )),
-    expect(
-        dead_code,
-        reason = "used only where the helper pool runs (parallel, and wasm-threads on wasm32)"
-    )
-)]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 struct Finish<'a, R>(&'a Ahead<R>);
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl<R> Drop for Finish<'_, R> {
     fn drop(&mut self) {
         self.0.finish();

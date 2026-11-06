@@ -663,11 +663,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         // a comment or blank stops the read before `ParseDataLine`: a `>?N` gap line too, and
         // whatever its size or modifiers.
         if !is_header && parse_deflines.is_some() && current.is_none() {
-            return Err(FastaParseError(format!(
-                "CFastaReader: Input doesn't start with a defline or comment around line {}",
-                line_index + 1
-            ))
-            .into());
+            return Err(NoDeflineError(line_index as u64 + 1).into());
         }
         if line.starts_with(b">?") {
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1098-1122
@@ -1300,6 +1296,35 @@ impl std::fmt::Display for FastaParseError {
 // public:
 // ```
 impl std::error::Error for FastaParseError {}
+
+/// The reader's `eNoDefline` at a line (1-based): under `-parse_deflines` the first line that
+/// is neither blank, a comment nor a defline. Its text is the reader's (`CFastaReader: ...`, a
+/// query's `BLAST query error`, `native::input_error`); the subjects end with `GetAllSeqs`'s
+/// error instead (`native::subject_input_error`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:391-396
+/// ```c++
+///                 const auto lineNum = LineNumber();
+///                 GetLineReader().UngetLine();
+///                 NCBI_THROW2(CObjReaderParseException, eNoDefline,
+///                             "CFastaReader: Input doesn't start with"
+///                             " a defline or comment around line " + NStr::NumericToString(lineNum),
+///                              lineNum);
+/// ```
+#[derive(Debug)]
+pub(crate) struct NoDeflineError(pub u64);
+
+impl std::fmt::Display for NoDeflineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "CFastaReader: Input doesn't start with a defline or comment around line {}",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for NoDeflineError {}
 
 #[cfg(test)]
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:86-94
@@ -3173,9 +3198,12 @@ mod defline_tests {
         ] {
             let error = read(data, true).unwrap_err();
             assert_eq!(
-                error.downcast_ref::<FastaParseError>().map(|e| e.0.clone()),
-                Some(format!(
-                    "CFastaReader: Input doesn't start with a defline or comment around line {line}"
+                error.downcast_ref::<NoDeflineError>().map(|e| (e.0, e.to_string())),
+                Some((
+                    line,
+                    format!(
+                        "CFastaReader: Input doesn't start with a defline or comment around line {line}"
+                    )
                 )),
                 "{}",
                 String::from_utf8_lossy(data)

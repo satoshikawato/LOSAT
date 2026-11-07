@@ -16,7 +16,7 @@ use super::{
     // ```
     input::{
         parse_fasta_stream_keeping, stream_is_empty, FastaParseError, FastaStream, InputWarning,
-        NoDeflineError,
+        NoDeflineError, QueryStreamSettings,
     },
     query_setup::BATCH_SIZE,
     report,
@@ -679,6 +679,17 @@ fn run_inner(
     if let (Some(database), true) = (database.as_ref(), structured_xml) {
         super::blast_xml::check_database_name(database.name())?;
     }
+    // How the search reads the query file (`-parse_deflines`, its ids, `-strand`), which the
+    // reads of the file before the search share (`QueryStreamSettings`).
+    let query_settings = QueryStreamSettings {
+        parse_deflines: args.parse_deflines,
+        id_scope: id_scope.clone(),
+        strand: crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand),
+    };
+    // The letters of a reader batch (below, where NCBI reads `BATCH_SIZE`, after the check of
+    // an empty query), which the reads before the search take too.
+    let batch_size = crate::blastinput::app::query_batch_size("BLASTX", BATCH_SIZE as u32)
+        .map(|size| size as usize);
     // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
     // come before the first byte, though the query file is read batch by batch: the query
     // titles are checked by a read of the file before the search, and a run in which a
@@ -704,11 +715,15 @@ fn run_inner(
         let start = (&query_file)
             .stream_position()
             .map_err(|_| inaccessible("query", &args.query))?;
+        // A `BATCH_SIZE` that the run refuses (below, before any query is read) leaves no title
+        // to check, as a batch size of 0 does.
         let messages_may_be_refused = super::blast_xml::prescan_queries(
             query_file
                 .try_clone()
                 .map_err(|_| inaccessible("query", &args.query))?,
+            &query_settings,
             args.lcase_masking,
+            *batch_size.as_ref().unwrap_or(&0),
             query_range.as_ref(),
         )?;
         (&query_file)
@@ -777,10 +792,7 @@ fn run_inner(
     } else {
         None
     };
-    let mut query_stream = FastaStream::from_file(query_file);
-    query_stream.parse_deflines = args.parse_deflines;
-    query_stream.id_scope = id_scope.clone();
-    query_stream.strand = crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand);
+    let mut query_stream = query_settings.stream(query_file);
     if stream_is_empty(&mut query_stream) {
         stderr.write_all(b"Warning: [blastx] Query is Empty!\n")?;
         // NCBI returns before the formatter exists: no archive carries the message.
@@ -808,9 +820,8 @@ fn run_inner(
     // search itself keeps units of at most 10002 letters (`BATCH_SIZE` the constant), however
     // large a reader batch is: a reader batch is split into units that are searched as the
     // batches of a run without `BATCH_SIZE` are, and its report is written when its last unit
-    // is searched.
-    let batch_size =
-        crate::blastinput::app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
+    // is searched. (`batch_size` is read above, for the reads before the search.)
+    let batch_size = batch_size?;
     // LOSAT's refusal of a query title the archive cannot write comes before its first byte,
     // though the query file is read batch by batch: the titles are checked by a read of the
     // file before the search.
@@ -822,6 +833,7 @@ fn run_inner(
             query_prescan
                 .as_ref()
                 .expect("the second handle of a regular query"),
+            &query_settings,
             args.lcase_masking,
             batch_size,
             query_range.as_ref(),
@@ -989,6 +1001,8 @@ fn run_inner(
                                 false,
                                 false,
                                 false,
+                                false,
+                                false,
                                 crate::report::tabular::PrintedIds::default(),
                                 false,
                             )
@@ -1144,7 +1158,9 @@ fn run_inner(
 #[derive(Clone, Copy, Default)]
 pub(super) struct ReportedAsks {
     tabular: bool,
+    tabular_reads: bool,
     pairwise: bool,
+    structured: bool,
     taxids: bool,
     joined: bool,
     taxonomy: bool,
@@ -1158,7 +1174,13 @@ impl ReportedAsks {
         let tabular = matches!(options.outfmt, 6 | 7 | 10 | 20);
         Self {
             tabular,
+            tabular_reads: tabular
+                && crate::report::tabular::reads_subject(
+                    options.tabular,
+                    crate::blastinput::app::Program::Blastx,
+                ),
             pairwise: options.outfmt == 0,
+            structured: matches!(options.outfmt, 5 | 13..=16),
             taxids: matches!(options.outfmt, 13..=16),
             joined: matches!(options.outfmt, 0 | 5 | 13..=16)
                 || options
@@ -1171,17 +1193,34 @@ impl ReportedAsks {
             } else {
                 crate::report::tabular::PrintedIds::default()
             },
-            prefetched: crate::algorithm::common::database::seq_annots_prefetch(Some(i32::from(
-                options.outfmt,
-            ))),
+            // Outfmt 10 and 20 prefetch as 6 does (`reported_batch`).
+            prefetched: prefetches_subjects(Some(match options.outfmt {
+                10 | 20 => 6,
+                outfmt => i32::from(outfmt),
+            })) && !crate::algorithm::common::database::prefetch_always_off(),
         }
+    }
+
+    /// What the reports `options` of one call ask: each of them, with the batches' prefetch of
+    /// the first, which NCBI's app runs for its one format
+    /// (`BlastFormatter_PreFetchSequenceData(..., GetFormattedOutputChoice())`).
+    pub(super) fn of_all(options: &[super::args::ResolvedOptions]) -> Self {
+        let mut asks = options
+            .iter()
+            .fold(Self::default(), |asks, options| asks.or(Self::of(options)));
+        asks.prefetched = options
+            .first()
+            .is_some_and(|options| Self::of(options).prefetched);
+        asks
     }
 
     /// What two reports of one batch ask.
     pub(super) fn or(self, other: Self) -> Self {
         Self {
             tabular: self.tabular || other.tabular,
+            tabular_reads: self.tabular_reads || other.tabular_reads,
             pairwise: self.pairwise || other.pairwise,
+            structured: self.structured || other.structured,
             taxids: self.taxids || other.taxids,
             joined: self.joined || other.joined,
             taxonomy: self.taxonomy || other.taxonomy,
@@ -1216,7 +1255,9 @@ pub(super) fn reported_batch(
         results,
         options.gapped,
         asks.tabular,
+        asks.tabular_reads,
         asks.pairwise,
+        asks.structured,
         asks.taxids,
         asks.joined,
         asks.taxonomy,

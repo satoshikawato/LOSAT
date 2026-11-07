@@ -39,6 +39,7 @@
 
 use super::{XHit, XScratch};
 use crate::algorithm::tblastx::extension::x_two_hit_cells;
+use crate::algorithm::tblastx::scoring::TbxScore;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
@@ -72,11 +73,13 @@ pub(super) trait XProbe {
     fn batch_end(&mut self);
     /// An extension starts.
     fn ext_begin(&mut self) -> Self::Mark;
-    /// The extension `extend_hit_two_hit(q, s, s_left, s_right, q_right, x_drop, false)` ended.
+    /// The extension `extend_hit_two_hit_reference(sc, q, s, s_left, s_right, q_right, x_drop,
+    /// false)` (the search's scores and word length) ended.
     #[allow(clippy::too_many_arguments)]
-    fn ext_end(
+    fn ext_end<M: TbxScore>(
         &mut self,
         mark: Self::Mark,
+        sc: M,
         q: &[u8],
         s: &[u8],
         s_left: usize,
@@ -107,9 +110,10 @@ impl XProbe for XNoProbe {
     #[inline(always)]
     fn ext_begin(&mut self) {}
     #[inline(always)]
-    fn ext_end(
+    fn ext_end<M: TbxScore>(
         &mut self,
         _mark: (),
+        _sc: M,
         _q: &[u8],
         _s: &[u8],
         _s_left: usize,
@@ -223,9 +227,10 @@ impl XProbe for XTimeProbe {
         ticks()
     }
     #[inline(always)]
-    fn ext_end(
+    fn ext_end<M: TbxScore>(
         &mut self,
         mark: u64,
+        _sc: M,
         _q: &[u8],
         _s: &[u8],
         _s_left: usize,
@@ -522,9 +527,10 @@ impl XProbe for XStatsProbe {
         self.batch_touched.clear();
     }
     fn ext_begin(&mut self) {}
-    fn ext_end(
+    fn ext_end<M: TbxScore>(
         &mut self,
         _mark: (),
+        sc: M,
         q: &[u8],
         s: &[u8],
         s_left: usize,
@@ -532,12 +538,12 @@ impl XProbe for XStatsProbe {
         q_right: usize,
         x_drop: i32,
     ) {
-        let cells = x_two_hit_cells(q, s, s_left, s_right, q_right, x_drop);
+        let cells = x_two_hit_cells(sc, q, s, s_left, s_right, q_right, x_drop);
         let t = &mut self.t;
         t.ext_calls += 1;
         t.ext_left += cells.left as u64;
         t.ext_right += cells.right as u64;
-        t.ext_cells += 3 + (cells.left + cells.right) as u64;
+        t.ext_cells += (sc.word() + cells.left + cells.right) as u64;
         let c = &mut self.cells[self.cur];
         let (lo, hi) = (cells.s_lo as u32, cells.s_hi as u32);
         t.ext_distinct += hi.saturating_sub(lo.max(c.ext_hi)) as u64;

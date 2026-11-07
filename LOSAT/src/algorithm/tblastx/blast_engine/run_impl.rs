@@ -3,8 +3,8 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c
 
 use super::*;
+use crate::algorithm::common::translated_chunks::{translated_chunk_scan_ranges, TranslatedChunk};
 use crate::algorithm::common::x_db_stream::XReadError;
-use crate::algorithm::tblastn::search_seed::{translated_chunk_scan_ranges, TranslatedChunk};
 use crate::algorithm::tblastx::database::DatabaseTitles;
 use crate::algorithm::tblastx::hit_collector::HitCollector;
 use crate::algorithm::tblastx::subjects::{
@@ -2162,7 +2162,11 @@ fn write_tblastx_outputs(
     // run without output (`tabular_subject_ids`).
     let subject_ids = if output_formats.iter().any(|format| format.is_tabular()) {
         match &run.database {
-            Some(database) => database.reported.tabular_subject_ids()?,
+            Some(database) => database.reported.tabular_subject_ids(
+                output_formats
+                    .iter()
+                    .any(|format| format.tabular_reads_subject()),
+            )?,
             None => tabular_subject_ids(&hits, run.subjects)?,
         }
     } else {
@@ -3842,8 +3846,9 @@ impl BatchReports<'_> {
                     .collect();
                 let pairwise_shown = formats.contains(&report::TblastxOutputFormat::Pairwise);
                 let shown = crate::algorithm::common::database::ParsedShown {
-                    tabular: formats.iter().any(|format| format.is_tabular()),
+                    tabular: formats.iter().any(|format| format.tabular_reads_subject()),
                     pairwise: pairwise_shown,
+                    structured: formats.iter().any(|format| format.is_structured_xml()),
                     joined: pairwise_shown
                         || formats.iter().any(|format| {
                             format.is_structured_xml() || format.tabular_joins_subjects()
@@ -3854,9 +3859,10 @@ impl BatchReports<'_> {
                         crate::report::tabular::PrintedIds::default(),
                         |words, format| words.or(format.printed_ids()),
                     ),
-                    prefetched: crate::algorithm::common::database::seq_annots_prefetch(
-                        formats.first().and_then(|format| format.serial_outfmt()),
-                    ),
+                    prefetched: formats
+                        .first()
+                        .is_some_and(|format| format.prefetches_subjects())
+                        && !crate::algorithm::common::database::prefetch_always_off(),
                 };
                 reported_subjects = super::super::database::reported_subjects(
                     database,
@@ -4339,15 +4345,16 @@ fn search_query_batch<S: TbxScore>(
             threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
             window,
             subjects,
-            // A word length other than 3 takes the reference frame loop: the units build and
-            // walk 3-letter words (`TbxScore::word`).
+            // A word length whose backbone index the direct builder does not cover (4 letters,
+            // 20 bits) takes the reference frame loop: the units' group tables are built by it
+            // (`x_direct_covers`; `TbxScore::word`, 3 for BLOSUM62's instance).
             debugging: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled
                 || debug_hsp_saving
                 || x_soft_subjects
-                || sc.word() != 3,
+                || !crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers(sc.word()),
             requested_parallel,
             use_serial_scan_chunks,
             pool: parallel_pool,
@@ -4679,15 +4686,16 @@ fn search_query_batch<S: TbxScore>(
             query_length,
             diag_array_size,
             subjects,
-            // A word length other than 3 takes the reference frame loop: the units build and
-            // walk 3-letter words (`TbxScore::word`).
+            // A word length whose backbone index the direct builder does not cover (4 letters,
+            // 20 bits) takes the reference frame loop: the units' group tables are built by it
+            // (`x_direct_covers`; `TbxScore::word`, 3 for BLOSUM62's instance).
             debugging: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled
                 || debug_hsp_saving
                 || x_soft_subjects
-                || sc.word() != 3,
+                || !crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers(sc.word()),
             chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
             // PAIRLUT: the groups built at dispatch point 0.
             lut: x_pair_lut_batch,

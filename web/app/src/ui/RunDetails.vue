@@ -10,6 +10,7 @@ import { CUSTOM_OUTPUT, customOutfmt } from '../domain/output-format';
 import { programById } from '../domain/programs';
 import CommandText from './CommandText.vue';
 import { formatBytes, formatCount, formatDateTime, formatDuration } from './format';
+import { vScrollFocus } from './scroll-focus';
 import VerificationBadge from './VerificationBadge.vue';
 
 const props = defineProps<{ run: RunView; loaded: LoadedRun }>();
@@ -101,7 +102,7 @@ const inputs = computed(() => [
     </ul>
 
     <h3>Warnings</h3>
-    <pre v-if="loaded.diagnostics !== ''" class="output" data-testid="run-diagnostics">{{ loaded.diagnostics }}</pre>
+    <pre v-if="loaded.diagnostics !== ''" v-scroll-focus="'Warnings'" class="output" data-testid="run-diagnostics">{{ loaded.diagnostics }}</pre>
     <p v-else class="muted" data-testid="run-diagnostics-none">The engine wrote no warnings.</p>
   </div>
 </template>

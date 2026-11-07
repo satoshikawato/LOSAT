@@ -776,8 +776,8 @@ Same values, faster computation:
   x1.011 (4 pairs, 0.993-1.015; user x1.000, instructions x0.9995); blastp sp4 `-subject` x1.000 (6),
   yeast `-db` x1.001 (4); user-space instructions x0.970-0.9995 in every cell.
 - `LOSAT_X_DPNIBBLE=1` (every program's vector X-drop traceback, memory; in the strict set from the
-  pull request that added it, 2026-10-24; since 2026-11-03 (the fold of line SF S3 family dp-trace) it also
-  governs the pool of long traces, folded from `LOSAT_X_DPTRACEPOOL` (entry below): a trace past the four-bit
+  pull request that added it, 2026-10-24; from 2026-11-03 (the fold of line SF S3 family dp-trace) to
+  2026-11-06 (line EB P2', next entry) it also governed the pool of long traces, folded from `LOSAT_X_DPTRACEPOOL` (entry below): a trace past the four-bit
   rows of one NCBI chunk (`CHUNKSIZE` 2,097,152 cells, `blast_gapalign.c:61`, 1 MiB) comes from a pool the
   scratches on a Rayon pool thread share, and the pool keeps two idle pairs; `=0` returns to one byte per cell
   and every scratch keeps its own trace. Measured with the fold: Sakai x EDL933 `-subject` at 16 threads, blastn and dc-megablast x0.993 and x0.995 the time and x1.015 and x1.005 the max RSS (rounds 0.93-1.12, as dev's own spread), at 4 threads x0.998 / x0.997 and x1.007 / x1.008; one-thread instructions x0.994-0.999; outputs equal to dev's and NCBI's) the
@@ -806,7 +806,12 @@ Same values, faster computation:
   the kernels' script codes in `const` blocks keep a one-byte kernel's register allocation, one thread at
   dev's instructions, x0.998 / x0.999): dc-megablast 16 threads x0.984 (8 pairs), 633 -> 476; blastn 16
   threads x0.986 (8), 535 -> 379; 4 threads x0.993 / x1.000 (6), 217 -> 189 / 257 -> 197.
-- `LOSAT_X_DPTRACEPOOL=1` (every program's vector X-drop traceback, memory; folded into `LOSAT_X_DPNIBBLE` on
+- `LOSAT_X_DPTRACEPOOL=1` (every program's vector X-drop traceback, memory; superseded on 2026-11-06, line EB
+  P2', by the rows in chunks, which no switch governs: every scratch keeps its traceback rows and their
+  records in a list of 1 MiB chunks as NCBI keeps `GapStateArrayStruct` (`XTrace`, `blast_gapalign.c:61,70-137`;
+  a row that does not fit the free part of the chunk being filled goes to the next), the chunks after a
+  scratch's first come from one pool shared by every scratch and go back when the traceback call ends, and
+  `LOSAT_X_DPNIBBLE` sets only the four-bit layout; folded into `LOSAT_X_DPNIBBLE` on
   2026-11-03, line SF S3 family dp-trace: no variable any more, the pool follows `LOSAT_X_DPNIBBLE`'s rule
   (a scratch on a Rayon pool thread) and `LOSAT_X_DPNIBBLE=0` gives every scratch its own trace; the pool keeps
   two idle pairs as before (one was measured: dc-megablast Sakai x EDL933 `-subject` 1.046x the time at 16
@@ -5060,7 +5065,7 @@ Scheduling (each value computed by one thread with the original function; order 
   the `[X_STATS] TBNXLATE` / `[X_SHADOW] TBNXLATE` lines are gone, and so is
   `LOSAT/tests/tblastn_subject_translate.rs` (it compared the report with `=0` and the shadow).
 - TBNSCANBF (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's decision of that day on
-  the timings below; no variable; always on) tblastn (speed; `tblastn/x_scan_bf.rs`): the
+  the timings below; no variable; always on) tblastn (speed; `tblastx/x_aascan_bf.rs`): the
   lookup scan of the unit path (`search_seed.rs` `x_scan_unit`) takes the subject in
   blocks of 256 words. Each word's position and table index are written to a list whose length
   advances by the word's presence-vector bit, without a branch; the hits of the listed words are
@@ -5466,7 +5471,7 @@ Scheduling (each value computed by one thread with the original function; order 
   `the_last_overflow_chain_is_copied_exactly`, both with and without the kept block; the first counts that the call
   after every stop finds its block kept for it; `tests/tblastn_scan_byte.rs` `the_offset_array_size_changes_only_the_scan_calls`: the same
   report at one and four threads with both switches, `=0` and neither). The units of the branch-free scan
-  (`x_scan_bf.rs`: aarch64, and tables that are not sparse without AVX2) keep `LOSAT_X_TBNPAIRCAP`'s size. Where:
+  (`tblastx/x_aascan_bf.rs`: aarch64, and tables that are not sparse without AVX2) keep `LOSAT_X_TBNPAIRCAP`'s size. Where:
   the units that take TBNSCANBYTE's scan (platform).
   Measured 2026-10-29 on the workstation (2x Xeon Gold 6338; base dev d6208db9; every output of a case the same bytes
   in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16 CPUs for
@@ -5744,7 +5749,7 @@ Scheduling (each value computed by one thread with the original function; order 
   it off; `tblastx/x_scan_bf.rs`): the lookup scans of the unit path
   (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/run_impl.rs`) walk the subject
   ranges as NCBI's `s_BlastAaScanSubject` (`blast_aascan.c:48-131`) does and scan each range with
-  the branch-free loop of tblastn (TBNSCANBF, graduated; `tblastn/x_scan_bf.rs` `x_scan_one_range_bf`), passing
+  the branch-free loop of tblastn (TBNSCANBF, graduated; `tblastx/x_aascan_bf.rs` `x_scan_one_range_bf`), passing
   on the room the earlier ranges of the call left, so every call returns NCBI's pairs and scan range
   (test `x_scan_subject_bf_equals_ncbi_scan_on_random_subjects` against `s_blast_aa_scan_subject`:
   TBLASTX tables, subjects of one or many ranges, offset arrays down to the longest chain). The
@@ -7092,7 +7097,7 @@ Scheduling (each value computed by one thread with the original function; order 
   presence test went with the variable; acts where the standard lookup table is scanned by the
   direct loop or `LOSAT_X_BXDIAG`'s fused loop; the compressed table and the reference word finder keep their
   scans) the subject words with lookup hits found without a branch per word, by tblastn's loop of
-  tblastn's TBNSCANBF (graduated; `tblastn/x_scan_bf.rs`): the direct loop calls `x_scan_one_range_bf` (NCBI's pairs,
+  tblastn's TBNSCANBF (graduated; `tblastx/x_aascan_bf.rs`): the direct loop calls `x_scan_one_range_bf` (NCBI's pairs,
   stop and resume, and `scan_range` values, as for tblastn), and the fused loop lists the positions of 256 words
   with `x_block_candidates` and passes the listed cells to the cell test in position order
   (`blastp/x_seed_fused.rs` `x_scan_cells_bf`; blastp's own loop keeps the presence test). Tests: the fused

@@ -27,13 +27,14 @@ use super::{
     blastp_gapped_x_dropoff_raw, database, BlastpRuntimeLookup, BlastpSubjectRef,
     BlastpSubjectResult, BlastpSubjectScratch, PrelimCollector,
 };
-use crate::algorithm::blastp::args::ResolvedBlastpArgs;
+use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::encoding::EncodedProtein;
 use crate::algorithm::blastp::hsp::BlastpHitList;
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::blastp::x_redo_subjects::XRedoSubjects;
 use crate::algorithm::pssm_search::lookup::build_pssm_lookup;
 use crate::algorithm::pssm_search::prelim::{PssmPrelim, PssmSubjectScratch};
+use crate::algorithm::pssm_search::redo1;
 use crate::algorithm::pssm_search::traceback0::PssmTraceback0;
 use crate::algorithm::pssm_search::PsiSearch;
 use crate::algorithm::tblastx::constants::{
@@ -44,6 +45,8 @@ use crate::algorithm::tblastx::lookup::{
 };
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
+use crate::blastinput::fasta_reader::FastaRecord;
+use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
 use crate::stats::{blast_spouge_etos, BlastGumbelBlk, KarlinParams};
 
 /// The lookup table of the PSSM and the query's contexts (with `kbp_std`, the query's
@@ -319,9 +322,9 @@ pub(super) fn pssm_prelim(
     }
 }
 
-/// The CBS-0 traceback of a PSSM search (`pssm_search::traceback0`): the final hit lists of the
-/// preliminary lists, which it takes. The final gapped X-drop and the e-values read
-/// `kbp_gap_psi`.
+/// The traceback of a PSSM search: mode 0's (`pssm_search::traceback0`), or the position-based
+/// redo of modes 1 to 3 (`pssm_redo`). The final hit lists of the preliminary lists, which it
+/// takes. The final gapped X-drop and the e-values read `kbp_gap_psi`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:464-467
 /// ```c
@@ -352,6 +355,20 @@ pub(super) fn pssm_traceback(
     let x_drop_final =
         blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, karlin.gapped.lambda)
             .max(x_drop_gapped);
+    if args.comp_based_stats.mode != BlastpCompositionMode::NoCompositionBasedStats {
+        return pssm_redo(
+            args,
+            psi,
+            &contexts[0],
+            subjects,
+            gapped_params,
+            &karlin,
+            x_drop_final,
+            psi_gumbel(gumbel),
+            preliminary_hit_lists,
+            compact_hit_lists,
+        );
+    }
     PssmTraceback0 {
         rows: &psi.pssm,
         context: &contexts[0],
@@ -366,4 +383,126 @@ pub(super) fn pssm_traceback(
         hitlist_size: args.traceback_hitlist_size(),
     }
     .run(preliminary_hit_lists, compact_hit_lists, pool)
+}
+
+/// The position-based redo of a PSSM search (`pssm_search::redo1`, modes 1 to 3): the matrix
+/// information of the PSSM (`PosMatrixInfo`, built when a preliminary list is there to redo),
+/// then the redo of every list.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1497
+/// ```c
+///     if (ext_params->options->compositionBasedStats > 0 ||
+///         ext_params->options->eTbackExt == eSmithWatermanTbck) {
+///         status =
+///             Blast_RedoAlignmentCore_MT(program_number, ...);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3254-3258
+/// ```c
+///         sbp_tld[i] = s_BlastScoreBlk_Copy(
+///                 program_number,
+///                 sbp,
+///                 sbp->alphabet_code,
+///                 sbp->number_of_contexts
+///         );
+/// ```
+/// The copy's matrix information reads its frequency ratios (zero where the PSSM has none: then
+/// every column takes BLOSUM62's), its ideal block and `kbp_gap_std[0]`'s K.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn pssm_redo(
+    args: &ResolvedBlastpArgs,
+    psi: &PsiSearch,
+    context: &QueryContext,
+    subjects: XRedoSubjects<'_>,
+    gapped_params: &KarlinParams,
+    karlin: &PsiKarlin,
+    x_drop_final: i32,
+    gumbel: &BlastGumbelBlk,
+    preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+) -> Result<Vec<Option<BlastpHitList>>> {
+    let has_lists = preliminary_hit_lists
+        .iter()
+        .zip(compact_hit_lists.iter())
+        .any(|(full, compact)| {
+            full.as_ref().is_some_and(|list| list.hsplist_count > 0)
+                || compact.as_ref().is_some_and(|list| list.hsplist_count > 0)
+        });
+    if !has_lists {
+        return Ok(preliminary_hit_lists.iter().map(|_| None).collect());
+    }
+    let sbp = crate::algorithm::psiblast::pssm::score_block(
+        args.scoring.matrix,
+        crate::core::psi::KarlinBlk {
+            lambda: gapped_params.lambda,
+            k: gapped_params.k,
+            h: gapped_params.h,
+        },
+    )?;
+    let query = &context.aa_seq[1..context.aa_seq.len() - 1];
+    let zero_ratios;
+    let freq_ratios: &[[f64; crate::core::blast_util::BLASTAA_SIZE]] = if psi.freq_ratios.is_empty()
+    {
+        zero_ratios = vec![[0.0; crate::core::blast_util::BLASTAA_SIZE]; query.len()];
+        &zero_ratios
+    } else {
+        &psi.freq_ratios
+    };
+    let kbp_psi = crate::core::psi::KarlinBlk {
+        lambda: karlin.ungapped.lambda,
+        k: karlin.ungapped.k,
+        h: karlin.ungapped.h,
+    };
+    let Some(info) = PosMatrixInfo::new(query, freq_ratios, &sbp, redo1::SCALING_FACTOR, kbp_psi)
+    else {
+        anyhow::bail!(
+            "a PSSM whose position-based scaling for the composition-based statistics gives no Karlin-Altschul parameters (NCBI BLAST+ 2.17.0 goes on with a Lambda of -1) is not supported by LOSAT's PSIBLAST"
+        );
+    };
+    redo1::PssmRedo1 {
+        pssm: &psi.pssm,
+        info: &info,
+        context,
+        subjects,
+        gap_open: args.scoring.gap_open,
+        gap_extend: args.scoring.gap_extend,
+        karlin: &karlin.gapped,
+        x_drop_final,
+        gumbel,
+        expect_value: args.evalue,
+        hitlist_size: args.traceback_hitlist_size(),
+        inclusion_ethresh: args.inclusion_ethresh,
+    }
+    .run(preliminary_hit_lists, compact_hit_lists)
+}
+
+/// The warning line of a PSSM query (psiblast `-in_pssm`): its label is the PSSM's Seq-id (the
+/// record's local id, DECISIONS 12 of line PS), and its messages add those of
+/// `PsiBlastSetupScoreBlock` (`PsiSearch::setup_messages`), which NCBI keeps with the query's
+/// others (sorted, `report::query_warnings::sorted_query_messages`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:188-190
+/// ```c++
+///         CRef<CSearchMessage> sm(new CSearchMessage(eBlastSevWarning, 0,
+///                                                    os.str()));
+///         _ASSERT(messages.size() == 1); // PSI-BLAST only works with one query
+///         messages.front().push_back(sm);
+/// ```
+#[cold]
+#[inline(never)]
+pub(super) fn pssm_query_warning(
+    program: &str,
+    psi: &PsiSearch,
+    record: &FastaRecord,
+    messages: &[String],
+) -> Vec<u8> {
+    let mut all = messages.to_vec();
+    all.extend(psi.setup_messages.iter().cloned());
+    crate::report::query_warnings::query_warning_with_seq_id(
+        program,
+        record.local_id.as_bytes(),
+        record,
+        &all,
+    )
 }

@@ -108,8 +108,8 @@ use super::arch::*;
 use super::kernel::finish;
 use super::x_w128::{build_row, fill_cols};
 use super::{
-    fits_8bit, script_codes, trace_bytes, ColSeq, RowSeq, Scores, XdropResult, XdropScratch, MAX_M,
-    PAD, SCRIPT_GAP_IN_A, TAB, VMAX,
+    fits_8bit, script_codes, ColSeq, RowSeq, Scores, XdropResult, XdropScratch, MAX_M, PAD, TAB,
+    VMAX,
 };
 use core::arch::aarch64::*;
 
@@ -676,8 +676,7 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
     }
     sc.dirty = b_size;
     if TB {
-        sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
-        sc.rows.push((0, 0, b_size as u32));
+        sc.trace.x_row_zero(NIB, b_size);
     }
 
     let mut ramp = [0i16; 16];
@@ -786,15 +785,12 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
         // no diagonal into the first lane of the band: lane 0 of the row's first block (`hpm`)
         let mut hpm = hpm0;
 
-        let row_off = sc.trace.len();
-        if TB {
-            crate::utils::xdrop_simd::x_trace_reserve(
-                &mut sc.trace,
-                &mut sc.rows,
-                bend - first + num_extra + 96,
-            );
-        }
-        let tr = sc.trace.as_mut_ptr().add(row_off);
+        let tr = if TB {
+            // SAFETY: room for every byte of the row loop (see `XTrace::x_row`)
+            sc.trace.x_row(bend - first + num_extra + 96)
+        } else {
+            core::ptr::null_mut()
+        };
 
         let bestv0 = splat16((bias + best_rel) as i16);
         let mut rs = Row {
@@ -883,19 +879,19 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
         }
         wend[wi] = proc_end;
         cur = wi;
+        let rec = if TB {
+            sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first)
+        } else {
+            core::ptr::null()
+        };
         if rs.slow {
             b_off = rs.rec_b + sc.x_sh;
             a_off = a;
             best_rel = lane0(rs.bestv) - bias;
-        }
-        if TB {
-            sc.trace
-                .set_len(row_off + trace_bytes(NIB, proc_end - first));
-            sc.rows.push((
-                row_off as u32,
-                (first + sc.x_sh) as u32,
-                (proc_end - first) as u32,
-            ));
+            if TB {
+                // No NCBI counterpart: the walk starts at this row's record (`XTrace::x_best`)
+                sc.trace.x_best(rec);
+            }
         }
         if fence_row {
             fence_hit = true;
@@ -1173,8 +1169,7 @@ unsafe fn align8<const TB: bool, const NIB: bool>(
     }
     sc.dirty8 = b_size;
     if TB {
-        sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
-        sc.rows.push((0, 0, b_size as u32));
+        sc.trace.x_row_zero(NIB, b_size);
     }
 
     let sat = |v: i32| v.min(255) as u8 as i8;
@@ -1289,15 +1284,12 @@ unsafe fn align8<const TB: bool, const NIB: bool>(
         }
         let mut hpm = hpm0;
 
-        let row_off = sc.trace.len();
-        if TB {
-            crate::utils::xdrop_simd::x_trace_reserve(
-                &mut sc.trace,
-                &mut sc.rows,
-                bend - first + num_extra + 96,
-            );
-        }
-        let tr = sc.trace.as_mut_ptr().add(row_off);
+        let tr = if TB {
+            // SAFETY: room for every byte of the row loop (see `XTrace::x_row`)
+            sc.trace.x_row(bend - first + num_extra + 96)
+        } else {
+            core::ptr::null_mut()
+        };
 
         let bestv0 = splat8((bias + best_rel) as u8 as i8);
         let mut rs = Row {
@@ -1378,19 +1370,19 @@ unsafe fn align8<const TB: bool, const NIB: bool>(
         }
         wend[wi] = proc_end;
         cur = wi;
+        let rec = if TB {
+            sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first)
+        } else {
+            core::ptr::null()
+        };
         if rs.slow {
             b_off = rs.rec_b + sc.x_sh;
             a_off = a;
             best_rel = lane0_u8(rs.bestv) - bias;
-        }
-        if TB {
-            sc.trace
-                .set_len(row_off + trace_bytes(NIB, proc_end - first));
-            sc.rows.push((
-                row_off as u32,
-                (first + sc.x_sh) as u32,
-                (proc_end - first) as u32,
-            ));
+            if TB {
+                // No NCBI counterpart: the walk starts at this row's record (`XTrace::x_best`)
+                sc.trace.x_best(rec);
+            }
         }
         if fence_row {
             fence_hit = true;

@@ -178,7 +178,7 @@
 //!
 //! BXSCANBF (graduated 2026-10-26: blastx always takes it): `x_scan_two_hit_with(.., branch_free: true, ..)`
 //! finds the cells with hits by the candidate loop of tblastn's branch-free scan
-//! (`tblastn/x_scan_bf.rs`, `x_block_candidates`): the positions of a block of words are written
+//! (`tblastx/x_aascan_bf.rs`, `x_block_candidates`): the positions of a block of words are written
 //! to a list whose length advances by the presence bit, without a branch on it, and the listed
 //! cells then go to the cell test in position order. The cells, their order and their hit lists
 //! are the presence-test loop's, so every outcome above is unchanged. blastp's own loop
@@ -254,11 +254,11 @@
 //! With `LOSAT_X_STATS` (and the `xstats` feature) `main` prints `[X_STATS] BPHITBF subjects=N` at
 //! exit when N is not zero, N the subjects the loop with the test scanned.
 
-use crate::algorithm::tblastn::x_scan_bf::{x_block_candidates, X_BLOCK};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::{
     BlastAaLookupTable, XCell, XHit, PV_ARRAY_BTS, PV_ARRAY_MASK,
 };
+use crate::algorithm::tblastx::x_aascan_bf::{x_block_candidates, X_BLOCK};
 use crate::utils::matrix::BLASTAA_SIZE;
 use std::mem::MaybeUninit;
 

@@ -1,0 +1,1 @@
+- Engine: the unused part of the old statistics layer `core::blast_stat` was deleted (`score_calc`, `search_space`, `length_adjustment`, and `sum_statistics` except `p_to_e` and `e_to_p`; 782 lines with their tests, which duplicate tests in `stats`), and `stats` keeps one copy each of `blast_expm1`, `blast_powi` and `blast_gcd` (63 lines fewer). No output changes.

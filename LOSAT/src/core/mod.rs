@@ -8,8 +8,9 @@
 //!
 //! # Structure
 //!
-//! - **Statistics** (`blast_stat`): Karlin-Altschul statistics, E-values, length
-//!   adjustment, search space
+//! - **Statistics** (`blast_stat`): the old layer's Karlin parameters from composition (the
+//!   BLOSUM62 ideal block, lambda of score probabilities) and the libm `p_to_e`/`e_to_p`; the
+//!   live layer is `crate::stats`
 //! - **Utilities** (`blast_util`, `blast_encoding`): sequence encoding and helpers
 //! - **Filtering/Masking** (`blast_seg`, a re-export of `utils::seg`)
 //! - **Composition adjustment** (`composition_adjustment`, NCBI algo/blast/composition_adjustment/)

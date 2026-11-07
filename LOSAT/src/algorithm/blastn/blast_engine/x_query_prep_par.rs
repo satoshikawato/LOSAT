@@ -127,13 +127,31 @@ fn on_pool(pool: &SearchPool<'_>, count: usize) -> bool {
     count > 1 && pool.enabled() && pool.threads() > 1
 }
 
-/// The serial buffer: today's `build_query_blastna_buffer`.
+/// The serial buffer: today's `fill_query_blastna_buffer`, into `buffer` (the batch loop's).
+fn serial_fill<L: QueryLetters + ?Sized>(
+    query_letters: &L,
+    context_offsets: &[i32],
+    query_concat_length: usize,
+    buffer: &mut Vec<u8>,
+) {
+    super::fill_query_blastna_buffer(query_letters, context_offsets, query_concat_length, buffer)
+}
+
+/// `serial_fill` into a buffer of its own (the tests).
+#[cfg(all(test, feature = "parallel"))]
 fn serial_buffer<L: QueryLetters + ?Sized>(
     query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
 ) -> Vec<u8> {
-    super::build_query_blastna_buffer(query_letters, context_offsets, query_concat_length)
+    let mut buffer = Vec::new();
+    serial_fill(
+        query_letters,
+        context_offsets,
+        query_concat_length,
+        &mut buffer,
+    );
+    buffer
 }
 
 /// The serial blocks: today's `context_ungapped_blocks` over `contexts`.
@@ -143,7 +161,7 @@ fn serial_blocks(contexts: &[&[u8]], spec: &NuclScoringSpec) -> Vec<Option<Karli
 
 /// The range of a context of `length` letters at `offset` in the buffer with its first sentinel
 /// (`None` for a context that is empty or does not end inside the block, which stays sentinels).
-// Copy of the `place` closure in `build_query_blastna_buffer` (run.rs): the serial function stays
+// Copy of the `place` closure in `fill_query_blastna_buffer` (run.rs): the serial function stays
 // untouched with the switch off, so a change of its rule must be made here too; the random
 // pool-vs-serial tests compare the two.
 #[cfg(all(
@@ -156,22 +174,23 @@ fn place(offset: i32, length: usize, query_concat_length: usize) -> Option<std::
     (start < end && end <= query_concat_length).then(|| start + 1..end + 1)
 }
 
-/// The parallel buffer; the same bytes as `serial_buffer`. Only called when `on_pool`. The flag is
-/// `true` when the queries were encoded on the pool and `false` when the spans were not in query
-/// order and disjoint and the serial function made the buffer (a fallback). `probe` is called once
-/// per query, on the thread that encodes it; production passes `|| {}`, which the compiler removes
-/// (a unit test passes a closure that looks at the thread).
+/// The parallel buffer, into `buffer`; the same bytes as `serial_fill`. Only called when
+/// `on_pool`. The flag is `true` when the queries were encoded on the pool and `false` when the
+/// spans were not in query order and disjoint and the serial function made the buffer (a
+/// fallback). `probe` is called once per query, on the thread that encodes it; production passes
+/// `|| {}`, which the compiler removes (a unit test passes a closure that looks at the thread).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn parallel_buffer<L: QueryLetters + ?Sized, P: Fn() + Sync>(
+fn parallel_fill<L: QueryLetters + ?Sized, P: Fn() + Sync>(
     query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
     pool: &SearchPool<'_>,
     probe: &P,
-) -> (Vec<u8>, bool) {
+    buffer: &mut Vec<u8>,
+) -> bool {
     debug_assert_eq!(2 * query_letters.count(), context_offsets.len());
     // (first byte, end, query) of the span of each query with a placed context, in query order.
     let mut spans: Vec<(usize, usize, usize)> = Vec::with_capacity(query_letters.count());
@@ -189,14 +208,12 @@ fn parallel_buffer<L: QueryLetters + ?Sized, P: Fn() + Sync>(
     // The spans of different queries must not overlap and must follow the query order (the serial
     // function writes in query order, so overlapping contexts would make its bytes depend on it).
     if !spans.windows(2).all(|w| w[0].1 <= w[1].0) {
-        return (
-            serial_buffer(query_letters, context_offsets, query_concat_length),
-            false,
-        );
+        serial_fill(query_letters, context_offsets, query_concat_length, buffer);
+        return false;
     }
-    let mut with_sentinels = vec![super::NUCL_SENTINEL; query_concat_length + 2];
+    super::x_query_sentinels(buffer, query_concat_length + 2);
     let mut parts: Vec<(&mut [u8], usize, usize)> = Vec::with_capacity(spans.len());
-    let mut rest: &mut [u8] = &mut with_sentinels;
+    let mut rest: &mut [u8] = buffer;
     let mut base = 0usize;
     for &(a, b, q) in &spans {
         let (_, tail) = std::mem::take(&mut rest).split_at_mut(a - base);
@@ -209,7 +226,7 @@ fn parallel_buffer<L: QueryLetters + ?Sized, P: Fn() + Sync>(
         parts.par_iter_mut().for_each(|(part, a, q)| {
             probe();
             let offsets = &context_offsets[2 * *q..2 * *q + 2];
-            // The same two calls as `build_query_blastna_buffer` (run.rs), in its order, into the
+            // The same two calls as `fill_query_blastna_buffer` (run.rs), in its order, into the
             // same bytes (`range` is relative to the buffer, `a` is the buffer index of the part's
             // first byte). A copy: a change of the serial calls must be made here too.
             query_letters.read(*q, |letters| {
@@ -228,28 +245,48 @@ fn parallel_buffer<L: QueryLetters + ?Sized, P: Fn() + Sync>(
             });
         });
     });
-    (with_sentinels, true)
+    true
 }
 
 #[cfg(not(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 )))]
-fn parallel_buffer<L: QueryLetters + ?Sized, P: Fn() + Sync>(
+fn parallel_fill<L: QueryLetters + ?Sized, P: Fn() + Sync>(
     query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
     _pool: &SearchPool<'_>,
     _probe: &P,
+    buffer: &mut Vec<u8>,
+) -> bool {
+    serial_fill(query_letters, context_offsets, query_concat_length, buffer);
+    false
+}
+
+/// `parallel_fill` into a buffer of its own (the tests).
+#[cfg(all(test, feature = "parallel"))]
+fn parallel_buffer<L: QueryLetters + ?Sized, P: Fn() + Sync>(
+    query_letters: &L,
+    context_offsets: &[i32],
+    query_concat_length: usize,
+    pool: &SearchPool<'_>,
+    probe: &P,
 ) -> (Vec<u8>, bool) {
-    (
-        serial_buffer(query_letters, context_offsets, query_concat_length),
-        false,
-    )
+    let mut buffer = Vec::new();
+    let on_the_pool = parallel_fill(
+        query_letters,
+        context_offsets,
+        query_concat_length,
+        pool,
+        probe,
+        &mut buffer,
+    );
+    (buffer, on_the_pool)
 }
 
 /// The parallel blocks; the same blocks as `serial_blocks`. Only called when `on_pool`. `probe` is
-/// called once per context, on the thread that computes it (see `parallel_buffer`).
+/// called once per context, on the thread that computes it (see `parallel_fill`).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -308,26 +345,82 @@ fn same_bits(a: &Option<KarlinParams>, b: &Option<KarlinParams>) -> bool {
     }
 }
 
-/// The query buffer as the switch `on` makes it. Separate from the environment so that tests
-/// choose the switch.
-pub(super) fn buffer_with_mode<L: QueryLetters + ?Sized>(
+/// The query buffer as the switch `on` makes it, into `buffer`. Separate from the environment so
+/// that tests choose the switch.
+pub(super) fn fill_with_mode<L: QueryLetters + ?Sized>(
     query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
     pool: &SearchPool<'_>,
     on: bool,
-) -> Vec<u8> {
-    buffer_with_probe(
+    buffer: &mut Vec<u8>,
+) {
+    fill_with_probe(
         query_letters,
         context_offsets,
         query_concat_length,
         pool,
         on,
         &|| {},
+        buffer,
     )
 }
 
-/// `buffer_with_mode` with a `probe` that the parallel map calls once per query.
+/// `fill_with_mode` with a `probe` that the parallel map calls once per query.
+fn fill_with_probe<L: QueryLetters + ?Sized, P: Fn() + Sync>(
+    query_letters: &L,
+    context_offsets: &[i32],
+    query_concat_length: usize,
+    pool: &SearchPool<'_>,
+    on: bool,
+    probe: &P,
+    buffer: &mut Vec<u8>,
+) {
+    if on {
+        crate::utils::xreach::x_reach!("LOSAT_X_QPREPPAR", on_pool(pool, query_letters.count()));
+    }
+    if !on || !on_pool(pool, query_letters.count()) {
+        serial_fill(query_letters, context_offsets, query_concat_length, buffer);
+        return;
+    }
+    let on_the_pool = parallel_fill(
+        query_letters,
+        context_offsets,
+        query_concat_length,
+        pool,
+        probe,
+        buffer,
+    );
+    if !on_the_pool {
+        // The serial function made it (spans not in query order and disjoint): not an encoding on
+        // a pool, nothing to compare.
+        FALLBACKS.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// `fill_with_mode` into a buffer of its own (the tests).
+#[cfg(all(test, feature = "parallel"))]
+fn buffer_with_mode<L: QueryLetters + ?Sized>(
+    query_letters: &L,
+    context_offsets: &[i32],
+    query_concat_length: usize,
+    pool: &SearchPool<'_>,
+    on: bool,
+) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    fill_with_mode(
+        query_letters,
+        context_offsets,
+        query_concat_length,
+        pool,
+        on,
+        &mut buffer,
+    );
+    buffer
+}
+
+/// `fill_with_probe` into a buffer of its own (the tests).
+#[cfg(all(test, feature = "parallel"))]
 fn buffer_with_probe<L: QueryLetters + ?Sized, P: Fn() + Sync>(
     query_letters: &L,
     context_offsets: &[i32],
@@ -336,29 +429,20 @@ fn buffer_with_probe<L: QueryLetters + ?Sized, P: Fn() + Sync>(
     on: bool,
     probe: &P,
 ) -> Vec<u8> {
-    if on {
-        crate::utils::xreach::x_reach!("LOSAT_X_QPREPPAR", on_pool(pool, query_letters.count()));
-    }
-    if !on || !on_pool(pool, query_letters.count()) {
-        return serial_buffer(query_letters, context_offsets, query_concat_length);
-    }
-    let (buffer, on_the_pool) = parallel_buffer(
+    let mut buffer = Vec::new();
+    fill_with_probe(
         query_letters,
         context_offsets,
         query_concat_length,
         pool,
+        on,
         probe,
+        &mut buffer,
     );
-    if !on_the_pool {
-        // The serial function made it (spans not in query order and disjoint): not an encoding on
-        // a pool, nothing to compare.
-        FALLBACKS.fetch_add(1, Ordering::Relaxed);
-        return buffer;
-    }
     buffer
 }
 
-/// The ungapped blocks of `contexts` as the switch `on` makes them (see `buffer_with_mode`).
+/// The ungapped blocks of `contexts` as the switch `on` makes them (see `fill_with_mode`).
 pub(super) fn blocks_with_mode(
     contexts: &[&[u8]],
     spec: &NuclScoringSpec,
@@ -385,27 +469,28 @@ fn blocks_with_probe<P: Fn() + Sync>(
     parallel_blocks(contexts, spec, pool, probe)
 }
 
-/// The BLASTNA buffer of a query batch with its sentinels, as `build_query_blastna_buffer` makes it:
-/// the environment's switch decides.
+/// The BLASTNA buffer of a query batch with its sentinels, as `fill_query_blastna_buffer` makes it,
+/// into `buffer` (the batch loop's): the environment's switch decides.
 pub(super) fn query_buffer<L: QueryLetters + ?Sized>(
     query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
     pool: &SearchPool<'_>,
-) -> Vec<u8> {
+    buffer: &mut Vec<u8>,
+) {
     let start = timing_on().then(std::time::Instant::now);
-    let buffer = buffer_with_mode(
+    fill_with_mode(
         query_letters,
         context_offsets,
         query_concat_length,
         pool,
         on(),
+        buffer,
     );
     if let Some(start) = start {
         ENCODE_NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         CALLS.fetch_add(1, Ordering::Relaxed);
     }
-    buffer
 }
 
 /// The ungapped Karlin block of each context, as `context_ungapped_blocks` makes them: the
@@ -634,6 +719,14 @@ mod tests {
                     let want = serial_buffer(&letters[..], &offsets, total);
                     let got = buffer_with_mode(&letters[..], &offsets, total, pool, true);
                     assert_eq!(got, want, "threads {threads} count {count} gap {gap:?}");
+                    // the batch loop's kept buffer, written again over other bytes
+                    let mut kept = got.clone();
+                    kept.fill(0xA5);
+                    fill_with_mode(&letters[..], &offsets, total, pool, true, &mut kept);
+                    assert_eq!(
+                        kept, want,
+                        "kept: threads {threads} count {count} gap {gap:?}"
+                    );
                     if gap.is_none() && count > 1 && pool.threads() > 1 {
                         let (got, on_the_pool) =
                             parallel_buffer(&letters[..], &offsets, total, pool, &|| {});

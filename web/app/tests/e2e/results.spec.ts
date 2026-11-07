@@ -178,7 +178,7 @@ const literal = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 async function show(page: Page, tab: Tab): Promise<void> {
   const button = page.getByTestId(TABS[tab]);
   await button.click();
-  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  await expect(button).toHaveAttribute('aria-selected', 'true');
 }
 
 /**
@@ -194,7 +194,7 @@ async function run(page: Page, number: number): Promise<void> {
 /** Opens a completed run's results in the run picker and waits until they are read. */
 async function openRun(page: Page, number: number): Promise<void> {
   await chooseRun(page, number);
-  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
 }
 
 /** The commands and stored outputs of the run on the results screen, read in its Outputs view; the Descriptions are shown after. */
@@ -436,7 +436,7 @@ async function expectGraphicSummary(page: Page, queryRows: readonly string[][], 
   await expect(popover.locator('.graphic-popover-title')).toHaveText(fields[1]!);
   await expect(popover).toContainText(`HSP ${rank + 1} · Bit score ${fields[11]} · E value ${fields[10]}`);
   await canvas.click({ position: { x: target.x, y: target.y } });
-  await expect(page.getByTestId('results-view-hits')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('results-view-hits')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', target.hsp);
   const block = page.getByTestId(`range-${target.hsp.replace(':', '-')}`);
   await expect(block).toBeInViewport();
@@ -593,7 +593,7 @@ for (const c of PROGRAM_CASES) {
       expect(readFileSync((await download.path())!, 'utf8'), `outfmt ${format} saved`).toBe(outputs.text[format]);
       await expect(menu).toHaveCount(0);
       await expect(page.getByTestId('results-download-all')).toBeFocused();
-      await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-selected', 'true');
     }
     // Escape closes the list, and the focus is on the button again.
     await page.getByTestId('results-download-all').click();
@@ -953,7 +953,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   // The Alignments are the tab of the next run opened, and of the results shown again (W4b).
   await page.getByTestId('tab-search').click();
   await page.getByTestId('tab-results').click();
-  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-selected', 'true');
   // outfmt 6 has the HSP; outfmt 0 has no alignment heading for its subject.
   await showOutput(page, 1, 6, false);
   expect((await text(page.getByTestId('result-output'))).split('\n')).toContain(row);
@@ -972,7 +972,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   await page.getByTestId('param-max_target_seqs-other').fill(String(limit));
   await run(page, 2);
   await openRun(page, 2);
-  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('results-run-options')).toHaveText(`-task blastn -max_target_seqs ${limit}`);
   await expect(page.getByTestId('results-program')).toHaveText('BLASTN (task blastn)');
   const notice = page.locator('[data-testid="results-notice"][data-kind="subject-limit"]');
@@ -1228,7 +1228,7 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   }
   await run(page, 2);
   await openRun(page, 2);
-  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-selected', 'true');
   const { asked, failNext } = await watchReads(page);
   const before = await asked();
   await show(page, 'hits');
@@ -1553,7 +1553,7 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
       name: /^Dot plot of 2 HSPs\. .*Ctrl or ⌘ and the mouse wheel.* n and p to select the next or previous HSP; Enter to show the selected HSP, and Escape to close it\.$/,
     }),
   ).toHaveAttribute('data-testid', 'dotplot-canvas');
-  await expect(canvas).toHaveCSS('touch-action', 'pan-y');
+  await expect(canvas).toHaveCSS('touch-action', 'pan-y pinch-zoom');
   await expect(page.getByTestId('dotplot-legend-selected')).toBeVisible();
 
   // An HSP chosen in the list is selected on the plot; "Zoom to HSP" frames it, from a view
@@ -1628,7 +1628,7 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await expect(popup).toHaveCSS('outline-width', '2px');
   // "Show alignment": the Alignments, with the HSP's Range in view and the focus on its label.
   await popup.getByTestId('dotplot-popup-alignment').click();
-  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', secondId);
   const range = page.getByTestId(`range-${secondId.replace(':', '-')}`);
   await expect(range.getByTestId('range-label')).toBeFocused();
@@ -1678,7 +1678,7 @@ test('the dot plot: the HSP popup is outside the plot, so a click on any line se
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     await expect(canvas).toHaveAttribute('data-selected', target.hsp);
     await expect(popup).toHaveAttribute('data-hsp', target.hsp);
-    await expect(page.getByTestId(TABS.dotplot)).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId(TABS.dotplot)).toHaveAttribute('aria-selected', 'true');
     await expect.poll(() => coversPlot(popup, canvas), `the popup of ${target.hsp} covers the plot`).toBe(false);
   }
   await expectNoSideScroll(page, 'dot plot popup');
@@ -2095,7 +2095,7 @@ test('narrow screens: the results are no wider than the screen; "Run LOSAT" open
   await page.getByTestId('tab-search').click();
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   await submit(page);
-  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
   await expect(heading).toBeFocused();
   await expect(page.getByTestId('run-2-option')).toHaveCount(1);
   await expect(heading).toBeInViewport({ ratio: 1 });
@@ -2253,7 +2253,7 @@ test('after the browser removed the stored results, the Outputs, Export and Down
   await expect(problem).toHaveAttribute('data-failed', '1:0');
   await expect(problem).toHaveText(`The results of run 1 could not be read: ${removed}`);
   await expect(output).toHaveCount(0);
-  await expect(page.getByTestId('format-0')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('format-0')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('result-command')).toHaveText('losat blastn -query query.fa -subject subject.fa -outfmt 0');
   // Export saves nothing and says why, in the same place.
   await page.getByTestId('export-output').click();
@@ -2321,7 +2321,7 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
     await waitStatus(page, run, 'completed');
     await chooseRun(page, run);
     await page.getByTestId('results-view-outputs').click();
-    await expect(page.getByTestId('results-outputs').locator('nav.tabs button')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7', `outfmt ${outfmt}`]);
+    await expect(page.getByTestId('results-outputs').getByRole('tab')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7', `outfmt ${outfmt}`]);
     await page.getByTestId('format-custom').click();
     await expect(output).toHaveAttribute('data-shown', `${run}:4`);
     await expect(command).toHaveText(`losat ${id} -query query.fa -subject subject.fa -outfmt '${outfmt}'`);
@@ -2368,7 +2368,7 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
   await waitStatus(page, cases.length + 1, 'completed');
   await chooseRun(page, cases.length + 1);
   await page.getByTestId('results-view-outputs').click();
-  await expect(page.getByTestId('results-outputs').locator('nav.tabs button')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7']);
+  await expect(page.getByTestId('results-outputs').getByRole('tab')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7']);
   await page.getByTestId('results-download-all').click();
   await expect(page.getByTestId('results-download-menu').getByRole('button')).toHaveCount(3);
 });
@@ -2465,7 +2465,7 @@ test("Additional options' -outfmt of another format adds its output to the Outpu
     await waitStatus(page, run, 'completed');
     await chooseRun(page, run);
     await page.getByTestId('results-view-outputs').click();
-    await expect(page.getByTestId('results-outputs').locator('nav.tabs button')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7', `outfmt ${outfmt}`]);
+    await expect(page.getByTestId('results-outputs').getByRole('tab')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7', `outfmt ${outfmt}`]);
     await page.getByTestId('format-custom').click();
     await expect(page.getByTestId('export-output')).toHaveText(`Export outfmt ${outfmt}`);
     if (binary) await expect(output).toHaveCount(0);

@@ -1069,13 +1069,25 @@ impl BlastpArgs {
             .and_then(|pssm| pssm.in_pssm.as_deref())
         {
             Some(path) => {
-                let search = crate::algorithm::psiblast::in_pssm::read_in_pssm(path)?;
+                let mut search = crate::algorithm::psiblast::in_pssm::read_in_pssm(path)?;
                 if let Some(pssm) = &self.psiblast_pssm {
                     crate::algorithm::psiblast::in_pssm::check_pssm_file_options(pssm)?;
                 }
+                search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
+                    &search,
+                    mode,
+                    &options.matrix_name,
+                );
                 Some(std::sync::Arc::new(search))
             }
             None => None,
+        };
+        // A PSSM search runs modes 2 and 3 as 1 (`PsiBlastSetupScoreBlock`), which every later
+        // reader of the options sees (`algorithm::psiblast::in_pssm::position_based_mode`).
+        let mode = if psi_search.is_some() {
+            crate::algorithm::psiblast::in_pssm::position_based_mode(mode)
+        } else {
+            mode
         };
         // NCBI's `Validate` (`BLAST_ValidateOptions`), shared with TBLASTN.
         crate::stats::protein_options::validate_protein_options(&ProteinOptionsCheck {

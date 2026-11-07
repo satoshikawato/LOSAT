@@ -167,8 +167,9 @@ fn search_records(
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
     write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
-    // LOSAT's refusal of a query title the archive cannot write, before its first byte.
-    if archive.is_some() {
+    // LOSAT's refusal of a query title the archive cannot write, before its first byte. A batch
+    // size of 0 reads no query, so no title (`archive::prescan_query_titles`).
+    if archive.is_some() && batch_size != 0 {
         crate::report::archive::check_titles(query_records, "query", "BLASTX")?;
     }
     // The environment of a search of subject records, after the subjects' warnings
@@ -409,11 +410,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     let mut run_subjects: Vec<ReportedSubject> = Vec::new();
     let mut subject_places = std::collections::HashMap::new();
     let mut first_hsp = 0;
-    let asks = resolved
-        .iter()
-        .fold(ReportedAsks::default(), |asks, options| {
-            asks.or(ReportedAsks::of(options))
-        });
+    let asks = ReportedAsks::of_all(resolved);
     let mut render = |diagnostics: &mut dyn Write,
                       queries: &[FastaRecord],
                       results: &mut Vec<BatchResults>,
@@ -744,8 +741,9 @@ fn search_database(
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
-    // LOSAT's refusal of a query title the archive cannot write, before its first byte.
-    if archive.is_some() {
+    // LOSAT's refusal of a query title the archive cannot write, before its first byte. A batch
+    // size of 0 reads no query, so no title (`archive::prescan_query_titles`).
+    if archive.is_some() && batch_size != 0 {
         crate::report::archive::check_titles(query_records, "query", "BLASTX")?;
     }
     app::check_search_environment("BLASTX", false, outputs.only_archive())?;

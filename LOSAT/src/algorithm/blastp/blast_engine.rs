@@ -1765,7 +1765,7 @@ fn ncbi_compressed_lookup_tables(
         .map(|batch| batch.searched.clone())
         .filter(|searched| !searched.is_empty())
         .filter(|searched| {
-            crate::algorithm::common::protein_query_split::split_protein_batch(
+            crate::algorithm::blastp::protein_query_split::split_protein_batch(
                 &query_lengths[searched.clone()],
                 sizes,
             )
@@ -2416,9 +2416,13 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     }
     // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`), and the PSSM's of psiblast
     // `-in_pssm` (`pssm_search::traceback0`); psiblast's rounds without a PSSM keep mode 2.
+    // psiblast `-in_pssm` runs modes 2 and 3 as 1 (`PsiBlastSetupScoreBlock`, the options), and
+    // mode 1 as the position-based redo (`pssm_search::redo1`).
     if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust
         && !((args.app == BlastpApp::Blastp || args.psi_search.is_some())
             && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats)
+        && !(args.psi_search.is_some()
+            && args.comp_based_stats.mode == BlastpCompositionMode::CompositionBasedStats)
     {
         bail!(
             "-comp_based_stats {} is not supported by LOSAT's {program}",
@@ -2474,6 +2478,19 @@ impl BlastpReport {
             // (`TaxdbPrinter`).
             BlastpReport::Archive | BlastpReport::Xml2(_) => None,
         })
+    }
+
+    /// Whether the report reads the sequence that NCBI's formatters find by a subject's Seq-align
+    /// id: every one but the Seq-annots, the archive and a table of fields that read nothing of
+    /// the subject (`report::tabular::reads_subject`).
+    fn reads_subjects(self) -> bool {
+        match self {
+            BlastpReport::Seqalign(_) | BlastpReport::Archive => false,
+            BlastpReport::CustomTabular(spec) => {
+                spec.reads_subject(crate::blastinput::app::Program::Blastp)
+            }
+            BlastpReport::Text(_) | BlastpReport::Xml | BlastpReport::Xml2(_) => true,
+        }
     }
 
     /// Whether the report is tabular (outfmt 6, 7, 10 and 20), which reads the tabular subject
@@ -3078,7 +3095,7 @@ fn query_record_masks(
                 .iter()
                 .map(|&(start, end)| (start as i32, end as i32 - 1))
                 .collect();
-            crate::algorithm::blastx::query_setup::combine_masks(ranges)
+            crate::algorithm::common::masks::combine_masks(ranges)
                 .into_iter()
                 .filter(|&(from, to)| from <= to && !(from == 0 && to == frame.aa_len as i32 - 1))
                 .collect()
@@ -6015,7 +6032,7 @@ fn psiblast_stop_at_invalid_query(
             "a PSSM query whose letters give no Karlin-Altschul parameters (with which NCBI BLAST+'s psiblast crashes) is not supported by LOSAT's PSIBLAST"
         ),
         Ok(sizes)
-            if crate::algorithm::common::protein_query_split::split_protein_batch(
+            if crate::algorithm::blastp::protein_query_split::split_protein_batch(
                 &[query_length],
                 sizes,
             )
@@ -6478,7 +6495,10 @@ fn search(
                 // format is a Seq-annot that the batches prefetch for
                 // (`PRE_FETCH_SEQS_LIMIT=2147483647`, `shared::seq_annots_prefetch`), whose
                 // prefetch can refuse a subject with parsed Seq-ids too
-                // (`ListedTitles::check_prefetched`).
+                // (`ListedTitles::check_prefetched`). A table of fields that read nothing of the
+                // subject has the same refusals of the prefetch, only on a database with parsed
+                // Seq-ids, whose definition lines the checks below never take
+                // (`database::x_titles_allow_blocks`).
                 if database.is_some()
                     && outfmts.first().is_some_and(|outfmt| {
                         crate::algorithm::common::database::seq_annots_prefetch(
@@ -6967,7 +6987,7 @@ fn x_block_search_refuses_nothing(
     query_batches: &[seq_range::RangedBatch],
     lengths: &[usize],
 ) -> bool {
-    use crate::algorithm::common::protein_query_split::{
+    use crate::algorithm::blastp::protein_query_split::{
         protein_chunk_would_be_split, split_protein_batch,
     };
     // `blastp_concatenated_query_length`: each query and the sentinel after it, but the last.
@@ -7476,7 +7496,7 @@ fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool)
 // NCBI searches every query batch on its own (RP-4). A blastp query's preliminary hit list
 // does not depend on the other queries of its batch, so the batches that NCBI does not
 // split are the search of all queries above; the queries of a batch that NCBI splits
-// (`common/protein_query_split.rs`) take the merged hit lists of the batch's query chunks,
+// (`blastp/protein_query_split.rs`) take the merged hit lists of the batch's query chunks,
 // each searched as a query set of its parts. The preliminary stage uses no effective search
 // space (its cutoffs and E-values use Spouge's FSC with the part's length), so the batch's
 // search spaces that NCBI gives a chunk do not change it. A chunk whose contexts all fail
@@ -7496,7 +7516,7 @@ fn search_split_query_batches(
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     x_prolog: bool,
 ) -> Result<()> {
-    use crate::algorithm::common::protein_query_split::{
+    use crate::algorithm::blastp::protein_query_split::{
         protein_chunk_part_in_record, protein_chunk_would_be_split, split_protein_batch,
     };
     let sizes = crate::blastinput::app::protein_query_split_sizes(args.app.name(), 10000)?;
@@ -10445,8 +10465,11 @@ fn run_resolved_in_pool(
     ))]
     let x_win_expand = false;
     // `-comp_based_stats 0`: the ordinary traceback below reads the compact lists as they are.
-    let ordinary_traceback =
-        args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats;
+    // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`, mode 0 or the
+    // position-based redo) takes the place of both, and reads them as they are too.
+    let ordinary_traceback = args.comp_based_stats.mode
+        == BlastpCompositionMode::NoCompositionBasedStats
+        || args.psi_search.is_some();
     if x_compact_expand_all && !x_win_expand && !ordinary_traceback {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
@@ -10472,7 +10495,8 @@ fn run_resolved_in_pool(
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
     let ordinary_hit_lists = if ordinary_traceback && args.psi_search.is_some() {
-        // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`).
+        // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`: mode 0's, or
+        // the position-based redo of modes 1 to 3).
         Some(pssm_hooks::pssm_traceback(
             &args,
             &contexts,
@@ -11769,12 +11793,14 @@ fn run_resolved_in_pool(
             .is_some_and(|outfmt| outfmt.prefetches_subjects());
     let prefetch_taxids =
         batches_prefetch && database.is_some_and(|database| database.taxdb_found());
-    // Whether that prefetch reads the subjects though the first format writes their Seq-align ids
-    // alone (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`): a subject with parsed
-    // Seq-ids that it cannot read as NCBI does is refused also without `taxdb.bti`
-    // (`ListedTitles::check_prefetched`).
-    let seq_annots_prefetch =
-        batches_prefetch && matches!(requested_formats.first(), Some(BlastpReport::Seqalign(_)));
+    // Whether that prefetch reads the subjects though the first format reads nothing of them
+    // (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, a table of fields that read nothing
+    // of the subject): a subject with parsed Seq-ids that it cannot read as NCBI does is refused
+    // also without `taxdb.bti` (`ListedTitles::check_prefetched`).
+    let prefetch_only = batches_prefetch
+        && requested_formats
+            .first()
+            .is_some_and(|outfmt| !outfmt.reads_subjects());
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:673-678
     // ```c++
     //     ITERATE(blast::CSearchResultSet, result, results) {
@@ -12063,14 +12089,10 @@ fn run_resolved_in_pool(
                 .cloned()
                 .unwrap_or_default();
             if result_warnings {
-                lines.extend(if args.psi_search.is_some() {
-                    // psiblast `-in_pssm`: the label is the PSSM's Seq-id, the record's local id.
-                    crate::report::query_warnings::query_warning_with_seq_id(
-                        args.app.ncbi_name(),
-                        record.local_id.as_bytes(),
-                        record,
-                        &messages,
-                    )
+                lines.extend(if let Some(psi) = args.psi_search.as_deref() {
+                    // psiblast `-in_pssm`: the label is the PSSM's Seq-id, the record's local id;
+                    // the messages add those of `PsiBlastSetupScoreBlock`.
+                    pssm_hooks::pssm_query_warning(args.app.ncbi_name(), psi, record, &messages)
                 } else {
                     crate::report::query_warnings::query_warning(
                         args.app.ncbi_name(),
@@ -12091,14 +12113,27 @@ fn run_resolved_in_pool(
         titles.check_reported_titles(&hit_lists)?;
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
         // (the formats that read a subject's Bioseq need its sequence found by its Seq-align
-        // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids, which LOSAT
-        // does for copies of one record; 13 to 16 and the tables of taxonomy fields write their
-        // taxids).
+        // id, which a table of fields that read nothing of the subject does not; outfmt 0, 5 and
+        // 13 to 16 join the hits of matching Seq-align ids, which LOSAT does for copies of one
+        // record; 13 to 16 and the tables of taxonomy fields write their taxids).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450
+        // ```c++
+        //     CSeq_loc seqloc(const_cast<CSeq_id&>(*ds.GetIds().back()), subj_start,
+        //                     subj_start+subjlen-1);
+        //
+        //     try {
+        //         CSeqVector sv(seqloc, scope);
+        //         sv.SetCoding(CSeq_data::e_Ncbistdaa);
+        //         sv.GetSeqData(0, kInvalidSeqPos, sequence_data);
+        //     } catch (const CException&) {
+        //         sequence_data.erase();
+        //         ERR_POST(Warning << "Failed to retrieve sequence " <<
+        // ```
+        // psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`) reads the letters of each aligned
+        // subject by its Seq-align id, as those formats do (review 1 of line DBID tabfields, H1).
         titles.check_parsed_reports(
             &hit_lists,
-            format_plans
-                .iter()
-                .any(|outfmt| !matches!(outfmt, BlastpReport::Seqalign(_) | BlastpReport::Archive)),
+            format_plans.iter().any(|outfmt| outfmt.reads_subjects()) || args.psi_pssm.is_some(),
             format_plans.iter().any(|outfmt| match outfmt {
                 BlastpReport::Text(OutputFormat::Pairwise)
                 | BlastpReport::Xml
@@ -12148,7 +12183,7 @@ fn run_resolved_in_pool(
     // first format's rows read their Bioseqs (`TabularSpec::subject_fetch`; `nident` alone on
     // rows with identities, `ListedTitles::fetched_ranks`).
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
-        if prefetch_taxids || psiblast_prefetched.is_some() || seq_annots_prefetch {
+        if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
             // too, which the prefetch does not: the rows of a batch with hits may open the
             // taxonomy database before a later batch's prefetch (`TaxdbRun::open_for_rows`).
@@ -12283,7 +12318,12 @@ fn run_resolved_in_pool(
                     ids.into()
                 }
                 (Some(titles), _) => {
-                    let (ids, accessions) = titles.tabular_subject_ids(&hit_lists)?;
+                    let (ids, accessions) = titles.tabular_subject_ids(
+                        &hit_lists,
+                        format_plans
+                            .iter()
+                            .any(|outfmt| outfmt.is_tabular() && outfmt.reads_subjects()),
+                    )?;
                     subject_accessions = accessions;
                     ids.into()
                 }

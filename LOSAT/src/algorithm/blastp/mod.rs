@@ -28,6 +28,9 @@ mod blast_xml;
 pub(crate) mod gapalign;
 pub(crate) mod hsp;
 mod query_split;
+// NCBI c++/src/algo/blast/api/split_query_cxx.cpp:145-171 (`CQuerySplitter`): the protein query batch's
+// chunks, used by BLASTP, TBLASTN and PSI-BLAST (moved from `common`, SW6 item 2).
+pub mod protein_query_split;
 mod seqalign;
 // NCBI c++/src/objtools/align_format/tabular.cpp: the tabular reports with a field list or a
 // delimiter, and outfmt 10 and 20, through the shared writer (`report::tabular`).

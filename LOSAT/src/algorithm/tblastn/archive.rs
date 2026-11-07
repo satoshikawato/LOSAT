@@ -30,6 +30,7 @@ use super::stage_d_stats::LocalSubjectParameters;
 use super::stage_e_report::{ReportRanges, ShownSubjects};
 use super::x_subject_store::SubjectLetters;
 use super::TblastnArgs;
+use crate::algorithm::common::masks::lowercase_runs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::value_parsers::SegSpec;
@@ -155,23 +156,6 @@ struct FirstContext {
     context0_space: i64,
 }
 
-/// The runs of lower-case letters of a record (inclusive 0-based positions).
-pub(crate) fn lowercase_runs(letters: &[u8]) -> Vec<(i32, i32)> {
-    let mut runs = Vec::new();
-    let mut start = None;
-    for (index, letter) in letters.iter().enumerate() {
-        if letter.is_ascii_lowercase() {
-            start.get_or_insert(index);
-        } else if let Some(from) = start.take() {
-            runs.push((from as i32, index as i32 - 1));
-        }
-    }
-    if let Some(from) = start {
-        runs.push((from as i32, letters.len() as i32 - 1));
-    }
-    runs
-}
-
 /// The masked regions of each query as NCBI's `TMaskedQueryRegions` holds them (`Map`,
 /// api/blast_aux.cpp:825-842): the SEG intervals and, with `-lcase_masking`, the lower-case runs of
 /// the searched letters, merged where they overlap, a mask that covers the whole query dropped,
@@ -202,7 +186,7 @@ fn query_record_masks(
                     .map(|(start, end)| (start as i32, end as i32 - 1))
                     .collect();
             let offset = ranges.queries.offset(q_idx) as i32;
-            crate::algorithm::blastx::query_setup::combine_masks(intervals)
+            crate::algorithm::common::masks::combine_masks(intervals)
                 .into_iter()
                 .filter(|&(from, to)| from <= to && !(from == 0 && to == letters.len() as i32 - 1))
                 .map(|(from, to)| (from + offset, to + offset))

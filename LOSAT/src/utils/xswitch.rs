@@ -132,7 +132,7 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_TBNHITBF` (the branch-free two-hit loop of TBLASTN's unit path,
 /// `tblastn/x_tbn_hitbf.rs`), `LOSAT_X_TBNLINKWIN` (the linking candidates of a head chosen by
 /// subject position, `tblastn/stage_d_linking/x_link_window.rs`) and `LOSAT_X_TBNSCANBF` (the
-/// lookup scan without a branch on the presence vector, `tblastn/x_scan_bf.rs`) graduated on
+/// lookup scan without a branch on the presence vector, `tblastx/x_aascan_bf.rs`) graduated on
 /// 2026-10-26: they left `STRICT_SET` and their previous code was deleted (NCBI's whole-window
 /// loop of the linking call stays as the reference of a unit test, and `XTwoHit::pairs` stays as
 /// the body that the branch-free loop hands the other hits to).

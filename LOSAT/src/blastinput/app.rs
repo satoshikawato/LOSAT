@@ -842,7 +842,7 @@ pub fn parse_comp_based_stats(
 /// overlap (`blastn/query_split.rs` `SplitSizes`; the `int` becomes a 64-bit `size_t`). The
 /// chunk size must be divisible by 3 only for a translated query (`translated_query`,
 /// tblastx). Whether a blastp or tblastn query batch is split is
-/// `common/protein_query_split.rs`.
+/// `blastp/protein_query_split.rs`.
 pub fn check_query_split_environment(
     program: &str,
     translated_query: bool,
@@ -889,7 +889,7 @@ pub(crate) fn read_query_split_variable(
 }
 
 /// NCBI's query chunk size and overlap of a blastp or tblastn search
-/// (`common/protein_query_split.rs` `protein_split_sizes`), with the environment variables
+/// (`blastp/protein_query_split.rs` `protein_split_sizes`), with the environment variables
 /// `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` read as NCBI reads them.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-58
@@ -904,7 +904,7 @@ pub fn protein_query_split_sizes(
     default_chunk_size: u32,
 ) -> anyhow::Result<crate::algorithm::blastn::query_split::SplitSizes> {
     Ok(
-        crate::algorithm::common::protein_query_split::protein_split_sizes(
+        crate::algorithm::blastp::protein_query_split::protein_split_sizes(
             default_chunk_size,
             read_query_split_variable(program, "CHUNK_SIZE")?,
             read_query_split_variable(program, "OVERLAP_CHUNK_SIZE")?,

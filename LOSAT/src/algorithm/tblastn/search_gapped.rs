@@ -2,9 +2,9 @@
 //! (frame, chunk) unit, the endpoint purge, the merge and the append, and the traceback helpers.
 
 use super::search_init::InitHsp;
+use super::search_seed::encode_tblastn_lookup_query;
 #[cfg(test)]
 use super::search_seed::Seed;
-use super::search_seed::{encode_tblastn_lookup_query, TranslatedChunk};
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::blastp::gapalign::{
@@ -12,6 +12,7 @@ use crate::algorithm::blastp::gapalign::{
     blastp_score_only_gapped_alignment_with_scratch, protein_identities_from_edit_ops,
     BlastpGappedAlignmentMode, GapAlignScratch,
 };
+use crate::algorithm::common::translated_chunks::TranslatedChunk;
 use crate::algorithm::tblastx::translation::{
     frame_length, translate_frame_into, x_codon_residues, x_codons_into, QueryFrame,
 };

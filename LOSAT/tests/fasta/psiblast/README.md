@@ -31,3 +31,10 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   (doubled in the ASN.1 string), a 685-byte title (wrapped at word ends), `tk tab<TAB>here` (the reader keeps
   `tk tab`), `tk café title` in UTF-8 (LOSAT refuses it with `-out_pssm`; NCBI writes `#` for each byte with an
   error message); `lc.faa` has letters 61-120 in lower case (the PSSM's query is the search's buffer, upper case).
+- `ps4b_q2.faa` (PS4b, design question Q2): a record without residues (`>e1 empty record`), then BDT63550.1,
+  BDT63556.1 and BDT63563.1 of `tests/fasta/PajaWSV.faa`: the `Subject sequence contains no data` warning comes
+  before the PSSM query's warning line.
+- `ps4b_stale_s1.faa` (PS4b review N3): `s_bz` (24 `BZ`, no true amino acid) and `s_good` (`tk.faa`'s 398 letters; the query
+  of `tests/fixtures/pssm/ps4_stale_q` is three TK stretches with 40-letter `DE` runs between them), for NCBI's adjusted PSSM kept across matches: `s_good`
+  is redone first, then `s_bz`'s first HSP is not redone (its adjustment fails) and its later HSPs are redone on the
+  PSSM `s_good` left.

@@ -38,10 +38,13 @@ const otherKind = computed(
 const otherKindName = computed(() => (kind.value === 'nucleotide' ? 'protein' : 'nucleotide'));
 const programLabel = computed(() => programById(props.state.program).label);
 const title = computed(() => (props.source.origin === 'paste' ? `Pasted sequences (${props.source.name})` : props.source.name));
-/** A pasted text of accessions that are not one per line, which cannot be read: Fetch takes them one per line (WA2-OP-04). */
+/**
+ * A pasted text of accessions only that are not one per line (WA2-OP-04): Fetch takes them one per line, so the card offers
+ * to put each on its own line. It does not depend on the reader: a list with no versions (AB000001 MH011443) reads as a
+ * sequence (ABMH) and a ✓, though it is a list of accessions.
+ */
 const splitsAccessions = computed(
-  () =>
-    props.source.origin === 'paste' && props.source.status === 'failed' && accessionsOnALine(props.state[props.role].paste) !== undefined,
+  () => props.source.origin === 'paste' && props.source.status !== 'indexing' && accessionsOnALine(props.state[props.role].paste) !== undefined,
 );
 const hasMark = computed(() => props.source.lead !== undefined && 'mark' in props.source.lead);
 /** The first line of a pasted text is an accession that the engine reads as a Seq-id: Fetch takes accessions only (WA2-OP-04). */
@@ -224,6 +227,12 @@ watch(verdict, (now) => {
       </div>
       <p v-else-if="source.check?.state === 'error'" class="error" :data-testid="`${testid}-check`" data-check="error">
         The input could not be checked here ({{ source.check.message }}).
+      </p>
+
+      <p v-if="splitsAccessions" class="hint">
+        <button type="button" class="link" :data-testid="`${testid}-split-accessions`" @click="$emit('splitAccessions')">
+          Put each accession on its own line
+        </button>
       </p>
 
       <p v-if="formatName" class="warning" :data-testid="`${testid}-format-warning`">

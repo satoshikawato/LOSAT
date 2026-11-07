@@ -274,10 +274,30 @@ test('accessions on one line are put one per line by one press, for Fetch (WA2-O
   await expect(page.getByTestId('subject-input')).toHaveValue('C_AA004835.1\nP12345');
   await expect(page.getByTestId('subject-fetch-group-0-button')).toBeFocused();
   await program(page, 'blastn');
+  // Accessions without a version are read as a sequence (AB000001 MH011443 is ABMH, a 4 nt record, in the
+  // engine build): the box is still a list of accessions, so the press is there, and Fetch comes after it.
+  await paste(page, 'query', 'AB000001 MH011443');
+  await expect(page.getByTestId('query-fetch-row')).toHaveCount(0);
+  await page.getByTestId('query-source-0-split-accessions').click();
+  await expect(page.getByTestId('query-input')).toHaveValue('AB000001\nMH011443');
+  await expect(page.getByTestId('query-fetch')).toBeFocused();
+  await program(page, 'blastp');
+  await paste(page, 'query', 'P12345 Q9Y261');
+  await expect(page.getByTestId('query-fetch-row')).toHaveCount(0);
+  await page.getByTestId('query-source-0-split-accessions').click();
+  await expect(page.getByTestId('query-input')).toHaveValue('P12345\nQ9Y261');
+  await expect(page.getByTestId('query-fetch-row')).toBeVisible();
+  await program(page, 'blastn');
   // A box with anything but accessions keeps the defline's button only.
   await paste(page, 'query', 'AB000001.1 MH011443.1 ACGT-1');
   await expect(page.getByTestId('query-source-0-split-accessions')).toHaveCount(0);
   await expect(page.getByTestId('query-source-0-add-defline')).toBeVisible();
+  // A box that is read as a sequence is not offered to be split: a bare sequence, and a GenBank ORIGIN line.
+  for (const text of ['ACGTACGTAC GGTTACGTAA', '        1 gatcctccat atacaacggt']) {
+    await paste(page, 'query', text);
+    await expect(page.getByTestId('query-source-0')).toBeVisible();
+    await expect(page.getByTestId('query-source-0-split-accessions')).toHaveCount(0);
+  }
   expect(away).toEqual([]);
 });
 

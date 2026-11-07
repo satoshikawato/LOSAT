@@ -39,6 +39,13 @@ describe('accessionLines', () => {
     expect(accessionsOnALine('AB000001.1 MH011443.1')).toEqual(['AB000001.1', 'MH011443.1']);
     expect(accessionsOnALine('ab000001.1,MH011443.1\n')).toEqual(['ab000001.1', 'MH011443.1']);
     expect(accessionsOnALine(' NR_074540.1, \tP12345 ,\r\nQ9Y261\n\nAB000001.1,')).toEqual(['NR_074540.1', 'P12345', 'Q9Y261', 'AB000001.1']);
+    // No version (a sequence to the reader): accessions still.
+    expect(accessionsOnALine('AB000001 MH011443')).toEqual(['AB000001', 'MH011443']);
+    expect(accessionsOnALine('P12345 Q9Y261')).toEqual(['P12345', 'Q9Y261']);
+    // A sequence, a GenBank ORIGIN line and a protein sequence have no accession-shaped word.
+    for (const text of ['ACGTACGTAC GGTTACGTAA', '        1 gatcctccat atacaacggt', '       61 aaccggttaa cc', 'MKLVFFAEDV GSNKGAIIGL']) {
+      expect(accessionsOnALine(text), text).toBeUndefined();
+    }
     // One per line is accessionLines'; anything but accessions (a gi, a sequence, a defline) is FASTA's.
     for (const text of ['AB000001.1\nMH011443.1', 'AB000001.1', '', ' , ', 'AB000001.1 12345678', 'AB000001.1 ACGT', '>q AB000001.1,MH011443.1']) {
       expect(accessionsOnALine(text), text).toBeUndefined();

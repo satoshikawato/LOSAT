@@ -103,9 +103,12 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    「The query accession is still being fetched.」で止まる。欄を書き換えると走っている取得は捨てる。取得中は取得先の選択を止め、
    「Fetching 1 of 2 from NCBI…」と送り先を出す。
    accession だけでない欄（線 WA の WA2-OP-04、2026-11-07）：1 行目が Seq-id として読まれる欄（accession や数字だけの行の後に
-   別の文字）の読めない理由は、adapter の文「…fetches through a data loader (from GenBank or a BLAST database). To fetch
-   accessions, put only the accessions in the box, one per line; otherwise start the input with a '>' defline.」（CLI の文は変えない）。
-   空白・コンマで区切った accession だけの欄は 1 行 1 つでないので Fetch を出さず（§4）、NCBI の reader の誤りの下に
+   別の文字）の読めない理由は adapter の文のまま（「…which is not supported in the browser (start the input with a '>' defline)」。
+   engine が Seq-id と見ても Fetch が取らない GI、PDB の id、`sp|…|` があるので、adapter には Fetch の案内を持たせない）。
+   card は、1 行目の頭に `>` を足すだけのボタン「Put '>' before the first line」を出し（Seq-id の場面では「Add the line」を出さない。
+   1 行目が最初の data 行になって読めない）、1 行目が `ACCESSION` に合う時だけ一文「To fetch accessions, put only the
+   accessions in the box, one per line.」を足す（`pointsToFetch`）。空白・コンマで区切った accession だけの欄は 1 行 1 つでない
+   ので Fetch を出さず（§4）、reader が読めるか（版の無い `AB000001 MH011443` は 4 nt の配列）に依らず card に
    「Put each accession on its own line」（押すと 1 行 1 つに書き換え、Fetch が出る。`accessionsOnALine`）。
 4. **1 accession に 1 要求、順に**。NCBI は 340 ms 以上空ける（鍵無し 3 req/s）。1 回に 100 個まで、合計 10 MB まで（超えたら
    「Open FASTA files…」で開く案内）。全部取れたときだけ欄に写し、失敗は欄をそのままにして取得先と accession を名乗る。

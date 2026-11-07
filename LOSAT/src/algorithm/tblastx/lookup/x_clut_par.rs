@@ -687,18 +687,11 @@ fn x_stripe_build(
     }
     // A cursor ends at the next cell's first slot; the cells of more than 5 offsets put o_k at
     // `x_emission_position(k, n)` (the serial builder's statements).
-    let mut appended: Vec<i32> = Vec::new();
     let mut begin = 0usize;
     for &end in &counts {
         let end = end as usize;
-        let n = (end - begin) as u32;
-        if n > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
-            let cell = &mut hits[begin..end];
-            appended.clear();
-            appended.extend_from_slice(cell);
-            for (k, &query_offset) in appended.iter().enumerate() {
-                cell[x_emission_position(k as u32, n) as usize] = query_offset;
-            }
+        if end - begin > COMPRESSED_HITS_PER_BACKBONE_CELL + 1 {
+            x_to_scan_order(&mut hits[begin..end]);
         }
         begin = end;
     }
@@ -710,8 +703,8 @@ fn x_stripe_build(
 }
 
 /// LOSAT_X_BPSTRIPEFILL: a thread's scratch for `x_stripe_fill`: the copy of the stripe's parts,
-/// the cells' counts (then cursors), the cells of more than 5 offsets, a cell's offsets.
-type XFillScratch = (Vec<u32>, Vec<u32>, Vec<u32>, Vec<i32>);
+/// the cells' counts (then cursors), the cells of more than 5 offsets.
+type XFillScratch = (Vec<u32>, Vec<u32>, Vec<u32>);
 
 // NCBI reference (598d8ae6): as `x_stripe_build` (blast_aalookup.c:787-849, :1197-1235)
 // ```c
@@ -740,7 +733,7 @@ fn x_stripe_fill(
         hits,
         pv,
     } = part;
-    let (copy, counts, overflowed, appended) = scratch;
+    let (copy, counts, overflowed) = scratch;
     let first = stripe << shift;
     counts.clear();
     counts.resize((backbone_size - first).min(1 << shift), 0);
@@ -812,13 +805,7 @@ fn x_stripe_fill(
         let cell = cell as usize;
         let begin = (starts[cell] - base) as usize;
         let end = counts[cell] as usize;
-        let n = (end - begin) as u32;
-        let cell_hits = &mut hits[begin..end];
-        appended.clear();
-        appended.extend_from_slice(cell_hits);
-        for (k, &query_offset) in appended.iter().enumerate() {
-            cell_hits[x_emission_position(k as u32, n) as usize] = query_offset;
-        }
+        x_to_scan_order(&mut hits[begin..end]);
     }
     XStripeCounts {
         nonempty,

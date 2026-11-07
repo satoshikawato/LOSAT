@@ -122,9 +122,14 @@ pub enum FoundInstead {
     WeakUnlisted,
     /// No sequence.
     Nothing,
-    /// The lookup fails on a file of the database or on the id, with this message: NCBI's
-    /// formatters stop with an exception.
+    /// The lookup fails on a file of the database, with this message: NCBI's formatters, and its
+    /// prefetch, stop with the `CSeqDBException`.
     Failed(String),
+    /// The lookup throws on the id itself before it reads a file (`SeqidLookup::throws_on_id`: a
+    /// `gnl|BL_ORD_ID|0` that makeblastdb stores with a text tag), with this message: NCBI's
+    /// formatters stop, its prefetch catches the exception with its warning
+    /// (`ParsedSubject::prefetch_fails`).
+    ThrowsOnId(String),
 }
 
 /// What NCBI's prefetch of a query batch reads for a subject that no report shows, by its
@@ -148,8 +153,10 @@ pub enum Prefetched {
         or_itself: bool,
         reason: String,
     },
-    /// A lookup that fails (the reason): NCBI's prefetch catches the exception, writes the
-    /// warning `Error pre-fetching sequence data` and reads no other subject of the batch.
+    /// A lookup that fails (the reason): on the id itself NCBI's prefetch catches the exception
+    /// and writes the warning `Error pre-fetching sequence data`
+    /// (`ParsedSubject::prefetch_fails`, `common::database::batch_prefetch`); on a file it
+    /// rethrows the `CSeqDBException` and stops.
     Failed(String),
 }
 
@@ -529,7 +536,10 @@ impl ParsedSubject {
                 "has the Seq-align id {}, which ids of other sequences can match weakly in any letter case (a name with or without an accession, a pir or prf accession as a name) and which a version 5 database does not look up: with PRE_FETCH_SEQS_LIMIT, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one, it can write the names and letters of such a sequence read before",
                 id()
             )),
-            (false, Some(FoundInstead::Failed(message))) => Err(format!(
+            (
+                false,
+                Some(FoundInstead::Failed(message) | FoundInstead::ThrowsOnId(message)),
+            ) => Err(format!(
                 "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0 stops)",
                 id()
             )),
@@ -587,8 +597,12 @@ impl ParsedSubject {
             // The prefetch catches the exception of a failed lookup and writes its warning, or
             // rethrows a database error (`CSeqDBException`) and stops; the formats that read the
             // Bioseq stop (`fetched`).
+            Some(FoundInstead::ThrowsOnId(message)) => Prefetched::Failed(format!(
+                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data, and a report that reads it stops)",
+                String::from_utf8_lossy(&self.alignment_fasta())
+            )),
             Some(FoundInstead::Failed(message)) => Prefetched::Failed(format!(
-                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data and reads no other subject of the batch, or stops)",
+                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error)",
                 String::from_utf8_lossy(&self.alignment_fasta())
             )),
             Some(FoundInstead::Sequence(other)) => Prefetched::Another {
@@ -607,6 +621,14 @@ impl ParsedSubject {
                 reason: reason(),
             },
         }
+    }
+
+    /// Whether the lookup of this subject's Seq-align id throws on the id where NCBI's prefetch
+    /// loads it (`FoundInstead::ThrowsOnId`): the batch's prefetch catches it and writes `Error
+    /// pre-fetching sequence data` (`common::database::batch_prefetch`). A lookup that fails on a
+    /// file stops NCBI (`FoundInstead::Failed`).
+    pub fn prefetch_fails(&self) -> bool {
+        !self.unfetchable && matches!(self.found_instead, Some(FoundInstead::ThrowsOnId(_)))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2250-2255
@@ -1955,10 +1977,21 @@ mod tests {
             assert_eq!(prefetched(itself.clone()), Prefetched::Itself, "{itself:?}");
         }
         assert_eq!(prefetched(Some(FoundInstead::Nothing)), Prefetched::Nothing);
+        // A file's error stops NCBI's prefetch; the exception of the id is its warning.
         assert!(matches!(
             prefetched(Some(FoundInstead::Failed("no accession info".into()))),
-            Prefetched::Failed(reason) if reason.contains("whose lookup in the database fails")
+            Prefetched::Failed(reason) if reason.contains("prefetch stops with a BLAST Database error")
         ));
+        let throws = Some(FoundInstead::ThrowsOnId("Invalid choice selection".into()));
+        assert!(matches!(
+            prefetched(throws.clone()),
+            Prefetched::Failed(reason) if reason.contains("writes Error pre-fetching sequence data")
+        ));
+        assert!(subject.clone().found_instead(throws).prefetch_fails());
+        assert!(!subject
+            .clone()
+            .found_instead(Some(FoundInstead::Failed("no accession info".into())))
+            .prefetch_fails());
         assert!(matches!(
             prefetched(Some(FoundInstead::Sequence(4))),
             Prefetched::Another {

@@ -11897,6 +11897,9 @@ fn run_resolved_in_pool(
     // formatter's cut; its files are staged here (`psiblast_pssms`) and written after the
     // reports (below `output_result`). A refusal between here and the reports (the database
     // titles below) or a report write error drops them: no PSSM file has changed (`PssmFiles`).
+    if let (Some(_), Some(titles)) = (args.psi_pssm.as_ref(), listed_titles.as_ref()) {
+        titles.check_pssm_subjects(&hit_lists)?;
+    }
     let psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
         match args.psi_pssm.as_ref() {
             Some(request) => Some(psiblast_pssms(
@@ -12307,29 +12310,30 @@ fn run_resolved_in_pool(
                     }
                     continue;
                 }
+                // The taxonomy texts, and NCBI's warning where the prefetch fails at a subject
+                // whose lookup fails (`ListedTitles::batch_prefetch`), also without `taxdb.bti`.
                 let messages = match psiblast_prefetched.as_ref() {
                     Some(ranks) => {
                         let prefetched = titles.prefetched_ranks(
                             database,
                             &ranks[batch.searched.clone()].concat(),
                             prefetch_taxids,
+                            !prefetch_only,
                         )?;
-                        if !prefetch_taxids {
-                            continue;
-                        }
-                        titles.prefetch_messages(database, prefetched)?
+                        titles.batch_prefetch(database, prefetched)?
                     }
-                    None if !prefetch_taxids => {
-                        titles.check_prefetched(
+                    None => {
+                        if !prefetch_taxids {
+                            titles.check_prefetched(
+                                database,
+                                database::ListedTitles::reported_ranks(lists),
+                            )?;
+                        }
+                        titles.batch_prefetch(
                             database,
                             database::ListedTitles::reported_ranks(lists),
-                        )?;
-                        continue;
+                        )?
                     }
-                    None => titles.prefetch_messages(
-                        database,
-                        database::ListedTitles::reported_ranks(lists),
-                    )?,
                 };
                 open_for_rows(lists)?;
                 if messages.is_empty() {

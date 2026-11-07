@@ -1,6 +1,6 @@
 - LOSAT Web on touch screens: a finger moving up or down over the Dot Plot scrolls the page without
   moving the plot (it moved with the page by up to a tenth of its view); a finger moving sideways
-  still moves the plot, and two fingers now zoom the page there too. A tap picks a Dot Plot line
+  still moves the plot, and two fingers are left to the page there. A tap picks a Dot Plot line
   from 16 px away (8 px with a mouse), and a Graphic Summary bar from 12 px away, in its row or the
   row above or below (4 px in its row with a mouse); a tap between two rows picks the nearer row.
   An input's "First lines" and "Records" are 24 px tall on a phone.

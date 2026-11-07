@@ -279,6 +279,46 @@ test.describe('a phone', () => {
     expect(missed).toBeGreaterThanOrEqual(2);
   });
 
+  test('a tap on the last 8 px of the Graphic Summary header chooses the first row; a mouse click there, or a tap higher up, chooses nothing', async ({ page }) => {
+    const [p, q, r] = [dna(61, 80), dna(62, 80), dna(63, 80)];
+    await program(page, 'blastn');
+    await paste(page, 'query', `>q\n${p}${q}${r}\n`);
+    await paste(page, 'subject', `>s1\n${dna(64, 30)}${p}\n>s2\n${q.slice(0, 70)}${dna(65, 30)}\n>s3\n${dna(66, 30)}${r.slice(0, 60)}${dna(67, 30)}\n`);
+    await runAndOpen(page);
+    const canvas = page.getByTestId('graphic-canvas');
+    await expect(canvas).toHaveAttribute('data-rows', '3');
+    const bars = JSON.parse((await canvas.getAttribute('data-targets'))!) as Bar[];
+    const rowYs = [...new Set(bars.map((bar) => bar.y))].sort((m, n) => m - n);
+    expect(rowYs).toHaveLength(3);
+    const first = bars.filter((bar) => bar.y === rowYs[0]).sort((m, n) => n.x1 - m.x1)[0]!;
+    const last = bars.filter((bar) => bar.y === rowYs[2]);
+    expect(last).toHaveLength(1);
+    // The header ends where the first row's band begins: half a row (12 px) above its middle.
+    const header = rowYs[0]! - 6;
+    // Selects the last row's bar (a click on its middle), then presses at `y` by `how`.
+    const press = async (y: number, how: 'tap' | 'click'): Promise<void> => {
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await centre(canvas);
+      let box = (await canvas.boundingBox())!;
+      await page.mouse.click(box.x + last[0]!.x, box.y + last[0]!.y);
+      await expect(canvas).toHaveAttribute('data-selected', last[0]!.hsp);
+      await centre(canvas);
+      box = (await canvas.boundingBox())!;
+      if (how === 'tap') await page.touchscreen.tap(box.x + first.x, box.y + y);
+      else await page.mouse.click(box.x + first.x, box.y + y);
+    };
+    await press(header - 4, 'tap');
+    await expect(canvas).toHaveAttribute('data-selected', first.hsp);
+    for (const [y, how] of [
+      [header - 4, 'click'],
+      [header - 12, 'tap'],
+    ] as const) {
+      await press(y, how);
+      await page.waitForTimeout(300);
+      await expect(canvas, `a ${how} ${header - y} px above the first row`).toHaveAttribute('data-selected', last[0]!.hsp);
+    }
+  });
+
   test('the "First lines" and "Records" of an input are 24 px touch targets', async ({ page }) => {
     await program(page, 'blastn');
     await paste(page, 'query', `>q\n${dna(71, 120)}\n`);
@@ -432,7 +472,7 @@ async function tickLabels(canvas: Locator): Promise<[string[], string[]]> {
   return JSON.parse((await canvas.getAttribute('data-ticks')) ?? '[[],[]]') as [string[], string[]];
 }
 
-test('the dot plot numbers both axes of a view shorter than 100 letters: a short pair, a zoomed view, an HSP of one letter', async ({ page }) => {
+test('the dot plot numbers both axes of a view shorter than 100 letters: a short pair, and Zoom to HSP on its HSP of one letter', async ({ page }) => {
   // Two short sequences (8 against 16 letters, results.spec.ts's HSP of one letter), whole.
   const qIdx = BUILD_HAS_ENGINE ? 0 : 2;
   await program(page, 'blastn');
@@ -452,12 +492,16 @@ test('the dot plot numbers both axes of a view shorter than 100 letters: a short
     ['0', '2', '4', '6', '8'],
     ['0', '5', '10', '15'],
   ]);
-  // "Zoom to HSP" on the HSP of one letter.
+  // "Zoom to HSP" on the HSP of one letter: its margin (10 letters at least) covers the whole pair of 8 and 16
+  // letters, so the view stays the pair's and keeps its numbers.
   const single = page.getByTestId('results-dotplot').getByTestId('hsp-list').locator('[data-testid^="hsp-row-"][data-orientation="unknown"]');
   await single.click();
   await page.getByTestId('dotplot-zoom-hsp').click();
-  await page.waitForTimeout(200);
-  for (const labels of await tickLabels(canvas)) expect(labels.length).toBeGreaterThanOrEqual(2);
+  await expect(canvas).toHaveAttribute('data-view', '0,8,0,16');
+  await expect.poll(() => tickLabels(canvas)).toEqual([
+    ['0', '2', '4', '6', '8'],
+    ['0', '5', '10', '15'],
+  ]);
 });
 
 test('the dot plot numbers both axes of a view zoomed to under 100 letters, and keeps blast2dotplot.py\'s ticks above 100', async ({ page }) => {

@@ -1,9 +1,10 @@
 // Scales and display classes of the results' plots (S13b; docs/web/ncbi_ui_mapping.md, "Dot Plot"
 // and "Graphic Summary"). The dot plot's ticks follow the Owner's blast2dotplot.py (its tick_size
 // table and its bp / kbp / Mbp labels), applied to the visible span so that zooming chooses them
-// again (with steps of its own for the short spans that zooming reaches). The classes only sort an engine value into the bins of a fixed table (the identity
-// classes of the script, the "Alignment Scores" bins of NCBI's Graphic Summary): they compute no
-// BLAST value, and the values shown next to them stay the engine's strings.
+// again (with steps of its own for the short spans that zooming reaches). The classes only sort an
+// engine value into the bins of a fixed table (the identity classes of the script, the "Alignment
+// Scores" bins of NCBI's Graphic Summary): they compute no BLAST value, and the values shown next
+// to them stay the engine's strings.
 
 // --- ticks of the dot plot -------------------------------------------------------------------------
 

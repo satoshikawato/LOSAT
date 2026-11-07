@@ -374,6 +374,38 @@ pub(super) fn write_tabular_without_queries(
     Ok(())
 }
 
+/// psiblast's epilog of a tabular report after its last round (`blast_engine::psi_round`): outfmt
+/// 7's count of the rounds formatted, after the warning of the epilog's formatter, as
+/// `write_blastp_tabular` writes it with `tab.epilog`; nothing for the other kinds.
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236 (quoted at
+// `write_blastp_tabular`)
+#[cold]
+#[inline(never)]
+pub(super) fn write_tabular_round_epilog(
+    spec: &TabularSpec,
+    taxdb_found: bool,
+    program: &str,
+    writer: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+    rounds: usize,
+) -> Result<()> {
+    if spec.kind != TabularKind::Commented {
+        return Ok(());
+    }
+    if spec.checks_taxdb() && !taxdb_found {
+        writer.flush()?;
+        diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
+        diagnostics.flush()?;
+    }
+    TabularWriter {
+        spec,
+        program_version: "",
+        matrix: None,
+    }
+    .epilog(writer, rounds)?;
+    Ok(())
+}
+
 /// Writes the report of every query of `hit_lists` (indexed by query) to `writer`, each query's
 /// warnings (and the taxonomy database's warning of its formatter) before its lines, outfmt 20's
 /// header line first when `tab.prolog` and outfmt 7's last line after the last query when

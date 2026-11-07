@@ -1129,13 +1129,52 @@ pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
 //     m_Ostream.flush();
 // }
 // ```
+/// Writes the text of the run's `NativeError` to standard error and exits with its code; a text
+/// that the run already wrote (`post_native_error`) is not written again.
 pub fn exit_on_native_error(error: &anyhow::Error) {
     if let Some(e) = error.downcast_ref::<NativeError>() {
-        eprint!("{}", e.message);
+        if !NATIVE_ERROR_POSTED.load(std::sync::atomic::Ordering::Relaxed) {
+            eprint!("{}", e.message);
+        }
         if e.exit < 0 {
             std::process::abort();
         }
         std::process::exit(e.exit);
+    }
+}
+
+/// Whether the run wrote the text of the error it returns (`post_native_error`).
+static NATIVE_ERROR_POSTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
+// ```c++
+//     } CATCH_ALL(status)
+//
+//     if(!m_Bah.GetMessages().empty()) {
+//     	const CArgs & a = GetArgs();
+//     	PrintErrorArchive(a, m_Bah.GetMessages());
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1160
+// ```c++
+// void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
+// {
+// 	if(m_handler != NULL) {
+// 		m_handler->Post(mess);
+// 	}
+// 	if(m_save) {
+// ```
+/// Writes the text of `error` (a `NativeError`) to standard error now. NCBI's `CATCH_ALL` posts
+/// the error inside `Run` (its handler writes the post at once and saves it for the archive)
+/// before `PrintErrorArchive` writes the error archive; LOSAT's `main` writes the text after the
+/// run returns (`exit_on_native_error`). A command line run that writes an error archive calls this
+/// first (`report::archive::write_error_archive_after_post`) and returns that error, whose text
+/// `exit_on_native_error` then does not write again.
+pub fn post_native_error(error: &anyhow::Error) {
+    if let Some(native) = error.downcast_ref::<NativeError>() {
+        eprint!("{}", native.message);
+        NATIVE_ERROR_POSTED.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

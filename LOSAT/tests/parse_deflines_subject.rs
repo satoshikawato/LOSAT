@@ -493,6 +493,96 @@ fn a_subject_without_a_first_defline_ends_with_the_input_error_of_get_all_seqs()
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
+// ```c++
+//     } CATCH_ALL(status)
+//
+//     if(!m_Bah.GetMessages().empty()) {
+//     	const CArgs & a = GetArgs();
+//     	PrintErrorArchive(a, m_Bah.GetMessages());
+//     }
+// ```
+// The `Run` of each of the five programs ends so. `CATCH_ALL` posts the error, which the handler
+// writes to standard error at once (blast_aux.cpp:1155-1159), before `PrintErrorArchive` writes the
+// error archive: in one stream of both (`2>&1`) the error comes between the archives written
+// before it and the error archive (NCBI BLAST+ 2.17.0 n1, probe `ncbi-parity-20261019/SM/archorder`,
+// every error of the five programs). Two errors: the reader's after the first batch's archive
+// (BATCH_SIZE=1), and a `-query` file that does not open, before the search.
+#[test]
+fn the_error_comes_before_its_error_archive_in_one_stream() {
+    const ARCHIVE: &[u8] = b"Blast4-archive ::= {";
+    for (program, query_letters, subject_letters) in PROGRAMS {
+        let dir = temp_dir("order");
+        let subject = dir.join(format!("{program}.s"));
+        std::fs::write(&subject, format!(">s1 b\n{subject_letters}\n")).unwrap();
+        let bad_gi = dir.join(format!("{program}.q"));
+        std::fs::write(
+            &bad_gi,
+            format!(">q1 a\n{query_letters}\n>gi|abc b\n{query_letters}\n"),
+        )
+        .unwrap();
+        let missing = dir.join(format!("{program}.missing"));
+        let cases: [(&PathBuf, &str, usize); 2] = [
+            (
+                &bad_gi,
+                "BLAST query error: Could not construct seq-id from 'gi|abc'\n",
+                1,
+            ),
+            (
+                &missing,
+                "Command line argument error: Argument \"query\". File is not accessible:",
+                0,
+            ),
+        ];
+        for (query, message, batches) in cases {
+            for threads in ["1", "4"] {
+                let search = || {
+                    let mut command = losat();
+                    command
+                        .arg(program)
+                        .arg("-query")
+                        .arg(query)
+                        .arg("-subject")
+                        .arg(&subject)
+                        .args(["-parse_deflines", "-outfmt", "11", "-num_threads", threads])
+                        .env("BATCH_SIZE", "1");
+                    command
+                };
+                let apart = search().output().unwrap();
+                // One file for both streams: the two descriptors share its offset, as `2>&1`.
+                let both = dir.join(format!("{program}.both"));
+                let file = std::fs::File::create(&both).unwrap();
+                let status = search()
+                    .stdout(file.try_clone().unwrap())
+                    .stderr(file)
+                    .status()
+                    .unwrap();
+                let merged = std::fs::read(&both).unwrap();
+                let what = format!("{program} {} n{threads}", query.display());
+                assert_eq!(apart.status.code(), Some(1), "{what}");
+                assert_eq!(status.code(), Some(1), "{what}");
+                assert!(apart.stderr.starts_with(message.as_bytes()), "{what}");
+                let starts: Vec<usize> = (0..apart.stdout.len())
+                    .filter(|&at| apart.stdout[at..].starts_with(ARCHIVE))
+                    .collect();
+                assert_eq!(starts.len(), batches + 1, "{what}");
+                let error_archive = *starts.last().unwrap();
+                let expected = [
+                    &apart.stdout[..error_archive],
+                    &apart.stderr[..],
+                    &apart.stdout[error_archive..],
+                ]
+                .concat();
+                assert_eq!(
+                    String::from_utf8_lossy(&merged),
+                    String::from_utf8_lossy(&expected),
+                    "{what}"
+                );
+            }
+        }
+    }
+}
+
 /// BLASTX reads its query file once before the search with outfmt 5, 11 and 13 to 16, to refuse a
 /// title its writers cannot write before any byte (`blast_xml::prescan_queries`,
 /// `archive::prescan_query_titles`). Under `-parse_deflines` that read stops where the search's

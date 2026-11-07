@@ -1976,7 +1976,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         match &result {
             Err(error) => {
                 if let Some(lines) = archive::error_lines(error, false) {
-                    let _ = crate::report::archive::write_error_archive(handle, &lines, writer);
+                    let _ = crate::report::archive::write_error_archive_after_post(
+                        handle, error, &lines, writer,
+                    );
                 }
             }
             Ok(()) => {
@@ -2016,7 +2018,12 @@ fn write_run_error_archive(
             None => Some(Box::new(io::stdout().lock())),
         };
     if let Some(mut destination) = destination {
-        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut destination);
+        let _ = crate::report::archive::write_error_archive_after_post(
+            handle,
+            error,
+            &lines,
+            &mut destination,
+        );
         let _ = destination.flush();
     }
 }

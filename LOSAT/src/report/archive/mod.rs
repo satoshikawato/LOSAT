@@ -507,6 +507,34 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
+// ```c++
+//     } CATCH_ALL(status)
+//
+//     if(!m_Bah.GetMessages().empty()) {
+//     	const CArgs & a = GetArgs();
+//     	PrintErrorArchive(a, m_Bah.GetMessages());
+//     }
+// ```
+/// Writes the error archive of a command line run that stopped with `error` (`error_lines` of it:
+/// `lines`) into `sink`, after the error's text. NCBI's `CATCH_ALL` writes the text to standard
+/// error before `PrintErrorArchive` writes the archive (`cli::post_native_error`), so in one
+/// stream of both (`2>&1`) the text comes between what the run wrote before into `sink` (the
+/// archives of the batches before, flushed first) and the error archive. Without an error archive
+/// (`11 <spec>`: `writes_error_archive`) the text is left to `main`, after the run's output.
+pub fn write_error_archive_after_post(
+    handle: &ArchiveHandle,
+    error: &anyhow::Error,
+    lines: &[Message],
+    sink: &mut dyn Write,
+) -> anyhow::Result<()> {
+    if handle.error_archive_enabled() {
+        sink.flush()?;
+        crate::cli::post_native_error(error);
+    }
+    write_error_archive(handle, lines, sink)
+}
+
 /// A diagnostics stream that saves what it writes as the messages of the next archive.
 pub struct DiagTee<'a> {
     inner: &'a mut (dyn Write + Send),

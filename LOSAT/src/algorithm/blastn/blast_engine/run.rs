@@ -7381,8 +7381,12 @@ pub fn run(
         match &result {
             Err(error) => {
                 if let Some(lines) = archive::error_lines(error, false) {
-                    let _ =
-                        crate::report::archive::write_error_archive(handle, &lines, &mut report);
+                    let _ = crate::report::archive::write_error_archive_after_post(
+                        handle,
+                        error,
+                        &lines,
+                        &mut report,
+                    );
                 }
             }
             Ok(()) => {
@@ -7443,7 +7447,12 @@ fn write_run_error_archive(
     };
     if let Ok(out_file) = open_out_file(args) {
         let mut report = cli_report_stream(out_file);
-        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut report);
+        let _ = crate::report::archive::write_error_archive_after_post(
+            handle,
+            error,
+            &lines,
+            &mut report,
+        );
         let _ = std::io::Write::flush(&mut report);
     }
 }

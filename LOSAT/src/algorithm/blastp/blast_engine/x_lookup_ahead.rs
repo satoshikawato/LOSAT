@@ -481,6 +481,7 @@ fn x_build_ahead(
                 &query_lengths,
                 pool,
                 XLookupFor::Ahead,
+                super::super::x_query_blocks::x_block_appends(pool, query_records),
             )
             .ok()?;
             if !matches!(lookup, BlastpRuntimeLookup::CompressedFlat(_)) {
@@ -1170,8 +1171,16 @@ mod tests {
             BlastpLookupTableType::CompressedAaLookupTable => {
                 let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
                 let batches = seq_range::QueryInput::whole(records).batches(batch_size);
-                blastp_compressed_lookup(args, frames, &batches, &lengths, pool, XLookupFor::Search)
-                    .expect("the block's own build")
+                blastp_compressed_lookup(
+                    args,
+                    frames,
+                    &batches,
+                    &lengths,
+                    pool,
+                    XLookupFor::Search,
+                    0,
+                )
+                .expect("the block's own build")
             }
         }
     }

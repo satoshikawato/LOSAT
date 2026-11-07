@@ -847,6 +847,7 @@ fn x_try_build_flat_parallel_with(
                 tables,
                 capacity,
                 X_COUNT_CHUNK,
+                0,
             )
         },
     )
@@ -2028,6 +2029,7 @@ mod tests {
                         spare: None,
                         extra: Some(&extra),
                         x_ahead: false,
+                        appends: 0,
                     },
                 ))
             })

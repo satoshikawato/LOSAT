@@ -734,6 +734,12 @@ pub(crate) struct XBlockSubjects {
     /// built ahead of their blocks (`x_bp_aa_spares`); EXPERIMENT (LOSAT_X_BPLKREUSE): or the
     /// vectors of the last block's table, for the next block's own build (`x_bp_aa_block_spare`).
     x_aa_spares: XAaSpares,
+    /// Each block's queries (`x_key`: the address and count of its records) and words
+    /// (`blast_engine.rs` `x_word_blocks`), for its table's build (`x_block_appends`).
+    x_block_words: Vec<((usize, usize), u64)>,
+    /// The SEG-masked subject ranges of the redo, kept from block to block
+    /// (`x_block_seg_store`).
+    x_seg_store: std::sync::Arc<super::kappa::XSharedSubjectRanges>,
 }
 
 impl XBlockSubjects {
@@ -747,8 +753,60 @@ impl XBlockSubjects {
             x_lookup_spare: XFlatSpare::default(),
             x_lookup_ahead: XFlatSpare::default(),
             x_aa_spares: XAaSpares::default(),
+            x_block_words: Vec::new(),
+            x_seg_store: std::sync::Arc::new(super::kappa::XSharedSubjectRanges::new()),
         }
     }
+
+    // No NCBI counterpart: the reserve of the builds (`x_block_appends`); it changes no value NCBI
+    // computes.
+    /// Keeps each block's words: `blocks` gives the block's queries (a slice of the searched
+    /// records, as the block search passes them) and its words.
+    pub(crate) fn x_set_block_words<'r>(
+        &mut self,
+        blocks: impl Iterator<Item = (&'r [FastaRecord], u64)>,
+    ) {
+        self.x_block_words = blocks
+            .map(|(queries, words)| ((queries.as_ptr() as usize, queries.len()), words))
+            .collect();
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
+// ```c
+//                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
+//                                              subject_maybe_biased);
+// ```
+// NCBI masks a subject range in each batch that reaches it. Reuse of an identical result only: an
+// entry is a function of its key.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): the store of SEG-masked subject ranges that the blocks' redos
+/// share (`x_redo_par.rs` `x_redo`, which empties it after a block as LOSAT_X_BPSEGWIN empties it
+/// after a window); `None` outside the block search.
+pub(crate) fn x_block_seg_store(
+    pool: &SearchPool<'_>,
+) -> Option<std::sync::Arc<super::kappa::XSharedSubjectRanges>> {
+    pool.x_ext::<XBlockSubjects>()
+        .map(|subjects| subjects.x_seg_store.clone())
+}
+
+// No NCBI counterpart: the reserve of a build (`x_clut_direct.rs` `x_try_build_flat_reserving`); it
+// changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): the words of the block whose queries are `query_records` (the
+/// same slice), the most appends of its compressed table's build (a table of a block holds at most
+/// the words its batches' offsets add, `CompressedWordCount`); 0 outside the block search or for a
+/// slice that is no block's.
+pub(crate) fn x_block_appends(pool: &SearchPool<'_>, query_records: &[FastaRecord]) -> usize {
+    let key = (query_records.as_ptr() as usize, query_records.len());
+    pool.x_ext::<XBlockSubjects>()
+        .and_then(|subjects| {
+            subjects
+                .x_block_words
+                .iter()
+                .find(|(block, _)| *block == key)
+        })
+        .map_or(0, |&(_, words)| {
+            usize::try_from(words).unwrap_or(usize::MAX)
+        })
 }
 
 // No NCBI counterpart: reads back the encoding attached by the block search (reuse only).
@@ -1010,8 +1068,9 @@ impl<'a> XLookupFlat<'a> {
     }
 
     // No NCBI counterpart: the arguments of the build (`x_bp_build_compressed_lookup`).
-    /// The switch's mode, the spare vectors and the extra tasks, for the build.
-    pub(crate) fn build_args(&self) -> XFlatArgs<'_> {
+    /// The switch's mode, the spare vectors and the extra tasks, for the build, with `appends`
+    /// (`x_block_appends`) for the serial builders' reserve.
+    pub(crate) fn build_args(&self, appends: usize) -> XFlatArgs<'_> {
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1030,6 +1089,7 @@ impl<'a> XLookupFlat<'a> {
             spare: self.spare,
             extra,
             x_ahead: self.x_ahead,
+            appends,
         }
     }
 
@@ -1232,7 +1292,7 @@ mod tests {
                             &flat_locations,
                             &[0..flat_locations.len()],
                             pool,
-                            flat.build_args(),
+                            flat.build_args(0),
                         );
                         assert!(matches!(built, Some(XFlatBuild::Table(_))));
                         let from_tasks = flat.finish(&mut flat_contexts);

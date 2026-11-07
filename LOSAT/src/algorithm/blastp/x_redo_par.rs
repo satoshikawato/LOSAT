@@ -1179,8 +1179,13 @@ where
     // reported here, before any match, as there.
     (search.build_redo_align_params)(0)?;
     // One store of masked subject ranges for the search, as in the query-parallel redo
-    // (`XSharedSubjectRanges`).
-    let shared = Arc::new(XSharedSubjectRanges::new());
+    // (`XSharedSubjectRanges`); in a block search the store of all blocks
+    // (`x_query_blocks::x_block_seg_store`): an entry depends on its key only (the subject, the range
+    // and the SEG parameters), the same in every block.
+    let block_store = super::x_query_blocks::x_block_seg_store(search.pool);
+    let shared = block_store
+        .clone()
+        .unwrap_or_else(|| Arc::new(XSharedSubjectRanges::new()));
     let threads = search.threads.max(1);
     let limits = XWindowLimits {
         jobs: x_window_jobs_per_thread().saturating_mul(threads),
@@ -1212,6 +1217,12 @@ where
     );
     if seg_win.is_some() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", seg_emptied);
+    }
+    // The block search keeps the store for the next block only as LOSAT_X_BPSEGWIN keeps it for
+    // the next window (fewer entries than its bound); without the switch a search's store ends with
+    // the search, as outside the block search.
+    if block_store.is_some() && seg_win.is_none_or(|min| shared.x_len() >= min) {
+        shared.x_clear();
     }
     let mut counts = counts?;
     counts.lpt_windows = lpt.then_some(lpt_windows);

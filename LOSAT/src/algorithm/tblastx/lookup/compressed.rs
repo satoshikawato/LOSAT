@@ -1748,7 +1748,7 @@ impl CompressedWordCount {
             words_and_one => return u64::from(words_and_one - 1),
         }
         let words = self.count(word);
-        // At most 10^7 + 1 words (15 letters up to word size 6, 10 at 7).
+        // At most 15^6 + 1 words (15 letters at word size 6; 15^5 + 1 at 5, 10^7 + 1 at 7).
         if let Some(words_and_one) = u32::try_from(words).ok().and_then(|w| w.checked_add(1)) {
             kept.store(words_and_one, Ordering::Relaxed);
         }

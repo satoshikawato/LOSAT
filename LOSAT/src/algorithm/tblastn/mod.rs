@@ -6,11 +6,13 @@ mod tblastn_app;
 //     status = s_BlastSearchEngineOneContext(...);
 // }
 pub(crate) mod search_seed;
-// The lookup scan without a branch on the presence vector.
-pub(crate) mod x_scan_bf;
 // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once
 // (blastx's direct loop takes it too, LOSAT_X_BXSCANBYTE).
 pub(crate) mod x_scan_byte;
+// Tests of the branch-free scan, which lives in `tblastx/x_aascan_bf.rs` (they use tblastn's query
+// encoder).
+#[cfg(test)]
+mod x_scan_bf_tests;
 // NCBI c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
 // translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
 // length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);
@@ -90,7 +92,7 @@ pub use x_subject_translate::print_summary as x_subject_translate_print_summary;
 pub use x_subject_store::print_summary as x_subject_store_print_summary;
 // The summary line of the branch-free scan that `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
-pub use x_scan_bf::print_summary as x_scan_bf_print_summary;
+pub use crate::algorithm::tblastx::x_aascan_bf::print_summary as x_scan_bf_print_summary;
 // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_scan_byte::print_summary as x_scan_byte_print_summary;

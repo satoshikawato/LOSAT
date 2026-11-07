@@ -5,7 +5,7 @@
 //! NCBI's scan (c++/src/algo/blast/core/blast_aascan.c:75-127, `s_BlastAaScanSubject`, kept as
 //! `tblastx/blast_aascan.rs` `s_blast_aa_scan_subject_one_range`) rolls the index of the next word
 //! from the one before (`ComputeTableIndexIncremental`), tests its presence-vector bit and copies
-//! the word's hits when the offset array has room. The branch-free scan (`x_scan_bf.rs`) takes the
+//! the word's hits when the offset array has room. The branch-free scan (`tblastx/x_aascan_bf.rs`) takes the
 //! branch on the bit away, in blocks of `X_BLOCK` words; on a genome searched with one protein
 //! (HsG_p1 x hsap_dna `-db`, n1) the scan was still 55-58 % of the cycles, 5.38 cycles per word,
 //! with the rolling index a chain from word to word (line F probe P3, v4-F/REPORT.md).
@@ -67,7 +67,7 @@
 //! in WebAssembly, and changes nothing elsewhere (aarch64: not timed). `LOSAT_X_TBNSCANBYTE=2`
 //! takes the plain loops on any CPU for every table, `=3` the plain loops for sparse tables on any
 //! CPU. A table of another shape, and without AVX2 a table that is not sparse, is scanned as before
-//! (the branch-free scan of `x_scan_bf.rs`). With `LOSAT_X_STATS` set, `main` prints
+//! (the branch-free scan of `tblastx/x_aascan_bf.rs`). With `LOSAT_X_STATS` set, `main` prints
 //! `[X_STATS] TBNSCANBYTE units= calls= avx2=` (the units scanned this way, their scan calls, and
 //! whether the AVX2 forms ran).
 //!
@@ -106,7 +106,7 @@ const X_SPARSE_DEFAULT: bool = cfg!(any(target_arch = "x86_64", target_arch = "w
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): how the unit path scans a table that `fits`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum XScanByte {
-    /// As before the switch (the branch-free scan of `x_scan_bf.rs`).
+    /// As before the switch (the branch-free scan of `tblastx/x_aascan_bf.rs`).
     Off,
     /// `x_scan_one_range_byte`; `avx2` = the AVX2 forms of both stages.
     On { avx2: bool },
@@ -260,7 +260,7 @@ static COUNTS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): counts one unit and its `calls` for the
 /// `[X_STATS] TBNSCANBYTE` line (`LOSAT_X_STATS` set).
 pub(super) fn x_count_unit(calls: u64) {
-    if super::x_scan_bf::x_stats() {
+    if crate::algorithm::tblastx::x_aascan_bf::x_stats() {
         COUNTS[0].fetch_add(1, Ordering::Relaxed);
         COUNTS[1].fetch_add(calls, Ordering::Relaxed);
     }
@@ -284,7 +284,7 @@ fn x_scan_byte_if_read() -> Option<XScanByte> {
     (COUNTS[0].load(Ordering::Relaxed) > 0).then(x_scan_byte)
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (see `x_scan_bf.rs`).
+// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (see `tblastx/x_aascan_bf.rs`).
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): `s_blast_aa_scan_subject_one_range` for a table that `fits`
 /// (see the module text). Same arguments, same result, same `s_range`; `presence` is
 /// `presence_bytes(lookup)` and `offset_pairs` must hold `array_size + X_SCAN_BYTE_SLACK` entries.
@@ -312,7 +312,7 @@ pub(crate) fn x_scan_one_range_byte(
     )
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (see `x_scan_bf.rs`).
+// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (see `tblastx/x_aascan_bf.rs`).
 /// EXPERIMENT (LOSAT_X_TBNSCANRESUME): `x_scan_one_range_byte` that keeps in `held` the block of a
 /// call that stops on a full offset array, and copies the rest of it when the next call is that
 /// call's resumption (the same subject and `s_range[2]`, `s_range[1]` the word that did not fit).

@@ -391,7 +391,7 @@ fn query_masks(
         .iter()
         .map(|&(start, end)| (start as i32, end as i32 - 1))
         .collect();
-    for (from, to) in crate::algorithm::blastx::query_setup::combine_masks(ranges) {
+    for (from, to) in crate::algorithm::common::masks::combine_masks(ranges) {
         if from > to || (from == 0 && to == length as i32 - 1) {
             continue;
         }

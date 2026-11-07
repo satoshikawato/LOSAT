@@ -38,7 +38,7 @@
 //! path only when nothing traces the seeds (not in the diagnostic stages).
 //!
 //! BXSCANBF (graduated 2026-10-26: no variable, always on): the scan of the standard
-//! lookup table is tblastn's branch-free scan (`tblastn/x_scan_bf.rs`, `x_scan_one_range_bf`,
+//! lookup table is tblastn's branch-free scan (`tblastx/x_aascan_bf.rs`, `x_scan_one_range_bf`,
 //! the loop of the former TBNSCANBF): the presence bits of a block of words advance a candidate list
 //! instead of a branch, and the listed words' hits are copied in position order with NCBI's stop
 //! and resume when the offset array is full. Its pairs and `scan_range` values are those of
@@ -125,10 +125,10 @@ use super::x_ungap_sent::XSent;
 use super::*;
 use crate::algorithm::blastp::extension::BlastpTwoHitUngappedResult;
 use crate::algorithm::blastp::x_seed_fused::XHitBf;
-use crate::algorithm::tblastn::x_scan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
 use crate::algorithm::tblastn::x_scan_byte::{
     x_kept_presence, x_mode, x_scan_one_range_byte, x_table_presence, XScanByte, X_SCAN_BYTE_SLACK,
 };
+use crate::algorithm::tblastx::x_aascan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
 use std::cell::RefCell;
 use std::sync::{Arc, OnceLock};
 

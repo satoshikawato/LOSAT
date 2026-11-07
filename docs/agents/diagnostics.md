@@ -5065,7 +5065,7 @@ Scheduling (each value computed by one thread with the original function; order 
   the `[X_STATS] TBNXLATE` / `[X_SHADOW] TBNXLATE` lines are gone, and so is
   `LOSAT/tests/tblastn_subject_translate.rs` (it compared the report with `=0` and the shadow).
 - TBNSCANBF (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's decision of that day on
-  the timings below; no variable; always on) tblastn (speed; `tblastn/x_scan_bf.rs`): the
+  the timings below; no variable; always on) tblastn (speed; `tblastx/x_aascan_bf.rs`): the
   lookup scan of the unit path (`search_seed.rs` `x_scan_unit`) takes the subject in
   blocks of 256 words. Each word's position and table index are written to a list whose length
   advances by the word's presence-vector bit, without a branch; the hits of the listed words are
@@ -5471,7 +5471,7 @@ Scheduling (each value computed by one thread with the original function; order 
   `the_last_overflow_chain_is_copied_exactly`, both with and without the kept block; the first counts that the call
   after every stop finds its block kept for it; `tests/tblastn_scan_byte.rs` `the_offset_array_size_changes_only_the_scan_calls`: the same
   report at one and four threads with both switches, `=0` and neither). The units of the branch-free scan
-  (`x_scan_bf.rs`: aarch64, and tables that are not sparse without AVX2) keep `LOSAT_X_TBNPAIRCAP`'s size. Where:
+  (`tblastx/x_aascan_bf.rs`: aarch64, and tables that are not sparse without AVX2) keep `LOSAT_X_TBNPAIRCAP`'s size. Where:
   the units that take TBNSCANBYTE's scan (platform).
   Measured 2026-10-29 on the workstation (2x Xeon Gold 6338; base dev d6208db9; every output of a case the same bytes
   in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16 CPUs for
@@ -5749,7 +5749,7 @@ Scheduling (each value computed by one thread with the original function; order 
   it off; `tblastx/x_scan_bf.rs`): the lookup scans of the unit path
   (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/run_impl.rs`) walk the subject
   ranges as NCBI's `s_BlastAaScanSubject` (`blast_aascan.c:48-131`) does and scan each range with
-  the branch-free loop of tblastn (TBNSCANBF, graduated; `tblastn/x_scan_bf.rs` `x_scan_one_range_bf`), passing
+  the branch-free loop of tblastn (TBNSCANBF, graduated; `tblastx/x_aascan_bf.rs` `x_scan_one_range_bf`), passing
   on the room the earlier ranges of the call left, so every call returns NCBI's pairs and scan range
   (test `x_scan_subject_bf_equals_ncbi_scan_on_random_subjects` against `s_blast_aa_scan_subject`:
   TBLASTX tables, subjects of one or many ranges, offset arrays down to the longest chain). The
@@ -7097,7 +7097,7 @@ Scheduling (each value computed by one thread with the original function; order 
   presence test went with the variable; acts where the standard lookup table is scanned by the
   direct loop or `LOSAT_X_BXDIAG`'s fused loop; the compressed table and the reference word finder keep their
   scans) the subject words with lookup hits found without a branch per word, by tblastn's loop of
-  tblastn's TBNSCANBF (graduated; `tblastn/x_scan_bf.rs`): the direct loop calls `x_scan_one_range_bf` (NCBI's pairs,
+  tblastn's TBNSCANBF (graduated; `tblastx/x_aascan_bf.rs`): the direct loop calls `x_scan_one_range_bf` (NCBI's pairs,
   stop and resume, and `scan_range` values, as for tblastn), and the fused loop lists the positions of 256 words
   with `x_block_candidates` and passes the listed cells to the cell test in position order
   (`blastp/x_seed_fused.rs` `x_scan_cells_bf`; blastp's own loop keeps the presence test). Tests: the fused

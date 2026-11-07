@@ -1,0 +1,11 @@
+>r0 lower
+atgctgtgtcgcatatttaaggaccacttgcatcaggagtggcgcgcacccaatataatt
+>?abc
+ctgcggtgccacgacgtcctcccctcacggcgttgtgccaacgactcggacatgtggacaATGCTGTGTCGC
+>r1 lower to the end
+atgctgtgtcgcatatttaaggaccacttgcatcaggagtggcgcgcacccaatataatt
+>?3
+>r2 upper
+CTGCGGTGCCACGACGTCCTCCCCTCACGGCGTTGTGCCAACGACTCGGACATGTGGACA
+>?+5
+ctgcggtgccacgacgtcctcccctcacggcgttgtgccaacgactcggacatgtggaca

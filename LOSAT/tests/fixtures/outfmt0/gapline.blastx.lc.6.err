@@ -1,0 +1,9 @@
+CFastaReader: Bad gap size at line 1
+CFastaReader: Bad gap size at line 9
+CFastaReader: Problem parsing gap mods at line 9
+Unknown linkage-evidence: map;bogus
+FASTA-Reader: Unknown gap-type can have linkage-evidence of type 'unspecified' only.
+CFastaReader: Bad gap size at line 3
+CFastaReader: Problem parsing gap mods at line 3
+CFastaReader: Bad gap size at line 10
+CFastaReader: Problem parsing gap mods at line 10

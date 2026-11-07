@@ -3558,7 +3558,10 @@ fn run_batch_loop(
             // batches before). Without `taxdb.bti` nothing is read. A refusal (a taxonomy
             // database or a taxid that LOSAT cannot read as NCBI does) stops the run before any
             // report, as the refusals of the titles above and XML2's lookups (`read_taxids`) do.
-            if prefetches && database.taxdb_found() {
+            // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning
+            // after those messages (`database::batch_prefetch`), with or without `taxdb.bti`.
+            let taxdb_found = database.taxdb_found();
+            if prefetches && (taxdb_found || database.parsed_seqids()) {
                 // The batch's Seq-aligns (`database::seq_aligns_of`).
                 let seq_aligns = super::super::database::seq_aligns_of(ordered);
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
@@ -3575,59 +3578,62 @@ fn run_batch_loop(
                 // the loop and a later batch that fetches still refuses before any report (outfmt
                 // 0's prolog is written before the search).
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
-                    let (query_code, db_code) = (
-                        crate::utils::genetic_code::GeneticCode::from_id(args.query_gencode),
-                        crate::utils::genetic_code::GeneticCode::from_id(args.db_gencode),
-                    );
-                    let stores = reports.stores.borrow();
-                    let mut window = Vec::new();
-                    for query in 0..(end - start) as u32 {
-                        let from = ordered.partition_point(|hsp| hsp.hit.q_idx < query);
-                        let to = ordered.partition_point(|hsp| hsp.hit.q_idx <= query);
-                        let query_letters = query_records[start + query as usize].seq();
-                        // The first HSP of each subject whose row reads it, in report order (a
-                        // subject's HSPs follow each other): the engine's identities are counted
-                        // only for `nident` alone, until one of the subject's rows reads it.
-                        let shown: Vec<&TblastxHsp> = match rows {
-                            SubjectFetch::Every => ordered[from..to].iter().collect(),
-                            SubjectFetch::Never => Vec::new(),
-                            SubjectFetch::WithIdentities => {
-                                let mut read = std::collections::HashSet::new();
-                                ordered[from..to]
-                                    .iter()
-                                    .filter(|hsp| {
-                                        !read.contains(&hsp.hit.s_idx)
-                                            && stores.get(&hsp.hit.s_idx).is_none_or(|store| {
-                                                report::stored_engine_identities(
-                                                    hsp,
-                                                    store,
-                                                    query_letters,
-                                                    &query_code,
-                                                    &db_code,
-                                                    &mut window,
-                                                ) > 0
-                                            })
-                                            && read.insert(hsp.hit.s_idx)
-                                    })
-                                    .collect()
+                    // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
+                    if taxdb_found {
+                        debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
+                        let (query_code, db_code) = (
+                            crate::utils::genetic_code::GeneticCode::from_id(args.query_gencode),
+                            crate::utils::genetic_code::GeneticCode::from_id(args.db_gencode),
+                        );
+                        let stores = reports.stores.borrow();
+                        let mut window = Vec::new();
+                        for query in 0..(end - start) as u32 {
+                            let from = ordered.partition_point(|hsp| hsp.hit.q_idx < query);
+                            let to = ordered.partition_point(|hsp| hsp.hit.q_idx <= query);
+                            let query_letters = query_records[start + query as usize].seq();
+                            // The first HSP of each subject whose row reads it, in report order (a
+                            // subject's HSPs follow each other): the engine's identities are counted
+                            // only for `nident` alone, until one of the subject's rows reads it.
+                            let shown: Vec<&TblastxHsp> = match rows {
+                                SubjectFetch::Every => ordered[from..to].iter().collect(),
+                                SubjectFetch::Never => Vec::new(),
+                                SubjectFetch::WithIdentities => {
+                                    let mut read = std::collections::HashSet::new();
+                                    ordered[from..to]
+                                        .iter()
+                                        .filter(|hsp| {
+                                            !read.contains(&hsp.hit.s_idx)
+                                                && stores.get(&hsp.hit.s_idx).is_none_or(|store| {
+                                                    report::stored_engine_identities(
+                                                        hsp,
+                                                        store,
+                                                        query_letters,
+                                                        &query_code,
+                                                        &db_code,
+                                                        &mut window,
+                                                    ) > 0
+                                                })
+                                                && read.insert(hsp.hit.s_idx)
+                                        })
+                                        .collect()
+                                }
+                            };
+                            query_fetches.push(if !shown.is_empty() {
+                                super::super::database::prefetch_messages(
+                                    database,
+                                    shown,
+                                    &reports.titles.borrow(),
+                                )?
+                            } else {
+                                Vec::new()
+                            });
+                            if plural_names && from < to {
+                                database.open_for_tabular_rows()?;
                             }
-                        };
-                        query_fetches.push(if !shown.is_empty() {
-                            super::super::database::prefetch_messages(
-                                database,
-                                shown,
-                                &reports.titles.borrow(),
-                            )?
-                        } else {
-                            Vec::new()
-                        });
-                        if plural_names && from < to {
-                            database.open_for_tabular_rows()?;
                         }
                     }
                 } else if !ordered.is_empty() {
-                    let messages = super::super::database::prefetch_messages(
+                    let messages = super::super::database::batch_prefetch(
                         database,
                         ordered,
                         &reports.titles.borrow(),

@@ -44,7 +44,7 @@
 //!   in the message of a query NCBI did not search), or (with `-db`) the taxonomy database is
 //!   on the search path and the lookup of the taxid of some sequence of the database would be
 //!   refused (a scientific name NCBI's XML2 cannot write, a damaged record, which outfmt 5 reads
-//!   in each batch's prefetch, `ReportedSubjects::prefetch_messages`: checked once before the
+//!   in each batch's prefetch, `ReportedSubjects::batch_prefetch`: checked once before the
 //!   first byte, `taxdb_may_refuse`, with the names for XML2 and JSON only), or the run's
 //!   fetches are refused for NCBI's taxonomy cache (`BlastxDatabase::prefetch_refused`: outfmt
 //!   5's prefetch, and the XML2 and JSON lookups of a batch that reports a subject with a

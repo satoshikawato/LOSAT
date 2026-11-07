@@ -141,6 +141,12 @@ impl TblastxDatabase {
         self.taxdb.open_for_rows(&self.db, PROGRAM)
     }
 
+    /// Whether the database has parsed Seq-ids, whose subjects NCBI's prefetch can fail at
+    /// (`batch_prefetch`).
+    pub(crate) fn parsed_seqids(&self) -> bool {
+        self.parsed
+    }
+
     /// Whether the database has parsed Seq-ids and more than `max_sequences` sequences in its
     /// volumes (`SeqDb::printed_num_seqs`, also under a taxid list: the range walks of
     /// `reports_may_refuse` decode a list's excluded sequences of every range they read): the
@@ -416,6 +422,32 @@ pub(crate) fn prefetch_messages<'h>(
     shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)
 }
 
+/// NCBI's prefetch of the query batch whose reported hits are `ordered` (in report order, by
+/// ordinal id) on standard error (`shared::batch_prefetch`): the taxonomy texts of
+/// [`prefetch_messages`], then the warning where the prefetch fails, at a subject whose lookup
+/// fails or one without a Bioseq with a Seq-align whose first Std-seg has a minus query frame
+/// and a plus subject frame (`CSeq_align::GetSeqStrand` reads the first segment): `ordered`
+/// holds each query's HSPs of a subject in one run, in the order of the Std-segs (`seqalign`).
+pub(crate) fn batch_prefetch(
+    database: &TblastxDatabase,
+    ordered: &[TblastxHsp],
+    titles: &DatabaseTitles,
+) -> Result<Vec<u8>> {
+    let mut previous = None;
+    let subjects = ordered.iter().map(|hsp| {
+        let ordinal = hsp.hit.s_idx;
+        let parsed = match titles.get(&ordinal) {
+            Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+            _ => None,
+        };
+        let run = (hsp.hit.q_idx, ordinal);
+        let first = previous.replace(run) != Some(run);
+        let flipped = first && hsp.hit.query_frame < 0 && hsp.subject_frame > 0;
+        (ordinal, parsed, flipped)
+    });
+    shared::batch_prefetch(&database.db, &database.taxdb, subjects, PROGRAM)
+}
+
 /// The database sequences that the reports show, by rank (`reported_subjects`).
 pub(crate) struct ReportedSubjects {
     /// The ordinal id of each rank.
@@ -474,15 +506,11 @@ pub(crate) fn reported_subjects(
     ordinals.dedup();
     // Where only the batches' prefetch reads the subjects (`shown.prefetched`), those that a
     // batch whose prefetch is on reports (`prefetch`: a batch whose Seq-aligns outnumber a
-    // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them), and of these the ones with a
-    // Seq-align in such a batch whose first Std-seg has a minus query frame and a plus subject
-    // frame (`shared::check_prefetched_strands`; `CSeq_align::GetSeqStrand` reads the first
-    // segment): `ordered` holds each query's HSPs of a subject in one run, in the order of the
-    // Std-segs (`seqalign`).
+    // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them); where the prefetch fails, the
+    // batch writes NCBI's warning (`batch_prefetch`).
     // `prefetched` is `None` where every batch prefetches.
     let mut prefetched = prefetch.counts().then(std::collections::HashSet::new);
-    let mut flipped = std::collections::HashSet::new();
-    if shown.prefetched {
+    if shown.prefetched && prefetched.is_some() {
         let mut previous = None;
         for hsp in ordered.iter() {
             let run = (hsp.hit.q_idx, hsp.hit.s_idx);
@@ -491,9 +519,6 @@ pub(crate) fn reported_subjects(
             }
             if let Some(prefetched) = &mut prefetched {
                 prefetched.insert(hsp.hit.s_idx);
-            }
-            if hsp.hit.query_frame < 0 && hsp.subject_frame > 0 {
-                flipped.insert(hsp.hit.s_idx);
             }
         }
     }
@@ -533,13 +558,6 @@ pub(crate) fn reported_subjects(
                     ),
                     false,
                     taxdb,
-                    ordinal,
-                    PROGRAM,
-                )?;
-                shared::check_prefetched_strands(
-                    &database.db,
-                    subject,
-                    flipped.contains(&ordinal),
                     ordinal,
                     PROGRAM,
                 )?;

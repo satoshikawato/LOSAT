@@ -199,6 +199,9 @@ pub(super) struct BlastnDatabase {
     /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
     /// and the batches' prefetch of outfmt 0, 5, 6, 7 and 17).
     taxdb: shared::TaxdbRun,
+    /// Whether the database has parsed Seq-ids (`shared::check_seqids`), whose subjects NCBI's
+    /// prefetch can fail at (`batch_prefetch`).
+    parsed_seqids: bool,
 }
 
 /// The length and the ambiguity runs of the database sequences that one report call wrote
@@ -400,7 +403,7 @@ impl BlastnDatabase {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
-        shared::check_seqids(&db, settings, PROGRAM)?;
+        let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
         shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         let (total, num_seqs) = db.statistics_numbers();
         let db_len_total = usize::try_from(total)
@@ -420,7 +423,14 @@ impl BlastnDatabase {
             name: name.to_string(),
             metadata,
             taxdb: shared::TaxdbRun::default(),
+            parsed_seqids,
         })
+    }
+
+    /// Whether NCBI's prefetch of a batch can fail at a subject (a database with parsed
+    /// Seq-ids, `batch_prefetch`).
+    pub(super) fn parsed_seqids(&self) -> bool {
+        self.parsed_seqids
     }
 
     /// The Blast-def-line taxid of each reported sequence by rank (`ordinals`: the ordinal id of
@@ -485,6 +495,49 @@ impl BlastnDatabase {
                 (hsp_list.oid, parsed)
             });
         shared::prefetch_messages(&self.db, &self.taxdb, subjects, PROGRAM)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:307-308
+    // ```c++
+    //     case C_Segs::e_Dendiag:
+    //         return GetSegs().GetDendiag().front()->GetSeqStrand(row);
+    // ```
+    // A gapped search makes a Seq-align of each HSP; an ungapped one makes one Seq-align of a
+    // subject's HSPs, a Dense-diag each (`shared::subject_seq_aligns`), whose strand is its
+    // first one's: the subject's first HSP (probe of line DBID pfwarn, `R/pfwarn` W4). BLASTN's
+    // Seq-aligns are on the subject's plus strand.
+    /// NCBI's prefetch of the query batch whose final hit lists are `hit_lists` on standard error
+    /// (`shared::batch_prefetch`): the taxonomy texts of [`BlastnDatabase::prefetch_messages`],
+    /// then the warning where the prefetch fails, at a subject whose lookup fails or one without
+    /// a Bioseq that a Seq-align on the query's minus strand flips (`gapped`: each HSP is a
+    /// Seq-align, else a subject's first HSP decides).
+    pub(super) fn batch_prefetch(
+        &self,
+        titles: &DatabaseTitles,
+        hit_lists: &[Option<BlastnHitList>],
+        gapped: bool,
+    ) -> Result<Vec<u8>> {
+        let subjects = hit_lists
+            .iter()
+            .flatten()
+            .flat_map(|hit_list| {
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                &hit_list.hsplist_array[..count]
+            })
+            .filter(|hsp_list| !hsp_list.hsps.is_empty())
+            .map(|hsp_list| {
+                let parsed = match titles.get(&hsp_list.oid) {
+                    Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+                    _ => None,
+                };
+                let flipped = if gapped {
+                    hsp_list.hsps.iter().any(|hsp| hsp.query_frame < 0)
+                } else {
+                    hsp_list.hsps[0].query_frame < 0
+                };
+                (hsp_list.oid, parsed, flipped)
+            });
+        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM)
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).
@@ -1313,13 +1366,11 @@ pub(super) fn reported_subjects(
     ordinals.dedup();
     // Where only the batches' prefetch reads the subjects (`shown.prefetched`), those that a
     // batch whose prefetch is on reports (`prefetch`: a batch whose Seq-aligns outnumber a
-    // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them), and of these the ones with an HSP
-    // on the query's minus strand in such a batch, whose Seq-align is on the subject's plus
-    // strand (`shared::check_prefetched_strands`).
+    // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them); where the prefetch fails, the
+    // batch writes NCBI's warning (`BlastnDatabase::batch_prefetch`).
     // `prefetched` is `None` where every batch prefetches.
     let mut prefetched = prefetch.counts().then(std::collections::HashSet::new);
-    let mut flipped = std::collections::HashSet::new();
-    if shown.prefetched {
+    if shown.prefetched && prefetched.is_some() {
         let lists = hit_lists
             .iter()
             .enumerate()
@@ -1330,9 +1381,6 @@ pub(super) fn reported_subjects(
         for hsp_list in lists {
             if let Some(prefetched) = &mut prefetched {
                 prefetched.insert(hsp_list.oid);
-            }
-            if hsp_list.hsps.iter().any(|hsp| hsp.query_frame < 0) {
-                flipped.insert(hsp_list.oid);
             }
         }
     }
@@ -1376,13 +1424,6 @@ pub(super) fn reported_subjects(
                         .is_none_or(|prefetched| prefetched.contains(&ordinal)),
                 );
                 shared::check_reported_parsed(db, subject, shown, false, taxdb, ordinal, PROGRAM)?;
-                shared::check_prefetched_strands(
-                    db,
-                    subject,
-                    flipped.contains(&ordinal),
-                    ordinal,
-                    PROGRAM,
-                )?;
                 (subject.first_title().to_vec(), Some(Arc::clone(subject)))
             }
         };
@@ -2263,6 +2304,7 @@ mod tests {
         let path = tests.join("db_search").join(name);
         let mut db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
         db.read_name_records(path.to_str().unwrap()).unwrap();
+        let parsed_seqids = db.has_parsed_seqids().unwrap();
         BlastnDatabase {
             metadata: SubjectMetadata {
                 db_len_total: db.total_length() as usize,
@@ -2271,6 +2313,7 @@ mod tests {
             db,
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
+            parsed_seqids,
         }
     }
 

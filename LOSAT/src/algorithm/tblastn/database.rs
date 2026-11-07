@@ -50,6 +50,9 @@ pub(super) struct TblastnDatabase {
     /// The taxonomy database of the run, opened by the XML2 and JSON formats and by the
     /// batches' prefetch of outfmt 0, 5, 6 and 7 (`prefetch_messages`).
     taxdb: shared::TaxdbRun,
+    /// Whether the database has parsed Seq-ids (`shared::check_seqids`), whose subjects NCBI's
+    /// prefetch can fail at (`batch_prefetch`).
+    parsed_seqids: bool,
 }
 
 impl TblastnDatabase {
@@ -97,7 +100,7 @@ impl TblastnDatabase {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
-        shared::check_seqids(&db, settings, PROGRAM)?;
+        let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
         shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
@@ -112,7 +115,14 @@ impl TblastnDatabase {
             db,
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
+            parsed_seqids,
         })
+    }
+
+    /// Whether NCBI's prefetch of a batch can fail at a subject (a database with parsed
+    /// Seq-ids, `batch_prefetch`).
+    pub(super) fn parsed_seqids(&self) -> bool {
+        self.parsed_seqids
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).
@@ -261,6 +271,30 @@ impl TblastnDatabase {
                 (reported.ordinals[rank], reported.parsed_subject(rank))
             });
         shared::prefetch_messages(&self.db, &self.taxdb, subjects, PROGRAM)
+    }
+
+    /// NCBI's prefetch of the query batch whose final hit lists are `hitlists` (subjects named by
+    /// rank, `reported_subjects`) on standard error (`shared::batch_prefetch`): the taxonomy
+    /// texts of the sequences with HSPs in them, then the warning where the prefetch fails at a
+    /// subject whose lookup fails (the protein query has no strand).
+    pub(super) fn batch_prefetch(
+        &self,
+        reported: &ReportedSubjects,
+        hitlists: &[KappaResultHitList],
+    ) -> Result<Vec<u8>> {
+        let subjects = hitlists
+            .iter()
+            .flat_map(KappaResultHitList::lists)
+            .filter(|list| reads_subject(list, SubjectFetch::Every))
+            .map(|list| {
+                let rank = list.oid as usize;
+                (
+                    reported.ordinals[rank],
+                    reported.parsed_subject(rank),
+                    false,
+                )
+            });
+        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM)
     }
 
     /// The database read where it is searched by `threads` threads, after the checks of
@@ -632,6 +666,7 @@ mod tests {
             },
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
+            parsed_seqids: true,
         }
     }
 

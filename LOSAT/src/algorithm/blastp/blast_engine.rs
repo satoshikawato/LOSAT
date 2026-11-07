@@ -12236,6 +12236,8 @@ fn run_resolved_in_pool(
                     }
                     continue;
                 }
+                // The taxonomy texts, and NCBI's warning where the prefetch fails at a subject
+                // whose lookup fails (`ListedTitles::batch_prefetch`), also without `taxdb.bti`.
                 let messages = match psiblast_prefetched.as_ref() {
                     Some(ranks) => {
                         let prefetched = titles.prefetched_ranks(
@@ -12243,22 +12245,20 @@ fn run_resolved_in_pool(
                             &ranks[batch.searched.clone()].concat(),
                             prefetch_taxids,
                         )?;
-                        if !prefetch_taxids {
-                            continue;
-                        }
-                        titles.prefetch_messages(database, prefetched)?
+                        titles.batch_prefetch(database, prefetched)?
                     }
-                    None if !prefetch_taxids => {
-                        titles.check_prefetched(
+                    None => {
+                        if !prefetch_taxids {
+                            titles.check_prefetched(
+                                database,
+                                database::ListedTitles::reported_ranks(lists),
+                            )?;
+                        }
+                        titles.batch_prefetch(
                             database,
                             database::ListedTitles::reported_ranks(lists),
-                        )?;
-                        continue;
+                        )?
                     }
-                    None => titles.prefetch_messages(
-                        database,
-                        database::ListedTitles::reported_ranks(lists),
-                    )?,
                 };
                 open_for_rows(lists)?;
                 if messages.is_empty() {

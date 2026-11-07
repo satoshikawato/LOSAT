@@ -1,0 +1,182 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "tblastx",
+          data int 5
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nrefuse_v5 (parsed Seq-ids)",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type diags,
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            gi 777
+          },
+          loc {
+            int {
+              from 30,
+              to 227,
+              strand plus,
+              id local str "Query_1"
+            },
+            int {
+              from 45,
+              to 242,
+              strand plus,
+              id gi 777
+            }
+          },
+          scores {
+            {
+              id str "score",
+              value int 344
+            },
+            {
+              id str "blast_score",
+              value int 344
+            },
+            {
+              id str "sum_n",
+              value int 3
+            },
+            {
+              id str "sum_e",
+              value real { 193182356303818, 10, -89 }
+            },
+            {
+              id str "bit_score",
+              value real { 160523905109651, 10, -12 }
+            },
+            {
+              id str "num_ident",
+              value int 60
+            },
+            {
+              id str "num_positives",
+              value int 63
+            },
+            {
+              id str "hsp_percent_coverage",
+              value real { 1425, 10, -2 }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "tblastx",
+          data int 5
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nrefuse_v5 (parsed Seq-ids)",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type diags,
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            gi 777
+          },
+          loc {
+            int {
+              from 14,
+              to 22,
+              strand minus,
+              id local str "Query_2"
+            },
+            int {
+              from 228,
+              to 236,
+              strand plus,
+              id gi 777
+            }
+          },
+          scores {
+            {
+              id str "score",
+              value int 14
+            },
+            {
+              id str "blast_score",
+              value int 14
+            },
+            {
+              id str "e_value",
+              value real { 853412264358669, 10, -14 }
+            },
+            {
+              id str "bit_score",
+              value real { 931508689715795, 10, -14 }
+            },
+            {
+              id str "num_ident",
+              value int 2
+            },
+            {
+              id str "num_positives",
+              value int 3
+            },
+            {
+              id str "hsp_percent_coverage",
+              value real { 383333333333333, 10, -14 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

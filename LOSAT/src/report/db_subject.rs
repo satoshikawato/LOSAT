@@ -148,8 +148,9 @@ pub enum Prefetched {
         or_itself: bool,
         reason: String,
     },
-    /// A lookup that fails (the reason): NCBI's prefetch catches the exception, writes the
-    /// warning `Error pre-fetching sequence data` and reads no other subject of the batch.
+    /// A lookup that fails (the reason): NCBI's prefetch catches the exception and writes the
+    /// warning `Error pre-fetching sequence data`; the batch's other subjects that it reads
+    /// before are not known (`common::database::batch_prefetch`).
     Failed(String),
 }
 
@@ -588,7 +589,7 @@ impl ParsedSubject {
             // rethrows a database error (`CSeqDBException`) and stops; the formats that read the
             // Bioseq stop (`fetched`).
             Some(FoundInstead::Failed(message)) => Prefetched::Failed(format!(
-                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data and reads no other subject of the batch, or stops)",
+                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data, and a report that reads it stops)",
                 String::from_utf8_lossy(&self.alignment_fasta())
             )),
             Some(FoundInstead::Sequence(other)) => Prefetched::Another {
@@ -607,6 +608,13 @@ impl ParsedSubject {
                 reason: reason(),
             },
         }
+    }
+
+    /// Whether the lookup of this subject's Seq-align id fails where NCBI's prefetch loads it
+    /// (`Prefetched::Failed`): the batch's prefetch writes `Error pre-fetching sequence data`
+    /// (`common::database::batch_prefetch`).
+    pub fn prefetch_fails(&self) -> bool {
+        !self.unfetchable && matches!(self.found_instead, Some(FoundInstead::Failed(_)))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2250-2255

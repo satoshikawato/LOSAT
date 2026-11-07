@@ -501,8 +501,21 @@ first; `ids/pfb_s.fna` holds two pieces of it (two HSPs gapped, one Seq-align wi
 and `ids/pfb_rc_ids_q.fna`, the reverse complements of `ids/nambig.fna` and `ids/ids_q.fna`, align on the minus strand
 of the query with `lcl|777` of `ids/nrefuse_v5`, whose Bioseq NCBI's prefetch does not get. With a positive
 `PRE_FETCH_SEQS_LIMIT`, a batch whose Seq-aligns outnumber it reads nothing in its prefetch, so a table that reads
-nothing of the subject writes NCBI's rows (NCBI writes no warning); a batch within it reads the subject, and LOSAT
-refuses where NCBI writes `Error pre-fetching sequence data`.
+nothing of the subject writes NCBI's rows (NCBI writes no warning); a batch within it reads the subject, and where its
+prefetch fails NCBI and LOSAT write `Error pre-fetching sequence data` (line DBID pfwarn).
+
+The warning of a batch whose prefetch fails (line DBID pfwarn; rows `db.id.pfw.*`): `make_ids.py --pfwarn-only` writes
+`ids/ntag_t5` (version 5) from `ids/nordtag.fna`, `ids/nlook_t4` (version 4) from `ids/nlook.fna` and `ids/pshare_t5`
+(version 5) from `ids/pshare.faa`, every sequence with taxid 99990, whose lookup in
+`tests/seqdb/taxdb/offset_last_past_end` writes the offset error. NCBI's prefetch writes the taxonomy database's texts of
+the subjects it loads, then `Warning: [<program>] Error pre-fetching sequence data`, once for the batch, before the
+batch's query warnings. A minus-strand Seq-align of `bbs|123` (no ISAM key in version 4, so no Bioseq) fails after every
+load (`ids/pfw_look_fw_rc.fna`, `ids/pfw_look_rc_fw.fna`: `fw70` on the plus strand of `gb|AF000070.1|`, `rc123` on the
+minus strand of `bbs|123`); the lookup of `gnl|BL_ORD_ID|0` with a text tag fails where the loads, in an order of
+NCBI's Seq-id handles that LOSAT does not reproduce, reach it, so a batch with it whose other subjects' loads write a
+text is LOSAT's refusal. With `-ungapped` BLASTN makes one Seq-align of a subject's HSPs, whose strand is its first
+HSP's: `ids/pfw_fwL_rcS.fna` aligns with `bbs|123` on the plus strand first (240 letters) and on the minus strand (60),
+`ids/pfw_fwS_rcL.fna` the other way round. `ids/pfw_ps_q21.faa` holds `pshare_q2.faa` and `pshare_q1.faa`.
 
 Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
 --join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and

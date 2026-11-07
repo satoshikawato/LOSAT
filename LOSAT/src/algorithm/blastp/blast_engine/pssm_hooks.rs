@@ -449,9 +449,15 @@ fn pssm_redo(
     } else {
         &psi.freq_ratios
     };
-    let Some(info) = PosMatrixInfo::new(query, freq_ratios, &sbp, redo1::SCALING_FACTOR) else {
+    let kbp_psi = crate::core::psi::KarlinBlk {
+        lambda: karlin.ungapped.lambda,
+        k: karlin.ungapped.k,
+        h: karlin.ungapped.h,
+    };
+    let Some(info) = PosMatrixInfo::new(query, freq_ratios, &sbp, redo1::SCALING_FACTOR, kbp_psi)
+    else {
         anyhow::bail!(
-            "a PSSM whose position-based scaling for the composition-based statistics gives no Karlin-Altschul parameters is not supported by LOSAT's PSIBLAST"
+            "a PSSM whose position-based scaling for the composition-based statistics gives no Karlin-Altschul parameters (NCBI BLAST+ 2.17.0 goes on with a Lambda of -1) is not supported by LOSAT's PSIBLAST"
         );
     };
     redo1::PssmRedo1 {

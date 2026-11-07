@@ -1946,6 +1946,91 @@ pub(super) fn gapped_psi_k(kbp_psi: KarlinBlk, sbp: &PsiScoreBlk) -> f64 {
     kbp_psi.k * sbp.gap_std_k / sbp.ideal_k
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2100-2119
+// ```c
+// BlastScoreChk(Int4 lo, Int4 hi)
+// {
+//    if (lo >= 0 || hi <= 0 ||
+//          lo < BLAST_SCORE_MIN || hi > BLAST_SCORE_MAX)
+//       return 1;
+//
+//    if (hi - lo > BLAST_SCORE_RANGE_MAX)
+//       return 1;
+//
+//    return 0;
+// }
+// ...
+//    if (BlastScoreChk(score_min, score_max) != 0)
+//       return NULL;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2699-2704
+// ```c
+// Blast_KarlinBlkUngappedCalc(Blast_KarlinBlk* kbp, Blast_ScoreFreq* sfp)
+// {
+//
+//
+//    if (kbp == NULL || sfp == NULL)
+//       return 1;
+// ```
+/// Whether `Blast_ScoreFreqNew` makes the score frequencies of `pssm` in
+/// `_PSIComputeScoreProbabilities` (the range of the 20 standard letters' scores over the
+/// positions that are not X, without `BLAST_SCORE_MIN` and `BLAST_SCORE_MAX`, passes
+/// `BlastScoreChk`: a negative smallest score and a positive largest one). Where it does not,
+/// `Blast_KarlinBlkUngappedCalc` returns 1 and leaves `kbp_psi[0]` as it was.
+fn factor_one_score_range_is_valid(pssm: &[[i32; BLASTAA_SIZE]], query: &[u8]) -> bool {
+    let (mut min_score, mut max_score) = (BLAST_SCORE_MAX, BLAST_SCORE_MIN);
+    for (_, column) in query.iter().zip(pssm).filter(|(&residue, _)| residue != X) {
+        for &r in &STD_ALPHABET {
+            let score = column[r as usize];
+            if score > BLAST_SCORE_MIN && score < BLAST_SCORE_MAX {
+                min_score = min_score.min(score);
+                max_score = max_score.max(score);
+            }
+        }
+    }
+    // Inside (BLAST_SCORE_MIN, BLAST_SCORE_MAX) the range is below BLAST_SCORE_RANGE_MAX.
+    min_score < 0 && max_score > 0
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:355-378
+// ```c
+//     std_prob = BLAST_GetStandardAaProbabilities();
+//     *pssm = PSIMatrixNew(query_length, (Uint4) sbp->alphabet_size);
+//     internal_pssm = _PSIInternalPssmDataNew(query_length, sbp->alphabet_size);
+//     ...
+//     _PSICopyMatrix_double(internal_pssm->freq_ratios, freq_ratios,
+//                           internal_pssm->ncols, internal_pssm->nrows);
+//
+//     status = _PSICreateAndScalePssmFromFrequencyRatios(internal_pssm,
+//                                                        query, query_length,
+//                                                        std_prob, sbp,
+//                                                        impala_scaling_factor);
+//     ...
+//     s_PSISavePssm(internal_pssm, sbp, *pssm);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:399-414
+// ```c
+//     status = _PSIConvertFreqRatiosToPSSM(internal_pssm, query, sbp, std_prob);
+//     ...
+//     if (impala_scaling_factor == kPSSM_NoImpalaScaling) {
+//         status = _PSIScaleMatrix(query, std_prob, internal_pssm, sbp);
+// ```
+/// `PSICreatePssmFromFrequencyRatios` without IMPALA's scaling (`CPsiBlastInputFreqRatios`'s
+/// default): the scores of the PSSM of `freq_ratios` (28 per position) and `kbp_psi[0]` of its
+/// scaling.
+pub(super) fn pssm_from_freq_ratios(
+    query: &[u8],
+    freq_ratios: &[[f64; BLASTAA_SIZE]],
+    sbp: &PsiScoreBlk,
+) -> Result<(Vec<[i32; BLASTAA_SIZE]>, KarlinBlk), PsiError> {
+    let std_probs = crate::stats::karlin_calc::compute_std_aa_composition();
+    let mut internal = InternalPssm::new(query.len());
+    internal.freq_ratios.copy_from_slice(freq_ratios);
+    convert_freq_ratios_to_pssm(&mut internal, query, sbp, &std_probs);
+    let ungapped = scale_matrix(query, &std_probs, &mut internal, sbp)?;
+    Ok((internal.into_scores(), ungapped))
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:715-742
 // ```c
 //     _PSICopyMatrix_int(internal_pssm->pssm, posSearch->posMatrix,
@@ -1990,56 +2075,19 @@ pub(super) fn gapped_psi_k(kbp_psi: KarlinBlk, sbp: &PsiScoreBlk) -> f64 {
 //         }
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:355-378
-// ```c
-//     std_prob = BLAST_GetStandardAaProbabilities();
-//     *pssm = PSIMatrixNew(query_length, (Uint4) sbp->alphabet_size);
-//     internal_pssm = _PSIInternalPssmDataNew(query_length, sbp->alphabet_size);
-//     ...
-//     _PSICopyMatrix_double(internal_pssm->freq_ratios, freq_ratios,
-//                           internal_pssm->ncols, internal_pssm->nrows);
-//
-//     status = _PSICreateAndScalePssmFromFrequencyRatios(internal_pssm,
-//                                                        query, query_length,
-//                                                        std_prob, sbp,
-//                                                        impala_scaling_factor);
-//     ...
-//     s_PSISavePssm(internal_pssm, sbp, *pssm);
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:399-414
-// ```c
-//     status = _PSIConvertFreqRatiosToPSSM(internal_pssm, query, sbp, std_prob);
-//     ...
-//     if (impala_scaling_factor == kPSSM_NoImpalaScaling) {
-//         status = _PSIScaleMatrix(query, std_prob, internal_pssm, sbp);
-// ```
-/// `PSICreatePssmFromFrequencyRatios` without IMPALA's scaling (`CPsiBlastInputFreqRatios`'s
-/// default): the scores of the PSSM of `freq_ratios` (28 per position) and `kbp_psi[0]` of its
-/// scaling.
-pub(super) fn pssm_from_freq_ratios(
-    query: &[u8],
-    freq_ratios: &[[f64; BLASTAA_SIZE]],
-    sbp: &PsiScoreBlk,
-) -> Result<(Vec<[i32; BLASTAA_SIZE]>, KarlinBlk), PsiError> {
-    let std_probs = crate::stats::karlin_calc::compute_std_aa_composition();
-    let mut internal = InternalPssm::new(query.len());
-    internal.freq_ratios.copy_from_slice(freq_ratios);
-    convert_freq_ratios_to_pssm(&mut internal, query, sbp, &std_probs);
-    let ungapped = scale_matrix(query, &std_probs, &mut internal, sbp)?;
-    Ok((internal.into_scores(), ungapped))
-}
-
 /// `s_ScalePosMatrix` of the position-based composition-based statistics: the scaled PSSM
 /// (`posPrivateMatrix`, the redo's `startMatrix`) and `kbp_psi[0]` of the factor-1 PSSM
-/// (`posMatrix`). `posMatrix` and `posPrivateMatrix` start zeroed (`_PSIAllocateMatrix`,
-/// `Nlm_Int4MatrixNew`); `impalaScaleMatrix` runs without its binary search, so `factor` stays
-/// 1.0, and leaves the cells of `BLAST_SCORE_MIN` as the conversion left them.
+/// (`posMatrix`), or `None` where `_PSIUpdateLambdaK` leaves `kbp_psi[0]` as it was
+/// (`factor_one_score_range_is_valid`). `posMatrix` and `posPrivateMatrix` start zeroed
+/// (`_PSIAllocateMatrix`, `Nlm_Int4MatrixNew`); `impalaScaleMatrix` runs without its binary
+/// search, so `factor` stays 1.0, and leaves the cells of `BLAST_SCORE_MIN` as the conversion left
+/// them.
 pub(super) fn scale_pos_matrix(
     query: &[u8],
     freq_ratios: &[[f64; BLASTAA_SIZE]],
     sbp: &PsiScoreBlk,
     scaling_factor: f64,
-) -> (Vec<[i32; BLASTAA_SIZE]>, KarlinBlk) {
+) -> (Vec<[i32; BLASTAA_SIZE]>, Option<KarlinBlk>) {
     let std_probs = crate::stats::karlin_calc::compute_std_aa_composition();
     let mut internal = InternalPssm::new(query.len());
     internal.freq_ratios.copy_from_slice(freq_ratios);
@@ -2052,7 +2100,8 @@ pub(super) fn scale_pos_matrix(
             }
         }
     }
-    let kbp_psi = update_lambda_k(&internal.pssm, query, &std_probs);
+    let kbp_psi = factor_one_score_range_is_valid(&internal.pssm, query)
+        .then(|| update_lambda_k(&internal.pssm, query, &std_probs));
     let scalefactor = scaling_factor / K_PSI_SCALE_FACTOR as f64;
     for row in internal.scaled_pssm.iter_mut() {
         for score in row.iter_mut() {
@@ -2161,9 +2210,12 @@ const STD_ALPHABET: [u8; 20] = [
 // ```
 // NCBI's `Blast_ScoreFreqNew` returns NULL when the PSSM's smallest score is 0 or more or its
 // largest 0 or less; `Blast_KarlinBlkUngappedCalc` then leaves `kbp_psi[0]` as it was (the
-// previous Lambda). This port does not model that branch: the scaled scores of a BLOSUM62 round
-// (the only matrix LOSAT's psiblast accepts) keep negative and positive values at every factor
-// the scaling tries, so it is not reached.
+// previous Lambda). The scaled scores of a BLOSUM62 round (the only matrix LOSAT's psiblast
+// accepts) keep negative and positive values at every factor the scaling tries, so a round does
+// not reach that branch; a PSSM file's own ratios can (every ratio at most 1e-4 and not 0): the
+// position-based redo models it (`scale_pos_matrix`, `factor_one_score_range_is_valid`, item
+// PS4b), and for a PSSM of ratios only NCBI's bracket search of `_PSIScaleMatrix` then never ends
+// (LOSAT refuses that PSSM, `pssm_from_freq_ratios`'s error).
 fn compute_score_probabilities(
     pssm: &[[i32; BLASTAA_SIZE]],
     query: &[u8],

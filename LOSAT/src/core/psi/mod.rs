@@ -384,9 +384,10 @@ pub(crate) fn create_pssm_with_diagnostics(
 }
 
 /// The scaled PSSM of the position-based composition-based statistics (`s_ScalePosMatrix`,
-/// `stages::scale_pos_matrix`): the redo's `startMatrix`, and `kbp_psi[0]` and the gapped K of
-/// the factor-1 PSSM, which `_PSIUpdateLambdaK` leaves in the redo's copy of the score block
-/// (`kbp_gap_psi[0]->K`, `stages::gapped_psi_k`).
+/// `stages::scale_pos_matrix`): the redo's `startMatrix`, and `kbp_psi[0]` and the gapped K that
+/// `_PSIUpdateLambdaK` leaves in the redo's copy of the score block (`kbp_gap_psi[0]->K`,
+/// `stages::gapped_psi_k`): those of the factor-1 PSSM, or, where NCBI's `Blast_ScoreFreqNew`
+/// gives no score frequencies for it, the copy's `kbp_psi[0]` as it was and its K.
 pub(crate) struct PosScaledMatrix {
     pub(crate) start_matrix: Vec<[i32; BLASTAA_SIZE]>,
     pub(crate) kbp_psi: KarlinBlk,
@@ -394,7 +395,9 @@ pub(crate) struct PosScaledMatrix {
 }
 
 /// `s_ScalePosMatrix` for `query` (NCBIstdaa), the PSSM's frequency ratios `freq_ratios` (28
-/// rows each) and the score block `sbp`, scaled by `scaling_factor` (`SCALING_FACTOR`, 32).
+/// rows each) and the score block `sbp`, scaled by `scaling_factor` (`SCALING_FACTOR`, 32);
+/// `kbp_psi` is the search's `kbp_psi[0]` (`PsiBlastSetupScoreBlock`'s), which the redo's copy
+/// holds before the call.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2216-2227
 // ```c
 //     if (self->positionBased) {
@@ -416,8 +419,11 @@ pub(crate) fn scale_pos_matrix(
     freq_ratios: &[[f64; BLASTAA_SIZE]],
     sbp: &PsiScoreBlk,
     scaling_factor: f64,
+    kbp_psi: KarlinBlk,
 ) -> PosScaledMatrix {
-    let (start_matrix, kbp_psi) = stages::scale_pos_matrix(query, freq_ratios, sbp, scaling_factor);
+    let (start_matrix, factor_one) =
+        stages::scale_pos_matrix(query, freq_ratios, sbp, scaling_factor);
+    let kbp_psi = factor_one.unwrap_or(kbp_psi);
     PosScaledMatrix {
         start_matrix,
         kbp_psi,

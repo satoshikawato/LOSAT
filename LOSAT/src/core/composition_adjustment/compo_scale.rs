@@ -121,9 +121,11 @@ pub(crate) struct PosMatrixInfo {
 impl PosMatrixInfo {
     /// `s_MatrixInfoInit` for a position-based search: the query `query` (NCBIstdaa, as the
     /// search holds it: O as X), the PSSM's frequency ratios `freq_ratios` (28 per position, 0.0
-    /// where the PSSM has none), the score block `sbp` (BLOSUM62's), and the scaling factor
-    /// `scale_factor` (`SCALING_FACTOR`, 32). `None` when the factor-1 PSSM has no
-    /// Karlin-Altschul parameters (NCBI goes on with a Lambda of -1 or of the block before).
+    /// where the PSSM has none), the score block `sbp` (BLOSUM62's), the scaling factor
+    /// `scale_factor` (`SCALING_FACTOR`, 32) and the search's `kbp_psi[0]` (`kbp_psi`: the PSSM
+    /// file's ungapped values, or `kbp_std`'s), which stays where the factor-1 PSSM has no score
+    /// frequencies (`Blast_ScoreFreqNew` NULL, review S1 of PS4b). `None` when the factor-1 PSSM
+    /// has score frequencies but no Karlin-Altschul parameters (NCBI goes on with a Lambda of -1).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2216-2227
     /// ```c
@@ -146,9 +148,11 @@ impl PosMatrixInfo {
         freq_ratios: &[[f64; BLASTAA_SIZE]],
         sbp: &PsiScoreBlk,
         scale_factor: f64,
+        kbp_psi: crate::core::psi::KarlinBlk,
     ) -> Option<Self> {
         let start_freq_ratios = pos_based_start_freq_ratios(query, freq_ratios, sbp);
-        let scaled = crate::core::psi::scale_pos_matrix(query, freq_ratios, sbp, scale_factor);
+        let scaled =
+            crate::core::psi::scale_pos_matrix(query, freq_ratios, sbp, scale_factor, kbp_psi);
         if !(scaled.kbp_psi.lambda > 0.0 && scaled.kbp_psi.k > 0.0) {
             return None;
         }
@@ -566,10 +570,64 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sbp.ideal_k, 0.13395614448848181);
-        let info = PosMatrixInfo::new(&query, &search.freq_ratios, &sbp, 32.0).unwrap();
+        let info = PosMatrixInfo::new(
+            &query,
+            &search.freq_ratios,
+            &sbp,
+            32.0,
+            file_ungapped(&search),
+        )
+        .unwrap();
         assert_eq!(info.ungapped_lambda, 0.32206865605351226 / 32.0);
         assert_eq!(info.gapped_k, 0.042084934723385127);
         assert_eq!(info.start_matrix.len(), 398);
+    }
+
+    /// The ungapped block of a PSSM file (all three values present).
+    fn file_ungapped(
+        search: &crate::algorithm::pssm_search::PsiSearch,
+    ) -> crate::core::psi::KarlinBlk {
+        crate::core::psi::KarlinBlk {
+            lambda: search.stats.lambda_ungapped.unwrap(),
+            k: search.stats.kappa_ungapped.unwrap(),
+            h: search.stats.h_ungapped.unwrap(),
+        }
+    }
+
+    // Review S1 of PS4b: the tk PSSM with every frequency ratio 5e-5 (`ps4_tk_eps`) has
+    // factor-1 scores of -24 to -17 for the 20 letters, so NCBI's `Blast_ScoreFreqNew` gives
+    // NULL, `Blast_KarlinBlkUngappedCalc` returns 1 and the redo keeps the file's ungapped block:
+    // an LD_PRELOAD probe of NCBI 2.17.0 (`psiblast -in_pssm tk_eps.asn -db paja`) saw Lambda
+    // 0.31673860011845001 and K 0.13910107343338302 in the redo and K 0.042574710048176159 in
+    // every redo e-value.
+    #[test]
+    fn a_factor_1_pssm_without_score_frequencies_keeps_the_files_block() {
+        let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(
+            "pssm/ps4_tk_eps.asn.gz",
+        ))
+        .unwrap();
+        let search = crate::algorithm::psiblast::in_pssm::psi_search_of(pssm).unwrap();
+        let query: Vec<u8> = search
+            .query
+            .seq()
+            .iter()
+            .map(|&c| crate::utils::matrix::aa_char_to_ncbistdaa(c))
+            .collect();
+        let sbp = crate::algorithm::psiblast::pssm::score_block(
+            crate::config::ScoringMatrix::Blosum62,
+            crate::core::psi::KarlinBlk {
+                lambda: 0.267,
+                k: 0.041,
+                h: 0.14,
+            },
+        )
+        .unwrap();
+        let kbp_psi = file_ungapped(&search);
+        assert_eq!(kbp_psi.lambda, 0.31673860011845001);
+        assert_eq!(kbp_psi.k, 0.13910107343338302);
+        let info = PosMatrixInfo::new(&query, &search.freq_ratios, &sbp, 32.0, kbp_psi).unwrap();
+        assert_eq!(info.ungapped_lambda, 0.31673860011845001 / 32.0);
+        assert_eq!(info.gapped_k, 0.042574710048176159);
     }
 
     #[test]

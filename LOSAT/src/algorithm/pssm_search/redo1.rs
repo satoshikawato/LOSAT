@@ -448,9 +448,8 @@ impl PssmRedo1<'_> {
             return Ok(None);
         };
         let best_score = first.align.score;
-        if best_evalue > self.expect_value {
-            return Ok(None);
-        }
+        // NCBI's `best_evalue <= hitParams->options->expect_value` holds: the list keeps an HSP,
+        // whose e-value is at most `-evalue`, and `best_evalue` is the smallest of all.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:102-116
         // ```c
         //         hsp->score = (Int4)BLAST_Nint(((double) hsp->score) / scoreDivisor);

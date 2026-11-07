@@ -679,7 +679,7 @@ fn scores_from_freq_ratios(
         },
     )?;
     crate::core::psi::pssm_from_freq_ratios(&query, freq_ratios, &sbp).map_err(|_| {
-        refuse("a PSSM of frequency ratios from which NCBI's PSSM engine makes no scaled scores")
+        refuse("a PSSM of frequency ratios from which NCBI's PSSM engine makes no scaled scores (NCBI BLAST+ 2.17.0 does not finish or stops with an error)")
     })
 }
 

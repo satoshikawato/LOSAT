@@ -479,6 +479,59 @@ mod tests {
         assert_eq!((entry.last_hit(), entry.flag()), (i32::MAX / 4 + 10, false));
     }
 
+    // Diagonals `L` apart share an entry (`(q - s) & mask`): across buckets, a hit of a later
+    // bucket at a smaller `s` reads the entry that an earlier bucket's hit at a larger `s` wrote
+    // (exactness point 1 of the design). A hit of bucket 0 on diagonal -4180 makes the two hits of
+    // bucket 1 on diagonal -84 (4,096 apart) read as overlapping it; with a table of 8,192 entries
+    // the second of them extends.
+    #[test]
+    fn diagonals_a_table_length_apart_share_an_entry_across_buckets() {
+        use crate::seqdb::rps::RPS_BACKBONE_SIZE;
+        let concat = 2100usize;
+        let mut rows = vec![[3i32; 28]; concat];
+        rows[concat - 1] = [-32767; 28];
+        let word = |l: usize| (l << 10) | (l << 5) | l;
+        let mut cells = vec![[0i32; 4]; RPS_BACKBONE_SIZE + 1];
+        let mut pv = vec![0u64; RPS_BACKBONE_SIZE / 64];
+        // The last letter's rows of the words A A A (q 10), C C C (q 2060), D D D (q 2065).
+        for (letter, entry) in [(1usize, 12), (3, 2062), (4, 2067)] {
+            cells[word(letter)] = [1, entry, 0, 0];
+            pv[word(letter) / 64] |= 1 << (word(letter) % 64);
+        }
+        let mut query = vec![20u8; 4200];
+        query[4190..4193].fill(1);
+        query[2144..2147].fill(3);
+        query[2149..2152].fill(4);
+        let params = RpsWordParams {
+            rows: RpsRows { rows: &rows },
+            table: RpsTable {
+                cells: &cells,
+                overflow: &[],
+                pv: &pv,
+            },
+            window: 40,
+            cutoff: 1,
+            dropoff: 20,
+        };
+        let hits_with_table = |length: i32| {
+            let mut scratch = RpsWordScratch {
+                diag: RpsDiagTable::new(),
+                buckets: RpsBuckets::new(concat),
+            };
+            scratch.diag.reset_for(length, 40);
+            let mut hits = Vec::new();
+            word_finder(&params, &mut scratch, &query, &mut hits);
+            (scratch.diag.mask, hits)
+        };
+        let (mask, ncbi) = hits_with_table(concat as i32);
+        assert_eq!(mask, 4095);
+        assert!(ncbi.is_empty(), "{ncbi:?}");
+        let (wide_mask, wide) = hits_with_table(8000);
+        assert_eq!(wide_mask, 8191);
+        assert_eq!(wide.len(), 1);
+        assert_eq!((wide[0].q_off, wide[0].s_off), (2065, 2149));
+    }
+
     // Stale entries of earlier queries read as no hit: a table that searched another query
     // gives the hits of a fresh one (exactness point 2 of the design).
     #[test]

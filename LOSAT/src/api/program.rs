@@ -134,6 +134,14 @@ mod tests {
             let error = Program::parse(tool).unwrap_err();
             assert!(error.message().contains("not a search program"), "{error}");
         }
+        // rpsblast runs on the command line only (line PS, PS11a).
+        let error = Program::parse("rpsblast").unwrap_err();
+        assert!(
+            error
+                .message()
+                .contains("rpsblast is not available through the library API"),
+            "{error}"
+        );
         assert_eq!(
             Program::parse("nosuch"),
             Err(Error::Argv("unknown program 'nosuch'".to_string()))

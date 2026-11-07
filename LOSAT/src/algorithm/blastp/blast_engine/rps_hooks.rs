@@ -25,7 +25,7 @@
 
 use anyhow::{bail, Result};
 
-use super::{blastp_gapped_x_dropoff_raw, database, BlastpRuntimeLookup};
+use super::{database, BlastpRuntimeLookup};
 use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::hsp::BlastpHitList;
 use crate::algorithm::rps_search::engine::{batch_gapped_k, RpsQuery, RpsRun, RpsSearch};
@@ -221,12 +221,14 @@ pub(super) fn rps_search(
             volumes.len()
         );
     }
-    let num_seqs = db.num_seqs();
+    // The one volume's local ordinal ids are the database's.
+    let volume = &volumes[0];
+    let num_seqs = volume.num_oids();
     let lengths = (0..num_seqs)
-        .map(|oid| db.protein_length(oid))
+        .map(|oid| volume.protein_length(oid))
         .collect::<std::result::Result<Vec<u32>, _>>()
         .map_err(|error| crate::algorithm::common::database::database_error(error, "RPSBLAST"))?;
-    let files = RpsVolumeFiles::open(volumes[0].base(), &lengths).map_err(|error| match error {
+    let files = RpsVolumeFiles::open(volume.base(), &lengths).map_err(|error| match error {
         RpsOpenError::Ncbi(text) => anyhow::Error::new(RpsEngineError(text)),
         RpsOpenError::Refused(text) => anyhow::anyhow!(text),
     })?;
@@ -278,13 +280,15 @@ pub(super) fn rps_search(
     // stored: `Blast_TracebackGetEncoding` gives `eBlastEncodingProtein`).
     let offsets = files.offsets();
     let mut consensus = vec![0u8; concat];
-    for oid in 0..num_seqs {
-        let block = db.read_sequence(oid).map_err(|error| {
+    if num_seqs > 0 {
+        let block = volume.read_block(0, num_seqs, 0).map_err(|error| {
             crate::algorithm::common::database::database_error(error, "RPSBLAST")
         })?;
-        let letters = block.protein(0);
-        let start = offsets[oid as usize] as usize;
-        consensus[start..start + letters.len()].copy_from_slice(letters);
+        for oid in 0..num_seqs as usize {
+            let letters = block.protein(oid);
+            let start = offsets[oid] as usize;
+            consensus[start..start + letters.len()].copy_from_slice(letters);
+        }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-250
     // ```c
@@ -309,11 +313,20 @@ pub(super) fn rps_search(
             }
         }
     }
-    let x_drop_gapped =
-        blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_PRELIM as f64, run.gapped_params.lambda);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:455-463
+    // ```c
+    //    if (sbp->kbp_gap) {
+    //       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
+    //       params->gap_x_dropoff = (Int4)
+    //           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
+    //       ...
+    //       params->gap_x_dropoff_final = (Int4)
+    //           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
+    //    }
+    // ```
+    let x_drop_gapped = (X_DROP_GAPPED_PRELIM as f64 * std::f64::consts::LN_2 / lambda) as i32;
     let x_drop_final =
-        blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, run.gapped_params.lambda)
-            .max(x_drop_gapped);
+        ((X_DROP_GAPPED_FINAL as f64 * std::f64::consts::LN_2 / lambda) as i32).max(x_drop_gapped);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:177-190
     // ```c
     //    case eRPSLookupTable:

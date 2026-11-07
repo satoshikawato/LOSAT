@@ -42,7 +42,7 @@ use super::traceback::{filter_results, RpsTraceScratch, RpsTraceback, RpsTraced}
 use super::wordfinder::{RpsDiagTable, RpsWordParams, RpsWordScratch};
 use super::{RpsRows, RPS_K_MULT};
 use crate::seqdb::rps::RpsVolumeFiles;
-use crate::stats::{blast_spouge_etos, BlastGumbelBlk, KarlinParams};
+use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 
 /// The options of an RPS-BLAST search that blastp's driver does not apply itself: `-max_hsps`
 /// and `-qcov_hsp_perc` (the RPS traceback filters with the length of the first query of a
@@ -131,15 +131,78 @@ struct RpsCutoffs {
     hit_cutoff: i32,
 }
 
+/// `BLAST_SpougeEtoS` (the hit cutoff of an e-value), the RPS engine's own copy of
+/// `stats::blast_spouge_etos` (blastp's default path inlines that one; this search adds no caller
+/// to it).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5268
+/// ```c
+///     Int4 a=0, b, c;
+///     double e;
+///     double db_scale_factor = (gbp->db_length) ?
+///             (double)gbp->db_length : 1.0;
+///
+///     b = MAX((int)(log(db_scale_factor/e0) / kbp->Lambda), 2);
+///
+///     e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
+///
+///     if (e > e0) {
+///         while (e> e0) {
+///             a = b;
+///             b *= 2;
+///             e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
+///         }
+///     } else {
+///         a = 0;
+///     }
+///     while(b-a > 1) {
+///         c = (a+b)/2;
+///         e = BLAST_SpougeStoE(c, kbp, gbp, m, n);
+///         if (e> e0) {
+///             a = c;
+///         } else {
+///             b = c;
+///         }
+///     }
+///     return a;
+/// ```
+fn spouge_etos(evalue: f64, kbp: &KarlinParams, gbp: &BlastGumbelBlk, m: i32, n: i32) -> i32 {
+    let db_scale_factor = if gbp.db_length != 0 {
+        gbp.db_length as f64
+    } else {
+        1.0
+    };
+    let e0 = evalue.max(f64::MIN_POSITIVE);
+    let mut b = (((db_scale_factor / e0).ln() / kbp.lambda) as i32).max(2);
+    let mut a = 0i32;
+    let mut e = blast_spouge_stoe(b, kbp, gbp, m, n);
+    if e > e0 {
+        while e > e0 {
+            a = b;
+            b *= 2;
+            e = blast_spouge_stoe(b, kbp, gbp, m, n);
+        }
+    }
+    while b - a > 1 {
+        let c = (a + b) / 2;
+        e = blast_spouge_stoe(c, kbp, gbp, m, n);
+        if e > e0 {
+            a = c;
+        } else {
+            b = c;
+        }
+    }
+    a
+}
+
 impl RpsRun<'_> {
     fn cutoffs(&self, query: &RpsQuery<'_>, scale: f64) -> RpsCutoffs {
         let int_scale = scale as i32;
-        let x_dropoff = crate::algorithm::tblastx::ncbi_cutoffs::x_drop_raw_score(
-            crate::algorithm::tblastx::constants::X_DROP_UNGAPPED_BITS,
-            &query.kbp_std,
-            scale,
-        );
-        let hit_cutoff = blast_spouge_etos(
+        let x_dropoff = (scale
+            * (crate::algorithm::tblastx::constants::X_DROP_UNGAPPED_BITS * std::f64::consts::LN_2
+                / query.kbp_std.lambda)
+                .ceil()) as i32;
+        let hit_cutoff = spouge_etos(
             self.evalue,
             &self.gapped,
             self.gumbel,
@@ -147,10 +210,10 @@ impl RpsRun<'_> {
             self.cutoff_subject_length,
         )
         .wrapping_mul(int_scale);
-        let gap_trigger = crate::algorithm::tblastx::ncbi_cutoffs::gap_trigger_raw_score(
-            crate::algorithm::tblastx::constants::GAP_TRIGGER_BIT_SCORE,
-            &query.kbp_std,
-        );
+        let gap_trigger = ((crate::algorithm::tblastx::constants::GAP_TRIGGER_BIT_SCORE
+            * std::f64::consts::LN_2
+            + query.kbp_std.k.ln())
+            / query.kbp_std.lambda) as i32;
         RpsCutoffs {
             x_dropoff,
             word_cutoff: gap_trigger.wrapping_mul(int_scale).min(hit_cutoff),

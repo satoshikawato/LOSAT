@@ -672,6 +672,10 @@ Known differences that remain:
     (`6 sseqid`, `6 sallseqid`, `6 stitle`), where NCBI exits 0: on the rows of a sequence that it
     does not find it writes `Unknown` (`sseqid`), the query's earlier rows' ids and titles
     (`sallseqid`, `stitle`, which it does not reset), and the alignment's fields as reset.
+  - With `-ungapped`, BLASTN refuses a sequence that NCBI's prefetch gets no Bioseq of where any of
+    its HSPs is on the minus strand of the query; NCBI's one Seq-align of the sequence in an
+    ungapped search takes its strand from the first HSP, and its prefetch fails only where that
+    HSP is on the minus strand.
   - A title ending in `]` without `taxdb.bti` on the search path, where NCBI keeps the title.
   - The same record with other tax ids is refused in outfmt 13 to 16 and the tabular tax id and name
     fields also where NCBI writes the subject's own tax ids (the copy it shows is the subject, or is

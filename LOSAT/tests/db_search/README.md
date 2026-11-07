@@ -486,6 +486,19 @@ A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.
 `ids/ppunct_q.faa` hits both records. A table that prints no subject id (`6 qseqid evalue`) does not make it, so LOSAT
 writes NCBI's rows; `sseqid` is LOSAT's refusal.
 
+Each batch's prefetch counts its own Seq-aligns (line DBID pfbatch; rows `db.id.pfb.*`): `make_ids.py --pfbatch-only`
+writes `ids/nordtag_v5` (version 5, `-parse_seqids`) from `ids/nordtag.fna`, a sequence whose first id
+`gnl|BL_ORD_ID|0` makeblastdb stores with a text tag, so NCBI's lookup by that Seq-align id fails (as in `pshare_v5`),
+and another sequence. The queries `ids/nordtag_q.fna` and `ids/nordtag_q.faa` (qa, qb) hit one each; `ids/pfb_aba.faa`
+(qa, qb, qa2: with `BATCH_SIZE=101` the batches [qa, qb] and [qa2]) and `ids/pfb_aab.faa`, `ids/pfb_aab.fna` (qa, qa2,
+qb) put the sequence with the text tag in a batch of more Seq-aligns than the limit and in one within it, or only in the
+first; `ids/pfb_s.fna` holds two pieces of it (two HSPs gapped, one Seq-align with `-ungapped`). `ids/pfb_rc_nambig.fna`
+and `ids/pfb_rc_ids_q.fna`, the reverse complements of `ids/nambig.fna` and `ids/ids_q.fna`, align on the minus strand
+of the query with `lcl|777` of `ids/nrefuse_v5`, whose Bioseq NCBI's prefetch does not get. With a positive
+`PRE_FETCH_SEQS_LIMIT`, a batch whose Seq-aligns outnumber it reads nothing in its prefetch, so a table that reads
+nothing of the subject writes NCBI's rows (NCBI writes no warning); a batch within it reads the subject, and LOSAT
+refuses where NCBI writes `Error pre-fetching sequence data`.
+
 Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
 --join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and
 `ids/njoin_a`, `ids/njoin_b`, `ids/njoin_c` (version 5; r1 in all three, r3 with two definition lines and two

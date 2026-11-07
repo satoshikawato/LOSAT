@@ -99,7 +99,8 @@ from `ppunct.faa`, whose first title `, ,` is punctuation that NCBI's x_CleanAnd
 it makes the tabular id. `--tabfields-only` builds only these. Line DBID pfbatch (each batch's prefetch counts its
 own Seq-aligns against a positive PRE_FETCH_SEQS_LIMIT): `nordtag_v5.*` from `nordtag.fna`, a sequence whose first id
 `gnl|BL_ORD_ID|0` makeblastdb stores with a text tag (NCBI's lookup by that Seq-align id fails, as `pshare`'s) and
-another sequence; the queries `nordtag_q.fna` and `nordtag_q.faa` hit one each (`pfb_rc_nambig.fna` and
+another sequence; the queries `nordtag_q.fna` and `nordtag_q.faa` hit one each (`pfb_aba.faa`, `pfb_aab.faa`,
+`pfb_aab.fna` and `pfb_s.fna` place it in other batches, see tests/db_search/README.md; `pfb_rc_nambig.fna` and
 `pfb_rc_ids_q.fna` are the reverse complements of `nambig.fna` and `ids_q.fna`, for the minus-strand alignments of
 `nrefuse_v5`). `--pfbatch-only` builds only these.
 

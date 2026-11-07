@@ -3273,7 +3273,9 @@ pub(super) fn x_bn_mapped_reach(bytes: usize) {
 /// by score (`x_mapped::x_sort_by_mapped`), whose idle buffers may hold `x_sort_idle_bytes`.
 /// Without it each sort maps its scratch again and touches every page of it (Sakai x EDL933
 /// `-subject` blastn, where the hits of one chunk are sorted at a time: x1.009-1.027 of the time
-/// with the switch off).
+/// with the switch off). The idle buffers are freed when a query batch's preliminary stage ends
+/// (`x_clear_idle` next to `x_lut_drop::after_prelim`); two searches of one process at once share
+/// the pool, so one's clear may free the other's idle buffer (time only).
 static X_SORT: crate::utils::x_mapped::XPool<UngappedHit> =
     crate::utils::x_mapped::XPool::new(x_sort_idle_bytes);
 
@@ -5564,9 +5566,6 @@ fn update_hitlists_with_subject_hits(
                 if q_idx >= hit_lists.len() {
                     continue;
                 }
-                // The kept list holds its exact count, as the `Mixed` path below gives it (the
-                // final tree and the e-value reap drop HSPs after `x_final_list` sized it).
-                hsps.shrink_to_fit();
                 sort_hsps_by_score(&mut hsps);
                 let hsp_list = BlastnHspList {
                     oid,
@@ -19057,9 +19056,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                 );
             }
             // No NCBI counterpart (memory placement only): the list was built by growing (the
-            // traceback's pushes) and filtered in place, so its capacity is up to twice its
-            // length; a database search keeps every subject's list until the hit lists are made,
-            // so the list keeps only its length (a shrinking `realloc`, which glibc does in place).
+            // traceback's pushes) and filtered in place, so its capacity is up to twice the count
+            // traced; a database search keeps every subject's list until the hit lists are made,
+            // so the list keeps only its length (a shrinking `realloc`: glibc shrinks the block in
+            // place; another allocator may copy the kept HSPs).
             final_hits.shrink_to_fit();
 
             (final_hits, final_tree_hit_count)
@@ -19148,7 +19148,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 // No NCBI counterpart (memory placement only): the list goes to the purges as it is
                 // (they work in its allocation, `x_in_handle_order`) and leaves as the subject's
                 // result, instead of a copy while the scratch keeps the buffer at its largest size;
-                // the next subject's list grows from empty, as NCBI's `hsp_list` does.
+                // the next subject's list grows from empty.
                 let (list, s1, s2, s3, s4) = x_post_purge(std::mem::take(hits));
                 let (list, s5) = x_final_list(list, interval_tree);
                 (SubjectHits::Mixed(list), [s1, s2, s3, s4, s5])
@@ -19673,10 +19673,20 @@ fn search_query_batch<const UNGAPPED: bool>(
     // so the tables are dropped here (NCBI's traceback stage, traceback_stage.cpp:208-211)
     // (`x_lut_drop.rs`).
     x_lut_drop::after_prelim(lookup_tables);
-    // No NCBI counterpart (memory placement only): the idle scratch of the ungapped hits' sort
-    // (`X_SORT`) serves the preliminary stage only (NCBI frees its `BlastInitHitList` there too), so
-    // it is freed here and the traceback runs without its touched pages (Sakai x EDL933 `-subject`
-    // blastn: 11.4 MiB); the next batch's first sort maps one again.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:111-114,1605
+    // ```c
+    // s_BlastCoreAuxStructFree(BlastCoreAuxStruct* aux_struct)
+    // {
+    //     BlastExtendWordFree(aux_struct->ewp);
+    //     BLAST_InitHitListFree(aux_struct->init_hitlist);
+    // ...
+    //     s_BlastCoreAuxStructFree(aux_struct);
+    // ```
+    // NCBI frees the initial (ungapped) hit list at the end of its preliminary search. No NCBI
+    // counterpart (memory placement only): the idle scratch of the ungapped hits' sort (`X_SORT`)
+    // serves the preliminary stage only, so it is freed here and the traceback runs without its
+    // touched pages (Sakai x EDL933 `-subject` blastn: 11.4 MiB); the next batch's first sort maps
+    // one again.
     X_SORT.x_clear_idle();
     let hit_lists = match subjects {
         SubjectSource::Prepared(_) => {

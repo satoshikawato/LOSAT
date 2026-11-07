@@ -2011,9 +2011,11 @@ fn search(
 
 /// What the reports `formats` show of the reported database sequences, for LOSAT's refusals of
 /// those with parsed Seq-ids (`common::database::ParsedShown`): the tabular formats (6, 7, 10,
-/// 20), outfmt 0, the formats that join the alignments of following hits whose Seq-align
-/// ids match (0, 5, 13 to 16), and those that write the sequences' taxids (13 to 16, the
-/// tabular reports of taxonomy fields).
+/// 20) whose fields read the subject (`report::tabular::reads_subject`), outfmt 0, the
+/// structured documents (5, 13 to 16), the formats that join the alignments of following hits
+/// whose Seq-align ids match (0, 5, 13 to 16), those that write the sequences' taxids (13 to 16,
+/// the tabular reports of taxonomy fields), and whether the first format's batches prefetch the
+/// subjects.
 fn parsed_shown(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
 ) -> crate::algorithm::common::database::ParsedShown {
@@ -2023,10 +2025,19 @@ fn parsed_shown(
         .collect();
     let pairwise = numbers.contains(&0);
     crate::algorithm::common::database::ParsedShown {
-        tabular: numbers
-            .iter()
-            .any(|&number| matches!(number, 6 | 7 | 10 | 20)),
+        tabular: formats.iter().any(|format| {
+            matches!(
+                super::stage_e_report::format_number(format.outfmt),
+                6 | 7 | 10 | 20
+            ) && crate::report::tabular::reads_subject(
+                super::tabular::tabular_spec(format.outfmt).as_ref(),
+                crate::blastinput::app::Program::Tblastn,
+            )
+        }),
         pairwise,
+        structured: formats
+            .iter()
+            .any(|format| super::stage_e_report::is_structured_xml(format.outfmt)),
         joined: pairwise
             || formats.iter().any(|format| {
                 super::stage_e_report::is_structured_xml(format.outfmt)
@@ -2055,9 +2066,13 @@ fn parsed_shown(
                     ))
                 },
             ),
-        prefetched: crate::algorithm::common::database::seq_annots_prefetch(
-            numbers.first().copied(),
-        ),
+        // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (quoted in `run`).
+        prefetched: crate::algorithm::common::database::prefetches_subjects(numbers.first().map(
+            |&number| match number {
+                10 | 20 => 6,
+                number => number,
+            },
+        )) && !crate::algorithm::common::database::prefetch_always_off(),
     }
 }
 

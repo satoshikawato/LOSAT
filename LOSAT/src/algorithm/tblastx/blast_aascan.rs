@@ -68,7 +68,7 @@ pub(super) fn determine_scanning_offsets(
 /// - Pointer-style iteration matching NCBI's C implementation
 /// - Inline presence vector test
 #[inline]
-pub fn s_blast_aa_scan_subject(
+pub(crate) fn s_blast_aa_scan_subject(
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     seq_ranges: &[(i32, i32)],
@@ -123,7 +123,8 @@ pub fn s_blast_aa_scan_subject(
             // Reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:55-57
             let pv_word = unsafe { *pv.add(index >> PV_ARRAY_BTS) };
             if (pv_word & (1u32 << (index & PV_ARRAY_MASK))) != 0 {
-                // SAFETY: index is within backbone bounds (masked)
+                // SAFETY: `index < backbone_size`: the crate's callers pass NCBIstdaa letters (below
+                // 28), so the word's index stays in the table's cells (the mask alone allows 32,768).
                 let cell = unsafe { &*backbone.add(index) };
                 let numhits = cell.num_used;
 
@@ -254,7 +255,7 @@ pub(crate) fn x_blast_aa_scan_subject_cells<C: XCell>(
 // }
 // ```
 #[inline]
-pub fn s_blast_aa_scan_subject_one_range(
+pub(crate) fn s_blast_aa_scan_subject_one_range(
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     offset_pairs: &mut [OffsetPair],
@@ -318,12 +319,13 @@ pub fn s_blast_aa_scan_subject_one_range(
         //     numhits = bbc[index].num_used;
         //     if (numhits <= (array_size - totalhits)) {
         // ```
-        // SAFETY: `index` is masked to the lookup backbone space, and the PV
-        // allocation is sized from that same space during lookup finalization.
+        // Bounds (not yet a SAFETY argument): `index < backbone_size` needs every letter of the
+        // word below 28 (the mask alone allows 32,768), and every builder gives `pv`
+        // `(backbone_size >> PV_ARRAY_BTS) + 1` words. The crate's callers pass NCBIstdaa letters,
+        // but tblastn's soft-masked last chunk can scan a word one byte past `subject` (open).
         let pv_word = unsafe { *pv.add(index >> PV_ARRAY_BTS) };
         if (pv_word & (1u32 << (index & PV_ARRAY_MASK))) != 0 {
-            // SAFETY: The same masked index addresses the finalized NCBI-style
-            // thick backbone cell.
+            // Bounds: `index < backbone_size` as for `pv` above addresses one of the table's cells.
             let cell = unsafe { &*backbone.add(index) };
             let numhits = cell.num_used;
 

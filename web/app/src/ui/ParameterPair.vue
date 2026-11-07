@@ -11,6 +11,7 @@ import { programById, type ParameterField as Field } from '../domain/programs';
 import { optionHelp } from './format';
 import HelpTip from './HelpTip.vue';
 import ParameterField from './ParameterField.vue';
+import { refusal, refusedMark } from './refusal';
 
 const props = defineProps<{ draft: SearchDraft; state: DraftState; pair: PairRow; fields: readonly Field[] }>();
 
@@ -37,6 +38,11 @@ watchEffect(() => {
   else if (shown.value !== '' && !list.value.includes(shown.value)) other.value = true;
 });
 const fieldsShown = computed(() => other.value || list.value.length === 0);
+/** A refusal that names one of the two marks the select, or the field shown for that flag (WA2-AX-05). */
+const refused = computed(() => {
+  const named = refusal(props.state)?.flags;
+  return named !== undefined && props.pair.flags.some((flag) => named.has(flag));
+});
 
 const label = (value: string) => props.pair.select.labels?.(value) ?? value;
 /** The two flags' help, a line each, behind the "?" (HelpTip). */
@@ -69,7 +75,13 @@ function onList(next: string): void {
     <div class="param-control">
       <!-- WebKit draws a select's chosen label at its whole length beyond the select's box (S13 screen review H2). -->
       <span v-if="list.length > 0" class="select-clip">
-        <select :id="id" :value="other ? OTHER : shown" :data-testid="id" @change="onList(($event.target as HTMLSelectElement).value)">
+        <select
+          :id="id"
+          :value="other ? OTHER : shown"
+          v-bind="refusedMark(refused && !fieldsShown)"
+          :data-testid="id"
+          @change="onList(($event.target as HTMLSelectElement).value)"
+        >
           <option v-if="shown === ''" value="">Default</option>
           <option v-for="item in list" :key="item" :value="item">{{ label(item) }}</option>
           <option :value="OTHER">Other</option>

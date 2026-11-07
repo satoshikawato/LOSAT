@@ -21,12 +21,13 @@ mod x_two_hit_fast;
 // Re-export public functions
 pub use gapped::extend_gapped_protein;
 pub use two_hit::extend_hit_two_hit;
+pub(crate) use two_hit::extend_hit_two_hit_fitting;
 pub(crate) use two_hit::extend_hit_two_hit_with;
 // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the walks the sentinels stop, and the checks that choose them.
 pub(crate) use two_hit::extend_hit_two_hit_sent;
 pub(crate) use x_two_hit_fast::{
     matrix_walk_table, sent_contexts as x_tbx_sent_contexts, sent_subject as x_tbx_sent_subject,
-    two_hit_in, two_hit_sent_in, MatrixWalkTable, TwoHit,
+    two_hit_in, two_hit_in2, two_hit_in4, two_hit_sent_in, MatrixWalkTable, TwoHit,
 };
 // Diagnostic (LOSAT_X_STATS): the cells of one extension (tblastx/x_unit_probe.rs).
 pub(crate) use two_hit::x_two_hit_cells;

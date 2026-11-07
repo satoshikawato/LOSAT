@@ -276,13 +276,15 @@ fn database_check(
     }
     let pairwise = format == report::TblastxOutputFormat::Pairwise;
     let shown = crate::algorithm::common::database::ParsedShown {
-        tabular: format.is_tabular(),
+        tabular: format.tabular_reads_subject(),
         pairwise,
+        structured: format.is_structured_xml(),
         joined: pairwise || format.tabular_joins_subjects(),
         sam: false,
         taxonomy: format.writes_taxonomy(),
         words: format.printed_ids(),
-        prefetched: crate::algorithm::common::database::seq_annots_prefetch(format.serial_outfmt()),
+        prefetched: format.prefetches_subjects()
+            && !crate::algorithm::common::database::prefetch_always_off(),
     };
     // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
     let prefetch = format.prefetches_subjects() && database.taxdb_found();

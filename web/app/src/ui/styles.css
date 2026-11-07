@@ -236,6 +236,18 @@ textarea:focus {
   background: var(--bg);
 }
 
+/* With the focus, the ring is the accent itself, 5.1:1 on white (the soft ring is 1.4:1,
+   WA2-AX-09), in the soft ring's place: an outline at the border, which WebKit draws on a select (it
+   draws no box-shadow there) and forced colours (Windows' high contrast) keep. Browsers give a text
+   box :focus-visible on a click too, and Chromium and WebKit a select. */
+input[type='text']:focus-visible,
+input[type='search']:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
 input[type='checkbox'],
 input[type='radio'] {
   accent-color: var(--accent);
@@ -2340,4 +2352,37 @@ pre.range-text {
 .error,
 .validation {
   white-space: pre-line;
+}
+
+/* Forced colours (Windows' high contrast) replace the page's colours and drop its shadows: the
+   selected mode, tab, row and Range looked like the others (WA2-AX-14). There they take the
+   system's Highlight, the colour of a selection: as a fill (the mode and the tabs, which look B
+   fills with the accent), or as the bar at their left (the rows and Ranges, look B's inset bar),
+   which leaves the outline to the focus. A filled tab is left as it is (forced-color-adjust):
+   forced colours put a backplate of the page's colour behind its text, which hid the text. */
+@media (forced-colors: active) {
+  .program-tab.selected,
+  .tabs button[aria-selected='true'],
+  .tabs button[aria-selected='true']:hover:not(:disabled) {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .program-tab.selected:focus-within,
+  .tabs button[aria-selected='true']:focus-visible {
+    outline-color: CanvasText;
+  }
+
+  .pick-row.selected,
+  .table-row.selected {
+    border-left: 4px solid Highlight;
+    padding-left: 4px;
+  }
+
+  .range-block.selected {
+    border-left: 3px solid Highlight;
+    padding-left: 5px;
+  }
 }

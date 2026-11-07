@@ -2162,7 +2162,11 @@ fn write_tblastx_outputs(
     // run without output (`tabular_subject_ids`).
     let subject_ids = if output_formats.iter().any(|format| format.is_tabular()) {
         match &run.database {
-            Some(database) => database.reported.tabular_subject_ids()?,
+            Some(database) => database.reported.tabular_subject_ids(
+                output_formats
+                    .iter()
+                    .any(|format| format.tabular_reads_subject()),
+            )?,
             None => tabular_subject_ids(&hits, run.subjects)?,
         }
     } else {
@@ -3842,8 +3846,9 @@ impl BatchReports<'_> {
                     .collect();
                 let pairwise_shown = formats.contains(&report::TblastxOutputFormat::Pairwise);
                 let shown = crate::algorithm::common::database::ParsedShown {
-                    tabular: formats.iter().any(|format| format.is_tabular()),
+                    tabular: formats.iter().any(|format| format.tabular_reads_subject()),
                     pairwise: pairwise_shown,
+                    structured: formats.iter().any(|format| format.is_structured_xml()),
                     joined: pairwise_shown
                         || formats.iter().any(|format| {
                             format.is_structured_xml() || format.tabular_joins_subjects()
@@ -3854,9 +3859,10 @@ impl BatchReports<'_> {
                         crate::report::tabular::PrintedIds::default(),
                         |words, format| words.or(format.printed_ids()),
                     ),
-                    prefetched: crate::algorithm::common::database::seq_annots_prefetch(
-                        formats.first().and_then(|format| format.serial_outfmt()),
-                    ),
+                    prefetched: formats
+                        .first()
+                        .is_some_and(|format| format.prefetches_subjects())
+                        && !crate::algorithm::common::database::prefetch_always_off(),
                 };
                 reported_subjects = super::super::database::reported_subjects(
                     database,
@@ -4339,8 +4345,8 @@ fn search_query_batch<S: TbxScore>(
             threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
             window,
             subjects,
-            // A word length other than 3 takes the reference frame loop: the units build and
-            // walk 3-letter words (`TbxScore::word`).
+            // A word length other than 3 takes the reference frame loop: the units build 3-letter
+            // words (`TbxScore::word`).
             debugging: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
@@ -4679,8 +4685,8 @@ fn search_query_batch<S: TbxScore>(
             query_length,
             diag_array_size,
             subjects,
-            // A word length other than 3 takes the reference frame loop: the units build and
-            // walk 3-letter words (`TbxScore::word`).
+            // A word length other than 3 takes the reference frame loop: the units build 3-letter
+            // words (`TbxScore::word`).
             debugging: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled

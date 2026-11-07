@@ -14,6 +14,7 @@ import type { ExampleLoader } from '../application/examples';
 import { changedFields, effectiveValue, placementFlags, sectionsAt } from '../domain/parameters';
 import { PROGRAMS, programById, searchSummaryParts, type InputRole } from '../domain/programs';
 import { announce } from './announcer';
+import { REFUSAL_ID } from './refusal';
 import { useStore } from './useStore';
 import ExampleLine from './ExampleLine.vue';
 import HelpTip from './HelpTip.vue';
@@ -215,9 +216,10 @@ function onThreads(event: Event): void {
           </span>
         </template>
       </div>
-      <!-- The engine's verdict on the options: only a refusal is shown (stop-describing-ui rule 7). -->
+      <!-- The engine's verdict on the options: only a refusal is shown (stop-describing-ui rule 7). The
+           fields that it names point to it (refusal.ts, WA2-AX-05). -->
       <p class="validation" :data-state="state.validation.state" data-testid="argv-validation" aria-live="polite">
-        <span v-if="state.validation.state === 'invalid'" class="error">{{ state.validation.message }}</span>
+        <span v-if="state.validation.state === 'invalid'" :id="REFUSAL_ID" class="error">{{ state.validation.message }}</span>
       </p>
       <p v-if="state.message && !messageBelow" class="error" data-testid="search-message">
         {{ state.message.text }}

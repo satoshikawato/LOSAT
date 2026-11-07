@@ -211,7 +211,7 @@ unsafe fn resolve<M: TbxScore, const SENT: bool>(
                 false,
             )
         } else if !SENT {
-            extend_hit_two_hit(
+            extend_hit_two_hit_fitting(
                 &query_full[1..query_full.len() - 1],
                 h.subject,
                 c.s_left as usize,
@@ -223,7 +223,7 @@ unsafe fn resolve<M: TbxScore, const SENT: bool>(
         } else {
             // SAFETY: as in `x_hit` (the caller's).
             unsafe {
-                h.sc.sent_two_hit(
+                h.sc.sent_two_hit_3(
                     query_full,
                     h.subject_sent,
                     c.s_left as usize,
@@ -1085,7 +1085,7 @@ mod tests {
                 };
                 diag[i].set_raw_bits(FLAG_BIT | i as u32);
                 let (q0, qe, s0, _se, score, right, s_last) =
-                    extend_hit_two_hit(q, &subject, s_left, s_right, q_raw, x_drop, false);
+                    extend_hit_two_hit_fitting(q, &subject, s_left, s_right, q_raw, x_drop, false);
                 let mut cell = DiagStruct::default();
                 if right {
                     cell.set_flag(1);

@@ -8048,13 +8048,16 @@ fn blastp_matrix_compressed_lookup(
 /// search gives its vectors to a spare at its end that a later block's build may take
 /// (`x_query_blocks::x_bp_lookup_spare` / `x_bp_aa_spares` / `x_bp_aa_block_spare` and
 /// `XAheadBlock::x_table_taken_later`), or with the switch off; otherwise dropped here, before the
-/// redo, instead of at the search's end.
+/// redo, instead of at the search's end. Item SC2d: first, where the next block's flat table is built
+/// ahead, the table's vectors go to that build, which goes on beside the rest of this block's search
+/// (`XAheadBlock::after_prelim`; `None`).
 fn x_lookup_after_prelim(
     lookup: BlastpRuntimeLookup,
     matrix: ScoringMatrix,
     pool: &crate::utils::threading::SearchPool<'_>,
     ahead: &x_lookup_ahead::XAheadBlock<'_>,
 ) -> Option<BlastpRuntimeLookup> {
+    let lookup = ahead.after_prelim(lookup)?;
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLKDROP")) {
         return Some(lookup);
@@ -10485,12 +10488,14 @@ fn run_resolved_in_pool(
     //     );
     // }
     // ```
+    // EXPERIMENT (LOSAT_X_BPIHPOOL): no subject scan runs any more; the pool's arrays of initial
+    // hits are freed, as the subject loop's scratches freed theirs (item SC2d: before the next
+    // block's build goes on below).
+    x_ih_pool::release();
     // EXPERIMENT (LOSAT_X_BPLKDROP): nothing reads the lookup table after the preliminary stage;
     // it is dropped here unless a later block's build may take its vectors (at the end below).
+    // Item SC2d: a flat table's vectors go to the next block's build here.
     let lookup = x_lookup_after_prelim(lookup, args.scoring.matrix, blastp_parallel_pool, &x_ahead);
-    // EXPERIMENT (LOSAT_X_BPIHPOOL): no subject scan runs any more; the pool's arrays of initial
-    // hits are freed, as the subject loop's scratches freed theirs.
-    x_ih_pool::release();
     let kappa_redo_start = blastp_timing_start(timing_enabled);
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists

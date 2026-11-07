@@ -9,7 +9,7 @@
 //
 // One canvas holds the figure and draws only the rows in view, so that thousands of HSPs stay
 // smooth; with many subjects the rows scroll inside the figure under the query bar.
-import { computed, onMounted, onUnmounted, ref, useId, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import type { HspId, ResultsBrowser, ResultsState, SubjectEntry } from '../application/results';
 import { headingTitle } from '../domain/outfmt0';
 import { placeBox } from '../domain/plot-geometry';
@@ -409,6 +409,18 @@ function onKey(event: KeyboardEvent): void {
   reveal(l.rowOf[k]!);
 }
 
+/**
+ * "Show all" leaves with the press: the focus goes to the plot, at the first subject that it adds,
+ * which a screen reader is then told of (WA2-AX-04), as after the arrow keys.
+ */
+async function showAllSubjects(): Promise<void> {
+  showAll.value = true;
+  await nextTick();
+  const first = layout.value.start[Math.min(FIRST_SUBJECTS, layout.value.rows.length - 1)]!;
+  if (first < layout.value.count) cursor.value = first;
+  canvas.value?.focus();
+}
+
 /** Scrolls the rows so that row `r` is in view. */
 function reveal(r: number): void {
   const element = scroller.value;
@@ -569,7 +581,7 @@ const selectedText = computed(() => (selectedIndex.value < 0 ? '' : `${props.sta
       <p class="visually-hidden" aria-live="polite">{{ spoken }}</p>
     </div>
     <p v-if="!showAll && subjects.length > FIRST_SUBJECTS" class="graphic-more">
-      <button type="button" data-testid="graphic-show-all" @click="showAll = true">Show all {{ formatCount(subjects.length) }}</button>
+      <button type="button" data-testid="graphic-show-all" @click="showAllSubjects">Show all {{ formatCount(subjects.length) }}</button>
     </p>
   </figure>
 </template>

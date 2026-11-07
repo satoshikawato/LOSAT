@@ -410,11 +410,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     let mut run_subjects: Vec<ReportedSubject> = Vec::new();
     let mut subject_places = std::collections::HashMap::new();
     let mut first_hsp = 0;
-    let asks = resolved
-        .iter()
-        .fold(ReportedAsks::default(), |asks, options| {
-            asks.or(ReportedAsks::of(options))
-        });
+    let asks = ReportedAsks::of_all(resolved);
     let mut render = |diagnostics: &mut dyn Write,
                       queries: &[FastaRecord],
                       results: &mut Vec<BatchResults>,

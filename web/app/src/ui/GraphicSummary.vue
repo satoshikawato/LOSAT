@@ -41,6 +41,8 @@ const PICK_PX = 4;
  * the 24 px of a touch target (WCAG 2.5.8). A tap between two rows picks the nearer row's bar.
  */
 const TOUCH_PICK_PX = 12;
+/** The last pixels of the header that a finger's tap on the first row in view may land on. */
+const TOUCH_HEADER_PX = 8;
 const FONT = '12px system-ui, sans-serif';
 const BOLD = '600 12px system-ui, sans-serif';
 const ACCENT = '#1f5fbf';
@@ -151,10 +153,14 @@ function rowsInView(top = scrollTop.value): [number, number] {
 /**
  * The HSP under a point of the canvas, or -1. A mouse picks in the row under the point, the bar
  * nearest sideways within PICK_PX. A finger picks the bar nearest to the point within
- * TOUCH_PICK_PX, in that row or the rows above and below it that are in view.
+ * TOUCH_PICK_PX, in that row or the rows above and below it that are in view; the last 8 px of
+ * the header count as a tap on the first row in view (a row under the header is never picked).
  */
 function hit(x: number, y: number, touch = false): number {
-  if (y < HEADER_PX) return -1;
+  if (y < HEADER_PX) {
+    if (!touch || y < HEADER_PX - TOUCH_HEADER_PX) return -1;
+    y = HEADER_PX;
+  }
   const l = layout.value;
   const r = Math.floor((y - HEADER_PX + scrollTop.value) / ROW_PX);
   if (r < 0 || r >= l.rows.length) return -1;
@@ -345,6 +351,10 @@ function onPointerLeave(): void {
 let pressedBy = '';
 function onPointerDown(event: PointerEvent): void {
   pressedBy = event.pointerType;
+}
+/** A finger that scrolls the page ends in a pointercancel and no click. */
+function onPointerCancel(): void {
+  pressedBy = '';
 }
 function onClick(event: MouseEvent): void {
   const { x, y } = point(event);
@@ -580,6 +590,7 @@ const selectedText = computed(() => (selectedIndex.value < 0 ? '' : `${props.sta
             :data-selected="selectedText"
             :data-targets="targets"
             @pointerdown="onPointerDown"
+            @pointercancel="onPointerCancel"
             @pointermove="onPointerMove"
             @pointerleave="onPointerLeave"
             @click="onClick"

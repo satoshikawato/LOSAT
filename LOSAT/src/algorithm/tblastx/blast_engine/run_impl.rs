@@ -3,8 +3,8 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c
 
 use super::*;
+use crate::algorithm::common::translated_chunks::{translated_chunk_scan_ranges, TranslatedChunk};
 use crate::algorithm::common::x_db_stream::XReadError;
-use crate::algorithm::tblastn::search_seed::{translated_chunk_scan_ranges, TranslatedChunk};
 use crate::algorithm::tblastx::database::DatabaseTitles;
 use crate::algorithm::tblastx::hit_collector::HitCollector;
 use crate::algorithm::tblastx::subjects::{

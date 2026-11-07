@@ -46,7 +46,8 @@
 //! TBNXLATESIMD`). With `LOSAT_X_STATS` set, `main` prints `[X_STATS] TBNUNITXLATE plans= units=
 //! residues= buffers= freed=` when a plan without residues was made.
 
-use super::search_seed::{translated_chunk_scan_ranges, TranslatedChunk, XSubjectPlan};
+use super::search_seed::XSubjectPlan;
+use crate::algorithm::common::translated_chunks::{translated_chunk_scan_ranges, TranslatedChunk};
 use crate::algorithm::common::x_db_stream::x_frames_pooled;
 use crate::algorithm::tblastx::constants::SENTINEL_BYTE;
 use crate::algorithm::tblastx::translation::QueryFrame;

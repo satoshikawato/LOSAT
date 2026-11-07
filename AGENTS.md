@@ -410,7 +410,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 ├── Cargo.toml             # Test targets are listed by hand (`autotests = false`)
 ├── build.rs               # WASI targets only: links the reactor start file, sets `losat_wasi_threads`
 ├── src/
-│   ├── lib.rs             # Module list; `api` is the public surface, the others are `#[doc(hidden)]`
+│   ├── lib.rs             # Module list; `api` is the public surface, the others are `#[doc(hidden)]` or `pub(crate)`
 │   ├── main.rs            # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, makeblastdb, blastdbcmd
 │   ├── cli.rs             # CLI v2 boundary: NCBI's single-dash options and the top-level -help
 │   ├── common.rs          # Shared hit type, gap edit operations and the older output writers

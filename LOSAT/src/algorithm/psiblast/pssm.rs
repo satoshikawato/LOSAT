@@ -115,7 +115,7 @@ impl PsiblastPssmOptions {
     // With one round (`itr` is false after it), the PSSM is computed only with
     // `-save_pssm_after_last_round`, and `SavePssmToFile` writes the files of `-out_pssm` and
     // `-out_ascii_pssm` (`SaveCheckpoint`, `SaveAsciiPssm`).
-    // With more rounds the driver writes the files (`round_plan`), not the search.
+    // With more rounds the driver writes the files (`rounds::RoundFiles`), not the search.
     pub(crate) fn request(&self) -> Option<PssmRequest> {
         if self.rounds.is_some()
             || !self.save_pssm_after_last_round

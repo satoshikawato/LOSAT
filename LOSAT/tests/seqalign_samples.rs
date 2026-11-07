@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! outfmt 8 (ASN.1 text), 9 (ASN.1 binary) and 12 (JSON) of the LOSAT CLI against NCBI BLAST+ 2.17.0's output
 //! for the same `-subject` searches, byte for byte, at one and four threads: BLASTN's three
 //! tasks (megablast, blastn, dc-megablast), BLASTP, BLASTX (gapped and `-ungapped`), TBLASTN

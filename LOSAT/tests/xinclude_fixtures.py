@@ -43,13 +43,22 @@ file `<tmp>/<fixture_id><suffix>` is written with the bytes `previous file\n` (`
 that the run finds there (`{pre:.asn}`, `{pre:.asn.1}`). It is collected after the run like the files
 the run writes, so `side_sha256` shows whether the run kept it or replaced it.
 
+A query cell of the form `pssm-gz:<path>` (psiblast `-in_pssm`, line PS, PS4a) is a PSSM committed
+gzipped: the runner inflates it into a fresh `<tmp>` as `<tmp>/<basename without .gz>` and passes
+`-in_pssm <that file>` in place of `-query <cell>`; `pssm:<path>` passes `-in_pssm <path>` as it is (a
+small PSSM committed as text, or a file NCBI cannot read: missing, FASTA, gzip, cut short, whose error
+names the path). `query_argv` gives the arguments of a query cell, the same for NCBI and LOSAT.
+
 This module has no manifest of its own: `run_oracle.py` / `check_losat.py` (outfmt 0 manifest) and
 `db_search_fixtures.py` call it.
 """
 from __future__ import annotations
 
+import atexit
+import gzip
 import hashlib
 import re
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -64,6 +73,28 @@ PSSM_KINDS = (PSSM, PSSM_ASN, PSSM_BOTH)
 FREEZE_LIMIT = 64 * 1024
 FILES_COLUMNS = ["files", "side_sha256"]
 EXTENSIONS = {"13": "json", "14": "xml"}
+
+
+# The directory of the inflated `pssm-gz:` PSSMs of this process (made at the first such cell).
+_PSSM_INPUTS: list[Path] = []
+
+
+def query_argv(cell: str, root: Path) -> list[str]:
+    """The arguments of a query cell (`root`: the directory the runs start in, LOSAT/): `-query
+    <cell>`, or for psiblast's PSSM query `-in_pssm <file>` (`pssm-gz:<path>` inflated into a
+    temporary directory, `pssm:<path>` as it is)."""
+    if cell.startswith("pssm:"):
+        return ["-in_pssm", cell.removeprefix("pssm:")]
+    if cell.startswith("pssm-gz:"):
+        source = root / cell.removeprefix("pssm-gz:")
+        if not _PSSM_INPUTS:
+            _PSSM_INPUTS.append(Path(tempfile.mkdtemp(prefix="pssm_inputs_")))
+            atexit.register(shutil.rmtree, _PSSM_INPUTS[0], True)
+        target = _PSSM_INPUTS[0] / source.name.removesuffix(".gz")
+        if not target.exists():
+            target.write_bytes(gzip.decompress(source.read_bytes()))
+        return ["-in_pssm", str(target)]
+    return ["-query", cell]
 
 
 def sha256(data: bytes) -> str:

@@ -87,8 +87,15 @@ function description(sIdx: number, inOutfmt0: boolean): string {
         <span class="muted small" data-testid="subject-count">{{ formatCount(state.subjects.length) }} shown</span>
       </h3>
     </div>
-    <div ref="scroller" class="table-scroll" :style="{ '--row-gutter': `${gutter}px`, '--id-width': idWidth }">
-      <div class="table-head subject-grid" role="row">
+    <div
+      ref="scroller"
+      class="table-scroll"
+      role="grid"
+      aria-label="Subjects"
+      :aria-rowcount="state.subjects.length + 1"
+      :style="{ '--row-gutter': `${gutter}px`, '--id-width': idWidth }"
+    >
+      <div class="table-head subject-grid" role="row" aria-rowindex="1">
         <SortButton class="num-head" data-col="order" label="#" sort-key="order" :sort="state.subjectSort" scope="subject" @sort="sortBy" />
         <span data-col="description" role="columnheader">Description</span>
         <SortButton
@@ -131,39 +138,42 @@ function description(sIdx: number, inOutfmt0: boolean): string {
         :reveal="selectedPosition"
         :reveal-key="`${state.runId}:${state.qIdx}:${state.sIdx}`"
         :order-key="`${state.subjectSort.key}:${state.subjectSort.descending}`"
-        label="Subjects"
+        kind="grid"
         testid="subject-list"
         @scroll="onScroll(Math.floor(($event.target as HTMLElement).scrollTop / ROW_PX))"
         @gutter="gutter = $event"
       >
-        <template #row="{ position }">
-          <button
+        <template #row="{ position, tabindex }">
+          <div
             v-for="subject in [state.subjects[position]!]"
             :key="subject.sIdx"
-            type="button"
+            role="row"
+            :aria-rowindex="position + 2"
+            :aria-selected="subject.sIdx === state.sIdx"
+            :tabindex="tabindex"
             class="table-row subject-grid"
             :class="{ selected: subject.sIdx === state.sIdx }"
-            :aria-pressed="subject.sIdx === state.sIdx"
             :data-testid="`subject-row-${subject.sIdx}`"
             :data-order="subject.order"
             @mousedown="focusPressed"
             @click="results.selectSubject(subject.sIdx)"
           >
-            <span class="num" data-field="order" :title="String(subject.order)">{{ subject.order }}</span>
+            <span role="gridcell" class="num" data-field="order" :title="String(subject.order)">{{ subject.order }}</span>
             <span
+              role="gridcell"
               :class="{ muted: !subject.inOutfmt0 }"
               :title="description(subject.sIdx, subject.inOutfmt0)"
               data-field="description"
               >{{ description(subject.sIdx, subject.inOutfmt0) }}</span
             >
-            <span class="num" data-field="bitscore" :title="subject.first.bitscore">{{ subject.first.bitscore }}</span>
-            <span class="num" data-field="evalue" :title="subject.first.evalue">{{ subject.first.evalue }}</span>
-            <span class="num" data-field="hsps" :title="hspCount(subject) + (subject.atHspLimit ? ' max' : '')">
+            <span role="gridcell" class="num" data-field="bitscore" :title="subject.first.bitscore">{{ subject.first.bitscore }}</span>
+            <span role="gridcell" class="num" data-field="evalue" :title="subject.first.evalue">{{ subject.first.evalue }}</span>
+            <span role="gridcell" class="num" data-field="hsps" :title="hspCount(subject) + (subject.atHspLimit ? ' max' : '')">
               {{ hspCount(subject) }}<span v-if="subject.atHspLimit" class="badge" title="The subject has as many HSPs as -max_hsps keeps">max</span>
             </span>
-            <span class="num" data-field="length" :title="formatCount(subject.length)">{{ formatCount(subject.length) }}</span>
-            <span :title="subject.first.sseqid" data-field="sseqid">{{ subject.first.sseqid }}</span>
-          </button>
+            <span role="gridcell" class="num" data-field="length" :title="formatCount(subject.length)">{{ formatCount(subject.length) }}</span>
+            <span role="gridcell" :title="subject.first.sseqid" data-field="sseqid">{{ subject.first.sseqid }}</span>
+          </div>
         </template>
       </VirtualRows>
     </div>

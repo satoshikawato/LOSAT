@@ -1780,7 +1780,9 @@ pub(super) fn x_titles_read_allow_blocks(
 // of all queries makes those refusals before its first byte; a block would make them after the
 // earlier blocks' bytes. So the block search is taken only where none can fail for any subject
 // of the database: every sequence's taxid reads, and `shared::taxdb_may_refuse` (OF5b, the one
-// implementation of "can a lookup of this database refuse?", DECISIONS 34 and 38) says no. That
+// implementation of "can a lookup of this database refuse?", DECISIONS 34 and 38) says no (the
+// refusal of NCBI's taxonomy cache, `shared::TaxdbRun::prefetch_refused`, is asked apart, by
+// `titles_allowed` in `blast_engine.rs`). That
 // check answers from the smaller side: one pass over the taxonomy database when it is the smaller
 // one (NCBI's real taxdb has no refusable record, so no taxid lookup and no pass over the
 // database's taxids), else the database's taxids, sorted and deduplicated, looked up. It has its

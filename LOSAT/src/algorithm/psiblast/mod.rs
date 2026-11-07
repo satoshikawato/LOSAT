@@ -5,6 +5,7 @@
 //! psiblast's report (`blastp::args::BlastpApp::Psiblast`).
 
 pub mod args;
+pub(crate) mod in_pssm;
 pub mod pssm;
 
 pub use args::PsiblastArgs;

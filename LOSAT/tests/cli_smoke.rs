@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! Release-facing CLI smoke tests.
 
 use std::fs;
@@ -355,7 +353,7 @@ fn compressed_query_and_subject_read_as_the_plain_files() {
         "{}",
         String::from_utf8_lossy(&plain.stderr)
     );
-    assert!(plain.stdout.len() > 0, "the plain run has rows");
+    assert!(!plain.stdout.is_empty(), "the plain run has rows");
     let plain_7 = String::from_utf8_lossy(&plain_7.stdout).into_owned();
     let input_line = |text: &str, path: &std::path::Path| {
         let line = format!(
@@ -513,7 +511,7 @@ fn makeblastdb_reads_compressed_inputs_as_makeblastdb_does() {
         "{}",
         String::from_utf8_lossy(&plain_rows.stderr)
     );
-    assert!(plain_rows.stdout.len() > 0);
+    assert!(!plain_rows.stdout.is_empty());
     let (first, second) = GZ_SUBJECT.split_at(GZ_SUBJECT.find("AAAAGGCATG").unwrap() + 4);
     for (suffix, upper, format, encode) in COMPRESSIONS {
         let name = format!("s.fna{upper}");
@@ -752,15 +750,14 @@ fn short_help_h_succeeds_for_every_program() {
         "psiblast",
         "makeblastdb",
     ] {
-        for words in [vec![name, "-h"]] {
-            let output = run_losat(&words);
-            assert!(output.status.success(), "{words:?}: {:?}", output.status);
-            assert!(output.stderr.is_empty(), "{words:?}");
-            let text = String::from_utf8_lossy(&output.stdout);
-            assert!(text.starts_with("USAGE\n"), "{words:?}: {text}");
-            assert!(text.contains("\nDESCRIPTION\n"), "{words:?}: {text}");
-            assert!(!text.contains("error:"), "{words:?}: {text}");
-        }
+        let words = vec![name, "-h"];
+        let output = run_losat(&words);
+        assert!(output.status.success(), "{words:?}: {:?}", output.status);
+        assert!(output.stderr.is_empty(), "{words:?}");
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(text.starts_with("USAGE\n"), "{words:?}: {text}");
+        assert!(text.contains("\nDESCRIPTION\n"), "{words:?}: {text}");
+        assert!(!text.contains("error:"), "{words:?}: {text}");
     }
 }
 

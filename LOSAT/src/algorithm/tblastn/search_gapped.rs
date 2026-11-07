@@ -4393,7 +4393,7 @@ mod tests {
                     .wrapping_mul(6364136223846793005)
                     .wrapping_add(1442695040888963407);
                 let draw = (state >> 33) as usize;
-                if draw % 16 == 0 {
+                if draw.is_multiple_of(16) {
                     b"RYKMSWBDHVN-rykmswbdhvn"[draw / 16 % 23]
                 } else {
                     b"ACGTacgt"[draw / 16 % 8]

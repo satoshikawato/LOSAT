@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! SAM (outfmt 17) of BLASTN: what the frozen-fixture rows cannot show. NCBI keeps every record until
 //! its formatter is destroyed and writes the header last, so a batch that fails to read still has
 //! the earlier batches' document written (the formatter is unwound before the error is printed), and
@@ -17,7 +15,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/outfmt17")

@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! The shared BLASTN entry `run_local` writes several output formats from one search.
 //! Every format must be byte-identical to the CLI run that requests only that format,
 //! the warnings must equal that run's standard error, and the observer must report the

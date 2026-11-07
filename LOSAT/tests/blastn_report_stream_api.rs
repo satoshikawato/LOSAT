@@ -10,7 +10,6 @@
 //! numbers would start again at every batch. This file holds one test, so that no other test of
 //! its process reads the environment while it changes `BATCH_SIZE`.
 
-#[allow(dead_code)]
 mod run_local_support;
 
 use run_local_support::{fixture_sequence, reader_records, run_formats, Run, TempFasta};

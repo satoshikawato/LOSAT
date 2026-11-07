@@ -1,6 +1,5 @@
 //! Unit tests for blastn/args.rs
 
-use clap::{Args, Command, FromArgMatches};
 use std::path::PathBuf;
 use LOSAT::algorithm::blastn::BlastnArgs;
 
@@ -41,7 +40,7 @@ fn test_default_values() {
     assert_eq!(args.gap_open, None);
     assert_eq!(args.gap_extend, None);
     assert_eq!(args.dust.params(), Some((20, 64, 1)));
-    assert_eq!(args.verbose, false);
+    assert!(!args.verbose);
     assert_eq!(args.scan_step, 0);
 }
 

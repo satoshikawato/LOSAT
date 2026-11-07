@@ -183,7 +183,7 @@ fn test_chain_and_filter_hsps_protein_multiple_hits_same_frame() {
     let result = chain_and_filter_hsps_protein(hits, &sequences, 1000, &params, 1e-5, None);
 
     // Both hits should be kept (clustering may group them, but both should pass e-value filter)
-    assert!(result.len() >= 1);
+    assert!(!result.is_empty());
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn test_chain_and_filter_hsps_protein_different_frames() {
 
     // Hits from different frames should be in separate groups
     // Both should be kept since they're in different frame combinations
-    assert!(result.len() >= 1);
+    assert!(!result.is_empty());
 }
 
 #[test]
@@ -317,7 +317,7 @@ fn test_chain_and_filter_hsps_protein_sorting_by_bit_score() {
     let result = chain_and_filter_hsps_protein(hits, &sequences, 1000, &params, 1e-5, None);
 
     // Results should be sorted by bit score (descending)
-    assert!(result.len() >= 1);
+    assert!(!result.is_empty());
     for i in 1..result.len() {
         assert!(result[i - 1].bit_score >= result[i].bit_score);
     }
@@ -348,5 +348,5 @@ fn test_chain_and_filter_hsps_protein_gapped_vs_ungapped() {
     let result = chain_and_filter_hsps_protein(hits, &sequences, 1000, &params, 1e-5, None);
 
     // Both hits should be kept regardless of gapped/ungapped source
-    assert!(result.len() >= 1);
+    assert!(!result.is_empty());
 }

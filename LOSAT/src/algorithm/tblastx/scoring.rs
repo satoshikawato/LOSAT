@@ -18,6 +18,12 @@
 //! units of PAIRPAR run wherever `decide` takes the batch, the reference frame loop builds NCBI's
 //! table with them (`build_ncbi_lookup_for_profile`), and both two-hit extensions take the table
 //! walks of TBXUNGAP with a byte table of the matrix ([`TbxScore::table_two_hit`]).
+//!
+//! The other instance also runs every search of a word length other than 3 (`-word_size` 2 or
+//! 4, NCBI's 2..=4; BLOSUM62 too): it holds the word length ([`TbxScore::word`]), which BLOSUM62's
+//! instance fixes at 3. Such a search takes the reference frame loop with NCBI's table of that
+//! word length (`build_ncbi_lookup_for_profile`) and the reference two-hit extension, whose loop
+//! over the word reads the length; the unit path and the table walks are for 3-letter words.
 
 use super::extension::{
     extend_hit_two_hit_sent, extend_hit_two_hit_with, matrix_walk_table, two_hit_in,
@@ -42,6 +48,17 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
 
     /// The matrix.
     fn matrix(self) -> ScoringMatrix;
+
+    /// The word length of the search's lookup table (`-word_size`): 3 for BLOSUM62's instance.
+    ///
+    /// NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:237
+    /// ```c
+    ///     lookup->word_length = opt->word_size;
+    /// ```
+    #[inline(always)]
+    fn word(self) -> usize {
+        3
+    }
 
     /// Whether the matrix's extensions may take the walks that the sentinels stop
     /// (LOSAT_X_TBXUNGAPSENT): its byte table exists and stops at a sentinel.
@@ -154,6 +171,8 @@ impl TbxScore for Blosum62Score {
 /// ```
 pub(crate) struct MatrixScores {
     matrix: ScoringMatrix,
+    /// `-word_size` (`TbxScore::word`).
+    word: usize,
     scores: Box<[i32; BLASTAA_SIZE * BLASTAA_SIZE]>,
     /// The byte table of the two-hit walks (`TbxScore::table_two_hit`), a static of the matrix;
     /// `None` if a score does not fit it.
@@ -161,7 +180,14 @@ pub(crate) struct MatrixScores {
 }
 
 impl MatrixScores {
+    /// The scores of `matrix` for a search of 3-letter words.
+    #[cfg(test)]
     pub(crate) fn new(matrix: ScoringMatrix) -> Self {
+        Self::with_word(matrix, 3)
+    }
+
+    /// The scores of `matrix` for a search of `word`-letter words (`-word_size`).
+    pub(crate) fn with_word(matrix: ScoringMatrix, word: usize) -> Self {
         let mut scores = Box::new([0i32; BLASTAA_SIZE * BLASTAA_SIZE]);
         for a in 0..BLASTAA_SIZE {
             for b in 0..BLASTAA_SIZE {
@@ -171,6 +197,7 @@ impl MatrixScores {
         let walk = matrix_walk_table(matrix, |a, b| {
             MatrixScore {
                 matrix,
+                word,
                 scores: &scores,
                 walk: None,
             }
@@ -178,6 +205,7 @@ impl MatrixScores {
         });
         Self {
             matrix,
+            word,
             scores,
             walk,
         }
@@ -187,16 +215,19 @@ impl MatrixScores {
     pub(crate) fn scorer(&self) -> MatrixScore<'_> {
         MatrixScore {
             matrix: self.matrix,
+            word: self.word,
             scores: &self.scores,
             walk: self.walk,
         }
     }
 }
 
-/// A matrix other than BLOSUM62, read from its [`MatrixScores`].
+/// A matrix other than BLOSUM62, or any matrix with a word length other than 3, read from its
+/// [`MatrixScores`].
 #[derive(Clone, Copy)]
 pub(crate) struct MatrixScore<'a> {
     matrix: ScoringMatrix,
+    word: usize,
     scores: &'a [i32; BLASTAA_SIZE * BLASTAA_SIZE],
     walk: Option<&'static MatrixWalkTable>,
 }
@@ -219,8 +250,14 @@ impl TbxScore for MatrixScore<'_> {
     }
 
     #[inline(always)]
+    fn word(self) -> usize {
+        self.word
+    }
+
+    // The walks score 3-letter words (`x_two_hit_fast::WORD`).
+    #[inline(always)]
     fn x_sent_walks(self) -> bool {
-        self.walk.is_some_and(MatrixWalkTable::x_sentinels_stop)
+        self.word == 3 && self.walk.is_some_and(MatrixWalkTable::x_sentinels_stop)
     }
 
     #[inline(always)]
@@ -269,6 +306,11 @@ impl TbxScore for MatrixScore<'_> {
         q_right_off: usize,
         x_drop: i32,
     ) -> Option<TwoHit> {
+        // The walks score 3-letter words (`x_two_hit_fast::WORD`); another word length takes the
+        // reference.
+        if self.word != 3 {
+            return None;
+        }
         two_hit_in(
             self.walk?,
             q_seq,

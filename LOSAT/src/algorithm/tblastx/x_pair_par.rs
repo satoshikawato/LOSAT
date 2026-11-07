@@ -1151,6 +1151,12 @@ pub(super) fn lut_build<M: TbxScore>(e: XLutEarly<'_, M>) -> Option<XLutBatch> {
 // after the lookup build (RI:2502-2510 `query_length`, `check_diag_table_window`,
 // `diag_array_size`), then the groups and the stub.
 fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
+    // A word length other than 3 takes the reference frame loop (`decide` gives Gate, the units
+    // build 3-letter words): no preparation of the query for the groups (`TbxScore::word`, 3 in
+    // BLOSUM62's instance).
+    if e.sc.word() != 3 {
+        return None;
+    }
     // The reference query preparation (contexts, concatenated query, lookup locations), with
     // another matrix's scores that of `build_ncbi_lookup_for_profile` (SC7b).
     let q = if M::BLOSUM62 {

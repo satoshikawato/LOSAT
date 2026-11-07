@@ -68,6 +68,9 @@ use std::io::{Read, Seek};
 pub(crate) use stream::FastaStream;
 use stream::LineReader;
 
+// The record and its public methods: `crate::record` (documented as `api::FastaRecord`).
+pub use crate::record::FastaRecord;
+
 /// How an input is read: the molecule, the role's local ID prefix and whether the data
 /// loaders are configured (the Seq-id path of `CBlastInputReader`).
 #[derive(Clone, Copy, Debug)]
@@ -186,28 +189,6 @@ impl ReaderConfig {
     }
 }
 
-/// One record as NCBI's FASTA input source reads it.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-#[non_exhaustive]
-pub struct FastaRecord {
-    /// The generated local ID (`lcl|Query_N`, `lcl|Subject_N`, without `lcl|`).
-    pub local_id: String,
-    /// The title: the defline after `>` and the white space that follows it, up to the
-    /// first byte below 0x20, without white space at its ends (`x_ApplyMods`); empty when
-    /// the record has none. Any other bytes, including bytes that are not UTF-8.
-    pub title: Vec<u8>,
-    /// The residues (IUPAC letters; nucleotide `U` as `T`; `>?` gaps as `N` or `X`), in
-    /// lower case where the lowercase mask covers them.
-    pub sequence: Vec<u8>,
-    /// The reader's messages written while the record was read, in order (each one a
-    /// line; NCBI writes them to standard error as it reads).
-    pub warnings: Vec<u8>,
-    /// What the BLAST archive (outfmt 11) writes besides the letters; `None` (8 bytes, no
-    /// allocation) unless the reader was configured to keep it (`ReaderConfig::keep_defline`).
-    #[doc(hidden)]
-    pub source: Option<Box<RecordSource>>,
-}
-
 /// The parts of a record that only the BLAST archive writes.
 ///
 /// NCBI keeps the defline line as read in the Bioseq's `CFastaReader` user object, and the
@@ -239,29 +220,6 @@ impl RecordSource {
             cut_from: self.cut_from,
             uncut_length: self.uncut_length,
         })
-    }
-}
-
-impl FastaRecord {
-    /// A record from its parts (tests and the ABI's records).
-    pub fn new(local_id: impl Into<String>, title: &[u8], sequence: &[u8]) -> Self {
-        Self {
-            local_id: local_id.into(),
-            title: title.to_vec(),
-            sequence: sequence.to_vec(),
-            warnings: Vec::new(),
-            source: None,
-        }
-    }
-
-    /// The residues.
-    pub fn seq(&self) -> &[u8] {
-        &self.sequence
-    }
-
-    /// The title bytes (empty without one).
-    pub fn title(&self) -> &[u8] {
-        &self.title
     }
 }
 

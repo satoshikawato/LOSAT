@@ -3027,7 +3027,8 @@ const PREFETCH_READS_IT: &str = "and NCBI BLAST+ 2.17.0's prefetch reads it by t
 // P3, `pdb|1ABC|A` and `pdb|1abc|A` in the two databases of `ids/pshare_cd`).
 /// What NCBI's prefetch reads for the subject with parsed Seq-ids `subject`, which it loads by its
 /// Seq-align id where no report may read its Bioseq (psiblast's traceback hit lists beyond
-/// `-max_target_seqs`, the Seq-annots of `ParsedShown::prefetched`; `ParsedSubject::prefetched`):
+/// `-max_target_seqs`, the reports of `ParsedShown::prefetched` that read nothing of it;
+/// `ParsedSubject::prefetched`):
 /// `Ok(true)` the subject itself (`ParsedSubject::volume_taxids`), `Ok(false)` nothing whose
 /// lookups write a text, and `Err` with the reason of LOSAT's refusal: a lookup that fails (NCBI's
 /// prefetch writes `Error pre-fetching sequence data` and reads no other subject of the batch),
@@ -3212,7 +3213,9 @@ pub(crate) fn check_prefetched_strands(
 
 /// Whether the batches of a `-db` search prefetch their reported subjects though the first format
 /// `outfmt` writes the Seq-align ids alone: outfmt 8, 9 and 12 with
-/// `PRE_FETCH_SEQS_LIMIT=2147483647` ([`prefetches_subjects`]; `ParsedShown::prefetched`).
+/// `PRE_FETCH_SEQS_LIMIT=2147483647` ([`prefetches_subjects`]; BLASTP's block search declines
+/// such a run, as it does a table of fields that read nothing of the subject on a database with
+/// parsed Seq-ids, whose definition lines it never takes).
 pub(crate) fn seq_annots_prefetch(outfmt: Option<i32>) -> bool {
     matches!(outfmt, Some(8 | 9 | 12)) && prefetches_subjects(outfmt)
 }

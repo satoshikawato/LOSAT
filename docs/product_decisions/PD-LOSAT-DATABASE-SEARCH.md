@@ -631,7 +631,9 @@ list (`6 qseqid evalue`, the coordinates, `length`, `gaps`, `gapopen`, `qcovhsp`
 the same bytes whatever the lookup finds, so the rows above that name the tabular formats do not
 refuse it, nor do the ids of a stored title that it does not print; the batches' prefetch still reads
 such a sequence (the row of the prefetch). Its `qcovs` and `qcovus` count following hits whose
-Seq-align ids `Match` as one (the row of such hits).
+Seq-align ids `Match` as one (the row of such hits). psiblast with a PSSM file (`-out_pssm`,
+`-out_ascii_pssm`) reads the letters of each aligned sequence by its Seq-align id for the PSSM, so such
+a run is refused as the lists that read the sequence are.
 
 A nucleotide title of punctuation is not refused: it stops at the end of the string, in outfmt 0 and
 in the tabular first word of an `lcl|Subject_N` id (approved exception 2 of

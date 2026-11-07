@@ -1189,6 +1189,19 @@ impl ReportedAsks {
         }
     }
 
+    /// What the reports `options` of one call ask: each of them, with the batches' prefetch of
+    /// the first, which NCBI's app runs for its one format
+    /// (`BlastFormatter_PreFetchSequenceData(..., GetFormattedOutputChoice())`).
+    pub(super) fn of_all(options: &[super::args::ResolvedOptions]) -> Self {
+        let mut asks = options
+            .iter()
+            .fold(Self::default(), |asks, options| asks.or(Self::of(options)));
+        asks.prefetched = options
+            .first()
+            .is_some_and(|options| Self::of(options).prefetched);
+        asks
+    }
+
     /// What two reports of one batch ask.
     pub(super) fn or(self, other: Self) -> Self {
         Self {

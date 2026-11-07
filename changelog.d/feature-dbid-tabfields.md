@@ -4,4 +4,6 @@
   that NCBI BLAST+'s formatters find as another sequence or not at all, nor for a stored title
   whose id it does not print: it writes NCBI BLAST+ 2.17.0's rows. LOSAT refused such runs, where
   NCBI exits 0 with the same rows for any lookup. What NCBI's prefetch of the batch reads for such
-  a sequence is refused as for outfmt 8, 9 and 12 with `PRE_FETCH_SEQS_LIMIT=2147483647`.
+  a sequence is refused as for outfmt 8, 9 and 12 with `PRE_FETCH_SEQS_LIMIT=2147483647`; psiblast
+  with a PSSM file, whose PSSM NCBI makes from the letters it reads by the Seq-align id, is refused
+  as before.

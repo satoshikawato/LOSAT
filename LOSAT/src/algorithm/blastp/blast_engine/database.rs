@@ -1235,7 +1235,7 @@ impl ListedTitles<'_> {
                     return Err(shared::parsed_refusal(
                         self.listed.ordinals[rank],
                         &format!(
-                            "{reason}, and is in psiblast's traceback hit list beyond -max_target_seqs, which NCBI BLAST+ 2.17.0 prefetches"
+                            "{reason}, and is in psiblast's traceback hit list, which NCBI BLAST+ 2.17.0 prefetches (also beyond -max_target_seqs, where no report shows it)"
                         ),
                         self.program,
                     ))
@@ -1246,8 +1246,8 @@ impl ListedTitles<'_> {
     }
 
     /// LOSAT's refusals of the subjects of ranks `ranks` that a batch's prefetch reads though its
-    /// reports write their Seq-align ids alone (the Seq-annots with
-    /// `PRE_FETCH_SEQS_LIMIT=2147483647`), without `taxdb.bti` on the search path
+    /// reports read nothing of them (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, a
+    /// table of fields that read nothing of the subject), without `taxdb.bti` on the search path
     /// (`shared::check_prefetched_parsed`; with it, `prefetch_messages` refuses them too).
     pub(super) fn check_prefetched(
         &self,
@@ -3238,7 +3238,7 @@ mod tests {
         );
         assert_eq!(listed.encoded[3].aa_len, 300);
         // The tabular ids of the subjects with rows, the stored titles for `stitle`.
-        let (ids, accessions) = titles.tabular_subject_ids(&hit_lists).unwrap();
+        let (ids, accessions) = titles.tabular_subject_ids(&hit_lists, true).unwrap();
         assert!(accessions.is_empty());
         assert_eq!(
             ids.iter().map(|id| id.as_ref()).collect::<Vec<_>>(),
@@ -3301,8 +3301,8 @@ mod tests {
         assert!(lean.title(2).is_empty() && lean.title(3).is_empty());
         assert!(Arc::ptr_eq(&lean_titles[2], &lean_titles[3]));
         assert_eq!(
-            lean.tabular_subject_ids(&hit_lists).unwrap(),
-            records.tabular_subject_ids(&hit_lists).unwrap()
+            lean.tabular_subject_ids(&hit_lists, true).unwrap(),
+            records.tabular_subject_ids(&hit_lists, true).unwrap()
         );
         lean.check_shown_titles(&database, &[0usize, 1].into_iter().collect())
             .unwrap();

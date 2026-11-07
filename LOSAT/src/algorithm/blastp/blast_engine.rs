@@ -6491,7 +6491,10 @@ fn search(
                 // format is a Seq-annot that the batches prefetch for
                 // (`PRE_FETCH_SEQS_LIMIT=2147483647`, `shared::seq_annots_prefetch`), whose
                 // prefetch can refuse a subject with parsed Seq-ids too
-                // (`ListedTitles::check_prefetched`).
+                // (`ListedTitles::check_prefetched`). A table of fields that read nothing of the
+                // subject has the same refusals of the prefetch, only on a database with parsed
+                // Seq-ids, whose definition lines the checks below never take
+                // (`database::x_titles_allow_blocks`).
                 if database.is_some()
                     && outfmts.first().is_some_and(|outfmt| {
                         crate::algorithm::common::database::seq_annots_prefetch(
@@ -12050,9 +12053,24 @@ fn run_resolved_in_pool(
         // id, which a table of fields that read nothing of the subject does not; outfmt 0, 5 and
         // 13 to 16 join the hits of matching Seq-align ids, which LOSAT does for copies of one
         // record; 13 to 16 and the tables of taxonomy fields write their taxids).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450
+        // ```c++
+        //     CSeq_loc seqloc(const_cast<CSeq_id&>(*ds.GetIds().back()), subj_start,
+        //                     subj_start+subjlen-1);
+        //
+        //     try {
+        //         CSeqVector sv(seqloc, scope);
+        //         sv.SetCoding(CSeq_data::e_Ncbistdaa);
+        //         sv.GetSeqData(0, kInvalidSeqPos, sequence_data);
+        //     } catch (const CException&) {
+        //         sequence_data.erase();
+        //         ERR_POST(Warning << "Failed to retrieve sequence " <<
+        // ```
+        // psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`) reads the letters of each aligned
+        // subject by its Seq-align id, as those formats do (review 1 of line DBID tabfields, H1).
         titles.check_parsed_reports(
             &hit_lists,
-            format_plans.iter().any(|outfmt| outfmt.reads_subjects()),
+            format_plans.iter().any(|outfmt| outfmt.reads_subjects()) || args.psi_pssm.is_some(),
             format_plans.iter().any(|outfmt| match outfmt {
                 BlastpReport::Text(OutputFormat::Pairwise)
                 | BlastpReport::Xml

@@ -15,6 +15,7 @@ import { flagGiven, windowAround } from '../domain/result-index';
 import { formatCount } from './format';
 import HspTable from './HspTable.vue';
 import LosatLoader from './LosatLoader.vue';
+import { vScrollFocus } from './scroll-focus';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
 
@@ -111,6 +112,7 @@ function selectRange(range: RangeEntry | undefined): void {
   void reveal(range.id, true);
 }
 
+/** Previous and Next are marked aria-disabled at the ends, not disabled, so that the one pressed keeps the focus (WA2-AX-04). */
 function selectSubject(offset: number): void {
   const next = props.state.subjects[position.value + offset];
   if (next !== undefined) props.results.selectSubject(next.sIdx);
@@ -229,13 +231,18 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
       <div class="tool-band alignments-nav">
         <span class="alignments-position muted small">Subject {{ formatCount(position + 1) }} of {{ formatCount(state.subjects.length) }}</span>
         <span class="alignments-buttons">
-          <button type="button" :disabled="position <= 0" data-testid="alignments-prev-subject" @click="selectSubject(-1)">Previous</button>
-          <button type="button" :disabled="position >= state.subjects.length - 1" data-testid="alignments-next-subject" @click="selectSubject(1)">
+          <button type="button" :aria-disabled="position <= 0 || undefined" data-testid="alignments-prev-subject" @click="selectSubject(-1)">Previous</button>
+          <button
+            type="button"
+            :aria-disabled="position >= state.subjects.length - 1 || undefined"
+            data-testid="alignments-next-subject"
+            @click="selectSubject(1)"
+          >
             Next
           </button>
         </span>
       </div>
-      <pre v-if="heading !== undefined" class="output subject-heading" data-testid="detail-heading">{{ heading }}</pre>
+      <pre v-if="heading !== undefined" v-scroll-focus="'outfmt 0 heading'" class="output subject-heading" data-testid="detail-heading">{{ heading }}</pre>
       <!-- The fields on one line of the template: the spaces between them are part of the text. -->
       <p class="alignments-summary" data-testid="alignments-summary">
         <span><strong>Sequence ID:</strong> {{ subject.first.sseqid }}</span>  <span><strong>Length:</strong> {{ formatCount(subject.length) }}</span>  <span><strong>Number of Matches:</strong> {{ formatCount(subject.hspCount) }}<template v-if="ranges.length < subject.hspCount"> ({{ formatCount(ranges.length) }} shown)</template></span>
@@ -298,7 +305,13 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
           <p v-if="detail.state === 'failed'" class="error" data-testid="detail-error">The HSP could not be read: {{ detail.error }}</p>
           <template v-if="range.inOutfmt0">
             <p v-if="detail.state === 'loading'" class="muted"><LosatLoader />Reading the alignment…</p>
-            <pre v-if="detail.section !== undefined" class="output range-text" data-testid="detail-section">{{ detail.section }}</pre>
+            <pre
+              v-if="detail.section !== undefined"
+              v-scroll-focus="`Range ${range.n} in outfmt 0`"
+              class="output range-text"
+              data-testid="detail-section"
+              >{{ detail.section }}</pre
+            >
           </template>
           <p v-else-if="outfmt0Failed" class="notice" data-testid="detail-not-in-outfmt0">
             No outfmt 0 alignment is linked to this HSP: the search of outfmt 0 failed, and its error is in the diagnostics. The outfmt 6 row
@@ -320,13 +333,14 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
             >), and this subject comes after them. The outfmt 6 row below and outfmt 7 hold the HSP.
           </p>
           <h5 class="row-label">outfmt 6 row</h5>
-          <pre class="output row-text" data-testid="detail-row">{{ detail.row }}</pre>
+          <pre v-scroll-focus="'outfmt 6 row'" class="output row-text" data-testid="detail-row">{{ detail.row }}</pre>
         </div>
 
         <!-- Another HSP of the subject: its section, read when the block comes into view. -->
         <template v-else-if="range.inOutfmt0">
           <pre
             v-if="sectionState(range) === 'ready'"
+            v-scroll-focus="`Range ${range.n} in outfmt 0`"
             class="output range-text"
             data-testid="range-section"
             data-state="ready"

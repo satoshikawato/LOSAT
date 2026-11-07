@@ -521,7 +521,9 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
 /// error before `PrintErrorArchive` writes the archive (`cli::post_native_error`), so in one
 /// stream of both (`2>&1`) the text comes between what the run wrote before into `sink` (the
 /// archives of the batches before, flushed first) and the error archive. Without an error archive
-/// (`11 <spec>`: `writes_error_archive`) the text is left to `main`, after the run's output.
+/// (`11 <spec>`: `writes_error_archive`) the text is left to `main`, after the run's output; a
+/// library caller of the command line entries (no `cli::post_errors_in_run`) gets the archive
+/// alone and the text in the error, as before.
 pub fn write_error_archive_after_post(
     handle: &ArchiveHandle,
     error: &anyhow::Error,
@@ -529,7 +531,7 @@ pub fn write_error_archive_after_post(
     sink: &mut dyn Write,
 ) -> anyhow::Result<()> {
     if handle.error_archive_enabled() {
-        sink.flush()?;
+        let _ = sink.flush();
         crate::cli::post_native_error(error);
     }
     write_error_archive(handle, lines, sink)

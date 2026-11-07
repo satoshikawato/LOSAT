@@ -1133,7 +1133,7 @@ pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
 /// that the run already wrote (`post_native_error`) is not written again.
 pub fn exit_on_native_error(error: &anyhow::Error) {
     if let Some(e) = error.downcast_ref::<NativeError>() {
-        if !NATIVE_ERROR_POSTED.load(std::sync::atomic::Ordering::Relaxed) {
+        if !posted(&e.message) {
             eprint!("{}", e.message);
         }
         if e.exit < 0 {
@@ -1143,9 +1143,31 @@ pub fn exit_on_native_error(error: &anyhow::Error) {
     }
 }
 
-/// Whether the run wrote the text of the error it returns (`post_native_error`).
-static NATIVE_ERROR_POSTED: std::sync::atomic::AtomicBool =
+/// Set by `main` (`post_errors_in_run`): the command line's run writes the text of an error that
+/// gets an error archive itself, before the archive (`post_native_error`). A library caller of the
+/// command line entries (`api::run_blastn` and the others) does not set it, and the text stays in
+/// the error it gets back.
+static POST_ERRORS_IN_RUN: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+
+/// The text that the run wrote (`post_native_error`), which `exit_on_native_error` does not write
+/// again.
+static POSTED_TEXT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Whether the run already wrote `text` (`post_native_error`).
+fn posted(text: &str) -> bool {
+    POSTED_TEXT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_deref()
+        == Some(text)
+}
+
+/// Makes the command line's run write an error's text before its error archive
+/// (`post_native_error`); called by `main` only.
+pub fn post_errors_in_run() {
+    POST_ERRORS_IN_RUN.store(true, std::sync::atomic::Ordering::Relaxed);
+}
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
 // ```c++
@@ -1170,11 +1192,18 @@ static NATIVE_ERROR_POSTED: std::sync::atomic::AtomicBool =
 /// before `PrintErrorArchive` writes the error archive; LOSAT's `main` writes the text after the
 /// run returns (`exit_on_native_error`). A command line run that writes an error archive calls this
 /// first (`report::archive::write_error_archive_after_post`) and returns that error, whose text
-/// `exit_on_native_error` then does not write again.
+/// `exit_on_native_error` then does not write again. Only when `main` asked for it
+/// (`post_errors_in_run`). A standard error that cannot be written loses the text, not the archive
+/// after it.
 pub fn post_native_error(error: &anyhow::Error) {
+    if !POST_ERRORS_IN_RUN.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
     if let Some(native) = error.downcast_ref::<NativeError>() {
-        eprint!("{}", native.message);
-        NATIVE_ERROR_POSTED.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = std::io::Write::write_all(&mut std::io::stderr(), native.message.as_bytes());
+        *POSTED_TEXT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(native.message.clone());
     }
 }
 
@@ -1194,6 +1223,21 @@ mod tests {
         ];
         argv.extend(words);
         argv
+    }
+
+    // Without `main`'s `post_errors_in_run` (a library caller of the command line entries such as
+    // `api::run_blastn`), the run writes no error text of its own: the text stays in the error.
+    // No unit test calls `post_errors_in_run`.
+    #[test]
+    fn a_run_outside_main_posts_no_error_text() {
+        let text = "BLAST query error: Could not construct seq-id from 'gi|abc'\n";
+        let error: anyhow::Error = NativeError {
+            exit: 1,
+            message: text.to_string(),
+        }
+        .into();
+        post_native_error(&error);
+        assert!(!posted(text));
     }
 
     // NCBI c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT

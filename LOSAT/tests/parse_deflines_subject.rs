@@ -545,7 +545,8 @@ fn the_error_comes_before_its_error_archive_in_one_stream() {
                         .arg("-subject")
                         .arg(&subject)
                         .args(["-parse_deflines", "-outfmt", "11", "-num_threads", threads])
-                        .env("BATCH_SIZE", "1");
+                        .env("BATCH_SIZE", "1")
+                        .env_remove("ARCHIVE_FORMAT");
                     command
                 };
                 let apart = search().output().unwrap();

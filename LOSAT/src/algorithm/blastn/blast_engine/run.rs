@@ -7376,7 +7376,7 @@ pub fn run(
     // NCBI writes an error archive after the archives of the batches before when the
     // application stops with one of its own errors, and when the run ends with messages that
     // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status:
-    // blastn_app.cpp:331-334).
+    // blastn_app.cpp:329-332).
     if let Some(handle) = &archive {
         match &result {
             Err(error) => {

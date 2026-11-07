@@ -11849,6 +11849,9 @@ fn run_resolved_in_pool(
     // formatter's cut; its files are staged here (`psiblast_pssms`) and written after the
     // reports (below `output_result`). A refusal between here and the reports (the database
     // titles below) or a report write error drops them: no PSSM file has changed (`PssmFiles`).
+    if let (Some(_), Some(titles)) = (args.psi_pssm.as_ref(), listed_titles.as_ref()) {
+        titles.check_pssm_subjects(&hit_lists)?;
+    }
     let psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
         match args.psi_pssm.as_ref() {
             Some(request) => Some(psiblast_pssms(
@@ -12244,6 +12247,7 @@ fn run_resolved_in_pool(
                             database,
                             &ranks[batch.searched.clone()].concat(),
                             prefetch_taxids,
+                            !prefetch_only,
                         )?;
                         titles.batch_prefetch(database, prefetched)?
                     }

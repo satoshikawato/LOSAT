@@ -6,7 +6,7 @@
   "description": "ntag_t5 (parsed Seq-ids, taxid 99990)",
   "number-of-letters": 1260,
   "number-of-sequences": 2,
-  "last-updated": "2026-11-07T23:51:00",
+  "last-updated": "2026-11-08T00:58:00",
   "number-of-volumes": 1,
   "number-of-taxids": 1,
   "bytes-total": 50028,

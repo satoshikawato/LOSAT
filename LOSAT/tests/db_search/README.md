@@ -511,9 +511,13 @@ The warning of a batch whose prefetch fails (line DBID pfwarn; rows `db.id.pfw.*
 the subjects it loads, then `Warning: [<program>] Error pre-fetching sequence data`, once for the batch, before the
 batch's query warnings. A minus-strand Seq-align of `bbs|123` (no ISAM key in version 4, so no Bioseq) fails after every
 load (`ids/pfw_look_fw_rc.fna`, `ids/pfw_look_rc_fw.fna`: `fw70` on the plus strand of `gb|AF000070.1|`, `rc123` on the
-minus strand of `bbs|123`); the lookup of `gnl|BL_ORD_ID|0` with a text tag fails where the loads, in an order of
-NCBI's Seq-id handles that LOSAT does not reproduce, reach it, so a batch with it whose other subjects' loads write a
-text is LOSAT's refusal. With `-ungapped` BLASTN makes one Seq-align of a subject's HSPs, whose strand is its first
+minus strand of `bbs|123`); the lookup of `gnl|BL_ORD_ID|0` with a text tag fails where the loads reach it, in the
+order of NCBI's Seq-id handles (the ids its mapper packs first), which LOSAT does not model, so a batch with it whose
+other subjects' loads write a text is LOSAT's refusal. In psiblast, where the report reads the sequences it shows
+(`pfw_weak_v5` with `pfw_q6.faa`, `-max_target_seqs 3`: the text tag ranks last, beyond the cut), the failed prefetch
+leaves `sp||NAMEY` unloaded and NCBI's formatter reads it one by one, matching `sp|P00042.1|NAMEY` weakly: LOSAT refuses
+there, and where the PSSM (`-out_ascii_pssm`) holds such a sequence (NCBI drops its letters). `pfw_bad/ntag_t5` fails the
+lookup of an accession on its file, which NCBI's prefetch rethrows (exit 2): LOSAT's refusal. With `-ungapped` BLASTN makes one Seq-align of a subject's HSPs, whose strand is its first
 HSP's: `ids/pfw_fwL_rcS.fna` aligns with `bbs|123` on the plus strand first (240 letters) and on the minus strand (60),
 `ids/pfw_fwS_rcL.fna` the other way round. `ids/pfw_ps_q21.faa` holds `pshare_q2.faa` and `pshare_q1.faa`.
 

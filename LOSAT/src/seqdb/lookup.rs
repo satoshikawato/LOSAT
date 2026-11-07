@@ -783,6 +783,27 @@ impl SeqidLookup<'_> {
     //            	}
     //        	}
     // ```
+    /// Whether [`SeqidLookup::seqid_to_oids`] looks `seqid` up by its key in the LMDB files (a
+    /// text id of a version 5 database but `gnl|BL_ORD_ID|n`), not by `SeqDB_SimplifyAccession`.
+    fn keys_in_lmdb(&self, seqid: &ParsedSeqId) -> bool {
+        let bl_ord_id = matches!(seqid, ParsedSeqId::General(tag) if tag.db == b"BL_ORD_ID");
+        self.volumes.db.is_version5() && !bl_ord_id && is_string_id(seqid)
+    }
+
+    /// The message of the exception that NCBI's lookup of `seqid` throws on the id itself, before
+    /// it reads a file: `SeqDB_SimplifyAccession`'s (a string tag of `BL_ORD_ID` or `PIG`, a `ti`
+    /// that is not a number, a `CSeqIdException`), which is no `CSeqDBException` (NCBI's
+    /// prefetch catches it with its warning, `common::database::batch_prefetch`, where it rethrows
+    /// the exception of a file). `None` where the lookup reads the files.
+    pub fn throws_on_id(&self, seqid: &ParsedSeqId) -> Option<String> {
+        if self.keys_in_lmdb(seqid) {
+            return None;
+        }
+        seqdb_simplify_seqid(seqid)
+            .err()
+            .map(|error| error.to_string())
+    }
+
     /// `CSeqDBImpl::SeqidToOids`: the OIDs that NCBI's lookup of the Seq-id `seqid` gives, in its
     /// order, the search's list's OIDs only; every one with `multi`, else the first.
     /// Version 5 looks a text id up by its key in every LMDB file (the files in order, in a file
@@ -792,8 +813,7 @@ impl SeqidLookup<'_> {
     /// bits. An error of a file is NCBI's exception of the lookup.
     pub fn seqid_to_oids(&self, seqid: &ParsedSeqId, multi: bool) -> Result<Vec<u32>, SeqDbError> {
         let db = self.volumes.db;
-        let bl_ord_id = matches!(seqid, ParsedSeqId::General(tag) if tag.db == b"BL_ORD_ID");
-        if db.is_version5() && !bl_ord_id && is_string_id(seqid) {
+        if self.keys_in_lmdb(seqid) {
             let mut key = Vec::new();
             if matches!(seqid, ParsedSeqId::Pir(_) | ParsedSeqId::Prf(_)) {
                 label::fasta(seqid, &mut key);

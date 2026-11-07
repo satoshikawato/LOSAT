@@ -1216,19 +1216,26 @@ impl ListedTitles<'_> {
         shared::batch_prefetch(
             &database.db,
             &database.taxdb,
-            ranks
-                .into_iter()
-                .map(|rank| (self.listed.ordinals[rank], self.parsed_subject(rank), false)),
+            ranks.into_iter().map(|rank| {
+                shared::PrefetchSubject::unflipped(
+                    self.listed.ordinals[rank],
+                    self.parsed_subject(rank),
+                )
+            }),
             self.program,
         )
     }
 
     /// The subjects of ranks `ranks` of psiblast's traceback hit lists as NCBI's prefetch reads
     /// them by their Seq-align ids (`shared::prefetch_reads_itself`), for `batch_prefetch`:
-    /// those it finds as themselves, and one whose lookup fails (the batch's prefetch fails
-    /// there); one that it finds nowhere is left out (the prefetch reads nothing for it).
-    /// Another sequence that NCBI can read for one and whose definition lines do not hold its
-    /// Seq-align id is refused (NCBI stops). With `taxids`
+    /// those it finds as themselves, and one whose lookup throws on its id
+    /// (`ParsedSubject::prefetch_fails`: the batch's prefetch fails there); one that it finds
+    /// nowhere is left out (the prefetch reads nothing for it). Such a failure is refused where
+    /// the reports read the subjects they show (`reads`): the prefetch then leaves those after
+    /// it unloaded, which NCBI's formatters read one by one (its scope can match an id of a
+    /// sequence read before weakly, as with the prefetch off). A lookup that fails on a file
+    /// (NCBI stops) and another sequence that NCBI can read for one and whose definition lines
+    /// do not hold its Seq-align id (NCBI stops) are refused. With `taxids`
     /// (`taxdb.bti` on the search path), one for which the prefetch can read another sequence
     /// (`Prefetched::Another`) is refused where the taxonomy database's texts can differ between
     /// what it can read (`shared::lookup_texts_differ`), and else kept as itself or left out. The
@@ -1239,6 +1246,7 @@ impl ListedTitles<'_> {
         database: &BlastpDatabase,
         ranks: &[usize],
         taxids: bool,
+        reads: bool,
     ) -> Result<Vec<usize>> {
         let mut kept = Vec::with_capacity(ranks.len());
         for &rank in ranks {
@@ -1246,7 +1254,7 @@ impl ListedTitles<'_> {
                 kept.push(rank);
                 continue;
             };
-            if subject.prefetch_fails() {
+            if subject.prefetch_fails() && !reads {
                 kept.push(rank);
                 continue;
             }
@@ -1265,6 +1273,36 @@ impl ListedTitles<'_> {
             }
         }
         Ok(kept)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450
+    // ```c++
+    //     try {
+    //         CSeqVector sv(seqloc, scope);
+    //         sv.SetCoding(CSeq_data::e_Ncbistdaa);
+    //         sv.GetSeqData(0, kInvalidSeqPos, sequence_data);
+    //     } catch (const CException&) {
+    //         sequence_data.erase();
+    //         ERR_POST(Warning << "Failed to retrieve sequence " <<
+    // ```
+    /// LOSAT's refusals of the subjects of psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`), made
+    /// from the Seq-aligns of `hit_lists` before the formatter's cut to `-max_target_seqs`: NCBI
+    /// reads the letters of each by its Seq-align id, as the formats that read the subject do
+    /// (`ParsedSubject::fetched`), also for those beyond the cut that no report shows; where
+    /// that read fails it drops the letters with a warning.
+    pub(super) fn check_pssm_subjects(&self, hit_lists: &[Option<BlastpHitList>]) -> Result<()> {
+        for rank in Self::reported(hit_lists) {
+            if let Some(subject) = self.parsed_subject(rank) {
+                subject.fetched(false).map_err(|reason| {
+                    shared::parsed_refusal(
+                        self.listed.ordinals[rank],
+                        &format!("{reason}, and is in psiblast's PSSM, whose letters NCBI BLAST+ 2.17.0 reads by that id (also beyond -max_target_seqs)"),
+                        self.program,
+                    )
+                })?;
+            }
+        }
+        Ok(())
     }
 
     /// LOSAT's refusals of the subjects of ranks `ranks` that a batch's prefetch reads though its

@@ -6,6 +6,9 @@
   prefetch fails at a Seq-align id whose lookup fails (`gnl|BL_ORD_ID|0` that makeblastdb stores
   with a text tag) and, in BLASTN and TBLASTX, at a minus-strand alignment of a sequence it gets
   no Bioseq of; BLASTN `-ungapped` now takes that strand from the sequence's first HSP, as NCBI's
-  one Seq-align of an ungapped search does. A failed lookup in a batch whose other sequences make
-  the taxonomy database write a message is still refused: NCBI loads them in an order that LOSAT
-  does not reproduce.
+  one Seq-align of an ungapped search does. Still refused: a failed lookup in a batch whose other
+  sequences make the taxonomy database write a message (NCBI loads them in an order that LOSAT
+  does not model), a lookup that fails on a damaged database file (NCBI stops), and in psiblast a
+  failed lookup beyond `-max_target_seqs` where the report reads the sequences it shows or a PSSM
+  is written (NCBI then reads the shown sequences one by one and drops the letters from the
+  PSSM); psiblast's PSSM now checks its sequences beyond `-max_target_seqs` as the shown ones.

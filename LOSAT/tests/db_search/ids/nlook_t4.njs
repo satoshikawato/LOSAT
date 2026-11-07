@@ -6,7 +6,7 @@
   "description": "nlook_t4 (parsed Seq-ids, taxid 99990)",
   "number-of-letters": 4620,
   "number-of-sequences": 7,
-  "last-updated": "2026-11-07T23:51:00",
+  "last-updated": "2026-11-08T00:58:00",
   "number-of-volumes": 1,
   "bytes-total": 2191,
   "bytes-to-cache": 1355,

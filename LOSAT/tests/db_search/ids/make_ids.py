@@ -105,7 +105,10 @@ another sequence; the queries `nordtag_q.fna` and `nordtag_q.faa` hit one each (
 `nrefuse_v5`). `--pfbatch-only` builds only these. Line DBID pfwarn (NCBI's prefetch writes `Error pre-fetching
 sequence data` where it fails): `ntag_t5.*` from `nordtag.fna`, `nlook_t4.*` (version 4) from `nlook.fna` and
 `pshare_t5.*` from `pshare.faa`, every sequence with taxid 99990, whose lookup writes the offset error of
-tests/seqdb/taxdb/offset_last_past_end. `--pfwarn-only` builds only these.
+tests/seqdb/taxdb/offset_last_past_end; `pfw_weak_v5.*` from `pfw_weak.faa` (`sp||NAMEY`, `sp|P00042.1|NAMEY`, which
+the query `pfw_q6.faa` matches exactly, `gb|FFF00099.1|` and `gnl|BL_ORD_ID|0` with a text tag, whose hit psiblast ranks
+last); and `pfw_bad/ntag_t5.*`, a copy of `ntag_t5` whose accession table's leaf page (page 6 of the `.ndb`) has its
+flags zeroed, so that the lookup of an accession fails on the file. `--pfwarn-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
@@ -213,6 +216,20 @@ def build_pfwarn(args: argparse.Namespace) -> None:
              "-blastdb_version", version, "-taxid", "99990", "-title", f"{name} (parsed Seq-ids, taxid 99990)",
              "-out", str(args.out / name)],
             check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(
+        [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / "pfw_weak.faa"), "-dbtype", "prot", "-parse_seqids",
+         "-blastdb_version", "5", "-title", "pfw_weak_v5 (parsed Seq-ids)", "-out", str(args.out / "pfw_weak_v5")],
+        check=True, stdout=subprocess.DEVNULL)
+    bad = args.out / "pfw_bad"
+    bad.mkdir(exist_ok=True)
+    for path in sorted(args.out.glob("ntag_t5.*")):
+        data = bytearray(path.read_bytes())
+        if path.suffix == ".ndb":
+            # The flags of an LMDB page header (8-byte number, 2 bytes of padding, 2 of flags).
+            flags = 6 * 4096 + 10
+            assert data[flags] != 0, "page 6 of ntag_t5.ndb is no longer the accession table's leaf"
+            data[flags] = 0
+        (bad / path.name).write_bytes(bytes(data))
 
 
 def build_join(args: argparse.Namespace) -> None:

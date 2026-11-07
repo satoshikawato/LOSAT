@@ -563,10 +563,9 @@ impl ReportedSubjects {
             .flat_map(|batch| batch.queries.iter().flatten())
             .filter(|list| super::report::reported(list, gapped))
             .map(|list| {
-                (
+                shared::PrefetchSubject::unflipped(
                     self.ordinals[list.oid],
                     self.parsed_subject(list.oid),
-                    false,
                 )
             });
         shared::batch_prefetch(&database.db, &database.taxdb, subjects, PROGRAM)

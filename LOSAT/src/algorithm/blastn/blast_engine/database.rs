@@ -535,7 +535,11 @@ impl BlastnDatabase {
                 } else {
                     hsp_list.hsps[0].query_frame < 0
                 };
-                (hsp_list.oid, parsed, flipped)
+                shared::PrefetchSubject {
+                    ordinal: hsp_list.oid,
+                    parsed,
+                    flipped,
+                }
             });
         shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM)
     }

@@ -288,10 +288,9 @@ impl TblastnDatabase {
             .filter(|list| reads_subject(list, SubjectFetch::Every))
             .map(|list| {
                 let rank = list.oid as usize;
-                (
+                shared::PrefetchSubject::unflipped(
                     reported.ordinals[rank],
                     reported.parsed_subject(rank),
-                    false,
                 )
             });
         shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM)

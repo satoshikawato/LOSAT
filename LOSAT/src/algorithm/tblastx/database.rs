@@ -443,7 +443,11 @@ pub(crate) fn batch_prefetch(
         let run = (hsp.hit.q_idx, ordinal);
         let first = previous.replace(run) != Some(run);
         let flipped = first && hsp.hit.query_frame < 0 && hsp.subject_frame > 0;
-        (ordinal, parsed, flipped)
+        shared::PrefetchSubject {
+            ordinal,
+            parsed,
+            flipped,
+        }
     });
     shared::batch_prefetch(&database.db, &database.taxdb, subjects, PROGRAM)
 }

@@ -19056,6 +19056,11 @@ fn search_query_batch<const UNGAPPED: bool>(
                     before_evalue_reap.saturating_sub(final_hits.len()) as u64,
                 );
             }
+            // No NCBI counterpart (memory placement only): the list was built by growing (the
+            // traceback's pushes) and filtered in place, so its capacity is up to twice its
+            // length; a database search keeps every subject's list until the hit lists are made,
+            // so the list keeps only its length (a shrinking `realloc`, which glibc does in place).
+            final_hits.shrink_to_fit();
 
             (final_hits, final_tree_hit_count)
         };

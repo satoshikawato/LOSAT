@@ -43,51 +43,7 @@ const NCBI_HELP_TEMPLATE: &str = "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\
 const LOSAT_HELP_TEMPLATE: &str =
     "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\n{all-args}\n\n{after-help}";
 
-/// The names that run a program without its subcommand word (`entry_argv`), as `losat
-/// --install-shims` links them. No NCBI counterpart: NCBI has one executable per program.
-pub const ENTRY_NAMES: [&str; 8] = [
-    "blastn",
-    "blastp",
-    "blastx",
-    "tblastn",
-    "tblastx",
-    "psiblast",
-    "makeblastdb",
-    "blastdbcmd",
-];
-
-/// The program of an executable called `argv0`: its file name without `.exe`, when that is one
-/// of `ENTRY_NAMES`.
-fn entry_program(argv0: &std::ffi::OsStr) -> Option<&'static str> {
-    let path = std::path::Path::new(argv0);
-    if !path
-        .extension()
-        .is_none_or(|extension| extension.eq_ignore_ascii_case("exe"))
-    {
-        return None;
-    }
-    let stem = path.file_stem()?.to_str()?;
-    // Windows finds `blastn.exe` for the word `BLASTN`, which is then `argv[0]`.
-    #[cfg(windows)]
-    let stem = stem.to_ascii_lowercase();
-    ENTRY_NAMES.into_iter().find(|name| *name == stem)
-}
-
-/// The words of the command line as `losat PROGRAM ...` reads them: an executable called by the
-/// name of a program (`ENTRY_NAMES`) runs that program, with the texts of `losat PROGRAM`. Any
-/// other name is `losat`, and its words stay as they are.
-pub fn entry_argv<I, S>(argv: I) -> Vec<OsString>
-where
-    I: IntoIterator<Item = S>,
-    S: Into<OsString>,
-{
-    let mut words: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    if let Some(program) = words.first().and_then(|argv0| entry_program(argv0)) {
-        words[0] = format!("losat{}", std::env::consts::EXE_SUFFIX).into();
-        words.insert(1, program.into());
-    }
-    words
-}
+pub use crate::utils::entry_names::{entry_argv, ENTRY_NAMES};
 
 /// The words that ask for `install_shims`: `-install-shims` is how the top level's `-help` shows
 /// it (`render_message` writes long options with one dash).

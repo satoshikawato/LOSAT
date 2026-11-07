@@ -2,8 +2,7 @@
 
 use std::ops::Range;
 
-use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
-use crate::blastinput::fasta_reader::FastaRecord;
+use crate::blastinput::fasta_reader::{FastaRecord, ReadError};
 
 /// Splits queries of the given lengths into NCBI's query batches.
 ///
@@ -525,6 +524,47 @@ fn psiblast_batch_error(batch: &[FastaRecord]) -> Option<anyhow::Error> {
     }
 }
 
+/// How the reading of the queries of a search ended, after its records.
+#[derive(Debug)]
+pub(crate) enum QueryReading {
+    /// The records of `run_local`: an input without records is NCBI's `Query is Empty!`
+    /// (the inputs of the ABI are read as regular files).
+    Records,
+    /// The CLI's reader reached the end of its input (`CBlastInput::End()`); without
+    /// records, no query batch is read.
+    End,
+    /// The CLI's reader found only blank and comment lines where it expected a record
+    /// (`eEOF`), which ends the batch being read.
+    BlankLines,
+    /// The CLI's reader failed on the record after the last one read (a reader error, or
+    /// LOSAT's explicit rejection of a line that NCBI would fetch as a Seq-id), after
+    /// writing `warnings`.
+    Error { error: ReadError, warnings: Vec<u8> },
+}
+
+impl QueryReading {
+    /// Whether NCBI's reader reads on after the last record (`End()` is false): an `eEOF`
+    /// or an error then comes in the batch being read.
+    pub(crate) fn reads_past_records(&self) -> bool {
+        matches!(self, QueryReading::BlankLines | QueryReading::Error { .. })
+    }
+}
+
+/// NCBI's message for a query or subject without letters.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup.hpp:190-198
+/// ```c
+///     TSeqPos size() const {
+///         TSeqPos retval = x_Size();
+///         if (retval == 0) {
+///             NCBI_THROW(CBlastException, eInvalidArgument,
+///                        "Sequence contains no data");
+///         }
+///         return retval;
+///     }
+/// ```
+pub(crate) const NO_DATA_MESSAGE: &str = "Sequence contains no data";
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -536,7 +576,7 @@ mod tests {
     // size; each searched query belongs to the batch that read it.
     #[test]
     fn every_searched_query_knows_where_its_batch_starts() {
-        use crate::algorithm::blastn::blast_engine::QueryReading;
+        use super::QueryReading;
         use crate::blastinput::fasta_reader::FastaRecord;
         use crate::blastinput::seq_range::QueryInput;
         let records: Vec<FastaRecord> = [4usize, 7, 3, 12, 1]
@@ -559,7 +599,7 @@ mod tests {
     // without residues crashes it).
     #[test]
     fn a_psiblast_batch_holds_one_query() {
-        use crate::algorithm::blastn::blast_engine::QueryReading;
+        use super::QueryReading;
         use crate::blastinput::fasta_reader::FastaRecord;
         use crate::blastinput::seq_range::QueryInput;
         let records = |lengths: &[usize]| -> Vec<FastaRecord> {

@@ -102,13 +102,13 @@ use super::super::x_subject_store::{
     x_blastna_into, x_blastna_into_pool, x_bnstore, x_read_subject_stores, SubjectLetters,
 };
 use crate::blastinput::fasta_reader::{
-    read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords, ReadError,
+    read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords,
     ReaderConfig,
 };
 use crate::blastinput::input_files::{
     check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings_by_length,
 };
-use crate::blastinput::query_batch::BatchSizeMixer;
+use crate::blastinput::query_batch::{BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
 use crate::blastinput::seq_range::{
     cut_queries, cut_subjects, next_ranged_batch, parse_optional_range, subjects_read, Placements,
     QueryInput, RangeRole, SequenceRange,
@@ -7888,32 +7888,6 @@ fn search_cli(
     )
 }
 
-/// How the reading of the queries of a search ended, after its records.
-#[derive(Debug)]
-pub(crate) enum QueryReading {
-    /// The records of `run_local`: an input without records is NCBI's `Query is Empty!`
-    /// (the inputs of the ABI are read as regular files).
-    Records,
-    /// The CLI's reader reached the end of its input (`CBlastInput::End()`); without
-    /// records, no query batch is read.
-    End,
-    /// The CLI's reader found only blank and comment lines where it expected a record
-    /// (`eEOF`), which ends the batch being read.
-    BlankLines,
-    /// The CLI's reader failed on the record after the last one read (a reader error, or
-    /// LOSAT's explicit rejection of a line that NCBI would fetch as a Seq-id), after
-    /// writing `warnings`.
-    Error { error: ReadError, warnings: Vec<u8> },
-}
-
-impl QueryReading {
-    /// Whether NCBI's reader reads on after the last record (`End()` is false): an `eEOF`
-    /// or an error then comes in the batch being read.
-    pub(crate) fn reads_past_records(&self) -> bool {
-        matches!(self, QueryReading::BlankLines | QueryReading::Error { .. })
-    }
-}
-
 /// The query range, read by NCBI's query options handler: after the filtering handler
 /// (`-dust`), before the formatting handler and the check of the options.
 ///
@@ -10392,21 +10366,6 @@ struct BatchResults<'a> {
     /// when the call is one batch.
     batches: &'a [std::ops::Range<usize>],
 }
-
-/// NCBI's message for a query or subject without letters.
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup.hpp:190-198
-/// ```c
-///     TSeqPos size() const {
-///         TSeqPos retval = x_Size();
-///         if (retval == 0) {
-///             NCBI_THROW(CBlastException, eInvalidArgument,
-///                        "Sequence contains no data");
-///         }
-///         return retval;
-///     }
-/// ```
-pub(crate) const NO_DATA_MESSAGE: &str = "Sequence contains no data";
 
 /// Writes what NCBI has written when a query batch fails, before its error: the reports of
 /// the batches before (`before`, the queries searched so far; without the epilog), or, for

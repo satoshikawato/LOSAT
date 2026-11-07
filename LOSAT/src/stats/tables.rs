@@ -492,7 +492,7 @@ fn protein_row_params(row: &ProteinTableRow) -> KarlinParams {
 /// for alpha and beta).
 ///
 /// A gapped search checks the gap costs against the table before it starts
-/// (`BLAST_ValidateOptions`, `protein_options::validate_protein_options`; blastx accepts 11/1
+/// (`BLAST_ValidateOptions`, `blastinput::protein_options_check::validate_protein_options`; blastx accepts 11/1
 /// only), so costs outside the table are a LOSAT defect here: it panics instead of reading
 /// another row. NCBI does not check them for an ungapped search, which no LOSAT protein program
 /// runs yet; a change that opens `-ungapped` must not call this with unchecked costs.

@@ -1,8 +1,8 @@
 // W8 (line WA, stage 2): the marks of the form and of what shows on hover and focus.
 // WA2-AX-05: a field that a refusal of the options names is marked as refused and points to the
 // message. WA2-AX-07: the "?" help and the Graphic Summary's popover close with Escape, and the
-// help stays while the pointer moves onto it. WA2-AX-09: text boxes and selects that have the
-// focus have the 2 px outline of the other controls. WA2-AX-14: in forced colours (Windows'
+// help stays while the pointer moves onto it. WA2-AX-09: text boxes, and selects focused with
+// the keyboard, have the 2 px outline of the other controls. WA2-AX-14: in forced colours (Windows'
 // high contrast), the selected mode, tab and row are marked in a system colour.
 import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from './support/test';
@@ -185,6 +185,12 @@ test('two "?" helps are not open by the pointer at once, where one "?" is inside
   // two helps are never open together.
   const from = await middle(open);
   const to = await middle(extend);
+  // The premise: the second "?" is inside the box around the first "?" and its help.
+  const boxes = [(await open.boundingBox())!, (await page.getByTestId('param-gapopen-help').boundingBox())!];
+  expect(to.x).toBeGreaterThanOrEqual(Math.min(...boxes.map((b) => b.x)));
+  expect(to.x).toBeLessThanOrEqual(Math.max(...boxes.map((b) => b.x + b.width)));
+  expect(to.y).toBeGreaterThanOrEqual(Math.min(...boxes.map((b) => b.y)));
+  expect(to.y).toBeLessThanOrEqual(Math.max(...boxes.map((b) => b.y + b.height)));
   await page.mouse.move(from.x, from.y);
   const steps = 24;
   for (let i = 1; i <= steps; i++) {

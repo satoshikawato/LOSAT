@@ -449,8 +449,9 @@ watch(shown, (k) => {
   if (k !== dismissed.value) dismissed.value = -1;
 });
 function onEscape(event: KeyboardEvent): void {
-  // The Escape that cancels an IME's composition is not for the page.
-  if (event.isComposing) return;
+  // The Escape that cancels an IME's composition is not for the page (Safari sends it after
+  // compositionend, with isComposing false and keyCode 229).
+  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === 'Escape') dismissed.value = shown.value;
 }
 watch(popoverShown, (on) => {

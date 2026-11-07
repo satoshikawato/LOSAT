@@ -94,8 +94,9 @@ const outside = (event: PointerEvent) => {
 };
 /** Escape closes the shown help, wherever the focus is; the focus stays (WCAG 1.4.13: dismissible). */
 const escape = (event: KeyboardEvent) => {
-  // The Escape that cancels an IME's composition is not for the page.
-  if (event.isComposing) return;
+  // The Escape that cancels an IME's composition is not for the page (Safari sends it after
+  // compositionend, with isComposing false and keyCode 229).
+  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === 'Escape') close();
 };
 

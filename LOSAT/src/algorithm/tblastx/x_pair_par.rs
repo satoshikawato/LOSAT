@@ -946,6 +946,48 @@ pub(super) fn decide(g: &XGates<'_>) -> XDecision {
     XDecision::Units
 }
 
+// No NCBI counterpart: `decide` for a batch whose groups are never cut (SC10b PR-3: words of 4
+// letters, `x_tbx_qslice::x_slices_fit`). With LOSAT_X_TBXBAND and LOSAT_X_TBXUNITMASK the memory
+// rule of such a batch holds whatever LOSAT_X_TBXQSLICE's rule says (`x_band_masked` without
+// `rule_cuts`), as `prepare` keeps its masked tables: the first guard holds. `decide` reads the
+// contexts for that guard only (the longest context, `x_guard_lengths`, and `x_band_masked`); with
+// no context the guard holds (a slack of `diag_array_size - query_length > 0` letters), and the
+// gates before it and the second guard and the cost gate after it read the same values. So this is
+// `decide` on the gates without their contexts.
+/// `decide` for a batch whose groups are never cut.
+#[inline(never)]
+pub(super) fn decide_uncut(g: &XGates<'_>) -> XDecision {
+    if g.band && g.unit_mask {
+        return decide(&XGates {
+            contexts: &[],
+            query_length: g.query_length,
+            diag_array_size: g.diag_array_size,
+            subjects: g.subjects,
+            debugging: g.debugging,
+            chunk_switches: g.chunk_switches,
+            threads: g.threads,
+            cost_gate: g.cost_gate,
+            n1_gate: g.n1_gate,
+            threshold: g.threshold,
+            band: g.band,
+            unit_mask: g.unit_mask,
+        });
+    }
+    decide(g)
+}
+
+// No NCBI counterpart: the choice between `decide` and `decide_uncut` by the search's word length
+// (`x_tbx_qslice::x_slices_fit`; constant for BLOSUM62's instance, which calls `decide`).
+/// The decision for a batch of `word`-letter words.
+#[inline(always)]
+pub(super) fn decide_for(word: usize, g: &XGates<'_>) -> XDecision {
+    if x_tbx_qslice::x_slices_fit(word) {
+        decide(g)
+    } else {
+        decide_uncut(g)
+    }
+}
+
 // No NCBI counterpart: a memory rule of LOSAT_X_TBXBAND (module doc). The units need no length
 // condition for exactness (item 3), but a unit's unmasked diagonal table has a cell for every raw
 // diagonal of its query group and subject chunk, one table per thread, where the reference loop
@@ -1197,7 +1239,7 @@ fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
         band: tbx_band(),
         unit_mask: unit_mask_kib().is_some(),
     };
-    if decide(&gates) != XDecision::Units {
+    if decide_for(e.sc.word(), &gates) != XDecision::Units {
         return None;
     }
     // EXPERIMENT (LOSAT_X_TBXQSLICE): the tables of the slices of the groups the switch cuts,
@@ -2055,20 +2097,23 @@ impl<M: TbxScore> XPairPar<M> {
     /// reference loop).
     pub(super) fn prepare(b: XBatch<'_, M>) -> Option<Self> {
         let wanted = x_groups_wanted(b.threads, b.subjects);
-        let decision = decide(&XGates {
-            contexts: b.contexts,
-            query_length: b.query_length,
-            diag_array_size: b.diag_array_size,
-            subjects: b.subjects,
-            debugging: b.debugging,
-            chunk_switches: b.chunk_switches,
-            threads: b.threads,
-            cost_gate: cost_gate(),
-            n1_gate: n1_gate(),
-            threshold: b.threshold,
-            band: tbx_band(),
-            unit_mask: unit_mask_kib().is_some(),
-        });
+        let decision = decide_for(
+            b.sc.word(),
+            &XGates {
+                contexts: b.contexts,
+                query_length: b.query_length,
+                diag_array_size: b.diag_array_size,
+                subjects: b.subjects,
+                debugging: b.debugging,
+                chunk_switches: b.chunk_switches,
+                threads: b.threads,
+                cost_gate: cost_gate(),
+                n1_gate: n1_gate(),
+                threshold: b.threshold,
+                band: tbx_band(),
+                unit_mask: unit_mask_kib().is_some(),
+            },
+        );
         BATCHES.fetch_add(1, AtomicOrdering::Relaxed);
         match decision {
             XDecision::Gate => {
@@ -6985,6 +7030,116 @@ mod tests {
             })
             .expect("search pool");
         }
+    }
+
+    // No NCBI counterpart: LOSAT_X_TBXBAND's memory rule with LOSAT_X_TBXUNITMASK (`x_band_masked`)
+    // for a batch whose groups are never cut (words of 4 letters, `x_slices_fit`): where
+    // LOSAT_X_TBXQSLICE's rule would cut the group (200,000 letters at 32 threads), `decide` keeps the
+    // guard and `decide_uncut` takes the units, as `prepare` keeps the masked tables of such a batch;
+    // `decide_for` chooses by the word length.
+    #[test]
+    fn groups_never_cut_keep_the_masked_rule() {
+        let mut rng = Rng(13);
+        let (_, mut contexts) =
+            lookup_for(&[frame(1, &random_residues(&mut rng, 216, &aa("ACDEKW")))]);
+        contexts.truncate(1);
+        contexts[0].aa_len = 200_000;
+        let query_length = query_length_of(&contexts);
+        let diag_array_size = diag_array_size_for(query_length, 40);
+        assert_eq!(diag_array_size, 1 << 18);
+        // A subject chunk longer than the table (the first guard fails, `x_band_fits` too).
+        let long = [FastaRecord::new("", b"l", &vec![b'A'; 3 * 300_000])];
+        let threads = 32;
+        let subjects = crate::algorithm::tblastx::subjects::Subjects::Fasta(&long);
+        let starts = group_starts(&contexts, x_groups_wanted(threads, subjects));
+        // The slicing rule (x86-64 only) cuts this group at 32 threads.
+        if !cfg!(target_arch = "x86_64") {
+            return;
+        }
+        assert!(x_tbx_qslice::rule_cuts(&contexts, &starts, threads));
+        let gates = XGates {
+            contexts: &contexts,
+            query_length,
+            diag_array_size,
+            subjects,
+            debugging: false,
+            chunk_switches: false,
+            threads,
+            cost_gate: false,
+            n1_gate: false,
+            threshold: 13,
+            band: true,
+            unit_mask: true,
+        };
+        assert_eq!(decide(&gates), XDecision::Guard);
+        assert_eq!(decide_uncut(&gates), XDecision::Units);
+        assert_eq!(decide_for(3, &gates), XDecision::Guard);
+        assert_eq!(decide_for(2, &gates), XDecision::Guard);
+        assert_eq!(decide_for(4, &gates), XDecision::Units);
+        // Without LOSAT_X_TBXUNITMASK both keep the guard; the gates still come first.
+        let unmasked = XGates {
+            unit_mask: false,
+            ..gates
+        };
+        assert_eq!(decide_uncut(&unmasked), XDecision::Guard);
+        let gated = XGates {
+            debugging: true,
+            ..gates
+        };
+        assert_eq!(decide_uncut(&gated), XDecision::Gate);
+        // Against `decide`'s statements with `x_band_masked` not reading the slicing rule, over
+        // gates drawn at random (thread counts, switches, context and subject lengths, tables).
+        let reference = |g: &XGates<'_>| -> XDecision {
+            if g.debugging || g.chunk_switches {
+                return XDecision::Gate;
+            }
+            let (max_context_len, longest_subject_chunk) = x_guard_lengths(g.contexts, g.subjects);
+            let first_guard = g.band
+                && (x_band_fits(longest_subject_chunk, g.diag_array_size) || g.unit_mask)
+                || guard(
+                    max_context_len,
+                    longest_subject_chunk,
+                    g.query_length,
+                    g.diag_array_size,
+                );
+            if !first_guard
+                || !last_hit_fits(longest_subject_chunk, g.query_length, g.diag_array_size)
+            {
+                return XDecision::Guard;
+            }
+            if g.cost_gate && !units_gain(g) {
+                return XDecision::Cost;
+            }
+            XDecision::Units
+        };
+        let mut rng = Rng(0x4b17_dec1_0000_0004);
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..2_000 {
+            let mut drawn = contexts.clone();
+            drawn[0].aa_len = [100, 5_000, 70_000, 200_000, 1_500_000][rng.below(5) as usize];
+            let query_length = query_length_of(&drawn);
+            let window = [40, 4_000, 300_000][rng.below(3) as usize];
+            let subject = vec![b'A'; [30, 3_000, 900_000][rng.below(3) as usize]];
+            let records = [FastaRecord::new("", b"s", &subject)];
+            let g = XGates {
+                contexts: &drawn,
+                query_length,
+                diag_array_size: diag_array_size_for(query_length, window),
+                subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(&records),
+                debugging: rng.below(8) == 0,
+                chunk_switches: rng.below(8) == 0,
+                threads: [1, 4, 8, 32][rng.below(4) as usize],
+                cost_gate: rng.below(2) == 0,
+                n1_gate: rng.below(2) == 0,
+                threshold: [11, 13][rng.below(2) as usize],
+                band: rng.below(4) != 0,
+                unit_mask: rng.below(4) != 0,
+            };
+            let got = decide_uncut(&g);
+            assert_eq!(got, reference(&g));
+            seen.insert(format!("{got:?}"));
+        }
+        assert_eq!(seen.len(), 4, "every decision met: {seen:?}");
     }
 
     // No NCBI counterpart: the slicing rule's table term (`x_tbx_qslice::x_slices_fit`): words of 2

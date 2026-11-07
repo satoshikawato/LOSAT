@@ -145,7 +145,7 @@ fn slice_rule() -> Option<XSliceRule> {
 // own, so a cut group repeats the table's backbone once per slice, and the slice width
 // (`X_QSLICE_LETTERS`) was chosen so that the slice's window fits the core's L2 with the slice's
 // backbone. That holds for words of 2 and 3 letters (892 and 28,540 cells, 14 KB and 457 KB); a
-// backbone of 4-letter words has 913,277 cells (14.6 MB; 2-4 MB compacted), larger than the window
+// backbone of 4-letter words has 913,276 cells (14.6 MB; 2-4 MB compacted), larger than the window
 // itself, so its slices would bring no locality and multiply the tables.
 /// Whether the groups of a batch of `word_length`-letter words may be cut: a slice table's backbone
 /// (16-byte cells, `compute_backbone_size`) is no larger than the slice's window

@@ -99,6 +99,16 @@ const X_WIDE_INDEX_BITS: usize = 20;
 /// No NCBI counterpart: the most source ranges of a table (each holds a count per backbone cell).
 const X_WIDE_MOST_PARTS: usize = 16;
 
+/// No NCBI counterpart: the least work of a table's source range, per backbone cell (`x_wide_table`).
+/// A range zeroes, sums and lays out a count per backbone cell (passes of about a nanosecond a
+/// cell), against several nanoseconds an append, so the ranges of a small table (short queries,
+/// many groups) cost more than they split. Measured (60 queries of 1.5-3 kb against a 0.6 Mb
+/// subject, 3 rounds): with a range per thread (up to 16) 0.80, 1.02 and 1.02 s at 8, 16 and 32
+/// threads (user 4.1, 8.0, 9.5 s); with one append a cell 0.74, 0.85 and 0.89 s (user 3.9, 5.1,
+/// 6.4 s); with two 0.82, 1.23 and 1.30 s (too few ranges). Two 0.6 Mb genomes at 8 threads: 1.98
+/// s against 2.15 (their tables take every range either way).
+const X_WIDE_RANGE_WORK_PER_CELL: u64 = 1;
+
 /// No NCBI counterpart: ranges of sources per pool thread for the lists T(s) (they differ in
 /// length; the pool's threads claim the ranges in turn).
 const X_WIDE_LIST_PARTS_PER_THREAD: usize = 4;
@@ -543,6 +553,20 @@ impl XPairLutQuery {
         pool: &crate::utils::threading::SearchPool<'_>,
         mapped: bool,
     ) -> Vec<XPairLutGroup> {
+        self.x_build_tables_wide_with(tables, pool, mapped, X_WIDE_RANGE_WORK_PER_CELL)
+    }
+
+    // No NCBI counterpart (scheduling only): `x_build_tables_wide` with the least work of a source
+    // range per backbone cell as an argument (the unit tests take 0: as many ranges as threads, up to
+    // `X_WIDE_MOST_PARTS`, whatever a table's size).
+    /// `x_build_tables_wide` with `range_work` in place of `X_WIDE_RANGE_WORK_PER_CELL`.
+    fn x_build_tables_wide_with(
+        &self,
+        tables: &[Vec<(i32, i32)>],
+        pool: &crate::utils::threading::SearchPool<'_>,
+        mapped: bool,
+        range_work: u64,
+    ) -> Vec<XPairLutGroup> {
         let word_length = self.word_length;
         assert!(
             x_wide_covers(word_length),
@@ -614,7 +638,7 @@ impl XPairLutQuery {
                     &lists,
                     &mut counts,
                     (pool, threads),
-                    (backbone_size, mapped),
+                    (backbone_size, mapped, range_work),
                 )
             })
             .collect()
@@ -630,20 +654,26 @@ impl XPairLutQuery {
         lists: &XWideLists,
         counts: &mut Vec<u32>,
         (pool, threads): (&crate::utils::threading::SearchPool<'_>, usize),
-        (backbone_size, mapped): (usize, bool),
+        (backbone_size, mapped, range_work): (usize, bool, u64),
     ) -> XPairLutGroup {
         let word_length = self.word_length;
         let alphabet_size = LOOKUP_ALPHABET_SIZE;
         let charsize = X_WIDE_CHARSIZE;
         // The ranges: range p ends at the first source whose work so far reaches total * (p + 1) /
-        // P (the work of a source: its list, read in (a) and (d), and its appends in (d)).
-        let parts = threads
-            .min(X_WIDE_MOST_PARTS)
-            .min(table_sources.len())
-            .max(1);
+        // P (the work of a source: its list, read in (a) and (d), and its appends in (d)). Each
+        // range costs passes over a count per backbone cell ((a)-(c)), so a table takes no more
+        // ranges than its work pays for (`X_WIDE_RANGE_WORK_PER_CELL`).
         let work =
             |s: &XWideSource| (lists.list(s.i).len() as u64 + 1) * (u64::from(s.to - s.from) + 1);
         let total: u64 = table_sources.iter().map(work).sum();
+        let paid = total
+            .checked_div(range_work * backbone_size as u64)
+            .unwrap_or(u64::MAX);
+        let parts = threads
+            .min(X_WIDE_MOST_PARTS)
+            .min(usize::try_from(paid).unwrap_or(usize::MAX))
+            .min(table_sources.len())
+            .max(1);
         let mut bounds: Vec<usize> = vec![table_sources.len(); parts + 1];
         bounds[0] = 0;
         let (mut cut, mut so_far) = (1usize, 0u64);
@@ -1012,6 +1042,19 @@ mod tests {
             .expect("every location inside one group");
         let wide = q.x_build_tables_wide(&locations, pool, true);
         assert_eq!(wide.len(), starts.len());
+        // As many source ranges as the pool has threads (up to `X_WIDE_MOST_PARTS`), whatever the
+        // tables' size: the same tables.
+        let ranged = q.x_build_tables_wide_with(&locations, pool, true, 0);
+        for (g, (a, b)) in wide.iter().zip(&ranged).enumerate() {
+            assert_eq!(a.rank, b.rank, "table {g}: rank differs with every range");
+            x_assert_same_group(
+                g,
+                &b.table,
+                (b.q_min, b.q_max),
+                &a.table,
+                (a.q_min, a.q_max),
+            );
+        }
         let mut seen = Seen {
             entries: full.backbone.iter().map(|c| c.num_used as usize).sum(),
             ..Seen::default()

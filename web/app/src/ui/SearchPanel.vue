@@ -13,6 +13,7 @@ import type { SearchDraft } from '../application/draft';
 import type { ExampleLoader } from '../application/examples';
 import { changedFields, effectiveValue, placementFlags, sectionsAt } from '../domain/parameters';
 import { PROGRAMS, programById, searchSummaryParts, type InputRole } from '../domain/programs';
+import { announce } from './announcer';
 import { useStore } from './useStore';
 import ExampleLine from './ExampleLine.vue';
 import HelpTip from './HelpTip.vue';
@@ -105,12 +106,25 @@ watch(
 const submittedFrom = ref<'top' | 'bottom'>('top');
 const messageBelow = computed(() => submittedFrom.value === 'bottom' && open.value);
 
+/**
+ * "Run LOSAT" is marked aria-disabled, not disabled, while the search starts: the focus stays on
+ * it (Chromium drops the focus of a button that becomes disabled), and a press then does nothing
+ * (WA2-AX-04). Why a search cannot start is told as an alert (WA2-AX-03).
+ */
 async function submit(from: 'top' | 'bottom'): Promise<void> {
+  if (state.value.submitting) return;
   submittedFrom.value = from;
   const result = await props.draft.submit();
   const first = result.ok ? result.runIds?.[0] : undefined;
   if (first !== undefined) emit('submitted', first);
 }
+
+watch(
+  () => state.value.message,
+  (message) => {
+    if (message !== undefined) announce(message.text, message.kind === 'error' ? 'alert' : 'status');
+  },
+);
 
 function restoreDefaults(): void {
   props.draft.resetFields(placementFlags(program.value, 'algorithm'));
@@ -159,7 +173,7 @@ function onThreads(event: Event): void {
       <button
         class="primary-action"
         data-testid="run-losat"
-        :disabled="state.submitting"
+        :aria-disabled="state.submitting || undefined"
         @click="submit('top')"
       >
         <LosatLoader v-if="state.submitting" />{{ buttonLabel }}
@@ -205,7 +219,7 @@ function onThreads(event: Event): void {
       <p class="validation" :data-state="state.validation.state" data-testid="argv-validation" aria-live="polite">
         <span v-if="state.validation.state === 'invalid'" class="error">{{ state.validation.message }}</span>
       </p>
-      <p v-if="state.message && !messageBelow" role="status" class="error" data-testid="search-message">
+      <p v-if="state.message && !messageBelow" class="error" data-testid="search-message">
         {{ state.message.text }}
       </p>
     </div>
@@ -238,7 +252,7 @@ function onThreads(event: Event): void {
           <button
             class="primary-action"
             data-testid="run-losat-bottom"
-            :disabled="state.submitting"
+            :aria-disabled="state.submitting || undefined"
             @click="submit('bottom')"
           >
             <LosatLoader v-if="state.submitting" />{{ buttonLabel }}
@@ -247,7 +261,7 @@ function onThreads(event: Event): void {
             <template v-for="(part, index) in summaryParts" :key="index"><strong v-if="part.strong">{{ part.text }}</strong><template v-else>{{ part.text }}</template></template>
           </p>
         </div>
-        <p v-if="state.message && messageBelow" role="status" class="error" data-testid="search-message">
+        <p v-if="state.message && messageBelow" class="error" data-testid="search-message">
           {{ state.message.text }}
         </p>
       </div>

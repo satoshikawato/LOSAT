@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+// One input of a role: its name, its records, and what the engine's check says of it. The check's
+// verdict and the warnings are told to a screen reader when they change (WA2-AX-03), in the
+// card's words after its name; "Remove" asks the role's block, which moves the focus on.
+import { computed, watch } from 'vue';
 import type { DraftSource, DraftState, SearchDraft } from '../application/draft';
 import { includedOf } from '../application/draft';
 import { duplicateIds } from '../domain/dataset';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
 import { looksLikeOtherKind } from '../domain/sequence-kind';
+import { announce } from './announcer';
 import { formatBytes, formatCount } from './format';
 import LosatLoader from './LosatLoader.vue';
 import RecordList from './RecordList.vue';
+import { vScrollFocus } from './scroll-focus';
 
 const props = defineProps<{
   draft: SearchDraft;
@@ -16,6 +21,7 @@ const props = defineProps<{
   source: DraftSource;
   index: number;
 }>();
+defineEmits<{ remove: [] }>();
 
 const kind = computed(() => sequenceKind(programById(props.state.program), props.role));
 const unit = computed(() => residueUnit(kind.value));
@@ -56,6 +62,56 @@ const formatName = computed(() => {
   return lead !== undefined && 'format' in lead ? FORMAT_NAMES[lead.format] : undefined;
 });
 const testid = computed(() => `${props.role}-source-${props.index}`);
+
+const recordsText = (count: number) => `${formatCount(count)} ${count === 1 ? 'record' : 'records'}`;
+/**
+ * What the card says once the input is read and checked (undefined until then), as the screen shows
+ * it, and its facts without the mode's name (`key`).
+ */
+const verdict = computed(() => {
+  const source = props.source;
+  const parts: string[] = [];
+  const check = source.check;
+  if (source.status === 'indexing' || (source.status !== 'failed' && (check === undefined || check.state === 'pending'))) return undefined;
+  const key = JSON.stringify([
+    source.status,
+    source.error,
+    markHint.value,
+    check?.state,
+    check === undefined ? undefined : check.state === 'ok' ? check.records : 'message' in check ? check.message : undefined,
+    otherKind.value,
+    otherKind.value > 0 ? kind.value : '',
+    duplicateCount.value,
+    formatName.value,
+  ]);
+  if (source.status === 'failed') {
+    parts.push(`This input cannot be read: ${source.error ?? ''}`);
+    if (markHint.value) parts.push(markHint.value);
+  } else if (check !== undefined) {
+    if (check.state === 'ok') parts.push(`Accepted by the ${programLabel.value} engine: ${recordsText(check.records)}`);
+    else if (check.state === 'refused') parts.push(`The ${programLabel.value} engine refuses this input: ${check.message}`);
+    else if (check.state === 'error') parts.push(`The input could not be checked here (${check.message}).`);
+    if (otherKind.value > 0) {
+      parts.push(
+        `${formatCount(otherKind.value)} ${otherKind.value === 1 ? 'record looks' : 'records look'} like ${otherKindName.value} sequences, but ${programLabel.value} reads the ${props.role} as ${kind.value}.`,
+      );
+    }
+    if (duplicateCount.value > 0) parts.push(`${formatCount(duplicateCount.value)} records share an ID with another record.`);
+  }
+  if (formatName.value) parts.push(`This looks like ${formatName.value}. LOSAT reads it as FASTA, so its text becomes sequence. Convert it to FASTA first.`);
+  return { text: `${title.value}: ${parts.join(' ')}`, key };
+});
+/**
+ * Told when it changes: not again after each check of the same input (each pause in typing, each
+ * change of mode) that finds what the last one found.
+ */
+/** A card that shows an input already checked (mounted again) does not tell it again. */
+let toldKey = verdict.value?.key;
+watch(verdict, (now) => {
+  if (now === undefined || now.key === toldKey) return;
+  toldKey = now.key;
+  announce(now.text);
+});
 </script>
 
 <template>
@@ -69,7 +125,7 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
     <div class="source-head">
       <strong class="source-name">{{ title }}</strong>
       <span class="muted">{{ formatBytes(source.size) }}</span>
-      <button type="button" class="link" :data-testid="`${testid}-remove`" @click="draft.removeSource(role, source.key)">
+      <button type="button" class="link source-remove" :data-testid="`${testid}-remove`" @click="$emit('remove')">
         Remove
       </button>
     </div>
@@ -145,7 +201,7 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
 
       <details v-if="source.head" class="head">
         <summary>First lines</summary>
-        <pre :data-testid="`${testid}-head`">{{ source.head }}</pre>
+        <pre v-scroll-focus="'First lines'" :data-testid="`${testid}-head`">{{ source.head }}</pre>
       </details>
       <!-- Closed, as NCBI shows only the file (Owner, 2026-11-02): opened to leave records out. -->
       <details class="records">

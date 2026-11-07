@@ -33,6 +33,15 @@ FASTA files:
   defline). `bx_gap_comment_q.fna` is the same after a comment, a blank line and a `#` line
   (`db.bxgap.comment.6`: NCBI names line 4), and `bx_gap_bad_q.fna` starts with `>?abc` instead
   (`db.bxgap.bad.6`: NCBI stops at line 1 before it parses the gap).
+- `bx_prescan_data_q.fna`, `bx_prescan_gap_q.fna`: a data line, or the gap line `>?5`, before any defline,
+  then the record `r1` whose title is not US-ASCII (`café x`), the BLASTX queries of `db.bxprescan.*`: with
+  `-parse_deflines` NCBI stops at line 1 (`Input doesn't start with a defline or comment`) in every format,
+  before any title is written. `bx_prescan_badgi_q.fna`: the record `r0` with that title, then `>gi|abc`, which
+  NCBI cannot read as a Seq-id under `-parse_deflines` (`Could not construct seq-id from 'gi|abc'`): in one batch
+  the error comes before `r0` is written, with `BATCH_SIZE=1` after; with `BATCH_SIZE=0` (`db.bxprescan.bs0.*`, without
+  `-parse_deflines`) NCBI reads no query and stops with `Empty CBlastQueryVector`. `bx_prescan_badgi_big_q.fna`: the same with
+  10,200 nucleotides in `r0`, more than BLASTX's batch of 10,002 letters (`db.bxprescan.badgi.big.5`,
+  `BATCH_SIZE=1000000`: one batch).
 - The rows `db.bxgapline.*` search `bslice` with `LOSAT/tests/fasta/outfmt0/bx_gapline_q.fna`, the query of the
   `-subject` rows `gapline.blastx.*` of `outfmt0_manifest.tsv`: gap lines of bad sizes (`>?abc` before any
   defline, `>?0`, `>?unk`, `>?99999999999`, `>?-5` as a record's last line), text after the size and unknown,

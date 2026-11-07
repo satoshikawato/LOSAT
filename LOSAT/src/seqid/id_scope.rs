@@ -79,6 +79,19 @@ pub struct IdScope {
 }
 
 impl IdScope {
+    /// A scope with the ids added so far, for a read that the search repeats later (BLASTX's reads
+    /// of the query file before the search): it refuses the record the search will refuse and
+    /// leaves this scope as it is.
+    pub fn copy(&self) -> Self {
+        let records = self
+            .records
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        Self {
+            records: Mutex::new(records.clone()),
+        }
+    }
+
     /// LOSAT's refusal of a record with the ids `ids` and the mark `mark` when a record of the other
     /// role has one of the ids and is not the same record; else that record, if there is one. Adds
     /// the ids.

@@ -431,6 +431,7 @@ impl PsiblastArgs {
                 pseudocount: self.pseudocount,
                 in_pssm: self.in_pssm,
             }),
+            rps: None,
         })
     }
 

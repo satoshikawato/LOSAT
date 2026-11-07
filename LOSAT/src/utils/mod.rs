@@ -1,5 +1,8 @@
 pub mod dust;
 pub mod genetic_code;
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:252-262 (`CRpsMmappedFile`,
+// quoted in the module).
+pub(crate) mod mapped_file;
 pub mod matrix;
 pub mod seg;
 mod seg_lnfact;

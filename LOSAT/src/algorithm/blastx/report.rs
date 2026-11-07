@@ -1602,6 +1602,7 @@ fn write_pairwise(
                 query_name: query.query_line().into_owned(),
                 query_length: query.placement().length,
                 ungapped_karlin: stat.map_or(batch.parameters[qidx * 6].ungapped, |p| p.ungapped),
+                gapped_karlin: None,
                 effective_search_space: stat.map_or(0, |p| p.search_space),
             });
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452

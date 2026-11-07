@@ -149,6 +149,10 @@ pub struct BlastpPairwiseQuery {
     pub query_name: String,
     pub query_length: usize,
     pub ungapped_karlin: KarlinParams,
+    /// The query's own gapped Karlin block where it is not the report's (`gapped_karlin`):
+    /// rpsblast's first query of a batch, whose K the RPS traceback wrote (`None` for the other
+    /// programs).
+    pub gapped_karlin: Option<KarlinParams>,
     pub effective_search_space: i64,
     /// Whether the query's Karlin-Altschul parameters could be computed (`is_valid`).
     pub valid: bool,
@@ -1422,6 +1426,9 @@ fn write_blastp_pairwise_intro<W: Write>(
     if program == "psiblast" {
         return write_psiblast_pairwise_intro(writer, version);
     }
+    if program == "rpsblast" {
+        return write_rpsblast_pairwise_intro(writer, version);
+    }
     writeln!(writer, "BLASTP {}", version)?;
     writeln!(writer)?;
     writeln!(writer)?;
@@ -1464,6 +1471,53 @@ fn write_blastp_pairwise_intro<W: Write>(
         "composition-based statistics and other refinements\", Nucleic Acids"
     )?;
     writeln!(writer, "Res. 29:2994-3005.")?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:386-405
+// ```c++
+//       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
+//                                               m_Outfile);
+//     }
+//
+//     if (m_IsBl2Seq && !m_IsDbScan) {
+//         return;
+//     }
+//
+//     m_Outfile << NcbiEndl << NcbiEndl;
+//     ...
+//     else
+//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
+//                                           m_Outfile);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:416-426 (quoted below:
+// the references of compositional matrix adjustment and of composition-based statistics are
+// psiblast's, deltablast's and blastp's only)
+/// The prolog of rpsblast's pairwise report: the program line and the Gapped BLAST reference
+/// only.
+fn write_rpsblast_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::Result<()> {
+    writeln!(writer, "RPSBLAST {}", version)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
+    )?;
+    writeln!(
+        writer,
+        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
+    )?;
+    writeln!(
+        writer,
+        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
+    )?;
+    writeln!(
+        writer,
+        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
+    )?;
     writeln!(writer)?;
     writeln!(writer)?;
     writeln!(writer)?;
@@ -2299,7 +2353,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 write_blastp_query_footer_spacing(
                     writer,
                     query.ungapped_karlin,
-                    report.gapped_karlin,
+                    query.gapped_karlin.unwrap_or(report.gapped_karlin),
                     report.gumbel,
                     query.effective_search_space,
                     false,
@@ -2385,7 +2439,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         write_blastp_query_footer_spacing(
             writer,
             query.ungapped_karlin,
-            self.report.gapped_karlin,
+            query.gapped_karlin.unwrap_or(self.report.gapped_karlin),
             self.report.gumbel,
             query.effective_search_space,
             false,

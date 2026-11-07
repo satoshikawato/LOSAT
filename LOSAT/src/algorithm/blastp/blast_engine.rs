@@ -83,6 +83,9 @@ mod traceback;
 // psiblast `-in_pssm` (series PS, item PS4a): the stages of a PSSM search, reached through the
 // `psi_search` hooks of `run_resolved_in_pool`.
 mod pssm_hooks;
+// rpsblast (series PR, item PS11a): the RPS engine's search, reached through the `rps_search`
+// hooks of `search_cli` and `run_resolved_in_pool`.
+mod rps_hooks;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{
@@ -2419,7 +2422,9 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // psiblast `-in_pssm` runs modes 2 and 3 as 1 (`PsiBlastSetupScoreBlock`, the options), and
     // mode 1 as the position-based redo (`pssm_search::redo1`).
     if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust
-        && !((args.app == BlastpApp::Blastp || args.psi_search.is_some())
+        && !((args.app == BlastpApp::Blastp
+            || args.psi_search.is_some()
+            || args.rps_search.is_some())
             && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats)
         && !(args.psi_search.is_some()
             && args.comp_based_stats.mode == BlastpCompositionMode::CompositionBasedStats)
@@ -5387,6 +5392,11 @@ fn search_cli(
         read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
     };
     let mut resolved = args.check_options(outputs.diagnostics)?;
+    // rpsblast: NCBI's check of the database's frequency ratios comes between the options and
+    // the database (`rps_hooks::check_freq_ratio_file`).
+    if let Some(rps) = resolved.rps_search.clone() {
+        rps_hooks::check_freq_ratio_file(&resolved, &rps, &settings, outputs.diagnostics)?;
+    }
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?;
     // psiblast sets its subjects up here, before the query (`psiblast_check_subject_letters`).
     if resolved.app == BlastpApp::Psiblast && database.is_none() {
@@ -6282,13 +6292,20 @@ fn search(
         observer.queries_begin();
     }
     let batches = match args.app {
-        BlastpApp::Blastp => crate::blastinput::query_batch::read_query_batches(
-            query_records,
-            &searched_queries,
-            &query_input,
-            reading,
-            batch_size,
-        ),
+        // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:158-159
+        // ```c++
+        //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
+        //         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
+        // ```
+        BlastpApp::Blastp | BlastpApp::Rpsblast => {
+            crate::blastinput::query_batch::read_query_batches(
+                query_records,
+                &searched_queries,
+                &query_input,
+                reading,
+                batch_size,
+            )
+        }
         BlastpApp::Psiblast => psiblast_stop_at_invalid_query(
             &args,
             &searched_queries,
@@ -6857,6 +6874,7 @@ fn x_query_block_plan(
     if args.query_range.is_some()
         || args.psi_pssm.is_some()
         || args.psi_search.is_some()
+        || args.rps_search.is_some()
         || outputs.formats.is_empty()
         || batches.stop.is_some()
         || batches.searched_done != queries.len()
@@ -7138,7 +7156,13 @@ fn blastp_database_name(args: &ResolvedBlastpArgs, subject_label: &str) -> Strin
 /// argument; psiblast makes its formatter without one (the default `kEmptyStr`).
 fn blastp_subject_tag(args: &ResolvedBlastpArgs, subject_label: &str) -> String {
     match args.app {
-        BlastpApp::Psiblast => String::new(),
+        // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:182-184
+        // ```c++
+        //                                fmt_args->GetCustomOutputFormatSpec(),
+        //                                false, false, NULL, NULL,
+        //                                GetCmdlineArgs(GetArguments()));
+        // ```
+        BlastpApp::Psiblast | BlastpApp::Rpsblast => String::new(),
         BlastpApp::Blastp if subject_label.is_empty() => args.subject.display().to_string(),
         BlastpApp::Blastp => subject_label.to_string(),
     }
@@ -7519,6 +7543,21 @@ fn search_split_query_batches(
     use crate::algorithm::blastp::protein_query_split::{
         protein_chunk_part_in_record, protein_chunk_would_be_split, split_protein_batch,
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:86-93
+    // ```c++
+    //         // do not split RPS-BLAST
+    //     if (Blast_SubjectIsPssm(program) ||
+    //         // the current implementation does NOT support splitting for multiple
+    //         // blastx queries, loop over queries individually here...
+    //         (program == eBlastTypeBlastx && num_queries > 1) ||
+    //         Blast_ProgramIsPhiBlast(program)) {
+    //         retval = false;
+    //     }
+    // ```
+    // An RPS-BLAST query batch is never split.
+    if args.rps_search.is_some() {
+        return Ok(());
+    }
     let sizes = crate::blastinput::app::protein_query_split_sizes(args.app.name(), 10000)?;
     let batch_size = args.query_batch_size()?;
     // The batches count whole records (`seq_range::QueryInput::batches`); a batch is
@@ -8330,6 +8369,9 @@ fn run_resolved_in_pool(
         crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", false);
     }
     let (lookup, mut contexts) = match args.lookup_table_type {
+        // rpsblast: the queries' contexts; the search scans with the database's prebuilt table
+        // (`rps_hooks::rps_contexts`).
+        _ if args.rps_search.is_some() => rps_hooks::rps_contexts(&args, &query_frames),
         // psiblast `-in_pssm`: the lookup table of the PSSM (`pssm_hooks::pssm_lookup`).
         _ if args.psi_search.is_some() => pssm_hooks::pssm_lookup(&args, &query_frames),
         // `blastp_aa_lookup`. EXPERIMENT (LOSAT_X_BPLKPAHEAD): or the table and contexts built
@@ -10066,9 +10108,49 @@ fn run_resolved_in_pool(
     ))]
     let use_parallel = false;
 
-    // psiblast `-in_pssm`: the PSSM's preliminary search (`pssm_hooks::pssm_prelim`), into the
-    // same hit lists.
-    if let Some(psi) = args.psi_search.as_deref() {
+    // rpsblast: the RPS engine's whole search (`rps_hooks::rps_search`): the final hit lists,
+    // which the ordinary traceback below hands on, and each query's outfmt 0 gapped K.
+    let mut rps_gapped_k: Option<Vec<f64>> = None;
+    if let Some(rps) = args.rps_search.as_deref() {
+        let run = rps_hooks::RpsSearchRun {
+            contexts: &contexts,
+            gapped_params: &gapped_params,
+            gumbel: gapped_gumbel.as_ref(),
+            cutoff_subject_length,
+            prelim_hitlist_size,
+            batches: query_batches
+                .iter()
+                .map(|batch| batch.searched.clone())
+                .collect(),
+        };
+        let searched = rps_hooks::rps_search(
+            rps,
+            &args,
+            &run,
+            database,
+            blastp_parallel_pool,
+            &mut preliminary_hit_lists,
+        )
+        .map_err(|error| {
+            match (database, error.downcast::<rps_hooks::RpsEngineError>()) {
+                // NCBI's errors of the RPS files come from the first batch's search, after the
+                // outfmt 0 prolog.
+                (Some(database), Ok(engine_error)) => preliminary_search_error(
+                    &args,
+                    subject_source,
+                    subject_label,
+                    outputs,
+                    reports,
+                    query_batch_skipped.first() == Some(&false),
+                    database.name(),
+                    &engine_error.0,
+                ),
+                (_, Ok(engine_error)) => anyhow::Error::new(engine_error),
+                (_, Err(other)) => other,
+            }
+        })?;
+        rps_gapped_k = Some(searched);
+    } else if let Some(psi) = args.psi_search.as_deref() {
         pssm_hooks::pssm_prelim(
             psi,
             &args,
@@ -10435,7 +10517,10 @@ fn run_resolved_in_pool(
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
-    let ordinary_hit_lists = if ordinary_traceback && args.psi_search.is_some() {
+    let ordinary_hit_lists = if args.rps_search.is_some() {
+        // rpsblast: the RPS engine's final hit lists (`rps_hooks::rps_search`).
+        Some(preliminary_hit_lists.iter_mut().map(Option::take).collect())
+    } else if ordinary_traceback && args.psi_search.is_some() {
         // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`: mode 0's, or
         // the position-based redo of modes 1 to 3).
         Some(pssm_hooks::pssm_traceback(
@@ -11624,6 +11709,7 @@ fn run_resolved_in_pool(
             database::XShownResidues::Listed
         } else if outputs.hits.is_none()
             && args.psi_pssm.is_none()
+            && args.rps_search.is_none()
             && requested_formats.iter().all(|outfmt| {
                 matches!(
                     outfmt,
@@ -12847,6 +12933,11 @@ fn run_resolved_in_pool(
                         // ```
                         ungapped_karlin: psi_report_karlin
                             .map_or(contexts[q_idx].karlin_params, |karlin| karlin.ungapped),
+                        // rpsblast: the gapped K of the RPS traceback (`rps_hooks::rps_search`).
+                        gapped_karlin: rps_gapped_k.as_ref().map(|gapped_k| KarlinParams {
+                            k: gapped_k[q_idx],
+                            ..gapped_params
+                        }),
                         // (A database's or a `-dbsize` search's is kept in NCBI's `Int8`.)
                         effective_search_space: exact_search_spaces[q_idx]
                             .unwrap_or(search_spaces[q_idx].effective_space.round() as i64),
@@ -12899,7 +12990,7 @@ fn run_resolved_in_pool(
                 // the traceback's results without them (psiblast_impl.cpp:150), so its rows show
                 // no lowercase masking.
                 let masked_hits = match args.app {
-                    BlastpApp::Blastp => masked_query_rows(
+                    BlastpApp::Blastp | BlastpApp::Rpsblast => masked_query_rows(
                         pairwise_hits,
                         &query_frames,
                         &ranges.query_input.placements,
@@ -13396,6 +13487,7 @@ mod tests {
             inclusion_ethresh: None,
             first_query_ordinal: 0,
             psiblast_pssm: None,
+            rps: None,
         }
     }
 

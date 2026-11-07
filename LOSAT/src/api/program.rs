@@ -74,6 +74,11 @@ impl Program {
             "blastdbcmd" => Err(Error::Argv(
                 "blastdbcmd is not a search program: run_blastdbcmd runs it".to_string(),
             )),
+            // rpsblast (series PR, item PS11a) runs on the command line; the API has no program
+            // for it yet (its results and options are those of a later item).
+            "rpsblast" => Err(Error::Argv(
+                "rpsblast is not available through the library API".to_string(),
+            )),
             other => Err(Error::Argv(format!("unknown program '{other}'"))),
         }
     }

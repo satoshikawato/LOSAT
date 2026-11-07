@@ -165,6 +165,12 @@ impl BlastpDatabase {
         })
     }
 
+    /// The opened database: rpsblast reads its volume's path and its profiles' consensus
+    /// sequences (`rps_hooks`).
+    pub(super) fn seqdb(&self) -> &SeqDb {
+        &self.db
+    }
+
     /// The `-db` value as NCBI keeps it.
     pub(super) fn name(&self) -> &str {
         &self.name

@@ -10,7 +10,7 @@ use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 //     arg.Reset(new CProgramDescriptionArgs(kProgram,
 //                                   "Translated Query-Protein Subject BLAST"));
 // ```
-use crate::algorithm::{blastn, blastp, blastx, psiblast, tblastn, tblastx};
+use crate::algorithm::{blastn, blastp, blastx, psiblast, rpsblast, tblastn, tblastx};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
 // ```c++
@@ -45,13 +45,14 @@ const LOSAT_HELP_TEMPLATE: &str =
 
 /// The names that run a program without its subcommand word (`entry_argv`), as `losat
 /// --install-shims` links them. No NCBI counterpart: NCBI has one executable per program.
-pub const ENTRY_NAMES: [&str; 8] = [
+pub const ENTRY_NAMES: [&str; 9] = [
     "blastn",
     "blastp",
     "blastx",
     "tblastn",
     "tblastx",
     "psiblast",
+    "rpsblast",
     "makeblastdb",
     "blastdbcmd",
 ];
@@ -242,6 +243,15 @@ pub enum Commands {
     /// Position-Specific Iterated BLAST (psiblast; its first round)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Psiblast(psiblast::PsiblastArgs),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:77-79
+    // ```c++
+    //     static const string kProgram("rpsblast");
+    //     arg.Reset(new CProgramDescriptionArgs(kProgram,
+    //                                           "Reverse Position Specific BLAST"));
+    // ```
+    /// Reverse Position Specific BLAST (rpsblast; without composition-based statistics)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
+    Rpsblast(rpsblast::RpsblastArgs),
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
     // ```c++
     //     arg_desc->SetUsageContext(GetArguments().GetProgramBasename(),
@@ -291,7 +301,7 @@ where
         .filter(|program| {
             matches!(
                 program.get_name(),
-                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast"
+                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "rpsblast"
             )
         })
     {
@@ -357,7 +367,13 @@ where
             && input.len() == 0
             && matches!(
                 scope.get_name(),
-                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "makeblastdb"
+                "blastn"
+                    | "blastp"
+                    | "tblastn"
+                    | "tblastx"
+                    | "psiblast"
+                    | "rpsblast"
+                    | "makeblastdb"
             )
         {
             continue;
@@ -443,7 +459,7 @@ fn inline_value(token: &std::ffi::OsStr, name: &str) -> OsString {
 fn is_ncbi_search_program(scope: &clap::Command) -> bool {
     matches!(
         scope.get_name(),
-        "blastn" | "blastp" | "blastx" | "tblastn" | "tblastx" | "psiblast"
+        "blastn" | "blastp" | "blastx" | "tblastn" | "tblastx" | "psiblast" | "rpsblast"
     )
 }
 
@@ -626,6 +642,34 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
     ) || (is_unported_blastp_arg(name) && !matches!(name, "db_hard_mask" | "db_soft_mask"))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (quoted at
+// `algorithm::rpsblast::args`)
+/// rpsblast's NCBI arguments that LOSAT does not run (its search reads the profile database's
+/// statistics and scale as NCBI's does; `-dbsize` and `-searchsp` would need NCBI's per-volume
+/// rule, `rpsblast_local.cpp:351-354`), the formats' options that LOSAT's reports do not have,
+/// and the query masks of the reversed scan.
+fn is_unported_rpsblast_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "dbsize"
+            | "entrez_query"
+            | "export_search_strategy"
+            | "html"
+            | "import_search_strategy"
+            | "lcase_masking"
+            | "line_length"
+            | "remote"
+            | "searchsp"
+            | "sorthits"
+            | "sorthsps"
+            | "sum_stats"
+            | "use_sw_tback"
+            | "xdrop_gap"
+            | "xdrop_gap_final"
+            | "xdrop_ungap"
+    )
+}
+
 fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
     // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
     // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
@@ -680,10 +724,18 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
             format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's PSIBLAST"),
         );
     }
-    if let Some(program) = ["blastn", "blastp", "tblastn", "tblastx", "psiblast"]
-        .into_iter()
-        .find(|program| scope.get_name() == *program)
-        .filter(|_| is_ncbi_toolkit_arg(name))
+    if scope.get_name() == "rpsblast" && is_unported_rpsblast_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's RPSBLAST"),
+        );
+    }
+    if let Some(program) = [
+        "blastn", "blastp", "tblastn", "tblastx", "psiblast", "rpsblast",
+    ]
+    .into_iter()
+    .find(|program| scope.get_name() == *program)
+    .filter(|_| is_ncbi_toolkit_arg(name))
     {
         return clap::Error::raw(
             ErrorKind::InvalidValue,
@@ -748,6 +800,7 @@ where
         "tblastn" => "tblastn",
         "tblastx" => "tblastx",
         "psiblast" => "psiblast",
+        "rpsblast" => "rpsblast",
         "makeblastdb" => "makeblastdb",
         _ => return None,
     };

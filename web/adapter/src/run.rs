@@ -34,6 +34,7 @@ impl Program {
             "tblastx" => Ok(Self::Tblastx),
             "blastx" => Ok(Self::Blastx),
             "psiblast" => Err("psiblast is not available in the browser (ABI v2)".into()),
+            "rpsblast" => Err("rpsblast is not available in the browser (ABI v2)".into()),
             other => Err(format!("unknown program '{other}'")),
         }
     }
@@ -109,7 +110,9 @@ fn outfmt_of(command: &mut Commands) -> &mut String {
         Commands::Blastn(a) => &mut a.outfmt,
         Commands::Tblastx(a) => &mut a.outfmt,
         Commands::Blastx(a) => &mut a.outfmt,
-        Commands::Psiblast(_) | Commands::Makedb(_) => unreachable!("rejected by Program::parse"),
+        Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => {
+            unreachable!("rejected by Program::parse")
+        }
     }
 }
 

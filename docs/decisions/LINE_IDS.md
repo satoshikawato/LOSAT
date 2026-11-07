@@ -154,6 +154,8 @@ and `docs/`. State: 142 done, 12 in progress, 0 stopped.
 | `PS3` | PS stage 3: psiblast's -out_pssm, the PSSM as NCBI's ASN.1 text `PssmWithParameters` after the first round, byte for byte as NCBI BLAST+ 2.17.0, and the reader of that text (for -in_pssm, PS4). | done | #892 | changelog entry `feature-ps-ps3` |
 | `PS4a` | PS stage 4a: psiblast -in_pssm with -comp_based_stats 0, the search with a PSSM query (lookup table, ungapped and gapped extensions, traceback from the PSSM's rows), byte for byte as NCBI BLAST+ 2.17.0. | done | #906 | changelog entry `feature-ps-ps4` |
 | `PS4b` | PS stage 4b: psiblast -in_pssm with the position-based composition-based statistics (-comp_based_stats 1, and 2 and 3 run as 1 with NCBI's warning; the default), the zero-ratio warning and PSSMs of frequency ratios only, byte for byte as NCBI BLAST+ 2.17.0. | in progress | none | changelog entry `feature-ps-ps4b` |
+| `PS11` | PS stage 11 (series PR): `losat rpsblast`, NCBI BLAST+ 2.17.0 rpsblast against profile databases (makeprofiledb -dbtype rps); split into PS11a and PS11b. | in progress | none | changelog entry `feature-ps-ps11` |
+| `PS11a` | PS stage 11a: `losat rpsblast` without composition-based statistics (-comp_based_stats 0, F, f, D, d; any mode on a database without frequency ratios, as NCBI runs it) on one-volume profile databases (version 4 and 5, 26 and 28 columns, any whole scale), outfmt 0, 6, 7 and 10, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps11` |
 
 ### RL: the v0.2.0 release
 

@@ -10,6 +10,7 @@ blastp	blastn	code
 blastp	common	code
 blastp	psiblast	code
 blastp	pssm_search	code
+blastp	rps_search	code
 blastp	tblastx	code
 blastx	blastn	code
 blastx	blastp	code
@@ -21,6 +22,12 @@ psiblast	pssm_search	code
 pssm_search	blastn	code
 pssm_search	blastp	code
 pssm_search	tblastx	code
+rps_search	blastn	code
+rps_search	blastp	code
+rps_search	pssm_search	code
+rps_search	tblastx	code
+rpsblast	blastp	code
+rpsblast	rps_search	code
 tblastn	blastn	code
 tblastn	blastp	code
 tblastn	common	code

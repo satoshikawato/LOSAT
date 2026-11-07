@@ -1131,7 +1131,6 @@ fn write_pairwise(
             // The query record's length, also with `-query_loc`.
             query_length: ranges.queries.length(q_idx, query.seq().len()),
             ungapped_karlin: karlin,
-            gapped_karlin: None,
             effective_search_space: length.eff_searchsp,
         })
         .collect();

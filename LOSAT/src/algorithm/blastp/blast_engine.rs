@@ -7358,6 +7358,7 @@ fn write_reports_without_queries(
                     &[],
                     &[],
                     &report,
+                    None,
                     pairwise_database.as_ref(),
                     None,
                     None,
@@ -12992,11 +12993,6 @@ fn run_resolved_in_pool(
                         // ```
                         ungapped_karlin: psi_report_karlin
                             .map_or(contexts[q_idx].karlin_params, |karlin| karlin.ungapped),
-                        // rpsblast: the gapped K of the RPS traceback (`rps_hooks::rps_search`).
-                        gapped_karlin: rps_gapped_k.as_ref().map(|gapped_k| KarlinParams {
-                            k: gapped_k[q_idx],
-                            ..gapped_params
-                        }),
                         // (A database's or a `-dbsize` search's is kept in NCBI's `Int8`.)
                         effective_search_space: exact_search_spaces[q_idx]
                             .unwrap_or(search_spaces[q_idx].effective_space.round() as i64),
@@ -13076,6 +13072,8 @@ fn run_resolved_in_pool(
                     &subject_titles,
                     listed_parsed,
                     &pairwise_report,
+                    // rpsblast: the gapped K of the RPS traceback (`rps_hooks::rps_search`).
+                    rps_gapped_k.as_deref(),
                     pairwise_database.as_ref(),
                     probe.as_mut(),
                     warnings.as_mut(),

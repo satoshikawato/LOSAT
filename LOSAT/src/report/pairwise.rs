@@ -149,10 +149,6 @@ pub struct BlastpPairwiseQuery {
     pub query_name: String,
     pub query_length: usize,
     pub ungapped_karlin: KarlinParams,
-    /// The query's own gapped Karlin block where it is not the report's (`gapped_karlin`):
-    /// rpsblast's first query of a batch, whose K the RPS traceback wrote (`None` for the other
-    /// programs).
-    pub gapped_karlin: Option<KarlinParams>,
     pub effective_search_space: i64,
     /// Whether the query's Karlin-Altschul parameters could be computed (`is_valid`).
     pub valid: bool,
@@ -2190,7 +2186,9 @@ fn write_final_database_report<W: Write>(
 // ```
 /// The report of `queries`: the prolog when `prolog` is set (EXPERIMENT (LOSAT_X_BPQBLOCK):
 /// false for the query blocks after the first of blastp's block search, whose first block wrote
-/// it), each query's section, and the epilog when `epilog` is set.
+/// it), each query's section, and the epilog when `epilog` is set. `query_gapped_k` is
+/// rpsblast's gapped K of each query's footer (`rps_search::engine::batch_gapped_k`), `None` for
+/// blastp and psiblast (the report's `gapped_karlin`).
 pub fn write_blastp_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
     writer: &mut W,
@@ -2200,6 +2198,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
     subject_titles: &[Arc<[u8]>],
     parsed_subjects: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     report: &BlastpPairwiseReport,
+    query_gapped_k: Option<&[f64]>,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
@@ -2247,6 +2246,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
             queries,
             query_titles,
             report,
+            query_gapped_k,
             database,
             parsed_subjects,
         },
@@ -2285,9 +2285,25 @@ struct BlastpSections<'a> {
     queries: &'a [BlastpPairwiseQuery],
     query_titles: &'a [Arc<[u8]>],
     report: &'a BlastpPairwiseReport,
+    /// rpsblast's gapped K by query (`write_blastp_pairwise_report`).
+    query_gapped_k: Option<&'a [f64]>,
     database: Option<&'a PairwiseDatabase>,
     /// The subjects with parsed Seq-ids by subject (empty without them).
     parsed_subjects: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+}
+
+impl BlastpSections<'_> {
+    /// The gapped Karlin block of query `q_idx`'s footer: the report's, with rpsblast's K of
+    /// the query (the first query of a batch has the K that the RPS traceback wrote).
+    fn gapped_karlin(&self, q_idx: usize) -> KarlinParams {
+        match self.query_gapped_k {
+            Some(gapped_k) => KarlinParams {
+                k: gapped_k[q_idx],
+                ..self.report.gapped_karlin
+            },
+            None => self.report.gapped_karlin,
+        }
+    }
 }
 
 impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
@@ -2353,7 +2369,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 write_blastp_query_footer_spacing(
                     writer,
                     query.ungapped_karlin,
-                    query.gapped_karlin.unwrap_or(report.gapped_karlin),
+                    self.gapped_karlin(q_idx),
                     report.gumbel,
                     query.effective_search_space,
                     false,
@@ -2439,7 +2455,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         write_blastp_query_footer_spacing(
             writer,
             query.ungapped_karlin,
-            query.gapped_karlin.unwrap_or(self.report.gapped_karlin),
+            self.gapped_karlin(q_idx),
             self.report.gumbel,
             query.effective_search_space,
             false,

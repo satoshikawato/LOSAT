@@ -237,15 +237,15 @@ textarea:focus {
 }
 
 /* Focused from the keyboard, the ring is the accent itself, 5.1:1 on white (the soft ring is 1.4:1,
-   WA2-AX-09); browsers give a text box :focus-visible on a click too. The outline is transparent:
-   only forced colours (Windows' high contrast), which draw no shadow, show it. */
+   WA2-AX-09), in the soft ring's place: an outline at the border, which WebKit draws on a select (it
+   draws no box-shadow there) and forced colours (Windows' high contrast) keep. Browsers give a text
+   box :focus-visible on a click too. */
 input[type='text']:focus-visible,
 input[type='search']:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid transparent;
+  outline: 2px solid var(--accent);
   outline-offset: 0;
-  box-shadow: 0 0 0 2px var(--accent);
 }
 
 input[type='checkbox'],

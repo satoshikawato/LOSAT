@@ -321,8 +321,9 @@ pub(crate) fn s_blast_aa_scan_subject_one_range(
         // ```
         // Bounds (not yet a SAFETY argument): `index < backbone_size` needs every letter of the
         // word below 28 (the mask alone allows 32,768), and every builder gives `pv`
-        // `(backbone_size >> PV_ARRAY_BTS) + 1` words. The crate's callers pass NCBIstdaa letters,
-        // but tblastn's soft-masked last chunk can scan a word one byte past `subject` (open).
+        // `(backbone_size >> PV_ARRAY_BTS) + 1` words. The crate's callers pass NCBIstdaa letters
+        // and words inside `subject` (TBLASTN's `x_scan_unit` does not scan a raised first-range
+        // word past it).
         let pv_word = unsafe { *pv.add(index >> PV_ARRAY_BTS) };
         if (pv_word & (1u32 << (index & PV_ARRAY_MASK))) != 0 {
             // Bounds: `index < backbone_size` as for `pv` above addresses one of the table's cells.

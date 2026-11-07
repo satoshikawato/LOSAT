@@ -424,12 +424,6 @@ mod tests {
             .collect()
     }
 
-    /// The path on its own (independent of the switch): the query block as blastp builds it,
-    /// without its leading sentinel.
-    fn query(block: &[u8], x_drops: &[i32]) -> Option<XSentQuery> {
-        query_of(ScoringMatrix::Blosum62, block, x_drops)
-    }
-
     /// The byte table the walks take for `matrix`: BLOSUM62's, or another matrix's
     /// (`MatrixTable::sent_table`, item SC2c).
     fn table_of(matrix: ScoringMatrix) -> &'static Table {
@@ -442,7 +436,8 @@ mod tests {
         }
     }
 
-    /// [`query`] with the table of `matrix`.
+    /// The path on its own (independent of the switch) with the table of `matrix`: the query
+    /// block as blastp builds it, without its leading sentinel.
     fn query_of(matrix: ScoringMatrix, block: &[u8], x_drops: &[i32]) -> Option<XSentQuery> {
         if x_drops.iter().any(|d| !(1..=MAX_DROPOFF).contains(d))
             || block.iter().fold(0u8, |a, &c| a | c) >= CODES

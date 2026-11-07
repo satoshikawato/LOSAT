@@ -1127,10 +1127,9 @@ pub(super) fn x_packed_lean_plan(
 
 // No NCBI counterpart for the margin: NCBI's scan reads the letters of its chunk
 // (aa_ungapped.c:496-501), as the scan loops here do (their blocks follow the scan range); one of
-// them (x_scan_byte) also looks at the length of the slice it is given before its last block.
-// With a margin past the chunk, or the frame's end sentinel when it is nearer, a unit's slice is
-// longer than every read and makes that choice as the frame's slice does; 4,096 residues are
-// 0.08 % of a chunk of 5,000,000.
+// them (x_scan_byte) also checks that its last word fits in the slice it is given. With a margin
+// past the chunk, or the frame's end sentinel when it is nearer, a unit's slice is longer than
+// every read, as the frame's slice is; 4,096 residues are 0.08 % of a chunk of 5,000,000.
 /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the residues a unit's translation runs past its chunk.
 const X_UNIT_MARGIN: usize = 4096;
 

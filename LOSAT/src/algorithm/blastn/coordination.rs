@@ -1149,7 +1149,7 @@ pub(crate) fn apply_dust_masking<L: QueryLetters + ?Sized>(
 
 /// Build lookup tables based on configuration. `x_keep`: the batch loop's keep of
 /// LOSAT_X_MBLUTKEEP for the megablast table (`lookup::x_mb_lut_keep`), `None` elsewhere.
-pub fn build_lookup_tables<R: InputRecord>(
+pub(crate) fn build_lookup_tables<R: InputRecord>(
     config: &TaskConfig,
     args: &BlastnArgs,
     queries_blastna: &[&[u8]],

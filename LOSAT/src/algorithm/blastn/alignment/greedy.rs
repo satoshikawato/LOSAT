@@ -755,7 +755,7 @@ fn debug_greedy_traceback_enabled(q_off: usize, s_off: usize) -> bool {
 /// Greedy alignment for high-identity nucleotide sequences.
 /// If `reverse` is true, sequences are accessed from the end (for left extension).
 /// This avoids the need to copy and reverse sequences for left extension.
-pub fn greedy_align_one_direction_ex(
+pub(crate) fn greedy_align_one_direction_ex(
     q_seq: &[u8],
     s_seq: &[u8],
     len1: usize,
@@ -838,7 +838,7 @@ pub fn greedy_align_one_direction(
 /// Internal greedy alignment function with explicit max_dist parameter.
 /// If `reverse` is true, sequences are accessed from the end (for left extension).
 /// Returns: ((q_consumed, s_consumed, score, matches, mismatches, gap_opens, gap_letters), converged)
-pub fn greedy_align_one_direction_with_max_dist(
+pub(crate) fn greedy_align_one_direction_with_max_dist(
     q_seq: &[u8],
     s_seq: &[u8],
     len1: usize,

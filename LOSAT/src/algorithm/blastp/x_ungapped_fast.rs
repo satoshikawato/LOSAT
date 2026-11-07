@@ -139,6 +139,17 @@ fn build_matrix_table(matrix: ScoringMatrix) -> Option<MatrixTable> {
     })
 }
 
+impl MatrixTable {
+    // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+    /// The table for the sentinel walks of `x_ungapped_sent.rs` (item SC2c): `None` unless the
+    /// sentinel (code 0) scores -128 against every code below 32, both ways, and the matrix's
+    /// largest score is at most 31 (`max_word_size` at least 4).
+    pub(crate) fn sent_table(&self) -> Option<&Table> {
+        let sentinel = (0..CODES).all(|c| self.table[c] == -128 && self.table[c << 5] == -128);
+        (sentinel && self.max_word_size >= 4).then_some(&*self.table)
+    }
+}
+
 /// The table of the walks for `matrix`, built at the first call for the matrix; `None` if a score
 /// does not fit a byte (the reference then runs).
 pub(crate) fn matrix_table(matrix: ScoringMatrix) -> Option<&'static MatrixTable> {

@@ -3285,22 +3285,33 @@ mod defline_tests {
     #[test]
     fn a_first_line_ncbi_tries_as_a_seq_id_is_refused_as_the_shared_reader_refuses_it() {
         use crate::blastinput::fasta_reader::{FastaInputSource, ReadError, ReaderConfig};
-        let first_lines = [
-            &b"lcl|abc"[..],
+        // The first lines, each before a record with LF line ends, and whole inputs: CR-only and
+        // CRLF line ends, and a file of the line alone without a line end.
+        let first_lines: [&[u8]; 9] = [
+            b"lcl|abc",
             b"12345",
             b"AB123456",
             b"P12345",
             b"gnl|db|x",
             b"  lcl|abc  ",
             b"lcl|abc\r",
+            b"\x0blcl|abc",
+            b"\x0c12345",
         ];
-        for first in first_lines {
-            let data = [first, b"\n>q1 x\nACGTACGT\n"].concat();
+        let inputs = first_lines
+            .iter()
+            .map(|first| [*first, b"\n>q1 x\nACGTACGT\n"].concat())
+            .chain([
+                b"lcl|abc\r>q1 x\rACGTACGT\r".to_vec(),
+                b"12345\r\n>q1 x\r\nACGTACGT\r\n".to_vec(),
+                b"lcl|abc".to_vec(),
+            ]);
+        for data in inputs {
             let config = ReaderConfig::query("BLASTX", false, true);
             let expected =
                 match FastaInputSource::from_bytes(&data, config).next_sequence(&mut |_| Ok(())) {
                     Err(ReadError::Unsupported(refusal)) => refusal.to_string(),
-                    other => panic!("{first:?}: {other:?}"),
+                    other => panic!("{data:?}: {other:?}"),
                 };
             assert!(
                 expected.contains("not supported by LOSAT's BLASTX"),
@@ -3308,12 +3319,13 @@ mod defline_tests {
             );
             for parse_deflines in [false, true] {
                 let error = read_with_loaders(&data, parse_deflines).unwrap_err();
-                assert_eq!(error.to_string(), expected, "{first:?}");
+                assert_eq!(error.to_string(), expected, "{data:?}");
             }
-            // With the data loaders off the line is data: the letters of a record without a
+            // With the data loaders off the line is data: the letters of a first record without a
             // defline, or `CheckDataLine`'s error for a line that is not plausible data (`12345`).
-            if let Err(error) = read(&data, false) {
-                assert!(error.is::<FastaParseError>(), "{first:?}: {error}");
+            match read(&data, false) {
+                Ok(records) => assert!(records[0].title.is_empty(), "{data:?}"),
+                Err(error) => assert!(error.is::<FastaParseError>(), "{data:?}: {error}"),
             }
         }
         let fasta: [&[u8]; 5] = [

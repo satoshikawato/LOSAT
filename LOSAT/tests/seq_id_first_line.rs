@@ -118,9 +118,11 @@ fn refusal(program: &str, role: &str, line: &str) -> String {
 //                     // defer to CFastaReader
 // ```
 // Every program refuses the line in the query and in the subject with the same text and exit
-// status, before any byte of a report that reads its subjects first (outfmt 6 and 11: no error
-// archive, since the refusal is LOSAT's, not an error of NCBI's), with and without
-// `-parse_deflines`; the white space around the line is trimmed, as NCBI trims it.
+// status, with and without `-parse_deflines`; the white space around the line is trimmed, as
+// NCBI trims it. The refusal comes when the reader reads the line: a subject's before any byte, a
+// query's after what the report writes before its first batch (outfmt 0: the prolog, no
+// `Query=`; outfmt 6 and 11: nothing, and no error archive, since the refusal is LOSAT's, not an
+// error of NCBI's).
 #[test]
 fn the_five_programs_refuse_a_seq_id_first_line_with_one_text() {
     let dir = temp_dir("refuse");
@@ -147,7 +149,7 @@ fn the_five_programs_refuse_a_seq_id_first_line_with_one_text() {
                 } else {
                     (&clean_q, &path)
                 };
-                for outfmt in ["6", "11"] {
+                for outfmt in ["6", "11", "0"] {
                     for parse_deflines in [false, true] {
                         let mut extra = vec!["-outfmt", outfmt];
                         if parse_deflines {
@@ -157,11 +159,16 @@ fn the_five_programs_refuse_a_seq_id_first_line_with_one_text() {
                         let (status, stdout, stderr) =
                             run(&dir, program, query, subject, &extra, &[]);
                         assert_eq!(status, 1, "{what}: {stderr}");
-                        assert!(
-                            stdout.is_empty(),
-                            "{what}: {}",
-                            String::from_utf8_lossy(&stdout)
-                        );
+                        let report = String::from_utf8_lossy(&stdout);
+                        if outfmt == "0" && role == "query" {
+                            let prolog = format!("{} 2.17.0+\n", program.to_uppercase());
+                            assert!(
+                                report.starts_with(&prolog) && !report.contains("Query="),
+                                "{what}: {report}"
+                            );
+                        } else {
+                            assert!(stdout.is_empty(), "{what}: {report}");
+                        }
                         assert_eq!(stderr, refusal(program, role, trimmed), "{what}");
                     }
                 }
@@ -317,5 +324,42 @@ fn only_a_first_line_that_ncbi_takes_as_a_seq_id_is_refused() {
             }
         }
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
+// ```c
+//     // Setup some debugging features from environment variables.
+//     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
+//         SetDiagTrace(eDT_Enable, eDT_Enable);
+//     }
+//     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
+// ```
+// NCBI's application layer reads its environment and registry files (the data loaders among
+// them) before the program's own code: every program refuses the settings that LOSAT does not
+// reproduce first, with one text, before an option or a file of the run fails (BLASTX reads them
+// at the start of its run, the others in `main`).
+#[test]
+fn the_settings_are_read_before_the_options_and_the_files() {
+    let dir = temp_dir("settings");
+    let missing = dir.join("missing.fa");
+    let env = [("DIAG_POST_LEVEL", "Trace")];
+    let mut texts = Vec::new();
+    for (program, query_protein, _) in PROGRAMS {
+        let query = dir.join(format!("{program}_q.fa"));
+        std::fs::write(&query, records("", "q", query_protein)).unwrap();
+        for extra in [&["-outfmt", "6"][..], &["-outfmt", "99"]] {
+            let (status, stdout, stderr) = run(&dir, program, &query, &missing, extra, &env);
+            assert_eq!(status, 1, "{program} {extra:?}: {stderr}");
+            assert!(stdout.is_empty(), "{program} {extra:?}");
+            assert!(
+                stderr.starts_with("Error: the environment variable DIAG_POST_LEVEL")
+                    && stderr.contains("is not supported by LOSAT"),
+                "{program} {extra:?}: {stderr}"
+            );
+            texts.push(stderr);
+        }
+    }
+    assert!(texts.iter().all(|text| *text == texts[0]), "{texts:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }

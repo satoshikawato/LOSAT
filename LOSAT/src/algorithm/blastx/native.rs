@@ -287,6 +287,22 @@ fn run_inner(
     output: &mut Option<BufWriter<Box<dyn Write>>>,
     archive_slot: &mut Option<crate::report::archive::ArchiveHandle>,
 ) -> Result<()> {
+    // NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
+    // ```c
+    //     // Setup some debugging features from environment variables.
+    //     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
+    //         SetDiagTrace(eDT_Enable, eDT_Enable);
+    //     }
+    //     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
+    // ```
+    // NCBI's application layer reads its environment and registry files before blastx's own
+    // code runs; LOSAT rejects the settings that change the output first, before any option or
+    // file of the run, as its other programs do in `main` (BLASTX's command line entry takes the
+    // arguments only). The registry's `BLASTDB` finds `-db`, and the data loaders decide whether
+    // the reader tries the first line of the query or the `-subject` file as a Seq-id
+    // (`FastaStream::seq_id_role`).
+    let settings = crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
+        .map_err(anyhow::Error::msg)?;
     let id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>> =
         args.parse_deflines.then(Default::default);
     // Diagnostic (LOSAT_TIMING): the clock of the run (x_timing.rs). No NCBI counterpart.
@@ -405,13 +421,8 @@ fn run_inner(
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the formatting handler and before
     // `CStdCmdLineArgs`, which opens the query and the output: its warning before theirs (probe
     // F04 of line DI-8), and a list error leaves no `-out`, only the error archive that NCBI's
-    // `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8). NCBI's application layer
-    // has read its environment and registry files by then; LOSAT reads them here, as its other
-    // programs do for every run: the registry's `BLASTDB` finds `-db`, and the data loaders decide
-    // whether the reader tries the first line of the query or the `-subject` file as a Seq-id
-    // (`FastaStream::seq_id_role`).
-    let settings = crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
-        .map_err(anyhow::Error::msg)?;
+    // `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8). The registry's `BLASTDB`
+    // finds `-db` (`settings`, read at the start of the run).
     let list = match args.database_name() {
         Some(_) => args
             .db_filter

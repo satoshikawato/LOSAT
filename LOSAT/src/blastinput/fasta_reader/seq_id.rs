@@ -615,8 +615,10 @@ pub(super) fn classify(line: &[u8]) -> SeqIdLine {
 /// Every line that `classify` does not call FASTA is rejected: NCBI fetches it, skips it
 /// (a query whose ID is not found, or another rethrown exception) or fails (a subject).
 /// `line` is the line as read (`classify` trims it); `program` and `role` name the reader in
-/// the rejection. The readers of all programs ask here: the shared reader
-/// (`reader::read_one_seq`) and BLASTX's (`algorithm::blastx::input`).
+/// the rejection. Both readers ask here: the shared reader (`reader::read_one_seq`, with its
+/// data loaders on) and BLASTX's command line reader (`algorithm::blastx::input`,
+/// `FastaStream::seq_id_role`). BLASTX's web ABI v1 (`algorithm::blastx::web`, frozen) does not:
+/// it reads such a line as data, as before.
 pub(crate) fn reject_seq_id_line(line: &[u8], program: &str, role: &str) -> Option<anyhow::Error> {
     if classify(line) == SeqIdLine::Fasta {
         return None;

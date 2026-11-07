@@ -131,12 +131,20 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 // No NCBI counterpart: how the build is divided among the pool's threads. Scheduling only.
-/// Chunks per thread, and the fewest stripes per thread.
+/// The fewest stripes per thread.
 const X_PARTS_PER_THREAD: usize = 8;
+/// Chunks per thread: many small chunks, so that the tasks of the appends pass end together and each
+/// task's scratch (`XAppendsScratch`) stays small.
+const X_CHUNKS_PER_THREAD: usize = 64;
+// No NCBI counterpart: where the chunks' packed appends are stored. Memory placement only.
+/// The fewest entries of a segment of packed appends (`XSegmentOut`): 40 MiB, above glibc's largest
+/// mmap threshold (32 MiB), so that each segment is a mapping of its own, returned whole when it is
+/// dropped, whichever thread made it (a pool thread's smaller blocks stay in its arena).
+const X_APPENDS_SEGMENT: usize = 10 << 20;
 /// The fewest query offsets of a chunk (about 65 appends each with blastp-fast's threshold).
 const X_MIN_CHUNK_OFFSETS: usize = 256;
 /// The most (chunk, stripe) parts: a stripe reads its part of every chunk.
-const X_MAX_PARTS: usize = 1 << 16;
+const X_MAX_PARTS: usize = 1 << 20;
 // No NCBI counterpart: the 16 bits of a packed append that hold the offset less the chunk's first.
 /// A chunk's offsets lie in `base..base + X_OFFSET_SPAN`.
 const X_OFFSET_SPAN: i64 = 1 << 16;
@@ -154,11 +162,108 @@ struct XChunk {
     base: i32,
 }
 
-/// A chunk's appends sorted by stripe, stably: stripe j's are `packed[stripe_starts[j]..
-/// stripe_starts[j + 1]]`, each `(index - (j << shift)) << 16 | (query_offset - base)`.
+/// A chunk's appends sorted by stripe, stably: its packed appends `packed` are
+/// `segments[segment][at..at + len]` of the pass's `XAppends`; stripe j's are
+/// `packed[stripe_starts[j]..stripe_starts[j + 1]]`, each
+/// `(index - (j << shift)) << 16 | (query_offset - base)`.
 struct XChunkAppends {
-    packed: Vec<u32>,
+    segment: usize,
+    at: usize,
+    len: usize,
     stripe_starts: Vec<u32>,
+}
+
+/// The appends pass's result: each chunk's appends (in chunk order), their packed appends in the
+/// segments that the pass's tasks filled.
+struct XAppends {
+    segments: Vec<Vec<u32>>,
+    chunks: Vec<XChunkAppends>,
+}
+
+impl XAppends {
+    /// A chunk's packed appends.
+    fn packed(&self, chunk: &XChunkAppends) -> &[u32] {
+        if chunk.len == 0 {
+            return &[];
+        }
+        &self.segments[chunk.segment][chunk.at..chunk.at + chunk.len]
+    }
+
+    /// The chunks' appends and packed appends, in chunk order.
+    fn iter(&self) -> impl Iterator<Item = (&XChunkAppends, &[u32])> {
+        self.chunks.iter().map(|chunk| (chunk, self.packed(chunk)))
+    }
+}
+
+// No NCBI counterpart: memory placement of the packed appends (`X_APPENDS_SEGMENT`).
+/// A task's segment of packed appends: chunks take ranges of it in turn; a full segment (and the
+/// last one, when the task ends) goes to its slot of `registry`, whose index the chunks keep.
+struct XSegmentOut<'r> {
+    registry: &'r Mutex<Vec<Vec<u32>>>,
+    segment: Vec<u32>,
+    /// The segment's slot in `registry` (`usize::MAX`: none yet).
+    index: usize,
+    used: usize,
+}
+
+impl<'r> XSegmentOut<'r> {
+    fn new(registry: &'r Mutex<Vec<Vec<u32>>>) -> Self {
+        Self {
+            registry,
+            segment: Vec::new(),
+            index: usize::MAX,
+            used: 0,
+        }
+    }
+
+    /// `n` entries for one chunk (each range is taken once; the chunk writes every entry of it
+    /// before any is read): the segment's slot, the range's start, the range.
+    fn take(&mut self, n: usize) -> (usize, usize, &mut [u32]) {
+        if self.segment.len() - self.used < n {
+            self.finish();
+            let mut registry = self.registry.lock().unwrap_or_else(PoisonError::into_inner);
+            self.index = registry.len();
+            registry.push(Vec::new());
+            drop(registry);
+            self.segment = vec![0u32; n.max(X_APPENDS_SEGMENT)];
+            self.used = 0;
+        }
+        let at = self.used;
+        self.used += n;
+        (self.index, at, &mut self.segment[at..at + n])
+    }
+
+    /// Moves the segment to its slot.
+    fn finish(&mut self) {
+        if self.index != usize::MAX {
+            self.registry.lock().unwrap_or_else(PoisonError::into_inner)[self.index] =
+                std::mem::take(&mut self.segment);
+        }
+    }
+}
+
+impl Drop for XSegmentOut<'_> {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+/// A task's scratch in the appends pass: a chunk's targets and appends per offset, and the task's
+/// segment of packed appends.
+struct XAppendsScratch<'r> {
+    targets: Vec<u32>,
+    per_offset: Vec<(i32, u32)>,
+    out: XSegmentOut<'r>,
+}
+
+impl<'r> XAppendsScratch<'r> {
+    fn new(registry: &'r Mutex<Vec<Vec<u32>>>) -> Self {
+        Self {
+            targets: Vec::new(),
+            per_offset: Vec::new(),
+            out: XSegmentOut::new(registry),
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
@@ -599,11 +704,17 @@ fn x_chunk_appends(
     max_appends: usize,
     appended: &AtomicUsize,
     too_large: &AtomicBool,
-    targets: &mut Vec<u32>,
-    per_offset: &mut Vec<(i32, u32)>,
+    scratch: &mut XAppendsScratch<'_>,
 ) -> XChunkAppends {
+    let XAppendsScratch {
+        targets,
+        per_offset,
+        out,
+    } = scratch;
     let empty = || XChunkAppends {
-        packed: Vec::new(),
+        segment: 0,
+        at: 0,
+        len: 0,
         stripe_starts: vec![0; stripes + 1],
     };
     targets.clear();
@@ -647,7 +758,8 @@ fn x_chunk_appends(
         stripe_starts[j + 1] += stripe_starts[j];
     }
     let mut cursors = stripe_starts[..stripes].to_vec();
-    let mut packed = vec![0u32; targets.len()];
+    let len = targets.len();
+    let (segment, at_segment, packed) = out.take(len);
     let mask = (1u32 << shift) - 1;
     let mut at = 0usize;
     for &(query_offset, appends) in per_offset.iter() {
@@ -662,7 +774,9 @@ fn x_chunk_appends(
         at = end;
     }
     XChunkAppends {
-        packed,
+        segment,
+        at: at_segment,
+        len,
         stripe_starts,
     }
 }
@@ -714,7 +828,7 @@ fn x_stripe_build(
     backbone_size: usize,
     ranges: usize,
     chunks: &[XChunk],
-    appends: &[XChunkAppends],
+    appends: &XAppends,
 ) -> XStripeCounts {
     let XStripe {
         stripe,
@@ -727,11 +841,11 @@ fn x_stripe_build(
     let parts = || {
         chunks
             .iter()
-            .zip(appends)
-            .map(move |(chunk, chunk_appends)| {
+            .zip(appends.iter())
+            .map(move |(chunk, (chunk_appends, packed))| {
                 (
                     chunk,
-                    &chunk_appends.packed[chunk_appends.stripe_starts[stripe] as usize
+                    &packed[chunk_appends.stripe_starts[stripe] as usize
                         ..chunk_appends.stripe_starts[stripe + 1] as usize],
                 )
             })
@@ -818,7 +932,7 @@ fn x_stripe_fill(
     backbone_size: usize,
     ranges: usize,
     chunks: &[XChunk],
-    appends: &[XChunkAppends],
+    appends: &XAppends,
     need_cells: bool,
     scratch: &mut XFillScratch,
 ) -> XStripeCounts {
@@ -842,8 +956,8 @@ fn x_stripe_fill(
 
     // Count: each cell's appends in the serial order; the overflow cells they take.
     let mut cells = vec![0usize; ranges];
-    for (chunk, chunk_appends) in chunks.iter().zip(appends) {
-        let part = &chunk_appends.packed[part_of(chunk_appends)];
+    for (chunk, (chunk_appends, packed)) in chunks.iter().zip(appends.iter()) {
+        let part = &packed[part_of(chunk_appends)];
         if need_cells {
             let mut taken = 0usize;
             copy.extend(part.iter().map(|&packed| {
@@ -886,7 +1000,7 @@ fn x_stripe_fill(
     // Fill: the serial fill on the stripe's cells, the appends in order, each at its cell's cursor;
     // the copy holds the chunks' parts one after the other.
     let mut at = 0usize;
-    for (chunk, chunk_appends) in chunks.iter().zip(appends) {
+    for (chunk, chunk_appends) in chunks.iter().zip(&appends.chunks) {
         let end = at + part_of(chunk_appends).len();
         for &packed in &copy[at..end] {
             let cursor = &mut counts[(packed >> 16) as usize];
@@ -1048,7 +1162,7 @@ pub(crate) struct XFlatAppends {
     largest_pv_shift: usize,
     ranges: Vec<(std::ops::Range<usize>, bool)>,
     chunks: Vec<XChunk>,
-    appends: Vec<XChunkAppends>,
+    appends: XAppends,
     shift: usize,
     stripe_hits: Vec<usize>,
     total: usize,
@@ -1107,7 +1221,7 @@ fn x_flat_appends_on<S: CompressedScores>(
             .map(|&(left, right)| (i64::from(right) - word + 2 - i64::from(left)).max(0))
             .sum();
         default_size = [(offsets as usize)
-            .div_ceil(X_PARTS_PER_THREAD * threads)
+            .div_ceil(X_CHUNKS_PER_THREAD * threads)
             .max(X_MIN_CHUNK_OFFSETS)];
         &default_size[..]
     } else {
@@ -1129,7 +1243,8 @@ fn x_flat_appends_on<S: CompressedScores>(
     // The chunks' appends, sorted by stripe.
     let appended = AtomicUsize::new(0);
     let too_large = AtomicBool::new(false);
-    let chunk_appends = |(targets, per_offset): &mut (Vec<u32>, Vec<(i32, u32)>), chunk| {
+    let registry: Mutex<Vec<Vec<u32>>> = Mutex::new(Vec::new());
+    let chunk_appends = |scratch: &mut XAppendsScratch<'_>, chunk| {
         x_chunk_appends(
             &words,
             query,
@@ -1139,24 +1254,20 @@ fn x_flat_appends_on<S: CompressedScores>(
             max_appends,
             &appended,
             &too_large,
-            targets,
-            per_offset,
+            scratch,
         )
     };
-    let appends: Vec<XChunkAppends> = match cuts.passes {
+    let chunk_list: Vec<XChunkAppends> = match cuts.passes {
         XPasses::Rayon => chunks
             .par_iter()
-            .map_init(
-                || (Vec::<u32>::new(), Vec::<(i32, u32)>::new()),
-                chunk_appends,
-            )
+            .map_init(|| XAppendsScratch::new(&registry), chunk_appends)
             .collect(),
         // LOSAT_X_BPLKPFLAT: the extra tasks after the chunks (module header).
         XPasses::OneLatch(extra) => x_one_latch_pass(
             threads,
             chunks.len(),
             extra.map_or(0, |extra| extra.count()),
-            || (Vec::<u32>::new(), Vec::<(i32, u32)>::new()),
+            || XAppendsScratch::new(&registry),
             |scratch, index| chunk_appends(scratch, &chunks[index]),
             |index| {
                 if let Some(extra) = extra {
@@ -1175,8 +1286,15 @@ fn x_flat_appends_on<S: CompressedScores>(
     }
 
     // Each stripe's hits: its appends in all chunks.
+    // Every task has ended: its segments are in their slots.
+    let appends = XAppends {
+        segments: registry
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner),
+        chunks: chunk_list,
+    };
     let mut stripe_hits = vec![0usize; stripes];
-    for chunk_appends in &appends {
+    for chunk_appends in &appends.chunks {
         for (hits, bounds) in stripe_hits
             .iter_mut()
             .zip(chunk_appends.stripe_starts.windows(2))
@@ -1303,8 +1421,8 @@ fn x_flat_stripes_on<S: CompressedScores>(
             // below reads (module header); it changes no value NCBI computes. An append takes at most
             // one: when no table's appends pass the capacity, no table's test can refuse it.
             let mut range_appends = vec![0usize; ranges.len()];
-            for (chunk, chunk_appends) in chunks.iter().zip(&appends) {
-                range_appends[chunk.range] += chunk_appends.packed.len();
+            for (chunk, chunk_appends) in chunks.iter().zip(&appends.chunks) {
+                range_appends[chunk.range] += chunk_appends.len;
             }
             let need_cells =
                 ranges

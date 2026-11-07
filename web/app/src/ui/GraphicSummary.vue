@@ -153,8 +153,9 @@ function rowsInView(top = scrollTop.value): [number, number] {
 /**
  * The HSP under a point of the canvas, or -1. A mouse picks in the row under the point, the bar
  * nearest sideways within PICK_PX. A finger picks the bar nearest to the point within
- * TOUCH_PICK_PX, in that row or the rows above and below it that are in view; the last 8 px of
- * the header count as a tap on the first row in view (a row under the header is never picked).
+ * TOUCH_PICK_PX, in that row or the rows above and below it, if the middle of the row is in view;
+ * the last 8 px of the header count as a tap on the first row in view (a row hidden by the
+ * header is never picked by a finger).
  */
 function hit(x: number, y: number, touch = false): number {
   if (y < HEADER_PX) {
@@ -167,7 +168,7 @@ function hit(x: number, y: number, touch = false): number {
   let best = -1;
   let bestDistance = touch ? TOUCH_PICK_PX : PICK_PX;
   for (let row = touch ? r - 1 : r; row <= (touch ? r + 1 : r); row++) {
-    if (row < 0 || row >= l.rows.length || (row !== r && (rowY(row) < HEADER_PX || rowY(row) > canvasHeight.value))) continue;
+    if (row < 0 || row >= l.rows.length || ((touch || row !== r) && (rowY(row) < HEADER_PX || rowY(row) > canvasHeight.value))) continue;
     const dy = touch ? Math.max(0, Math.abs(y - rowY(row)) - BAR_PX / 2) : 0;
     for (let k = l.start[row]!; k < l.start[row + 1]!; k++) {
       const [x0, x1] = barX(k);

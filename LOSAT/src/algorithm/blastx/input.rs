@@ -509,7 +509,6 @@ pub(crate) fn parse_fasta_batches_with_warnings(
         false,
         None,
         None,
-        None,
         deliver,
         warn,
     )
@@ -550,7 +549,6 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     batch_size: usize,
     keep_defline: bool,
     parse_deflines: Option<BelievedRead<'_>>,
-    seq_id_role: Option<&str>,
     range: Option<&SequenceRange>,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
@@ -570,36 +568,6 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     let mut raw_residues = 0;
     for (line_index, raw) in lines.enumerate() {
         let raw = raw.as_ref();
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:130-162
-        // ```c++
-        //     virtual CRef<CSeq_entry> ReadOneSeq(ILineErrorListener * pMessageListener) {
-        //
-        //         const string line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
-        //         if ( !line.empty() && isalnum(line.data()[0]&0xff) ) {
-        //             try {
-        //                 CRef<CSeq_id> id(new CSeq_id(line, (CSeq_id::fParse_AnyRaw |
-        // 							CSeq_id::fParse_ValidLocal)));
-        // ...
-        //         // If all fails, fall back to parent's implementation
-        //         GetLineReader().UngetLine();
-        //         return CFastaReader::ReadOneSeq(pMessageListener);
-        //     }
-        // ```
-        // BLASTX reads its query and its subjects with the reader of the other programs
-        // (`CBlastFastaInputSource`), whose every record first tries its first line as a Seq-id
-        // when the data loaders are on. Only the input's first line can be one: a record ends
-        // before the next `>` line. LOSAT refuses such a line as the other programs' reader does
-        // (`fasta_reader::reader::read_one_seq`), before the `-parse_deflines` stop below, as
-        // NCBI tries the Seq-id before its `CFastaReader` reads.
-        if line_index == 0 {
-            if let Some(role) = seq_id_role {
-                if let Some(refusal) =
-                    crate::blastinput::fasta_reader::seq_id::reject_seq_id_line(raw, "BLASTX", role)
-                {
-                    return Err(refusal);
-                }
-            }
-        }
         let line = raw.strip_suffix(b"\r").unwrap_or(raw);
         // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:350-375
         // ```c++
@@ -1807,6 +1775,9 @@ pub(crate) struct FastaStream<R: Read> {
     /// Seq-id (`fasta_reader::seq_id::reject_seq_id_line`); `None` reads every first line as
     /// FASTA, as NCBI does with the data loaders off.
     pub(crate) seq_id_role: Option<&'static str>,
+    /// `CStreamLineReader::UngetLine`: the line that the next read gives again (the Seq-id step
+    /// of `parse_fasta_stream_keeping` read it and handed it back).
+    unget_line: Option<Vec<u8>>,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
 // ```c++
@@ -1876,6 +1847,7 @@ impl<R: Read> FastaStream<R> {
             id_scope: None,
             strand: crate::report::archive::bioseq::SeqLocStrand::Both,
             seq_id_role: None,
+            unget_line: None,
         }
     }
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
@@ -2131,6 +2103,9 @@ impl<R: Read> FastaStream<R> {
     // }
     // ```
     pub(crate) fn at_eof(&mut self) -> bool {
+        if self.unget_line.is_some() {
+            return false;
+        }
         if self.failed {
             return true;
         }
@@ -2503,6 +2478,9 @@ impl<R: Read> Iterator for FastaStream<R> {
     //     } else {
     // ```
     fn next(&mut self) -> Option<Self::Item> {
+        if let Some(line) = self.unget_line.take() {
+            return Some(line);
+        }
         if self.at_eof() {
             return None;
         }
@@ -2594,7 +2572,38 @@ pub(crate) fn parse_fasta_stream_keeping<R: Read>(
     // A file without records gives one empty batch; one whose records a range skipped gave it
     // already.
     let mut delivered = false;
-    let seq_id_role = stream.seq_id_role;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:130-162
+    // ```c++
+    //     virtual CRef<CSeq_entry> ReadOneSeq(ILineErrorListener * pMessageListener) {
+    //
+    //         const string line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
+    //         if ( !line.empty() && isalnum(line.data()[0]&0xff) ) {
+    //             try {
+    //                 CRef<CSeq_id> id(new CSeq_id(line, (CSeq_id::fParse_AnyRaw |
+    // 							CSeq_id::fParse_ValidLocal)));
+    // ...
+    //         // If all fails, fall back to parent's implementation
+    //         GetLineReader().UngetLine();
+    //         return CFastaReader::ReadOneSeq(pMessageListener);
+    //     }
+    // ```
+    // BLASTX reads its query and its subjects with the reader of the other programs
+    // (`CBlastFastaInputSource`), whose every record first tries its first line as a Seq-id when
+    // the data loaders are on (`seq_id_role`). Only the input's first line can be one: a record
+    // ends before the next `>` line. LOSAT refuses such a line as the other programs' reader does
+    // (`fasta_reader::reader::read_one_seq`), here, before `CFastaReader`'s read (and its
+    // `-parse_deflines` stop at a first line that is not a defline), which gets the line back
+    // (`UngetLine`).
+    if let Some(role) = stream.seq_id_role {
+        if let Some(line) = stream.next() {
+            if let Some(refusal) =
+                crate::blastinput::fasta_reader::seq_id::reject_seq_id_line(&line, "BLASTX", role)
+            {
+                return Err(refusal);
+            }
+            stream.unget_line = Some(line);
+        }
+    }
     let records = parse_fasta_lines(
         stream,
         protein,
@@ -2602,7 +2611,6 @@ pub(crate) fn parse_fasta_stream_keeping<R: Read>(
         batch_size,
         keep_defline,
         parse_deflines,
-        seq_id_role,
         range,
         &mut |records| {
             delivered = true;

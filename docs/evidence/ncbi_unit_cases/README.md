@@ -78,7 +78,7 @@ database tests are out of scope.
 | `partial` | a LOSAT test exercises the case but asserts less | a citation line, a `path::fn` test, or the evidence in `note` |
 | `e2e` | only fixtures, frozen hashes or oracle comparisons cover it | the fixture in `losat_test` or `note` |
 | `to-port` | LOSAT has ported the function, but no test checks this case | the LOSAT function in `note` |
-| `n-a` | LOSAT has no such feature (object manager, GenBank, `-db`, PSI/RPS/PHI, ...) or NCBI compiles the case out | the reason in `note` |
+| `n-a` | LOSAT has no such feature (object manager, sequences fetched by id from GenBank or a BLAST database, RPS/PHI, an option LOSAT refuses, ...) or NCBI compiles the case out | the reason in `note` (for a refused option, the `path:line` of the refusal) |
 | `superseded` | another LOSAT test or fixture checks more than the NCBI case | the reason in `note` |
 
 ## Adding a row (porting a case)
@@ -151,3 +151,18 @@ tests made on `main` b28e42e1, each module's mapping checked by a second reader 
 -> `n-a`; the 18 refuted claims take the reader's corrected status and evidence; `DISABLED` cases
 set to `n-a`). Where the cited test could not be found on the current `main`, the row is
 `partial` with the evidence (paths at b28e42e1) in `note`.
+
+## Re-grading of 2026-11-07
+
+The `n-a` reasons of 2026-10-10 were written before LOSAT read BLAST databases (`-db`) and before
+`-parse_deflines`, `-query_loc`/`-subject_loc`, blastn `-strand`, psiblast and LOSAT's own FASTA
+reader. On `dev` 869dfe0ee every `n-a` row (324) and the 77 other rows whose note claimed a LOSAT
+limit were checked again against the NCBI case and the LOSAT code, and a second reader checked
+every status change. 270 rows changed: 73 left `n-a` (17 `ported`, 38 `partial`, 14 `e2e`,
+3 `to-port`, 1 `superseded`), 10 `partial` rows became `ported`, 4 `e2e` and 2 `to-port` rows
+became `partial`, 1 `partial` row became `n-a` (Smith-Waterman mode, which every program
+refuses), and the other 180 changed rows keep their status with a note (for 33 also the
+`losat_test`) that states today's facts. Notes that cite LOSAT lines start with
+`evidence (869dfe0e):`. Of the 61 `n-a` rows whose reason was a BLAST database, 52 stay `n-a`:
+they need sequences fetched by id, the object manager, a refused option (`-filtering_db`, ...)
+or C++ API plumbing with no LOSAT counterpart; 48 of their notes were rewritten to say which.

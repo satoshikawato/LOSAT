@@ -950,8 +950,9 @@ mod tests {
         assert_eq!(stats.lambda, Some(267.0 * 1e-3));
     }
 
-    // NCBI's unit-test PSSMs: one of frequency ratios only (PS4b) and one without a query (NCBI's
-    // application stops with a C++ exception); both refused before the search.
+    // NCBI's unit-test PSSMs: one of frequency ratios only whose query has a gi and a swissprot
+    // Seq-id (refused for its ids) and one without a query (NCBI's application stops with a C++
+    // exception); both refused before the search.
     #[test]
     fn ncbis_unit_test_pssms_are_refused() {
         let read = |name: &str| {
@@ -960,12 +961,43 @@ mod tests {
         let error = psi_search_of(read("pssm/pssm_freq_ratios.asn.gz"))
             .unwrap_err()
             .to_string();
-        assert!(error.contains("a PSSM without scores"), "{error}");
+        assert!(
+            error.contains("whose Seq-id is not one local id"),
+            "{error}"
+        );
         let error = psi_search_of(read("pssm/pssm_zero_fratios.asn.gz"))
             .unwrap_err()
             .to_string();
         assert!(
             error.contains("not supported by LOSAT's PSIBLAST"),
+            "{error}"
+        );
+    }
+
+    // A PSSM of frequency ratios only (the tk PSSM without its scores) gets NCBI's engine's
+    // scores, which are the tk PSSM's own (NCBI 2.17.0 searches both to the same bytes, fixture
+    // rows db.ps.inpssm.cbs.ratios.6 and db.ps.inpssm.cbs.tk.6), and the engine's gapped values;
+    // its ungapped values stay absent. By row it is refused.
+    #[test]
+    fn a_pssm_of_frequency_ratios_only_gets_the_engines_scores() {
+        let read = |name: &str| {
+            crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(name)).unwrap()
+        };
+        let tk = psi_search_of(read("pssm/ps4_tk_paja.asn.gz")).unwrap();
+        let ratios = psi_search_of(read("pssm/ps4_tk_ratios.asn.gz")).unwrap();
+        assert_eq!(ratios.pssm, tk.pssm);
+        assert_eq!(ratios.freq_ratios, tk.freq_ratios);
+        assert_eq!(ratios.stats.lambda, tk.stats.lambda);
+        assert_eq!(ratios.stats.h, tk.stats.h);
+        let (kappa, file_kappa) = (ratios.stats.kappa.unwrap(), tk.stats.kappa.unwrap());
+        assert!((kappa - file_kappa).abs() < 1e-15, "{kappa} {file_kappa}");
+        assert_eq!(ratios.stats.lambda_ungapped, None);
+        assert_eq!(ratios.stats.kappa_ungapped, None);
+        let error = psi_search_of(read("pssm/ps4_rnd_ratios_byrow.asn.gz"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("a PSSM of frequency ratios only written by row"),
             "{error}"
         );
     }

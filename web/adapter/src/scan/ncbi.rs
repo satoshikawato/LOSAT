@@ -33,9 +33,10 @@
 //! a title), the length is the number of stored residues, and `residue_counts` counts the
 //! stored residues upper-cased (`U` is `T` for kind 1, as the reader stores it).
 //!
-//! The scan fails with the reader's error (`CheckDataLine`) and rejects explicitly, with
-//! `not supported in the browser`:
-//! - a first line that NCBI's data loaders would read as a Seq-id (the engine's test);
+//! The scan fails with the reader's error (`CheckDataLine`) and rejects explicitly a first
+//! line that NCBI's data loaders would read as a Seq-id (the engine's test; the text names
+//! LOSAT Web's Fetch, which takes a paste box of accessions only, one per line, and the `>`
+//! defline: WA2-OP-04), and, with `not supported in the browser`:
 //! - a `>?` gap line (maintainer decision 3: gap residues have no bytes to index);
 //! - a record longer than 2147483647 letters (the engine's limit);
 //! - a record whose residues neither follow the uniform layout nor the read-forward rules
@@ -1423,7 +1424,7 @@ impl Records {
             if seq_id_line(&line, self.protein) {
                 let line = String::from_utf8_lossy(&line);
                 self.fail(format!(
-                    "the first line ({:?}) is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported in the browser (start the input with a '>' defline)",
+                    "the first line ({:?}) is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database). To fetch accessions, put only the accessions in the box, one per line; otherwise start the input with a '>' defline.",
                     line.trim_end()
                 ));
                 return;

@@ -7,6 +7,7 @@
 // CSP (public/_headers connect-src); the tests also count every request that leaves the site.
 import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';
+import { BUILD_HAS_ENGINE } from './support/browser';
 import { E2E_ORIGIN } from './support/origin';
 import { openSearch, paste, program, settled, submit } from './support/search';
 
@@ -246,4 +247,25 @@ test('a group starts at the race order of the tab, and keeps the site its record
       'https://rest.uniprot.org/uniprotkb/P12345.fasta',
     ].sort(),
   );
+});
+
+test('a first line that NCBI BLAST+ would fetch as a Seq-id before other text names the Fetch of accessions (WA2-OP-04)', async ({
+  page,
+}) => {
+  // The FakeEngine's reader never takes a first line for a Seq-id (infra/fake/fake-fasta.ts).
+  test.skip(!BUILD_HAS_ENGINE, 'the reason is the adapter scan of the engine build');
+  const away = await stubSources(page);
+  await openSearch(page);
+  const reason = (line: string) =>
+    `This input cannot be read: the first line ("${line}") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database). To fetch accessions, put only the accessions in the box, one per line; otherwise start the input with a '>' defline.`;
+  for (const [role, text, line] of [
+    ['query', 'AB000001.1\n>x\nACGTACGT', 'AB000001.1'],
+    ['query', '12345678\nACGTACGT', '12345678'],
+    ['subject', ' NR_074540.1 \nACGTACGT', 'NR_074540.1'],
+  ] as const) {
+    await paste(page, role, text);
+    await expect(page.getByTestId(`${role}-source-0-error`)).toHaveText(reason(line));
+    await expect(page.getByTestId(`${role}-source-0-add-defline`)).toBeVisible();
+  }
+  expect(away).toEqual([]);
 });

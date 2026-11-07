@@ -823,7 +823,7 @@ fn check(input: &[u8], random: &mut Random, context: &str, coverage: &mut Covera
             }
             (Expected::SeqId, Err(error)) => assert!(
                 error.contains("may be a sequence identifier")
-                    && error.contains("not supported in the browser"),
+                    && error.contains("To fetch accessions, put only the accessions in the box"),
                 "{context}: {error}"
             ),
             (Expected::Gap(line), Err(error)) => assert!(

@@ -485,13 +485,67 @@ mod tests {
         assert!(gap.starts_with("line 3 is a gap line ('>?')"), "{gap}");
         assert!(gap.ends_with("not supported in the browser"), "{gap}");
         let seq_id = register("tblastx", ROLE_QUERY, b"AB123456\nACGT\n").unwrap_err();
-        assert!(seq_id.contains("not supported in the browser"), "{seq_id}");
+        assert!(seq_id.contains("To fetch accessions"), "{seq_id}");
         let reader =
             register("blastp", ROLE_QUERY, b">q\n1234567890123456789012345\n").unwrap_err();
         assert_eq!(
             reader,
             "BLAST query error: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment."
         );
+    }
+
+    // WA2-OP-04: a first line that NCBI BLAST+ would fetch as a Seq-id (an accession or a GI
+    // number) before other text says how LOSAT Web fetches accessions (the paste box's Fetch,
+    // which takes only accessions, one per line), as well as the defline.
+    #[test]
+    fn register_points_a_seq_id_first_line_to_the_fetch() {
+        let cases: [(&str, u32, &[u8], &str); 5] = [
+            (
+                "blastn",
+                ROLE_QUERY,
+                b"AB000001.1\n>x\nACGT\n",
+                "AB000001.1",
+            ),
+            ("blastn", ROLE_QUERY, b"12345678\nACGTACGT\n", "12345678"),
+            (
+                "blastn",
+                ROLE_SUBJECT,
+                b"  NR_074540.1 \nACGT\n",
+                "NR_074540.1",
+            ),
+            ("blastp", ROLE_QUERY, b"P12345\nMKLV\n", "P12345"),
+            (
+                "tblastn",
+                ROLE_SUBJECT,
+                b"AB000001.1\nMH011443.1\n",
+                "AB000001.1",
+            ),
+        ];
+        for (program, role, input, line) in cases {
+            assert_eq!(
+                register(program, role, input).unwrap_err(),
+                format!(
+                    "the first line ({line:?}) is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database). To fetch accessions, put only the accessions in the box, one per line; otherwise start the input with a '>' defline."
+                ),
+                "{program} {role} {}",
+                String::from_utf8_lossy(input)
+            );
+        }
+        // Accessions on one line, separated by white space or commas, are not a Seq-id: the
+        // reader's error, as the CLI and NCBI BLAST+ give it (the card offers to split them).
+        for input in [
+            &b"AB000001.1 MH011443.1\n"[..],
+            b"AB000001.1,MH011443.1\n",
+            b"AB000001.1, MH011443.1\n",
+            b"AB000001.1\tMH011443.1\n",
+        ] {
+            assert_eq!(
+                register("blastn", ROLE_QUERY, input).unwrap_err(),
+                "BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.",
+                "{}",
+                String::from_utf8_lossy(input)
+            );
+        }
     }
 
     // Another program's handle cannot bring a record to a run.

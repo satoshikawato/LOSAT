@@ -1942,14 +1942,15 @@ label.inline {
 /* #, Bit score, E value, Identity, Length, Mismatches, Gap opens, Query, Subject, [Frames],
    Orientation, outfmt 0. The columns are 5 px apart (W4b). Identity holds "100.000" and
    Orientation "Not in the record" (13.3ch in Inter's italic) whole; the ranges give them the room
-   (WA2-OP-01: they were cut to "100.0…" and "Not in the …"). */
+   (WA2-OP-01: they were cut to "100.0…" and "Not in the …"). A table with frames has no "Not in
+   the record", so its Orientation stays 9.5ch. */
 .hsp-grid {
   column-gap: 5px;
   grid-template-columns: 3.5ch 9ch 9.5ch 8ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 14ch 8.25ch;
 }
 
 .hsp-grid.framed {
-  grid-template-columns: 3.5ch 9ch 9.5ch 8ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 6ch 14ch 8.25ch;
+  grid-template-columns: 3.5ch 9ch 9.5ch 8ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 6ch 9.5ch 8.25ch;
 }
 
 /* The header's columns are the rows' columns: the same borders, and room for the rows'
@@ -2286,7 +2287,7 @@ pre.range-text {
   }
 
   .hsp-grid.framed {
-    grid-template-columns: 3.5ch 9ch 9.5ch 6ch 11ch 11ch 14ch 8ch 6ch 9.75ch 5.25ch 8.25ch;
+    grid-template-columns: 3.5ch 9ch 9.5ch 6ch 11ch 11ch 9.5ch 8ch 6ch 9.75ch 5.25ch 8.25ch;
   }
 
   .hsp-grid > [data-col='frames'],

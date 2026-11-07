@@ -381,11 +381,7 @@ impl TblastnArgs {
             match &result {
                 Err(error) => {
                     if let Some(lines) = super::archive::error_lines(error, false) {
-                        let _ = crate::report::archive::write_error_archive(
-                            handle,
-                            &lines,
-                            &mut stream,
-                        );
+                        let _ = write_error_archive(&io, handle, error, &lines, &mut stream);
                     }
                 }
                 Ok(()) => {
@@ -518,8 +514,26 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(mut report) = report_stream(args, io) {
-        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut report);
+        let _ = write_error_archive(io, handle, error, &lines, &mut report);
         let _ = std::io::Write::flush(&mut report);
+    }
+}
+
+/// The error archive of a run that stopped with `error` (`lines`), into `report`: on the command
+/// line after the error's text (`write_error_archive_after_post`); web ABI v1 (`RunIo::Memory`)
+/// reports the error itself, so there only the archive.
+fn write_error_archive(
+    io: &RunIo<'_>,
+    handle: &crate::report::archive::ArchiveHandle,
+    error: &anyhow::Error,
+    lines: &[crate::report::diag_log::Message],
+    report: &mut crate::cli::ReportStream,
+) -> Result<()> {
+    match io {
+        RunIo::Files => {
+            crate::report::archive::write_error_archive_after_post(handle, error, lines, report)
+        }
+        RunIo::Memory { .. } => crate::report::archive::write_error_archive(handle, lines, report),
     }
 }
 

@@ -18,8 +18,10 @@ pub mod fasta_reader;
 pub mod input_files;
 // NCBI corelib/ncbiapp.cpp, metareg.cpp: the application layer's environment and registry.
 pub mod ncbi_environment;
-// NCBI serial/objistrasn.cpp: psiblast's PSSM in ASN.1 text (`-out_pssm`, `-in_pssm`).
+// NCBI core/blast_options.c BLAST_ValidateOptions: the protein option checks of blastp, tblastn
+// and psiblast.
 pub mod protein_options_check;
+// NCBI serial/objistrasn.cpp: psiblast's PSSM in ASN.1 text (`-out_pssm`, `-in_pssm`).
 pub mod pssm_text;
 pub mod query_batch;
 // NCBI blastinput/blast_args.cpp:2894-2978: the hit list size and the numbers of descriptions

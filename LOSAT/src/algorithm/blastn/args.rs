@@ -232,7 +232,7 @@ pub struct BlastnArgs {
     // ```
     // NCBI applies them to any task (`coordination.rs` `determine_template`).
     #[arg(long, value_name = "TYPE", value_parser = blastn_template_type, requires = "template_length", help = "Discontiguous MegaBLAST template type: coding, optimal or coding_and_optimal")]
-    pub template_type: Option<crate::algorithm::blastn::disc_lookup::DiscWordType>,
+    pub template_type: Option<DiscWordType>,
     #[arg(long, value_name = "INT", value_parser = blastn_template_length, requires = "template_type", help = "Discontiguous MegaBLAST template length: 16, 18 or 21")]
     pub template_length: Option<u8>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170,288-300

@@ -119,6 +119,7 @@ use super::kappa::{
     reset_blastp_kappa_range_counters, x_newton_lanes_prefetch_matches, BlastRedoAlignParams,
     BlastpKappaSubjectRangeCache, BlastpTraceHspTarget,
 };
+use super::protein_query_split::protein_query_split_sizes;
 use super::x_prelim_compact::{
     x_expand_hit_list, x_expanded_lists, x_finish_compact_lists, XPrelimHsp,
 };
@@ -1752,8 +1753,7 @@ fn ncbi_compressed_lookup_tables(
     if query_chunk {
         return Ok(vec![0..locations.len()]);
     }
-    let sizes =
-        crate::algorithm::blastp::protein_query_split::protein_query_split_sizes("BLASTP", 10000)?;
+    let sizes = protein_query_split_sizes("BLASTP", 10000)?;
     // The first lookup segment of query `q_idx` or of a query after it.
     let first_segment = |q_idx: usize| {
         let context = contexts.partition_point(|context| (context.q_idx as usize) < q_idx);
@@ -6024,7 +6024,7 @@ fn psiblast_stop_at_invalid_query(
     };
     let (input_start, searched_start) = batches.starts[batch];
     let query_length = searched_queries[searched_start].seq().len();
-    let error = match crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(args.app.name(), 10000) {
+    let error = match protein_query_split_sizes(args.app.name(), 10000) {
         // A PSSM query (`-in_pssm`, never split: `check_in_pssm_options`) whose letters give no
         // Karlin-Altschul parameters: NCBI's psiblast crashes (2.17.0, exit 139) where
         // `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc`
@@ -7004,9 +7004,7 @@ fn x_block_search_refuses_nothing(
     if crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP").is_err() {
         return false;
     }
-    let Ok(sizes) =
-        crate::algorithm::blastp::protein_query_split::protein_query_split_sizes("BLASTP", 10000)
-    else {
+    let Ok(sizes) = protein_query_split_sizes("BLASTP", 10000) else {
         return false;
     };
     let searched_batches = || {
@@ -7522,10 +7520,7 @@ fn search_split_query_batches(
     use crate::algorithm::blastp::protein_query_split::{
         protein_chunk_part_in_record, protein_chunk_would_be_split, split_protein_batch,
     };
-    let sizes = crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(
-        args.app.name(),
-        10000,
-    )?;
+    let sizes = protein_query_split_sizes(args.app.name(), 10000)?;
     let batch_size = args.query_batch_size()?;
     // The batches count whole records (`seq_range::QueryInput::batches`); a batch is
     // split by the lengths of its searched queries (their intervals with `-query_loc`).

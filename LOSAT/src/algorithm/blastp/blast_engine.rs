@@ -3078,7 +3078,7 @@ fn query_record_masks(
                 .iter()
                 .map(|&(start, end)| (start as i32, end as i32 - 1))
                 .collect();
-            crate::algorithm::blastx::query_setup::combine_masks(ranges)
+            crate::algorithm::common::masks::combine_masks(ranges)
                 .into_iter()
                 .filter(|&(from, to)| from <= to && !(from == 0 && to == frame.aa_len as i32 - 1))
                 .collect()

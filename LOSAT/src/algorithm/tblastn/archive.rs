@@ -186,7 +186,7 @@ fn query_record_masks(
                     .map(|(start, end)| (start as i32, end as i32 - 1))
                     .collect();
             let offset = ranges.queries.offset(q_idx) as i32;
-            crate::algorithm::blastx::query_setup::combine_masks(intervals)
+            crate::algorithm::common::masks::combine_masks(intervals)
                 .into_iter()
                 .filter(|&(from, to)| from <= to && !(from == 0 && to == letters.len() as i32 - 1))
                 .map(|(from, to)| (from + offset, to + offset))

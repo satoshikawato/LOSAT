@@ -796,10 +796,10 @@ pub(super) fn query_dna_masks(
                 .iter()
                 .map(|&(start, end)| (start as i32, end as i32 - 1))
                 .collect();
-            let combined = crate::algorithm::blastx::query_setup::combine_masks(ranges);
+            let combined = crate::algorithm::common::masks::combine_masks(ranges);
             (
                 *frame,
-                crate::algorithm::blastx::query_setup::protein_to_dna_masks(
+                crate::algorithm::common::masks::protein_to_dna_masks(
                     &combined, dna_length, *frame,
                 ),
             )

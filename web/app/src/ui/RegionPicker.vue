@@ -6,7 +6,7 @@ import { computed, nextTick, ref } from 'vue';
 import type { SearchDraft } from '../application/draft';
 import type { DatasetRecord } from '../domain/dataset';
 import type { InputRole } from '../domain/programs';
-import { regionFromPositions, regionProblem, regionRange, swappedRegion, type RegionText } from '../domain/region';
+import { regionFromPositions, regionProblem, regionProblemFields, regionRange, swappedRegion, type RegionText } from '../domain/region';
 import { formatCount } from './format';
 import { refusedMark } from './refusal';
 
@@ -28,17 +28,8 @@ const problem = computed(() => (props.region === undefined ? undefined : regionP
 /** A start after the stop: the swap, offered beside the problem (Owner, 2026-11-04). */
 const swapped = computed(() => (props.region === undefined ? undefined : swappedRegion(props.region, props.record.length)));
 const range = computed(() => (props.region === undefined ? undefined : regionRange(props.region, props.record.length)));
-/**
- * The fields that the problem is about, marked as refused and pointing to it (WA2-AX-05): those
- * empty, not a whole number or outside the record, or else both (a start after the stop).
- */
-const refused = computed(() => {
-  if (problem.value === undefined || props.region === undefined) return { start: false, stop: false };
-  const wrong = (text: string) => !/^\d+$/.test(text.trim()) || Number(text) < 1 || Number(text) > props.record.length;
-  const start = wrong(props.region.start);
-  const stop = wrong(props.region.stop);
-  return start || stop ? { start, stop } : { start: true, stop: true };
-});
+/** The fields that the problem is about, marked as refused and pointing to it (WA2-AX-05). */
+const refused = computed(() => (props.region === undefined ? { start: false, stop: false } : regionProblemFields(props.region, props.record.length)));
 const mark = (on: boolean) => refusedMark(on, `${testid.value}-problem`);
 const selection = computed(() => {
   const value = range.value;

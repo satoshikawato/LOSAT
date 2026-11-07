@@ -253,6 +253,27 @@ describe('refusedFields', () => {
     expect(fields('-num_threads is set in the form: Threads', '-num_threads=2')).toEqual({ extra: true, flags: [] });
     expect(fields("error: invalid value 'x' for '-qcov_hsp_perc <QCOV_HSP_PERC>'", '-qcov_hsp_perc x')).toEqual({ extra: true, flags: [] });
   });
+  it('does not read the options of clap\'s Usage line, which the argv lists, as named by the sentence', () => {
+    const message = [
+      "error: the argument '-max_target_seqs <MAX_TARGET_SEQS>' cannot be used with '-num_alignments <int_value>'",
+      '',
+      'Usage: losat blastn -query <PATH> -subject <PATH> -evalue <EVALUE> -max_target_seqs <MAX_TARGET_SEQS>',
+      '',
+      "For more information, try '--help'.",
+    ].join('\n');
+    expect(fields(message)).toEqual({ extra: false, flags: ['-max_target_seqs', '-num_alignments'] });
+    // --help of the closing line is not the option typed in Additional options.
+    expect(fields(message, '--help')).toEqual({ extra: false, flags: ['-max_target_seqs', '-num_alignments'] });
+  });
+  it('names "Additional options" for a word typed there that is not an option name', () => {
+    expect(fields('--help is not available in the browser', '--help')).toEqual({ extra: true, flags: [] });
+    expect(fields('--help is not available in the browser', '-strand plus')).toEqual({ extra: false, flags: [] });
+    expect(fields("error: unknown option or argument 'evalue'; use -help for CLI v2 syntax", 'evalue 1e-5')).toEqual({
+      extra: true,
+      flags: ['-help'],
+    });
+    expect(fields("error: unknown option or argument 'evalue'", '-strand plus')).toEqual({ extra: false, flags: [] });
+  });
   it('names "Additional options" for the messages about its text', () => {
     expect(fields("Additional options: a quote (') is not closed", "-strand 'plus")).toEqual({ extra: true, flags: [] });
     expect(fields("Additional options: '' is not accepted", "''")).toEqual({ extra: true, flags: [] });

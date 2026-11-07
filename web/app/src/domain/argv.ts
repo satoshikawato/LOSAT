@@ -131,15 +131,23 @@ export function splitOptions(text: string): readonly string[] {
  * An option typed in "Additional options" is that field's, not the form's field of the same flag.
  */
 export function refusedFields(message: string, extra: string): { readonly extra: boolean; readonly flags: ReadonlySet<string> } {
-  const named = new Set(message.match(/(?<![\w-])-[A-Za-z][A-Za-z0-9_]*/g) ?? []);
+  // The sentence ends at its first empty line: clap's `Usage:` line lists the options of the argv,
+  // and its `For more information, try '--help'.` line is not about the argv.
+  const sentence = message.split(/\n[ \t]*\n/, 1)[0]!;
+  // No look-behind (`(?<!…)`): a bundle with one does not load in an older Safari.
+  const named = new Set([...sentence.matchAll(/(?:^|[^\w-])(-[A-Za-z][A-Za-z0-9_]*)/g)].map((found) => found[1]!));
   let typed: readonly string[];
   try {
     typed = splitOptions(extra).map((word) => word.split('=', 1)[0]!);
   } catch {
     typed = [];
   }
+  // A word typed there that is not an option name (`--help`, `evalue` without its `-`) is named as
+  // the start of the sentence ("--help is not available in the browser") or in quotes
+  // ("unknown option or argument 'evalue'").
+  const quoted = (word: string) => word !== '' && (sentence.includes(`'${word}'`) || (sentence.startsWith(word) && /^\s|^$/.test(sentence.slice(word.length))));
   return {
-    extra: message.startsWith('Additional options') || typed.some((flag) => named.has(flag)),
+    extra: message.startsWith('Additional options') || typed.some((word) => named.has(word) || quoted(word)),
     flags: new Set([...named].filter((flag) => !typed.includes(flag))),
   };
 }

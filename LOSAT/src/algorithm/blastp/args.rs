@@ -748,6 +748,9 @@ pub struct ResolvedBlastpArgs {
     /// (`algorithm::psiblast::in_pssm`); the search then runs the PSSM's stages
     /// (`algorithm::pssm_search`).
     pub psi_search: Option<std::sync::Arc<crate::algorithm::pssm_search::PsiSearch>>,
+    /// psiblast `-num_iterations` other than 1 for FASTA queries: the rounds that the round
+    /// driver runs (`algorithm::psiblast::rounds`), with the PSSM files it writes.
+    pub psi_rounds: Option<std::sync::Arc<crate::algorithm::psiblast::rounds::PsiRoundPlan>>,
     /// `traceback_hitlist_size`, computed once (psiblast's reads `ADAPTIVE_CBS`).
     traceback_hitlist: usize,
     /// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search whose custom tabular
@@ -1111,6 +1114,24 @@ impl BlastpArgs {
             .psiblast_pssm
             .as_ref()
             .and_then(crate::algorithm::psiblast::pssm::PsiblastPssmOptions::request);
+        let psi_rounds = self
+            .psiblast_pssm
+            .as_ref()
+            .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::of)
+            .map(std::sync::Arc::new);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:186-214 (quoted at
+        // `blast_engine::pssm_hooks`: the query's SEG mask, then `PsiBlastSetupScoreBlock` and
+        // the lookup table of the PSSM)
+        // A later round's PSSM search takes no query mask in its lookup table (DESIGN_ps4 §1.6),
+        // which LOSAT's PSSM lookup table does not model, as for `-in_pssm`.
+        if let Some(plan) = &psi_rounds {
+            if options.seg.params().is_some() || soft_masking {
+                bail!(
+                    "-seg and -soft_masking true with -num_iterations {} are not supported by LOSAT's PSIBLAST",
+                    plan.num_iterations
+                );
+            }
+        }
         let mut resolved = ResolvedBlastpArgs {
             query: self.query.clone(),
             subject: self.subject.clone().unwrap_or_default(),
@@ -1195,6 +1216,7 @@ impl BlastpArgs {
             first_query_ordinal: self.first_query_ordinal,
             psi_pssm,
             psi_search,
+            psi_rounds,
             app: self.app,
             inclusion_ethresh: self
                 .inclusion_ethresh

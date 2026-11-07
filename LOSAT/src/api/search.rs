@@ -172,7 +172,20 @@ fn parse(
             )));
         }
     }
-    parse_words(program, argv, query, subject_flag, subject)
+    let command = parse_words(program, argv, query, subject_flag, subject)?;
+    // No NCBI counterpart: NCBI has no library API. psiblast's rounds (`-num_iterations` other
+    // than 1) run on the command line (`algorithm::psiblast::rounds`); the library's results
+    // (`QueryHits`, the hit records and the observer's events) have no round, so the library
+    // runs one round only (line PS, DECISIONS 15).
+    if let Commands::Psiblast(args) = &command {
+        if args.num_iterations != 1 {
+            return Err(Error::Argv(format!(
+                "-num_iterations {} is not accepted by the library API: its results have one round (the command line runs psiblast's rounds)",
+                args.num_iterations
+            )));
+        }
+    }
+    Ok(command)
 }
 
 /// Parses the argv with the command line's parser, as `losat <program> -query <query>

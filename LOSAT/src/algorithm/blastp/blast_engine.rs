@@ -83,6 +83,9 @@ mod traceback;
 // psiblast `-in_pssm` (series PS, item PS4a): the stages of a PSSM search, reached through the
 // `psi_search` hooks of `run_resolved_in_pool`.
 mod pssm_hooks;
+// psiblast's rounds of FASTA queries (series PS, item PS5a): the round driver, reached from
+// `search`, and the round's outcome hook of `run_resolved_in_pool`.
+mod psi_round;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{
@@ -2414,13 +2417,14 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 gives different reports for the same search)"
         );
     }
-    // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`), and the PSSM's of psiblast
-    // `-in_pssm` (`pssm_search::traceback0`); psiblast's rounds without a PSSM keep mode 2.
-    // psiblast `-in_pssm` runs modes 2 and 3 as 1 (`PsiBlastSetupScoreBlock`, the options), and
-    // mode 1 as the position-based redo (`pssm_search::redo1`).
+    // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`), psiblast's first round of a
+    // FASTA query too (with psiblast's hit list size, `traceback_hitlist_size`), and the PSSM's of
+    // psiblast `-in_pssm` and of its later rounds (`pssm_search::traceback0`). psiblast's PSSM
+    // searches run modes 2 and 3 as 1 (`PsiBlastSetupScoreBlock`, the options), and mode 1 as the
+    // position-based redo (`pssm_search::redo1`); a FASTA query's first round of mode 1 or 3 is
+    // blastp's, which LOSAT does not run.
     if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust
-        && !((args.app == BlastpApp::Blastp || args.psi_search.is_some())
-            && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats)
+        && args.comp_based_stats.mode != BlastpCompositionMode::NoCompositionBasedStats
         && !(args.psi_search.is_some()
             && args.comp_based_stats.mode == BlastpCompositionMode::CompositionBasedStats)
     {
@@ -2577,6 +2581,7 @@ fn write_blastp_outfmt7_header<W: Write>(
     fields: &[crate::report::tabular::TabularField],
     num_hits: usize,
     batch_skipped: bool,
+    iteration: Option<u32>,
 ) -> std::io::Result<()> {
     let version_str = context.version.as_deref().unwrap_or("0.1.0");
     writeln!(
@@ -2591,9 +2596,9 @@ fn write_blastp_outfmt7_header<W: Write>(
     //         m_Ostream << "# Iteration: " << iteration << "\n";
     // ```
     // psiblast's tabular reports carry their round (`x_PrintTabularReport(results, itr_num)`,
-    // blast_format.cpp:1458); LOSAT's psiblast runs its first round only.
-    if context.program == "psiblast" {
-        writeln!(writer, "# Iteration: 1")?;
+    // blast_format.cpp:1458): 1, or the round of the round driver (`psi_round`).
+    if let Some(iteration) = iteration {
+        writeln!(writer, "# Iteration: {iteration}")?;
     }
     // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1305-1308
     // ```c
@@ -2846,6 +2851,7 @@ fn write_blastp_tabular_hit_lists(
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
     epilog: bool,
     queries_before: usize,
+    iteration: Option<u32>,
 ) -> Result<()> {
     let config = OutputConfig::ncbi_compat();
     // Index of the next HSP in the final hit list (collect_hits_from_hit_lists order).
@@ -2869,6 +2875,7 @@ fn write_blastp_tabular_hit_lists(
                     |found| found[q_idx],
                 ),
                 query_batch_skipped[q_idx],
+                iteration,
             )?;
         }
         let Some(hit_list) = hit_list_opt else {
@@ -3249,13 +3256,16 @@ fn psiblast_pssms(
             args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1
         );
         let ungapped = &contexts[query].karlin_params;
+        let ungapped = KarlinBlk {
+            lambda: ungapped.lambda,
+            k: ungapped.k,
+            h: ungapped.h,
+        };
         let ancillary = PssmAncillary {
-            ungapped: KarlinBlk {
-                lambda: ungapped.lambda,
-                k: ungapped.k,
-                h: ungapped.h,
-            },
+            ungapped,
             gapped,
+            psi_ungapped: ungapped,
+            psi_gapped: gapped,
         };
         let made = query_pssm(
             request,
@@ -5491,7 +5501,13 @@ fn search_cli(
     }
     // So does the refusal of a title that psiblast's ASN.1 PSSM cannot write, and of a PSSM file
     // that LOSAT cannot write as NCBI does (one of the report streams, a named pipe).
-    if let Some(request) = resolved.psi_pssm.as_ref() {
+    // psiblast's rounds write the files of their PSSMs too (`PsiRoundPlan::file_request`).
+    if let Some(request) = resolved.psi_pssm.as_ref().or_else(|| {
+        resolved
+            .psi_rounds
+            .as_deref()
+            .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
+    }) {
         if request.asn_path.is_some() {
             crate::algorithm::psiblast::pssm::check_pssm_titles(&records)?;
         }
@@ -6303,6 +6319,22 @@ fn search(
     // psiblast `-in_pssm`: NCBI's check of the PSSM stops the run at its query
     // (`psiblast_stop_at_invalid_pssm`).
     let batches = psiblast_stop_at_invalid_pssm(&args, batches);
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523 (quoted below)
+    // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,
+    // one search per round per query (`psi_round`).
+    if let Some(plan) = args.psi_rounds.clone() {
+        return psi_round::search_rounds(
+            &args,
+            &plan,
+            query_records,
+            &searched_queries,
+            batches,
+            subjects,
+            subject_source,
+            subject_label,
+            outputs,
+        );
+    }
     // NCBI reference: c++/src/app/blast/blastp_app.cpp:294-295
     // ```c++
     //         BLAST_PROF_START( APP.POST );
@@ -6347,6 +6379,7 @@ fn search(
             x_prolog: true,
             x_queries_before: 0,
             x_xml2_carry: None,
+            psi_round: None,
         };
         run_resolved_in_pool(
             args,
@@ -6675,6 +6708,7 @@ fn search(
                                 x_xml2_carry: x_kinds
                                     .contains(&XBlockReport::Xml2)
                                     .then_some(&x_xml2_carry),
+                                psi_round: None,
                             },
                             x_block,
                         )
@@ -7431,6 +7465,9 @@ struct BlastpReports<'a> {
     /// blocks hand on (the count of reports, the start of the document, a `-subject` run's held
     /// report; `None` outside the block search).
     x_xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
+    /// psiblast's round of a FASTA query (`psi_round`): the round's number and previous
+    /// inclusion set for its reports, and where its outcome goes; `None` outside the rounds.
+    psi_round: Option<&'a crate::algorithm::psiblast::rounds::PsiRoundIo>,
 }
 
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
@@ -7603,6 +7640,7 @@ fn search_split_query_batches(
                     x_prolog,
                     x_queries_before: 0,
                     x_xml2_carry: None,
+                    psi_round: None,
                 },
                 x_lookup_ahead::XAheadBlock::none(),
             )?;
@@ -11624,6 +11662,7 @@ fn run_resolved_in_pool(
             database::XShownResidues::Listed
         } else if outputs.hits.is_none()
             && args.psi_pssm.is_none()
+            && reports.psi_round.is_none()
             && requested_formats.iter().all(|outfmt| {
                 matches!(
                     outfmt,
@@ -11802,6 +11841,27 @@ fn run_resolved_in_pool(
             )?),
             None => None,
         };
+    // psiblast's rounds: the round's outcome (its inclusion set and the next round's PSSM, from
+    // the same Seq-aligns), and the subjects of the previous round's set for its two-part table
+    // (`psi_round::round_outcome`).
+    let psi_found_before: Option<Vec<bool>> = match reports.psi_round {
+        Some(io) => psi_round::round_outcome(
+            &args,
+            io,
+            &hit_lists,
+            ranges,
+            shown_subjects,
+            &contexts,
+            &gapped_params,
+            listed_subjects
+                .as_ref()
+                .map(|listed| listed.ordinals.as_slice()),
+            listed_titles
+                .as_ref()
+                .map_or(&[][..], |titles| titles.parsed.as_slice()),
+        ),
+        None => None,
+    };
     let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
         hit_lists
             .iter_mut()
@@ -12074,7 +12134,9 @@ fn run_resolved_in_pool(
         // subject by its Seq-align id, as those formats do (review 1 of line DBID tabfields, H1).
         titles.check_parsed_reports(
             &hit_lists,
-            format_plans.iter().any(|outfmt| outfmt.reads_subjects()) || args.psi_pssm.is_some(),
+            format_plans.iter().any(|outfmt| outfmt.reads_subjects())
+                || args.psi_pssm.is_some()
+                || reports.psi_round.is_some(),
             format_plans.iter().any(|outfmt| match outfmt {
                 BlastpReport::Text(OutputFormat::Pairwise)
                 | BlastpReport::Xml
@@ -12914,11 +12976,34 @@ fn run_resolved_in_pool(
                         ranges.subject_placements,
                     )
                 });
+                let shown_rows = x_subject_rows
+                    .as_deref()
+                    .or(masked_hits.as_deref())
+                    .unwrap_or(pairwise_hits);
+                // psiblast's rounds: the round's report (`psiblast_round`), without the epilog.
+                if let Some(io) = reports.psi_round {
+                    crate::report::pairwise::psiblast_round::write_psiblast_round_report(
+                        shown_rows,
+                        &mut *writer,
+                        &pairwise_config,
+                        &pairwise_queries,
+                        &query_titles,
+                        &subject_titles,
+                        listed_parsed,
+                        &pairwise_report,
+                        pairwise_database.as_ref(),
+                        probe.as_mut(),
+                        warnings.as_mut(),
+                        reports.x_prolog,
+                        crate::report::pairwise::psiblast_round::ReportRound {
+                            number: io.state.number(),
+                            found_before: psi_found_before.as_deref(),
+                        },
+                    )?;
+                    return Ok(());
+                }
                 write_blastp_pairwise_report(
-                    x_subject_rows
-                        .as_deref()
-                        .or(masked_hits.as_deref())
-                        .unwrap_or(pairwise_hits),
+                    shown_rows,
                     &mut writer,
                     &pairwise_config,
                     &pairwise_queries,
@@ -13001,8 +13086,9 @@ fn run_resolved_in_pool(
                     // ```c++
                     //         x_PrintTabularReport(results, itr_num);
                     // ```
-                    // LOSAT's psiblast runs its first round only.
-                    iteration: (args.app == BlastpApp::Psiblast).then_some(1),
+                    // psiblast's round (`psi_round`), 1 outside the rounds.
+                    iteration: (args.app == BlastpApp::Psiblast)
+                        .then(|| reports.psi_round.map_or(1, |io| io.state.number())),
                     matrix: args.scoring.matrix,
                     query_ids: &query_ids,
                     query_records,
@@ -13072,6 +13158,9 @@ fn run_resolved_in_pool(
                     warnings.as_mut(),
                     reports.epilog,
                     reports.x_queries_before,
+                    // psiblast's round (`psi_round`), 1 outside the rounds.
+                    (args.app == BlastpApp::Psiblast)
+                        .then(|| reports.psi_round.map_or(1, |io| io.state.number())),
                 )?;
                 // NCBI reference: ncbi-blast/c++/src/corelib/ncbidiag.cpp:4086
                 // ```c

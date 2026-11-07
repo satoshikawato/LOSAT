@@ -242,3 +242,43 @@ fn in_pssm_dash_reads_the_standard_input() {
         b"BLAST query/options error: Unsupported format for PSSM\nPlease refer to the BLAST+ user manual.\n"
     );
 }
+
+// Line PS, PS5a (DECISIONS 15; NCBI 2.17.0 step-1 cases f.bad.asn, f.bad.ascii): with more rounds
+// the PSSM files are written between the rounds, the first at the start of round 2, after round 1's
+// report. An `-out_pssm` file that cannot be written ends the run there (NCBI: its serial-stream
+// write error, status 0; LOSAT: its refusal), without round 2 and the epilog; an `-out_ascii_pssm`
+// file that cannot be opened is ignored, as NCBI's `ofstream`.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_unwritable_pssm_file_stops_the_rounds_after_the_round_before() {
+    let (dir, home) = scratch("rounds");
+    let run = |iterations: &str, args: &[&str]| {
+        let mut command = losat_psiblast(&home);
+        command
+            .args(["-db", "tests/db_search/paja"])
+            .args(["-query", "tests/fasta/psiblast/tk.faa"])
+            .args([
+                "-num_threads",
+                "1",
+                "-num_iterations",
+                iterations,
+                "-outfmt",
+                "6",
+            ])
+            .args(args);
+        command.output().expect("run LOSAT CLI")
+    };
+    let rounds = |args: &[&str]| run("3", args);
+    let one_round = run("1", &[]);
+    assert_eq!(one_round.status.code(), Some(0));
+    let stopped = rounds(&["-out_pssm", "/dev/full"]);
+    assert_eq!(stopped.status.code(), Some(1));
+    assert_eq!(stopped.stdout, one_round.stdout);
+    assert!(String::from_utf8_lossy(&stopped.stderr)
+        .contains("a -out_pssm file that cannot be written (/dev/full: "));
+    let missing = dir.join("nodir").join("f.txt");
+    let ignored = rounds(&["-out_ascii_pssm", path(&missing)]);
+    assert_eq!(ignored.status.code(), Some(0));
+    assert!(ignored.stdout.ends_with(b"\nSearch has CONVERGED!\n"));
+    assert!(names(&dir).is_empty());
+}

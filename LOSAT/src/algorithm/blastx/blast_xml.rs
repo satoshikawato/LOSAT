@@ -598,22 +598,32 @@ fn query_text(
 /// a written byte. Returns whether some query would be refused if NCBI had not searched its
 /// batch (a title that only its message cannot carry); the run then holds the document.
 ///
-/// The reader is the search's own (same records and titles, cut to `range` as the search cuts
-/// them: a record the range skips is never reported and is not checked). A record it refuses for
-/// every format (a title that is not UTF-8) ends the scan: the run reads the file again and fails
-/// there as it always did.
+/// The reader is the search's own, reading as the search reads (`settings`: same records and
+/// titles, cut to `range` as the search cuts them: a record the range skips is never reported
+/// and is not checked) in the search's batches of `batch_size` letters. A reader error ends the
+/// scan (under `-parse_deflines`, a first line that is not a defline): the run reads the file
+/// again and fails there as it always did, after the reports of the batches before it, so the
+/// titles of those batches are checked and the records of the batch the error interrupts are
+/// never written and need no check. So does a record it refuses for every format (a title that
+/// is not UTF-8). A batch size of 0 reads no query (NCBI's first batch is empty and the search
+/// stops at it): nothing is checked.
 pub(super) fn prescan_queries(
     file: std::fs::File,
+    settings: &super::input::QueryStreamSettings,
     lowercase: bool,
+    batch_size: usize,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
 ) -> Result<bool> {
-    let mut stream = super::input::FastaStream::from_file(file);
+    if batch_size == 0 {
+        return Ok(false);
+    }
+    let mut stream = settings.stream_before_search(file);
     let mut may_be_refused = false;
     let scanned = super::input::parse_fasta_stream_keeping(
         &mut stream,
         false,
         lowercase,
-        super::query_setup::BATCH_SIZE,
+        batch_size,
         false,
         range,
         &mut |batch| {

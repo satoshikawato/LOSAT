@@ -374,6 +374,15 @@ export class SearchDraft {
   }
 
   /**
+   * Puts ">" before the first line of a pasted text that the engine reads as a Seq-id, which NCBI BLAST+
+   * would fetch, so that the line is a defline (WA2-OP-04). The user asks for it; the first line is
+   * the only change, as the reason says ("start the input with a '>' defline").
+   */
+  markFirstLineAsDefline(role: InputRole): void {
+    this.setPaste(role, `>${this.role(role).paste.trimStart()}`);
+  }
+
+  /**
    * Puts each accession of a pasted text of accessions on its own line (WA2-OP-04), where Fetch
    * takes them; the user asks for it.
    */

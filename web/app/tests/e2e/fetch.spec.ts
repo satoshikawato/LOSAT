@@ -300,7 +300,9 @@ test('a first line that is an accession and NCBI BLAST+ would fetch as a Seq-id 
     await paste(page, role, text);
     await expect(page.getByTestId(`${role}-source-0-error`)).toHaveText(reason(line));
     await expect(page.getByTestId(`${role}-source-0-fetch-hint`)).toHaveText(fetchSentence);
-    await expect(page.getByTestId(`${role}-source-0-add-defline`)).toBeVisible();
+    // The press puts '>' before the first line (the next test); "Add the line" would make the line data.
+    await expect(page.getByTestId(`${role}-source-0-put-defline-mark`)).toHaveText("Put '>' before the first line");
+    await expect(page.getByTestId(`${role}-source-0-add-defline`)).toHaveCount(0);
     await expect(page.getByTestId(`${role}-source-0-split-accessions`)).toHaveCount(0);
   }
   // A GI number, a PDB id and a tagged id are Seq-ids to the engine, but not what Fetch takes: no sentence.
@@ -315,6 +317,7 @@ test('a first line that is an accession and NCBI BLAST+ would fetch as a Seq-id 
     await paste(page, role, text);
     await expect(page.getByTestId(`${role}-source-0-error`)).toHaveText(reason(line));
     await expect(page.getByTestId(`${role}-source-0-fetch-hint`)).toHaveCount(0);
+    await expect(page.getByTestId(`${role}-source-0-put-defline-mark`)).toBeVisible();
   }
   await program(page, 'blastn');
   // Accessions only, more than one on a line: the reason, the sentence and the press that splits them.
@@ -323,4 +326,31 @@ test('a first line that is an accession and NCBI BLAST+ would fetch as a Seq-id 
   await expect(page.getByTestId('subject-source-0-fetch-hint')).toHaveText(fetchSentence);
   await expect(page.getByTestId('subject-source-0-split-accessions')).toBeVisible();
   expect(away).toEqual([]);
+});
+
+test("a first line that NCBI BLAST+ would fetch as a Seq-id gets '>' before it by one press, not a defline line (WA2-OP-04)", async ({
+  page,
+}) => {
+  test.skip(!BUILD_HAS_ENGINE, 'the reason is the adapter scan of the engine build');
+  await openSearch(page);
+  // "Add the line >pasted_query" would make the first line the first data line, which NCBI's reader cannot read
+  // (a GI number, an accession) or reads as residues (AAA12345 and MKLV): the press adds '>' to the line only.
+  for (const [program_, role, text, written, length] of [
+    ['blastn', 'query', '12345678\nACGTACGT', '>12345678\nACGTACGT', '8 nt'],
+    ['blastn', 'query', 'AB000001.1\nACGTACGT', '>AB000001.1\nACGTACGT', '8 nt'],
+    ['blastp', 'query', 'AAA12345\nMKLV', '>AAA12345\nMKLV', '4 aa'],
+    ['blastp', 'subject', '  4HHB\nMKLV', '>4HHB\nMKLV', '4 aa'],
+  ] as const) {
+    await program(page, program_);
+    await paste(page, role, text);
+    await expect(page.getByTestId(`${role}-source-0-error`)).toContainText('may be a sequence identifier');
+    await expect(page.getByTestId(`${role}-source-0-add-defline`)).toHaveCount(0);
+    await page.getByTestId(`${role}-source-0-put-defline-mark`).click();
+    await settled(page, role);
+    await expect(page.getByTestId(`${role}-input`)).toHaveValue(written);
+    await expect(page.getByTestId(`${role}-source-0-check`)).toHaveAttribute('data-check', 'ok');
+    await expect(page.getByTestId(`${role}-source-0-summary`)).toContainText(`1 record · ${length}`);
+    await expect(page.getByTestId(`${role}-source-0-put-defline-mark`)).toHaveCount(0);
+    await expect(page.getByTestId(`${role}-source-0-add-defline`)).toHaveCount(0);
+  }
 });

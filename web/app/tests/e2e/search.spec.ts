@@ -653,12 +653,15 @@ test('empty inputs, every record excluded, a sequence without a defline, and the
     "This input cannot be read: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser",
   );
   if (BUILD_HAS_ENGINE) {
-    // A first line that NCBI's data loaders would fetch as a Seq-id fails; a defline can go first.
+    // A first line that NCBI's data loaders would fetch as a Seq-id fails; '>' can go before it (a defline line
+    // would make it the first data line).
     await paste(page, 'query', 'AB123456\nACGTACGTACGTACGT');
     await expect(page.getByTestId('query-source-0-error')).toContainText('may be a sequence identifier');
-    await page.getByTestId('query-source-0-add-defline').click();
+    await expect(page.getByTestId('query-source-0-add-defline')).toHaveCount(0);
+    await page.getByTestId('query-source-0-put-defline-mark').click();
     await settled(page, 'query');
-    await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nAB123456\nACGTACGTACGTACGT');
+    await expect(page.getByTestId('query-input')).toHaveValue('>AB123456\nACGTACGTACGTACGT');
+    await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', 'ok');
   }
   // NCBI's reader reads a sequence without a defline as a record without a title (DW-38).
   await paste(page, 'query', 'ACGTACGTACGTACGT');

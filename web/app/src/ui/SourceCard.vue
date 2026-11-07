@@ -6,7 +6,7 @@
 import { computed, watch } from 'vue';
 import type { DraftSource, DraftState, SearchDraft } from '../application/draft';
 import { includedOf } from '../application/draft';
-import { accessionsOnALine, pointsToFetch } from '../domain/accession';
+import { accessionsOnALine, isSeqIdReason, pointsToFetch } from '../domain/accession';
 import { duplicateIds } from '../domain/dataset';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
 import { looksLikeOtherKind } from '../domain/sequence-kind';
@@ -43,21 +43,26 @@ const splitsAccessions = computed(
   () =>
     props.source.origin === 'paste' && props.source.status === 'failed' && accessionsOnALine(props.state[props.role].paste) !== undefined,
 );
+const hasMark = computed(() => props.source.lead !== undefined && 'mark' in props.source.lead);
 /** The first line of a pasted text is an accession that the engine reads as a Seq-id: Fetch takes accessions only (WA2-OP-04). */
 const fetchHint = computed(
   () => props.source.origin === 'paste' && props.source.status === 'failed' && pointsToFetch(props.source.error, props.state[props.role].paste),
 );
 /**
- * A pasted text that does not start with a defline and cannot be read (such as a first line that NCBI would fetch as a
- * Seq-id); a byte order mark and accessions on a line have their own hints.
+ * A pasted text whose first line the engine reads as a Seq-id (which NCBI BLAST+ would fetch) and cannot read (WA2-OP-04): the
+ * line is not data, and "Add the line >pasted_..." would make it the first data line, so the card puts ">" before it instead.
  */
+const seqIdFirstLine = computed(
+  () => props.source.origin === 'paste' && props.source.status === 'failed' && !hasMark.value && isSeqIdReason(props.source.error),
+);
+/** A pasted text that does not start with a defline and cannot be read; a byte order mark, a Seq-id and accessions on a line have their own hints. */
 const needsDefline = computed(() => {
   const text = props.state[props.role].paste.trimStart();
-  const mark = props.source.lead !== undefined && 'mark' in props.source.lead;
   return (
     props.source.origin === 'paste' &&
     props.source.status === 'failed' &&
-    !mark &&
+    !hasMark.value &&
+    !seqIdFirstLine.value &&
     !splitsAccessions.value &&
     text !== '' &&
     !text.startsWith('>')
@@ -159,6 +164,11 @@ watch(verdict, (now) => {
       <p v-if="splitsAccessions" class="hint">
         <button type="button" class="link" :data-testid="`${testid}-split-accessions`" @click="$emit('splitAccessions')">
           Put each accession on its own line
+        </button>
+      </p>
+      <p v-if="seqIdFirstLine" class="hint">
+        <button type="button" class="link" :data-testid="`${testid}-put-defline-mark`" @click="draft.markFirstLineAsDefline(role)">
+          Put '&gt;' before the first line
         </button>
       </p>
       <p v-if="needsDefline" class="hint">

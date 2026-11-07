@@ -496,7 +496,7 @@ mod tests {
             names(Program::Blastn),
             ["blastn", "blastn-short", "dc-megablast", "megablast"]
         );
-        assert_eq!(names(Program::Blastp), ["blastp", "blastp-fast"]);
+        assert_eq!(names(Program::Blastp), ["blastp", "blastp-fast", "blastp-short"]);
         assert_eq!(names(Program::Tblastn), ["tblastn", "tblastn-fast"]);
         assert_eq!(names(Program::Blastx), ["blastx", "blastx-fast"]);
         // TBLASTX has no -task.

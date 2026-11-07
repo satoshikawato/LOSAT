@@ -4073,7 +4073,8 @@ mod tests {
                 x_bp_build_lookup_as(&queries, threshold, false, true, matrix, 2);
             x_assert_narrow_same_as_wide(&name, &narrow_of(built), &want);
             same_contexts(&contexts);
-            // On a block spare: new vectors, then the ones given back, of a table of words of 3.
+            // On a block spare: the vectors given back from a table of words of 3, then from the
+            // table just built.
             let spare = XAaSpares::default();
             spare.give(x_bp_build_lookup(&queries, 11, false).0);
             for _ in 0..2 {
@@ -4087,6 +4088,23 @@ mod tests {
                 spare.x_build_on_block_spare16(&queries, threshold, false, matrix, 2);
             let narrow = narrow_of(built);
             x_assert_narrow_same_as_wide(&name, &narrow, &want);
+            same_contexts(&contexts);
+            // On the 16-bit vectors given back from a table of words of 3.
+            let three = narrow_of(
+                x_bp_build_lookup_as(
+                    &queries,
+                    11,
+                    false,
+                    true,
+                    ScoringMatrix::Blosum62,
+                    LOOKUP_WORD_LENGTH,
+                )
+                .0,
+            );
+            spare.give16(three);
+            let (built, contexts) =
+                spare.x_build_on_block_spare16(&queries, threshold, false, matrix, 2);
+            x_assert_narrow_same_as_wide(&name, &narrow_of(built), &want);
             same_contexts(&contexts);
             // Ahead, on the room made for it.
             let spares = XAaSpares::default();

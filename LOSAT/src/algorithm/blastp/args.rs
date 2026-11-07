@@ -366,7 +366,7 @@ pub struct BlastpArgs {
     // An omitted value keeps the default of the task (10).
     #[arg(long, value_parser = blastp_real, help = "Expectation value (E) threshold for saving hits [default: 10; 20000 for blastp-short]")]
     pub evalue: Option<f64>,
-    #[arg(long, value_parser = blastp_threshold, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast]")]
+    #[arg(long, value_parser = blastp_threshold, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast; 16 (PAM30's) for blastp-short]")]
     pub threshold: Option<f64>,
     #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3; 2 for blastp-short; 5 for blastp-fast]")]
     pub word_size: Option<i32>,
@@ -429,14 +429,14 @@ pub struct BlastpArgs {
     pub culling_limit: Option<i32>,
     #[arg(long)]
     pub ungapped: bool,
-    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion; 15 (PAM30's) for blastp-short]")]
     pub window_size: Option<i32>,
     #[arg(
         long,
         help = "Scoring matrix name [default: BLOSUM62; PAM30 for blastp-short]"
     )]
     pub matrix: Option<String>,
-    #[arg(long = "gapopen", value_parser = ncbi_integer, help = "Cost to open a gap [default: 11, or the matrix's best value]")]
+    #[arg(long = "gapopen", value_parser = ncbi_integer, help = "Cost to open a gap [default: 11, or the matrix's best value; 9 for blastp-short]")]
     pub gap_open: Option<i32>,
     #[arg(long = "gapextend", value_parser = ncbi_integer, help = "Cost to extend a gap [default: 1, or the matrix's best value]")]
     pub gap_extend: Option<i32>,

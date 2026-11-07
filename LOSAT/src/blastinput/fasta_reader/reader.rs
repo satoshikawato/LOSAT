@@ -650,13 +650,7 @@ impl<R: Read> FastaReader<R> {
         message: &[u8],
         warn: Warn<'_>,
     ) -> Result<(), ReadError> {
-        if IGNORED_PROBLEMS.contains(&problem) {
-            return Ok(());
-        }
-        let mut line = Vec::with_capacity(message.len() + 1);
-        line.extend_from_slice(message);
-        line.push(b'\n');
-        warn(&line).map_err(ReadError::Write)
+        post_line_warning(problem, message, warn)
     }
 
     /// `FASTA_ERROR`: `PostWarning` with `eDiag_Error` and no listener throws
@@ -1506,417 +1500,17 @@ impl<R: Read> FastaReader<R> {
         }
     }
 
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1094-1349
-    /// ```c++
-    /// bool CFastaReader::ParseGapLine(
-    ///     const TStr& line, ILineErrorListener * pMessageListener)
-    /// {
-    ///     _ASSERT( NStr::StartsWith(line, ">?") );
-    ///
-    ///     // just in case there's a gap before this one,
-    ///     // even though somewhat unusual
-    ///     CloseGap();
-    ///
-    ///     // sRemainingLine will hold the part of the line left to parse
-    ///     TStr sRemainingLine = line.substr(2);
-    ///     NStr::TruncateSpacesInPlace(sRemainingLine);
-    ///
-    ///     const TSeqPos uPos = GetCurrentPos(eRawPos);
-    ///
-    ///     // check if size is unknown
-    ///     SGap::EKnownSize eIsKnown = SGap::eKnownSize_Yes;
-    ///     if( NStr::StartsWith(sRemainingLine, "unk") ) {
-    ///         eIsKnown = SGap::eKnownSize_No;
-    ///         sRemainingLine = sRemainingLine.substr(3);
-    ///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
-    ///     }
-    ///
-    ///     // extract the gap size
-    ///     TSeqPos uGapSize = 0;
-    ///     {
-    ///         // find how many digits in number
-    ///         TStr::size_type uNumDigits = 0;
-    ///         while( uNumDigits != sRemainingLine.size() &&
-    ///                ::isdigit(sRemainingLine[uNumDigits]) )
-    ///         {
-    ///             ++uNumDigits;
-    ///         }
-    ///         TStr sDigits = sRemainingLine.substr(
-    ///             0, uNumDigits);
-    ///         uGapSize = NStr::StringToUInt(sDigits, NStr::fConvErr_NoThrow);
-    ///         if( uGapSize <= 0 ) {
-    ///             FASTA_WARNING(LineNumber(),
-    ///                 "CFastaReader: Bad gap size at line " << LineNumber(),
-    ///                 ILineError::eProblem_NonPositiveLength,
-    ///                 "gapline" );
-    ///             // try to continue the best we can
-    ///             uGapSize = 1;
-    ///         }
-    ///         sRemainingLine = sRemainingLine.substr(sDigits.length());
-    ///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
-    ///     }
-    ///
-    ///     // extract the raw key-value pairs for the gap
-    ///     typedef multimap<TStr, TStr> TModKeyValueMultiMap;
-    ///     TModKeyValueMultiMap modKeyValueMultiMap;
-    ///     while( ! sRemainingLine.empty() ) {
-    ///         TStr::size_type uOpenBracketPos = TStr::npos;
-    ///         if ( NStr::StartsWith(sRemainingLine, "[") ) {
-    ///             uOpenBracketPos = 0;
-    ///         }
-    ///         TStr::size_type uPosOfEqualSign = TStr::npos;
-    ///         if( uOpenBracketPos != TStr::npos ) {
-    ///             // uses "1" to skip the '['
-    ///             uPosOfEqualSign = sRemainingLine.find('=', uOpenBracketPos + 1);
-    ///         }
-    ///         TStr::size_type uCloseBracketPos = TStr::npos;
-    ///         if( uPosOfEqualSign != TStr::npos ) {
-    ///             uCloseBracketPos = sRemainingLine.find(']', uPosOfEqualSign + 1);
-    ///         }
-    ///         if( uCloseBracketPos == TStr::npos )
-    ///         {
-    ///             FASTA_WARNING(LineNumber(),
-    ///                 "CFastaReader: Problem parsing gap mods at line "
-    ///                 << LineNumber(),
-    ///                 ILineError::eProblem_ParsingModifiers,
-    ///                 "gapline" );
-    ///             break; // give up on mod-parsing
-    ///         }
-    ///
-    ///         // extract the key and the value
-    ///         TStr sKey = NStr::TruncateSpaces_Unsafe(
-    ///             sRemainingLine.substr(uOpenBracketPos + 1,
-    ///                 (uPosOfEqualSign - uOpenBracketPos - 1) ) );
-    ///         TStr sValue = NStr::TruncateSpaces_Unsafe(
-    ///             sRemainingLine.substr(uPosOfEqualSign + 1,
-    ///                 uCloseBracketPos - uPosOfEqualSign - 1) );
-    ///
-    ///         // remember what we saw
-    ///         modKeyValueMultiMap.insert(
-    ///             TModKeyValueMultiMap::value_type(sKey, sValue) );
-    ///
-    ///         // prepare for the next loop around
-    ///         sRemainingLine = sRemainingLine.substr(uCloseBracketPos + 1);
-    ///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
-    ///     }
-    /// ```
-    /// The rest of the function (the modifiers, quoted at `gap_mod_warnings`) only warns:
-    /// without `fParseGaps` `AssembleSeq` turns each gap into a run of `N` or `X`.
+    /// `ParseGapLine` (`gap_line_size`): the gap of the line, as a run of `N` or `X` that
+    /// `AssembleSeq` puts at this position.
     fn parse_gap_line(&mut self, line: &[u8], warn: Warn<'_>) -> Result<(), ReadError> {
-        let mut remaining = trim_input_space(&line[2..]);
         let position = self.seq_data.len() as u32;
-        if let Some(rest) = remaining.strip_prefix(b"unk") {
-            remaining = trim_input_start(rest);
-        }
-        let digits = remaining
-            .iter()
-            .position(|byte| !byte.is_ascii_digit())
-            .unwrap_or(remaining.len());
-        // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp (NStr::StringToUInt with
-        // fConvErr_NoThrow): an empty string or a value over UINT_MAX converts to 0.
-        let mut gap_size = std::str::from_utf8(&remaining[..digits])
-            .ok()
-            .and_then(|text| text.parse::<u32>().ok())
-            .unwrap_or(0);
-        if gap_size == 0 {
-            let line = self.line_number();
-            self.post_warning(
-                Problem::NonPositiveLength,
-                format!("CFastaReader: Bad gap size at line {line}").as_bytes(),
-                warn,
-            )?;
-            gap_size = 1;
-        }
-        remaining = trim_input_start(&remaining[digits..]);
-        let mut mods: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-        while !remaining.is_empty() {
-            let close = if remaining.starts_with(b"[") {
-                remaining[1..]
-                    .iter()
-                    .position(|&byte| byte == b'=')
-                    .map(|equal| equal + 1)
-                    .and_then(|equal| {
-                        remaining[equal + 1..]
-                            .iter()
-                            .position(|&byte| byte == b']')
-                            .map(|close| (equal, equal + 1 + close))
-                    })
-            } else {
-                None
-            };
-            let Some((equal, close)) = close else {
-                let line = self.line_number();
-                self.post_warning(
-                    Problem::ParsingModifiers,
-                    format!("CFastaReader: Problem parsing gap mods at line {line}").as_bytes(),
-                    warn,
-                )?;
-                break;
-            };
-            let key = trim_input_space(&remaining[1..equal]).to_vec();
-            let value = trim_input_space(&remaining[equal + 1..close]).to_vec();
-            mods.push((key, value));
-            remaining = trim_input_start(&remaining[close + 1..]);
-        }
-        // `multimap` iterates in key order (stable for equal keys).
-        mods.sort_by(|left, right| left.0.cmp(&right.0));
-        self.gap_mod_warnings(&mods, warn)?;
+        let gap_size = gap_line_size(line, self.line_number(), warn)?;
         self.gaps.push(Gap {
             position,
             length: gap_size,
         });
         self.total_gap_length = self.total_gap_length.saturating_add(gap_size);
         self.check_length()?;
-        Ok(())
-    }
-
-    /// The warnings of `ParseGapLine` about the gap modifiers. Without `fParseGaps` the
-    /// gap type and linkage evidence are not kept (`AssembleSeq` warns that the
-    /// modifiers are ignored, an ignored problem).
-    ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1190-1340
-    /// ```c++
-    ///     // remember if there is a gap-type conflict
-    ///     bool bConflictingGapTypes = false;
-    ///     // extract the mods, if any
-    ///     SGap::TNullableGapType pGapType;
-    ///     CSeq_gap::ELinkEvid eLinkEvid = CSeq_gap::eLinkEvid_UnspecifiedOnly;
-    ///     set<CLinkage_evidence::EType> setOfLinkageEvidence;
-    ///
-    ///     if (m_gap_type && modKeyValueMultiMap.empty()) // fall back to default values coming from caller
-    ///     {
-    ///         ...
-    ///     }
-    ///
-    ///     ITERATE(TModKeyValueMultiMap, modKeyValue_it, modKeyValueMultiMap) {
-    ///         const TStr & sKey   = modKeyValue_it->first;
-    ///         const TStr & sValue = modKeyValue_it->second;
-    ///
-    ///         string canonicalKey = CanonicalizeString(sKey);
-    ///         if(  canonicalKey == "gap-type") {
-    ///
-    ///             const CSeq_gap::SGapTypeInfo *pGapTypeInfo = CSeq_gap::NameToGapTypeInfo(sValue);
-    ///             if( pGapTypeInfo ) {
-    ///                  CSeq_gap::EType eGapType = pGapTypeInfo->m_eType;
-    ///
-    ///                 if( ! pGapType ) {
-    ///                     pGapType.Reset( new SGap::TGapTypeObj(eGapType) );
-    ///                     eLinkEvid = pGapTypeInfo->m_eLinkEvid;
-    ///                 } else if( eGapType != *pGapType ) {
-    ///                     // check if pGapType already set and different
-    ///                     bConflictingGapTypes = true;
-    ///                 }
-    ///             } else {
-    ///                 FASTA_WARNING_EX(
-    ///                     LineNumber(),
-    ///                     "Unknown gap-type: " << sValue,
-    ///                     ILineError::eProblem_ParsingModifiers,
-    ///                     "gapline",
-    ///                     "gap-type",
-    ///                     sValue );
-    ///             }
-    ///             continue;
-    ///
-    ///         }
-    ///
-    ///         if( canonicalKey == "linkage-evidence") {
-    ///             // could be semi-colon separated
-    ///             vector<CTempString> arrLinkageEvidences;
-    ///             NStr::Split(sValue, ";", arrLinkageEvidences,
-    ///                         NStr::fSplit_MergeDelimiters | NStr::fSplit_Truncate);
-    ///
-    ///             ITERATE(vector<CTempString>, link_evid_it, arrLinkageEvidences) {
-    ///                 CTempString sLinkEvid = *link_evid_it;
-    ///                 CEnumeratedTypeValues::TNameToValue::const_iterator find_iter =
-    ///                     linkage_evidence_to_value_map.find(CanonicalizeString(sLinkEvid));
-    ///                 if( find_iter != linkage_evidence_to_value_map.end() ) {
-    ///                     setOfLinkageEvidence.insert(
-    ///                         static_cast<CLinkage_evidence::EType>(
-    ///                         find_iter->second));
-    ///                 } else {
-    ///                     FASTA_WARNING_EX(
-    ///                         LineNumber(),
-    ///                         "Unknown linkage-evidence: " << sValue,
-    ///                         ILineError::eProblem_ParsingModifiers,
-    ///                         "gapline",
-    ///                         "linkage-evidence",
-    ///                         sValue );
-    ///                 }
-    ///             }
-    ///             continue;
-    ///         }
-    ///
-    ///         // unknown mod.
-    ///         FASTA_WARNING_EX(
-    ///             LineNumber(),
-    ///             "Unknown gap modifier name(s): " << sKey,
-    ///             ILineError::eProblem_UnrecognizedQualifierName,
-    ///             "gapline", sKey, kEmptyStr );
-    ///     }
-    ///
-    ///     if( bConflictingGapTypes ) {
-    ///         FASTA_WARNING_EX(LineNumber(),
-    ///             "There were conflicting gap-types around line " << LineNumber(),
-    ///             ILineError::eProblem_ContradictoryModifiers,
-    ///             "gapline", "gap-type", kEmptyStr );
-    ///     }
-    ///
-    ///     // check validation beyond basic parsing problems
-    ///
-    ///     // if no gap-type set (but linkage-evidence explicitly set, use "unknown")
-    ///     if( ! pGapType && ! setOfLinkageEvidence.empty() ) {
-    ///         pGapType.Reset( new SGap::TGapTypeObj(CSeq_gap::eType_unknown) );
-    ///     }
-    ///
-    ///     // check if linkage-evidence(s) compatible with gap-type
-    ///     switch( eLinkEvid ) {
-    ///     case CSeq_gap::eLinkEvid_UnspecifiedOnly:
-    ///         if( setOfLinkageEvidence.empty() ) {
-    ///             if( pGapType ) {
-    ///                 // silently add the required "unspecified"
-    ///                 setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
-    ///             }
-    ///         } else if( setOfLinkageEvidence.size() > 1 ||
-    ///             *setOfLinkageEvidence.begin() != CLinkage_evidence::eType_unspecified )
-    ///         {
-    ///             // only "unspecified" is allowed
-    ///             FASTA_WARNING(
-    ///                 LineNumber(),
-    ///                 "FASTA-Reader: Unknown gap-type can have linkage-evidence "
-    ///                     "of type 'unspecified' only.",
-    ///                 ILineError::eProblem_ExtraModifierFound,
-    ///                 "gapline");
-    ///             setOfLinkageEvidence.clear();
-    ///             setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
-    ///         }
-    ///         break;
-    ///     case CSeq_gap::eLinkEvid_Forbidden:
-    ///         if( ! setOfLinkageEvidence.empty() ) {
-    ///             FASTA_WARNING(LineNumber(),
-    ///                 "FASTA-Reader: This gap-type cannot have any "
-    ///                 "linkage-evidence specified, so any will be ignored.",
-    ///                 ILineError::eProblem_ModifierFoundButNoneExpected,
-    ///                 "gapline" );
-    ///             setOfLinkageEvidence.clear();
-    ///         }
-    ///         break;
-    ///     case CSeq_gap::eLinkEvid_Required:
-    ///         if( setOfLinkageEvidence.empty() ) {
-    ///             setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
-    ///         }
-    ///         if( setOfLinkageEvidence.size() == 1 &&
-    ///             *setOfLinkageEvidence.begin() == CLinkage_evidence::eType_unspecified)
-    ///         {
-    ///             FASTA_WARNING(LineNumber(),
-    ///                 "CFastaReader: This gap-type should have at least one "
-    ///                 "specified linkage-evidence.",
-    ///                 ILineError::eProblem_ExpectedModifierMissing,
-    ///                 "gapline" );
-    ///         }
-    ///         break;
-    ///         // intentionally omitted "default:" so a compiler warning will
-    ///         // hopefully let us know if we've forgotten a case
-    ///     }
-    /// ```
-    /// The caller's default gap type (`m_gap_type`) is not set by the BLAST input source.
-    /// `NStr::Split` with `fSplit_MergeDelimiters | fSplit_Truncate` drops empty pieces.
-    fn gap_mod_warnings(
-        &self,
-        mods: &[(Vec<u8>, Vec<u8>)],
-        warn: Warn<'_>,
-    ) -> Result<(), ReadError> {
-        let line = self.line_number();
-        let mut conflicting = false;
-        let mut gap_type: Option<GapType> = None;
-        let mut link_evid = LinkEvid::UnspecifiedOnly;
-        let mut evidence: std::collections::BTreeSet<u8> = std::collections::BTreeSet::new();
-        for (key, value) in mods {
-            let canonical_key = canonicalize_string(key);
-            if canonical_key == b"gap-type" {
-                match gap_type_info(value) {
-                    Some((value_type, value_evid)) => match gap_type {
-                        None => {
-                            gap_type = Some(value_type);
-                            link_evid = value_evid;
-                        }
-                        Some(current) if current != value_type => conflicting = true,
-                        Some(_) => {}
-                    },
-                    None => {
-                        let mut message = b"Unknown gap-type: ".to_vec();
-                        message.extend_from_slice(value);
-                        self.post_warning(Problem::ParsingModifiers, &message, warn)?;
-                    }
-                }
-                continue;
-            }
-            if canonical_key == b"linkage-evidence" {
-                for piece in value
-                    .split(|&byte| byte == b';')
-                    .filter(|piece| !piece.is_empty())
-                {
-                    match linkage_evidence_value(&canonicalize_string(piece)) {
-                        Some(evidence_value) => {
-                            evidence.insert(evidence_value);
-                        }
-                        None => {
-                            let mut message = b"Unknown linkage-evidence: ".to_vec();
-                            message.extend_from_slice(value);
-                            self.post_warning(Problem::ParsingModifiers, &message, warn)?;
-                        }
-                    }
-                }
-                continue;
-            }
-            let mut message = b"Unknown gap modifier name(s): ".to_vec();
-            message.extend_from_slice(key);
-            self.post_warning(Problem::UnrecognizedQualifierName, &message, warn)?;
-        }
-        if conflicting {
-            self.post_warning(
-                Problem::ContradictoryModifiers,
-                format!("There were conflicting gap-types around line {line}").as_bytes(),
-                warn,
-            )?;
-        }
-        if gap_type.is_none() && !evidence.is_empty() {
-            gap_type = Some(GapType::Unknown);
-        }
-        match link_evid {
-            LinkEvid::UnspecifiedOnly => {
-                if !evidence.is_empty()
-                    && (evidence.len() > 1 || !evidence.contains(&LINKAGE_UNSPECIFIED))
-                {
-                    self.post_warning(
-                        Problem::ExtraModifierFound,
-                        b"FASTA-Reader: Unknown gap-type can have linkage-evidence of type 'unspecified' only.",
-                        warn,
-                    )?;
-                }
-            }
-            LinkEvid::Forbidden => {
-                if !evidence.is_empty() {
-                    self.post_warning(
-                        Problem::ModifierFoundButNoneExpected,
-                        b"FASTA-Reader: This gap-type cannot have any linkage-evidence specified, so any will be ignored.",
-                        warn,
-                    )?;
-                }
-            }
-            LinkEvid::Required => {
-                if evidence.is_empty() {
-                    evidence.insert(LINKAGE_UNSPECIFIED);
-                }
-                if evidence.len() == 1 && evidence.contains(&LINKAGE_UNSPECIFIED) {
-                    self.post_warning(
-                        Problem::ExpectedModifierMissing,
-                        b"CFastaReader: This gap-type should have at least one specified linkage-evidence.",
-                        warn,
-                    )?;
-                }
-            }
-        }
-        let _ = gap_type;
         Ok(())
     }
 
@@ -2256,6 +1850,430 @@ impl<R: Read> FastaReader<R> {
         }
         Ok(())
     }
+}
+
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1094-1349
+/// ```c++
+/// bool CFastaReader::ParseGapLine(
+///     const TStr& line, ILineErrorListener * pMessageListener)
+/// {
+///     _ASSERT( NStr::StartsWith(line, ">?") );
+///
+///     // just in case there's a gap before this one,
+///     // even though somewhat unusual
+///     CloseGap();
+///
+///     // sRemainingLine will hold the part of the line left to parse
+///     TStr sRemainingLine = line.substr(2);
+///     NStr::TruncateSpacesInPlace(sRemainingLine);
+///
+///     const TSeqPos uPos = GetCurrentPos(eRawPos);
+///
+///     // check if size is unknown
+///     SGap::EKnownSize eIsKnown = SGap::eKnownSize_Yes;
+///     if( NStr::StartsWith(sRemainingLine, "unk") ) {
+///         eIsKnown = SGap::eKnownSize_No;
+///         sRemainingLine = sRemainingLine.substr(3);
+///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
+///     }
+///
+///     // extract the gap size
+///     TSeqPos uGapSize = 0;
+///     {
+///         // find how many digits in number
+///         TStr::size_type uNumDigits = 0;
+///         while( uNumDigits != sRemainingLine.size() &&
+///                ::isdigit(sRemainingLine[uNumDigits]) )
+///         {
+///             ++uNumDigits;
+///         }
+///         TStr sDigits = sRemainingLine.substr(
+///             0, uNumDigits);
+///         uGapSize = NStr::StringToUInt(sDigits, NStr::fConvErr_NoThrow);
+///         if( uGapSize <= 0 ) {
+///             FASTA_WARNING(LineNumber(),
+///                 "CFastaReader: Bad gap size at line " << LineNumber(),
+///                 ILineError::eProblem_NonPositiveLength,
+///                 "gapline" );
+///             // try to continue the best we can
+///             uGapSize = 1;
+///         }
+///         sRemainingLine = sRemainingLine.substr(sDigits.length());
+///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
+///     }
+///
+///     // extract the raw key-value pairs for the gap
+///     typedef multimap<TStr, TStr> TModKeyValueMultiMap;
+///     TModKeyValueMultiMap modKeyValueMultiMap;
+///     while( ! sRemainingLine.empty() ) {
+///         TStr::size_type uOpenBracketPos = TStr::npos;
+///         if ( NStr::StartsWith(sRemainingLine, "[") ) {
+///             uOpenBracketPos = 0;
+///         }
+///         TStr::size_type uPosOfEqualSign = TStr::npos;
+///         if( uOpenBracketPos != TStr::npos ) {
+///             // uses "1" to skip the '['
+///             uPosOfEqualSign = sRemainingLine.find('=', uOpenBracketPos + 1);
+///         }
+///         TStr::size_type uCloseBracketPos = TStr::npos;
+///         if( uPosOfEqualSign != TStr::npos ) {
+///             uCloseBracketPos = sRemainingLine.find(']', uPosOfEqualSign + 1);
+///         }
+///         if( uCloseBracketPos == TStr::npos )
+///         {
+///             FASTA_WARNING(LineNumber(),
+///                 "CFastaReader: Problem parsing gap mods at line "
+///                 << LineNumber(),
+///                 ILineError::eProblem_ParsingModifiers,
+///                 "gapline" );
+///             break; // give up on mod-parsing
+///         }
+///
+///         // extract the key and the value
+///         TStr sKey = NStr::TruncateSpaces_Unsafe(
+///             sRemainingLine.substr(uOpenBracketPos + 1,
+///                 (uPosOfEqualSign - uOpenBracketPos - 1) ) );
+///         TStr sValue = NStr::TruncateSpaces_Unsafe(
+///             sRemainingLine.substr(uPosOfEqualSign + 1,
+///                 uCloseBracketPos - uPosOfEqualSign - 1) );
+///
+///         // remember what we saw
+///         modKeyValueMultiMap.insert(
+///             TModKeyValueMultiMap::value_type(sKey, sValue) );
+///
+///         // prepare for the next loop around
+///         sRemainingLine = sRemainingLine.substr(uCloseBracketPos + 1);
+///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
+///     }
+/// ```
+/// The rest of the function (the modifiers, quoted at `gap_mod_warnings`) only warns:
+/// without `fParseGaps` `AssembleSeq` turns each gap into a run of `N` or `X`.
+///
+/// The size of the gap line `line` (it starts with `>?`), line `line_number` of the input, after
+/// its warnings: the reader of the four programs (`FastaReader::parse_gap_line`) and BLASTX's
+/// (`blastx::input`) read gap lines with it.
+pub(crate) fn gap_line_size(
+    line: &[u8],
+    line_number: u64,
+    warn: Warn<'_>,
+) -> Result<u32, ReadError> {
+    let mut remaining = trim_input_space(&line[2..]);
+    if let Some(rest) = remaining.strip_prefix(b"unk") {
+        remaining = trim_input_start(rest);
+    }
+    let digits = remaining
+        .iter()
+        .position(|byte| !byte.is_ascii_digit())
+        .unwrap_or(remaining.len());
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp (NStr::StringToUInt with
+    // fConvErr_NoThrow): an empty string or a value over UINT_MAX converts to 0.
+    let mut gap_size = std::str::from_utf8(&remaining[..digits])
+        .ok()
+        .and_then(|text| text.parse::<u32>().ok())
+        .unwrap_or(0);
+    if gap_size == 0 {
+        post_line_warning(
+            Problem::NonPositiveLength,
+            format!("CFastaReader: Bad gap size at line {line_number}").as_bytes(),
+            warn,
+        )?;
+        gap_size = 1;
+    }
+    remaining = trim_input_start(&remaining[digits..]);
+    let mut mods: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+    while !remaining.is_empty() {
+        let close = if remaining.starts_with(b"[") {
+            remaining[1..]
+                .iter()
+                .position(|&byte| byte == b'=')
+                .map(|equal| equal + 1)
+                .and_then(|equal| {
+                    remaining[equal + 1..]
+                        .iter()
+                        .position(|&byte| byte == b']')
+                        .map(|close| (equal, equal + 1 + close))
+                })
+        } else {
+            None
+        };
+        let Some((equal, close)) = close else {
+            post_line_warning(
+                Problem::ParsingModifiers,
+                format!("CFastaReader: Problem parsing gap mods at line {line_number}").as_bytes(),
+                warn,
+            )?;
+            break;
+        };
+        let key = trim_input_space(&remaining[1..equal]).to_vec();
+        let value = trim_input_space(&remaining[equal + 1..close]).to_vec();
+        mods.push((key, value));
+        remaining = trim_input_start(&remaining[close + 1..]);
+    }
+    // `multimap` iterates in key order (stable for equal keys).
+    mods.sort_by(|left, right| left.0.cmp(&right.0));
+    gap_mod_warnings(line_number, &mods, warn)?;
+    Ok(gap_size)
+}
+
+/// The warnings of `ParseGapLine` about the gap modifiers. Without `fParseGaps` the
+/// gap type and linkage evidence are not kept (`AssembleSeq` warns that the
+/// modifiers are ignored, an ignored problem).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1190-1340
+/// ```c++
+///     // remember if there is a gap-type conflict
+///     bool bConflictingGapTypes = false;
+///     // extract the mods, if any
+///     SGap::TNullableGapType pGapType;
+///     CSeq_gap::ELinkEvid eLinkEvid = CSeq_gap::eLinkEvid_UnspecifiedOnly;
+///     set<CLinkage_evidence::EType> setOfLinkageEvidence;
+///
+///     if (m_gap_type && modKeyValueMultiMap.empty()) // fall back to default values coming from caller
+///     {
+///         ...
+///     }
+///
+///     ITERATE(TModKeyValueMultiMap, modKeyValue_it, modKeyValueMultiMap) {
+///         const TStr & sKey   = modKeyValue_it->first;
+///         const TStr & sValue = modKeyValue_it->second;
+///
+///         string canonicalKey = CanonicalizeString(sKey);
+///         if(  canonicalKey == "gap-type") {
+///
+///             const CSeq_gap::SGapTypeInfo *pGapTypeInfo = CSeq_gap::NameToGapTypeInfo(sValue);
+///             if( pGapTypeInfo ) {
+///                  CSeq_gap::EType eGapType = pGapTypeInfo->m_eType;
+///
+///                 if( ! pGapType ) {
+///                     pGapType.Reset( new SGap::TGapTypeObj(eGapType) );
+///                     eLinkEvid = pGapTypeInfo->m_eLinkEvid;
+///                 } else if( eGapType != *pGapType ) {
+///                     // check if pGapType already set and different
+///                     bConflictingGapTypes = true;
+///                 }
+///             } else {
+///                 FASTA_WARNING_EX(
+///                     LineNumber(),
+///                     "Unknown gap-type: " << sValue,
+///                     ILineError::eProblem_ParsingModifiers,
+///                     "gapline",
+///                     "gap-type",
+///                     sValue );
+///             }
+///             continue;
+///
+///         }
+///
+///         if( canonicalKey == "linkage-evidence") {
+///             // could be semi-colon separated
+///             vector<CTempString> arrLinkageEvidences;
+///             NStr::Split(sValue, ";", arrLinkageEvidences,
+///                         NStr::fSplit_MergeDelimiters | NStr::fSplit_Truncate);
+///
+///             ITERATE(vector<CTempString>, link_evid_it, arrLinkageEvidences) {
+///                 CTempString sLinkEvid = *link_evid_it;
+///                 CEnumeratedTypeValues::TNameToValue::const_iterator find_iter =
+///                     linkage_evidence_to_value_map.find(CanonicalizeString(sLinkEvid));
+///                 if( find_iter != linkage_evidence_to_value_map.end() ) {
+///                     setOfLinkageEvidence.insert(
+///                         static_cast<CLinkage_evidence::EType>(
+///                         find_iter->second));
+///                 } else {
+///                     FASTA_WARNING_EX(
+///                         LineNumber(),
+///                         "Unknown linkage-evidence: " << sValue,
+///                         ILineError::eProblem_ParsingModifiers,
+///                         "gapline",
+///                         "linkage-evidence",
+///                         sValue );
+///                 }
+///             }
+///             continue;
+///         }
+///
+///         // unknown mod.
+///         FASTA_WARNING_EX(
+///             LineNumber(),
+///             "Unknown gap modifier name(s): " << sKey,
+///             ILineError::eProblem_UnrecognizedQualifierName,
+///             "gapline", sKey, kEmptyStr );
+///     }
+///
+///     if( bConflictingGapTypes ) {
+///         FASTA_WARNING_EX(LineNumber(),
+///             "There were conflicting gap-types around line " << LineNumber(),
+///             ILineError::eProblem_ContradictoryModifiers,
+///             "gapline", "gap-type", kEmptyStr );
+///     }
+///
+///     // check validation beyond basic parsing problems
+///
+///     // if no gap-type set (but linkage-evidence explicitly set, use "unknown")
+///     if( ! pGapType && ! setOfLinkageEvidence.empty() ) {
+///         pGapType.Reset( new SGap::TGapTypeObj(CSeq_gap::eType_unknown) );
+///     }
+///
+///     // check if linkage-evidence(s) compatible with gap-type
+///     switch( eLinkEvid ) {
+///     case CSeq_gap::eLinkEvid_UnspecifiedOnly:
+///         if( setOfLinkageEvidence.empty() ) {
+///             if( pGapType ) {
+///                 // silently add the required "unspecified"
+///                 setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
+///             }
+///         } else if( setOfLinkageEvidence.size() > 1 ||
+///             *setOfLinkageEvidence.begin() != CLinkage_evidence::eType_unspecified )
+///         {
+///             // only "unspecified" is allowed
+///             FASTA_WARNING(
+///                 LineNumber(),
+///                 "FASTA-Reader: Unknown gap-type can have linkage-evidence "
+///                     "of type 'unspecified' only.",
+///                 ILineError::eProblem_ExtraModifierFound,
+///                 "gapline");
+///             setOfLinkageEvidence.clear();
+///             setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
+///         }
+///         break;
+///     case CSeq_gap::eLinkEvid_Forbidden:
+///         if( ! setOfLinkageEvidence.empty() ) {
+///             FASTA_WARNING(LineNumber(),
+///                 "FASTA-Reader: This gap-type cannot have any "
+///                 "linkage-evidence specified, so any will be ignored.",
+///                 ILineError::eProblem_ModifierFoundButNoneExpected,
+///                 "gapline" );
+///             setOfLinkageEvidence.clear();
+///         }
+///         break;
+///     case CSeq_gap::eLinkEvid_Required:
+///         if( setOfLinkageEvidence.empty() ) {
+///             setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
+///         }
+///         if( setOfLinkageEvidence.size() == 1 &&
+///             *setOfLinkageEvidence.begin() == CLinkage_evidence::eType_unspecified)
+///         {
+///             FASTA_WARNING(LineNumber(),
+///                 "CFastaReader: This gap-type should have at least one "
+///                 "specified linkage-evidence.",
+///                 ILineError::eProblem_ExpectedModifierMissing,
+///                 "gapline" );
+///         }
+///         break;
+///         // intentionally omitted "default:" so a compiler warning will
+///         // hopefully let us know if we've forgotten a case
+///     }
+/// ```
+/// The caller's default gap type (`m_gap_type`) is not set by the BLAST input source.
+/// `NStr::Split` with `fSplit_MergeDelimiters | fSplit_Truncate` drops empty pieces.
+fn gap_mod_warnings(
+    line: u64,
+    mods: &[(Vec<u8>, Vec<u8>)],
+    warn: Warn<'_>,
+) -> Result<(), ReadError> {
+    let mut conflicting = false;
+    let mut gap_type: Option<GapType> = None;
+    let mut link_evid = LinkEvid::UnspecifiedOnly;
+    let mut evidence: std::collections::BTreeSet<u8> = std::collections::BTreeSet::new();
+    for (key, value) in mods {
+        let canonical_key = canonicalize_string(key);
+        if canonical_key == b"gap-type" {
+            match gap_type_info(value) {
+                Some((value_type, value_evid)) => match gap_type {
+                    None => {
+                        gap_type = Some(value_type);
+                        link_evid = value_evid;
+                    }
+                    Some(current) if current != value_type => conflicting = true,
+                    Some(_) => {}
+                },
+                None => {
+                    let mut message = b"Unknown gap-type: ".to_vec();
+                    message.extend_from_slice(value);
+                    post_line_warning(Problem::ParsingModifiers, &message, warn)?;
+                }
+            }
+            continue;
+        }
+        if canonical_key == b"linkage-evidence" {
+            for piece in value
+                .split(|&byte| byte == b';')
+                .filter(|piece| !piece.is_empty())
+            {
+                match linkage_evidence_value(&canonicalize_string(piece)) {
+                    Some(evidence_value) => {
+                        evidence.insert(evidence_value);
+                    }
+                    None => {
+                        let mut message = b"Unknown linkage-evidence: ".to_vec();
+                        message.extend_from_slice(value);
+                        post_line_warning(Problem::ParsingModifiers, &message, warn)?;
+                    }
+                }
+            }
+            continue;
+        }
+        let mut message = b"Unknown gap modifier name(s): ".to_vec();
+        message.extend_from_slice(key);
+        post_line_warning(Problem::UnrecognizedQualifierName, &message, warn)?;
+    }
+    if conflicting {
+        post_line_warning(
+            Problem::ContradictoryModifiers,
+            format!("There were conflicting gap-types around line {line}").as_bytes(),
+            warn,
+        )?;
+    }
+    if gap_type.is_none() && !evidence.is_empty() {
+        gap_type = Some(GapType::Unknown);
+    }
+    match link_evid {
+        LinkEvid::UnspecifiedOnly => {
+            if !evidence.is_empty()
+                && (evidence.len() > 1 || !evidence.contains(&LINKAGE_UNSPECIFIED))
+            {
+                post_line_warning(
+                    Problem::ExtraModifierFound,
+                    b"FASTA-Reader: Unknown gap-type can have linkage-evidence of type 'unspecified' only.",
+                    warn,
+                )?;
+            }
+        }
+        LinkEvid::Forbidden => {
+            if !evidence.is_empty() {
+                post_line_warning(
+                    Problem::ModifierFoundButNoneExpected,
+                    b"FASTA-Reader: This gap-type cannot have any linkage-evidence specified, so any will be ignored.",
+                    warn,
+                )?;
+            }
+        }
+        LinkEvid::Required => {
+            if evidence.is_empty() {
+                evidence.insert(LINKAGE_UNSPECIFIED);
+            }
+            if evidence.len() == 1 && evidence.contains(&LINKAGE_UNSPECIFIED) {
+                post_line_warning(
+                    Problem::ExpectedModifierMissing,
+                    b"CFastaReader: This gap-type should have at least one specified linkage-evidence.",
+                    warn,
+                )?;
+            }
+        }
+    }
+    let _ = gap_type;
+    Ok(())
+}
+
+/// `PostWarning` without a listener (`FastaReader::post_warning`): the message on a line of its own,
+/// unless the reader ignores the problem.
+fn post_line_warning(problem: Problem, message: &[u8], warn: Warn<'_>) -> Result<(), ReadError> {
+    if IGNORED_PROBLEMS.contains(&problem) {
+        return Ok(());
+    }
+    let mut line = Vec::with_capacity(message.len() + 1);
+    line.extend_from_slice(message);
+    line.push(b'\n');
+    warn(&line).map_err(ReadError::Write)
 }
 
 /// The message of `CreateWarningsForSeqDataInTitle` for the title text `text` (see

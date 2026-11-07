@@ -22,9 +22,16 @@ counts as named for both.
 workflow runs that command; without it, each file needs its name like any other.
 
 The workflow files are read line by line (the Python of the runner has no YAML
-parser). A ` #` inside a quoted `run:` value is taken as the start of a comment,
-which can only report a file as not run. The search walks the directory, so a
-local untracked `test_*.py` file is reported too; CI checks a clean checkout.
+parser), with these limits:
+- `on:` is read inline (`on: push`), as a flow list, or as a block; a flow
+  mapping (`on: {push: ...}`) is not, so its workflow does not count.
+- A ` #` inside a quoted `run:` value is taken as the start of a comment.
+- An action input named `run` under `with:` is read as a command, and a job's
+  `if:` is not read: a job that runs only when dispatched, in a workflow that
+  push or pull_request starts, counts.
+The first two can only report a file as not run. The search walks the
+directory, so a local untracked `test_*.py` file is reported too; CI checks a
+clean checkout.
 
 Usage: python3 LOSAT/tests/check_python_tests_in_ci.py --root .
 """

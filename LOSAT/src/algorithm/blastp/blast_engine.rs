@@ -9277,10 +9277,125 @@ fn run_resolved_in_pool(
                         }
                         (None, _) => None,
                     };
+                    // SC2e PROBE (F2CAP): the capture runs the same body with a record.
+                    macro_rules! x_cap_closure {
+                        ($sent_query:expr, $sent_subject:expr, $hsps:expr) => {
+                            |query_offset: i32,
+                             subject_offset: i32,
+                             last_hit: i32,
+                             diff: i32,
+                             diag_entry: &mut DiagStruct|
+                             -> [i32; 8] {
+                                let ctx_idx =
+                                    x_context_table.get(query_offset).unwrap_or_else(|| {
+                                        blastp_context_idx_for_query_offset_with_bounds(
+                                            &contexts,
+                                            context_lookup_bounds,
+                                            query_offset,
+                                        )
+                                    });
+                                let ctx = &contexts[ctx_idx];
+                                if query_offset - diff < ctx.frame_base {
+                                    diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                                    return [ctx_idx as i32, 0, 0, 0, 0, 0, 0, 0];
+                                }
+                                let x_drop = x_dropoff_per_context[ctx_idx];
+                                let cutoff = word_cutoff_scores[ctx_idx];
+                                let extended = unsafe {
+                                    super::x_ungapped_sent::two_hit(
+                                        $sent_query,
+                                        $sent_subject,
+                                        (last_hit + word_size) as usize,
+                                        subject_offset as usize,
+                                        query_offset as usize,
+                                        x_drop,
+                                    )
+                                };
+                                let Some(ungapped_hit) = extended else {
+                                    return [ctx_idx as i32, 1, 0, 0, 0, 0, 0, 0];
+                                };
+                                let mut saved = 0;
+                                if ungapped_hit.ungapped_data.score >= cutoff {
+                                    blastp_save_init_hsp(
+                                        $hsps,
+                                        ungapped_hit.ungapped_data.q_start,
+                                        ungapped_hit.ungapped_data.s_start,
+                                        query_offset,
+                                        subject_offset,
+                                        ungapped_hit.ungapped_data.length,
+                                        ungapped_hit.ungapped_data.score,
+                                    );
+                                    saved = 1;
+                                }
+                                if ungapped_hit.right_extend {
+                                    diag_entry.set_flag(1);
+                                    diag_entry.set_last_hit(
+                                        ungapped_hit.s_last_off - (word_size - 1)
+                                            + subject_diag_offset,
+                                    );
+                                } else {
+                                    diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                                }
+                                [
+                                    ctx_idx as i32,
+                                    2 | (i32::from(ungapped_hit.right_extend) << 2) | (saved << 3),
+                                    ungapped_hit.ungapped_data.q_start,
+                                    ungapped_hit.ungapped_data.s_start,
+                                    ungapped_hit.ungapped_data.length,
+                                    ungapped_hit.ungapped_data.score,
+                                    ungapped_hit.s_last_off,
+                                    0,
+                                ]
+                            }
+                        };
+                    }
+                    let x_cap = super::sc2e_cap::enabled() && x_sent.is_some();
+                    if x_cap {
+                        let frame_bases: Vec<i32> = contexts.iter().map(|c| c.frame_base).collect();
+                        super::sc2e_cap::set_block(
+                            args.scoring.matrix,
+                            &concatenated_query,
+                            &frame_bases,
+                            &x_dropoff_per_context,
+                            &word_cutoff_scores,
+                            args.word_size,
+                            word_size,
+                        );
+                    }
                     // The tables of another matrix: the standard table (either width) or the
                     // compressed one (`blastp_matrix_compressed_lookup`: the flat table, the
                     // reference one where the flat build declines or LOSAT_X_BPCLUT is off).
                     match &lookup {
+                        BlastpRuntimeLookup::Aa(aa_lookup) if x_cap => {
+                            let (sent_query, sent_subject) = x_sent.expect("checked");
+                            super::sc2e_cap::scan(
+                                aa_lookup,
+                                subject.aa_seq,
+                                subject_sequence,
+                                subject.aa_len,
+                                &mut scratch.diag_array,
+                                diag_mask,
+                                subject_diag_offset,
+                                window,
+                                word_size,
+                                x_cap_closure!(sent_query, sent_subject, &mut init_hsps),
+                            )
+                        }
+                        BlastpRuntimeLookup::Aa16(aa_lookup) if x_cap => {
+                            let (sent_query, sent_subject) = x_sent.expect("checked");
+                            super::sc2e_cap::scan(
+                                aa_lookup,
+                                subject.aa_seq,
+                                subject_sequence,
+                                subject.aa_len,
+                                &mut scratch.diag_array,
+                                diag_mask,
+                                subject_diag_offset,
+                                window,
+                                word_size,
+                                x_cap_closure!(sent_query, sent_subject, &mut init_hsps),
+                            )
+                        }
                         BlastpRuntimeLookup::Aa(aa_lookup) if x_sent.is_some() => {
                             let (sent_query, sent_subject) = x_sent.expect("checked");
                             super::x_seed_fused::x_scan_two_hit(

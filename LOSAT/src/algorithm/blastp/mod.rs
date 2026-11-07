@@ -20,6 +20,8 @@ pub(crate) mod x_ungapped_fast;
 // EXPERIMENT (LOSAT_X_BPUNGAPSENT): blastp's two-hit extension for word size 3 inlined into the
 // fused loop's candidate closure, walks stopped by the sentinels, same results.
 pub(crate) mod x_ungapped_sent;
+// SC2e PROBE (measurement only)
+pub(crate) mod sc2e_cap;
 // NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
 // max_offset = BlastGetStartForGappedAlignment(...);
 // status = s_BlastProtGappedAlignment(...);

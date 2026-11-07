@@ -266,10 +266,7 @@ impl PssmRedo1<'_> {
                 }
             }
         }
-        Ok(fill_results_from_compo_heaps(
-            self.hitlist_size,
-            &mut heaps,
-        ))
+        Ok(fill_results_from_compo_heaps(self.hitlist_size, &mut heaps))
     }
 
     /// The scaled values of the search (`s_RescaleSearch` on `kbp_gap` and the gap costs, the
@@ -987,9 +984,8 @@ fn with_distinct_ends(new_align: Align, alignments: &mut Vec<Align>, is_same_adj
     if excluded {
         return;
     }
-    alignments.retain(|align| {
-        !(align.frame == new_align.frame && is_same_end_point(&new_align, align))
-    });
+    alignments
+        .retain(|align| !(align.frame == new_align.frame && is_same_end_point(&new_align, align)));
     alignments.insert(0, new_align);
 }
 

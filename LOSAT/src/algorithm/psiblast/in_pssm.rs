@@ -42,9 +42,9 @@ use std::sync::Arc;
 use anyhow::{bail, Result};
 
 use crate::algorithm::blastp::args::ResolvedBlastpArgs;
-use crate::blastinput::app::CompositionMode;
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::algorithm::pssm_search::{PsiSearch, PssmStats};
+use crate::blastinput::app::CompositionMode;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::report::serial::pssm::{ObjectId, PssmSeqId, PssmWithParameters, SeqData};
@@ -657,10 +657,12 @@ fn scores_from_freq_ratios(
 ) -> Result<(Vec<[i32; BLASTAA_SIZE]>, crate::core::psi::KarlinBlk)> {
     let query: Vec<u8> = letters
         .iter()
-        .map(|&letter| match crate::utils::matrix::aa_char_to_ncbistdaa(letter) {
-            crate::utils::matrix::ncbistdaa::O => crate::utils::matrix::ncbistdaa::X,
-            code => code,
-        })
+        .map(
+            |&letter| match crate::utils::matrix::aa_char_to_ncbistdaa(letter) {
+                crate::utils::matrix::ncbistdaa::O => crate::utils::matrix::ncbistdaa::X,
+                code => code,
+            },
+        )
         .collect();
     let spec = crate::config::ProteinScoringSpec {
         matrix: crate::config::ScoringMatrix::Blosum62,

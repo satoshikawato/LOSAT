@@ -417,8 +417,7 @@ pub(crate) fn scale_pos_matrix(
     sbp: &PsiScoreBlk,
     scaling_factor: f64,
 ) -> PosScaledMatrix {
-    let (start_matrix, kbp_psi) =
-        stages::scale_pos_matrix(query, freq_ratios, sbp, scaling_factor);
+    let (start_matrix, kbp_psi) = stages::scale_pos_matrix(query, freq_ratios, sbp, scaling_factor);
     PosScaledMatrix {
         start_matrix,
         kbp_psi,

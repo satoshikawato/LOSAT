@@ -37,8 +37,6 @@ use crate::algorithm::pssm_search::prelim::{PssmPrelim, PssmSubjectScratch};
 use crate::algorithm::pssm_search::redo1;
 use crate::algorithm::pssm_search::traceback0::PssmTraceback0;
 use crate::algorithm::pssm_search::PsiSearch;
-use crate::blastinput::fasta_reader::FastaRecord;
-use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
 use crate::algorithm::tblastx::constants::{
     GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
 };
@@ -47,6 +45,8 @@ use crate::algorithm::tblastx::lookup::{
 };
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
+use crate::blastinput::fasta_reader::FastaRecord;
+use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
 use crate::stats::{blast_spouge_etos, BlastGumbelBlk, KarlinParams};
 
 /// The lookup table of the PSSM and the query's contexts (with `kbp_std`, the query's
@@ -442,13 +442,13 @@ fn pssm_redo(
     )?;
     let query = &context.aa_seq[1..context.aa_seq.len() - 1];
     let zero_ratios;
-    let freq_ratios: &[[f64; crate::core::blast_util::BLASTAA_SIZE]] =
-        if psi.freq_ratios.is_empty() {
-            zero_ratios = vec![[0.0; crate::core::blast_util::BLASTAA_SIZE]; query.len()];
-            &zero_ratios
-        } else {
-            &psi.freq_ratios
-        };
+    let freq_ratios: &[[f64; crate::core::blast_util::BLASTAA_SIZE]] = if psi.freq_ratios.is_empty()
+    {
+        zero_ratios = vec![[0.0; crate::core::blast_util::BLASTAA_SIZE]; query.len()];
+        &zero_ratios
+    } else {
+        &psi.freq_ratios
+    };
     let Some(info) = PosMatrixInfo::new(query, freq_ratios, &sbp, redo1::SCALING_FACTOR) else {
         anyhow::bail!(
             "a PSSM whose position-based scaling for the composition-based statistics gives no Karlin-Altschul parameters is not supported by LOSAT's PSIBLAST"

@@ -273,6 +273,12 @@ describe('refusedFields', () => {
       flags: ['-help'],
     });
     expect(fields("error: unknown option or argument 'evalue'", '-strand plus')).toEqual({ extra: false, flags: [] });
+    // The engine quotes the whole word, with its =value.
+    expect(fields("error: unknown option or argument '--evalue=1e-5'; use -help for CLI v2 syntax", '--evalue=1e-5')).toEqual({
+      extra: true,
+      flags: ['-help'],
+    });
+    expect(fields("error: unknown option or argument 'evalue=10'", '-strand plus evalue=10')).toEqual({ extra: true, flags: [] });
   });
   it('names "Additional options" for the messages about its text', () => {
     expect(fields("Additional options: a quote (') is not closed", "-strand 'plus")).toEqual({ extra: true, flags: [] });

@@ -136,18 +136,19 @@ export function refusedFields(message: string, extra: string): { readonly extra:
   const sentence = message.split(/\n[ \t]*\n/, 1)[0]!;
   // No look-behind (`(?<!…)`): a bundle with one does not load in an older Safari.
   const named = new Set([...sentence.matchAll(/(?:^|[^\w-])(-[A-Za-z][A-Za-z0-9_]*)/g)].map((found) => found[1]!));
-  let typed: readonly string[];
+  let words: readonly string[];
   try {
-    typed = splitOptions(extra).map((word) => word.split('=', 1)[0]!);
+    words = splitOptions(extra);
   } catch {
-    typed = [];
+    words = [];
   }
+  const typed = words.map((word) => word.split('=', 1)[0]!);
   // A word typed there that is not an option name (`--help`, `evalue` without its `-`) is named as
   // the start of the sentence ("--help is not available in the browser") or in quotes
-  // ("unknown option or argument 'evalue'").
+  // ("unknown option or argument 'evalue'"); the engine names the whole word (`'evalue=10'`).
   const quoted = (word: string) => word !== '' && (sentence.includes(`'${word}'`) || (sentence.startsWith(word) && /^\s|^$/.test(sentence.slice(word.length))));
   return {
-    extra: message.startsWith('Additional options') || typed.some((word) => named.has(word) || quoted(word)),
+    extra: message.startsWith('Additional options') || typed.some((word) => named.has(word) || quoted(word)) || words.some(quoted),
     flags: new Set([...named].filter((flag) => !typed.includes(flag))),
   };
 }

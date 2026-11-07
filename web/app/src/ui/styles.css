@@ -236,10 +236,10 @@ textarea:focus {
   background: var(--bg);
 }
 
-/* Focused from the keyboard, the ring is the accent itself, 5.1:1 on white (the soft ring is 1.4:1,
+/* With the focus, the ring is the accent itself, 5.1:1 on white (the soft ring is 1.4:1,
    WA2-AX-09), in the soft ring's place: an outline at the border, which WebKit draws on a select (it
    draws no box-shadow there) and forced colours (Windows' high contrast) keep. Browsers give a text
-   box :focus-visible on a click too. */
+   box :focus-visible on a click too, and Chromium and WebKit a select. */
 input[type='text']:focus-visible,
 input[type='search']:focus-visible,
 select:focus-visible,

@@ -855,6 +855,12 @@ impl BatchPrefetch {
         Self(Some(on))
     }
 
+    /// Whether the prefetch of some batch of the call is off by its count (else every batch
+    /// prefetches, and no subject needs to be told apart).
+    pub(crate) fn counts(&self) -> bool {
+        self.0.is_some()
+    }
+
     /// Whether the batch of the call's query `query` prefetches.
     pub(crate) fn query(&self, query: usize) -> bool {
         self.0
@@ -2275,6 +2281,8 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let every = vec![true; counts.len() + 1];
+        assert!(!BatchPrefetch::every().counts());
+        assert!(BatchPrefetch::at(Some(3), 2, 0, &[], |_| 1).counts());
         // No limit, `INT_MAX` (every batch prefetches) and 0 or below (none does: the reports'
         // `prefetched` is false) count nothing.
         for limit in [None, Some(i32::MAX), Some(0), Some(-1)] {

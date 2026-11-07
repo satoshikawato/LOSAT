@@ -479,7 +479,8 @@ pub(crate) fn reported_subjects(
     // frame (`shared::check_prefetched_strands`; `CSeq_align::GetSeqStrand` reads the first
     // segment): `ordered` holds each query's HSPs of a subject in one run, in the order of the
     // Std-segs (`seqalign`).
-    let mut prefetched = std::collections::HashSet::new();
+    // `prefetched` is `None` where every batch prefetches.
+    let mut prefetched = prefetch.counts().then(std::collections::HashSet::new);
     let mut flipped = std::collections::HashSet::new();
     if shown.prefetched {
         let mut previous = None;
@@ -488,7 +489,9 @@ pub(crate) fn reported_subjects(
             if previous.replace(run) == Some(run) || !prefetch.query(hsp.hit.q_idx as usize) {
                 continue;
             }
-            prefetched.insert(hsp.hit.s_idx);
+            if let Some(prefetched) = &mut prefetched {
+                prefetched.insert(hsp.hit.s_idx);
+            }
             if hsp.hit.query_frame < 0 && hsp.subject_frame > 0 {
                 flipped.insert(hsp.hit.s_idx);
             }
@@ -523,7 +526,11 @@ pub(crate) fn reported_subjects(
                 shared::check_reported_parsed(
                     &database.db,
                     subject,
-                    shown.prefetched_if(prefetched.contains(&ordinal)),
+                    shown.prefetched_if(
+                        prefetched
+                            .as_ref()
+                            .is_none_or(|prefetched| prefetched.contains(&ordinal)),
+                    ),
                     false,
                     taxdb,
                     ordinal,

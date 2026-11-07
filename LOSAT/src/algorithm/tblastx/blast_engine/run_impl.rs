@@ -3560,7 +3560,7 @@ fn run_batch_loop(
             // report, as the refusals of the titles above and XML2's lookups (`read_taxids`) do.
             if prefetches && database.taxdb_found() {
                 // The batch's Seq-aligns (`database::seq_aligns_of`).
-                let seq_aligns = super::super::database::seq_aligns_of(&ordered);
+                let seq_aligns = super::super::database::seq_aligns_of(ordered);
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                 // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
                 // after the query's own warnings (`query_fetches`, added after them below), where

@@ -1316,7 +1316,8 @@ pub(super) fn reported_subjects(
     // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them), and of these the ones with an HSP
     // on the query's minus strand in such a batch, whose Seq-align is on the subject's plus
     // strand (`shared::check_prefetched_strands`).
-    let mut prefetched = std::collections::HashSet::new();
+    // `prefetched` is `None` where every batch prefetches.
+    let mut prefetched = prefetch.counts().then(std::collections::HashSet::new);
     let mut flipped = std::collections::HashSet::new();
     if shown.prefetched {
         let lists = hit_lists
@@ -1327,7 +1328,9 @@ pub(super) fn reported_subjects(
             .flat_map(|hit_list| hit_list.hsplist_array.iter())
             .filter(|hsp_list| !hsp_list.hsps.is_empty());
         for hsp_list in lists {
-            prefetched.insert(hsp_list.oid);
+            if let Some(prefetched) = &mut prefetched {
+                prefetched.insert(hsp_list.oid);
+            }
             if hsp_list.hsps.iter().any(|hsp| hsp.query_frame < 0) {
                 flipped.insert(hsp_list.oid);
             }
@@ -1367,7 +1370,11 @@ pub(super) fn reported_subjects(
             }
             ReportedHeader::Parsed(subject) => {
                 let taxdb = shown.pairwise && *taxdb_found.get_or_init(|| db.taxdb_found());
-                let shown = shown.prefetched_if(prefetched.contains(&ordinal));
+                let shown = shown.prefetched_if(
+                    prefetched
+                        .as_ref()
+                        .is_none_or(|prefetched| prefetched.contains(&ordinal)),
+                );
                 shared::check_reported_parsed(db, subject, shown, false, taxdb, ordinal, PROGRAM)?;
                 shared::check_prefetched_strands(
                     db,

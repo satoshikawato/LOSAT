@@ -437,15 +437,20 @@ pub(super) fn reported_subjects(
     // Where only the batches' prefetch reads the subjects (`shown.prefetched`), those that a
     // batch whose prefetch is on reports (a batch whose Seq-aligns outnumber a positive
     // `PRE_FETCH_SEQS_LIMIT` reads nothing of them, `shared::BatchPrefetch`).
-    let mut prefetched = std::collections::HashSet::new();
+    // `None` where every batch prefetches.
+    let mut prefetched = None;
     if shown.prefetched {
         let prefetch = shared::BatchPrefetch::of(hitlists.len(), 0, batches, |span| {
             seq_aligns_of(&hitlists[span])
         });
-        for (query, hitlist) in hitlists.iter().enumerate() {
-            if prefetch.query(query) {
-                prefetched.extend(hitlist.lists().iter().map(|list| list.oid as u32));
+        if prefetch.counts() {
+            let mut read = std::collections::HashSet::new();
+            for (query, hitlist) in hitlists.iter().enumerate() {
+                if prefetch.query(query) {
+                    read.extend(hitlist.lists().iter().map(|list| list.oid as u32));
+                }
             }
+            prefetched = Some(read);
         }
     }
     ordinals.sort_unstable();
@@ -483,7 +488,11 @@ pub(super) fn reported_subjects(
                 shared::check_reported_parsed(
                     &database.db,
                     subject,
-                    shown.prefetched_if(prefetched.contains(&ordinal)),
+                    shown.prefetched_if(
+                        prefetched
+                            .as_ref()
+                            .is_none_or(|prefetched| prefetched.contains(&ordinal)),
+                    ),
                     false,
                     taxdb,
                     ordinal,

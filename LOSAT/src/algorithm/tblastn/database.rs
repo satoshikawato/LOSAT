@@ -392,6 +392,17 @@ impl ReportedSubjects {
     }
 }
 
+/// The Seq-aligns of the results `hitlists` that NCBI's prefetch counts against
+/// `PRE_FETCH_SEQS_LIMIT` (`shared::prefetch_off`): one for each HSP (TBLASTN's search is gapped;
+/// LOSAT refuses `-ungapped`, whose Seq-aligns are one per subject).
+pub(super) fn seq_aligns_of(hitlists: &[KappaResultHitList]) -> usize {
+    hitlists
+        .iter()
+        .flat_map(KappaResultHitList::lists)
+        .map(|list| list.hsps.hsps.len())
+        .sum()
+}
+
 /// The reported database sequences of `hitlists` (the final hit lists of all query batches,
 /// subjects named by ordinal id; their HSPs of score 0 are dropped first, as the report
 /// drops them): the hit lists name them by rank from here on (the rank grows with the
@@ -402,8 +413,10 @@ impl ReportedSubjects {
 /// A reported sequence whose stored title LOSAT does not report as
 /// NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports `shown` do
 /// not write as NCBI (`common::database::check_reported_parsed`, and with `shown.joined`
-/// `refuse_joined_hits`). The packed subjects are read
-/// from the database (`SubjectLetters::Stream`, one read each) instead of cloned from the copy.
+/// `refuse_joined_hits`; where only the prefetch reads a subject, a batch of `batches`, the
+/// query ranges of the batches of `hitlists`, whose prefetch is on reports it). The packed
+/// subjects are read from the database (`SubjectLetters::Stream`, one read each) instead of
+/// cloned from the copy.
 pub(super) fn reported_subjects(
     database: &TblastnDatabase,
     titles: &DatabaseTitles,
@@ -411,6 +424,7 @@ pub(super) fn reported_subjects(
     stores: super::x_subject_store::SubjectLetters<'_>,
     letters: bool,
     shown: ParsedShown,
+    batches: &[std::ops::Range<usize>],
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
     for hitlist in hitlists.iter_mut() {
@@ -419,6 +433,25 @@ pub(super) fn reported_subjects(
     let mut ordinals = Vec::new();
     for list in hitlists.iter().flat_map(KappaResultHitList::lists) {
         ordinals.push(u32::try_from(list.oid).context("negative TBLASTN subject OID")?);
+    }
+    // Where only the batches' prefetch reads the subjects (`shown.prefetched`), those that a
+    // batch whose prefetch is on reports (a batch whose Seq-aligns outnumber a positive
+    // `PRE_FETCH_SEQS_LIMIT` reads nothing of them, `shared::BatchPrefetch`).
+    // `None` where every batch prefetches.
+    let mut prefetched = None;
+    if shown.prefetched {
+        let prefetch = shared::BatchPrefetch::of(hitlists.len(), 0, batches, |span| {
+            seq_aligns_of(&hitlists[span])
+        });
+        if prefetch.counts() {
+            let mut read = std::collections::HashSet::new();
+            for (query, hitlist) in hitlists.iter().enumerate() {
+                if prefetch.query(query) {
+                    read.extend(hitlist.lists().iter().map(|list| list.oid as u32));
+                }
+            }
+            prefetched = Some(read);
+        }
     }
     ordinals.sort_unstable();
     ordinals.dedup();
@@ -455,7 +488,11 @@ pub(super) fn reported_subjects(
                 shared::check_reported_parsed(
                     &database.db,
                     subject,
-                    shown,
+                    shown.prefetched_if(
+                        prefetched
+                            .as_ref()
+                            .is_none_or(|prefetched| prefetched.contains(&ordinal)),
+                    ),
                     false,
                     taxdb,
                     ordinal,
@@ -659,6 +696,7 @@ mod tests {
                 SubjectLetters::Stream(&stream),
                 letters,
                 ParsedShown::default(),
+                &[],
             )
             .unwrap()
         };
@@ -713,6 +751,7 @@ mod tests {
                 SubjectLetters::Stream(&stream),
                 true,
                 ParsedShown::default(),
+                &[],
             )
             .unwrap();
             let messages = database.prefetch_messages(&reported, &hitlists, SubjectFetch::Every);

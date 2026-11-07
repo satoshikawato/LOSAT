@@ -6326,15 +6326,27 @@ mod tests {
         let (mut saved, mut short_frames, mut merged) = (0usize, 0usize, 0usize);
         let mut outcomes = [0usize; 7];
         let serial = crate::utils::threading::SearchPool::x_serial();
+        // Every knob (matrix, alphabet, window, threshold, masked unit tables) is its own draw
+        // from a second generator, so the 300 cases meet in combination (the data generator's
+        // stream is left as it was). `combos[matrix][batched]` counts the units on masked tables.
+        let mut knobs = Rng(0x2b17_6b0b_0000_0002);
+        let mut combos = [[0usize; 2]; 4];
+        let mut settings = std::collections::BTreeSet::new();
         for case_no in 0..300 {
-            let sc = tables[case_no % tables.len()].scorer();
+            let matrix_no = knobs.below(tables.len() as u64) as usize;
+            let alphabet_no = knobs.below(alphabets.len() as u64) as usize;
+            let window_no = knobs.below(4) as usize;
+            let threshold_no = knobs.below(4) as usize;
+            let masked = knobs.below(2) == 1;
+            settings.insert((matrix_no, alphabet_no, window_no, threshold_no, masked));
+            let sc = tables[matrix_no].scorer();
             assert_eq!(sc.word(), 2);
-            let alphabet = &alphabets[case_no % alphabets.len()];
+            let alphabet = &alphabets[alphabet_no];
             // The batched extensions only where their rule allows them (`x_tbx_extbatch::active`:
             // `window >= wordsize + BATCH`, here at its bound too); a window of 3 without them.
-            let window = [40, 2 + x_tbx_extbatch::BATCH as i32, 64, 3][case_no % 4];
+            let window = [40, 2 + x_tbx_extbatch::BATCH as i32, 64, 3][window_no];
             let batched = window >= 2 + x_tbx_extbatch::BATCH as i32;
-            let threshold = [11, 13, 0, 8][case_no % 4];
+            let threshold = [11, 13, 0, 8][threshold_no];
             let queries: Vec<Vec<QueryFrame>> = (0..1 + usize::from(case_no % 5 == 4))
                 .map(|_| {
                     (0..1 + rng.below(6) as usize)
@@ -6411,9 +6423,8 @@ mod tests {
                 s_idx: 0,
                 s_len: 999,
             };
-            // Every other case on masked unit tables (ratio 1: every unit whose unmasked table is
-            // at least the masked one's size).
-            let masked = case_no % 2 == 1;
+            // Masked unit tables in about half of the cases (ratio 1: every unit whose unmasked
+            // table is at least the masked one's size).
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
                 stub: false,
@@ -6465,7 +6476,9 @@ mod tests {
                     assert_eq!(sent, pp.sent);
                     units += 1;
                     sent_units += usize::from(sent);
-                    masked_units += usize::from(pp.x_unit_mask(&unit, window).is_some());
+                    let is_masked = pp.x_unit_mask(&unit, window).is_some();
+                    masked_units += usize::from(is_masked);
+                    combos[matrix_no][usize::from(batched)] += usize::from(is_masked);
                     let mut want: Vec<InitHSP> = Vec::new();
                     pp.scan_unit_hits::<_, XNoProbe, false, false, 0>(
                         &unit,
@@ -6560,14 +6573,41 @@ mod tests {
             let one =
                 XPairPar::<MatrixScore>::merge_subject(pp.run_subject_units(&inp, &serial), &inp);
             merged += one.len();
+            // Against the reference's own lists, converted and merged by the reference's
+            // statements (one chunk per frame here: `get_ungapped_hsp_list` per frame list, the
+            // frame lists appended and sorted), not by anything of `run_subject_units`.
+            let mut expect: Vec<UngappedHit> = Vec::new();
+            for list in &reference {
+                if !list.is_empty() {
+                    expect.extend(get_ungapped_hsp_list(
+                        list.clone(),
+                        inp.contexts,
+                        inp.s_frames,
+                    ));
+                    if !ungapped_hits_is_sorted_by_score_ncbi(&expect) {
+                        sort_ungapped_hits_by_score_ncbi(&mut expect);
+                    }
+                }
+            }
+            assert_eq!(
+                one.len(),
+                expect.len(),
+                "case {case_no}: merged list length"
+            );
+            for (k, (a, b)) in one.iter().zip(&expect).enumerate() {
+                assert!(
+                    x_same_hit(a, b),
+                    "case {case_no}: merged hit {k} (1 thread)"
+                );
+            }
             for threads in [4usize, 8] {
                 crate::utils::threading::with_search_pool(threads, "tblastx", |pool| {
                     let got = XPairPar::<MatrixScore>::merge_subject(
                         pp.run_subject_units(&inp, pool),
                         &inp,
                     );
-                    assert_eq!(got.len(), one.len(), "case {case_no} threads {threads}");
-                    for (k, (a, b)) in got.iter().zip(&one).enumerate() {
+                    assert_eq!(got.len(), expect.len(), "case {case_no} threads {threads}");
+                    for (k, (a, b)) in got.iter().zip(&expect).enumerate() {
                         assert!(x_same_hit(a, b), "case {case_no} threads {threads} hit {k}");
                     }
                     Ok(())
@@ -6581,6 +6621,14 @@ mod tests {
         assert!(saved > 100_000, "saved {saved}");
         assert!(merged > 100_000, "merged {merged}");
         assert!(short_frames > 100, "short frames {short_frames}");
+        // The knobs met in combination: many distinct settings, and masked tables with and
+        // without batched extensions on every matrix.
+        assert!(settings.len() > 200, "distinct settings {}", settings.len());
+        for (m, row) in combos.iter().enumerate() {
+            for (b, n) in row.iter().enumerate() {
+                assert!(*n > 0, "no masked unit: matrix {m}, batched {b}");
+            }
+        }
         // The reference took every branch of the two-hit test.
         for (outcome, n) in outcomes.iter().enumerate() {
             assert!(*n > 0, "outcome {outcome} never taken");

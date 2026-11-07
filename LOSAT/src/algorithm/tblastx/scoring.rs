@@ -116,7 +116,8 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
         q_right_off: usize,
         x_drop: i32,
     ) -> TwoHit {
-        // The units check it once per unit (`scan_unit_cells`).
+        // The dispatches in `x_tbx_hitbf.rs` choose W from `word()` and check it (a release
+        // assert in the arm of SENT = 3).
         debug_assert_eq!(W, self.word());
         // SAFETY: the caller's.
         unsafe { self.sent_two_hit(q_full, s_full, s_left_off, s_right_off, q_right_off, x_drop) }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail when a Python test file of the repository is run by no workflow.
+"""Fail when a Python test file of the repository is run by no workflow that runs on its own.
 
 No NCBI counterpart: this checks LOSAT's own CI wiring, not ported behavior.
 
@@ -7,16 +7,24 @@ The SWEBOK audit of 2026-11-04 (KA5) found five `test_*.py` files with 35 tests
 that no workflow ran (`test_audit_blastp_v010.py`, `test_audit_tblastx_v010.py`,
 `test_benchmark_wasm_threading.py`, `test_certify_blastn_v010.py`,
 `test_compare_blastn_parity.py`), so a change to the tools they test could break
-them unseen. Every workflow names the test files it runs one by one
+them unseen. The workflows name the test files they run one by one
 (`unittest discover -s LOSAT/tests -p 'test_x.py'`, `unittest LOSAT/tests/test_x.py`),
-so this check fails when the file name of a `test_*.py` file appears in no
-`.github/workflows/*.yml` outside a comment. A file name shared by two
-directories counts as named for both.
+so this check fails when the file name of a `test_*.py` file appears in the
+`run:` commands of no workflow that runs without a person: one started by
+push, pull_request(_target), merge_group or schedule, or one such a workflow
+calls (`uses: ./.github/workflows/<file>`). A name only in a `paths:` filter, in
+a comment, or in a workflow that runs only when dispatched (release readiness,
+platform certification) does not count. A file name shared by two directories
+counts as named for both.
 
 `python/tests/` is pylosat's pytest suite, which `python.yml` runs as a directory
 (`pytest tests`, working directory `python`): its files are run while that
-workflow holds that command; without it, each file needs its name in a workflow
-like any other.
+workflow runs that command; without it, each file needs its name like any other.
+
+The workflow files are read line by line (the Python of the runner has no YAML
+parser). A ` #` inside a quoted `run:` value is taken as the start of a comment,
+which can only report a file as not run. The search walks the directory, so a
+local untracked `test_*.py` file is reported too; CI checks a clean checkout.
 
 Usage: python3 LOSAT/tests/check_python_tests_in_ci.py --root .
 """
@@ -33,9 +41,14 @@ from typing import Iterable, Sequence
 SKIPPED_DIRS = frozenset({".git", ".worktrees", "target", "node_modules", ".venv", "__pycache__"})
 TEST_FILE_RE = re.compile(r"^test_.*\.py$")
 # A YAML comment: `#` at the start of a line or after a space (`'#'` inside a value is not one).
-YAML_COMMENT_RE = re.compile(r"(^|\s)#.*$", re.M)
+YAML_COMMENT_RE = re.compile(r"(^|\s)#.*$")
+# Events that start a workflow without a person.
+AUTOMATIC_EVENTS = frozenset({"push", "pull_request", "pull_request_target", "merge_group", "schedule"})
+ON_RE = re.compile(r"""^(?:on|"on"|'on'|true):\s*(.*)$""")
+RUN_RE = re.compile(r"^(\s*(?:-\s+)?)run:\s*(.*)$")
+CALL_RE = re.compile(r"^\s*(?:-\s+)?uses:\s*\./\.github/workflows/([^\s@]+)\s*$")
 # Directories whose test files a workflow runs as a whole: directory -> (workflow file, command).
-DIRECTORY_SUITES = {"python/tests": ("python.yml", "pytest tests")}
+DIRECTORY_SUITES = {"python/tests": ("python.yml", re.compile(r"\bpytest tests(?:\s|$)"))}
 
 
 def test_files(root: Path) -> Iterable[str]:
@@ -47,29 +60,86 @@ def test_files(root: Path) -> Iterable[str]:
                 yield (Path(directory) / name).relative_to(root).as_posix()
 
 
-def workflow_texts(root: Path) -> dict[str, str]:
-    """File name -> text without comments, for every workflow file."""
+def indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def triggers(lines: list[str]) -> set[str]:
+    """The events of the top-level `on:` key (`on: push`, `on: [push, schedule]`, or a block)."""
+    for i, line in enumerate(lines):
+        match = ON_RE.match(line)
+        if not match:
+            continue
+        inline = match.group(1).strip()
+        if inline:
+            return {word for word in re.split(r"[\s,\[\]]+", inline) if word}
+        events = set()
+        child = None
+        for below in lines[i + 1:]:
+            if not below.strip():
+                continue
+            if indent(below) == 0:
+                break
+            child = indent(below) if child is None else child
+            if indent(below) == child:
+                events.add(below.strip().lstrip("-").strip().split(":")[0].strip())
+        return events
+    return set()
+
+
+def run_text(lines: list[str]) -> str:
+    """The values of every `run:` key, inline or block (`|`, `>`), one after another."""
+    out = []
+    i = 0
+    while i < len(lines):
+        match = RUN_RE.match(lines[i])
+        i += 1
+        if not match:
+            continue
+        value = match.group(2).strip()
+        if value[:1] not in ("|", ">"):
+            out.append(value)
+            continue
+        key_column = len(match.group(1))
+        while i < len(lines) and (not lines[i].strip() or indent(lines[i]) > key_column):
+            out.append(lines[i].strip())
+            i += 1
+    return "\n".join(out)
+
+
+def automatic_run_texts(root: Path) -> dict[str, str]:
+    """File name -> the `run:` text, for the workflows that run without a person."""
     directory = root / ".github" / "workflows"
-    texts = {}
+    lines = {}
     for path in sorted(directory.glob("*.y*ml")):
-        texts[path.name] = YAML_COMMENT_RE.sub("", path.read_text(encoding="utf-8"))
-    if not texts:
+        text = path.read_text(encoding="utf-8")
+        lines[path.name] = [YAML_COMMENT_RE.sub("", line) for line in text.splitlines()]
+    if not lines:
         raise ValueError(f"{directory}: no workflow files")
-    return texts
+    running = [name for name, body in lines.items() if triggers(body) & AUTOMATIC_EVENTS]
+    seen = set(running)
+    while running:
+        name = running.pop()
+        for line in lines[name]:
+            match = CALL_RE.match(line)
+            if match and match.group(1) in lines and match.group(1) not in seen:
+                seen.add(match.group(1))
+                running.append(match.group(1))
+    return {name: run_text(lines[name]) for name in sorted(seen)}
 
 
 def is_run(path: str, workflows: dict[str, str]) -> bool:
-    """Whether a workflow names the file, or runs the directory suite that holds it."""
+    """Whether a running workflow names the file, or runs the directory suite that holds it."""
     for directory, (workflow, command) in DIRECTORY_SUITES.items():
-        if path.startswith(directory + "/") and command in workflows.get(workflow, ""):
+        if path.startswith(directory + "/") and command.search(workflows.get(workflow, "")):
             return True
     name = path.rsplit("/", 1)[-1]
     return any(name in text for text in workflows.values())
 
 
 def not_run(root: Path) -> tuple[list[str], list[str]]:
-    """(files, the files no workflow runs)."""
-    workflows = workflow_texts(root)
+    """(files, the files no running workflow runs)."""
+    workflows = automatic_run_texts(root)
     files = list(test_files(root))
     return files, [path for path in files if not is_run(path, workflows)]
 
@@ -89,8 +159,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     for path in missing:
         print(
-            f"NOT RUN\t{path}\tno workflow names it: add a step that runs it (ci.yml `rust lint` "
-            "for a quick test of a tool), or delete the test with the tool it tests",
+            f"NOT RUN\t{path}\tno workflow that runs on push, pull request or schedule runs it: add a "
+            "step (ci.yml `rust lint` for a quick test of a tool), or delete the test with the tool "
+            "it tests",
         )
     print(f"python tests in CI\tfiles={len(files)}\tnot_run={len(missing)}")
     return 0 if not missing else 1

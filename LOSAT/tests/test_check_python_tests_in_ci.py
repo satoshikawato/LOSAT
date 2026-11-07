@@ -22,13 +22,21 @@ checker = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = checker
 SPEC.loader.exec_module(checker)
 
-CI = """jobs:
+CI = """on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
   lint:
     steps:
       - name: Tool tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_tool.py'
 """
-PYTHON_YML = """jobs:
+PYTHON_YML = """on:
+  pull_request:
+    paths:
+      - "python/**"
+jobs:
   pylosat:
     defaults:
       run:
@@ -51,7 +59,40 @@ def run(root: Path) -> tuple[int, str]:
     return code, out.getvalue()
 
 
+def workflow(on: str, run_lines: str) -> str:
+    return f"on: {on}\njobs:\n  a:\n    steps:\n{run_lines}"
+
+
 class PythonTestsInCiTests(unittest.TestCase):
+    def test_trigger_forms(self) -> None:
+        self.assertEqual(checker.triggers(["on: push"]), {"push"})
+        self.assertEqual(checker.triggers(["on: [push, schedule]"]), {"push", "schedule"})
+        block = ["name: x", "on:", "  workflow_call:", "    inputs:", "      push:", "  schedule:",
+                 "    - cron: '1 2 * * *'", "jobs:", "  push:"]
+        self.assertEqual(checker.triggers(block), {"workflow_call", "schedule"})
+        self.assertEqual(checker.triggers(["on:", "  - push", "  - pull_request"]), {"push", "pull_request"})
+        self.assertEqual(checker.triggers(["jobs:", "  a:", "    on: push"]), set())
+
+    def test_run_text_reads_inline_and_block_values_only(self) -> None:
+        lines = [
+            "    paths: ['tests/test_paths.py']",
+            "      - run: python3 tests/test_inline.py",
+            "      - name: block",
+            "        run: |",
+            "          python3 tests/test_block_1.py",
+            "",
+            "          python3 tests/test_block_2.py",
+            "        env:",
+            "          X: tests/test_env.py",
+            "        run: >-",
+            "          python3 tests/test_folded.py",
+        ]
+        text = checker.run_text(lines)
+        for name in ("test_inline.py", "test_block_1.py", "test_block_2.py", "test_folded.py"):
+            self.assertIn(name, text)
+        for name in ("test_paths.py", "test_env.py"):
+            self.assertNotIn(name, text)
+
     def test_a_named_file_passes_and_an_unnamed_one_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -69,21 +110,46 @@ class PythonTestsInCiTests(unittest.TestCase):
             self.assertIn("NOT RUN\tscripts/test_script.py\t", out)
             self.assertNotIn("test_tool.py\t", out)
 
-    def test_a_name_in_a_comment_does_not_count(self) -> None:
+    def test_a_name_outside_a_run_command_does_not_count(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write(
                 root,
                 ".github/workflows/ci.yml",
-                CI + "      # - run: python3 -m unittest LOSAT/tests/test_old.py\n"
-                "      - run: echo hi  # test_trailing.py\n",
+                CI.replace("  pull_request:\n", "  pull_request:\n    paths: ['LOSAT/tests/test_paths.py']\n")
+                + "      # - run: python3 -m unittest LOSAT/tests/test_old.py\n"
+                "      - run: echo hi  # test_trailing.py\n"
+                "        env:\n          FILE: LOSAT/tests/test_env.py\n",
             )
-            write(root, "LOSAT/tests/test_old.py")
-            write(root, "LOSAT/tests/test_trailing.py")
+            for name in ("test_tool", "test_paths", "test_old", "test_trailing", "test_env"):
+                write(root, f"LOSAT/tests/{name}.py")
             code, out = run(root)
             self.assertEqual(code, 1)
-            self.assertIn("NOT RUN\tLOSAT/tests/test_old.py", out)
-            self.assertIn("NOT RUN\tLOSAT/tests/test_trailing.py", out)
+            for name in ("test_paths", "test_old", "test_trailing", "test_env"):
+                self.assertIn(f"NOT RUN\tLOSAT/tests/{name}.py", out)
+            self.assertIn("not_run=4", out)
+
+    def test_only_workflows_that_run_without_a_person_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            step = "      - run: python3 -m unittest discover -s LOSAT/tests -p 'test_{}.py'\n"
+            write(root, ".github/workflows/ci.yml", CI)
+            write(root, ".github/workflows/release.yml",
+                  workflow("workflow_dispatch", step.format("release")
+                           + "  b:\n    uses: ./.github/workflows/called_by_release.yml\n"))
+            write(root, ".github/workflows/called_by_release.yml",
+                  workflow("[workflow_call, workflow_dispatch]", step.format("called_by_release")))
+            write(root, ".github/workflows/nightly.yml",
+                  workflow("\n  schedule:\n    - cron: '17 18 * * *'\n  workflow_dispatch:", step.format("nightly"))
+                  + "  wasm:\n    uses: ./.github/workflows/called.yml\n")
+            write(root, ".github/workflows/called.yml", workflow("workflow_call", step.format("called")))
+            for name in ("tool", "release", "called_by_release", "nightly", "called"):
+                write(root, f"LOSAT/tests/test_{name}.py")
+            code, out = run(root)
+            self.assertEqual(code, 1)
+            self.assertIn("NOT RUN\tLOSAT/tests/test_release.py", out)
+            self.assertIn("NOT RUN\tLOSAT/tests/test_called_by_release.py", out)
+            self.assertIn("not_run=2", out)
 
     def test_a_directory_suite_counts_while_its_workflow_runs_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -91,15 +157,23 @@ class PythonTestsInCiTests(unittest.TestCase):
             write(root, ".github/workflows/ci.yml", CI)
             write(root, ".github/workflows/python.yml", PYTHON_YML)
             write(root, "python/tests/test_search.py")
+            write(root, "python/tests/test_other.py")
             self.assertEqual(run(root)[0], 0)
+            # One file of the directory is not the directory.
+            write(root, ".github/workflows/python.yml", PYTHON_YML.replace("pytest tests", "pytest tests/test_search.py"))
+            code, out = run(root)
+            self.assertEqual(code, 1)
+            self.assertIn("NOT RUN\tpython/tests/test_other.py", out)
+            self.assertIn("not_run=1", out)
             # The command in another workflow does not run python/tests.
-            write(root, ".github/workflows/python.yml", "jobs: {}\n")
+            write(root, ".github/workflows/python.yml", "on: pull_request\njobs: {}\n")
             write(root, ".github/workflows/ci.yml", CI + "      - run: pytest tests\n")
             code, out = run(root)
             self.assertEqual(code, 1)
             self.assertIn("NOT RUN\tpython/tests/test_search.py", out)
             # Without the directory command, a step that names the file runs it.
-            write(root, ".github/workflows/ci.yml", CI + "      - run: pytest python/tests/test_search.py\n")
+            write(root, ".github/workflows/ci.yml",
+                  CI + "      - run: pytest python/tests/test_search.py python/tests/test_other.py\n")
             self.assertEqual(run(root)[0], 0)
 
     def test_build_output_worktrees_and_packages_are_not_read(self) -> None:

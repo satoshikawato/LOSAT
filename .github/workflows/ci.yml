@@ -55,9 +55,10 @@ jobs:
         run: python3 LOSAT/tests/check_program_edges.py --root .
       - name: Program-edge ratchet tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_program_edges.py'
-      # No NCBI counterpart: CI wiring. Every test_*.py file is named in a workflow (SWEBOK
-      # 2026-11-04 audit, KA5: five files and 35 tests ran in none); python/tests/ runs as a
-      # directory in python.yml.
+      # No NCBI counterpart: CI wiring. Every test_*.py file is named in a `run:` command of a
+      # workflow that runs on push, pull request or schedule, or one it calls (SWEBOK 2026-11-04
+      # audit, KA5: five files and 35 tests ran in none); python/tests/ runs as a directory in
+      # python.yml.
       - name: Python tests in CI
         run: python3 LOSAT/tests/check_python_tests_in_ci.py --root .
       - name: Python-tests-in-CI checker tests
@@ -75,11 +76,12 @@ jobs:
       # No NCBI counterpart: the merge of the coverage shards of nightly.yml (a report).
       - name: Coverage summary tooling tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_coverage_summary.py'
-      # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+      # NCBI reference (598d8ae6): ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
       # x_PrintField(*iter); m_Ostream << "\n";
-      # The Gate A tools compare NCBI's and LOSAT's raw outfmt 6 bytes (set A of
-      # docs/release/v0.2.0_certification_plan.md, Gate A of the losat-gates skill), and
-      # certify_platform_native_v010.py imports them. Their tests use small files and stand-in
+      # The Gate A tools compare NCBI's and LOSAT's raw outfmt 6/7 bytes (set A of
+      # docs/release/v0.2.0_certification_plan.md, Gate A of the losat-gates skill):
+      # certify_integrated_runtime_v010.py drives the other four, which
+      # certify_platform_native_v010.py also imports. Their tests use small files and stand-in
       # programs, so no search runs (under a second in all, 2026-11-07).
       - name: Gate A certification tooling tests
         run: |
@@ -88,7 +90,9 @@ jobs:
           python3 -m unittest discover -s LOSAT/tests -p 'test_audit_blastp_v010.py'
           python3 -m unittest discover -s LOSAT/tests -p 'test_audit_tblastx_v010.py'
           python3 -m unittest discover -s LOSAT/tests -p 'test_certify_integrated_runtime_v010.py'
-      # No NCBI counterpart: the A/B timing tool of the WASI builds (LOSAT/tests/README.md).
+      # No NCBI counterpart: the A/B timing tool of the WASI builds (LOSAT/tests/README.md). Its
+      # tests run stand-in runners; the tool also calls node and git (both on the runner image) and
+      # needs the temporary directory under /tmp.
       - name: WASI benchmark tooling tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_benchmark_wasm_threading.py'
       # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143

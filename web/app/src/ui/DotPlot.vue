@@ -344,12 +344,13 @@ function drawBase(): void {
   context.textAlign = 'center';
   context.textBaseline = 'bottom';
   const labelEdge = b.top - 1 - MAJOR_PX - GAP;
-  for (const t of labelled(context, xTicks, sx)) {
+  const [xLabels, yLabels] = [labelled(context, xTicks, sx), labelled(context, yTicks, sy)];
+  for (const t of xLabels) {
     const text = tickLabel(t, xTicks.unit);
     // End labels stay inside the canvas (S13 screen review L7); all sit above the ticks, off the frame.
     context.fillText(text, within(toPixelX(t, v, b), context.measureText(text).width, W), labelEdge);
   }
-  for (const t of labelled(context, yTicks, sy)) {
+  for (const t of yLabels) {
     const text = tickLabel(t, yTicks.unit);
     context.save();
     context.translate(labelEdge, within(toPixelY(t, v, b), context.measureText(text).width, H));
@@ -368,8 +369,11 @@ function drawBase(): void {
   context.rotate(-Math.PI / 2);
   context.fillText(yTitle, 0, 0);
   context.restore();
-  // The titles as drawn, for the tests.
-  if (base.value !== undefined) base.value.dataset['titles'] = JSON.stringify([xTitle, yTitle]);
+  // The titles and the tick labels as drawn, for the tests.
+  if (base.value !== undefined) {
+    base.value.dataset['titles'] = JSON.stringify([xTitle, yTitle]);
+    base.value.dataset['ticks'] = JSON.stringify([xLabels.map((t) => tickLabel(t, xTicks.unit)), yLabels.map((t) => tickLabel(t, yTicks.unit))]);
+  }
 }
 
 /**

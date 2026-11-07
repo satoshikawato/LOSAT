@@ -1,5 +1,6 @@
-// The Dot Plot and the Graphic Summary under a finger (W9: WA2-AX-10, WA2-AX-11) and the HSP
-// table's Identity and Orientation columns (WA2-OP-01).
+// The Dot Plot and the Graphic Summary under a finger (W9: WA2-AX-10, WA2-AX-11), the HSP table's
+// Identity and Orientation columns (WA2-OP-01) and the numbers on the axes of a short span
+// (WA2-OP-02).
 //
 // The touch screen is a phone's: hasTouch and a phone's width. A tap is Playwright's touchscreen
 // tap, which gives pointer events of type "touch" in all three browsers. A finger that moves is
@@ -423,3 +424,65 @@ for (const width of [1280, 375]) {
     }
   });
 }
+
+// --- WA2-OP-02: numbers on the axes of a short span -------------------------------------------------
+
+/** The tick labels that the dot plot drew on its query and subject axes. */
+async function tickLabels(canvas: Locator): Promise<[string[], string[]]> {
+  return JSON.parse((await canvas.getAttribute('data-ticks')) ?? '[[],[]]') as [string[], string[]];
+}
+
+test('the dot plot numbers both axes of a view shorter than 100 letters: a short pair, a zoomed view, an HSP of one letter', async ({ page }) => {
+  // Two short sequences (8 against 16 letters, results.spec.ts's HSP of one letter), whole.
+  const qIdx = BUILD_HAS_ENGINE ? 0 : 2;
+  await program(page, 'blastn');
+  await task(page, 'blastn');
+  await openParameters(page);
+  await page.getByTestId('param-word_size').selectOption('other');
+  await page.getByTestId('param-word_size-other').fill('4');
+  await paste(page, 'query', BUILD_HAS_ENGINE ? '>q\nTAGGACGG\n' : '>q1\nACGTACGTACGT\n>q2\nACGTACGTACGT\n>q\nTAGGACGG\n');
+  await paste(page, 'subject', '>s\nYCAYAANTNCRGYACT\n');
+  await runAndOpen(page);
+  if (!BUILD_HAS_ENGINE) await page.getByTestId(`query-row-${qIdx}`).click();
+  await showTab(page, 'pane-dotplot');
+  const canvas = page.getByTestId('dotplot-canvas');
+  await expect(canvas).toHaveAttribute('data-view', '0,8,0,16');
+  // Steps of 2 letters on the query's 8, of 5 on the subject's 16 (blast2dotplot.py's 100 gave each axis its 0 only).
+  await expect.poll(() => tickLabels(canvas)).toEqual([
+    ['0', '2', '4', '6', '8'],
+    ['0', '5', '10', '15'],
+  ]);
+  // "Zoom to HSP" on the HSP of one letter.
+  const single = page.getByTestId('results-dotplot').getByTestId('hsp-list').locator('[data-testid^="hsp-row-"][data-orientation="unknown"]');
+  await single.click();
+  await page.getByTestId('dotplot-zoom-hsp').click();
+  await page.waitForTimeout(200);
+  for (const labels of await tickLabels(canvas)) expect(labels.length).toBeGreaterThanOrEqual(2);
+});
+
+test('the dot plot numbers both axes of a view zoomed to under 100 letters, and keeps blast2dotplot.py\'s ticks above 100', async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q\n${LONG}\n`);
+  await paste(page, 'subject', `>s\n${LONG}\n`);
+  await runAndOpen(page);
+  await showTab(page, 'pane-dotplot');
+  const canvas = page.getByTestId('dotplot-canvas');
+  await expect(canvas).toHaveAttribute('data-view', '0,600,0,600');
+  // The whole 600 letters: blast2dotplot.py's 100 a major tick.
+  await expect.poll(async () => (await tickLabels(canvas))[0]).toEqual(['0', '100', '200', '300', '400', '500', '600']);
+  // Zoomed in to 600 / 1.5^n letters: under 100 from n = 5 (79 letters) on, under 20 at n = 9 (16)
+  // and 10 (10.4). Above 100 letters, the steps stay blast2dotplot.py's (100 a major tick up to 1000).
+  for (let n = 1; n <= 10; n++) {
+    const before = (await canvas.getAttribute('data-view'))!;
+    await page.getByTestId('dotplot-zoom-in').click();
+    await expect(canvas).not.toHaveAttribute('data-view', before);
+    const [x0, x1, y0, y1] = await view(canvas);
+    const labels = await tickLabels(canvas);
+    const span = x1! - x0!;
+    const says = (axis: number) => `${n}: ${axis === 0 ? `query ${x0}–${x1}` : `subject ${y0}–${y1}`}: ${labels[axis]!.join(' ')}`;
+    for (const axis of [0, 1]) {
+      if (span <= 100) expect(labels[axis]!.length, says(axis)).toBeGreaterThanOrEqual(2);
+      else expect(labels[axis]!.map((label) => Number(label.replace(/,/g, '')) % 100), says(axis)).toEqual(labels[axis]!.map(() => 0));
+    }
+  }
+});

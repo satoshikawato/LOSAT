@@ -1282,7 +1282,7 @@ pub(super) fn x_scan_unit(
     let pairs_len = if presence.is_some() {
         capacity + super::x_scan_byte::X_SCAN_BYTE_SLACK
     } else {
-        capacity + super::x_scan_bf::X_SCAN_BF_SLACK
+        capacity + crate::algorithm::tblastx::x_aascan_bf::X_SCAN_BF_SLACK
     };
     if pairs.len() < pairs_len {
         pairs.resize(pairs_len, BlastOffsetPair::default());
@@ -1327,7 +1327,7 @@ pub(super) fn x_scan_unit(
                     )
                 }
             } else {
-                super::x_scan_bf::x_scan_one_range_bf(
+                crate::algorithm::tblastx::x_aascan_bf::x_scan_one_range_bf(
                     lookup,
                     subject,
                     pairs,
@@ -1341,8 +1341,8 @@ pub(super) fn x_scan_unit(
     }
     if presence.is_some() {
         super::x_scan_byte::x_count_unit(x_calls);
-    } else if super::x_scan_bf::x_stats() {
-        super::x_scan_bf::x_count_unit(x_calls);
+    } else if crate::algorithm::tblastx::x_aascan_bf::x_stats() {
+        crate::algorithm::tblastx::x_aascan_bf::x_count_unit(x_calls);
     }
 }
 

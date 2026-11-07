@@ -1465,7 +1465,7 @@ impl XGroup {
 
 /// One unit: subject frame `f`, its chunk number `k`, context group `g`.
 #[derive(Clone, Copy)]
-struct XUnit {
+pub(super) struct XUnit {
     f: usize,
     k: usize,
     chunk: SubjectChunk,
@@ -3294,7 +3294,7 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: usize>(
                     false,
                 )
             } else if SENT == 0 {
-                extend_hit_two_hit(
+                extend_hit_two_hit_fitting(
                     query,
                     h.subject,
                     (last_hit + wordsize) as usize,

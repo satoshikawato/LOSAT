@@ -114,12 +114,28 @@ const BLAST2NA_MASK: u8 = 0xFC;
 ///   index = (index << charsize) | word[i];
 /// }
 /// ```
+/// `None` when the word `start..start + k` does not fit in `seq` (for any `start` and `k`) or
+/// holds a base that is not A, C, G or T.
 pub fn encode_kmer(seq: &[u8], start: usize, k: usize) -> Option<u64> {
+    // No NCBI counterpart: NCBI's callers pass words that fit; this form cannot wrap.
+    if k > seq.len() || start > seq.len() - k {
+        return None;
+    }
+    encode_kmer_fitting(seq, start, k)
+}
+
+/// `encode_kmer` for the table builders below, whose words fit (`start <= seq.len() - k`), so
+/// `start + k` does not wrap.
+#[inline(always)]
+fn encode_kmer_fitting(seq: &[u8], start: usize, k: usize) -> Option<u64> {
     if start + k > seq.len() {
         return None;
     }
     let mut encoded: u64 = 0;
     for i in 0..k {
+        // SAFETY: `start + i < start + k <= seq.len()` (the test above); `start + k` does not
+        // wrap: `encode_kmer` tests that the word fits, and the two builders pass
+        // `start <= seq.len() - k`.
         let base = unsafe { *seq.get_unchecked(start + i) };
         if (base & BLAST2NA_MASK) != 0 {
             return None;
@@ -2262,7 +2278,11 @@ fn build_mb_lookup(
     }
 }
 
-pub fn build_two_stage_lookup(
+/// Only the tests call it; searches go through `build_two_stage_lookup_kept` with the lookup
+/// word of `choose_na_lookup_table` and disjoint contexts (not `pub`: overlapping
+/// `query_offsets` race in the pooled fill, and a lookup word of 0 writes past `next_pos`).
+#[cfg(test)]
+pub(crate) fn build_two_stage_lookup(
     queries_blastna: &[&[u8]],
     query_offsets: &[i32],
     word_length: usize,
@@ -2698,8 +2718,12 @@ fn disc_longest_chain(helper_array: &[u32], helper_array2: &[u32], two_templates
 /// ```
 /// The locations are the unmasked ranges of each context, in the order of
 /// `build_mb_lookup`; `left`/`right` are offsets in the concatenated query.
+/// Only the tests call it (with checked word sizes and disjoint contexts); searches go through
+/// `build_disc_mb_lookup_kept` after `check_scoring_options` (not `pub`: a word size other than
+/// 11 or 12, or overlapping `query_offsets` on a pool of 2+ threads, breaks the parallel fill).
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
-pub fn build_disc_mb_lookup(
+pub(crate) fn build_disc_mb_lookup(
     queries_blastna: &[&[u8]],
     query_offsets: &[i32],
     word_size: usize,
@@ -2994,7 +3018,7 @@ pub fn build_direct_lookup(
 
             // NCBI reference: blast_lookup.c:119-120
             // if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
-            if let Some(kmer) = encode_kmer(seq, i, safe_word_size) {
+            if let Some(kmer) = encode_kmer_fitting(seq, i, safe_word_size) {
                 // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
                 // Adds ALL hits without any frequency limit - no query-side filtering
                 let idx = kmer as usize;
@@ -3038,7 +3062,7 @@ pub fn build_direct_lookup(
                 continue;
             }
 
-            if let Some(kmer) = encode_kmer(seq, i, safe_word_size) {
+            if let Some(kmer) = encode_kmer_fitting(seq, i, safe_word_size) {
                 let idx = kmer as usize;
                 if idx < table_size {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
@@ -3518,5 +3542,20 @@ mod disc_lookup_tests {
         assert_eq!(chain(&masked, coding, false), vec![42]);
         assert!(masked.disc().is_some_and(|d| !d.two_templates));
         assert!(chain(&masked, optimal, true).is_empty());
+    }
+}
+
+// No NCBI counterpart: the checked public form refuses words that do not fit (line LIB, P-S1).
+#[cfg(test)]
+mod encode_kmer_bounds_tests {
+    use super::encode_kmer;
+
+    #[test]
+    fn a_word_that_does_not_fit_is_refused_for_any_start() {
+        // `start + k` wraps to 1 here; the unchecked read was `seq[usize::MAX]`.
+        assert_eq!(encode_kmer(&[0u8], usize::MAX, 2), None);
+        assert_eq!(encode_kmer(&[0u8], 1, usize::MAX), None);
+        assert_eq!(encode_kmer(&[0u8, 1], 1, 2), None);
+        assert_eq!(encode_kmer(&[0u8, 1], 0, 2), Some(1));
     }
 }

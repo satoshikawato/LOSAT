@@ -1453,6 +1453,17 @@ impl TblastxOutputFormat {
         )
     }
 
+    /// Whether the format is a table whose fields read the sequence that NCBI's formatter finds
+    /// by a subject's Seq-align id (`report::tabular::reads_subject`: the default fields do).
+    pub(crate) fn tabular_reads_subject(self) -> bool {
+        let spec = match self {
+            Self::Tabular | Self::TabularWithComments => None,
+            Self::CustomTabular(spec) => Some(spec),
+            _ => return false,
+        };
+        crate::report::tabular::reads_subject(spec, crate::blastinput::app::Program::Tblastx)
+    }
+
     /// Whether the format writes the displayed identity counts of the rows
     /// (`set_displayed_identities`): not the structured formats, which read the engine's counts
     /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5, 15, 16), and not the
@@ -1504,14 +1515,6 @@ impl TblastxOutputFormat {
             self,
             Self::Seqalign(_) | Self::Xml | Self::Xml2(_) | Self::Archive
         )
-    }
-
-    /// The `-outfmt` number of a Seq-annot format (8, 9 or 12), `None` for the others.
-    pub(crate) fn serial_outfmt(self) -> Option<i32> {
-        match self {
-            Self::Seqalign(serial) => Some(serial.outfmt()),
-            _ => None,
-        }
     }
 
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's

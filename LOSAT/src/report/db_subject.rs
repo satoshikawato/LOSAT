@@ -584,7 +584,13 @@ impl ParsedSubject {
                 | FoundInstead::WeakUnlisted,
             ) => Prefetched::Itself,
             Some(FoundInstead::Nothing) => Prefetched::Nothing,
-            Some(FoundInstead::Failed(_)) => Prefetched::Failed(reason()),
+            // The prefetch catches the exception of a failed lookup and writes its warning, or
+            // rethrows a database error (`CSeqDBException`) and stops; the formats that read the
+            // Bioseq stop (`fetched`).
+            Some(FoundInstead::Failed(message)) => Prefetched::Failed(format!(
+                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data and reads no other subject of the batch, or stops)",
+                String::from_utf8_lossy(&self.alignment_fasta())
+            )),
             Some(FoundInstead::Sequence(other)) => Prefetched::Another {
                 other: Some(*other),
                 or_itself: false,

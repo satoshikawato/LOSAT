@@ -12,6 +12,7 @@ import { effectiveValue, fieldChoices, fieldList, knownDefault, writtenValue } f
 import { programById, type ParameterField } from '../domain/programs';
 import { optionHelp } from './format';
 import HelpTip from './HelpTip.vue';
+import { refusal, refusedMark } from './refusal';
 
 const props = defineProps<{ draft: SearchDraft; state: DraftState; field: ParameterField; inline?: boolean }>();
 
@@ -56,6 +57,14 @@ watchEffect(() => {
 const otherInput = ref<HTMLInputElement | null>(null);
 
 const choiceLabel = (choice: string) => props.field.choiceLabels?.[choice] ?? choice;
+/** Whether the refusal of the argv names the field's option (WA2-AX-05). */
+const refused = computed(() => refusal(props.state)?.flags.has(props.field.flag) === true);
+/**
+ * The refused field's marks, on the control that holds its value: the text box after "Other" or of
+ * a filter's arguments where it is shown (`on` is false for the select or the checkbox beside it).
+ */
+const mark = (on = true) => refusedMark(refused.value && on);
+
 /** The engine's help, behind the "?" (HelpTip). */
 const help = computed(() => optionHelp(option.value?.help));
 
@@ -116,7 +125,7 @@ function onList(next: string): void {
       <span v-if="changed" class="visually-hidden">, changed from the default</span>
     </component>
     <div class="param-control">
-      <div v-if="field.kind === 'radio'" class="radios" role="radiogroup" :aria-labelledby="`${id}-label`" :data-testid="id">
+      <div v-if="field.kind === 'radio'" class="radios" role="radiogroup" :aria-labelledby="`${id}-label`" v-bind="mark()" :data-testid="id">
         <label v-for="choice in choices" :key="choice" class="radio">
           <input
             type="radio"
@@ -130,7 +139,14 @@ function onList(next: string): void {
         </label>
       </div>
       <template v-else-if="field.kind === 'filter'">
-        <input :id="id" type="checkbox" :checked="filterOn" :data-testid="id" @change="toggleFilter(($event.target as HTMLInputElement).checked)" />
+        <input
+          :id="id"
+          type="checkbox"
+          :checked="filterOn"
+          v-bind="mark(!(filterOn || filterEditing))"
+          :data-testid="id"
+          @change="toggleFilter(($event.target as HTMLInputElement).checked)"
+        />
         <label v-if="inline" :id="`${id}-label`" class="param-label" :for="id">
           <span v-if="changed" class="changed-mark" aria-hidden="true">♦</span>
           {{ field.label }} <span class="flag">{{ field.flag }}</span>
@@ -146,6 +162,7 @@ function onList(next: string): void {
             :value="value === undefined ? (fallback ?? '') : text"
             :placeholder="fallback === 'no' ? '' : (fallback ?? '')"
             :aria-labelledby="`${id}-label ${id}-value-name`"
+            v-bind="mark()"
             :data-testid="`${id}-value`"
             @input="set(($event.target as HTMLInputElement).value)"
             @focus="filterEditing = true"
@@ -159,6 +176,7 @@ function onList(next: string): void {
           :id="id"
           type="checkbox"
           :checked="boxChecked"
+          v-bind="mark()"
           :data-testid="id"
           @change="
             field.kind === 'flag'
@@ -175,7 +193,13 @@ function onList(next: string): void {
       </template>
       <template v-else-if="list.length > 0">
         <span class="select-clip">
-          <select :id="id" :value="other ? OTHER : shown" :data-testid="id" @change="onList(($event.target as HTMLSelectElement).value)">
+          <select
+            :id="id"
+            :value="other ? OTHER : shown"
+            v-bind="mark(!other)"
+            :data-testid="id"
+            @change="onList(($event.target as HTMLSelectElement).value)"
+          >
             <option v-if="shown === ''" value="">Default</option>
             <option v-for="item in list" :key="item" :value="item">{{ item }}</option>
             <option :value="OTHER">Other</option>
@@ -192,6 +216,7 @@ function onList(next: string): void {
           :value="text"
           :placeholder="fallback ?? ''"
           :aria-labelledby="`${id}-label`"
+          v-bind="mark()"
           :data-testid="`${id}-other`"
           @input="set(($event.target as HTMLInputElement).value)"
         />
@@ -205,6 +230,7 @@ function onList(next: string): void {
           spellcheck="false"
           :value="value === undefined ? (fallback ?? '') : text"
           :placeholder="fallback ?? ''"
+          v-bind="mark()"
           :data-testid="id"
           @input="set(($event.target as HTMLInputElement).value)"
         />
@@ -216,6 +242,7 @@ function onList(next: string): void {
           v-if="field.kind === 'gencode'"
           :id="id"
           :value="text"
+          v-bind="mark()"
           :data-testid="id"
           @change="set(($event.target as HTMLSelectElement).value)"
         >
@@ -226,12 +253,13 @@ function onList(next: string): void {
           v-else-if="defaultChosen"
           :id="id"
           :value="shown"
+          v-bind="mark()"
           :data-testid="id"
           @change="choose(($event.target as HTMLSelectElement).value)"
         >
           <option v-for="choice in choices" :key="choice" :value="choice">{{ choiceLabel(choice) }}</option>
         </select>
-        <select v-else :id="id" :value="text" :data-testid="id" @change="set(($event.target as HTMLSelectElement).value)">
+        <select v-else :id="id" :value="text" v-bind="mark()" :data-testid="id" @change="set(($event.target as HTMLSelectElement).value)">
           <option value="">{{ defaultLabel }}</option>
           <option v-for="choice in choices" :key="choice" :value="choice">{{ choiceLabel(choice) }}</option>
         </select>

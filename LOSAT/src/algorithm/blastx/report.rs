@@ -1294,7 +1294,7 @@ pub fn render(
 // ```c++
 //         formatter.PrintEpilog(opt);
 // ```
-pub fn render_queries(
+pub(crate) fn render_queries(
     writer: &mut impl Write,
     stderr: &mut dyn Write,
     options: &ResolvedOptions,

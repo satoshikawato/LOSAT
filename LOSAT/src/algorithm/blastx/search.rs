@@ -192,7 +192,10 @@ pub(crate) trait PreliminarySink {
 //             Int4 prot_length = 0;
 //             if (score_options->is_ooframe) {
 // ```
+// The sink of `search_preliminary` (the tests').
+#[cfg(test)]
 struct DiagnosticOnly;
+#[cfg(test)]
 impl PreliminarySink for DiagnosticOnly {}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:491-526
@@ -428,7 +431,10 @@ pub struct BatchStage {
 //
 //         Blast_HSPListSortByScore(hsp_list);
 // ```
-pub fn search_preliminary(
+// Only the tests call it (not `pub`: a subject's `lowercase_masks` past its letters would give the
+// scan ranges outside the subject).
+#[cfg(test)]
+pub(crate) fn search_preliminary(
     records: &[FastaRecord],
     subjects: &[FastaRecord],
     options: &ResolvedOptions,

@@ -1225,6 +1225,21 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
     }
 }
 
+/// The Seq-aligns of the results `hit_lists` that NCBI's prefetch counts against
+/// `PRE_FETCH_SEQS_LIMIT` (`shared::prefetch_off`): one for each HSP of a `gapped` search, one
+/// for each subject of an ungapped one (`shared::subject_seq_aligns`).
+pub(super) fn seq_aligns_of(hit_lists: &[Option<BlastnHitList>], gapped: bool) -> usize {
+    hit_lists
+        .iter()
+        .flatten()
+        .flat_map(|hit_list| {
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            &hit_list.hsplist_array[..count]
+        })
+        .map(|hsp_list| shared::subject_seq_aligns(hsp_list.hsps.len(), gapped))
+        .sum()
+}
+
 /// The database sequences that the reports show, by rank (`reported_subjects`).
 pub(super) struct ReportedSubjects {
     /// The ordinal id of each rank, ascending.
@@ -1273,14 +1288,17 @@ pub(super) struct ReportedSubjects {
 /// formats with letters read them; `reported_store`). A reported sequence whose stored title LOSAT
 /// does not report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the
 /// reports `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
-/// `shown.joined` `refuse_joined_hits`; `first_query`: the index of the query of `hit_lists[0]`).
+/// `shown.joined` `refuse_joined_hits`; `first_query`: the index of the query of `hit_lists[0]`;
+/// `prefetch`: whether each query's batch prefetches, where only the prefetch reads a subject).
 /// The records are made on `pool` (`x_reported_records`).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn reported_subjects(
     database: &BlastnDatabase,
     titles: &DatabaseTitles,
     hit_lists: &mut [Option<BlastnHitList>],
     letters: bool,
     shown: ParsedShown,
+    prefetch: &shared::BatchPrefetch,
     first_query: usize,
     pool: Option<&SearchPool<'_>>,
 ) -> Result<ReportedSubjects> {
@@ -1293,20 +1311,31 @@ pub(super) fn reported_subjects(
         .collect();
     ordinals.sort_unstable();
     ordinals.dedup();
-    // Where only the batches' prefetch reads the subjects (`shown.prefetched`), those with an HSP
-    // on the query's minus strand, whose Seq-align is on the subject's plus strand
-    // (`shared::check_prefetched_strands`).
-    let flipped: std::collections::HashSet<u32> = if shown.prefetched {
-        hit_lists
+    // Where only the batches' prefetch reads the subjects (`shown.prefetched`), those that a
+    // batch whose prefetch is on reports (`prefetch`: a batch whose Seq-aligns outnumber a
+    // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them), and of these the ones with an HSP
+    // on the query's minus strand in such a batch, whose Seq-align is on the subject's plus
+    // strand (`shared::check_prefetched_strands`).
+    // `prefetched` is `None` where every batch prefetches.
+    let mut prefetched = prefetch.counts().then(std::collections::HashSet::new);
+    let mut flipped = std::collections::HashSet::new();
+    if shown.prefetched {
+        let lists = hit_lists
             .iter()
-            .flatten()
+            .enumerate()
+            .filter(|&(query, _)| prefetch.query(query))
+            .filter_map(|(_, hit_list)| hit_list.as_ref())
             .flat_map(|hit_list| hit_list.hsplist_array.iter())
-            .filter(|hsp_list| hsp_list.hsps.iter().any(|hsp| hsp.query_frame < 0))
-            .map(|hsp_list| hsp_list.oid)
-            .collect()
-    } else {
-        Default::default()
-    };
+            .filter(|hsp_list| !hsp_list.hsps.is_empty());
+        for hsp_list in lists {
+            if let Some(prefetched) = &mut prefetched {
+                prefetched.insert(hsp_list.oid);
+            }
+            if hsp_list.hsps.iter().any(|hsp| hsp.query_frame < 0) {
+                flipped.insert(hsp_list.oid);
+            }
+        }
+    }
     let rank = |ordinal: u32| -> u32 {
         ordinals
             .binary_search(&ordinal)
@@ -1341,6 +1370,11 @@ pub(super) fn reported_subjects(
             }
             ReportedHeader::Parsed(subject) => {
                 let taxdb = shown.pairwise && *taxdb_found.get_or_init(|| db.taxdb_found());
+                let shown = shown.prefetched_if(
+                    prefetched
+                        .as_ref()
+                        .is_none_or(|prefetched| prefetched.contains(&ordinal)),
+                );
                 shared::check_reported_parsed(db, subject, shown, false, taxdb, ordinal, PROGRAM)?;
                 shared::check_prefetched_strands(
                     db,
@@ -2059,6 +2093,7 @@ mod tests {
             &mut hit_lists,
             true,
             ParsedShown::default(),
+            &shared::BatchPrefetch::every(),
             0,
             None,
         )
@@ -2113,6 +2148,7 @@ mod tests {
             &mut hit_lists,
             false,
             ParsedShown::default(),
+            &shared::BatchPrefetch::every(),
             0,
             None,
         )
@@ -2149,6 +2185,7 @@ mod tests {
             &mut clean,
             false,
             ParsedShown::default(),
+            &shared::BatchPrefetch::every(),
             0,
             None,
         )
@@ -2162,6 +2199,7 @@ mod tests {
             &mut bad,
             false,
             ParsedShown::default(),
+            &shared::BatchPrefetch::every(),
             0,
             None,
         )

@@ -1248,6 +1248,25 @@ pub(super) fn reported_batch(
     if matches!(search_subjects, Subjects::Unreadable) {
         return Ok(ReportedSubjects::default());
     }
+    // The batch's Seq-aligns: one for each HSP that the reports show
+    // (`has_seqalign`), one for each subject of an ungapped search. Where
+    // `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
+    // (`shared::prefetch_off`), it reads nothing of a subject that no
+    // report reads (`asks.prefetched`).
+    let seq_aligns: usize = results
+        .iter()
+        .flat_map(|batch| batch.queries.iter().flatten())
+        .map(|list| {
+            crate::algorithm::common::database::subject_seq_aligns(
+                list.hsps
+                    .iter()
+                    .filter(|hsp| super::report::has_seqalign(hsp, options.gapped))
+                    .count(),
+                options.gapped,
+            )
+        })
+        .sum();
+    let prefetch_off = crate::algorithm::common::database::prefetch_off(seq_aligns);
     let x_t = super::x_timing::lap();
     let reported = ReportedSubjects::for_batch(
         database,
@@ -1262,7 +1281,7 @@ pub(super) fn reported_batch(
         asks.joined,
         asks.taxonomy,
         asks.words,
-        asks.prefetched,
+        asks.prefetched && !prefetch_off,
     );
     super::x_timing::run(XRun::Titles, x_t);
     let reported = reported
@@ -1335,27 +1354,12 @@ pub(super) fn reported_batch(
                 }
             }
         };
-        // The batch's Seq-aligns: one for each HSP that the reports show
-        // (`has_seqalign`), one for each subject of an ungapped search.
-        let seq_aligns: usize = results
-            .iter()
-            .flat_map(|batch| batch.queries.iter().flatten())
-            .map(|list| {
-                crate::algorithm::common::database::subject_seq_aligns(
-                    list.hsps
-                        .iter()
-                        .filter(|hsp| super::report::has_seqalign(hsp, options.gapped))
-                        .count(),
-                    options.gapped,
-                )
-            })
-            .sum();
         // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
-        // (`shared::prefetch_off`), each query's report fetches the
+        // (`prefetch_off`, above), each query's report fetches the
         // subjects it shows, after the query's own warnings
         // (`ReportedSubjects::fetch_by_query`), where the format's rows read
         // their Bioseqs (`TabularSpec::subject_fetch`).
-        if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+        if prefetch_off {
             let rows = options
                 .tabular
                 .map_or(crate::report::tabular::SubjectFetch::Every, |spec| {
@@ -1976,7 +1980,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         match &result {
             Err(error) => {
                 if let Some(lines) = archive::error_lines(error, false) {
-                    let _ = crate::report::archive::write_error_archive(handle, &lines, writer);
+                    let _ = crate::report::archive::write_error_archive_after_post(
+                        handle, error, &lines, writer,
+                    );
                 }
             }
             Ok(()) => {
@@ -2016,7 +2022,12 @@ fn write_run_error_archive(
             None => Some(Box::new(io::stdout().lock())),
         };
     if let Some(mut destination) = destination {
-        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut destination);
+        let _ = crate::report::archive::write_error_archive_after_post(
+            handle,
+            error,
+            &lines,
+            &mut destination,
+        );
         let _ = destination.flush();
     }
 }

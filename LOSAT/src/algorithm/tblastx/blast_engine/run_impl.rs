@@ -925,8 +925,12 @@ pub fn run(
         match &result {
             Err(error) => {
                 if let Some(lines) = super::super::archive::error_lines(error, false) {
-                    let _ =
-                        crate::report::archive::write_error_archive(handle, &lines, &mut stream);
+                    let _ = crate::report::archive::write_error_archive_after_post(
+                        handle,
+                        error,
+                        &lines,
+                        &mut stream,
+                    );
                 }
             }
             Ok(()) => {
@@ -994,7 +998,12 @@ fn write_run_error_archive(
     };
     if let Ok(out_file) = open_out_file(args) {
         let mut report = cli_report_stream(out_file);
-        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut report);
+        let _ = crate::report::archive::write_error_archive_after_post(
+            handle,
+            error,
+            &lines,
+            &mut report,
+        );
         let _ = std::io::Write::flush(&mut report);
     }
 }
@@ -3559,14 +3568,8 @@ fn run_batch_loop(
             // database or a taxid that LOSAT cannot read as NCBI does) stops the run before any
             // report, as the refusals of the titles above and XML2's lookups (`read_taxids`) do.
             if prefetches && database.taxdb_found() {
-                // The batch's Seq-aligns: one for each subject of each query (TBLASTX's search
-                // is ungapped), whose HSPs follow each other in report order.
-                let seq_aligns: usize = ordered
-                    .chunk_by(|a, b| a.hit.q_idx == b.hit.q_idx && a.hit.s_idx == b.hit.s_idx)
-                    .map(|hsps| {
-                        crate::algorithm::common::database::subject_seq_aligns(hsps.len(), false)
-                    })
-                    .sum();
+                // The batch's Seq-aligns (`database::seq_aligns_of`).
+                let seq_aligns = super::super::database::seq_aligns_of(ordered);
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                 // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
                 // after the query's own warnings (`query_fetches`, added after them below), where
@@ -3864,6 +3867,18 @@ impl BatchReports<'_> {
                         .is_some_and(|format| format.prefetches_subjects())
                         && !crate::algorithm::common::database::prefetch_always_off(),
                 };
+                // Whether each query's batch prefetches (`done.spans`, in the numbering of
+                // `hits`), for the subjects that only the prefetch reads.
+                let prefetch = crate::algorithm::common::database::BatchPrefetch::of(
+                    done.searched.len(),
+                    0,
+                    &done.spans,
+                    |span| {
+                        super::super::database::seq_aligns_of(super::super::database::query_hits(
+                            &hits, span,
+                        ))
+                    },
+                );
                 reported_subjects = super::super::database::reported_subjects(
                     database,
                     &self.titles.borrow(),
@@ -3871,6 +3886,7 @@ impl BatchReports<'_> {
                     self.reads_letters.then_some(&*self.stores.borrow()),
                     &self.lengths.borrow(),
                     shown,
+                    &prefetch,
                 )?;
                 // The library's records name a database's sequences through this event.
                 if outputs.hits.is_some() {

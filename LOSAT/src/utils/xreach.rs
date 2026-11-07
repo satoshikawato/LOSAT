@@ -139,7 +139,7 @@ pub fn write_report() {
             return;
         }
     };
-    let program = crate::cli::entry_argv(std::env::args_os())
+    let program = crate::utils::entry_names::entry_argv(std::env::args_os())
         .get(1)
         .map_or_else(String::new, |word| word.to_string_lossy().into_owned());
     let mut text = String::from("switch\tnew\tref\tprogram\n");

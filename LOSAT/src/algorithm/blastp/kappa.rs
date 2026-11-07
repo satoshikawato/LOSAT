@@ -14,7 +14,6 @@ use std::sync::OnceLock;
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
 use crate::core::blast_seg::{SegMasker, SegParams};
-use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
 use crate::core::composition_adjustment::adjust_scores::{
     blast_overall_p_value, read_aa_composition, x_newton_input, AdjustedProteinMatrix,
     BlastCompositionWorkspace,
@@ -27,7 +26,10 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks, BlastRedoRangeResult,
     EMatrixAdjustRule, XSubjectComposition,
 };
-use crate::stats::{blast_spouge_stoe, e_to_p, p_to_e, BlastGumbelBlk, KarlinParams};
+use crate::stats::{
+    blast_spouge_stoe, compute_lambda_from_score_probs, e_to_p, p_to_e, BlastGumbelBlk,
+    KarlinParams,
+};
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, ncbistdaa, protein_score};
 
 use super::gapalign::{

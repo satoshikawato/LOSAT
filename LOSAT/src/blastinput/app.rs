@@ -888,30 +888,6 @@ pub(crate) fn read_query_split_variable(
     }
 }
 
-/// NCBI's query chunk size and overlap of a blastp or tblastn search
-/// (`blastp/protein_query_split.rs` `protein_split_sizes`), with the environment variables
-/// `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` read as NCBI reads them.
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-58
-/// ```c
-///     m_ChunkSize = SplitQuery_GetChunkSize(m_Options->GetProgram());
-///     m_LocalQueryData = m_QueryFactory->MakeLocalQueryData(m_Options);
-///     m_TotalQueryLength = m_LocalQueryData->GetSumOfSequenceLengths();
-///     m_NumChunks = SplitQuery_CalculateNumChunks(m_Options->GetProgramType(),
-/// ```
-pub fn protein_query_split_sizes(
-    program: &str,
-    default_chunk_size: u32,
-) -> anyhow::Result<crate::algorithm::blastn::query_split::SplitSizes> {
-    Ok(
-        crate::algorithm::blastp::protein_query_split::protein_split_sizes(
-            default_chunk_size,
-            read_query_split_variable(program, "CHUNK_SIZE")?,
-            read_query_split_variable(program, "OVERLAP_CHUNK_SIZE")?,
-        ),
-    )
-}
-
 /// The environment that changes NCBI's search or report in a way that LOSAT does not
 /// reproduce, where NCBI reads it: `BL2SEQ_LEGACY` in a search of `-subject` sequences
 /// (`fasta_subjects`; NCBI searches each subject on its own and writes another report, a

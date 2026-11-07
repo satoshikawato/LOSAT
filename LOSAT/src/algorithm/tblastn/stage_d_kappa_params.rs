@@ -7,13 +7,13 @@ use anyhow::{ensure, Context, Result};
 
 use super::stage_d_stats::LocalSubjectParameters;
 use crate::config::ScoringMatrix;
-use crate::core::blast_stat::compute_blosum62_ideal_karlin_params;
 use crate::core::composition_adjustment::adjust_scores::{
     build_matrix_info, BlastCompositionWorkspace,
 };
 use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoAdjustMode, BlastCompoGappingParams, BlastRedoAlignParams,
 };
+use crate::stats::compute_blosum62_ideal_karlin_params;
 use crate::stats::tables::KarlinParams;
 use crate::utils::matrix::BLASTAA_SIZE;
 

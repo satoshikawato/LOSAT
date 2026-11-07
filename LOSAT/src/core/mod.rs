@@ -8,8 +8,6 @@
 //!
 //! # Structure
 //!
-//! - **Statistics** (`blast_stat`): the old layer's Karlin parameters from composition (the
-//!   BLOSUM62 ideal block, lambda of score probabilities); the live layer is `crate::stats`
 //! - **Utilities** (`blast_util`, `blast_encoding`): sequence encoding and helpers
 //! - **Filtering/Masking** (`blast_seg`, a re-export of `utils::seg`)
 //! - **Composition adjustment** (`composition_adjustment`, NCBI algo/blast/composition_adjustment/)
@@ -17,9 +15,6 @@
 //!   `-culling_limit`)
 //! - **PSI-BLAST's PSSM engine** (`psi`, NCBI core/blast_psi.c and blast_psi_priv.c): psiblast's
 //!   `-out_ascii_pssm` and `-out_pssm`
-
-// Statistics
-pub mod blast_stat;
 
 // Utilities
 pub mod blast_encoding;

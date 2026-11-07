@@ -418,8 +418,8 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   ├── api/               # Library API: FASTA records in memory, `run_collect`, `run_batches` (library surface plan)
 │   ├── blastinput/        # Application layer, FASTA and compressed input, shared value parsers;
 │   │                      # per-program args in `algorithm/<program>/args.rs`
-│   ├── core/              # NCBI core/ ports shared by several programs (encoding, HSP lists, SEG, blast_stat, composition adjustment)
-│   ├── stats/             # Karlin-Altschul, Spouge, length adjustment and sum statistics
+│   ├── core/              # NCBI core/ ports shared by several programs (encoding, HSP lists, SEG, composition adjustment)
+│   ├── stats/             # Karlin-Altschul (incl. composition lambda), Spouge, length adjustment and sum statistics
 │   ├── report/            # Output formats: pairwise, tabular, XML, XML2, JSON, ASN.1 archive, SAM
 │   ├── seqdb/             # Reader of BLAST database volumes (NCBI CSeqDB), for `-db`
 │   ├── seqid/             # Seq-ids of database sequences (CSeq_id, deflines, id formatting)

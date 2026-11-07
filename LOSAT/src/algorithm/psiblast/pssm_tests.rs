@@ -129,7 +129,7 @@ fn a_lower_case_matrix_name_has_frequency_ratios() {
         3
     );
     // BLOSUM62's ideal Lambda (`kbp_ideal`), as blastp's engine computes it.
-    let ideal = crate::core::blast_stat::compute_blosum62_ideal_karlin_params().unwrap();
+    let ideal = crate::stats::compute_blosum62_ideal_karlin_params().unwrap();
     assert_eq!(sbp.ideal_lambda, ideal.lambda);
 }
 

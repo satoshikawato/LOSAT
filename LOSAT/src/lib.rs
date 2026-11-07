@@ -14,8 +14,7 @@
 pub mod algorithm;
 #[doc(hidden)]
 pub mod common;
-#[doc(hidden)]
-pub mod sequence;
+pub(crate) mod sequence;
 #[doc(hidden)]
 pub mod utils;
 
@@ -37,8 +36,7 @@ pub mod core;
 pub mod seqdb;
 // NCBI objects/seqloc (CSeq_id), objects/blastdb (CBlast_def_line_set) and the id helpers
 // of objtools/align_format: the Seq-ids of database sequences.
-#[doc(hidden)]
-pub mod seqid;
+pub(crate) mod seqid;
 // NCBI objtools/blast/seqdb_writer (CWriteDB) and app/blastdb/makeblastdb.cpp:
 // writer of BLAST database volumes.
 #[doc(hidden)]
@@ -48,8 +46,7 @@ pub mod writedb;
 pub mod blastdbcmd;
 
 #[cfg(target_arch = "wasm32")]
-#[doc(hidden)]
-pub mod web_api;
+pub(crate) mod web_api;
 
 // NCBI blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.
 #[doc(hidden)]

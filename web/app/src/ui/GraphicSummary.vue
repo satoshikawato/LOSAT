@@ -4,12 +4,14 @@
 // order and view filters. Each HSP that the filters show is a thin bar from the smaller to the
 // larger query coordinate of its record, coloured by NCBI's "Alignment Scores" bin of its record's
 // bit score; the HSPs of a subject are joined by a thin grey line. The bins only classify the
-// engine's number; hover and focus show the outfmt 6 strings. Click or Enter selects the HSP and
-// asks the results screen to show its alignment.
+// engine's number; hover and focus show the outfmt 6 strings in a popover, which Escape closes
+// wherever the focus is (WCAG 1.4.13 dismissible, WA2-AX-07); the pointer cannot move onto the
+// popover, which lets it through to the bars under it (not 1.4.13's hoverable). Click or Enter
+// selects the HSP and asks the results screen to show its alignment.
 //
 // One canvas holds the figure and draws only the rows in view, so that thousands of HSPs stay
 // smooth; with many subjects the rows scroll inside the figure under the query bar.
-import { computed, onMounted, onUnmounted, ref, useId, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import type { HspId, ResultsBrowser, ResultsState, SubjectEntry } from '../application/results';
 import { headingTitle } from '../domain/outfmt0';
 import { placeBox } from '../domain/plot-geometry';
@@ -409,6 +411,18 @@ function onKey(event: KeyboardEvent): void {
   reveal(l.rowOf[k]!);
 }
 
+/**
+ * "Show all" leaves with the press: the focus goes to the plot, at the first subject that it adds,
+ * which a screen reader is then told of (WA2-AX-04), as after the arrow keys.
+ */
+async function showAllSubjects(): Promise<void> {
+  showAll.value = true;
+  await nextTick();
+  const first = layout.value.start[Math.min(FIRST_SUBJECTS, layout.value.rows.length - 1)]!;
+  if (first < layout.value.count) cursor.value = first;
+  canvas.value?.focus();
+}
+
 /** Scrolls the rows so that row `r` is in view. */
 function reveal(r: number): void {
   const element = scroller.value;
@@ -424,6 +438,26 @@ function reveal(r: number): void {
 
 /** The HSP that the popover shows: the hovered one, else the keyboard's. */
 const shown = computed(() => (hovered.value >= 0 ? hovered.value : keyboard.value ? cursor.value : -1));
+/**
+ * The HSP whose popover Escape closed, wherever the focus was: the popover stays closed until the
+ * pointer or the keyboard moves to another HSP. The keyboard's frame and what a screen reader was
+ * told stay; the focus stays where it is.
+ */
+const dismissed = ref(-1);
+const popoverShown = computed(() => shown.value >= 0 && shown.value !== dismissed.value);
+watch(shown, (k) => {
+  if (k !== dismissed.value) dismissed.value = -1;
+});
+function onEscape(event: KeyboardEvent): void {
+  // The Escape that cancels an IME's composition is not for the page (Safari sends it after
+  // compositionend, with isComposing false and keyCode 229).
+  if (event.isComposing || event.keyCode === 229) return;
+  if (event.key === 'Escape') dismissed.value = shown.value;
+}
+watch(popoverShown, (on) => {
+  if (on) document.addEventListener('keydown', onEscape);
+  else document.removeEventListener('keydown', onEscape);
+});
 const info = computed(() => {
   const k = shown.value;
   const l = layout.value;
@@ -476,6 +510,7 @@ onMounted(() => {
   schedule();
 });
 onUnmounted(() => {
+  document.removeEventListener('keydown', onEscape);
   observer?.disconnect();
   if (frame !== 0) cancelAnimationFrame(frame);
 });
@@ -554,7 +589,7 @@ const selectedText = computed(() => (selectedIndex.value < 0 ? '' : `${props.sta
         </div>
       </div>
       <div
-        v-if="info"
+        v-if="info && popoverShown"
         ref="popover"
         class="graphic-popover"
         aria-hidden="true"
@@ -569,7 +604,7 @@ const selectedText = computed(() => (selectedIndex.value < 0 ? '' : `${props.sta
       <p class="visually-hidden" aria-live="polite">{{ spoken }}</p>
     </div>
     <p v-if="!showAll && subjects.length > FIRST_SUBJECTS" class="graphic-more">
-      <button type="button" data-testid="graphic-show-all" @click="showAll = true">Show all {{ formatCount(subjects.length) }}</button>
+      <button type="button" data-testid="graphic-show-all" @click="showAllSubjects">Show all {{ formatCount(subjects.length) }}</button>
     </p>
   </figure>
 </template>

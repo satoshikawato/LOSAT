@@ -989,6 +989,8 @@ fn run_inner(
                                 false,
                                 false,
                                 false,
+                                false,
+                                false,
                                 crate::report::tabular::PrintedIds::default(),
                                 false,
                             )
@@ -1144,7 +1146,9 @@ fn run_inner(
 #[derive(Clone, Copy, Default)]
 pub(super) struct ReportedAsks {
     tabular: bool,
+    tabular_reads: bool,
     pairwise: bool,
+    structured: bool,
     taxids: bool,
     joined: bool,
     taxonomy: bool,
@@ -1158,7 +1162,13 @@ impl ReportedAsks {
         let tabular = matches!(options.outfmt, 6 | 7 | 10 | 20);
         Self {
             tabular,
+            tabular_reads: tabular
+                && crate::report::tabular::reads_subject(
+                    options.tabular,
+                    crate::blastinput::app::Program::Blastx,
+                ),
             pairwise: options.outfmt == 0,
+            structured: matches!(options.outfmt, 5 | 13..=16),
             taxids: matches!(options.outfmt, 13..=16),
             joined: matches!(options.outfmt, 0 | 5 | 13..=16)
                 || options
@@ -1171,9 +1181,11 @@ impl ReportedAsks {
             } else {
                 crate::report::tabular::PrintedIds::default()
             },
-            prefetched: crate::algorithm::common::database::seq_annots_prefetch(Some(i32::from(
-                options.outfmt,
-            ))),
+            // Outfmt 10 and 20 prefetch as 6 does (`reported_batch`).
+            prefetched: prefetches_subjects(Some(match options.outfmt {
+                10 | 20 => 6,
+                outfmt => i32::from(outfmt),
+            })) && !crate::algorithm::common::database::prefetch_always_off(),
         }
     }
 
@@ -1181,7 +1193,9 @@ impl ReportedAsks {
     pub(super) fn or(self, other: Self) -> Self {
         Self {
             tabular: self.tabular || other.tabular,
+            tabular_reads: self.tabular_reads || other.tabular_reads,
             pairwise: self.pairwise || other.pairwise,
+            structured: self.structured || other.structured,
             taxids: self.taxids || other.taxids,
             joined: self.joined || other.joined,
             taxonomy: self.taxonomy || other.taxonomy,
@@ -1216,7 +1230,9 @@ pub(super) fn reported_batch(
         results,
         options.gapped,
         asks.tabular,
+        asks.tabular_reads,
         asks.pairwise,
+        asks.structured,
         asks.taxids,
         asks.joined,
         asks.taxonomy,

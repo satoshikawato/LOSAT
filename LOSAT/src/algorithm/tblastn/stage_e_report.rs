@@ -277,7 +277,15 @@ pub(super) fn render(
     {
         match shown {
             ShownSubjects::Fasta { .. } => tabular_subject_ids(hitlists, subject_records)?,
-            ShownSubjects::Database { reported, .. } => reported.tabular_subject_ids()?,
+            ShownSubjects::Database { reported, .. } => {
+                reported.tabular_subject_ids(outputs.formats.iter().any(|format| {
+                    matches!(format_number(format.outfmt), 6 | 7 | 10 | 20)
+                        && crate::report::tabular::reads_subject(
+                            super::tabular::tabular_spec(format.outfmt).as_ref(),
+                            crate::blastinput::app::Program::Tblastn,
+                        )
+                }))?
+            }
         }
     } else {
         Vec::new()

@@ -1,0 +1,10 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: qw thirty W
+# Database: tests/seqid/db/variants
+# Fields: query id, s. start, s. end, evalue
+# 3 hits found
+qw	1	30	0.004
+qw	1	30	0.004
+qw	1	30	0.004
+# BLAST processed 1 queries

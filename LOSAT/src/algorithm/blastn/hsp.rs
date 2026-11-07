@@ -209,6 +209,16 @@ impl BlastnOutputFormat {
         )
     }
 
+    /// Whether the format is a table whose fields read the sequence that NCBI's formatter finds
+    /// by a subject's Seq-align id (`report::tabular::reads_subject`: the default fields do).
+    pub(crate) fn tabular_reads_subject(self) -> bool {
+        self.is_tabular()
+            && crate::report::tabular::reads_subject(
+                self.tabular_spec(),
+                crate::blastinput::app::Program::Blastn,
+            )
+    }
+
     /// The field list of the custom tabular report (`CustomTabular`).
     pub(crate) fn tabular_spec(self) -> Option<&'static crate::report::tabular::TabularSpec> {
         match self {

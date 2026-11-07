@@ -2476,6 +2476,19 @@ impl BlastpReport {
         })
     }
 
+    /// Whether the report reads the sequence that NCBI's formatters find by a subject's Seq-align
+    /// id: every one but the Seq-annots, the archive and a table of fields that read nothing of
+    /// the subject (`report::tabular::reads_subject`).
+    fn reads_subjects(self) -> bool {
+        match self {
+            BlastpReport::Seqalign(_) | BlastpReport::Archive => false,
+            BlastpReport::CustomTabular(spec) => {
+                spec.reads_subject(crate::blastinput::app::Program::Blastp)
+            }
+            BlastpReport::Text(_) | BlastpReport::Xml | BlastpReport::Xml2(_) => true,
+        }
+    }
+
     /// Whether the report is tabular (outfmt 6, 7, 10 and 20), which reads the tabular subject
     /// IDs.
     fn is_tabular(self) -> bool {
@@ -11710,12 +11723,14 @@ fn run_resolved_in_pool(
             .is_some_and(|outfmt| outfmt.prefetches_subjects());
     let prefetch_taxids =
         batches_prefetch && database.is_some_and(|database| database.taxdb_found());
-    // Whether that prefetch reads the subjects though the first format writes their Seq-align ids
-    // alone (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`): a subject with parsed
-    // Seq-ids that it cannot read as NCBI does is refused also without `taxdb.bti`
-    // (`ListedTitles::check_prefetched`).
-    let seq_annots_prefetch =
-        batches_prefetch && matches!(requested_formats.first(), Some(BlastpReport::Seqalign(_)));
+    // Whether that prefetch reads the subjects though the first format reads nothing of them
+    // (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, a table of fields that read nothing
+    // of the subject): a subject with parsed Seq-ids that it cannot read as NCBI does is refused
+    // also without `taxdb.bti` (`ListedTitles::check_prefetched`).
+    let prefetch_only = batches_prefetch
+        && requested_formats
+            .first()
+            .is_some_and(|outfmt| !outfmt.reads_subjects());
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:673-678
     // ```c++
     //     ITERATE(blast::CSearchResultSet, result, results) {
@@ -12032,14 +12047,12 @@ fn run_resolved_in_pool(
         titles.check_reported_titles(&hit_lists)?;
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
         // (the formats that read a subject's Bioseq need its sequence found by its Seq-align
-        // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids, which LOSAT
-        // does for copies of one record; 13 to 16 and the tables of taxonomy fields write their
-        // taxids).
+        // id, which a table of fields that read nothing of the subject does not; outfmt 0, 5 and
+        // 13 to 16 join the hits of matching Seq-align ids, which LOSAT does for copies of one
+        // record; 13 to 16 and the tables of taxonomy fields write their taxids).
         titles.check_parsed_reports(
             &hit_lists,
-            format_plans
-                .iter()
-                .any(|outfmt| !matches!(outfmt, BlastpReport::Seqalign(_) | BlastpReport::Archive)),
+            format_plans.iter().any(|outfmt| outfmt.reads_subjects()),
             format_plans.iter().any(|outfmt| match outfmt {
                 BlastpReport::Text(OutputFormat::Pairwise)
                 | BlastpReport::Xml
@@ -12089,7 +12102,7 @@ fn run_resolved_in_pool(
     // first format's rows read their Bioseqs (`TabularSpec::subject_fetch`; `nident` alone on
     // rows with identities, `ListedTitles::fetched_ranks`).
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
-        if prefetch_taxids || psiblast_prefetched.is_some() || seq_annots_prefetch {
+        if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
             // too, which the prefetch does not: the rows of a batch with hits may open the
             // taxonomy database before a later batch's prefetch (`TaxdbRun::open_for_rows`).
@@ -12224,7 +12237,12 @@ fn run_resolved_in_pool(
                     ids.into()
                 }
                 (Some(titles), _) => {
-                    let (ids, accessions) = titles.tabular_subject_ids(&hit_lists)?;
+                    let (ids, accessions) = titles.tabular_subject_ids(
+                        &hit_lists,
+                        format_plans
+                            .iter()
+                            .any(|outfmt| outfmt.is_tabular() && outfmt.reads_subjects()),
+                    )?;
                     subject_accessions = accessions;
                     ids.into()
                 }

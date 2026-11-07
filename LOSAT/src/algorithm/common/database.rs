@@ -1549,13 +1549,22 @@ pub(crate) fn check_shown_parsed_subject(
 /// those with parsed Seq-ids (`check_reported_parsed`).
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ParsedShown {
-    /// The tabular formats (`sseqid`, `ParsedSubject::tabular_ids`).
+    /// The tabular formats whose fields read the sequence found by the subject's Seq-align id
+    /// (`report::tabular::reads_subject`: the default fields, the subject's ids, titles,
+    /// taxonomy, strand and length, the alignment's letters; `sseqid`,
+    /// `ParsedSubject::tabular_ids`). A table of other fields (`6 qseqid evalue`) writes the same
+    /// whatever that lookup finds.
     pub(crate) tabular: bool,
     /// Outfmt 0 (`check_shown_parsed_subject`).
     pub(crate) pairwise: bool,
+    /// The structured documents, outfmt 5 and 13 to 16, which read the subject's Bioseq for its
+    /// ids and title.
+    pub(crate) structured: bool,
     /// The formats that show the alignments of following hits whose Seq-align ids match as one
     /// hit, outfmt 0, 5 and 13 to 16, and the tabular formats that count their coverage as one,
-    /// with `qcovs` or `qcovus` (`TabularNeeds::joins_subjects`; `refuse_joined_hits`).
+    /// with `qcovs` or `qcovus` (`TabularNeeds::joins_subjects`; `refuse_joined_hits`). The
+    /// coverage groups the Seq-aligns by their ids without reading a Bioseq
+    /// (`CBlastFormatUtil::InsertSubjectScores`).
     pub(crate) joined: bool,
     /// SAM (outfmt 17), which names a subject by an id of its Bioseq (`ParsedSubject::sam_id`).
     pub(crate) sam: bool,
@@ -1564,18 +1573,22 @@ pub(crate) struct ParsedShown {
     pub(crate) taxonomy: bool,
     /// The subject ids that the tabular formats print (`ParsedSubject::check_printed_word`).
     pub(crate) words: crate::report::tabular::PrintedIds,
-    /// Whether the batches' prefetch reads the subjects by their Seq-align ids though the first
-    /// format writes the Seq-align ids alone: the Seq-annots with
-    /// `PRE_FETCH_SEQS_LIMIT=2147483647` ([`seq_annots_prefetch`]; `check_prefetched_parsed`).
+    /// Whether the batches' prefetch reads the subjects by their Seq-align ids (the first
+    /// format's: outfmt 0, 5, 6, 7, 10, 17 and 20, with `PRE_FETCH_SEQS_LIMIT=2147483647` also the
+    /// Seq-annots 8, 9 and 12, [`prefetches_subjects`]), unless `PRE_FETCH_SEQS_LIMIT` turns it
+    /// off for every batch ([`prefetch_always_off`]). Where no report reads their Bioseqs (the
+    /// Seq-annots, a table of fields that read nothing of the subject), what the prefetch
+    /// cannot read as NCBI does is refused (`check_prefetched_parsed`), also in a batch whose
+    /// Seq-aligns outnumber a positive limit (the refusal is the run's).
     pub(crate) prefetched: bool,
 }
 
 impl ParsedShown {
     /// Whether a report reads the subject's Bioseq, which NCBI's formatters find by its
-    /// Seq-align id (`ParsedSubject::fetched`); the Seq-annots and the archive write the
-    /// Seq-align id alone.
+    /// Seq-align id (`ParsedSubject::fetched`); the Seq-annots, the archive and the tables of
+    /// fields that read nothing of the subject write the Seq-align id or nothing of it.
     pub(crate) fn reads_bioseq(self) -> bool {
-        self.tabular || self.pairwise || self.joined || self.sam || self.taxonomy
+        self.tabular || self.pairwise || self.structured || self.sam || self.taxonomy
     }
 }
 
@@ -1627,27 +1640,34 @@ pub(crate) fn check_reported_parsed(
 /// of the stored title (`tabular_subject_id`, the same for `sseqid`, `sacc` and `saccver`), or for
 /// a sequence with parsed Seq-ids (`parsed[rank]`) its `saccver` (`ParsedSubject::tabular_ids`).
 /// `records[rank]` holds the stored title, `ordinals[rank]` the ordinal id; `protein` for a
-/// protein database.
+/// protein database. An id that LOSAT cannot write as NCBI is its refusal where a tabular report
+/// `reads` the subject (`report::tabular::reads_subject`), else empty: a table of fields that
+/// read nothing of the subject prints none of its ids.
 pub(crate) fn tabular_subject_ids(
     records: &[crate::blastinput::fasta_reader::FastaRecord],
     ordinals: &[u32],
     parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     protein: bool,
+    reads: bool,
     program: &str,
 ) -> Result<Vec<std::sync::Arc<[u8]>>> {
     records
         .iter()
         .zip(ordinals)
         .enumerate()
-        .map(
-            |(rank, (record, &ordinal))| match parsed.get(rank).and_then(Option::as_deref) {
+        .map(|(rank, (record, &ordinal))| {
+            let id = match parsed.get(rank).and_then(Option::as_deref) {
                 Some(subject) => subject
                     .tabular_saccver(protein)
                     .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program)),
                 None => tabular_subject_id(&record.title, ordinal, protein, program)
                     .map(std::sync::Arc::from),
-            },
-        )
+            };
+            match id {
+                Err(_) if !reads => Ok(std::sync::Arc::from(&b""[..])),
+                id => id,
+            }
+        })
         .collect()
 }
 
@@ -2986,7 +3006,7 @@ fn taxonomy_cache_collision(db: &SeqDb, last: i32) -> Option<(usize, i32)> {
 
 /// The end of the reason of a refusal by [`prefetch_reads_itself`] where no report reads the
 /// subject's Bioseq.
-const PREFETCH_READS_IT: &str = "and NCBI BLAST+ 2.17.0's prefetch reads it by that id though the report writes the Seq-align id alone (outfmt 8, 9 and 12 with PRE_FETCH_SEQS_LIMIT=2147483647)";
+const PREFETCH_READS_IT: &str = "and NCBI BLAST+ 2.17.0's prefetch reads it by that id though the report reads nothing of it (outfmt 8, 9 and 12 with PRE_FETCH_SEQS_LIMIT=2147483647, a tabular field list that reads nothing of the subject)";
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1340-1355
 // ```c++

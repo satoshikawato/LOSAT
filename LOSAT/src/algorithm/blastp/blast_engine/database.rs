@@ -1310,10 +1310,13 @@ impl ListedTitles<'_> {
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
     /// listed subject, by rank (`report::defline::database_subject_id`); a subject
     /// without rows gets an empty id. A subject with rows whose id LOSAT cannot write as
-    /// NCBI is an error before any format is written.
+    /// NCBI is an error before any format is written where a tabular report `reads` the
+    /// subject (`report::tabular::reads_subject`), else its ids are empty: a table of fields
+    /// that read nothing of the subject prints none of them.
     pub(super) fn tabular_subject_ids(
         &self,
         hit_lists: &[Option<BlastpHitList>],
+        reads: bool,
     ) -> Result<(Vec<Arc<[u8]>>, Vec<Option<[Arc<[u8]>; 2]>>)> {
         let reported = Self::reported(hit_lists);
         let ranks = self.listed.ordinals.len();
@@ -1333,9 +1336,17 @@ impl ListedTitles<'_> {
             }
             let ordinal = self.listed.ordinals[rank];
             if let Some(subject) = self.parsed_subject(rank) {
-                let [id, accession, version] = subject.tabular_ids(true).map_err(|problem| {
-                    shared::parsed_refusal(ordinal, &format!("has {problem}"), self.program)
-                })?;
+                let [id, accession, version] = match subject.tabular_ids(true) {
+                    Ok(ids) => ids,
+                    Err(_) if !reads => Default::default(),
+                    Err(problem) => {
+                        return Err(shared::parsed_refusal(
+                            ordinal,
+                            &format!("has {problem}"),
+                            self.program,
+                        ))
+                    }
+                };
                 ids.push(Arc::from(id));
                 if accessions.is_empty() {
                     accessions = vec![None; ranks];
@@ -1343,7 +1354,11 @@ impl ListedTitles<'_> {
                 accessions[rank] = Some([Arc::from(accession), Arc::from(version)]);
                 continue;
             }
-            let id = shared::tabular_subject_id(self.title(rank), ordinal, true, self.program)?;
+            let id = match shared::tabular_subject_id(self.title(rank), ordinal, true, self.program)
+            {
+                Err(_) if !reads => Vec::new(),
+                id => id?,
+            };
             ids.push(Arc::from(id));
         }
         Ok((ids, accessions))

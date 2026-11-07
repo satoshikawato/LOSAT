@@ -14,8 +14,6 @@ use std::sync::OnceLock;
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
 use crate::core::blast_seg::{SegMasker, SegParams};
-use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
-use crate::core::blast_stat::{e_to_p, p_to_e};
 use crate::core::composition_adjustment::adjust_scores::{
     blast_overall_p_value, read_aa_composition, x_newton_input, AdjustedProteinMatrix,
     BlastCompositionWorkspace,
@@ -28,7 +26,10 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks, BlastRedoRangeResult,
     EMatrixAdjustRule, XSubjectComposition,
 };
-use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
+use crate::stats::{
+    blast_spouge_stoe, compute_lambda_from_score_probs, e_to_p, p_to_e, BlastGumbelBlk,
+    KarlinParams,
+};
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, ncbistdaa, protein_score};
 
 use super::gapalign::{
@@ -1767,6 +1768,16 @@ fn adjust_evalues_for_composition(
         return;
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:172-176
+    // ```c
+    //         hsp->evalue *= db_to_sequence_scale;
+    //
+    //         align_p_value = BLAST_KarlinEtoP(hsp->evalue);
+    //         combined_p_value = Blast_Overall_P_Value(comp_p_value,align_p_value);
+    //         hsp->evalue = BLAST_KarlinPtoE(combined_p_value);
+    // ```
+    // `stats::e_to_p` / `stats::p_to_e` are `BLAST_KarlinEtoP` / `BLAST_KarlinPtoE` with
+    // NCBI's `BLAST_Expm1` / `BLAST_Log1p` (not libm's `exp_m1` / `ln_1p`).
     let mut best_evalue = f64::MAX;
     for hsp in &mut hsp_list.hsps {
         hsp.e_value *= db_to_sequence_scale;

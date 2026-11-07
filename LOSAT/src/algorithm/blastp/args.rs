@@ -850,9 +850,12 @@ impl BlastpArgs {
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<ResolvedBlastpArgs> {
         use crate::blastinput::app::CompositionMode;
+        use crate::blastinput::protein_options_check::{
+            validate_protein_options, ProteinOptionsCheck,
+        };
         use crate::stats::protein_options::{
             protein_gap_existence_extend_params, suggested_threshold, suggested_window_size,
-            ProteinOptionsCheck, SuggestionProgram,
+            SuggestionProgram,
         };
         let mut options = BlastpTaskOptions::create(&self.task)?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:251-301
@@ -1086,7 +1089,7 @@ impl BlastpArgs {
             mode
         };
         // NCBI's `Validate` (`BLAST_ValidateOptions`), shared with TBLASTN.
-        crate::stats::protein_options::validate_protein_options(&ProteinOptionsCheck {
+        validate_protein_options(&ProteinOptionsCheck {
             gapped: !self.ungapped,
             gap_open: options.gap_open,
             gap_extend: options.gap_extend,

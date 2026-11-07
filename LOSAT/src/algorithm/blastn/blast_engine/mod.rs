@@ -33,7 +33,7 @@ pub use run::x_tb_range_print_summary;
 pub(crate) use run::check_subjects_not_empty;
 // The end of a query reading and NCBI's message for a sequence without letters, shared with
 // TBLASTX (port plan step S5).
-pub(crate) use run::{QueryReading, NO_DATA_MESSAGE};
+pub(crate) use crate::blastinput::query_batch::{QueryReading, NO_DATA_MESSAGE};
 
 use super::alignment::build_blastna_matrix;
 use super::filtering::{

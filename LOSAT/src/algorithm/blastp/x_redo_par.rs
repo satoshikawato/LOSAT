@@ -2497,7 +2497,7 @@ mod tests {
                 }
             })
             .collect();
-        let ideal = crate::core::blast_stat::composition::compute_blosum62_ideal_karlin_params()
+        let ideal = crate::stats::compute_blosum62_ideal_karlin_params()
             .expect("BLOSUM62 ideal parameters");
         XRedoFixture {
             contexts,

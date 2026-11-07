@@ -75,7 +75,10 @@
 //! equal slices (`X_QSLICE_MAX_SLICES` at most; `x_partition`); the cut does not depend on the
 //! subjects. A batch in which no group is cut runs as before (`scan_unit`, whose machine code does
 //! not change); in a batch with a cut group every group's units take this path (a group that is not
-//! cut is one slice). The size of a slice changes no output. x86-64 only (where it was measured).
+//! cut is one slice). The groups of a search whose slice table would not fit beside the slice's
+//! window are never cut (`x_slices_fit`: words of 4 letters, whose backbone alone exceeds the window;
+//! cut at 8 to 32 threads on two 0.6 Mb genomes, they took 4-9 % more time and 80-240 MiB more
+//! memory). The size of a slice changes no output. x86-64 only (where it was measured).
 //! The probes of LOSAT_TIMING / LOSAT_X_STATS (x_unit_probe.rs) need the group's table: with them
 //! nothing is cut.
 //!
@@ -136,6 +139,34 @@ fn slice_rule() -> Option<XSliceRule> {
             }),
         }
     })
+}
+
+// No NCBI counterpart: a term of the rule (module doc; SC10b PR-3). A slice has a lookup table of its
+// own, so a cut group repeats the table's backbone once per slice, and the slice width
+// (`X_QSLICE_LETTERS`) was chosen so that the slice's window fits the core's L2 with the slice's
+// backbone. That holds for words of 2 and 3 letters (892 and 28,540 cells, 14 KB and 457 KB); a
+// backbone of 4-letter words has 913,276 cells (14.6 MB; 2-4 MB compacted), larger than the window
+// itself, so its slices would bring no locality and multiply the tables.
+/// Whether the groups of a batch of `word_length`-letter words may be cut: a slice table's backbone
+/// (16-byte cells, `compute_backbone_size`) is no larger than the slice's window
+/// (`X_QSLICE_LETTERS` diagonal cells, `DiagStruct`).
+#[inline(always)]
+pub(super) const fn x_slices_fit(word_length: usize) -> bool {
+    use crate::algorithm::tblastx::lookup::LOOKUP_ALPHABET_SIZE;
+    let charsize = LOOKUP_ALPHABET_SIZE.ilog2() as usize + 1;
+    if word_length * charsize >= usize::BITS as usize {
+        return false;
+    }
+    // compute_backbone_size (blast_aalookup.c:238-240), as a constant expression.
+    let mut cells = 0usize;
+    let mut i = 0usize;
+    while i < word_length {
+        cells |= (LOOKUP_ALPHABET_SIZE - 1) << (i * charsize);
+        i += 1;
+    }
+    cells += 1;
+    cells * std::mem::size_of::<BackboneCell>()
+        <= X_QSLICE_LETTERS * std::mem::size_of::<DiagStruct>()
 }
 
 // No NCBI counterpart: the rule of the switch for one batch (module doc). The groups are those of

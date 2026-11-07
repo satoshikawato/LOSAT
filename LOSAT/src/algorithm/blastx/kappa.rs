@@ -8,17 +8,14 @@ use crate::{
         blast_gapped_alignment_with_traceback_with_scratch, GapAlignScratch,
     },
     config::{ProteinScoringSpec, ScoringMatrix},
-    core::{
-        blast_stat::compute_blosum62_ideal_karlin_params,
-        composition_adjustment::{
-            adjust_scores::{
-                build_matrix_info, AdjustedProteinMatrix, BlastAminoAcidComposition,
-                BlastCompositionWorkspace,
-            },
-            redo_alignment::*,
+    core::composition_adjustment::{
+        adjust_scores::{
+            build_matrix_info, AdjustedProteinMatrix, BlastAminoAcidComposition,
+            BlastCompositionWorkspace,
         },
+        redo_alignment::*,
     },
-    stats::lookup_protein_params,
+    stats::{compute_blosum62_ideal_karlin_params, lookup_protein_params},
     utils::{
         matrix::BLASTAA_SIZE,
         seg::{SegMasker, SegParams},

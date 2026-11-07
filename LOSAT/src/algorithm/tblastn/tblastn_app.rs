@@ -381,11 +381,7 @@ impl TblastnArgs {
             match &result {
                 Err(error) => {
                     if let Some(lines) = super::archive::error_lines(error, false) {
-                        let _ = crate::report::archive::write_error_archive(
-                            handle,
-                            &lines,
-                            &mut stream,
-                        );
+                        let _ = write_error_archive(&io, handle, error, &lines, &mut stream);
                     }
                 }
                 Ok(()) => {
@@ -518,8 +514,26 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(mut report) = report_stream(args, io) {
-        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut report);
+        let _ = write_error_archive(io, handle, error, &lines, &mut report);
         let _ = std::io::Write::flush(&mut report);
+    }
+}
+
+/// The error archive of a run that stopped with `error` (`lines`), into `report`: on the command
+/// line after the error's text (`write_error_archive_after_post`); web ABI v1 (`RunIo::Memory`)
+/// reports the error itself, so there only the archive.
+fn write_error_archive(
+    io: &RunIo<'_>,
+    handle: &crate::report::archive::ArchiveHandle,
+    error: &anyhow::Error,
+    lines: &[crate::report::diag_log::Message],
+    report: &mut crate::cli::ReportStream,
+) -> Result<()> {
+    match io {
+        RunIo::Files => {
+            crate::report::archive::write_error_archive_after_post(handle, error, lines, report)
+        }
+        RunIo::Memory { .. } => crate::report::archive::write_error_archive(handle, lines, report),
     }
 }
 
@@ -1686,6 +1700,14 @@ fn search(
                 lines
             })
             .collect();
+        // The query batches that were read and searched, by their searched queries (the batches
+        // before a database failure or a reader stop): each is reported.
+        let batch_spans: Vec<std::ops::Range<usize>> = query_input
+            .batches(batch_size)
+            .into_iter()
+            .map(|batch| batch.searched)
+            .filter(|searched| !searched.is_empty() && searched.end <= queries.len())
+            .collect();
         // `-db`: the reported sequences by rank, with their records and lengths, and their packed
         // subjects where a report reads their letters; the database's other sequences are dropped
         // before the reports.
@@ -1701,6 +1723,7 @@ fn search(
                         outputs.formats.iter().map(|format| format.outfmt),
                     ),
                     parsed_shown(&outputs.formats),
+                    &batch_spans,
                 )
                 // A read of a reported sequence that
                 // failed: the run's error, as the check's error would be.
@@ -1718,14 +1741,6 @@ fn search(
             observer.database_subjects(reported.library_subjects(database));
         }
         drop(database_stores);
-        // The query batches that were read and searched, by their searched queries (the batches
-        // before a database failure or a reader stop): each is reported.
-        let batch_spans: Vec<std::ops::Range<usize>> = query_input
-            .batches(batch_size)
-            .into_iter()
-            .map(|batch| batch.searched)
-            .filter(|searched| !searched.is_empty() && searched.end <= queries.len())
-            .collect();
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:298-302
         // ```c++
         //                     BlastFormatter_PreFetchSequenceData(*results, scope,
@@ -1793,13 +1808,8 @@ fn search(
                 };
                 for span in &batch_spans {
                     let hitlists = &results[span.clone()];
-                    // The batch's Seq-aligns, one for each HSP: TBLASTN's search is gapped (LOSAT
-                    // refuses `-ungapped`, whose Seq-aligns are one per subject).
-                    let seq_aligns: usize = hitlists
-                        .iter()
-                        .flat_map(super::stage_d_results::KappaResultHitList::lists)
-                        .map(|list| list.hsps.hsps.len())
-                        .sum();
+                    // The batch's Seq-aligns, one for each HSP (`database::seq_aligns_of`).
+                    let seq_aligns = super::database::seq_aligns_of(hitlists);
                     // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                     // (`shared::prefetch_off`), each query's report fetches the subjects it
                     // shows, after the query's own warnings, where the first format's rows read

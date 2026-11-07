@@ -487,3 +487,14 @@ component) ran the tests 6.3 times as long as `cargo nextest run` (2026-11-07, 8
 32-core machine); set `LLVM_PROFILE_FILE_NAME=LOSAT-%8m.profraw` as the jobs do, or its default writes
 one profile file per process (29 GB for the whole test set). Profile files of an earlier run stay in the
 target directory and are counted again; `cargo llvm-cov clean --profraw-only` removes them.
+
+## Python tool tests
+
+The `test_*.py` files here test the Python tools beside them (regression drivers, certification
+audits, ratchets, release tooling) with small files and stand-in programs. ci.yml's `rust lint` and the
+other workflows run each file by name. `check_python_tests_in_ci.py` (tested by
+`test_check_python_tests_in_ci.py`) fails `rust lint` when a `test_*.py` file of the repository is named
+in the `run:` commands of no workflow that runs on push, pull request or schedule (or of a workflow one
+of them calls); a release workflow that runs only when dispatched does not count. `python/tests/`,
+pylosat's pytest suite, runs as a directory in `python.yml`. Add the step that runs a new test file in
+the same pull request, and delete a test together with the tool it tests.

@@ -314,13 +314,68 @@ pub(super) fn rps_search(
     let x_drop_final =
         blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, run.gapped_params.lambda)
             .max(x_drop_gapped);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:177-190
+    // ```c
+    //    case eRPSLookupTable:
+    //        {
+    //            BlastRPSLookupTable *lookup;
+    //            Int4 alphabet_size;
+    //            RPSLookupTableNew(rps_info, (BlastRPSLookupTable* *)
+    //                                         (&lookup_wrap->lut));
+    //
+    //            /* if the alphabet size from the RPS database is too
+    //               small, mask all unsupported query letters */
+    //            lookup = (BlastRPSLookupTable*)(lookup_wrap->lut);
+    //            alphabet_size = lookup->alphabet_size;
+    //            if (alphabet_size < BLASTAA_SIZE)
+    //                Blast_MaskUnsupportedAA(query, alphabet_size);
+    //            break;
+    //        }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1336-1346
+    // ```c
+    // Blast_MaskUnsupportedAA(BLAST_SequenceBlk* seq, Uint1 min_invalid)
+    // {
+    //     ...
+    //     for (i = 0; i < length; i++) {
+    //         if (sequence[i] >= min_invalid) {
+    //             sequence[i] = kProtMask;
+    //         }
+    //     }
+    // }
+    // ```
+    // The lookup table is made after the score block, so the queries' Karlin-Altschul values
+    // keep their letters; the search (scan, extensions, traceback, rescale) reads them masked.
+    const PROT_MASK: u8 = 21;
+    let masked: Vec<Option<Vec<u8>>> = run
+        .contexts
+        .iter()
+        .map(|ctx| {
+            let inner = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
+            (files.alphabet < crate::core::blast_util::BLASTAA_SIZE
+                && inner
+                    .iter()
+                    .any(|&letter| usize::from(letter) >= files.alphabet))
+            .then(|| {
+                let mut copy = ctx.aa_seq.clone();
+                let end = copy.len() - 1;
+                for letter in &mut copy[1..end] {
+                    if usize::from(*letter) >= files.alphabet {
+                        *letter = PROT_MASK;
+                    }
+                }
+                copy
+            })
+        })
+        .collect();
     let engine = RpsRun {
         queries: run
             .contexts
             .iter()
             .zip(&first_query_length)
-            .map(|(ctx, &first)| RpsQuery {
-                aa_seq: &ctx.aa_seq,
+            .zip(&masked)
+            .map(|((ctx, &first), masked)| RpsQuery {
+                aa_seq: masked.as_deref().unwrap_or(&ctx.aa_seq),
                 valid: ctx.is_valid && ctx.aa_len > 0,
                 kbp_std: ctx.karlin_params,
                 first_query_length: first,

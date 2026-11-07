@@ -177,7 +177,9 @@ pub(crate) struct RpsVolumeFiles {
     /// The byte offset of the backbone in the `.loo` file (`start_of_backbone`).
     backbone_start: usize,
     /// The rows widened to 28 columns, for a 26-column `.rps` (columns 26 and 27 of a row are
-    /// the next row's columns 0 and 1, as NCBI's stride-26 rows read them; 0 for the last row).
+    /// the next row's columns 0 and 1, as NCBI's stride-26 rows would read them; 0 for the last
+    /// row). No search reads them: NCBI masks the query letters past a 26-letter alphabet to X
+    /// (`Blast_MaskUnsupportedAA`, `rps_hooks::rps_search`).
     narrow: Option<Vec<[i32; 28]>>,
     /// The presence bits of the backbone's cells (`lookup->pv`).
     pv: Vec<u64>,

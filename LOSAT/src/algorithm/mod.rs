@@ -14,6 +14,13 @@ pub mod common;
 // static const string kProgram("psiblast");
 // arg.Reset(new CProgramDescriptionArgs(kProgram, "Position-Specific Iterated BLAST"));
 pub mod psiblast;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:46-47
+// ```c
+// Boolean Blast_QueryIsPssm(EBlastProgramType p)
+// { return SAFE_CAST_INT_TO_BOOLEAN(p & PSSM_QUERY_MASK); }
+// ```
+// The search of a query given as a PSSM (psiblast `-in_pssm`): its kernels and stages.
+pub mod pssm_search;
 // NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:45-62
 // static const string kProgram("tblastn");
 // static const char kDefaultTask[] = "tblastn";

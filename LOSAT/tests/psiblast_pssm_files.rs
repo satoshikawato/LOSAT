@@ -12,12 +12,11 @@
 //!        }
 //! ```
 
-#[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
+use std::process::Command;
 #[cfg(target_os = "linux")]
-use std::process::{Command, Output};
+use std::process::Output;
 
-#[cfg(target_os = "linux")]
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 
 /// One `losat psiblast -db tests/db_search/paja -query tests/fasta/psiblast/<query>
@@ -26,14 +25,22 @@ const BIN: &str = env!("CARGO_BIN_EXE_losat");
 /// `--all-features` binary writes its probe there).
 #[cfg(target_os = "linux")]
 fn psiblast(query: &str, args: &[&str], home: &Path) -> Output {
-    let mut command = Command::new(BIN);
+    let mut command = losat_psiblast(home);
     command
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .arg("psiblast")
         .args(["-db", "tests/db_search/paja"])
         .args(["-query", &format!("tests/fasta/psiblast/{query}")])
         .args(["-num_threads", "1", "-save_pssm_after_last_round"])
         .args(args);
+    command.output().expect("run LOSAT CLI")
+}
+
+/// `losat psiblast` from `LOSAT/`, with `HOME` the directory `home` and without the variables that
+/// change a search.
+fn losat_psiblast(home: &Path) -> Command {
+    let mut command = Command::new(BIN);
+    command
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .arg("psiblast");
     for (name, _) in std::env::vars() {
         if name.starts_with("LOSAT_X_")
             || name == "LOSAT_TIMING"
@@ -48,11 +55,10 @@ fn psiblast(query: &str, args: &[&str], home: &Path) -> Output {
         }
     }
     command.env("HOME", home).env("USERPROFILE", home);
-    command.output().expect("run LOSAT CLI")
+    command
 }
 
 /// An empty directory of the test's own for the PSSM files, and one for HOME.
-#[cfg(target_os = "linux")]
 fn scratch(tag: &str) -> (PathBuf, PathBuf) {
     let base =
         std::env::temp_dir().join(format!("losat_psiblast_pssm_{tag}_{}", std::process::id()));
@@ -73,7 +79,6 @@ fn names(dir: &Path) -> Vec<String> {
     names
 }
 
-#[cfg(target_os = "linux")]
 fn path(path: &Path) -> &str {
     path.to_str().unwrap()
 }
@@ -189,4 +194,51 @@ fn a_pssm_file_that_is_a_report_stream_is_refused_before_the_search() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+// NCBI 2.17.0 (the review of PS4a, S3; probes s3.file.6, s3.stdin.6, s3.stdin.trunc and
+// s3.stdin.empty of `PS/tmp/fix4a`): `-in_pssm -` reads the PSSM from the standard input, as
+// `CArg_InputFile` reads `-` (ncbiargs.cpp:717-721); the search gives the bytes of the run that names
+// the file, and NCBI's errors name the file `-`.
+#[test]
+fn in_pssm_dash_reads_the_standard_input() {
+    let (_, home) = scratch("stdin");
+    let pssm =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/db_search/db.ps.asn.rnd.6.asn");
+    let run = |in_pssm: &str, stdin: std::process::Stdio| {
+        let mut command = losat_psiblast(&home);
+        command
+            .args(["-in_pssm", in_pssm, "-db", "tests/db_search/paja"])
+            .args(["-comp_based_stats", "0", "-evalue", "1000", "-outfmt", "6"])
+            .args(["-num_threads", "1"])
+            .stdin(stdin);
+        command.output().expect("run LOSAT CLI")
+    };
+    let named = run(path(&pssm), std::process::Stdio::null());
+    let piped = run("-", std::fs::File::open(&pssm).unwrap().into());
+    assert_eq!(named.status.code(), Some(0));
+    assert!(!named.stdout.is_empty());
+    assert_eq!(
+        (piped.status.code(), &piped.stdout, &piped.stderr),
+        (named.status.code(), &named.stdout, &named.stderr)
+    );
+    let truncated = std::fs::read(&pssm).unwrap();
+    let half = std::env::temp_dir().join(format!(
+        "losat_psiblast_pssm_stdin_cut_{}.asn",
+        std::process::id()
+    ));
+    std::fs::write(&half, &truncated[..truncated.len() / 2]).unwrap();
+    let cut = run("-", std::fs::File::open(&half).unwrap().into());
+    let _ = std::fs::remove_file(&half);
+    assert_eq!(cut.status.code(), Some(1));
+    assert_eq!(
+        cut.stderr,
+        b"BLAST query/options error: Unrecognized format for PSSM in - (must be PssmWithParameters)\nPlease refer to the BLAST+ user manual.\n"
+    );
+    let empty = run("-", std::process::Stdio::null());
+    assert_eq!(empty.status.code(), Some(1));
+    assert_eq!(
+        empty.stderr,
+        b"BLAST query/options error: Unsupported format for PSSM\nPlease refer to the BLAST+ user manual.\n"
+    );
 }

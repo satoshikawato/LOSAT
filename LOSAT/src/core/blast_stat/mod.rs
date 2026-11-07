@@ -11,12 +11,10 @@
 //! # Organization
 //!
 //! - `karlin_params` - Parameter definitions (KarlinParams)
-//! - `sum_statistics` - `p_to_e` / `e_to_p` (libm versions, see the module doc)
 //! - `composition` - Karlin parameter calculation from composition
 
 pub mod composition;
 pub mod karlin_params;
-pub mod sum_statistics;
 
 // Re-export main types and functions for convenience
 pub use composition::{
@@ -25,4 +23,3 @@ pub use composition::{
     ScoreFreqProfile,
 };
 pub use karlin_params::KarlinParams;
-pub use sum_statistics::{e_to_p, p_to_e};

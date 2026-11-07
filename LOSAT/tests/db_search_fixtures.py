@@ -56,11 +56,13 @@ The tool takes no lock; whoever runs it next to other NCBI runs holds the caller
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import os
 import shlex
 import subprocess
 import sys
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -73,7 +75,7 @@ MANIFEST = TESTS / "db_search_manifest.tsv"
 FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
-PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast")
+PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast")
 NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY", "ARCHIVE_FORMAT",
             "PRE_FETCH_SEQS_LIMIT")
 TIMEOUT = 600
@@ -135,10 +137,51 @@ def is_env_token(token: str) -> bool:
     return token.partition("=")[0] in ENV_NAMES
 
 
+def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str]] | None:
+    """The profile databases of an rpsblast `db` cell `rps-gz:NAME[+NAME2...][!EXT...][!EXT=FILE...]`:
+    the names (`-db "NAME NAME2"`), the extensions left out (`!aux`, `!freq`) and the files put in their
+    place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux); None for another cell."""
+    if not cell.startswith("rps-gz:"):
+        return None
+    names, *changes = cell.removeprefix("rps-gz:").split("!")
+    dropped = {"." + change for change in changes if "=" not in change}
+    replaced = dict(("." + change.split("=")[0], change.split("=")[1]) for change in changes if "=" in change)
+    return names.split("+"), dropped, replaced
+
+
+def inflate_rps(cell: str) -> Path:
+    """A fresh directory (its path with links resolved, as NCBI's RPS errors print it) holding the
+    files LOSAT/tests/db_search/rps/NAME.*.gz of the cell's databases, inflated, but the extensions it
+    leaves out or replaces."""
+    names, dropped, replaced = rps_cell(cell)
+    rps_dir = TESTS / "db_search" / "rps"
+    target = Path(tempfile.mkdtemp(prefix="rps_db_")).resolve()
+    for name in names:
+        sources = sorted(rps_dir.glob(f"{name}.*.gz"))
+        if not sources:
+            raise SystemExit(f"no files LOSAT/tests/db_search/rps/{name}.*.gz")
+        for source in sources:
+            inflated = source.name.removesuffix(".gz")
+            if inflated[len(name):] in dropped or inflated[len(name):] in replaced:
+                continue
+            (target / inflated).write_bytes(gzip.decompress(source.read_bytes()))
+        for extension, file in replaced.items():
+            (target / f"{name}{extension}").write_bytes((rps_dir / file).read_bytes())
+    return target
+
+
+def rps_dir_token(row: dict[str, str]) -> bool:
+    """Whether the row's outputs name the database's directory, frozen as the token `{db_dir}`."""
+    return "path: {db_dir}" in row["covers"]
+
+
 def subjects_argv(cell: str) -> list[str]:
-    """The arguments of a `db` cell: `-db DB`, or `-subject PATH` for a cell `subject:PATH`."""
+    """The arguments of a `db` cell: `-db DB`, `-subject PATH` for a cell `subject:PATH`, or `-db NAME`
+    for an rpsblast cell `rps-gz:NAME...` (`rps_cell`; the run's BLASTDB is the inflated directory)."""
     if cell.startswith("subject:"):
         return ["-subject", cell.removeprefix("subject:")]
+    if (rps := rps_cell(cell)) is not None:
+        return ["-db", " ".join(rps[0])]
     return ["-db", cell]
 
 
@@ -242,6 +285,9 @@ def freeze(args: argparse.Namespace) -> int:
             continue
         files = xinclude.wants_files(row)
         pssm = xinclude.wants_pssm(row)
+        if rps_cell(row["db"]) is not None:
+            freeze_rps(row, command, env)
+            continue
         if files:
             written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
                                               timeout=TIMEOUT, env=row_env(row, env))
@@ -275,6 +321,30 @@ def freeze(args: argparse.Namespace) -> int:
     return 0
 
 
+def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> None:
+    """`freeze` of an rpsblast row: NCBI's run with BLASTDB the inflated database, its directory
+    written as `{db_dir}` where the row says so."""
+    db_dir = inflate_rps(row["db"])
+    try:
+        run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
+                             env={**row_env(row, env), "BLASTDB": str(db_dir)})
+    finally:
+        shutil.rmtree(db_dir, ignore_errors=True)
+    stdout, stderr = run.stdout, run.stderr
+    if rps_dir_token(row):
+        stdout = stdout.replace(str(db_dir).encode(), b"{db_dir}")
+        stderr = stderr.replace(str(db_dir).encode(), b"{db_dir}")
+    (FROZEN / f"{row['row_id']}.out").write_bytes(stdout)
+    err = FROZEN / f"{row['row_id']}.err"
+    if stderr:
+        err.write_bytes(stderr)
+    else:
+        err.unlink(missing_ok=True)
+    row.update(rc=str(run.returncode), stdout_sha256=sha256(stdout), stdout_bytes=str(len(stdout)),
+               stderr_sha256=sha256(stderr) if stderr else "")
+    print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(stdout)}\tstderr={len(stderr)}")
+
+
 def status_differs(observed: int, expected: int, library: bool) -> bool:
     """Whether a run's exit status is not the frozen one. `examples/library_command_line.rs` ends every
     failure with status 1: the library API's errors carry the command line's message, not its status."""
@@ -289,10 +359,21 @@ LIBRARY_REFUSED = {"-out_pssm", "-out_ascii_pssm", "-save_pssm_after_last_round"
 def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False) -> tuple[str, str]:
     files = xinclude.wants_files(row)
     pssm = xinclude.wants_pssm(row)
-    if library and (pssm or LIBRARY_REFUSED.intersection(search_argv(row))):
+    # The library API refuses rpsblast (`api::Program::parse`, line PS item PS11a).
+    if library and (pssm or LIBRARY_REFUSED.intersection(search_argv(row)) or row["program"] == "rpsblast"):
         return "library-skip", ""
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
-    if files:
+    db_dir = inflate_rps(row["db"]) if rps_cell(row["db"]) is not None else None
+    if db_dir is not None:
+        try:
+            run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
+                                 env={**row_env(row, env), "BLASTDB": str(db_dir)})
+        finally:
+            shutil.rmtree(db_dir, ignore_errors=True)
+        if rps_dir_token(row):
+            run.stdout = run.stdout.replace(str(db_dir).encode(), b"{db_dir}")
+            run.stderr = run.stderr.replace(str(db_dir).encode(), b"{db_dir}")
+    elif files:
         written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
                                           env=row_env(row, env), timeout=TIMEOUT)
         run = written.run

@@ -5566,6 +5566,9 @@ fn update_hitlists_with_subject_hits(
                 if q_idx >= hit_lists.len() {
                     continue;
                 }
+                // The kept list holds its exact count (the final tree and the e-value reap drop
+                // HSPs from the preliminary count the list was given).
+                hsps.shrink_to_fit();
                 sort_hsps_by_score(&mut hsps);
                 let hsp_list = BlastnHspList {
                     oid,
@@ -19055,13 +19058,6 @@ fn search_query_batch<const UNGAPPED: bool>(
                     before_evalue_reap.saturating_sub(final_hits.len()) as u64,
                 );
             }
-            // No NCBI counterpart (memory placement only): the list was built by growing (the
-            // traceback's pushes) and filtered in place, so its capacity is up to twice the count
-            // traced; a database search keeps every subject's list until the hit lists are made,
-            // so the list keeps only its length (a shrinking `realloc`: glibc shrinks the block in
-            // place; another allocator may copy the kept HSPs).
-            final_hits.shrink_to_fit();
-
             (final_hits, final_tree_hit_count)
         };
         // Dispatch point of LOSAT_X_QGROUPPAR for the traceback: the kept HSPs are the queries'
@@ -19098,7 +19094,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                         let query = query as usize;
                         let mut edit_lengths = Vec::new();
                         let mut alignment_lengths = Vec::new();
-                        let mut hits = Vec::new();
+                        // (the list holds the query's preliminary count, as NCBI's traced list does:
+                        // the subject path below)
+                        let mut hits = Vec::with_capacity(x_starts[query + 1] - x_starts[query]);
                         x_trace_list(
                             &x_kept[x_starts[query]..x_starts[query + 1]],
                             tree,
@@ -19134,6 +19132,20 @@ fn search_query_batch<const UNGAPPED: bool>(
                 }
                 (SubjectHits::ByQuery(lists), steps)
             } else {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:296,312,375-376
+                // ```c
+                //    Int4 num_initial_hsps = hsp_list->hspcnt;
+                // ...
+                //    hsp_array = hsp_list->hsp_array;
+                // ...
+                //    for (index=0; index < num_initial_hsps; index++) {
+                //       hsp = hsp_array[index];
+                // ```
+                // NCBI traces the preliminary list in its own array, so the traced list never
+                // holds more than the preliminary count. No NCBI counterpart (memory placement
+                // only): the list here gets that count once, instead of growing by doubling (up to
+                // twice the traced count) and being copied or shrunk afterwards.
+                hits.reserve_exact(prelim_hits.len());
                 x_trace_list(
                     prelim_hits,
                     interval_tree,
@@ -19148,7 +19160,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 // No NCBI counterpart (memory placement only): the list goes to the purges as it is
                 // (they work in its allocation, `x_in_handle_order`) and leaves as the subject's
                 // result, instead of a copy while the scratch keeps the buffer at its largest size;
-                // the next subject's list grows from empty.
+                // the next subject's list gets that subject's preliminary count (above).
                 let (list, s1, s2, s3, s4) = x_post_purge(std::mem::take(hits));
                 let (list, s5) = x_final_list(list, interval_tree);
                 (SubjectHits::Mixed(list), [s1, s2, s3, s4, s5])

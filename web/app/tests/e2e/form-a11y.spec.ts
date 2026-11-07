@@ -291,3 +291,63 @@ test('a text box and a select focused with the keyboard have a mark of 3:1 or mo
   });
   expect(outline).toBe('solid 2px');
 });
+
+/** The computed colour of a system colour (`Highlight`) in the page's colours now. */
+async function systemColour(page: Page, name: string): Promise<string> {
+  return page.evaluate((colour) => {
+    const probe = document.createElement('span');
+    probe.style.color = colour;
+    document.body.append(probe);
+    const value = getComputedStyle(probe).color;
+    probe.remove();
+    return value;
+  }, name);
+}
+
+/** The colours and widths that mark a selection: the fill, the top border and the left border. */
+async function marks(locator: Locator): Promise<{ fill: string; top: string; left: string }> {
+  return locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { fill: style.backgroundColor, top: style.borderTopColor, left: `${style.borderLeftColor} ${style.borderLeftWidth}` };
+  });
+}
+
+test('in forced colours, the selected mode, tabs and rows are marked in the system colour of a selection', async ({ page }) => {
+  await page.emulateMedia({ forcedColors: 'active', colorScheme: 'dark' });
+  await threeSubjects(page);
+  const highlight = await systemColour(page, 'Highlight');
+  // The tabs: the selected one filled and framed in Highlight, the others not.
+  for (const [selected, other] of [
+    ['tab-results', 'tab-search'],
+    ['results-view-hits', 'pane-dotplot'],
+  ] as const) {
+    await expect(page.getByTestId(selected)).toHaveAttribute('aria-selected', 'true');
+    await transitionsEnded(page);
+    expect(await marks(page.getByTestId(selected))).toMatchObject({ fill: highlight, top: highlight });
+    const unselected = await marks(page.getByTestId(other));
+    expect(unselected.fill).not.toBe(highlight);
+    expect(unselected.top).not.toBe(highlight);
+  }
+  // The Descriptions' and the HSPs' selected rows: a bar of Highlight at the left, the others none.
+  for (const table of ['subject-table', 'hsp-table']) {
+    await expect(page.getByTestId(table).locator('.table-row.selected')).toHaveCount(1);
+    await transitionsEnded(page);
+    const rows = await page
+      .getByTestId(table)
+      .locator('.table-row')
+      .evaluateAll((elements) =>
+        elements.map((row) => ({ selected: row.classList.contains('selected'), left: `${getComputedStyle(row).borderLeftColor} ${getComputedStyle(row).borderLeftWidth}` })),
+      );
+    expect(rows.filter((row) => row.selected).map((row) => row.left)).toEqual([`${highlight} 4px`]);
+    for (const row of rows.filter((row) => !row.selected)) expect(row.left).not.toContain(highlight);
+  }
+  expect(await page.getByTestId('subject-table').locator('.table-row').count()).toBeGreaterThan(1);
+  // The mode on the search page.
+  await page.getByTestId('tab-search').click();
+  await transitionsEnded(page);
+  const mode = (id: string) => page.getByTestId(`program-${id}`).locator('xpath=..');
+  expect(await marks(mode('blastp'))).toMatchObject({ fill: highlight, top: highlight });
+  const blastn = await marks(mode('blastn'));
+  expect(blastn.fill).not.toBe(highlight);
+  expect(blastn.top).not.toBe(highlight);
+});

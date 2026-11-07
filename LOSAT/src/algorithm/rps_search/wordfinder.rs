@@ -20,7 +20,8 @@ use crate::algorithm::pssm_search::ungapped::{pssm_extend_one_hit, pssm_extend_t
 use crate::seqdb::rps::RPS_WORDSIZE;
 
 /// One entry of the diagonal table (`DiagStruct`: a 31-bit signed `last_hit` and a 1-bit
-/// `flag`), packed as NCBI's bit fields are.
+/// `flag`), packed in a `u32` as NCBI's bit fields are. The table is a `Vec<u32>` so that a
+/// zeroed one comes from the allocator's zeroed pages (`vec![0u32; n]`, `calloc`), as NCBI's.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
 /// ```c
@@ -29,29 +30,32 @@ use crate::seqdb::rps::RPS_WORDSIZE;
 ///    unsigned int flag      : 1 ; /**< Reset the next extension? */
 /// } DiagStruct;
 /// ```
-#[derive(Clone, Copy, Default)]
-struct RpsDiag(u32);
+trait RpsDiag {
+    fn last_hit(&self) -> i32;
+    fn flag(&self) -> bool;
+    fn set(&mut self, last_hit: i32, flag: bool);
+}
 
-impl RpsDiag {
+impl RpsDiag for u32 {
     #[inline(always)]
-    fn last_hit(self) -> i32 {
-        ((self.0 << 1) as i32) >> 1
+    fn last_hit(&self) -> i32 {
+        ((*self << 1) as i32) >> 1
     }
 
     #[inline(always)]
-    fn flag(self) -> bool {
-        self.0 >> 31 != 0
+    fn flag(&self) -> bool {
+        *self >> 31 != 0
     }
 
     #[inline(always)]
     fn set(&mut self, last_hit: i32, flag: bool) {
-        self.0 = (last_hit as u32 & 0x7fff_ffff) | (u32::from(flag) << 31);
+        *self = (last_hit as u32 & 0x7fff_ffff) | (u32::from(flag) << 31);
     }
 }
 
 /// The diagonal table of one worker (`BLAST_DiagTable` of `ewp`).
 pub(crate) struct RpsDiagTable {
-    array: Vec<RpsDiag>,
+    array: Vec<u32>,
     mask: i32,
     offset: i32,
     window: i32,
@@ -68,7 +72,15 @@ impl RpsDiagTable {
         }
     }
 
-    /// `BlastExtendWordNew(concat_length, ...)`: a zeroed table of the volume's length.
+    /// `BlastExtendWordNew(concat_length, ...)`: a zeroed table of the volume's length. The
+    /// table is allocated zeroed and not written (NCBI's `calloc`): only the pages of the
+    /// diagonals that the queries hit become resident, whatever the window.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
+    /// ```c
+    ///         diag_table->hit_level_array = (DiagStruct *)
+    ///             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+    /// ```
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-62
     /// ```c
@@ -88,8 +100,7 @@ impl RpsDiagTable {
     /// ```
     pub(crate) fn reset_for(&mut self, concat_length: i32, window: i32) {
         let length = diag_array_length(concat_length, window);
-        self.array.clear();
-        self.array.resize(length as usize, RpsDiag::default());
+        self.array = vec![0u32; length as usize];
         self.mask = length - 1;
         self.offset = window;
         self.window = window;
@@ -472,7 +483,7 @@ mod tests {
 
     #[test]
     fn the_entry_keeps_ncbis_31_bit_signed_field_and_flag() {
-        let mut entry = RpsDiag::default();
+        let mut entry = 0u32;
         entry.set(-40, true);
         assert_eq!((entry.last_hit(), entry.flag()), (-40, true));
         entry.set(i32::MAX / 4 + 10, false);

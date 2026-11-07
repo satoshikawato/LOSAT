@@ -406,20 +406,16 @@ fn run_inner(
     // `CStdCmdLineArgs`, which opens the query and the output: its warning before theirs (probe
     // F04 of line DI-8), and a list error leaves no `-out`, only the error archive that NCBI's
     // `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8). NCBI's application layer
-    // has read its environment and registry files by then; LOSAT reads them for `-db` (the
-    // registry's `BLASTDB`), as its other programs with `-db`, and leaves `-subject`'s path as it
-    // was.
-    let db_settings = match args.database_name() {
-        Some(_) => Some(
-            crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
-                .map_err(anyhow::Error::msg)?,
-        ),
-        None => None,
-    };
-    let list = match &db_settings {
-        Some(settings) => args
+    // has read its environment and registry files by then; LOSAT reads them here, as its other
+    // programs do for every run: the registry's `BLASTDB` finds `-db`, and the data loaders decide
+    // whether the reader tries the first line of the query or the `-subject` file as a Seq-id
+    // (`FastaStream::seq_id_role`).
+    let settings = crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
+        .map_err(anyhow::Error::msg)?;
+    let list = match args.database_name() {
+        Some(_) => args
             .db_filter
-            .resolve(settings, &mut stderr)
+            .resolve(&settings, &mut stderr)
             .map_err(early_archive_error)?,
         None => None,
     };
@@ -456,6 +452,7 @@ fn run_inner(
                 let mut stream = FastaStream::from_file(subject_file);
                 stream.parse_deflines = args.parse_deflines;
                 stream.id_scope = id_scope.clone();
+                stream.seq_id_role = settings.data_loaders.then_some("subject");
                 stream
             },
             true,
@@ -613,10 +610,10 @@ fn run_inner(
     // ```
     // The database of `-db` opens after the arguments (the query and output files) and the
     // options are processed and before the query is read, as NCBI's `InitializeSubject`.
-    let database = match (args.database_name(), &db_settings) {
-        (Some(name), Some(settings)) => {
+    let database = match args.database_name() {
+        Some(name) => {
             let database =
-                BlastxDatabase::open_restricted(name, settings, list.as_ref(), &mut stderr)?
+                BlastxDatabase::open_restricted(name, &settings, list.as_ref(), &mut stderr)?
                     .showing_gis(args.show_gis)
                     .in_id_scope(id_scope.clone());
             crate::algorithm::common::database::note_archive_database_filter(
@@ -630,7 +627,7 @@ fn run_inner(
             )?;
             Some(database)
         }
-        _ => None,
+        None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
     // ```c++
@@ -648,16 +645,11 @@ fn run_inner(
     // A custom tabular field list that shows a plural name of the taxonomy database asks
     // whether `taxdb.bti` is on the search path: its formatters warn without it. A `-db` search
     // asks its database; a `-subject` search the search path of NCBI's databases (the
-    // environment and the registry, read here for it alone), as BLASTP's and BLASTN's.
+    // environment and the registry), as BLASTP's and BLASTN's.
     if options.tabular.is_some_and(|spec| spec.checks_taxdb()) {
         options.taxdb_found = match &database {
             Some(database) => database.taxdb_found(),
-            None => {
-                let settings =
-                    crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
-                        .map_err(anyhow::Error::msg)?;
-                crate::algorithm::common::database::subject_taxdb_found(&settings, "BLASTX")?
-            }
+            None => crate::algorithm::common::database::subject_taxdb_found(&settings, "BLASTX")?,
         };
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
@@ -685,6 +677,7 @@ fn run_inner(
         parse_deflines: args.parse_deflines,
         id_scope: id_scope.clone(),
         strand: crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand),
+        data_loaders: settings.data_loaders,
     };
     // The letters of a reader batch (below, where NCBI reads `BATCH_SIZE`, after the check of
     // an empty query), which the reads before the search take too.

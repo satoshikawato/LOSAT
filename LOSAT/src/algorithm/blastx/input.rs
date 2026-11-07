@@ -509,6 +509,7 @@ pub(crate) fn parse_fasta_batches_with_warnings(
         false,
         None,
         None,
+        None,
         deliver,
         warn,
     )
@@ -549,6 +550,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     batch_size: usize,
     keep_defline: bool,
     parse_deflines: Option<BelievedRead<'_>>,
+    seq_id_role: Option<&str>,
     range: Option<&SequenceRange>,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
@@ -568,6 +570,36 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     let mut raw_residues = 0;
     for (line_index, raw) in lines.enumerate() {
         let raw = raw.as_ref();
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:130-162
+        // ```c++
+        //     virtual CRef<CSeq_entry> ReadOneSeq(ILineErrorListener * pMessageListener) {
+        //
+        //         const string line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
+        //         if ( !line.empty() && isalnum(line.data()[0]&0xff) ) {
+        //             try {
+        //                 CRef<CSeq_id> id(new CSeq_id(line, (CSeq_id::fParse_AnyRaw |
+        // 							CSeq_id::fParse_ValidLocal)));
+        // ...
+        //         // If all fails, fall back to parent's implementation
+        //         GetLineReader().UngetLine();
+        //         return CFastaReader::ReadOneSeq(pMessageListener);
+        //     }
+        // ```
+        // BLASTX reads its query and its subjects with the reader of the other programs
+        // (`CBlastFastaInputSource`), whose every record first tries its first line as a Seq-id
+        // when the data loaders are on. Only the input's first line can be one: a record ends
+        // before the next `>` line. LOSAT refuses such a line as the other programs' reader does
+        // (`fasta_reader::reader::read_one_seq`), before the `-parse_deflines` stop below, as
+        // NCBI tries the Seq-id before its `CFastaReader` reads.
+        if line_index == 0 {
+            if let Some(role) = seq_id_role {
+                if let Some(refusal) =
+                    crate::blastinput::fasta_reader::seq_id::reject_seq_id_line(raw, "BLASTX", role)
+                {
+                    return Err(refusal);
+                }
+            }
+        }
         let line = raw.strip_suffix(b"\r").unwrap_or(raw);
         // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:350-375
         // ```c++
@@ -1770,6 +1802,11 @@ pub(crate) struct FastaStream<R: Read> {
     pub(crate) strand: crate::report::archive::bioseq::SeqLocStrand,
     /// The search whose records this stream reads under `-parse_deflines`.
     pub(crate) id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
+    /// With NCBI's data loaders on (`ncbi_environment::ApplicationSettings::data_loaders`), the
+    /// role ("query", "subject") named in LOSAT's refusal of a first line that NCBI tries as a
+    /// Seq-id (`fasta_reader::seq_id::reject_seq_id_line`); `None` reads every first line as
+    /// FASTA, as NCBI does with the data loaders off.
+    pub(crate) seq_id_role: Option<&'static str>,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
 // ```c++
@@ -1838,6 +1875,7 @@ impl<R: Read> FastaStream<R> {
             parse_deflines: false,
             id_scope: None,
             strand: crate::report::archive::bioseq::SeqLocStrand::Both,
+            seq_id_role: None,
         }
     }
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
@@ -2371,6 +2409,8 @@ pub(crate) struct QueryStreamSettings {
     pub(crate) parse_deflines: bool,
     pub(crate) id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
     pub(crate) strand: crate::report::archive::bioseq::SeqLocStrand,
+    /// NCBI's data loaders (`FastaStream::seq_id_role`).
+    pub(crate) data_loaders: bool,
 }
 
 impl QueryStreamSettings {
@@ -2380,6 +2420,7 @@ impl QueryStreamSettings {
         stream.parse_deflines = self.parse_deflines;
         stream.id_scope = self.id_scope.clone();
         stream.strand = self.strand;
+        stream.seq_id_role = self.data_loaders.then_some("query");
         stream
     }
 
@@ -2553,6 +2594,7 @@ pub(crate) fn parse_fasta_stream_keeping<R: Read>(
     // A file without records gives one empty batch; one whose records a range skipped gave it
     // already.
     let mut delivered = false;
+    let seq_id_role = stream.seq_id_role;
     let records = parse_fasta_lines(
         stream,
         protein,
@@ -2560,6 +2602,7 @@ pub(crate) fn parse_fasta_stream_keeping<R: Read>(
         batch_size,
         keep_defline,
         parse_deflines,
+        seq_id_role,
         range,
         &mut |records| {
             delivered = true;
@@ -3207,6 +3250,89 @@ mod defline_tests {
         )
     }
 
+    /// `read` with NCBI's data loaders on (`FastaStream::seq_id_role`): the titles and letters.
+    fn read_with_loaders(data: &[u8], parse_deflines: bool) -> Result<Vec<(String, Vec<u8>)>> {
+        let mut stream = FastaStream::new(Cursor::new(data.to_vec()));
+        stream.parse_deflines = parse_deflines;
+        stream.seq_id_role = Some("query");
+        let records = parse_fasta_stream_keeping(
+            &mut stream,
+            false,
+            false,
+            100,
+            false,
+            None,
+            &mut |_| Ok(()),
+            &mut |_| Ok(()),
+        )?;
+        Ok(records
+            .into_iter()
+            .map(|record| (record.title, record.sequence))
+            .collect())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:130-133
+    // ```c++
+    //     virtual CRef<CSeq_entry> ReadOneSeq(ILineErrorListener * pMessageListener) {
+    //
+    //         const string line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
+    //         if ( !line.empty() && isalnum(line.data()[0]&0xff) ) {
+    // ```
+    // With the data loaders on, BLASTX's reader refuses the first lines that the other programs'
+    // reader refuses, with that reader's text, also under `-parse_deflines` (the Seq-id is tried
+    // before `CFastaReader` reads); a first line that NCBI reads as FASTA, and a Seq-id after the
+    // first line, are read as with the data loaders off.
+    #[test]
+    fn a_first_line_ncbi_tries_as_a_seq_id_is_refused_as_the_shared_reader_refuses_it() {
+        use crate::blastinput::fasta_reader::{FastaInputSource, ReadError, ReaderConfig};
+        let first_lines = [
+            &b"lcl|abc"[..],
+            b"12345",
+            b"AB123456",
+            b"P12345",
+            b"gnl|db|x",
+            b"  lcl|abc  ",
+            b"lcl|abc\r",
+        ];
+        for first in first_lines {
+            let data = [first, b"\n>q1 x\nACGTACGT\n"].concat();
+            let config = ReaderConfig::query("BLASTX", false, true);
+            let expected =
+                match FastaInputSource::from_bytes(&data, config).next_sequence(&mut |_| Ok(())) {
+                    Err(ReadError::Unsupported(refusal)) => refusal.to_string(),
+                    other => panic!("{first:?}: {other:?}"),
+                };
+            assert!(
+                expected.contains("not supported by LOSAT's BLASTX"),
+                "{expected}"
+            );
+            for parse_deflines in [false, true] {
+                let error = read_with_loaders(&data, parse_deflines).unwrap_err();
+                assert_eq!(error.to_string(), expected, "{first:?}");
+            }
+            // With the data loaders off the line is data: the letters of a record without a
+            // defline, or `CheckDataLine`'s error for a line that is not plausible data (`12345`).
+            if let Err(error) = read(&data, false) {
+                assert!(error.is::<FastaParseError>(), "{first:?}: {error}");
+            }
+        }
+        let fasta: [&[u8]; 5] = [
+            b"ACGTACGTAC\n>q1 x\nACGT\n",
+            b"ACGT ACGT\n>q1 x\nACGT\n",
+            b"\nlcl|abc\n>q1 x\nACGT\n",
+            b";c\nlcl|abc\n>q1 x\nACGT\n",
+            b">lcl|abc x\nACGT\n>q1 x\nACGT\n",
+        ];
+        for data in fasta {
+            let without: Vec<_> = read(data, false)
+                .unwrap()
+                .into_iter()
+                .map(|record| (record.title, record.sequence))
+                .collect();
+            assert_eq!(read_with_loaders(data, false).unwrap(), without, "{data:?}");
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:383-398
     // ```c++
     //         if (c == '!'  ||  c == '#' || c == ';') {
@@ -3421,6 +3547,7 @@ mod query_settings_tests {
             parse_deflines: true,
             id_scope: Some(Default::default()),
             strand: crate::report::archive::bioseq::SeqLocStrand::Both,
+            data_loaders: false,
         };
         let error = read(
             &mut settings.stream_before_search(file("nodef", b"ACGT\n>q1 x\nACGT\n")),

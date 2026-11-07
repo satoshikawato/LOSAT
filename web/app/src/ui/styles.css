@@ -2195,6 +2195,13 @@ pre.range-text {
     min-height: 0;
   }
 
+  /* An input's "First lines" and "Records" are touch targets of 24 px (WCAG 2.5.8; WA2-AX-11). */
+  .source summary {
+    box-sizing: border-box;
+    min-height: 24px;
+    padding-block: 2px;
+  }
+
   /* The "?" stays a circle, at the 24 px of WCAG 2.5.8. */
   .help-toggle {
     width: 24px;

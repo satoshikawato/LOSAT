@@ -5,7 +5,8 @@
 // larger query coordinate of its record, coloured by NCBI's "Alignment Scores" bin of its record's
 // bit score; the HSPs of a subject are joined by a thin grey line. The bins only classify the
 // engine's number; hover and focus show the outfmt 6 strings. Click or Enter selects the HSP and
-// asks the results screen to show its alignment.
+// asks the results screen to show its alignment. A finger picks further from a bar than a mouse,
+// across rows too (WA2-AX-11); the 12 px rows stay NCBI's.
 //
 // One canvas holds the figure and draws only the rows in view, so that thousands of HSPs stay
 // smooth; with many subjects the rows scroll inside the figure under the query bar.
@@ -33,8 +34,13 @@ const QUERY_PX = 16;
 const TICK_PX = 5;
 const LABEL_TOP = QUERY_TOP + QUERY_PX + TICK_PX + 2;
 const HEADER_PX = LABEL_TOP + 14 + 8;
-/** How far beside a bar a pointer still picks it. */
+/** How far beside a bar a pointer still picks it, in the row under it. */
 const PICK_PX = 4;
+/**
+ * How far from a bar a finger still picks it, in the row under it or the one above or below: half
+ * the 24 px of a touch target (WCAG 2.5.8). A tap between two rows picks the nearer row's bar.
+ */
+const TOUCH_PICK_PX = 12;
 const FONT = '12px system-ui, sans-serif';
 const BOLD = '600 12px system-ui, sans-serif';
 const ACCENT = '#1f5fbf';
@@ -142,20 +148,28 @@ function rowsInView(top = scrollTop.value): [number, number] {
   return [Math.min(first, rows), Math.min(rows, Math.ceil((top + canvasHeight.value - HEADER_PX) / ROW_PX))];
 }
 
-/** The HSP under a point of the canvas: in the row under it, the bar nearest (within PICK_PX), or -1. */
-function hit(x: number, y: number): number {
+/**
+ * The HSP under a point of the canvas, or -1. A mouse picks in the row under the point, the bar
+ * nearest sideways within PICK_PX. A finger picks the bar nearest to the point within
+ * TOUCH_PICK_PX, in that row or the rows above and below it that are in view.
+ */
+function hit(x: number, y: number, touch = false): number {
   if (y < HEADER_PX) return -1;
   const l = layout.value;
   const r = Math.floor((y - HEADER_PX + scrollTop.value) / ROW_PX);
   if (r < 0 || r >= l.rows.length) return -1;
   let best = -1;
-  let bestDistance = PICK_PX;
-  for (let k = l.start[r]!; k < l.start[r + 1]!; k++) {
-    const [x0, x1] = barX(k);
-    const d = x < x0 ? x0 - x : x > x1 ? x - x1 : 0;
-    if (d <= bestDistance) {
-      best = k;
-      bestDistance = d;
+  let bestDistance = touch ? TOUCH_PICK_PX : PICK_PX;
+  for (let row = touch ? r - 1 : r; row <= (touch ? r + 1 : r); row++) {
+    if (row < 0 || row >= l.rows.length || (row !== r && (rowY(row) < HEADER_PX || rowY(row) > canvasHeight.value))) continue;
+    const dy = touch ? Math.max(0, Math.abs(y - rowY(row)) - BAR_PX / 2) : 0;
+    for (let k = l.start[row]!; k < l.start[row + 1]!; k++) {
+      const [x0, x1] = barX(k);
+      const d = Math.hypot(x < x0 ? x0 - x : x > x1 ? x - x1 : 0, dy);
+      if (d <= bestDistance) {
+        best = k;
+        bestDistance = d;
+      }
     }
   }
   return best;
@@ -327,9 +341,16 @@ function onPointerMove(event: PointerEvent): void {
 function onPointerLeave(): void {
   hovered.value = -1;
 }
+/** The kind of the pointer of the last press: WebKit's click after a tap says "mouse". */
+let pressedBy = '';
+function onPointerDown(event: PointerEvent): void {
+  pressedBy = event.pointerType;
+}
 function onClick(event: MouseEvent): void {
   const { x, y } = point(event);
-  choose(hit(x, y));
+  const touch = pressedBy === 'touch';
+  pressedBy = '';
+  choose(hit(x, y, touch));
 }
 
 function onFocus(): void {
@@ -511,14 +532,16 @@ watch(layout, (now, before) => {
 });
 watch([layout, canvasWidth, canvasHeight, selectedIndex, hovered, cursor, keyboard, info], () => schedule(), { flush: 'post' });
 
-/** The HSPs drawn in view (at most 200), with the middles of their bars in CSS pixels of the canvas, for tests. */
+/** The HSPs drawn in view (at most 200), with the middles and ends of their bars in CSS pixels of the canvas, for tests. */
 const targets = computed(() => {
   const l = layout.value;
   const [first, last] = rowsInView(scrollTop.value);
-  const out: { hsp: string; x: number; y: number; bin: number }[] = [];
+  const out: { hsp: string; x: number; y: number; x0: number; x1: number; bin: number }[] = [];
+  const tenth = (n: number) => Math.round(n * 10) / 10;
   for (let k = l.start[first]!; k < l.start[last]! && out.length < 200; k++) {
     const [x0, x1] = barX(k);
-    out.push({ hsp: `${props.state.qIdx}:${l.rank[k]}`, x: Math.round((x0 + x1) / 2), y: Math.round(rowY(l.rowOf[k]!)), bin: l.bin[k]! });
+    const y = Math.round(rowY(l.rowOf[k]!));
+    out.push({ hsp: `${props.state.qIdx}:${l.rank[k]}`, x: Math.round((x0 + x1) / 2), y, x0: tenth(x0), x1: tenth(x1), bin: l.bin[k]! });
   }
   return JSON.stringify(out);
 });
@@ -556,6 +579,7 @@ const selectedText = computed(() => (selectedIndex.value < 0 ? '' : `${props.sta
             :data-hsps="layout.count"
             :data-selected="selectedText"
             :data-targets="targets"
+            @pointerdown="onPointerDown"
             @pointermove="onPointerMove"
             @pointerleave="onPointerLeave"
             @click="onClick"

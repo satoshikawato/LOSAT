@@ -54,7 +54,9 @@ const HALO = 'rgba(255, 196, 0, 0.75)';
 /** Tick labels: at least 12 px (S13 screen review L4). */
 const FONT = '12px system-ui, sans-serif';
 const TITLE_FONT = '600 13px system-ui, sans-serif';
+/** How far from a line a press picks it: a mouse's, and a finger's (WA2-AX-11: a short line was hard to hit). */
 const PICK_PX = 8;
+const TOUCH_PICK_PX = 16;
 /**
  * How far a press moves before it is a drag, not a click: a mouse's, and a finger's, which wobbles
  * more and, moving, may be the page's (onPointerMove).
@@ -471,9 +473,9 @@ function ends(i: number, v = view.value): [number, number, number, number] {
   return [toPixelX(s.x0[i]!, v, b), toPixelY(s.y0[i]!, v, b), toPixelX(s.x1[i]!, v, b), toPixelY(s.y1[i]!, v, b)];
 }
 
-/** The HSP whose line, as the frame shows it, is nearest to a point of the plot, within PICK_PX, or -1. */
-function pick(x: number, y: number): number {
-  return pickLine(x, y, segments.value.list.length, (i) => ends(i), box.value, PICK_PX);
+/** The HSP whose line, as the frame shows it, is nearest to a point of the plot, within `reach` px, or -1. */
+function pick(x: number, y: number, reach = PICK_PX): number {
+  return pickLine(x, y, segments.value.list.length, (i) => ends(i), box.value, reach);
 }
 
 // --- zoom, pan and selection ---------------------------------------------------------------------
@@ -558,13 +560,13 @@ function onPointerMove(event: PointerEvent): void {
 /** A press that did not move clicks: on a line it selects the HSP and opens its popup, elsewhere it closes the popup. */
 function onPointerUp(event: PointerEvent): void {
   if (drag === undefined || drag.id !== event.pointerId) return;
-  const moved = drag.moved;
+  const { moved, touch } = drag;
   drag = undefined;
   hoverDirty = true;
   schedule(false);
   if (moved) return;
   const { x, y } = canvasPoint(event);
-  const i = pick(x, y);
+  const i = pick(x, y, touch ? TOUCH_PICK_PX : PICK_PX);
   if (i < 0) {
     popupOpen.value = false;
     return;

@@ -1,6 +1,7 @@
-// The Dot Plot under a finger (W9: WA2-AX-10).
+// The Dot Plot and the Graphic Summary under a finger (W9: WA2-AX-10, WA2-AX-11).
 //
-// The touch screen is a phone's: hasTouch and a phone's width. A finger that moves is
+// The touch screen is a phone's: hasTouch and a phone's width. A tap is Playwright's touchscreen
+// tap, which gives pointer events of type "touch" in all three browsers. A finger that moves is
 // Chromium's DevTools Protocol touch events, which also scroll the page as a phone does; Firefox
 // and WebKit have no such events here, so there the finger is pointer events of type "touch" sent
 // to the plot, which check the plot's own handling (the browser's scrolling is Chromium's test).
@@ -8,6 +9,8 @@
 // text, W5): the plot leaves it to the page with touch-action, which the tests read.
 import { expect, type CDPSession, type Locator, type Page } from '@playwright/test';
 import { test } from './support/test';
+import { axeViolations } from './support/axe';
+import { BUILD_HAS_ENGINE } from './support/browser';
 import { chooseRun, openSearch, paste, program, submit, waitStatus } from './support/search';
 
 test.setTimeout(180_000);
@@ -148,7 +151,186 @@ test.describe('a phone', () => {
     }
   });
 
+  // --- WA2-AX-11: touch targets ----------------------------------------------------------------------
+
+  test('a tap 12 px from a dot plot line selects it; a mouse click there does not', async ({ page }) => {
+    // Two HSPs far apart: A is twice in the subject (as results.spec.ts's dot plot test).
+    const a = dna(11, 60);
+    await program(page, 'blastn');
+    await paste(page, 'query', `>q1\n${dna(21, 20)}\n>q2\n${a}\n`);
+    await paste(page, 'subject', `>s1\n${a}${dna(12, 60)}${a}\n`);
+    await runAndOpen(page);
+    await page.getByTestId('query-row-1').click();
+    await showTab(page, 'pane-dotplot');
+    const canvas = page.getByTestId('dotplot-canvas');
+    await expect(canvas).toHaveAttribute('data-segments', '2');
+    const selected = (await canvas.getAttribute('data-selected'))!;
+    const targets = JSON.parse((await canvas.getAttribute('data-targets'))!) as { hsp: string; ends: number[] }[];
+    const target = targets.find((t) => t.hsp !== selected)!;
+    // A point 12 px from the line, across it, in the plot (the frame inside the axes' 50 px bands,
+    // DotPlot's MARGIN), 30 px or more from every other line (the FakeEngine's two lines cross).
+    const [left, top] = [50, 50];
+    const [width, height] = (await canvas.getAttribute('data-plot'))!.split('x').map(Number) as [number, number];
+    const [ax, ay, bx, by] = target.ends as [number, number, number, number];
+    const length = Math.hypot(bx - ax, by - ay);
+    const at = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8]
+      .flatMap((t) => [1, -1].map((side) => ({ x: ax + t * (bx - ax) + (side * 12 * -(by - ay)) / length, y: ay + t * (by - ay) + (side * 12 * (bx - ax)) / length })))
+      .find(
+        (point) =>
+          point.x > left + 2 &&
+          point.x < left + width - 2 &&
+          point.y > top + 2 &&
+          point.y < top + height - 2 &&
+          targets.every((other) => other === target || distance(point, other.ends) >= 30),
+      )!;
+    expect(at, 'a point 12 px from the line and 30 px from the others').toBeDefined();
+    expect(distance(at, target.ends)).toBeCloseTo(12, 0);
+    await centre(canvas);
+    let box = (await canvas.boundingBox())!;
+
+    // The mouse: as before, 8 px.
+    await page.mouse.click(box.x + at.x, box.y + at.y);
+    await page.waitForTimeout(200);
+    await expect(canvas).toHaveAttribute('data-selected', selected);
+    await expect(page.getByTestId('dotplot-popup')).toHaveCount(0);
+
+    // A finger: the line is chosen, and its popup opens.
+    await page.touchscreen.tap(box.x + at.x, box.y + at.y);
+    await expect(canvas).toHaveAttribute('data-selected', target.hsp);
+    await expect(page.getByTestId('dotplot-popup')).toHaveAttribute('data-hsp', target.hsp);
+
+    // A tap far from every line closes the popup and keeps the selection.
+    await centre(canvas);
+    box = (await canvas.boundingBox())!;
+    const far = farPoint(box, targets);
+    expect(far, 'a point of the canvas 40 px from every line').toBeDefined();
+    await page.touchscreen.tap(box.x + far!.x, box.y + far!.y);
+    await expect(page.getByTestId('dotplot-popup')).toHaveCount(0);
+    await expect(canvas).toHaveAttribute('data-selected', target.hsp);
+  });
+
+  test("a tap between two rows of the Graphic Summary chooses the nearer row's HSP; the mouse keeps its row and 4 px", async ({ page }) => {
+    // The query's thirds in three subjects, shorter and shorter, so that the rows come in this
+    // order: in the engine build each row's bar starts where the one above it ends (the
+    // FakeEngine's bars all start at the query's start).
+    const [p, q, r] = [dna(61, 80), dna(62, 80), dna(63, 80)];
+    await program(page, 'blastn');
+    await paste(page, 'query', `>q\n${p}${q}${r}\n`);
+    await paste(page, 'subject', `>s1\n${dna(64, 30)}${p}\n>s2\n${q.slice(0, 70)}${dna(65, 30)}\n>s3\n${dna(66, 30)}${r.slice(0, 60)}${dna(67, 30)}\n`);
+    await runAndOpen(page);
+    const canvas = page.getByTestId('graphic-canvas');
+    await expect(canvas).toHaveAttribute('data-rows', '3');
+    const bars = JSON.parse((await canvas.getAttribute('data-targets'))!) as Bar[];
+    const rowYs = [...new Set(bars.map((bar) => bar.y))].sort((m, n) => m - n);
+    expect(rowYs).toHaveLength(3);
+    const first = bars.filter((bar) => bar.y === rowYs[0]).sort((m, n) => n.x1 - m.x1)[0]!;
+    // Points in the gap between the first and the second row, on both sides of the line between
+    // their bands: 6 and 9 px past the right end of the first row's bar, and under its middle.
+    const points = [
+      { x: first.x1 + 6, y: first.y + 4 },
+      { x: first.x1 + 6, y: first.y + 7 },
+      { x: first.x1 + 9, y: first.y + 2 },
+      { x: first.x, y: first.y + 7 },
+    ];
+    /**
+     * Selects another HSP than `hsp` (with a click on the middle of the last row's bar, which no
+     * other bar overlaps), then presses at `point` by `how`; returns the selection before that press.
+     */
+    const press = async (point: { x: number; y: number }, how: 'tap' | 'click', hsp: string): Promise<string> => {
+      const last = bars.filter((bar) => bar.y === rowYs[2]);
+      expect(last).toHaveLength(1);
+      const other = last[0]!.hsp === hsp ? first : last[0]!;
+      for (const [at, by] of [
+        [other, 'click'],
+        [point, how],
+      ] as const) {
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await centre(canvas);
+        const box = (await canvas.boundingBox())!;
+        if (by === 'tap') await page.touchscreen.tap(box.x + at.x, box.y + at.y);
+        else await page.mouse.click(box.x + at.x, box.y + at.y);
+        if (at === other) await expect(canvas).toHaveAttribute('data-selected', other.hsp);
+      }
+      return other.hsp;
+    };
+    let across = 0;
+    for (const point of points) {
+      // A finger: the bar nearest to it (12 px at most), in its row or the one above or below.
+      const near = nearestBar(bars, point, 12);
+      expect(near, `a bar within 12 px of ${JSON.stringify(point)}`).toBeDefined();
+      if (near!.y !== bandOf(rowYs, point.y)) across++;
+      await press(point, 'tap', near!.hsp);
+      await expect(canvas, `a tap at ${JSON.stringify(point)}`).toHaveAttribute('data-selected', near!.hsp);
+    }
+    // In the engine build, a point in one row's band is nearer to the bar of the row below.
+    if (BUILD_HAS_ENGINE) expect(across).toBeGreaterThan(0);
+    // The mouse picks in the row under it, 4 px beside a bar at most, as before: a click at the
+    // points that are further from the bars of their rows chooses nothing.
+    let missed = 0;
+    for (const point of points) {
+      if (bars.some((bar) => bar.y === bandOf(rowYs, point.y) && Math.max(bar.x0 - point.x, point.x - bar.x1, 0) <= 4)) continue;
+      missed++;
+      const before = await press(point, 'click', nearestBar(bars, point, 12)!.hsp);
+      await page.waitForTimeout(300);
+      await expect(canvas, `a click at ${JSON.stringify(point)}`).toHaveAttribute('data-selected', before);
+    }
+    expect(missed).toBeGreaterThanOrEqual(2);
+  });
+
+  test('the "First lines" and "Records" of an input are 24 px touch targets', async ({ page }) => {
+    await program(page, 'blastn');
+    await paste(page, 'query', `>q\n${dna(71, 120)}\n`);
+    await paste(page, 'subject', `>s\n${dna(72, 120)}\n`);
+    for (const summary of await page.locator('[data-testid$="-source-0"] summary').all()) {
+      expect((await summary.boundingBox())!.height, (await summary.textContent()) ?? '').toBeGreaterThanOrEqual(24);
+    }
+    expect(await page.locator('[data-testid$="-source-0"] summary').count()).toBeGreaterThanOrEqual(2);
+    const found = await axeViolations(page, ['[data-testid="query-source-0"]', '[data-testid="subject-source-0"]']);
+    expect(found.filter((violation) => violation.id === 'target-size')).toEqual([]);
+  });
 });
+
+/** A point of the canvas 40 px or more from every line, or undefined. */
+function farPoint(box: { width: number; height: number }, targets: readonly { ends: number[] }[]): { x: number; y: number } | undefined {
+  for (let y = 10; y < box.height - 10; y += 5) {
+    for (let x = 10; x < box.width - 10; x += 5) if (targets.every((t) => distance({ x, y }, t.ends) >= 40)) return { x, y };
+  }
+  return undefined;
+}
+
+/** A bar of the Graphic Summary in CSS pixels of its canvas: its HSP, the middle, the ends and the row's y. */
+interface Bar {
+  readonly hsp: string;
+  readonly x: number;
+  readonly y: number;
+  readonly x0: number;
+  readonly x1: number;
+}
+
+/** The y of the row whose band (12 px, its bar in the middle) holds `y`. */
+function bandOf(rowYs: readonly number[], y: number): number | undefined {
+  return rowYs.find((row) => y >= row - 6 && y < row + 6);
+}
+
+/** The bar (6 px high) nearest to a point, `reach` px away at most. */
+function nearestBar(bars: readonly Bar[], point: { x: number; y: number }, reach: number): Bar | undefined {
+  let best: Bar | undefined;
+  let bestDistance = reach;
+  for (const bar of bars) {
+    const dx = Math.max(bar.x0 - point.x, point.x - bar.x1, 0);
+    const dy = Math.max(Math.abs(point.y - bar.y) - 3, 0);
+    const d = Math.hypot(dx, dy);
+    if (d <= bestDistance) [best, bestDistance] = [bar, d];
+  }
+  return best;
+}
+
+/** The distance from a point to a line from (ax, ay) to (bx, by). */
+function distance(point: { x: number; y: number }, [ax, ay, bx, by]: readonly number[]): number {
+  const [dx, dy] = [bx! - ax!, by! - ay!];
+  const t = dx === 0 && dy === 0 ? 0 : Math.max(0, Math.min(1, ((point.x - ax!) * dx + (point.y - ay!) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(point.x - (ax! + t * dx), point.y - (ay! + t * dy));
+}
 
 /** A finger of the DevTools Protocol: down at (x, y) of the window, moved by (dx, dy) in `steps` steps a frame apart, and up. */
 async function touchDrag(page: Page, cdp: CDPSession, x: number, y: number, dx: number, dy: number, steps: number): Promise<void> {

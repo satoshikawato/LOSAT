@@ -1,3 +1,4 @@
+use super::disc_lookup::DiscWordType;
 use crate::blastinput::value_parsers::*;
 use clap::Args;
 use std::path::PathBuf;
@@ -231,7 +232,7 @@ pub struct BlastnArgs {
     // ```
     // NCBI applies them to any task (`coordination.rs` `determine_template`).
     #[arg(long, value_name = "TYPE", value_parser = blastn_template_type, requires = "template_length", help = "Discontiguous MegaBLAST template type: coding, optimal or coding_and_optimal")]
-    pub template_type: Option<crate::algorithm::blastn::disc_lookup::DiscWordType>,
+    pub template_type: Option<DiscWordType>,
     #[arg(long, value_name = "INT", value_parser = blastn_template_length, requires = "template_type", help = "Discontiguous MegaBLAST template length: 16, 18 or 21")]
     pub template_length: Option<u8>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170,288-300
@@ -896,6 +897,43 @@ impl BlastnArgs {
             })?;
         }
         Ok(())
+    }
+}
+
+/// A discontiguous megablast template type: `coding`, `optimal` or `coding_and_optimal`.
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:688-693,708-714
+/// ```c
+/// /// Value to specify coding template type
+/// const char* kTemplType_Coding = "coding";
+/// /// Value to specify optimal template type
+/// const char* kTemplType_Optimal = "optimal";
+/// /// Value to specify coding+optimal template type
+/// const char* kTemplType_CodingAndOptimal = "coding_and_optimal";
+/// ...
+///     arg_desc.AddOptionalKey(kArgDMBTemplateType, "type",
+///                  "Discontiguous MegaBLAST template type",
+///                  CArgDescriptions::eString);
+///     arg_desc.SetConstraint(kArgDMBTemplateType, &(*new CArgAllow_Strings,
+///                                                   kTemplType_Coding,
+///                                                   kTemplType_Optimal,
+///                                                   kTemplType_CodingAndOptimal));
+/// ```
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:747-752
+/// ```c
+///         if (type == kTemplType_Coding) {
+///             temp_type = eMBWordCoding;
+///         } else if (type == kTemplType_Optimal) {
+///             temp_type = eMBWordOptimal;
+///         } else if (type == kTemplType_CodingAndOptimal) {
+///             temp_type = eMBWordTwoTemplates;
+/// ```
+pub fn blastn_template_type(value: &str) -> Result<DiscWordType, String> {
+    match value {
+        "coding" => Ok(DiscWordType::Coding),
+        "optimal" => Ok(DiscWordType::Optimal),
+        "coding_and_optimal" => Ok(DiscWordType::TwoTemplates),
+        _ => Err("expected one of coding, coding_and_optimal, optimal".into()),
     }
 }
 

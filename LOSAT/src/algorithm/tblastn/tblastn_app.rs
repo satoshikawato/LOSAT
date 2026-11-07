@@ -1686,6 +1686,14 @@ fn search(
                 lines
             })
             .collect();
+        // The query batches that were read and searched, by their searched queries (the batches
+        // before a database failure or a reader stop): each is reported.
+        let batch_spans: Vec<std::ops::Range<usize>> = query_input
+            .batches(batch_size)
+            .into_iter()
+            .map(|batch| batch.searched)
+            .filter(|searched| !searched.is_empty() && searched.end <= queries.len())
+            .collect();
         // `-db`: the reported sequences by rank, with their records and lengths, and their packed
         // subjects where a report reads their letters; the database's other sequences are dropped
         // before the reports.
@@ -1701,6 +1709,7 @@ fn search(
                         outputs.formats.iter().map(|format| format.outfmt),
                     ),
                     parsed_shown(&outputs.formats),
+                    &batch_spans,
                 )
                 // A read of a reported sequence that
                 // failed: the run's error, as the check's error would be.
@@ -1718,14 +1727,6 @@ fn search(
             observer.database_subjects(reported.library_subjects(database));
         }
         drop(database_stores);
-        // The query batches that were read and searched, by their searched queries (the batches
-        // before a database failure or a reader stop): each is reported.
-        let batch_spans: Vec<std::ops::Range<usize>> = query_input
-            .batches(batch_size)
-            .into_iter()
-            .map(|batch| batch.searched)
-            .filter(|searched| !searched.is_empty() && searched.end <= queries.len())
-            .collect();
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:298-302
         // ```c++
         //                     BlastFormatter_PreFetchSequenceData(*results, scope,
@@ -1793,13 +1794,8 @@ fn search(
                 };
                 for span in &batch_spans {
                     let hitlists = &results[span.clone()];
-                    // The batch's Seq-aligns, one for each HSP: TBLASTN's search is gapped (LOSAT
-                    // refuses `-ungapped`, whose Seq-aligns are one per subject).
-                    let seq_aligns: usize = hitlists
-                        .iter()
-                        .flat_map(super::stage_d_results::KappaResultHitList::lists)
-                        .map(|list| list.hsps.hsps.len())
-                        .sum();
+                    // The batch's Seq-aligns, one for each HSP (`database::seq_aligns_of`).
+                    let seq_aligns = super::database::seq_aligns_of(hitlists);
                     // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                     // (`shared::prefetch_off`), each query's report fetches the subjects it
                     // shows, after the query's own warnings, where the first format's rows read

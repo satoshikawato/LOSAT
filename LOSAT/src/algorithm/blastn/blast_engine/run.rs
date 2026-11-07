@@ -9918,20 +9918,7 @@ fn run_in_pool(
                     Ok(())
                 };
                 let seq_aligns_of = |hit_lists: &[Option<BlastnHitList>]| -> usize {
-                    hit_lists
-                        .iter()
-                        .flatten()
-                        .flat_map(|hit_list| {
-                            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                            &hit_list.hsplist_array[..count]
-                        })
-                        .map(|hsp_list| {
-                            crate::algorithm::common::database::subject_seq_aligns(
-                                hsp_list.hsps.len(),
-                                !args.ungapped,
-                            )
-                        })
-                        .sum()
+                    database::seq_aligns_of(hit_lists, !args.ungapped)
                 };
                 let seq_aligns = seq_aligns_of(&batch_hit_lists);
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
@@ -10388,7 +10375,8 @@ struct BatchResults<'a> {
     context_karlin: &'a [Option<ContextKarlin>],
     query_eff_searchsp: &'a [i64],
     /// The searched queries of each query batch of the call, in order, for the reports of
-    /// every batch written at once (the BLAST archive writes one document per batch); empty
+    /// every batch written at once (the BLAST archive writes one document per batch, and each
+    /// batch's prefetch counts its own Seq-aligns, `common::database::BatchPrefetch`); empty
     /// when the call is one batch.
     batches: &'a [std::ops::Range<usize>],
 }
@@ -10597,12 +10585,21 @@ fn write_reports_untimed(
                     .iter()
                     .filter_map(|format| format.tabular_spec())
                     .any(|spec| spec.needs().rows);
+            // Whether each query's batch prefetches (`results.batches`: the batches of this
+            // call, or one), for the subjects that only the prefetch reads.
+            let prefetch = crate::algorithm::common::database::BatchPrefetch::of(
+                hit_lists.len(),
+                written.queries,
+                results.batches,
+                |span| database::seq_aligns_of(&hit_lists[span], !args.ungapped),
+            );
             Some(database::reported_subjects(
                 database,
                 subjects.titles,
                 &mut hit_lists,
                 letters,
                 database::parsed_shown(output_formats),
+                &prefetch,
                 written.queries,
                 x_pool,
             )?)

@@ -760,7 +760,12 @@ fn prefetch_may_be_off() -> bool {
 /// Its formatters then fetch the sequences that each query's report shows, after the query's
 /// own warnings, where the report reads them (`TabularSpec::subject_fetch`).
 pub(crate) fn prefetch_off(seq_aligns: usize) -> bool {
-    prefetch_seqs_limit().is_some_and(|limit| {
+    prefetch_off_at(prefetch_seqs_limit(), seq_aligns)
+}
+
+/// [`prefetch_off`] with the limit `limit` (`prefetch_seqs_limit`).
+fn prefetch_off_at(limit: Option<i32>, seq_aligns: usize) -> bool {
+    limit.is_some_and(|limit| {
         limit != i32::MAX
             && (limit == 0 || i64::try_from(seq_aligns).unwrap_or(i64::MAX) > i64::from(limit))
     })
@@ -790,6 +795,72 @@ pub(crate) fn subject_seq_aligns(hsps: usize, gapped: bool) -> usize {
 /// subject looks no taxid up, so it has no refusal of NCBI's taxonomy cache to ask for.
 pub(crate) fn prefetch_always_off() -> bool {
     prefetch_off(0)
+}
+
+/// Whether the prefetch of each query's batch reads the batch's reported subjects, for a call
+/// whose reports read nothing of them (`ParsedShown::prefetched`, refused by
+/// [`check_prefetched_parsed`] and [`check_prefetched_strands`]): NCBI counts each batch's
+/// Seq-aligns against a positive `PRE_FETCH_SEQS_LIMIT` ([`prefetch_off`]), so a batch above it
+/// reads nothing of its subjects.
+#[derive(Debug)]
+pub(crate) struct BatchPrefetch(Option<Vec<bool>>);
+
+impl BatchPrefetch {
+    /// Every batch prefetches (no limit that counts, a subject set, a test).
+    pub(crate) fn every() -> Self {
+        Self(None)
+    }
+
+    /// The batches of a call of `queries` queries (its hit lists, numbered from 0): `batches`,
+    /// the ranges of the queries of each batch numbered from `first` (the call's first query;
+    /// ranges before it are the batches written before), or the whole call as one batch where
+    /// `batches` is empty; `seq_aligns` counts the Seq-aligns of the hit lists of a range of
+    /// the call ([`subject_seq_aligns`]). A query of no range keeps the prefetch.
+    pub(crate) fn of(
+        queries: usize,
+        first: usize,
+        batches: &[std::ops::Range<usize>],
+        seq_aligns: impl Fn(std::ops::Range<usize>) -> usize,
+    ) -> Self {
+        Self::at(prefetch_seqs_limit(), queries, first, batches, seq_aligns)
+    }
+
+    /// [`BatchPrefetch::of`] with the limit `limit` (`prefetch_seqs_limit`).
+    fn at(
+        limit: Option<i32>,
+        queries: usize,
+        first: usize,
+        batches: &[std::ops::Range<usize>],
+        seq_aligns: impl Fn(std::ops::Range<usize>) -> usize,
+    ) -> Self {
+        if limit.is_none_or(|limit| limit == i32::MAX) || prefetch_off_at(limit, 0) {
+            // No batch is above the limit, or none prefetches: the reports' `prefetched` says
+            // it for every batch.
+            return Self::every();
+        }
+        let mut on = vec![true; queries];
+        let whole = [first..first + queries];
+        let batches = if batches.is_empty() {
+            &whole[..]
+        } else {
+            batches
+        };
+        for batch in batches {
+            let span = batch.start.saturating_sub(first).min(queries)
+                ..batch.end.saturating_sub(first).min(queries);
+            if !span.is_empty() && prefetch_off_at(limit, seq_aligns(span.clone())) {
+                on[span].fill(false);
+            }
+        }
+        Self(Some(on))
+    }
+
+    /// Whether the batch of the call's query `query` prefetches.
+    pub(crate) fn query(&self, query: usize) -> bool {
+        self.0
+            .as_ref()
+            .is_none_or(|on| on.get(query).copied().unwrap_or(true))
+    }
 }
 
 /// `PRE_FETCH_SEQS_LIMIT` as `NStr::StringToInt` reads it; `None` when it is not set or is no
@@ -1578,12 +1649,22 @@ pub(crate) struct ParsedShown {
     /// Seq-annots 8, 9 and 12, [`prefetches_subjects`]), unless `PRE_FETCH_SEQS_LIMIT` turns it
     /// off for every batch ([`prefetch_always_off`]). Where no report reads their Bioseqs (the
     /// Seq-annots, a table of fields that read nothing of the subject), what the prefetch
-    /// cannot read as NCBI does is refused (`check_prefetched_parsed`), also in a batch whose
-    /// Seq-aligns outnumber a positive limit (the refusal is the run's).
+    /// cannot read as NCBI does is refused (`check_prefetched_parsed`) for a subject that a
+    /// batch whose prefetch is on reports ([`ParsedShown::prefetched_if`], [`BatchPrefetch`]:
+    /// a batch whose Seq-aligns outnumber a positive limit reads nothing).
     pub(crate) prefetched: bool,
 }
 
 impl ParsedShown {
+    /// What the reports show of a subject that the batches' prefetch reads only where `read`:
+    /// a batch that reports it prefetches ([`BatchPrefetch`]).
+    pub(crate) fn prefetched_if(self, read: bool) -> Self {
+        Self {
+            prefetched: self.prefetched && read,
+            ..self
+        }
+    }
+
     /// Whether a report reads the subject's Bioseq, which NCBI's formatters find by its
     /// Seq-align id (`ParsedSubject::fetched`); the Seq-annots, the archive and the tables of
     /// fields that read nothing of the subject write the Seq-align id or nothing of it.
@@ -2178,6 +2259,49 @@ pub(crate) fn x_check_protein_stores(
 mod tests {
     use super::*;
     use crate::utils::matrix::BLASTAA_SIZE;
+
+    // Line DBID pfbatch: each batch's prefetch counts its own Seq-aligns against a positive
+    // `PRE_FETCH_SEQS_LIMIT` (`s_PreFetchSeqs`, quoted at `prefetch_may_be_off`).
+    #[test]
+    fn each_batch_prefetches_by_its_own_seq_aligns() {
+        // Seq-aligns of the queries 0 to 4 of a call.
+        let counts = [2, 1, 0, 3, 1];
+        let of = |limit, first, batches: &[std::ops::Range<usize>]| {
+            let prefetch = BatchPrefetch::at(limit, counts.len(), first, batches, |span| {
+                counts[span].iter().sum()
+            });
+            (0..counts.len() + 1)
+                .map(|query| prefetch.query(query))
+                .collect::<Vec<_>>()
+        };
+        let every = vec![true; counts.len() + 1];
+        // No limit, `INT_MAX` (every batch prefetches) and 0 or below (none does: the reports'
+        // `prefetched` is false) count nothing.
+        for limit in [None, Some(i32::MAX), Some(0), Some(-1)] {
+            assert_eq!(of(limit, 0, &[0..2, 2..5]), every, "{limit:?}");
+        }
+        // Batches of 3 and 4 Seq-aligns: limit 3 turns the second off, a query beyond the call
+        // (or of no batch) keeps the prefetch.
+        assert_eq!(
+            of(Some(3), 0, &[0..2, 2..5]),
+            [true, true, false, false, false, true]
+        );
+        assert_eq!(of(Some(4), 0, &[0..2, 2..5]), every);
+        // No batches: the call is one batch of 7 Seq-aligns.
+        assert_eq!(
+            of(Some(6), 0, &[]),
+            [false, false, false, false, false, true]
+        );
+        assert_eq!(of(Some(7), 0, &[]), every);
+        // Ranges numbered from the call's first query 10; a batch before it is not this call's.
+        assert_eq!(
+            of(Some(1), 10, &[3..10, 10..11, 11..13, 13..15]),
+            [false, true, true, false, false, true]
+        );
+        assert!(prefetch_off_at(Some(1), 2) && !prefetch_off_at(Some(2), 2));
+        assert!(prefetch_off_at(Some(0), 0) && !prefetch_off_at(Some(i32::MAX), usize::MAX));
+        assert!(!prefetch_off_at(None, usize::MAX));
+    }
 
     /// The subjects of the database `name` of `tests/db_search/ids` by ordinal id.
     fn parsed_subjects(name: &str) -> Vec<crate::report::db_subject::ParsedSubject> {

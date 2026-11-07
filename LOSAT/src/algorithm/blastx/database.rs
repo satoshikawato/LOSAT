@@ -330,8 +330,9 @@ impl ReportedSubjects {
     /// ids. `structured`: outfmt 5 or 13 to 16, which read the Bioseq. `taxonomy`: whether the
     /// report writes the sequences' taxids or their names (13 to 16, a table of taxonomy fields;
     /// `ParsedSubject::fetched`). `prefetched`: whether the batch's prefetch reads the subjects
-    /// (`shared::prefetches_subjects`), which where no report reads their Bioseqs refuses what it
-    /// cannot read as NCBI does (`shared::check_prefetched_parsed`).
+    /// (`shared::prefetches_subjects`, and the batch's Seq-aligns do not outnumber a positive
+    /// `PRE_FETCH_SEQS_LIMIT`, `shared::prefetch_off`), which where no report reads their Bioseqs
+    /// refuses what it cannot read as NCBI does (`shared::check_prefetched_parsed`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,

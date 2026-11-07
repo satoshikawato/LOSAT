@@ -42,7 +42,6 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
-use crate::core::blast_stat::compute_blosum62_ideal_karlin_params;
 use crate::core::composition_adjustment::adjust_scores::{
     build_matrix_info, BlastCompositionWorkspace,
 };
@@ -53,6 +52,7 @@ use crate::report::{
     write_blastp_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport, OutputConfig,
     OutputFormat, PairwiseConfig, PairwiseHit, ReportContext,
 };
+use crate::stats::compute_blosum62_ideal_karlin_params;
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{
     blast_spouge_etos, blast_spouge_stoe, lookup_protein_gumbel_params, lookup_protein_params,

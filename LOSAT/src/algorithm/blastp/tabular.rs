@@ -398,10 +398,31 @@ pub(super) fn write_blastp_tabular(
             }
         }
     }
+    // rpsblast's options carry no matrix name (the `.aux` matrix goes to the search's options
+    // only), so NCBI's formatter has no matrix and counts the identities as the positives.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:238
+    // ```c++
+    //           m_MatrixName(opts.GetMatrixName()),
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3552-3556
+    // ```c++
+    //     retval.Resize(0, 0, -1);
+    //     if (matrix_name == NULL ||
+    //         NStr::TruncateSpaces(string(matrix_name)).empty()) {
+    //         return;
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1018-1020
+    // ```c++
+    //                     if (matrix && !matrix->GetData().empty() &&
+    //                            (*matrix)(m_QuerySeq[i], m_SubjectSeq[i]) > 0) {
+    //                         ++num_positives;
+    // ```
     let table = TabularWriter {
         spec,
         program_version: tab.program_version,
-        matrix: Some(tab.matrix),
+        matrix: (tab.app != BlastpApp::Rpsblast).then_some(tab.matrix),
     };
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.

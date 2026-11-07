@@ -427,14 +427,17 @@ pub(crate) fn x_inner_serial() -> bool {
 
 // No NCBI counterpart: scope guard that sets and restores the flag above; it does not change any
 // value NCBI computes.
+#[cfg(feature = "parallel")]
 struct XInnerSerial(bool);
 
+#[cfg(feature = "parallel")]
 impl XInnerSerial {
     fn enter() -> Self {
         Self(X_INNER_SERIAL.with(|flag| flag.replace(true)))
     }
 }
 
+#[cfg(feature = "parallel")]
 impl Drop for XInnerSerial {
     fn drop(&mut self) {
         X_INNER_SERIAL.with(|flag| flag.set(self.0));
@@ -454,7 +457,7 @@ impl Drop for XInnerSerial {
 // side by side.
 /// `search_internal` as the one-thread search, whatever thread it is called on. The caller runs
 /// several of these side by side; each takes the serial path of every stage (the Web's, `web.rs`).
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(all(feature = "parallel", any(target_arch = "wasm32", test)))]
 pub(crate) fn x_search_internal_serial<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
@@ -465,6 +468,8 @@ pub(crate) fn x_search_internal_serial<'a>(
 
 /// `x_search_internal_serial` for one unit of a reader batch of several, prepared in phase 1
 /// (`reader_batch.rs`); `None`: `records` are the reader batch (or the whole batch is one unit).
+/// Its callers are the several-batches-at-a-time paths, which need a pool (`parallel`).
+#[cfg(feature = "parallel")]
 pub(crate) fn x_search_unit_serial<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,

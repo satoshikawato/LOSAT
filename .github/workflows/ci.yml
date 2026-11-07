@@ -65,6 +65,9 @@ jobs:
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_ci_fast_regressions.py'
       - name: Drop-in corpus tooling tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_dropin_corpus.py'
+      # No NCBI counterpart: the merge of the coverage shards of nightly.yml (a report).
+      - name: Coverage summary tooling tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_coverage_summary.py'
       # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
       # result *= expl(-z * z) / z;
       # LOSAT's one mul_add emulates that long-double line; nothing else may fuse or

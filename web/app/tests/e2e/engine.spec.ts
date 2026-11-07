@@ -41,7 +41,7 @@ const EVERY_COUNT_CASES: readonly string[] = ['multi.megablast', 'e2e.blastp.fas
  * a page that had run some 95 searches failed the next dc-megablast search with "ran out of
  * memory" (memory.grow refused) at every thread count, which a new page does not.
  */
-const TASK_DEFAULT_CASES: readonly string[] = ['multi.megablast', 'dc.default', 'short.default', 'e2e.blastp.fast', 'pyl.blastx', 'tfast.e2e.def'];
+const TASK_DEFAULT_CASES: readonly string[] = ['multi.megablast', 'dc.default', 'short.default', 'e2e.blastp.fast', 'short.blastp.def', 'pyl.blastx', 'tfast.e2e.def'];
 
 let harness: HarnessFiles;
 let isolated: HarnessServer;

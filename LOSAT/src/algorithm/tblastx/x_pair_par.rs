@@ -1153,8 +1153,8 @@ pub(super) fn lut_build<M: TbxScore>(e: XLutEarly<'_, M>) -> Option<XLutBatch> {
 fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
     // The reference query preparation (contexts, concatenated query, lookup locations), with
     // another matrix's scores or another word length that of `build_ncbi_lookup_for_profile`
-    // (SC7b; `TbxScore::word`, 3 in BLOSUM62's instance). A word length the direct builder does
-    // not cover gives None here (`x_direct_covers`; the batch's `debugging` gate holds for it too).
+    // (SC7b; `TbxScore::word`, 3 in BLOSUM62's instance). A word length neither builder covers
+    // gives None here (`x_tables_cover`: TBLASTX takes words of 2 to 4 letters, all covered).
     let q = if M::BLOSUM62 {
         XPairLutQuery::x_prepare(e.query_frames, e.threshold, true)?
     } else {
@@ -1205,6 +1205,12 @@ fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
     let threads = e.pool.threads();
     let wanted = x_groups_wanted(threads, e.subjects);
     let starts = group_starts(contexts, wanted);
+    // SC10b PR-3: words whose backbone index the 16-bit direct builder does not cover (4 letters)
+    // take the joint builder of 32-bit indices on the pool, and their groups are not cut
+    // (`lut_wide`; `x_tbx_qslice::x_slices_fit`). Constant for BLOSUM62's instance (3 letters).
+    if !crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers(e.sc.word()) {
+        return lut_wide(q, &starts, e.pool);
+    }
     let (groups, sliced) = match x_tbx_qslice::partition(contexts, &starts, threads) {
         None => (lut_direct_groups(&q, wanted, e.pool, lut_on_pool())?, None),
         Some(parts) => {
@@ -1258,6 +1264,49 @@ fn lut_direct_groups(
     let starts = group_starts(q.contexts(), wanted);
     let locations = q.x_group_locations(&starts)?;
     Some(lut_direct_tables(q, &locations, pool, on_pool))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456,461-465 (cited at
+// `lut_direct_groups`). SC10b PR-3: the groups of `lut_direct_groups` for words whose backbone index
+// does not fit 16 bits, built together by the joint builder of 32-bit indices on the search pool
+// (`XPairLutQuery::x_build_tables_wide`, the tables `x_build_group` would build; lookup/
+// x_pair_lut_wide.rs). Scheduling only: the pool's threads build the neighbour lists and fill the
+// tables; the tables are the same at any thread count.
+/// The groups of `starts` (`group_starts`) built by the joint builder. None when a lookup location
+/// does not lie inside one group.
+fn lut_wide_groups(
+    q: &XPairLutQuery,
+    starts: &[usize],
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> Option<Vec<XGroup>> {
+    let locations = q.x_group_locations(starts)?;
+    let mapped = locations.len() <= X_MAX_GROUPS;
+    Some(
+        q.x_build_tables_wide(&locations, pool, mapped)
+            .into_iter()
+            .map(XGroup::from_direct)
+            .collect(),
+    )
+}
+
+// No NCBI counterpart beyond `lut_wide_groups`' and `x_into_stub`'s: the end of `lut_direct` for
+// words of 4 letters, whose groups are never cut (`x_tbx_qslice::x_slices_fit`).
+/// The batch of `lut_direct` for words the 16-bit direct builder does not cover: the groups of
+/// `starts` by the joint builder and the stub. None when a lookup location does not lie inside one
+/// group.
+#[inline(never)]
+fn lut_wide(
+    q: XPairLutQuery,
+    starts: &[usize],
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> Option<XLutBatch> {
+    let groups = lut_wide_groups(&q, starts, pool)?;
+    let stub = q.x_into_stub(groups.iter().map(|g| &g.lookup));
+    Some(XLutBatch {
+        groups,
+        sliced: None,
+        stub: Some(stub),
+    })
 }
 
 // No NCBI counterpart: scheduling of the builds (the NCBI reference above `lut_direct_groups`;
@@ -2072,8 +2121,14 @@ impl<M: TbxScore> XPairPar<M> {
                 // EXPERIMENT (LOSAT_X_TBXQSLICE): the slices filtered out of the batch's table, as
                 // the groups are; the whole groups only where no group is cut.
                 let starts = group_starts(b.contexts, wanted);
-                let sliced = x_tbx_qslice::partition(b.contexts, &starts, b.threads)
-                    .map(|parts| x_tbx_qslice::build_sliced(b.lookup, &parts));
+                // As at the build site (`lut_direct`): no cut where a slice's table does not fit
+                // beside its window (`x_slices_fit`; constant for BLOSUM62's instance).
+                let sliced = if x_tbx_qslice::x_slices_fit(b.sc.word()) {
+                    x_tbx_qslice::partition(b.contexts, &starts, b.threads)
+                        .map(|parts| x_tbx_qslice::build_sliced(b.lookup, &parts))
+                } else {
+                    None
+                };
                 let groups = if sliced.is_none() {
                     build_groups(b.lookup, b.contexts, wanted)
                 } else {
@@ -2102,25 +2157,35 @@ impl<M: TbxScore> XPairPar<M> {
         // masked tables; none where LOSAT_X_TBXQSLICE's rule cuts a group (module doc;
         // `x_band_masked`), so a batch takes the same tables with and without the diagnostics that
         // stop the slicing.
-        let mask_rule = unit_mask_kib()
-            .filter(|_| {
-                let ungrouped = sliced.is_none()
-                    && !x_tbx_qslice::rule_cuts(
-                        b.contexts,
-                        &group_starts(b.contexts, wanted),
-                        b.threads,
-                    );
-                // A batch with cut groups keeps the unmasked tables.
-                if !ungrouped {
-                    crate::utils::xreach::x_reach!("LOSAT_X_TBXUNITMASK", false);
-                }
-                ungrouped
-            })
-            .map(|kib| XMaskRule {
+        // A batch whose groups are never cut (`x_slices_fit`; constant for BLOSUM62's instance)
+        // keeps the rule's masked tables whatever the slicing rule says.
+        let mask_rule = if x_tbx_qslice::x_slices_fit(b.sc.word()) {
+            unit_mask_kib()
+                .filter(|_| {
+                    let ungrouped = sliced.is_none()
+                        && !x_tbx_qslice::rule_cuts(
+                            b.contexts,
+                            &group_starts(b.contexts, wanted),
+                            b.threads,
+                        );
+                    // A batch with cut groups keeps the unmasked tables.
+                    if !ungrouped {
+                        crate::utils::xreach::x_reach!("LOSAT_X_TBXUNITMASK", false);
+                    }
+                    ungrouped
+                })
+                .map(|kib| XMaskRule {
+                    max_cells: x_mask_max_cells(kib, b.threads),
+                    ratio: X_UNITMASK_RATIO,
+                    band_cells: band.then_some(b.diag_array_size),
+                })
+        } else {
+            unit_mask_kib().map(|kib| XMaskRule {
                 max_cells: x_mask_max_cells(kib, b.threads),
                 ratio: X_UNITMASK_RATIO,
                 band_cells: band.then_some(b.diag_array_size),
-            });
+            })
+        };
         let extents = if mask_rule.is_some() {
             x_group_extents(b.contexts, wanted)
         } else {
@@ -4811,9 +4876,15 @@ mod tests {
         let q = XPairLutQuery::x_prepare_for(queries, threshold, true, matrix, word_length)
             .expect("direct builder applies");
         assert_eq!(q.word_length(), word_length);
-        // On the pool when the caller has one, else in order on this thread.
-        let direct = lut_direct_groups(&q, X_MAX_GROUPS, pool, true)
-            .expect("every location inside one group");
+        // On the pool when the caller has one, else in order on this thread; words of 4 letters by
+        // the joint builder (`lut_wide_groups`), as `lut_direct` dispatches them.
+        let direct = if crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers(word_length)
+        {
+            lut_direct_groups(&q, X_MAX_GROUPS, pool, true)
+        } else {
+            lut_wide_groups(&q, &group_starts(q.contexts(), X_MAX_GROUPS), pool)
+        }
+        .expect("every location inside one group");
         let stub = q.x_into_stub(direct.iter().map(|g| &g.lookup));
         let lut = XLutBatch {
             groups: direct,
@@ -6286,25 +6357,49 @@ mod tests {
         }
     }
 
-    // No NCBI counterpart: `-word_size 2` (SC10b PR-2). The unit path of a search of 2-letter
-    // words (the other matrices' instance, `MatrixScore`, which BLOSUM62 takes at that word length
-    // too) against the reference statements on one masked table (`masked_reference`: the table
-    // walks of `extend_hit_two_hit_with`), in every instance a unit runs: the scan loop and the
-    // branch-free one, with and without the prefetch, the sentinel walks of 2-letter words
-    // (`SENT` = 2, `TbxScore::sent_two_hit_of::<2>`) and none, the batched extensions, and the
-    // masked tables of LOSAT_X_TBXUNITMASK; then the subject's merged list on 1, 4 and 8 threads.
-    // Query contexts with SEG masks, empty, or of one or two letters; subject frames now and then
-    // of 0 to 3 letters (shorter than a word, one word); X-drops above 127 (the walks refuse
-    // them).
+    /// What `units_equal_the_masked_reference` saw.
+    #[derive(Debug)]
+    struct XMaskedSeen {
+        units: usize,
+        masked_units: usize,
+        saved: usize,
+        merged: usize,
+        short_frames: usize,
+        settings: usize,
+        /// Units on masked tables, by matrix, without and with the batched extensions.
+        combos: [[usize; 2]; 4],
+        /// How often the reference took each branch of the two-hit test.
+        outcomes: [usize; 7],
+    }
+
+    // No NCBI counterpart: `-word_size` 2 (SC10b PR-2) and 4 (PR-3). The unit path of a search of
+    // `word`-letter words (the other matrices' instance, `MatrixScore`, which BLOSUM62 takes at
+    // those word lengths too) against the reference statements on one masked table
+    // (`masked_reference`: the table walks of `extend_hit_two_hit_with`), in every instance a unit
+    // runs: the scan loop and the branch-free one, with and without the prefetch, the sentinel
+    // walks of 2-letter words (`SENT` = 2, `TbxScore::sent_two_hit_of::<2>`; none at 4 letters)
+    // and none, the batched extensions, and the masked tables of LOSAT_X_TBXUNITMASK; then the
+    // subject's merged list on 1, 4 and 8 threads. Query contexts with SEG masks, empty, or of
+    // one or two letters; subject frames now and then of 0 to 3 letters (shorter than a word, one
+    // word); X-drops above 127 (the walks refuse them).
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1108
     // ```c
     //     for (i = 0; i < word_size; i++) {
     // ```
-    #[test]
-    fn units_of_2_letter_words_equal_the_masked_reference() {
+    /// The comparison above for words of `word` letters: `cases` cases from the generators `seeds`
+    /// (data, knobs) with the lookup `thresholds`; with `wide`, the units scan the tables of the
+    /// joint builder (`XPairLutQuery::x_build_tables_wide`, on a pool of 1, 4 or 8 threads by case)
+    /// in place of `build_groups`' filter of the chain builder's table.
+    fn units_equal_the_masked_reference(
+        word: usize,
+        seeds: (u64, u64),
+        cases: usize,
+        thresholds: [i32; 4],
+        wide: bool,
+    ) -> XMaskedSeen {
         use crate::algorithm::tblastx::scoring::{MatrixScore, MatrixScores};
-        let mut rng = Rng(0x2b17_5eed_0000_0002);
+        let mut rng = Rng(seeds.0);
         let alphabets = [
             aa("AW"),
             aa("ACW"),
@@ -6318,7 +6413,7 @@ mod tests {
             ScoringMatrix::Identity,
         ]
         .into_iter()
-        .map(|matrix| MatrixScores::with_word(matrix, 2))
+        .map(|matrix| MatrixScores::with_word(matrix, word))
         .collect();
         // LOSAT_X_TBXUNGAPSENT is on (the batches' contexts have their sentinels).
         let on = x_tbx_sent_contexts(std::iter::empty());
@@ -6326,13 +6421,15 @@ mod tests {
         let (mut saved, mut short_frames, mut merged) = (0usize, 0usize, 0usize);
         let mut outcomes = [0usize; 7];
         let serial = crate::utils::threading::SearchPool::x_serial();
+        // The sentinel walks take words of 2 and 3 letters (`prepare`).
+        let sent_expected = on && matches!(word, 2 | 3);
         // Every knob (matrix, alphabet, window, threshold, masked unit tables) is its own draw
         // from a second generator, so the 300 cases meet in combination (the data generator's
         // stream is left as it was). `combos[matrix][batched]` counts the units on masked tables.
-        let mut knobs = Rng(0x2b17_6b0b_0000_0002);
+        let mut knobs = Rng(seeds.1);
         let mut combos = [[0usize; 2]; 4];
         let mut settings = std::collections::BTreeSet::new();
-        for case_no in 0..300 {
+        for case_no in 0..cases {
             let matrix_no = knobs.below(tables.len() as u64) as usize;
             let alphabet_no = knobs.below(alphabets.len() as u64) as usize;
             let window_no = knobs.below(4) as usize;
@@ -6340,13 +6437,15 @@ mod tests {
             let masked = knobs.below(2) == 1;
             settings.insert((matrix_no, alphabet_no, window_no, threshold_no, masked));
             let sc = tables[matrix_no].scorer();
-            assert_eq!(sc.word(), 2);
+            assert_eq!(sc.word(), word);
             let alphabet = &alphabets[alphabet_no];
             // The batched extensions only where their rule allows them (`x_tbx_extbatch::active`:
-            // `window >= wordsize + BATCH`, here at its bound too); a window of 3 without them.
-            let window = [40, 2 + x_tbx_extbatch::BATCH as i32, 64, 3][window_no];
-            let batched = window >= 2 + x_tbx_extbatch::BATCH as i32;
-            let threshold = [11, 13, 0, 8][threshold_no];
+            // `window >= wordsize + BATCH`, here at its bound too); a window of one letter more
+            // than a word without them.
+            let w = word as i32;
+            let window = [40, w + x_tbx_extbatch::BATCH as i32, 64, w + 1][window_no];
+            let batched = window >= w + x_tbx_extbatch::BATCH as i32;
+            let threshold = thresholds[threshold_no];
             let queries: Vec<Vec<QueryFrame>> = (0..1 + usize::from(case_no % 5 == 4))
                 .map(|_| {
                     (0..1 + rng.below(6) as usize)
@@ -6385,9 +6484,9 @@ mod tests {
                     &params,
                     true,
                     sc.matrix(),
-                    2,
+                    word,
                 );
-            assert_eq!(lookup.word_length, 2);
+            assert_eq!(lookup.word_length, word as i32);
             let query_length = query_length_of(&contexts);
             let size = diag_array_size_for(query_length, window);
             let cutoff_scores: Vec<i32> = (0..contexts.len())
@@ -6419,14 +6518,39 @@ mod tests {
                 cutoff_scores: &cutoff_scores,
                 x_dropoff_per_context: &x_dropoff_per_context,
                 window,
-                wordsize: 2,
+                wordsize: word as i32,
                 s_idx: 0,
                 s_len: 999,
             };
             // Masked unit tables in about half of the cases (ratio 1: every unit whose unmasked
             // table is at least the masked one's size).
+            // The joint builder's tables on a pool of 1, 4 or 8 threads (by case), or the filter.
+            let groups = if wide {
+                let q = XPairLutQuery::x_prepare_for(&queries, threshold, true, sc.matrix(), word)
+                    .expect("the joint builder covers the word length");
+                let locations = q
+                    .x_group_locations(&group_starts(&contexts, X_MAX_GROUPS))
+                    .expect("every location inside one group");
+                let build = |pool: &crate::utils::threading::SearchPool<'_>| {
+                    q.x_build_tables_wide(&locations, pool, true)
+                        .into_iter()
+                        .map(XGroup::from_direct)
+                        .collect::<Vec<_>>()
+                };
+                match case_no % 3 {
+                    0 => build(&serial),
+                    threads => {
+                        crate::utils::threading::with_search_pool(4 * threads, "tblastx", |pool| {
+                            Ok(build(pool))
+                        })
+                        .expect("search pool")
+                    }
+                }
+            } else {
+                build_groups(&lookup, &contexts, X_MAX_GROUPS)
+            };
             let pp = XPairPar {
-                groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
+                groups,
                 stub: false,
                 // As `prepare` decides it.
                 sent: matches!(sc.word(), 2 | 3)
@@ -6445,7 +6569,7 @@ mod tests {
                     Vec::new()
                 },
             };
-            assert_eq!(pp.sent, on, "case {case_no}");
+            assert_eq!(pp.sent, sent_expected, "case {case_no}");
             assert_eq!(
                 unit_lists(&pp, &inp),
                 reference,
@@ -6615,22 +6739,78 @@ mod tests {
                 .expect("search pool");
             }
         }
-        assert!(units > 1_000, "units {units}");
-        assert_eq!(sent_units, if on { units } else { 0 });
-        assert!(masked_units > 350, "masked units {masked_units}");
-        assert!(saved > 100_000, "saved {saved}");
-        assert!(merged > 100_000, "merged {merged}");
-        assert!(short_frames > 100, "short frames {short_frames}");
-        // The knobs met in combination: many distinct settings, and masked tables with and
-        // without batched extensions on every matrix.
-        assert!(settings.len() > 200, "distinct settings {}", settings.len());
-        for (m, row) in combos.iter().enumerate() {
+        assert_eq!(sent_units, if sent_expected { units } else { 0 });
+        XMaskedSeen {
+            units,
+            masked_units,
+            saved,
+            merged,
+            short_frames,
+            settings: settings.len(),
+            combos,
+            outcomes,
+        }
+    }
+
+    // No NCBI counterpart: `-word_size 2` (SC10b PR-2). The unit path of a search of 2-letter
+    // words against the reference statements on one masked table (`units_equal_the_masked_reference`).
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1108
+    // ```c
+    //     for (i = 0; i < word_size; i++) {
+    // ```
+    #[test]
+    fn units_of_2_letter_words_equal_the_masked_reference() {
+        let seen = units_equal_the_masked_reference(
+            2,
+            (0x2b17_5eed_0000_0002, 0x2b17_6b0b_0000_0002),
+            300,
+            [11, 13, 0, 8],
+            false,
+        );
+        assert_masked_seen(&seen, (1_000, 350, 100_000, 100_000, 100, 200));
+    }
+
+    // No NCBI counterpart: `-word_size 4` (SC10b PR-3). The unit path of a search of 4-letter
+    // words, on the tables of the joint builder (`x_build_tables_wide`, on pools of 1, 4 and 8
+    // threads), against the reference statements on one masked table over the chain builder's
+    // full table (`units_equal_the_masked_reference`): the scan loop and the branch-free one, with
+    // and without the prefetch, the batched extensions, the masked tables of LOSAT_X_TBXUNITMASK
+    // (no sentinel walks at 4 letters), then the merged list on 1, 4 and 8 threads.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1108
+    // ```c
+    //     for (i = 0; i < word_size; i++) {
+    // ```
+    #[test]
+    fn units_of_4_letter_words_equal_the_masked_reference() {
+        let seen = units_equal_the_masked_reference(
+            4,
+            (0x4b17_5eed_0000_0004, 0x4b17_6b0b_0000_0004),
+            200,
+            [11, 13, 0, 15],
+            true,
+        );
+        assert_masked_seen(&seen, (700, 200, 20_000, 20_000, 60, 150));
+    }
+
+    /// The floors of `units_equal_the_masked_reference`'s counts: (units, masked units, saved,
+    /// merged, short frames, distinct settings); every matrix met masked tables with and without the
+    /// batched extensions, and the reference took every branch of the two-hit test.
+    fn assert_masked_seen(seen: &XMaskedSeen, floors: (usize, usize, usize, usize, usize, usize)) {
+        let (units, masked_units, saved, merged, short_frames, settings) = floors;
+        assert!(seen.units > units, "{seen:?}");
+        assert!(seen.masked_units > masked_units, "{seen:?}");
+        assert!(seen.saved > saved, "{seen:?}");
+        assert!(seen.merged > merged, "{seen:?}");
+        assert!(seen.short_frames > short_frames, "{seen:?}");
+        assert!(seen.settings > settings, "{seen:?}");
+        for (m, row) in seen.combos.iter().enumerate() {
             for (b, n) in row.iter().enumerate() {
                 assert!(*n > 0, "no masked unit: matrix {m}, batched {b}");
             }
         }
-        // The reference took every branch of the two-hit test.
-        for (outcome, n) in outcomes.iter().enumerate() {
+        for (outcome, n) in seen.outcomes.iter().enumerate() {
             assert!(*n > 0, "outcome {outcome} never taken");
         }
     }
@@ -6650,8 +6830,8 @@ mod tests {
     // are `build_groups` of the reference builder's table of that word length, for one query and
     // several (groups of several contexts), SEG masks and contexts without words, thresholds 0
     // (no neighbours), 8, 11, 13 and INT_MIN (every word), several matrices, and on a search pool
-    // (the memo of neighbour lists keyed by the word length). Words of 4 letters are not covered
-    // (20-bit indices): the unit path leaves them to the reference loop.
+    // (the memo of neighbour lists keyed by the word length). Words of 4 letters (20-bit indices)
+    // take the joint builder (`wide_groups_of_4_letter_words_equal_build_groups`).
     #[test]
     fn direct_groups_of_2_letter_words_equal_build_groups() {
         use crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers;
@@ -6723,5 +6903,95 @@ mod tests {
             Ok(())
         })
         .expect("search pool");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456,461-465
+    // ```c
+    //     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
+    //                                       lookup->charsize, lookup->word_length,
+    //                                       query, location);
+    // ...
+    //     for (i = 0; i < lookup->backbone_size; i++) {
+    //         if (exact_backbone[i] != NULL) {
+    //             s_AddWordHits(lookup, matrix, query->sequence,
+    //                           exact_backbone[i], query_bias, row_max);
+    // ```
+    // `-word_size 4` (SC10b PR-3): the groups of the joint builder (`lut_wide_groups`, 20-bit
+    // backbone indices) are `build_groups` of the chain builder's table of that word length, with the
+    // stub, for one query and several (groups of several contexts), SEG masks and contexts without
+    // words, thresholds 0, 11, 13 and INT_MIN, several matrices, on one thread and on pools of 4
+    // and 8 threads.
+    #[test]
+    fn wide_groups_of_4_letter_words_equal_build_groups() {
+        let mut rng = Rng(0x4b17_d1ec_0000_0004);
+        let alphabets = [aa("ACDEKW"), aa("AW"), aa("ACDEFGHIKLMNPQRSTVWY")];
+        let matrices = [
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Pam30,
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Pam250,
+        ];
+        let cases: Vec<(Vec<Vec<QueryFrame>>, ScoringMatrix)> = (0..24)
+            .map(|case_no| {
+                let alphabet = &alphabets[case_no % alphabets.len()];
+                let queries: Vec<Vec<QueryFrame>> = (0..if case_no % 3 == 2 { 3 } else { 1 })
+                    .map(|_| {
+                        let n_ctx = 1 + rng.below(6) as usize;
+                        (0..n_ctx)
+                            .map(|c| random_masked_frame(&mut rng, FRAMES[c], 120, alphabet))
+                            .collect()
+                    })
+                    .collect();
+                (queries, matrices[case_no % matrices.len()])
+            })
+            .collect();
+        let alphabet = aa("ACDEFGHIKLMNPQRSTVWY");
+        let tiny: Vec<QueryFrame> = FRAMES
+            .iter()
+            .map(|&f| random_masked_frame(&mut rng, f, 5, &alphabet))
+            .collect();
+        let check = |pool: &crate::utils::threading::SearchPool<'_>| {
+            let (mut with_entries, mut empty_groups, mut six_groups) = (0usize, 0usize, 0usize);
+            for (queries, matrix) in &cases {
+                for threshold in [0, 11, 13] {
+                    let (groups, filled) = lut_check_for(queries, threshold, pool, *matrix, 4);
+                    with_entries += filled;
+                    empty_groups += groups - filled;
+                    six_groups += usize::from(groups == X_MAX_GROUPS);
+                }
+            }
+            assert!(with_entries > 100, "groups with entries {with_entries}");
+            assert!(empty_groups > 10, "empty groups {empty_groups}");
+            assert!(six_groups > 5, "six groups {six_groups}");
+            // INT_MIN: every 4-letter word is a neighbour of every query word.
+            assert_eq!(
+                lut_check_for(
+                    std::slice::from_ref(&tiny),
+                    i32::MIN,
+                    pool,
+                    ScoringMatrix::Blosum62,
+                    4
+                )
+                .0,
+                6
+            );
+        };
+        check(&crate::utils::threading::SearchPool::x_serial());
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        for threads in [4usize, 8] {
+            crate::utils::threading::with_search_pool(threads, "tblastx", |pool| {
+                check(pool);
+                Ok(())
+            })
+            .expect("search pool");
+        }
+    }
+
+    // No NCBI counterpart: the slicing rule's table term (`x_tbx_qslice::x_slices_fit`): words of 2
+    // and 3 letters may be cut, words of 4 letters are not.
+    #[test]
+    fn groups_of_4_letter_words_are_not_cut() {
+        assert!(x_tbx_qslice::x_slices_fit(2) && x_tbx_qslice::x_slices_fit(3));
+        assert!(!x_tbx_qslice::x_slices_fit(4));
     }
 }

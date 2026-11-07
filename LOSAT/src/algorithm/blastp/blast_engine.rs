@@ -7744,7 +7744,7 @@ fn x_bp_runtime_lookup(built: XBpLookup) -> BlastpRuntimeLookup {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:244-245
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:237,245
 // ```c
 //     lookup->word_length = opt->word_size;
 //     lookup->threshold = (Int4)opt->threshold;

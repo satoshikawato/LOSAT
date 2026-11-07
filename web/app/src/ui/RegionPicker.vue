@@ -8,6 +8,7 @@ import type { DatasetRecord } from '../domain/dataset';
 import type { InputRole } from '../domain/programs';
 import { regionFromPositions, regionProblem, regionRange, swappedRegion, type RegionText } from '../domain/region';
 import { formatCount } from './format';
+import { refusedMark } from './refusal';
 
 const props = defineProps<{
   draft: SearchDraft;
@@ -27,6 +28,18 @@ const problem = computed(() => (props.region === undefined ? undefined : regionP
 /** A start after the stop: the swap, offered beside the problem (Owner, 2026-11-04). */
 const swapped = computed(() => (props.region === undefined ? undefined : swappedRegion(props.region, props.record.length)));
 const range = computed(() => (props.region === undefined ? undefined : regionRange(props.region, props.record.length)));
+/**
+ * The fields that the problem is about, marked as refused and pointing to it (WA2-AX-05): those
+ * empty, not a whole number or outside the record, or else both (a start after the stop).
+ */
+const refused = computed(() => {
+  if (problem.value === undefined || props.region === undefined) return { start: false, stop: false };
+  const wrong = (text: string) => !/^\d+$/.test(text.trim()) || Number(text) < 1 || Number(text) > props.record.length;
+  const start = wrong(props.region.start);
+  const stop = wrong(props.region.stop);
+  return start || stop ? { start, stop } : { start: true, stop: true };
+});
+const mark = (on: boolean) => refusedMark(on, `${testid.value}-problem`);
 const selection = computed(() => {
   const value = range.value;
   if (value === undefined) return undefined;
@@ -101,6 +114,7 @@ function up(): void {
           ref="startInput"
           :value="region?.start ?? ''"
           placeholder="1"
+          v-bind="mark(refused.start)"
           :data-testid="`${testid}-start`"
           @input="update({ start: ($event.target as HTMLInputElement).value })"
         />
@@ -112,6 +126,7 @@ function up(): void {
           inputmode="numeric"
           :value="region?.stop ?? ''"
           :placeholder="String(record.length)"
+          v-bind="mark(refused.stop)"
           :data-testid="`${testid}-stop`"
           @input="update({ stop: ($event.target as HTMLInputElement).value })"
         />
@@ -122,7 +137,7 @@ function up(): void {
     </div>
     <p v-if="problem" class="error">
       <!-- One line: the space between the two is kept. -->
-      <span :data-testid="`${testid}-problem`">{{ problem }}</span> <button
+      <span :id="`${testid}-problem`" :data-testid="`${testid}-problem`">{{ problem }}</span> <button
         v-if="swapped"
         type="button"
         class="link"

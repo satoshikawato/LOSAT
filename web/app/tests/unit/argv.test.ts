@@ -7,6 +7,7 @@ import {
   DATABASE_FLAGS,
   optionNames,
   optionValue,
+  refusedFields,
   RESERVED_FLAGS,
   shellWords,
   splitOptions,
@@ -224,5 +225,36 @@ describe('optionValue', () => {
     expect(optionValue(argv, '-evalue')).toBe('1e-5');
     expect(optionValue(argv, '-word_size')).toBeUndefined();
     expect(optionValue(['blastn', '-task'], '-task')).toBeUndefined();
+  });
+});
+
+describe('refusedFields', () => {
+  const fields = (message: string, extra = '') => {
+    const { extra: inExtra, flags } = refusedFields(message, extra);
+    return { extra: inExtra, flags: [...flags].sort() };
+  };
+  it("names the form's fields of the options that a message names, and no words of its sentences", () => {
+    expect(fields("error: invalid value '3' for '-word_size <WORD_SIZE>': expected an integer >= 4\n\nFor more information, try '--help'.")).toEqual({
+      extra: false,
+      flags: ['-word_size'],
+    });
+    expect(fields('BLAST query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12')).toEqual({
+      extra: false,
+      flags: [],
+    });
+    expect(fields('the e-value of -penalty -3 and -2')).toEqual({ extra: false, flags: ['-penalty'] });
+  });
+  it('names "Additional options" for the options typed there, also those of the form', () => {
+    expect(fields('-evalue is set in the form: Expect threshold', '-evalue abc')).toEqual({ extra: true, flags: [] });
+    expect(fields("error: unknown option or argument '-foo'; use -help for CLI v2 syntax", '-qcov_hsp_perc 50 -foo')).toEqual({
+      extra: true,
+      flags: ['-help'],
+    });
+    expect(fields('-num_threads is set in the form: Threads', '-num_threads=2')).toEqual({ extra: true, flags: [] });
+    expect(fields("error: invalid value 'x' for '-qcov_hsp_perc <QCOV_HSP_PERC>'", '-qcov_hsp_perc x')).toEqual({ extra: true, flags: [] });
+  });
+  it('names "Additional options" for the messages about its text', () => {
+    expect(fields("Additional options: a quote (') is not closed", "-strand 'plus")).toEqual({ extra: true, flags: [] });
+    expect(fields("Additional options: '' is not accepted", "''")).toEqual({ extra: true, flags: [] });
   });
 });

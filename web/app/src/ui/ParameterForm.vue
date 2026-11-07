@@ -14,6 +14,7 @@ import { programById, type ParameterField as Field } from '../domain/programs';
 import HelpTip from './HelpTip.vue';
 import ParameterField from './ParameterField.vue';
 import ParameterPair from './ParameterPair.vue';
+import { refusal, refusedMark } from './refusal';
 
 const props = defineProps<{ draft: SearchDraft; state: DraftState }>();
 const sectionId = (title: string) => `parameters-${title.toLowerCase().replace(/[^a-z]+/g, '-')}`;
@@ -32,6 +33,8 @@ const sections = computed(() => {
 const extra = computed(() => props.state.extra[props.state.program]);
 /** Words typed in "Additional options" are written to the argv: the row is marked as a changed field is. */
 const extraChanged = computed(() => extra.value.trim() !== '');
+/** A refusal of a word typed there, or of its text, marks the row's text box (WA2-AX-05). */
+const extraRefused = computed(() => refusal(props.state)?.extra === true);
 </script>
 
 <template>
@@ -79,6 +82,7 @@ const extraChanged = computed(() => extra.value.trim() !== '');
             autocapitalize="off"
             spellcheck="false"
             :value="extra"
+            v-bind="refusedMark(extraRefused)"
             data-testid="param-extra"
             @input="draft.setExtra(($event.target as HTMLInputElement).value)"
           />

@@ -124,6 +124,27 @@ export function splitOptions(text: string): readonly string[] {
 }
 
 /**
+ * The fields of the form that a refusal of the argv names (WA2-AX-05), which are marked as refused
+ * and point to it: the options that it names (`-word_size`, not the `e-value` of a sentence), and
+ * whether "Additional options" is one of them, as the Web's own messages about its words say
+ * ("Additional options: …", "-evalue is set in the form: …"), or as an option typed there is named.
+ * An option typed in "Additional options" is that field's, not the form's field of the same flag.
+ */
+export function refusedFields(message: string, extra: string): { readonly extra: boolean; readonly flags: ReadonlySet<string> } {
+  const named = new Set(message.match(/(?<![\w-])-[A-Za-z][A-Za-z0-9_]*/g) ?? []);
+  let typed: readonly string[];
+  try {
+    typed = splitOptions(extra).map((word) => word.split('=', 1)[0]!);
+  } catch {
+    typed = [];
+  }
+  return {
+    extra: message.startsWith('Additional options') || typed.some((flag) => named.has(flag)),
+    flags: new Set([...named].filter((flag) => !typed.includes(flag))),
+  };
+}
+
+/**
  * Renders the CLI command that reproduces one output of a run, as a copyable POSIX shell
  * command. `-outfmt` is always written: several programs reject their CLI default format, so a
  * command without it may not run. The command of a format that every run writes has the

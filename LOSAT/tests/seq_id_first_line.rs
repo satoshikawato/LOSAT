@@ -337,8 +337,8 @@ fn only_a_first_line_that_ncbi_takes_as_a_seq_id_is_refused() {
 // ```
 // NCBI's application layer reads its environment and registry files (the data loaders among
 // them) before the program's own code: every program refuses the settings that LOSAT does not
-// reproduce first, with one text, before an option or a file of the run fails (BLASTX reads them
-// at the start of its run, the others in `main`).
+// reproduce with one text, before its run checks an option or opens a file (BLASTX reads them at
+// the start of its run, the others in `main`; the command line's own parse comes first in all).
 #[test]
 fn the_settings_are_read_before_the_options_and_the_files() {
     let dir = temp_dir("settings");

@@ -3336,12 +3336,19 @@ mod defline_tests {
                 Err(error) => assert!(error.is::<FastaParseError>(), "{data:?}: {error}"),
             }
         }
-        let fasta: [&[u8]; 5] = [
+        // The same with CR-only and CRLF line ends and without a line end: the line handed back
+        // keeps the reader's line ends and line numbers.
+        let fasta: [&[u8]; 10] = [
             b"ACGTACGTAC\n>q1 x\nACGT\n",
             b"ACGT ACGT\n>q1 x\nACGT\n",
             b"\nlcl|abc\n>q1 x\nACGT\n",
             b";c\nlcl|abc\n>q1 x\nACGT\n",
             b">lcl|abc x\nACGT\n>q1 x\nACGT\n",
+            b"ACGTACGTAC\r>q1 x\rACGT\r",
+            b"ACGTACGTAC\r\n>q1 x\r\nACGT\r\n",
+            b"\r\nlcl|abc\r\n>q1 x\r\nACGT\r\n",
+            b"ACGTACGTAC",
+            b">q1 x",
         ];
         for data in fasta {
             let without: Vec<_> = read(data, false)

@@ -1,4 +1,5 @@
-// The Dot Plot and the Graphic Summary under a finger (W9: WA2-AX-10, WA2-AX-11).
+// The Dot Plot and the Graphic Summary under a finger (W9: WA2-AX-10, WA2-AX-11) and the HSP
+// table's Identity and Orientation columns (WA2-OP-01).
 //
 // The touch screen is a phone's: hasTouch and a phone's width. A tap is Playwright's touchscreen
 // tap, which gives pointer events of type "touch" in all three browsers. A finger that moves is
@@ -11,7 +12,7 @@ import { expect, type CDPSession, type Locator, type Page } from '@playwright/te
 import { test } from './support/test';
 import { axeViolations } from './support/axe';
 import { BUILD_HAS_ENGINE } from './support/browser';
-import { chooseRun, openSearch, paste, program, submit, waitStatus } from './support/search';
+import { chooseRun, openParameters, openSearch, paste, program, submit, task, waitStatus } from './support/search';
 
 test.setTimeout(180_000);
 
@@ -381,4 +382,44 @@ async function finger(canvas: Locator, pointerId: number, points: readonly (read
     },
     [pointerId, points] as const,
   );
+}
+
+// --- WA2-OP-01: the HSP table's Identity and Orientation ---------------------------------------------
+
+for (const width of [1280, 375]) {
+  test(`at ${width} px, the HSP tables show Identity and Orientation whole: 100.000 and "Not in the record"`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    // A one-letter BLASTN HSP (results.spec.ts's): its record has no orientation, and its identity is 100.000.
+    const qIdx = BUILD_HAS_ENGINE ? 0 : 2;
+    await program(page, 'blastn');
+    await task(page, 'blastn');
+    await openParameters(page);
+    await page.getByTestId('param-word_size').selectOption('other');
+    await page.getByTestId('param-word_size-other').fill('4');
+    await paste(page, 'query', BUILD_HAS_ENGINE ? '>q\nTAGGACGG\n' : '>q1\nACGTACGTACGT\n>q2\nACGTACGTACGT\n>q\nTAGGACGG\n');
+    await paste(page, 'subject', '>s\nYCAYAANTNCRGYACT\n');
+    await runAndOpen(page);
+    if (!BUILD_HAS_ENGINE) await page.getByTestId(`query-row-${qIdx}`).click();
+    for (const tab of ['pane-dotplot', 'results-view-hits'] as const) {
+      await showTab(page, tab);
+      const table = page.locator(tab === 'pane-dotplot' ? '[data-testid="results-dotplot"]' : '[data-testid="results-hits"]').getByTestId('hsp-table');
+      const single = table.locator('[data-testid^="hsp-row-"][data-orientation="unknown"]');
+      await expect(single).toHaveCount(1);
+      await expect(single.locator('[data-field="orientation"]')).toHaveText('Not in the record');
+      if (BUILD_HAS_ENGINE) await expect(single.locator('[data-field="pident"]')).toHaveText('100.000');
+      // The cells of the two columns, and a copy of the row with BLAST's widest identity (the
+      // FakeEngine writes FAKE): no text is cut.
+      const cut = await single.evaluate((row) => {
+        const copy = row.cloneNode(true) as HTMLElement;
+        copy.removeAttribute('data-testid');
+        copy.querySelector('[data-field="pident"]')!.textContent = '100.000';
+        row.after(copy);
+        const cells = [row, copy].flatMap((r) => [...r.querySelectorAll<HTMLElement>('[data-field="pident"], [data-field="orientation"]')]);
+        const out = cells.filter((cell) => cell.scrollWidth > cell.clientWidth).map((cell) => `${cell.dataset['field']} "${cell.textContent}" ${cell.scrollWidth} > ${cell.clientWidth}`);
+        copy.remove();
+        return out;
+      });
+      expect(cut, tab).toEqual([]);
+    }
+  });
 }

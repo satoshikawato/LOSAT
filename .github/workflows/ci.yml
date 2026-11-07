@@ -46,9 +46,11 @@ jobs:
         run: python3 LOSAT/tests/check_lint_allow_ratchet.py --root .
       - name: Lint-allow ratchet tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_lint_allow_ratchet.py'
-      # No new reference between the programs under LOSAT/src/algorithm/ and none up the layering
+      # No reference between the programs under LOSAT/src/algorithm/ that
+      # LOSAT/tests/program_edges.tsv does not list, and none up the layering
       # common < blastn < tblastx < blastp < tblastn < blastx (SWEBOK 2026-11-04 audit, KA3).
-      # LOSAT/tests/program_edges.tsv only shrinks.
+      # Rows are added only by review, for an edge down the layering; remove a row when its
+      # edge goes (fewer edges are welcome).
       - name: Program-edge ratchet
         run: python3 LOSAT/tests/check_program_edges.py --root .
       - name: Program-edge ratchet tests

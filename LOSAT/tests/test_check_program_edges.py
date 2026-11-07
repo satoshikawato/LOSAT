@@ -142,6 +142,16 @@ class ResolutionTests(unittest.TestCase):
                 },
             )
 
+    def test_self_super_is_a_super_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_tree(root, {"blastn/mod.rs": (
+                "mod inner {\n"
+                "    pub use self::super::super::common::f;\n"
+                "}\n"
+            )})
+            self.assertEqual(edges(root), {("blastn", "common"): ("code", 1, 0)})
+
     def test_super_chains_from_a_path_child(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -157,6 +167,51 @@ class ResolutionTests(unittest.TestCase):
                 ),
             })
             self.assertEqual(edges(root), {("blastx", "tblastx"): ("code", 1, 0)})
+
+
+class AlgorithmModuleTests(unittest.TestCase):
+    """A path that names `algorithm` itself would hide the program it reaches."""
+
+    FORMS = {
+        "glob": "use super::*;\npub fn g() { blastx::f(); }\n",
+        "bare import": "use crate::algorithm;\npub fn g() { algorithm::blastx::f(); }\n",
+        "alias": "use crate::algorithm as a;\npub fn g() { a::blastx::f(); }\n",
+    }
+
+    def test_each_form_is_unexpected(self) -> None:
+        for form, text in self.FORMS.items():
+            with self.subTest(form), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                make_tree(root, {"common/mod.rs": text})
+                self.assertEqual(edges(root), {})
+                code, out = run(root, [])
+                self.assertEqual(code, 1, out)
+                self.assertIn(
+                    "UNEXPECTED\tcommon -> algorithm\tcode\tLOSAT/src/algorithm/common/mod.rs:1\t"
+                    "crate::algorithm\tnames the algorithm module itself",
+                    out,
+                )
+                self.assertIn("edges=0\tlisted=0\tunexpected=1\tstale=0\tupward=0", out)
+
+    def test_an_item_of_algorithm_mod_rs_is_unexpected_and_a_child_module_is_not(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_tree(root, {
+                "mod.rs": "".join(f"pub mod {p};\n" for p in PROGRAMS)
+                + "pub mod shared;\npub use blastx::f as g;\n",
+                "shared.rs": "pub fn s() {}\n",
+                "blastn/mod.rs": (
+                    "pub fn h() { crate::algorithm::g(); }\n"
+                    "pub fn i() { crate::algorithm::shared::s(); }\n"
+                    "#[cfg(test)]\nmod tests {\n    use super::*;\n}\n"
+                ),
+            })
+            graph = ratchet.scan(root)
+            self.assertEqual(graph.edges, {})
+            self.assertEqual(list(graph.opaque), ["blastn"])
+            self.assertEqual(
+                [site.reference() for site in graph.opaque["blastn"].code], ["crate::algorithm::g"]
+            )
 
 
 class TestCodeTests(unittest.TestCase):
@@ -338,6 +393,31 @@ class OutcomeTests(unittest.TestCase):
             self.assertIn("header", out)
             (root / "LOSAT/src/lib.rs").unlink()
             self.assertEqual(run(root, ["blastp\tblastn\tcode"])[0], 2)
+
+    def test_a_module_under_algorithm_that_cannot_be_followed_exits_2(self) -> None:
+        cases = {
+            "no file found for `mod missing;`": {"blastn/mod.rs": "mod missing;\n"},
+            "takes its path from `cfg_attr`": {
+                "blastn/mod.rs": '#[cfg_attr(unix, path = "imp_unix.rs")]\nmod imp;\n',
+                "blastn/imp.rs": "",
+                "blastn/imp_unix.rs": "use crate::algorithm::blastp::f;\n",
+            },
+        }
+        for message, files in cases.items():
+            with self.subTest(message), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                make_tree(root, files)
+                code, out = run(root, [])
+                self.assertEqual(code, 2, out)
+                self.assertIn("LOSAT/src/algorithm/blastn/mod.rs:", out)
+                self.assertIn(message, out)
+
+    def test_an_unresolved_module_outside_algorithm_is_not_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_tree(root, {})
+            write(root, "LOSAT/src/lib.rs", "pub mod algorithm;\nmod elsewhere;\n")
+            self.assertEqual(run(root, [])[0], 0)
 
 
 if __name__ == "__main__":

@@ -15,27 +15,38 @@ and a program uses only the programs below it; `common` uses none. psiblast and 
 not layered yet (see LAYERS).
 
 An edge A -> B is a reference from a module under `algorithm::A` to one under `algorithm::B`,
-A != B. A reference is every `crate::...` path and `super::` chain, resolved to an absolute module
-path through the real module tree (from `lib.rs` through `mod x;`, `#[path = "..."]` and inline
-`mod x { ... }`, which add a level for `super::`), with `use` groups expanded (`{a, b::{c, d}}`
-gives one site per leaf). Comments, string literals and char literals are blanked first; `$crate`
-and the `pub(in ...)` visibility are not references. A site is test code when it is inside an
-item, statement or field under a `cfg` that requires `test` (`all(test, x)`; `any(test, x)` is
-code), inside a `#[test]` fn, or in a file reached through a `#[cfg(test)] mod x;` (transitively)
-or under an inner `#![cfg(test)]`. An edge's scope is `code` when it has a site outside test code,
-else `test`.
+A != B. A reference is every `crate::...` path and `super::` (or `self::super::`) chain, resolved
+to an absolute module path through the real module tree (from `lib.rs` through `mod x;`,
+`#[path = "..."]` and inline `mod x { ... }`, which add a level for `super::`), with `use` groups
+expanded (`{a, b::{c, d}}` gives one site per leaf). Comments, string literals and char literals
+are blanked first; the `pub(in ...)` visibility is not a reference. A site is test code when it
+is inside an item, statement or field under a `cfg` that requires `test` (`all(test, x)`;
+`any(test, x)` is code), inside a `#[test]` fn, or in a file reached through a
+`#[cfg(test)] mod x;` (transitively) or under an inner `#![cfg(test)]`. An edge's scope is `code`
+when it has a site outside test code, else `test`.
 
-`LOSAT/tests/program_edges.tsv` lists the reviewed edges (`src<TAB>dst<TAB>scope`) and only
-shrinks. The ratchet reports, one tab-separated line each with the first site and the referenced
+`LOSAT/tests/program_edges.tsv` lists the reviewed edges (`src<TAB>dst<TAB>scope`). Rows are added
+only by review, for an edge down the layering; remove a row when its edge goes (fewer edges are
+welcome). The ratchet reports, one tab-separated line each with the first site and the referenced
 path:
-- UNEXPECTED: an edge that is not listed, or a listed `test` edge that now has code sites;
+- UNEXPECTED: an edge that is not listed, or a listed `test` edge that now has code sites; also a
+  path from a program that names the `algorithm` module itself (`use super::*;` in a program's
+  root, `use crate::algorithm;`, an alias of it, an item of `algorithm/mod.rs`), which would hide
+  the program it reaches (`algorithm::blastx::f()` after such an import);
 - STALE: a listed edge that is gone, or a listed `code` edge whose sites are all test code now;
 - UPWARD: an edge up the layering, listed or not (it is never also reported as UNEXPECTED).
+
+Not seen, by design or as known limits: `$crate::` paths (macros); a reference that passes through
+a module outside the programs (a re-export in `api/`, `blastinput/` or another top-level module,
+or in a module under `algorithm/` that is not a program directory); a file brought in by
+`include!`. A `mod x;` under `algorithm` whose file cannot be found, or one with
+`#[cfg_attr(..., path = "...")]`, stops the check (exit 2) instead of being skipped.
 
 Usage: python3 LOSAT/tests/check_program_edges.py --root .
        python3 LOSAT/tests/check_program_edges.py --root . --list
        (`--list` prints every edge; `--list | cut -f1-3` regenerates the list's rows)
-Exit status: 0 clean, 1 findings, 2 a source file or the list could not be read or is malformed.
+Exit status: 0 clean, 1 findings, 2 a source file or the list could not be read or is malformed,
+or a `mod x;` under `algorithm` cannot be followed.
 """
 
 from __future__ import annotations
@@ -79,6 +90,7 @@ CFG_ATTR_RE = re.compile(r"cfg\((.*)\)")
 WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 MOD_RE = re.compile(r"\bmod\s+(?:r#)?([A-Za-z_][A-Za-z0-9_]*)\s*([;{])")
 VISIBILITY_BEFORE_RE = re.compile(r"\bpub\s*(?:\([^()]*\))?\s*$")
+CFG_ATTR_PATH_RE = re.compile(r"cfg_attr\(.*\bpath=")
 
 # What an attribute is attached to, by its first tokens (visibility and qualifiers skipped).
 ITEM_RE = re.compile(
@@ -99,8 +111,9 @@ ELSE_RE = re.compile(r"\s*else\b\s*")
 SCAN_RE = re.compile(r"[;,()\[\]{}]")
 FIELD_SCAN_RE = re.compile(r"->|[;,()\[\]{}<>]")
 
-# A path that starts at the crate root or a parent module. `$crate` (macros) and `a::crate` are not.
-REF_RE = re.compile(r"(?<![A-Za-z0-9_$:])(?:crate|super)\s*::")
+# A path that starts at the crate root or a parent module (also `self::super::`). `$crate` (macros)
+# and `a::crate` are not.
+REF_RE = re.compile(r"(?<![A-Za-z0-9_$:])(?:crate|super|self\s*::\s*super)\s*::")
 VISIBILITY_IN_RE = re.compile(r"\(\s*in\s+$")
 SEGMENT_RE = re.compile(r"(?:r#)?([A-Za-z_][A-Za-z0-9_]*)")
 RENAME_RE = re.compile(r"\s*as\s+(?:r#)?[A-Za-z_][A-Za-z0-9_]*")
@@ -246,6 +259,7 @@ class ModDecl:
     at: int  # offset of `mod`
     inline: bool
     path: str | None  # `#[path = "..."]`
+    cfg_attr_path: bool = False  # `#[cfg_attr(..., path = "...")]`, which the walk cannot follow
     open: int = -1  # inline: the braces
     close: int = -1
 
@@ -292,6 +306,7 @@ class SourceFile:
             vis = VISIBILITY_BEFORE_RE.search(self.masked, max(0, at - 160), at)
             q = vis.start() if vis else at
             path = None
+            cfg_attr_path = False
             while True:  # the outer attributes right before the item, last to first
                 j = q
                 while j > 0 and self.masked[j - 1].isspace():
@@ -302,8 +317,9 @@ class SourceFile:
                 found = PATH_ATTR_RE.fullmatch(attr.raw)
                 if found and path is None:
                     path = found.group(1)
+                cfg_attr_path = cfg_attr_path or bool(CFG_ATTR_PATH_RE.match(attr.body))
                 q = attr.start
-            decl = ModDecl(m.group(1), at, m.group(2) == "{", path)
+            decl = ModDecl(m.group(1), at, m.group(2) == "{", path, cfg_attr_path)
             if decl.inline:
                 decl.open = m.end() - 1
                 decl.close = self.pairs.get(decl.open, len(self.masked))
@@ -560,6 +576,8 @@ def resolve(leaf: list[str], here: tuple[str, ...]) -> tuple[str, ...] | None:
     if leaf[0] == "crate":
         base, rest = (), leaf[1:]
     else:
+        if leaf[0] == "self":  # `self::super::...`
+            leaf = leaf[1:]
         up = 0
         while up < len(leaf) and leaf[up] == "super":
             up += 1
@@ -575,8 +593,21 @@ def program_of(modpath: tuple[str, ...], programs: frozenset[str]) -> str | None
     return None
 
 
+@dataclass
+class Graph:
+    edges: dict[tuple[str, str], Edge]  # (src, dst) -> edge, sorted
+    # src -> the paths of that program that name the `algorithm` module itself, as an Edge whose
+    # dst is `algorithm` (they would hide which program they reach)
+    opaque: dict[str, Edge]
+
+
 def find_edges(root: Path) -> dict[tuple[str, str], Edge]:
     """Every edge between two programs, with its sites in file and line order."""
+    return scan(root).edges
+
+
+def scan(root: Path) -> Graph:
+    """The edges between programs and the paths that name the `algorithm` module itself."""
     src_root = root.joinpath(*SRC_DIR)
     algorithm_dir = src_root / ALGORITHM
     if not (src_root / "lib.rs").is_file() or not algorithm_dir.is_dir():
@@ -611,12 +642,19 @@ def find_edges(root: Path) -> dict[tuple[str, str], Edge]:
         source = load(rel)
         for decl in source.mods:
             chain = source.inline_chain(decl.at)
+            modpath = ctx.modpath + tuple(inline.name for inline in chain) + (decl.name,)
+            if modpath[:1] != (ALGORITHM,):
+                continue
+            where = f"{'/'.join(SRC_DIR)}/{rel}:{source.line(decl.at)}"
+            if decl.cfg_attr_path:
+                raise ValueError(
+                    f"{where}: `mod {decl.name};` takes its path from `cfg_attr`, which this check "
+                    "cannot follow: write one `#[cfg(...)] #[path = \"...\"] mod x;` per case"
+                )
             child = child_file(ctx, chain, decl, existing)
             if child is None:
-                continue
+                raise ValueError(f"{where}: no file found for `mod {decl.name};`")
             child_rel, child_ctx = child
-            if child_ctx.modpath[:1] != (ALGORITHM,):
-                continue
             child_ctx.test = ctx.test or source.whole_file_test or source.in_test(decl.at)
             seen = contexts.get(child_rel)
             if seen is None:
@@ -626,7 +664,15 @@ def find_edges(root: Path) -> dict[tuple[str, str], Edge]:
                 seen.test = False
                 stack.append(child_rel)
 
+    # The modules right under `algorithm`; any other name after `algorithm::` is an item of
+    # algorithm/mod.rs (a re-export would hide the program it comes from).
+    children = {ctx.modpath[1] for ctx in contexts.values() if len(ctx.modpath) >= 2}
+    for rel, ctx in contexts.items():
+        if ctx.modpath == (ALGORITHM,):
+            source = sources[rel]
+            children.update(d.name for d in source.inline_mods if not source.inline_chain(d.at))
     edges: dict[tuple[str, str], Edge] = {}
+    opaque: dict[str, Edge] = {}
     prefix = "/".join(SRC_DIR) + "/"
     for rel in sorted(contexts):
         ctx = contexts[rel]
@@ -646,15 +692,20 @@ def find_edges(root: Path) -> dict[tuple[str, str], Edge]:
             test = None
             for leaf in leaves:
                 target = resolve(leaf, here) if leaf else None
-                dst = program_of(target, programs) if target else None
-                if dst is None or dst == src:
+                if not target or target[0] != ALGORITHM:
                     continue
+                if len(target) == 1 or target[1] not in children:
+                    edge = opaque.setdefault(src, Edge(src, ALGORITHM))
+                else:
+                    dst = program_of(target, programs)
+                    if dst is None or dst == src:
+                        continue
+                    edge = edges.setdefault((src, dst), Edge(src, dst))
                 if test is None:
                     test = ctx.test or source.in_test(at)
-                edge = edges.setdefault((src, dst), Edge(src, dst))
                 site = Site(prefix + rel, source.line(at), target, test)
                 (edge.test if test else edge.code).append(site)
-    return dict(sorted(edges.items()))
+    return Graph(dict(sorted(edges.items())), dict(sorted(opaque.items())))
 
 
 def load_listed(path: Path) -> dict[tuple[str, str], str]:
@@ -727,7 +778,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = args.root.resolve()
     edges_path = args.edges or root / "LOSAT" / "tests" / "program_edges.tsv"
     try:
-        edges = find_edges(root)
+        graph = scan(root)
+        edges = graph.edges
         if args.list:
             print_list(edges)
             return 0
@@ -736,6 +788,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"program-edge ratchet error: {error}", file=sys.stderr)
         return 2
     unexpected, stale, upward = evaluate(edges, listed)
+    unexpected_count = len(unexpected) + len(graph.opaque)
     layering = " < ".join(LAYERS)
     bottom = f"{ALGORITHM}/{LAYERS[0]}"
     for edge in upward:
@@ -747,13 +800,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                    f"a program below it or {bottom}")
         print(f"UPWARD\t{edge.src} -> {edge.dst}\t{edge.scope}\t{first.where()}\t"
               f"{first.reference()}\t{fix}; a row in {edges_path.name} does not allow it")
+    rule = f"rows are added only by review, for an edge down the layering ({edges_path.name})"
+    for edge in graph.opaque.values():
+        first = edge.first()
+        print(f"UNEXPECTED\t{edge.src} -> {ALGORITHM}\t{edge.scope}\t{first.where()}\t"
+              f"{first.reference()}\tnames the {ALGORITHM} module itself (a glob, alias or bare "
+              f"import of it, or an item of {ALGORITHM}/mod.rs), which hides the program it "
+              "reaches: name the program in the path")
     for edge in unexpected:
         first = edge.first()
         was = " (listed as test only)" if (edge.src, edge.dst) in listed else ""
         print(f"UNEXPECTED\t{edge.src} -> {edge.dst}\t{edge.scope}{was}\t{first.where()}\t"
               f"{first.reference()}\tnew reference between programs: take the item from a program "
-              f"below {edge.src} or from {bottom}, or move it there; a new downward edge needs a "
-              f"reviewed row in {edges_path.name}")
+              f"below {edge.src} or from {bottom}, or move it there; {rule}")
     for (src, dst), scope, edge in stale:
         if edge is None:
             print(f"STALE\t{src} -> {dst}\t{scope}\t-\t-\tlisted but gone: remove the row from "
@@ -763,8 +822,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"STALE\t{src} -> {dst}\t{scope}\t{first.where()}\t{first.reference()}\t"
                   f"listed as code, now only in test code: change the row's scope to test")
     print(f"program-edge ratchet\tedges={len(edges)}\tlisted={len(listed)}\t"
-          f"unexpected={len(unexpected)}\tstale={len(stale)}\tupward={len(upward)}")
-    return 0 if not unexpected and not stale and not upward else 1
+          f"unexpected={unexpected_count}\tstale={len(stale)}\tupward={len(upward)}")
+    return 0 if not unexpected_count and not stale and not upward else 1
 
 
 if __name__ == "__main__":

@@ -76,7 +76,7 @@
 //! under its own switch of the same values and CPU policy (`x_mode`). Its presence bytes are built
 //! once per table and kept with it (`x_table_presence`; blastx's `Lookup`).
 
-use crate::algorithm::tblastx::blast_aascan::{s_blast_aa_scan_subject_one_range, BlastOffsetPair};
+use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 use crate::algorithm::tblastx::lookup::{
     BackboneCell, BlastAaLookupTable, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK,
 };
@@ -414,19 +414,14 @@ fn scan(
     debug_assert!(!avx2 || avx2_detected(), "AVX2 forms without AVX2");
     let s_first = s_range[1] as usize;
     let s_last = s_range[2] as usize;
-    // NCBI's loop reads `subject[s + 2]` for every `s <= s_last`. A first range of one letter at
-    // the end of the slice (`x_scan_unit` sets its end to its left edge, aa_ungapped.c:500-501)
-    // reads one byte past it: that call takes NCBI's loop, as without this switch.
-    if s_last + 2 >= subject.len() {
-        held.n = 0;
-        return s_blast_aa_scan_subject_one_range(
-            lookup,
-            subject,
-            offset_pairs,
-            array_size,
-            s_range,
-        );
-    }
+    // NCBI's loop reads `subject[s + 2]` for every `s <= s_last`. The callers keep every word in
+    // `subject`: TBLASTN's `x_scan_unit` does not scan a raised first-range word past it
+    // (aa_ungapped.c:500-501), and BLASTX pads its subject (`x_scan_bytes`).
+    assert!(
+        s_last + 2 < subject.len(),
+        "LOSAT_X_TBNSCANBYTE: the word at {s_last} runs past a subject of {} letters",
+        subject.len()
+    );
     let table = Table {
         backbone: lookup.backbone.as_ptr(),
         overflow: lookup.overflow.as_ptr(),
@@ -917,6 +912,7 @@ unsafe fn write_avx2(
 mod tests {
     use super::*;
     use crate::algorithm::tblastn::search_seed::encode_tblastn_lookup_query;
+    use crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject_one_range;
     use crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile;
     use crate::config::ScoringMatrix;
     use crate::stats::lookup_protein_params_ungapped;

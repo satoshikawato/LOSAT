@@ -406,4 +406,34 @@ mod tests {
         assert!(!path.exists());
         assert!(!std::path::Path::new("p.txt").exists());
     }
+
+    // Line PS, PS5a (DECISIONS 15): psiblast's rounds run on the command line only; the library's
+    // results have one round, so `validate` and every search refuse `-num_iterations` other than 1.
+    #[test]
+    fn psiblast_rounds_are_refused_by_validate_and_every_search() {
+        for rounds in ["0", "2"] {
+            let error = validate(Program::Psiblast, &["-num_iterations", rounds]).unwrap_err();
+            assert_eq!(
+                error,
+                Error::Argv(format!(
+                    "-num_iterations {rounds} is not accepted by the library API: its results have one round (the command line runs psiblast's rounds)"
+                ))
+            );
+        }
+        validate(Program::Psiblast, &["-num_iterations", "1"]).unwrap();
+        let search = Search {
+            program: Program::Psiblast,
+            argv: vec!["-num_iterations".to_string(), "3".to_string()],
+        };
+        let query = crate::api::read_fasta(
+            Program::Psiblast,
+            Role::Query,
+            b">q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n",
+        )
+        .unwrap();
+        let inputs = Inputs::new(&query, &query).named("q.faa", "s.faa");
+        assert!(
+            matches!(search.command(inputs), Err(Error::Argv(message)) if message.starts_with("-num_iterations 3 "))
+        );
+    }
 }

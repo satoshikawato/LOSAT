@@ -203,6 +203,7 @@ pub(crate) struct MatrixScores {
 
 impl MatrixScores {
     /// The scores of `matrix` for a search of 3-letter words.
+    #[cfg(test)]
     pub(crate) fn new(matrix: ScoringMatrix) -> Self {
         Self::with_word(matrix, 3)
     }

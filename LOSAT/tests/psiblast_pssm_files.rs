@@ -12,12 +12,11 @@
 //!        }
 //! ```
 
-#[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
+use std::process::Command;
 #[cfg(target_os = "linux")]
-use std::process::{Command, Output};
+use std::process::Output;
 
-#[cfg(target_os = "linux")]
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 
 /// One `losat psiblast -db tests/db_search/paja -query tests/fasta/psiblast/<query>
@@ -60,7 +59,6 @@ fn losat_psiblast(home: &Path) -> Command {
 }
 
 /// An empty directory of the test's own for the PSSM files, and one for HOME.
-#[cfg(target_os = "linux")]
 fn scratch(tag: &str) -> (PathBuf, PathBuf) {
     let base =
         std::env::temp_dir().join(format!("losat_psiblast_pssm_{tag}_{}", std::process::id()));
@@ -81,7 +79,6 @@ fn names(dir: &Path) -> Vec<String> {
     names
 }
 
-#[cfg(target_os = "linux")]
 fn path(path: &Path) -> &str {
     path.to_str().unwrap()
 }

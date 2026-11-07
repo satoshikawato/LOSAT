@@ -873,7 +873,10 @@ fn preliminary_test_near_identical(query_length: i32, align: &Align, cutoff: f64
     }
     let align_len = (align.query_end - align.query_start).min(align.match_end - align.match_start);
     // A float division as NCBI's (0 gives an infinity or NaN, neither below the cutoff).
-    !((align.score as f64) / (align_len as f64) < cutoff)
+    if (align.score as f64) / (align_len as f64) < cutoff {
+        return false;
+    }
+    true
 }
 
 /// `KAPPA_CONTAINED_IN_HSP` (redo_alignment.c:72-73) and `CONTAINED_IN_HSP` (blast_kappa.c).

@@ -17,7 +17,8 @@ A psiblast row whose `files` column is `pssm` runs with `-out_ascii_pssm <tmp>/<
 (`pssm-asn`: `-out_pssm <tmp>/<fixture_id>.asn`; `pssm-both`: both); its report is compared as usual,
 and the PSSM files it writes must be those of `side_sha256` byte for byte (none when it is empty):
 the frozen ones, or in the kinds `pssm-asn` and `pssm-both` a file over 64 KB by its SHA-256 alone. With `--library` LOSAT is `examples/library_command_line`, the
-same search through the library API, which writes no PSSM file: those rows are `library-skip`.
+same search through the library API, which writes no PSSM file and takes no PSSM query (`-in_pssm`, a
+query cell `pssm-gz:` or `pssm:`): those rows are `library-skip`.
 
 A row with the contract `approved_db_gencode_deviation` (AGENTS.md's approved TBLASTX
 exception: LOSAT's local search applies a non-default -db_gencode to the subject) is
@@ -95,8 +96,8 @@ def main() -> int:
         command = [str(args.losat.resolve()), row["program"], *search_argv(row), *threads]
         files = xinclude.wants_files(row)
         pssm = xinclude.wants_pssm(row)
-        # The library API refuses the PSSM file options (`api::search`).
-        if args.library and pssm:
+        # The library API refuses the PSSM file options and `-in_pssm` (`api::search`).
+        if args.library and (pssm or row["query"].startswith(("pssm:", "pssm-gz:"))):
             print(f"{row['fixture_id']}\tlibrary-skip\t")
             continue
         if files:

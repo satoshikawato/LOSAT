@@ -1,7 +1,7 @@
 //! Engine-level tests for tblastx runs.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -344,8 +344,8 @@ fn tblastx_serial_scan_chunks_matches_normal_on_mjenmv() {
 }
 
 fn assert_serial_scan_chunks_match_normal(
-    query: &PathBuf,
-    subject: &PathBuf,
+    query: &Path,
+    subject: &Path,
     extra_args: &[&str],
     require_boundary_crossing_hsp: bool,
 ) {

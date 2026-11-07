@@ -2,6 +2,36 @@ use crate::blastinput::value_parsers::*;
 use clap::Args;
 use std::path::PathBuf;
 
+/// The BLASTN tasks that LOSAT runs (case-sensitive): NCBI's nucleotide-nucleotide tasks but
+/// rmblastn (matrix scoring and masklevel, `RMBLASTN_UNSUPPORTED`) and vecscreen (a program of
+/// its own). `-task` accepts these and `describe` lists them, in the order of NCBI's BLASTN
+/// page (megablast, dc-megablast, blastn; the Web form's task list) with blastn-short last.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:211-222
+/// ```c
+/// CBlastOptionsFactory::GetTasks(ETaskSets choice /* = eAll */)
+/// {
+///     set<string> retval;
+///     if (choice == eNuclNucl || choice == eAll) {
+///         retval.insert("blastn");
+///         retval.insert("blastn-short");
+///         retval.insert("megablast");
+///         retval.insert("dc-megablast");
+///         retval.insert("vecscreen");
+///         // -RMH-
+///         retval.insert("rmblastn");
+/// ```
+/// NCBI reference: c++/src/algo/blast/blastinput/blastn_args.cpp:57-59
+/// ```c
+///     set<string> tasks
+///         (CBlastOptionsFactory::GetTasks(CBlastOptionsFactory::eNuclNucl));
+///     tasks.erase("vecscreen"); // vecscreen has its own program
+/// ```
+const BLASTN_TASKS: &[&str] = &["megablast", "dc-megablast", "blastn", "blastn-short"];
+
+/// The message for `-task rmblastn`, the NCBI task that LOSAT's BLASTN does not implement.
+const RMBLASTN_UNSUPPORTED: &str = "the task rmblastn is not supported by LOSAT's BLASTN (use megablast, blastn, dc-megablast or blastn-short)";
+
 /// The strand(s) of the query that a search covers (`-strand`): the strand of the query's
 /// Seq-loc. A strand that is not searched has a context of length 0 and, in a split search, a
 /// chunk context of `None` (`kInvalidContext`).
@@ -177,7 +207,9 @@ pub struct BlastnArgs {
     // ```
     #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
     pub searchsp: Option<i64>,
-    #[arg(long, default_value = "megablast", help = "Task to execute: megablast, blastn, dc-megablast or blastn-short", long_help = "Implemented tasks: megablast, blastn, dc-megablast and blastn-short. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST. An omitted option takes the default of the task.", value_parser = blastn_task)]
+    // The help texts name the tasks (the Web form shows the short one), so the help does not
+    // repeat clap's list of them; `describe` and the parse errors list `BLASTN_TASKS`.
+    #[arg(long, default_value = "megablast", help = "Task to execute: megablast, blastn, dc-megablast or blastn-short", long_help = "Implemented tasks: megablast, blastn, dc-megablast and blastn-short. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST. An omitted option takes the default of the task.", value_parser = task_parser(BLASTN_TASKS, &[("rmblastn", RMBLASTN_UNSUPPORTED)]), hide_possible_values = true)]
     pub task: String,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:708-730
     // ```c
@@ -869,13 +901,76 @@ impl BlastnArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::{BlastnArgs, QueryStrand};
-    use clap::Parser;
+    use super::{BlastnArgs, QueryStrand, BLASTN_TASKS};
+    use clap::{CommandFactory, Parser};
 
     #[derive(Parser)]
     struct TestCli {
         #[command(flatten)]
         args: BlastnArgs,
+    }
+
+    // blastn_args.cpp:57-59: -task takes NCBI's nucleotide tasks; LOSAT runs those of
+    // `BLASTN_TASKS`, refuses rmblastn with its own message and lists its tasks for any other
+    // name, as for the other programs' -task (`task_parser`).
+    #[test]
+    fn task_accepts_the_task_table_and_lists_it() {
+        let parse = |task: &str| {
+            TestCli::try_parse_from([
+                "losat",
+                "--query",
+                "q.fa",
+                "--subject",
+                "s.fa",
+                "--task",
+                task,
+            ])
+        };
+        for task in BLASTN_TASKS {
+            assert_eq!(parse(task).unwrap().args.task, *task);
+        }
+        let command = TestCli::command();
+        let arg = command
+            .get_arguments()
+            .find(|arg| arg.get_long() == Some("task"))
+            .unwrap();
+        let listed: Vec<String> = arg
+            .get_possible_values()
+            .iter()
+            .map(|value| value.get_name().to_string())
+            .collect();
+        assert_eq!(listed, BLASTN_TASKS);
+        // The help texts name every task in place of clap's list.
+        assert!(arg.is_hide_possible_values_set());
+        for help in [arg.get_help(), arg.get_long_help()] {
+            let help = help.unwrap().to_string();
+            for task in BLASTN_TASKS {
+                assert!(help.contains(task), "{help}");
+            }
+        }
+        // rmblastn: clap's error for a value its parser refuses, with the usage hint.
+        let rmblastn = parse("rmblastn").err().unwrap();
+        assert_eq!(rmblastn.kind(), clap::error::ErrorKind::ValueValidation);
+        let rmblastn = rmblastn.to_string();
+        assert!(
+            rmblastn.starts_with("error: invalid value 'rmblastn' for '--task <TASK>': the task rmblastn is not supported by LOSAT's BLASTN (use megablast, blastn, dc-megablast or blastn-short)\n")
+                && rmblastn.ends_with("For more information, try '--help'.\n"),
+            "{rmblastn}"
+        );
+        for other in ["vecscreen", "MEGABLAST", "blastn-fast"] {
+            let error = parse(other).err().unwrap();
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::InvalidValue,
+                "{other}"
+            );
+            assert!(
+                error
+                    .to_string()
+                    .contains("[possible values: megablast, dc-megablast, blastn, blastn-short]"),
+                "{error}"
+            );
+        }
     }
 
     // `-soft_masking` takes NCBI's boolean spellings (`NStr::StringToBool`); its default is true,

@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! BLAST XML2 and JSON (outfmt 16 and 15) of BLASTN: what the frozen-fixture rows cannot show.
 //! The `-subject` report that NCBI holds back one query (a failed batch loses it), the documents
 //! of a run with no query, and the searches LOSAT refuses before the first byte (a byte >= 0x80 in
@@ -14,7 +12,6 @@
 //! (the `-subject` result is written when the next query's arrives, or by `PrintEpilog`, which a
 //! failed batch does not reach).
 
-use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};

@@ -122,7 +122,7 @@ mod search;
 mod tools;
 mod view;
 
-pub use crate::blastinput::fasta_reader::FastaRecord;
+pub use crate::record::FastaRecord;
 pub use batches::{run_batches, Batch, Batches};
 pub use describe::{describe, Description, Parameter, ValueKind};
 pub use error::Error;

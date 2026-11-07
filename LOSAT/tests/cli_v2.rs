@@ -848,12 +848,16 @@ fn numeric_values_are_validated_before_io() {
             );
         }
     }
-    // NCBI tblastx runs word sizes 2 to 4 (blast_options.c:1342-1364), which LOSAT's
-    // TBLASTX rejects where the search starts; 5 or more is NCBI's error.
+    // NCBI tblastx runs word sizes 2 to 4 (blast_options.c:1335-1362), as LOSAT's TBLASTX
+    // does (series SC, SC10); 5 or more is NCBI's error.
     for (value, message) in [
-        ("2", "not supported by LOSAT's TBLASTX"),
-        ("4", "not supported by LOSAT's TBLASTX"),
-        ("5", "Word-size must be less than 6 for protein comparison"),
+        ("2", None),
+        ("3", None),
+        ("4", None),
+        (
+            "5",
+            Some("Word-size must be less than 6 for protein comparison"),
+        ),
     ] {
         let Commands::Tblastx(args) = parse("tblastx", &["-outfmt", "6", "-word_size", value])
             .unwrap()
@@ -861,10 +865,14 @@ fn numeric_values_are_validated_before_io() {
         else {
             unreachable!("tblastx")
         };
-        let error = LOSAT::algorithm::tblastx::blast_engine::check_options(&args)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains(message), "{value}: {error}");
+        let checked = LOSAT::algorithm::tblastx::blast_engine::check_options(&args);
+        match message {
+            None => assert!(checked.is_ok(), "{value}: {checked:?}"),
+            Some(message) => {
+                let error = checked.unwrap_err().to_string();
+                assert!(error.contains(message), "{value}: {error}");
+            }
+        }
     }
     // NCBI blast_args.cpp:168-170: the argument is 4 or more; blast_options.c:1326-1333:
     // an option check rejects more than 100, with NCBI's message.

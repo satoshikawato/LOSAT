@@ -872,6 +872,32 @@ most 9 in BLOSUM62).
   `nz_qx2.*` `qx` then `q2`: with `BATCH_SIZE=1` the refusal of `q2`'s batch still comes before any byte. TBLASTX's
   report stream (outfmt 7 in two batches), which would write `qx`'s block before `q2`'s lookups, is off for a run that
   the taxonomy cache refuses, so `nz_qxy.fna` (`qx`, then `qy` without hits either) gets NCBI's bytes.
+- Rows `db.nz.cq.bn.*` (line DBID, L1c): BLASTN asks for that refusal only where NCBI fetches a subject too: not for
+  fields that read none (`6 qseqid evalue`) where a positive `PRE_FETCH_SEQS_LIMIT` below the batch's Seq-aligns turns
+  the prefetch off, not for queries without hits whose reports would fetch (`PRE_FETCH_SEQS_LIMIT=0`, outfmt 6), and not
+  for a batch without hits (`nz_qx.fna` in outfmt 0; `nz_qxy.fna` with `BATCH_SIZE=1` in outfmt 7, where the report
+  stream writes each batch's reports). `nz_qx2.fna` with `BATCH_SIZE=1` is refused at `q2`'s batch, whose subjects
+  (taxids 562 and 10090) NCBI fetches without a message (the superset kept since L1b); outfmt 6 writes nothing for
+  `qx` before it, and `tests/blastn_report_stream.rs` checks that outfmt 0 and 7 write `qx`'s report first where the
+  report stream acts (and only outfmt 0's prolog where it does not). The rows use `-task blastn -dust no -evalue 1e-3`
+  (megablast and dc-megablast find no hit of these queries).
+- Rows `db.nz.cq.x.*` (line DBID, L1d): the XML2 and JSON formats (outfmt 13 to 16), whose reports fetch every reported
+  subject, ask for that refusal too, where a reported subject has a positive taxid. `nz_rep.fna` holds `a1` (the
+  letters of `sN` as in `nz_n`), `b1` (`sZ`) and `c1` (`sI`) with the taxids 99990, 150 and 99990 (`nz_rep.map`), `d1`
+  (the codons of 60 random residues) without a taxid and `e1` (another 60) with the taxid -5: one volume where NCBI
+  really writes the offset error again (for `c1` after `b1`; `nz_nc`'s only 99990 is `sN`, whose entry NCBI keeps
+  loaded, so it writes the message once there). `nz_rep_q.fna` holds `qN`, `qZ` and `qI`, the whole of `a1`, `b1` and
+  `c1`, and `nz_rep_q.faa` their translations (`nz_repp.faa` holds those of `a1` to `d1`): NCBI writes the message 3 to
+  5 times in outfmt 15 / 16 and LOSAT refuses before any byte, as in outfmt 6 with `BATCH_SIZE=1` (twice).
+  `nz_rep_qd.*` (`qD`, the start of `d1`) and `nz_rep_qe.fna` (`qE`, the start of `e1`) hit `d1` or `e1` alone: no
+  volume looks a positive taxid up, so their `ncbi` rows are not refused. `nz_repo` and `nz_reppo` hold `a1` to `d1`
+  (nucleotide, protein) without parsed Seq-ids: their taxid is that of the definition line, a branch of its own
+  (`db.nz.cq.x.bn.repo.*`: NCBI writes the message 4 times with `BATCH_SIZE=1`). `nz_rep_qxn.fna` is `nz_qx.fna`'s `qx`
+  then `qN`: BLASTX writes each batch's XML2 report before it searches the next, so on `nz_reppo` it holds the
+  document of a run with this refusal and drops it at `qN`'s batch (no byte of `qx`'s); `tm_cache_qx.fna` (`qx` then
+  the three records of `x16_bx_taxid_q.fna`) does the same on `tm_cache150`, whose parsed Seq-ids make BLASTX hold
+  anyway. BLASTP's search in blocks of query batches takes the search of all queries for such a run
+  (`tests/blastp_query_blocks.rs`, `nz_reppo`).
 - The sequences come from the line's probe script (kept outside the repository). The databases (version 4, every file
   makeblastdb writes; `nz_pc` and `nz_nc` alike with their maps), run from `LOSAT/`:
 
@@ -881,3 +907,15 @@ most 9 in BLOSUM62).
           -blastdb_version 4 -title "nz n" -out tests/db_search/nz_n
       makeblastdb -in tests/db_search/nz_psi.faa -dbtype prot -parse_seqids -taxid_map tests/db_search/nz_psi.map \
           -blastdb_version 4 -title "nz psi" -out tests/db_search/nz_psi
+      makeblastdb -in tests/db_search/nz_rep.fna -dbtype nucl -parse_seqids -taxid_map tests/db_search/nz_rep.map \
+          -blastdb_version 4 -title "nz rep" -out tests/db_search/nz_rep
+      D=$PWD/tests/db_search; cd "$(mktemp -d)"   # nz_repo, nz_reppo: one database per record, then one volume
+      for k in a1 b1 c1 d1; do  # a1, b1, c1, d1 of nz_rep.fna / nz_repp.faa, each in $k.fna / $k.faa
+          t=""; case $k in a1|c1) t="-taxid 99990";; b1) t="-taxid 150";; esac
+          makeblastdb -in $k.fna -dbtype nucl $t -blastdb_version 4 -out n$k
+          makeblastdb -in $k.faa -dbtype prot $t -blastdb_version 4 -out p$k
+      done
+      makeblastdb -in "na1 nb1 nc1 nd1" -input_type blastdb -dbtype nucl -blastdb_version 4 -title "nz repo" \
+          -out $D/nz_repo
+      makeblastdb -in "pa1 pb1 pc1 pd1" -input_type blastdb -dbtype prot -blastdb_version 4 -title "nz reppo" \
+          -out $D/nz_reppo

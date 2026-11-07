@@ -1271,17 +1271,6 @@ pub(crate) fn check_losat_limits(args: &TblastxArgs) -> Result<()> {
             "-window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX"
         );
     }
-    // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:237
-    // ```c
-    //     lookup->word_length = opt->word_size;
-    // ```
-    // LOSAT's TBLASTX builds and scans 3-residue words only.
-    if args.word_size() != 3 {
-        anyhow::bail!(
-            "-word_size {} is not supported by LOSAT's TBLASTX (it implements word size 3)",
-            args.word_size()
-        );
-    }
     Ok(())
 }
 
@@ -2949,11 +2938,13 @@ fn run_in_pool(
     // The search's matrix, chosen once (`scoring.rs`): BLOSUM62's instance of the search, or
     // the other matrices' with the table of `-matrix` (a name without a table stops at the first
     // batch with letters, `run_batch_loop`; one that NCBI aborts on runs no batch).
+    // A word length other than 3 (`-word_size` 2 or 4) takes the other instance, BLOSUM62 too
+    // (`TbxScore::word`).
+    let word = args.word_size() as usize;
     let matrix_scores = match args.scoring_matrix() {
-        TblastxMatrix::Table(ScoringMatrix::Blosum62)
-        | TblastxMatrix::Unknown
-        | TblastxMatrix::Aborts => None,
-        TblastxMatrix::Table(matrix) => Some(MatrixScores::new(matrix)),
+        TblastxMatrix::Unknown | TblastxMatrix::Aborts => None,
+        TblastxMatrix::Table(ScoringMatrix::Blosum62) if word == 3 => None,
+        TblastxMatrix::Table(matrix) => Some(MatrixScores::with_word(matrix, word)),
     };
     // EXPERIMENT (LOSAT_X_TBXBOARD): one board for the search's batches (tblastx/x_work_board.rs).
     // Only when the batches use it (`search_query_batch`, `x_board_batch`): with the serial chunk
@@ -4141,7 +4132,8 @@ fn search_query_batch<S: TbxScore>(
     // [C] window = diag->window;
     let window = args.window();
     // [C] wordsize = lookup->word_length;
-    let wordsize: i32 = 3;
+    // (`-word_size`; BLOSUM62's instance of the search is for 3, `TbxScore::word`)
+    let wordsize: i32 = sc.word() as i32;
 
     // NCBI BLAST computes x_dropoff per-context using kbp[context]->Lambda:
     //   p->cutoffs[context].x_dropoff_init =
@@ -4347,12 +4339,15 @@ fn search_query_batch<S: TbxScore>(
             threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
             window,
             subjects,
+            // A word length other than 3 takes the reference frame loop: the units build and
+            // walk 3-letter words (`TbxScore::word`).
             debugging: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled
                 || debug_hsp_saving
-                || x_soft_subjects,
+                || x_soft_subjects
+                || sc.word() != 3,
             requested_parallel,
             use_serial_scan_chunks,
             pool: parallel_pool,
@@ -4405,7 +4400,7 @@ fn search_query_batch<S: TbxScore>(
                     &ungapped_params_for_xdrop,
                     true,
                     sc.matrix(),
-                    3,
+                    sc.word(),
                 );
             for ctx in contexts.iter_mut().filter(|ctx| ctx.is_valid) {
                 ctx.karlin_params.alpha = ungapped_params_for_xdrop.alpha;
@@ -4684,12 +4679,15 @@ fn search_query_batch<S: TbxScore>(
             query_length,
             diag_array_size,
             subjects,
+            // A word length other than 3 takes the reference frame loop: the units build and
+            // walk 3-letter words (`TbxScore::word`).
             debugging: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled
                 || debug_hsp_saving
-                || x_soft_subjects,
+                || x_soft_subjects
+                || sc.word() != 3,
             chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
             // PAIRLUT: the groups built at dispatch point 0.
             lut: x_pair_lut_batch,

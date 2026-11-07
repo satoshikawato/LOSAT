@@ -68,7 +68,7 @@ fn test_extend_hit_ungapped_with_mismatches() {
     let q_seq = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8]; // ABCDEF
     let s_seq = [0u8, 1u8, 2u8, 10u8, 11u8, 12u8]; // ABCKLM (mismatches)
 
-    let (q_start, q_end, s_start, s_end, score, _s_last_off) =
+    let (q_start, q_end, _s_start, _s_end, score, _s_last_off) =
         extend_hit_ungapped(&q_seq, &s_seq, 1, 1, 0, X_DROP_UNGAPPED);
 
     // Should still extend but score will be lower due to mismatches
@@ -83,7 +83,7 @@ fn test_extend_hit_ungapped_x_drop_termination() {
     let q_seq = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8, 9u8];
     let s_seq = [0u8, 1u8, 2u8, 20u8, 21u8, 22u8, 23u8, 24u8, 20u8, 21u8]; // Many mismatches
 
-    let (q_start, q_end, s_start, s_end, score, _s_last_off) =
+    let (q_start, q_end, _s_start, _s_end, score, _s_last_off) =
         extend_hit_ungapped(&q_seq, &s_seq, 1, 1, 0, X_DROP_UNGAPPED);
 
     // X-drop should terminate extension when score drops too much
@@ -111,7 +111,7 @@ fn test_extend_hit_ungapped_at_sequence_start() {
     ];
 
     // Start at first residue (position 1). Seeds never start at the sentinel.
-    let (q_start, q_end, s_start, s_end, score, _s_last_off) =
+    let (q_start, q_end, _s_start, _s_end, score, _s_last_off) =
         extend_hit_ungapped(&q_seq, &s_seq, 1, 1, 0, X_DROP_UNGAPPED);
 
     // Should extend rightward only (can't extend left from position 0)
@@ -129,7 +129,7 @@ fn test_extend_hit_ungapped_at_sequence_end() {
 
     // Start at the last valid word position (covers the sequence end).
     let last_pos = q_seq.len() - 3;
-    let (q_start, q_end, s_start, s_end, score, _s_last_off) =
+    let (_q_start, q_end, _s_start, _s_end, score, _s_last_off) =
         extend_hit_ungapped(&q_seq, &s_seq, last_pos, last_pos, 0, X_DROP_UNGAPPED);
 
     // Should extend leftward only (can't extend right beyond end)
@@ -208,7 +208,7 @@ fn test_extend_hit_two_hit_no_connection() {
     // NCBI c++/src/algo/blast/core/aa_ungapped.c:576-582:
     // score = s_BlastAaExtendTwoHit(matrix, subject, query, ...);
     // Preserve extension inputs; disable the search-local LOSAT diagnostic flag.
-    let (q_start, q_end, s_start, s_end, score, right_extended, _s_last_off) = extend_hit_two_hit(
+    let (q_start, q_end, s_start, _s_end, score, right_extended, _s_last_off) = extend_hit_two_hit(
         &q_seq,
         &s_seq,
         s_left_off,
@@ -273,7 +273,7 @@ fn test_extend_gapped_protein_basic() {
     let ss = 2;
     let len = 3;
 
-    let (q_start, q_end, s_start, s_end, score, matches, _mismatches, gap_opens, gap_letters) =
+    let (q_start, q_end, s_start, s_end, score, matches, _mismatches, _gap_opens, _gap_letters) =
         extend_gapped_protein(&q_seq, &s_seq, qs, ss, len, X_DROP_GAPPED_PRELIM);
 
     // Should extend and produce valid alignment
@@ -285,8 +285,6 @@ fn test_extend_gapped_protein_basic() {
 
     // Statistics should be valid
     assert!(matches > 0);
-    assert!(gap_opens >= 0);
-    assert!(gap_letters >= 0);
 }
 
 #[test]
@@ -321,18 +319,13 @@ fn test_extend_gapped_protein_with_gaps() {
     let ss = 0;
     let len = 3;
 
-    let (q_start, q_end, _s_start, _s_end, score, _matches, _mismatches, gap_opens, gap_letters) =
+    let (q_start, q_end, _s_start, _s_end, score, _matches, _mismatches, _gap_opens, _gap_letters) =
         extend_gapped_protein(&q_seq, &s_seq, qs, ss, len, X_DROP_GAPPED_PRELIM);
 
     // Should handle gaps
     assert!(score > 0);
     assert!(q_start <= qs);
     assert!(q_end >= qs + len);
-
-    // May have gaps if alignment requires them
-    // (gap_opens and gap_letters may be > 0)
-    assert!(gap_opens >= 0);
-    assert!(gap_letters >= 0);
 }
 
 #[test]
@@ -414,7 +407,7 @@ fn test_extend_gapped_protein_with_stop_codons() {
     let ss = 0;
     let len = 3;
 
-    let (q_start, q_end, _s_start, _s_end, score, _matches, mismatches, _gap_opens, _gap_letters) =
+    let (q_start, q_end, _s_start, _s_end, _score, _matches, _mismatches, _gap_opens, _gap_letters) =
         extend_gapped_protein(&q_seq, &s_seq, qs, ss, len, X_DROP_GAPPED_PRELIM);
 
     // Should handle stop codons (they should be penalized)
@@ -422,7 +415,4 @@ fn test_extend_gapped_protein_with_stop_codons() {
     // Don't assert score >= 0, just check coordinates are valid
     assert!(q_start <= qs);
     assert!(q_end >= qs + len);
-
-    // Should count stop codons as mismatches
-    assert!(mismatches >= 0);
 }

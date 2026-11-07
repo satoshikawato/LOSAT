@@ -394,8 +394,10 @@ pub(crate) struct XFlatArgs<'a> {
 // ```
 const X_TARGET_PV_BYTES: usize = 262_144;
 
-// No NCBI counterpart: the callers of `XFlatCompressedLookup::scan_subject`, one copy each.
-/// BLASTP's caller of `XFlatCompressedLookup::scan_subject` (and the tests').
+// No NCBI counterpart: the callers of `XFlatCompressedLookup::scan_subject` and
+// `XFlatCompressedLookup::x_list_pairs_lean`, one copy each.
+/// BLASTP's caller of `XFlatCompressedLookup::scan_subject` and `x_list_pairs_lean` (BLOSUM62's
+/// scans, `blastp/x_seed_fused_clut.rs`; and the tests').
 pub(crate) const X_BLASTP: u8 = 0;
 /// TBLASTN's caller of `XFlatCompressedLookup::scan_subject` (`tblastn/search_seed.rs`).
 pub(crate) const X_TBLASTN: u8 = 1;
@@ -404,6 +406,9 @@ pub(crate) const X_BLASTX: u8 = 2;
 /// BLASTP's scan of a `-subject` with lower-case letters (`-lcase_masking`), a copy of its own so
 /// that `X_BLASTP` keeps its one caller.
 pub(crate) const X_BLASTP_SOFT: u8 = 3;
+/// BLASTP's scans with a matrix other than BLOSUM62 (item SC2b; `scan_subject` and
+/// `x_list_pairs_lean`), copies of their own so that `X_BLASTP` keeps its one caller.
+pub(crate) const X_BLASTP_MATRIX: u8 = 4;
 
 /// EXPERIMENT (LOSAT_X_BPCLUT): the compressed lookup table with each cell's hits in one slice of
 /// `hits` (`starts[index]..starts[index + 1]`), in NCBI's scan order. The other fields are those of
@@ -2145,8 +2150,9 @@ impl<H: XQueryOffset> XFlatCompressedLookup<H> {
     // }
     // ```
     /// `BlastCompressedAaLookupTable::scan_subject` on the flat table: the same statements, a cell's
-    /// hits copied from its slice. `CALLER` gives each program's caller a copy of its own (`X_BLASTP`,
-    /// `X_TBLASTN`), so that the compiler inlines BLASTP's as it did when that was the only caller.
+    /// hits copied from its slice. `CALLER` gives each caller a copy of its own (`X_BLASTP`,
+    /// `X_TBLASTN`, `X_BLASTX`, `X_BLASTP_SOFT`, `X_BLASTP_MATRIX`), so that the compiler inlines
+    /// BLASTP's as it did when that was the only caller.
     pub(crate) fn scan_subject<const CALLER: u8>(
         &self,
         subject: &[u8],
@@ -2531,9 +2537,10 @@ impl XFlatCompressedLookup {
     /// # Safety
     ///
     /// [`Self::x_pairs_fit`]`(subject, subject_length)` holds: the scan reads the subject's bytes
-    /// and the presence bits without bounds checks.
+    /// and the presence bits without bounds checks. `CALLER` gives each caller a copy of its own,
+    /// as in [`Self::scan_subject`] (`X_BLASTP`, `X_BLASTP_MATRIX`).
     #[inline(never)]
-    pub(crate) unsafe fn x_list_pairs_lean(
+    pub(crate) unsafe fn x_list_pairs_lean<const CALLER: u8>(
         &self,
         subject: &[u8],
         subject_length: usize,
@@ -2892,6 +2899,70 @@ pub(crate) fn x_tbn_build_compressed_lookup_of(
         XFlatBuild::Refused => Some(Err(())),
         XFlatBuild::TooLarge => reference(),
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310,1352-1354 (see
+// `x_tbn_build_compressed_lookup_of`)
+// ```c
+//     new_alphabet = SCompressedAlphabetNew(sbp,
+//                                 lookup->compressed_alphabet_size,
+//                                 kMatrixScale);
+//     ...
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+// ```
+/// blastp-fast's compressed lookup table with the words of the search matrix `matrix`, any but
+/// BLOSUM62 (item SC2b): `x_bp_build_compressed_lookup` without the spare vectors and the build
+/// ahead. The flat table by `pool`'s threads where `x_pool_builds` (`x_try_build_flat_in_pool_of`;
+/// the reference builder where it declines), else `x_tbn_build_compressed_lookup_of` on this
+/// thread; the reference table with the switch off. Out of line, so that BLOSUM62's build keeps
+/// its code.
+#[inline(never)]
+pub(crate) fn x_bp_build_compressed_lookup_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    pool: &SearchPool<'_>,
+) -> Option<Result<XCompressedLookup, ()>> {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if x_bpclut_on() && x_pool_builds(pool) {
+        return match x_clut_par::x_try_build_flat_in_pool_of(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            pool,
+        )? {
+            XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
+            XFlatBuild::Refused => Some(Err(())),
+            XFlatBuild::TooLarge => try_build_compressed_lookup(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+            )
+            .map(|built| built.map(XCompressedLookup::Reference)),
+        };
+    }
+    let _ = pool;
+    x_tbn_build_compressed_lookup_of(
+        matrix,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
@@ -3889,7 +3960,7 @@ mod tests {
                 let want_list = cells.clone();
                 let mut lean = Vec::new();
                 // SAFETY: x_pairs_fit holds (asserted above).
-                unsafe { flat.x_list_pairs_lean(subject, length, &mut lean) };
+                unsafe { flat.x_list_pairs_lean::<X_BLASTP>(subject, length, &mut lean) };
                 assert_eq!(lean, want_list, "subject {n}: x_list_pairs_lean's list");
                 assert!(
                     lean.capacity() >= lean.len() + X_STARTS_AHEAD,
@@ -3967,7 +4038,7 @@ mod tests {
                 let want_list = cells.clone();
                 let mut lean = Vec::new();
                 // SAFETY: x_pairs_fit holds (asserted above).
-                unsafe { flat6.x_list_pairs_lean(&subject, length, &mut lean) };
+                unsafe { flat6.x_list_pairs_lean::<X_BLASTP>(&subject, length, &mut lean) };
                 assert_eq!(lean, want_list, "length {length}: list");
                 found += want.len();
                 let got: Vec<(i32, i32)> = lean

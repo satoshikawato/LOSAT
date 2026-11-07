@@ -99,7 +99,7 @@ fn test_reverse_complement_basic() {
 #[test]
 fn test_reverse_complement_actual() {
     let seq = b"ACGT";
-    let rc = reverse_complement(seq);
+    let _rc = reverse_complement(seq);
 
     // Reverse complement: reverse first, then complement
     // ACGT -> reverse -> TGCA -> complement -> ACGT

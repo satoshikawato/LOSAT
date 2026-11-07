@@ -90,20 +90,6 @@ pub fn default_protein_params() -> KarlinParams {
     }
 }
 
-/// Generate a simple nucleotide sequence for testing
-pub fn make_nucleotide_sequence(length: usize) -> Vec<u8> {
-    let bases = b"ACGT";
-    (0..length).map(|i| bases[i % bases.len()]).collect()
-}
-
-/// Generate a simple protein sequence for testing
-pub fn make_protein_sequence(length: usize) -> Vec<u8> {
-    let amino_acids = b"ACDEFGHIKLMNPQRSTVWY";
-    (0..length)
-        .map(|i| amino_acids[i % amino_acids.len()])
-        .collect()
-}
-
 /// Assert that two floating point values are approximately equal
 pub fn assert_approx_eq(a: f64, b: f64, epsilon: f64) {
     assert!(

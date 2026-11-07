@@ -60,3 +60,6 @@ pub mod web_api;
 // NCBI blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.
 #[doc(hidden)]
 pub mod cli;
+
+// The type of `api::FastaRecord`: private, so that rustdoc inlines its re-exports (record.rs).
+mod record;

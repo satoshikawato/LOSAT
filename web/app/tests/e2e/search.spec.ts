@@ -449,12 +449,13 @@ test("the engine's refusals of option values are shown as the engine writes them
     "error: the NCBI BLAST+ option -version is not supported by LOSAT's TBLASTX",
   );
   await expect(page.getByTestId('run-1-option')).toHaveCount(0);
-  // A value that LOSAT does not support (typed after "Other"), and one that NCBI refuses.
+  // A value that LOSAT does not support (typed after "Other": IDENTITY, which NCBI's page does
+  // not list, with its gap costs 15/2), and one that NCBI refuses.
   await program(page, 'blastp');
   await page.getByTestId('param-matrix').selectOption('other');
-  await page.getByTestId('param-matrix-other').fill('BLOSUM45');
+  await page.getByTestId('param-matrix-other').fill('IDENTITY');
   await expect(page.getByTestId('argv-validation')).toHaveText(
-    "the matrix BLOSUM45 with gap costs 14/2 is not supported by LOSAT's BLASTP",
+    "the matrix IDENTITY with gap costs 15/2 is not supported by LOSAT's BLASTP",
   );
   await page.getByTestId('param-matrix').selectOption('BLOSUM62');
   await page.getByTestId('param-evalue').fill('0');
@@ -1392,7 +1393,8 @@ test("NCBI's selects of pairs follow the scores and the matrix; Other shows the 
   await expect(gaps).toHaveValue('9 1');
   await expect(page.getByTestId('param-gapcosts-field')).not.toHaveClass(/\bchanged\b/);
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
-  // BLASTP's list is NCBI's of BLOSUM62 and BLASTX's holds the one pair that LOSAT's BLASTX reads (WA-FM-02).
+  // BLASTP's list is NCBI's of the matrix (BLOSUM62 here) and BLASTX's holds the one pair that
+  // LOSAT's BLASTX reads (WA-FM-02).
   await program(page, 'blastp');
   await expect(gaps.locator('option')).toHaveText([
     ...PROTEIN_GAP_COSTS.lists.BLOSUM62!.map((pair) => `Existence: ${pair.replace(' ', ' Extension: ')}`),

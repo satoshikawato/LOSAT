@@ -18871,8 +18871,11 @@ fn search_query_batch<const UNGAPPED: bool>(
             // Since the list is sorted by score already, any HSP
             // contained by a previous HSP is guaranteed to have a
             // lower score, and may be purged.
-            let mut final_hits = Vec::with_capacity(local_hits.len());
-            for hit in local_hits {
+            // No NCBI counterpart (memory placement only): the kept HSPs move to the front of the
+            // same list, in order (`kept`), instead of into a second list of its length.
+            let mut kept = 0usize;
+            for read in 0..local_hits.len() {
+                let hit = &local_hits[read];
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
                 // ```c
                 // query_start = query_context_offset;
@@ -18983,12 +18986,15 @@ fn search_query_batch<const UNGAPPED: bool>(
                             final_tree_add_start,
                         );
                     }
-                    final_hits.push(hit);
+                    local_hits.swap(kept, read);
+                    kept += 1;
                 } else if let Some(timing) = timing_ref {
                     BlastnTiming::record_count(&timing.traceback_removed_final_tree_hsps, 1);
                 }
                 // else: HSP is contained within another, skip (implicit delete)
             }
+            local_hits.truncate(kept);
+            let mut final_hits = local_hits;
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:678-692
             // ```c
@@ -19134,11 +19140,11 @@ fn search_query_batch<const UNGAPPED: bool>(
                     &mut traceback_edit_script_lengths,
                     &mut traceback_alignment_lengths,
                 );
-                #[expect(
-                    clippy::drain_collect,
-                    reason = "the subject scratch keeps its buffer for the next subject; mem::take would hand the buffer away and allocate again"
-                )]
-                let (list, s1, s2, s3, s4) = x_post_purge(hits.drain(..).collect());
+                // No NCBI counterpart (memory placement only): the list goes to the purges as it is
+                // (they work in its allocation, `x_in_handle_order`) and leaves as the subject's
+                // result, instead of a copy while the scratch keeps the buffer at its largest size;
+                // the next subject's list grows from empty, as NCBI's `hsp_list` does.
+                let (list, s1, s2, s3, s4) = x_post_purge(std::mem::take(hits));
                 let (list, s5) = x_final_list(list, interval_tree);
                 (SubjectHits::Mixed(list), [s1, s2, s3, s4, s5])
             };
@@ -19662,6 +19668,11 @@ fn search_query_batch<const UNGAPPED: bool>(
     // so the tables are dropped here (NCBI's traceback stage, traceback_stage.cpp:208-211)
     // (`x_lut_drop.rs`).
     x_lut_drop::after_prelim(lookup_tables);
+    // No NCBI counterpart (memory placement only): the idle scratch of the ungapped hits' sort
+    // (`X_SORT`) serves the preliminary stage only (NCBI frees its `BlastInitHitList` there too), so
+    // it is freed here and the traceback runs without its touched pages (Sakai x EDL933 `-subject`
+    // blastn: 11.4 MiB); the next batch's first sort maps one again.
+    X_SORT.x_clear_idle();
     let hit_lists = match subjects {
         SubjectSource::Prepared(_) => {
             let kept = prelim_hits_by_subject(prelim_lists, subject_records_ref.len());

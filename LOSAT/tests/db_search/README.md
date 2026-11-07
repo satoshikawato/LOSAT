@@ -480,6 +480,12 @@ makes the title from it where the taxonomy database names the taxid (`tests/seqd
 product [Homo sapiens]`, `Homo sapiens`): LOSAT refuses that outfmt 0 and writes it without a taxonomy database or with
 `no_btd`, and the other formats (XML shows the stored title, the tabular id of a protein is `unnamed` either way).
 
+A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
+--tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title
+`, ,` NCBI's `x_CleanAndCompress` reads past the end of where it makes the tabular id of a protein; the query
+`ids/ppunct_q.faa` hits both records. A table that prints no subject id (`6 qseqid evalue`) does not make it, so LOSAT
+writes NCBI's rows; `sseqid` is LOSAT's refusal.
+
 Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
 --join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and
 `ids/njoin_a`, `ids/njoin_b`, `ids/njoin_c` (version 5; r1 in all three, r3 with two definition lines and two

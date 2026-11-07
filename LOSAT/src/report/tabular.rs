@@ -357,6 +357,13 @@ pub struct TabularNeeds {
     pub all_deflines: bool,
 }
 
+/// Whether `program`'s tabular report of the field list `spec` reads the sequence that NCBI's
+/// formatter finds by a subject's Seq-align id ([`TabularSpec::reads_subject`]); `None` is the
+/// default field list, whose `saccver` reads it.
+pub fn reads_subject(spec: Option<&TabularSpec>, program: crate::blastinput::app::Program) -> bool {
+    spec.is_none_or(|spec| spec.reads_subject(program))
+}
+
 /// Which rows of a tabular report read the subject's Bioseq in NCBI's formatter
 /// (`TabularSpec::subject_fetch`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -607,6 +614,24 @@ impl TabularSpec {
         } else {
             SubjectFetch::Never
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:891-898
+    // ```c++
+    //     if (x_IsFieldRequested(eSubjectLength) && m_SubjectLength == 0) {
+    //         ...
+    //         m_SubjectLength = sequence::GetLength(align.GetSeq_id(1), &scope);
+    //     }
+    // ```
+    /// Whether `program`'s rows read the sequence that NCBI's formatter finds by the subject's
+    /// Seq-align id: its Bioseq or letters on some row ([`TabularSpec::subject_fetch`]), or its
+    /// length (`slen`, which the scope looks up by that id without loading the Bioseq). A table
+    /// of other fields (`6 qseqid evalue`, the coordinates, `length`, `gaps`, `qcovs`; in
+    /// BLASTN also `pident`, `nident` and `mismatch`) writes nothing of that sequence, so it is
+    /// the same whatever the lookup finds; only the batches' prefetch reads it
+    /// (`common::database::ParsedShown::prefetched`).
+    pub fn reads_subject(&self, program: crate::blastinput::app::Program) -> bool {
+        self.subject_fetch(program) != SubjectFetch::Never || self.has(SubjectLength)
     }
 
     pub fn needs(&self) -> TabularNeeds {
@@ -1680,6 +1705,57 @@ mod tests {
         }
         assert!(!SubjectFetch::WithIdentities.reads(0) && SubjectFetch::WithIdentities.reads(1));
         assert!(SubjectFetch::Every.reads(0) && !SubjectFetch::Never.reads(1));
+    }
+
+    // Line DBID tabfields: a table reads the sequence that NCBI finds by the subject's Seq-align
+    // id where its rows read the Bioseq or letters, or its length (`slen`); NCBI 2.17.0 writes
+    // every other list the same for a subject it finds as another sequence or not at all (probe
+    // `blastdb-ids-20261021/R/tabfields`).
+    #[test]
+    fn tables_read_the_found_sequence_for_the_bioseq_its_letters_and_slen() {
+        use crate::blastinput::app::Program;
+        let spec = |fields: &str| TabularSpec {
+            kind: TabularKind::Tabular,
+            fields: parse_fields(fields),
+            delimiter: "\t".into(),
+        };
+        let all = [
+            Program::Blastp,
+            Program::Blastn,
+            Program::Blastx,
+            Program::Tblastn,
+            Program::Tblastx,
+        ];
+        assert!(all.iter().all(|&program| reads_subject(None, program)));
+        for fields in [
+            "qseqid evalue",
+            "qseqid qlen qstart qend sstart send evalue bitscore score length gaps gapopen qcovhsp",
+            "qseqid qcovs qcovus",
+        ] {
+            for program in all {
+                assert!(!spec(fields).reads_subject(program), "{fields} {program:?}");
+                assert!(!reads_subject(Some(&spec(fields)), program), "{fields}");
+            }
+        }
+        for fields in [
+            "std",
+            "qseqid sseqid",
+            "qseqid slen",
+            "evalue stitle",
+            "qseqid sseq",
+        ] {
+            for program in all {
+                assert!(spec(fields).reads_subject(program), "{fields} {program:?}");
+            }
+        }
+        // BLASTN's formatter counts the identities without the letters; the translated
+        // programs read the subject for its frame.
+        for fields in ["qseqid pident", "qseqid nident", "qseqid mismatch length"] {
+            assert!(!spec(fields).reads_subject(Program::Blastn), "{fields}");
+            assert!(spec(fields).reads_subject(Program::Blastp), "{fields}");
+        }
+        assert!(spec("qseqid sstart sframe").reads_subject(Program::Tblastn));
+        assert!(!spec("qseqid sstart sframe").reads_subject(Program::Blastp));
     }
 
     #[test]

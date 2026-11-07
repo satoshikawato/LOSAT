@@ -291,7 +291,7 @@ pub struct InitHsp {
     clippy::large_enum_variant,
     reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
 )]
-pub enum Lookup {
+pub(crate) enum Lookup {
     Standard(BlastAaLookupTable, x_seed_scan::XKeptPresence),
     // EXPERIMENT (LOSAT_X_BPCLUT): the compressed table as the reference builds it or flat
     // (`x_clut_direct.rs`), one variant so that the standard table's loops keep their match.
@@ -327,7 +327,7 @@ impl Drop for Lookup {
     clippy::large_enum_variant,
     reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
 )]
-pub enum BxLookup {
+pub(crate) enum BxLookup {
     Wide(Lookup),
     Narrow(NarrowLookup),
 }
@@ -526,7 +526,9 @@ impl Lookup {
     //     /* index the query and finish up */
     //
     // ```
-    pub fn new(
+    // Only the tests build a table this way; the searches use `x_new_as`.
+    #[cfg(test)]
+    pub(crate) fn new(
         batch: &PreparedQueryBatch,
         parameters: &[ContextParameters],
         options: &ResolvedOptions,
@@ -677,7 +679,7 @@ impl Lookup {
     //         hits = scansub(lookup_wrap, subject,
     //                        offset_pairs, array_size, scan_range);
     // ```
-    pub fn scan(
+    pub(crate) fn scan(
         &self,
         subject: &[u8],
         length: usize,
@@ -910,7 +912,7 @@ pub(crate) fn x_scan_bytes<'a>(
 // (they trace the seeds), and the unit tests of the faster loops compare with it.
 /// The reference word finder (the loop of NCBI's BlastAaWordFinder_TwoHit /
 /// _OneHit for one subject), kept verbatim.
-pub fn word_finder(
+pub(crate) fn word_finder(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,

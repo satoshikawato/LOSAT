@@ -1185,12 +1185,17 @@ pub(super) fn read_titles(
 
 /// What the reports `output_formats` show of a reported sequence with parsed Seq-ids
 /// (`reported_subjects`); outfmt 13 to 16 and the tabular reports of taxonomy fields write its
-/// taxids.
+/// taxids; the first format's batches prefetch the subjects.
 pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown {
     let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
     ParsedShown {
-        tabular: output_formats.iter().any(|format| format.is_tabular()),
+        tabular: output_formats
+            .iter()
+            .any(|format| format.tabular_reads_subject()),
         pairwise,
+        structured: output_formats
+            .iter()
+            .any(|format| format.is_structured_xml()),
         joined: pairwise
             || output_formats.iter().any(|format| {
                 format.is_structured_xml()
@@ -1213,12 +1218,10 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
             .fold(PrintedIds::default(), |words, format| {
                 words.or(PrintedIds::of(format.tabular_spec()))
             }),
-        prefetched: shared::seq_annots_prefetch(
-            output_formats
-                .first()
-                .and_then(|format| format.serial())
-                .map(|serial| serial.outfmt()),
-        ),
+        prefetched: output_formats
+            .first()
+            .is_some_and(|format| format.prefetches_subjects())
+            && !shared::prefetch_always_off(),
     }
 }
 
@@ -1476,9 +1479,16 @@ impl ReportedSubjects {
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
     /// reported sequence, by rank (`algorithm::common::database::tabular_subject_ids`). A
     /// sequence whose id LOSAT cannot write as NCBI is an error before any format is
-    /// written.
-    pub(super) fn tabular_subject_ids(&self) -> Result<Vec<Arc<[u8]>>> {
-        shared::tabular_subject_ids(&self.records, &self.ordinals, &self.parsed, false, PROGRAM)
+    /// written where a tabular report `reads` the subject, else its id is empty.
+    pub(super) fn tabular_subject_ids(&self, reads: bool) -> Result<Vec<Arc<[u8]>>> {
+        shared::tabular_subject_ids(
+            &self.records,
+            &self.ordinals,
+            &self.parsed,
+            false,
+            reads,
+            PROGRAM,
+        )
     }
 
     /// The reported sequences as the library's records name them (`shared::library_subjects`).
@@ -2088,7 +2098,7 @@ mod tests {
             .all(|letter| !letter.is_ascii_lowercase()));
         assert_eq!(
             reported
-                .tabular_subject_ids()
+                .tabular_subject_ids(true)
                 .unwrap()
                 .iter()
                 .map(|id| id.as_ref())

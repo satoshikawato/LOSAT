@@ -7,6 +7,7 @@ import {
   DATABASE_FLAGS,
   optionNames,
   optionValue,
+  refusedFields,
   RESERVED_FLAGS,
   shellWords,
   splitOptions,
@@ -224,5 +225,63 @@ describe('optionValue', () => {
     expect(optionValue(argv, '-evalue')).toBe('1e-5');
     expect(optionValue(argv, '-word_size')).toBeUndefined();
     expect(optionValue(['blastn', '-task'], '-task')).toBeUndefined();
+  });
+});
+
+describe('refusedFields', () => {
+  const fields = (message: string, extra = '') => {
+    const { extra: inExtra, flags } = refusedFields(message, extra);
+    return { extra: inExtra, flags: [...flags].sort() };
+  };
+  it("names the form's fields of the options that a message names, and no words of its sentences", () => {
+    expect(fields("error: invalid value '3' for '-word_size <WORD_SIZE>': expected an integer >= 4\n\nFor more information, try '--help'.")).toEqual({
+      extra: false,
+      flags: ['-word_size'],
+    });
+    expect(fields('BLAST query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12')).toEqual({
+      extra: false,
+      flags: [],
+    });
+    expect(fields('the e-value of -penalty -3 and -2')).toEqual({ extra: false, flags: ['-penalty'] });
+  });
+  it('names "Additional options" for the options typed there, also those of the form', () => {
+    expect(fields('-evalue is set in the form: Expect threshold', '-evalue abc')).toEqual({ extra: true, flags: [] });
+    expect(fields("error: unknown option or argument '-foo'; use -help for CLI v2 syntax", '-qcov_hsp_perc 50 -foo')).toEqual({
+      extra: true,
+      flags: ['-help'],
+    });
+    expect(fields('-num_threads is set in the form: Threads', '-num_threads=2')).toEqual({ extra: true, flags: [] });
+    expect(fields("error: invalid value 'x' for '-qcov_hsp_perc <QCOV_HSP_PERC>'", '-qcov_hsp_perc x')).toEqual({ extra: true, flags: [] });
+  });
+  it('does not read the options of clap\'s Usage line, which the argv lists, as named by the sentence', () => {
+    const message = [
+      "error: the argument '-max_target_seqs <MAX_TARGET_SEQS>' cannot be used with '-num_alignments <int_value>'",
+      '',
+      'Usage: losat blastn -query <PATH> -subject <PATH> -evalue <EVALUE> -max_target_seqs <MAX_TARGET_SEQS>',
+      '',
+      "For more information, try '--help'.",
+    ].join('\n');
+    expect(fields(message)).toEqual({ extra: false, flags: ['-max_target_seqs', '-num_alignments'] });
+    // --help of the closing line is not the option typed in Additional options.
+    expect(fields(message, '--help')).toEqual({ extra: false, flags: ['-max_target_seqs', '-num_alignments'] });
+  });
+  it('names "Additional options" for a word typed there that is not an option name', () => {
+    expect(fields('--help is not available in the browser', '--help')).toEqual({ extra: true, flags: [] });
+    expect(fields('--help is not available in the browser', '-strand plus')).toEqual({ extra: false, flags: [] });
+    expect(fields("error: unknown option or argument 'evalue'; use -help for CLI v2 syntax", 'evalue 1e-5')).toEqual({
+      extra: true,
+      flags: ['-help'],
+    });
+    expect(fields("error: unknown option or argument 'evalue'", '-strand plus')).toEqual({ extra: false, flags: [] });
+    // The engine quotes the whole word, with its =value.
+    expect(fields("error: unknown option or argument '--evalue=1e-5'; use -help for CLI v2 syntax", '--evalue=1e-5')).toEqual({
+      extra: true,
+      flags: ['-help'],
+    });
+    expect(fields("error: unknown option or argument 'evalue=10'", '-strand plus evalue=10')).toEqual({ extra: true, flags: [] });
+  });
+  it('names "Additional options" for the messages about its text', () => {
+    expect(fields("Additional options: a quote (') is not closed", "-strand 'plus")).toEqual({ extra: true, flags: [] });
+    expect(fields("Additional options: '' is not accepted", "''")).toEqual({ extra: true, flags: [] });
   });
 });

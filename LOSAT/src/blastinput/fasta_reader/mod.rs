@@ -807,12 +807,6 @@ impl<R: Read> FastaInputSource<R> {
     }
 }
 
-/// `IsIStreamEmpty` on an opened input (true when it has only white space; false for a
-/// stream without a position, such as a pipe).
-pub fn input_is_empty<R: Read + Seek>(stream: &mut FastaStream<R>) -> bool {
-    stream::stream_is_empty(stream)
-}
-
 /// All records of an input (`CBlastInput::GetAllSeqs`, the subjects): the messages go to
 /// `warn` as they are written; a reader error stops the reading.
 ///

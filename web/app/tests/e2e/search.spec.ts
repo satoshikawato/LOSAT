@@ -930,12 +930,24 @@ test('a GenBank, EMBL or FASTQ file is read as FASTA text, as the command line d
   await expect(page.getByTestId('subject-source-0-format-warning')).toContainText('This looks like an EMBL or UniProt flat file');
 });
 
+test('"Add the line" keeps the focus on the card, not the page\'s body (WA2-AX-04)', async ({ page }) => {
+  await program(page, 'blastn');
+  // Not a defline, and the gap line fails it again after the defline: the card stays, with the button.
+  await paste(page, 'query', 'ACGTACGTACGT\n>?10\nACGT\n');
+  await expect(page.getByTestId('query-source-0-error')).toContainText('gap line');
+  await page.getByTestId('query-source-0-add-defline').click();
+  await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nACGTACGTACGT\n>?10\nACGT\n');
+  await expect(page.getByTestId('query-source-0')).toBeFocused();
+});
+
 test('an input that starts with a byte order mark says why it cannot be read (WA-IN-05)', async ({ page }) => {
   await program(page, 'blastn');
   await paste(page, 'query', '\uFEFF>q1\nACGTACGTACGTACGTACGTACGT\n');
   await expect(page.getByTestId('query-source-0-error')).toContainText("doesn't look like plausible data");
   await expect(page.getByTestId('query-source-0-mark')).toContainText('The text starts with a byte order mark (U+FEFF).');
   await page.getByTestId('query-source-0-remove-mark').click();
+  // The button goes with the old reading: the focus stays on the card (WA2-AX-04).
+  await expect(page.getByTestId('query-source-0')).toBeFocused();
   await expect(page.getByTestId('query-input')).toHaveValue('>q1\nACGTACGTACGTACGTACGTACGT\n');
   await expect(page.getByTestId('query-source-0-summary')).toHaveText('1 record · 24 nt');
   await expect(page.getByTestId('query-source-0-mark')).toHaveCount(0);

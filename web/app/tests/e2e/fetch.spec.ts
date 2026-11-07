@@ -340,11 +340,13 @@ test('a first line that is an accession and NCBI BLAST+ would fetch as a Seq-id 
     await expect(page.getByTestId(`${role}-source-0-put-defline-mark`)).toBeVisible();
   }
   await program(page, 'blastn');
-  // Accessions only, more than one on a line: the reason, the sentence and the press that splits them.
+  // Accessions only, more than one on a line: the reason and the press that splits them.
   await paste(page, 'subject', 'NR_074540.1\nAB000001.1 MH011443.1');
   await expect(page.getByTestId('subject-source-0-error')).toHaveText(reason('NR_074540.1'));
-  await expect(page.getByTestId('subject-source-0-fetch-hint')).toHaveText(fetchSentence);
+  // The press that splits them says the same as the sentence, and '>' would leave the list unread: only the split press.
   await expect(page.getByTestId('subject-source-0-split-accessions')).toBeVisible();
+  await expect(page.getByTestId('subject-source-0-fetch-hint')).toHaveCount(0);
+  await expect(page.getByTestId('subject-source-0-put-defline-mark')).toHaveCount(0);
   expect(away).toEqual([]);
 });
 
@@ -367,6 +369,8 @@ test("a first line that NCBI BLAST+ would fetch as a Seq-id gets '>' before it b
     await expect(page.getByTestId(`${role}-source-0-add-defline`)).toHaveCount(0);
     await page.getByTestId(`${role}-source-0-put-defline-mark`).click();
     await settled(page, role);
+    // The press goes with the card's old reading: the focus stays on the card, not the page's body (WA2-AX-04).
+    await expect(page.getByTestId(`${role}-source-0`)).toBeFocused();
     await expect(page.getByTestId(`${role}-input`)).toHaveValue(written);
     await expect(page.getByTestId(`${role}-source-0-check`)).toHaveAttribute('data-check', 'ok');
     await expect(page.getByTestId(`${role}-source-0-summary`)).toContainText(`1 record · ${length}`);

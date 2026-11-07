@@ -2,8 +2,8 @@
 // One input of a role: its name, its records, and what the engine's check says of it. The check's
 // verdict and the warnings are told to a screen reader when they change (WA2-AX-03), in the
 // card's words after its name; "Remove" and "Put each accession on its own line" ask the role's
-// block, which moves the focus on.
-import { computed, watch } from 'vue';
+// block, which moves the focus on, and the buttons that rewrite the box keep it on the card (rewrite).
+import { computed, nextTick, ref, watch } from 'vue';
 import type { DraftSource, DraftState, SearchDraft } from '../application/draft';
 import { includedOf } from '../application/draft';
 import { accessionsOnALine, isSeqIdReason, pointsToFetch } from '../domain/accession';
@@ -47,16 +47,28 @@ const splitsAccessions = computed(
   () => props.source.origin === 'paste' && props.source.status !== 'indexing' && accessionsOnALine(props.state[props.role].paste) !== undefined,
 );
 const hasMark = computed(() => props.source.lead !== undefined && 'mark' in props.source.lead);
-/** The first line of a pasted text is an accession that the engine reads as a Seq-id: Fetch takes accessions only (WA2-OP-04). */
+/**
+ * The first line of a pasted text is an accession that the engine reads as a Seq-id: Fetch takes accessions only (WA2-OP-04).
+ * Not when the box is a list of accessions, whose button puts them one per line, and so says the same.
+ */
 const fetchHint = computed(
-  () => props.source.origin === 'paste' && props.source.status === 'failed' && pointsToFetch(props.source.error, props.state[props.role].paste),
+  () =>
+    props.source.origin === 'paste' &&
+    props.source.status === 'failed' &&
+    !splitsAccessions.value &&
+    pointsToFetch(props.source.error, props.state[props.role].paste),
 );
 /**
  * A pasted text whose first line the engine reads as a Seq-id (which NCBI BLAST+ would fetch) and cannot read (WA2-OP-04): the
  * line is not data, and "Add the line >pasted_..." would make it the first data line, so the card puts ">" before it instead.
  */
 const seqIdFirstLine = computed(
-  () => props.source.origin === 'paste' && props.source.status === 'failed' && !hasMark.value && isSeqIdReason(props.source.error),
+  () =>
+    props.source.origin === 'paste' &&
+    props.source.status === 'failed' &&
+    !hasMark.value &&
+    !splitsAccessions.value &&
+    isSeqIdReason(props.source.error),
 );
 /** A pasted text that does not start with a defline and cannot be read; a byte order mark, a Seq-id and accessions on a line have their own hints. */
 const needsDefline = computed(() => {
@@ -89,6 +101,16 @@ const formatName = computed(() => {
   const lead = props.source.lead;
   return lead !== undefined && 'format' in lead ? FORMAT_NAMES[lead.format] : undefined;
 });
+const card = ref<HTMLElement>();
+/**
+ * Asks the draft to rewrite the box ("Add the line", "Put '>'", "Remove the byte order mark"): the input is read again, so
+ * the button goes, and the focus goes to the card, which the live region then speaks of, not to the page's body (WA2-AX-04).
+ */
+async function rewrite(change: () => void): Promise<void> {
+  change();
+  await nextTick();
+  card.value?.focus();
+}
 const testid = computed(() => `${props.role}-source-${props.index}`);
 
 const recordsText = (count: number) => `${formatCount(count)} ${count === 1 ? 'record' : 'records'}`;
@@ -146,6 +168,8 @@ watch(verdict, (now) => {
 
 <template>
   <li
+    ref="card"
+    tabindex="-1"
     class="source"
     :data-testid="testid"
     :data-status="source.status"
@@ -170,12 +194,12 @@ watch(verdict, (now) => {
         </button>
       </p>
       <p v-if="seqIdFirstLine" class="hint">
-        <button type="button" class="link" :data-testid="`${testid}-put-defline-mark`" @click="draft.markFirstLineAsDefline(role)">
+        <button type="button" class="link" :data-testid="`${testid}-put-defline-mark`" @click="rewrite(() => draft.markFirstLineAsDefline(role))">
           Put '&gt;' before the first line
         </button>
       </p>
       <p v-if="needsDefline" class="hint">
-        <button type="button" class="link" :data-testid="`${testid}-add-defline`" @click="draft.addDefline(role)">
+        <button type="button" class="link" :data-testid="`${testid}-add-defline`" @click="rewrite(() => draft.addDefline(role))">
           Add the line "&gt;pasted_{{ role }}" before the sequence
         </button>
       </p>
@@ -186,7 +210,7 @@ watch(verdict, (now) => {
           type="button"
           class="link"
           :data-testid="`${testid}-remove-mark`"
-          @click="draft.removeByteOrderMark(role)"
+          @click="rewrite(() => draft.removeByteOrderMark(role))"
         >
           Remove the byte order mark
         </button>

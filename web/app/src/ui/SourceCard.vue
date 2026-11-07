@@ -6,7 +6,7 @@
 import { computed, watch } from 'vue';
 import type { DraftSource, DraftState, SearchDraft } from '../application/draft';
 import { includedOf } from '../application/draft';
-import { accessionsOnALine } from '../domain/accession';
+import { accessionsOnALine, pointsToFetch } from '../domain/accession';
 import { duplicateIds } from '../domain/dataset';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
 import { looksLikeOtherKind } from '../domain/sequence-kind';
@@ -43,6 +43,10 @@ const splitsAccessions = computed(
   () =>
     props.source.origin === 'paste' && props.source.status === 'failed' && accessionsOnALine(props.state[props.role].paste) !== undefined,
 );
+/** The first line of a pasted text is an accession that the engine reads as a Seq-id: Fetch takes accessions only (WA2-OP-04). */
+const fetchHint = computed(
+  () => props.source.origin === 'paste' && props.source.status === 'failed' && pointsToFetch(props.source.error, props.state[props.role].paste),
+);
 /**
  * A pasted text that does not start with a defline and cannot be read (such as a first line that NCBI would fetch as a
  * Seq-id); a byte order mark and accessions on a line have their own hints.
@@ -59,6 +63,8 @@ const needsDefline = computed(() => {
     !text.startsWith('>')
   );
 });
+/** The card's sentence on Fetch, for a first line that is an accession and a Seq-id to the engine. */
+const FETCH_HINT = 'To fetch accessions, put only the accessions in the box, one per line.';
 const refusedRecord = computed(() => (props.source.check?.state === 'refused' ? props.source.check.record : undefined));
 /** Why a source that starts with a byte order mark cannot be read (WA-IN-05); the engine's message is NCBI's. */
 const markHint = computed(() => {
@@ -91,6 +97,7 @@ const verdict = computed(() => {
     source.status,
     source.error,
     markHint.value,
+    fetchHint.value,
     check?.state,
     check === undefined ? undefined : check.state === 'ok' ? check.records : 'message' in check ? check.message : undefined,
     otherKind.value,
@@ -100,6 +107,7 @@ const verdict = computed(() => {
   ]);
   if (source.status === 'failed') {
     parts.push(`This input cannot be read: ${source.error ?? ''}`);
+    if (fetchHint.value) parts.push(FETCH_HINT);
     if (markHint.value) parts.push(markHint.value);
   } else if (check !== undefined) {
     if (check.state === 'ok') parts.push(`Accepted by the ${programLabel.value} engine: ${recordsText(check.records)}`);
@@ -147,6 +155,7 @@ watch(verdict, (now) => {
     <p v-if="source.status === 'indexing'" class="muted"><LosatLoader />Reading the records…</p>
     <template v-else-if="source.status === 'failed'">
       <p class="error" :data-testid="`${testid}-error`">This input cannot be read: {{ source.error }}</p>
+      <p v-if="fetchHint" class="hint" :data-testid="`${testid}-fetch-hint`">{{ FETCH_HINT }}</p>
       <p v-if="splitsAccessions" class="hint">
         <button type="button" class="link" :data-testid="`${testid}-split-accessions`" @click="$emit('splitAccessions')">
           Put each accession on its own line

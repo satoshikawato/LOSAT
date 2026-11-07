@@ -281,28 +281,46 @@ test('accessions on one line are put one per line by one press, for Fetch (WA2-O
   expect(away).toEqual([]);
 });
 
-test('a first line that NCBI BLAST+ would fetch as a Seq-id before other text names the Fetch of accessions (WA2-OP-04)', async ({
+test('a first line that is an accession and NCBI BLAST+ would fetch as a Seq-id points to Fetch; a GI, a PDB id and a tagged id do not (WA2-OP-04)', async ({
   page,
 }) => {
   // The FakeEngine's reader never takes a first line for a Seq-id (infra/fake/fake-fasta.ts).
   test.skip(!BUILD_HAS_ENGINE, 'the reason is the adapter scan of the engine build');
   const away = await stubSources(page);
   await openSearch(page);
+  // The adapter's reason is NCBI's text and the defline; the card adds the Fetch sentence for an accession.
   const reason = (line: string) =>
-    `This input cannot be read: the first line ("${line}") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database). To fetch accessions, put only the accessions in the box, one per line; otherwise start the input with a '>' defline.`;
+    `This input cannot be read: the first line ("${line}") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported in the browser (start the input with a '>' defline)`;
+  const fetchSentence = 'To fetch accessions, put only the accessions in the box, one per line.';
   for (const [role, text, line] of [
     ['query', 'AB000001.1\n>x\nACGTACGT', 'AB000001.1'],
-    ['query', '12345678\nACGTACGT', '12345678'],
+    ['query', 'AB000001.1\nACGTACGT', 'AB000001.1'],
     ['subject', ' NR_074540.1 \nACGTACGT', 'NR_074540.1'],
   ] as const) {
     await paste(page, role, text);
     await expect(page.getByTestId(`${role}-source-0-error`)).toHaveText(reason(line));
+    await expect(page.getByTestId(`${role}-source-0-fetch-hint`)).toHaveText(fetchSentence);
     await expect(page.getByTestId(`${role}-source-0-add-defline`)).toBeVisible();
     await expect(page.getByTestId(`${role}-source-0-split-accessions`)).toHaveCount(0);
   }
-  // Accessions only, more than one on a line: the reason and the press that splits them.
+  // A GI number, a PDB id and a tagged id are Seq-ids to the engine, but not what Fetch takes: no sentence.
+  for (const [role, program_, text, line] of [
+    ['query', 'blastn', '12345678\nACGTACGT', '12345678'],
+    ['query', 'blastp', '4HHB\nMKLV', '4HHB'],
+    ['subject', 'blastp', '1ABC_A\nMKLV', '1ABC_A'],
+    ['query', 'blastp', 'sp|P04637|P53_HUMAN\nMKLV', 'sp|P04637|P53_HUMAN'],
+    ['query', 'blastn', 'ref|NM_000546.6|\nACGTACGT', 'ref|NM_000546.6|'],
+  ] as const) {
+    await program(page, program_);
+    await paste(page, role, text);
+    await expect(page.getByTestId(`${role}-source-0-error`)).toHaveText(reason(line));
+    await expect(page.getByTestId(`${role}-source-0-fetch-hint`)).toHaveCount(0);
+  }
+  await program(page, 'blastn');
+  // Accessions only, more than one on a line: the reason, the sentence and the press that splits them.
   await paste(page, 'subject', 'NR_074540.1\nAB000001.1 MH011443.1');
   await expect(page.getByTestId('subject-source-0-error')).toHaveText(reason('NR_074540.1'));
+  await expect(page.getByTestId('subject-source-0-fetch-hint')).toHaveText(fetchSentence);
   await expect(page.getByTestId('subject-source-0-split-accessions')).toBeVisible();
   expect(away).toEqual([]);
 });

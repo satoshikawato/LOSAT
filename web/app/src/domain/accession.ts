@@ -78,6 +78,30 @@ export function accessionsOnALine(text: string): readonly string[] | undefined {
 }
 
 /**
+ * The part of the engine's reason that names a first line NCBI BLAST+ would fetch as a Seq-id
+ * (adapter, scan/ncbi.rs). The adapter's answer has no kind or code, only this text, so the
+ * app tells that reason by this part of it (WA2-OP-04); the CLI's message is not the adapter's.
+ */
+const SEQ_ID_REASON = 'may be a sequence identifier that NCBI BLAST+ fetches through a data loader';
+
+/** True when a source's error is the reason for a first line that NCBI BLAST+ would fetch as a Seq-id. */
+export function isSeqIdReason(error: string | undefined): boolean {
+  return error !== undefined && error.includes(SEQ_ID_REASON);
+}
+
+/**
+ * Whether the card of a pasted text that failed with `error` says how Fetch takes accessions
+ * (WA2-OP-04): the reason is the Seq-id one and the box's first line is an accession, which is
+ * what Fetch takes. A GI number, a PDB id (`4HHB`, `1ABC_A`) and a tagged id (`sp|P04637|...`)
+ * are Seq-ids to the engine but not to Fetch, and the user has put them as they are.
+ */
+export function pointsToFetch(error: string | undefined, paste: string): boolean {
+  if (!isSeqIdReason(error)) return false;
+  const first = paste.split(/\r?\n/).find((line) => line.trim() !== '');
+  return first !== undefined && ACCESSION.test(first.trim().toUpperCase());
+}
+
+/**
  * Why a source cannot serve an accession of a kind, without asking it, or undefined (measured on
  * 2026-11-03): ENA has no RefSeq records, UniProt has only its own accessions, only GenBase has
  * GenBase's, and GenBase has no UniProt accessions (an empty answer).

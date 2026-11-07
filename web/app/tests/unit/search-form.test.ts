@@ -44,6 +44,7 @@ import {
   REGION_FLAG,
   regionFromPositions,
   regionProblem,
+  regionProblemFields,
   regionRange,
   regionValue,
   swappedRegion,
@@ -732,6 +733,27 @@ describe('searchSummary', () => {
   it('names a task without a note, and leaves the task out while it is unknown', () => {
     expect(searchSummary(programById('blastp'), 'other')).toBe('Search protein subjects with BLASTP, task other.');
     expect(searchSummary(programById('blastn'), undefined)).toBe('Search nucleotide subjects with BLASTN.');
+  });
+});
+
+describe('regionProblemFields', () => {
+  const fields = (start: string, stop: string, length = 100) => regionProblemFields({ start, stop }, length);
+
+  it('marks neither field without a problem', () => {
+    expect(fields('5', '10')).toEqual({ start: false, stop: false });
+  });
+  it('marks the field that is empty, not a whole number, or outside the record', () => {
+    expect(fields('', '10')).toEqual({ start: true, stop: false });
+    expect(fields('5', '  ')).toEqual({ start: false, stop: true });
+    expect(fields('1.5', '10')).toEqual({ start: true, stop: false });
+    expect(fields('5', 'abc')).toEqual({ start: false, stop: true });
+    expect(fields('0', '10')).toEqual({ start: true, stop: false });
+    expect(fields('5', '101')).toEqual({ start: false, stop: true });
+    expect(fields('', '')).toEqual({ start: true, stop: true });
+  });
+  it('marks both when the start is after the stop or equal to it', () => {
+    expect(fields('10', '5')).toEqual({ start: true, stop: true });
+    expect(fields('7', '7')).toEqual({ start: true, stop: true });
   });
 });
 

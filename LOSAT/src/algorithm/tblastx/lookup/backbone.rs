@@ -2146,15 +2146,16 @@ pub(crate) fn x_bp_build_ncbi_lookup(
 /// EXPERIMENT (LOSAT_X_BPLK16): [`x_bp_build_ncbi_lookup`] with the width of the table's hits
 /// chosen by the build (`narrow`: a table of `u16` hits where the lookup query is at most 65,535
 /// letters and the in-place builder applies; x_lut_direct.rs `x_bp_build_lookup_as`), of the words
-/// of the search's `matrix`.
+/// of the search's `matrix` and word size (`word_length`: 3, or 2 for `-word_size 2`, item SC3).
 pub(crate) fn x_bp_build_ncbi_lookup_as(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     check_ideal: bool,
     narrow: bool,
     matrix: ScoringMatrix,
+    word_length: usize,
 ) -> (x_lut_direct::XBpLookup, Vec<QueryContext>) {
-    x_lut_direct::x_bp_build_lookup_as(queries, threshold, check_ideal, narrow, matrix)
+    x_lut_direct::x_bp_build_lookup_as(queries, threshold, check_ideal, narrow, matrix, word_length)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:356-360

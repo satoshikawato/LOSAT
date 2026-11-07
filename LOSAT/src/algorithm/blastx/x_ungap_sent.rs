@@ -157,9 +157,8 @@ impl<'a> XSent<'a> {
         Self {
             query,
             subject: XSentSubject::new(with_sentinels).expect("a subject on the path"),
-            keys: KEYS.get_or_init(|| {
-                key_table(&build_table().expect("BLOSUM62 fits a byte table"))
-            }),
+            keys: KEYS
+                .get_or_init(|| key_table(&build_table().expect("BLOSUM62 fits a byte table"))),
             shadow,
         }
     }

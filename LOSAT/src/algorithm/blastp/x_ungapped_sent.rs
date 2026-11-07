@@ -50,7 +50,10 @@
 //!
 //! In a replay of the closure on 4.3 million captured candidates of an OrthoFinder job (line F,
 //! `v4-F/results/s1/p2`, arm V6) every result equalled the reference's, at 204.7 instead of 264.7
-//! cycles per candidate.
+//! cycles per candidate. The key walks (item SC2e, arm K16) replayed on that capture and on the
+//! candidates of BLOSUM45, BLOSUM50, BLOSUM90 and PAM250 (39 million in all) gave every result of
+//! the reference at 0.89 to 0.93 of the time of the walks before them (178 instead of 199 cycles
+//! per BLOSUM50 candidate, 472 instead of 648 instructions).
 
 use super::extension::{BlastpTwoHitUngappedResult, BlastpUngappedData};
 use super::x_ungapped_fast::{build_table, Table};
@@ -752,6 +755,56 @@ mod tests {
             let sl = sr.saturating_sub(rng.below(8) as usize);
             check_call(&block, &s, sl, sr, qr, d);
         }
+    }
+
+    /// The keys of the module comment: a best key decodes to its score and length, a tie keeps the
+    /// first step, and the keys of a matrix are `(t << 32) - 1`.
+    #[test]
+    fn keys_decode_and_order_as_the_reference_compares() {
+        // no best yet: the length is 0
+        for maxscore in [0i32, 1, 77, 1 << 20] {
+            assert_eq!(best_of((maxscore as i64) << 32), (maxscore, 0));
+        }
+        // a best at step i: (score << 32) - (i + 1)
+        for (score, i) in [
+            (0i32, 0i64),
+            (5, 0),
+            (-3, 7),
+            (100_000, 9000),
+            (11, (1 << 31) - 2),
+        ] {
+            let key = ((score as i64) << 32) - (i + 1);
+            assert_eq!(
+                best_of(key),
+                (score, (i + 1) as i32),
+                "score {score} step {i}"
+            );
+        }
+        // the same score later is not above the first (the reference's `>`), a higher one is
+        let first = (40i64 << 32) - 3;
+        assert!(((40i64 << 32) - 9) < first);
+        assert!(((41i64 << 32) - 9_000_000) > first);
+        // the X-drop test: best - key >= dropoff << 32 exactly when best - score >= dropoff
+        for (best, bi, score, si, d) in [
+            (30i64, 2i64, 14i64, 9i64, 16i64),
+            (30, 2, 15, 9, 16),
+            (30, 2, 15, 3, 15),
+        ] {
+            let bk = (best << 32) - (bi + 1);
+            let k = (score << 32) - (si + 1);
+            assert_eq!(k + (d << 32) <= bk, best - score >= d, "{best} {score} {d}");
+        }
+        let table = build_table().expect("BLOSUM62 fits bytes");
+        let keys = key_table(&table);
+        for q in 0..CODES as usize {
+            for c in 0..CODES as usize {
+                assert_eq!(keys[q << 5 | c], ((table[q << 5 | c] as i64) << 32) - 1);
+            }
+        }
+        assert_eq!(
+            padded_rows(&[1, 20, 31]),
+            vec![0, 1 << 5, 20 << 5, 31 << 5, 0]
+        );
     }
 
     /// The checks keep everything the sentinel stop is not exact for on the reference closure.

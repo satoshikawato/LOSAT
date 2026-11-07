@@ -96,7 +96,13 @@ Seq-ids, which NCBI's outfmt 0 makes from the taxid): `nbare_t.*` from `nbare.fn
 (`>` alone), without -parse_seqids, with taxid 9606. `--emptytitle-only` builds only these. Line DBID tabfields (a
 table that reads nothing of the subject prints no id of its title): `ppunct_np.*` (version 4, without -parse_seqids)
 from `ppunct.faa`, whose first title `, ,` is punctuation that NCBI's x_CleanAndCompress reads past the end of where
-it makes the tabular id. `--tabfields-only` builds only these.
+it makes the tabular id. `--tabfields-only` builds only these. Line DBID pfbatch (each batch's prefetch counts its
+own Seq-aligns against a positive PRE_FETCH_SEQS_LIMIT): `nordtag_v5.*` from `nordtag.fna`, a sequence whose first id
+`gnl|BL_ORD_ID|0` makeblastdb stores with a text tag (NCBI's lookup by that Seq-align id fails, as `pshare`'s) and
+another sequence; the queries `nordtag_q.fna` and `nordtag_q.faa` hit one each (`pfb_aba.faa`, `pfb_aab.faa`,
+`pfb_aab.fna` and `pfb_s.fna` place it in other batches, see tests/db_search/README.md; `pfb_rc_nambig.fna` and
+`pfb_rc_ids_q.fna` are the reverse complements of `nambig.fna` and `ids_q.fna`, for the minus-strand alignments of
+`nrefuse_v5`). `--pfbatch-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
@@ -189,6 +195,13 @@ def build_tabfields(args: argparse.Namespace) -> None:
         check=True, stdout=subprocess.DEVNULL)
 
 
+def build_pfbatch(args: argparse.Namespace) -> None:
+    subprocess.run(
+        [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / "nordtag.fna"), "-dbtype", "nucl", "-parse_seqids",
+         "-blastdb_version", "5", "-title", "nordtag_v5 (parsed Seq-ids)", "-out", str(args.out / "nordtag_v5")],
+        check=True, stdout=subprocess.DEVNULL)
+
+
 def build_join(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("pjoin_a", "pjoin_a.faa", "prot", None), ("pjoin_b", "pjoin_b.faa", "prot", None),
                                        ("pjoin_c", "pjoin_c.faa", "prot", None), ("pjoin_bt", "pjoin_b.faa", "prot", "9606"),
@@ -223,6 +236,7 @@ def main() -> int:
     ap.add_argument("--titlesrc-only", action="store_true", help="build only the databases of line DBID N1b L1")
     ap.add_argument("--emptytitle-only", action="store_true", help="build only the databases of line DBID H3")
     ap.add_argument("--tabfields-only", action="store_true", help="build only the database of line DBID tabfields")
+    ap.add_argument("--pfbatch-only", action="store_true", help="build only the database of line DBID pfbatch")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
@@ -241,6 +255,9 @@ def main() -> int:
         return 0
     if args.tabfields_only:
         build_tabfields(args)
+        return 0
+    if args.pfbatch_only:
+        build_pfbatch(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants
@@ -357,6 +374,7 @@ def main() -> int:
     build_titlesrc(args)
     build_emptytitle(args)
     build_tabfields(args)
+    build_pfbatch(args)
     return 0
 
 

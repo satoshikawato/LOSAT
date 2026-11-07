@@ -65,7 +65,10 @@ pub(super) fn search_rounds(
     // chunks of a split query are set up without the PSSM; `in_pssm::check_in_pssm_options`)
     // A query long enough to be split would have its later rounds' chunks searched without
     // their PSSM: refused before the search, as a PSSM query of that length (DESIGN_ps5 §6).
-    let sizes = crate::blastinput::app::protein_query_split_sizes(args.app.name(), 10000)?;
+    let sizes = crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(
+        args.app.name(),
+        10000,
+    )?;
     for &(_, query) in &batches.starts {
         let length = searched_queries[query].seq().len();
         if crate::algorithm::blastp::protein_query_split::split_protein_batch(&[length], sizes)

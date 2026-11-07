@@ -3515,7 +3515,7 @@ fn blast_choose_matrix_adjust_rule(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
+    use crate::stats::compute_lambda_from_score_probs;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-572
     // ```c

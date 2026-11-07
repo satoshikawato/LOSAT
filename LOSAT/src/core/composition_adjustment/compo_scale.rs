@@ -50,8 +50,8 @@
 //! }
 //! ```
 
-use crate::core::blast_stat::composition::calc_lambda_of_score_probs;
 use crate::core::psi::PsiScoreBlk;
+use crate::stats::karlin_calc::calc_lambda_of_score_probs;
 use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
 
 /// `COMPO_SCORE_MIN` (composition_constants.h:43: `#define COMPO_SCORE_MIN INT2_MIN`).

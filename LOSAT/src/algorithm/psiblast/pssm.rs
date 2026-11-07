@@ -31,6 +31,9 @@ pub struct PsiblastPssmOptions {
     pub pseudocount: i32,
     /// `-in_pssm`: the query as a PSSM file (`algorithm::psiblast::in_pssm`).
     pub in_pssm: Option<std::path::PathBuf>,
+    /// `-num_iterations` when it is not 1 (0: until convergence): the rounds of a FASTA query
+    /// (`algorithm::psiblast::rounds`); `None` for one round.
+    pub rounds: Option<u32>,
 }
 
 /// A run that writes the PSSM of each query whose round-1 results have alignments.
@@ -112,8 +115,10 @@ impl PsiblastPssmOptions {
     // With one round (`itr` is false after it), the PSSM is computed only with
     // `-save_pssm_after_last_round`, and `SavePssmToFile` writes the files of `-out_pssm` and
     // `-out_ascii_pssm` (`SaveCheckpoint`, `SaveAsciiPssm`).
+    // With more rounds the driver writes the files (`rounds::RoundFiles`), not the search.
     pub(crate) fn request(&self) -> Option<PssmRequest> {
-        if !self.save_pssm_after_last_round
+        if self.rounds.is_some()
+            || !self.save_pssm_after_last_round
             || (self.out_pssm.is_none() && self.out_ascii_pssm.is_none())
         {
             return None;
@@ -175,14 +180,34 @@ pub(crate) struct PssmAlignment<'a> {
     pub(crate) ops: Option<&'a [GapEditOp]>,
 }
 
-/// The Karlin-Altschul blocks of the round's ancillary data (`CBlastAncillaryData`): the
-/// ungapped block of the query's context and the gapped block. In the first round the PSI blocks
-/// are copies of them (`kbp_psi` and `kbp_gap_psi` of the search's score block are its
-/// standard blocks, blast_setup.c:114-120).
+/// The Karlin-Altschul blocks of the round's ancillary data (`CBlastAncillaryData`, the blocks of
+/// the query's context): `kbp_std`, `kbp_gap`, `kbp_psi` and `kbp_gap_psi`. In the first round
+/// the PSI blocks are copies of the standard ones (`kbp_psi` and `kbp_gap_psi` of the search's
+/// score block are its standard blocks, blast_setup.c:114-120); in a round that searched a PSSM
+/// they are the PSSM's, and `kbp_gap` is `kbp_gap_psi` (blast_setup.c:113-126, quoted at
+/// `algorithm::pssm_search`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:99-111
+// ```c++
+//     if (sbp->kbp_std) {
+//         s_InitializeKarlinBlk(sbp->kbp_std[ctx_index], &m_UngappedKarlinBlk);
+//     }
+//     if (sbp->kbp_gap) {
+//         s_InitializeKarlinBlk(sbp->kbp_gap[ctx_index], &m_GappedKarlinBlk);
+//     }
+//     if (sbp->kbp_psi) {
+//         s_InitializeKarlinBlk(sbp->kbp_psi[ctx_index], &m_PsiUngappedKarlinBlk);
+//     }
+//     if (sbp->kbp_gap_psi) {
+//         s_InitializeKarlinBlk(sbp->kbp_gap_psi[ctx_index],
+//                               &m_PsiGappedKarlinBlk);
+//     }
+// ```
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PssmAncillary {
     pub(crate) ungapped: KarlinBlk,
     pub(crate) gapped: KarlinBlk,
+    pub(crate) psi_ungapped: KarlinBlk,
+    pub(crate) psi_gapped: KarlinBlk,
 }
 
 /// The query of a PSSM: its letters (the whole record, without masks), its Seq-align id
@@ -209,6 +234,8 @@ pub(crate) struct PssmScoring<'a> {
 pub(crate) struct QueryPssm {
     pub(crate) asn: Option<Vec<u8>>,
     pub(crate) ascii: Option<Vec<u8>>,
+    /// The engine's PSSM, which the next round searches (`algorithm::psiblast::rounds`).
+    pub(crate) engine: PsiPssm,
 }
 
 /// The PSSM of one query (`ComputePssmForNextIteration`) and its files: the ASN.1 text
@@ -375,7 +402,7 @@ pub(crate) fn query_pssm(
     ancillary: PssmAncillary,
 ) -> Result<QueryPssm> {
     let mut sbp = score_block(scoring.matrix, gapped)?;
-    sbp.set_ungapped_statistical_params(ancillary.gapped);
+    sbp.set_ungapped_statistical_params(ancillary.psi_gapped);
     let encoded = crate::algorithm::blastp::encoding::encode_protein_sequence(query.letters);
     let letters = &encoded.aa_seq[1..=encoded.aa_len];
     let msa = input_msa(letters, alignments, subject, inclusion_ethresh)?;
@@ -406,7 +433,11 @@ pub(crate) fn query_pssm(
         .ascii_path
         .as_ref()
         .map(|_| print_ascii_pssm(&pssm, letters, ancillary));
-    Ok(QueryPssm { asn, ascii })
+    Ok(QueryPssm {
+        asn,
+        ascii,
+        engine: pssm,
+    })
 }
 
 /// The `PssmWithParameters` of a PSSM (`x_PSIMatrix2Asn1` with its query, then
@@ -1231,15 +1262,18 @@ pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAnci
     }
     out.push_str("\n\n");
     out.push_str("                      K         Lambda\n");
-    let (ungapped_k, ungapped_lambda) = (ancillary.ungapped.k, ancillary.ungapped.lambda);
-    let (gapped_k, gapped_lambda) = (ancillary.gapped.k, ancillary.gapped.lambda);
-    for (label, k, lambda) in [
-        ("Standard Ungapped    ", ungapped_k, ungapped_lambda),
-        ("Standard Gapped      ", gapped_k, gapped_lambda),
-        ("PSI Ungapped         ", ungapped_k, ungapped_lambda),
-        ("PSI Gapped           ", gapped_k, gapped_lambda),
+    for (label, block) in [
+        ("Standard Ungapped    ", ancillary.ungapped),
+        ("Standard Gapped      ", ancillary.gapped),
+        ("PSI Ungapped         ", ancillary.psi_ungapped),
+        ("PSI Gapped           ", ancillary.psi_gapped),
     ] {
-        let _ = writeln!(out, "{label}{}     {}", fixed(k, 4), fixed(lambda, 4));
+        let _ = writeln!(
+            out,
+            "{label}{}     {}",
+            fixed(block.k, 4),
+            fixed(block.lambda, 4)
+        );
     }
     out.into_bytes()
 }
@@ -1887,7 +1921,7 @@ pub(crate) fn check_pssm_files(
     queries: usize,
     out: Option<&std::path::Path>,
 ) -> Result<()> {
-    let streams = ReportStreams::new(out);
+    let check = PssmFileCheck::new(out);
     for (option, path) in [
         ("-out_pssm", request.asn_path.as_deref()),
         ("-out_ascii_pssm", request.ascii_path.as_deref()),
@@ -1903,20 +1937,48 @@ pub(crate) fn check_pssm_files(
             vec![std::path::PathBuf::from(path)]
         };
         for name in &names {
-            if let Some(stream) = streams.stream_of(name) {
-                anyhow::bail!(
-                    "an {option} file that is also {stream} ({}) is not supported by LOSAT's PSIBLAST",
-                    name.display()
-                );
-            }
-            if option == "-out_pssm" {
-                if let TargetKind::Unsupported(kind) = target_kind(name) {
-                    return Err(unsupported_target(name, kind));
-                }
-            }
+            check.check(option, name)?;
         }
     }
     Ok(())
+}
+
+/// `check_pssm_files`' check of one name, also made by the round driver before each write
+/// (`rounds::RoundFiles`), whose numbered names are not known before the search.
+pub(crate) struct PssmFileCheck {
+    streams: ReportStreams,
+}
+
+impl PssmFileCheck {
+    pub(crate) fn new(out: Option<&std::path::Path>) -> Self {
+        Self {
+            streams: ReportStreams::new(out),
+        }
+    }
+
+    /// The refusal of the file `name` of `option` (`-out_pssm` or `-out_ascii_pssm`) where it
+    /// is a report stream, or for `-out_pssm` a named pipe, a block device or a symbolic link to
+    /// no file.
+    pub(crate) fn check(&self, option: &str, name: &std::path::Path) -> Result<()> {
+        if let Some(stream) = self.streams.stream_of(name) {
+            anyhow::bail!(
+                "an {option} file that is also {stream} ({}) is not supported by LOSAT's PSIBLAST",
+                name.display()
+            );
+        }
+        if option == "-out_pssm" {
+            if let TargetKind::Unsupported(kind) = target_kind(name) {
+                return Err(unsupported_target(name, kind));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Whether `path` names a regular file (also through a symbolic link), which a failed write
+/// leaves partly written (`rounds::RoundFiles`).
+pub(crate) fn is_regular_file(path: &std::path::Path) -> bool {
+    matches!(target_kind(path), TargetKind::Regular)
 }
 
 /// The report streams (`check_pssm_files`): the standard output, the standard error (`fstat` of a

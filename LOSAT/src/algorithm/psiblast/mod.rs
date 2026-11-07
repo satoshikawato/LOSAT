@@ -1,12 +1,15 @@
 //! PSIBLAST (Position-Specific Iterated BLAST)
 //!
-//! LOSAT runs psiblast's first round: the search of each query with blastp's engine, as NCBI's
+//! LOSAT runs psiblast's first round as the search of each query with blastp's engine, as NCBI's
 //! `CPsiBlast` runs it before any PSSM exists (`ePSIBlast`, one query per batch), with
-//! psiblast's report (`blastp::args::BlastpApp::Psiblast`).
+//! psiblast's report (`blastp::args::BlastpApp::Psiblast`); with `-num_iterations` other than 1
+//! each later round searches the PSSM that the engine made from the round before (`rounds`,
+//! `blastp::blast_engine::psi_round`); `-in_pssm` searches a PSSM query (`in_pssm`).
 
 pub mod args;
 pub(crate) mod in_pssm;
 pub mod pssm;
+pub mod rounds;
 
 pub use args::PsiblastArgs;
 

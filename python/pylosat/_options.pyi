@@ -460,7 +460,7 @@ class PsiblastOptions(TypedDict, total=False):
     subject_loc: str
     """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
     num_iterations: int
-    """Number of iterations to perform (0 means run until convergence); LOSAT runs 1"""
+    """Number of iterations to perform (0 means run until convergence)"""
     pseudocount: int
     """Pseudo-count value used when constructing PSSM"""
     inclusion_ethresh: float

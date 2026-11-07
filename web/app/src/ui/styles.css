@@ -1952,15 +1952,17 @@ label.inline {
 }
 
 /* #, Bit score, E value, Identity, Length, Mismatches, Gap opens, Query, Subject, [Frames],
-   Orientation, outfmt 0. The columns are 5 px apart: with the frames, the table fit the results'
-   column at 1280 px beside the queue's column of the same width (W4b). */
+   Orientation, outfmt 0. The columns are 5 px apart (W4b). Identity holds "100.000" and
+   Orientation "Not in the record" (13.3ch in Inter's italic) whole; the ranges give them the room
+   (WA2-OP-01: they were cut to "100.0…" and "Not in the …"). A table with frames has no "Not in
+   the record", so its Orientation stays 9.5ch. */
 .hsp-grid {
   column-gap: 5px;
-  grid-template-columns: 3.5ch 9ch 9.5ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 9.5ch 8.25ch;
+  grid-template-columns: 3.5ch 9ch 9.5ch 8ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 14ch 8.25ch;
 }
 
 .hsp-grid.framed {
-  grid-template-columns: 3.5ch 9ch 9.5ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 6ch 9.5ch 8.25ch;
+  grid-template-columns: 3.5ch 9ch 9.5ch 8ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 6ch 9.5ch 8.25ch;
 }
 
 /* The header's columns are the rows' columns: the same borders, and room for the rows'
@@ -2207,6 +2209,13 @@ pre.range-text {
     min-height: 0;
   }
 
+  /* An input's "First lines" and "Records" are touch targets of 24 px (WCAG 2.5.8; WA2-AX-11). */
+  .source summary {
+    box-sizing: border-box;
+    min-height: 24px;
+    padding-block: 2px;
+  }
+
   /* The "?" stays a circle, at the 24 px of WCAG 2.5.8. */
   .help-toggle {
     width: 24px;
@@ -2286,11 +2295,11 @@ pre.range-text {
      Mismatches, Gap opens, outfmt 0. The frames come before the ranges, so that a phone shows
      them (W4 screen review middle 2: the screen ended inside the subject range). */
   .hsp-grid {
-    grid-template-columns: 3.5ch 9ch 9.5ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
+    grid-template-columns: 3.5ch 9ch 9.5ch 11ch 11ch 14ch 8ch 6ch 9.75ch 5.25ch 8.25ch;
   }
 
   .hsp-grid.framed {
-    grid-template-columns: 3.5ch 9ch 9.5ch 6ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
+    grid-template-columns: 3.5ch 9ch 9.5ch 6ch 11ch 11ch 9.5ch 8ch 6ch 9.75ch 5.25ch 8.25ch;
   }
 
   .hsp-grid > [data-col='frames'],

@@ -5,8 +5,9 @@
 // larger query coordinate of its record, coloured by NCBI's "Alignment Scores" bin of its record's
 // bit score; the HSPs of a subject are joined by a thin grey line. The bins only classify the
 // engine's number; hover and focus show the outfmt 6 strings in a popover, which Escape closes
-// (WCAG 1.4.13, WA2-AX-07). Click or Enter selects the HSP and asks the results screen to show its
-// alignment.
+// wherever the focus is (WCAG 1.4.13 dismissible, WA2-AX-07); the pointer cannot move onto the
+// popover, which lets it through to the bars under it (not 1.4.13's hoverable). Click or Enter
+// selects the HSP and asks the results screen to show its alignment.
 //
 // One canvas holds the figure and draws only the rows in view, so that thousands of HSPs stay
 // smooth; with many subjects the rows scroll inside the figure under the query bar.
@@ -448,6 +449,8 @@ watch(shown, (k) => {
   if (k !== dismissed.value) dismissed.value = -1;
 });
 function onEscape(event: KeyboardEvent): void {
+  // The Escape that cancels an IME's composition is not for the page.
+  if (event.isComposing) return;
   if (event.key === 'Escape') dismissed.value = shown.value;
 }
 watch(popoverShown, (on) => {

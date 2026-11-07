@@ -172,6 +172,37 @@ test('the "?" help stays while the pointer moves from the "?" onto it, and goes 
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
 });
 
+test('two "?" helps are not open by the pointer at once, where one "?" is inside the box around another', async ({ page }) => {
+  await openSearch(page);
+  await openParameters(page);
+  await page.getByTestId('param-gapcosts').selectOption('other');
+  const open = page.getByTestId('param-gapopen-help-toggle');
+  const extend = page.getByTestId('param-gapextend-help-toggle');
+  const helps = page.locator('[role="tooltip"].help');
+  await open.hover();
+  await expect(helps).toHaveCount(1);
+  // Across the box of the first help, onto the second "?": a pointer move at a time, so that the
+  // two helps are never open together.
+  const from = await middle(open);
+  const to = await middle(extend);
+  await page.mouse.move(from.x, from.y);
+  const steps = 24;
+  for (let i = 1; i <= steps; i++) {
+    await page.mouse.move(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);
+    expect(await helps.count()).toBeLessThanOrEqual(1);
+  }
+  await expect(page.getByTestId('param-gapextend-help')).toBeVisible();
+  await expect(page.getByTestId('param-gapopen-help')).toHaveCount(0);
+  await expect(helps).toHaveCount(1);
+  // Back onto the first: the second goes.
+  await page.mouse.move(from.x, from.y, { steps });
+  await expect(page.getByTestId('param-gapopen-help')).toBeVisible();
+  await expect(page.getByTestId('param-gapextend-help')).toHaveCount(0);
+  // Away from both: gone.
+  await page.mouse.move(0, 0, { steps: 4 });
+  await expect(helps).toHaveCount(0);
+});
+
 /** A run of the FakeEngine (or the engine) with HSPs on three subjects, shown on the results page. */
 async function threeSubjects(page: Page): Promise<void> {
   const protein = 'MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKRQTLGQHDFSAGEGLYTHMKALRPDEDRLSPLHSVYVDQWDWERVMGDGERQFSTLKSTVEAIWAGIKATEAAVSEEFGLAPFLPDQIHFVHSQELLSRYPDLDAKGRERAIAKDLGAVFLVGIGGKLSDGHRHDVRAPDYDDWEAVTLGEQ';

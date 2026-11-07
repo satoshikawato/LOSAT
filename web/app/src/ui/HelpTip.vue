@@ -1,3 +1,8 @@
+<script lang="ts">
+/** Closes the help that the pointer opened last, which is shown while the pointer is not over it any more. */
+let pointing: (() => void) | undefined;
+</script>
+
 <script setup lang="ts">
 // The "?" beside a control and the help it opens (stop-describing-ui: the control shows, the
 // help waits behind "?"). As NCBI's helpbox, the help shows while the "?" is pointed at with a
@@ -43,8 +48,19 @@ const follow = (event: PointerEvent) => {
   unfollow();
 };
 const unfollow = () => document.removeEventListener('pointermove', follow, true);
+/** The pointer's part of the help closes (a pinned help, or one the keyboard shows, stays). */
+const unpoint = () => {
+  pointed.value = false;
+  unfollow();
+};
+/**
+ * Only one help is open by the pointer: a "?" inside the box of another help (the way from its
+ * "?" to the help) closes that one as the pointer comes to it.
+ */
 const enter = (event: PointerEvent) => {
   if (event.pointerType === 'touch') return;
+  if (pointing !== undefined && pointing !== unpoint) pointing();
+  pointing = unpoint;
   unfollow();
   pointed.value = true;
 };
@@ -78,6 +94,8 @@ const outside = (event: PointerEvent) => {
 };
 /** Escape closes the shown help, wherever the focus is; the focus stays (WCAG 1.4.13: dismissible). */
 const escape = (event: KeyboardEvent) => {
+  // The Escape that cancels an IME's composition is not for the page.
+  if (event.isComposing) return;
   if (event.key === 'Escape') close();
 };
 
@@ -98,6 +116,7 @@ watch(shown, async (on) => {
   }
 });
 onUnmounted(() => {
+  if (pointing === unpoint) pointing = undefined;
   document.removeEventListener('pointerdown', outside, true);
   document.removeEventListener('keydown', escape);
   unfollow();

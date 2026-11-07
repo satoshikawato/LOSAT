@@ -42,6 +42,11 @@ FASTA files:
   `-parse_deflines`) NCBI reads no query and stops with `Empty CBlastQueryVector`. `bx_prescan_badgi_big_q.fna`: the same with
   10,200 nucleotides in `r0`, more than BLASTX's batch of 10,002 letters (`db.bxprescan.badgi.big.5`,
   `BATCH_SIZE=1000000`: one batch).
+- The rows `db.bxgapline.*` search `bslice` with `LOSAT/tests/fasta/outfmt0/bx_gapline_q.fna`, the query of the
+  `-subject` rows `gapline.blastx.*` of `outfmt0_manifest.tsv`: gap lines of bad sizes (`>?abc` before any
+  defline, `>?0`, `>?unk`, `>?99999999999`, `>?-5` as a record's last line), text after the size and unknown,
+  conflicting or unclosed modifiers, which NCBI reads as `ParseGapLine` does (a gap of 1 after `Bad gap size`,
+  warnings for the rest).
 - `p3.faa`: records p01, p03 and p08 of `LOSAT/tests/seqdb/prot.faa`, in that order.
 - `d1_q.faa`: D1, a hit that `-db` keeps and `-subject` drops. Two proteins of `LOSAT/tests/fasta/WSSV.faa`
   (YP_009220551.1 and YP_009220614.1: for each, NCBI `blastp -db paja -outfmt 6` prints 2 rows and

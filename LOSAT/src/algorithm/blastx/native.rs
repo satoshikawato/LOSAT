@@ -2147,6 +2147,15 @@ fn write_run_error_archive(
 // LOG_POST_X uses the log flags without severity/prefix. Positions in the
 // existing B reader state have already been converted to one-based indexes.
 pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> Result<()> {
+    // A warning of `ParseGapLine` (`fasta_reader::reader::gap_line_size`) is the bytes that the
+    // reader of the other programs writes: a modifier's value as it is in the input.
+    if warning.kind == "gap_line" {
+        let mut line = Vec::with_capacity(warning.text.len() + 1);
+        line.extend_from_slice(&warning.text);
+        line.push(b'\n');
+        stderr.write_all(&line)?;
+        return Ok(());
+    }
     let message=match warning.kind {
             "hyphens"=>format!("CFastaReader: Hyphens are invalid and will be ignored around line {}",warning.line),
             "title_nucleotide_residues"=>"FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?".into(),

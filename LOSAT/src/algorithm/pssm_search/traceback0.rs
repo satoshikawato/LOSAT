@@ -412,7 +412,7 @@ fn tree_hsp(hsp: &BlastpPreliminaryHsp) -> TreeHsp {
 }
 
 /// A preliminary list's HSP as the traceback reads it (0-based starts).
-fn preliminary_hsp(local: &BlastpHsp) -> BlastpPreliminaryHsp {
+pub(super) fn preliminary_hsp(local: &BlastpHsp) -> BlastpPreliminaryHsp {
     BlastpPreliminaryHsp {
         query_start: local.q_start as i32 - 1,
         query_end: local.q_end as i32,
@@ -459,7 +459,7 @@ fn preliminary_hsp(local: &BlastpHsp) -> BlastpPreliminaryHsp {
 ///             q += esp->num[index];
 ///             break;
 /// ```
-fn final_hsp(
+pub(super) fn final_hsp(
     hsp: &BlastpPreliminaryHsp,
     edit_script: Vec<GapEditOp>,
     query_nomask: &[u8],

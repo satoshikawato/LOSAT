@@ -3,6 +3,9 @@
 //! Reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/
 
 pub mod adjust_scores;
+// The core of the position-based composition-based statistics (mode 1) of a PSSM (line PS,
+// item PS4b).
+pub(crate) mod compo_scale;
 pub mod matrix_tables;
 pub mod redo_alignment;
 // No NCBI counterpart: `LOSAT_X_REDOCONTAINIDX`, the redo's kept alignments with an index by

@@ -2416,9 +2416,13 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     }
     // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`), and the PSSM's of psiblast
     // `-in_pssm` (`pssm_search::traceback0`); psiblast's rounds without a PSSM keep mode 2.
+    // psiblast `-in_pssm` runs modes 2 and 3 as 1 (`PsiBlastSetupScoreBlock`, the options), and
+    // mode 1 as the position-based redo (`pssm_search::redo1`).
     if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust
         && !((args.app == BlastpApp::Blastp || args.psi_search.is_some())
             && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats)
+        && !(args.psi_search.is_some()
+            && args.comp_based_stats.mode == BlastpCompositionMode::CompositionBasedStats)
     {
         bail!(
             "-comp_based_stats {} is not supported by LOSAT's {program}",
@@ -10402,8 +10406,11 @@ fn run_resolved_in_pool(
     ))]
     let x_win_expand = false;
     // `-comp_based_stats 0`: the ordinary traceback below reads the compact lists as they are.
-    let ordinary_traceback =
-        args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats;
+    // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`, mode 0 or the
+    // position-based redo) takes the place of both, and reads them as they are too.
+    let ordinary_traceback = args.comp_based_stats.mode
+        == BlastpCompositionMode::NoCompositionBasedStats
+        || args.psi_search.is_some();
     if x_compact_expand_all && !x_win_expand && !ordinary_traceback {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
@@ -10429,7 +10436,8 @@ fn run_resolved_in_pool(
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
     let ordinary_hit_lists = if ordinary_traceback && args.psi_search.is_some() {
-        // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`).
+        // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`: mode 0's, or
+        // the position-based redo of modes 1 to 3).
         Some(pssm_hooks::pssm_traceback(
             &args,
             &contexts,
@@ -12022,14 +12030,10 @@ fn run_resolved_in_pool(
                 .cloned()
                 .unwrap_or_default();
             if result_warnings {
-                lines.extend(if args.psi_search.is_some() {
-                    // psiblast `-in_pssm`: the label is the PSSM's Seq-id, the record's local id.
-                    crate::report::query_warnings::query_warning_with_seq_id(
-                        args.app.ncbi_name(),
-                        record.local_id.as_bytes(),
-                        record,
-                        &messages,
-                    )
+                lines.extend(if let Some(psi) = args.psi_search.as_deref() {
+                    // psiblast `-in_pssm`: the label is the PSSM's Seq-id, the record's local id;
+                    // the messages add those of `PsiBlastSetupScoreBlock`.
+                    pssm_hooks::pssm_query_warning(args.app.ncbi_name(), psi, record, &messages)
                 } else {
                     crate::report::query_warnings::query_warning(
                         args.app.ncbi_name(),

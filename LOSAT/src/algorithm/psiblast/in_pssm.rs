@@ -2,7 +2,8 @@
 //! reads it, NCBI's errors for files it cannot read, NCBI's checks of the PSSM
 //! (`CPsiBlastValidate::Pssm`), the query record made from the PSSM's Bioseq, the score rows
 //! (`CScorematPssmConverter::GetScores`) and the statistical values of `PsiBlastSetupScoreBlock`,
-//! and LOSAT's refusals of what the PSSM search does not run yet (DECISIONS 11 of line PS).
+//! the frequency ratios and the warnings of the composition-based statistics (item PS4b), and
+//! LOSAT's refusals of what the PSSM search does not run yet (DECISIONS 11 of line PS).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1363
 //! ```c++
@@ -40,7 +41,8 @@ use std::sync::Arc;
 
 use anyhow::{bail, Result};
 
-use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
+use crate::algorithm::blastp::args::ResolvedBlastpArgs;
+use crate::blastinput::app::CompositionMode;
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::algorithm::pssm_search::{PsiSearch, PssmStats};
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -387,16 +389,30 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
     };
     let validation_error = validation_error(&pssm);
     // A PSSM of frequency ratios only: NCBI computes its scores with the PSSM engine
-    // (`x_CreatePssmScoresFromFrequencyRatios`), which item PS4b ports.
-    let scores = match pssm.pssm.final_data.as_ref() {
+    // (`x_CreatePssmScoresFromFrequencyRatios`, below).
+    let scores: &[i32] = match pssm.pssm.final_data.as_ref() {
         Some(data) if !data.scores.is_empty() => data.scores.as_slice(),
-        _ if validation_error.is_some() => &[],
-        _ => {
-            return Err(refuse(
-                "a PSSM without scores (frequency ratios only, from which NCBI computes the scores) yet",
-            ))
-        }
+        _ => &[],
     };
+    let ratios_only = validation_error.is_none() && scores.is_empty();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:648-660
+    // ```c++
+    //     asn1_pssm.SetByRow(false);  // this is the default
+    //     ...
+    //     if (asn1_pssm.GetByRow() == false) {
+    //         for (unsigned int i = 0; i < pssm->ncols; i++) {
+    //             for (unsigned int j = 0; j < pssm->nrows; j++) {
+    //                 asn1_pssm.SetFinalData().SetScores().
+    //                     push_back(pssm->pssm[i][j]);
+    // ```
+    // The engine's scores are column by column, which NCBI's search then reads by the PSSM's
+    // own `byRow` (`PsiBlastComputePssmScores` copies the scores, not `byRow`): a ratio-only
+    // PSSM written row by row would be searched with its scores transposed.
+    if ratios_only && pssm.pssm.by_row == Some(true) {
+        return Err(refuse(
+            "a PSSM of frequency ratios only written by row (NCBI reads the scores it computes for it in the wrong order)",
+        ));
+    }
     // The query: one local Seq-id (`local str "Query_N"` in a psiblast PSSM), its title, its
     // letters. The record's local id is the Seq-id's `GetSeqIdString()`: the string, or the
     // integer's decimal digits (`CObject_id::AsString`); the reports show it where they show the
@@ -510,7 +526,7 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
     if validation_error.is_none()
         && (!(1..=BLASTAA_SIZE as i32).contains(&rows_n)
             || i64::from(columns_n) != letters.len() as i64
-            || scores.len() as i64 != cells
+            || (!ratios_only && scores.len() as i64 != cells)
             || (ratios_len != 0 && ratios_len as i64 != cells))
     {
         return Err(refuse(format!(
@@ -538,19 +554,51 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
             )));
         }
     }
-    let rows = if validation_error.is_none() {
-        convert_scores(
+    let by_row = pssm.pssm.by_row == Some(true);
+    let mut rows = if validation_error.is_none() {
+        convert_2_matrix(
             scores,
             rows_n as usize,
             columns_n as usize,
-            pssm.pssm.by_row == Some(true),
+            by_row,
+            BLAST_SCORE_MIN,
         )
     } else {
         Vec::new()
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:264-284
+    // ```c++
+    //     if ( !pssm_asn.GetPssm().CanGetIntermediateData() ||
+    //          !pssm_asn.GetPssm().GetIntermediateData().CanGetFreqRatios() ||
+    //          pssm_asn.GetPssm().GetIntermediateData().GetFreqRatios().empty() ) {
+    //         throw runtime_error("Cannot obtain frequency ratios from ASN.1 PSSM");
+    //     }
+    //     ...
+    //     unique_ptr< CNcbiMatrix<double> > retval
+    //         (new CNcbiMatrix<double>(BLASTAA_SIZE, pssm.GetNumColumns(), 0.0));
+    //
+    //     Convert2Matrix(pssm.GetIntermediateData().GetFreqRatios(),
+    //                    *retval, pssm.GetByRow(), pssm.GetNumRows(),
+    //                    pssm.GetNumColumns());
+    // ```
+    // The frequency ratios (`psi_matrix->freq_ratios`, 28 per position, 0.0 past the file's
+    // rows), which the position-based composition-based statistics read; none when the PSSM has
+    // none (NCBI's then stay zero).
+    let freq_ratios = match pssm.pssm.intermediate_data.as_ref() {
+        Some(data) if validation_error.is_none() && !data.freq_ratios.is_empty() => {
+            convert_2_matrix(
+                &data.freq_ratios,
+                rows_n as usize,
+                columns_n as usize,
+                by_row,
+                0.0,
+            )
+        }
+        _ => Vec::new(),
+    };
     let final_data = pssm.pssm.final_data.as_ref();
     let stat = |value: Option<f64>| value.filter(|&value| value != 0.0);
-    let stats = PssmStats {
+    let mut stats = PssmStats {
         lambda_ungapped: stat(final_data.and_then(|data| data.lambda_ungapped)),
         kappa_ungapped: stat(final_data.and_then(|data| data.kappa_ungapped)),
         h_ungapped: stat(final_data.and_then(|data| data.h_ungapped)),
@@ -558,16 +606,84 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
         kappa: stat(final_data.map(|data| data.kappa)),
         h: stat(final_data.map(|data| data.h)),
     };
+    if ratios_only {
+        let (scores, gapped) = scores_from_freq_ratios(&letters, &freq_ratios)?;
+        rows = scores;
+        stats.lambda = stat(Some(gapped.lambda));
+        stats.kappa = stat(Some(gapped.k));
+        stats.h = stat(Some(gapped.h));
+    }
     Ok(PsiSearch {
         pssm: QueryPssm { rows },
+        freq_ratios,
         stats,
         query: FastaRecord::new(local_id, title, &letters),
         validation_error,
+        setup_messages: Vec::new(),
     })
 }
 
-/// `GetScores` + the copy of `PsiBlastSetupScoreBlock`: `rows[position][residue]` of 28 cells,
-/// those past the file's rows `BLAST_SCORE_MIN`.
+/// The scores of a PSSM of frequency ratios only, and the gapped values of its scaling:
+/// `PsiBlastComputePssmScores` runs the PSSM engine on the ratios (padded to 28 rows) of the
+/// query's letters as the search holds them (O as X), with BLOSUM62 and its gap costs 11/1 (the
+/// defaults of `CPsiBlastInputFreqRatios`; LOSAT's psiblast runs no other matrix), and keeps the
+/// scores and `lambda`, `kappa`, `h`; the ungapped values stay absent (`kbp_psi` then takes
+/// `kbp_std`'s, `PsiSearch::ungapped_karlin`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:466-485
+/// ```c++
+/// void PsiBlastComputePssmScores(CRef<objects::CPssmWithParameters> pssm,
+///                                const CBlastOptions& opts)
+/// {
+///     CConstRef<CBioseq> query(&pssm->GetQuery().GetSeq());
+///     CRef<IQueryFactory> seq_fetcher(new CObjMgrFree_QueryFactory(query)); /* NCBI_FAKE_WARNING */
+///
+///     CRef<ILocalQueryData> query_data(seq_fetcher->MakeLocalQueryData(&opts));
+///     BLAST_SequenceBlk* seqblk = query_data->GetSequenceBlk();
+///     ...
+///     unique_ptr< CNcbiMatrix<double> > freq_ratios
+///         (CScorematPssmConverter::GetFreqRatios(*pssm));
+///
+///     CPsiBlastInputFreqRatios pssm_engine_input(seqblk->sequence,
+///                                                seqblk->length,
+///                                                *freq_ratios,
+///                                                opts.GetMatrixName());
+///     CPssmEngine pssm_engine(&pssm_engine_input);
+///     CRef<CPssmWithParameters> pssm_with_scores(pssm_engine.Run());
+/// ```
+fn scores_from_freq_ratios(
+    letters: &[u8],
+    freq_ratios: &[[f64; BLASTAA_SIZE]],
+) -> Result<(Vec<[i32; BLASTAA_SIZE]>, crate::core::psi::KarlinBlk)> {
+    let query: Vec<u8> = letters
+        .iter()
+        .map(|&letter| match crate::utils::matrix::aa_char_to_ncbistdaa(letter) {
+            crate::utils::matrix::ncbistdaa::O => crate::utils::matrix::ncbistdaa::X,
+            code => code,
+        })
+        .collect();
+    let spec = crate::config::ProteinScoringSpec {
+        matrix: crate::config::ScoringMatrix::Blosum62,
+        gap_open: 11,
+        gap_extend: 1,
+    };
+    let gapped = crate::stats::tables::lookup_protein_params(&spec);
+    let sbp = crate::algorithm::psiblast::pssm::score_block(
+        spec.matrix,
+        crate::core::psi::KarlinBlk {
+            lambda: gapped.lambda,
+            k: gapped.k,
+            h: gapped.h,
+        },
+    )?;
+    crate::core::psi::pssm_from_freq_ratios(&query, freq_ratios, &sbp).map_err(|_| {
+        refuse("a PSSM of frequency ratios from which NCBI's PSSM engine makes no scaled scores")
+    })
+}
+
+/// `GetScores` or `GetFreqRatios` + the copy of `PsiBlastSetupScoreBlock`:
+/// `rows[position][residue]` of 28 cells, those past the file's rows `fill` (`BLAST_SCORE_MIN`
+/// for the scores, 0.0 for the frequency ratios).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:215-237
 /// ```c++
@@ -600,30 +716,99 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
 ///             }
 ///         }
 /// ```
-fn convert_scores(
-    scores: &[i32],
+fn convert_2_matrix<T: Copy>(
+    values: &[T],
     num_rows: usize,
     num_columns: usize,
     by_row: bool,
-) -> Vec<[i32; BLASTAA_SIZE]> {
-    let mut rows: Vec<[i32; BLASTAA_SIZE]> = (0..num_columns)
-        .map(|_| [BLAST_SCORE_MIN; BLASTAA_SIZE])
-        .collect();
-    let mut values = scores.iter().copied();
+    fill: T,
+) -> Vec<[T; BLASTAA_SIZE]> {
+    let mut rows: Vec<[T; BLASTAA_SIZE]> = (0..num_columns).map(|_| [fill; BLASTAA_SIZE]).collect();
+    let mut values = values.iter().copied();
     if by_row {
         for r in 0..num_rows {
             for row in rows.iter_mut() {
-                row[r] = values.next().unwrap_or(BLAST_SCORE_MIN);
+                row[r] = values.next().unwrap_or(fill);
             }
         }
     } else {
         for row in rows.iter_mut() {
             for cell in row.iter_mut().take(num_rows) {
-                *cell = values.next().unwrap_or(BLAST_SCORE_MIN);
+                *cell = values.next().unwrap_or(fill);
             }
         }
     }
     rows
+}
+
+/// The warnings of `PsiBlastSetupScoreBlock` for a PSSM search in the composition-based mode
+/// `mode` with the matrix `matrix_name` (the frequency ratios all zero when the statistics are on;
+/// modes 2 and 3 reset to 1), which the query's warning line carries. None for a PSSM that
+/// `CPsiBlastValidate::Pssm` stops before.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:179-207
+/// ```c++
+///     _ASSERT(options->GetCompositionBasedStats() < eNumCompoAdjustModes);
+///     // the message below is meaningless for deltablast
+///     if (options->GetProgram() != eDeltaBlast &&
+///         (options->GetCompositionBasedStats() != eNoCompositionBasedStats) &&
+///         freq_ratios_all_zeros) {
+///         ostringstream os;
+///         os << "Frequency ratios for PSSM are all zeros, frequency ratios for ";
+///         os << options->GetMatrixName() << " will be used during traceback ";
+///         os << "in composition based statistics";
+///         ...
+///     }
+///
+///     if (options->GetCompositionBasedStats() > eCompositionBasedStats) {
+///         // ugly, but necessary
+///         const_cast<CBlastOptions*>(&*options)
+///             ->SetCompositionBasedStats(eCompositionBasedStats);
+///         ostringstream os;
+///         os << "Composition-based score adjustment conditioned on "
+///            << "sequence properties and unconditional composition-based score "
+///            << "adjustment is not supported with PSSMs, resetting to default "
+///            << "value of standard composition-based statistics";
+///         ...
+///     }
+/// ```
+pub(crate) fn setup_messages(
+    search: &PsiSearch,
+    mode: CompositionMode,
+    matrix_name: &str,
+) -> Vec<String> {
+    let mut messages = Vec::new();
+    if search.validation_error.is_some() {
+        return messages;
+    }
+    if mode != CompositionMode::NoCompositionBasedStats
+        && crate::core::composition_adjustment::compo_scale::freq_ratios_all_zeros(
+            &search.freq_ratios,
+        )
+    {
+        messages.push(format!(
+            "Frequency ratios for PSSM are all zeros, frequency ratios for {matrix_name} will be used during traceback in composition based statistics"
+        ));
+    }
+    if position_based_mode(mode) != mode {
+        messages.push(
+            "Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics"
+                .to_string(),
+        );
+    }
+    messages
+}
+
+/// The composition-based mode of a PSSM search for the mode `mode` of the options: 2 and 3 are
+/// 1 (`PsiBlastSetupScoreBlock` sets it in the options, so the preliminary cutoff's stretch and
+/// the redo read 1; `setup_messages`).
+pub(crate) fn position_based_mode(mode: CompositionMode) -> CompositionMode {
+    match mode {
+        CompositionMode::CompositionMatrixAdjust | CompositionMode::CompoForceFullMatrixAdjust => {
+            CompositionMode::CompositionBasedStats
+        }
+        other => other,
+    }
 }
 
 /// The refusal of psiblast's PSSM file options with `-in_pssm` (item PS5), made when the PSSM has
@@ -655,20 +840,6 @@ pub(crate) fn check_pssm_file_options(
 /// LOSAT's refusals of a psiblast `-in_pssm` search that the PSSM search does not run yet
 /// (DECISIONS 11 of line PS), checked when the options have been processed, before the search.
 pub(crate) fn check_in_pssm_options(args: &ResolvedBlastpArgs, psi: &Arc<PsiSearch>) -> Result<()> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1497
-    // ```c
-    //     if (ext_params->options->compositionBasedStats > 0 ||
-    //         ext_params->options->eTbackExt == eSmithWatermanTbck) {
-    //         status =
-    //             Blast_RedoAlignmentCore_MT(program_number, ...);
-    // ```
-    // The position-based redo (modes 1, 2 and 3, which NCBI runs as 1) is item PS4b's.
-    if args.comp_based_stats.mode != BlastpCompositionMode::NoCompositionBasedStats {
-        bail!(
-            "-comp_based_stats {} with -in_pssm (the position-based composition-based statistics) is not supported by LOSAT's PSIBLAST yet",
-            args.comp_based_stats.to_ncbi_cli_string()
-        );
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:191-198 (the SEG mask
     // of the query, then `PsiBlastSetupScoreBlock`)
     // The query's SEG mask changes the PSSM search's hits (DESIGN_ps4 §1.6).
@@ -916,12 +1087,12 @@ mod tests {
     #[test]
     fn scores_fill_28_rows_by_column_or_by_row() {
         // Two rows (A, B) of three positions, column by column.
-        let rows = convert_scores(&[1, 2, 3, 4, 5, 6], 2, 3, false);
+        let rows = convert_2_matrix(&[1, 2, 3, 4, 5, 6], 2, 3, false, BLAST_SCORE_MIN);
         assert_eq!(rows.len(), 3);
         assert_eq!((rows[0][0], rows[0][1], rows[2][1]), (1, 2, 6));
         assert_eq!(rows[1][2], BLAST_SCORE_MIN);
         // The same values row by row.
-        let rows = convert_scores(&[1, 3, 5, 2, 4, 6], 2, 3, true);
+        let rows = convert_2_matrix(&[1, 3, 5, 2, 4, 6], 2, 3, true, BLAST_SCORE_MIN);
         assert_eq!((rows[0][0], rows[0][1], rows[2][1]), (1, 2, 6));
         assert_eq!(rows[2][27], BLAST_SCORE_MIN);
     }

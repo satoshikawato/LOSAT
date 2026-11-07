@@ -1,10 +1,11 @@
 //! The search of a query given as a position-specific score matrix (PSSM): psiblast `-in_pssm`
-//! (series PS, item PS4a: `-comp_based_stats 0`).
+//! (series PS, items PS4a, `-comp_based_stats 0`, and PS4b, the position-based composition-based
+//! statistics of modes 1 to 3).
 //!
 //! The kernels read the PSSM's rows by absolute query position where blastp's read the matrix
 //! row of the query letter (`PssmRows`): the lookup table (`lookup.rs`), the ungapped extensions
 //! (`ungapped.rs`), the gapped start, score-only and traceback alignments (`gapalign.rs`), all
-//! scalar as NCBI's PSSM code is. The stages (`prelim.rs`, `traceback0.rs`) run them for the one
+//! scalar as NCBI's PSSM code is. The stages (`prelim.rs`, `traceback0.rs`, `redo1.rs`) run them for the one
 //! query of a PSSM search; blastp's per-run driver calls them where a PSSM search differs
 //! (`blastp::blast_engine`, the `psi_search` hooks) and does the rest (the subject sets and
 //! databases, the hit lists, the reports) as for blastp.
@@ -26,6 +27,7 @@
 pub(crate) mod gapalign;
 pub(crate) mod lookup;
 pub(crate) mod prelim;
+pub(crate) mod redo1;
 pub(crate) mod rows;
 pub(crate) mod traceback0;
 pub(crate) mod ungapped;
@@ -65,9 +67,16 @@ pub(crate) struct PssmStats {
 #[derive(Debug, Clone)]
 pub struct PsiSearch {
     pub(crate) pssm: rows::QueryPssm,
+    /// The PSSM's frequency ratios, 28 per position (`psi_matrix->freq_ratios`), which the
+    /// position-based composition-based statistics read; empty when the PSSM has none.
+    pub(crate) freq_ratios: Vec<[f64; crate::core::blast_util::BLASTAA_SIZE]>,
     pub(crate) stats: PssmStats,
     pub(crate) query: FastaRecord,
     pub(crate) validation_error: Option<String>,
+    /// The warnings of `PsiBlastSetupScoreBlock` for the search's options (the frequency ratios
+    /// all zero, the composition-based statistics reset to mode 1), which the query's warning
+    /// line carries (`algorithm::psiblast::in_pssm::setup_messages`).
+    pub(crate) setup_messages: Vec<String>,
 }
 
 impl PsiSearch {

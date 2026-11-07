@@ -1946,6 +1946,124 @@ pub(super) fn gapped_psi_k(kbp_psi: KarlinBlk, sbp: &PsiScoreBlk) -> f64 {
     kbp_psi.k * sbp.gap_std_k / sbp.ideal_k
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:715-742
+// ```c
+//     _PSICopyMatrix_int(internal_pssm->pssm, posSearch->posMatrix,
+//                        internal_pssm->ncols, internal_pssm->nrows);
+//     _PSICopyMatrix_int(internal_pssm->scaled_pssm,
+//                        posSearch->posPrivateMatrix,
+//                        internal_pssm->ncols, internal_pssm->nrows);
+//     _PSICopyMatrix_double(internal_pssm->freq_ratios,
+//                           posSearch->posFreqs, internal_pssm->ncols,
+//                           internal_pssm->nrows);
+//     status = _PSIConvertFreqRatiosToPSSM(internal_pssm, query, sbp,
+//                                          compactSearch->standardProb);
+//     ...
+//     status = Kappa_impalaScaling(posSearch, compactSearch, (double)
+//                                  scale_factor, FALSE, sbp);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_posit.c:357-386
+// ```c
+//     for (c = 0; c < dim1; c++) {
+//         for (a = 0; a < dim2; a++) {
+//             if (BLAST_SCORE_MIN != private_matrix[c][a]) {
+//                 matrix[c][a] = (int)BLAST_Nint((double) private_matrix[c][a] *
+//                                         factor / kPSIScaleFactor);
+//             }
+//         }
+//     }
+//
+//     _PSIUpdateLambdaK((const int**) matrix,
+//                       compactSearch->query,
+//                       compactSearch->qlength,
+//                       compactSearch->standardProb,
+//                       sbp);
+//
+//     scalefactor = ((double) scalingFactor) / kPSIScaleFactor;
+//     for (c = 0; c < dim1; c++) {
+//         for (a = 0; a < dim2; a++) {
+//             if (BLAST_SCORE_MIN != private_matrix[c][a]) {
+//                 private_matrix[c][a] =
+//                     (int)BLAST_Nint((double) private_matrix[c][a] * factor *
+//                              scalefactor);
+//             }
+//         }
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:355-378
+// ```c
+//     std_prob = BLAST_GetStandardAaProbabilities();
+//     *pssm = PSIMatrixNew(query_length, (Uint4) sbp->alphabet_size);
+//     internal_pssm = _PSIInternalPssmDataNew(query_length, sbp->alphabet_size);
+//     ...
+//     _PSICopyMatrix_double(internal_pssm->freq_ratios, freq_ratios,
+//                           internal_pssm->ncols, internal_pssm->nrows);
+//
+//     status = _PSICreateAndScalePssmFromFrequencyRatios(internal_pssm,
+//                                                        query, query_length,
+//                                                        std_prob, sbp,
+//                                                        impala_scaling_factor);
+//     ...
+//     s_PSISavePssm(internal_pssm, sbp, *pssm);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:399-414
+// ```c
+//     status = _PSIConvertFreqRatiosToPSSM(internal_pssm, query, sbp, std_prob);
+//     ...
+//     if (impala_scaling_factor == kPSSM_NoImpalaScaling) {
+//         status = _PSIScaleMatrix(query, std_prob, internal_pssm, sbp);
+// ```
+/// `PSICreatePssmFromFrequencyRatios` without IMPALA's scaling (`CPsiBlastInputFreqRatios`'s
+/// default): the scores of the PSSM of `freq_ratios` (28 per position) and `kbp_psi[0]` of its
+/// scaling.
+pub(super) fn pssm_from_freq_ratios(
+    query: &[u8],
+    freq_ratios: &[[f64; BLASTAA_SIZE]],
+    sbp: &PsiScoreBlk,
+) -> Result<(Vec<[i32; BLASTAA_SIZE]>, KarlinBlk), PsiError> {
+    let std_probs = crate::stats::karlin_calc::compute_std_aa_composition();
+    let mut internal = InternalPssm::new(query.len());
+    internal.freq_ratios.copy_from_slice(freq_ratios);
+    convert_freq_ratios_to_pssm(&mut internal, query, sbp, &std_probs);
+    let ungapped = scale_matrix(query, &std_probs, &mut internal, sbp)?;
+    Ok((internal.into_scores(), ungapped))
+}
+
+/// `s_ScalePosMatrix` of the position-based composition-based statistics: the scaled PSSM
+/// (`posPrivateMatrix`, the redo's `startMatrix`) and `kbp_psi[0]` of the factor-1 PSSM
+/// (`posMatrix`). `posMatrix` and `posPrivateMatrix` start zeroed (`_PSIAllocateMatrix`,
+/// `Nlm_Int4MatrixNew`); `impalaScaleMatrix` runs without its binary search, so `factor` stays
+/// 1.0, and leaves the cells of `BLAST_SCORE_MIN` as the conversion left them.
+pub(super) fn scale_pos_matrix(
+    query: &[u8],
+    freq_ratios: &[[f64; BLASTAA_SIZE]],
+    sbp: &PsiScoreBlk,
+    scaling_factor: f64,
+) -> (Vec<[i32; BLASTAA_SIZE]>, KarlinBlk) {
+    let std_probs = crate::stats::karlin_calc::compute_std_aa_composition();
+    let mut internal = InternalPssm::new(query.len());
+    internal.freq_ratios.copy_from_slice(freq_ratios);
+    convert_freq_ratios_to_pssm(&mut internal, query, sbp, &std_probs);
+    let factor = 1.0;
+    for (pssm, scaled) in internal.pssm.iter_mut().zip(&internal.scaled_pssm) {
+        for (score, &scaled) in pssm.iter_mut().zip(scaled) {
+            if scaled != BLAST_SCORE_MIN {
+                *score = blast_nint(scaled as f64 * factor / K_PSI_SCALE_FACTOR as f64) as i32;
+            }
+        }
+    }
+    let kbp_psi = update_lambda_k(&internal.pssm, query, &std_probs);
+    let scalefactor = scaling_factor / K_PSI_SCALE_FACTOR as f64;
+    for row in internal.scaled_pssm.iter_mut() {
+        for score in row.iter_mut() {
+            if *score != BLAST_SCORE_MIN {
+                *score = blast_nint(*score as f64 * factor * scalefactor) as i32;
+            }
+        }
+    }
+    (internal.scaled_pssm, kbp_psi)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1795-1815
 // ```c
 // static BLAST_LetterProb Robinson_prob[] = {

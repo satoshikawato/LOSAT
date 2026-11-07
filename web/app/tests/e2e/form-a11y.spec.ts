@@ -224,3 +224,70 @@ test("the Graphic Summary's popover closes with Escape, from the pointer and fro
   await expect(popover).toBeVisible();
   await expect(popover).not.toHaveAttribute('data-hsp', hsp!);
 });
+
+/** Waits until the colour transitions (0.15 s) of the page have ended. */
+async function transitionsEnded(page: Page): Promise<void> {
+  await page.evaluate(() =>
+    Promise.all(document.getAnimations().filter((animation) => animation instanceof CSSTransition).map((animation) => animation.finished)),
+  );
+}
+
+/**
+ * The focus mark of the focused element: the best contrast, against the colour behind the element,
+ * of its outline or of an opaque ring of its box-shadow at least 2 px wide (0 when it has neither).
+ */
+async function focusMarkContrast(page: Page): Promise<number> {
+  await transitionsEnded(page);
+  return page.evaluate(() => {
+    const element = document.activeElement as HTMLElement;
+    const rgba = (text: string): number[] => (text.match(/[\d.]+/g) ?? []).map(Number);
+    const luminance = ([r, g, b]: number[]) =>
+      [r!, g!, b!].map((v) => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4)).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i]!, 0);
+    const contrast = (a: number[], b: number[]) => {
+      const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p);
+      return (x! + 0.05) / (y! + 0.05);
+    };
+    let behind = [255, 255, 255];
+    for (let node = element.parentElement; node !== null; node = node.parentElement) {
+      const colour = rgba(getComputedStyle(node).backgroundColor);
+      if (colour.length === 3 || (colour.length === 4 && colour[3] === 1)) {
+        behind = colour.slice(0, 3);
+        break;
+      }
+    }
+    const style = getComputedStyle(element);
+    const marks: number[][] = [];
+    if (style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2) marks.push(rgba(style.outlineColor));
+    for (const shadow of style.boxShadow.split(/,(?![^(]*\))/)) {
+      const colour = shadow.match(/rgba?\([^)]*\)/)?.[0];
+      const lengths = shadow.replace(/rgba?\([^)]*\)/, '').match(/-?[\d.]+px/g)?.map(parseFloat) ?? [];
+      if (colour !== undefined && !shadow.includes('inset') && lengths.length === 4 && lengths[3]! >= 2) marks.push(rgba(colour));
+    }
+    return Math.max(0, ...marks.filter((m) => m.length === 3 || m[3] === 1).map((m) => contrast(m.slice(0, 3), behind)));
+  });
+}
+
+test('a text box and a select focused with the keyboard have a mark of 3:1 or more', async ({ page }) => {
+  await openSearch(page);
+  // Reached with Tab, as a keyboard user reaches them.
+  await page.getByTestId('run-losat').focus();
+  await page.keyboard.press('Tab');
+  expect(await focused(page)).toBe('threads');
+  expect(await focusMarkContrast(page)).toBeGreaterThanOrEqual(3);
+  await page.getByTestId('query-clear').focus();
+  await page.keyboard.press('Tab');
+  expect(await focused(page)).toBe('query-input');
+  expect(await focusMarkContrast(page)).toBeGreaterThanOrEqual(3);
+  await page.getByTestId('job-title').focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  expect(await focused(page)).toBe('job-title');
+  expect(await focusMarkContrast(page)).toBeGreaterThanOrEqual(3);
+  // Forced colours (Windows' high contrast) draw no shadows: the mark is an outline there.
+  await page.emulateMedia({ forcedColors: 'active' });
+  const outline = await page.getByTestId('job-title').evaluate((element) => {
+    const style = getComputedStyle(element);
+    return `${style.outlineStyle} ${style.outlineWidth}`;
+  });
+  expect(outline).toBe('solid 2px');
+});

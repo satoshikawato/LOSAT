@@ -4,7 +4,9 @@
 //!
 //! This is the old statistics layer. The live, NCBI-faithful layer is
 //! `crate::stats`; what remains here is what blastp, blastx and tblastn
-//! composition-based statistics still call.
+//! composition-based statistics still call, plus unused items in `composition.rs`
+//! (and its own copies of `blast_gcd`, `blast_expm1`, `blast_powi`) that go with
+//! the rest of this layer.
 //!
 //! # Organization
 //!

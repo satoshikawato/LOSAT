@@ -5,6 +5,9 @@
 //! `ln_1p` / `exp_m1`, where NCBI uses `BLAST_Log1p` / `BLAST_Expm1` (the
 //! `stats::p_to_e` / `stats::e_to_p` versions). Switching changes result bits,
 //! so it is a separate change.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:174-176 converts with
+//! `BLAST_KarlinEtoP` and `BLAST_KarlinPtoE` (c++/src/algo/blast/core/blast_stat.c:4174-4192).
 
 /// Convert P-value to E-value.
 pub fn p_to_e(p: f64) -> f64 {

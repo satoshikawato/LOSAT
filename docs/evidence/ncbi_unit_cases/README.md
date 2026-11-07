@@ -156,11 +156,13 @@ set to `n-a`). Where the cited test could not be found on the current `main`, th
 
 The `n-a` reasons of 2026-10-10 were written before LOSAT read BLAST databases (`-db`) and before
 `-parse_deflines`, `-query_loc`/`-subject_loc`, blastn `-strand`, psiblast and LOSAT's own FASTA
-reader. On `dev` 869dfe0ee every `n-a` row (324) and the 57 other rows whose note claimed a LOSAT
-limit were checked again against the NCBI case and the LOSAT code. 254 rows changed: 74 left `n-a`
-(18 `ported`, 36 `partial`, 12 `e2e`, 7 `to-port`, 1 `superseded`), 11 `partial` rows became
-`ported`, 4 `e2e` and 2 `to-port` rows became `partial`, and the remaining changed rows keep their
-status with a note that states today's facts. Notes that cite LOSAT lines start with
+reader. On `dev` 869dfe0ee every `n-a` row (324) and the 77 other rows whose note claimed a LOSAT
+limit were checked again against the NCBI case and the LOSAT code, and a second reader checked
+every status change. 270 rows changed: 73 left `n-a` (17 `ported`, 38 `partial`, 14 `e2e`,
+3 `to-port`, 1 `superseded`), 10 `partial` rows became `ported`, 4 `e2e` and 2 `to-port` rows
+became `partial`, 1 `partial` row became `n-a` (Smith-Waterman mode, which every program
+refuses), and the other 180 changed rows keep their status with a note (for 33 also the
+`losat_test`) that states today's facts. Notes that cite LOSAT lines start with
 `evidence (869dfe0e):`. Of the 61 `n-a` rows whose reason was a BLAST database, 52 stay `n-a`:
-they need sequences fetched by id, the object manager, `-filtering_db` or another refused option,
-which the note now names.
+they need sequences fetched by id, the object manager, a refused option (`-filtering_db`, ...)
+or C++ API plumbing with no LOSAT counterpart; 48 of their notes were rewritten to say which.

@@ -91,7 +91,7 @@
 //! - fill: the recorded appends again in order, each written at its cell's cursor (the cell's start,
 //!   moved on by one per append), so that a cell's slice holds its offsets in the order of their
 //!   appends; then the offset of rank k (0-based) of a cell whose count n is above 5 is moved to slot
-//!   `x_emission_position(k, n)` (for n <= 5 that slot is k).
+//!   `x_emission_position(k, n)` (for n <= 5 that slot is k), in place (`x_to_scan_order`).
 //!
 //! The permutation. Let a cell take the offsets o_0, ..., o_{n-1} in this order (o_k is appended when
 //! `num_used` is k). By `add_word_hit` (above): o_0 is `query_offset` and o_1..o_4 are
@@ -498,8 +498,9 @@ pub(crate) enum XFlatBuild<H: XQueryOffset = i32> {
 //                 Int4 first_cell_entries = (numhits - 3) & COMPRESSED_HITS_CELL_MASK;
 // ```
 /// The position in NCBI's scan order of the offset appended with rank `k` (0-based) to a cell that
-/// ends with `n` offsets (module header).
-#[inline(always)]
+/// ends with `n` offsets (module header). The builders put a cell in that order with
+/// `x_to_scan_order`; this is the statement of the order that the unit tests check it against.
+#[cfg(test)]
 pub(crate) fn x_emission_position(k: u32, n: u32) -> u32 {
     if n <= (COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1) || k < 3 {
         return k;
@@ -511,6 +512,38 @@ pub(crate) fn x_emission_position(k: u32, n: u32) -> u32 {
         3 + s
     } else {
         n - 4 * (g + 1) + s
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:787-849 and
+// c++/src/algo/blast/core/blast_aascan.c:348-396 (module header, `x_emission_position`)
+// ```c
+//         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
+//         ...
+//                 Int4 first_cell_entries = (numhits - 3) & COMPRESSED_HITS_CELL_MASK;
+// ```
+/// A cell's offsets, given in the order of their appends (o_0..o_{n-1}), put in NCBI's scan order in
+/// place: o_k at `x_emission_position(k, n)`. That order keeps o_0..o_2 and takes the n >> 2 groups
+/// after them (groups of four, the last one of (n & 3) + 1 offsets) last group first, each group in
+/// its own order; so the slots after the third are reversed, and then the first group of the
+/// reversed slots (the last group's) and each group of four after it are reversed back. No copy of
+/// the cell is made (the unit test `scan_order_in_place_is_the_emission_positions` compares it with
+/// `x_emission_position` for 0 to 300 offsets).
+#[inline(always)]
+pub(crate) fn x_to_scan_order<T>(cell: &mut [T]) {
+    // `x_emission_position`'s `cells`: with one group (n <= 7, the cells of 5 or fewer offsets
+    // among them) the order is the order of the appends.
+    let groups = cell.len() >> 2;
+    if groups < 2 {
+        return;
+    }
+    let tail = &mut cell[3..];
+    tail.reverse();
+    let last_len = tail.len() - 4 * (groups - 1);
+    let (last, full) = tail.split_at_mut(last_len);
+    last.reverse();
+    for group in full.chunks_exact_mut(4) {
+        group.reverse();
     }
 }
 
@@ -1238,16 +1271,9 @@ fn x_flat_with_capacity_of<S: CompressedScores>(
     }
     drop(targets);
     drop(per_offset);
-    let mut appended: Vec<i32> = Vec::new();
     for &index in &overflowed {
         let index = index as usize;
-        let cell = &mut hits[starts[index] as usize..starts[index + 1] as usize];
-        let n = cell.len() as u32;
-        appended.clear();
-        appended.extend_from_slice(cell);
-        for (k, &query_offset) in appended.iter().enumerate() {
-            cell[x_emission_position(k as u32, n) as usize] = query_offset;
-        }
+        x_to_scan_order(&mut hits[starts[index] as usize..starts[index + 1] as usize]);
     }
 
     Some(XFlatBuild::Table(XFlatCompressedLookup {
@@ -1717,7 +1743,6 @@ fn x_buckets_with<S: CompressedScores>(
     // above), so the bits are set as the counts are read.
     let mut cell_slots = vec![0u32; 1 << X_BUCKET_SHIFT];
     let mut overflowed: Vec<u32> = Vec::new();
-    let mut appended: Vec<i32> = Vec::new();
     let mut nonempty_count = 0usize;
     let mut longest_chain = 0i32;
     for b in 0..buckets {
@@ -1771,13 +1796,7 @@ fn x_buckets_with<S: CompressedScores>(
             let cell = cell as usize;
             let begin = starts[first + cell] as usize;
             let end = slots[cell] as usize;
-            let n = (end - begin) as u32;
-            let slice = &mut hits[begin..end];
-            appended.clear();
-            appended.extend_from_slice(slice);
-            for (k, &query_offset) in appended.iter().enumerate() {
-                slice[x_emission_position(k as u32, n) as usize] = query_offset;
-            }
+            x_to_scan_order(&mut hits[begin..end]);
         }
     }
     starts[backbone_size] = total as u32;
@@ -2004,7 +2023,6 @@ fn x_bx_buckets_on(
     let mut pv = x_zeroed_on(kept.pv, (backbone_size >> PV_ARRAY_BTS) + 1);
     let mut cell_slots = vec![0u32; 1 << X_BUCKET_SHIFT];
     let mut overflowed: Vec<u32> = Vec::new();
-    let mut appended: Vec<u16> = Vec::new();
     let mut nonempty_count = 0usize;
     let mut longest_chain = 0i32;
     let mut lo = 0u32;
@@ -2046,13 +2064,7 @@ fn x_bx_buckets_on(
             let cell = cell as usize;
             let begin = starts[first + cell] as usize;
             let end = slots[cell] as usize;
-            let n = (end - begin) as u32;
-            let slice = &mut hits[begin..end];
-            appended.clear();
-            appended.extend_from_slice(slice);
-            for (k, &query_offset) in appended.iter().enumerate() {
-                slice[x_emission_position(k as u32, n) as usize] = query_offset;
-            }
+            x_to_scan_order(&mut hits[begin..end]);
         }
     }
     debug_assert_eq!(lo as usize, total);
@@ -3314,6 +3326,33 @@ mod tests {
             .collect();
         subject.push(0);
         subject
+    }
+
+    // `x_to_scan_order` puts o_k at `x_emission_position(k, n)` for cells of 0 to 300 offsets, of
+    // both offset types of the tables (`i32`, `u16`).
+    #[test]
+    fn scan_order_in_place_is_the_emission_positions() {
+        for n in 0..=300u32 {
+            let mut expected = vec![u32::MAX; n as usize];
+            for k in 0..n {
+                expected[x_emission_position(k, n) as usize] = k;
+            }
+            let mut cell: Vec<i32> = (0..n as i32).collect();
+            x_to_scan_order(&mut cell);
+            assert!(
+                cell.iter().map(|&v| v as u32).eq(expected.iter().copied()),
+                "n {n}"
+            );
+            let mut narrow: Vec<u16> = (0..n as u16).collect();
+            x_to_scan_order(&mut narrow);
+            assert!(
+                narrow
+                    .iter()
+                    .map(|&v| u32::from(v))
+                    .eq(expected.iter().copied()),
+                "u16 n {n}"
+            );
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:825-841

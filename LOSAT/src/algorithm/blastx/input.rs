@@ -240,7 +240,8 @@ pub struct InputWarning {
     pub line: usize,
     pub kind: &'static str,
     pub positions: Vec<usize>,
-    /// The message of kind `defline_id` (the Seq-id warnings of `-parse_deflines`).
+    /// The message of kind `defline_id` (the Seq-id warnings of `-parse_deflines`) and of kind
+    /// `gap_line` (the warnings of a `>?` gap line, `fasta_reader::reader::gap_line_size`).
     pub text: Vec<u8>,
 }
 
@@ -703,92 +704,101 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             //                             ILineErrorListener * /*pMessageListener*/)
             //         { }
             // ```
-            // Explicit assembly gaps become N/X in BLAST's default no-parse-gap mode.
-            // Rich gap modifiers remain explicitly outside the local FASTA scope.
-            let gap = trim_input_space(&line[2..]);
-            let gap = trim_input_start(gap.strip_prefix(b"unk").unwrap_or(gap));
-            if !gap.is_empty()
-                && gap.iter().all(u8::is_ascii_digit)
-                && std::str::from_utf8(gap)
-                    .ok()
-                    .and_then(|s| s.parse::<u32>().ok())
-                    .is_some_and(|n| n > 0)
-            {
-                let record = current.get_or_insert_with(|| {
-                    new_record(records.len() + batch.skipped, protein, String::new())
-                });
-                // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1387-1394
-                // ```c++
-                //         // Encountered >? lines; substitute runs of Ns or Xs as appropriate.
-                //         string    new_data;
-                //         char      gap_char(inst.IsAa() ? 'X' : 'N');
-                //         SIZE_TYPE pos = 0;
-                //         new_data.reserve(GetCurrentPos(ePosWithGaps));
-                //         ITERATE (TGaps, it, m_Gaps) {
-                //             // since we're not parsing gaps, we have to throw out
-                //             // any specified extra information that can't be
-                // ```
-                // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1411-1425
-                // ```c++
-                //             if ((*it)->m_uPos > pos) {
-                //                 new_data.append(m_SeqData, pos, (*it)->m_uPos - pos);
-                //                 pos = (*it)->m_uPos;
-                //             }
-                //             new_data.append((*it)->m_uLen, gap_char);
-                //         }
-                //         if (m_CurrentPos > pos) {
-                //             new_data.append(m_SeqData, pos, m_CurrentPos - pos);
-                //         }
-                //         swap(m_SeqData, new_data);
-                //         m_Gaps.clear();
-                //         m_CurrentPos += m_TotalGapLength;
-                //         m_TotalGapLength = 0;
-                //         m_CurrentGapChar = '\0';
-                //     }
-                // ```
-                let count = std::str::from_utf8(gap).unwrap().parse::<u32>().unwrap() as usize;
-                if count > i32::MAX as usize - record.sequence.len() {
-                    bail!("BLASTX sequence exceeds Int4 length");
-                }
-                // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1082-1090
-                // ```c++
-                //     m_MaskRangeStart = GetCurrentPos(ePosWithGapsAndSegs);
-                // }
-                //
-                // void CFastaReader::x_CloseMask(void)
-                // {
-                //     _ASSERT(m_MaskRangeStart != kInvalidSeqPos);
-                //     m_CurrentMask->SetPacked_int().AddInterval
-                //         (GetBestID(), m_MaskRangeStart, GetCurrentPos(ePosWithGapsAndSegs) - 1,
-                //          eNa_strand_plus);
-                // ```
-                // NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:505-514
-                // ```c++
-                //     TSeqPos pos = m_CurrentPos;
-                //     switch (pos_type) {
-                //     case ePosWithGapsAndSegs:
-                //         return pos + m_SegmentBase + m_TotalGapLength;
-                //     case ePosWithGaps:
-                //         return pos + m_TotalGapLength;
-                //     case eRawPos:
-                //         return pos;
-                //     default:
-                //         return kInvalidSeqPos;
-                // ```
-                if let Some(last) = record
-                    .lowercase_masks
-                    .last_mut()
-                    .filter(|r| r.1 + 1 == record.sequence.len() as i32)
-                {
-                    last.1 += count as i32;
-                }
-                record.sequence.resize(
-                    record.sequence.len() + count,
-                    if protein { b'X' } else { b'N' },
-                );
-                continue;
+            // The gap line is read as the reader of the other programs reads it
+            // (`fasta_reader::reader::gap_line_size`, the whole `ParseGapLine`): a size that is not
+            // a number from 1 to 4294967295 is 1 after `Bad gap size`, and the modifiers only warn.
+            // The warnings go out as the line is read, before those of the data lines after it.
+            let mut messages = Vec::new();
+            let count = crate::blastinput::fasta_reader::reader::gap_line_size(
+                line,
+                line_index as u64 + 1,
+                &mut |message| {
+                    messages.push(message.strip_suffix(b"\n").unwrap_or(message).to_vec());
+                    Ok(())
+                },
+            )? as usize;
+            let record = current.get_or_insert_with(|| {
+                new_record(records.len() + batch.skipped, protein, String::new())
+            });
+            for text in messages {
+                let warning = InputWarning {
+                    line: line_index + 1,
+                    kind: "gap_line",
+                    positions: Vec::new(),
+                    text,
+                };
+                warn(&warning)?;
+                record.warnings.push(warning);
             }
-            bail!("unsupported FASTA assembly-gap size/modifiers: outside the declared local FASTA scope");
+            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1387-1394
+            // ```c++
+            //         // Encountered >? lines; substitute runs of Ns or Xs as appropriate.
+            //         string    new_data;
+            //         char      gap_char(inst.IsAa() ? 'X' : 'N');
+            //         SIZE_TYPE pos = 0;
+            //         new_data.reserve(GetCurrentPos(ePosWithGaps));
+            //         ITERATE (TGaps, it, m_Gaps) {
+            //             // since we're not parsing gaps, we have to throw out
+            //             // any specified extra information that can't be
+            // ```
+            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1411-1425
+            // ```c++
+            //             if ((*it)->m_uPos > pos) {
+            //                 new_data.append(m_SeqData, pos, (*it)->m_uPos - pos);
+            //                 pos = (*it)->m_uPos;
+            //             }
+            //             new_data.append((*it)->m_uLen, gap_char);
+            //         }
+            //         if (m_CurrentPos > pos) {
+            //             new_data.append(m_SeqData, pos, m_CurrentPos - pos);
+            //         }
+            //         swap(m_SeqData, new_data);
+            //         m_Gaps.clear();
+            //         m_CurrentPos += m_TotalGapLength;
+            //         m_TotalGapLength = 0;
+            //         m_CurrentGapChar = '\0';
+            //     }
+            // ```
+            if count > i32::MAX as usize - record.sequence.len() {
+                bail!("BLASTX sequence exceeds Int4 length");
+            }
+            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1082-1090
+            // ```c++
+            //     m_MaskRangeStart = GetCurrentPos(ePosWithGapsAndSegs);
+            // }
+            //
+            // void CFastaReader::x_CloseMask(void)
+            // {
+            //     _ASSERT(m_MaskRangeStart != kInvalidSeqPos);
+            //     m_CurrentMask->SetPacked_int().AddInterval
+            //         (GetBestID(), m_MaskRangeStart, GetCurrentPos(ePosWithGapsAndSegs) - 1,
+            //          eNa_strand_plus);
+            // ```
+            // NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:505-514
+            // ```c++
+            //     TSeqPos pos = m_CurrentPos;
+            //     switch (pos_type) {
+            //     case ePosWithGapsAndSegs:
+            //         return pos + m_SegmentBase + m_TotalGapLength;
+            //     case ePosWithGaps:
+            //         return pos + m_TotalGapLength;
+            //     case eRawPos:
+            //         return pos;
+            //     default:
+            //         return kInvalidSeqPos;
+            // ```
+            if let Some(last) = record
+                .lowercase_masks
+                .last_mut()
+                .filter(|r| r.1 + 1 == record.sequence.len() as i32)
+            {
+                last.1 += count as i32;
+            }
+            record.sequence.resize(
+                record.sequence.len() + count,
+                if protein { b'X' } else { b'N' },
+            );
+            continue;
         }
         if is_header {
             if let Some(record) = current.take() {
@@ -3249,6 +3259,121 @@ mod defline_tests {
         let records = read(b">r0\nAC\n>?5\nGT\n", true).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].sequence, b"ACNNNNNGT");
+    }
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:774-780
+    // ```c++
+    // void CFastaReader::ParseDataLine(
+    //     const TStr& s, ILineErrorListener * pMessageListener)
+    // {
+    //     if( NStr::StartsWith(s, ">?") ) {
+    //         ParseGapLine(s, pMessageListener);
+    //         return;
+    //     }
+    // ```
+    // BLASTX's reader reads a gap line as the reader of the other programs reads it
+    // (`fasta_reader::reader::gap_line_size`): the same letters, lower-case runs and warnings,
+    // whatever the size and the modifiers, before any defline, inside a record, as its last line
+    // and inside a lower-case run. NCBI 2.17.0 reads them so in all five programs (probe
+    // `ncbi-parity-20261019/SM/gapline`).
+    #[test]
+    fn a_gap_line_reads_as_the_reader_of_the_other_programs_reads_it() {
+        use crate::blastinput::fasta_reader::{
+            FastaInputSource, ParseErrorCode, ReadError, ReaderConfig,
+        };
+        let gaps: [&[u8]; 23] = [
+            b">?5",
+            b">? 5 ",
+            b">?0",
+            b">?abc",
+            b">?-5",
+            b">?+5",
+            b">?5abc",
+            b">?",
+            b">?unk",
+            b">?unk7",
+            b">?unk 7",
+            b">?99999999999",
+            b">?4294967296",
+            b">?5 [gap-type=short-arm]",
+            b">?5 [gap-type=bogus]",
+            b">?5 [linkage-evidence=paired-ends]",
+            b">?5 [gap-type=within scaffold][linkage-evidence=paired-ends]",
+            b">?5 [gap-type=short-arm][gap-type=centromere]",
+            b">?5 [foo=bar]",
+            b">?5 [gap-type",
+            b">?0 [gap-type=short-arm] x",
+            b">?5 [gap-type=caf\xe9]",
+            b">?5 [gap-type=a\0b] [linkage-evidence=pcr]",
+        ];
+        // BLASTX's records of `input` (a nucleotide query file, `-lcase_masking`): the letters with
+        // the lower-case runs in lower case, as the reader of the other programs gives them, and
+        // the warnings as BLASTX writes them.
+        let blastx = |input: &[u8]| {
+            let mut warnings = Vec::new();
+            let records = parse_fasta_stream_keeping(
+                &mut FastaStream::new(Cursor::new(input.to_vec())),
+                false,
+                true,
+                100,
+                false,
+                None,
+                &mut |_| Ok(()),
+                &mut |warning| {
+                    crate::algorithm::blastx::native::reader_warning(warning, &mut warnings)
+                },
+            )
+            .unwrap();
+            let letters: Vec<Vec<u8>> = records
+                .iter()
+                .map(|record| {
+                    let mut letters = record.sequence.to_ascii_uppercase();
+                    for &(left, right) in &record.lowercase_masks {
+                        letters[left as usize..=right as usize].make_ascii_lowercase();
+                    }
+                    letters
+                })
+                .collect();
+            (letters, warnings)
+        };
+        for gap in gaps {
+            for input in [
+                [gap, b"\nACGT\n>r1\nAC\n"].concat(),
+                [b">r0\nAC\n", gap, b"\nGT\n>r1\nAC\n"].concat(),
+                [b">r0\nAC\n", gap, b"\n>r1\nAC\n"].concat(),
+                [b">r0\nac\n", gap, b"\ngtAC\n>r1\nac\n>?2\n"].concat(),
+            ] {
+                let context = String::from_utf8_lossy(&input).into_owned();
+                let (letters, warnings) = blastx(&input);
+                let mut source = FastaInputSource::from_bytes(
+                    &input,
+                    ReaderConfig::query("BLASTX", false, false),
+                );
+                let (mut messages, mut expected) = (Vec::new(), Vec::new());
+                while !source.end() {
+                    match source.next_sequence(&mut |message: &[u8]| {
+                        messages.extend_from_slice(message);
+                        Ok(())
+                    }) {
+                        Ok(record) => expected.push(record.sequence),
+                        Err(ReadError::Parse {
+                            code: ParseErrorCode::Eof,
+                            ..
+                        }) => break,
+                        Err(error) => panic!("{context}: {error}"),
+                    }
+                }
+                assert_eq!(letters, expected, "{context}");
+                assert_eq!(warnings, messages, "{context}");
+            }
+        }
+        // NCBI 2.17.0's warnings and letters (`blastx -query` with `>?abc` inside a record, probe
+        // case `blastx.q.mid_abc.f6.sub`; `>?5 [gap-type=caf\xe9]` keeps its byte).
+        let (letters, warnings) = blastx(b">r0\nAC\n>?abc\nGT\n>r1\nAC\n>?5 [gap-type=caf\xe9]\n");
+        assert_eq!(letters, vec![b"ACNGT".to_vec(), b"ACNNNNN".to_vec()]);
+        assert_eq!(
+            warnings,
+            b"CFastaReader: Bad gap size at line 3\nCFastaReader: Problem parsing gap mods at line 3\nUnknown gap-type: caf\xe9\n"
+        );
     }
 }
 

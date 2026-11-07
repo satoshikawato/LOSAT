@@ -4345,16 +4345,12 @@ fn search_query_batch<S: TbxScore>(
             threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
             window,
             subjects,
-            // A word length whose backbone index the direct builder does not cover (4 letters,
-            // 20 bits) takes the reference frame loop: the units' group tables are built by it
-            // (`x_direct_covers`; `TbxScore::word`, 3 for BLOSUM62's instance).
             debugging: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled
                 || debug_hsp_saving
-                || x_soft_subjects
-                || !crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers(sc.word()),
+                || x_soft_subjects,
             requested_parallel,
             use_serial_scan_chunks,
             pool: parallel_pool,
@@ -4686,16 +4682,12 @@ fn search_query_batch<S: TbxScore>(
             query_length,
             diag_array_size,
             subjects,
-            // A word length whose backbone index the direct builder does not cover (4 letters,
-            // 20 bits) takes the reference frame loop: the units' group tables are built by it
-            // (`x_direct_covers`; `TbxScore::word`, 3 for BLOSUM62's instance).
             debugging: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled
                 || debug_hsp_saving
-                || x_soft_subjects
-                || !crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers(sc.word()),
+                || x_soft_subjects,
             chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
             // PAIRLUT: the groups built at dispatch point 0.
             lut: x_pair_lut_batch,

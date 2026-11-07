@@ -2800,15 +2800,25 @@ mod tests {
     }
 
     // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 52 rows of the manifest that a
-    // run takes (not the one with -parse_deflines), stream 4 and stream 3.
+    // run takes (not the one with -parse_deflines, nor the one with a `>?` gap line, which the
+    // store refuses: maintainer decision 3), stream 4 and stream 3.
     #[test]
     fn blastx_writes_ncbis_archive() {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
         let read = |path: &str| std::fs::read(format!("{root}/{path}")).unwrap();
+        let gap_line = |path: &str| {
+            read(path)
+                .split(|b| *b == b'\n')
+                .any(|l| l.starts_with(b">?"))
+        };
         let rows = manifest_rows(|program, number, _| program == "blastx" && number == "11");
         let rows: Vec<_> = rows
             .into_iter()
             .filter(|(_, argv)| !argv.iter().any(|word| word == "-parse_deflines"))
+            .filter(|(_, argv)| {
+                let file = |flag: &str| &argv[argv.iter().position(|w| w == flag).unwrap() + 1];
+                !gap_line(file("-query")) && !gap_line(file("-subject"))
+            })
             .collect();
         assert_eq!(rows.len(), 52);
         for (id, argv) in &rows {

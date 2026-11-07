@@ -108,8 +108,8 @@ use super::arch::*;
 use super::kernel::finish;
 use super::x_w128::{build_row, fill_cols};
 use super::{
-    fits_8bit, script_codes, ColSeq, RowSeq, Scores, XdropResult, XdropScratch, MAX_M, PAD,
-    SCRIPT_GAP_IN_A, TAB, VMAX,
+    fits_8bit, script_codes, ColSeq, RowSeq, Scores, XdropResult, XdropScratch, MAX_M, PAD, TAB,
+    VMAX,
 };
 use core::arch::aarch64::*;
 

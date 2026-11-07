@@ -143,7 +143,7 @@
 use super::kernel::finish;
 use super::{
     build_row_table, fits_8bit, script_codes, ColSeq, RowSeq, Scores, XdropResult, XdropScratch,
-    FENCE_SENTRY, MAX_M, PAD, SCRIPT_GAP_IN_A, TAB, VMAX,
+    FENCE_SENTRY, MAX_M, PAD, TAB, VMAX,
 };
 use core::arch::x86_64::*;
 

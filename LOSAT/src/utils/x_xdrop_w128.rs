@@ -146,7 +146,7 @@ use super::arch::*;
 use super::kernel::finish;
 use super::{
     build_row_table, fits_8bit, script_codes, ColSeq, RowSeq, Scores, XdropResult, XdropScratch,
-    FENCE_SENTRY, MAX_M, PAD, SCRIPT_GAP_IN_A, TAB, VMAX,
+    FENCE_SENTRY, MAX_M, PAD, TAB, VMAX,
 };
 
 // No NCBI counterpart: lane operations the `arch` layer of `xdrop_simd.rs` does not have (unsigned

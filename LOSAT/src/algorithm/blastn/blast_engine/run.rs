@@ -4847,15 +4847,22 @@ fn build_query_blastna_buffer<L: QueryLetters + ?Sized>(
 /// fit the hole once small blocks had split it, was mapped on its own, and the 8.5 MiB hole stayed
 /// resident (31,168 cDNAs x 3 Mb, dc-megablast `-db`, 1 thread: +9.5 MiB in half the runs, set off
 /// by the length of the output file's name). The kept buffer has the capacity of
-/// `x_mapped_capacity`, so from 1 MiB glibc maps it and its free leaves the threshold as it is. A
-/// batch writes all of its bytes again when a new buffer of the batch's length would have the
-/// same capacity (any length from 1 MiB to glibc's 32 MiB ceiling), and otherwise takes a new
-/// block: a longer batch, one below 1 MiB, or one past the ceiling does not keep a longer batch's
-/// buffer, so the kept pages beyond a batch's length are at most those of the longest batch of
-/// that class (under 32 MiB). Bytes past the batch's length are not read.
+/// `x_mapped_capacity`, so from 1 MiB glibc maps it and its free leaves the threshold as it is.
+/// A batch writes all of its bytes again while the kept buffer is long enough and no longer than
+/// the larger of the batch's own capacity and that of 1 MiB (glibc's 32 MiB ceiling and a page;
+/// 1 MiB elsewhere), and otherwise takes a new block: a batch below 1 MiB writes the mapped
+/// buffer of a longer batch again, while a batch shorter than one past the ceiling does not keep
+/// that batch's buffer. So the kept pages beyond a batch's length are at most 32 MiB, and pages
+/// fault once, when a batch first reaches them. (Taking a new block for each batch below 1 MiB
+/// mapped the buffer again for each longer batch after it: the cDNAs above, 16 threads: 18 maps of
+/// 32 MiB instead of 1, +40,000 minor faults, +5 % wall.) Bytes past the batch's length are not
+/// read.
 fn x_query_sentinels(buffer: &mut Vec<u8>, length: usize) {
-    let capacity = crate::utils::x_mapped::x_mapped_capacity(length, 1);
-    if buffer.capacity() < length || buffer.capacity() > capacity {
+    use crate::utils::x_mapped::{x_mapped_capacity, X_MAPPED_FROM};
+    let capacity = x_mapped_capacity(length, 1);
+    if buffer.capacity() < length
+        || buffer.capacity() > capacity.max(x_mapped_capacity(X_MAPPED_FROM, 1))
+    {
         // The old contents are not kept: the old block is freed first, then a new one, not a copy.
         drop(std::mem::take(buffer));
         *buffer = Vec::with_capacity(capacity);
@@ -20235,12 +20242,16 @@ mod tests {
             (offsets, at - 1)
         };
         let (long, mid) = (vec![b'G'; 3 << 20], vec![b'c'; 1 << 20]);
-        let batches: [Vec<&[u8]>; 5] = [
+        let huge = vec![b'T'; 17 << 20];
+        let batches: [Vec<&[u8]>; 8] = [
             vec![&b"ACGTTGCAAC"[..], &b"acgtnRYKMSWBDHVNu-acgt"[..]],
             vec![&b"A"[..]],
             vec![&long[..], &b"TTTT"[..]],
             vec![&mid[..], &b"GA"[..]],
             vec![&b"GGGGCCCCTTTTAAAAccgg*0"[..], &b""[..], &b"CA"[..]],
+            vec![&long[..]],
+            vec![&huge[..], &b"G"[..]],
+            vec![&b"ACGT"[..]],
         ];
         let mut keep = Vec::new();
         let mut blocks = Vec::new();
@@ -20269,11 +20280,16 @@ mod tests {
             }
         }
         if crate::utils::x_mapped::X_MAPPED_ALLOCATOR {
-            // the 3 MiB batch made a mapped buffer, the shorter one of the same class wrote the same
-            // block again, and the batch below 1 MiB took a block of its own
+            // the 3 MiB batch made a mapped buffer; the shorter one of the same class, the batch
+            // below 1 MiB and the next 3 MiB batch wrote the same block again (it is not mapped
+            // again); the 34 MiB batch, past the ceiling, took a block of its own length, and the
+            // short batch after it did not keep that block
             assert!(blocks[2].1 > 32 << 20);
             assert_eq!(blocks[3], blocks[2]);
-            assert!(blocks[4].1 < 1 << 20);
+            assert_eq!(blocks[4], blocks[2]);
+            assert_eq!(blocks[5], blocks[2]);
+            assert!(blocks[6].1 > blocks[2].1);
+            assert!(blocks[7].1 < 1 << 20);
         }
     }
 

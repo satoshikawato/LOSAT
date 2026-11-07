@@ -33,6 +33,11 @@ FASTA files:
   defline). `bx_gap_comment_q.fna` is the same after a comment, a blank line and a `#` line
   (`db.bxgap.comment.6`: NCBI names line 4), and `bx_gap_bad_q.fna` starts with `>?abc` instead
   (`db.bxgap.bad.6`: NCBI stops at line 1 before it parses the gap).
+- The rows `db.bxgapline.*` search `bslice` with `LOSAT/tests/fasta/outfmt0/bx_gapline_q.fna`, the query of the
+  `-subject` rows `gapline.blastx.*` of `outfmt0_manifest.tsv`: gap lines of bad sizes (`>?abc` before any
+  defline, `>?0`, `>?unk`, `>?99999999999`, `>?-5` as a record's last line), text after the size and unknown,
+  conflicting or unclosed modifiers, which NCBI reads as `ParseGapLine` does (a gap of 1 after `Bad gap size`,
+  warnings for the rest).
 - `p3.faa`: records p01, p03 and p08 of `LOSAT/tests/seqdb/prot.faa`, in that order.
 - `d1_q.faa`: D1, a hit that `-db` keeps and `-subject` drops. Two proteins of `LOSAT/tests/fasta/WSSV.faa`
   (YP_009220551.1 and YP_009220614.1: for each, NCBI `blastp -db paja -outfmt 6` prints 2 rows and

@@ -208,7 +208,7 @@ test('several runs; the next search is edited while one runs; separate searches 
   await expect(page.getByTestId('run-losat-bottom')).toHaveText('Run LOSAT (2 runs)');
   await submit(page);
   // The page goes to the results of the first run of the group.
-  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('run-3-option')).toHaveCount(1);
   await expect(page.getByTestId('run-2-option')).toContainText('query.fa vs a.fa');
   await expect(page.getByTestId('run-3-option')).toContainText('query.fa vs b.fa');
@@ -1291,7 +1291,7 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   await expect(page.getByTestId('results-job-title')).toHaveCount(0);
   // A started search shows no message: the page is on the run.
   await expect(page.getByTestId('search-message')).toHaveCount(0);
-  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
   await waitStatus(page, 2, 'completed');
 });
 

@@ -4,7 +4,7 @@
 // role's genetic code (BLASTX, TBLASTN, TBLASTX), the Job Title (query), then LOSAT's own parts: the
 // inputs with their records, and Combined / Separate. A file dropped anywhere on the block is
 // opened.
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type { DraftState, SearchDraft } from '../application/draft';
 import { groupSite, raceChoice } from '../application/source-race';
 import {
@@ -34,6 +34,20 @@ const program = computed(() => programById(props.state.program));
 const kind = computed(() => sequenceKind(program.value, props.role));
 const dragging = ref(false);
 const fileInput = ref<HTMLInputElement>();
+const openButton = ref<HTMLButtonElement>();
+const sourceItems = ref<HTMLElement>();
+
+/**
+ * Removes an input; the focus goes to the input that takes its place in the list, or to "Open FASTA
+ * files…" when it was the last one, and not to the page's body (WA2-AX-04).
+ */
+async function removeSource(key: string): Promise<void> {
+  const at = roleState.value.sources.findIndex((source) => source.key === key);
+  props.draft.removeSource(props.role, key);
+  await nextTick();
+  const buttons = sourceItems.value?.querySelectorAll<HTMLButtonElement>('.source-remove');
+  (buttons?.[Math.min(at, buttons.length - 1)] ?? openButton.value)?.focus();
+}
 
 /** The box's accessions, when it holds accessions only: "Fetch" brings their FASTA into it. */
 const accessions = computed(() => accessionLines(roleState.value.paste));
@@ -261,13 +275,15 @@ function onDrop(event: DragEvent): void {
     <div class="param-row file-row">
       <span class="param-label">Or, upload file</span>
       <div class="param-control dropzone" :data-testid="`${role}-dropzone`">
-        <button type="button" :data-testid="`${role}-open`" @click="fileInput?.click()">Open FASTA files…</button>
+        <button ref="openButton" type="button" :data-testid="`${role}-open`" @click="fileInput?.click()">Open FASTA files…</button>
+        <!-- Opened by the button: out of the accessibility tree, where it was a second button (WA2-AX-13). -->
         <input
           ref="fileInput"
           class="visually-hidden"
           type="file"
           multiple
           tabindex="-1"
+          aria-hidden="true"
           :aria-label="`Open ${title.toLowerCase()} FASTA files`"
           :data-testid="`${role}-files`"
           @change="onFiles"
@@ -297,7 +313,7 @@ function onDrop(event: DragEvent): void {
       </div>
     </div>
 
-    <ul v-if="roleState.sources.length > 0" class="sources">
+    <ul v-if="roleState.sources.length > 0" ref="sourceItems" class="sources">
       <SourceCard
         v-for="source in roleState.sources"
         :key="source.key"
@@ -306,6 +322,7 @@ function onDrop(event: DragEvent): void {
         :role="role"
         :source="source"
         :index="roleState.sources.indexOf(source)"
+        @remove="removeSource(source.key)"
       />
     </ul>
 

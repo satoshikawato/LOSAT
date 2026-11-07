@@ -4339,8 +4339,8 @@ fn search_query_batch<S: TbxScore>(
             threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
             window,
             subjects,
-            // A word length other than 3 takes the reference frame loop: the units build and
-            // walk 3-letter words (`TbxScore::word`).
+            // A word length other than 3 takes the reference frame loop: the units build 3-letter
+            // words (`TbxScore::word`).
             debugging: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
@@ -4679,8 +4679,8 @@ fn search_query_batch<S: TbxScore>(
             query_length,
             diag_array_size,
             subjects,
-            // A word length other than 3 takes the reference frame loop: the units build and
-            // walk 3-letter words (`TbxScore::word`).
+            // A word length other than 3 takes the reference frame loop: the units build 3-letter
+            // words (`TbxScore::word`).
             debugging: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled

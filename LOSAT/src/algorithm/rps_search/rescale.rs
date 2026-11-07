@@ -5,8 +5,8 @@
 use anyhow::{bail, Result};
 
 use super::blast_nint;
-use crate::core::blast_stat::composition::calc_lambda_of_score_probs;
 use crate::core::blast_util::BLASTAA_SIZE;
+use crate::stats::karlin_calc::calc_lambda_of_score_probs;
 
 /// `BLAST_SCORE_MIN` (`INT2_MIN`).
 const BLAST_SCORE_MIN: i32 = i16::MIN as i32;

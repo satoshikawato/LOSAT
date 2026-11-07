@@ -104,6 +104,9 @@ fn main() -> Result<()> {
     if startup_trace {
         eprintln!("[startup] after clap parse");
     }
+    // The search programs write an error's text before its error archive, where NCBI's
+    // `CATCH_ALL` posts it (`cli::post_native_error`).
+    LOSAT::cli::post_errors_in_run();
 
     match cli.command {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-281

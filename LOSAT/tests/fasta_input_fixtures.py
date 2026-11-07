@@ -886,8 +886,8 @@ def extra_rows() -> list[Row]:
     # its own input error, `BLAST query/options error: Query input doesn't start with a defline or comment, line N` with
     # the NUL of `ends` (blast_input.cpp:209-214); the queries keep the reader's `BLAST query error` (GetNextSeqBatch);
     # the subjects are read first. Outfmt 0 shows what is written before the error (a query's report header). The rows
-    # without -parse_deflines are the variants' own. (Outfmt 11's error archive is in tests/parse_deflines_subject.rs:
-    # LOSAT writes it before the error on standard error, NCBI after, which the `2>&1` stream of these rows sees.)
+    # without -parse_deflines are the variants' own. Outfmt 11 shows the order of the error and the error archive in the
+    # `2>&1` stream: NCBI's CATCH_ALL posts the error (standard error) before PrintErrorArchive writes the archive.
     pd = "-parse_deflines"
     for program, task in ALL_PROGRAMS:
         if task == "blastn":
@@ -895,10 +895,10 @@ def extra_rows() -> list[Row]:
         q, s = base_pair(program)
         qkind, skind = kind_of(program, "q"), kind_of(program, "s")
         for name in ("nodef_seq_only", "nodef_then_defline", "nodef_ws_lead", "nodef_blank_first", "nodef_comment_first"):
-            fmts = (6, 0) if name in ("nodef_seq_only", "nodef_comment_first") else (6,)
+            fmts = (6, 0, 11) if name in ("nodef_seq_only", "nodef_comment_first") else (6,)
             add(f"pd_{name}_s", program, task, q, variant_file(name, "s", skind), args=pd, fmts=fmts)
         for name in ("nodef_seq_only", "nodef_comment_first"):
-            add(f"pd_{name}_q", program, task, variant_file(name, "q", qkind), s, args=pd, fmts=(6, 0))
+            add(f"pd_{name}_q", program, task, variant_file(name, "q", qkind), s, args=pd, fmts=(6, 0, 11))
         add("pd_nodef_seq_only_qs", program, task, variant_file("nodef_seq_only", "q", qkind),
             variant_file("nodef_comment_first", "s", skind), args=pd, fmts=(6,))
         add("pd_nodef_seq_only_s_stdin", program, task, q, "-", args=pd, fmts=(6,),

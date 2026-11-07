@@ -513,45 +513,6 @@ pub fn report_count(value: &str) -> Result<usize, String> {
     nonnegative_ncbi_integer(value).map(|n| n as usize)
 }
 
-/// A discontiguous megablast template type: `coding`, `optimal` or `coding_and_optimal`.
-///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:688-693,708-714
-/// ```c
-/// /// Value to specify coding template type
-/// const char* kTemplType_Coding = "coding";
-/// /// Value to specify optimal template type
-/// const char* kTemplType_Optimal = "optimal";
-/// /// Value to specify coding+optimal template type
-/// const char* kTemplType_CodingAndOptimal = "coding_and_optimal";
-/// ...
-///     arg_desc.AddOptionalKey(kArgDMBTemplateType, "type",
-///                  "Discontiguous MegaBLAST template type",
-///                  CArgDescriptions::eString);
-///     arg_desc.SetConstraint(kArgDMBTemplateType, &(*new CArgAllow_Strings,
-///                                                   kTemplType_Coding,
-///                                                   kTemplType_Optimal,
-///                                                   kTemplType_CodingAndOptimal));
-/// ```
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:747-752
-/// ```c
-///         if (type == kTemplType_Coding) {
-///             temp_type = eMBWordCoding;
-///         } else if (type == kTemplType_Optimal) {
-///             temp_type = eMBWordOptimal;
-///         } else if (type == kTemplType_CodingAndOptimal) {
-///             temp_type = eMBWordTwoTemplates;
-/// ```
-pub fn blastn_template_type(
-    value: &str,
-) -> Result<crate::algorithm::blastn::disc_lookup::DiscWordType, String> {
-    use crate::algorithm::blastn::disc_lookup::DiscWordType;
-    match value {
-        "coding" => Ok(DiscWordType::Coding),
-        "optimal" => Ok(DiscWordType::Optimal),
-        "coding_and_optimal" => Ok(DiscWordType::TwoTemplates),
-        _ => Err("expected one of coding, coding_and_optimal, optimal".into()),
-    }
-}
 /// A discontiguous megablast template length: 16, 18 or 21.
 ///
 /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:719-727

@@ -42,7 +42,6 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
-use crate::core::blast_stat::compute_blosum62_ideal_karlin_params;
 use crate::core::composition_adjustment::adjust_scores::{
     build_matrix_info, BlastCompositionWorkspace,
 };
@@ -53,6 +52,7 @@ use crate::report::{
     write_blastp_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport, OutputConfig,
     OutputFormat, PairwiseConfig, PairwiseHit, ReportContext,
 };
+use crate::stats::compute_blosum62_ideal_karlin_params;
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{
     blast_spouge_etos, blast_spouge_stoe, lookup_protein_gumbel_params, lookup_protein_params,
@@ -122,6 +122,7 @@ use super::kappa::{
     reset_blastp_kappa_range_counters, x_newton_lanes_prefetch_matches, BlastRedoAlignParams,
     BlastpKappaSubjectRangeCache, BlastpTraceHspTarget,
 };
+use super::protein_query_split::protein_query_split_sizes;
 use super::x_prelim_compact::{
     x_expand_hit_list, x_expanded_lists, x_finish_compact_lists, XPrelimHsp,
 };
@@ -1755,7 +1756,7 @@ fn ncbi_compressed_lookup_tables(
     if query_chunk {
         return Ok(vec![0..locations.len()]);
     }
-    let sizes = crate::blastinput::app::protein_query_split_sizes("BLASTP", 10000)?;
+    let sizes = protein_query_split_sizes("BLASTP", 10000)?;
     // The first lookup segment of query `q_idx` or of a query after it.
     let first_segment = |q_idx: usize| {
         let context = contexts.partition_point(|context| (context.q_idx as usize) < q_idx);
@@ -5062,8 +5063,12 @@ pub fn run(
         match &result {
             Err(error) => {
                 if let Some(lines) = super::archive::error_lines(error, false) {
-                    let _ =
-                        crate::report::archive::write_error_archive(handle, &lines, &mut stream);
+                    let _ = crate::report::archive::write_error_archive_after_post(
+                        handle,
+                        error,
+                        &lines,
+                        &mut stream,
+                    );
                 }
             }
             Ok(()) => {
@@ -5115,7 +5120,12 @@ fn write_run_error_archive(
     };
     if let Ok(out_file) = open_out_file(args) {
         let mut report = cli_report_stream(out_file);
-        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut report);
+        let _ = crate::report::archive::write_error_archive_after_post(
+            handle,
+            error,
+            &lines,
+            &mut report,
+        );
         let _ = std::io::Write::flush(&mut report);
     }
 }
@@ -6033,7 +6043,7 @@ fn psiblast_stop_at_invalid_query(
     };
     let (input_start, searched_start) = batches.starts[batch];
     let query_length = searched_queries[searched_start].seq().len();
-    let error = match crate::blastinput::app::protein_query_split_sizes(args.app.name(), 10000) {
+    let error = match protein_query_split_sizes(args.app.name(), 10000) {
         // A PSSM query (`-in_pssm`, never split: `check_in_pssm_options`) whose letters give no
         // Karlin-Altschul parameters: NCBI's psiblast crashes (2.17.0, exit 139) where
         // `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc`
@@ -7021,7 +7031,7 @@ fn x_block_search_refuses_nothing(
     if crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP").is_err() {
         return false;
     }
-    let Ok(sizes) = crate::blastinput::app::protein_query_split_sizes("BLASTP", 10000) else {
+    let Ok(sizes) = protein_query_split_sizes("BLASTP", 10000) else {
         return false;
     };
     let searched_batches = || {
@@ -7559,7 +7569,7 @@ fn search_split_query_batches(
     if args.rps_search.is_some() {
         return Ok(());
     }
-    let sizes = crate::blastinput::app::protein_query_split_sizes(args.app.name(), 10000)?;
+    let sizes = protein_query_split_sizes(args.app.name(), 10000)?;
     let batch_size = args.query_batch_size()?;
     // The batches count whole records (`seq_range::QueryInput::batches`); a batch is
     // split by the lengths of its searched queries (their intervals with `-query_loc`).

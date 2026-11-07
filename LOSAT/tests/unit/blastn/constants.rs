@@ -1,20 +1,12 @@
 //! Unit tests for blastn/constants.rs
 
 use LOSAT::algorithm::blastn::constants::*;
-use LOSAT::seed::aa_word_finder::MAX_HITS_PER_KMER;
 
 #[test]
 fn test_x_drop_constants() {
     // X-drop values should match NCBI BLAST defaults
     assert_eq!(X_DROP_UNGAPPED, 20);
     assert_eq!(X_DROP_GAPPED_FINAL, 100);
-}
-
-#[test]
-fn test_max_hits_per_kmer() {
-    // MAX_HITS_PER_KMER should limit memory usage
-    const { assert!(MAX_HITS_PER_KMER > 0) };
-    assert_eq!(MAX_HITS_PER_KMER, 200);
 }
 
 #[test]

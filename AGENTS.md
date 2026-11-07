@@ -426,10 +426,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   ├── blastdbcmd/        # `losat blastdbcmd`: -info and sequence retrieval
 │   ├── utils/             # DUST, SEG, WindowMasker, matrices, genetic codes, threading, switches (`xswitch`)
 │   ├── sequence/          # Sequence storage and 2-bit packed nucleotides
-│   ├── seed/              # Word finders; no program calls it (one unit test reads a constant)
 │   ├── config/            # Scoring matrix and scoring specs (`ScoringMatrix`, `*ScoringSpec`)
-│   ├── align/             # Banded alignment and traceback; no program calls it
-│   ├── post/              # Chaining and filtering; no program calls it
 │   ├── web_api.rs         # wasm32 only: Wasm ABI v1 exports and their dispatch to the programs
 │   └── web_api/           # ABI v1 searches of BLASTN, BLASTP, TBLASTX and their input reader
 └── tests/

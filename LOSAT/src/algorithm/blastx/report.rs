@@ -3,6 +3,7 @@ use super::{
     args::ResolvedOptions, database::ReportedSubjects, input::FastaRecord, results::Hsp,
     runtime::BatchResults,
 };
+use crate::algorithm::tblastx::report::display_codon;
 use crate::{
     common::GapEditOp,
     report::outfmt6::{
@@ -32,7 +33,6 @@ use crate::{
 //     retval('U', 'C') = retval('C', 'C');
 //     retval('C', 'U') = retval('C', 'C');
 // ```
-use crate::algorithm::tblastx::report::display_codon;
 use crate::utils::matrix::protein_display_score;
 use anyhow::{ensure, Result};
 use std::{io::Write, path::Path};

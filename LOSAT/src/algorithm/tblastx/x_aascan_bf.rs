@@ -23,7 +23,7 @@
 //! `X_SCAN_BF_SLACK` entries after `array_size`; the entries past the returned count are not
 //! part of the result.
 //!
-//! The unit path of every search scans with this loop where `x_scan_byte.rs` does not (the former
+//! The unit path of every search scans with this loop where `tblastn/x_scan_byte.rs` does not (the former
 //! switch `LOSAT_X_TBNSCANBF` graduated on 2026-10-26). With `LOSAT_X_STATS` set,
 //! `main` prints `[X_STATS] TBNSCANBF units= calls=` at exit (the scan units of the unit path
 //! scanned by this loop, and the scan calls they took; a call more than the unit's ranges is a stop

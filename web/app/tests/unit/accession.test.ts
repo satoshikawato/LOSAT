@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { groupSite, SourceRace, type RaceStanding } from '../../src/application/source-race';
-import { accessionLines, fetchGroups, RACE_RECORDS, servingSources, sourceList, unserved } from '../../src/domain/accession';
+import {
+  accessionLines,
+  accessionsOnALine,
+  fetchGroups,
+  RACE_RECORDS,
+  servingSources,
+  sourceList,
+  unserved,
+} from '../../src/domain/accession';
 import { BrowserAccessionFetcher, fetchUrl } from '../../src/infra/browser/accession-fetcher';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 
@@ -22,6 +30,16 @@ describe('accessionLines', () => {
   it('takes nothing else: FASTA, a bare sequence, a gi, an empty box, a mix', () => {
     for (const text of ['>NR_074540.1\nACGT', 'ACGTACGT', 'MKVLAAGIV', '12345678', '', '\n', 'NR_074540.1\nACGT']) {
       expect(accessionLines(text)).toBeUndefined();
+    }
+  });
+
+  it('finds accessions that are not one per line (WA2-OP-04), as typed', () => {
+    expect(accessionsOnALine('AB000001.1 MH011443.1')).toEqual(['AB000001.1', 'MH011443.1']);
+    expect(accessionsOnALine('ab000001.1,MH011443.1\n')).toEqual(['ab000001.1', 'MH011443.1']);
+    expect(accessionsOnALine(' NR_074540.1, \tP12345 ,\r\nQ9Y261\n\nAB000001.1,')).toEqual(['NR_074540.1', 'P12345', 'Q9Y261', 'AB000001.1']);
+    // One per line is accessionLines'; anything but accessions (a gi, a sequence, a defline) is FASTA's.
+    for (const text of ['AB000001.1\nMH011443.1', 'AB000001.1', '', ' , ', 'AB000001.1 12345678', 'AB000001.1 ACGT', '>q AB000001.1,MH011443.1']) {
+      expect(accessionsOnALine(text), text).toBeUndefined();
     }
   });
 

@@ -66,6 +66,18 @@ export function accessionLines(text: string): readonly string[] | undefined {
 }
 
 /**
+ * The accessions of a text that has only accessions but not one per line (separated by white
+ * space or commas, as lists are often copied), as typed; undefined for any other text, and for a
+ * text that accessionLines takes. NCBI's reader cannot read such a line (WA2-OP-04): the source's
+ * card offers to put each accession on its own line, where Fetch takes them.
+ */
+export function accessionsOnALine(text: string): readonly string[] | undefined {
+  if (accessionLines(text) !== undefined) return undefined;
+  const words = text.split(/[\s,]+/).filter((word) => word !== '');
+  return words.length > 0 && words.every((word) => ACCESSION.test(word.toUpperCase())) ? words : undefined;
+}
+
+/**
  * Why a source cannot serve an accession of a kind, without asking it, or undefined (measured on
  * 2026-11-03): ENA has no RefSeq records, UniProt has only its own accessions, only GenBase has
  * GenBase's, and GenBase has no UniProt accessions (an empty answer).

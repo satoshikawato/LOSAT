@@ -249,6 +249,38 @@ test('a group starts at the race order of the tab, and keeps the site its record
   );
 });
 
+test('accessions on one line are put one per line by one press, for Fetch (WA2-OP-04)', async ({ page }) => {
+  const away = await stubSources(page);
+  await openSearch(page);
+  // Accessions on one line, separated by white space or commas, cannot be read (NCBI's reader
+  // error): one press puts each on its own line, where Fetch takes them.
+  for (const text of ['AB000001.1 MH011443.1', 'AB000001.1,MH011443.1', 'ab000001.1, MH011443.1\n']) {
+    await paste(page, 'query', text);
+    await expect(page.getByTestId('query-source-0-error')).toContainText('This input cannot be read: ');
+    await expect(page.getByTestId('query-source-0-split-accessions')).toHaveText('Put each accession on its own line');
+    await expect(page.getByTestId('query-source-0-add-defline')).toHaveCount(0);
+    await expect(page.getByTestId('query-fetch-row')).toHaveCount(0);
+  }
+  await page.getByTestId('query-source-0-split-accessions').click();
+  await expect(page.getByTestId('query-input')).toHaveValue('ab000001.1\nMH011443.1');
+  await expect(page.getByTestId('query-fetch-row')).toBeVisible();
+  await expect(page.getByTestId('query-source-0')).toHaveCount(0);
+  // The card goes; the focus goes to the Fetch, not to the page's body.
+  await expect(page.getByTestId('query-fetch')).toBeFocused();
+  // A box that no one site serves: the focus goes to the first group's Fetch.
+  await program(page, 'blastp');
+  await paste(page, 'subject', 'C_AA004835.1, P12345');
+  await page.getByTestId('subject-source-0-split-accessions').press('Enter');
+  await expect(page.getByTestId('subject-input')).toHaveValue('C_AA004835.1\nP12345');
+  await expect(page.getByTestId('subject-fetch-group-0-button')).toBeFocused();
+  await program(page, 'blastn');
+  // A box with anything but accessions keeps the defline's button only.
+  await paste(page, 'query', 'AB000001.1 MH011443.1 ACGT-1');
+  await expect(page.getByTestId('query-source-0-split-accessions')).toHaveCount(0);
+  await expect(page.getByTestId('query-source-0-add-defline')).toBeVisible();
+  expect(away).toEqual([]);
+});
+
 test('a first line that NCBI BLAST+ would fetch as a Seq-id before other text names the Fetch of accessions (WA2-OP-04)', async ({
   page,
 }) => {
@@ -266,6 +298,11 @@ test('a first line that NCBI BLAST+ would fetch as a Seq-id before other text na
     await paste(page, role, text);
     await expect(page.getByTestId(`${role}-source-0-error`)).toHaveText(reason(line));
     await expect(page.getByTestId(`${role}-source-0-add-defline`)).toBeVisible();
+    await expect(page.getByTestId(`${role}-source-0-split-accessions`)).toHaveCount(0);
   }
+  // Accessions only, more than one on a line: the reason and the press that splits them.
+  await paste(page, 'subject', 'NR_074540.1\nAB000001.1 MH011443.1');
+  await expect(page.getByTestId('subject-source-0-error')).toHaveText(reason('NR_074540.1'));
+  await expect(page.getByTestId('subject-source-0-split-accessions')).toBeVisible();
   expect(away).toEqual([]);
 });

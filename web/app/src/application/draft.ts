@@ -19,6 +19,7 @@
 // text and its subject set the only subject source.
 import {
   accessionLines,
+  accessionsOnALine,
   FETCH_ACCESSION_LIMIT,
   FETCH_BYTE_LIMIT,
   FETCH_SOURCES,
@@ -370,6 +371,15 @@ export class SearchDraft {
    */
   addDefline(role: InputRole): void {
     this.setPaste(role, `>pasted_${role}\n${this.role(role).paste.trimStart()}`);
+  }
+
+  /**
+   * Puts each accession of a pasted text of accessions on its own line (WA2-OP-04), where Fetch
+   * takes them; the user asks for it.
+   */
+  splitAccessions(role: InputRole): void {
+    const accessions = accessionsOnALine(this.role(role).paste);
+    if (accessions !== undefined) this.setPaste(role, accessions.join('\n'));
   }
 
   /** Removes the byte order mark (U+FEFF) that a pasted text starts with, which NCBI's reader cannot read (WA-IN-05). */

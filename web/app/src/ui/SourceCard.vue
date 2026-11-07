@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // One input of a role: its name, its records, and what the engine's check says of it. The check's
 // verdict and the warnings are told to a screen reader when they change (WA2-AX-03), in the
-// card's words after its name; "Remove" asks the role's block, which moves the focus on.
+// card's words after its name; "Remove" and "Put each accession on its own line" ask the role's
+// block, which moves the focus on.
 import { computed, watch } from 'vue';
 import type { DraftSource, DraftState, SearchDraft } from '../application/draft';
 import { includedOf } from '../application/draft';
+import { accessionsOnALine } from '../domain/accession';
 import { duplicateIds } from '../domain/dataset';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
 import { looksLikeOtherKind } from '../domain/sequence-kind';
@@ -21,7 +23,7 @@ const props = defineProps<{
   source: DraftSource;
   index: number;
 }>();
-defineEmits<{ remove: [] }>();
+defineEmits<{ remove: []; splitAccessions: [] }>();
 
 const kind = computed(() => sequenceKind(programById(props.state.program), props.role));
 const unit = computed(() => residueUnit(kind.value));
@@ -36,14 +38,26 @@ const otherKind = computed(
 const otherKindName = computed(() => (kind.value === 'nucleotide' ? 'protein' : 'nucleotide'));
 const programLabel = computed(() => programById(props.state.program).label);
 const title = computed(() => (props.source.origin === 'paste' ? `Pasted sequences (${props.source.name})` : props.source.name));
+/** A pasted text of accessions that are not one per line, which cannot be read: Fetch takes them one per line (WA2-OP-04). */
+const splitsAccessions = computed(
+  () =>
+    props.source.origin === 'paste' && props.source.status === 'failed' && accessionsOnALine(props.state[props.role].paste) !== undefined,
+);
 /**
  * A pasted text that does not start with a defline and cannot be read (such as a first line that NCBI would fetch as a
- * Seq-id); a byte order mark has its own hint.
+ * Seq-id); a byte order mark and accessions on a line have their own hints.
  */
 const needsDefline = computed(() => {
   const text = props.state[props.role].paste.trimStart();
   const mark = props.source.lead !== undefined && 'mark' in props.source.lead;
-  return props.source.origin === 'paste' && props.source.status === 'failed' && !mark && text !== '' && !text.startsWith('>');
+  return (
+    props.source.origin === 'paste' &&
+    props.source.status === 'failed' &&
+    !mark &&
+    !splitsAccessions.value &&
+    text !== '' &&
+    !text.startsWith('>')
+  );
 });
 const refusedRecord = computed(() => (props.source.check?.state === 'refused' ? props.source.check.record : undefined));
 /** Why a source that starts with a byte order mark cannot be read (WA-IN-05); the engine's message is NCBI's. */
@@ -133,6 +147,11 @@ watch(verdict, (now) => {
     <p v-if="source.status === 'indexing'" class="muted"><LosatLoader />Reading the records…</p>
     <template v-else-if="source.status === 'failed'">
       <p class="error" :data-testid="`${testid}-error`">This input cannot be read: {{ source.error }}</p>
+      <p v-if="splitsAccessions" class="hint">
+        <button type="button" class="link" :data-testid="`${testid}-split-accessions`" @click="$emit('splitAccessions')">
+          Put each accession on its own line
+        </button>
+      </p>
       <p v-if="needsDefline" class="hint">
         <button type="button" class="link" :data-testid="`${testid}-add-defline`" @click="draft.addDefline(role)">
           Add the line "&gt;pasted_{{ role }}" before the sequence

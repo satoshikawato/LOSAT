@@ -513,39 +513,6 @@ pub fn report_count(value: &str) -> Result<usize, String> {
     nonnegative_ncbi_integer(value).map(|n| n as usize)
 }
 
-/// A BLASTN task: NCBI's blastn tasks (case-sensitive), of which LOSAT implements
-/// megablast, blastn, dc-megablast and blastn-short and rejects rmblastn (matrix scoring
-/// and masklevel) explicitly.
-///
-/// NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:211-222
-/// ```c
-/// CBlastOptionsFactory::GetTasks(ETaskSets choice /* = eAll */)
-/// {
-///     set<string> retval;
-///     if (choice == eNuclNucl || choice == eAll) {
-///         retval.insert("blastn");
-///         retval.insert("blastn-short");
-///         retval.insert("megablast");
-///         retval.insert("dc-megablast");
-///         retval.insert("vecscreen");
-///         // -RMH-
-///         retval.insert("rmblastn");
-/// ```
-/// NCBI reference: c++/src/algo/blast/blastinput/blastn_args.cpp:57-59
-/// ```c
-///     set<string> tasks
-///         (CBlastOptionsFactory::GetTasks(CBlastOptionsFactory::eNuclNucl));
-///     tasks.erase("vecscreen"); // vecscreen has its own program
-/// ```
-pub fn blastn_task(value: &str) -> Result<String, String> {
-    match value {
-        "megablast" | "blastn" | "dc-megablast" | "blastn-short" => Ok(value.to_string()),
-        "rmblastn" => Err(format!(
-            "the task {value} is not supported by LOSAT's BLASTN (use megablast, blastn, dc-megablast or blastn-short)"
-        )),
-        _ => Err("expected one of blastn, blastn-short, dc-megablast, megablast, rmblastn".into()),
-    }
-}
 /// A discontiguous megablast template type: `coding`, `optimal` or `coding_and_optimal`.
 ///
 /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:688-693,708-714
@@ -725,15 +692,6 @@ pub fn blastp_word_size(value: &str) -> Result<usize, String> {
     let n = positive_usize(value)?;
     if n < 2 {
         return Err("protein word_size must be >= 2".into());
-    }
-    Ok(n)
-}
-// NCBI aa lookup word size is resolved before lookup construction; LOSAT's
-// TBLASTX port currently constructs only 3-residue words (run_impl.rs).
-pub fn tblastx_word_size(value: &str) -> Result<usize, String> {
-    let n = positive_usize(value)?;
-    if n != 3 {
-        return Err("unsupported TBLASTX word_size: only 3 is implemented".into());
     }
     Ok(n)
 }
@@ -918,6 +876,10 @@ pub fn blastn_real(value: &str) -> Result<f64, String> {
 /// ```
 fn ncbi_threshold(value: &str, program: &str) -> Result<f64, String> {
     let threshold = ncbi_double(value, program)?;
+    #[expect(
+        clippy::neg_cmp_op_on_partial_ord,
+        reason = "NCBI accepts the value when `value >= m_MinValue` (blast_input_aux.hpp:111-112), so NaN fails; `threshold < 0.0` would accept NaN"
+    )]
     if !(threshold >= 0.0) {
         return Err("Illegal value, expected greater or equal to 0".into());
     }
@@ -1359,7 +1321,8 @@ mod tests {
 
 /// The `-task` of a program: `accepted` names are the choices (help and `describe` list
 /// them), a name in `rejected` is a task LOSAT does not implement and fails at the parse
-/// with the given message, and any other name is clap's invalid-value error.
+/// with the given message (clap's error for a value its parser refuses, as every other
+/// option's), and any other name is clap's invalid-value error.
 ///
 /// NCBI's `-task` is a `CArgAllowStringSet` (`blast_args.cpp:3158-3163`); the rejected
 /// names are NCBI tasks outside LOSAT's implementation.
@@ -1386,18 +1349,13 @@ impl clap::builder::TypedValueParser for TaskParser {
         value: &std::ffi::OsStr,
     ) -> Result<String, clap::Error> {
         let inner = clap::builder::PossibleValuesParser::new(self.accepted);
-        if let Some((_, message)) = self
+        if let Some(&(_, message)) = self
             .rejected
             .iter()
             .find(|(name, _)| value == std::ffi::OsStr::new(name))
         {
-            let name = arg.map_or_else(|| "--task".to_string(), ToString::to_string);
-            let value = value.to_string_lossy();
-            return Err(clap::Error::raw(
-                clap::error::ErrorKind::ValueValidation,
-                format!("invalid value '{value}' for '{name}': {message}"),
-            )
-            .with_cmd(command));
+            let refuse = move |_: &str| -> Result<String, String> { Err(message.to_string()) };
+            return clap::builder::TypedValueParser::parse_ref(&refuse, command, arg, value);
         }
         clap::builder::TypedValueParser::parse_ref(&inner, command, arg, value)
     }

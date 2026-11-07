@@ -5,7 +5,7 @@ use super::{
     parameters::{
         effective_lengths, ka_once_on, score_block, subject_parameters, ContextParameters,
     },
-    preliminary::{gapped, purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
+    preliminary::{purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
     query_setup::{batch_ranges, PreparedQueryBatch, BATCH_SIZE},
     reader_batch::{prepare_reader_batch, UnitPrep},
     seed::{word_finder_bx, BxLookup, Diagonals, InitHsp},
@@ -192,7 +192,10 @@ pub(crate) trait PreliminarySink {
 //             Int4 prot_length = 0;
 //             if (score_options->is_ooframe) {
 // ```
+// The sink of `search_preliminary` (the tests').
+#[cfg(test)]
 struct DiagnosticOnly;
+#[cfg(test)]
 impl PreliminarySink for DiagnosticOnly {}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:491-526
@@ -428,7 +431,10 @@ pub struct BatchStage {
 //
 //         Blast_HSPListSortByScore(hsp_list);
 // ```
-pub fn search_preliminary(
+// Only the tests call it (not `pub`: a subject's `lowercase_masks` past its letters would give the
+// scan ranges outside the subject).
+#[cfg(test)]
+pub(crate) fn search_preliminary(
     records: &[FastaRecord],
     subjects: &[FastaRecord],
     options: &ResolvedOptions,
@@ -1734,7 +1740,7 @@ fn compute_subject(
             batch,
             params,
             options,
-            &encoded,
+            encoded,
             lookup,
             diagonals,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:494-500
@@ -1764,7 +1770,7 @@ fn compute_subject(
             batch,
             params,
             options,
-            &encoded,
+            encoded,
             &initial,
             xdrop,
             &mut |h, contained| {

@@ -37,7 +37,6 @@ use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
 };
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
-use crate::report::seqid::SeqId;
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 use crate::stats::tables::KarlinParams;
 
@@ -162,20 +161,30 @@ pub(crate) fn refuse_irregular_query() -> Result<()> {
 /// ends the scan: the run reads the file again and fails there as it always did, after the
 /// archives of the batches before it (NCBI writes them), so the titles of the batches the reader
 /// completed before the error are checked; the records of the batch the error interrupts are
-/// never written and need no check. The file must be a regular file (`query_is_regular`). The
-/// records are cut to `range` as the search cuts them: a record the range skips is never
-/// written and is not checked.
+/// never written and need no check. The file must be a regular file (`query_is_regular`). It is
+/// read as the search reads it (`settings`: under `-parse_deflines`, a first line that is not a
+/// defline is the reader error), and the records are cut to `range` as the search cuts them: a
+/// record the range skips is never written and is not checked. It keeps no defline, so LOSAT's
+/// refusal of a Seq-id range in a defline (`refuse_range_in_archive`, which the search with the
+/// archive makes) does not stop it, and a later title may be refused first: both refusals come
+/// before any byte, and keeping the deflines would keep whole records under `-query_loc`. A
+/// batch size of 0 reads no query (NCBI's first batch is empty and the search stops at it):
+/// nothing is checked.
 pub(crate) fn prescan_query_titles(
     file: &std::fs::File,
+    settings: &super::input::QueryStreamSettings,
     lowercase: bool,
     batch_size: usize,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
 ) -> Result<()> {
     use std::io::Seek;
+    if batch_size == 0 {
+        return Ok(());
+    }
     // A second handle on the open file (a `.gz` query is an unnamed inflated file that no path
     // reaches, `input_files::open_file_input`); the handles share one position, put back below.
     let start = (&*file).stream_position()?;
-    let mut stream = super::input::FastaStream::from_file(file.try_clone()?);
+    let mut stream = settings.stream_before_search(file.try_clone()?);
     let scanned = super::input::parse_fasta_stream_keeping(
         &mut stream,
         false,
@@ -230,7 +239,7 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
     let parameters = &batch.parameters[..6];
     let valid = parameters.iter().find(|parameters| parameters.valid);
     FirstContext {
-        karlin: valid.map(|parameters| (parameters.ungapped.clone(), gapped)),
+        karlin: valid.map(|parameters| (parameters.ungapped, gapped)),
         search_space: valid.map_or(0, |parameters| parameters.search_space),
         length_adjustment: valid.map_or(0, |parameters| i64::from(parameters.length_adjustment)),
         // An invalid context keeps `-searchsp`, else 0 (`effective_lengths`).

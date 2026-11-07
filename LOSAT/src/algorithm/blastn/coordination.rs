@@ -511,14 +511,12 @@ pub fn determine_scoring_params(args: &BlastnArgs) -> (i32, i32, i32, i32) {
 pub fn calculate_initial_scan_step(effective_word_size: usize, user_scan_step: usize) -> usize {
     if user_scan_step > 0 {
         user_scan_step
+    } else if effective_word_size >= 16 {
+        4
+    } else if effective_word_size >= 11 {
+        2
     } else {
-        if effective_word_size >= 16 {
-            4
-        } else if effective_word_size >= 11 {
-            2
-        } else {
-            1
-        }
+        1
     }
 }
 
@@ -740,8 +738,8 @@ fn choose_na_lookup_table(
         return (LookupTableKind::Mb, word_size);
     }
 
-    let (mut lut_kind, mut lut_width) = match word_size {
-        4 | 5 | 6 => (LookupTableKind::Small, word_size),
+    let (mut lut_kind, lut_width) = match word_size {
+        4..=6 => (LookupTableKind::Small, word_size),
         7 => {
             if approx_table_entries < 250 {
                 (LookupTableKind::Small, 6)
@@ -1151,7 +1149,7 @@ pub(crate) fn apply_dust_masking<L: QueryLetters + ?Sized>(
 
 /// Build lookup tables based on configuration. `x_keep`: the batch loop's keep of
 /// LOSAT_X_MBLUTKEEP for the megablast table (`lookup::x_mb_lut_keep`), `None` elsewhere.
-pub fn build_lookup_tables<R: InputRecord>(
+pub(crate) fn build_lookup_tables<R: InputRecord>(
     config: &TaskConfig,
     args: &BlastnArgs,
     queries_blastna: &[&[u8]],

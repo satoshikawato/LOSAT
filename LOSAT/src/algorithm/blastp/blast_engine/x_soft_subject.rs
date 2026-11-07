@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use super::super::x_seed_fused::x_test_hit;
 use super::BlastpRuntimeLookup;
-use crate::algorithm::tblastn::archive::lowercase_runs;
+use crate::algorithm::common::masks::lowercase_runs;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::X_BLASTP_SOFT;

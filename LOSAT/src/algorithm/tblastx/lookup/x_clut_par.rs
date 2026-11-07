@@ -1,6 +1,7 @@
 //! EXPERIMENT (LOSAT_X_BPCLUT at more than one thread): the flat compressed lookup table of
 //! `x_clut_direct.rs` built by the search's thread pool. The table is the serial builder's
-//! (`x_try_build_flat_with_capacity`), slot for slot, at every thread count.
+//! (`x_try_build_flat_with_capacity`; for another matrix than BLOSUM62, `x_try_build_flat_of` with
+//! the matrix's words, item SC2b), slot for slot, at every thread count.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175
 //! ```c
@@ -63,6 +64,7 @@
 //!   first offset (a chunk's offsets lie within 2^16 of it): nothing is lost.
 //! - `TooLarge` (the reference builder runs) when the appends pass `x_max_appends`, as the serial
 //!   builder's bound; the reference then decides the table or the refusal.
+//!
 //! The cuts (chunks, stripes) depend on the thread count; by the above the table does not.
 //!
 //! With `LOSAT_X_BPLKPFLAT` the same passes are scheduled otherwise and the table's vectors may come
@@ -212,6 +214,49 @@ pub(super) fn x_try_build_flat_in_pool(
         X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
     }
     built
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+// `x_try_build_flat_in_pool`)
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// `x_try_build_flat_in_pool` with the words of the search matrix `matrix`, any but BLOSUM62 (item
+/// SC2b): the passes of rayon on fresh vectors (no spare vectors, extra tasks or build ahead, which
+/// are BLOSUM62's); `pool` has more than one thread.
+pub(super) fn x_try_build_flat_in_pool_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    pool: &SearchPool<'_>,
+) -> Option<XFlatBuild> {
+    let threads = pool.threads();
+    pool.install(|| {
+        x_try_build_flat_parallel_of(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            XParallelCuts {
+                overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                max_appends: None,
+                threads,
+                chunk_sizes: &[],
+                stripe_shift: None,
+                passes: XPasses::Rayon,
+                spare: None,
+                x_ahead: false,
+                stripe_fill: false,
+            },
+        )
+    })
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BPSTRIPEFILL switch once; it does not change any value NCBI
@@ -642,18 +687,11 @@ fn x_stripe_build(
     }
     // A cursor ends at the next cell's first slot; the cells of more than 5 offsets put o_k at
     // `x_emission_position(k, n)` (the serial builder's statements).
-    let mut appended: Vec<i32> = Vec::new();
     let mut begin = 0usize;
     for &end in &counts {
         let end = end as usize;
-        let n = (end - begin) as u32;
-        if n > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
-            let cell = &mut hits[begin..end];
-            appended.clear();
-            appended.extend_from_slice(cell);
-            for (k, &query_offset) in appended.iter().enumerate() {
-                cell[x_emission_position(k as u32, n) as usize] = query_offset;
-            }
+        if end - begin > COMPRESSED_HITS_PER_BACKBONE_CELL + 1 {
+            x_to_scan_order(&mut hits[begin..end]);
         }
         begin = end;
     }
@@ -665,8 +703,8 @@ fn x_stripe_build(
 }
 
 /// LOSAT_X_BPSTRIPEFILL: a thread's scratch for `x_stripe_fill`: the copy of the stripe's parts,
-/// the cells' counts (then cursors), the cells of more than 5 offsets, a cell's offsets.
-type XFillScratch = (Vec<u32>, Vec<u32>, Vec<u32>, Vec<i32>);
+/// the cells' counts (then cursors), the cells of more than 5 offsets.
+type XFillScratch = (Vec<u32>, Vec<u32>, Vec<u32>);
 
 // NCBI reference (598d8ae6): as `x_stripe_build` (blast_aalookup.c:787-849, :1197-1235)
 // ```c
@@ -695,7 +733,7 @@ fn x_stripe_fill(
         hits,
         pv,
     } = part;
-    let (copy, counts, overflowed, appended) = scratch;
+    let (copy, counts, overflowed) = scratch;
     let first = stripe << shift;
     counts.clear();
     counts.resize((backbone_size - first).min(1 << shift), 0);
@@ -767,13 +805,7 @@ fn x_stripe_fill(
         let cell = cell as usize;
         let begin = (starts[cell] - base) as usize;
         let end = counts[cell] as usize;
-        let n = (end - begin) as u32;
-        let cell_hits = &mut hits[begin..end];
-        appended.clear();
-        appended.extend_from_slice(cell_hits);
-        for (k, &query_offset) in appended.iter().enumerate() {
-            cell_hits[x_emission_position(k as u32, n) as usize] = query_offset;
-        }
+        x_to_scan_order(&mut hits[begin..end]);
     }
     XStripeCounts {
         nonempty,
@@ -798,6 +830,84 @@ fn x_try_build_flat_parallel_with(
     tables: &[std::ops::Range<usize>],
     cuts: XParallelCuts<'_>,
 ) -> Option<XFlatBuild> {
+    x_flat_parallel_on(
+        Blosum62Compressed,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        cuts,
+        |capacity| {
+            x_try_build_flat_with_capacity(
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                capacity,
+                X_COUNT_CHUNK,
+            )
+        },
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310 (see
+// `x_clut_direct::x_tbn_build_compressed_lookup_of`)
+// ```c
+//     new_alphabet = SCompressedAlphabetNew(sbp,
+//                                 lookup->compressed_alphabet_size,
+//                                 kMatrixScale);
+// ```
+/// `x_try_build_flat_parallel_with` with the words of the search matrix `matrix`, any but BLOSUM62
+/// (`build_compressed_score_matrix`, item SC2b): the same passes, and the serial builder of the
+/// matrix's words (`x_try_build_flat_of`) where the parallel build takes the serial one.
+fn x_try_build_flat_parallel_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    cuts: XParallelCuts<'_>,
+) -> Option<XFlatBuild> {
+    x_flat_parallel_on(
+        matrix,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        cuts,
+        |capacity| {
+            x_try_build_flat_of(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                capacity,
+                X_COUNT_CHUNK,
+            )
+        },
+    )
+}
+
+// The body of both builders above, so that BLOSUM62's keeps its constant matrix (as
+// `x_flat_with_capacity_of`); `serial` is the serial builder of the same words, with the capacity.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn x_flat_parallel_on<S: CompressedScores>(
+    scores: S,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    cuts: XParallelCuts<'_>,
+    serial: impl FnOnce(usize) -> Option<XFlatBuild>,
+) -> Option<XFlatBuild> {
     let header = XHeader::new(word_size)?;
     let backbone_size = header.backbone_size;
     let largest_pv_shift = x_largest_pv_shift(backbone_size);
@@ -806,17 +916,9 @@ fn x_try_build_flat_parallel_with(
         // spare's vectors): a build ahead would allocate its table here, on the pool thread. This
         // is unreachable for blastp-fast's compressed backbones (759,375 cells for word size 5,
         // far below 2^32), and the table would have the same values.
-        return x_try_build_flat_with_capacity(
-            word_size,
-            scaled_threshold,
-            query,
-            locations,
-            tables,
-            cuts.overflow_cell_capacity,
-            X_COUNT_CHUNK,
-        );
+        return serial(cuts.overflow_cell_capacity);
     }
-    let matrix = build_blosum62_compressed_score_matrix(header.alphabet)?;
+    let matrix = scores.score_matrix(header.alphabet)?;
     let info = CompressedNeighborInfo::new(&matrix, header.alphabet);
     let words = XWords::new(&header, scaled_threshold, &matrix, &info);
     let threads = cuts.threads.max(1);
@@ -925,9 +1027,7 @@ fn x_try_build_flat_parallel_with(
         x_ahead_pv = cuts
             .spare
             .and_then(|spare| spare.x_room_for(backbone_size + 1, total, pv_words));
-        if x_ahead_pv.is_none() {
-            return None;
-        }
+        x_ahead_pv.as_ref()?;
     }
     let mut pv = if pv_in_stripes {
         match x_ahead_pv.take() {
@@ -1062,14 +1162,14 @@ fn x_try_build_flat_parallel_with(
             .sum();
         if cells > cuts.overflow_cell_capacity {
             let words_before = range.start > 0;
-            let refused = !(words_before
-                && !x_table_fills_banks(
+            let refused = !words_before
+                || x_table_fills_banks(
                     &words,
                     backbone_size,
                     query,
                     &locations[range.clone()],
                     cuts.overflow_cell_capacity,
-                ));
+                );
             if refused {
                 return Some(XFlatBuild::Refused);
             }
@@ -1341,6 +1441,220 @@ mod tests {
             }
         }
         assert!(overflow_seen, "cells with overflow lists");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310
+    // ```c
+    //     new_alphabet = SCompressedAlphabetNew(sbp,
+    //                                 lookup->compressed_alphabet_size,
+    //                                 kMatrixScale);
+    // ```
+    // Every search matrix but BLOSUM62 and IDENTITY (item SC2b): random queries of few letters, NCBI's
+    // tables of several batches and split batches, word size 5 with capacities around each table's
+    // overflow cells, at 2, 3 and 7 threads with even and uneven chunks. The pool's build of the
+    // matrix's words gives the serial builder's table of those words (`x_try_build_flat_of`) slot
+    // for slot, which is the reference's cell by cell, or refuses where both refuse; a table of the
+    // matrix's words is not BLOSUM62's. BLOSUM45 and PAM30 also at word size 6.
+    #[test]
+    fn parallel_tables_of_each_matrix_equal_its_serial_tables() {
+        let mut rng = XorShift(0x1f83_d9ab_fb41_bd6b);
+        let (mut built_seen, mut refused_seen) = (0usize, 0usize);
+        let (mut overflow_seen, mut differs_seen) = (false, false);
+        let cuts = |threads, capacity, chunk_sizes| XParallelCuts {
+            overflow_cell_capacity: capacity,
+            max_appends: None,
+            threads,
+            chunk_sizes,
+            stripe_shift: None,
+            passes: XPasses::Rayon,
+            spare: None,
+            x_ahead: false,
+            stripe_fill: false,
+        };
+        for matrix in ScoringMatrix::ALL {
+            if matches!(matrix, ScoringMatrix::Blosum62 | ScoringMatrix::Identity) {
+                continue;
+            }
+            let compressed = CompressedScores::score_matrix(matrix, 15).expect("compressed matrix");
+            for round in 0..3 {
+                let threshold = [1100, 1600, 2000][round];
+                let lengths: Vec<usize> =
+                    (0..2 + rng.below(4)).map(|_| 5 + rng.below(250)).collect();
+                let (query, locations, first) =
+                    queries(&mut rng, &lengths, &FEW_LETTERS, round % 2);
+                let mut tables = Vec::new();
+                let mut q = 0;
+                while q < lengths.len() {
+                    let end = (q + 1 + rng.below(3)).min(lengths.len());
+                    if rng.below(4) != 0 {
+                        tables.push(first[q]..first[end]);
+                    }
+                    q = end;
+                }
+                let mut capacities = vec![1usize, NCBI_OVERFLOW_CELL_CAPACITY];
+                for table in &tables {
+                    let mut own =
+                        BlastCompressedAaLookupTable::new(5, 0.0).expect("compressed lookup");
+                    own.threshold = threshold;
+                    own.overflow_cell_capacity = usize::MAX;
+                    own.add_neighboring_words(&compressed, &query, &locations[table.clone()]);
+                    let cells = own.overflow_cells.len();
+                    capacities.extend([cells.saturating_sub(1), cells, cells + 1]);
+                }
+                capacities.retain(|&capacity| capacity > 0);
+                capacities.sort_unstable();
+                capacities.dedup();
+                for capacity in capacities {
+                    let what = format!("{matrix:?} threshold {threshold} capacity {capacity}");
+                    let reference = try_build_compressed_lookup_with_capacity(
+                        matrix, 5, threshold, &query, &locations, &tables, capacity,
+                    )
+                    .expect("word size 5");
+                    let serial = x_try_build_flat_of(
+                        matrix,
+                        5,
+                        threshold,
+                        &query,
+                        &locations,
+                        &tables,
+                        capacity,
+                        X_COUNT_CHUNK,
+                    )
+                    .expect("word size 5");
+                    match (&reference, &serial) {
+                        (Ok(reference), XFlatBuild::Table(serial)) => {
+                            x_assert_same_compressed_table(serial, reference);
+                            overflow_seen |= serial.longest_chain > 5;
+                            built_seen += 1;
+                        }
+                        (Err(()), XFlatBuild::Refused) => refused_seen += 1,
+                        _ => panic!("{what}: the serial outcome is not the reference's"),
+                    }
+                    for (threads, chunk_sizes) in
+                        [(2, &[][..]), (3, &[7, 1, 50][..]), (7, &[1][..])]
+                    {
+                        let built = in_pool(threads, || {
+                            x_try_build_flat_parallel_of(
+                                matrix,
+                                5,
+                                threshold,
+                                &query,
+                                &locations,
+                                &tables,
+                                cuts(threads, capacity, chunk_sizes),
+                            )
+                        });
+                        match (&serial, built) {
+                            (XFlatBuild::Table(serial), Some(XFlatBuild::Table(built))) => {
+                                x_assert_same_flat_tables(&built, serial)
+                            }
+                            (XFlatBuild::Refused, Some(XFlatBuild::Refused)) => {}
+                            _ => panic!(
+                                "{what} n{threads}: the pool's outcome is not the serial one"
+                            ),
+                        }
+                    }
+                }
+                // The matrix's words, not BLOSUM62's, on the same query.
+                if let (Some(XFlatBuild::Table(ours)), Some(XFlatBuild::Table(blosum62))) = (
+                    x_try_build_flat_of(
+                        matrix,
+                        5,
+                        threshold,
+                        &query,
+                        &locations,
+                        &[],
+                        NCBI_OVERFLOW_CELL_CAPACITY,
+                        X_COUNT_CHUNK,
+                    ),
+                    x_try_build_flat_compressed_lookup(5, threshold, &query, &locations, &[]),
+                ) {
+                    differs_seen |= ours.hits != blosum62.hits;
+                }
+            }
+        }
+        // Word size 6 (a backbone of 15^6 cells) with two matrices, NCBI's capacity.
+        for matrix in [ScoringMatrix::Blosum45, ScoringMatrix::Pam30] {
+            let lengths: Vec<usize> = (0..2 + rng.below(3)).map(|_| 1 + rng.below(200)).collect();
+            let (query, locations, first) = queries(&mut rng, &lengths, &LETTERS[..], 1);
+            let tables = vec![first[0]..first[lengths.len()]];
+            let Some(XFlatBuild::Table(serial)) = x_try_build_flat_of(
+                matrix,
+                6,
+                2100,
+                &query,
+                &locations,
+                &tables,
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                X_COUNT_CHUNK,
+            ) else {
+                panic!("{matrix:?} word size 6: no serial table")
+            };
+            for (threads, chunk_sizes) in [(2, &[][..]), (3, &[7, 50][..]), (7, &[1][..])] {
+                let built = in_pool(threads, || {
+                    x_try_build_flat_parallel_of(
+                        matrix,
+                        6,
+                        2100,
+                        &query,
+                        &locations,
+                        &tables,
+                        cuts(threads, NCBI_OVERFLOW_CELL_CAPACITY, chunk_sizes),
+                    )
+                });
+                let Some(XFlatBuild::Table(built)) = built else {
+                    panic!("{matrix:?} word size 6 n{threads}: no parallel table")
+                };
+                x_assert_same_flat_tables(&built, &serial);
+            }
+        }
+        assert!(
+            built_seen > 0 && refused_seen > 0 && overflow_seen && differs_seen,
+            "built {built_seen} refused {refused_seen} overflow {overflow_seen} differs {differs_seen}"
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+    // `x_try_build_flat_in_pool`)
+    // ```c
+    //     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+    //                                     query, locations);
+    //     s_CompressedLookupFinalize(lookup);
+    // ```
+    // The entry of blastp-fast with another matrix (`x_bp_build_compressed_lookup_of`, item SC2b): the
+    // serial builders at one thread and the pool's build at 3 threads give the matrix's serial table.
+    #[test]
+    fn the_entry_of_another_matrix_builds_its_serial_table_at_any_thread_count() {
+        let mut rng = XorShift(0x6a09_e667_f3bc_c908);
+        for matrix in [ScoringMatrix::Blosum45, ScoringMatrix::Pam250] {
+            let lengths: Vec<usize> = (0..3).map(|_| 20 + rng.below(200)).collect();
+            let (query, locations, first) = queries(&mut rng, &lengths, &LETTERS[..], 1);
+            let tables = vec![first[0]..first[lengths.len()]];
+            let Some(XFlatBuild::Table(serial)) = x_try_build_flat_of(
+                matrix,
+                5,
+                1100,
+                &query,
+                &locations,
+                &tables,
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                X_COUNT_CHUNK,
+            ) else {
+                panic!("{matrix:?}: no serial table")
+            };
+            for threads in [1, 3] {
+                let built = crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    Ok(super::super::x_bp_build_compressed_lookup_of(
+                        matrix, 5, 1100, &query, &locations, &tables, pool,
+                    ))
+                })
+                .expect("pool");
+                let Some(Ok(XCompressedLookup::Flat(built))) = built else {
+                    panic!("{matrix:?} n{threads}: no flat table")
+                };
+                x_assert_same_flat_tables(&built, &serial);
+            }
+        }
     }
 
     fn flat(build: Option<XFlatBuild>) -> XFlatCompressedLookup {
@@ -1886,7 +2200,7 @@ mod tests {
         );
         {
             let kept = ahead_spare.0.lock().unwrap();
-            assert!(kept.0.is_empty() && kept.0.capacity() >= backbone_size + 1);
+            assert!(kept.0.is_empty() && kept.0.capacity() > backbone_size);
             assert!(kept.1.is_empty() && kept.1.capacity() >= 1500);
             assert!(ahead_spare.1.lock().unwrap().capacity() >= pv_words);
         }

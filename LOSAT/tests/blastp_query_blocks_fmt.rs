@@ -1494,6 +1494,7 @@ fn assert_same_files(
 /// not reach the side-file code: the cases that look at the files alone run at one thread.
 const ONE_THREAD: [u32; 1] = [1];
 /// The side file of a report in the second block (queries 27-30) of `bpqb_q.faa` at `LOSAT_X_BPQBLOCK=80`.
+#[cfg(target_os = "linux")]
 const SECOND_BLOCK: [usize; 1] = [28];
 const BLOCK_80: (&str, &str) = ("LOSAT_X_BPQBLOCK", "80");
 const NO_PREPARE: &dyn Fn(&Path) = &|_| {};

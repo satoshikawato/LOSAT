@@ -5,7 +5,7 @@
 //! `blast_aascan.rs` `s_blast_aa_scan_subject`) walks the subject's ranges with
 //! `s_DetermineScanningOffsets` (masksubj.inl:43-58) and tests the presence-vector bit of every
 //! word of a range. Here each range is scanned by tblastn's branch-free loop
-//! (`tblastn/x_scan_bf.rs` `x_scan_one_range_bf`; its module text gives how
+//! (`tblastx/x_aascan_bf.rs` `x_scan_one_range_bf`; its module text gives how
 //! it keeps NCBI's pairs and its stop for room). The ranges are walked as NCBI walks them and the
 //! room left after the earlier ranges of a call is passed on, so every call returns NCBI's pairs
 //! and `s_range`. The offset array must have `X_SCAN_BF_SLACK` entries after `array_size`
@@ -36,9 +36,7 @@ use super::blast_aascan::{determine_scanning_offsets, s_blast_aa_scan_subject, B
 use super::lookup::{
     BackboneCell, BlastAaLookupTable, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK,
 };
-use crate::algorithm::tblastn::x_scan_bf::{
-    x_block_candidates, x_scan_one_range_bf, X_BLOCK, X_SCAN_BF_SLACK,
-};
+use super::x_aascan_bf::{x_block_candidates, x_scan_one_range_bf, X_BLOCK, X_SCAN_BF_SLACK};
 use std::mem::MaybeUninit;
 
 // No NCBI counterpart: reads LOSAT_X_TBXSCANBF once (a switch of the strict set).
@@ -335,7 +333,7 @@ fn x_scan_subject_compact_in(
 }
 
 // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (as above `x_scan_one_range_bf`,
-// tblastn/x_scan_bf.rs)
+// tblastx/x_aascan_bf.rs)
 /// `x_scan_one_range_bf` on a compacted table: the candidates are the same words (the presence
 /// vector is the table's), and the cell of a candidate's index is found through `rank`.
 #[inline(always)]
@@ -519,7 +517,6 @@ mod tests {
             let len = [3, 4, 255, 256, 257, 1_000, 20_000][case % 7];
             let mut subject: Vec<u8> = (0..len).map(|_| 1 + rng.below(25) as u8).collect();
             subject.push(0);
-            let len = len as i32;
             // One range; three ranges, the middle one shorter than a word; ranges every ~300
             // letters with gaps between them.
             let mut cuts = vec![(0, len)];

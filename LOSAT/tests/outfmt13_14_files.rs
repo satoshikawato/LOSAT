@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! BLAST JSON and XML2 as files (outfmt 13 and 14): what the frozen-fixture rows of the manifests
 //! (`files` column) cannot show. BLASTP and BLASTN first (OF5c part 1), then BLASTX, TBLASTN and TBLASTX
 //! (part 2: the last section of this file). The names of the side files and of the entries of
@@ -565,9 +563,9 @@ fn a_failed_batch_keeps_the_db_files_and_loses_the_held_subject_file() {
     }
 }
 
-/// 13 and 14 are written by the command line only (DECISIONS 26 Q10: `run_local` has no output
-/// file, ABI v1 has no such format): the shared entries of BLASTP and BLASTN stop at NCBI's
-/// XInclude error.
+/// A `run_local` call without an output file and without a receiver of side files
+/// (`OutputSink::Files`) cannot write 13 and 14: the shared entries of BLASTP and BLASTN stop at
+/// NCBI's XInclude error.
 #[test]
 fn run_local_does_not_write_outfmt_13_and_14() {
     use run_local_support::reader_records as records;
@@ -1298,7 +1296,8 @@ fn outfmt_13_and_14_to_standard_output_ask_for_a_file_name_in_every_program() {
     fs::remove_dir_all(root).ok();
 }
 
-/// `run_local` has no output file, so TBLASTN and TBLASTX (like BLASTP and BLASTN) stop at NCBI's XInclude error.
+/// Without an output file or a receiver of side files, TBLASTN and TBLASTX (like BLASTP and BLASTN) stop at
+/// NCBI's XInclude error.
 #[test]
 fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
     use run_local_support::reader_records as records;
@@ -1369,6 +1368,160 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
             assert!(sink.is_empty() && diagnostics.is_empty());
         }
     }
+}
+
+/// A receiver of side files that keeps them in memory (`SideFileReceiver`).
+#[derive(Default)]
+struct Received(std::sync::Mutex<Vec<(String, Vec<u8>)>>);
+
+impl LOSAT::report::blast_xml2::SideFileReceiver for Received {
+    fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+        self.0
+            .lock()
+            .unwrap()
+            .push((String::from_utf8(name.to_vec()).unwrap(), bytes.to_vec()));
+        Ok(())
+    }
+}
+
+/// `run_local` with the caller's receiver of side files (`OutputSink::Files`, LOSAT Web) writes
+/// outfmt 13 and 14 as the command line writes them with `-out` of the receiver's name in every
+/// program: the master file to the writer, each side file whole to the receiver, by the names of
+/// the files, and the command line's standard error to the diagnostics.
+#[test]
+fn run_local_writes_outfmt_13_and_14_to_a_receiver_as_the_command_line_writes_files() {
+    use run_local_support::reader_records as records;
+    use std::sync::Arc;
+    use LOSAT::api::local_blast::{
+        run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
+        FormatOutput, OutputSink, ReportOutputs,
+    };
+    use LOSAT::blastinput::fasta_reader::ReaderConfig;
+    use LOSAT::cli::{try_parse_from, Cli, Commands};
+    use LOSAT::report::blast_xml2::SideFileSink;
+    let work = temp_dir("receiver");
+    let pquery = {
+        // qprot_bad.faa has a bad third record: use the first two
+        let valid = work.join("qprot_valid.faa");
+        let text = fs::read_to_string(inputs().join("qprot_bad.faa")).unwrap();
+        fs::write(&valid, text.split(">q3").next().unwrap()).unwrap();
+        valid
+    };
+    let (sprot, snucl) = (inputs().join("sprot.faa"), inputs().join("snucl.fna"));
+    let (nquery, xquery) = (
+        inputs().join("qnucl_valid.fna"),
+        inputs().join("qnx_late.fna"),
+    );
+    let cases: [(&str, &Path, &Path, &[&str]); 5] = [
+        ("blastp", &frozen().join("qprot.faa"), &sprot, &[]),
+        ("blastn", &nquery, &snucl, &[]),
+        ("blastx", &xquery, &sprot, &[]),
+        ("tblastn", &pquery, &snucl, &[]),
+        (
+            "tblastx",
+            &nquery,
+            &snucl,
+            &["-evalue", "1e-20", "-max_hsps", "2"],
+        ),
+    ];
+    for (program, query, subject, extra) in cases {
+        for (format, ext) in [("13", "json"), ("14", "xml")] {
+            let what = format!("{program} {format}");
+            let dir = work.join(format!("{program}_{format}"));
+            fs::create_dir_all(&dir).unwrap();
+            let mut argv = vec![
+                program,
+                "-query",
+                query.to_str().unwrap(),
+                "-subject",
+                subject.to_str().unwrap(),
+            ];
+            argv.extend_from_slice(extra);
+            let mut cli_argv = argv.clone();
+            cli_argv.extend_from_slice(&["-num_threads", "1", "-outfmt", format, "-out", "r"]);
+            let cli_run = run_in(&dir, &cli_argv, &[]);
+            assert_ok(&cli_run, &what);
+            let mut cli_sides = Vec::new();
+            for n in 1.. {
+                let name = format!("r_{n}.{ext}");
+                match fs::read(dir.join(&name)) {
+                    Ok(bytes) => cli_sides.push((name, bytes)),
+                    Err(_) => break,
+                }
+            }
+            assert!(
+                cli_sides.len() >= 2,
+                "{what}: {} side files",
+                cli_sides.len()
+            );
+            let cli_master = fs::read(dir.join("r")).unwrap();
+
+            let received = Arc::new(Received::default());
+            let mut master = Vec::new();
+            let mut diagnostics = Vec::new();
+            let mut outputs = ReportOutputs {
+                formats: vec![FormatOutput {
+                    outfmt: format,
+                    sink: OutputSink::Files(&mut master, SideFileSink::new("r", received.clone())),
+                }],
+                diagnostics: &mut diagnostics,
+                hits: None,
+                observer: None,
+            };
+            let mut parse_argv = vec!["LOSAT"];
+            parse_argv.extend_from_slice(&argv);
+            parse_argv.extend_from_slice(&["-num_threads", "1"]);
+            let cli: Cli = try_parse_from(parse_argv).unwrap();
+            let result = match cli.command {
+                Commands::Blastp(args) => run_local_blastp(
+                    args,
+                    &records(query, ReaderConfig::query("BLASTP", true, true)),
+                    &records(subject, ReaderConfig::subject("BLASTP", true, true)),
+                    "",
+                    "",
+                    &mut outputs,
+                ),
+                Commands::Blastn(args) => run_local_blastn(
+                    args,
+                    &records(query, ReaderConfig::query("BLASTN", false, true)),
+                    &records(subject, ReaderConfig::subject("BLASTN", false, true)),
+                    &mut outputs,
+                ),
+                Commands::Blastx(args) => run_local_blastx(
+                    args,
+                    &records(query, ReaderConfig::query("BLASTX", false, true)),
+                    &records(subject, ReaderConfig::subject("BLASTX", true, true)),
+                    &mut outputs,
+                ),
+                Commands::Tblastn(args) => run_local_tblastn(
+                    args,
+                    &records(query, ReaderConfig::query("TBLASTN", true, true)),
+                    &records(subject, ReaderConfig::subject("TBLASTN", false, true)),
+                    &mut outputs,
+                ),
+                Commands::Tblastx(args) => run_local_tblastx(
+                    args,
+                    &records(query, ReaderConfig::query("TBLASTX", false, true)),
+                    &records(subject, ReaderConfig::subject("TBLASTX", false, true)),
+                    &mut outputs,
+                ),
+                _ => unreachable!(),
+            };
+            drop(outputs);
+            result.unwrap_or_else(|error| panic!("{what}: {error:#}"));
+            assert!(master == cli_master, "{what}: master");
+            assert!(
+                *received.0.lock().unwrap() == cli_sides,
+                "{what}: side files"
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&diagnostics),
+                String::from_utf8_lossy(&cli_run.stderr),
+                "{what}: diagnostics"
+            );
+        }
+    }
+    fs::remove_dir_all(work).ok();
 }
 
 // ---- OF5c review fixes (DECISIONS 35) ----

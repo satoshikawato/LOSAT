@@ -10,7 +10,7 @@ use std::io::Write;
 use crate::report::defline::{bioseq_title_from_source, generate_bioseq_defline};
 use crate::seqid::accguide::parse_flags::PARTIAL_OK;
 use crate::seqid::label::{bare, fasta};
-use crate::seqid::model::{Dbtag, ObjectId};
+use crate::seqid::model::Dbtag;
 use crate::seqid::parse::parse_ids;
 use crate::seqid::rank::{fasta_aa_score, fasta_na_score, find_best, text_score};
 use crate::seqid::{DeflineSet, ParsedSeqId};
@@ -961,6 +961,7 @@ fn write_sequence(letters: &[u8], width: u32, out: &mut Vec<u8>) {
 /// `ObjectId` of a `BL_ORD_ID` tag, for tests.
 #[cfg(test)]
 fn ordinal_id(n: i32) -> ParsedSeqId {
+    use crate::seqid::model::ObjectId;
     ParsedSeqId::General(Dbtag {
         db: b"BL_ORD_ID".to_vec(),
         tag: ObjectId::Id(n),

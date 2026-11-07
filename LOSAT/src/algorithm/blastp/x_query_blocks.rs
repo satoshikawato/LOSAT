@@ -32,6 +32,7 @@
 //!   only. A block is made of whole batches, and the batches inside a block are those of the
 //!   whole input (they are counted greedily from the block's first record, which starts a
 //!   batch of the whole input).
+//!
 //! The rows of tabular format 6 depend only on each query's hit list and come in query order,
 //! so the blocks' rows written one after the other are the rows of the whole search. The block
 //! search is used only where the blocks' reports written one after the other are the report of
@@ -105,6 +106,7 @@
 //!   that tie have the same subject start and query start, so the same diagonal, and come from
 //!   hits at different subject offsets, saved in the same order in both searches; the sorted list
 //!   is the reference's (its query starts shifted by the block's start).
+//!
 //! The same argument covers the reference path's one table of all queries against NCBI's table
 //! per query batch. A block's table is tested for NCBI's overflow banks with the block's own
 //! batches (`blast_engine.rs` `ncbi_compressed_lookup_tables`), and the block search is taken only
@@ -211,6 +213,7 @@
 //!   the same handle. In a call of several outputs, hit records or an observer
 //!   the plan is refused for 11 as for 15 and 16: the handle's muting and
 //!   messages with several formats were argued for the CLI's shape.
+//!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
 //! ```c++
 //!         if (results.HasAlignments()) {
@@ -263,6 +266,7 @@
 //!   are those of the search of all queries. Each format's events come in the same order as in the
 //!   search of all queries; between formats they alternate block by block, and an observer reads
 //!   each format's events apart (the ABI orders the events within a stream only).
+//!
 //! An outfmt 13 to 16 output does not take blocks in such a call: the
 //! document's run-level frame and `Xml2Carry` were argued and checked for a call of one output
 //! (the CLI's shape) only, so `x_query_block_plan` refuses the plan when the call has several
@@ -669,7 +673,9 @@ impl<'a> XBlockSink<'a> {
         match sink {
             OutputSink::Stdout => Self::Stdout(BufWriter::new(io::stdout())),
             OutputSink::File(path) => Self::File { path, file: None },
-            OutputSink::Writer(writer) => Self::Writer(&mut **writer),
+            OutputSink::Writer(writer) | OutputSink::Files(writer, _) => {
+                Self::Writer(&mut **writer)
+            }
         }
     }
 

@@ -17,8 +17,8 @@
 //! itself built ahead), as one task spawned in a `rayon::in_place_scope` around block i's search
 //! (`XLookupAhead::run_block`); block i + 1's search then takes the values instead of computing them.
 //!
-//! Why the reports do not change: block i + 1's frames, table and contexts are functions of block i
-//! + 1's query records and the search's arguments only. The task computes them by the calls the
+//! Why the reports do not change: block i + 1's frames, table and contexts are functions of block i +
+//! 1's query records and the search's arguments only. The task computes them by the calls the
 //! block's own search makes, with the same inputs: `blastp_query_frames` of the block's records,
 //! and `blastp_compressed_lookup` with the block's batches (`QueryInput::whole` of its records cut
 //! by the search's batch size, as the block loop gives them to `run_resolved_in_pool`) and lengths,
@@ -129,7 +129,12 @@
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::OnceLock;
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+use std::sync::{Mutex, PoisonError};
 
 use super::{
     blastp_aa_lookup_ahead, blastp_compressed_lookup, blastp_query_frames, BlastpRuntimeLookup,
@@ -275,6 +280,16 @@ pub(super) fn x_use_prebuilt(prebuilt: XAheadLookup) -> (BlastpRuntimeLookup, Ve
 }
 
 /// What the build ahead of a block gave (`V`: its values).
+#[cfg_attr(
+    not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )),
+    expect(
+        dead_code,
+        reason = "Values, Dropped and Panicked are constructed only by x_run_with_build_ahead (used only with `parallel` threads)"
+    )
+)]
 enum XBuilt<V> {
     Values(V),
     /// No values: the block builds inline (module header).
@@ -351,6 +366,16 @@ const X_MIN_HITS_ROOM: usize = 1 << 18;
 /// `largest_hits` (exact blastp: overflow entries), plus a half; at least `X_MIN_HITS_ROOM`),
 /// allocating here what is short (twice the largest). `false` where the block's table is neither a
 /// flat one nor an exact one with its spares (no build ahead then).
+#[cfg_attr(
+    not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )),
+    expect(
+        dead_code,
+        reason = "called only by run_block's build ahead (used only with `parallel` threads)"
+    )
+)]
 fn x_make_room(
     pool: &SearchPool<'_>,
     lookup: &BlastpRuntimeLookup,
@@ -421,6 +446,16 @@ fn x_make_room(
 /// `batch_size` is the search's query batch size), its table on the second spare's vectors
 /// (`XLookupFor::Ahead`; exact blastp: `XAaSpares`). `None` where the build fails, refuses or makes
 /// no flat table (exact blastp: makes no table on the spare's vectors).
+#[cfg_attr(
+    not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )),
+    expect(
+        dead_code,
+        reason = "called only by run_block's build ahead (used only with `parallel` threads)"
+    )
+)]
 fn x_build_ahead(
     args: &ResolvedBlastpArgs,
     query_records: &[FastaRecord],
@@ -467,10 +502,30 @@ fn x_build_ahead(
 pub(super) struct XLookupAhead<'a, 'p> {
     args: &'a ResolvedBlastpArgs,
     pool: &'a SearchPool<'p>,
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        expect(
+            dead_code,
+            reason = "read only by run_block's build ahead (used only with `parallel` threads)"
+        )
+    )]
     batch_size: u32,
     acts: bool,
     next: Option<XBuilt<XAheadLookup>>,
     /// The most hits of a table so far (`x_make_room`).
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        expect(
+            dead_code,
+            reason = "read only by run_block's build ahead (used only with `parallel` threads)"
+        )
+    )]
     largest_hits: Cell<usize>,
 }
 
@@ -489,8 +544,12 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         )) && x_bp_lkp_ahead()
             && match args.lookup_table_type {
+                // The flat table's (BLOSUM62's; another matrix's flat builders take no spare
+                // vectors: item SC2b).
                 BlastpLookupTableType::CompressedAaLookupTable => {
-                    x_bpclut_on() && x_bp_lookup_spares(pool).is_some()
+                    x_bpclut_on()
+                        && args.scoring.matrix == crate::config::ScoringMatrix::Blosum62
+                        && x_bp_lookup_spares(pool).is_some()
                 }
                 BlastpLookupTableType::AaLookupTable => x_bp_aa_spares(pool).is_some(),
             };
@@ -597,13 +656,36 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use crate::algorithm::blastp::args::{BlastpApp, BlastpArgs};
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use crate::algorithm::blastp::x_query_blocks::XBlockSubjects;
-    use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-        x_assert_same_flat_tables_as, XFlatCompressedLookup,
-    };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_assert_same_flat_tables_as;
+    use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::XFlatCompressedLookup;
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use crate::algorithm::tblastx::lookup::x_pair_lut::x_assert_same_contexts_as;
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use crate::algorithm::tblastx::lookup::{x_assert_same_table_as, x_same_table};
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use std::path::PathBuf;
 
     // No NCBI counterpart: a check of the unit tests; it changes no value NCBI computes.

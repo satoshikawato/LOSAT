@@ -72,8 +72,9 @@ use crate::blastinput::value_parsers::*;
 // psiblast's arguments are blastp's without `-task` (its task is "psiblast"), `-ungapped`
 // (no `CGappedArgs`), the database masks and `-mt_mode`, with the PSI-BLAST, PSSM engine and
 // PHI-BLAST arguments. LOSAT runs psiblast's first round (`-num_iterations 1`), which is blastp's
-// search (`run`), and writes the ASCII PSSM after it (`pssm.rs`); `-out_pssm`, `-in_msa`,
-// `-in_pssm`, `-phi_pattern`, `-gap_trigger` and `-sum_stats` are refused by the parser
+// search (`run`), and writes the ASN.1 and ASCII PSSMs after it (`pssm.rs`); with `-in_pssm` the
+// query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`);
+// `-in_msa`, `-phi_pattern`, `-gap_trigger` and `-sum_stats` are refused by the parser
 // (`cli.rs` `is_unported_psiblast_arg`). The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
 // after reading them are blastp's (`BlastpArgs::check_options`, with psiblast's program).
@@ -267,6 +268,22 @@ pub struct PsiblastArgs {
         help = "E-value inclusion threshold for pairwise alignments"
     )]
     pub inclusion_ethresh: f64,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1160
+    // ```c++
+    //         // checkpoint file
+    //         arg_desc.AddOptionalKey(kArgPSIOutputChkPntFile, "checkpoint_file",
+    //
+    //                                 "File name to store checkpoint file",
+    //                                 CArgDescriptions::eOutputFile);
+    // ```
+    // The file is opened when a PSSM is written (`pssm.rs` `AsnPssmWriter`, as
+    // `CAutoOutputFileReset`), not by the parser.
+    #[arg(
+        long = "out_pssm",
+        value_name = "checkpoint_file",
+        help = "File name to store checkpoint file"
+    )]
+    pub out_pssm: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1161-1170
     // ```c++
     //         // ASCII matrix file
@@ -298,6 +315,34 @@ pub struct PsiblastArgs {
         help = "Save PSSM after each iteration (file name is given in -save_pssm or -save_ascii_pssm options)"
     )]
     pub save_each_pssm: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1231-1247
+    // ```c++
+    //             // PSI-BLAST checkpoint
+    //             arg_desc.AddOptionalKey(kArgPSIInputChkPntFile, "psi_chkpt_file",
+    //                                     "PSI-BLAST checkpoint file",
+    //                                     CArgDescriptions::eInputFile);
+    //             ...
+    //     if (!m_IsDeltaBlast) {
+    //         arg_desc.SetDependency(kArgPSIInputChkPntFile,
+    //                                CArgDescriptions::eExcludes,
+    //                                kArgQuery);
+    //         arg_desc.SetDependency(kArgPSIInputChkPntFile,
+    //                                CArgDescriptions::eExcludes,
+    //                                kArgQueryLocation);
+    //     }
+    // ```
+    // The exclusions are errors of the argument parser: LOSAT's parser reports them with its own
+    // text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The file is opened and read with
+    // the options (`algorithm::psiblast::in_pssm`); `-in_msa` and `-phi_pattern` are refused by
+    // the parser (`cli.rs` `is_unported_psiblast_arg`).
+    #[arg(
+        long = "in_pssm",
+        value_name = "psi_chkpt_file",
+        value_parser = ncbi_input_path(),
+        conflicts_with_all = ["query", "query_loc"],
+        help = "PSI-BLAST checkpoint file"
+    )]
+    pub in_pssm: Option<PathBuf>,
 
     /// `BlastpArgs::first_query_ordinal`: the number of the first query of the records of a call
     /// that starts there (`api::run_batches`). 0 on the command line.
@@ -381,8 +426,10 @@ impl PsiblastArgs {
             psiblast_pssm: Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {
                 save_pssm_after_last_round: self.save_pssm_after_last_round,
                 save_each_pssm: self.save_each_pssm,
+                out_pssm: self.out_pssm,
                 out_ascii_pssm: self.out_ascii_pssm,
                 pseudocount: self.pseudocount,
+                in_pssm: self.in_pssm,
             }),
         })
     }
@@ -530,8 +577,6 @@ mod tests {
     #[test]
     fn psiblasts_arguments_that_losat_does_not_run_are_named() {
         for (option, value) in [
-            ("-in_pssm", Some("x")),
-            ("-out_pssm", Some("x")),
             ("-in_msa", Some("x")),
             ("-msa_master_idx", Some("2")),
             ("-ignore_msa_master", None),
@@ -540,6 +585,7 @@ mod tests {
             ("-sum_stats", Some("false")),
             ("-culling_limit", Some("1")),
             ("-html", None),
+            ("-parse_deflines", None),
         ] {
             let mut extra = vec![option];
             extra.extend(value);
@@ -551,6 +597,10 @@ mod tests {
                 "{option}: {error}"
             );
         }
+        // `-in_pssm` (PS4a) is an argument: with `-query` it is the parser's exclusion
+        // (blast_args.cpp:1240-1247).
+        let error = parse(&["-in_pssm", "x"]).unwrap_err();
+        assert!(error.contains("cannot be used with"), "{error}");
         // Arguments that psiblast does not have are unknown, as in NCBI's parser.
         for option in ["-task", "-ungapped", "-db_soft_mask", "-mt_mode"] {
             let error = parse(&[option, "1"]).unwrap_err();

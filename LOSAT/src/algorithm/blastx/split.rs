@@ -213,7 +213,7 @@ pub fn calculate_num_chunks(
 // ```
 pub fn validate_chunk_size(size: u64) -> Result<()> {
     ensure!(
-        size % 3 == 0,
+        size.is_multiple_of(3),
         "Split query chunk size must be divisible by 3"
     );
     Ok(())
@@ -514,7 +514,7 @@ pub fn split_queries(
     // multiple of 3 starts the chunks after the first out of the query's reading frames
     // (split_query_aux_priv.cpp:62-64: "this value must be divisible by 3 to work with
     // translated queries"), and NCBI then moves their HSPs onto contexts of other frames.
-    if sizes.overlap % 3 != 0 {
+    if !sizes.overlap.is_multiple_of(3) {
         return Err(refusal(format!(
             "OVERLAP_CHUNK_SIZE={}, which is not a multiple of 3, splits this query in chunks out of its reading frames (NCBI BLAST+ requires a multiple of 3 for a translated query); this is not supported by LOSAT's BLASTX",
             sizes.overlap
@@ -742,7 +742,7 @@ fn x_chunk_masks(whole: &FastaRecord, start: usize, end: usize) -> Vec<(i32, i32
             let from = (start + offset).saturating_sub(1);
             let to = (end + offset).min(uncut.len());
             let runs: Vec<MaskedInterval> =
-                crate::algorithm::tblastn::archive::lowercase_runs(&uncut[from..to])
+                crate::algorithm::common::masks::lowercase_runs(&uncut[from..to])
                     .into_iter()
                     .map(|(a, b)| MaskedInterval::new(from + a as usize, from + b as usize + 1))
                     .collect();
@@ -1264,7 +1264,7 @@ mod x_chunk_record_tests {
         for (offset, before) in [(0, 0), (1, 1), (2_500, 0), (2_500, 1), (2_500, 3)] {
             let cut = cut_whole(whole.clone(), offset, before);
             let letters = cut.source.as_deref().unwrap().uncut.as_deref().unwrap();
-            let runs: Vec<_> = crate::algorithm::tblastn::archive::lowercase_runs(letters)
+            let runs: Vec<_> = crate::algorithm::common::masks::lowercase_runs(letters)
                 .into_iter()
                 .map(|(a, b)| MaskedInterval::new(a as usize, b as usize + 1))
                 .collect();

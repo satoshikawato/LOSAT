@@ -48,6 +48,8 @@ export interface ExamplesState {
   readonly note?: { readonly id: ExampleId; readonly text: string };
   /** The set whose saved copy is being written into a folder or downloaded. */
   readonly copying?: ExampleId;
+  /** The set put into the inputs last, and how many sets were put there (the screen tells each; WA2-AX-03). */
+  readonly loaded?: { readonly id: ExampleId; readonly count: number };
 }
 
 export interface ExamplesDeps {
@@ -253,11 +255,13 @@ export class ExampleLoader {
   private finish(set: ExampleSet, data: Blob, copy: ExampleCopy | null): void {
     this.running = undefined;
     const program = this.deps.draft.state.get().program;
+    let loaded = this.state.get().loaded;
     if (set.programs.includes(program)) {
       this.deps.draft.useExample(set.id, exampleQuery(set, program), new File([data], set.fileName, { type: 'text/plain' }));
+      loaded = { id: set.id, count: (loaded?.count ?? 0) + 1 };
     }
     this.setSaved(set.id, copy);
-    this.update({ load: undefined });
+    this.update({ load: undefined, ...(loaded === undefined ? {} : { loaded }) });
   }
 
   private setSaved(id: ExampleId, copy: ExampleCopy | null): void {

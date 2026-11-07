@@ -1,6 +1,5 @@
 use super::constants::X_DROP_UNGAPPED;
 use crate::core::blast_encoding::COMPRESSION_RATIO;
-use crate::utils::dust::MaskedInterval;
 
 /// BLASTNA alphabet size.
 /// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_encoding.h:91-92
@@ -785,7 +784,7 @@ pub fn extend_hit_ungapped_approx_ncbi(
 
     let mut q_idx = q_ext as isize;
     let mut s_idx = (s_ext / COMPRESSION_RATIO) as isize;
-    let left_len = (q_ext.min(s_ext) / COMPRESSION_RATIO) as usize;
+    let left_len = q_ext.min(s_ext) / COMPRESSION_RATIO;
 
     let mut score = 0i32;
     let mut sum = 0i32;
@@ -825,7 +824,7 @@ pub fn extend_hit_ungapped_approx_ncbi(
     // Right extension in 4-base blocks.
     let mut q_idx = q_ext as isize;
     let mut s_idx = (s_ext / COMPRESSION_RATIO) as isize;
-    let right_len = ((q_len - q_ext).min(subject_len - s_ext) / COMPRESSION_RATIO) as usize;
+    let right_len = (q_len - q_ext).min(subject_len - s_ext) / COMPRESSION_RATIO;
     sum = 0;
     new_q = q_idx;
 
@@ -1044,6 +1043,9 @@ mod approx_context_tests {
 ///
 /// # Returns
 /// (q_start, q_end, s_start, s_end, score) - Half-open interval [start, end)
+///
+/// # Panics
+/// When the seed is outside a sequence (`q_pos >= q_seq.len()` or `s_pos >= s_seq.len()`).
 pub fn extend_hit_ungapped(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -1053,6 +1055,14 @@ pub fn extend_hit_ungapped(
     penalty: i32,
     x_drop: Option<i32>,
 ) -> (usize, usize, usize, usize, i32) {
+    // No NCBI counterpart: NCBI's seeds lie in both sequences; this public form tests it (no
+    // search calls this function).
+    assert!(
+        q_pos < q_seq.len() && s_pos < s_seq.len(),
+        "extend_hit_ungapped: seed ({q_pos}, {s_pos}) outside sequences of {} and {} letters",
+        q_seq.len(),
+        s_seq.len()
+    );
     let x_drop_val = x_drop.unwrap_or(X_DROP_UNGAPPED);
     let mut current_score = 0;
     let mut max_score = 0;
@@ -1065,6 +1075,8 @@ pub fn extend_hit_ungapped(
     let max_left = q_pos.min(s_pos);
 
     while i <= max_left {
+        // SAFETY: `i <= max_left <= q_pos, s_pos`, so `q_pos - i <= q_pos < q_seq.len()` and
+        // `s_pos - i <= s_pos < s_seq.len()` (the assert at the top).
         let q = unsafe { *q_seq.get_unchecked(q_pos - i) };
         let s = unsafe { *s_seq.get_unchecked(s_pos - i) };
         let sc = if q == s { reward } else { penalty };
@@ -1380,8 +1392,35 @@ where
     // return ((ext_max == ext_to) ? 2 : 1);
     // ```
     if double_ext_max == double_ext_to {
-        return (2, extended, q_off_adjusted, s_off_adjusted);
+        (2, extended, q_off_adjusted, s_off_adjusted)
     } else {
-        return (1, extended, q_off_adjusted, s_off_adjusted);
+        (1, extended, q_off_adjusted, s_off_adjusted)
+    }
+}
+
+// No NCBI counterpart: the public form refuses a seed outside the sequences (line LIB, P-S1).
+#[cfg(test)]
+mod extend_hit_ungapped_bounds_tests {
+    use super::extend_hit_ungapped;
+
+    #[test]
+    #[should_panic(expected = "outside sequences")]
+    fn a_seed_past_the_query_panics() {
+        // The left walk's first read was `q_seq[5]` of a 1-letter slice.
+        extend_hit_ungapped(&[0], &[0], 5, 5, 1, -2, None);
+    }
+
+    #[test]
+    #[should_panic(expected = "outside sequences")]
+    fn a_seed_past_the_subject_panics() {
+        extend_hit_ungapped(&[0, 1, 2], &[0], 1, 1, 1, -2, None);
+    }
+
+    #[test]
+    fn a_seed_at_the_last_letter_extends() {
+        assert_eq!(
+            extend_hit_ungapped(&[0, 1], &[0, 1], 1, 1, 1, -2, None),
+            (0, 2, 0, 2, 2)
+        );
     }
 }

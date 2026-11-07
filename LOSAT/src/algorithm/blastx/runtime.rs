@@ -17,7 +17,6 @@ use super::{
         evaluate_gapped, identity_and_positive, normalize_scores, reap_final, reap_preliminary,
     },
     subjects::Subjects,
-    traceback::ordinary_traceback,
 };
 use crate::core::blast_hits::{reap_by_query_coverage, trim_by_max_hsps};
 use anyhow::Result;
@@ -395,7 +394,7 @@ fn x_speculate_match(
     };
     Some((output, best_score, matrix))
 }
-pub fn search_internal<'a>(
+pub(crate) fn search_internal<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
@@ -406,6 +405,7 @@ pub fn search_internal<'a>(
 // a flow instead of waves); the reports, their order and the values in them are those of the waves.
 /// EXPERIMENT (LOSAT_X_BXFLOW): a switch of the strict set, on unless `LOSAT_X_BXFLOW=0`
 ///  (acts with several query batches at 2+ threads).
+#[cfg(feature = "parallel")]
 pub(crate) fn x_bx_flow() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -427,14 +427,17 @@ pub(crate) fn x_inner_serial() -> bool {
 
 // No NCBI counterpart: scope guard that sets and restores the flag above; it does not change any
 // value NCBI computes.
+#[cfg(feature = "parallel")]
 struct XInnerSerial(bool);
 
+#[cfg(feature = "parallel")]
 impl XInnerSerial {
     fn enter() -> Self {
         Self(X_INNER_SERIAL.with(|flag| flag.replace(true)))
     }
 }
 
+#[cfg(feature = "parallel")]
 impl Drop for XInnerSerial {
     fn drop(&mut self) {
         X_INNER_SERIAL.with(|flag| flag.set(self.0));
@@ -453,8 +456,9 @@ impl Drop for XInnerSerial {
 // is search_internal run on one thread, whatever thread that is, so that several batches can run
 // side by side.
 /// `search_internal` as the one-thread search, whatever thread it is called on. The caller runs
-/// several of these side by side; each takes the serial path of every stage.
-pub fn x_search_internal_serial<'a>(
+/// several of these side by side; each takes the serial path of every stage (the Web's, `web.rs`).
+#[cfg(all(feature = "parallel", any(target_arch = "wasm32", test)))]
+pub(crate) fn x_search_internal_serial<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
@@ -464,6 +468,8 @@ pub fn x_search_internal_serial<'a>(
 
 /// `x_search_internal_serial` for one unit of a reader batch of several, prepared in phase 1
 /// (`reader_batch.rs`); `None`: `records` are the reader batch (or the whole batch is one unit).
+/// Its callers are the several-batches-at-a-time paths, which need a pool (`parallel`).
+#[cfg(feature = "parallel")]
 pub(crate) fn x_search_unit_serial<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
@@ -489,7 +495,7 @@ pub(crate) fn x_search_unit_serial<'a>(
 // The search of one query batch (lcl_blast.Run()) on a pool that the caller keeps. The search
 // itself is search_internal.
 /// `search_internal` on a pool that the caller keeps for all its query batches.
-pub fn x_search_internal_in_pool<'a>(
+pub(crate) fn x_search_internal_in_pool<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
@@ -552,7 +558,7 @@ pub(crate) fn x_search_unit_in_pool<'a>(
 //                     }
 //
 // ```
-pub fn search_internal_observed<'a>(
+pub(crate) fn search_internal_observed<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
@@ -1822,6 +1828,10 @@ impl PreliminarySink for Runtime<'_> {
             let mut x_reused = 0usize;
             let mut x_serial = 0usize;
             let x_t_loop = super::x_timing::lap();
+            #[cfg_attr(
+                not(feature = "parallel"),
+                expect(unused_variables, reason = "used only with parallel")
+            )]
             for (match_index, list) in matches.iter().enumerate() {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
                 // ```c

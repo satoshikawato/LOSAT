@@ -400,7 +400,6 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         let mut s_end = kmer_start + safe_k;
         let mut s_end_pos = s_end + diag_offset as usize;
         let off_found = false;
-        let mut hit_ready = true;
         let query_mask = ctx.masks.as_slice();
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:459-489
@@ -412,6 +411,10 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         //                                      (lookup_wrap, index, q_pos));
         // }
         // ```
+        #[expect(
+            clippy::manual_contains,
+            reason = "a linear scan of the cell's hits with an early exit, as NCBI's loop (na_ungapped.c:131-133); slice::contains would switch this per-seed check to std's chunked search"
+        )]
         let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
             if s_pos + safe_k > s_len {
                 return true;
@@ -526,7 +529,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         //             }
         // ```
         if !(off_found || ungapped_score >= cutoff_score) {
-            hit_ready = false;
+            let hit_ready = false;
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
             // ```c
             // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
@@ -968,7 +971,7 @@ mod tests {
             }
             let s_len = subject.len();
             let packed = encode_subject_ncbi2na_packed(&subject);
-            let ctx_seqs = vec![
+            let ctx_seqs = [
                 encode_iupac_to_blastna(&query),
                 encode_iupac_to_blastna(&minus),
             ];

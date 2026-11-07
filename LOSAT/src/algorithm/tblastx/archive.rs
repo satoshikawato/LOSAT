@@ -37,7 +37,7 @@ use super::report::SubjectLetters;
 use super::seqalign::{query_records_of, SeqalignSubjects};
 use super::subjects::SubjectSetNumbers;
 use super::TblastxArgs;
-use crate::algorithm::tblastn::archive::lowercase_runs;
+use crate::algorithm::common::masks::lowercase_runs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
@@ -52,7 +52,6 @@ use crate::report::archive::{
 };
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
-use crate::report::seqid::SeqId;
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the
@@ -424,8 +423,8 @@ mod tests {
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTX refuses some of these options at the command line
     // (`-sum_stats`, `-strand`, `-subject_besthit`, `-xdrop_ungap`,
-    // `-parse_deflines`) or in its limits (`-word_size` other than 3): the list that NCBI would
-    // record is what the archive's model knows about them, pinned here.
+    // `-parse_deflines`): the list that NCBI would record is what the archive's model knows
+    // about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
         ("def_sub", &[], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 QueryGeneticCode=integer:1 DbGeneticCode=integer:1 HitlistSize=integer:500"),
         ("seg_no_sub", &["-seg", "no"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFiltering=boolean:False WordThreshold=integer:13 WindowSize=integer:40 QueryGeneticCode=integer:1 DbGeneticCode=integer:1 HitlistSize=integer:500"),

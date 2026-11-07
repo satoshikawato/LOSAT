@@ -45,9 +45,9 @@ pub use backbone::{
 pub use backbone::x_tbn_lut_print_summary;
 pub(crate) use backbone::{
     build_ncbi_lookup_for_profile, ideal_karlin_params_of,
-    prepare_blosum62_lookup_query_for_word_size, x_compressed_contexts_for_profile,
-    x_lookup_contexts_for_profile, x_lookup_query_for_profile, x_lookup_table_for_profile,
-    x_lookup_table_for_profile_in,
+    prepare_blosum62_lookup_query_for_word_size, prepare_matrix_lookup_query_for_word_size,
+    x_compressed_contexts_for_profile, x_lookup_contexts_for_profile, x_lookup_query_for_profile,
+    x_lookup_table_for_profile, x_lookup_table_for_profile_in,
 };
 
 use crate::stats::KarlinParams;
@@ -241,8 +241,13 @@ pub(crate) use backbone::{x_bp_build_ncbi_lookup, x_bp_build_ncbi_lookup_as};
 // EXPERIMENT (LOSAT_X_BPLKPAHEAD): exact blastp's table built ahead of its block
 // (lookup/x_lut_direct.rs `XAaSpares`); no NCBI counterpart for the re-export itself.
 pub(crate) use backbone::{XAaSpares, XBpLookup};
-// The comparison of two tables, for the unit tests (lookup/x_lut_direct.rs).
-#[cfg(test)]
+// The comparison of two tables (lookup/x_lut_direct.rs), for blastp's unit tests with
+// `parallel` threads (blast_engine/x_lookup_ahead.rs).
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 pub(crate) use backbone::{x_assert_same_table_as, x_same_table};
 // The BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
 // by searches of two threads or more; x_lut_direct.rs), and the table of either width a BLASTX

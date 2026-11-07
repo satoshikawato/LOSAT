@@ -248,6 +248,29 @@ pub fn extend_one_hit(
 // else
 //     sum += matrix[q[q_off + i]][s[s_off + i]];
 // ```
+/// [`extend_one_hit`] of a matrix other than BLOSUM62 (BLASTP's other matrices, item SC2b): the
+/// reference walk with `protein_score`, without the dispatch, so that BLOSUM62's instance keeps the
+/// one caller (`extend_one_hit_blosum62`'s reference) that inlines it.
+pub(crate) fn extend_one_hit_of(
+    matrix: ScoringMatrix,
+    query: &[u8],
+    subject: &[u8],
+    q_off: usize,
+    s_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpOneHitUngappedResult> {
+    debug_assert_ne!(matrix, ScoringMatrix::Blosum62);
+    extend_one_hit_impl::<false>(matrix, query, subject, q_off, s_off, dropoff, word_size)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
+// ```c
+// if (use_pssm)
+//     sum += matrix[q_off + i][s[s_off + i]];
+// else
+//     sum += matrix[q[q_off + i]][s[s_off + i]];
+// ```
 #[inline]
 pub(crate) fn extend_one_hit_blosum62(
     query: &[u8],
@@ -469,6 +492,55 @@ pub(crate) fn extend_two_hit_blosum62(
     .unwrap_or_else(reference)
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
+// ```c
+// if (use_pssm)
+//     score += matrix[q_right_off + i][s[s_right_off + i]];
+// else
+//     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
+// ```
+/// [`extend_two_hit`] of a matrix other than BLOSUM62 (item SC2b), with the byte-table walks of
+/// the matrix (`x_ungapped_fast::two_hit_of`; `of.1` is the matrix's `matrix_table`): the same
+/// result. The reference runs where the matrix has no table or the walks do not cover the call.
+#[inline]
+pub(crate) fn extend_two_hit_table(
+    of: (ScoringMatrix, Option<&'static x_ungapped_fast::MatrixTable>),
+    query: &[u8],
+    subject: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpTwoHitUngappedResult> {
+    let (matrix, table) = of;
+    table
+        .and_then(|table| {
+            x_ungapped_fast::two_hit_of(
+                table,
+                query,
+                subject,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                dropoff,
+                word_size,
+            )
+        })
+        .unwrap_or_else(|| {
+            extend_two_hit(
+                matrix,
+                query,
+                subject,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                dropoff,
+                word_size,
+            )
+        })
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1155
 // ```c
 // static Int4 s_BlastAaExtendTwoHit(...)
@@ -499,7 +571,7 @@ fn extend_two_hit_impl<const BLOSUM62: bool>(
     let mut s_right_off = s_right_off as i32;
     let word_size = word_size as i32;
 
-    let mut left_d = 0i32;
+    let left_d: i32;
     let mut right_d = 0i32;
     let mut left_score = 0i32;
     let mut right_score = 0i32;

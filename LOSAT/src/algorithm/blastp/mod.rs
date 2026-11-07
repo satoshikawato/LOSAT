@@ -26,8 +26,11 @@ pub(crate) mod x_ungapped_sent;
 // BLASTP and TBLASTN use the same protein gapped-score path.
 mod blast_xml;
 pub(crate) mod gapalign;
-mod hsp;
+pub(crate) mod hsp;
 mod query_split;
+// NCBI c++/src/algo/blast/api/split_query_cxx.cpp:145-171 (`CQuerySplitter`): the protein query batch's
+// chunks, used by BLASTP, TBLASTN and PSI-BLAST (moved from `common`, SW6 item 2).
+pub mod protein_query_split;
 mod seqalign;
 // NCBI c++/src/objtools/align_format/tabular.cpp: the tabular reports with a field list or a
 // delimiter, and outfmt 10 and 20, through the shared writer (`report::tabular`).
@@ -45,7 +48,7 @@ mod x_redo_fit;
 ))]
 mod x_redo_par;
 // The redo of a `-db` search reads each match's subject from the database.
-mod x_redo_subjects;
+pub(crate) mod x_redo_subjects;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-3691
 // ```c
 // static void s_HSPListNormalizeScores(...);
@@ -63,7 +66,7 @@ mod x_seed_fused_clut;
 // Preliminary hit lists without spare room, each freed after its query's redo.
 mod x_prelim_free;
 // Preliminary hit lists with a 64-byte element until the redo.
-mod x_prelim_compact;
+pub(crate) mod x_prelim_compact;
 
 /// EXPERIMENT (LOSAT_X_BPHITBF): the `[X_STATS] BPHITBF` line at exit.
 // No NCBI counterpart: it prints a counter and changes no value NCBI computes.

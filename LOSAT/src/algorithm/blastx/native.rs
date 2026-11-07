@@ -16,6 +16,7 @@ use super::{
     // ```
     input::{
         parse_fasta_stream_keeping, stream_is_empty, FastaParseError, FastaStream, InputWarning,
+        NoDeflineError, QueryStreamSettings,
     },
     query_setup::BATCH_SIZE,
     report,
@@ -81,14 +82,41 @@ fn database_error(kept: anyhow::Error) -> anyhow::Error {
 //     }                                                                       \
 // ```
 pub(super) fn input_error(error: anyhow::Error) -> anyhow::Error {
-    if let Some(e) = error.downcast_ref::<FastaParseError>() {
-        NativeError {
-            exit: 1,
-            message: format!("BLAST query error: {e}\n"),
-        }
-        .into()
+    let text = if let Some(e) = error.downcast_ref::<FastaParseError>() {
+        e.to_string()
+    } else if let Some(e) = error.downcast_ref::<NoDeflineError>() {
+        e.to_string()
     } else {
-        error
+        return error;
+    };
+    NativeError {
+        exit: 1,
+        message: format!("BLAST query error: {text}\n"),
+    }
+    .into()
+}
+
+/// The error that ends the read of the `-subject` file (`ReadSequencesToBlast`, NCBI's
+/// `CBlastInput::GetAllSeqs`): the reader's `eNoDefline` is `GetAllSeqs`'s input error
+/// (`fasta_reader::no_defline_error`), every other error is `input_error`'s.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:205-214
+/// ```c++
+///         catch (const CObjReaderParseException& e) {
+///             auto err = e.GetErrCode();
+///             if (err == CObjReaderParseException::eEOF) {
+///                 break;
+///             } else if (err == CObjReaderParseException::eNoDefline) {
+///                 CNcbiStrstream ss;
+///                 ss << "Query input doesn't start with "
+///                     "a defline or comment, line " << e.GetPos() << ends;
+///                 NCBI_THROW(CInputException, eInvalidInput, ss.str());
+///             }
+/// ```
+pub(super) fn subject_input_error(error: anyhow::Error) -> anyhow::Error {
+    match error.downcast_ref::<NoDeflineError>() {
+        Some(NoDeflineError(line)) => crate::blastinput::fasta_reader::no_defline_error(*line),
+        None => input_error(error),
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
@@ -449,7 +477,7 @@ fn run_inner(
             },
             &mut |warning| reader_warning(warning, &mut stderr),
         )
-        .map_err(input_error)
+        .map_err(subject_input_error)
         .map_err(early_archive_error)?,
         None => Vec::new(),
     };
@@ -564,7 +592,7 @@ fn run_inner(
     app::formatting_handler_check(&choice, Program::Blastx)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
-    stderr.write_all(&warnings_of(&args, choice.number))?;
+    stderr.write_all(&warnings_of(args, choice.number))?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
     // ```c++
     //     catch (const blast::CInputException& e) {                               \
@@ -651,6 +679,17 @@ fn run_inner(
     if let (Some(database), true) = (database.as_ref(), structured_xml) {
         super::blast_xml::check_database_name(database.name())?;
     }
+    // How the search reads the query file (`-parse_deflines`, its ids, `-strand`), which the
+    // reads of the file before the search share (`QueryStreamSettings`).
+    let query_settings = QueryStreamSettings {
+        parse_deflines: args.parse_deflines,
+        id_scope: id_scope.clone(),
+        strand: crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand),
+    };
+    // The letters of a reader batch (below, where NCBI reads `BATCH_SIZE`, after the check of
+    // an empty query), which the reads before the search take too.
+    let batch_size = crate::blastinput::app::query_batch_size("BLASTX", BATCH_SIZE as u32)
+        .map(|size| size as usize);
     // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
     // come before the first byte, though the query file is read batch by batch: the query
     // titles are checked by a read of the file before the search, and a run in which a
@@ -676,11 +715,15 @@ fn run_inner(
         let start = (&query_file)
             .stream_position()
             .map_err(|_| inaccessible("query", &args.query))?;
+        // A `BATCH_SIZE` that the run refuses (below, before any query is read) leaves no title
+        // to check, as a batch size of 0 does.
         let messages_may_be_refused = super::blast_xml::prescan_queries(
             query_file
                 .try_clone()
                 .map_err(|_| inaccessible("query", &args.query))?,
+            &query_settings,
             args.lcase_masking,
+            *batch_size.as_ref().unwrap_or(&0),
             query_range.as_ref(),
         )?;
         (&query_file)
@@ -688,17 +731,18 @@ fn run_inner(
             .map_err(|_| inaccessible("query", &args.query))?;
         // The documents of a `-db` search with a taxonomy database on the search path: a later
         // batch can still refuse the scientific name of a taxid (XML2 and JSON), or the damaged
-        // database (`read_reported_taxids`, which needs the batch's hits; outfmt 5 looks the
+        // database (`read_reported_taxonomy`, which needs the batch's hits; outfmt 5 looks the
         // batch's subjects up in its prefetch, `ReportedSubjects::prefetch_messages`, DBID item
         // T). The taxids of every sequence are looked up here, once, and the output is held only
         // when one of them would be refused (DECISIONS 32; outfmt 5 asks no scientific name); the
-        // usual run, in which none is, writes batch by batch. Outfmt 5's prefetch is also refused
-        // at the run's first prefetch where NCBI's taxonomy cache would repeat the offset error
-        // (`BlastxDatabase::prefetch_refused`), after the prolog: the run holds then too.
+        // usual run, in which none is, writes batch by batch. Where NCBI's taxonomy cache would
+        // repeat the offset error (`BlastxDatabase::prefetch_refused`) outfmt 5's prefetch, and the
+        // XML2 and JSON lookups of a batch with a subject that has a taxid
+        // (`read_reported_taxonomy`), are refused after the prolog: the run holds then too.
         let prefetch = prefetches_subjects(Some(choice.number));
         let taxdb_may_refuse = database.as_ref().is_some_and(|database| {
             database.taxdb_found()
-                && (database.taxdb_may_refuse(!prefetch) || prefetch && database.prefetch_refused())
+                && (database.taxdb_may_refuse(!prefetch) || database.prefetch_refused())
         });
         // A database with parsed Seq-ids: a later batch can still refuse one of its subjects
         // (`ReportedSubjects::for_batch`), which only the batch's hits show.
@@ -748,10 +792,7 @@ fn run_inner(
     } else {
         None
     };
-    let mut query_stream = FastaStream::from_file(query_file);
-    query_stream.parse_deflines = args.parse_deflines;
-    query_stream.id_scope = id_scope.clone();
-    query_stream.strand = crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand);
+    let mut query_stream = query_settings.stream(query_file);
     if stream_is_empty(&mut query_stream) {
         stderr.write_all(b"Warning: [blastx] Query is Empty!\n")?;
         // NCBI returns before the formatter exists: no archive carries the message.
@@ -779,9 +820,8 @@ fn run_inner(
     // search itself keeps units of at most 10002 letters (`BATCH_SIZE` the constant), however
     // large a reader batch is: a reader batch is split into units that are searched as the
     // batches of a run without `BATCH_SIZE` are, and its report is written when its last unit
-    // is searched.
-    let batch_size =
-        crate::blastinput::app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
+    // is searched. (`batch_size` is read above, for the reads before the search.)
+    let batch_size = batch_size?;
     // LOSAT's refusal of a query title the archive cannot write comes before its first byte,
     // though the query file is read batch by batch: the titles are checked by a read of the
     // file before the search.
@@ -793,6 +833,7 @@ fn run_inner(
             query_prescan
                 .as_ref()
                 .expect("the second handle of a regular query"),
+            &query_settings,
             args.lcase_masking,
             batch_size,
             query_range.as_ref(),
@@ -960,6 +1001,8 @@ fn run_inner(
                                 false,
                                 false,
                                 false,
+                                false,
+                                false,
                                 crate::report::tabular::PrintedIds::default(),
                                 false,
                             )
@@ -1115,7 +1158,9 @@ fn run_inner(
 #[derive(Clone, Copy, Default)]
 pub(super) struct ReportedAsks {
     tabular: bool,
+    tabular_reads: bool,
     pairwise: bool,
+    structured: bool,
     taxids: bool,
     joined: bool,
     taxonomy: bool,
@@ -1129,7 +1174,13 @@ impl ReportedAsks {
         let tabular = matches!(options.outfmt, 6 | 7 | 10 | 20);
         Self {
             tabular,
+            tabular_reads: tabular
+                && crate::report::tabular::reads_subject(
+                    options.tabular,
+                    crate::blastinput::app::Program::Blastx,
+                ),
             pairwise: options.outfmt == 0,
+            structured: matches!(options.outfmt, 5 | 13..=16),
             taxids: matches!(options.outfmt, 13..=16),
             joined: matches!(options.outfmt, 0 | 5 | 13..=16)
                 || options
@@ -1142,17 +1193,34 @@ impl ReportedAsks {
             } else {
                 crate::report::tabular::PrintedIds::default()
             },
-            prefetched: crate::algorithm::common::database::seq_annots_prefetch(Some(i32::from(
-                options.outfmt,
-            ))),
+            // Outfmt 10 and 20 prefetch as 6 does (`reported_batch`).
+            prefetched: prefetches_subjects(Some(match options.outfmt {
+                10 | 20 => 6,
+                outfmt => i32::from(outfmt),
+            })) && !crate::algorithm::common::database::prefetch_always_off(),
         }
+    }
+
+    /// What the reports `options` of one call ask: each of them, with the batches' prefetch of
+    /// the first, which NCBI's app runs for its one format
+    /// (`BlastFormatter_PreFetchSequenceData(..., GetFormattedOutputChoice())`).
+    pub(super) fn of_all(options: &[super::args::ResolvedOptions]) -> Self {
+        let mut asks = options
+            .iter()
+            .fold(Self::default(), |asks, options| asks.or(Self::of(options)));
+        asks.prefetched = options
+            .first()
+            .is_some_and(|options| Self::of(options).prefetched);
+        asks
     }
 
     /// What two reports of one batch ask.
     pub(super) fn or(self, other: Self) -> Self {
         Self {
             tabular: self.tabular || other.tabular,
+            tabular_reads: self.tabular_reads || other.tabular_reads,
             pairwise: self.pairwise || other.pairwise,
+            structured: self.structured || other.structured,
             taxids: self.taxids || other.taxids,
             joined: self.joined || other.joined,
             taxonomy: self.taxonomy || other.taxonomy,
@@ -1172,7 +1240,7 @@ pub(super) fn reported_batch(
     search_subjects: Subjects<'_>,
     options: &super::args::ResolvedOptions,
     asks: ReportedAsks,
-    results: &mut Vec<BatchResults>,
+    results: &mut [BatchResults],
     diagnostics: &mut dyn Write,
     held: Option<&super::blast_xml::HeldOutput>,
 ) -> Result<ReportedSubjects> {
@@ -1187,7 +1255,9 @@ pub(super) fn reported_batch(
         results,
         options.gapped,
         asks.tabular,
+        asks.tabular_reads,
         asks.pairwise,
+        asks.structured,
         asks.taxids,
         asks.joined,
         asks.taxonomy,
@@ -1867,7 +1937,7 @@ pub(super) fn run_query_batches(
         // With 2+ threads one pool is built for the whole run and every batch is searched on
         // it. Reuse of threads only.
         crate::utils::xreach::x_reach!("LOSAT_X_BXPOOL", options.num_threads > 1);
-        let x_batches = if options.num_threads > 1 {
+        if options.num_threads > 1 {
             // A pool that cannot be built is the engine error it was when each
             // batch built its own.
             match crate::utils::threading::x_with_search_pool_local(
@@ -1887,8 +1957,7 @@ pub(super) fn run_query_batches(
             }
         } else {
             x_run_batches(None)
-        };
-        x_batches
+        }
     };
     x_batches?;
     super::x_timing::run(XRun::Loop, x_t_loop);
@@ -2074,6 +2143,15 @@ fn write_run_error_archive(
 // LOG_POST_X uses the log flags without severity/prefix. Positions in the
 // existing B reader state have already been converted to one-based indexes.
 pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> Result<()> {
+    // A warning of `ParseGapLine` (`fasta_reader::reader::gap_line_size`) is the bytes that the
+    // reader of the other programs writes: a modifier's value as it is in the input.
+    if warning.kind == "gap_line" {
+        let mut line = Vec::with_capacity(warning.text.len() + 1);
+        line.extend_from_slice(&warning.text);
+        line.push(b'\n');
+        stderr.write_all(&line)?;
+        return Ok(());
+    }
     let message=match warning.kind {
             "hyphens"=>format!("CFastaReader: Hyphens are invalid and will be ignored around line {}",warning.line),
             "title_nucleotide_residues"=>"FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?".into(),
@@ -2691,6 +2769,53 @@ mod archive_error_tests {
         let engine_error = archive_error(anyhow::anyhow!("something else"));
         assert!(engine_error.downcast_ref::<NativeError>().is_some());
         assert!(archive::error_lines(&engine_error, false).is_some());
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 (the
+    // subjects' `GetAllSeqs` turns `eNoDefline` into a `CInputException`; its text ends with the
+    // NUL of `ends`, which the error archive does not keep); a query keeps the reader's error.
+    #[test]
+    fn a_subject_without_a_first_defline_is_the_input_error_of_get_all_seqs() {
+        let subject = subject_input_error(NoDeflineError(4).into());
+        let native = subject.downcast_ref::<NativeError>().unwrap();
+        assert_eq!(
+            (native.exit, native.message.as_str()),
+            (
+                1,
+                "BLAST query/options error: Query input doesn't start with a defline or comment, \
+                 line 4\0\nPlease refer to the BLAST+ user manual.\n"
+            )
+        );
+        let texts = |error: &anyhow::Error| -> Vec<Vec<u8>> {
+            archive::error_lines(error, true)
+                .unwrap()
+                .into_iter()
+                .map(|(_, text)| text)
+                .collect()
+        };
+        assert_eq!(
+            texts(&subject),
+            [
+                b"BLAST query/options error: Query input doesn't start with a defline or comment, line 4".to_vec(),
+                b"Please refer to the BLAST+ user manual.".to_vec(),
+            ]
+        );
+        let query = input_error(NoDeflineError(4).into());
+        let native = query.downcast_ref::<NativeError>().unwrap();
+        assert_eq!(
+            (native.exit, native.message.as_str()),
+            (
+                1,
+                "BLAST query error: CFastaReader: Input doesn't start with a defline or comment \
+                 around line 4\n"
+            )
+        );
+        // Every other reader error of the subjects is the reader's (`BLAST query error`).
+        let other = subject_input_error(FastaParseError("CFastaReader: x".into()).into());
+        assert_eq!(
+            other.downcast_ref::<NativeError>().unwrap().message,
+            "BLAST query error: CFastaReader: x\n"
+        );
     }
 }
 

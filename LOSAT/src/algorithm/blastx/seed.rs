@@ -11,9 +11,7 @@ use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_bx_build_compressed_lookup, x_bx_clut_pool, x_give_back_flat, x_give_back_wide_flat,
     XBxCompressedLookup, X_BLASTX,
 };
-use crate::algorithm::tblastx::lookup::compressed::{
-    x_compressed_scaled_threshold, BlastCompressedAaLookupTable,
-};
+use crate::algorithm::tblastx::lookup::compressed::x_compressed_scaled_threshold;
 use crate::algorithm::tblastx::lookup::{
     build_ncbi_lookup_from_prepared, BackboneCell16, BlastAaLookupTable, QueryContext, XBxTable,
 };
@@ -289,7 +287,11 @@ pub struct InitHsp {
 // ```
 // EXPERIMENT (LOSAT_X_BXSCANBYTE): the standard table carries the presence bytes of the direct
 // loop's scan, built the first time that loop scans with it (x_seed_scan.rs).
-pub enum Lookup {
+#[expect(
+    clippy::large_enum_variant,
+    reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
+)]
+pub(crate) enum Lookup {
     Standard(BlastAaLookupTable, x_seed_scan::XKeptPresence),
     // EXPERIMENT (LOSAT_X_BPCLUT): the compressed table as the reference builds it or flat
     // (`x_clut_direct.rs`), one variant so that the standard table's loops keep their match.
@@ -321,7 +323,11 @@ impl Drop for Lookup {
 // has at least LOSAT_X_BXDIAGMIN hits per used cell). It is a type of its own, so that no loop of
 // `Int4` hits can be given one: the fused loop is generic over the table's cell and scans either,
 // and the reference scan reads either.
-pub enum BxLookup {
+#[expect(
+    clippy::large_enum_variant,
+    reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
+)]
+pub(crate) enum BxLookup {
     Wide(Lookup),
     Narrow(NarrowLookup),
 }
@@ -520,7 +526,9 @@ impl Lookup {
     //     /* index the query and finish up */
     //
     // ```
-    pub fn new(
+    // Only the tests build a table this way; the searches use `x_new_as`.
+    #[cfg(test)]
+    pub(crate) fn new(
         batch: &PreparedQueryBatch,
         parameters: &[ContextParameters],
         options: &ResolvedOptions,
@@ -671,7 +679,7 @@ impl Lookup {
     //         hits = scansub(lookup_wrap, subject,
     //                        offset_pairs, array_size, scan_range);
     // ```
-    pub fn scan(
+    pub(crate) fn scan(
         &self,
         subject: &[u8],
         length: usize,
@@ -904,7 +912,7 @@ pub(crate) fn x_scan_bytes<'a>(
 // (they trace the seeds), and the unit tests of the faster loops compare with it.
 /// The reference word finder (the loop of NCBI's BlastAaWordFinder_TwoHit /
 /// _OneHit for one subject), kept verbatim.
-pub fn word_finder(
+pub(crate) fn word_finder(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,

@@ -49,6 +49,9 @@ mod x_link_timing;
 mod x_rpt_par;
 // EXPERIMENT (LOSAT_X_TBXSCANBF): the lookup scan without a branch on the presence vector.
 mod x_scan_bf;
+// The lookup scan without a branch on the presence vector, used by TBLASTN, BLASTP, BLASTX and
+// TBLASTX (moved from `tblastn`, SW6 item 3).
+pub(crate) mod x_aascan_bf;
 // EXPERIMENT (LOSAT_X_TBXBOARD): units and link groups handed out by one board per search.
 pub mod x_seed_bucket;
 pub(crate) mod x_work_board;

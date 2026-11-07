@@ -355,8 +355,9 @@ unsafe fn x_hits_bf_run<C: XCells>(
 impl<M: TbxScore> XPairPar<M> {
     // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the units without probes (`run_unit`,
     // `run_unit_compact`) by the switch and `fits`. EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the
-    // branch-free loop's units by `x_unit_sent`, between the two instances of `scan_unit_bf`, so
-    // that the instance without the switch keeps the code it had before it.
+    // branch-free loop's units by `x_unit_sent`, between the instances of `scan_unit_bf` (`SENT`:
+    // the search's word length, the walks `TbxScore::sent_two_hit_of` of 2 or 3 letters, or 0),
+    // so that the instance without the switch keeps the code it had before it.
     /// `scan_unit` without probes, or its branch-free hit loop.
     #[inline(always)]
     pub(super) fn scan_unit_or_bf<S: XInitSink, const PF: bool>(
@@ -368,9 +369,16 @@ impl<M: TbxScore> XPairPar<M> {
     ) {
         if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
             if self.x_unit_sent(unit, inp) {
-                self.scan_unit_bf::<S, PF, true>(unit, inp, scratch, init_hsps);
+                // The walks of the search's word length (`XPairPar::sent`: 2 or 3 letters); 2
+                // only in another instance than BLOSUM62's (whose words have 3).
+                if !M::BLOSUM62 && self.sc.word() == 2 {
+                    self.scan_unit_bf::<S, PF, 2>(unit, inp, scratch, init_hsps);
+                } else {
+                    assert!(M::BLOSUM62 || self.sc.word() == 3);
+                    self.scan_unit_bf::<S, PF, 3>(unit, inp, scratch, init_hsps);
+                }
             } else {
-                self.scan_unit_bf::<S, PF, false>(unit, inp, scratch, init_hsps);
+                self.scan_unit_bf::<S, PF, 0>(unit, inp, scratch, init_hsps);
             }
         } else {
             self.scan_unit::<S, XNoProbe, PF>(unit, inp, scratch, init_hsps, &mut XNoProbe);
@@ -381,7 +389,7 @@ impl<M: TbxScore> XPairPar<M> {
     // units outside the switch run the instance of `scan_unit` without it.
     /// `scan_unit` with the branch-free hit loop.
     #[inline(never)]
-    fn scan_unit_bf<S: XInitSink, const PF: bool, const SENT: bool>(
+    fn scan_unit_bf<S: XInitSink, const PF: bool, const SENT: usize>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -411,9 +419,16 @@ impl<M: TbxScore> XPairPar<M> {
     ) {
         if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
             if self.x_unit_sent(unit, inp) {
-                self.scan_unit_batched_bf::<S, PF, true>(unit, inp, scratch, init_hsps);
+                // The walks of the search's word length (`XPairPar::sent`: 2 or 3 letters); 2
+                // only in another instance than BLOSUM62's (whose words have 3).
+                if !M::BLOSUM62 && self.sc.word() == 2 {
+                    self.scan_unit_batched_bf::<S, PF, 2>(unit, inp, scratch, init_hsps);
+                } else {
+                    assert!(M::BLOSUM62 || self.sc.word() == 3);
+                    self.scan_unit_batched_bf::<S, PF, 3>(unit, inp, scratch, init_hsps);
+                }
             } else {
-                self.scan_unit_batched_bf::<S, PF, false>(unit, inp, scratch, init_hsps);
+                self.scan_unit_batched_bf::<S, PF, 0>(unit, inp, scratch, init_hsps);
             }
         } else {
             self.scan_unit_batched::<S, PF>(unit, inp, scratch, init_hsps, x_tbx_extbatch::BATCH);
@@ -423,7 +438,7 @@ impl<M: TbxScore> XPairPar<M> {
     // EXPERIMENT (LOSAT_X_TBXHITBF): its own function, as `scan_unit_bf`.
     /// `scan_unit_batched` with full batches and the branch-free hit loop.
     #[inline(never)]
-    fn scan_unit_batched_bf<S: XInitSink, const PF: bool, const SENT: bool>(
+    fn scan_unit_batched_bf<S: XInitSink, const PF: bool, const SENT: usize>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -455,9 +470,16 @@ impl<M: TbxScore> XPairPar<M> {
     ) {
         if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
             if self.x_unit_sent(unit, inp) {
-                self.scan_unit_sliced_bf::<S, B, PF, true>(group, unit, inp, scratch, init_hsps);
+                // The walks of the search's word length (`XPairPar::sent`: 2 or 3 letters); 2
+                // only in another instance than BLOSUM62's (whose words have 3).
+                if !M::BLOSUM62 && self.sc.word() == 2 {
+                    self.scan_unit_sliced_bf::<S, B, PF, 2>(group, unit, inp, scratch, init_hsps);
+                } else {
+                    assert!(M::BLOSUM62 || self.sc.word() == 3);
+                    self.scan_unit_sliced_bf::<S, B, PF, 3>(group, unit, inp, scratch, init_hsps);
+                }
             } else {
-                self.scan_unit_sliced_bf::<S, B, PF, false>(group, unit, inp, scratch, init_hsps);
+                self.scan_unit_sliced_bf::<S, B, PF, 0>(group, unit, inp, scratch, init_hsps);
             }
         } else {
             self.scan_unit_sliced::<S, B, PF>(group, unit, inp, scratch, init_hsps);
@@ -467,7 +489,7 @@ impl<M: TbxScore> XPairPar<M> {
     // EXPERIMENT (LOSAT_X_TBXHITBF): its own function, as `scan_unit_bf`.
     /// `scan_unit_sliced` with the branch-free hit loop.
     #[inline(never)]
-    fn scan_unit_sliced_bf<S: XInitSink, const B: bool, const PF: bool, const SENT: bool>(
+    fn scan_unit_sliced_bf<S: XInitSink, const B: bool, const PF: bool, const SENT: usize>(
         &self,
         group: &XSliced,
         unit: &XUnit,
@@ -544,9 +566,10 @@ mod tests {
         }
         fn batch_end(&mut self) {}
         fn ext_begin(&mut self) {}
-        fn ext_end(
+        fn ext_end<M: TbxScore>(
             &mut self,
             _mark: (),
+            _sc: M,
             _q: &[u8],
             _s: &[u8],
             _s_left: usize,
@@ -588,7 +611,7 @@ mod tests {
     ) {
         // SAFETY: cell < width.
         rare_apply(unsafe { &mut *table.add(cell) }, s, window);
-        if s % 3 == 0 {
+        if s.is_multiple_of(3) {
             // SAFETY: (cell + 1) % width < width.
             unsafe { (*table.add((cell + 1) % width)).set_raw_bits(s.wrapping_add(window as u32)) };
         }
@@ -860,7 +883,8 @@ mod tests {
                     .map(|&f| frame(f, &residues(&mut rng, s_len, abc, &source)))
                     .collect()
             };
-            let (lookup, contexts) = build_ncbi_lookup(&[frames.clone()], 11, &params, true);
+            let (lookup, contexts) =
+                build_ncbi_lookup(std::slice::from_ref(&frames), 11, &params, true);
             let cutoff_scores: Vec<i32> = (0..contexts.len())
                 .map(|i| 10 + (i as i32 % 4) * 3)
                 .collect();
@@ -921,9 +945,9 @@ mod tests {
                     for pf in [false, true] {
                         let mut got: Vec<InitHSP> = Vec::new();
                         if pf {
-                            pp.scan_unit_bf::<_, true, false>(&unit, &inp, &mut scratch, &mut got);
+                            pp.scan_unit_bf::<_, true, 0>(&unit, &inp, &mut scratch, &mut got);
                         } else {
-                            pp.scan_unit_bf::<_, false, false>(&unit, &inp, &mut scratch, &mut got);
+                            pp.scan_unit_bf::<_, false, 0>(&unit, &inp, &mut scratch, &mut got);
                         }
                         assert_eq!(got, reference, "case {case} frame {f} group {g} pf {pf}");
                         assert!(
@@ -940,7 +964,7 @@ mod tests {
                         &mut compact_ref,
                         &mut XNoProbe,
                     );
-                    pp.scan_unit_bf::<_, false, false>(&unit, &inp, &mut scratch, &mut compact);
+                    pp.scan_unit_bf::<_, false, 0>(&unit, &inp, &mut scratch, &mut compact);
                     assert_eq!(
                         compact, compact_ref,
                         "case {case} frame {f} group {g}: compact"
@@ -953,7 +977,7 @@ mod tests {
                     for len in [1, 3, 16] {
                         let mut got: Vec<InitHSP> = Vec::new();
                         if len == 3 {
-                            pp.scan_unit_batched_hits::<_, true, true, false>(
+                            pp.scan_unit_batched_hits::<_, true, true, 0>(
                                 &unit,
                                 &inp,
                                 &mut scratch,
@@ -961,7 +985,7 @@ mod tests {
                                 len,
                             );
                         } else {
-                            pp.scan_unit_batched_hits::<_, false, true, false>(
+                            pp.scan_unit_batched_hits::<_, false, true, 0>(
                                 &unit,
                                 &inp,
                                 &mut scratch,

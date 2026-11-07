@@ -45,9 +45,11 @@
 //!   on the search path and the lookup of the taxid of some sequence of the database would be
 //!   refused (a scientific name NCBI's XML2 cannot write, a damaged record, which outfmt 5 reads
 //!   in each batch's prefetch, `ReportedSubjects::prefetch_messages`: checked once before the
-//!   first byte, `taxdb_may_refuse`, with the names for XML2 and JSON only), or outfmt 5's
-//!   prefetch is refused for NCBI's taxonomy cache (`BlastxDatabase::prefetch_refused`, at the
-//!   first batch, after the prolog), so that a later batch could refuse it,
+//!   first byte, `taxdb_may_refuse`, with the names for XML2 and JSON only), or the run's
+//!   fetches are refused for NCBI's taxonomy cache (`BlastxDatabase::prefetch_refused`: outfmt
+//!   5's prefetch, and the XML2 and JSON lookups of a batch that reports a subject with a
+//!   positive taxid, `read_reported_taxonomy`; after the prolog), so that a later batch could
+//!   refuse it,
 //!   the run holds the document in memory (`HeldOutput`; with outfmt 13 and 14 the side files'
 //!   bytes too, `HeldSideFiles`) and writes it at the epilog; a refusal found while the batches
 //!   are reported drops it, with nothing written (an empty master file, no side file).
@@ -596,22 +598,32 @@ fn query_text(
 /// a written byte. Returns whether some query would be refused if NCBI had not searched its
 /// batch (a title that only its message cannot carry); the run then holds the document.
 ///
-/// The reader is the search's own (same records and titles, cut to `range` as the search cuts
-/// them: a record the range skips is never reported and is not checked). A record it refuses for
-/// every format (a title that is not UTF-8) ends the scan: the run reads the file again and fails
-/// there as it always did.
+/// The reader is the search's own, reading as the search reads (`settings`: same records and
+/// titles, cut to `range` as the search cuts them: a record the range skips is never reported
+/// and is not checked) in the search's batches of `batch_size` letters. A reader error ends the
+/// scan (under `-parse_deflines`, a first line that is not a defline): the run reads the file
+/// again and fails there as it always did, after the reports of the batches before it, so the
+/// titles of those batches are checked and the records of the batch the error interrupts are
+/// never written and need no check. So does a record it refuses for every format (a title that
+/// is not UTF-8). A batch size of 0 reads no query (NCBI's first batch is empty and the search
+/// stops at it): nothing is checked.
 pub(super) fn prescan_queries(
     file: std::fs::File,
+    settings: &super::input::QueryStreamSettings,
     lowercase: bool,
+    batch_size: usize,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
 ) -> Result<bool> {
-    let mut stream = super::input::FastaStream::from_file(file);
+    if batch_size == 0 {
+        return Ok(false);
+    }
+    let mut stream = settings.stream_before_search(file);
     let mut may_be_refused = false;
     let scanned = super::input::parse_fasta_stream_keeping(
         &mut stream,
         false,
         lowercase,
-        super::query_setup::BATCH_SIZE,
+        batch_size,
         false,
         range,
         &mut |batch| {

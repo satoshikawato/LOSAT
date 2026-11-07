@@ -9,7 +9,6 @@
 //! function. They are `pub` so that the command line, the web adapters and the tests reach them,
 //! but they are hidden from this documentation and outside the compatibility promise of the
 //! version number: their items change as the port advances.
-#![allow(warnings, clippy::all)]
 
 #[doc(hidden)]
 pub mod algorithm;
@@ -21,15 +20,9 @@ pub mod sequence;
 pub mod utils;
 
 #[doc(hidden)]
-pub mod align;
-#[doc(hidden)]
 pub mod config;
 #[doc(hidden)]
-pub mod post;
-#[doc(hidden)]
 pub mod report;
-#[doc(hidden)]
-pub mod seed;
 #[doc(hidden)]
 pub mod stats;
 
@@ -61,3 +54,6 @@ pub mod web_api;
 // NCBI blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.
 #[doc(hidden)]
 pub mod cli;
+
+// The type of `api::FastaRecord`: private, so that rustdoc inlines its re-exports (record.rs).
+mod record;

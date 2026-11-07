@@ -14,7 +14,7 @@ use crate::stats::KarlinParams;
 /// ln(2) constant used in NCBI BLAST
 /// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h
 /// #define NCBIMATH_LN2 0.69314718055994530941723212145818
-pub(crate) const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+pub(crate) const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
 /// Default gap trigger bit score for nucleotide searches
 /// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:140
@@ -50,9 +50,7 @@ pub fn gap_trigger_raw_score(gap_trigger_bits: f64, ungapped_params: &KarlinPara
     // NCBI: gap_trigger = (Int4)((gap_trigger_bits * NCBIMATH_LN2 + logK) / Lambda)
     let log_k = ungapped_params.k.ln();
     let numerator = gap_trigger_bits * NCBIMATH_LN2 + log_k;
-    let gap_trigger = (numerator / ungapped_params.lambda) as i32;
-
-    gap_trigger
+    (numerator / ungapped_params.lambda) as i32
 }
 
 /// Calculate cutoff_score_max from E-value using GAPPED Karlin params.
@@ -408,7 +406,7 @@ mod tests {
         // = 17.82337575547674 / 0.625
         // = 28.517401208762784
         // ≈ 28 or 29
-        assert!(gap_trigger >= 28 && gap_trigger <= 29);
+        assert!((28..=29).contains(&gap_trigger));
     }
 
     #[test]
@@ -509,7 +507,7 @@ mod tests {
             alpha: 0.8,
             beta: -2.0,
         };
-        let gapped_params = ungapped_params.clone(); // Same for blastn
+        let gapped_params = ungapped_params; // Same for blastn
 
         let query_len = 1000i64 * 2; // Both strands
         let subject_len = 10000i64;

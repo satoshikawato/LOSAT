@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! The shared BLASTX entry `run_local` writes outfmt 0, 6 and 7 from one search. Every format
 //! must be byte-identical to the CLI run that requests only that format and to the frozen NCBI
 //! BLAST+ 2.17.0 bytes (`outfmt0_manifest.tsv`), the warnings must be written once, as the CLI
@@ -14,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use run_local_support::{
-    assert_observer_ranges, assert_tabular_ranges, cli_out_path, fixture_sequence, run_formats,
+    assert_observer_ranges, assert_tabular_ranges, cli_out_path, fixture_sequence,
     run_formats_with, temp_path, Run,
 };
 use LOSAT::algorithm::blastx::BlastxArgs;
@@ -503,7 +501,7 @@ fn the_records_of_ncbis_reader_search_as_blastxs_reader_reads_them() {
             };
             let (result, outputs, diagnostics) =
                 try_run(&inputs, &query_records, &subject_records, &["6"], extra);
-            if let Some(difference) = ReaderDifference::of(&query, &subject) {
+            if let Some(difference) = ReaderDifference::of(&query) {
                 difference.check(ok, &stderr, &result, &diagnostics, &query);
                 continue;
             }
@@ -635,38 +633,21 @@ enum ReaderDifference {
     /// BLASTX's CLI gives; the records hold no query, which every program's `run_local` reports
     /// as NCBI's `Query is Empty!`.
     NoRecords,
-    /// A `>?` gap line with a size that is not a number, or with modifiers: BLASTX's reader
-    /// refuses it; NCBI's reader reads it as NCBI does (`fasta_reader`, line SF).
-    GapModifiers,
 }
 
 impl ReaderDifference {
-    fn of(query: &str, subject: &str) -> Option<Self> {
-        let stem = |path: &str| {
-            Path::new(path)
-                .file_name()
-                .map(|name| {
-                    name.to_string_lossy()
-                        .split('.')
-                        .next()
-                        .unwrap_or("")
-                        .to_string()
-                })
-                .unwrap_or_default()
-        };
-        let (query, subject) = (stem(query), stem(subject));
-        if query == "file_comment_only" {
-            return Some(Self::NoRecords);
-        }
-        [query, subject]
-            .iter()
-            .any(|stem| {
-                matches!(
-                    stem.as_str(),
-                    "gap_abc" | "gap_bare" | "gap_mods" | "gap_mods_bad" | "gap_mods_nul"
-                )
+    fn of(query: &str) -> Option<Self> {
+        let stem = Path::new(query)
+            .file_name()
+            .map(|name| {
+                name.to_string_lossy()
+                    .split('.')
+                    .next()
+                    .unwrap_or("")
+                    .to_string()
             })
-            .then_some(Self::GapModifiers)
+            .unwrap_or_default();
+        (stem == "file_comment_only").then_some(Self::NoRecords)
     }
 
     fn check(
@@ -684,13 +665,6 @@ impl ReaderDifference {
                 assert_eq!(cli_stderr, "BLAST engine error: Empty CBlastQueryVector\n");
                 assert!(result.is_ok(), "{context}");
                 assert_eq!(diagnostics, b"Warning: [blastx] Query is Empty!\n");
-            }
-            Self::GapModifiers => {
-                assert!(
-                    cli_stderr.contains("unsupported FASTA assembly-gap"),
-                    "{context}: {cli_stderr}"
-                );
-                assert!(result.is_ok(), "{context}: {result:?}");
             }
         }
     }

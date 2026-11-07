@@ -1700,6 +1700,22 @@ impl CompressedWordCount {
         })
     }
 
+    /// [`Self::new`] for the table of the search matrix `matrix` (`try_build_compressed_lookup`):
+    /// the compressed scores of another matrix than BLOSUM62 (`build_compressed_score_matrix`) in
+    /// place of BLOSUM62's. BLASTP's block search counts the words of its matrix (item SC2b).
+    pub(crate) fn new_of(
+        matrix: ScoringMatrix,
+        word_size: usize,
+        scaled_threshold: i32,
+    ) -> Option<Self> {
+        let mut count = Self::new(word_size, scaled_threshold)?;
+        if matrix != ScoringMatrix::Blosum62 {
+            count.matrix = build_compressed_score_matrix(matrix, count.compressed_alphabet_size)?;
+            count.info = CompressedNeighborInfo::new(&count.matrix, count.compressed_alphabet_size);
+        }
+        Some(count)
+    }
+
     /// The rank of the set of `word`'s letters; `None` when a letter has no compressed letter.
     fn rank(&self, word: &[u8]) -> Option<usize> {
         let mut sorted = [0u8; X_MOST_WORD_LETTERS];
@@ -2399,9 +2415,20 @@ mod tests {
     // offset, on random words of all NCBISTDAA letters (some without a compressed letter), with
     // and without a threshold, and the count of a word does not depend on the order of its
     // letters (the counts are kept per set of letters); at each word size of the table (6 and 7
-    // with shorter queries and higher thresholds, whose tables are larger).
+    // with shorter queries and higher thresholds, whose tables are larger), for BLOSUM62 and two
+    // other matrices (`CompressedWordCount::new_of`, BLASTP's block search with them, SC2b).
     #[test]
     fn compressed_word_count_is_the_words_of_each_offset() {
+        for search_matrix in [
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Pam30,
+            ScoringMatrix::Blosum45,
+        ] {
+            compressed_word_count_is_the_words_of_each_offset_of(search_matrix);
+        }
+    }
+
+    fn compressed_word_count_is_the_words_of_each_offset_of(search_matrix: ScoringMatrix) {
         let mut rng = XorShift(0x0bad_cafe_1234_5678);
         let standard = (*b"ACDEFGHIKLMNPQRSTVWY").map(aa_char_to_ncbistdaa);
         let mut letters: Vec<u8> = (1..BLASTAA_SIZE as u8).collect();
@@ -2415,10 +2442,11 @@ mod tests {
         ] {
             let (alphabet, _) = compressed_lookup_parameters(word_size).expect("word size");
             let matrix =
-                build_blosum62_compressed_score_matrix(alphabet).expect("compressed matrix");
+                build_compressed_score_matrix(search_matrix, alphabet).expect("compressed matrix");
             let info = CompressedNeighborInfo::new(&matrix, alphabet);
             for &threshold in thresholds {
-                let counter = CompressedWordCount::new(word_size, threshold).expect("word size");
+                let counter = CompressedWordCount::new_of(search_matrix, word_size, threshold)
+                    .expect("word size");
                 let mut table =
                     BlastCompressedAaLookupTable::new(word_size, 0.0).expect("compressed lookup");
                 table.threshold = threshold;
@@ -2437,7 +2465,7 @@ mod tests {
                     assert_eq!(
                         counter.words(word),
                         added,
-                        "word size {word_size}, threshold {threshold}, offset {offset}"
+                        "{search_matrix:?} word size {word_size}, threshold {threshold}, offset {offset}"
                     );
                     if word.iter().all(|&residue| {
                         usize::from(table.compress_table[usize::from(residue)]) < alphabet

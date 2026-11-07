@@ -9,7 +9,23 @@
 //! - ncbi-blast/c++/src/algo/blast/core/blast_hits.c:675-733
 
 use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
+#[cfg(any(
+    target_arch = "x86_64",
+    all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )
+))]
 use crate::utils::matrix::blosum62_score;
+#[cfg(any(
+    target_arch = "x86_64",
+    all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )
+))]
 use std::sync::OnceLock;
 
 // ---------------------------------------------------------------------------
@@ -43,8 +59,24 @@ use std::sync::OnceLock;
 // the exact per-residue control flow (sum updates, branches) to preserve
 // 1-bit parity with NCBI.
 
+#[cfg(any(
+    target_arch = "x86_64",
+    all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )
+))]
 static REEVALUATE_SCORE_TABLE_32: OnceLock<[i32; 32 * 32]> = OnceLock::new();
 
+#[cfg(any(
+    target_arch = "x86_64",
+    all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )
+))]
 #[inline(always)]
 fn reevaluate_score_table_32() -> &'static [i32; 32 * 32] {
     REEVALUATE_SCORE_TABLE_32.get_or_init(|| {
@@ -160,11 +192,12 @@ unsafe fn gather_scores8_reevaluate_avx2(
 /// - `query_raw` / `subject_raw` start at the first residue (sequence_start + 1)
 /// - `q_off_raw` / `s_off_raw` are 0-based offsets from those starts
 /// - `hsp_len` is the ungapped alignment length in residues
+///
 /// Reference: blast_util.c:112-116, blast_hits.c:675-733.
 ///
 /// Returns updated (q_off_raw, s_off_raw, hsp_len, score) if kept, else `None`.
 #[inline]
-pub fn reevaluate_ungapped_hit_ncbi_translated(
+pub(crate) fn reevaluate_ungapped_hit_ncbi_translated(
     query_raw: &[u8],
     subject_raw: &[u8],
     q_off_raw: usize,
@@ -175,8 +208,12 @@ pub fn reevaluate_ungapped_hit_ncbi_translated(
     if hsp_len == 0 {
         return None;
     }
-    // Bounds safety: NCBI assumes offsets/length are valid.
-    if q_off_raw + hsp_len > query_raw.len() || s_off_raw + hsp_len > subject_raw.len() {
+    // Bounds safety: NCBI assumes offsets/length are valid. This form cannot wrap.
+    if hsp_len > query_raw.len()
+        || q_off_raw > query_raw.len() - hsp_len
+        || hsp_len > subject_raw.len()
+        || s_off_raw > subject_raw.len() - hsp_len
+    {
         return None;
     }
 
@@ -263,8 +300,10 @@ pub(crate) fn reevaluate_ungapped_hit_ncbi_translated_with<S: TbxScore>(
     }
     // The bounds of `reevaluate_ungapped_hit_ncbi_translated`.
     if hsp_len == 0
-        || q_off_raw + hsp_len > query_raw.len()
-        || s_off_raw + hsp_len > subject_raw.len()
+        || hsp_len > query_raw.len()
+        || q_off_raw > query_raw.len() - hsp_len
+        || hsp_len > subject_raw.len()
+        || s_off_raw > subject_raw.len() - hsp_len
     {
         return None;
     }
@@ -388,8 +427,12 @@ unsafe fn reevaluate_ungapped_hit_ncbi_translated_wasm_simd128(
     if hsp_len == 0 {
         return None;
     }
-    // Bounds safety: NCBI assumes offsets/length are valid.
-    if q_off_raw + hsp_len > query_raw.len() || s_off_raw + hsp_len > subject_raw.len() {
+    // Bounds safety: NCBI assumes offsets/length are valid. This form cannot wrap.
+    if hsp_len > query_raw.len()
+        || q_off_raw > query_raw.len() - hsp_len
+        || hsp_len > subject_raw.len()
+        || s_off_raw > subject_raw.len() - hsp_len
+    {
         return None;
     }
 
@@ -429,6 +472,10 @@ unsafe fn reevaluate_ungapped_hit_ncbi_translated_wasm_simd128(
     }
 
     let mut idx = 0usize;
+    #[expect(
+        unused_assignments,
+        reason = "the lane macro steps pos after every lane, the last one too; the next block starts again from its own offset"
+    )]
     while idx + 16 <= hsp_len {
         let qv = v128_load(q_ptr.add(idx) as *const v128);
         let sv = v128_load(s_ptr.add(idx) as *const v128);
@@ -696,15 +743,19 @@ unsafe fn reevaluate_ungapped_hit_ncbi_translated_avx2(
 ///
 /// # Returns
 /// `(num_ident, align_length)` if successful, `None` if lengths don't match
-pub fn get_num_identities_and_positives_ungapped(
+pub(crate) fn get_num_identities_and_positives_ungapped(
     query_nomask: &[u8],
     subject: &[u8],
     q_off: usize,
     s_off: usize,
     hsp_len: usize,
 ) -> Option<(usize, usize)> {
-    // NCBI: Check that lengths are the same in query and subject
-    if q_off + hsp_len > query_nomask.len() || s_off + hsp_len > subject.len() {
+    // NCBI: Check that lengths are the same in query and subject. This form cannot wrap.
+    if hsp_len > query_nomask.len()
+        || q_off > query_nomask.len() - hsp_len
+        || hsp_len > subject.len()
+        || s_off > subject.len() - hsp_len
+    {
         return None;
     }
 
@@ -876,4 +927,38 @@ pub fn hsp_test(
 
     // NCBI: return (identity_check || length_check)
     identity_check || length_check
+}
+
+// No NCBI counterpart: the bound tests cannot wrap (line LIB, P-S1; they wrapped in release).
+#[cfg(test)]
+mod bounds_wrap_tests {
+    use super::{
+        get_num_identities_and_positives_ungapped, reevaluate_ungapped_hit_ncbi_translated,
+    };
+
+    #[test]
+    fn an_offset_near_usize_max_is_refused() {
+        let seq = [1u8; 40];
+        // `q_off + hsp_len` wraps to 1; 16 letters take the AVX2 loop where it is detected.
+        for len in [2, 16] {
+            let q_off = usize::MAX - len + 2;
+            assert_eq!(
+                reevaluate_ungapped_hit_ncbi_translated(&seq, &seq, q_off, 0, len, 0),
+                None
+            );
+            assert_eq!(
+                reevaluate_ungapped_hit_ncbi_translated(&seq, &seq, 0, usize::MAX, len, 0),
+                None
+            );
+            assert_eq!(
+                get_num_identities_and_positives_ungapped(&seq, &seq, usize::MAX, 0, len),
+                None
+            );
+        }
+        assert_eq!(
+            reevaluate_ungapped_hit_ncbi_translated(&seq, &seq, 0, 0, 41, 0),
+            None
+        );
+        assert!(get_num_identities_and_positives_ungapped(&seq, &seq, 24, 24, 16).is_some());
+    }
 }

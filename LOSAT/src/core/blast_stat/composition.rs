@@ -321,6 +321,10 @@ pub fn compute_score_freq_profile(
     sfp.obs_max = obs_max;
 
     let mut score_avg = 0.0;
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if score_sum > 0.0001 || score_sum < -0.0001 {
         for score in obs_min..=obs_max {
             let prob = sfp.get_prob(score) / score_sum;
@@ -527,6 +531,57 @@ fn nlm_karlin_lambda_nr(
     }
 
     Ok(-x.ln() / d as f64)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:550-572
+// ```c
+// static double
+// s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
+// {
+//
+//     int i;                 /* loop index */
+//     int score_range;       /* range of possible scores */
+//     double avg;            /* expected score of aligning two characters */
+//     Blast_ScoreFreq freq;  /* score frequency data */
+//
+//     score_range = max_score - min_score + 1;
+//     avg = 0.0;
+//     for (i = 0;  i < score_range;  i++) {
+//         avg += (min_score + i) * probs[i];
+//     }
+//     freq.score_min = min_score;
+//     freq.score_max = max_score;
+//     freq.obs_min = min_score;
+//     freq.obs_max = max_score;
+//     freq.sprob0 = probs;
+//     freq.sprob = &probs[-min_score];
+//     freq.score_avg = avg;
+//
+//     return Blast_KarlinLambdaNR(&freq, lambda0);
+// }
+// ```
+/// NCBI's `s_CalcLambda` as written: the probabilities `probs` of the scores `min_score` to
+/// `max_score` as given (not normalized, the observed range as given), -1.0 where
+/// `Blast_KarlinLambdaNR` gives it. The position-based composition-based statistics call it
+/// (`core::composition_adjustment::compo_scale`).
+pub(crate) fn calc_lambda_of_score_probs(
+    probs: Vec<f64>,
+    min_score: i32,
+    max_score: i32,
+    lambda0: f64,
+) -> f64 {
+    let mut score_avg = 0.0;
+    for (i, &prob) in probs.iter().enumerate() {
+        score_avg += (min_score + i as i32) as f64 * prob;
+    }
+    let sfp = ScoreFreqProfile {
+        sprob: probs,
+        obs_min: min_score,
+        obs_max: max_score,
+        score_avg,
+        score_min: min_score,
+    };
+    compute_lambda_nr(&sfp, lambda0).unwrap_or(-1.0)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2567-2598

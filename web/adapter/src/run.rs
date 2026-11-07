@@ -135,12 +135,12 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 /// the CLI does (`parse_formatting_string`, `report_format`, with the CLI's messages; the
 /// formatting handler's check of a custom delimiter comes later, `custom_handler_check`). A run
 /// writes the program's formats 0, 6 and 7 whatever the value; every other format that the CLI
-/// writes (5, 8 to 12, 15, 16, 20, BLASTN's 17), and 6 and 7 with words after the number (fields,
+/// writes (5, 8 to 16, 20, BLASTN's 17), and 6 and 7 with words after the number (fields,
 /// `delim=`), add an output of their own, the third value returned (docs/web/abi_v2.md §7). The
 /// rule reads the words, not the fields they make, so that the application reads it from the argv
 /// alike: `6 std` adds an output with the bytes of outfmt 6. 0 with words adds none (the CLI writes
-/// outfmt 0). Outfmt 13 and 14 (side files next to `-out`) and BLASTX's 11 are refused. The
-/// arguments come back with
+/// outfmt 0). The output of outfmt 13 and 14 is a ZIP archive of the master file and the side
+/// files (`search`). The arguments come back with
 /// `-outfmt` at the CLI's default, `0`: the engine is given the formats of each search
 /// (`ReportOutputs`), and the checks of the arguments alone (`check_options`) read the formats
 /// as they do without `-outfmt`, but for an `-outfmt` whose custom delimiter the CLI rejects
@@ -188,7 +188,8 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
     // formats that NCBI's formatting handler rejects (`report_format` gives none: SAM of another
     // program, AIRR, FASTA), which a run never gives the engine; the CLI rejects those after the
     // ranges and the query options, so for an argv with an error of both the CLI reports the
-    // other. The CLI is taken with `-out`, which the formats 13 and 14 need there. The handler's
+    // other. The CLI is taken with `-out`, which the formats 13 and 14 need there (a run gives
+    // them a receiver of their side files, `search`). The handler's
     // check of a custom delimiter comes with the program's checks of the options (`validate`) and
     // in the engine's `run_local`.
     let engine = engine_program(program);
@@ -198,13 +199,6 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
             None => LOSAT::blastinput::app::formatting_handler_check(&choice, engine),
         })
         .map_err(|error| format!("{error:#}"))?;
-    // No writer in memory yet: the side files of 13 and 14, BLASTX's archive (its `run_local`).
-    if matches!(choice.number, 13 | 14) || (choice.number == 11 && program == Program::Blastx) {
-        return Err(format!(
-            "-outfmt {} is not supported in the browser yet",
-            choice.number
-        ));
-    }
     // NCBI's white space around the value (`NStr::TruncateSpaces`), as `parse_formatting_string`
     // reads it: a space inside is followed by words.
     let words_follow = outfmt
@@ -663,6 +657,46 @@ impl Failed {
     }
 }
 
+/// The name that the side files of outfmt 13 and 14 follow, as the CLI's `-out` (no directory and
+/// no extension, so that the side files have the names that the master file lists: `results_1.json`
+/// for 13 too, where an `-out` ending in `.json` lists other names than its side files have,
+/// `report::blast_xml2::files`).
+pub const SIDE_FILE_BASE: &str = "results";
+
+/// The name of the master file in the archive of outfmt 13 or 14.
+pub fn master_name(number: u32) -> String {
+    let extension = if number == 13 { "json" } else { "xml" };
+    format!("{SIDE_FILE_BASE}.{extension}")
+}
+
+/// The output of outfmt 13 or 14 (stream 4): a ZIP archive (`zip::ZipStream`) of the side files,
+/// added as the engine hands each over, and of the master file, added after the run.
+struct ArchivedFiles(std::sync::Mutex<Option<crate::zip::ZipStream<StreamWriter>>>);
+
+impl ArchivedFiles {
+    fn take(&self) -> crate::zip::ZipStream<StreamWriter> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .expect("the archive is taken once, after the run")
+    }
+}
+
+impl LOSAT::report::blast_xml2::SideFileReceiver for ArchivedFiles {
+    fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+        match self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_mut()
+        {
+            Some(zip) => zip.add(name, bytes),
+            None => Err(std::io::Error::other("the archive was closed")),
+        }
+    }
+}
+
 /// What one search wrote.
 struct Searched {
     writers: Vec<StreamWriter>,
@@ -696,6 +730,22 @@ fn search(
         fault: None,
     };
     let mut collected: Option<std::sync::Arc<Vec<PairwiseHit>>> = None;
+    // Outfmt 13 and 14: the master file goes to memory and the side files to a ZIP archive on the
+    // format's stream, to which the master file is added after the run (`ArchivedFiles`).
+    let mut archives: Vec<Option<(Vec<u8>, Arc<ArchivedFiles>)>> = formats
+        .iter()
+        .zip(writers.iter_mut())
+        .map(|(format, writer)| {
+            matches!(format.number, 13 | 14).then(|| {
+                let stream = std::mem::replace(writer, StreamWriter::new(format.stream));
+                let zip = crate::zip::ZipStream::new(stream);
+                (
+                    Vec::new(),
+                    Arc::new(ArchivedFiles(std::sync::Mutex::new(Some(zip)))),
+                )
+            })
+        })
+        .collect();
     let ordinals;
     let outcome = {
         let mut on_hits = |hits| collected = Some(hits);
@@ -703,9 +753,19 @@ fn search(
             formats: formats
                 .iter()
                 .zip(writers.iter_mut())
-                .map(|(format, writer)| FormatOutput {
+                .zip(archives.iter_mut())
+                .map(|((format, writer), archive)| FormatOutput {
                     outfmt: &format.outfmt,
-                    sink: OutputSink::Writer(writer),
+                    sink: match archive {
+                        Some((master, files)) => OutputSink::Files(
+                            master,
+                            LOSAT::report::blast_xml2::SideFileSink::new(
+                                SIDE_FILE_BASE,
+                                files.clone(),
+                            ),
+                        ),
+                        None => OutputSink::Writer(writer),
+                    },
                 })
                 .collect(),
             diagnostics,
@@ -739,6 +799,33 @@ fn search(
         };
         result
     };
+    // The archives: the master file after the side files and the central directory, on the
+    // format's stream again. A run that failed leaves the side files written (the host discards
+    // them).
+    for ((format, writer), archive) in formats.iter().zip(writers.iter_mut()).zip(&mut archives) {
+        let Some((master, files)) = archive.take() else {
+            continue;
+        };
+        let zip = files.take();
+        *writer = if outcome.is_ok() {
+            let mut zip = zip;
+            match zip
+                .add(master_name(format.number).as_bytes(), &master)
+                .and_then(|()| zip.finish())
+            {
+                Ok(stream) => stream,
+                Err(error) => {
+                    return Err(Failed {
+                        cli_stderr: format!("{error}\n").into_bytes(),
+                        message: format!("the archive of outfmt {}: {error}", format.number),
+                        wrote: true,
+                    })
+                }
+            }
+        } else {
+            zip.into_inner()
+        };
+    }
     if let Err(error) = outcome {
         let wrote = writers
             .iter()
@@ -1561,8 +1648,8 @@ mod tests {
     }
 
     // -outfmt is read as the CLI reads it, with the CLI's messages; 0, 6 and 7 add no output, 6 and
-    // 7 with words after the number add one (WA2-OP-03, Owner 2026-11-05), the formats that the CLI
-    // writes besides are refused with the browser's message.
+    // 7 with words after the number add one (WA2-OP-03, Owner 2026-11-05), and so does every other
+    // format that the CLI writes (W11), 13 and 14 without the CLI's need of -out.
     #[test]
     fn outfmt_is_read_as_on_the_command_line() {
         let custom = |program: &str, outfmt: &str| {
@@ -1607,6 +1694,10 @@ mod tests {
                 "10 qseqid",
                 "20 delim=| std",
                 "5 qseqid",
+                "11",
+                "13",
+                "14",
+                "14 qseqid",
             ] {
                 assert_eq!(
                     custom(program, outfmt),
@@ -1615,29 +1706,6 @@ mod tests {
                 );
                 let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
                 assert_eq!(validate(&words), Ok(()), "{program} {outfmt:?}");
-            }
-            assert_eq!(
-                custom(program, "11").map(|c| c.is_some()),
-                if program == "blastx" {
-                    Err("-outfmt 11 is not supported in the browser yet".to_string())
-                } else {
-                    Ok(true)
-                },
-                "{program}"
-            );
-            // The side files of 13 and 14 have no writer in memory yet; the CLI's own errors
-            // (13 and 14 need -out there) do not apply to a run, which writes no file.
-            for outfmt in ["13", "14", "14 qseqid"] {
-                let number = &outfmt[..2];
-                assert_eq!(
-                    custom(program, outfmt),
-                    Err(format!(
-                        "-outfmt {number} is not supported in the browser yet"
-                    )),
-                    "{program}"
-                );
-                let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
-                assert_eq!(validate(&words).unwrap_err(), parse(&words).unwrap_err());
             }
             // What the CLI rejects, with its message.
             let engine = engine_program(Program::parse(program).unwrap());
@@ -2622,6 +2690,146 @@ mod tests {
                     "{id}: stream {stream}"
                 );
             }
+        }
+    }
+
+    /// The rows of NCBI's frozen outputs (`LOSAT/tests/outfmt0_manifest.tsv`) for which `keep(program,
+    /// format number, files column)` holds, as (fixture id, argv): the arguments of
+    /// `run_oracle.search_argv` (none of the rows taken here quotes a value).
+    fn manifest_rows(keep: impl Fn(&str, &str, &str) -> bool) -> Vec<(String, Vec<String>)> {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
+        let manifest =
+            std::fs::read_to_string(format!("{root}/tests/outfmt0_manifest.tsv")).unwrap();
+        let mut lines = manifest.lines().filter(|line| !line.starts_with('#'));
+        let header: Vec<&str> = lines.next().unwrap().split('\t').collect();
+        let column = |name: &str| header.iter().position(|h| *h == name).unwrap();
+        let mut rows = Vec::new();
+        for line in lines {
+            let row: Vec<&str> = line.split('\t').collect();
+            let field = |name: &str| row.get(column(name)).copied().unwrap_or("");
+            let outfmt = match field("outfmt") {
+                "" => "0",
+                outfmt => outfmt,
+            };
+            let number = outfmt
+                .trim()
+                .split(' ')
+                .next()
+                .unwrap()
+                .trim_start_matches('+');
+            let number = number.trim_start_matches('0');
+            if !keep(field("program"), number, field("files")) {
+                continue;
+            }
+            let extra = field("extra_args");
+            assert!(
+                !extra.contains(['"', '\'', '\\']),
+                "{}",
+                field("fixture_id")
+            );
+            let mut argv = vec![
+                field("program").to_string(),
+                "-query".to_string(),
+                field("query").to_string(),
+                "-subject".to_string(),
+                field("subject").to_string(),
+            ];
+            if !field("task").is_empty() {
+                argv.extend(["-task".to_string(), field("task").to_string()]);
+            }
+            argv.extend(extra.split_whitespace().map(str::to_string));
+            argv.extend(["-outfmt".to_string(), outfmt.to_string()]);
+            rows.push((field("fixture_id").to_string(), argv));
+        }
+        rows
+    }
+
+    // Outfmt 13 and 14 are a ZIP archive on stream 4: NCBI's side files, named as the CLI names them
+    // for `-out results`, and NCBI's master file (`results.json` / `results.xml`), which lists them by
+    // those names; stream 3 is NCBI's standard error, and the other streams are those of the run
+    // without -outfmt (the 18 rows of the manifest with side files).
+    #[test]
+    fn outfmt_13_and_14_are_an_archive_of_ncbis_files() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
+        let read = |path: &str| std::fs::read(format!("{root}/{path}")).unwrap();
+        let rows = manifest_rows(|_, _, files| files == "xinclude");
+        assert_eq!(rows.len(), 18);
+        let programs: std::collections::BTreeSet<&str> =
+            rows.iter().map(|(_, argv)| argv[0].as_str()).collect();
+        assert_eq!(programs.len(), 5);
+        for (id, argv) in &rows {
+            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+            let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
+            let number: u32 = at("-outfmt").trim().parse().unwrap();
+            let extension = if number == 13 { "json" } else { "xml" };
+            let (query, subject) = (read(at("-query")), read(at("-subject")));
+            let with = registered_streams(&words, &query, &subject);
+            let plain = registered_streams(&words[..words.len() - 2], &query, &subject);
+            let mut expected = Vec::new();
+            for n in 1.. {
+                let path = format!("{root}/tests/fixtures/outfmt0/{id}.out_{n}.{extension}");
+                let Ok(side) = std::fs::read(path) else {
+                    break;
+                };
+                expected.push((format!("results_{n}.{extension}").into_bytes(), side));
+            }
+            let master = text(&read(&format!("tests/fixtures/outfmt0/{id}.out")))
+                .replace(&format!("{id}.out_"), "results_");
+            expected.push((master_name(number).into_bytes(), master.into_bytes()));
+            let archive = with.get(&STREAM_CUSTOM).cloned().unwrap_or_default();
+            let files = crate::zip::read(&archive);
+            assert_eq!(files.len(), expected.len(), "{id}: entries");
+            for ((name, bytes), (want_name, want)) in files.iter().zip(&expected) {
+                assert_eq!(text(name), text(want_name), "{id}");
+                assert!(bytes == want, "{id}: {}", text(name));
+            }
+            let stderr = std::fs::read(format!("{root}/tests/fixtures/outfmt0/{id}.err"))
+                .unwrap_or_default();
+            let diagnostics = with.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
+            assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
+            for stream in [0, 6, 7, STREAM_HITS] {
+                assert!(
+                    plain.get(&stream) == with.get(&stream),
+                    "{id}: stream {stream}"
+                );
+            }
+        }
+    }
+
+    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 52 rows of the manifest that a
+    // run takes (not the one with -parse_deflines, nor the one with a `>?` gap line, which the
+    // store refuses: maintainer decision 3), stream 4 and stream 3.
+    #[test]
+    fn blastx_writes_ncbis_archive() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
+        let read = |path: &str| std::fs::read(format!("{root}/{path}")).unwrap();
+        let gap_line = |path: &str| {
+            read(path)
+                .split(|b| *b == b'\n')
+                .any(|l| l.starts_with(b">?"))
+        };
+        let rows = manifest_rows(|program, number, _| program == "blastx" && number == "11");
+        let rows: Vec<_> = rows
+            .into_iter()
+            .filter(|(_, argv)| !argv.iter().any(|word| word == "-parse_deflines"))
+            .filter(|(_, argv)| {
+                let file = |flag: &str| &argv[argv.iter().position(|w| w == flag).unwrap() + 1];
+                !gap_line(file("-query")) && !gap_line(file("-subject"))
+            })
+            .collect();
+        assert_eq!(rows.len(), 52);
+        for (id, argv) in &rows {
+            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+            let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
+            let (query, subject) = (read(at("-query")), read(at("-subject")));
+            let with = registered_streams(&words, &query, &subject);
+            let ncbi = read(&format!("tests/fixtures/outfmt0/{id}.out"));
+            let ours = with.get(&STREAM_CUSTOM).cloned().unwrap_or_default();
+            assert!(ours == ncbi, "{id}: stream 4");
+            let stderr = std::fs::read(format!("{root}/tests/fixtures/outfmt0/{id}.err"))
+                .unwrap_or_default();
+            let diagnostics = with.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
+            assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
         }
     }
 

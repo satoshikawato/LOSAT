@@ -208,7 +208,7 @@ test('several runs; the next search is edited while one runs; separate searches 
   await expect(page.getByTestId('run-losat-bottom')).toHaveText('Run LOSAT (2 runs)');
   await submit(page);
   // The page goes to the results of the first run of the group.
-  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('run-3-option')).toHaveCount(1);
   await expect(page.getByTestId('run-2-option')).toContainText('query.fa vs a.fa');
   await expect(page.getByTestId('run-3-option')).toContainText('query.fa vs b.fa');
@@ -449,12 +449,13 @@ test("the engine's refusals of option values are shown as the engine writes them
     "error: the NCBI BLAST+ option -version is not supported by LOSAT's TBLASTX",
   );
   await expect(page.getByTestId('run-1-option')).toHaveCount(0);
-  // A value that LOSAT does not support (typed after "Other"), and one that NCBI refuses.
+  // A value that LOSAT does not support (typed after "Other": IDENTITY, which NCBI's page does
+  // not list, with its gap costs 15/2), and one that NCBI refuses.
   await program(page, 'blastp');
   await page.getByTestId('param-matrix').selectOption('other');
-  await page.getByTestId('param-matrix-other').fill('BLOSUM45');
+  await page.getByTestId('param-matrix-other').fill('IDENTITY');
   await expect(page.getByTestId('argv-validation')).toHaveText(
-    "the matrix BLOSUM45 with gap costs 14/2 is not supported by LOSAT's BLASTP",
+    "the matrix IDENTITY with gap costs 15/2 is not supported by LOSAT's BLASTP",
   );
   await page.getByTestId('param-matrix').selectOption('BLOSUM62');
   await page.getByTestId('param-evalue').fill('0');
@@ -652,12 +653,15 @@ test('empty inputs, every record excluded, a sequence without a defline, and the
     "This input cannot be read: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser",
   );
   if (BUILD_HAS_ENGINE) {
-    // A first line that NCBI's data loaders would fetch as a Seq-id fails; a defline can go first.
+    // A first line that NCBI's data loaders would fetch as a Seq-id fails; '>' can go before it (a defline line
+    // would make it the first data line).
     await paste(page, 'query', 'AB123456\nACGTACGTACGTACGT');
     await expect(page.getByTestId('query-source-0-error')).toContainText('may be a sequence identifier');
-    await page.getByTestId('query-source-0-add-defline').click();
+    await expect(page.getByTestId('query-source-0-add-defline')).toHaveCount(0);
+    await page.getByTestId('query-source-0-put-defline-mark').click();
     await settled(page, 'query');
-    await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nAB123456\nACGTACGTACGTACGT');
+    await expect(page.getByTestId('query-input')).toHaveValue('>AB123456\nACGTACGTACGTACGT');
+    await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', 'ok');
   }
   // NCBI's reader reads a sequence without a defline as a record without a title (DW-38).
   await paste(page, 'query', 'ACGTACGTACGTACGT');
@@ -926,12 +930,24 @@ test('a GenBank, EMBL or FASTQ file is read as FASTA text, as the command line d
   await expect(page.getByTestId('subject-source-0-format-warning')).toContainText('This looks like an EMBL or UniProt flat file');
 });
 
+test('"Add the line" keeps the focus on the card, not the page\'s body (WA2-AX-04)', async ({ page }) => {
+  await program(page, 'blastn');
+  // Not a defline, and the gap line fails it again after the defline: the card stays, with the button.
+  await paste(page, 'query', 'ACGTACGTACGT\n>?10\nACGT\n');
+  await expect(page.getByTestId('query-source-0-error')).toContainText('gap line');
+  await page.getByTestId('query-source-0-add-defline').click();
+  await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nACGTACGTACGT\n>?10\nACGT\n');
+  await expect(page.getByTestId('query-source-0')).toBeFocused();
+});
+
 test('an input that starts with a byte order mark says why it cannot be read (WA-IN-05)', async ({ page }) => {
   await program(page, 'blastn');
   await paste(page, 'query', '\uFEFF>q1\nACGTACGTACGTACGTACGTACGT\n');
   await expect(page.getByTestId('query-source-0-error')).toContainText("doesn't look like plausible data");
   await expect(page.getByTestId('query-source-0-mark')).toContainText('The text starts with a byte order mark (U+FEFF).');
   await page.getByTestId('query-source-0-remove-mark').click();
+  // The button goes with the old reading: the focus stays on the card (WA2-AX-04).
+  await expect(page.getByTestId('query-source-0')).toBeFocused();
   await expect(page.getByTestId('query-input')).toHaveValue('>q1\nACGTACGTACGTACGTACGTACGT\n');
   await expect(page.getByTestId('query-source-0-summary')).toHaveText('1 record · 24 nt');
   await expect(page.getByTestId('query-source-0-mark')).toHaveCount(0);
@@ -1290,7 +1306,7 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   await expect(page.getByTestId('results-job-title')).toHaveCount(0);
   // A started search shows no message: the page is on the run.
   await expect(page.getByTestId('search-message')).toHaveCount(0);
-  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
   await waitStatus(page, 2, 'completed');
 });
 
@@ -1392,7 +1408,8 @@ test("NCBI's selects of pairs follow the scores and the matrix; Other shows the 
   await expect(gaps).toHaveValue('9 1');
   await expect(page.getByTestId('param-gapcosts-field')).not.toHaveClass(/\bchanged\b/);
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
-  // BLASTP's list is NCBI's of BLOSUM62 and BLASTX's holds the one pair that LOSAT's BLASTX reads (WA-FM-02).
+  // BLASTP's list is NCBI's of the matrix (BLOSUM62 here) and BLASTX's holds the one pair that
+  // LOSAT's BLASTX reads (WA-FM-02).
   await program(page, 'blastp');
   await expect(gaps.locator('option')).toHaveText([
     ...PROTEIN_GAP_COSTS.lists.BLOSUM62!.map((pair) => `Existence: ${pair.replace(' ', ' Extension: ')}`),

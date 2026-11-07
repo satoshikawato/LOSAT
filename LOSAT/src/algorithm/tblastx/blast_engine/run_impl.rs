@@ -3,8 +3,8 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c
 
 use super::*;
+use crate::algorithm::common::translated_chunks::{translated_chunk_scan_ranges, TranslatedChunk};
 use crate::algorithm::common::x_db_stream::XReadError;
-use crate::algorithm::tblastn::search_seed::{translated_chunk_scan_ranges, TranslatedChunk};
 use crate::algorithm::tblastx::database::DatabaseTitles;
 use crate::algorithm::tblastx::hit_collector::HitCollector;
 use crate::algorithm::tblastx::subjects::{
@@ -1271,17 +1271,6 @@ pub(crate) fn check_losat_limits(args: &TblastxArgs) -> Result<()> {
             "-window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX"
         );
     }
-    // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:237
-    // ```c
-    //     lookup->word_length = opt->word_size;
-    // ```
-    // LOSAT's TBLASTX builds and scans 3-residue words only.
-    if args.word_size() != 3 {
-        anyhow::bail!(
-            "-word_size {} is not supported by LOSAT's TBLASTX (it implements word size 3)",
-            args.word_size()
-        );
-    }
     Ok(())
 }
 
@@ -1657,8 +1646,9 @@ fn search_database(
 /// Each requested format as NCBI reads `-outfmt`: NCBI's errors, and a rejection of a
 /// format that LOSAT's TBLASTX does not write.
 ///
-/// `out` is the run's `-out`: outfmt 13 and 14 write side files next to it, and fail on standard
-/// output (`xinclude_check_for`).
+/// `out` is the run's `-out` (a format with the caller's receiver of side files takes that
+/// receiver's, `FormatOutput::side_out`): outfmt 13 and 14 write side files next to it, and fail
+/// on standard output (`xinclude_check_for`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
 /// ```c++
@@ -1670,6 +1660,7 @@ fn check_report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Pat
     use crate::blastinput::app;
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
+        let out = format.side_out(out);
         if app::report_format(&choice, app::Program::Tblastx, out)?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastx)?;
             app::xinclude_check_for(&choice, out)?;
@@ -2171,7 +2162,11 @@ fn write_tblastx_outputs(
     // run without output (`tabular_subject_ids`).
     let subject_ids = if output_formats.iter().any(|format| format.is_tabular()) {
         match &run.database {
-            Some(database) => database.reported.tabular_subject_ids()?,
+            Some(database) => database.reported.tabular_subject_ids(
+                output_formats
+                    .iter()
+                    .any(|format| format.tabular_reads_subject()),
+            )?,
             None => tabular_subject_ids(&hits, run.subjects)?,
         }
     } else {
@@ -2261,6 +2256,8 @@ fn write_tblastx_outputs(
         //     : m_FormatType(format_type), ..., m_Outfile(outfile),
         // ```
         let prolog = !prolog_before_search(&format.sink);
+        // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
+        let side_sink = format.sink.side_files().cloned();
         let mut writer = format.sink.open()?;
         match output_format {
             report::TblastxOutputFormat::Pairwise => {
@@ -2515,6 +2512,7 @@ fn write_tblastx_outputs(
                     kind,
                     super::super::blast_xml::xml2_run(run),
                     run.args.out.as_deref(),
+                    side_sink.as_ref(),
                 ),
                 true,
                 &mut writer,
@@ -2620,7 +2618,7 @@ fn rows_up_front(
 #[allow(clippy::too_many_arguments)]
 fn report_counts<S: TbxScore>(
     sc: S,
-    hits: &mut Vec<TblastxHsp>,
+    hits: &mut [TblastxHsp],
     outputs: &ReportOutputs<'_>,
     run: &TblastxReportRun<'_>,
     output_formats: &[report::TblastxOutputFormat],
@@ -2853,6 +2851,7 @@ fn run_in_pool(
         observer.queries_begin();
     }
     let query_records = query_runs.records;
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let input = query_runs.input;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
     // (`s_ReplaceLocalId`)
@@ -2943,11 +2942,13 @@ fn run_in_pool(
     // The search's matrix, chosen once (`scoring.rs`): BLOSUM62's instance of the search, or
     // the other matrices' with the table of `-matrix` (a name without a table stops at the first
     // batch with letters, `run_batch_loop`; one that NCBI aborts on runs no batch).
+    // A word length other than 3 (`-word_size` 2 or 4) takes the other instance, BLOSUM62 too
+    // (`TbxScore::word`).
+    let word = args.word_size() as usize;
     let matrix_scores = match args.scoring_matrix() {
-        TblastxMatrix::Table(ScoringMatrix::Blosum62)
-        | TblastxMatrix::Unknown
-        | TblastxMatrix::Aborts => None,
-        TblastxMatrix::Table(matrix) => Some(MatrixScores::new(matrix)),
+        TblastxMatrix::Unknown | TblastxMatrix::Aborts => None,
+        TblastxMatrix::Table(ScoringMatrix::Blosum62) if word == 3 => None,
+        TblastxMatrix::Table(matrix) => Some(MatrixScores::with_word(matrix, word)),
     };
     // EXPERIMENT (LOSAT_X_TBXBOARD): one board for the search's batches (tblastx/x_work_board.rs).
     // Only when the batches use it (`search_query_batch`, `x_board_batch`): with the serial chunk
@@ -3845,8 +3846,9 @@ impl BatchReports<'_> {
                     .collect();
                 let pairwise_shown = formats.contains(&report::TblastxOutputFormat::Pairwise);
                 let shown = crate::algorithm::common::database::ParsedShown {
-                    tabular: formats.iter().any(|format| format.is_tabular()),
+                    tabular: formats.iter().any(|format| format.tabular_reads_subject()),
                     pairwise: pairwise_shown,
+                    structured: formats.iter().any(|format| format.is_structured_xml()),
                     joined: pairwise_shown
                         || formats.iter().any(|format| {
                             format.is_structured_xml() || format.tabular_joins_subjects()
@@ -3857,9 +3859,10 @@ impl BatchReports<'_> {
                         crate::report::tabular::PrintedIds::default(),
                         |words, format| words.or(format.printed_ids()),
                     ),
-                    prefetched: crate::algorithm::common::database::seq_annots_prefetch(
-                        formats.first().and_then(|format| format.serial_outfmt()),
-                    ),
+                    prefetched: formats
+                        .first()
+                        .is_some_and(|format| format.prefetches_subjects())
+                        && !crate::algorithm::common::database::prefetch_always_off(),
                 };
                 reported_subjects = super::super::database::reported_subjects(
                     database,
@@ -4075,9 +4078,6 @@ fn search_query_batch<S: TbxScore>(
     // Optional timing breakdown (disabled by default to preserve output/parity logs)
     let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
     let t_total = Instant::now();
-    let mut t_read_queries = Duration::ZERO;
-    let mut t_build_lookup = Duration::ZERO;
-    let mut t_read_subjects = Duration::ZERO;
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
@@ -4138,7 +4138,8 @@ fn search_query_batch<S: TbxScore>(
     // [C] window = diag->window;
     let window = args.window();
     // [C] wordsize = lookup->word_length;
-    let wordsize: i32 = 3;
+    // (`-word_size`; BLOSUM62's instance of the search is for 3, `TbxScore::word`)
+    let wordsize: i32 = sc.word() as i32;
 
     // NCBI BLAST computes x_dropoff per-context using kbp[context]->Lambda:
     //   p->cutoffs[context].x_dropoff_init =
@@ -4287,7 +4288,7 @@ fn search_query_batch<S: TbxScore>(
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
     }
 
-    t_read_queries = t_phase_read_queries.elapsed();
+    let t_read_queries = t_phase_read_queries.elapsed();
 
     let t_phase_build_lookup = Instant::now();
     // Note: karlin_params argument is now unused - computed per context in build_ncbi_lookup()
@@ -4344,12 +4345,16 @@ fn search_query_batch<S: TbxScore>(
             threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
             window,
             subjects,
+            // A word length whose backbone index the direct builder does not cover (4 letters,
+            // 20 bits) takes the reference frame loop: the units' group tables are built by it
+            // (`x_direct_covers`; `TbxScore::word`, 3 for BLOSUM62's instance).
             debugging: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled
                 || debug_hsp_saving
-                || x_soft_subjects,
+                || x_soft_subjects
+                || !crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers(sc.word()),
             requested_parallel,
             use_serial_scan_chunks,
             pool: parallel_pool,
@@ -4402,7 +4407,7 @@ fn search_query_batch<S: TbxScore>(
                     &ungapped_params_for_xdrop,
                     true,
                     sc.matrix(),
-                    3,
+                    sc.word(),
                 );
             for ctx in contexts.iter_mut().filter(|ctx| ctx.is_valid) {
                 ctx.karlin_params.alpha = ungapped_params_for_xdrop.alpha;
@@ -4417,7 +4422,7 @@ fn search_query_batch<S: TbxScore>(
             true,
         ),
     };
-    t_build_lookup = t_phase_build_lookup.elapsed();
+    let t_build_lookup = t_phase_build_lookup.elapsed();
     // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs). No
     // NCBI counterpart.
     crate::utils::xtiming::add_duration(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
@@ -4471,7 +4476,7 @@ fn search_query_batch<S: TbxScore>(
             x_timing: Vec::new(),
         });
     }
-    t_read_subjects = t_phase_read_subjects.elapsed();
+    let t_read_subjects = t_phase_read_subjects.elapsed();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
     // ```c
@@ -4681,12 +4686,16 @@ fn search_query_batch<S: TbxScore>(
             query_length,
             diag_array_size,
             subjects,
+            // A word length whose backbone index the direct builder does not cover (4 letters,
+            // 20 bits) takes the reference frame loop: the units' group tables are built by it
+            // (`x_direct_covers`; `TbxScore::word`, 3 for BLOSUM62's instance).
             debugging: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled
                 || debug_hsp_saving
-                || x_soft_subjects,
+                || x_soft_subjects
+                || !crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers(sc.word()),
             chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
             // PAIRLUT: the groups built at dispatch point 0.
             lut: x_pair_lut_batch,
@@ -4751,6 +4760,7 @@ fn search_query_batch<S: TbxScore>(
         crate::utils::xreach::x_reach!("LOSAT_X_TBXBOARD", x_board_batch.is_some());
     }
     // Whether the batch puts units on the board (`x_board_help` below).
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let x_board_unit_path = x_pair_par_batch.is_some();
     let x_seed_batch = x_seed_release::XSeedBatch::new(lookup, x_pair_par_batch, subjects.count());
     let x_worker_diag_cells = x_seed_batch.worker_table_cells(diag_array_size as usize);
@@ -5273,7 +5283,7 @@ fn search_query_batch<S: TbxScore>(
         let mut x_letter_frames_later = false;
         // `-db`: the block of a short sequence with ambiguous bases, kept for the frames of its
         // letters (`Subjects::x_letter_frames`).
-        let mut x_kept = None;
+        let mut x_kept;
         // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
         // return word_length * 3 + 2;
         // if (subject->length < min_subj_seq_length) { ... continue; }
@@ -5590,9 +5600,7 @@ fn search_query_batch<S: TbxScore>(
                     },
                 );
                 let mut previous_seed_s_off: Option<u32> = None;
-                for (_scan_chunk_index, (interior_start, interior_end)) in
-                    scan_interiors.into_iter().enumerate()
-                {
+                for (interior_start, interior_end) in scan_interiors.into_iter() {
                     let seq_ranges = match x_soft {
                         Some(ranges) => ranges.to_vec(),
                         None => clip_tblastx_seq_ranges_for_scan_interior(
@@ -5994,10 +6002,10 @@ fn search_query_batch<S: TbxScore>(
                                         // Compute outfmt coords for this candidate init-hsp (same logic as trace_init_hsp_if_match).
                                         // NCBI offsets are 0-based in query/subject->sequence buffers.
                                         // Reference: blast_gapalign.c:4756-4768, blast_aascan.c:110-113.
-                                        let q_aa_start = hsp_q_u as usize;
-                                        let q_aa_end = hsp_qe_u as usize;
-                                        let s_aa_start = hsp_s_u as usize + chunk.offset;
-                                        let s_aa_end = _hsp_se_u as usize + chunk.offset;
+                                        let q_aa_start = hsp_q_u;
+                                        let q_aa_end = hsp_qe_u;
+                                        let s_aa_start = hsp_s_u + chunk.offset;
+                                        let s_aa_end = _hsp_se_u + chunk.offset;
                                         let (q_start_dna, q_end_dna) = convert_coords(
                                             q_aa_start,
                                             q_aa_end,
@@ -6664,9 +6672,7 @@ fn search_query_batch<S: TbxScore>(
                         );
                     }};
                 }
-                for (_scan_chunk_index, (interior_start, interior_end)) in
-                    scan_interiors.into_iter().enumerate()
-                {
+                for (interior_start, interior_end) in scan_interiors.into_iter() {
                     let seq_ranges = clip_tblastx_seq_ranges_for_scan_interior(
                         &base_seq_ranges,
                         interior_start,
@@ -7256,6 +7262,10 @@ fn search_query_batch<S: TbxScore>(
         // ```
         // An HSP is removed when its e-value is greater than the cutoff, so a NaN cutoff
         // (`-evalue -nan`) keeps every HSP.
+        #[expect(
+            clippy::neg_cmp_op_on_partial_ord,
+            reason = "NCBI removes an HSP only when evalue > cutoff (blast_hits.c:1996); `<=` would drop NaN values"
+        )]
         prelinked_ungapped_hits.retain(|h| !(h.e_value > evalue_threshold));
         x_lap.lap(XStage::Reap);
         if diag_enabled && prelim_linked_count != prelinked_ungapped_hits.len() {
@@ -7405,7 +7415,7 @@ fn search_query_batch<S: TbxScore>(
                         stats_score_distribution.iter().filter(|&&s| s < 30).count();
                     eprintln!("[DEBUG HSP_SAVING] score_distribution: min={}, max={}, median={}, low_score(<30)={}/{} ({:.2}%)", 
                             min_score, max_score, median_score, low_score_count, stats_score_distribution.len(),
-                            if stats_score_distribution.len() > 0 { (low_score_count as f64 / stats_score_distribution.len() as f64) * 100.0 } else { 0.0 });
+                            if !stats_score_distribution.is_empty() { (low_score_count as f64 / stats_score_distribution.len() as f64) * 100.0 } else { 0.0 });
                 }
             }
 
@@ -7876,7 +7886,6 @@ fn search_query_batch<S: TbxScore>(
         // ```
         // The threads' subjects go to the collector the subject loop keeps (`emit_subject_hits`;
         // no writer thread on this target), which takes them in OID order.
-        let parallel_pool = parallel_pool;
         if x_subject_next::on() {
             // EXPERIMENT (LOSAT_X_TBXNEXT): as in native builds below, each thread of the pool
             // takes the next subject when it is free, with one worker state per thread made when
@@ -7930,7 +7939,7 @@ fn search_query_batch<S: TbxScore>(
                         diag_offset: window,
                         sc,
                     },
-                    &process_subject,
+                    process_subject,
                 );
             });
         }
@@ -7960,6 +7969,7 @@ fn search_query_batch<S: TbxScore>(
 
     // EXPERIMENT (LOSAT_X_TBXBOARD): a thread of the subject loop without a subject helps with the
     // batch's units (tblastx/x_work_board.rs `XBoard::help`).
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let x_board_help = x_board_batch.as_ref().map(|(board, batch)| {
         move |stopped: &std::sync::atomic::AtomicBool| {
             board.help(batch, stopped);
@@ -7980,7 +7990,6 @@ fn search_query_batch<S: TbxScore>(
         // EXPERIMENT (LOSAT_X_TBXNEXT): each thread of the pool takes the next subject when it is
         // free, with one worker state per thread, made by the same initializer as below when the
         // thread takes its first subject (tblastx/x_subject_next.rs). Same `process_subject`.
-        let parallel_pool = parallel_pool;
         parallel_pool.install(|| {
             x_subject_next::for_each_subject(
                 subjects.count(),
@@ -8008,7 +8017,6 @@ fn search_query_batch<S: TbxScore>(
             );
         });
     } else if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {
-        let parallel_pool = parallel_pool;
         parallel_pool.install(|| {
             (0..subjects.count()).into_par_iter().for_each_init(
                 || WorkerState {
@@ -8028,7 +8036,7 @@ fn search_query_batch<S: TbxScore>(
                     diag_offset: window,
                     sc,
                 },
-                &process_subject,
+                process_subject,
             );
         });
     } else {

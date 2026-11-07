@@ -1,6 +1,5 @@
 //! Unit tests for tblastx/args.rs
 
-use clap::{Args, Command, FromArgMatches};
 use std::path::PathBuf;
 use LOSAT::algorithm::tblastx::TblastxArgs;
 

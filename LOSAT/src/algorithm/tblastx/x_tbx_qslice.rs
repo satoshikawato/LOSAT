@@ -86,6 +86,7 @@
 //! next hit on its cell is tested, from whichever slice); the batch is flushed at the end of the
 //! unit.
 
+#[cfg(test)]
 use super::x_kmerge::XUnitSort;
 use super::x_tbx_extbatch::{self, XPendBatch, BATCH};
 use super::*;
@@ -343,7 +344,8 @@ pub(super) fn lut_direct_sliced(
     on_pool: bool,
 ) -> Option<Vec<XSliced>> {
     let locations = q.x_group_locations(starts)?;
-    let word_length = crate::algorithm::tblastx::lookup::LOOKUP_WORD_LENGTH as i32;
+    // The word length of the tables (`-word_size`, as `x_build_group` reads it).
+    let word_length = q.word_length() as i32;
     let pieces: Vec<Vec<(i32, i32)>> = locations
         .iter()
         .zip(parts)
@@ -547,22 +549,22 @@ impl<M: TbxScore> XPairPar<M> {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        self.scan_unit_sliced_hits::<S, B, PF, false, false>(group, unit, inp, scratch, init_hsps);
+        self.scan_unit_sliced_hits::<S, B, PF, false, 0>(group, unit, inp, scratch, init_hsps);
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
     // `x_hits_bf`, which takes the too-far and overlap outcomes without a branch and hands the
     // others to `x_hit` (or `x_hit_batched` with `B`); without it this is the loop before the
     // switch. `BF` runs only where `x_tbx_hitbf::fits` holds.
-    /// `scan_unit_sliced`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF and with `SENT` the
-    /// extensions of `extend_hit_two_hit_sent` (LOSAT_X_TBXUNGAPSENT).
+    /// `scan_unit_sliced`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF and with `SENT` (a
+    /// word length, 0: none) the extensions of `TbxScore::sent_two_hit_of` (LOSAT_X_TBXUNGAPSENT).
     #[inline(always)]
     pub(super) fn scan_unit_sliced_hits<
         S: XInitSink,
         const B: bool,
         const PF: bool,
         const BF: bool,
-        const SENT: bool,
+        const SENT: usize,
     >(
         &self,
         group: &XSliced,
@@ -572,7 +574,8 @@ impl<M: TbxScore> XPairPar<M> {
         init_hsps: &mut S,
     ) {
         // LOSAT_X_TBXUNGAPSENT: as in `scan_unit_cells`.
-        assert!(!SENT || self.x_unit_sent(unit, inp));
+        let sent = SENT != 0;
+        assert!(!sent || self.x_unit_sent(unit, inp));
         let wordsize = inp.wordsize;
         let window = inp.window;
         let s_frame = &inp.s_frames_preliminary[unit.f];
@@ -608,7 +611,7 @@ impl<M: TbxScore> XPairPar<M> {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
-            subject_sent: if SENT { subject_full } else { &[] },
+            subject_sent: if sent { subject_full } else { &[] },
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -867,12 +870,13 @@ mod tests {
     }
 
     // No NCBI counterpart: the cut of the lookup locations (module doc, item 5): every word start of
-    // every location goes to exactly one piece, in the slice that holds it, in list order.
+    // every location goes to exactly one piece, in the slice that holds it, in list order, for
+    // words of 2, 3 and 4 letters (`-word_size`).
     #[test]
     fn slice_locations_keep_every_word_once_in_its_slice() {
         let mut rng = Rng(0x51ce_0000_1234_abcd);
-        for _ in 0..2000 {
-            let wl = 3i32;
+        for round in 0..3000 {
+            let wl = [3i32, 2, 4][round % 3];
             let a = rng.below(50) as i32;
             let b = a + 1 + rng.below(400) as i32;
             let k = 1 + rng.below(8) as usize;
@@ -930,8 +934,8 @@ mod tests {
     // No NCBI counterpart: one instance of the scan in slices by the bits of `variant`: batched
     // extensions (2), the prefetch (1), the branch-free hit loop of LOSAT_X_TBXHITBF (4); `SENT`:
     // the extensions of LOSAT_X_TBXUNGAPSENT (for a unit `x_unit_sent` accepts).
-    fn scan_sliced_variant<S: XInitSink, const SENT: bool>(
-        pp: &XPairPar,
+    fn scan_sliced_variant<S: XInitSink, M: TbxScore, const SENT: usize>(
+        pp: &XPairPar<M>,
         variant: usize,
         sliced: &XSliced,
         unit: &XUnit,
@@ -972,11 +976,32 @@ mod tests {
     // batched extensions, the prefetch and the branch-free hit loop (LOSAT_X_TBXHITBF).
     #[test]
     fn slices_equal_scan_unit() {
+        slices_check(Blosum62Score, 0x5eed_51ce_0123_4567);
+    }
+
+    // No NCBI counterpart: `slices_equal_scan_unit` for a search of 2-letter words (`-word_size
+    // 2`, the other matrices' instance; SC10b PR-2): the slices of the direct builder at that word
+    // length, the sentinel walks of 2-letter words (`SENT` = 2).
+    #[test]
+    fn slices_of_2_letter_words_equal_scan_unit() {
+        use crate::algorithm::tblastx::scoring::MatrixScores;
+        for (i, matrix) in [ScoringMatrix::Blosum62, ScoringMatrix::Pam30]
+            .into_iter()
+            .enumerate()
+        {
+            let scores = MatrixScores::with_word(matrix, 2);
+            slices_check(scores.scorer(), 0x2b17_51ce_0000_0001 + i as u64);
+        }
+    }
+
+    /// The checks of `slices_equal_scan_unit` for the search of `sc` (its matrix and word length).
+    fn slices_check<M: TbxScore>(sc: M, seed: u64) {
         let alphabet = aa("ACDEKLMNPQRSTVWY");
         let narrow = aa("AKLE");
-        let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let (matrix, word) = (sc.matrix(), sc.word());
+        let params = lookup_protein_params_ungapped(matrix);
         let serial = crate::utils::threading::SearchPool::x_serial();
-        let mut rng = Rng(0x5eed_51ce_0123_4567);
+        let mut rng = Rng(seed);
         let mut records = 0usize;
         let mut cut_groups = 0usize;
         // LOSAT_X_TBXUNGAPSENT: the units, those whose chunk is the whole frame, and those that took
@@ -1005,7 +1030,10 @@ mod tests {
             };
             let queries = [frames.clone()];
             let threshold = 11;
-            let (lookup, contexts) = build_ncbi_lookup(&queries, threshold, &params, true);
+            let (lookup, contexts) =
+                crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile(
+                    &queries, threshold, &params, true, matrix, word,
+                );
             let starts = group_starts(&contexts, X_MAX_GROUPS);
             // Every fourth case cuts no group (one slice each, as a group of a cut batch that is
             // not cut).
@@ -1014,7 +1042,8 @@ mod tests {
             let parts = x_partition(&spans, width, 0)
                 .unwrap_or_else(|| spans.iter().map(|&(a, _)| vec![a]).collect());
             let filtered = build_sliced(&lookup, &parts);
-            let q = XPairLutQuery::x_prepare(&queries, threshold, true).expect("direct builder");
+            let q = XPairLutQuery::x_prepare_for(&queries, threshold, true, matrix, word)
+                .expect("direct builder");
             let direct = lut_direct_sliced(&q, &starts, &parts, &serial, false).expect("groups");
             lut_shadow_compare(Some(&direct), Some(&filtered));
             cut_groups += direct.iter().filter(|g| g.slices.len() > 1).count();
@@ -1035,8 +1064,10 @@ mod tests {
             let pp = XPairPar {
                 groups,
                 stub: false,
-                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
-                sc: Blosum62Score,
+                // As `prepare` decides it.
+                sent: sc.x_sent_walks()
+                    && x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc,
                 sliced: Some(direct),
                 mask_rule: None,
                 extents: Vec::new(),
@@ -1049,7 +1080,7 @@ mod tests {
                 cutoff_scores: &cutoff_scores,
                 x_dropoff_per_context: &x_dropoff_per_context,
                 window,
-                wordsize: 3,
+                wordsize: word as i32,
                 s_idx: 0,
                 s_len: 999,
             };
@@ -1089,7 +1120,7 @@ mod tests {
                             }
                             let mut got: Vec<InitHSP> = Vec::new();
                             if variant < 8 {
-                                scan_sliced_variant::<_, false>(
+                                scan_sliced_variant::<_, _, 0>(
                                     &pp,
                                     variant,
                                     sliced,
@@ -1098,8 +1129,18 @@ mod tests {
                                     &mut scratch,
                                     &mut got,
                                 );
+                            } else if word == 2 {
+                                scan_sliced_variant::<_, _, 2>(
+                                    &pp,
+                                    variant & 7,
+                                    sliced,
+                                    &unit,
+                                    &inp,
+                                    &mut scratch,
+                                    &mut got,
+                                );
                             } else {
-                                scan_sliced_variant::<_, true>(
+                                scan_sliced_variant::<_, _, 3>(
                                     &pp,
                                     variant & 7,
                                     sliced,
@@ -1149,7 +1190,7 @@ mod tests {
                         &mut compact,
                     );
                     let mut compact_bf: Vec<XUnitHsp> = Vec::new();
-                    pp.scan_unit_sliced_hits::<_, true, false, true, false>(
+                    pp.scan_unit_sliced_hits::<_, true, false, true, 0>(
                         &pp.sliced.as_ref().unwrap()[g],
                         &unit,
                         &inp,

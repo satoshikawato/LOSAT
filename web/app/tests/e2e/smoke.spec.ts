@@ -27,7 +27,7 @@ test(`paste, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' : 'the 
 
   // "Run LOSAT" opens the results page of the run: its status, then its results and, in the
   // Outputs view, the outputs as written.
-  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
   await page.getByTestId('results-view-outputs').click();
   await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:6');
@@ -67,9 +67,9 @@ test('a BLASTN query of white space only has no record, and its run ends as the 
 test('the empty Results tab offers "Run a search", which opens the Search tab', async ({ page }) => {
   await openSearch(page);
   await page.getByTestId('tab-results').click();
-  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('results-empty')).toBeVisible();
   await page.getByTestId('results-run-a-search').click();
-  await expect(page.getByTestId('tab-search')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('tab-search')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'false');
 });

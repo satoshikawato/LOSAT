@@ -494,6 +494,7 @@ pub(crate) use query_setup::BATCH_SIZE as QUERY_BATCH_SIZE;
 //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
 //                 results = lcl_blast.Run();
 // ```
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod web;
 // The subjects of a search by oid: `-subject` records or the stored sequences of `-db`.
 pub(crate) mod subjects;

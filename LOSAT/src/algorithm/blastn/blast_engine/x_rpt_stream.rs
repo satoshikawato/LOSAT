@@ -74,8 +74,9 @@
 //!   line that does not read as the reports read it, holds a byte outside ' ' ..= '~' or gives no
 //!   tabular subject id (`database::reported_subjects`), with parsed Seq-ids a header that the
 //!   reports refuse and two sequences that outfmt 0 would join (`check_reported_parsed`,
-//!   `refuse_joined_hits`), one that the prefetch of the Seq-annots with
-//!   `PRE_FETCH_SEQS_LIMIT=2147483647` cannot read as NCBI does (`check_prefetched_parsed`,
+//!   `refuse_joined_hits`), one that the batches' prefetch reads where no report reads it (the
+//!   Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, a table of fields that read nothing of the
+//!   subject) and cannot read as NCBI does (`check_prefetched_parsed`,
 //!   `check_prefetched_strands`), ambiguity data that the traceback cannot decode (`traceback_listed`),
 //!   a taxid or a lookup of the taxonomy database that the prefetch refuses, and what a custom
 //!   tabular report reads (the taxonomy fields, the names of the taxonomy database, `sall*`); with
@@ -128,8 +129,10 @@
 //! the taxonomy database writes its messages there; the batch loop adds them to the warnings of
 //! the batch's first query (`run_in_pool`), so both paths write them before that query's report.
 //! Their lookups can be refused (a taxonomy database or a taxid that LOSAT cannot read as NCBI
-//! does), in the batch that first reports the sequence, which writes the refusal after the
-//! reports of the batches before (above).
+//! does), in the batch that first reports the sequence, and so can the run for NCBI's taxonomy
+//! cache (`TaxdbRun::cache_collision`), in the first batch that fetches a subject (NCBI looks
+//! nothing up before it); either writes the refusal after the reports of the batches before
+//! (above).
 //!
 //! `finish_sam` at NCBI's five error sites writes the document of the batches before as in the off
 //! path. Memory: the records of the batches before are rendered text, and each batch's lists are
@@ -154,7 +157,7 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
 
-use crate::api::local_blast::{FormatOutput, OutputSink, ReportOutputs};
+use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::seq_range::{next_ranged_batch, Placements, QueryInput};
 use crate::config::NuclScoringSpec;
 use crate::report::sam::SamDocument;
@@ -582,6 +585,7 @@ fn check(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::local_blast::FormatOutput;
     use crate::blastinput::seq_range::RecordPlacement;
 
     // EXPERIMENT (LOSAT_X_RPTSTREAM): a batch's part of the query input numbers its queries from

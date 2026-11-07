@@ -22,17 +22,6 @@ use indicatif::{ProgressBar, ProgressStyle};
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 use rayon::prelude::*;
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783
-// ```c
-// BLAST_PreliminarySearchEngine(..., hsp_stream, ...);
-// ...
-// BLAST_ComputeTraceback(..., hsp_stream, ..., results, ...);
-// ```
-#[cfg(all(
-    feature = "parallel",
-    not(all(target_arch = "wasm32", feature = "wasm-threads"))
-))]
-use std::sync::mpsc::channel;
 use std::sync::Arc;
 
 use crate::config::NuclScoringSpec;
@@ -101,7 +90,7 @@ use super::super::query_split::{
 };
 use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
-    context_blocks_ungapped, context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
+    context_blocks_ungapped, gap_x_dropoffs, karlin_error, ContextKarlin,
 };
 use super::super::seqalign::write_blastn_seqalign;
 use super::super::ungapped;
@@ -119,7 +108,7 @@ use crate::blastinput::fasta_reader::{
 use crate::blastinput::input_files::{
     check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings_by_length,
 };
-use crate::blastinput::query_batch::{next_query_batch_end, BatchSizeMixer};
+use crate::blastinput::query_batch::BatchSizeMixer;
 use crate::blastinput::seq_range::{
     cut_queries, cut_subjects, next_ranged_batch, parse_optional_range, subjects_read, Placements,
     QueryInput, RangeRole, SequenceRange,
@@ -161,6 +150,10 @@ mod x_few_subj;
 
 // EXPERIMENT (LOSAT_X_BNSTREAM): the subjects of a subject set searched by the pool threads in
 // OID order with a bounded window of results that the owner hands over in OID order.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 #[path = "x_bnstream.rs"]
 mod x_bnstream;
 
@@ -288,7 +281,7 @@ pub fn x_query_drop_print_summary() {
 // ```c
 // #define NCBIMATH_LN2 0.69314718055994530941723212145818
 // ```
-const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
 /// The text of a query's outfmt 0 `Query=` line and outfmt 7 `# Query:` line: the record's
 /// title bytes (the local ID is not shown without `-parse_deflines`; the writers apply
@@ -581,7 +574,6 @@ impl SeqRanges {
 struct SubjectChunk {
     offset: usize,
     length: usize,
-    residual: usize,
     seq_ranges: SeqRanges,
     masked: bool,
     overlap: usize,
@@ -759,7 +751,6 @@ impl SubjectSplitState {
         SubjectChunkStatus::Ok(SubjectChunk {
             offset: offset as usize,
             length,
-            residual,
             seq_ranges,
             masked: subject_masked,
             overlap,
@@ -833,8 +824,8 @@ fn advance_diag_table_offset(
     diag_window: i32,
     subject_len: usize,
     use_array_indexing: bool,
-    hit_level_array: &mut Vec<DiagStruct>,
-    hit_len_array: &mut Vec<u8>,
+    hit_level_array: &mut [DiagStruct],
+    hit_len_array: &mut [u8],
     diag_hash: &mut DiagHashTable,
 ) {
     if use_array_indexing {
@@ -893,25 +884,13 @@ fn advance_diag_table_offset(
 //    Uint4 next;           /**< Offset of next element in the chain */
 // }  DiagHashCell;
 // ```
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct DiagHashCell {
     diag: i32,
     level: i32,
     hit_saved: bool,
     hit_len: i32,
     next: u32,
-}
-
-impl Default for DiagHashCell {
-    fn default() -> Self {
-        Self {
-            diag: 0,
-            level: 0,
-            hit_saved: false,
-            hit_len: 0,
-            next: 0,
-        }
-    }
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:97-105
@@ -1323,7 +1302,7 @@ fn packed_kmer_at_seed_mask(packed: &[u8], start: usize, lut_word_length: usize)
     }
 
     let shift = 2i32 * (16i32 - (start % COMPRESSION_RATIO) as i32 - lut_word_length as i32);
-    if shift < 0 || shift > 24 {
+    if !(0..=24).contains(&shift) {
         return packed_kmer_at(packed, start, lut_word_length);
     }
 
@@ -1414,7 +1393,7 @@ fn scan_subject_kmers_range_mb_any<F>(
 ) where
     F: FnMut(usize, u64),
 {
-    if subject_len < lut_word_length || lut_word_length < 9 || lut_word_length > 12 {
+    if subject_len < lut_word_length || !(9..=12).contains(&lut_word_length) {
         return;
     }
 
@@ -1425,29 +1404,27 @@ fn scan_subject_kmers_range_mb_any<F>(
 
     let mask = (1u64 << (2 * lut_word_length)) - 1;
 
-    if scan_step % COMPRESSION_RATIO == 0 && !subject_masked {
-        if packed_len >= 3 {
-            let shift = 2 * (12 - lut_word_length);
-            let step_bytes = scan_step / COMPRESSION_RATIO;
-            let mut byte_idx = start / COMPRESSION_RATIO;
-            let max_byte_idx = packed_len.saturating_sub(3);
-            let end_byte_idx = (end / COMPRESSION_RATIO).min(max_byte_idx);
-            while byte_idx <= end_byte_idx {
-                let idx = ((packed[byte_idx] as u32) << 16)
-                    | ((packed[byte_idx + 1] as u32) << 8)
-                    | (packed[byte_idx + 2] as u32);
-                let kmer = ((idx >> shift) as u64) & mask;
-                on_kmer(byte_idx * COMPRESSION_RATIO, kmer);
-                byte_idx = byte_idx.saturating_add(step_bytes);
-            }
-            let mut pos = byte_idx * COMPRESSION_RATIO;
-            while pos <= end {
-                let kmer = packed_kmer_at(packed, pos, lut_word_length);
-                on_kmer(pos, kmer);
-                pos = pos.saturating_add(scan_step);
-            }
-            return;
+    if scan_step.is_multiple_of(COMPRESSION_RATIO) && !subject_masked && packed_len >= 3 {
+        let shift = 2 * (12 - lut_word_length);
+        let step_bytes = scan_step / COMPRESSION_RATIO;
+        let mut byte_idx = start / COMPRESSION_RATIO;
+        let max_byte_idx = packed_len.saturating_sub(3);
+        let end_byte_idx = (end / COMPRESSION_RATIO).min(max_byte_idx);
+        while byte_idx <= end_byte_idx {
+            let idx = ((packed[byte_idx] as u32) << 16)
+                | ((packed[byte_idx + 1] as u32) << 8)
+                | (packed[byte_idx + 2] as u32);
+            let kmer = ((idx >> shift) as u64) & mask;
+            on_kmer(byte_idx * COMPRESSION_RATIO, kmer);
+            byte_idx = byte_idx.saturating_add(step_bytes);
         }
+        let mut pos = byte_idx * COMPRESSION_RATIO;
+        while pos <= end {
+            let kmer = packed_kmer_at(packed, pos, lut_word_length);
+            on_kmer(pos, kmer);
+            pos = pos.saturating_add(scan_step);
+        }
+        return;
     }
 
     if lut_word_length > 9 {
@@ -2273,7 +2250,7 @@ fn scan_subject_kmers_range_mb_11_2mod4<F>(
 
     let mask = (1u64 << (2 * LUT_WORD_LENGTH)) - 1;
     let scan_step_byte = scan_step / COMPRESSION_RATIO;
-    let (top_shift, bottom_shift) = if (start % 2) == 0 {
+    let (top_shift, bottom_shift) = if start.is_multiple_of(2) {
         (2u32, 6u32)
     } else {
         (0u32, 4u32)
@@ -2388,24 +2365,18 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
     let scan_step_byte = scan_step / COMPRESSION_RATIO;
     let mut pos = start;
     let mut byte_idx = (pos / COMPRESSION_RATIO) as i32;
-    let mut state = 0u8;
-
-    match pos % COMPRESSION_RATIO {
+    let mut state: u8 = match pos % COMPRESSION_RATIO {
         1 => {
             byte_idx -= 2;
-            state = 3;
+            3
         }
         2 => {
             byte_idx -= 1;
-            state = 2;
+            2
         }
-        3 => {
-            state = 1;
-        }
-        _ => {
-            state = 0;
-        }
-    }
+        3 => 1,
+        _ => 0,
+    };
 
     while pos <= end {
         match state {
@@ -2683,9 +2654,9 @@ fn scan_subject_kmers_range<F>(
             //     }
             // }
             // ```
-            if scan_step % COMPRESSION_RATIO == 0
+            if scan_step.is_multiple_of(COMPRESSION_RATIO)
                 && !subject_masked
-                && start % COMPRESSION_RATIO == 0
+                && start.is_multiple_of(COMPRESSION_RATIO)
                 && packed_len >= 2
             {
                 let shift = 2 * (8 - lut_word_length);
@@ -3715,7 +3686,7 @@ fn merge_prelim_hit_lists(
         return incoming;
     }
     if combined.is_empty() {
-        combined.extend(incoming.drain(..));
+        combined.append(&mut incoming);
         return incoming;
     }
 
@@ -3880,10 +3851,10 @@ fn append_prelim_hit_list(
         return incoming;
     }
     if combined.is_empty() {
-        combined.extend(incoming.drain(..));
+        combined.append(&mut incoming);
         return incoming;
     }
-    combined.extend(incoming.drain(..));
+    combined.append(&mut incoming);
     sort_prelim_hits_by_score(combined);
     incoming
 }
@@ -4014,6 +3985,7 @@ type PrelimHitLists = Vec<Option<HitList<PrelimHspList>>>;
 ///       }
 ///       Blast_HitListUpdate(results->hitlist_array[0], hsp_list);
 /// ```
+#[cfg(test)]
 fn collect_prelim_hit_lists(
     subject_hits: Vec<Vec<PrelimHit>>,
     num_queries: usize,
@@ -4040,6 +4012,10 @@ fn x_bnstream() -> bool {
 }
 
 /// No NCBI counterpart: the subjects per thread of the window of `LOSAT_X_BNSTREAM`.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 const X_BNSTREAM_SUBJECTS_PER_THREAD: usize = 64;
 
 /// EXPERIMENT (LOSAT_X_BNHITGROUP, a strict-set switch: on unless it is `0`): a subject's HSPs
@@ -4282,9 +4258,6 @@ struct SubjectScratch {
     // of the pool, kept with the rest of this scratch so that each subject's traceback reuses it
     // instead of making it again. Reuse only, as `x_ahead_scratch`.
     x_spec_scratch: Vec<(GapAlignScratch, GreedyAlignScratch)>,
-    cutoff_scores: Vec<i32>,
-    x_dropoff_scores: Vec<i32>,
-    reduced_cutoff_scores: Vec<i32>,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198
     // ```c
     // if (backup->allocated >= num_seq_ranges) return;
@@ -4375,7 +4348,7 @@ struct SubjectScratch {
 // BlastInitHitListReset(init_hitlist);
 // ```
 impl SubjectScratch {
-    fn new(query_count: usize, offset_array_size: usize, window_size: usize) -> Self {
+    fn new(offset_array_size: usize, window_size: usize) -> Self {
         Self {
             hits: Vec::new(),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4076
@@ -4403,9 +4376,6 @@ impl SubjectScratch {
             // it does not change any value NCBI computes.
             x_ahead_scratch: Vec::new(),
             x_spec_scratch: Vec::new(),
-            cutoff_scores: Vec::with_capacity(query_count),
-            x_dropoff_scores: Vec::with_capacity(query_count),
-            reduced_cutoff_scores: Vec::with_capacity(query_count),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198
             // ```c
             // if (backup->allocated >= num_seq_ranges) return;
@@ -4813,15 +4783,17 @@ fn diag_container_query_length(query_contexts: &[QueryContext]) -> usize {
 /// `context_offsets[2 * q]` (plus) and `context_offsets[2 * q + 1]` (minus), the plus
 /// context is the BLASTNA code of the letters and the minus context that of their reverse
 /// complement. The searched block (`query_concat_length` bytes) is `[1..n + 1]` of it
-/// (LOSAT's memory: no second copy of the block, no IUPAC copy of either strand).
-fn build_query_blastna_buffer<L: QueryLetters + ?Sized>(
+/// (LOSAT's memory: no second copy of the block, no IUPAC copy of either strand). The buffer is
+/// `with_sentinels`, the one that the batch loop keeps (`x_query_sentinels`).
+fn fill_query_blastna_buffer<L: QueryLetters + ?Sized>(
     query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
-) -> Vec<u8> {
+    with_sentinels: &mut Vec<u8>,
+) {
     debug_assert_eq!(2 * query_letters.count(), context_offsets.len());
 
-    let mut with_sentinels = vec![NUCL_SENTINEL; query_concat_length + 2];
+    x_query_sentinels(with_sentinels, query_concat_length + 2);
 
     for (q, offsets) in context_offsets.chunks_exact(2).enumerate() {
         query_letters.read(q, |letters| {
@@ -4829,7 +4801,7 @@ fn build_query_blastna_buffer<L: QueryLetters + ?Sized>(
             // A context that is empty or does not end inside the block stays sentinels.
             // (Twin: `place` and the two encoder calls below are copied in x_query_prep_par.rs
             // (LOSAT_X_QPREPPAR) and, with the strand switches, in
-            // `build_strand_query_blastna_buffer`; change them there too.)
+            // `fill_strand_query_blastna_buffer`; change them there too.)
             let place = |offset: i32| -> Option<std::ops::Range<usize>> {
                 let start = offset.max(0) as usize;
                 let end = start.saturating_add(length);
@@ -4843,8 +4815,61 @@ fn build_query_blastna_buffer<L: QueryLetters + ?Sized>(
             }
         });
     }
+}
 
+/// `fill_query_blastna_buffer` into a buffer of its own (the tests).
+#[cfg(test)]
+fn build_query_blastna_buffer<L: QueryLetters + ?Sized>(
+    query_letters: &L,
+    context_offsets: &[i32],
+    query_concat_length: usize,
+) -> Vec<u8> {
+    let mut with_sentinels = Vec::new();
+    fill_query_blastna_buffer(
+        query_letters,
+        context_offsets,
+        query_concat_length,
+        &mut with_sentinels,
+    );
     with_sentinels
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603
+// ```c
+// int buflen = QueryInfo_GetSeqBufLen(qinfo);
+// TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
+// ```
+/// `buffer` as `length` sentinels: the query buffer of a batch before its contexts are written.
+/// NCBI allocates the buffer of each batch; LOSAT's batch loop keeps one buffer from batch to
+/// batch and each batch writes all of it again (LOSAT's memory). A buffer freed by each batch
+/// leaves a hole of its size under the blocks allocated after it, and glibc raises its mmap
+/// threshold to the size of the freed buffer: the next batch's buffer, a few KiB larger, did not
+/// fit the hole once small blocks had split it, was mapped on its own, and the 8.5 MiB hole stayed
+/// resident (31,168 cDNAs x 3 Mb, dc-megablast `-db`, 1 thread: +9.5 MiB in half the runs, set off
+/// by the length of the output file's name). The kept buffer has the capacity of
+/// `x_mapped_capacity`, so from 1 MiB glibc maps it and its free leaves the threshold as it is.
+/// A batch writes all of its bytes again while the kept buffer is long enough and no longer than
+/// the larger of the batch's own capacity and that of 1 MiB (glibc's 32 MiB ceiling and a page;
+/// 1 MiB elsewhere), and otherwise takes a new block: a batch below 1 MiB writes the mapped
+/// buffer of a longer batch again, while a batch shorter than one past the ceiling does not keep
+/// that batch's buffer. So the kept pages beyond a batch's length are at most 32 MiB, and pages
+/// fault once, when a batch first reaches them. (Taking a new block for each batch below 1 MiB
+/// mapped the buffer again for each longer batch after it: the cDNAs above, 16 threads: 18 maps of
+/// 32 MiB instead of 1, +40,000 minor faults, +5 % wall.) Bytes past the batch's length are not
+/// read.
+fn x_query_sentinels(buffer: &mut Vec<u8>, length: usize) {
+    use crate::utils::x_mapped::{x_mapped_capacity, X_MAPPED_FROM};
+    let capacity = x_mapped_capacity(length, 1);
+    if buffer.capacity() < length
+        || buffer.capacity() > capacity.max(x_mapped_capacity(X_MAPPED_FROM, 1))
+    {
+        // The old contents are not kept: the old block is freed first, then a new one, not a copy.
+        drop(std::mem::take(buffer));
+        *buffer = Vec::with_capacity(capacity);
+    } else {
+        buffer.clear();
+    }
+    buffer.resize(length, NUCL_SENTINEL);
 }
 
 /// `-soft_masking false`: writes the masks of the contexts into the searched BLASTNA copy of the
@@ -4910,7 +4935,7 @@ fn mask_query_letters(
 }
 
 /// The query buffer of a search of one strand (`-strand plus` or `minus`): as
-/// `build_query_blastna_buffer`, but a context is written only when its length is above 0,
+/// `fill_query_blastna_buffer`, but a context is written only when its length is above 0,
 /// with its own length (the strand that is not searched has a context of length 0 and takes no
 /// room, so it must not be written over the next query).
 ///
@@ -4920,16 +4945,17 @@ fn mask_query_letters(
 ///
 ///         qinfo->contexts[index].query_offset = prev_loc + shift;
 /// ```
-fn build_strand_query_blastna_buffer<L: QueryLetters + ?Sized>(
+fn fill_strand_query_blastna_buffer<L: QueryLetters + ?Sized>(
     query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
     strand: QueryStrand,
-) -> Vec<u8> {
+    with_sentinels: &mut Vec<u8>,
+) {
     debug_assert_eq!(2 * query_letters.count(), context_offsets.len());
     let (plus_on, minus_on) = strand.searched();
 
-    let mut with_sentinels = vec![NUCL_SENTINEL; query_concat_length + 2];
+    x_query_sentinels(with_sentinels, query_concat_length + 2);
 
     for (q, offsets) in context_offsets.chunks_exact(2).enumerate() {
         query_letters.read(q, |letters| {
@@ -4950,7 +4976,24 @@ fn build_strand_query_blastna_buffer<L: QueryLetters + ?Sized>(
             }
         });
     }
+}
 
+/// `fill_strand_query_blastna_buffer` into a buffer of its own (the tests).
+#[cfg(test)]
+fn build_strand_query_blastna_buffer<L: QueryLetters + ?Sized>(
+    query_letters: &L,
+    context_offsets: &[i32],
+    query_concat_length: usize,
+    strand: QueryStrand,
+) -> Vec<u8> {
+    let mut with_sentinels = Vec::new();
+    fill_strand_query_blastna_buffer(
+        query_letters,
+        context_offsets,
+        query_concat_length,
+        strand,
+        &mut with_sentinels,
+    );
     with_sentinels
 }
 
@@ -6499,6 +6542,8 @@ fn post_process_hits_and_write(
             before: warning_lines.take().unwrap_or(&[]),
             sink: &mut *outputs.diagnostics,
         });
+        // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
+        let side_sink = format.sink.side_files().cloned();
         // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
         // ```c
         // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
@@ -6913,8 +6958,12 @@ fn post_process_hits_and_write(
                         query_gencode: None,
                         db_gencode: None,
                     };
-                    let mut document =
-                        crate::report::blast_xml2::Xml2Writer::for_run(kind, params, report.out);
+                    let mut document = crate::report::blast_xml2::Xml2Writer::for_run(
+                        kind,
+                        params,
+                        report.out,
+                        side_sink.as_ref(),
+                    );
                     super::super::blast_xml::write_blastn_xml(
                         &xml,
                         &mut document,
@@ -7952,14 +8001,14 @@ fn cli_output_formats(
 
 /// The requested output formats of `run_local`, each read as the CLI reads its single
 /// `-outfmt` (`cli_output_formats`); a format that NCBI rejects later fails here with NCBI's
-/// error, as in the other programs' `run_local`. `out`: the file of `api::run_to_file`.
+/// error, as in the other programs' `run_local`. `out`: the file of `api::run_to_file`, or the
+/// `-out` of the caller's receiver of the side files of a format (`FormatOutput::side_out`).
 fn parse_output_formats<'a>(
-    formats: impl IntoIterator<Item = &'a str>,
-    out: Option<&std::path::Path>,
+    formats: impl IntoIterator<Item = (&'a str, Option<&'a std::path::Path>)>,
 ) -> Result<Vec<BlastnOutputFormat>> {
     formats
         .into_iter()
-        .map(|outfmt| {
+        .map(|(outfmt, out)| {
             let choice = app::parse_formatting_string(outfmt)?;
             match app::report_format(&choice, Program::Blastn, out)? {
                 Some(format) => BlastnOutputFormat::of(format, &choice),
@@ -8106,8 +8155,10 @@ fn run_local_formats(
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
     QueryStrand::parse(&args.strand)?;
     let output_formats = parse_output_formats(
-        outputs.formats.iter().map(|format| format.outfmt),
-        args.out.as_deref(),
+        outputs
+            .formats
+            .iter()
+            .map(|format| (format.outfmt, format.side_out(args.out.as_deref()))),
     )?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
@@ -8178,8 +8229,10 @@ pub fn run_local_database(
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
     QueryStrand::parse(&args.strand)?;
     let output_formats = parse_output_formats(
-        outputs.formats.iter().map(|format| format.outfmt),
-        args.out.as_deref(),
+        outputs
+            .formats
+            .iter()
+            .map(|format| (format.outfmt, format.side_out(args.out.as_deref()))),
     )?;
     args.archive = archive::handle_for(
         &args,
@@ -8332,7 +8385,7 @@ fn search(
     for format in &outputs.formats {
         app::xinclude_check_for(
             &app::parse_formatting_string(format.outfmt)?,
-            args.out.as_deref(),
+            format.side_out(args.out.as_deref()),
         )?;
     }
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
@@ -9230,6 +9283,10 @@ fn run_in_pool(
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
     // (`lookup::x_mb_lut_keep`), freed when the loop ends.
     let x_lut_keep = x_mb_lut_keep::Keep::for_loop();
+    // No NCBI counterpart (memory placement only; NCBI allocates the buffer of each batch,
+    // `x_query_sentinels`): the query buffer this loop keeps between its batches, freed when the
+    // loop ends.
+    let mut query_keep: Vec<u8> = Vec::new();
     let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(lengths.len());
     let mut batch_spans: Vec<std::ops::Range<usize>> = Vec::new();
     let mut unsearched = Vec::with_capacity(lengths.len());
@@ -9614,6 +9671,7 @@ fn run_in_pool(
                     lower_case_before: &lower_case_before,
                 },
                 x_lut_keep.as_ref(),
+                &mut query_keep,
             )
         } else {
             search_query_batch::<false>(
@@ -9630,6 +9688,7 @@ fn run_in_pool(
                     lower_case_before: &lower_case_before,
                 },
                 x_lut_keep.as_ref(),
+                &mut query_keep,
             )
         };
         let batch = match searched {
@@ -9858,28 +9917,36 @@ fn run_in_pool(
                     }
                     Ok(())
                 };
-                let seq_aligns: usize = batch_hit_lists
-                    .iter()
-                    .flatten()
-                    .flat_map(|hit_list| {
-                        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                        &hit_list.hsplist_array[..count]
-                    })
-                    .map(|hsp_list| {
-                        crate::algorithm::common::database::subject_seq_aligns(
-                            hsp_list.hsps.len(),
-                            !args.ungapped,
-                        )
-                    })
-                    .sum();
+                let seq_aligns_of = |hit_lists: &[Option<BlastnHitList>]| -> usize {
+                    hit_lists
+                        .iter()
+                        .flatten()
+                        .flat_map(|hit_list| {
+                            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                            &hit_list.hsplist_array[..count]
+                        })
+                        .map(|hsp_list| {
+                            crate::algorithm::common::database::subject_seq_aligns(
+                                hsp_list.hsps.len(),
+                                !args.ungapped,
+                            )
+                        })
+                        .sum()
+                };
+                let seq_aligns = seq_aligns_of(&batch_hit_lists);
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                 // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
                 // after the query's own warnings (`query_fetches`, added after them below), where
                 // the first format reads their Bioseqs (`TabularSpec::subject_fetch`; BLASTN's
                 // formatter does not fetch for the identities, so every row reads them or none
-                // does). A batch that fetches nothing still
-                // asks for the run's refusal of NCBI's taxonomy cache before its first byte, unless
-                // no batch of the run prefetches (`shared::prefetch_always_off`).
+                // does). NCBI looks the taxonomy up only where it fetches a subject: in such a
+                // report, or in the prefetch of a batch with Seq-aligns (one without them loads
+                // no id, below). The run's refusal of NCBI's taxonomy cache
+                // (`shared::TaxdbRun::cache_collision`) is asked only there, so a run that fetches
+                // no subject is not refused. Where the report stream acts (`x_rpt_stream`), a
+                // later batch's refusal comes after the reports of the batches before, as the
+                // stream's other refusals of a batch's reported subjects; without it every
+                // report is written after the loop, so the refusal comes before any report.
                 let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                     let fetches = match output_formats.first() {
                         Some(BlastnOutputFormat::CustomTabular(spec)) => {
@@ -9888,15 +9955,12 @@ fn run_in_pool(
                         }
                         _ => true,
                     };
-                    let asks =
-                        fetches || !crate::algorithm::common::database::prefetch_always_off();
                     batch_hit_lists
                         .iter()
                         .map(|hit_list| {
                             let shown = std::slice::from_ref(hit_list);
-                            let messages = if asks {
-                                database
-                                    .prefetch_messages(&titles, if fetches { shown } else { &[] })?
+                            let messages = if fetches && seq_aligns_of(shown) > 0 {
+                                database.prefetch_messages(&titles, shown)?
                             } else {
                                 Vec::new()
                             };
@@ -9908,6 +9972,17 @@ fn run_in_pool(
                             query_fetches = messages;
                             Vec::new()
                         })
+                } else if seq_aligns == 0 {
+                    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
+                    // ```c++
+                    //        CScope::TIds ids;
+                    //        vector<TSeqRange> ranges;
+                    //        s_ExtractSeqidsAndRanges(results, ids, ranges);
+                    //        _TRACE("Prefetching " << ids.size() << " sequence lengths");
+                    //        LoadSequencesToScope(ids, ranges, scope);
+                    // ```
+                    // A batch without Seq-aligns prefetches no sequence.
+                    rows_open(&batch_hit_lists).map(|()| Vec::new())
                 } else {
                     database
                         .prefetch_messages(&titles, &batch_hit_lists)
@@ -10092,6 +10167,8 @@ fn run_in_pool(
     }
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop's kept table is freed with the loop.
     drop(x_lut_keep);
+    // So is its query buffer (the reports below do not read it).
+    drop(query_keep);
 
     let reports = |outputs: &mut ReportOutputs<'_>| {
         write_batch_reports(
@@ -10541,9 +10618,13 @@ fn write_reports_untimed(
         observer.database_subjects(reported.library_subjects(database)?);
     }
     let database_subject_ids = match &reported {
-        Some(reported) if output_formats.iter().any(|format| format.is_tabular()) => {
-            Some(reported.tabular_subject_ids()?)
-        }
+        Some(reported) if output_formats.iter().any(|format| format.is_tabular()) => Some(
+            reported.tabular_subject_ids(
+                output_formats
+                    .iter()
+                    .any(|format| format.tabular_reads_subject()),
+            )?,
+        ),
         _ => None,
     };
     let subject_letters = match (&reported, subjects.source) {
@@ -10830,6 +10911,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     first_batch: bool,
     stage: BatchStage<'_>,
     x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
+    query_keep: &mut Vec<u8>,
 ) -> Result<QueryBatch> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
@@ -10923,7 +11005,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     let requested_parallel = false;
 
     // Configure task-specific parameters (initial configuration)
-    let mut config = configure_task(&args);
+    let mut config = configure_task(args);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:509-513
     // ```c
@@ -11116,18 +11198,6 @@ fn search_query_batch<const UNGAPPED: bool>(
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
     let seq_data = prepare_sequence_data(queries, query_ids, masks, subject_metadata);
 
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
-    // ```c
-    // x_PrintQueryAndDbNames(program_version, bioseq, dbname, rid, iteration,
-    //                        subj_bioseq);
-    // ```
-    let query_titles_arc = Arc::new(
-        seq_data
-            .queries
-            .iter()
-            .map(record_title)
-            .collect::<Vec<Arc<[u8]>>>(),
-    );
     // The subjects as the reports show them (the outfmt 0 prolog of an error below).
     let shown = ShownSubjects::new(args, subjects);
 
@@ -11144,24 +11214,6 @@ fn search_query_batch<const UNGAPPED: bool>(
             .collect::<Vec<usize>>(),
     );
 
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-    // ```c
-    // typedef struct BlastHSPList {
-    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
-    //    BlastHSP** hsp_array;
-    //    Int4 hspcnt;
-    //    ...
-    // } BlastHSPList;
-    // ```
-    let query_ids_arc = Arc::new(
-        seq_data
-            .query_ids
-            .iter()
-            .map(|id| Arc::<str>::from(id.as_str()))
-            .collect::<Vec<Arc<str>>>(),
-    );
-
     // Build per-context query sequences (plus/minus) for blastn.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:839-847
     // ```c
@@ -11175,7 +11227,6 @@ fn search_query_batch<const UNGAPPED: bool>(
     // ```
     let mut query_contexts: Vec<QueryContext> = Vec::new();
     let mut query_context_masks: Vec<Vec<MaskedInterval>> = Vec::new();
-    let mut query_base_offsets: Vec<usize> = Vec::new();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:166-174
     // ```c
     // query_info->contexts[0].query_offset = 0;
@@ -11231,7 +11282,6 @@ fn search_query_batch<const UNGAPPED: bool>(
         let plus_offset = query_concat_offset;
         let minus_offset = plus_offset + context_room(plus_len);
 
-        query_base_offsets.push(plus_offset);
         query_contexts.push(QueryContext {
             query_idx: q_idx as u32,
             frame: 1,
@@ -11311,22 +11361,26 @@ fn search_query_batch<const UNGAPPED: bool>(
     // (utils/xtiming.rs). No NCBI counterpart.
     let t_encode = crate::utils::xtiming::clock();
     // `-strand plus` or `minus` builds the buffer serially from the contexts that are searched
-    // (`build_strand_query_blastna_buffer`); `both` is the code of the search without the option.
-    let mut encoded_query_buffer = if strand == QueryStrand::Both {
+    // (`fill_strand_query_blastna_buffer`); `both` is the code of the search without the option.
+    // The buffer is the one the caller keeps from batch to batch (`x_query_sentinels`).
+    let encoded_query_buffer: &mut Vec<u8> = query_keep;
+    if strand == QueryStrand::Both {
         x_query_prep_par::query_buffer(
             &letters,
             &query_context_offsets,
             query_concat_length,
             parallel_pool,
-        )
+            encoded_query_buffer,
+        );
     } else {
-        build_strand_query_blastna_buffer(
+        fill_strand_query_blastna_buffer(
             &letters,
             &query_context_offsets,
             query_concat_length,
             strand,
-        )
-    };
+            encoded_query_buffer,
+        );
+    }
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:609-619
     // ```c
@@ -11344,12 +11398,12 @@ fn search_query_batch<const UNGAPPED: bool>(
         None
     } else {
         mask_query_letters(
-            &mut encoded_query_buffer,
+            encoded_query_buffer,
             &mut query_contexts,
             &query_context_masks,
         )
     };
-    let encoded_query_concat_blastna_with_sentinels: &[u8] = &encoded_query_buffer;
+    let encoded_query_concat_blastna_with_sentinels: &[u8] = encoded_query_buffer;
     let encoded_query_concat_blastna: &[u8] = &encoded_query_buffer[1..query_concat_length + 1];
     let encoded_queries_blastna: Vec<&[u8]> = query_contexts
         .iter()
@@ -11458,12 +11512,12 @@ fn search_query_batch<const UNGAPPED: bool>(
     // ```
     let small_na_compressed_query =
         if config.small_na_lookup && config.effective_word_size > config.lut_word_length {
-            build_compressed_query(&encoded_query_concat_blastna)
+            build_compressed_query(encoded_query_concat_blastna)
         } else {
             Vec::new()
         };
-    let small_na_aligned_one_byte = config.lut_word_length % COMPRESSION_RATIO == 0
-        && config.scan_step % COMPRESSION_RATIO == 0
+    let small_na_aligned_one_byte = config.lut_word_length.is_multiple_of(COMPRESSION_RATIO)
+        && config.scan_step.is_multiple_of(COMPRESSION_RATIO)
         && config.effective_word_size - config.lut_word_length <= 4;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1002-1003
@@ -11735,7 +11789,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     // Gap costs that the tables accept but LOSAT's greedy extension does not (`scoring.rs`);
     // with no valid context, NCBI extends nothing.
     if any_valid_context && !UNGAPPED {
-        check_greedy_gap_costs(&args)?;
+        check_greedy_gap_costs(args)?;
     }
     let search_karlin: Vec<ContextKarlin> = {
         let fallback = context_karlin
@@ -11914,7 +11968,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     //                               lookup_options->max_db_word_count);
     // }
     // ```
-    let subjects_for_lookup: &[FastaRecord] = subject_records.as_deref().unwrap_or(&[]);
+    let subjects_for_lookup: &[FastaRecord] = subject_records.unwrap_or(&[]);
     // A split batch has no lookup table of its own; its chunks have theirs.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_aux_priv.cpp:206-207
     // ```c
@@ -11936,7 +11990,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         let t_build_lookup = crate::utils::xtiming::clock();
         let tables = build_lookup_tables(
             &config,
-            &args,
+            args,
             &encoded_queries_blastna,
             &query_context_masks,
             &query_context_offsets,
@@ -12035,10 +12089,6 @@ fn search_query_batch<const UNGAPPED: bool>(
     // m_NumAlignments = hitlist_size;
     // ```
     let hitlist_size = args.report_counts.hitlist_size;
-    // NCBI blast_args.cpp:317-318: if (... args[kArgMaxHSPsPerSubject]) {
-    // opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger()); }
-    // CLI omission maps to the engine's unlimited sentinel.
-    let max_hsps_per_subject = args.max_hsps_per_subject.unwrap_or(0);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (GetPrelimHitlistSize)
     // ```c
     // Int4
@@ -12118,7 +12168,6 @@ fn search_query_batch<const UNGAPPED: bool>(
     let two_stage_lookup_ref = lookup_tables.two_stage_lookup.as_ref();
     let queries_ref = &seq_data.queries;
     let query_contexts_ref = &query_contexts;
-    let query_base_offsets_ref = &query_base_offsets;
     let query_eff_searchsp_ref = &query_eff_searchsp;
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
@@ -12211,7 +12260,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     crate::utils::threading::report_stage("blastn", "subjects", seq_data.db_num_seqs, use_parallel);
     let db_len_total = seq_data.db_len_total;
     let db_num_seqs = seq_data.db_num_seqs;
-    let evalue_threshold = super::super::coordination::determine_evalue(&args);
+    let evalue_threshold = super::super::coordination::determine_evalue(args);
     let subject_besthit = args.subject_besthit;
     // EXPERIMENT (LOSAT_X_QGROUPPAR): whether the gapped stages of a subject searched on this
     // thread may run per query on the pool (x_qgroup_par.rs). Not on the diagnostic paths, which
@@ -12424,7 +12473,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     &search_karlin_ref[context_idx].ungapped,
                     hit_saving_cutoff,
                 )
-                .map_err(|limit| ungapped_cutoff_limit_error(limit))?
+                .map_err(ungapped_cutoff_limit_error)?
             } else {
                 cutoff_score_for_ungapped_extension(gap_trigger, hit_saving_cutoff, 1.0)
             };
@@ -12505,7 +12554,6 @@ fn search_query_batch<const UNGAPPED: bool>(
         }
         let queries = queries_ref;
         let query_contexts = query_contexts_ref;
-        let query_base_offsets = query_base_offsets_ref;
         let query_eff_searchsp = query_eff_searchsp_ref;
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:493-526
@@ -12765,7 +12813,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             let dbg_no_lookup_match = 0usize;
             let mut dbg_seeds_found = 0usize;
             let mut dbg_ungapped_low = 0usize;
-            let mut dbg_two_hit_failed = 0usize;
+            let dbg_two_hit_failed = 0usize;
             let mut dbg_gapped_attempted = 0usize;
             let mut dbg_window_seeds = 0usize;
 
@@ -13015,17 +13063,16 @@ fn search_query_batch<const UNGAPPED: bool>(
                             two_stage,
                             search_seq_packed,
                             s_len,
-                            subject_seq_ranges: &subject_seq_ranges,
+                            subject_seq_ranges,
                             subject_masked,
                             scan_step,
                             query_context_index: &query_context_index,
                             query_contexts,
-                            encoded_query_concat_blastna: &encoded_query_concat_blastna,
-                            encoded_query_concat_blastna_with_sentinels:
-                                &encoded_query_concat_blastna_with_sentinels,
-                            cutoff_scores: &cutoff_scores,
-                            x_dropoff_scores: &x_dropoff_scores,
-                            reduced_cutoff_scores: &reduced_cutoff_scores,
+                            encoded_query_concat_blastna,
+                            encoded_query_concat_blastna_with_sentinels,
+                            cutoff_scores,
+                            x_dropoff_scores,
+                            reduced_cutoff_scores,
                             score_matrix: &score_matrix,
                             nucl_score_table: &nucl_score_table,
                             diag_offset,
@@ -13197,7 +13244,6 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 let context_idx = query_context_index.context_for_offset(q_off0);
                                 let ctx = &query_contexts[context_idx];
                                 let q_idx = context_idx as u32;
-                                let query_idx = ctx.query_idx as usize;
                                 let q_context_start = ctx.query_offset as usize;
                                 let q_context_end = q_context_start + ctx.len;
                                 let q_pos_usize = q_off0 - q_context_start;
@@ -13417,10 +13463,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                                             // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by max_ext_left.
                                             let s_byte =
                                                 unsafe { *search_seq_packed.get_unchecked(s_idx) };
-                                            let s_base = ((s_byte
-                                                << (2 * (s_off % COMPRESSION_RATIO)))
-                                                >> 6)
-                                                as u8;
+                                            let s_base =
+                                                (s_byte << (2 * (s_off % COMPRESSION_RATIO))) >> 6;
                                             // SAFETY: q_left is bounded by the outer-sentinel query buffer.
                                             let q_base = unsafe {
                                                 *encoded_query_concat_blastna_with_sentinels
@@ -13505,10 +13549,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                                                 let s_byte = unsafe {
                                                     *search_seq_packed.get_unchecked(s_idx)
                                                 };
-                                                let s_base = ((s_byte
+                                                let s_base = (s_byte
                                                     << (2 * (s_off % COMPRESSION_RATIO)))
-                                                    >> 6)
-                                                    as u8;
+                                                    >> 6;
                                                 // SAFETY: q_right is bounded by the outer-sentinel query buffer.
                                                 let q_base = unsafe {
                                                     *encoded_query_concat_blastna_with_sentinels
@@ -13520,7 +13563,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                                 ext_right += 1;
                                                 q_right += 1;
                                                 s_off += 1;
-                                                if s_off % COMPRESSION_RATIO == 0 {
+                                                if s_off.is_multiple_of(COMPRESSION_RATIO) {
                                                     s_idx += 1;
                                                 }
                                             }
@@ -14318,7 +14361,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 // }
                                 // ```
                                 // Update hit_level_array after collecting ungapped hit
-                                hit_ready = true;
+                                // (hit_ready is 1 here: flag 1, hit length 0)
                                 if use_array_indexing && diag_idx < diag_array_size {
                                     hit_level_array[diag_idx].last_hit = ungapped_s_end_pos as i32;
                                     hit_level_array[diag_idx].flag = 1;
@@ -14581,7 +14624,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 search_seq_packed,
                                 s_len,
                                 disc,
-                                &subject_seq_ranges,
+                                subject_seq_ranges,
                                 subject_masked,
                                 |s_off, s_range, index, index2| {
                                     debug_assert!(index2.is_none());
@@ -14598,7 +14641,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 search_seq_packed,
                                 s_len,
                                 disc,
-                                &subject_seq_ranges,
+                                subject_seq_ranges,
                                 subject_masked,
                                 |s_off, s_range, index, index2| {
                                     on_word(s_off, s_range, index, index2)
@@ -14625,9 +14668,12 @@ fn search_query_batch<const UNGAPPED: bool>(
                         // per cell, so its scan (`$pv` false) tests the word there only, not first
                         // in the coarser presence vector, whose bit stands for several cells; for
                         // a head whose bits fit the cache (`x_bn_pv_once`).
+                        // The trait's methods are called in two of the three scans below only, so
+                        // it is imported here and not in the macro's body.
+                        use x_dc_csr::XRing as _;
                         macro_rules! x_scan_csr {
                             ($head:expr, $pv:expr) => {{
-                                use x_dc_csr::{XHead, XRing};
+                                use x_dc_csr::XHead;
                                 let head = $head;
                             let mut x_on_word_csr =
                                 |(kmer_start, s_range, index): (usize, usize, u64)| {
@@ -14709,7 +14755,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                             word_length,
                             lut_word_length,
                             scan_step,
-                            &subject_seq_ranges,
+                            subject_seq_ranges,
                             subject_masked,
                             mb_scan_kind,
                             |kmer_start, s_range, current_lut_kmer| {
@@ -14811,15 +14857,15 @@ fn search_query_batch<const UNGAPPED: bool>(
                             word_length: safe_k,
                             search_seq_packed,
                             s_len,
-                            subject_seq_ranges: &subject_seq_ranges,
+                            subject_seq_ranges,
                             subject_masked,
                             scan_step,
                             query_context_index: &query_context_index,
                             query_contexts,
                             encoded_queries_blastna: &encoded_queries_blastna,
-                            cutoff_scores: &cutoff_scores,
-                            x_dropoff_scores: &x_dropoff_scores,
-                            reduced_cutoff_scores: &reduced_cutoff_scores,
+                            cutoff_scores,
+                            x_dropoff_scores,
+                            reduced_cutoff_scores,
                             score_matrix: &score_matrix,
                             nucl_score_table: &nucl_score_table,
                             diag_offset,
@@ -14859,7 +14905,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                         safe_k,
                         safe_k,
                         scan_step,
-                        &subject_seq_ranges,
+                        subject_seq_ranges,
                         subject_masked,
                         mb_scan_kind,
                         |kmer_start, s_range, current_kmer| {
@@ -14923,7 +14969,6 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 let context_idx = query_context_index.context_for_offset(q_off0);
                                 let ctx = &query_contexts[context_idx];
                                 let q_idx = context_idx as u32;
-                                let query_idx = ctx.query_idx as usize;
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
                                 // ```c
@@ -15101,8 +15146,6 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 let mut s_off = kmer_start;
                                 let mut s_end = kmer_start + safe_k;
                                 let mut s_end_pos = s_end + diag_offset as usize;
-                                let mut word_type = 1u8; // Default: single word (when word_length == lut_word_length)
-                                let mut extended = 0usize;
                                 let mut off_found = false;
                                 let mut hit_ready = true;
                                 let query_mask = ctx.masks.as_slice();
@@ -15141,6 +15184,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 //     if (lookup_pos[i] == q_pos) return TRUE;
                                 // }
                                 // ```
+                                #[expect(
+                                    clippy::manual_contains,
+                                    reason = "a linear scan of the cell's hits with an early exit, as NCBI's loop (na_ungapped.c:131-133); slice::contains would switch this per-seed check to std's chunked search"
+                                )]
                                 let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
                                     if s_pos + safe_k > s_len {
                                         return true;
@@ -15200,8 +15247,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                                         true,   // check_double = TRUE
                                         &mut is_seed_masked,
                                     );
-                                    word_type = wt;
-                                    extended = ext;
+                                    let word_type = wt;
+                                    let extended = ext;
                                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
                                     // ```c
                                     // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
@@ -15676,7 +15723,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 // }
                                 // ```
                                 // Update hit_level_array after collecting ungapped hit
-                                hit_ready = true;
+                                // (hit_ready is 1 here: flag 1, hit length 0)
                                 if use_array_indexing && diag_idx < diag_array_size {
                                     hit_level_array[diag_idx].last_hit = ungapped_s_end_pos as i32;
                                     hit_level_array[diag_idx].flag = 1;
@@ -16616,6 +16663,10 @@ fn search_query_batch<const UNGAPPED: bool>(
             //
             // BlastInitHitListReset(init_hitlist);
             // ```
+            #[expect(
+                clippy::drain_collect,
+                reason = "without reuse the scratch keeps its buffer for the next chunk; mem::take would hand the buffer away and allocate again"
+            )]
             let mut chunk_prelim_hits: Vec<PrelimHit> = if reuse_prelim_hits {
                 std::mem::take(prelim_hits)
             } else {
@@ -16822,11 +16873,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                             // aux_struct->offset_pairs =
                                             //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
                                             // ```
-                                            SubjectScratch::new(
-                                                queries_ref.len(),
-                                                offset_array_size,
-                                                window_size,
-                                            ),
+                                            SubjectScratch::new(offset_array_size, window_size),
                                         )
                                     },
                                     |state, chunk| {
@@ -17444,6 +17491,16 @@ fn search_query_batch<const UNGAPPED: bool>(
                 // EXPERIMENT (LOSAT_X_SPECBATCH=n): how many HSPs are traced ahead of
                 // the ordered loop at a time. Scheduling only, like the batch itself.
                 #[allow(non_snake_case)]
+                #[cfg_attr(
+                    not(all(
+                        feature = "parallel",
+                        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                    )),
+                    expect(
+                        unused_variables,
+                        reason = "used only by the speculative traceback batch, built with the parallel feature outside serial Wasm"
+                    )
+                )]
                 let SPECULATIVE_TRACEBACK_BATCH_SIZE: usize = {
                     use std::sync::OnceLock;
                     static SIZE: OnceLock<usize> = OnceLock::new();
@@ -17488,7 +17545,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     let x_mark = x_fence::x_fence_mark(x_fenced);
                     if !use_dp {
                         let result = greedy_gapped_alignment_with_traceback(
-                            &encoded_queries_blastna[p.context_idx as usize],
+                            encoded_queries_blastna[p.context_idx as usize],
                             &s_seq_blastna[shift..shift + slen],
                             slen,
                             qs,
@@ -17504,7 +17561,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                         return Some((prepared, XSpecTraceback::Greedy(result)));
                     }
                     let result = extend_gapped_heuristic_with_traceback_with_scratch(
-                        &encoded_queries_blastna[p.context_idx as usize],
+                        encoded_queries_blastna[p.context_idx as usize],
                         &s_seq_blastna[shift..shift + slen],
                         qs,
                         ss,
@@ -17703,7 +17760,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                                             // the ordered loop below, on this slot's scratch.
                                                             let result =
                                                                 greedy_gapped_alignment_with_traceback(
-                                                                    &encoded_queries_blastna
+                                                                    encoded_queries_blastna
                                                                         [p.context_idx as usize],
                                                                     &s_seq_blastna[shift..shift + slen],
                                                                     slen,
@@ -17727,7 +17784,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                                         }
                                                         let result =
                                                     extend_gapped_heuristic_with_traceback_with_scratch(
-                                                        &encoded_queries_blastna
+                                                        encoded_queries_blastna
                                                             [p.context_idx as usize],
                                                         &s_seq_blastna[shift..shift + slen],
                                                         qs,
@@ -18722,7 +18779,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             } else {
                 None
             };
-            let mut local_hits = purge_hsps_with_common_endpoints(local_hits);
+            let local_hits = purge_hsps_with_common_endpoints(local_hits);
             let hits_step4 = local_hits.len();
             if let (Some(timing), Some(purge_pass2_start)) = (timing_ref, purge_pass2_start) {
                 BlastnTiming::record_duration(
@@ -18878,7 +18935,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 if blastn_trace_enabled
                     && blastn_trace::should_trace_range(
                         "purge",
-                        (hit.q_idx * 2 + if hit.query_frame < 0 { 1 } else { 0 }) as u32,
+                        hit.q_idx * 2 + if hit.query_frame < 0 { 1 } else { 0 },
                         s_idx,
                         s_id,
                         hit.internal_q_offset_0,
@@ -19077,6 +19134,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                     &mut traceback_edit_script_lengths,
                     &mut traceback_alignment_lengths,
                 );
+                #[expect(
+                    clippy::drain_collect,
+                    reason = "the subject scratch keeps its buffer for the next subject; mem::take would hand the buffer away and allocate again"
+                )]
                 let (list, s1, s2, s3, s4) = x_post_purge(hits.drain(..).collect());
                 let (list, s5) = x_final_list(list, interval_tree);
                 (SubjectHits::Mixed(list), [s1, s2, s3, s4, s5])
@@ -19202,7 +19263,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         let new_state = || {
             (
                 GapAlignScratch::new(),
-                SubjectScratch::new(queries_ref.len(), offset_array_size, window_size),
+                SubjectScratch::new(offset_array_size, window_size),
             )
         };
         let search_one = |state: &mut (GapAlignScratch, SubjectScratch), s_idx: usize| {
@@ -19303,7 +19364,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     let new_scratch = || {
         (
             GapAlignScratch::new(),
-            SubjectScratch::new(queries_ref.len(), offset_array_size, window_size),
+            SubjectScratch::new(offset_array_size, window_size),
         )
     };
     // An ungapped (`-ungapped`) search only (the other instance never calls them): the steps of
@@ -19759,6 +19820,9 @@ fn search_query_chunks(
     // PD-LOSAT-NCBI-DEFECTS).
     let mut merged: PrelimHitLists = Vec::with_capacity(queries.count());
     merged.resize_with(queries.count(), || None);
+    // No NCBI counterpart (memory placement only, `x_query_sentinels`): the chunks' query buffer,
+    // kept from chunk to chunk (the batch's own buffer is in use until its traceback).
+    let mut query_keep: Vec<u8> = Vec::new();
     for chunk in &chunks {
         // NCBI fails to make the query factory of a chunk without a query ("Empty
         // CBlastQueryVector"); `split_query_batch` makes none.
@@ -19800,6 +19864,7 @@ fn search_query_chunks(
                 batch_eff_searchsp,
             },
             x_keep,
+            &mut query_keep,
         )?;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:174-178
         // ```c
@@ -20181,6 +20246,73 @@ mod tests {
 
     // One buffer written context by context equals the two buffers of the IUPAC copies,
     // with an empty query (no room) between queries and letters of both cases.
+    #[test]
+    fn kept_query_buffer_equals_a_new_one() {
+        // (letters, offsets, concatenated length) of a batch of `queries`, laid out as above.
+        let layout = |queries: &[&[u8]]| {
+            let mut offsets = Vec::new();
+            let mut at = 0usize;
+            let room = |length: usize| if length == 0 { 0 } else { length + 1 };
+            for seq in queries {
+                offsets.push(at as i32);
+                at += room(seq.len());
+                offsets.push(at as i32);
+                at += room(seq.len());
+            }
+            (offsets, at - 1)
+        };
+        let (long, mid) = (vec![b'G'; 3 << 20], vec![b'c'; 1 << 20]);
+        let huge = vec![b'T'; 17 << 20];
+        let batches: [Vec<&[u8]>; 8] = [
+            vec![&b"ACGTTGCAAC"[..], &b"acgtnRYKMSWBDHVNu-acgt"[..]],
+            vec![&b"A"[..]],
+            vec![&long[..], &b"TTTT"[..]],
+            vec![&mid[..], &b"GA"[..]],
+            vec![&b"GGGGCCCCTTTTAAAAccgg*0"[..], &b""[..], &b"CA"[..]],
+            vec![&long[..]],
+            vec![&huge[..], &b"G"[..]],
+            vec![&b"ACGT"[..]],
+        ];
+        let mut keep = Vec::new();
+        let mut blocks = Vec::new();
+        for queries in &batches {
+            let (offsets, concat_len) = layout(&queries[..]);
+            fill_query_blastna_buffer(&queries[..], &offsets, concat_len, &mut keep);
+            assert_eq!(
+                keep,
+                build_query_blastna_buffer(&queries[..], &offsets, concat_len)
+            );
+            blocks.push((keep.as_ptr(), keep.capacity()));
+            for strand in [QueryStrand::Plus, QueryStrand::Minus] {
+                let mut kept = keep.clone();
+                kept.extend_from_slice(b"stale bytes past the length");
+                fill_strand_query_blastna_buffer(
+                    &queries[..],
+                    &offsets,
+                    concat_len,
+                    strand,
+                    &mut kept,
+                );
+                assert_eq!(
+                    kept,
+                    build_strand_query_blastna_buffer(&queries[..], &offsets, concat_len, strand)
+                );
+            }
+        }
+        if crate::utils::x_mapped::X_MAPPED_ALLOCATOR {
+            // the 3 MiB batch made a mapped buffer; the shorter one of the same class, the batch
+            // below 1 MiB and the next 3 MiB batch wrote the same block again (it is not mapped
+            // again); the 34 MiB batch, past the ceiling, took a block of its own length, and the
+            // short batch after it did not keep that block
+            assert!(blocks[2].1 > 32 << 20);
+            assert_eq!(blocks[3], blocks[2]);
+            assert_eq!(blocks[4], blocks[2]);
+            assert_eq!(blocks[5], blocks[2]);
+            assert!(blocks[6].1 > blocks[2].1);
+            assert!(blocks[7].1 < 1 << 20);
+        }
+    }
+
     #[test]
     fn query_buffer_equals_the_buffers_of_the_context_copies() {
         let queries: [&[u8]; 5] = [
@@ -20836,14 +20968,14 @@ mod tests {
         // Multiple seeds extend to the same gapped HSP. Compute in reverse input
         // order with independent scratch, then replay in the original seed order.
         let q = encode_iupac_to_blastna(
-            &reader_records(
+            reader_records(
                 &std::fs::read_to_string(&query_path).unwrap(),
                 ReaderConfig::query("BLASTN", false, false),
             )[0]
             .seq(),
         );
         let subj = encode_iupac_to_blastna(
-            &reader_records(
+            reader_records(
                 &std::fs::read_to_string(&subject_path).unwrap(),
                 ReaderConfig::subject("BLASTN", false, false),
             )[0]
@@ -21184,13 +21316,13 @@ mod tests {
             ("21", "FASTA output format is only applicable to magicblast"),
         ] {
             assert_eq!(
-                native(parse_output_formats(["6", outfmt], None).unwrap_err()),
+                native(parse_output_formats([("6", None), (outfmt, None)]).unwrap_err()),
                 options(error),
                 "{outfmt}"
             );
         }
         assert_eq!(
-            parse_output_formats(["0", "6", "07"], None).unwrap(),
+            parse_output_formats([("0", None), ("6", None), ("07", None)]).unwrap(),
             [
                 BlastnOutputFormat::Pairwise,
                 BlastnOutputFormat::Tabular,
@@ -21198,7 +21330,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            parse_output_formats(["17", "17 SQ SR"], None).unwrap(),
+            parse_output_formats([("17", None), ("17 SQ SR", None)]).unwrap(),
             [
                 BlastnOutputFormat::Sam(crate::report::sam::SamSpec::default()),
                 BlastnOutputFormat::Sam(crate::report::sam::SamSpec {

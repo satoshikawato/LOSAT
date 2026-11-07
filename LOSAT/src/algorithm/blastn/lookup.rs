@@ -114,12 +114,28 @@ const BLAST2NA_MASK: u8 = 0xFC;
 ///   index = (index << charsize) | word[i];
 /// }
 /// ```
+/// `None` when the word `start..start + k` does not fit in `seq` (for any `start` and `k`) or
+/// holds a base that is not A, C, G or T.
 pub fn encode_kmer(seq: &[u8], start: usize, k: usize) -> Option<u64> {
+    // No NCBI counterpart: NCBI's callers pass words that fit; this form cannot wrap.
+    if k > seq.len() || start > seq.len() - k {
+        return None;
+    }
+    encode_kmer_fitting(seq, start, k)
+}
+
+/// `encode_kmer` for the table builders below, whose words fit (`start <= seq.len() - k`), so
+/// `start + k` does not wrap.
+#[inline(always)]
+fn encode_kmer_fitting(seq: &[u8], start: usize, k: usize) -> Option<u64> {
     if start + k > seq.len() {
         return None;
     }
     let mut encoded: u64 = 0;
     for i in 0..k {
+        // SAFETY: `start + i < start + k <= seq.len()` (the test above); `start + k` does not
+        // wrap: `encode_kmer` tests that the word fits, and the two builders pass
+        // `start <= seq.len() - k`.
         let base = unsafe { *seq.get_unchecked(start + i) };
         if (base & BLAST2NA_MASK) != 0 {
             return None;
@@ -246,19 +262,10 @@ impl Default for NaLookupPayload {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct NaLookupBackboneCell {
     num_used: u32,
     payload: NaLookupPayload,
-}
-
-impl Default for NaLookupBackboneCell {
-    fn default() -> Self {
-        NaLookupBackboneCell {
-            num_used: 0,
-            payload: NaLookupPayload::default(),
-        }
-    }
 }
 
 /// Compact array-backed lookup table for blastn (NCBI BlastNaLookupTable).
@@ -267,8 +274,6 @@ pub struct NaLookupTable {
     overflow: Vec<u32>,
     pv: Vec<PvArrayType>,
     longest_chain: usize,
-    word_length: usize,
-    lut_word_length: usize,
 }
 
 impl NaLookupTable {
@@ -617,7 +622,7 @@ fn compute_mb_pv_params(
         && (approx_table_entries <= K_SMALL_QUERY_CUTOFF
             || approx_table_entries >= K_LARGE_QUERY_CUTOFF)
     {
-        pv_size = pv_size / 2;
+        pv_size /= 2;
     }
 
     if pv_size == 0 {
@@ -850,6 +855,7 @@ impl PvDirectLookup {
 /// Two-stage lookup table (like NCBI BLAST)
 /// - lut_word_length: Used for indexing (e.g., 8 for megablast)
 /// - word_length: Used for extension triggering (e.g., 28 for megablast)
+///
 /// This allows O(1) direct array access even for large word_length values
 pub struct TwoStageLookup {
     /// Megablast lookup table using NCBI hashtable/next_pos chains.
@@ -1068,7 +1074,11 @@ impl MbLookupTable {
 
     /// Tests only: the head table's words, as the batch loop's keep holds them (LOSAT_X_MB24: the
     /// words of the 3-byte heads).
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn x_table(&self) -> &[u32] {
         self.x_narrow
             .as_ref()
@@ -1434,7 +1444,7 @@ pub fn build_pv_direct_lookup(
 
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
-    let mut dust_skipped = 0usize;
+    let dust_skipped = 0usize;
 
     debug_assert_eq!(queries_blastna.len(), query_offsets.len());
 
@@ -1732,7 +1742,7 @@ pub fn build_na_lookup(
     let mut counts: Vec<u32> = vec![0; table_size];
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
-    let mut dust_skipped = 0usize;
+    let dust_skipped = 0usize;
 
     let kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
 
@@ -1829,13 +1839,10 @@ pub fn build_na_lookup(
         backbone[idx].num_used = num_hits as u32;
         pv_set(&mut pv, idx);
         if num_hits > NA_HITS_PER_CELL {
-            // SAFETY: a write of a `Copy` union field (no read, no drop); it sets the
-            // `overflow_cursor` that the fill below and `get_hits_checked` read for this chain.
-            unsafe {
-                // SAFETY: Storing overflow_cursor is valid for chains larger
-                // than NA_HITS_PER_CELL, matching NCBI union usage.
-                backbone[idx].payload.overflow_cursor = overflow_size as u32;
-            }
+            // Chains larger than NA_HITS_PER_CELL store overflow_cursor, matching NCBI union
+            // usage (writing a `Copy` union field needs no `unsafe`). It sets the cursor that the
+            // fill below and `get_hits_checked` read for this chain.
+            backbone[idx].payload.overflow_cursor = overflow_size as u32;
             overflow_size += num_hits;
         }
     }
@@ -1933,14 +1940,13 @@ pub fn build_na_lookup(
         overflow,
         pv,
         longest_chain,
-        word_length,
-        lut_word_length,
     }
 }
 
 /// Build two-stage lookup table (like NCBI BLAST)
 /// - lut_word_length: Used for indexing (typically 8 for megablast)
 /// - word_length: Used for extension triggering (typically 28 for megablast)
+///
 /// This allows O(1) direct array access even for large word_length values
 fn build_mb_lookup(
     queries_blastna: &[&[u8]],
@@ -2039,8 +2045,7 @@ fn build_mb_lookup(
     };
     let mut pv_array = vec![0u32; pv_size];
     const K_COMPRESSION_FACTOR: usize = 2048;
-    let mut helper_array =
-        vec![0u32; ((table_size + K_COMPRESSION_FACTOR - 1) / K_COMPRESSION_FACTOR).max(1)];
+    let mut helper_array = vec![0u32; table_size.div_ceil(K_COMPRESSION_FACTOR).max(1)];
     let mut words: Vec<(u32, u32)> = Vec::new();
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
@@ -2273,7 +2278,11 @@ fn build_mb_lookup(
     }
 }
 
-pub fn build_two_stage_lookup(
+/// Only the tests call it; searches go through `build_two_stage_lookup_kept` with the lookup
+/// word of `choose_na_lookup_table` and disjoint contexts (not `pub`: overlapping
+/// `query_offsets` race in the pooled fill, and a lookup word of 0 writes past `next_pos`).
+#[cfg(test)]
+pub(crate) fn build_two_stage_lookup(
     queries_blastna: &[&[u8]],
     query_offsets: &[i32],
     word_length: usize,
@@ -2709,8 +2718,12 @@ fn disc_longest_chain(helper_array: &[u32], helper_array2: &[u32], two_templates
 /// ```
 /// The locations are the unmasked ranges of each context, in the order of
 /// `build_mb_lookup`; `left`/`right` are offsets in the concatenated query.
+/// Only the tests call it (with checked word sizes and disjoint contexts); searches go through
+/// `build_disc_mb_lookup_kept` after `check_scoring_options` (not `pub`: a word size other than
+/// 11 or 12, or overlapping `query_offsets` on a pool of 2+ threads, breaks the parallel fill).
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
-pub fn build_disc_mb_lookup(
+pub(crate) fn build_disc_mb_lookup(
     queries_blastna: &[&[u8]],
     query_offsets: &[i32],
     word_size: usize,
@@ -3005,7 +3018,7 @@ pub fn build_direct_lookup(
 
             // NCBI reference: blast_lookup.c:119-120
             // if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
-            if let Some(kmer) = encode_kmer(seq, i, safe_word_size) {
+            if let Some(kmer) = encode_kmer_fitting(seq, i, safe_word_size) {
                 // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
                 // Adds ALL hits without any frequency limit - no query-side filtering
                 let idx = kmer as usize;
@@ -3049,7 +3062,7 @@ pub fn build_direct_lookup(
                 continue;
             }
 
-            if let Some(kmer) = encode_kmer(seq, i, safe_word_size) {
+            if let Some(kmer) = encode_kmer_fitting(seq, i, safe_word_size) {
                 let idx = kmer as usize;
                 if idx < table_size {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
@@ -3529,5 +3542,20 @@ mod disc_lookup_tests {
         assert_eq!(chain(&masked, coding, false), vec![42]);
         assert!(masked.disc().is_some_and(|d| !d.two_templates));
         assert!(chain(&masked, optimal, true).is_empty());
+    }
+}
+
+// No NCBI counterpart: the checked public form refuses words that do not fit (line LIB, P-S1).
+#[cfg(test)]
+mod encode_kmer_bounds_tests {
+    use super::encode_kmer;
+
+    #[test]
+    fn a_word_that_does_not_fit_is_refused_for_any_start() {
+        // `start + k` wraps to 1 here; the unchecked read was `seq[usize::MAX]`.
+        assert_eq!(encode_kmer(&[0u8], usize::MAX, 2), None);
+        assert_eq!(encode_kmer(&[0u8], 1, usize::MAX), None);
+        assert_eq!(encode_kmer(&[0u8, 1], 1, 2), None);
+        assert_eq!(encode_kmer(&[0u8, 1], 0, 2), Some(1));
     }
 }

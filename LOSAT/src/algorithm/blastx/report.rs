@@ -3,6 +3,7 @@ use super::{
     args::ResolvedOptions, database::ReportedSubjects, input::FastaRecord, results::Hsp,
     runtime::BatchResults,
 };
+use crate::algorithm::tblastx::report::display_codon;
 use crate::{
     common::GapEditOp,
     report::outfmt6::{
@@ -179,130 +180,6 @@ pub(super) fn reported(list: &super::results::HspList, gapped: bool) -> bool {
     list.hsps.iter().any(|hsp| has_seqalign(hsp, gapped))
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:94-112
-// ```c++
-//     static char  charToBase [17] = "-ACMGRSVTWYHKDBN";
-//     static char  baseToComp [17] = "-TGKCYSBAWRDMHVN";
-//
-//     // illegal characters map to 0
-//     for (i = 0; i < 256; i++) {
-//         sm_BaseToIdx [i] = 0;
-//     }
-//
-//     // map iupacna alphabet to EBaseCode
-//     for (i = eBase_gap; i <= eBase_N; i++) {
-//         ch = charToBase [i];
-//         sm_BaseToIdx [(int) ch] = i;
-//         ch = (unsigned char)tolower (ch);
-//         sm_BaseToIdx [(int) ch] = i;
-//     }
-//     sm_BaseToIdx [(int) 'U'] = eBase_T;
-//     sm_BaseToIdx [(int) 'u'] = eBase_T;
-//     sm_BaseToIdx [(int) 'X'] = eBase_N;
-//     sm_BaseToIdx [(int) 'x'] = eBase_N;
-// ```
-// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:145-148
-// ```c++
-//     static int  expansions [4] = {eBase_A, eBase_C, eBase_G, eBase_T};
-//                                 // T = 0, C = 1, A = 2, G = 3
-//     static int  codonIdx [9] = {0, 2, 1, 0, 3, 0, 0, 0, 0};
-//
-// ```
-// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:170-209
-// ```c++
-//                 // expand ambiguous IJK nucleotide symbols into component bases XYZ
-//                 for (p = 0; p < 4 && go_on; p++) {
-//                     x = expansions [p];
-//                     if ((x & i) != 0) {
-//                         for (q = 0; q < 4 && go_on; q++) {
-//                             y = expansions [q];
-//                             if ((y & j) != 0) {
-//                                 for (r = 0; r < 4 && go_on; r++) {
-//                                     z = expansions [r];
-//                                     if ((z & k) != 0) {
-//
-//                                         // calculate offset in genetic code string
-//
-//                                         // the T = 0, C = 1, A = 2, G = 3 order is
-//                                         // necessary because the genetic code strings
-//                                         // are presented in TCAG order in printed tables
-//                                         // and in the genetic code strings
-//                                         cd = 16 * codonIdx [x] + 4 * codonIdx [y] + codonIdx [z];
-//
-//                                         // lookup amino acid for codon XYZ
-//                                         ch = (*ncbieaa) [cd];
-//                                         if (aa == '\0') {
-//                                             aa = ch;
-//                                         } else if (aa != ch) {
-//                                             // allow Asx (Asp or Asn) and Glx (Glu or Gln)
-//                                             if ((aa == 'B' || aa == 'D' || aa == 'N') &&
-//                                                 (ch == 'D' || ch == 'N')) {
-//                                                 aa = 'B';
-//                                             } else if ((aa == 'Z' || aa == 'E' || aa == 'Q') &&
-//                                                        (ch == 'E' || ch == 'Q')) {
-//                                                 aa = 'Z';
-//                                             } else if ((aa == 'J' || aa == 'I' || aa == 'L') &&
-//                                                 (ch == 'I' || ch == 'L')) {
-//                                                 aa = 'J';
-//                                             } else {
-//                                                 aa = 'X';
-//                                             }
-//                                         }
-//
-//                                         // lookup translation start flag
-// ```
-
-// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:155-160
-// ```c++
-//     // ambiguous codons map to unknown amino acid or not start
-//     for (i = 0; i <= 4096; i++) {
-//         m_AminoAcid [i] = 'X';
-//         m_OrfStart [i] = '-';
-//         m_OrfStop [i] = '-';
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:228-231
-// ```c++
-//                 // assign amino acid
-//                 if (aa != '\0') {
-//                     m_AminoAcid [st] = aa;
-//                 }
-// ```
-pub(crate) fn display_codon(masks: [u8; 3], code: &crate::utils::genetic_code::GeneticCode) -> u8 {
-    let expansions = [(1, 2), (2, 1), (4, 3), (8, 0)];
-    let mut aa = 0;
-    for (x, i) in expansions {
-        if masks[0] & x == 0 {
-            continue;
-        }
-        for (y, j) in expansions {
-            if masks[1] & y == 0 {
-                continue;
-            }
-            for (z, k) in expansions {
-                if masks[2] & z == 0 {
-                    continue;
-                }
-                let ch = code.table[16 * i + 4 * j + k];
-                if aa == 0 {
-                    aa = ch;
-                } else if aa != ch {
-                    aa = match (aa, ch) {
-                        (b'B' | b'D' | b'N', b'D' | b'N') => b'B',
-                        (b'Z' | b'E' | b'Q', b'E' | b'Q') => b'Z',
-                        (b'J' | b'I' | b'L', b'I' | b'L') => b'J',
-                        _ => b'X',
-                    };
-                }
-            }
-        }
-    }
-    if aa == 0 {
-        b'X'
-    } else {
-        aa
-    }
-}
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:162-176
 // ```c++
 //
@@ -1253,7 +1130,8 @@ pub fn render(
     };
     let mut stderr = std::io::stderr().lock();
     write_prolog(writer, &mut stderr, options, subjects, &shown)?;
-    // The library entry has no output file: outfmt 13 and 14 are the command line's.
+    // This entry has no output file and no receiver of side files: outfmt 13 and 14 fail at their
+    // first report (`NoSideFiles`).
     let mut xml2 = super::blast_xml::xml2_kind(options.outfmt).map(|kind| {
         super::blast_xml::xml2_writer(
             kind,
@@ -1293,7 +1171,7 @@ pub fn render(
 // ```c++
 //         formatter.PrintEpilog(opt);
 // ```
-pub fn render_queries(
+pub(crate) fn render_queries(
     writer: &mut impl Write,
     stderr: &mut dyn Write,
     options: &ResolvedOptions,
@@ -1881,7 +1759,7 @@ pub(super) fn pairwise_hits(
                         // title alone (`ReportedSubjects::descriptions`).
                         subject_title: match shown {
                             ShownSubjects::Fasta { parsed, .. }
-                                if parsed.shown(usize::try_from(list.oid)?).is_some() =>
+                                if parsed.shown(list.oid).is_some() =>
                             {
                                 None
                             }

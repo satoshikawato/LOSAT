@@ -328,6 +328,7 @@ impl Captured {
     }
 
     /// Replays the call through `xdrop_align` with the forward `Bytes` rows and columns.
+    #[cfg(target_arch = "x86_64")]
     pub(super) fn replay(&self, sc: &mut super::XdropScratch) -> Option<XdropResult> {
         super::xdrop_align(
             &self.row_seq(),

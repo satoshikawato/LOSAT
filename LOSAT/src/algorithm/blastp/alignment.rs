@@ -49,6 +49,13 @@ fn blastp_positive_score<const BLOSUM62: bool>(
 // }
 // ```
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "num_ident, num_positives, gap_letters, gap_opens and alignment_len are read only by unit tests"
+    )
+)]
 pub struct ProteinAlignmentView {
     pub query_aln: String,
     pub subject_aln: String,

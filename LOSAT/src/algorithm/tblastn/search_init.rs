@@ -292,28 +292,6 @@ impl XUngapWalks for &'static x_ungapped_fast::MatrixTable {
 }
 
 impl<'a> XTwoHit<'a> {
-    #[cfg(test)]
-    pub(super) fn new(
-        query_sequence: &'a [u8],
-        context_offsets: &'a [i32],
-        x_dropoffs: &'a [i32],
-        cutoff_scores: &'a [i32],
-        matrix: ScoringMatrix,
-        window: i32,
-        word_size: usize,
-    ) -> Self {
-        Self::with_table(
-            None,
-            query_sequence,
-            context_offsets,
-            x_dropoffs,
-            cutoff_scores,
-            matrix,
-            window,
-            word_size,
-        )
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1003,1377-1379,1412-1413
     // ```c
     //     if ((status = BlastExtendWordNew(query->length, word_params,
@@ -1385,7 +1363,7 @@ mod tests {
                 let call: usize = f[1].parse().unwrap();
                 InitHsp {
                     frame: [1, 2, 3, -1, -2, -3][call / 2],
-                    chunk_offset: if call % 2 == 0 { 0 } else { 4_999_900 },
+                    chunk_offset: if call.is_multiple_of(2) { 0 } else { 4_999_900 },
                     q_seed: f[3].parse().unwrap(),
                     s_seed: f[4].parse().unwrap(),
                     q_start: f[5].parse().unwrap(),
@@ -1553,7 +1531,7 @@ mod tests {
                 let call: usize = f[1].parse().unwrap();
                 InitHsp {
                     frame: [1, 2, 3, -1, -2, -3][call / 2],
-                    chunk_offset: if call % 2 == 0 { 0 } else { 4_999_900 },
+                    chunk_offset: if call.is_multiple_of(2) { 0 } else { 4_999_900 },
                     q_seed: f[3].parse().unwrap(),
                     s_seed: f[4].parse().unwrap(),
                     q_start: f[5].parse().unwrap(),

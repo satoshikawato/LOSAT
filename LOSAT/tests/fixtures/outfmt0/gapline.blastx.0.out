@@ -1,0 +1,525 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/bx_gapline_s.faa).
+           3 sequences; 437 total letters
+
+
+
+Query= 
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+unnamed protein product                                               46.6    4e-14
+s2 modifiers                                                          46.2    2e-13
+s1 subject                                                            45.8    6e-13
+
+
+> unnamed protein product
+Length=61
+
+ Score = 46.6 bits (109),  Expect = 4e-14, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +2
+
+Query  2   MLCRIFKDHLHQEWRAPNII  61
+           MLCRIFKDHLHQEWRAPNII
+Sbjct  2   MLCRIFKDHLHQEWRAPNII  21
+
+
+> s2 modifiers
+Length=123
+
+ Score = 46.2 bits (108),  Expect = 2e-13, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +2
+
+Query  2   MLCRIFKDHLHQEWRAPNII  61
+           MLCRIFKDHLHQEWRAPNII
+Sbjct  64  MLCRIFKDHLHQEWRAPNII  83
+
+
+> s1 subject
+Length=253
+
+ Score = 45.8 bits (107),  Expect = 6e-13, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +2
+
+Query  2   MLCRIFKDHLHQEWRAPNII  61
+           MLCRIFKDHLHQEWRAPNII
+Sbjct  1   MLCRIFKDHLHQEWRAPNII  20
+
+
+ Score = 45.8 bits (107),  Expect = 6e-13, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +2
+
+Query  2    MLCRIFKDHLHQEWRAPNII  61
+            MLCRIFKDHLHQEWRAPNII
+Sbjct  133  MLCRIFKDHLHQEWRAPNII  152
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 8740
+
+
+Query= r1 sizes
+
+Length=308
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+unnamed protein product                                               75.1    6e-24
+s2 modifiers                                                          74.7    4e-23
+s1 subject                                                            74.3    6e-22
+
+
+> unnamed protein product
+Length=61
+
+ Score = 75.1 bits (183),  Expect = 6e-24, Method: Compositional matrix adjust.
+ Identities = 40/62 (65%), Positives = 40/62 (65%), Gaps = 22/62 (35%)
+ Frame = +1
+
+Query  1    MLCRIFKDHLHQEWRAPNIIXAVPRRPPLTALCQRLGHVDXXLRCHDVLPSRRCANDSDM  180
+            MLCRIFKDHLHQEWRAPNII                      LRCHDVLPSRRCANDSDM
+Sbjct  2    MLCRIFKDHLHQEWRAPNII----------------------LRCHDVLPSRRCANDSDM  39
+
+Query  181  WT  186
+            WT
+Sbjct  40   WT  41
+
+
+ Score = 48.1 bits (113),  Expect(2) = 2e-18, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +2
+
+Query  188  MLCRIFKDHLHQEWRAPNII  247
+            MLCRIFKDHLHQEWRAPNII
+Sbjct  2    MLCRIFKDHLHQEWRAPNII  21
+
+
+ Score = 45.8 bits (107),  Expect(2) = 2e-18, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +3
+
+Query  249  LRCHDVLPSRRCANDSDMWT  308
+            LRCHDVLPSRRCANDSDMWT
+Sbjct  22   LRCHDVLPSRRCANDSDMWT  41
+
+
+> s2 modifiers
+Length=123
+
+ Score = 74.7 bits (182),  Expect = 4e-23, Method: Compositional matrix adjust.
+ Identities = 40/62 (65%), Positives = 40/62 (65%), Gaps = 22/62 (35%)
+ Frame = +1
+
+Query  1    MLCRIFKDHLHQEWRAPNIIXAVPRRPPLTALCQRLGHVDXXLRCHDVLPSRRCANDSDM  180
+            MLCRIFKDHLHQEWRAPNII                      LRCHDVLPSRRCANDSDM
+Sbjct  64   MLCRIFKDHLHQEWRAPNII----------------------LRCHDVLPSRRCANDSDM  101
+
+Query  181  WT  186
+            WT
+Sbjct  102  WT  103
+
+
+ Score = 47.8 bits (112),  Expect(2) = 3e-18, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +2
+
+Query  188  MLCRIFKDHLHQEWRAPNII  247
+            MLCRIFKDHLHQEWRAPNII
+Sbjct  64   MLCRIFKDHLHQEWRAPNII  83
+
+
+ Score = 45.8 bits (107),  Expect(2) = 3e-18, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +3
+
+Query  249  LRCHDVLPSRRCANDSDMWT  308
+            LRCHDVLPSRRCANDSDMWT
+Sbjct  84   LRCHDVLPSRRCANDSDMWT  103
+
+
+> s1 subject
+Length=253
+
+ Score = 74.3 bits (181),  Expect = 6e-22, Method: Compositional matrix adjust.
+ Identities = 40/62 (65%), Positives = 40/62 (65%), Gaps = 22/62 (35%)
+ Frame = +1
+
+Query  1    MLCRIFKDHLHQEWRAPNIIXAVPRRPPLTALCQRLGHVDXXLRCHDVLPSRRCANDSDM  180
+            MLCRIFKDHLHQEWRAPNII                      LRCHDVLPSRRCANDSDM
+Sbjct  1    MLCRIFKDHLHQEWRAPNII----------------------LRCHDVLPSRRCANDSDM  38
+
+Query  181  WT  186
+            WT
+Sbjct  39   WT  40
+
+
+ Score = 74.3 bits (181),  Expect = 6e-22, Method: Compositional matrix adjust.
+ Identities = 40/62 (65%), Positives = 40/62 (65%), Gaps = 22/62 (35%)
+ Frame = +1
+
+Query  1    MLCRIFKDHLHQEWRAPNIIXAVPRRPPLTALCQRLGHVDXXLRCHDVLPSRRCANDSDM  180
+            MLCRIFKDHLHQEWRAPNII                      LRCHDVLPSRRCANDSDM
+Sbjct  133  MLCRIFKDHLHQEWRAPNII----------------------LRCHDVLPSRRCANDSDM  170
+
+Query  181  WT  186
+            WT
+Sbjct  171  WT  172
+
+
+ Score = 47.8 bits (112),  Expect(2) = 3e-18, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +2
+
+Query  188  MLCRIFKDHLHQEWRAPNII  247
+            MLCRIFKDHLHQEWRAPNII
+Sbjct  1    MLCRIFKDHLHQEWRAPNII  20
+
+
+ Score = 47.8 bits (112),  Expect(2) = 3e-18, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +2
+
+Query  188  MLCRIFKDHLHQEWRAPNII  247
+            MLCRIFKDHLHQEWRAPNII
+Sbjct  133  MLCRIFKDHLHQEWRAPNII  152
+
+
+ Score = 45.4 bits (106),  Expect(2) = 3e-18, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +3
+
+Query  249  LRCHDVLPSRRCANDSDMWT  308
+            LRCHDVLPSRRCANDSDMWT
+Sbjct  21   LRCHDVLPSRRCANDSDMWT  40
+
+
+ Score = 45.4 bits (106),  Expect(2) = 3e-18, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +3
+
+Query  249  LRCHDVLPSRRCANDSDMWT  308
+            LRCHDVLPSRRCANDSDMWT
+Sbjct  153  LRCHDVLPSRRCANDSDMWT  172
+
+
+ Score = 43.9 bits (102),  Expect = 1e-10, Method: Compositional matrix adjust.
+ Identities = 24/50 (48%), Positives = 25/50 (50%), Gaps = 5/50 (10%)
+ Frame = +2
+
+Query  62   LRCHDVLPSRRCANDSDMWTX---XCGA--TTSSPHGVVPTTRTCGXMLC  196
+            LRCHDVLPSRRCANDSDMWT     C         H           +LC
+Sbjct  21   LRCHDVLPSRRCANDSDMWTYDMFNCDELHKGDKAHEATQXXXXXWKVLC  70
+
+
+ Score = 12.3 bits (20),  Expect = 7.4, Method: Compositional matrix adjust.
+ Identities = 6/13 (46%), Positives = 7/13 (54%), Gaps = 0/13 (0%)
+ Frame = -2
+
+Query  199  ATQHXSTCPSRWH  161
+            ATQ      SR+H
+Sbjct  190  ATQXWKVLCSRYH  202
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 30914
+
+
+Query= r2 modifiers
+
+Length=320
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+unnamed protein product                                               64.7    9e-20
+s2 modifiers                                                          64.3    5e-19
+s1 subject                                                            63.9    5e-18
+
+
+> unnamed protein product
+Length=61
+
+ Score = 64.7 bits (156),  Expect = 9e-20, Method: Compositional matrix adjust.
+ Identities = 38/85 (45%), Positives = 38/85 (45%), Gaps = 45/85 (53%)
+ Frame = +1
+
+Query  1    MLCRIFKDHLHQEWRAPNIIXXCGATTSSPHGVVPTTRTCGXXXAVSHI*GPLASGVART  180
+            MLCRIFKDHLHQEWRAPNII  C                                     
+Sbjct  2    MLCRIFKDHLHQEWRAPNIILRC-------------------------------------  24
+
+Query  181  QYNXXLRCHDVLPSRRCANDSDMWT  255
+                    HDVLPSRRCANDSDMWT
+Sbjct  25   --------HDVLPSRRCANDSDMWT  41
+
+
+ Score = 52.8 bits (125),  Expect = 4e-15, Method: Compositional matrix adjust.
+ Identities = 25/38 (66%), Positives = 27/38 (71%), Gaps = 7/38 (18%)
+ Frame = +2
+
+Query  131  MLCRIFKDHLHQEWRAPNIIXXCGATTSSPHGVVPTTR  244
+            MLCRIFKDHLHQEWRAPNII  C       H V+P+ R
+Sbjct  2    MLCRIFKDHLHQEWRAPNIILRC-------HDVLPSRR  32
+
+
+ Score = 47.4 bits (111),  Expect = 5e-13, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +3
+
+Query  261  MLCRIFKDHLHQEWRAPNII  320
+            MLCRIFKDHLHQEWRAPNII
+Sbjct  2    MLCRIFKDHLHQEWRAPNII  21
+
+
+ Score = 47.0 bits (110),  Expect = 6e-13, Method: Compositional matrix adjust.
+ Identities = 21/23 (91%), Positives = 21/23 (91%), Gaps = 0/23 (0%)
+ Frame = +3
+
+Query  57   NXXLRCHDVLPSRRCANDSDMWT  125
+            N  LRCHDVLPSRRCANDSDMWT
+Sbjct  19   NIILRCHDVLPSRRCANDSDMWT  41
+
+
+> s2 modifiers
+Length=123
+
+ Score = 64.3 bits (155),  Expect = 5e-19, Method: Compositional matrix adjust.
+ Identities = 38/85 (45%), Positives = 38/85 (45%), Gaps = 45/85 (53%)
+ Frame = +1
+
+Query  1    MLCRIFKDHLHQEWRAPNIIXXCGATTSSPHGVVPTTRTCGXXXAVSHI*GPLASGVART  180
+            MLCRIFKDHLHQEWRAPNII  C                                     
+Sbjct  64   MLCRIFKDHLHQEWRAPNIILRC-------------------------------------  86
+
+Query  181  QYNXXLRCHDVLPSRRCANDSDMWT  255
+                    HDVLPSRRCANDSDMWT
+Sbjct  87   --------HDVLPSRRCANDSDMWT  103
+
+
+ Score = 52.4 bits (124),  Expect = 2e-14, Method: Compositional matrix adjust.
+ Identities = 28/43 (65%), Positives = 30/43 (70%), Gaps = 7/43 (16%)
+ Frame = +2
+
+Query  116  HVDXXMLCRIFKDHLHQEWRAPNIIXXCGATTSSPHGVVPTTR  244
+            H  XXMLCRIFKDHLHQEWRAPNII  C       H V+P+ R
+Sbjct  59   HRXXXMLCRIFKDHLHQEWRAPNIILRC-------HDVLPSRR  94
+
+
+ Score = 47.4 bits (111),  Expect = 2e-12, Method: Compositional matrix adjust.
+ Identities = 23/25 (92%), Positives = 23/25 (92%), Gaps = 0/25 (0%)
+ Frame = +3
+
+Query  246  HVDXXMLCRIFKDHLHQEWRAPNII  320
+            H  XXMLCRIFKDHLHQEWRAPNII
+Sbjct  59   HRXXXMLCRIFKDHLHQEWRAPNII  83
+
+
+ Score = 47.0 bits (110),  Expect = 2e-12, Method: Compositional matrix adjust.
+ Identities = 21/23 (91%), Positives = 21/23 (91%), Gaps = 0/23 (0%)
+ Frame = +3
+
+Query  57   NXXLRCHDVLPSRRCANDSDMWT  125
+            N  LRCHDVLPSRRCANDSDMWT
+Sbjct  81   NIILRCHDVLPSRRCANDSDMWT  103
+
+
+> s1 subject
+Length=253
+
+ Score = 63.9 bits (154),  Expect = 5e-18, Method: Compositional matrix adjust.
+ Identities = 38/85 (45%), Positives = 38/85 (45%), Gaps = 45/85 (53%)
+ Frame = +1
+
+Query  1    MLCRIFKDHLHQEWRAPNIIXXCGATTSSPHGVVPTTRTCGXXXAVSHI*GPLASGVART  180
+            MLCRIFKDHLHQEWRAPNII  C                                     
+Sbjct  1    MLCRIFKDHLHQEWRAPNIILRC-------------------------------------  23
+
+Query  181  QYNXXLRCHDVLPSRRCANDSDMWT  255
+                    HDVLPSRRCANDSDMWT
+Sbjct  24   --------HDVLPSRRCANDSDMWT  40
+
+
+ Score = 63.9 bits (154),  Expect = 5e-18, Method: Compositional matrix adjust.
+ Identities = 38/85 (45%), Positives = 38/85 (45%), Gaps = 45/85 (53%)
+ Frame = +1
+
+Query  1    MLCRIFKDHLHQEWRAPNIIXXCGATTSSPHGVVPTTRTCGXXXAVSHI*GPLASGVART  180
+            MLCRIFKDHLHQEWRAPNII  C                                     
+Sbjct  133  MLCRIFKDHLHQEWRAPNIILRC-------------------------------------  155
+
+Query  181  QYNXXLRCHDVLPSRRCANDSDMWT  255
+                    HDVLPSRRCANDSDMWT
+Sbjct  156  --------HDVLPSRRCANDSDMWT  172
+
+
+ Score = 52.4 bits (124),  Expect = 1e-13, Method: Compositional matrix adjust.
+ Identities = 25/38 (66%), Positives = 27/38 (71%), Gaps = 7/38 (18%)
+ Frame = +2
+
+Query  131  MLCRIFKDHLHQEWRAPNIIXXCGATTSSPHGVVPTTR  244
+            MLCRIFKDHLHQEWRAPNII  C       H V+P+ R
+Sbjct  1    MLCRIFKDHLHQEWRAPNIILRC-------HDVLPSRR  31
+
+
+ Score = 52.4 bits (124),  Expect = 1e-13, Method: Compositional matrix adjust.
+ Identities = 25/38 (66%), Positives = 27/38 (71%), Gaps = 7/38 (18%)
+ Frame = +2
+
+Query  131  MLCRIFKDHLHQEWRAPNIIXXCGATTSSPHGVVPTTR  244
+            MLCRIFKDHLHQEWRAPNII  C       H V+P+ R
+Sbjct  133  MLCRIFKDHLHQEWRAPNIILRC-------HDVLPSRR  163
+
+
+ Score = 47.0 bits (110),  Expect = 8e-12, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +3
+
+Query  261  MLCRIFKDHLHQEWRAPNII  320
+            MLCRIFKDHLHQEWRAPNII
+Sbjct  1    MLCRIFKDHLHQEWRAPNII  20
+
+
+ Score = 47.0 bits (110),  Expect = 8e-12, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +3
+
+Query  261  MLCRIFKDHLHQEWRAPNII  320
+            MLCRIFKDHLHQEWRAPNII
+Sbjct  133  MLCRIFKDHLHQEWRAPNII  152
+
+
+ Score = 47.0 bits (110),  Expect = 9e-12, Method: Compositional matrix adjust.
+ Identities = 21/23 (91%), Positives = 21/23 (91%), Gaps = 0/23 (0%)
+ Frame = +3
+
+Query  57   NXXLRCHDVLPSRRCANDSDMWT  125
+            N  LRCHDVLPSRRCANDSDMWT
+Sbjct  18   NIILRCHDVLPSRRCANDSDMWT  40
+
+
+ Score = 47.0 bits (110),  Expect = 9e-12, Method: Compositional matrix adjust.
+ Identities = 21/23 (91%), Positives = 21/23 (91%), Gaps = 0/23 (0%)
+ Frame = +3
+
+Query  57   NXXLRCHDVLPSRRCANDSDMWT  125
+            N  LRCHDVLPSRRCANDSDMWT
+Sbjct  150  NIILRCHDVLPSRRCANDSDMWT  172
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 31790
+
+
+Query= r3 last line is a gap
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+unnamed protein product                                               46.6    4e-14
+s2 modifiers                                                          46.2    2e-13
+s1 subject                                                            45.8    6e-13
+
+
+> unnamed protein product
+Length=61
+
+ Score = 46.6 bits (109),  Expect = 4e-14, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +1
+
+Query  1   MLCRIFKDHLHQEWRAPNII  60
+           MLCRIFKDHLHQEWRAPNII
+Sbjct  2   MLCRIFKDHLHQEWRAPNII  21
+
+
+> s2 modifiers
+Length=123
+
+ Score = 46.2 bits (108),  Expect = 2e-13, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +1
+
+Query  1   MLCRIFKDHLHQEWRAPNII  60
+           MLCRIFKDHLHQEWRAPNII
+Sbjct  64  MLCRIFKDHLHQEWRAPNII  83
+
+
+> s1 subject
+Length=253
+
+ Score = 45.8 bits (107),  Expect = 6e-13, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +1
+
+Query  1   MLCRIFKDHLHQEWRAPNII  60
+           MLCRIFKDHLHQEWRAPNII
+Sbjct  1   MLCRIFKDHLHQEWRAPNII  20
+
+
+ Score = 45.8 bits (107),  Expect = 6e-13, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +1
+
+Query  1    MLCRIFKDHLHQEWRAPNII  60
+            MLCRIFKDHLHQEWRAPNII
+Sbjct  133  MLCRIFKDHLHQEWRAPNII  152
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 8740
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/bx_gapline_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 437
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

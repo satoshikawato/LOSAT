@@ -44,6 +44,10 @@ const ISAM_STRING_TYPE: i32 = 2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IsamType {
     /// `ePig`: protein identifier groups, never filled from FASTA input.
+    #[expect(
+        dead_code,
+        reason = "ePig is never built from FASTA input; kept for its row of the s_IsamExtension port (writedb_isam.cpp:56-96)"
+    )]
     Pig,
     /// `eGi`: the numeric index of the GIs.
     Gi,
@@ -1253,7 +1257,7 @@ impl StringIsam {
             // Each chunk sorted in place, then the chunks merged while the records are
             // written (`m_StringSort.Sort()` and the walk of `x_FlushStringIndex`): no
             // second copy of the entries.
-            let chunks = (self.count + ENTRY_CHUNK - 1) / ENTRY_CHUNK;
+            let chunks = self.count.div_ceil(ENTRY_CHUNK);
             let mut entries = std::mem::take(&mut self.entries);
             for chunk in &mut entries[..chunks] {
                 chunk.sort_unstable_by(|x, y| self.cmp_entries(x, y));

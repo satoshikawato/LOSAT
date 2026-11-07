@@ -1842,10 +1842,14 @@ pub(super) fn summary() {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    use super::super::super::scan_subject_disc_words_with_ranges;
     use super::super::super::{
         build_blastna_matrix, build_nucl_score_table, build_query_blastna_buffer,
-        diag_hash_insert_window, scan_subject_disc_words_with_ranges, QueryContext,
-        QueryContextIndex,
+        diag_hash_insert_window, QueryContext, QueryContextIndex,
     };
     use super::*;
     use crate::algorithm::blastn::disc_lookup::DiscWordType;
@@ -1873,12 +1877,20 @@ mod tests {
         (0..len).map(|_| b"ACGT"[rng.below(4) as usize]).collect()
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     type HashState = (Vec<u32>, Vec<(i32, i32, bool, i32, u32)>, u32, u32, i32);
 
     /// `seed_stage_of` in the instance of `lean` (LOSAT_X_FOLDLEAN) and of the table's memo
     /// (LOSAT_X_DIAGLV2), with LOSAT_X_DCSEEDLEAN's stage or not (`lists`), whatever the
     /// environment says (`seed_stage` reads the switches), after the memo is made again at the
     /// stage's start as `seed_stage` does.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn stage_of(
         lean: bool,
         lists: bool,
@@ -1910,6 +1922,10 @@ mod tests {
 
     /// `fold_two_hit` without partitions in the instance of `lean` (LOSAT_X_FOLDLEAN) and of
     /// the table's memo (LOSAT_X_DIAGLV2), as `seed_stage` picks it.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     #[allow(clippy::too_many_arguments)]
     fn fold_serial(
         lean: bool,
@@ -1969,6 +1985,10 @@ mod tests {
         }
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn hash_state(h: &DiagHashTable) -> HashState {
         (
             h.backbone.clone(),
@@ -2504,7 +2524,7 @@ mod tests {
                                     hash.offset = xc.diag_offset as i32;
                                     let mut hits = Vec::new();
                                     if stage {
-                                        let fold_part = (parts > 0).then(|| part::FoldPart {
+                                        let fold_part = (parts > 0).then_some(part::FoldPart {
                                             scratch: &mut scratch,
                                             parts,
                                         });
@@ -2726,7 +2746,7 @@ mod tests {
     // (window_size != 0) and the reference runs.
     #[test]
     fn scope_is_the_two_hit_discontiguous_stage() {
-        let mut rng = Lcg(0x5C0_9E);
+        let mut rng = Lcg(0x5C09E);
         let c = make_case(&mut rng, 5_000);
         let disc = build_disc_mb_lookup(
             &ctx_refs(&c),

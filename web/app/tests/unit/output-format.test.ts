@@ -95,6 +95,8 @@ describe('outputFileName', () => {
     ['10 qseqid sseqid', 'outfmt10-custom.csv', 'text/csv'],
     ['11', 'outfmt11.asn', 'text/plain'],
     ['12', 'outfmt12.json', 'application/json'],
+    ['13', 'outfmt13.zip', 'application/zip'],
+    ['14', 'outfmt14.zip', 'application/zip'],
     ['15', 'outfmt15.json', 'application/json'],
     ['16', 'outfmt16.xml', 'application/xml'],
     ['17', 'outfmt17.sam', 'text/plain'],
@@ -107,14 +109,14 @@ describe('outputFileName', () => {
     expect(outputFileName({ ...run, argv: custom }, CUSTOM_OUTPUT)).toBe(`losat-run3-blastn-megablast-20251104T111640Z.${name}`);
     expect(outputMediaType(custom, CUSTOM_OUTPUT)).toBe(type);
     expect(outputMediaType(custom, 0)).toBe('text/plain');
-    expect(isBinaryOutput(custom, CUSTOM_OUTPUT)).toBe(value === '9');
+    expect(isBinaryOutput(custom, CUSTOM_OUTPUT)).toBe(['9', '13', '14'].includes(value));
     expect(isBinaryOutput(custom, 6)).toBe(false);
   });
 });
 
 describe('FORMAT_NAMES', () => {
   it("has BLAST+'s name of every format that a run writes", () => {
-    for (const number of [0, 5, 6, 7, 8, 9, 10, 11, 12, 15, 16, 17, 20]) expect(FORMAT_NAMES[number]).toBeTruthy();
+    for (const number of [0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20]) expect(FORMAT_NAMES[number]).toBeTruthy();
     expect(FORMAT_NAMES[20]).toBe('Comma-separated values with header lines');
   });
 });

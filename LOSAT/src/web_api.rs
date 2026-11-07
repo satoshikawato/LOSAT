@@ -10,7 +10,7 @@ mod v1_blastp;
 mod v1_input;
 mod v1_tblastx;
 
-use crate::algorithm::blastp::args::{BlastpCompBasedStats, BlastpCompositionMode, BlastpSegSpec};
+use crate::algorithm::blastp::args::{BlastpCompBasedStats, BlastpSegSpec};
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
 // ```c++
 //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
@@ -855,7 +855,7 @@ fn run_pair(
             "subject",
         )
         .map_err(engine_error),
-        other => return Err(format!("unsupported LOSAT program: {other}")),
+        other => Err(format!("unsupported LOSAT program: {other}")),
     }
 }
 

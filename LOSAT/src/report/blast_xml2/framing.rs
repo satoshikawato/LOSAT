@@ -53,7 +53,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use super::files::FsSideFiles;
+use super::files::{run_side_files, SideFileSink};
 use crate::report::serial::xml::XML2_ROOT_ATTRIBUTES;
 
 /// Which of NCBI's four document forms a run writes.
@@ -122,10 +122,21 @@ pub fn side_file_write_error() -> anyhow::Error {
 pub trait SideFiles {
     fn create(&mut self, n: u32) -> io::Result<Box<dyn Write + '_>>;
     fn listed(&self, n: u32) -> Vec<u8>;
+
+    /// Writes the n-th report, whole, as its side file: opens it (`create`; a failure is NCBI's
+    /// "Cannot open output file", `side_file_open_error`) and writes it (a failure is
+    /// `side_file_write_error`). A caller's receiver takes the bytes as they are
+    /// (`files::ReceivedSideFiles`).
+    fn write_file(&mut self, n: u32, report: &[u8]) -> Result<()> {
+        let mut file = self.create(n).map_err(|_| side_file_open_error())?;
+        file.write_all(report)
+            .and_then(|()| file.flush())
+            .map_err(|_| side_file_write_error())
+    }
 }
 
-/// The side files of a run that writes none (outfmt 15 and 16), and of the callers that cannot
-/// write files (13 and 14 are CLI-only until ABI v2, DECISIONS 26 Q10).
+/// The side files of a run that writes none (outfmt 15 and 16), and of the callers that have
+/// neither a file name nor a receiver for them (`files::run_side_files`).
 pub struct NoSideFiles;
 
 impl SideFiles for NoSideFiles {
@@ -150,6 +161,10 @@ impl SideFiles for RunSideFiles {
 
     fn listed(&self, n: u32) -> Vec<u8> {
         (**self).listed(n)
+    }
+
+    fn write_file(&mut self, n: u32, report: &[u8]) -> Result<()> {
+        (**self).write_file(n, report)
     }
 }
 
@@ -221,14 +236,16 @@ impl Xml2Document<NoSideFiles> {
 
 impl Xml2Document<RunSideFiles> {
     /// The document of a run with `-out` `out`: the side files of outfmt 13 and 14 are written
-    /// next to it (`FsSideFiles`); outfmt 15 and 16 have none. A caller with outfmt 13 or 14
-    /// and no file name (`out` is `None`) gets an error when the first report is written.
-    pub fn for_run(kind: Xml2Kind, delayed: bool, out: Option<&Path>) -> Self {
-        let files: RunSideFiles = match out {
-            Some(out) if kind.is_files() => Box::new(FsSideFiles::new(out, kind)),
-            _ => Box::new(NoSideFiles),
-        };
-        Self::with_files(kind, delayed, files)
+    /// next to it (`FsSideFiles`), or handed to the caller's receiver when the format's output
+    /// gives one (`sink`, `files::run_side_files`); outfmt 15 and 16 have none. A caller with
+    /// outfmt 13 or 14 and neither gets an error when the first report is written.
+    pub fn for_run(
+        kind: Xml2Kind,
+        delayed: bool,
+        out: Option<&Path>,
+        sink: Option<&SideFileSink>,
+    ) -> Self {
+        Self::with_files(kind, delayed, run_side_files(kind, out, sink))
     }
 }
 
@@ -336,13 +353,7 @@ impl<F: SideFiles> Xml2Document<F> {
                 // The `CArgException` is caught by the application (blast_app_util.hpp:177-180):
                 // "Command line argument error: " and the message, exit status 1. The side files
                 // written before stay, and the master file stays empty (no epilog).
-                let mut file = self
-                    .files
-                    .create(self.written)
-                    .map_err(|_| side_file_open_error())?;
-                file.write_all(report)
-                    .and_then(|()| file.flush())
-                    .map_err(|_| side_file_write_error())?;
+                self.files.write_file(self.written, report)?;
             }
         }
         Ok(())

@@ -1,7 +1,7 @@
 //! Internal BLASTX HSP ownership, collector, stream and result reduction.
 use super::{
     args::ResolvedOptions,
-    linking::{LinkedHsp, LinkedHspList},
+    linking::LinkedHspList,
     preliminary::{compare_score, PreliminaryHsp},
     split::QueryChunk,
 };
@@ -1387,8 +1387,7 @@ impl HspStream {
             let mut points = [-1; 6];
             for local in local_query * 6..local_query * 6 + 6 {
                 if chunk.absolute_contexts[local] >= 0 {
-                    points[chunk.absolute_contexts[local] as usize % 6] =
-                        chunk.corrections[local] as i32;
+                    points[chunk.absolute_contexts[local] as usize % 6] = chunk.corrections[local];
                 }
             }
             for list in &mut incoming_hitlist.lists {
@@ -1400,7 +1399,7 @@ impl HspStream {
                         "HSP in invalid split context"
                     );
                     h.hsp.context = chunk.absolute_contexts[local] as usize;
-                    let offset = chunk.corrections[local] as i32;
+                    let offset = chunk.corrections[local];
                     h.hsp.q_start += offset;
                     h.hsp.q_end += offset;
                     h.hsp.q_gapped_start += offset;

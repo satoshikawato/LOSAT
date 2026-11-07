@@ -446,10 +446,16 @@ impl Xml2Writer<NoSideFiles> {
 
 impl Xml2Writer<RunSideFiles> {
     /// A writer of the document `kind` for the run with `-out` `out`: outfmt 13 and 14 write
-    /// their side files next to it and the master file to the output stream (`Xml2Document::for_run`).
-    pub fn for_run(kind: Xml2Kind, params: Xml2Run, out: Option<&std::path::Path>) -> Self {
+    /// their side files next to it, or to the caller's receiver `sink`, and the master file to
+    /// the output stream (`Xml2Document::for_run`).
+    pub fn for_run(
+        kind: Xml2Kind,
+        params: Xml2Run,
+        out: Option<&std::path::Path>,
+        sink: Option<&super::SideFileSink>,
+    ) -> Self {
         let delayed = matches!(params.target, Xml2Target::Subjects(_));
-        Self::with_document(Xml2Document::for_run(kind, delayed, out), params)
+        Self::with_document(Xml2Document::for_run(kind, delayed, out, sink), params)
     }
 }
 

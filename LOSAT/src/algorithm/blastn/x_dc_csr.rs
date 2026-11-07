@@ -79,7 +79,12 @@ use super::{build_unmasked_ranges, DiscWords, PvArrayType, BLAST2NA_MASK, PV_ARR
 use super::{disc_longest_chain, fill_disc_mb_tables, DiscTables};
 use crate::algorithm::blastn::disc_lookup::compute_discontiguous_index;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: reads LOSAT_X_DCCSR once (a switch of the strict set: on unless
@@ -415,7 +420,7 @@ pub(super) unsafe fn x_sum_packed(
     b1: usize,
     pv_array_bts: usize,
 ) -> u32 {
-    debug_assert!(b0 % 32 == 0 && pv_array_bts >= 5);
+    debug_assert!(b0.is_multiple_of(32) && pv_array_bts >= 5);
     let (mut end, mut pop, mut h0) = (base, 0u32, base);
     for j in b0..b1 {
         let w = bits[2 * j];
@@ -573,7 +578,7 @@ pub(super) unsafe fn sum_cells(
     c1: usize,
     pv_array_bts: usize,
 ) -> u32 {
-    debug_assert!(c0 % 2048 == 0 && pv_array_bts >= 5);
+    debug_assert!(c0.is_multiple_of(2048) && pv_array_bts >= 5);
     let pv_last = (1usize << pv_array_bts) - 1;
     let (mut end, mut word, mut pop, mut h0) = (base, 0u32, 0u32, base);
     let mut g = c0;
@@ -694,7 +699,7 @@ pub(super) fn build(
     x_offsets: Vec<u32>,
 ) -> Csr {
     // Once per table: the bounds the unchecked writes below rely on.
-    assert!(!words.two_templates && cells % 2048 == 0 && pv_array_bts >= 5);
+    assert!(!words.two_templates && cells.is_multiple_of(2048) && pv_array_bts >= 5);
     assert_eq!(helper_array.len(), cells >> 11);
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
     let mut offsets = x_offsets_buffer(x_offsets, cells + 1);
@@ -763,6 +768,10 @@ pub(super) fn build(
 /// on native targets; WebAssembly only spins). A thread that panics between barriers (`Poison`,
 /// unwinding builds only: the release profile aborts) makes the waiting threads panic instead of
 /// waiting for it forever.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 pub(super) struct SpinBarrier {
     n: usize,
     count: AtomicUsize,
@@ -772,8 +781,16 @@ pub(super) struct SpinBarrier {
 
 /// Held by each thread of a build that waits at a `SpinBarrier`: poisons the barrier when the
 /// thread unwinds.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 pub(super) struct Poison<'a>(pub(super) &'a SpinBarrier);
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl Drop for Poison<'_> {
     fn drop(&mut self) {
         if std::thread::panicking() {
@@ -782,6 +799,10 @@ impl Drop for Poison<'_> {
     }
 }
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl SpinBarrier {
     pub(super) fn new(n: usize) -> Self {
         Self {

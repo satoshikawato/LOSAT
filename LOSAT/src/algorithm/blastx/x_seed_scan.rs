@@ -38,7 +38,7 @@
 //! path only when nothing traces the seeds (not in the diagnostic stages).
 //!
 //! BXSCANBF (graduated 2026-10-26: no variable, always on): the scan of the standard
-//! lookup table is tblastn's branch-free scan (`tblastn/x_scan_bf.rs`, `x_scan_one_range_bf`,
+//! lookup table is tblastn's branch-free scan (`tblastx/x_aascan_bf.rs`, `x_scan_one_range_bf`,
 //! the loop of the former TBNSCANBF): the presence bits of a block of words advance a candidate list
 //! instead of a branch, and the listed words' hits are copied in position order with NCBI's stop
 //! and resume when the offset array is full. Its pairs and `scan_range` values are those of
@@ -125,10 +125,10 @@ use super::x_ungap_sent::XSent;
 use super::*;
 use crate::algorithm::blastp::extension::BlastpTwoHitUngappedResult;
 use crate::algorithm::blastp::x_seed_fused::XHitBf;
-use crate::algorithm::tblastn::x_scan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
 use crate::algorithm::tblastn::x_scan_byte::{
     x_kept_presence, x_mode, x_scan_one_range_byte, x_table_presence, XScanByte, X_SCAN_BYTE_SLACK,
 };
+use crate::algorithm::tblastx::x_aascan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
 use std::cell::RefCell;
 use std::sync::{Arc, OnceLock};
 
@@ -805,6 +805,10 @@ mod tests {
     /// candidate loop.
     fn arms() -> Vec<(XScanByte, bool)> {
         let plain = XScanByte::On { avx2: false };
+        #[cfg_attr(
+            not(target_arch = "x86_64"),
+            expect(unused_mut, reason = "the AVX2 arms are pushed on x86_64 only")
+        )]
         let mut arms = vec![
             (XScanByte::Off, false),
             (XScanByte::Off, true),
@@ -1352,6 +1356,10 @@ mod tests {
             state ^= state << 17;
             (state % n as u64) as usize
         };
+        #[cfg_attr(
+            not(target_arch = "x86_64"),
+            expect(unused_mut, reason = "the AVX2 form is pushed on x86_64 only")
+        )]
         let mut forms = vec![XScanByte::On { avx2: false }];
         #[cfg(target_arch = "x86_64")]
         if std::is_x86_feature_detected!("avx2") {

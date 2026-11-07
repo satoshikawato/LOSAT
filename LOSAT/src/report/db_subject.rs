@@ -9,7 +9,7 @@
 //! the XML `Hit_def`, the XML2 and JSON `HitDescr` list, `stitle`).
 //!
 //! A database without parsed Seq-ids keeps its own path (the title and `gnl|BL_ORD_ID|n`,
-//! `algorithm::common::database::read_title`); `SeqDb::read_header` tells the two apart.
+//! `algorithm::common::database::stored_title`); `SeqDb::read_header` tells the two apart.
 //!
 //! LOSAT writes the names of the sequence it searched. NCBI's formatters look the Seq-align id
 //! up again in the database, and where the lookup finds another sequence first (an accession
@@ -22,7 +22,7 @@
 use crate::seqid::defline_set::{
     alignment_line_id, compare, description_id, seq_id_list, tabular_id, Sic, TabularId,
 };
-use crate::seqid::model::{ObjectId, PatentNumber};
+use crate::seqid::model::PatentNumber;
 use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{label, BlastDefline, DeflineSet, ParsedSeqId};
 
@@ -584,7 +584,13 @@ impl ParsedSubject {
                 | FoundInstead::WeakUnlisted,
             ) => Prefetched::Itself,
             Some(FoundInstead::Nothing) => Prefetched::Nothing,
-            Some(FoundInstead::Failed(_)) => Prefetched::Failed(reason()),
+            // The prefetch catches the exception of a failed lookup and writes its warning, or
+            // rethrows a database error (`CSeqDBException`) and stops; the formats that read the
+            // Bioseq stop (`fetched`).
+            Some(FoundInstead::Failed(message)) => Prefetched::Failed(format!(
+                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data and reads no other subject of the batch, or stops)",
+                String::from_utf8_lossy(&self.alignment_fasta())
+            )),
             Some(FoundInstead::Sequence(other)) => Prefetched::Another {
                 other: Some(*other),
                 or_itself: false,
@@ -1536,6 +1542,7 @@ pub fn scope_keys(subject: &ParsedSubject, keys: &mut Vec<u64>) {
 mod tests {
     use super::*;
     use crate::seqdb::{SeqDb, SeqType};
+    use crate::seqid::model::ObjectId;
     use crate::seqid::model::{Dbtag, PdbSeqId};
 
     /// The subjects of `tests/db_search/ids/prot_v4` (`make_ids.py`), by the FASTA form of the

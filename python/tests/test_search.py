@@ -58,13 +58,21 @@ def test_what_is_not_an_option_here_is_refused(option):
             Search.from_argv("blastn", [f"-{option}", "x"])
 
 
-@pytest.mark.parametrize("option", ["out_ascii_pssm", "save_pssm_after_last_round", "save_each_pssm"])
+@pytest.mark.parametrize("option", ["out_pssm", "out_ascii_pssm", "save_pssm_after_last_round", "save_each_pssm"])
 def test_psiblast_writes_no_pssm_file_here(option):
+    takes_a_file = option in ("out_pssm", "out_ascii_pssm")
     with pytest.raises(TypeError, match=option):
-        Search("psiblast", **{option: "p.txt" if option == "out_ascii_pssm" else True})
-    words = [f"-{option}", "p.txt"] if option == "out_ascii_pssm" else [f"-{option}"]
+        Search("psiblast", **{option: "p.txt" if takes_a_file else True})
+    words = [f"-{option}", "p.txt"] if takes_a_file else [f"-{option}"]
     with pytest.raises(ArgumentError, match="writes no PSSM file"):
         Search.from_argv("psiblast", words)
+
+
+def test_psiblast_takes_no_pssm_query_here():
+    with pytest.raises(TypeError, match="in_pssm"):
+        Search("psiblast", in_pssm="q.asn")
+    with pytest.raises(ArgumentError, match="the queries are given as records"):
+        Search.from_argv("psiblast", ["-in_pssm", "q.asn"])
 
 
 def test_the_parser_refuses_as_on_the_command_line():

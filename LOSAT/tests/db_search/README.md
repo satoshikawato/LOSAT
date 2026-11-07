@@ -33,6 +33,20 @@ FASTA files:
   defline). `bx_gap_comment_q.fna` is the same after a comment, a blank line and a `#` line
   (`db.bxgap.comment.6`: NCBI names line 4), and `bx_gap_bad_q.fna` starts with `>?abc` instead
   (`db.bxgap.bad.6`: NCBI stops at line 1 before it parses the gap).
+- `bx_prescan_data_q.fna`, `bx_prescan_gap_q.fna`: a data line, or the gap line `>?5`, before any defline,
+  then the record `r1` whose title is not US-ASCII (`café x`), the BLASTX queries of `db.bxprescan.*`: with
+  `-parse_deflines` NCBI stops at line 1 (`Input doesn't start with a defline or comment`) in every format,
+  before any title is written. `bx_prescan_badgi_q.fna`: the record `r0` with that title, then `>gi|abc`, which
+  NCBI cannot read as a Seq-id under `-parse_deflines` (`Could not construct seq-id from 'gi|abc'`): in one batch
+  the error comes before `r0` is written, with `BATCH_SIZE=1` after; with `BATCH_SIZE=0` (`db.bxprescan.bs0.*`, without
+  `-parse_deflines`) NCBI reads no query and stops with `Empty CBlastQueryVector`. `bx_prescan_badgi_big_q.fna`: the same with
+  10,200 nucleotides in `r0`, more than BLASTX's batch of 10,002 letters (`db.bxprescan.badgi.big.5`,
+  `BATCH_SIZE=1000000`: one batch).
+- The rows `db.bxgapline.*` search `bslice` with `LOSAT/tests/fasta/outfmt0/bx_gapline_q.fna`, the query of the
+  `-subject` rows `gapline.blastx.*` of `outfmt0_manifest.tsv`: gap lines of bad sizes (`>?abc` before any
+  defline, `>?0`, `>?unk`, `>?99999999999`, `>?-5` as a record's last line), text after the size and unknown,
+  conflicting or unclosed modifiers, which NCBI reads as `ParseGapLine` does (a gap of 1 after `Bad gap size`,
+  warnings for the rest).
 - `p3.faa`: records p01, p03 and p08 of `LOSAT/tests/seqdb/prot.faa`, in that order.
 - `d1_q.faa`: D1, a hit that `-db` keeps and `-subject` drops. Two proteins of `LOSAT/tests/fasta/WSSV.faa`
   (YP_009220551.1 and YP_009220614.1: for each, NCBI `blastp -db paja -outfmt 6` prints 2 rows and
@@ -471,6 +485,12 @@ makes the title from it where the taxonomy database names the taxid (`tests/seqd
 product [Homo sapiens]`, `Homo sapiens`): LOSAT refuses that outfmt 0 and writes it without a taxonomy database or with
 `no_btd`, and the other formats (XML shows the stored title, the tabular id of a protein is `unnamed` either way).
 
+A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
+--tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title
+`, ,` NCBI's `x_CleanAndCompress` reads past the end of where it makes the tabular id of a protein; the query
+`ids/ppunct_q.faa` hits both records. A table that prints no subject id (`6 qseqid evalue`) does not make it, so LOSAT
+writes NCBI's rows; `sseqid` is LOSAT's refusal.
+
 Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
 --join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and
 `ids/njoin_a`, `ids/njoin_b`, `ids/njoin_c` (version 5; r1 in all three, r3 with two definition lines and two
@@ -872,6 +892,32 @@ most 9 in BLOSUM62).
   `nz_qx2.*` `qx` then `q2`: with `BATCH_SIZE=1` the refusal of `q2`'s batch still comes before any byte. TBLASTX's
   report stream (outfmt 7 in two batches), which would write `qx`'s block before `q2`'s lookups, is off for a run that
   the taxonomy cache refuses, so `nz_qxy.fna` (`qx`, then `qy` without hits either) gets NCBI's bytes.
+- Rows `db.nz.cq.bn.*` (line DBID, L1c): BLASTN asks for that refusal only where NCBI fetches a subject too: not for
+  fields that read none (`6 qseqid evalue`) where a positive `PRE_FETCH_SEQS_LIMIT` below the batch's Seq-aligns turns
+  the prefetch off, not for queries without hits whose reports would fetch (`PRE_FETCH_SEQS_LIMIT=0`, outfmt 6), and not
+  for a batch without hits (`nz_qx.fna` in outfmt 0; `nz_qxy.fna` with `BATCH_SIZE=1` in outfmt 7, where the report
+  stream writes each batch's reports). `nz_qx2.fna` with `BATCH_SIZE=1` is refused at `q2`'s batch, whose subjects
+  (taxids 562 and 10090) NCBI fetches without a message (the superset kept since L1b); outfmt 6 writes nothing for
+  `qx` before it, and `tests/blastn_report_stream.rs` checks that outfmt 0 and 7 write `qx`'s report first where the
+  report stream acts (and only outfmt 0's prolog where it does not). The rows use `-task blastn -dust no -evalue 1e-3`
+  (megablast and dc-megablast find no hit of these queries).
+- Rows `db.nz.cq.x.*` (line DBID, L1d): the XML2 and JSON formats (outfmt 13 to 16), whose reports fetch every reported
+  subject, ask for that refusal too, where a reported subject has a positive taxid. `nz_rep.fna` holds `a1` (the
+  letters of `sN` as in `nz_n`), `b1` (`sZ`) and `c1` (`sI`) with the taxids 99990, 150 and 99990 (`nz_rep.map`), `d1`
+  (the codons of 60 random residues) without a taxid and `e1` (another 60) with the taxid -5: one volume where NCBI
+  really writes the offset error again (for `c1` after `b1`; `nz_nc`'s only 99990 is `sN`, whose entry NCBI keeps
+  loaded, so it writes the message once there). `nz_rep_q.fna` holds `qN`, `qZ` and `qI`, the whole of `a1`, `b1` and
+  `c1`, and `nz_rep_q.faa` their translations (`nz_repp.faa` holds those of `a1` to `d1`): NCBI writes the message 3 to
+  5 times in outfmt 15 / 16 and LOSAT refuses before any byte, as in outfmt 6 with `BATCH_SIZE=1` (twice).
+  `nz_rep_qd.*` (`qD`, the start of `d1`) and `nz_rep_qe.fna` (`qE`, the start of `e1`) hit `d1` or `e1` alone: no
+  volume looks a positive taxid up, so their `ncbi` rows are not refused. `nz_repo` and `nz_reppo` hold `a1` to `d1`
+  (nucleotide, protein) without parsed Seq-ids: their taxid is that of the definition line, a branch of its own
+  (`db.nz.cq.x.bn.repo.*`: NCBI writes the message 4 times with `BATCH_SIZE=1`). `nz_rep_qxn.fna` is `nz_qx.fna`'s `qx`
+  then `qN`: BLASTX writes each batch's XML2 report before it searches the next, so on `nz_reppo` it holds the
+  document of a run with this refusal and drops it at `qN`'s batch (no byte of `qx`'s); `tm_cache_qx.fna` (`qx` then
+  the three records of `x16_bx_taxid_q.fna`) does the same on `tm_cache150`, whose parsed Seq-ids make BLASTX hold
+  anyway. BLASTP's search in blocks of query batches takes the search of all queries for such a run
+  (`tests/blastp_query_blocks.rs`, `nz_reppo`).
 - The sequences come from the line's probe script (kept outside the repository). The databases (version 4, every file
   makeblastdb writes; `nz_pc` and `nz_nc` alike with their maps), run from `LOSAT/`:
 
@@ -881,3 +927,15 @@ most 9 in BLOSUM62).
           -blastdb_version 4 -title "nz n" -out tests/db_search/nz_n
       makeblastdb -in tests/db_search/nz_psi.faa -dbtype prot -parse_seqids -taxid_map tests/db_search/nz_psi.map \
           -blastdb_version 4 -title "nz psi" -out tests/db_search/nz_psi
+      makeblastdb -in tests/db_search/nz_rep.fna -dbtype nucl -parse_seqids -taxid_map tests/db_search/nz_rep.map \
+          -blastdb_version 4 -title "nz rep" -out tests/db_search/nz_rep
+      D=$PWD/tests/db_search; cd "$(mktemp -d)"   # nz_repo, nz_reppo: one database per record, then one volume
+      for k in a1 b1 c1 d1; do  # a1, b1, c1, d1 of nz_rep.fna / nz_repp.faa, each in $k.fna / $k.faa
+          t=""; case $k in a1|c1) t="-taxid 99990";; b1) t="-taxid 150";; esac
+          makeblastdb -in $k.fna -dbtype nucl $t -blastdb_version 4 -out n$k
+          makeblastdb -in $k.faa -dbtype prot $t -blastdb_version 4 -out p$k
+      done
+      makeblastdb -in "na1 nb1 nc1 nd1" -input_type blastdb -dbtype nucl -blastdb_version 4 -title "nz repo" \
+          -out $D/nz_repo
+      makeblastdb -in "pa1 pb1 pc1 pd1" -input_type blastdb -dbtype prot -blastdb_version 4 -title "nz reppo" \
+          -out $D/nz_reppo

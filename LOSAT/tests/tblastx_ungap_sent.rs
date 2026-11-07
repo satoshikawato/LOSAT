@@ -241,3 +241,55 @@ fn chunks_of_a_frame_stay_off_the_path() {
         );
     }
 }
+
+/// `-word_size 2` (SC10b PR-2: its searches take the unit path, with sentinel walks of 2-letter
+/// words) with subject frames searched in chunks (`LOSAT_TBLASTX_TEST_CHUNK_SIZE`, debug builds):
+/// at 1, 4 and 8 threads, with chunks of the smallest size the variable allows (the overlap plus
+/// 3, so a chunk is barely longer than the overlap) and of two larger ones, the report equals the
+/// reference frame loop's with the same chunks. A chunk cuts the extensions at its ends, so a
+/// small chunk size changes the report itself (the reports of 103 and 700 differ from the
+/// unchunked one); the size 1500 is longer than every HSP here and gives the unchunked report,
+/// which the unchunked unit path and the unchunked reference frame loop share. The unchunked unit
+/// path takes the sentinel walks and the chunked one the bounded walks, as at word size 3.
+#[cfg(debug_assertions)]
+#[test]
+fn chunks_of_a_frame_at_word_size_2_give_the_report_of_the_reference_loop() {
+    let inputs = Inputs::new();
+    let args = ["-word_size", "2"];
+    let (unchunked, sides, unit_path) = tblastx_args(&inputs, 1, &[], &args);
+    assert!(!unchunked.is_empty(), "no hits at word size 2");
+    assert!(unit_path, "unchunked: the unit path");
+    assert_eq!(sides, (true, false), "unchunked: the sentinel walks ran");
+    let (report, _, unit_path) = tblastx_args(&inputs, 1, &[REFERENCE_LOOP], &args);
+    assert_eq!(report, unchunked, "reference frame loop, unchunked");
+    assert!(!unit_path, "reference frame loop: not the unit path");
+    let mut reports = Vec::new();
+    for size in ["103", "700", "1500"] {
+        let chunks = ("LOSAT_TBLASTX_TEST_CHUNK_SIZE", size);
+        let (expected, _, unit_path) = tblastx_args(&inputs, 1, &[chunks, REFERENCE_LOOP], &args);
+        assert!(!unit_path, "chunks of {size}: reference frame loop");
+        assert!(!expected.is_empty(), "chunks of {size}: no hits");
+        for threads in [1, 4, 8] {
+            let (report, sides, unit_path) = tblastx_args(&inputs, threads, &[chunks], &args);
+            assert_eq!(
+                report, expected,
+                "unit path, chunks of {size}, {threads} threads"
+            );
+            assert!(unit_path, "chunks of {size}, {threads} threads: unit path");
+            assert_eq!(
+                sides,
+                (false, true),
+                "chunks of {size}, {threads} threads: the bounded walks"
+            );
+        }
+        reports.push(expected);
+    }
+    assert_eq!(
+        reports[2], unchunked,
+        "chunks of 1500 equal the unchunked report"
+    );
+    assert_ne!(
+        reports[0], reports[1],
+        "the chunk sizes of 103 and 700 are not the same search"
+    );
+}

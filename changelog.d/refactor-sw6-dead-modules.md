@@ -1,0 +1,1 @@
+- Engine: the four modules no program used are gone: `post/` (chaining and filtering), `align/` (a banded Smith-Waterman with no NCBI counterpart), `seed/` (word finders; one unit test read a constant from it) and `sequence/packed_nucleotide.rs` (a copy of `core/blast_encoding.rs`). 2,636 + 568 lines. No output changes.

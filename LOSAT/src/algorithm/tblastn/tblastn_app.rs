@@ -65,6 +65,7 @@ impl TblastnArgs {
     /// returned instead of written to standard output. The `query` and `subject` of `self` are
     /// only the names the report shows for the inputs; `out` is `None`. The diagnostics go to
     /// standard error, as the command line's.
+    #[cfg(any(target_arch = "wasm32", test))]
     pub(crate) fn run_in_memory(
         self,
         settings: crate::blastinput::ncbi_environment::ApplicationSettings,
@@ -423,6 +424,13 @@ enum RunIo<'a> {
     /// `-out` file or standard output.
     Files,
     /// Web ABI v1 (`run_in_memory`): the call's bytes, and the report kept in memory.
+    #[cfg_attr(
+        not(any(target_arch = "wasm32", test)),
+        expect(
+            dead_code,
+            reason = "made only by `run_in_memory`, for the web ABI (wasm32) and tests"
+        )
+    )]
     Memory {
         query: &'a [u8],
         subject: &'a [u8],
@@ -904,13 +912,14 @@ pub fn run_local(
 }
 
 /// The numbers of the requested formats, each read as on the command line. `out`: the file of
-/// `api::run_to_file`.
+/// `api::run_to_file` (a format with the caller's receiver of side files takes that receiver's,
+/// `FormatOutput::side_out`).
 fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<Vec<i32>> {
     use crate::blastinput::app;
     let mut outfmts = Vec::with_capacity(outputs.formats.len());
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        if app::report_format(&choice, app::Program::Tblastn, out)?.is_none() {
+        if app::report_format(&choice, app::Program::Tblastn, format.side_out(out))?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastn)?;
             app::xinclude_check(&choice)?;
         }
@@ -1574,7 +1583,7 @@ fn search(
             // if (CheckInternalData() != 0) each result in this Run() batch
             // receives an unsearched ancillary state and null align set.
             let skipped = batch_validity.iter().all(|&valid| !valid);
-            query_batch_skipped.extend(std::iter::repeat(skipped).take(batch_validity.len()));
+            query_batch_skipped.extend(std::iter::repeat_n(skipped, batch_validity.len()));
             query_validity.extend(batch_validity);
         }
         // A run without a searched query has no parameters of a query set.
@@ -2002,39 +2011,50 @@ fn search(
 
 /// What the reports `formats` show of the reported database sequences, for LOSAT's refusals of
 /// those with parsed Seq-ids (`common::database::ParsedShown`): the tabular formats (6, 7, 10,
-/// 20), outfmt 0, the formats that join the alignments of following hits whose Seq-align
-/// ids match (0, 5, 13 to 16), and those that write the sequences' taxids (13 to 16, the
-/// tabular reports of taxonomy fields).
+/// 20) whose fields read the subject (`report::tabular::reads_subject`), outfmt 0, the
+/// structured documents (5, 13 to 16), the formats that join the alignments of following hits
+/// whose Seq-align ids match (0, 5, 13 to 16), those that write the sequences' taxids (13 to 16,
+/// the tabular reports of taxonomy fields), and whether the first format's batches prefetch the
+/// subjects.
 fn parsed_shown(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
 ) -> crate::algorithm::common::database::ParsedShown {
     let numbers: Vec<i32> = formats
         .iter()
-        .map(|format| super::stage_e_report::format_number(&format.outfmt))
+        .map(|format| super::stage_e_report::format_number(format.outfmt))
         .collect();
     let pairwise = numbers.contains(&0);
     crate::algorithm::common::database::ParsedShown {
-        tabular: numbers
-            .iter()
-            .any(|&number| matches!(number, 6 | 7 | 10 | 20)),
+        tabular: formats.iter().any(|format| {
+            matches!(
+                super::stage_e_report::format_number(format.outfmt),
+                6 | 7 | 10 | 20
+            ) && crate::report::tabular::reads_subject(
+                super::tabular::tabular_spec(format.outfmt).as_ref(),
+                crate::blastinput::app::Program::Tblastn,
+            )
+        }),
         pairwise,
+        structured: formats
+            .iter()
+            .any(|format| super::stage_e_report::is_structured_xml(format.outfmt)),
         joined: pairwise
             || formats.iter().any(|format| {
-                super::stage_e_report::is_structured_xml(&format.outfmt)
-                    || super::tabular::tabular_spec(&format.outfmt)
+                super::stage_e_report::is_structured_xml(format.outfmt)
+                    || super::tabular::tabular_spec(format.outfmt)
                         .is_some_and(|spec| spec.needs().joins_subjects())
             }),
         sam: false,
         taxonomy: formats.iter().any(|format| {
-            super::stage_e_report::xml2_kind(&format.outfmt).is_some()
-                || super::tabular::tabular_spec(&format.outfmt)
+            super::stage_e_report::xml2_kind(format.outfmt).is_some()
+                || super::tabular::tabular_spec(format.outfmt)
                     .is_some_and(|spec| spec.needs().taxonomy)
         }),
         words: formats
             .iter()
             .filter(|format| {
                 matches!(
-                    super::stage_e_report::format_number(&format.outfmt),
+                    super::stage_e_report::format_number(format.outfmt),
                     6 | 7 | 10 | 20
                 )
             })
@@ -2042,13 +2062,17 @@ fn parsed_shown(
                 crate::report::tabular::PrintedIds::default(),
                 |words, format| {
                     words.or(crate::report::tabular::PrintedIds::of(
-                        super::tabular::tabular_spec(&format.outfmt).as_ref(),
+                        super::tabular::tabular_spec(format.outfmt).as_ref(),
                     ))
                 },
             ),
-        prefetched: crate::algorithm::common::database::seq_annots_prefetch(
-            numbers.first().copied(),
-        ),
+        // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (quoted in `run`).
+        prefetched: crate::algorithm::common::database::prefetches_subjects(numbers.first().map(
+            |&number| match number {
+                10 | 20 => 6,
+                number => number,
+            },
+        )) && !crate::algorithm::common::database::prefetch_always_off(),
     }
 }
 

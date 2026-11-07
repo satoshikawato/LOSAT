@@ -81,6 +81,10 @@ fn blastna_of_ncbi4na() -> [u8; 16] {
 // No NCBI counterpart: LOSAT's speed (`blastna_into_par`); the packed bytes of one piece, 128 Ki
 // bases (a piece is a few tens of microseconds of decoding; 3 Mb is 23 pieces).
 /// The packed bytes that `blastna_into_par` decodes as one piece.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 const DECODE_PIECE: usize = 32 * 1024;
 
 // No NCBI counterpart: LOSAT's speed (the check of a block's letters is vectorized, and four

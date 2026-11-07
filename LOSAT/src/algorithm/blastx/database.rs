@@ -89,6 +89,7 @@ impl BlastxDatabase {
 
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
+    #[cfg(test)]
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         Self::open_restricted(name, settings, None, &mut std::io::sink())
     }
@@ -151,8 +152,9 @@ impl BlastxDatabase {
         shared::taxdb_may_refuse(&self.db, names)
     }
 
-    /// Whether the batches' prefetch of the run is refused for NCBI's taxonomy cache
-    /// (`shared::TaxdbRun::prefetch_refused`), which an outfmt 5 run holds its document for.
+    /// Whether the batches' fetches of the run are refused for NCBI's taxonomy cache
+    /// (`shared::TaxdbRun::prefetch_refused`): outfmt 5's prefetch, and the XML2 and JSON lookups
+    /// (`shared::read_reported_taxonomy`), which an XML run holds its document for.
     pub(crate) fn prefetch_refused(&self) -> bool {
         self.taxdb.prefetch_refused(&self.db)
     }
@@ -321,11 +323,15 @@ impl ReportedSubjects {
     /// (`shared::read_header`), with LOSAT's refusals of `ParsedSubject::fetched`, of
     /// `shared::check_shown_parsed_subject` (with `pairwise`), of `shared::refuse_joined_hits`
     /// (with `joined`: outfmt 0, 5 and 13 to 16) and of `ParsedSubject::tabular_ids` (with
-    /// `tabular`, and `ParsedSubject::check_printed_word` of the ids it prints, `words`).
-    /// `taxonomy`: whether the report writes the sequences' taxids or their names (13 to 16, a
-    /// table of taxonomy fields; `ParsedSubject::fetched`). `prefetched`: whether the batch's
-    /// prefetch reads the subjects though the report writes their Seq-align ids alone (the
-    /// Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, `shared::check_prefetched_parsed`).
+    /// `tabular_reads`, and `ParsedSubject::check_printed_word` of the ids it prints, `words`).
+    /// `tabular`: a tabular report, which takes every reported sequence's ids
+    /// (`tabular_ids`); `tabular_reads`: one whose fields read the sequence found by the
+    /// subject's Seq-align id (`report::tabular::reads_subject`), the only kind that refuses the
+    /// ids. `structured`: outfmt 5 or 13 to 16, which read the Bioseq. `taxonomy`: whether the
+    /// report writes the sequences' taxids or their names (13 to 16, a table of taxonomy fields;
+    /// `ParsedSubject::fetched`). `prefetched`: whether the batch's prefetch reads the subjects
+    /// (`shared::prefetches_subjects`), which where no report reads their Bioseqs refuses what it
+    /// cannot read as NCBI does (`shared::check_prefetched_parsed`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -333,7 +339,9 @@ impl ReportedSubjects {
         batches: &mut [BatchResults],
         gapped: bool,
         tabular: bool,
+        tabular_reads: bool,
         pairwise: bool,
+        structured: bool,
         taxids: bool,
         joined: bool,
         taxonomy: bool,
@@ -413,7 +421,7 @@ impl ReportedSubjects {
             if let Some(subject) = parsed.get(&oid) {
                 // The formats that read the subject's Bioseq; the Seq-annots and the archive
                 // write its Seq-align id alone.
-                if tabular || pairwise || joined || taxids {
+                if tabular_reads || pairwise || structured || taxids || taxonomy {
                     subject
                         .fetched(taxonomy)
                         .map_err(|reason| shared::parsed_refusal(ordinal, &reason, PROGRAM))?;
@@ -430,12 +438,21 @@ impl ReportedSubjects {
                     )?;
                 }
                 if tabular {
-                    let [id, accession, version] = subject
+                    let ids = subject
                         .tabular_ids(true)
-                        .and_then(|ids| subject.check_printed_word(true, words).map(|()| ids))
-                        .map_err(|problem| {
-                            shared::parsed_refusal(ordinal, &format!("has {problem}"), PROGRAM)
-                        })?;
+                        .and_then(|ids| subject.check_printed_word(true, words).map(|()| ids));
+                    // A table of fields that read nothing of the subject prints none of its ids.
+                    let [id, accession, version] = match ids {
+                        Ok(ids) => ids,
+                        Err(_) if !tabular_reads => Default::default(),
+                        Err(problem) => {
+                            return Err(shared::parsed_refusal(
+                                ordinal,
+                                &format!("has {problem}"),
+                                PROGRAM,
+                            ))
+                        }
+                    };
                     // The ids of a stored definition line are VisibleStrings: ASCII.
                     let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
                     reported.tabular_ids.push(text(id));
@@ -450,8 +467,9 @@ impl ReportedSubjects {
                 }
                 reported.parsed[reported.ordinals.len()] = Some(Arc::clone(subject));
             } else if tabular {
-                // An unreported subject's id is never written.
-                let id = if shown {
+                // An unreported subject's id is never written, nor an id of a table of fields
+                // that read nothing of the subject.
+                let id = if shown && tabular_reads {
                     shared::tabular_subject_id(&title, ordinal, true, PROGRAM)?
                 } else {
                     Vec::new()
@@ -494,7 +512,7 @@ impl ReportedSubjects {
         }
         if taxids {
             // The taxid of each reported sequence, read apart from the titles for the XML2 and
-            // JSON formats only (`algorithm::common::database::read_reported_taxids`); the
+            // JSON formats only (`algorithm::common::database::read_reported_taxonomy`); the
             // sequences with a title are the reported ones.
             // A sequence with parsed Seq-ids has the taxid of each definition line
             // (`shared::read_reported_taxonomy`).
@@ -759,11 +777,6 @@ impl ReportedSubjects {
         self.parsed.get(rank).and_then(Option::as_deref)
     }
 
-    /// The stored title of rank `rank` (`stitle`).
-    pub(crate) fn title(&self, rank: usize) -> &str {
-        &self.records[rank].title
-    }
-
     /// The stored titles by rank (the outfmt 0 alignment headings).
     pub(crate) fn stored_titles(&self) -> &[Arc<[u8]>] {
         &self.titles
@@ -952,6 +965,8 @@ mod tests {
                 false,
                 false,
                 false,
+                false,
+                false,
                 crate::report::tabular::PrintedIds::default(),
                 false,
             )
@@ -1009,6 +1024,8 @@ mod tests {
                 }),
                 &mut batches,
                 true,
+                false,
+                false,
                 false,
                 false,
                 false,

@@ -179,6 +179,27 @@ fn x_group_zeroed(elements: usize, mapped: bool) -> Vec<u32> {
     zeroed
 }
 
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:103-105
+// (ComputeTableIndex: `wordsize` letters of `charsize` bits)
+// ```c
+//   for(i = 0; i < wordsize; i++) {
+//     index = (index << charsize) | word[i];
+//   }
+// ```
+// The precondition of the direct builders (`x_build_direct`, `x_build_group`): their neighbour
+// lists hold backbone indices in 16 bits (`x_target_list`), so the index of a word, `word_length`
+// letters of `charsize` bits (5 for the 28 letters), must fit 16 bits: words of 2 and 3 letters
+// (10 and 15 bits), not of 4 (20 bits). The unit path takes a search only where this holds
+// (`blast_engine/run_impl.rs`, its `debugging` gate), so that its group tables are built here and
+// never filtered out of a full table (`build_groups`).
+/// Whether the direct builder takes a table of `word_length`-letter words: their backbone index
+/// fits 16 bits.
+#[inline(always)]
+pub(crate) const fn x_direct_covers(word_length: usize) -> bool {
+    let charsize = LOOKUP_ALPHABET_SIZE.ilog2() as usize + 1;
+    word_length * charsize <= 16 && word_length <= 32
+}
+
 impl XPairLutQuery {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
     // ```c
@@ -199,23 +220,29 @@ impl XPairLutQuery {
         threshold: i32,
         check_ideal: bool,
     ) -> Option<Self> {
-        Self::x_prepare_for(queries, threshold, check_ideal, ScoringMatrix::Blosum62)
+        Self::x_prepare_for(
+            queries,
+            threshold,
+            check_ideal,
+            ScoringMatrix::Blosum62,
+            LOOKUP_WORD_LENGTH,
+        )
     }
 
-    /// `x_prepare` with the scores of `matrix` (another matrix's search, `-matrix`): the query
-    /// preparation of `build_ncbi_lookup_for_profile(queries, threshold, _, check_ideal, matrix,
-    /// LOOKUP_WORD_LENGTH)`.
+    /// `x_prepare` with the scores of `matrix` (`-matrix`) and words of `word_length` letters
+    /// (`-word_size`): the query preparation of `build_ncbi_lookup_for_profile(queries, threshold,
+    /// _, check_ideal, matrix, word_length)`. `None` also for a word length whose backbone index
+    /// the direct builder does not cover (`x_direct_covers`).
     #[inline(always)]
     pub(crate) fn x_prepare_for(
         queries: &[Vec<QueryFrame>],
         threshold: i32,
         check_ideal: bool,
         matrix: ScoringMatrix,
+        word_length: usize,
     ) -> Option<Self> {
-        let word_length = LOOKUP_WORD_LENGTH;
         let alphabet_size = LOOKUP_ALPHABET_SIZE;
-        let charsize = ilog2(alphabet_size) + 1;
-        if diagnostics_enabled() || word_length * charsize > 16 || word_length > 32 {
+        if diagnostics_enabled() || !x_direct_covers(word_length) {
             return None;
         }
         // Same expressions as build_ncbi_lookup_for_profile.
@@ -261,6 +288,11 @@ impl XPairLutQuery {
     /// The query contexts (those `build_ncbi_lookup` returns with its table).
     pub(crate) fn contexts(&self) -> &[QueryContext] {
         &self.prepared.contexts
+    }
+
+    /// The word length of the tables built from this query (`lookup->word_length`).
+    pub(crate) fn word_length(&self) -> usize {
+        self.word_length
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1045-1056

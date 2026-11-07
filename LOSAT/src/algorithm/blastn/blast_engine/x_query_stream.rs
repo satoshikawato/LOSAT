@@ -138,12 +138,10 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 
 use crate::blastinput::fasta_reader::{
-    read_queries, FastaInputSource, FastaRecord, ParseErrorCode, QueryEnd, QueryRecords, ReadError,
-    ReaderConfig,
+    FastaInputSource, FastaRecord, ParseErrorCode, QueryEnd, ReadError, ReaderConfig,
 };
 use crate::blastinput::seq_range::{
-    cut_queries, record_interval, Placements, QueryInput, RecordInterval, RecordPlacement,
-    SequenceRange,
+    record_interval, Placements, QueryInput, RecordInterval, RecordPlacement, SequenceRange,
 };
 
 // No NCBI counterpart: reads the switch once (LOSAT_X_QSTREAM is in the strict set). It chooses
@@ -425,6 +423,13 @@ struct State {
 }
 
 /// How the second reading reads the records.
+#[cfg_attr(
+    all(unix, feature = "parallel"),
+    expect(
+        clippy::large_enum_variant,
+        reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
+    )
+)]
 enum Second {
     /// One reader over the file, record after record (`State::read_one`), where the first reading
     /// was not read in parts.
@@ -832,6 +837,13 @@ impl State {
             return Err(anyhow::anyhow!("{failed}"));
         }
         let index = self.next;
+        #[cfg_attr(
+            not(all(unix, feature = "parallel")),
+            expect(
+                clippy::infallible_destructuring_match,
+                reason = "Second has a second variant (Parts) on unix with the parallel feature"
+            )
+        )]
         let source = match &mut self.second {
             Second::Serial(source) => source,
             #[cfg(all(unix, feature = "parallel"))]
@@ -956,11 +968,6 @@ impl BatchRecords<'_> {
 }
 
 impl<'a> Queries<'a> {
-    /// Whether the records are read batch by batch.
-    pub(super) fn streamed(&self) -> bool {
-        matches!(self, Queries::Streamed(_))
-    }
-
     /// Whether a batch's records leave the search with the batch (read batch by batch, or taken
     /// out of a LOSAT_X_BNQPACK `Store`): a writer after the batch reads the loop's kept records.
     pub(super) fn per_batch(&self) -> bool {
@@ -1213,7 +1220,8 @@ fn end_text(end: &QueryEnd) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blastinput::seq_range::RangeRole;
+    use crate::blastinput::fasta_reader::{read_queries, QueryRecords};
+    use crate::blastinput::seq_range::{cut_queries, RangeRole};
 
     /// The query input made from the lengths is `cut_queries`'s (with ranges that start inside,
     /// at the end of, and past some records) and `QueryInput::whole`'s.
@@ -1338,7 +1346,7 @@ mod tests {
         let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
         let ends = seed % 3;
         let mut text = Vec::new();
-        let mut eol = |text: &mut Vec<u8>, rng: &mut Rng| match ends {
+        let eol = |text: &mut Vec<u8>, rng: &mut Rng| match ends {
             0 => text.push(b'\n'),
             1 => text.extend_from_slice(b"\r\n"),
             _ => {
@@ -1349,7 +1357,7 @@ mod tests {
                 }
             }
         };
-        if seed % 7 == 0 {
+        if seed.is_multiple_of(7) {
             text.extend_from_slice(b"ACGTACGTTT");
             eol(&mut text, &mut rng);
         }
@@ -1370,7 +1378,7 @@ mod tests {
                 text.extend_from_slice(format!("rec{index} some words {seed}").as_bytes());
             }
             eol(&mut text, &mut rng);
-            let length = if seed % 5 == 0 && index == 2 {
+            let length = if seed.is_multiple_of(5) && index == 2 {
                 (1 << 20) + 100_000
             } else {
                 match rng.below(20) {

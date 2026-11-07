@@ -1448,3 +1448,78 @@ fn custom_tabular_reports_give_the_off_bytes() {
         }
     }
 }
+
+/// The refusal of NCBI's taxonomy cache (`TaxdbRun::cache_collision`: `tests/db_search/nz_nc`
+/// holds taxid 150 beside 99990, the damaged last entry of `tests/seqdb/taxdb/offset_last_past_end`;
+/// line DBID L1c) is asked where NCBI fetches a subject, one query per batch: `qx` and `qy`
+/// (`nz_qxy.fna`, no hits at `-evalue 1e-3`) are not refused (NCBI looks nothing up, the
+/// manifest's `db.nz.cq.bn.*` rows have its bytes), and `qx` then `q2` (`nz_qx2.fna`) are refused
+/// where `q2`'s batch prefetches its subjects (or, with `PRE_FETCH_SEQS_LIMIT=0`, where its report
+/// fetches them): with the switch after `qx`'s report, as the stream's other refusals of a batch's
+/// reported subjects, without it before any report (outfmt 0's prolog is written before the
+/// search).
+#[test]
+fn a_taxonomy_cache_refusal_comes_with_the_first_batch_that_fetches() {
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let path = |name: &str| tests.join(name).to_str().unwrap().to_string();
+    let db = path("db_search/nz_nc");
+    let blastdb = path("seqdb/taxdb/offset_last_past_end");
+    for (outfmt, threads, limit) in [("7", 1, None), ("0", 4, None), ("7", 4, Some("0"))] {
+        let mut extra = vec![("BATCH_SIZE", "1"), ("BLASTDB", blastdb.as_str())];
+        if let Some(limit) = limit {
+            extra.push(("PRE_FETCH_SEQS_LIMIT", limit));
+        }
+        let what = format!("outfmt {outfmt}, PRE_FETCH_SEQS_LIMIT {limit:?}");
+        let args = |query: &str| -> Vec<String> {
+            [
+                "-task",
+                "blastn",
+                "-dust",
+                "no",
+                "-evalue",
+                "1e-3",
+                "-query",
+                &path(&format!("db_search/{query}")),
+                "-db",
+                &db,
+                "-outfmt",
+                outfmt,
+            ]
+            .map(String::from)
+            .to_vec()
+        };
+        let run = |query: &str| {
+            let args = args(query);
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            same_two(&format!("{what}, {query}"), &args, threads, &extra, None)
+        };
+        let (none, (batches, reason)) = run("nz_qxy.fna");
+        assert_eq!(none.status, Some(0), "{what}, no hits: {none:?}");
+        assert!(
+            batches == 2 && reason == "none",
+            "{what}, no hits: {batches} {reason}"
+        );
+        let late = args("nz_qx2.fna");
+        let late: Vec<&str> = late.iter().map(String::as_str).collect();
+        let (off, on, (batches, _)) = refused_late(&what, &late, threads, &extra);
+        assert!(
+            String::from_utf8_lossy(&off.stderr).contains("256-slot taxonomy cache"),
+            "{what}: {}",
+            String::from_utf8_lossy(&off.stderr)
+        );
+        assert!(batches >= 1, "{what}");
+        // Without the switch every report is written after the loop: none before the refusal.
+        let marker = if outfmt == "0" {
+            "Query= "
+        } else {
+            "# Query: "
+        };
+        assert!(
+            !String::from_utf8_lossy(&off.report).contains(marker),
+            "{what}: off, no report"
+        );
+        let (qx, _) = run("nz_qx.fna");
+        assert_eq!(qx.status, Some(0), "{what}, qx: {qx:?}");
+        reports_before(&what, &off, &on, &qx.report, &qx.stderr, Some((marker, 1)));
+    }
+}

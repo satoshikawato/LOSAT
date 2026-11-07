@@ -85,13 +85,13 @@ impl Default for DustParams {
 impl DustParams {
     pub fn new(level: u32, window: usize, linker: usize) -> Self {
         // Validate and clamp parameters to NCBI BLAST ranges
-        let level = if level >= 2 && level <= 64 { level } else { 20 };
-        let window = if window >= 8 && window <= 64 {
+        let level = if (2..=64).contains(&level) { level } else { 20 };
+        let window = if (8..=64).contains(&window) {
             window
         } else {
             64
         };
-        let linker = if linker >= 1 && linker <= 32 {
+        let linker = if (1..=32).contains(&linker) {
             linker
         } else {
             1
@@ -893,9 +893,7 @@ impl<'a> XTripletWindow<'a> {
                 }
             }
             count += 1;
-            if pos > 0 {
-                pos -= 1;
-            }
+            pos = pos.saturating_sub(1);
         }
         if inserted {
             merged.extend(perfect_list.iter().skip(read).copied());
@@ -1169,9 +1167,7 @@ impl<'a> TripletWindow<'a> {
                 }
             }
             count += 1;
-            if pos > 0 {
-                pos -= 1;
-            }
+            pos = pos.saturating_sub(1);
         }
         if inserted {
             merged.extend(perfect_list.iter().skip(read).copied());
@@ -1219,7 +1215,7 @@ mod tests {
         fn debruijn_acgt_k3() -> Vec<u8> {
             fn db(t: usize, p: usize, k: usize, n: usize, a: &mut [usize], seq: &mut Vec<usize>) {
                 if t > n {
-                    if n % p == 0 {
+                    if n.is_multiple_of(p) {
                         for i in 1..=p {
                             seq.push(a[i]);
                         }
@@ -1333,11 +1329,11 @@ mod tests {
                     }
                     4 => {
                         let base = bases[rng.below(4) as usize];
-                        seq.extend(std::iter::repeat(base).take(piece));
+                        seq.extend(std::iter::repeat_n(base, piece));
                     }
                     5 => {
                         let n = 1 + rng.below(12) as usize;
-                        seq.extend(std::iter::repeat(b'N').take(n));
+                        seq.extend(std::iter::repeat_n(b'N', n));
                     }
                     _ => {
                         // other IUPAC letters and lower case

@@ -1153,6 +1153,7 @@ impl KappaState {
     /// A second state for another thread, as NCBI c++/src/algo/blast/core/blast_kappa.c:3244-3340
     /// allocates per thread (`redo_align_params_tld`, `gap_align_tld`, `NRrecord_tld`); the query
     /// information is read-only and shared.
+    #[cfg(feature = "parallel")]
     pub(crate) fn x_for_thread(
         &self,
         batch: &PreparedQueryBatch,
@@ -1258,6 +1259,7 @@ impl KappaState {
     // between Rust states so that a match redone out of order sees the matrix it would have seen in
     // stream order.
     /// The matrix a match leaves for the next one.
+    #[cfg(feature = "parallel")]
     pub(crate) fn x_take_matrix(&mut self) -> Option<AdjustedProteinMatrix> {
         self.matrix.take()
     }

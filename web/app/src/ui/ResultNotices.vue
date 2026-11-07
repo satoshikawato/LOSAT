@@ -7,6 +7,7 @@ import { noHspReason, type ResultsState } from '../application/results';
 import { flagGiven } from '../domain/result-index';
 import { formatCount } from './format';
 import { NO_HSP_TEXT } from './no-hsp-text';
+import { vScrollFocus } from './scroll-focus';
 
 const props = defineProps<{ state: ResultsState }>();
 defineEmits<{ clear: [] }>();
@@ -31,7 +32,7 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
   <div class="result-notices" aria-live="polite">
     <div v-if="reason === 'empty-query'" class="notice" data-testid="results-notice" data-kind="empty-query">
       <p>{{ NO_HSP_TEXT['empty-query'] }}</p>
-      <pre v-if="engineWarnings !== ''" class="output" data-testid="results-notice-engine">{{ engineWarnings }}</pre>
+      <pre v-if="engineWarnings !== ''" v-scroll-focus="'Warnings'" class="output" data-testid="results-notice-engine">{{ engineWarnings }}</pre>
     </div>
     <p v-else-if="reason === 'no-tabular-hits'" class="notice" data-testid="results-notice" data-kind="no-tabular-hits">
       <span class="option-name">-num_alignments</span> 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved" error,

@@ -13,10 +13,12 @@ first differing line of a difference, and exits 1 on any difference.
 A row whose `files` column is `xinclude` (outfmt 13 or 14) runs with `-out <tmp>/<fixture_id>.out`;
 its master file must equal <fixture_id>.out, each side file <fixture_id>.out_<n>.json|xml, their
 number the frozen number, and standard output must be empty (LOSAT/tests/xinclude_fixtures.py).
-A psiblast row whose `files` column is `pssm` runs with `-out_ascii_pssm <tmp>/<fixture_id>.pssm`;
-its report is compared as usual, and the PSSM files it writes must be the frozen ones byte for byte
-(none when `side_sha256` is empty). With `--library` LOSAT is `examples/library_command_line`, the
-same search through the library API, which writes no PSSM file: those rows are `library-skip`.
+A psiblast row whose `files` column is `pssm` runs with `-out_ascii_pssm <tmp>/<fixture_id>.pssm`
+(`pssm-asn`: `-out_pssm <tmp>/<fixture_id>.asn`; `pssm-both`: both); its report is compared as usual,
+and the PSSM files it writes must be those of `side_sha256` byte for byte (none when it is empty):
+the frozen ones, or in the kinds `pssm-asn` and `pssm-both` a file over 64 KB by its SHA-256 alone. With `--library` LOSAT is `examples/library_command_line`, the
+same search through the library API, which writes no PSSM file and takes no PSSM query (`-in_pssm`, a
+query cell `pssm-gz:` or `pssm:`): those rows are `library-skip`.
 
 A row with the contract `approved_db_gencode_deviation` (AGENTS.md's approved TBLASTX
 exception: LOSAT's local search applies a non-default -db_gencode to the subject) is
@@ -94,15 +96,15 @@ def main() -> int:
         command = [str(args.losat.resolve()), row["program"], *search_argv(row), *threads]
         files = xinclude.wants_files(row)
         pssm = xinclude.wants_pssm(row)
-        # The library API refuses the PSSM file options (`api::search`).
-        if args.library and pssm:
+        # The library API refuses the PSSM file options and `-in_pssm` (`api::search`).
+        if args.library and (pssm or row["query"].startswith(("pssm:", "pssm-gz:"))):
             print(f"{row['fixture_id']}\tlibrary-skip\t")
             continue
         if files:
             written = xinclude.run_with_files(command, row["fixture_id"], outfmt(row), cwd=ENGINE)
             run = written.run
         elif pssm:
-            pssms = xinclude.run_with_pssm(command, row["fixture_id"], cwd=ENGINE)
+            pssms = xinclude.run_with_pssm(command, row["fixture_id"], xinclude.files_kind(row), cwd=ENGINE)
             run = pssms.run
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True)

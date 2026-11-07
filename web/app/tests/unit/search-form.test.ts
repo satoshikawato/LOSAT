@@ -44,6 +44,7 @@ import {
   REGION_FLAG,
   regionFromPositions,
   regionProblem,
+  regionProblemFields,
   regionRange,
   regionValue,
   swappedRegion,
@@ -407,9 +408,9 @@ describe("the selects of the protein modes: NCBI's values that LOSAT reads", () 
   const field = (id: ProgramId, flag: string) => programById(id).sections.flatMap((section) => section.fields).find((f) => f.flag === flag)!;
   const list = (id: ProgramId, flag: string, values: FormValues = {}) => fieldList(field(id, flag), values, optionsOf(id));
 
-  it('gives BLASTP BLOSUM62, word sizes 3, 5 and 6, and modes 0 and 2, in both tasks', () => {
+  it("gives BLASTP NCBI's matrices, word sizes 3, 5 and 6, and modes 0 and 2, in both tasks", () => {
     for (const values of [{}, { '-task': 'blastp-fast' }]) {
-      expect(list('blastp', '-matrix', values)).toEqual(['BLOSUM62']);
+      expect(list('blastp', '-matrix', values)).toEqual(MATRICES);
       expect(list('blastp', '-word_size', values)).toEqual(['3', '5', '6']);
     }
     expect(fieldChoices(field('blastp', '-comp_based_stats'), optionsOf('blastp').find((o) => o.flag === '-comp_based_stats'))).toEqual(['0', '2']);
@@ -417,8 +418,8 @@ describe("the selects of the protein modes: NCBI's values that LOSAT reads", () 
     expect(fieldChoices(field('tblastn', '-comp_based_stats'), optionsOf('tblastn').find((o) => o.flag === '-comp_based_stats'))).toEqual(COMPOSITION_MODES);
   });
 
-  it('gives TBLASTX word size 3', () => {
-    expect(list('tblastx', '-word_size')).toEqual(['3']);
+  it("gives TBLASTX NCBI's word sizes 2 and 3", () => {
+    expect(list('tblastx', '-word_size')).toEqual(['2', '3']);
     expect(list('tblastx', '-matrix')).toEqual(MATRICES);
   });
 
@@ -531,7 +532,7 @@ describe("NCBI's pair selects: Match/Mismatch Scores and Gap Costs", () => {
   const bp = optionsOf('blastp');
   const [scores, gaps] = pairRows(blastn);
   const proteinGaps = pairRows(blastp)[0]!;
-  // TBLASTN reads NCBI's gap costs of every matrix; BLASTP's list is 11 1 alone (WA-FM-02).
+  // BLASTP and TBLASTN read NCBI's gap costs of every matrix (WA-FM-02).
   const tblastn = programById('tblastn');
   const tn = optionsOf('tblastn');
   const tblastnGaps = pairRows(tblastn)[0]!;
@@ -568,9 +569,10 @@ describe("NCBI's pair selects: Match/Mismatch Scores and Gap Costs", () => {
     expect(pairList(tblastn, tblastnGaps, { '-matrix': 'IDENTITY' }, tn)).toEqual([]);
     expect(pairList(tblastn, tblastnGaps, { '-matrix': 'constructor' }, tn)).toEqual([]);
     expect(setField(tblastn, {}, '-matrix', '__proto__', tn)).toEqual({ '-matrix': '__proto__' });
-    // BLASTP's list is NCBI's of BLOSUM62, the one matrix that LOSAT's BLASTP reads.
+    // BLASTP's lists are NCBI's of each matrix, all of which LOSAT's BLASTP reads.
     expect(pairList(blastp, proteinGaps, {}, bp)).toEqual(PROTEIN_GAP_COSTS.lists.BLOSUM62);
-    expect(pairList(blastp, proteinGaps, { '-matrix': 'BLOSUM45' }, bp)).toEqual([]);
+    expect(pairList(blastp, proteinGaps, { '-matrix': 'BLOSUM45' }, bp)).toEqual(PROTEIN_GAP_COSTS.lists.BLOSUM45);
+    expect(pairList(blastp, proteinGaps, { '-matrix': 'IDENTITY' }, bp)).toEqual([]);
     expect(pairList(programById('blastx'), pairRows(programById('blastx'))[0]!, {}, optionsOf('blastx'))).toEqual(['11 1']);
   });
 
@@ -670,8 +672,10 @@ describe("NCBI's pair selects: Match/Mismatch Scores and Gap Costs", () => {
     expect(setField(tblastn, set, '-task', 'tblastn-fast', tn)).toEqual({ ...set, '-task': 'tblastn-fast' });
     // A matrix that NCBI does not list (typed after "Other"): no list, the costs stay.
     expect(setField(tblastn, set, '-matrix', 'IDENTITY', tn)).toEqual({ ...set, '-matrix': 'IDENTITY' });
-    // BLASTP's one list: a matrix typed after "Other" leaves the costs.
-    expect(setField(blastp, set, '-matrix', 'PAM30', bp)).toEqual({ ...set, '-matrix': 'PAM30' });
+    // BLASTP's lists are per matrix as TBLASTN's: the new matrix's list gives its default; a
+    // matrix that NCBI does not list leaves the costs.
+    expect(setField(blastp, set, '-matrix', 'PAM30', bp)).toEqual({ '-matrix': 'PAM30' });
+    expect(setField(blastp, set, '-matrix', 'IDENTITY', bp)).toEqual({ ...set, '-matrix': 'IDENTITY' });
     // The row's own fields set here are kept.
     expect(setFields(tblastn, {}, [['-matrix', 'PAM30'], ['-gapopen', '8']], tn)).toEqual({ '-matrix': 'PAM30', '-gapopen': '8' });
     // Scores typed in the two fields: a pair without a list leaves the costs.
@@ -729,6 +733,27 @@ describe('searchSummary', () => {
   it('names a task without a note, and leaves the task out while it is unknown', () => {
     expect(searchSummary(programById('blastp'), 'other')).toBe('Search protein subjects with BLASTP, task other.');
     expect(searchSummary(programById('blastn'), undefined)).toBe('Search nucleotide subjects with BLASTN.');
+  });
+});
+
+describe('regionProblemFields', () => {
+  const fields = (start: string, stop: string, length = 100) => regionProblemFields({ start, stop }, length);
+
+  it('marks neither field without a problem', () => {
+    expect(fields('5', '10')).toEqual({ start: false, stop: false });
+  });
+  it('marks the field that is empty, not a whole number, or outside the record', () => {
+    expect(fields('', '10')).toEqual({ start: true, stop: false });
+    expect(fields('5', '  ')).toEqual({ start: false, stop: true });
+    expect(fields('1.5', '10')).toEqual({ start: true, stop: false });
+    expect(fields('5', 'abc')).toEqual({ start: false, stop: true });
+    expect(fields('0', '10')).toEqual({ start: true, stop: false });
+    expect(fields('5', '101')).toEqual({ start: false, stop: true });
+    expect(fields('', '')).toEqual({ start: true, stop: true });
+  });
+  it('marks both when the start is after the stop or equal to it', () => {
+    expect(fields('10', '5')).toEqual({ start: true, stop: true });
+    expect(fields('7', '7')).toEqual({ start: true, stop: true });
   });
 });
 

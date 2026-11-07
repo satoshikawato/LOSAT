@@ -1,9 +1,10 @@
-//! psiblast's PSSM after the last round (`-num_iterations 1 -save_pssm_after_last_round
-//! -out_ascii_pssm F`): the input of NCBI's PSSM engine from a query's round-1 alignments
-//! (`CPsiBlastInputData`), the engine's score block (`CPssmEngine`), the ASCII PSSM
-//! (`CBlastFormatUtil::PrintAsciiPssm`) and its file (`CAutoOutputFileReset`). The engine itself
-//! is `core::psi`. The blastp engine reaches this module only when a PSSM is requested
-//! (`blast_engine.rs` `psiblast_ascii_pssms`).
+//! psiblast's PSSM after the last round (`-num_iterations 1 -save_pssm_after_last_round` with
+//! `-out_pssm F` and/or `-out_ascii_pssm F`): the input of NCBI's PSSM engine from a query's
+//! round-1 alignments (`CPsiBlastInputData`), the engine's score block (`CPssmEngine`), the
+//! ASN.1 PSSM (`x_PSIMatrix2Asn1`, written by `report::serial::pssm`), the ASCII PSSM
+//! (`CBlastFormatUtil::PrintAsciiPssm`) and their files (`CAutoOutputFileReset`). The engine
+//! itself is `core::psi`. The blastp engine reaches this module only when a PSSM is requested
+//! (`blast_engine.rs` `psiblast_pssms`).
 
 use std::io::Write as _;
 
@@ -11,7 +12,13 @@ use anyhow::Result;
 
 use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
-use crate::core::psi::{self, PsiError, PsiMsa, PsiMsaCell, PsiPssm, PsiScoreBlk};
+use crate::core::psi::{
+    self, KarlinBlk, PsiDiagnosticsRequest, PsiError, PsiMsa, PsiMsaCell, PsiPssm, PsiScoreBlk,
+};
+use crate::report::serial::pssm::{
+    FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
+    PssmQuery, PssmSeqId, PssmWithParameters, SeqData, SeqInst,
+};
 use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
 
 /// psiblast's PSSM options as given on the command line.
@@ -19,24 +26,36 @@ use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa, BLASTAA_SIZE, BLAST_
 pub struct PsiblastPssmOptions {
     pub save_pssm_after_last_round: bool,
     pub save_each_pssm: bool,
+    pub out_pssm: Option<String>,
     pub out_ascii_pssm: Option<String>,
     pub pseudocount: i32,
+    /// `-in_pssm`: the query as a PSSM file (`algorithm::psiblast::in_pssm`).
+    pub in_pssm: Option<std::path::PathBuf>,
 }
 
-/// A run that writes the ASCII PSSM of each query whose round-1 results have alignments.
+/// A run that writes the PSSM of each query whose round-1 results have alignments.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PssmRequest {
-    /// `-out_ascii_pssm`, as given.
-    pub ascii_path: String,
+    /// `-out_pssm`, as given: the ASN.1 text PSSM (`SaveCheckpoint`).
+    pub asn_path: Option<String>,
+    /// `-out_ascii_pssm`, as given (`SaveAsciiPssm`).
+    pub ascii_path: Option<String>,
     /// `-save_each_pssm`: the files are `F.1`, `F.2`, ... (`CAutoOutputFileReset` with versions).
     pub save_each: bool,
     /// `-pseudocount` (`PSIBlastOptions::pseudo_count`).
     pub pseudocount: i32,
 }
 
+impl PssmRequest {
+    /// The diagnostics the engine computes (`PSIDiagnosticsRequestNewEx(SaveAsciiPssm())`).
+    pub(crate) fn diagnostics(&self) -> PsiDiagnosticsRequest {
+        PsiDiagnosticsRequest::new_ex(self.ascii_path.is_some())
+    }
+}
+
 impl PsiblastPssmOptions {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1283-1303
-    // ```c++
+    // ```c
     //         if (args.Exist(kArgSaveLastPssm) && args[kArgSaveLastPssm] &&
     //             (!args.Exist(kArgPSIOutputChkPntFile) ||
     //              !args[kArgPSIOutputChkPntFile]) &&
@@ -61,15 +80,15 @@ impl PsiblastPssmOptions {
     // ```
     // `CPsiBlastArgs::ExtractAlgorithmOptions` runs after the composition-based statistics
     // handler's (psiblast_args.cpp:102-110, the order of `m_Args`) and before `Validate`
-    // (blast_args.cpp:3826-3832); `-out_pssm` is refused by the parser (`cli.rs`
-    // `is_unported_psiblast_arg`), so only `-out_ascii_pssm` can satisfy it.
+    // (blast_args.cpp:3826-3832).
     pub(crate) fn check(&self) -> Result<()> {
-        if self.save_pssm_after_last_round && self.out_ascii_pssm.is_none() {
+        let no_file = self.out_pssm.is_none() && self.out_ascii_pssm.is_none();
+        if self.save_pssm_after_last_round && no_file {
             return Err(crate::blastinput::app::options_error(
                 "save_pssm_after_last_round option requires out_pssm or out_ascii_pssm",
             ));
         }
-        if self.save_each_pssm && self.out_ascii_pssm.is_none() {
+        if self.save_each_pssm && no_file {
             return Err(crate::blastinput::app::options_error(
                 "save_each_pssm option requires out_pssm or out_ascii_pssm",
             ));
@@ -91,29 +110,33 @@ impl PsiblastPssmOptions {
     //        }
     // ```
     // With one round (`itr` is false after it), the PSSM is computed only with
-    // `-save_pssm_after_last_round`, and `SavePssmToFile` writes only `-out_ascii_pssm`'s file
-    // here (`SaveAsciiPssm`).
+    // `-save_pssm_after_last_round`, and `SavePssmToFile` writes the files of `-out_pssm` and
+    // `-out_ascii_pssm` (`SaveCheckpoint`, `SaveAsciiPssm`).
     pub(crate) fn request(&self) -> Option<PssmRequest> {
-        match (&self.out_ascii_pssm, self.save_pssm_after_last_round) {
-            (Some(path), true) => Some(PssmRequest {
-                ascii_path: path.clone(),
-                save_each: self.save_each_pssm,
-                pseudocount: self.pseudocount,
-            }),
-            _ => None,
+        if !self.save_pssm_after_last_round
+            || (self.out_pssm.is_none() && self.out_ascii_pssm.is_none())
+        {
+            return None;
         }
+        Some(PssmRequest {
+            asn_path: self.out_pssm.clone(),
+            ascii_path: self.out_ascii_pssm.clone(),
+            save_each: self.save_each_pssm,
+            pseudocount: self.pseudocount,
+        })
     }
 }
 
 /// The failure of the PSSM of the searched query `query` (an error that NCBI's psiblast raises
-/// after that query's report, when it computes its PSSM): the run reports the queries up to it
-/// without the epilog, then fails with `error` (`blast_engine.rs` `search`).
+/// after that query's report, when it computes or saves its PSSM): the run reports the queries up
+/// to it without the epilog, then fails with `error` (`blast_engine.rs` `search`).
 #[derive(Debug)]
 pub(crate) struct PssmStop {
     pub(crate) query: usize,
     pub(crate) error: anyhow::Error,
-    /// The PSSMs of the queries before it, which NCBI has written.
-    pub(crate) pssms: Vec<Vec<u8>>,
+    /// The PSSM files of the queries before it, which NCBI has written: LOSAT writes them after
+    /// the reports of the queries up to it (`PssmFiles::commit`).
+    pub(crate) files: PssmFiles,
 }
 
 impl std::fmt::Display for PssmStop {
@@ -152,24 +175,65 @@ pub(crate) struct PssmAlignment<'a> {
     pub(crate) ops: Option<&'a [GapEditOp]>,
 }
 
-/// The Karlin-Altschul blocks of the round's ancillary data (`CBlastAncillaryData`): `(K,
-/// Lambda)` of the ungapped and gapped blocks. In the first round the PSI blocks are the
-/// standard ones.
+/// The Karlin-Altschul blocks of the round's ancillary data (`CBlastAncillaryData`): the
+/// ungapped block of the query's context and the gapped block. In the first round the PSI blocks
+/// are copies of them (`kbp_psi` and `kbp_gap_psi` of the search's score block are its
+/// standard blocks, blast_setup.c:114-120).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PssmAncillary {
-    pub(crate) ungapped: (f64, f64),
-    pub(crate) gapped: (f64, f64),
+    pub(crate) ungapped: KarlinBlk,
+    pub(crate) gapped: KarlinBlk,
 }
 
-/// The ASCII PSSM of one query (`ComputePssmForNextIteration` and `PrintAsciiPssm`), from its
-/// record's letters (the whole record, without masks), its Seq-aligns, the letters of their
-/// subjects (`subject(s_idx)`: the record's letters in NCBIstdaa) and the round's ancillary data.
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast.cpp:108-145
+/// The query of a PSSM: its letters (the whole record, without masks), its Seq-align id
+/// (`Query_<n>`) and its title.
+pub(crate) struct PssmQueryRecord<'a> {
+    pub(crate) letters: &'a [u8],
+    pub(crate) id: &'a str,
+    pub(crate) title: &'a [u8],
+}
+
+/// The scoring of the search that the PSSM records: the matrix as named (`-matrix`, any case)
+/// and the gap costs.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PssmScoring<'a> {
+    pub(crate) matrix: ScoringMatrix,
+    pub(crate) matrix_name: &'a str,
+    pub(crate) gap_open: i32,
+    pub(crate) gap_extend: i32,
+}
+
+/// The files of one query's PSSM: the ASN.1 text with `-out_pssm`, the ASCII PSSM with
+/// `-out_ascii_pssm`.
+#[derive(Debug)]
+pub(crate) struct QueryPssm {
+    pub(crate) asn: Option<Vec<u8>>,
+    pub(crate) ascii: Option<Vec<u8>>,
+}
+
+/// The PSSM of one query (`ComputePssmForNextIteration`) and its files: the ASN.1 text
+/// (`x_PSIMatrix2Asn1`, `PsiBlastAddAncillaryPssmData` and `MSerial_AsnText`) and the ASCII
+/// PSSM (`PrintAsciiPssm`), as requested. The inputs are the query, its Seq-aligns, the letters
+/// of their subjects (`subject(s_idx)`: the record's letters in NCBIstdaa), the round's
+/// ancillary data, and the gapped block of the matrix and gap costs (`gapped`, the score block's
+/// `kbp_gap_std[0]`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast.cpp:110-150
 // ```c++
 //     CPSIBlastOptions opts;
 //     PSIBlastOptionsNew(&opts);
 //     opts->pseudo_count = opts_handle.GetPseudoCount();
 //     opts->inclusion_ethresh = opts_handle.GetInclusionThreshold();
+//
+//     string query_descr = NcbiEmptyString;
+//
+//     if (query.IsSetDescr()) {
+//          const CBioseq::TDescr::Tdata& data = query.GetDescr().Get();
+//          ITERATE(CBioseq::TDescr::Tdata, iter, data) {
+//              if((*iter)->IsTitle()) {
+//                  query_descr += (*iter)->GetTitle();
+//              }
+//          }
+//     }
 //     ...
 //     const SBlastSequence query_seq =
 //         query_source.GetBlastSequence(0, eBlastEncodingProtein,
@@ -181,12 +245,20 @@ pub(crate) struct PssmAncillary {
 //                              alignment, database_scope,
 //                              *opts.Get(),
 //                              opts_handle.GetMatrixName(),
-//                              ...
+//                              opts_handle.GetGapOpeningCost(),
+//                              opts_handle.GetGapExtensionCost(),
+//                              diagnostics_request,
+//                              query_descr);
+//
 //     CPssmEngine engine(&input);
 //     engine.SetUngappedStatisticalParams(ancillary_data);
 //     CRef<CPssmWithParameters> retval(engine.Run());
+//
+//     PsiBlastAddAncillaryPssmData(*retval,
+//                                   opts_handle.GetGapOpeningCost(),
+//                                   opts_handle.GetGapExtensionCost());
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:376-399
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:380-404
 // ```c++
 //     m_PssmInput->Process();
 //     s_Validate(m_PssmInput);
@@ -204,6 +276,15 @@ pub(crate) struct PssmAncillary {
 //         // FIXME: need to use core level perror-like facility
 //         string msg = x_ErrorCodeToString(status);
 //         NCBI_THROW(CBlastException, eCoreBlastError, msg);
+//     }
+//
+//     // Convert core BLAST matrix structure into ASN.1 score matrix object
+//     CRef<CPssmWithParameters> retval;
+//     retval = x_PSIMatrix2Asn1(pssm, m_PssmInput->GetMatrixName(),
+//                               m_PssmInput->GetOptions(), diagnostics);
+//     CRef<CBioseq> query = m_PssmInput->GetQueryForPssm();
+//     if (query.NotEmpty()) {
+//         retval->SetQuery().SetSeq(*query);
 //     }
 // ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:131-148
@@ -245,9 +326,8 @@ pub(crate) struct PssmAncillary {
 // ```
 // Every check of `PSIBlastOptionsValidate`, in its order (the options are never NULL here). The
 // search before it does not check the inclusion threshold: nothing else calls this function, so
-// a run with `-inclusion_ethresh 0` reports the query first. The ungapped statistical parameters
-// that `SetUngappedStatisticalParams` gives the score block are not read by the ASCII PSSM, which
-// prints the ancillary data's.
+// a run with `-inclusion_ethresh 0` reports the query first. The ASCII PSSM prints the ancillary
+// data's blocks; the ASN.1 PSSM keeps those of the scaling (`core::psi`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:894-903
 // ```c++
 //     for (i = 0; i < sv.size(); i++) {
@@ -273,35 +353,32 @@ pub(crate) struct PssmAncillary {
 //         seq.Set().push_back(m_Query[i]);
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:402-405
-// ```c++
-//     CRef<CBioseq> query = m_PssmInput->GetQueryForPssm();
-//     if (query.NotEmpty()) {
-//         retval->SetQuery().SetSeq(*query);
-//     }
-// ```
 // The MSA's query row and the PSSM's query Bioseq, which `PrintAsciiPssm` prints, are both the
 // search's buffer (`GetBlastSequence` with `eBlastEncodingProtein`): an O is X in both. That is
 // the only letter the buffer changes from the record's NCBIstdaa letters, and
-// `encode_protein_sequence` makes the same change, so the printed letters are the buffer's (NCBI
-// 2.17.0 and LOSAT give the same PSSM for a query with lower-case letters, a lower-case o, and a
-// `-` that the FASTA reader drops).
+// `encode_protein_sequence` makes the same change, so the letters are the buffer's (NCBI
+// 2.17.0 and LOSAT give the same PSSMs for a query with lower-case letters, a lower-case o, and
+// a `-` that the FASTA reader drops). The query has one title (the FASTA reader's), empty when
+// the definition line has none, and `CPsiBlastInputData` writes it as the Bioseq's title also
+// when it is empty.
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn ascii_pssm(
+pub(crate) fn query_pssm(
     request: &PssmRequest,
-    matrix: ScoringMatrix,
+    scoring: PssmScoring<'_>,
+    gapped: KarlinBlk,
     inclusion_ethresh: f64,
-    query_letters: &[u8],
+    query: PssmQueryRecord<'_>,
     alignments: &[PssmAlignment<'_>],
     subject: &dyn Fn(u32) -> Vec<u8>,
     ancillary: PssmAncillary,
-) -> Result<Vec<u8>> {
-    let sbp = score_block(matrix)?;
-    let query = crate::algorithm::blastp::encoding::encode_protein_sequence(query_letters);
-    let query = &query.aa_seq[1..=query.aa_len];
-    let msa = input_msa(query, alignments, subject, inclusion_ethresh)?;
+) -> Result<QueryPssm> {
+    let mut sbp = score_block(scoring.matrix, gapped)?;
+    sbp.set_ungapped_statistical_params(ancillary.gapped);
+    let encoded = crate::algorithm::blastp::encoding::encode_protein_sequence(query.letters);
+    let letters = &encoded.aa_seq[1..=encoded.aa_len];
+    let msa = input_msa(letters, alignments, subject, inclusion_ethresh)?;
     if request.pseudocount < 0 {
         return Err(blast_options_error(
             "IPssmInputData returns invalid PSIBlastOptions: Pseudo count must be greater than or equal to 0",
@@ -312,9 +389,194 @@ pub(crate) fn ascii_pssm(
             "IPssmInputData returns invalid PSIBlastOptions: Inclusion threshold must be greater than 0",
         ));
     }
-    let pssm = psi::create_pssm_with_diagnostics(&msa, request.pseudocount, &sbp)
-        .map_err(|error| crate::blastinput::app::engine_error(error_code_to_string(error)))?;
-    Ok(print_ascii_pssm(&pssm, query, ancillary))
+    let pssm =
+        psi::create_pssm_with_diagnostics(&msa, request.pseudocount, &sbp, request.diagnostics())
+            .map_err(|error| crate::blastinput::app::engine_error(error_code_to_string(error)))?;
+    let asn = match request.asn_path {
+        Some(_) => {
+            let value = pssm_with_parameters(&pssm, letters, &query, scoring, request.pseudocount);
+            Some(
+                crate::report::serial::pssm::asn_text(&value)
+                    .map_err(|error| anyhow::anyhow!("{error}"))?,
+            )
+        }
+        None => None,
+    };
+    let ascii = request
+        .ascii_path
+        .as_ref()
+        .map(|_| print_ascii_pssm(&pssm, letters, ancillary));
+    Ok(QueryPssm { asn, ascii })
+}
+
+/// The `PssmWithParameters` of a PSSM (`x_PSIMatrix2Asn1` with its query, then
+/// `PsiBlastAddAncillaryPssmData`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:632-661
+// ```c++
+//     CRef<CPssmWithParameters> retval(new CPssmWithParameters);
+//
+//     // Record the parameters
+//     string mtx(matrix_name);
+//     mtx = NStr::ToUpper(mtx); // save the matrix name in all capital letters
+//     retval->SetParams().SetRpsdbparams().SetMatrixName(mtx);
+//     if (opts) {
+//         retval->SetParams().SetPseudocount(opts->pseudo_count);
+//     }
+//
+//     CPssm& asn1_pssm = retval->SetPssm();
+//     asn1_pssm.SetIsProtein(true);
+//     // number of rows is alphabet size
+//     asn1_pssm.SetNumRows(pssm->nrows);
+//     // number of columns is query length
+//     asn1_pssm.SetNumColumns(pssm->ncols);
+//     asn1_pssm.SetByRow(false);  // this is the default
+//
+//     asn1_pssm.SetLambda(pssm->lambda);
+//     asn1_pssm.SetKappa(pssm->kappa);
+//     asn1_pssm.SetH(pssm->h);
+//     asn1_pssm.SetLambdaUngapped(pssm->ung_lambda);
+//     asn1_pssm.SetKappaUngapped(pssm->ung_kappa);
+//     asn1_pssm.SetHUngapped(pssm->ung_h);
+//     if (asn1_pssm.GetByRow() == false) {
+//         for (unsigned int i = 0; i < pssm->ncols; i++) {
+//             for (unsigned int j = 0; j < pssm->nrows; j++) {
+//                 asn1_pssm.SetFinalData().SetScores().
+//                     push_back(pssm->pssm[i][j]);
+//             }
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:684-778
+// ```c++
+//     if (diagnostics->information_content) {
+//         CPssmIntermediateData::TInformationContent& info_content =
+//             asn1_pssm.SetIntermediateData().SetInformationContent();
+//         for (Uint4 i = 0; i < diagnostics->query_length; i++) {
+//             info_content.push_back(diagnostics->information_content[i]);
+//         }
+//     }
+//     ...
+//     if (diagnostics->weighted_residue_freqs) {
+//         CPssmIntermediateData::TWeightedResFreqsPerPos& wres_freqs =
+//             asn1_pssm.SetIntermediateData().SetWeightedResFreqsPerPos();
+//         if (asn1_pssm.GetByRow() == false) {
+//             for (unsigned int i = 0; i < pssm->ncols; i++) {
+//                 for (unsigned int j = 0; j < pssm->nrows; j++) {
+//                     wres_freqs.
+//                         push_back(diagnostics->weighted_residue_freqs[i][j]);
+//     ...
+//     if (diagnostics->frequency_ratios) {
+//         CPssmIntermediateData::TFreqRatios& freq_ratios =
+//             asn1_pssm.SetIntermediateData().SetFreqRatios();
+//         if (asn1_pssm.GetByRow() == false) {
+//             for (unsigned int i = 0; i < pssm->ncols; i++) {
+//                 for (unsigned int j = 0; j < pssm->nrows; j++) {
+//                     freq_ratios.push_back(diagnostics->frequency_ratios[i][j]);
+//     ...
+//     if (diagnostics->gapless_column_weights) {
+//         ...
+//             gcw.push_back(diagnostics->gapless_column_weights[i]);
+//     ...
+//     if (diagnostics->sigma) {
+//         ...
+//             sigma.push_back(diagnostics->sigma[i]);
+//     ...
+//     if (diagnostics->interval_sizes) {
+//         ...
+//             interval_sizes.push_back(diagnostics->interval_sizes[i]);
+//     ...
+//     if (diagnostics->num_matching_seqs) {
+//         ...
+//             num_matching_seqs.push_back(diagnostics->num_matching_seqs[i]);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:426-433
+// ```c++
+// PsiBlastAddAncillaryPssmData(objects::CPssmWithParameters& pssm,
+//                          int gap_open,
+//                          int gap_extend)
+// {
+//     _ASSERT(pssm.GetParams().GetRpsdbparams().IsSetMatrixName());
+//     pssm.SetParams().SetRpsdbparams().SetGapOpen(gap_open);
+//     pssm.SetParams().SetRpsdbparams().SetGapExtend(gap_extend);
+// }
+// ```
+// psiblast's options have no IMPALA scaling (`scalingFactor` is not set), and its diagnostics
+// request never asks for the residue frequencies or the independent observations. The interval
+// sizes and numbers of matching sequences are `Uint4` pushed to a `vector<int>`.
+fn pssm_with_parameters(
+    pssm: &PsiPssm,
+    letters: &[u8],
+    query: &PssmQueryRecord<'_>,
+    scoring: PssmScoring<'_>,
+    pseudocount: i32,
+) -> PssmWithParameters {
+    let by_column =
+        |rows: &[[f64; BLASTAA_SIZE]]| -> Vec<f64> { rows.iter().flatten().copied().collect() };
+    let diagnostics = &pssm.diagnostics;
+    let intermediate_data = PssmIntermediateData {
+        res_freqs_per_pos: None,
+        weighted_res_freqs_per_pos: diagnostics.weighted_residue_freqs.as_deref().map(by_column),
+        freq_ratios: diagnostics
+            .frequency_ratios
+            .as_deref()
+            .map(by_column)
+            .unwrap_or_default(),
+        information_content: diagnostics.information_content.clone(),
+        gapless_column_weights: diagnostics.gapless_column_weights.clone(),
+        sigma: diagnostics.sigma.clone(),
+        interval_sizes: diagnostics
+            .interval_sizes
+            .as_ref()
+            .map(|sizes| sizes.iter().map(|&size| size as i32).collect()),
+        num_matching_seqs: diagnostics
+            .num_matching_seqs
+            .as_ref()
+            .map(|counts| counts.iter().map(|&count| count as i32).collect()),
+        num_indept_obsr: None,
+    };
+    PssmWithParameters {
+        pssm: Pssm {
+            is_protein: Some(true),
+            identifier: None,
+            num_rows: BLASTAA_SIZE as i32,
+            num_columns: letters.len() as i32,
+            row_labels: None,
+            by_row: Some(false),
+            query: Some(PssmQuery {
+                ids: vec![PssmSeqId::Local(ObjectId::Str(
+                    query.id.as_bytes().to_vec(),
+                ))],
+                titles: Some(vec![query.title.to_vec()]),
+                inst: SeqInst {
+                    repr: ("raw", 2),
+                    mol: ("aa", 3),
+                    length: Some(letters.len() as i32),
+                    seq_data: Some(SeqData::Ncbistdaa(letters.to_vec())),
+                },
+            }),
+            intermediate_data: Some(intermediate_data),
+            final_data: Some(PssmFinalData {
+                scores: pssm.scores.iter().flatten().copied().collect(),
+                lambda: pssm.gapped.lambda,
+                kappa: pssm.gapped.k,
+                h: pssm.gapped.h,
+                scaling_factor: None,
+                lambda_ungapped: Some(pssm.ungapped.lambda),
+                kappa_ungapped: Some(pssm.ungapped.k),
+                h_ungapped: Some(pssm.ungapped.h),
+                word_score_threshold: None,
+            }),
+        },
+        params: Some(PssmParameters {
+            pseudocount: Some(pseudocount),
+            rpsdbparams: Some(FormatRpsDbParameters {
+                matrix_name: scoring.matrix_name.to_ascii_uppercase().into_bytes(),
+                gap_open: Some(scoring.gap_open),
+                gap_extend: Some(scoring.gap_extend),
+            }),
+            bit_score_thresh: None,
+            bit_score_reporting_thresh: None,
+        }),
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:218-282
@@ -424,7 +686,26 @@ fn error_code_to_string(error: PsiError) -> &'static str {
 //         retval = _PSIMatrixFrequencyRatiosFree(retval);
 //     }
 // ```
-pub(crate) fn score_block(matrix: ScoringMatrix) -> Result<PsiScoreBlk> {
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:104-120
+// ```c
+//         } else {
+//             retval =
+//                 Blast_KarlinBlkGappedCalc(sbp->kbp_gap_std[index],
+//                     scoring_options->gap_open, scoring_options->gap_extend,
+//                     sbp->name, error_return);
+//         }
+//         ...
+//         /* For right now, copy the contents from kbp_gap_std to
+//          * kbp_gap_psi (as in old code - BLASTSetUpSearchInternalByLoc) */
+//         if (program != eBlastTypeBlastn && program != eBlastTypeMapping) {
+//             sbp->kbp_gap_psi[index] = Blast_KarlinBlkNew();
+//             Blast_KarlinBlkCopy(sbp->kbp_gap_psi[index],
+//                                 sbp->kbp_gap_std[index]);
+//         }
+// ```
+// `gapped` is the gapped block of the matrix and gap costs (`Blast_KarlinBlkGappedCalc`), the
+// search's: `kbp_gap_std[0]`, copied to `kbp_gap_psi[0]`.
+pub(crate) fn score_block(matrix: ScoringMatrix, gapped: KarlinBlk) -> Result<PsiScoreBlk> {
     // psiblast's `Validate` refuses IDENTITY, the one matrix without frequency ratios
     // (`stats::protein_options`, the standard matrices only).
     let data = crate::core::composition_adjustment::adjust_scores::compo_matrix_data(matrix)
@@ -450,6 +731,9 @@ pub(crate) fn score_block(matrix: ScoringMatrix) -> Result<PsiScoreBlk> {
     Ok(PsiScoreBlk {
         matrix: table,
         ideal_lambda: ideal.lambda,
+        ideal_k: ideal.k,
+        gap_std_k: gapped.k,
+        gap_psi: gapped,
         freq_ratios: data.freq_ratios,
         bit_scale_factor: if matrix == ScoringMatrix::Blosum45 {
             3
@@ -713,7 +997,7 @@ fn process_denseg(row: &mut [PsiMsaCell], alignment: &PssmAlignment<'_>, subject
 /// A subject record's letters in NCBIstdaa as its Bioseq holds them (the `CSeqVector` of
 /// `CPsiBlastInputData::x_GetSubjectSequence`, quoted at `process_denseg`): upper case, and O
 /// stays O. The query's letters are not these: the PSSM's query is the search's buffer, in which
-/// O is X (`ascii_pssm`).
+/// O is X (`query_pssm`).
 pub(crate) fn ncbistdaa_letters(letters: &[u8]) -> Vec<u8> {
     letters
         .iter()
@@ -870,10 +1154,23 @@ fn fixed(value: f64, precision: usize) -> String {
 // The scores matrix of `GetScores` has the 28 rows of NCBIstdaa (pssm_engine.cpp
 // `x_PSIMatrix2Asn1` stores every row). The query's letters are those of the PSSM's query Bioseq
 // (`GetQuerySequenceData`, blastfmtutil.cpp:253-255), which `CPsiBlastInputData` builds from the
-// search's buffer, in which an O is X (quoted at `ascii_pssm`): `query` is that buffer, so an O
-// of the record prints as X and takes the X branch of the gapless weight.
+// search's buffer, in which an O is X (quoted at `query_pssm`): `query` is that buffer, so an O
+// of the record prints as X and takes the X branch of the gapless weight. The diagnostics it
+// reads are those that `-out_ascii_pssm` asks for (`PssmRequest::diagnostics`).
 pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAncillary) -> Vec<u8> {
     use std::fmt::Write as _;
+    const REQUESTED: &str = "a diagnostic that -out_ascii_pssm requests";
+    let diagnostics = &pssm.diagnostics;
+    let weighted_residue_freqs = diagnostics
+        .weighted_residue_freqs
+        .as_ref()
+        .expect(REQUESTED);
+    let information_content = diagnostics.information_content.as_ref().expect(REQUESTED);
+    let num_matching_seqs = diagnostics.num_matching_seqs.as_ref().expect(REQUESTED);
+    let gapless_column_weights = diagnostics
+        .gapless_column_weights
+        .as_ref()
+        .expect(REQUESTED);
     let mut out = String::new();
     out.push_str("\nLast position-specific scoring matrix computed, weighted observed percentages rounded down, information per position, and relative weight of gapless real matches to pseudocounts\n");
     let mut max_score: i32 = 0;
@@ -920,22 +1217,22 @@ pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAnci
         for &c in &RESIDUE_ORDER {
             if scores[c] != BLAST_SCORE_MIN {
                 let mut value = 100.0;
-                value *= pssm.weighted_residue_freqs[i][c];
+                value *= weighted_residue_freqs[i][c];
                 value = (value + if value > 0.0 { 0.5 } else { -0.5 }) as i32 as f64;
                 let _ = write!(out, "{:>4}", value as i32);
             }
         }
-        let _ = write!(out, "  {} ", fixed(pssm.information_content[i], 2));
-        if pssm.num_matching_seqs[i] > 1 && residue != ncbistdaa::X {
-            out.push_str(&fixed(pssm.gapless_column_weights[i], 2));
+        let _ = write!(out, "  {} ", fixed(information_content[i], 2));
+        if num_matching_seqs[i] > 1 && residue != ncbistdaa::X {
+            out.push_str(&fixed(gapless_column_weights[i], 2));
         } else {
             out.push_str("    0.00");
         }
     }
     out.push_str("\n\n");
     out.push_str("                      K         Lambda\n");
-    let (ungapped_k, ungapped_lambda) = ancillary.ungapped;
-    let (gapped_k, gapped_lambda) = ancillary.gapped;
+    let (ungapped_k, ungapped_lambda) = (ancillary.ungapped.k, ancillary.ungapped.lambda);
+    let (gapped_k, gapped_lambda) = (ancillary.gapped.k, ancillary.gapped.lambda);
     for (label, k, lambda) in [
         ("Standard Ungapped    ", ungapped_k, ungapped_lambda),
         ("Standard Gapped      ", gapped_k, gapped_lambda),
@@ -947,21 +1244,60 @@ pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAnci
     out.into_bytes()
 }
 
-/// Writes the ASCII PSSMs of the queries whose round-1 results have alignments, in the order of
-/// the queries: each write opens the file again (`CAutoOutputFileReset::GetStream`), so without
-/// `-save_each_pssm` the last PSSM stays, and with it the writes are `F.1`, `F.2`, ...
-/// A file that cannot be opened or written is not reported, as NCBI's `ofstream` is not checked.
-// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:398-407
+/// With `-out_pssm`, the refusal of a query whose title has a byte outside the visible ASCII
+/// range (0x20 to 0x7E), before the search: the PSSM's Bioseq holds the title as a
+/// VisibleString, and NCBI's ASN.1 text stream writes `#` for each such byte with an error message
+/// of three lines for each (`Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title`,
+/// `Bad char [0xC3] in string at line 12`, the title; NCBI 2.17.0, a UTF-8 title, status 0),
+/// which LOSAT does not reproduce (as outfmt 11's titles, `report::archive::check_titles`). The
+/// FASTA reader cuts a title at its first byte below 0x20, so the bytes refused are those from
+/// 0x7F on.
+// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:413-444
 // ```c++
-//     if (m_CmdLineArgs->SaveAsciiPssm() &&
-//         (itr == NULL || // this is true in the case of remote PSI-BLAST
-//          itr->GetIterationNumber() >= 1)) {
-//         ...
-//         CBlastFormatUtil::PrintAsciiPssm(*pssm,
-//                                          m_AncillaryData,
-//                                          *m_CmdLineArgs->GetAsciiPssmStream());
-//     }
+// void CObjectOStreamAsn::WriteString(const char* ptr, size_t length)
+// {
+//     m_Output.PutChar('"');
+//     CTempString original(ptr, length);
+//     size_t valid=0;
+//     while ( length > 0 ) {
+//         char c = *ptr;
+//         if ( x_FixCharsMethod() != eFNP_Allow ) {
+//             if ( !GoodVisibleChar(c) ) {
+//                 if (valid == 0) {
+// #if SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_WRITING
+//                     valid = CUtf8::EvaluateSymbolLength(CTempString(ptr,length));
+// #endif
+//                     if (valid == 0) {
+//                         c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, original, x_FixCharsSubst());
+//                     }
 // ```
+// NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:456-459
+// ```c++
+// bool GoodVisibleChar(char c)
+// {
+//     return c >= ' ' && c <= '~';
+// }
+// ```
+pub(crate) fn check_pssm_titles(
+    records: &[crate::blastinput::fasta_reader::FastaRecord],
+) -> Result<()> {
+    if let Some(record) = records.iter().find(|record| {
+        record
+            .title
+            .iter()
+            .any(|byte| !(0x20..=0x7E).contains(byte))
+    }) {
+        anyhow::bail!(
+            "the title of the query {} has a character the PSSM file cannot write as NCBI does (outside the visible ASCII range), which is not supported by LOSAT's PSIBLAST with -out_pssm",
+            record.local_id
+        );
+    }
+    Ok(())
+}
+
+/// `CAutoOutputFileReset`: the file of one PSSM option, opened again at each write
+/// (`GetStream`). Without `-save_each_pssm` an existing file of the name is deleted and the file
+/// made again, so the last PSSM stays; with it the writes are `F.1`, `F.2`, ...
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:50-66
 // ```c++
 // CAutoOutputFileReset::GetStream()
@@ -988,28 +1324,677 @@ pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAnci
 //     CAutoOutputFileReset(const string& file_name, bool use_versions = false)
 //         : m_FileName(file_name), m_Version(use_versions ? 1 : 0) {}
 // ```
-#[cold]
-#[inline(never)]
-pub(crate) fn write_ascii_pssm_files<'a>(
-    request: &PssmRequest,
-    pssms: impl Iterator<Item = &'a [u8]>,
-) {
-    let mut version: u32 = if request.save_each { 1 } else { 0 };
-    for pssm in pssms {
-        let filename = if version == 0 {
-            let path = std::path::Path::new(&request.ascii_path);
-            if path.is_file() {
-                let _ = std::fs::remove_file(path);
-            }
-            request.ascii_path.clone()
-        } else {
-            let filename = format!("{}.{}", request.ascii_path, version);
-            version += 1;
-            filename
-        };
-        if let Ok(mut file) = std::fs::File::create(&filename) {
-            let _ = file.write_all(pssm);
+#[derive(Debug)]
+pub(crate) struct OutputFileReset {
+    file_name: String,
+    version: u32,
+}
+
+impl OutputFileReset {
+    pub(crate) fn new(file_name: &str, use_versions: bool) -> Self {
+        Self {
+            file_name: file_name.to_string(),
+            version: u32::from(use_versions),
         }
+    }
+
+    /// `GetStream`'s file: `F`, or `F.<version>` (the version counts the writes).
+    pub(crate) fn next_file(&mut self) -> PssmFile {
+        if self.version == 0 {
+            return PssmFile {
+                path: std::path::PathBuf::from(&self.file_name),
+                replaced: true,
+            };
+        }
+        let path = std::path::PathBuf::from(format!("{}.{}", self.file_name, self.version));
+        self.version += 1;
+        PssmFile {
+            path,
+            replaced: false,
+        }
+    }
+}
+
+/// One file of `CAutoOutputFileReset::GetStream`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PssmFile {
+    pub(crate) path: std::path::PathBuf,
+    /// Version 0 (no `-save_each_pssm`): an existing regular file of the name is removed before
+    /// the file is opened, so the file is made again; a numbered file is only truncated, which
+    /// keeps an existing file's inode and mode.
+    pub(crate) replaced: bool,
+}
+
+impl PssmFile {
+    /// `GetStream`: with version 0, `CFile::Exists` (a regular file, through symbolic links) and
+    /// `Remove` (the name itself, `remove(3)`; a failure is neither checked nor, by default,
+    /// logged), then `ofstream` (made or truncated, through symbolic links).
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbifile.hpp:4039-4042
+    // ```c++
+    // bool CFile::Exists(void) const
+    // {
+    //     return IsFile();
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:2595-2610
+    // ```c++
+    // bool CDirEntry::Remove(TRemoveFlags flags) const
+    // {
+    //     // Is this a directory ? (and processing not entry only)
+    //     if ( (flags & (fDir_All | fDir_Recursive)) != eEntryOnly  &&  IsDir(eIgnoreLinks) ) {
+    //         return CDir(GetPath()).Remove(flags);
+    //     }
+    //     // Other entries
+    //     return RemoveEntry(flags);
+    // }
+    //
+    //
+    // bool CDirEntry::RemoveEntry(TRemoveFlags flags) const
+    // {
+    //
+    //     if ( NcbiSys_remove(_T_XCSTRING(GetPath())) != 0 ) {
+    // ```
+    pub(crate) fn open(&self) -> std::io::Result<std::fs::File> {
+        if self.replaced && self.path.is_file() {
+            let _ = std::fs::remove_file(&self.path);
+        }
+        std::fs::File::create(&self.path)
+    }
+}
+
+/// What a PSSM file's name is before the run, for NCBI's `GetStream` on it (`PssmFile::open`).
+#[derive(Debug)]
+enum TargetKind {
+    /// No file: `ofstream` makes it in its directory.
+    Absent,
+    /// A regular file, also through a symbolic link.
+    Regular,
+    /// A character device (`/dev/null`, `/dev/full`): opened for writing as it is; `null`: it is
+    /// `/dev/null`.
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "constructed only on unix (special_target_kind)")
+    )]
+    Device { null: bool },
+    /// A directory or a socket: `ofstream` cannot open it.
+    Unopenable,
+    /// A named pipe, a block device or a symbolic link to no file: not supported.
+    Unsupported(&'static str),
+    /// A name whose directories cannot be read: `ofstream` fails the same way.
+    Unreachable(std::io::Error),
+}
+
+fn target_kind(path: &std::path::Path) -> TargetKind {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => TargetKind::Regular,
+        Ok(metadata) => special_target_kind(&metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if std::fs::symlink_metadata(path).is_ok() {
+                TargetKind::Unsupported("a symbolic link to a missing file")
+            } else {
+                TargetKind::Absent
+            }
+        }
+        Err(error) => TargetKind::Unreachable(error),
+    }
+}
+
+#[cfg(unix)]
+fn special_target_kind(metadata: &std::fs::Metadata) -> TargetKind {
+    use std::os::unix::fs::FileTypeExt;
+    let file_type = metadata.file_type();
+    if file_type.is_fifo() {
+        TargetKind::Unsupported("a named pipe")
+    } else if file_type.is_block_device() {
+        TargetKind::Unsupported("a block device")
+    } else if file_type.is_char_device() {
+        TargetKind::Device {
+            null: device_number(metadata).is_some_and(|rdev| Some(rdev) == null_device()),
+        }
+    } else {
+        TargetKind::Unopenable
+    }
+}
+
+#[cfg(not(unix))]
+fn special_target_kind(_metadata: &std::fs::Metadata) -> TargetKind {
+    TargetKind::Unopenable
+}
+
+/// The device number of a character device.
+#[cfg(unix)]
+fn device_number(metadata: &std::fs::Metadata) -> Option<u64> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    metadata
+        .file_type()
+        .is_char_device()
+        .then(|| metadata.rdev())
+}
+
+/// `/dev/null`'s device number.
+#[cfg(unix)]
+fn null_device() -> Option<u64> {
+    std::fs::metadata("/dev/null")
+        .ok()
+        .as_ref()
+        .and_then(device_number)
+}
+
+/// Whether the test open of an existing file failed with `EPERM`: an immutable or append-only file
+/// (`open(2)`), whose name cannot be removed either (`unlink(2)`, `EPERM`).
+#[cfg(unix)]
+fn immutable(error: &std::io::Error) -> bool {
+    rustix::io::Errno::from_io_error(error) == Some(rustix::io::Errno::PERM)
+}
+
+#[cfg(not(unix))]
+fn immutable(_error: &std::io::Error) -> bool {
+    false
+}
+
+/// Whether removing `path` succeeds, given that its directory takes a new file (the staging file
+/// made there by the user `uid`): in a directory with the sticky bit only the owner of the file or
+/// of the directory, or root, removes a name (`unlink(2)`, `EPERM`).
+#[cfg(unix)]
+fn removable(path: &std::path::Path, directory: &std::path::Path, uid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let (Ok(entry), Ok(directory)) = (
+        std::fs::symlink_metadata(path),
+        std::fs::metadata(directory),
+    ) else {
+        return false;
+    };
+    directory.mode() & 0o1000 == 0 || uid == 0 || entry.uid() == uid || directory.uid() == uid
+}
+
+/// Elsewhere a file that cannot be opened for writing is taken as one that cannot be removed
+/// either (a refusal where NCBI might remove it).
+#[cfg(not(unix))]
+fn removable(_path: &std::path::Path, _directory: &std::path::Path, _uid: u32) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn owner(metadata: &std::fs::Metadata) -> u32 {
+    std::os::unix::fs::MetadataExt::uid(metadata)
+}
+
+#[cfg(not(unix))]
+fn owner(_metadata: &std::fs::Metadata) -> u32 {
+    0
+}
+
+/// The PSSM files of a psiblast run (`-out_pssm`, `-out_ascii_pssm`): made with the PSSMs, before
+/// the reports (`add`), and written after them (`commit`), each query's ASN.1 file then its ASCII
+/// one, as psiblast's `SavePssmToFile` after the query's report. The ASCII PSSMs, whose writes
+/// NCBI does not check, are kept in memory.
+///
+/// NCBI ends a run whose ASN.1 file cannot be opened or written after that query's report, so LOSAT
+/// must know before its first report byte whether each file can be written; and a run that fails
+/// before its reports are out (a report write error, a LOSAT refusal) must leave every file as it
+/// was, as NCBI's, which stops before `SavePssmToFile`. So `add` writes the ASN.1 bytes to a
+/// staging file beside the target (`.losat-<pid>-<n>`, a new file in the target's directory, whose
+/// name is short so that any name the target can have is no reason for its failure), which shows
+/// that the directory takes a file and the file system the bytes, and foresees NCBI's open of the
+/// target without changing it; only `commit` writes the targets.
+/// Dropped without `commit`, `PssmFiles` removes the staging files: no target has changed. A
+/// failure in `add` is the refusal of a file that NCBI cannot write either (its stop after that
+/// query's report, `PssmStop`) or that LOSAT cannot write as NCBI does; no partial file is left.
+///
+/// The rule for a target, from what `GetStream` does with it (`PssmFile::open`):
+/// - no file of the name: made in its directory, which takes the staging file;
+/// - a regular file (also through a symbolic link): removed and made again (version 0) or
+///   truncated in place. LOSAT opens it for writing (without truncation); if that fails with
+///   `EPERM` (an immutable or append-only file, whose name cannot be removed either), or fails and
+///   the name cannot be removed (`removable`) or the file is numbered, NCBI's open fails there.
+///   An existing file that opens for writing but beside which no staging file can be made (a
+///   directory that takes no new file) is written in place, as NCBI's version 0, which cannot remove
+///   its name, and a numbered file do: its bytes are kept in memory for `commit` (only the last
+///   query's with version 0), which cannot show before the reports that they fit;
+/// - a character device: opened for writing and written zero bytes, which a device that takes no
+///   bytes refuses (`/dev/full`: ENOSPC), so the run stops at that query as NCBI's. `/dev/null`
+///   gets nothing more; the PSSM of every query for another device is kept in memory (a few MB per
+///   query of some thousand residues) and written by `commit`. A device that takes zero bytes but
+///   not the PSSM's would fail only after the reports;
+/// - a directory or a socket: NCBI's open fails, and so does LOSAT's;
+/// - a named pipe, a block device, a symbolic link to no file: refused (also before the search,
+///   `check_pssm_files`).
+///
+/// Not foreseen: a file system that fills between `add` and `commit`, or that has no room for the
+/// bytes of a file written in place (LOSAT's peak use is the old file, at most two staged PSSMs of
+/// version 0 and every numbered one); such a failure comes after the reports (`commit`).
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-407
+// ```c++
+// CPsiBlastApp::SavePssmToFile(CRef<CPssmWithParameters> pssm,
+//                              const CPsiBlastIterationState* itr)
+// {
+//     if (pssm.Empty()) {
+//         return;
+//     }
+//
+//     if (m_CmdLineArgs->SaveCheckpoint() &&
+//         (itr == NULL || // this is true in the case of remote PSI-BLAST
+//          itr->GetIterationNumber() >= 1)) {
+//         *m_CmdLineArgs->GetCheckpointStream() << MSerial_AsnText << *pssm;
+//     }
+//
+//     if (m_CmdLineArgs->SaveAsciiPssm() &&
+//         (itr == NULL || // this is true in the case of remote PSI-BLAST
+//          itr->GetIterationNumber() >= 1)) {
+//         ...
+//         CBlastFormatUtil::PrintAsciiPssm(*pssm,
+//                                          m_AncillaryData,
+//                                          *m_CmdLineArgs->GetAsciiPssmStream());
+//     }
+// ```
+#[derive(Debug)]
+pub(crate) struct PssmFiles {
+    asn: Option<OutputFileReset>,
+    ascii: Option<OutputFileReset>,
+    pending: Vec<PendingPssm>,
+    /// The entry whose staging file holds the last version-0 ASN.1 PSSM, which the next one
+    /// replaces: of NCBI's writes of one name only the last one's bytes stay, made or truncated
+    /// as each of them would make or truncate it.
+    last_replaced: Option<usize>,
+    staging_count: u64,
+}
+
+/// One query's PSSM files, to be written after the reports.
+#[derive(Debug)]
+struct PendingPssm {
+    asn: Option<(PssmFile, Staged)>,
+    ascii: Option<Vec<u8>>,
+}
+
+#[derive(Debug)]
+enum Staged {
+    /// The bytes in a staging file beside the target.
+    File(std::path::PathBuf),
+    /// The bytes of an existing file in a directory that takes no new file, written in place.
+    InPlace(Vec<u8>),
+    /// The bytes for a character device.
+    Device(Vec<u8>),
+    /// Nothing: the target is `/dev/null`.
+    Null,
+    /// Written, or replaced by a later query's file of the same name.
+    Done,
+}
+
+impl PssmFiles {
+    pub(crate) fn new(request: &PssmRequest) -> Self {
+        let stream =
+            |path: Option<&str>| path.map(|path| OutputFileReset::new(path, request.save_each));
+        Self {
+            asn: stream(request.asn_path.as_deref()),
+            ascii: stream(request.ascii_path.as_deref()),
+            pending: Vec::new(),
+            last_replaced: None,
+            staging_count: 0,
+        }
+    }
+
+    /// One query's PSSM: its ASN.1 file staged and its ASCII PSSM kept. `Err` is LOSAT's refusal
+    /// of an ASN.1 file that cannot be written as NCBI does (NCBI stops after that query's report).
+    // NCBI's stream writes through a 4 KiB buffer (`COStreamBuffer`); the first write that fails
+    // throws a `CIOException` (`eWrite`, "write fault"), the object stream reports it once as an
+    // error of its own (`SetFailFlags`: `Error: (802.5) [psiblast] CObjectOStream: error at byte
+    // N: stack is empty: write fault`, N being where the buffer first overflowed), and psiblast's
+    // `CATCH_ALL` ends the run with status 0, without the epilog and the later queries. LOSAT
+    // stops at the same place, with its own refusal instead of NCBI's message and status, and
+    // without NCBI's partial file.
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:871-904 and 921-924
+    // ```c++
+    // void COStreamBuffer::FlushBuffer(bool fullBuffer)
+    //     THROWS1((CIOException))
+    // {
+    //     ...
+    //     if ( count != 0 ) {
+    //         if ( !m_Output.write(m_Buffer, count) ) {
+    //             m_Error = "write fault";
+    //             NCBI_THROW(CIOException,eWrite,m_Error);
+    //         }
+    //     ...
+    // char* COStreamBuffer::DoReserve(size_t count)
+    //     THROWS1((CIOException, bad_alloc))
+    // {
+    //     FlushBuffer(false);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-384
+    // ```c++
+    // CObjectOStream::TFailFlags CObjectOStream::SetFailFlags(TFailFlags flags,
+    //                                                         const char* message)
+    // {
+    //     TFailFlags old = m_Fail;
+    //     m_Fail |= flags;
+    //     if ( !old && flags ) {
+    //         // first fail
+    //         ERR_POST_X(5, "CObjectOStream: error at "<<
+    //                    GetPosition()<<": "<<GetStackTrace() << ": " << message);
+    //     }
+    //     return old;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+    // ```c++
+    //     catch (const CIOException& e) {                                         \
+    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
+    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
+    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
+    //         }                                                                   \
+    //     }                                                                       \
+    // ```
+    pub(crate) fn add(&mut self, asn: Option<&[u8]>, ascii: Option<Vec<u8>>) -> Result<()> {
+        let file = asn.and(self.asn.as_mut()).map(OutputFileReset::next_file);
+        let asn = match (file, asn) {
+            (Some(file), Some(bytes)) => {
+                let staged = self.stage(&file, bytes)?;
+                Some((file, staged))
+            }
+            _ => None,
+        };
+        if let Some((file, Staged::File(_) | Staged::InPlace(_))) = &asn {
+            if file.replaced {
+                if let Some(previous) = self.last_replaced.replace(self.pending.len()) {
+                    if let Some((_, staged)) = self.pending[previous].asn.as_mut() {
+                        if let Staged::File(staging) = std::mem::replace(staged, Staged::Done) {
+                            let _ = std::fs::remove_file(staging);
+                        }
+                    }
+                }
+            }
+        }
+        self.pending.push(PendingPssm { asn, ascii });
+        Ok(())
+    }
+
+    /// The ASN.1 bytes of `file`, staged (`PssmFiles`).
+    fn stage(&mut self, file: &PssmFile, asn: &[u8]) -> Result<Staged> {
+        let path = &file.path;
+        let cannot_write = |error: std::io::Error| {
+            anyhow::anyhow!(
+                "a -out_pssm file that cannot be written ({}: {error}), where NCBI BLAST+'s psiblast stops after the query's report with a serial-stream write error, is not supported by LOSAT's PSIBLAST",
+                path.display()
+            )
+        };
+        let existing = match target_kind(path) {
+            TargetKind::Absent => false,
+            TargetKind::Regular => true,
+            TargetKind::Device { null } => {
+                return test_device(path, null, asn).map_err(cannot_write)
+            }
+            TargetKind::Unopenable => return test_device(path, false, asn).map_err(cannot_write),
+            TargetKind::Unsupported(kind) => return Err(unsupported_target(path, kind)),
+            TargetKind::Unreachable(error) => return Err(cannot_write(error)),
+        };
+        if path.file_name().is_none() {
+            return Err(cannot_write(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "not a file name",
+            )));
+        }
+        let directory = match path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent,
+            _ => std::path::Path::new("."),
+        };
+        let (staging, uid) = match self.write_staging(directory, asn) {
+            Ok(staged) => staged,
+            Err(_) if existing => {
+                // Where the directory takes no new file, NCBI's version 0 cannot remove the file
+                // either and opens it in place, as a numbered file.
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(path)
+                    .map_err(cannot_write)?;
+                return Ok(Staged::InPlace(asn.to_vec()));
+            }
+            Err(error) => return Err(cannot_write(error)),
+        };
+        if existing {
+            if let Err(error) = std::fs::OpenOptions::new().write(true).open(path) {
+                if immutable(&error) || !(file.replaced && removable(path, directory, uid)) {
+                    let _ = std::fs::remove_file(&staging);
+                    return Err(cannot_write(error));
+                }
+            }
+        }
+        Ok(Staged::File(staging))
+    }
+
+    /// Writes `bytes` to a new staging file `.losat-<pid>-<n>` in the target's `directory`; its
+    /// path and owner.
+    fn write_staging(
+        &mut self,
+        directory: &std::path::Path,
+        bytes: &[u8],
+    ) -> std::io::Result<(std::path::PathBuf, u32)> {
+        loop {
+            self.staging_count += 1;
+            let staging = directory.join(format!(
+                ".losat-{}-{}",
+                std::process::id(),
+                self.staging_count
+            ));
+            let mut file = match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&staging)
+            {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            };
+            let written = file
+                .write_all(bytes)
+                .and_then(|()| file.metadata())
+                .map(|metadata| owner(&metadata));
+            return match written {
+                Ok(uid) => Ok((staging, uid)),
+                Err(error) => {
+                    drop(file);
+                    let _ = std::fs::remove_file(&staging);
+                    Err(error)
+                }
+            };
+        }
+    }
+
+    /// After the reports: each query's ASN.1 file (`GetStream` on the target, then the staged
+    /// bytes), then its ASCII file (not checked, as NCBI's `ofstream`). `Err`: an ASN.1 file that
+    /// `add` found writable failed, after the reports (see `PssmFiles`).
+    pub(crate) fn commit(mut self) -> Result<()> {
+        for index in 0..self.pending.len() {
+            if let Some((file, staged)) = self.pending[index].asn.as_mut() {
+                let bytes = match std::mem::replace(staged, Staged::Done) {
+                    Staged::File(staging) => {
+                        let bytes = std::fs::read(&staging);
+                        let _ = std::fs::remove_file(&staging);
+                        Some(bytes)
+                    }
+                    Staged::InPlace(bytes) | Staged::Device(bytes) => Some(Ok(bytes)),
+                    Staged::Null | Staged::Done => None,
+                };
+                if let Some(bytes) = bytes {
+                    bytes
+                        .and_then(|bytes| file.open()?.write_all(&bytes))
+                        .map_err(|error| {
+                            anyhow::anyhow!(
+                                "a -out_pssm file that could not be written after the reports ({}: {error}), although LOSAT found it writable before them, is not supported by LOSAT's PSIBLAST",
+                                file.path.display()
+                            )
+                        })?;
+                }
+            }
+            if let (Some(stream), Some(ascii)) =
+                (self.ascii.as_mut(), self.pending[index].ascii.take())
+            {
+                if let Ok(mut out) = stream.next_file().open() {
+                    let _ = out.write_all(&ascii);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PssmFiles {
+    // Out of line: it runs where the blastp engine's function that holds the files
+    // (`run_resolved_in_pool`) returns.
+    #[cold]
+    #[inline(never)]
+    fn drop(&mut self) {
+        for pending in &self.pending {
+            if let Some((_, Staged::File(staging))) = &pending.asn {
+                let _ = std::fs::remove_file(staging);
+            }
+        }
+    }
+}
+
+/// A character device's test (`PssmFiles`): opened for writing and written zero bytes; what
+/// `commit` writes to it.
+fn test_device(path: &std::path::Path, null: bool, asn: &[u8]) -> std::io::Result<Staged> {
+    let mut device = std::fs::OpenOptions::new().write(true).open(path)?;
+    // A write of zero bytes is passed to the device (`write(2)`).
+    let written = device.write(&[])?;
+    debug_assert_eq!(written, 0);
+    Ok(if null {
+        Staged::Null
+    } else {
+        Staged::Device(asn.to_vec())
+    })
+}
+
+fn unsupported_target(path: &std::path::Path, kind: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "an -out_pssm file that is {kind} ({}) is not supported by LOSAT's PSIBLAST",
+        path.display()
+    )
+}
+
+/// Before the search: refuses PSSM files that LOSAT cannot write as NCBI does. NCBI writes each
+/// query's files after its report through streams of their own, so a PSSM file that is also the
+/// standard output, the standard error or the `-out` file gets its bytes among the reports' in an
+/// order that their buffers make, which LOSAT does not reproduce (it writes the PSSM files after
+/// all reports). Every name the run can write is checked: `F`, or with `-save_each_pssm` `F.1` to
+/// `F.<number of queries>`; a name that does not exist cannot be one of those streams. The same
+/// file is the same device and inode (`metadata` follows `/dev/stdout` to the stream's file),
+/// or for a character device the same device number (`/dev/null` excepted: no order of its bytes
+/// shows); without inode numbers, the same canonical path as `-out`, or one of the names of the
+/// standard streams (`ReportStreams`, taken once). Also refused, for `-out_pssm`: a named pipe, a
+/// block device and a symbolic link to no file (`PssmFiles`).
+pub(crate) fn check_pssm_files(
+    request: &PssmRequest,
+    queries: usize,
+    out: Option<&std::path::Path>,
+) -> Result<()> {
+    let streams = ReportStreams::new(out);
+    for (option, path) in [
+        ("-out_pssm", request.asn_path.as_deref()),
+        ("-out_ascii_pssm", request.ascii_path.as_deref()),
+    ] {
+        let Some(path) = path else {
+            continue;
+        };
+        let names: Vec<std::path::PathBuf> = if request.save_each {
+            (1..=queries)
+                .map(|n| std::path::PathBuf::from(format!("{path}.{n}")))
+                .collect()
+        } else {
+            vec![std::path::PathBuf::from(path)]
+        };
+        for name in &names {
+            if let Some(stream) = streams.stream_of(name) {
+                anyhow::bail!(
+                    "an {option} file that is also {stream} ({}) is not supported by LOSAT's PSIBLAST",
+                    name.display()
+                );
+            }
+            if option == "-out_pssm" {
+                if let TargetKind::Unsupported(kind) = target_kind(name) {
+                    return Err(unsupported_target(name, kind));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The report streams (`check_pssm_files`): the standard output, the standard error (`fstat` of a
+/// copy of each descriptor) and the `-out` file, as files.
+#[cfg(unix)]
+struct ReportStreams {
+    streams: Vec<(&'static str, std::fs::Metadata)>,
+    null: Option<u64>,
+}
+
+#[cfg(unix)]
+impl ReportStreams {
+    fn new(out: Option<&std::path::Path>) -> Self {
+        use std::os::fd::AsFd;
+        let stream = |fd: std::os::fd::BorrowedFd<'_>| {
+            fd.try_clone_to_owned()
+                .ok()
+                .and_then(|fd| std::fs::File::from(fd).metadata().ok())
+        };
+        let streams = [
+            ("the standard output", stream(std::io::stdout().as_fd())),
+            ("the standard error", stream(std::io::stderr().as_fd())),
+            (
+                "the -out file",
+                out.and_then(|out| std::fs::metadata(out).ok()),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(name, metadata)| Some((name, metadata?)))
+        .collect();
+        Self {
+            streams,
+            null: null_device(),
+        }
+    }
+
+    /// The report stream that the file `name` is; `/dev/null`, where no order of bytes shows, is
+    /// none.
+    fn stream_of(&self, name: &std::path::Path) -> Option<&'static str> {
+        use std::os::unix::fs::MetadataExt;
+        let target = std::fs::metadata(name).ok()?;
+        let device = device_number(&target);
+        if device.is_some() && device == self.null {
+            return None;
+        }
+        self.streams.iter().find_map(|(stream, metadata)| {
+            ((metadata.dev(), metadata.ino()) == (target.dev(), target.ino())
+                || device.is_some_and(|rdev| device_number(metadata) == Some(rdev)))
+            .then_some(*stream)
+        })
+    }
+}
+
+#[cfg(not(unix))]
+struct ReportStreams {
+    out: Option<std::path::PathBuf>,
+}
+
+#[cfg(not(unix))]
+impl ReportStreams {
+    fn new(out: Option<&std::path::Path>) -> Self {
+        Self {
+            out: out.and_then(|out| std::fs::canonicalize(out).ok()),
+        }
+    }
+
+    fn stream_of(&self, name: &std::path::Path) -> Option<&'static str> {
+        match name.to_str() {
+            Some("/dev/stdout" | "/dev/fd/1" | "/proc/self/fd/1") => {
+                return Some("the standard output")
+            }
+            Some("/dev/stderr" | "/dev/fd/2" | "/proc/self/fd/2") => {
+                return Some("the standard error")
+            }
+            _ => {}
+        }
+        let target = std::fs::canonicalize(name).ok()?;
+        (self.out.as_ref() == Some(&target)).then_some("the -out file")
     }
 }
 

@@ -5,7 +5,6 @@ use clap::Args;
 use std::path::PathBuf;
 
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
-use crate::utils::seg::SegParams;
 
 pub use crate::blastinput::value_parsers::SegSpec as BlastpSegSpec;
 use crate::blastinput::value_parsers::*;
@@ -745,6 +744,10 @@ pub struct ResolvedBlastpArgs {
     pub first_query_ordinal: usize,
     /// The ASCII PSSMs that psiblast writes after its round (`algorithm::psiblast::pssm`).
     pub psi_pssm: Option<crate::algorithm::psiblast::pssm::PssmRequest>,
+    /// psiblast `-in_pssm`: the query given as a PSSM, read with the options
+    /// (`algorithm::psiblast::in_pssm`); the search then runs the PSSM's stages
+    /// (`algorithm::pssm_search`).
+    pub psi_search: Option<std::sync::Arc<crate::algorithm::pssm_search::PsiSearch>>,
     /// `traceback_hitlist_size`, computed once (psiblast's reads `ADAPTIVE_CBS`).
     traceback_hitlist: usize,
     /// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search whose custom tabular
@@ -850,7 +853,7 @@ impl BlastpArgs {
         &self,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<ResolvedBlastpArgs> {
-        use crate::blastinput::app::{options_error, CompositionMode};
+        use crate::blastinput::app::CompositionMode;
         use crate::stats::protein_options::{
             protein_gap_existence_extend_params, suggested_threshold, suggested_window_size,
             ProteinOptionsCheck, SuggestionProgram,
@@ -1052,6 +1055,40 @@ impl BlastpArgs {
         if let Some(pssm) = &self.psiblast_pssm {
             pssm.check()?;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
+        // ```c++
+        //     if (args.Exist(kArgPSIInputChkPntFile) && args[kArgPSIInputChkPntFile]) {
+        //         CNcbiIstream& in = args[kArgPSIInputChkPntFile].AsInputFile();
+        //         _ASSERT(m_Pssm.Empty());
+        // ```
+        // psiblast's `-in_pssm` is read by the same handler, after the checks of its PSSM
+        // files (`algorithm::psiblast::in_pssm`).
+        let psi_search = match self
+            .psiblast_pssm
+            .as_ref()
+            .and_then(|pssm| pssm.in_pssm.as_deref())
+        {
+            Some(path) => {
+                let mut search = crate::algorithm::psiblast::in_pssm::read_in_pssm(path)?;
+                if let Some(pssm) = &self.psiblast_pssm {
+                    crate::algorithm::psiblast::in_pssm::check_pssm_file_options(pssm)?;
+                }
+                search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
+                    &search,
+                    mode,
+                    &options.matrix_name,
+                );
+                Some(std::sync::Arc::new(search))
+            }
+            None => None,
+        };
+        // A PSSM search runs modes 2 and 3 as 1 (`PsiBlastSetupScoreBlock`), which every later
+        // reader of the options sees (`algorithm::psiblast::in_pssm::position_based_mode`).
+        let mode = if psi_search.is_some() {
+            crate::algorithm::psiblast::in_pssm::position_based_mode(mode)
+        } else {
+            mode
+        };
         // NCBI's `Validate` (`BLAST_ValidateOptions`), shared with TBLASTN.
         crate::stats::protein_options::validate_protein_options(&ProteinOptionsCheck {
             gapped: !self.ungapped,
@@ -1157,6 +1194,7 @@ impl BlastpArgs {
             archive: self.archive.clone(),
             first_query_ordinal: self.first_query_ordinal,
             psi_pssm,
+            psi_search,
             app: self.app,
             inclusion_ethresh: self
                 .inclusion_ethresh
@@ -1172,7 +1210,6 @@ impl BlastpArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3152-3171 (`s_TruncateSpaces`
     // with `eTrunc_Both`: `isspace` at both ends; `seqdb::db_argument_name`).

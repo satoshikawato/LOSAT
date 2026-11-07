@@ -7,6 +7,7 @@
 //!   - check_ideal logic: use kbp_ideal if computed Lambda >= ideal Lambda
 
 use crate::config::ScoringMatrix;
+use crate::stats::sum_statistics::{blast_expm1, blast_powi};
 use crate::stats::KarlinParams;
 use crate::utils::matrix::{ncbistdaa, protein_score, BLASTAA_SIZE};
 
@@ -186,7 +187,7 @@ pub struct ScoreFreqProfile {
 impl ScoreFreqProfile {
     pub fn new(score_min: i32, score_max: i32) -> Self {
         let range = (score_max - score_min + 1) as usize;
-        let mut sprob = vec![0.0; range];
+        let sprob = vec![0.0; range];
 
         Self {
             sprob,
@@ -306,6 +307,10 @@ pub fn score_freq_profile_from_probabilities(
         }
     }
 
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if score_sum > 0.0001 || score_sum < -0.0001 {
         for score in obs_min..=obs_max {
             let prob = sfp.get_prob(score) / score_sum;
@@ -401,6 +406,10 @@ pub fn compute_score_freq_profile_for_matrix(
 
     // Compute average score (also normalize probabilities)
     let mut score_avg = 0.0;
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if score_sum > 0.0001 || score_sum < -0.0001 {
         for score in obs_min..=obs_max {
             let prob = sfp.get_prob(score) / score_sum;
@@ -414,8 +423,25 @@ pub fn compute_score_freq_profile_for_matrix(
     sfp
 }
 
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:405-418
-fn blast_gcd(mut a: i32, mut b: i32) -> i32 {
+/// NCBI reference: c++/src/algo/blast/core/ncbi_math.c:405-419
+/// ```c
+/// Int4 BLAST_Gcd(Int4 a, Int4 b)
+/// {
+///    Int4   c;
+///
+///    b = ABS(b);
+///    if (b > a)
+///       c=a, a=b, b=c;
+///
+///    while (b != 0) {
+///       c = a%b;
+///       a = b;
+///       b = c;
+///    }
+///    return a;
+/// }
+/// ```
+pub(crate) fn blast_gcd(mut a: i32, mut b: i32) -> i32 {
     let mut c: i32;
 
     b = b.abs();
@@ -442,57 +468,6 @@ fn blast_score_chk(lo: i32, hi: i32) -> Result<(), String> {
         return Err("Score range exceeds BLAST_SCORE_RANGE_MAX".to_string());
     }
     Ok(())
-}
-
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:33-55
-#[rustfmt::skip]
-fn blast_expm1(x: f64) -> f64 {
-    let absx = x.abs();
-    if absx > 0.33 {
-        return x.exp() - 1.0;
-    }
-    if absx < 1.0e-16 {
-        return x;
-    }
-    x * (1.0
-        + x * (1.0 / 2.0
-            + x * (1.0 / 6.0
-                + x * (1.0 / 24.0
-                    + x * (1.0 / 120.0
-                        + x * (1.0 / 720.0
-                            + x * (1.0 / 5040.0
-                                + x * (1.0 / 40320.0
-                                    + x * (1.0 / 362880.0
-                                        + x * (1.0 / 3628800.0
-                                            + x * (1.0 / 39916800.0
-                                                + x * (1.0 / 479001600.0
-                                                    + x / 6227020800.0))))))))))))
-}
-
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:444-470
-fn blast_powi(mut x: f64, mut n: i32) -> f64 {
-    if n == 0 {
-        return 1.0;
-    }
-    if x == 0.0 {
-        if n < 0 {
-            return f64::INFINITY;
-        }
-        return 0.0;
-    }
-    if n < 0 {
-        x = 1.0 / x;
-        n = -n;
-    }
-    let mut y = 1.0;
-    while n > 0 {
-        if (n & 1) != 0 {
-            y *= x;
-        }
-        n /= 2;
-        x *= x;
-    }
-    y
 }
 
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2491-2563
@@ -721,8 +696,8 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
     let mut low_alignment_score = 0;
     let mut high_alignment_score = 0;
     let mut inner_sum = 1.0;
-    let mut oldsum = 1.0;
-    let mut oldsum2 = 1.0;
+    // NCBI's `oldsum` and `oldsum2` (blast_stat.c:2266, 2344, 2379-2380) are read only under
+    // `#ifdef ADD_GEOMETRIC_TERMS_TO_K` (blast_stat.c:2383-2410), which nothing defines.
     alignment_score_probabilities[0] = 1.0;
 
     let mut iter_counter = 0;
@@ -812,9 +787,6 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
             inner_sum += alignment_score_probabilities[ptr_p_idx as usize];
             i += 1;
         }
-
-        oldsum2 = oldsum;
-        oldsum = inner_sum;
 
         iter_counter += 1;
         inner_sum /= iter_counter as f64;

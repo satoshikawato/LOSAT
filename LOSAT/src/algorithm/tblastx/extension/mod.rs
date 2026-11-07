@@ -21,12 +21,13 @@ mod x_two_hit_fast;
 // Re-export public functions
 pub use gapped::extend_gapped_protein;
 pub use two_hit::extend_hit_two_hit;
+pub(crate) use two_hit::extend_hit_two_hit_fitting;
 pub(crate) use two_hit::extend_hit_two_hit_with;
 // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the walks the sentinels stop, and the checks that choose them.
 pub(crate) use two_hit::extend_hit_two_hit_sent;
 pub(crate) use x_two_hit_fast::{
     matrix_walk_table, sent_contexts as x_tbx_sent_contexts, sent_subject as x_tbx_sent_subject,
-    two_hit_in, two_hit_sent_in, MatrixWalkTable, TwoHit,
+    two_hit_in, two_hit_in2, two_hit_in4, two_hit_sent_in, MatrixWalkTable, TwoHit,
 };
 // Diagnostic (LOSAT_X_STATS): the cells of one extension (tblastx/x_unit_probe.rs).
 pub(crate) use two_hit::x_two_hit_cells;
@@ -82,7 +83,7 @@ pub fn get_score(a: u8, b: u8) -> i32 {
 ///   Output +1: start = len - (3*offset + shift + 1) + 1 = len - 3*offset - shift
 ///   Output +1: end = len - (3*end + shift) + 1
 pub fn convert_coords(aa_start: usize, aa_end: usize, frame: i8, dna_len: usize) -> (usize, usize) {
-    let f_abs = frame.abs() as usize;
+    let f_abs = frame.unsigned_abs() as usize;
     let shift = f_abs - 1;
 
     if frame > 0 {

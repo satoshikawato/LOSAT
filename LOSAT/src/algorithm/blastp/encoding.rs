@@ -1,7 +1,7 @@
 //! Protein sequence encoding helpers for BLASTP
 
-use crate::algorithm::blastx::query_setup::combine_masks;
-use crate::algorithm::tblastn::archive::lowercase_runs;
+use crate::algorithm::common::masks::combine_masks;
+use crate::algorithm::common::masks::lowercase_runs;
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa};
 use crate::utils::seg::{SegMasker, SegParams};

@@ -411,3 +411,82 @@ fn database_search_with_the_exact_blastp_experiments() {
     std::fs::remove_dir_all(db.parent().unwrap()).unwrap();
     std::fs::remove_dir_all(query.parent().unwrap()).unwrap();
 }
+
+/// One blastp run of `query` against the database `tests/db_search/nz_reppo` (line DBID L1d) with
+/// `BLASTDB` the taxonomy database `taxdb` of `tests/seqdb/taxdb`, one query per batch, blocks of
+/// one batch (`LOSAT_X_BPQBLOCK=1`, the default is on) and outfmt `outfmt`: the exit status, the
+/// standard output, the standard error and the number of `[TIMING] blastp_total` lines.
+fn blastp_xml2_cache(query: &Path, taxdb: &str, outfmt: &str) -> (bool, Vec<u8>, String, usize) {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    for (name, _) in std::env::vars_os() {
+        let text = name.to_string_lossy();
+        if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
+            || text.starts_with("BLAST")
+            || text == "BATCH_SIZE"
+            || text == "PRE_FETCH_SEQS_LIMIT"
+        {
+            command.env_remove(name);
+        }
+    }
+    let output = command
+        .arg("blastp")
+        .arg("-query")
+        .arg(query)
+        .arg("-db")
+        .arg(root.join("tests/db_search/nz_reppo"))
+        .args(["-seg", "no", "-comp_based_stats", "0", "-evalue", "1e-3"])
+        .args(["-num_threads", "1", "-outfmt", outfmt])
+        .env("BLASTDB", root.join("tests/seqdb/taxdb").join(taxdb))
+        .env("BATCH_SIZE", "1")
+        .env("LOSAT_X_BPQBLOCK", "1")
+        .env("LOSAT_TIMING", "1")
+        .output()
+        .expect("run LOSAT");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let searches = stderr
+        .lines()
+        .filter(|line| line.starts_with("[TIMING] blastp_total:"))
+        .count();
+    (output.status.success(), output.stdout, stderr, searches)
+}
+
+/// Line DBID L1d review 1 Low 1: outfmt 13 to 16 ask for the refusal of NCBI's taxonomy cache
+/// (a volume of `nz_reppo` holds 99990, the damaged last entry of `offset_last_past_end`, and 150
+/// of its cache slot) at the first batch that reports a subject with a positive taxid, which can
+/// be in a later block: such a run takes the search of all queries, which refuses before any
+/// byte. `qx` (no hits) then `qN` (a1, 99990) make two blocks; with a healthy taxonomy database
+/// the run searches them block by block.
+#[test]
+fn an_xml2_run_that_the_taxonomy_cache_refuses_takes_the_search_of_all_queries() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let dir = std::env::temp_dir().join(format!("losat-bpqblock-xml2cache-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let query = dir.join("queries.faa");
+    let qx = std::fs::read_to_string(root.join("tests/db_search/nz_qx.faa")).unwrap();
+    let rep = std::fs::read_to_string(root.join("tests/db_search/nz_rep_q.faa")).unwrap();
+    let q_n: String = rep
+        .lines()
+        .take(2)
+        .map(|line| format!("{line}\n"))
+        .collect();
+    assert!(q_n.starts_with(">qN\n"), "{q_n}");
+    std::fs::write(&query, qx + &q_n).unwrap();
+    let (ok, _, stderr, searches) = blastp_xml2_cache(&query, "good", "16");
+    assert!(ok, "{stderr}");
+    assert_eq!(searches, 2, "the healthy taxonomy database: two blocks");
+    for outfmt in ["15", "16"] {
+        let (ok, stdout, stderr, _) = blastp_xml2_cache(&query, "offset_last_past_end", outfmt);
+        assert!(!ok, "outfmt {outfmt}: refused");
+        assert!(
+            stdout.is_empty(),
+            "outfmt {outfmt}: {} bytes before the refusal",
+            stdout.len()
+        );
+        assert!(
+            stderr.contains("256-slot taxonomy cache"),
+            "outfmt {outfmt}: {stderr}"
+        );
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}

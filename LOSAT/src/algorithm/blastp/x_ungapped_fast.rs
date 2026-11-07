@@ -33,9 +33,9 @@
 //! * Table. `T[q << 5 | s]` is `blosum62_score_ncbistdaa_direct(q, s)` (the function the
 //!   reference calls) for `q, s < 32`, with the one change that `BLAST_SCORE_MIN` (-32768, the
 //!   score of the sentinel code 0 against anything) is stored as -128 so that an entry is one
-//!   byte; the table is used only if every other entry is within -127..=127. A residue code
-//!   >= 32 would index a part of the 8 KiB table that holds zeros, so each extension ORs
-//!   together every code it reads and is handed to the reference when the OR is >= 32.
+//!   byte; the table is used only if every other entry is within -127..=127. A residue code >= 32
+//!   would index a part of the 8 KiB table that holds zeros, so each extension ORs together every
+//!   code it reads and is handed to the reference when the OR is >= 32.
 //! * Sentinel. Take `1 <= dropoff <= 127` (otherwise the reference runs). The score before a
 //!   step is never above the best (`best` is raised whenever `score` exceeds it, and both start
 //!   equal), so a sentinel step makes `best - score >= 128 > dropoff` with the stored -128 as it
@@ -137,6 +137,17 @@ fn build_matrix_table(matrix: ScoringMatrix) -> Option<MatrixTable> {
         table,
         max_word_size: (WORD_SCORE_ROOM / max_score) as usize,
     })
+}
+
+impl MatrixTable {
+    // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+    /// The table for the sentinel walks of `x_ungapped_sent.rs` (item SC2c): `None` unless the
+    /// sentinel (code 0) scores -128 against every code below 32, both ways, and the matrix's
+    /// largest score is at most 31 (`max_word_size` at least 4).
+    pub(crate) fn sent_table(&self) -> Option<&Table> {
+        let sentinel = (0..CODES).all(|c| self.table[c] == -128 && self.table[c << 5] == -128);
+        (sentinel && self.max_word_size >= 4).then_some(&*self.table)
+    }
 }
 
 /// The table of the walks for `matrix`, built at the first call for the matrix; `None` if a score

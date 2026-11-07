@@ -404,7 +404,7 @@ mod tests {
             };
             let mut lengths = Vec::new();
             for _ in 0..queries {
-                let len = if lcg(&mut state) % 10 == 0 {
+                let len = if lcg(&mut state).is_multiple_of(10) {
                     0
                 } else {
                     lo + (lcg(&mut state) as usize % span)

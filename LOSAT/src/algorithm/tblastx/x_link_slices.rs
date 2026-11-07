@@ -199,6 +199,10 @@ pub(crate) fn x_helped(on: bool) -> XHelped {
 }
 
 /// Whether this thread's linking calls are in the helped mode.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 pub(super) fn x_helped_now() -> bool {
     HELPED.with(std::cell::Cell::get)
 }

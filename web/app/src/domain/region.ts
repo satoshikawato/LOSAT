@@ -37,6 +37,18 @@ export function regionProblem(region: RegionText, length: number): string | unde
 }
 
 /**
+ * The fields that `regionProblem`'s problem is about: those empty, not a whole number or outside
+ * the record, or else both (a start after the stop, or equal to it). Neither without a problem.
+ */
+export function regionProblemFields(region: RegionText, length: number): { readonly start: boolean; readonly stop: boolean } {
+  if (regionProblem(region, length) === undefined) return { start: false, stop: false };
+  const wrong = (text: string) => !DIGITS.test(text.trim()) || Number(text) < 1 || Number(text) > length;
+  const start = wrong(region.start);
+  const stop = wrong(region.stop);
+  return start || stop ? { start, stop } : { start: true, stop: true };
+}
+
+/**
  * The region with its start and stop swapped, when that is all that keeps it from being one: both
  * positions within the record and the start after the stop. A reversed range is not a strand
  * (-strand chooses that), so the form offers the swap rather than reading it as one.

@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! Unit tests for LOSAT
 //!
 //! This file contains unit tests organized by module.

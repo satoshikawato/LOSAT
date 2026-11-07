@@ -126,6 +126,8 @@ describe('ExampleLoader', () => {
     ]);
     expect(state.subject.sources[0]!.base?.records.map((r) => r.id)).toEqual(['NR_102783.2', 'NR_114042.1']);
     expect(examples.state.get().load).toBeUndefined();
+    // The screen tells a screen reader that the set was put into the inputs (WA2-AX-03).
+    expect(examples.state.get().loaded).toEqual({ id: 'refseq-16s-bacteria', count: 1 });
     expect(examples.state.get().saved['refseq-16s-bacteria']).toEqual({
       id: 'refseq-16s-bacteria',
       url: SIXTEEN_S.url,
@@ -146,6 +148,7 @@ describe('ExampleLoader', () => {
     await settle();
     expect(downloader.requests).toHaveLength(1);
     expect(draft.state.get().subject.sources.map((s) => s.name)).toEqual(['bacteria.16SrRNA.fna']);
+    expect(examples.state.get().loaded).toEqual({ id: 'refseq-16s-bacteria', count: 2 });
   });
 
   it('shows the progress, and Cancel leaves the draft as it was', async () => {
@@ -162,6 +165,7 @@ describe('ExampleLoader', () => {
     downloader.release();
     await settle();
     expect(examples.state.get().load).toBeUndefined();
+    expect(examples.state.get().loaded).toBeUndefined();
     expect(draft.state.get().query.paste).toBe('>old\nACGT\n');
     expect(draft.state.get().subject.sources).toEqual([]);
   });

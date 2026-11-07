@@ -203,7 +203,7 @@ mod tests {
             for _ in 0..1 + next(&mut state) % 4 {
                 for _ in 0..1 + next(&mut state) % 40 {
                     let r = next(&mut state);
-                    query.push(if r % 50 == 0 {
+                    query.push(if r.is_multiple_of(50) {
                         (4 + r % 11) as u8
                     } else {
                         (r % 4) as u8

@@ -4,11 +4,11 @@
 No NCBI counterpart: this checks LOSAT's own lint settings, not ported behavior.
 
 `#![allow(warnings, clippy::all)]` at the top of `LOSAT/src/lib.rs` and `main.rs`
-(2026-06-23) and of most integration-test files silences every rustc and clippy
-warning in their crate or module, so `cargo clippy -- -D warnings` in CI cannot
-fail there. New
-test files copied the line with the rest of their header (SWEBOK audit
-2026-11-04, KA4: 22 -> 23 test files). This ratchet fails when a Rust file that
+(2026-06-23) and of most integration-test files silenced every rustc and clippy
+warning in their crate or module, so `cargo clippy -- -D warnings` in CI could
+not fail there. New test files copied the line with the rest of their header
+(SWEBOK audit 2026-11-04, KA4: 22 -> 23 test files). Every file dropped it by
+2026-11-06 and the list is empty. This ratchet fails when a Rust file that
 is not in `lint_allow_warnings.tsv` carries such an attribute (also an outer
 `#[allow(warnings)]`, or `clippy::all`), and when a listed
 file no longer does (remove it from the list: a shorter list is welcome, and
@@ -103,8 +103,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     unexpected, stale = evaluate(found, allowed)
     for path in unexpected:
         print(
-            f"UNEXPECTED\t{path}\tnew `#![allow(warnings ...)]`: remove it and allow only the lints "
-            "the file needs, by name",
+            f"UNEXPECTED\t{path}\tnew `#![allow(warnings ...)]`: remove it; allow a lint in the "
+            "[lints] table of LOSAT/Cargo.toml with a reason, or put #[expect(lint, reason = ...)] "
+            "on the item",
         )
     for path in stale:
         print(f"STALE\t{path}\tno longer has the attribute: remove it from {allowlist_path.name}")

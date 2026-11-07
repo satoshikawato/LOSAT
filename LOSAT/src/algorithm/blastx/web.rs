@@ -116,6 +116,10 @@ fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
 // ```
 // Original bytes are reparsed on each call with this role's gencode/mask
 // options; generic FASTA handles never cache translated or masked search state.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    expect(dead_code, reason = "called only by the web ABI (`web_api`, wasm32)")
+)]
 pub(crate) fn run_pair(
     args: BlastxArgs,
     query: &[u8],
@@ -404,7 +408,6 @@ pub(crate) fn run_pair(
     } else {
         x_run_batches(None)?;
     }
-    drop(x_run_batches);
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
     // ```c++
     //         formatter.PrintEpilog(opt);

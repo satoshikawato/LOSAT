@@ -1,5 +1,5 @@
 //! NCBI's merge of the preliminary hit lists of BLASTP query chunks (`BlastHSPStreamMerge`):
-//! the chunks themselves are `common/protein_query_split.rs`, and each chunk's preliminary
+//! the chunks themselves are `blastp/protein_query_split.rs`, and each chunk's preliminary
 //! stage is a search of its query parts (`blast_engine.rs`).
 
 use std::cmp::Ordering;

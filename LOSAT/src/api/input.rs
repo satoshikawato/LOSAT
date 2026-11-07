@@ -147,22 +147,39 @@ pub(super) fn check_archive_inputs(program: Program, inputs: Inputs<'_>) -> Resu
 /// a search of the records is the command line's search of the file. An input of white space
 /// only has no record. A reader error is the command line's message (`Error::Input`).
 pub fn read_fasta(program: Program, role: Role, bytes: &[u8]) -> Result<Vec<FastaRecord>, Error> {
-    read_source(FastaInputSource::from_bytes(
-        bytes,
-        reader_config(program, role),
-    ))
+    read_source(
+        FastaInputSource::from_bytes(bytes, reader_config(program, role)),
+        role,
+    )
 }
 
-/// Reads every record of an input source; a reader error is the command line's message.
+/// Reads every record of an input source; a reader error is the command line's message: the
+/// subjects end as `GetAllSeqs` ends (`ReadError::into_all_seqs_error`), the queries as a batch of
+/// queries ends (`ReadError::into_app_error`, `GetNextSeqBatch` rethrows the reader's exception).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:205-214
+/// ```c++
+///         catch (const CObjReaderParseException& e) {
+///             auto err = e.GetErrCode();
+///             if (err == CObjReaderParseException::eEOF) {
+///                 break;
+///             } else if (err == CObjReaderParseException::eNoDefline) {
+///                 CNcbiStrstream ss;
+///                 ss << "Query input doesn't start with "
+///                     "a defline or comment, line " << e.GetPos() << ends;
+///                 NCBI_THROW(CInputException, eInvalidInput, ss.str());
+///             }
+/// ```
 fn read_source<R: std::io::Read>(
     mut source: FastaInputSource<R>,
+    role: Role,
 ) -> Result<Vec<FastaRecord>, Error> {
     read_all(&mut source, &mut |_| Ok(())).map_err(|error| {
-        Error::Input(
-            format!("{:#}", error.into_app_error())
-                .trim_end_matches('\n')
-                .to_string(),
-        )
+        let error = match role {
+            Role::Query => error.into_app_error(),
+            Role::Subject => error.into_all_seqs_error(),
+        };
+        Error::Input(format!("{error:#}").trim_end_matches('\n').to_string())
     })
 }
 
@@ -222,7 +239,7 @@ pub fn read_inputs(
         };
         let mut source = FastaInputSource::from_bytes(bytes, config);
         source.set_id_scope(scope.clone());
-        read_source(source)
+        read_source(source, role)
     };
     let subject = read(Role::Subject, subject)?;
     let query = read(Role::Query, query)?;

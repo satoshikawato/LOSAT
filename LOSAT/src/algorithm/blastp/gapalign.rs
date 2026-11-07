@@ -3564,11 +3564,11 @@ fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
     use crate::core::composition_adjustment::adjust_scores::{
         blast_adjust_scores, build_matrix_info, read_aa_composition, BlastCompositionWorkspace,
     };
     use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
+    use crate::stats::compute_lambda_from_score_probs;
     use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa};
     use crate::utils::seg::{SegMasker, SegParams};
     use std::fs;

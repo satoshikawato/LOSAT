@@ -416,7 +416,7 @@ fn scan(
     let s_last = s_range[2] as usize;
     // NCBI's loop reads `subject[s + 2]` for every `s <= s_last`. The callers keep every word in
     // `subject`: TBLASTN's `x_scan_unit` does not scan a raised first-range word past it
-    // (aa_ungapped.c:500-501), and BLASTX pads its subject (`x_scan_bytes`).
+    // (aa_ungapped.c:499-500), and BLASTX pads its subject (`x_scan_bytes`).
     assert!(
         s_last + 2 < subject.len(),
         "LOSAT_X_TBNSCANBYTE: the word at {s_last} runs past a subject of {} letters",

@@ -85,7 +85,19 @@ pub(crate) struct RpsRun<'a> {
     /// `gap_x_dropoff` and `gap_x_dropoff_final` before the scale (from `kbp_gap_std`).
     pub(crate) x_drop_gapped: i32,
     pub(crate) x_drop_final: i32,
+    /// blastp's ungapped X-drop and gap trigger in bits (`word_options->x_dropoff`,
+    /// `kOptions->gap_trigger`).
+    pub(crate) x_drop_ungapped_bits: f64,
+    pub(crate) gap_trigger_bits: f64,
     pub(crate) options: &'a RpsSearch,
+}
+
+/// The refusal of a database whose scale makes a scaled score leave NCBI's `Int4` (gap costs,
+/// X-drops, cutoffs): NCBI's products overflow there.
+fn scale_overflow(scale: f64) -> anyhow::Error {
+    anyhow::anyhow!(
+        "a profile database of the scale {scale} (its scaled gap costs, X-drops or score cutoffs leave 32-bit integers) is not supported by LOSAT's RPSBLAST"
+    )
 }
 
 /// The per-query cutoffs of the preliminary stage at the database's scale.
@@ -196,12 +208,14 @@ fn spouge_etos(evalue: f64, kbp: &KarlinParams, gbp: &BlastGumbelBlk, m: i32, n:
 }
 
 impl RpsRun<'_> {
-    fn cutoffs(&self, query: &RpsQuery<'_>, scale: f64) -> RpsCutoffs {
+    /// The query's cutoffs, `None` where a scaled one leaves `i32`.
+    fn cutoffs(&self, query: &RpsQuery<'_>, scale: f64) -> Option<RpsCutoffs> {
         let int_scale = scale as i32;
-        let x_dropoff = (scale
-            * (crate::algorithm::tblastx::constants::X_DROP_UNGAPPED_BITS * std::f64::consts::LN_2
-                / query.kbp_std.lambda)
-                .ceil()) as i32;
+        let x_dropoff = scale
+            * (self.x_drop_ungapped_bits * std::f64::consts::LN_2 / query.kbp_std.lambda).ceil();
+        if !x_dropoff.is_finite() || x_dropoff > f64::from(i32::MAX) {
+            return None;
+        }
         let hit_cutoff = spouge_etos(
             self.evalue,
             &self.gapped,
@@ -209,16 +223,14 @@ impl RpsRun<'_> {
             (query.aa_seq.len() - 2) as i32,
             self.cutoff_subject_length,
         )
-        .wrapping_mul(int_scale);
-        let gap_trigger = ((crate::algorithm::tblastx::constants::GAP_TRIGGER_BIT_SCORE
-            * std::f64::consts::LN_2
-            + query.kbp_std.k.ln())
+        .checked_mul(int_scale)?;
+        let gap_trigger = ((self.gap_trigger_bits * std::f64::consts::LN_2 + query.kbp_std.k.ln())
             / query.kbp_std.lambda) as i32;
-        RpsCutoffs {
-            x_dropoff,
-            word_cutoff: gap_trigger.wrapping_mul(int_scale).min(hit_cutoff),
+        Some(RpsCutoffs {
+            x_dropoff: x_dropoff as i32,
+            word_cutoff: gap_trigger.checked_mul(int_scale)?.min(hit_cutoff),
             hit_cutoff,
-        }
+        })
     }
 
     /// Every query's traced results on the volume `files`, whose consensus letters are
@@ -232,6 +244,10 @@ impl RpsRun<'_> {
         let rows = files.rows();
         let offsets = files.offsets();
         let scale = files.aux.scale;
+        // (A whole number of 1 or more, `rps_hooks::rps_search`.)
+        if scale > f64::from(i32::MAX) {
+            return Err(scale_overflow(scale));
+        }
         let int_scale = scale as i32;
         let table = RpsTable {
             cells: files.cells().expect("checked when the volume was opened"),
@@ -250,19 +266,58 @@ impl RpsRun<'_> {
         // ```
         let (x_drop_gapped, x_drop_final) = if scale > 1.0 {
             (
-                self.x_drop_gapped * int_scale,
-                self.x_drop_final * int_scale,
+                self.x_drop_gapped.checked_mul(int_scale),
+                self.x_drop_final.checked_mul(int_scale),
             )
         } else {
-            (self.x_drop_gapped, self.x_drop_final)
+            (Some(self.x_drop_gapped), Some(self.x_drop_final))
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:558-562
         // ```c
         //    params->gap_open = score_options->gap_open * (Int4)scale_factor;
         //    params->gap_extend = score_options->gap_extend * (Int4)scale_factor;
         // ```
-        let gap_open = files.aux.gap_open * int_scale;
-        let gap_extend = files.aux.gap_extend * int_scale;
+        let (Some(x_drop_gapped), Some(x_drop_final), Some(gap_open), Some(gap_extend)) = (
+            x_drop_gapped,
+            x_drop_final,
+            files.aux.gap_open.checked_mul(int_scale),
+            files.aux.gap_extend.checked_mul(int_scale),
+        ) else {
+            return Err(scale_overflow(scale));
+        };
+        // Every searched query's cutoffs, before the search (`BlastHitSavingParametersNew` and
+        // `BlastInitialWordParametersNew` set them for the whole batch before its scan).
+        let cutoffs = self
+            .queries
+            .iter()
+            .map(|query| {
+                if query.valid {
+                    self.cutoffs(query, scale)
+                        .ok_or_else(|| scale_overflow(scale))
+                } else {
+                    Ok(RpsCutoffs {
+                        x_dropoff: 0,
+                        word_cutoff: 0,
+                        hit_cutoff: 0,
+                    })
+                }
+            })
+            .collect::<Result<Vec<_>>>()?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1862-1895
+        // ```c
+        //       kbp[kbp_context]->Lambda /= scaling_factor;
+        //       ...
+        //       /* Put back the unscaled value of Lambda. */
+        //       kbp[kbp_context]->Lambda *= scaling_factor;
+        // ```
+        // NCBI divides Lambda by the scale for each HSP's e-value and multiplies it back; at a
+        // scale where that does not give Lambda back, NCBI's Lambda changes from HSP to HSP.
+        let lambda = self.gapped.lambda;
+        if lambda / scale * scale != lambda {
+            anyhow::bail!(
+                "a profile database of the scale {scale} (NCBI BLAST+ divides Lambda by the scale for each e-value and multiplies it back, which changes Lambda at this scale) is not supported by LOSAT's RPSBLAST"
+            );
+        }
         let traceback = RpsTraceback {
             rows,
             offsets,
@@ -304,7 +359,7 @@ impl RpsRun<'_> {
             if !query.valid {
                 return Ok(none);
             }
-            let cutoffs = self.cutoffs(query, scale);
+            let cutoffs = &cutoffs[q_idx];
             let prelim = RpsPrelim {
                 word: RpsWordParams {
                     rows: RpsRows { rows },

@@ -29,7 +29,9 @@ use super::{database, BlastpRuntimeLookup};
 use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::hsp::BlastpHitList;
 use crate::algorithm::rps_search::engine::{batch_gapped_k, RpsQuery, RpsRun, RpsSearch};
-use crate::algorithm::tblastx::constants::{X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM};
+use crate::algorithm::tblastx::constants::{
+    GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
+};
 use crate::algorithm::tblastx::lookup::{
     prepare_blosum62_lookup_query_for_word_size, BlastAaLookupTable, QueryContext,
 };
@@ -250,14 +252,12 @@ pub(super) fn rps_search(
             aux.gap_extend
         );
     }
-    // NCBI's scaled values: `(Int4)scale` multiplies the costs and cutoffs, Lambda is divided by
-    // the scale and multiplied back after each e-value (`Blast_HSPListGetEvalues`), which keeps
-    // BLOSUM62 11/1's Lambda only for the scales tested here.
+    // NCBI's scaled values: `(Int4)scale` multiplies the costs and cutoffs (a whole scale of 1
+    // or more here; `RpsRun::search_volume` refuses one whose products leave `Int4` and one that
+    // changes Lambda).
     let scale = aux.scale;
     let lambda = run.gapped_params.lambda;
-    if !(scale >= 1.0 && scale.fract() == 0.0 && scale <= f64::from(i32::MAX / 4))
-        || lambda / scale * scale != lambda
-    {
+    if !(scale >= 1.0 && scale.fract() == 0.0) {
         bail!(
             "a profile database of the scale {scale} (not a whole number of 1 or more) is not supported by LOSAT's RPSBLAST"
         );
@@ -403,6 +403,8 @@ pub(super) fn rps_search(
         window: args.window_size as i32,
         x_drop_gapped,
         x_drop_final,
+        x_drop_ungapped_bits: X_DROP_UNGAPPED_BITS,
+        gap_trigger_bits: GAP_TRIGGER_BIT_SCORE,
         options: rps,
     };
     let traced = engine.search_volume(&files, &consensus, pool)?;

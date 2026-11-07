@@ -9001,15 +9001,17 @@ fn run_resolved_in_pool(
                     //     continue;
                     // }
                     // ```
-                    let ctx_idx = x_context_table.get(query_offset).unwrap_or_else(|| {
-                        blastp_context_idx_for_query_offset_with_bounds(
-                            &contexts,
-                            context_lookup_bounds,
-                            query_offset,
-                        )
-                    });
-                    let ctx = &contexts[ctx_idx];
-                    if query_offset - diff < ctx.frame_base {
+                    let (ctx_idx, frame_base) = x_context_table
+                        .get_with_start(query_offset)
+                        .unwrap_or_else(|| {
+                            let idx = blastp_context_idx_for_query_offset_with_bounds(
+                                &contexts,
+                                context_lookup_bounds,
+                                query_offset,
+                            );
+                            (idx, contexts[idx].frame_base)
+                        });
+                    if query_offset - diff < frame_base {
                         diag_entry.set_last_hit(subject_offset + subject_diag_offset);
                         return;
                     }
@@ -9213,15 +9215,17 @@ fn run_resolved_in_pool(
                  diag_entry: &mut DiagStruct| {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:551-570
                     // (as in the closure above)
-                    let ctx_idx = x_context_table.get(query_offset).unwrap_or_else(|| {
-                        blastp_context_idx_for_query_offset_with_bounds(
-                            &contexts,
-                            context_lookup_bounds,
-                            query_offset,
-                        )
-                    });
-                    let ctx = &contexts[ctx_idx];
-                    if query_offset - diff < ctx.frame_base {
+                    let (ctx_idx, frame_base) = x_context_table
+                        .get_with_start(query_offset)
+                        .unwrap_or_else(|| {
+                            let idx = blastp_context_idx_for_query_offset_with_bounds(
+                                &contexts,
+                                context_lookup_bounds,
+                                query_offset,
+                            );
+                            (idx, contexts[idx].frame_base)
+                        });
+                    if query_offset - diff < frame_base {
                         diag_entry.set_last_hit(subject_offset + subject_diag_offset);
                         return;
                     }
@@ -13694,17 +13698,25 @@ mod tests {
                     if bounds.min_length > 0 && q >= base {
                         continue;
                     }
+                    let idx = blastp_context_idx_for_query_offset_with_bounds(&contexts, bounds, q);
                     assert_eq!(
                         table.get(q),
-                        Some(blastp_context_idx_for_query_offset_with_bounds(
-                            &contexts, bounds, q
-                        )),
+                        Some(idx),
+                        "lengths {:?} offset {q}",
+                        &lengths[..lengths.len().min(12)]
+                    );
+                    // the frame base the candidate closures test (SC2e)
+                    assert_eq!(
+                        table.get_with_start(q),
+                        Some((idx, contexts[idx].frame_base)),
                         "lengths {:?} offset {q}",
                         &lengths[..lengths.len().min(12)]
                     );
                 }
                 assert_eq!(table.get(span as i32), None);
                 assert_eq!(table.get(-1), None);
+                assert_eq!(table.get_with_start(span as i32), None);
+                assert_eq!(table.get_with_start(-1), None);
             }
         }
         let empty = super::super::x_seed_fused::XContextTable::new(&[], 4);

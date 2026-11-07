@@ -11,11 +11,11 @@
 // n and p) act on the same selection as the tables. The subject is chosen in the tool band (the
 // Owner, 2026-11-02: chosen only by a Descriptions row, the plotted pair was a riddle) or by a
 // Descriptions row: one selection. The wheel alone, a finger moving up or down and two fingers
-// are the page's: they scroll or zoom the page (S13 screen review L4, WA2-AX-10); a finger
-// moving sideways moves the plot. The grid and the HSPs are drawn on a base canvas, the
-// HSPs by colour and opacity class, one stroke each; hover and selection on a canvas above it, so
-// that they redraw cheaply. Input is gathered and drawn once per animation frame. A TBLASTN or
-// BLASTX plot counts 3 nt per aa for its proportions (S13b decision 26).
+// are left to the page (S13 screen review L4, WA2-AX-10); a finger moving sideways moves the
+// plot. The grid and the HSPs are drawn on a base canvas, the HSPs by colour and opacity class,
+// one stroke each; hover and selection on a canvas above it, so that they redraw cheaply. Input is
+// gathered and drawn once per animation frame. A TBLASTN or BLASTX plot counts 3 nt per aa for its
+// proportions (S13b decision 26).
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId, watch } from 'vue';
 import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../application/results';
 import {

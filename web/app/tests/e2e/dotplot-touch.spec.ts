@@ -113,7 +113,7 @@ test.describe('a phone', () => {
     const after = await view(canvas);
     expect(after.slice(2)).toEqual(before.slice(2));
     expect(await scrollY(page)).toBe(top);
-    // The browser takes a finger moving up or down, and two fingers (a pinch zooms the page).
+    // The browser takes a finger moving up or down, and two fingers are left to the page.
     await expect(canvas).toHaveCSS('touch-action', 'pan-y pinch-zoom');
   });
 
@@ -319,6 +319,41 @@ test.describe('a phone', () => {
     }
   });
 
+  test('with the Graphic Summary scrolled, a tap on the last 8 px of the header chooses the first row in view, never the row the header hides', async ({ page }) => {
+    test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine has three subjects; 41 rows need 41 subjects');
+    // 50 subjects holding the same 60 letters of the query: every bar has the same ends, so only the row decides.
+    const query = dna(81, 200);
+    const part = query.slice(60, 120);
+    const subjects = Array.from({ length: 50 }, (_, i) => `>s${i + 1}\n${dna(1000 + i, 25)}${part}${dna(3000 + i, 25)}\n`).join('');
+    await program(page, 'blastn');
+    await paste(page, 'query', `>q\n${query}\n`);
+    await paste(page, 'subject', subjects);
+    await runAndOpen(page);
+    const canvas = page.getByTestId('graphic-canvas');
+    await expect(canvas).toHaveAttribute('data-rows', '50');
+    const targets = async (): Promise<Bar[]> => JSON.parse((await canvas.getAttribute('data-targets'))!) as Bar[];
+    const header = Math.min(...(await targets()).map((bar) => bar.y)) - 6;
+    // Scrolled by 10 px: the first row's middle is 4 px above the header, and its bar is hidden.
+    await page.locator('.graphic-scroll').evaluate((element) => {
+      element.scrollTop = 10;
+    });
+    await expect.poll(async () => (await targets()).some((bar) => bar.y < header)).toBe(true);
+    const bars = await targets();
+    const hidden = bars.filter((bar) => bar.y < header);
+    const shown = bars.filter((bar) => bar.y >= header).sort((m, n) => m.y - n.y);
+    expect(hidden).toHaveLength(1);
+    // Another row's bar is chosen first (a click), so that the tap changes the selection.
+    const other = shown[4]!;
+    await centre(canvas);
+    let box = (await canvas.boundingBox())!;
+    await page.mouse.click(box.x + other.x, box.y + other.y);
+    await expect(canvas).toHaveAttribute('data-selected', other.hsp);
+    await centre(canvas);
+    box = (await canvas.boundingBox())!;
+    await page.touchscreen.tap(box.x + shown[0]!.x, box.y + header - 4);
+    await expect(canvas).toHaveAttribute('data-selected', shown[0]!.hsp);
+  });
+
   test('the "First lines" and "Records" of an input are 24 px touch targets', async ({ page }) => {
     await program(page, 'blastn');
     await paste(page, 'query', `>q\n${dna(71, 120)}\n`);
@@ -472,7 +507,7 @@ async function tickLabels(canvas: Locator): Promise<[string[], string[]]> {
   return JSON.parse((await canvas.getAttribute('data-ticks')) ?? '[[],[]]') as [string[], string[]];
 }
 
-test('the dot plot numbers both axes of a view shorter than 100 letters: a short pair, and Zoom to HSP on its HSP of one letter', async ({ page }) => {
+test('the dot plot numbers both axes of a view shorter than 100 letters: a short pair', async ({ page }) => {
   // Two short sequences (8 against 16 letters, results.spec.ts's HSP of one letter), whole.
   const qIdx = BUILD_HAS_ENGINE ? 0 : 2;
   await program(page, 'blastn');
@@ -492,16 +527,26 @@ test('the dot plot numbers both axes of a view shorter than 100 letters: a short
     ['0', '2', '4', '6', '8'],
     ['0', '5', '10', '15'],
   ]);
-  // "Zoom to HSP" on the HSP of one letter: its margin (10 letters at least) covers the whole pair of 8 and 16
-  // letters, so the view stays the pair's and keeps its numbers.
-  const single = page.getByTestId('results-dotplot').getByTestId('hsp-list').locator('[data-testid^="hsp-row-"][data-orientation="unknown"]');
-  await single.click();
+});
+
+test('Zoom to a short HSP of a 600-letter pair gives a view of 100 letters or fewer, with numbers on both axes', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, "the FakeEngine's HSPs do not follow the sequences");
+  // 30 letters of the query inside a subject of 430: one HSP of 30 letters.
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q\n${LONG}\n`);
+  await paste(page, 'subject', `>s\n${dna(91, 200)}${LONG.slice(300, 330)}${dna(92, 200)}\n`);
+  await runAndOpen(page);
+  await showTab(page, 'pane-dotplot');
+  const canvas = page.getByTestId('dotplot-canvas');
+  await expect(canvas).toHaveAttribute('data-view', '0,600,0,430');
+  await expect(page.getByTestId('results-dotplot').getByTestId('hsp-list').locator('[data-testid^="hsp-row-"]')).toHaveCount(1);
+  await page.getByTestId('results-dotplot').getByTestId('hsp-list').locator('[data-testid^="hsp-row-"]').click();
   await page.getByTestId('dotplot-zoom-hsp').click();
-  await expect(canvas).toHaveAttribute('data-view', '0,8,0,16');
-  await expect.poll(() => tickLabels(canvas)).toEqual([
-    ['0', '2', '4', '6', '8'],
-    ['0', '5', '10', '15'],
-  ]);
+  await expect(canvas).not.toHaveAttribute('data-view', '0,600,0,430');
+  const [x0, x1, y0, y1] = await view(canvas);
+  expect(x1! - x0!, 'the query axis').toBeLessThanOrEqual(100);
+  expect(y1! - y0!, 'the subject axis').toBeLessThanOrEqual(100);
+  await expect.poll(async () => (await tickLabels(canvas)).map((labels) => labels.length >= 2)).toEqual([true, true]);
 });
 
 test('the dot plot numbers both axes of a view zoomed to under 100 letters, and keeps blast2dotplot.py\'s ticks above 100', async ({ page }) => {

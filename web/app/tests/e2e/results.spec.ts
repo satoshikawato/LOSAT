@@ -1553,7 +1553,7 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
       name: /^Dot plot of 2 HSPs\. .*Ctrl or ⌘ and the mouse wheel.* n and p to select the next or previous HSP; Enter to show the selected HSP, and Escape to close it\.$/,
     }),
   ).toHaveAttribute('data-testid', 'dotplot-canvas');
-  await expect(canvas).toHaveCSS('touch-action', 'pan-y');
+  await expect(canvas).toHaveCSS('touch-action', 'pan-y pinch-zoom');
   await expect(page.getByTestId('dotplot-legend-selected')).toBeVisible();
 
   // An HSP chosen in the list is selected on the plot; "Zoom to HSP" frames it, from a view

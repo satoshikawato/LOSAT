@@ -89,8 +89,10 @@
 .plot-base {
   display: block;
   cursor: crosshair;
-  /* A finger moving up or down scrolls the page; one moving sideways moves the plot (S13 screen review L4). */
+  /* A finger moving up or down scrolls the page, and two fingers zoom it; one moving sideways moves
+     the plot (S13 screen review L4, WA2-AX-10). pan-y alone where pinch-zoom is not known. */
   touch-action: pan-y;
+  touch-action: pan-y pinch-zoom;
 }
 
 .plot-base:focus-visible {

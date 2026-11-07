@@ -167,15 +167,17 @@ button {
     transform 0.1s;
 }
 
-button:hover:not(:disabled) {
+button:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--panel);
 }
 
-button:active:not(:disabled) {
+button:active:not(:disabled, [aria-disabled='true']) {
   transform: scale(0.97);
 }
 
-button:disabled {
+/* A button that cannot be pressed for a while keeps the focus: aria-disabled, shown as disabled (WA2-AX-04). */
+button:disabled,
+button[aria-disabled='true'] {
   cursor: not-allowed;
   opacity: 0.5;
 }
@@ -199,7 +201,7 @@ button.link {
   text-decoration: underline;
 }
 
-button.link:hover:not(:disabled) {
+button.link:hover:not(:disabled, [aria-disabled='true']) {
   background: none;
   color: var(--accent-hover);
 }
@@ -437,13 +439,13 @@ input[type='radio'] {
    width (one token too, a delim= value): its tab, its command, Export and its "Download All" item. */
 .tabs button.custom-output,
 .outputs-view .command,
-.outputs-view > button,
+.outputs-panel > button,
 .download-list button {
   overflow-wrap: anywhere;
 }
 
-.tabs button[aria-pressed='true'],
-.tabs button[aria-pressed='true']:hover:not(:disabled) {
+.tabs button[aria-selected='true'],
+.tabs button[aria-selected='true']:hover:not(:disabled) {
   border-color: var(--accent);
   color: #fff;
   background: var(--accent);
@@ -1327,7 +1329,7 @@ textarea {
   box-shadow: 0 1px 2px rgba(37, 99, 235, 0.3);
 }
 
-.primary-action:hover:not(:disabled),
+.primary-action:hover:not(:disabled, [aria-disabled='true']),
 .filter-submit:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);

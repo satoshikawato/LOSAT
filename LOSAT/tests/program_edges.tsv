@@ -1,0 +1,28 @@
+# The references between the programs under LOSAT/src/algorithm/ that review allowed, read by
+# LOSAT/tests/check_program_edges.py (CI `rust lint`). scope: code = some site outside test code,
+# test = test code only. This list only shrinks: remove a row when its edge is gone. An edge up
+# the layering (LAYERS in the checker) fails even when listed.
+# Rows: python3 LOSAT/tests/check_program_edges.py --root . --list | cut -f1-3
+src	dst	scope
+blastn	common	code
+blastp	blastn	code
+blastp	common	code
+blastp	psiblast	code
+blastp	pssm_search	code
+blastp	tblastx	code
+blastx	blastn	code
+blastx	blastp	code
+blastx	common	code
+blastx	tblastn	code
+blastx	tblastx	code
+psiblast	blastp	code
+psiblast	pssm_search	code
+pssm_search	blastn	code
+pssm_search	blastp	code
+pssm_search	tblastx	code
+tblastn	blastn	code
+tblastn	blastp	code
+tblastn	common	code
+tblastn	tblastx	code
+tblastx	blastn	code
+tblastx	common	code

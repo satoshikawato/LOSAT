@@ -1,3 +1,13 @@
+//! The search programs (blastn, blastp, blastx, psiblast, pssm_search, tblastn, tblastx) and
+//! `common`, the code they share.
+//!
+//! The programs are layered, bottom to top:
+//! `common < blastn < tblastx < blastp < tblastn < blastx`. A program uses only the programs
+//! below it, and `common` uses none; psiblast and pssm_search join the order above blastp once
+//! their cycle with blastp is cut. `LOSAT/tests/check_program_edges.py` (CI) fails on a reference
+//! up the order and on a reference between two programs that `LOSAT/tests/program_edges.tsv` does
+//! not list; that list only shrinks.
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blastp_args.cpp:71-115
 // ```c
 // arg.Reset(new CGenericSearchArgs(kQueryIsProtein, false, false,

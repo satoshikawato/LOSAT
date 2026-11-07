@@ -311,15 +311,17 @@ impl RpsVolumeFiles {
         }
         let num_rows =
             usize::try_from(offsets[num_profiles]).map_err(|_| refused(".rps row count"))?;
+        // NCBI reads the rows that the offsets name and nothing after them: bytes after the last
+        // row are searched as NCBI searches them (not read).
         let rows_start = 8 + 4 * (num_profiles + 1);
         if rps.len()
-            != num_rows
+            < num_rows
                 .checked_mul(alphabet * 4)
                 .and_then(|bytes| bytes.checked_add(rows_start))
                 .ok_or_else(|| refused(".rps row count"))?
         {
             return Err(refused(
-                ".rps file length is not that of its rows (header, offsets, one row per position)",
+                ".rps file is shorter than its rows (header, offsets, one row per position)",
             ));
         }
         if aux.karlin_k.len() < num_profiles {
@@ -626,6 +628,22 @@ mod tests {
             RpsVolumeFiles::open(&base, &[3, 2]),
             Err(RpsOpenError::Refused(_))
         ));
+        // A .rps cut inside its rows (NCBI crashes).
+        let base = write_volume(&dir, 28, AUX);
+        let rps = std::fs::read(base.with_extension("rps")).unwrap();
+        std::fs::write(base.with_extension("rps"), &rps[..rps.len() - 4]).unwrap();
+        assert!(matches!(
+            RpsVolumeFiles::open(&base, &[3, 2]),
+            Err(RpsOpenError::Refused(_))
+        ));
+        // Bytes after the last row are not read (NCBI searches the file).
+        let mut longer = rps.clone();
+        longer.extend_from_slice(&[0x7f; 112]);
+        std::fs::write(base.with_extension("rps"), &longer).unwrap();
+        let files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
+        assert_eq!(files.rows().len(), 7);
+        // (Windows does not write a mapped file.)
+        drop(files);
         // An empty .rps (NCBI crashes).
         let base = write_volume(&dir, 28, AUX);
         std::fs::write(base.with_extension("rps"), b"").unwrap();

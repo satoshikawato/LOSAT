@@ -510,14 +510,17 @@ pub(super) fn round_outcome(
         }
         found
     });
-    let next = has_alignments
-        .then(|| {
-            let mut after = io.state.clone();
-            after.advance(set.clone());
-            after.go() || io.save_last
-        })
-        .unwrap_or(false)
-        .then(|| next_pssm(args, io, &hsps, ranges, shown_subjects, contexts, gapped));
+    // NCBI makes the next PSSM after `Advance` when another round follows or the last PSSM is
+    // saved (`itr || GetSaveLastPssm()`), and after a round with alignments only.
+    let makes_next = if has_alignments {
+        let mut after = io.state.clone();
+        after.advance(set.clone());
+        after.go() || io.save_last
+    } else {
+        false
+    };
+    let next =
+        makes_next.then(|| next_pssm(args, io, &hsps, ranges, shown_subjects, contexts, gapped));
     *io.outcome.lock().expect("the round's outcome") = Some(RoundOutcome {
         has_alignments,
         set,

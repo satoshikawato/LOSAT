@@ -10,11 +10,12 @@
 // Zoom (Ctrl or ⌘ and the wheel, buttons, + and -), pan (drag, arrow keys) and selection (click,
 // n and p) act on the same selection as the tables. The subject is chosen in the tool band (the
 // Owner, 2026-11-02: chosen only by a Descriptions row, the plotted pair was a riddle) or by a
-// Descriptions row: one selection. The wheel alone and a finger moving up or down
-// scroll the page (S13 screen review L4). The grid and the HSPs are drawn on a base canvas, the
-// HSPs by colour and opacity class, one stroke each; hover and selection on a canvas above it, so
-// that they redraw cheaply. Input is gathered and drawn once per animation frame. A TBLASTN or
-// BLASTX plot counts 3 nt per aa for its proportions (S13b decision 26).
+// Descriptions row: one selection. The wheel alone, a finger moving up or down and two fingers
+// are left to the page (S13 screen review L4, WA2-AX-10); a finger moving sideways moves the
+// plot. The grid and the HSPs are drawn on a base canvas, the HSPs by colour and opacity class,
+// one stroke each; hover and selection on a canvas above it, so that they redraw cheaply. Input is
+// gathered and drawn once per animation frame. A TBLASTN or BLASTX plot counts 3 nt per aa for its
+// proportions (S13b decision 26).
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId, watch } from 'vue';
 import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../application/results';
 import {
@@ -53,7 +54,15 @@ const HALO = 'rgba(255, 196, 0, 0.75)';
 /** Tick labels: at least 12 px (S13 screen review L4). */
 const FONT = '12px system-ui, sans-serif';
 const TITLE_FONT = '600 13px system-ui, sans-serif';
+/** How far from a line a press picks it: a mouse's, and a finger's (WA2-AX-11: a short line was hard to hit). */
 const PICK_PX = 8;
+const TOUCH_PICK_PX = 16;
+/**
+ * How far a press moves before it is a drag, not a click: a mouse's, and a finger's, which wobbles
+ * more and, moving, may be the page's (onPointerMove).
+ */
+const DRAG_PX = 3;
+const TOUCH_DRAG_PX = 8;
 /** The HSP popup's largest width (its CSS max-width, in rem) and its gap from the plot: it goes right of the plot where the stage has this room. */
 const POPUP_MAX_REM = 20;
 const POPUP_GAP_PX = 12;
@@ -169,7 +178,8 @@ let pendingView: View | undefined;
 const current = (): View => pendingView ?? view.value;
 let hovered = -1;
 let pointer: { x: number; y: number } | undefined;
-let drag: { x: number; y: number; moved: boolean; id: number } | undefined;
+/** The press in progress: where it last was, whether it moves the plot, its pointer, and whether it is a finger. */
+let drag: { x: number; y: number; moved: boolean; id: number; touch: boolean } | undefined;
 let frame = 0;
 /** Frames drawn (`data-drawn`). */
 let drawn = 0;
@@ -334,12 +344,13 @@ function drawBase(): void {
   context.textAlign = 'center';
   context.textBaseline = 'bottom';
   const labelEdge = b.top - 1 - MAJOR_PX - GAP;
-  for (const t of labelled(context, xTicks, sx)) {
+  const [xLabels, yLabels] = [labelled(context, xTicks, sx), labelled(context, yTicks, sy)];
+  for (const t of xLabels) {
     const text = tickLabel(t, xTicks.unit);
     // End labels stay inside the canvas (S13 screen review L7); all sit above the ticks, off the frame.
     context.fillText(text, within(toPixelX(t, v, b), context.measureText(text).width, W), labelEdge);
   }
-  for (const t of labelled(context, yTicks, sy)) {
+  for (const t of yLabels) {
     const text = tickLabel(t, yTicks.unit);
     context.save();
     context.translate(labelEdge, within(toPixelY(t, v, b), context.measureText(text).width, H));
@@ -358,8 +369,11 @@ function drawBase(): void {
   context.rotate(-Math.PI / 2);
   context.fillText(yTitle, 0, 0);
   context.restore();
-  // The titles as drawn, for the tests.
-  if (base.value !== undefined) base.value.dataset['titles'] = JSON.stringify([xTitle, yTitle]);
+  // The titles and the tick labels as drawn, for the tests.
+  if (base.value !== undefined) {
+    base.value.dataset['titles'] = JSON.stringify([xTitle, yTitle]);
+    base.value.dataset['ticks'] = JSON.stringify([xLabels.map((t) => tickLabel(t, xTicks.unit)), yLabels.map((t) => tickLabel(t, yTicks.unit))]);
+  }
 }
 
 /**
@@ -463,9 +477,9 @@ function ends(i: number, v = view.value): [number, number, number, number] {
   return [toPixelX(s.x0[i]!, v, b), toPixelY(s.y0[i]!, v, b), toPixelX(s.x1[i]!, v, b), toPixelY(s.y1[i]!, v, b)];
 }
 
-/** The HSP whose line, as the frame shows it, is nearest to a point of the plot, within PICK_PX, or -1. */
-function pick(x: number, y: number): number {
-  return pickLine(x, y, segments.value.list.length, (i) => ends(i), box.value, PICK_PX);
+/** The HSP whose line, as the frame shows it, is nearest to a point of the plot, within `reach` px, or -1. */
+function pick(x: number, y: number, reach = PICK_PX): number {
+  return pickLine(x, y, segments.value.list.length, (i) => ends(i), box.value, reach);
 }
 
 // --- zoom, pan and selection ---------------------------------------------------------------------
@@ -513,17 +527,32 @@ function canvasPoint(event: MouseEvent): { x: number; y: number } {
 function onPointerDown(event: PointerEvent): void {
   // A line chosen with the pointer is not told as n and p's (its popup shows it).
   stepped.value = false;
-  drag = { x: event.clientX, y: event.clientY, moved: false, id: event.pointerId };
+  const touch = event.pointerType === 'touch';
+  // A second finger makes a pinch, the page's (touch-action): the first finger neither moves the plot nor taps.
+  if (touch && drag !== undefined && drag.id !== event.pointerId) {
+    drag = undefined;
+    return;
+  }
+  drag = { x: event.clientX, y: event.clientY, moved: false, id: event.pointerId, touch };
   base.value?.setPointerCapture(event.pointerId);
 }
+/**
+ * A press that moves drags the plot. A finger moves it only when it first moves more sideways than
+ * up or down: one moving up or down scrolls the page (touch-action: pan-y), and the plot leaves it
+ * from its first move, before the browser takes the finger with a pointercancel (WA2-AX-10: the
+ * plot moved with the page by 7 to 10 % of its view).
+ */
 function onPointerMove(event: PointerEvent): void {
   pointer = canvasPoint(event);
   hoverDirty = true;
   if (drag !== undefined && drag.id === event.pointerId) {
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;
-    if (drag.moved || Math.hypot(dx, dy) >= 3) {
-      drag.moved = true;
+    if (!drag.moved && Math.hypot(dx, dy) >= (drag.touch ? TOUCH_DRAG_PX : DRAG_PX)) {
+      if (drag.touch && Math.abs(dx) <= Math.abs(dy)) drag = undefined;
+      else drag.moved = true;
+    }
+    if (drag?.moved) {
       pan(dx, dy);
       drag.x = event.clientX;
       drag.y = event.clientY;
@@ -535,13 +564,13 @@ function onPointerMove(event: PointerEvent): void {
 /** A press that did not move clicks: on a line it selects the HSP and opens its popup, elsewhere it closes the popup. */
 function onPointerUp(event: PointerEvent): void {
   if (drag === undefined || drag.id !== event.pointerId) return;
-  const moved = drag.moved;
+  const { moved, touch } = drag;
   drag = undefined;
   hoverDirty = true;
   schedule(false);
   if (moved) return;
   const { x, y } = canvasPoint(event);
-  const i = pick(x, y);
+  const i = pick(x, y, touch ? TOUCH_PICK_PX : PICK_PX);
   if (i < 0) {
     popupOpen.value = false;
     return;

@@ -36,6 +36,8 @@ const dragging = ref(false);
 const fileInput = ref<HTMLInputElement>();
 const openButton = ref<HTMLButtonElement>();
 const sourceItems = ref<HTMLElement>();
+const fetchButton = ref<HTMLButtonElement>();
+const fetchGroupList = ref<HTMLElement>();
 
 /**
  * Removes an input; the focus goes to the input that takes its place in the list, or to "Open FASTA
@@ -47,6 +49,16 @@ async function removeSource(key: string): Promise<void> {
   await nextTick();
   const buttons = sourceItems.value?.querySelectorAll<HTMLButtonElement>('.source-remove');
   (buttons?.[Math.min(at, buttons.length - 1)] ?? openButton.value)?.focus();
+}
+
+/**
+ * Puts each accession of the box on its own line (WA2-OP-04): the pasted input's card goes, and the
+ * focus goes to the Fetch that now takes them, not to the page's body.
+ */
+async function splitAccessions(): Promise<void> {
+  props.draft.splitAccessions(props.role);
+  await nextTick();
+  (fetchButton.value ?? fetchGroupList.value?.querySelector<HTMLButtonElement>('button'))?.focus();
 }
 
 /** The box's accessions, when it holds accessions only: "Fetch" brings their FASTA into it. */
@@ -193,6 +205,7 @@ function onDrop(event: DragEvent): void {
         <div v-if="accessions" class="fetch-row" :data-testid="`${role}-fetch-row`">
           <template v-if="groups.length === 0">
             <button
+              ref="fetchButton"
               type="button"
               :disabled="fetchBusy"
               :data-testid="`${role}-fetch`"
@@ -216,7 +229,7 @@ function onDrop(event: DragEvent): void {
           <span class="hint" :data-testid="`${role}-fetch-note`">{{ fetchNote }}</span>
           <HelpTip :id="`${role}-fetch`" label="About fetching accessions" :text="fetchHelp" />
         </div>
-        <ul v-if="groups.length > 0" class="fetch-groups" :data-testid="`${role}-fetch-groups`">
+        <ul v-if="groups.length > 0" ref="fetchGroupList" class="fetch-groups" :data-testid="`${role}-fetch-groups`">
           <li v-for="(group, index) in groups" :key="groupKey(group)" :data-testid="`${role}-fetch-group-${index}`">
             <button
               type="button"
@@ -323,6 +336,7 @@ function onDrop(event: DragEvent): void {
         :source="source"
         :index="roleState.sources.indexOf(source)"
         @remove="removeSource(source.key)"
+        @split-accessions="splitAccessions"
       />
     </ul>
 

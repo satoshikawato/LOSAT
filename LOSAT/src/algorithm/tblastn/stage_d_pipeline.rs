@@ -38,7 +38,7 @@ use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
 };
 use crate::algorithm::blastp::gapalign::GapAlignScratch;
-use crate::algorithm::common::protein_query_split::{
+use crate::algorithm::blastp::protein_query_split::{
     protein_chunk_part_in_record, protein_chunk_would_be_split, split_protein_batch,
     ProteinQueryChunk,
 };

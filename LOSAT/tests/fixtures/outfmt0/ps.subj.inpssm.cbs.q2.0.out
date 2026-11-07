@@ -1,0 +1,118 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           4 sequences; 4,432 total letters
+
+Results from round 1
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          290     2e-101
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       25.4    0.035 
+
+
+> BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]
+Length=197
+
+ Score = 290 bits (741),  Expect = 2e-101, Method: Composition-based stats.
+ Identities = 79/188 (42%), Positives = 105/188 (56%), Gaps = 9/188 (5%)
+
+Query  10   TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV  69
+            T  G++ LV GPMFAGKS+ +  IYQ++    K C+F+KH  + RYGC     VTH+G+ 
+Sbjct  4    TNIGKIHLVIGPMFAGKSSTIIKIYQKKIKMQKRCVFIKHVKDNRYGCELTETVTHSGQT  63
+
+Query  70   IEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDL-VLVNRLADKGKRIVIAALDGTSDQ  128
+            I  C   S    L  V     D I IDEGQFF+DL       A KGKR+ +AALDG  +Q
+Sbjct  64   IRDCVATSV---LSYVDTSNYDYIFIDEGQFFSDLGATCKDWAIKGKRVTVAALDGNYEQ  120
+
+Query  129  QMFSPIHKLLPYTNSIVKLASKCMIC-----KIDTKEAPFTVRFGNDNDNNVICVGGAEM  183
+            Q+F  + KL+P  + I KL++ CMIC      +  K  P+     +D+    +CVGG E 
+Sbjct  121  QLFPSVIKLIPICDKIEKLSAVCMICNKNEASLTKKYLPYNNTGDDDHHKYDMCVGGTET  180
+
+Query  184  YAAACRDC  191
+            Y A C  C
+Sbjct  181  YCAVCIGC  188
+
+
+> BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]
+Length=1890
+
+ Score = 25.4 bits (54),  Expect = 0.035, Method: Composition-based stats.
+ Identities = 17/71 (24%), Positives = 31/71 (44%), Gaps = 3/71 (4%)
+
+Query  46    FVKHSLETR--YGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILID-EGQFFT  102
+             F K   + +  YG     IV   G     C T      + + +  VVD++ ID E + ++
+Sbjct  1797  FYKFLFDRKQLYGVKLLAIVEMMGHEFASCLTSDMRMNMYNGVGSVVDILSIDNEEERYS  1856
+
+Query  103   DLVLVNRLADK  113
+              ++ +N+   K
+Sbjct  1857  IIISINKFILK  1867
+
+
+ Score = 19.2 bits (38),  Expect = 2.2, Method: Composition-based stats.
+ Identities = 15/58 (26%), Positives = 21/58 (36%), Gaps = 3/58 (5%)
+
+Query  110  LADKGKRIVIAALDGTSDQQMF---SPIHKLLPYTNSIVKLASKCMICKIDTKEAPFT  164
+            LA  GK  ++  L    D+      S    +L    S   +AS    CK D K   + 
+Sbjct  114  LAGAGKTTMVKELIAELDEAKIIDSSTDEDMLLCCKSNSAIASLMSACKFDEKSLMYN  171
+
+
+ Score = 18.1 bits (35),  Expect = 5.9, Method: Composition-based stats.
+ Identities = 6/30 (20%), Positives = 17/30 (57%), Gaps = 0/30 (0%)
+
+Query  255  KKIELDDHAAHLLFSANRWEVCSKIKQLLD  284
+            K++++  HA  L++  +  ++   +  L+D
+Sbjct  883  KRVDVIKHAYSLMYGVSLLDMTVSLPDLID  912
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.139    0.421    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0426    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1484000
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 4,432
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

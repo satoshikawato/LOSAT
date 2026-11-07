@@ -1,6 +1,19 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { groupSite, SourceRace, type RaceStanding } from '../../src/application/source-race';
-import { accessionLines, fetchGroups, RACE_RECORDS, servingSources, sourceList, unserved } from '../../src/domain/accession';
+import {
+  accessionLines,
+  accessionsOnALine,
+  fetchGroups,
+  isSeqIdReason,
+  pointsToFetch,
+  SEQ_ID_REASON,
+  RACE_RECORDS,
+  servingSources,
+  sourceList,
+  unserved,
+} from '../../src/domain/accession';
 import { BrowserAccessionFetcher, fetchUrl } from '../../src/infra/browser/accession-fetcher';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 
@@ -23,6 +36,48 @@ describe('accessionLines', () => {
     for (const text of ['>NR_074540.1\nACGT', 'ACGTACGT', 'MKVLAAGIV', '12345678', '', '\n', 'NR_074540.1\nACGT']) {
       expect(accessionLines(text)).toBeUndefined();
     }
+  });
+
+  it('finds accessions that are not one per line (WA2-OP-04), as typed', () => {
+    expect(accessionsOnALine('AB000001.1 MH011443.1')).toEqual(['AB000001.1', 'MH011443.1']);
+    expect(accessionsOnALine('ab000001.1,MH011443.1\n')).toEqual(['ab000001.1', 'MH011443.1']);
+    expect(accessionsOnALine(' NR_074540.1, \tP12345 ,\r\nQ9Y261\n\nAB000001.1,')).toEqual(['NR_074540.1', 'P12345', 'Q9Y261', 'AB000001.1']);
+    // No version (a sequence to the reader): accessions still.
+    expect(accessionsOnALine('AB000001 MH011443')).toEqual(['AB000001', 'MH011443']);
+    expect(accessionsOnALine('P12345 Q9Y261')).toEqual(['P12345', 'Q9Y261']);
+    // A sequence, a GenBank ORIGIN line and a protein sequence have no accession-shaped word.
+    for (const text of ['ACGTACGTAC GGTTACGTAA', '        1 gatcctccat atacaacggt', '       61 aaccggttaa cc', 'MKLVFFAEDV GSNKGAIIGL']) {
+      expect(accessionsOnALine(text), text).toBeUndefined();
+    }
+    // One per line is accessionLines'; anything but accessions (a gi, a sequence, a defline) is FASTA's.
+    for (const text of ['AB000001.1\nMH011443.1', 'AB000001.1', '', ' , ', 'AB000001.1 12345678', 'AB000001.1 ACGT', '>q AB000001.1,MH011443.1']) {
+      expect(accessionsOnALine(text), text).toBeUndefined();
+    }
+  });
+
+  it('points to Fetch only for an accession on the first line of a Seq-id reason (WA2-OP-04)', () => {
+    const reason = (line: string) =>
+      `the first line ("${line}") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported in the browser (start the input with a '>' defline)`;
+    const accessions = ['AB000001.1', 'ab000001', 'NR_074540.1', 'P12345', 'Q9Y261', 'C_AA004835.1', 'AAA12345'];
+    for (const line of accessions) {
+      expect(pointsToFetch(reason(line), `${line}\nACGT\n`), line).toBe(true);
+      expect(pointsToFetch(reason(line), `\n  ${line} \r\n>x\nACGT`), line).toBe(true);
+    }
+    // A GI number, a PDB id and a tagged id are Seq-ids to the engine, which Fetch does not take.
+    for (const line of ['12345678', '4HHB', '1ABC_A', 'sp|P04637|P53_HUMAN', 'ref|NM_000546.6|', 'gi|12345', 'AB000001.1 ACGT']) {
+      expect(pointsToFetch(reason(line), `${line}\nACGT\n`), line).toBe(false);
+    }
+    // Another reason, a reader's error, or no reason: no sentence, whatever the first line is.
+    expect(pointsToFetch("CFastaReader: Near line 2, there's a line that doesn't look like plausible data", 'AB000001.1\nACGT')).toBe(false);
+    expect(pointsToFetch(undefined, 'AB000001.1\nACGT')).toBe(false);
+    expect(pointsToFetch(reason('AB000001.1'), '')).toBe(false);
+    expect(isSeqIdReason(reason('x'))).toBe(true);
+    expect(isSeqIdReason('line 3 is a gap line')).toBe(false);
+  });
+
+  it("tells the adapter's Seq-id reason by a part of its text, which the adapter still has (WA2-OP-04)", () => {
+    const adapter = readFileSync(resolve(import.meta.dirname, '../../../adapter/src/scan/ncbi.rs'), 'utf8');
+    expect(adapter).toContain(SEQ_ID_REASON);
   });
 
   it('knows what EBI cannot serve without asking it', () => {

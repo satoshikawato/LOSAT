@@ -126,7 +126,7 @@ impl FastaRecord {
             .as_deref()
             .and_then(|source| source.uncut.as_deref())
         {
-            Some(uncut) => crate::algorithm::tblastn::archive::lowercase_runs(uncut),
+            Some(uncut) => crate::algorithm::common::masks::lowercase_runs(uncut),
             None => self.lowercase_masks.clone(),
         }
     }

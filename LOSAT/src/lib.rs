@@ -20,15 +20,9 @@ pub mod sequence;
 pub mod utils;
 
 #[doc(hidden)]
-pub mod align;
-#[doc(hidden)]
 pub mod config;
 #[doc(hidden)]
-pub mod post;
-#[doc(hidden)]
 pub mod report;
-#[doc(hidden)]
-pub mod seed;
 #[doc(hidden)]
 pub mod stats;
 

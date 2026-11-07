@@ -1,3 +1,4 @@
+use super::karlin_calc::blast_gcd;
 use super::protein_options::{
     gap_costs_row, protein_gap_existence_extend_params, scoring_matrix_table,
 };
@@ -209,37 +210,6 @@ const BLASTN_5_4: &[ParamEntry] = &[
     ParamEntry::new(10, 6, 0.163, 0.068, 0.16, 1.0, -19.0),
     ParamEntry::new(8, 6, 0.146, 0.039, 0.11, 1.3, -29.0),
 ];
-
-/// NCBI reference: c++/src/algo/blast/core/ncbi_math.c:405-419
-/// ```c
-/// Int4 BLAST_Gcd(Int4 a, Int4 b)
-/// {
-///    Int4   c;
-///
-///    b = ABS(b);
-///    if (b > a)
-///       c=a, a=b, b=c;
-///
-///    while (b != 0) {
-///       c = a%b;
-///       a = b;
-///       b = c;
-///    }
-///    return a;
-/// }
-/// ```
-fn blast_gcd(a: i32, b: i32) -> i32 {
-    let (mut a, mut b) = (a, b.abs());
-    if b > a {
-        std::mem::swap(&mut a, &mut b);
-    }
-    while b != 0 {
-        let c = a % b;
-        a = b;
-        b = c;
-    }
-    a
-}
 
 /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3955-3963
 /// ```c

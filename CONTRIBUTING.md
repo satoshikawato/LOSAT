@@ -144,6 +144,7 @@ Before opening a PR, please verify:
 - [ ] Relevant NCBI C/C++ source citations are included in code comments for all ported algorithms.
 - [ ] No runtime, build, or fallback code invokes external NCBI binaries or libraries.
 - [ ] `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings` pass. The lint levels of every target are in the `[lints]` table of `LOSAT/Cargo.toml`. New code allows a lint there only with a reason, or with `#[expect(lint, reason = "...")]` on a single item that keeps a lint's shape on purpose; older item-level `#[allow]` attributes remain. No file may silence every warning with `#![allow(warnings ...)]` (`LOSAT/tests/check_lint_allow_ratchet.py` in `rust lint`).
+- [ ] A program under `LOSAT/src/algorithm/` uses only the programs below it in the layering `common < blastn < tblastx < blastp < tblastn < blastx` (`common` uses none), and every reference between two programs has a row in `LOSAT/tests/program_edges.tsv`. Rows are added only by review, for an edge down the layering; remove a row when its edge goes (fewer edges are welcome) (`LOSAT/tests/check_program_edges.py` in `rust lint`).
 - [ ] Parity comparison tests confirm bit-identical output with NCBI BLAST+ on affected profiles.
 
 ---

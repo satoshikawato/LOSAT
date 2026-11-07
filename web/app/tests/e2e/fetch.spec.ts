@@ -7,6 +7,7 @@
 // CSP (public/_headers connect-src); the tests also count every request that leaves the site.
 import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';
+import { BUILD_HAS_ENGINE } from './support/browser';
 import { E2E_ORIGIN } from './support/origin';
 import { openSearch, paste, program, settled, submit } from './support/search';
 
@@ -246,4 +247,134 @@ test('a group starts at the race order of the tab, and keeps the site its record
       'https://rest.uniprot.org/uniprotkb/P12345.fasta',
     ].sort(),
   );
+});
+
+test('accessions on one line are put one per line by one press, for Fetch (WA2-OP-04)', async ({ page }) => {
+  const away = await stubSources(page);
+  await openSearch(page);
+  // Accessions on one line, separated by white space or commas, cannot be read (NCBI's reader
+  // error): one press puts each on its own line, where Fetch takes them.
+  for (const text of ['AB000001.1 MH011443.1', 'AB000001.1,MH011443.1', 'ab000001.1, MH011443.1\n']) {
+    await paste(page, 'query', text);
+    await expect(page.getByTestId('query-source-0-error')).toContainText('This input cannot be read: ');
+    await expect(page.getByTestId('query-source-0-split-accessions')).toHaveText('Put each accession on its own line');
+    await expect(page.getByTestId('query-source-0-add-defline')).toHaveCount(0);
+    await expect(page.getByTestId('query-fetch-row')).toHaveCount(0);
+  }
+  await page.getByTestId('query-source-0-split-accessions').click();
+  await expect(page.getByTestId('query-input')).toHaveValue('ab000001.1\nMH011443.1');
+  await expect(page.getByTestId('query-fetch-row')).toBeVisible();
+  await expect(page.getByTestId('query-source-0')).toHaveCount(0);
+  // The card goes; the focus goes to the Fetch, not to the page's body.
+  await expect(page.getByTestId('query-fetch')).toBeFocused();
+  // A box that no one site serves: the focus goes to the first group's Fetch.
+  await program(page, 'blastp');
+  await paste(page, 'subject', 'C_AA004835.1, P12345');
+  await page.getByTestId('subject-source-0-split-accessions').press('Enter');
+  await expect(page.getByTestId('subject-input')).toHaveValue('C_AA004835.1\nP12345');
+  await expect(page.getByTestId('subject-fetch-group-0-button')).toBeFocused();
+  await program(page, 'blastn');
+  // Accessions without a version are read as a sequence (AB000001 MH011443 is ABMH, a 4 nt record, in the
+  // engine build): the box is still a list of accessions, so the press is there, and Fetch comes after it.
+  await paste(page, 'query', 'AB000001 MH011443');
+  await expect(page.getByTestId('query-fetch-row')).toHaveCount(0);
+  await page.getByTestId('query-source-0-split-accessions').click();
+  await expect(page.getByTestId('query-input')).toHaveValue('AB000001\nMH011443');
+  await expect(page.getByTestId('query-fetch')).toBeFocused();
+  await program(page, 'blastp');
+  await paste(page, 'query', 'P12345 Q9Y261');
+  await expect(page.getByTestId('query-fetch-row')).toHaveCount(0);
+  await page.getByTestId('query-source-0-split-accessions').click();
+  await expect(page.getByTestId('query-input')).toHaveValue('P12345\nQ9Y261');
+  await expect(page.getByTestId('query-fetch-row')).toBeVisible();
+  await program(page, 'blastn');
+  // A box with anything but accessions keeps the defline's button only.
+  await paste(page, 'query', 'AB000001.1 MH011443.1 ACGT-1');
+  await expect(page.getByTestId('query-source-0-split-accessions')).toHaveCount(0);
+  await expect(page.getByTestId('query-source-0-add-defline')).toBeVisible();
+  // A box that is read as a sequence is not offered to be split: a bare sequence, and a GenBank ORIGIN line.
+  for (const text of ['ACGTACGTAC GGTTACGTAA', '        1 gatcctccat atacaacggt']) {
+    await paste(page, 'query', text);
+    await expect(page.getByTestId('query-source-0')).toBeVisible();
+    await expect(page.getByTestId('query-source-0-split-accessions')).toHaveCount(0);
+  }
+  expect(away).toEqual([]);
+});
+
+test('a first line that is an accession and NCBI BLAST+ would fetch as a Seq-id points to Fetch; a GI, a PDB id and a tagged id do not (WA2-OP-04)', async ({
+  page,
+}) => {
+  // The FakeEngine's reader never takes a first line for a Seq-id (infra/fake/fake-fasta.ts).
+  test.skip(!BUILD_HAS_ENGINE, 'the reason is the adapter scan of the engine build');
+  const away = await stubSources(page);
+  await openSearch(page);
+  // The adapter's reason is NCBI's text and the defline; the card adds the Fetch sentence for an accession.
+  const reason = (line: string) =>
+    `This input cannot be read: the first line ("${line}") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported in the browser (start the input with a '>' defline)`;
+  const fetchSentence = 'To fetch accessions, put only the accessions in the box, one per line.';
+  for (const [role, text, line] of [
+    ['query', 'AB000001.1\n>x\nACGTACGT', 'AB000001.1'],
+    ['query', 'AB000001.1\nACGTACGT', 'AB000001.1'],
+    ['subject', ' NR_074540.1 \nACGTACGT', 'NR_074540.1'],
+  ] as const) {
+    await paste(page, role, text);
+    await expect(page.getByTestId(`${role}-source-0-error`)).toHaveText(reason(line));
+    await expect(page.getByTestId(`${role}-source-0-fetch-hint`)).toHaveText(fetchSentence);
+    // The press puts '>' before the first line (the next test); "Add the line" would make the line data.
+    await expect(page.getByTestId(`${role}-source-0-put-defline-mark`)).toHaveText("Put '>' before the first line");
+    await expect(page.getByTestId(`${role}-source-0-add-defline`)).toHaveCount(0);
+    await expect(page.getByTestId(`${role}-source-0-split-accessions`)).toHaveCount(0);
+  }
+  // A GI number, a PDB id and a tagged id are Seq-ids to the engine, but not what Fetch takes: no sentence.
+  for (const [role, program_, text, line] of [
+    ['query', 'blastn', '12345678\nACGTACGT', '12345678'],
+    ['query', 'blastp', '4HHB\nMKLV', '4HHB'],
+    ['subject', 'blastp', '1ABC_A\nMKLV', '1ABC_A'],
+    ['query', 'blastp', 'sp|P04637|P53_HUMAN\nMKLV', 'sp|P04637|P53_HUMAN'],
+    ['query', 'blastn', 'ref|NM_000546.6|\nACGTACGT', 'ref|NM_000546.6|'],
+  ] as const) {
+    await program(page, program_);
+    await paste(page, role, text);
+    await expect(page.getByTestId(`${role}-source-0-error`)).toHaveText(reason(line));
+    await expect(page.getByTestId(`${role}-source-0-fetch-hint`)).toHaveCount(0);
+    await expect(page.getByTestId(`${role}-source-0-put-defline-mark`)).toBeVisible();
+  }
+  await program(page, 'blastn');
+  // Accessions only, more than one on a line: the reason and the press that splits them.
+  await paste(page, 'subject', 'NR_074540.1\nAB000001.1 MH011443.1');
+  await expect(page.getByTestId('subject-source-0-error')).toHaveText(reason('NR_074540.1'));
+  // The press that splits them says the same as the sentence, and '>' would leave the list unread: only the split press.
+  await expect(page.getByTestId('subject-source-0-split-accessions')).toBeVisible();
+  await expect(page.getByTestId('subject-source-0-fetch-hint')).toHaveCount(0);
+  await expect(page.getByTestId('subject-source-0-put-defline-mark')).toHaveCount(0);
+  expect(away).toEqual([]);
+});
+
+test("a first line that NCBI BLAST+ would fetch as a Seq-id gets '>' before it by one press, not a defline line (WA2-OP-04)", async ({
+  page,
+}) => {
+  test.skip(!BUILD_HAS_ENGINE, 'the reason is the adapter scan of the engine build');
+  await openSearch(page);
+  // "Add the line >pasted_query" would make the first line the first data line, which NCBI's reader cannot read
+  // (a GI number, an accession) or reads as residues (AAA12345 and MKLV): the press adds '>' to the line only.
+  for (const [program_, role, text, written, length] of [
+    ['blastn', 'query', '12345678\nACGTACGT', '>12345678\nACGTACGT', '8 nt'],
+    ['blastn', 'query', 'AB000001.1\nACGTACGT', '>AB000001.1\nACGTACGT', '8 nt'],
+    ['blastp', 'query', 'AAA12345\nMKLV', '>AAA12345\nMKLV', '4 aa'],
+    ['blastp', 'subject', '  4HHB\nMKLV', '>4HHB\nMKLV', '4 aa'],
+  ] as const) {
+    await program(page, program_);
+    await paste(page, role, text);
+    await expect(page.getByTestId(`${role}-source-0-error`)).toContainText('may be a sequence identifier');
+    await expect(page.getByTestId(`${role}-source-0-add-defline`)).toHaveCount(0);
+    await page.getByTestId(`${role}-source-0-put-defline-mark`).click();
+    await settled(page, role);
+    // The press goes with the card's old reading: the focus stays on the card, not the page's body (WA2-AX-04).
+    await expect(page.getByTestId(`${role}-source-0`)).toBeFocused();
+    await expect(page.getByTestId(`${role}-input`)).toHaveValue(written);
+    await expect(page.getByTestId(`${role}-source-0-check`)).toHaveAttribute('data-check', 'ok');
+    await expect(page.getByTestId(`${role}-source-0-summary`)).toContainText(`1 record · ${length}`);
+    await expect(page.getByTestId(`${role}-source-0-put-defline-mark`)).toHaveCount(0);
+    await expect(page.getByTestId(`${role}-source-0-add-defline`)).toHaveCount(0);
+  }
 });

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // One input of a role: its name, its records, and what the engine's check says of it. The check's
 // verdict and the warnings are told to a screen reader when they change (WA2-AX-03), in the
-// card's words after its name; "Remove" asks the role's block, which moves the focus on.
-import { computed, watch } from 'vue';
+// card's words after its name; "Remove" and "Put each accession on its own line" ask the role's
+// block, which moves the focus on, and the buttons that rewrite the box keep it on the card (rewrite).
+import { computed, nextTick, ref, watch } from 'vue';
 import type { DraftSource, DraftState, SearchDraft } from '../application/draft';
 import { includedOf } from '../application/draft';
+import { accessionsOnALine, isSeqIdReason, pointsToFetch } from '../domain/accession';
 import { duplicateIds } from '../domain/dataset';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
 import { looksLikeOtherKind } from '../domain/sequence-kind';
@@ -21,7 +23,7 @@ const props = defineProps<{
   source: DraftSource;
   index: number;
 }>();
-defineEmits<{ remove: [] }>();
+defineEmits<{ remove: []; splitAccessions: [] }>();
 
 const kind = computed(() => sequenceKind(programById(props.state.program), props.role));
 const unit = computed(() => residueUnit(kind.value));
@@ -37,14 +39,52 @@ const otherKindName = computed(() => (kind.value === 'nucleotide' ? 'protein' : 
 const programLabel = computed(() => programById(props.state.program).label);
 const title = computed(() => (props.source.origin === 'paste' ? `Pasted sequences (${props.source.name})` : props.source.name));
 /**
- * A pasted text that does not start with a defline and cannot be read (such as a first line that NCBI would fetch as a
- * Seq-id); a byte order mark has its own hint.
+ * A pasted text of accessions only that are not one per line (WA2-OP-04): Fetch takes them one per line, so the card offers
+ * to put each on its own line. It does not depend on the reader: a list with no versions (AB000001 MH011443) reads as a
+ * sequence (ABMH) and a ✓, though it is a list of accessions.
  */
+const splitsAccessions = computed(
+  () => props.source.origin === 'paste' && props.source.status !== 'indexing' && accessionsOnALine(props.state[props.role].paste) !== undefined,
+);
+const hasMark = computed(() => props.source.lead !== undefined && 'mark' in props.source.lead);
+/**
+ * The first line of a pasted text is an accession that the engine reads as a Seq-id: Fetch takes accessions only (WA2-OP-04).
+ * Not when the box is a list of accessions, whose button puts them one per line, and so says the same.
+ */
+const fetchHint = computed(
+  () =>
+    props.source.origin === 'paste' &&
+    props.source.status === 'failed' &&
+    !splitsAccessions.value &&
+    pointsToFetch(props.source.error, props.state[props.role].paste),
+);
+/**
+ * A pasted text whose first line the engine reads as a Seq-id (which NCBI BLAST+ would fetch) and cannot read (WA2-OP-04): the
+ * line is not data, and "Add the line >pasted_..." would make it the first data line, so the card puts ">" before it instead.
+ */
+const seqIdFirstLine = computed(
+  () =>
+    props.source.origin === 'paste' &&
+    props.source.status === 'failed' &&
+    !hasMark.value &&
+    !splitsAccessions.value &&
+    isSeqIdReason(props.source.error),
+);
+/** A pasted text that does not start with a defline and cannot be read; a byte order mark, a Seq-id and accessions on a line have their own hints. */
 const needsDefline = computed(() => {
   const text = props.state[props.role].paste.trimStart();
-  const mark = props.source.lead !== undefined && 'mark' in props.source.lead;
-  return props.source.origin === 'paste' && props.source.status === 'failed' && !mark && text !== '' && !text.startsWith('>');
+  return (
+    props.source.origin === 'paste' &&
+    props.source.status === 'failed' &&
+    !hasMark.value &&
+    !seqIdFirstLine.value &&
+    !splitsAccessions.value &&
+    text !== '' &&
+    !text.startsWith('>')
+  );
 });
+/** The card's sentence on Fetch, for a first line that is an accession and a Seq-id to the engine. */
+const FETCH_HINT = 'To fetch accessions, put only the accessions in the box, one per line.';
 const refusedRecord = computed(() => (props.source.check?.state === 'refused' ? props.source.check.record : undefined));
 /** Why a source that starts with a byte order mark cannot be read (WA-IN-05); the engine's message is NCBI's. */
 const markHint = computed(() => {
@@ -61,6 +101,16 @@ const formatName = computed(() => {
   const lead = props.source.lead;
   return lead !== undefined && 'format' in lead ? FORMAT_NAMES[lead.format] : undefined;
 });
+const card = ref<HTMLElement>();
+/**
+ * Asks the draft to rewrite the box ("Add the line", "Put '>'", "Remove the byte order mark"): the input is read again, so
+ * the button goes, and the focus goes to the card, which the live region then speaks of, not to the page's body (WA2-AX-04).
+ */
+async function rewrite(change: () => void): Promise<void> {
+  change();
+  await nextTick();
+  card.value?.focus();
+}
 const testid = computed(() => `${props.role}-source-${props.index}`);
 
 const recordsText = (count: number) => `${formatCount(count)} ${count === 1 ? 'record' : 'records'}`;
@@ -77,6 +127,7 @@ const verdict = computed(() => {
     source.status,
     source.error,
     markHint.value,
+    fetchHint.value,
     check?.state,
     check === undefined ? undefined : check.state === 'ok' ? check.records : 'message' in check ? check.message : undefined,
     otherKind.value,
@@ -86,6 +137,7 @@ const verdict = computed(() => {
   ]);
   if (source.status === 'failed') {
     parts.push(`This input cannot be read: ${source.error ?? ''}`);
+    if (fetchHint.value) parts.push(FETCH_HINT);
     if (markHint.value) parts.push(markHint.value);
   } else if (check !== undefined) {
     if (check.state === 'ok') parts.push(`Accepted by the ${programLabel.value} engine: ${recordsText(check.records)}`);
@@ -116,6 +168,8 @@ watch(verdict, (now) => {
 
 <template>
   <li
+    ref="card"
+    tabindex="-1"
     class="source"
     :data-testid="testid"
     :data-status="source.status"
@@ -133,8 +187,19 @@ watch(verdict, (now) => {
     <p v-if="source.status === 'indexing'" class="muted"><LosatLoader />Reading the records…</p>
     <template v-else-if="source.status === 'failed'">
       <p class="error" :data-testid="`${testid}-error`">This input cannot be read: {{ source.error }}</p>
+      <p v-if="fetchHint" class="hint" :data-testid="`${testid}-fetch-hint`">{{ FETCH_HINT }}</p>
+      <p v-if="splitsAccessions" class="hint">
+        <button type="button" class="link" :data-testid="`${testid}-split-accessions`" @click="$emit('splitAccessions')">
+          Put each accession on its own line
+        </button>
+      </p>
+      <p v-if="seqIdFirstLine" class="hint">
+        <button type="button" class="link" :data-testid="`${testid}-put-defline-mark`" @click="rewrite(() => draft.markFirstLineAsDefline(role))">
+          Put '&gt;' before the first line
+        </button>
+      </p>
       <p v-if="needsDefline" class="hint">
-        <button type="button" class="link" :data-testid="`${testid}-add-defline`" @click="draft.addDefline(role)">
+        <button type="button" class="link" :data-testid="`${testid}-add-defline`" @click="rewrite(() => draft.addDefline(role))">
           Add the line "&gt;pasted_{{ role }}" before the sequence
         </button>
       </p>
@@ -145,7 +210,7 @@ watch(verdict, (now) => {
           type="button"
           class="link"
           :data-testid="`${testid}-remove-mark`"
-          @click="draft.removeByteOrderMark(role)"
+          @click="rewrite(() => draft.removeByteOrderMark(role))"
         >
           Remove the byte order mark
         </button>
@@ -186,6 +251,12 @@ watch(verdict, (now) => {
       </div>
       <p v-else-if="source.check?.state === 'error'" class="error" :data-testid="`${testid}-check`" data-check="error">
         The input could not be checked here ({{ source.check.message }}).
+      </p>
+
+      <p v-if="splitsAccessions" class="hint">
+        <button type="button" class="link" :data-testid="`${testid}-split-accessions`" @click="$emit('splitAccessions')">
+          Put each accession on its own line
+        </button>
       </p>
 
       <p v-if="formatName" class="warning" :data-testid="`${testid}-format-warning`">

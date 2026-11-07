@@ -24,7 +24,7 @@ use anyhow::Result;
 use super::args::BlastpArgs;
 use super::hsp::BlastpHitList;
 use super::seqalign::{query_records, EngineCounts};
-use crate::algorithm::tblastn::archive::lowercase_runs;
+use crate::algorithm::common::masks::lowercase_runs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;

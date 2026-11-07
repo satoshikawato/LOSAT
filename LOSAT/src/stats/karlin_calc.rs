@@ -647,6 +647,9 @@ pub(crate) fn calc_lambda_of_score_probs(
 //     return Blast_KarlinLambdaNR(&freq, lambda0);
 // }
 // ```
+// Not `s_CalcLambda` as written: this normalizes the probabilities, narrows the observed range to
+// the nonzero scores and returns `Err` where NCBI returns -1 (the exact port is
+// `calc_lambda_of_score_probs` above).
 //
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2567-2598
 // ```c

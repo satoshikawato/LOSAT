@@ -56,7 +56,7 @@
 //! per BLOSUM50 candidate, 472 instead of 648 instructions).
 
 use super::extension::{BlastpTwoHitUngappedResult, BlastpUngappedData};
-use super::x_ungapped_fast::{build_table, Table};
+use super::x_ungapped_fast::Table;
 use std::sync::OnceLock;
 
 /// The key of a step for every pair of codes below 32 (`q << 5 | s`): `(t << 32) - 1`, `t` the
@@ -72,6 +72,28 @@ pub(crate) fn key_table(table: &Table) -> Box<KeyTable> {
         *k = ((t as i64) << 32) - 1;
     }
     keys
+}
+
+/// BLOSUM62's keys, from its scores as `x_ungapped_fast::build_table` takes them (-128 for
+/// `BLAST_SCORE_MIN`), built in place (no byte table beside them); `None` if a score does not fit
+/// a byte.
+// NCBI reference: aa_ungapped.c:804-883 `matrix[q[i]][s[i]]` (the scores the reference walks add).
+pub(crate) fn blosum62_keys() -> Option<Box<KeyTable>> {
+    let mut keys = Box::new([0i64; KEY_TABLE_LEN]);
+    for q in 0..CODES {
+        for c in 0..CODES {
+            let v = crate::utils::matrix::blosum62_score_ncbistdaa_direct(q, c);
+            let t = if v == crate::utils::matrix::BLAST_SCORE_MIN {
+                -128
+            } else if (-127..=127).contains(&v) {
+                v
+            } else {
+                return None;
+            };
+            keys[(q as usize) << 5 | c as usize] = ((t as i64) << 32) - 1;
+        }
+    }
+    Some(keys)
 }
 
 /// The score and the length of a best key (module comment).
@@ -137,7 +159,7 @@ fn state() -> &'static State {
     STATE.get_or_init(|| State {
         // `LOSAT_X_BPUNGAPSENT` is a strict-set switch.
         on: crate::utils::xswitch::on("LOSAT_X_BPUNGAPSENT"),
-        keys: build_table().map(|table| key_table(&table)),
+        keys: blosum62_keys(),
     })
 }
 
@@ -458,6 +480,7 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode>(
 
 #[cfg(test)]
 mod tests {
+    use super::super::x_ungapped_fast::build_table;
     use super::*;
     use crate::algorithm::blastp::extension::extend_two_hit;
     use crate::config::ScoringMatrix;
@@ -796,6 +819,7 @@ mod tests {
         }
         let table = build_table().expect("BLOSUM62 fits bytes");
         let keys = key_table(&table);
+        assert_eq!(blosum62_keys().as_deref(), Some(&*keys));
         for q in 0..CODES as usize {
             for c in 0..CODES as usize {
                 assert_eq!(keys[q << 5 | c], ((table[q << 5 | c] as i64) << 32) - 1);

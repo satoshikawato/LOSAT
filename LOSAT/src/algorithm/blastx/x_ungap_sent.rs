@@ -30,8 +30,9 @@
 //!   line). A batch or a subject that fails a check runs the reference.
 
 use crate::algorithm::blastp::extension::{extend_two_hit_blosum62, BlastpTwoHitUngappedResult};
-use crate::algorithm::blastp::x_ungapped_fast::build_table;
-use crate::algorithm::blastp::x_ungapped_sent::{key_table, two_hit_in, KeyTable, XSentSubject};
+use crate::algorithm::blastp::x_ungapped_sent::{
+    blosum62_keys, two_hit_in, KeyTable, XSentSubject,
+};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
@@ -65,11 +66,7 @@ fn state() -> &'static State {
         };
         State {
             mode,
-            keys: if mode != 0 {
-                build_table().map(|table| key_table(&table))
-            } else {
-                None
-            },
+            keys: if mode != 0 { blosum62_keys() } else { None },
         }
     })
 }
@@ -157,8 +154,7 @@ impl<'a> XSent<'a> {
         Self {
             query,
             subject: XSentSubject::new(with_sentinels).expect("a subject on the path"),
-            keys: KEYS
-                .get_or_init(|| key_table(&build_table().expect("BLOSUM62 fits a byte table"))),
+            keys: KEYS.get_or_init(|| blosum62_keys().expect("BLOSUM62 fits a byte table")),
             shadow,
         }
     }

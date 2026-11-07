@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { groupSite, SourceRace, type RaceStanding } from '../../src/application/source-race';
 import {
@@ -6,6 +8,7 @@ import {
   fetchGroups,
   isSeqIdReason,
   pointsToFetch,
+  SEQ_ID_REASON,
   RACE_RECORDS,
   servingSources,
   sourceList,
@@ -70,6 +73,11 @@ describe('accessionLines', () => {
     expect(pointsToFetch(reason('AB000001.1'), '')).toBe(false);
     expect(isSeqIdReason(reason('x'))).toBe(true);
     expect(isSeqIdReason('line 3 is a gap line')).toBe(false);
+  });
+
+  it("tells the adapter's Seq-id reason by a part of its text, which the adapter still has (WA2-OP-04)", () => {
+    const adapter = readFileSync(resolve(import.meta.dirname, '../../../adapter/src/scan/ncbi.rs'), 'utf8');
+    expect(adapter).toContain(SEQ_ID_REASON);
   });
 
   it('knows what EBI cannot serve without asking it', () => {

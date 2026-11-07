@@ -37,8 +37,9 @@
 //! * Bounds. The reference reads `q_seq[q_r - 1 - i]` for `i < min(q_r, s_r)` on the left and
 //!   `q_seq[q_r + j]` while both `q_r + j < q_seq.len()` and `s_r + j < s_seq.len()` on the right.
 //!   The walks here take the same counts and read the same positions, so every position is inside
-//!   both slices; the word loop reads its three positions after a test that they fit (the
-//!   reference reads them unchecked; a word that does not fit runs the reference).
+//!   both slices; the word loop reads the word's positions (3 for BLOSUM62's `two_hit`, `W` for
+//!   `two_hit_in_word::<W>`) after a test that they fit (the reference reads them unchecked; a
+//!   word that does not fit runs the reference).
 //! * Table. `T[q << 8 | s]` is `get_score(q, s)` (`blosum62_score_ncbistdaa_direct`, defined for
 //!   every pair of bytes) for every two bytes, with `BLAST_SCORE_MIN` (-32768, the gap and
 //!   sentinel code 0 against anything) stored as -128; the table exists only if every other score
@@ -81,12 +82,13 @@
 //! batched `resolve`, the reference frame loops).
 //! * Instances. The unit path chooses for each unit of its branch-free hit loops
 //!   (LOSAT_X_TBXHITBF; `XPairPar::x_unit_sent`, in the dispatches `scan_unit_or_bf`,
-//!   `scan_unit_batched_or_bf` and `scan_unit_sliced_or_bf` of x_tbx_hitbf.rs) between two
-//!   instances of the loop's function (`const SENT`: `scan_unit_bf`, `scan_unit_batched_bf`,
-//!   `scan_unit_sliced_bf`), so that the instances without the walks keep the machine code they had
-//!   before the switch. The units of the other hit loop (`LOSAT_X_TBXHITBF=0`, the probes of
-//!   `LOSAT_TIMING` and `LOSAT_X_STATS`) take `two_hit`. The reference frame loops (run_impl.rs)
-//!   choose at every call.
+//!   `scan_unit_batched_or_bf` and `scan_unit_sliced_or_bf` of x_tbx_hitbf.rs) between instances
+//!   of the loop's function (`const SENT`: `scan_unit_bf`, `scan_unit_batched_bf`,
+//!   `scan_unit_sliced_bf`): without the walks (0), so that it keeps the machine code it had
+//!   before the switch, and with the walks of the search's word length (3, or 2 for the other
+//!   matrices' instance; `TbxScore::sent_two_hit_of`). The units of the other hit loop
+//!   (`LOSAT_X_TBXHITBF=0`, the probes of `LOSAT_TIMING` and `LOSAT_X_STATS`) take `two_hit`.
+//!   The reference frame loops (run_impl.rs) choose at every call.
 //! * Where. A query context's buffer is `[0, residues.., 0]` and a subject frame's too
 //!   (`translation.rs`, NCBI's NULLB at each end, blast_util.c:438-453); the callers' sequences are
 //!   the residues. A subject frame of more than `MAX_DBSEQ_LEN` (5,000,000) residues is searched in
@@ -99,8 +101,8 @@
 //!   the bound, which holds a sentinel. A step on it scores -128 and stops the walk as the bound
 //!   does, with the same best, length and stop position (the argument of the sentinel above: the
 //!   step does not raise the best and makes `best - score >= 128 > x_drop`). Every step before it
-//!   reads the positions the reference reads. The word loop reads the same three positions as in
-//!   `two_hit`, after the same test that they fit.
+//!   reads the positions the reference reads. The word loop reads the same positions as in
+//!   `two_hit` (or `two_hit_in_word::<W>`, the word's `W`), after the same test that they fit.
 //! * Overflow. A walk without a bound would step over a sentinel if its score wrapped. The left walk
 //!   (from 0) and then the right walk (from the left walk's best) read each subject position once at
 //!   most, at +`MAX_MATRIX_SCORE` (42) at most, so a score stays below `42 * (subject letters + 2)`, and
@@ -1399,11 +1401,9 @@ mod tests {
             let (qf, sf) = (&qb[qb_range], &sb[sb_range]);
             let sent = unsafe { sc.sent_two_hit(qf, sf, sl, sr, qr, d) };
             assert_eq!(sent, expect, "sent {what}");
-            if W == 3 {
-                // SAFETY: as above, and the words have 3 letters (the unit path's walks).
-                let sent = unsafe { sc.sent_two_hit_3(qf, sf, sl, sr, qr, d) };
-                assert_eq!(sent, expect, "sent_two_hit_3 {what}");
-            }
+            // SAFETY: as above, and the words have `W` letters (the unit path's walks).
+            let sent = unsafe { sc.sent_two_hit_of::<W>(qf, sf, sl, sr, qr, d) };
+            assert_eq!(sent, expect, "sent_two_hit_of {what}");
         };
         let ties = [(1u8, 2u8), (4, 5), (19, 25), (5, 31), (27, 29)];
         let compared = walk_rounds::<W>(rng, 60, &ties, &mut check);
@@ -1436,14 +1436,12 @@ mod tests {
             // SAFETY: the buffer is [0, residues.., 0]; `x_sent_walks` holds.
             let sent = unsafe { sc.sent_two_hit(q_full, q_full, 10, sr, qr, d) };
             assert_eq!(sent, expect, "sent {matrix:?} W={W} sr={sr} qr={qr} d={d}");
-            if W == 3 {
-                // SAFETY: as above, and the words have 3 letters.
-                let sent = unsafe { sc.sent_two_hit_3(q_full, q_full, 10, sr, qr, d) };
-                assert_eq!(
-                    sent, expect,
-                    "sent_two_hit_3 {matrix:?} sr={sr} qr={qr} d={d}"
-                );
-            }
+            // SAFETY: as above, and the words have `W` letters.
+            let sent = unsafe { sc.sent_two_hit_of::<W>(q_full, q_full, 10, sr, qr, d) };
+            assert_eq!(
+                sent, expect,
+                "sent_two_hit_of {matrix:?} W={W} sr={sr} qr={qr} d={d}"
+            );
         }
     }
 

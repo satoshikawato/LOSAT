@@ -74,11 +74,11 @@
 //!      sign-extending `DiagStruct::last_hit` (round-1 bug: `-window` read as `2^31 - window`).
 //!    - cross-sentinel diagonals: one raw diagonal can run from context c into c+1 (q grows with
 //!      s, so all c hits come first). Words do not span the sentinel, so the first c+1 hit is at
-//!      least 4 letters after the last c hit (`diff >= wordsize`). With flag 0, either diff >=
-//!      window, or `query_offset - diff` lies in context c, the context check fails
+//!      least `wordsize` + 1 letters after the last c hit (`diff >= wordsize`). With flag 0,
+//!      either diff >= window, or `query_offset - diff` lies in context c, the context check fails
 //!      (aa_ungapped.c:566-573) and `last_hit = s + D`. With flag 1, the c extension stopped at the
 //!      end of context c (the query slice ends there; NCBI: the sentinel scores BLAST_SCORE_MIN),
-//!      so `s_last_off - 2 < s` of the first c+1 hit and the hit resets the cell.
+//!      so `s_last_off - (wordsize - 1) < s` of the first c+1 hit and the hit resets the cell.
 //!    - masked aliasing: raw diagonals d > d' share a reference cell when d - d' = m 2^k. Both
 //!      exist only if s_len >= slack + 2. Then for any hit (q, s) on d and (q', s') on d',
 //!      s' - s = m 2^k - (q - q') >= slack + 3: the cell sees all hits of d, then all of d', with
@@ -1151,18 +1151,20 @@ pub(super) fn lut_build<M: TbxScore>(e: XLutEarly<'_, M>) -> Option<XLutBatch> {
 // after the lookup build (RI:2502-2510 `query_length`, `check_diag_table_window`,
 // `diag_array_size`), then the groups and the stub.
 fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
-    // A word length other than 3 takes the reference frame loop (`decide` gives Gate, the units
-    // build 3-letter words): no preparation of the query for the groups (`TbxScore::word`, 3 in
-    // BLOSUM62's instance).
-    if e.sc.word() != 3 {
-        return None;
-    }
     // The reference query preparation (contexts, concatenated query, lookup locations), with
-    // another matrix's scores that of `build_ncbi_lookup_for_profile` (SC7b).
+    // another matrix's scores or another word length that of `build_ncbi_lookup_for_profile`
+    // (SC7b; `TbxScore::word`, 3 in BLOSUM62's instance). A word length the direct builder does
+    // not cover gives None here (`x_direct_covers`; the batch's `debugging` gate holds for it too).
     let q = if M::BLOSUM62 {
         XPairLutQuery::x_prepare(e.query_frames, e.threshold, true)?
     } else {
-        XPairLutQuery::x_prepare_for(e.query_frames, e.threshold, true, e.sc.matrix())?
+        XPairLutQuery::x_prepare_for(
+            e.query_frames,
+            e.threshold,
+            true,
+            e.sc.matrix(),
+            e.sc.word(),
+        )?
     };
     let contexts = q.contexts();
     let query_length: i32 = contexts
@@ -1979,8 +1981,8 @@ pub(super) struct XPairPar<M: TbxScore = Blosum62Score> {
     extents: Vec<usize>,
     /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the batch's extensions may take the walks the
     /// sentinels stop (`x_tbx_sent_contexts`); a unit takes them where its chunk is the whole frame.
-    /// Another matrix's needs its byte table (`TbxScore::x_sent_walks`); only for words of 3
-    /// letters (`TbxScore::sent_two_hit_3`).
+    /// Another matrix's needs its byte table (`TbxScore::x_sent_walks`); only for words of 2 and 3
+    /// letters, whose walks the units have (`scan_unit_or_bf`, `TbxScore::sent_two_hit_of`).
     sent: bool,
     /// The search's matrix (`-matrix`; no data for BLOSUM62's instance).
     sc: M,
@@ -2126,9 +2128,9 @@ impl<M: TbxScore> XPairPar<M> {
         };
         debug_assert!(extents.is_empty() || extents.len() == groups.len());
         // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): checked once for the batch's contexts. The units'
-        // extensions take the walks of 3-letter words (`TbxScore::sent_two_hit_3`; the units build
-        // words of 3 letters, `TbxScore::word`, 3 for BLOSUM62's instance).
-        let sent = b.sc.word() == 3
+        // extensions take the walks of the search's word length, 2 or 3 letters
+        // (`scan_unit_or_bf`; `TbxScore::word`, 3 for BLOSUM62's instance).
+        let sent = matches!(b.sc.word(), 2 | 3)
             && b.sc.x_sent_walks()
             && x_tbx_sent_contexts(b.contexts.iter().map(|c| c.aa_seq.as_slice()));
         Some(Self {
@@ -2778,16 +2780,22 @@ impl<M: TbxScore> XPairPar<M> {
         init_hsps: &mut S,
         probe: &mut P,
     ) {
-        self.scan_unit_hits::<S, P, PF, false, false>(unit, inp, scratch, init_hsps, probe);
+        self.scan_unit_hits::<S, P, PF, false, 0>(unit, inp, scratch, init_hsps, probe);
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
     // `x_hits_bf`, which takes the too-far and overlap outcomes of `x_hit` without a branch and
     // hands the others to `x_hit`; without it this is the loop before the switch. `BF` runs only
     // with `XNoProbe` (the probes count every outcome) and where `x_tbx_hitbf::fits` holds.
-    /// `scan_unit`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF and with `SENT` the
-    /// extensions of `extend_hit_two_hit_sent` (LOSAT_X_TBXUNGAPSENT).
-    fn scan_unit_hits<S: XInitSink, P: XProbe, const PF: bool, const BF: bool, const SENT: bool>(
+    /// `scan_unit`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF and with `SENT` (a word
+    /// length, 0: none) the extensions of `TbxScore::sent_two_hit_of` (LOSAT_X_TBXUNGAPSENT).
+    fn scan_unit_hits<
+        S: XInitSink,
+        P: XProbe,
+        const PF: bool,
+        const BF: bool,
+        const SENT: usize,
+    >(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -2814,7 +2822,7 @@ impl<M: TbxScore> XPairPar<M> {
         P: XProbe,
         const PF: bool,
         const BF: bool,
-        const SENT: bool,
+        const SENT: usize,
     >(
         &self,
         unit: &XUnit,
@@ -2854,7 +2862,7 @@ impl<M: TbxScore> XPairPar<M> {
         C: XCells,
         const PF: bool,
         const BF: bool,
-        const SENT: bool,
+        const SENT: usize,
     >(
         &self,
         unit: &XUnit,
@@ -2864,9 +2872,12 @@ impl<M: TbxScore> XPairPar<M> {
         probe: &mut P,
         mask: u32,
     ) {
-        // LOSAT_X_TBXUNGAPSENT: `SENT` only on the units `x_unit_sent` accepts (`x_hit`'s SAFETY;
-        // once per unit).
-        assert!(!SENT || self.x_unit_sent(unit, inp));
+        // LOSAT_X_TBXUNGAPSENT: the walks of `SENT`-letter words only on the units `x_unit_sent`
+        // accepts (`x_hit`'s SAFETY; once per unit), of the search's word length (the dispatches of
+        // x_tbx_hitbf.rs, `scan_unit_or_bf`, choose `SENT` and check it, outside this function so
+        // that its loop keeps its registers).
+        let sent = SENT != 0;
+        assert!(!sent || self.x_unit_sent(unit, inp));
         let group = &self.groups[unit.g];
         let sub = &group.lookup;
         let wordsize = inp.wordsize;
@@ -2925,7 +2936,7 @@ impl<M: TbxScore> XPairPar<M> {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
-            subject_sent: if SENT { subject_full } else { &[] },
+            subject_sent: if sent { subject_full } else { &[] },
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -3003,7 +3014,7 @@ fn x_unit_batch<
     M: TbxScore,
     const PF: bool,
     const BF: bool,
-    const SENT: bool,
+    const SENT: usize,
 >(
     group: &XGroup,
     subject: &[u8],
@@ -3198,9 +3209,9 @@ fn x_unit_batch<
 // caller's sink (today's `Vec<InitHSP>`, or the records of LOSAT_X_SEEDCOMPACT, section above
 // `XUnitHsp`), by the same push statement.
 /// The two-hit test and extension of one hit on its cell (`SENT`: LOSAT_X_TBXUNGAPSENT, the
-/// extension of `extend_hit_two_hit_sent`).
+/// sentinel walks of `SENT`-letter words, `TbxScore::sent_two_hit_of`; 0: none).
 #[inline(always)]
-fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
+fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: usize>(
     diag_entry: &mut DiagStruct,
     query_offset: u32,
     subject_offset: u32,
@@ -3267,10 +3278,11 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
         // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): the probe around the extension
         // (x_unit_probe.rs; `XNoProbe` does nothing). No NCBI counterpart.
         let mark = probe.ext_begin();
-        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): with `SENT` the walks the sentinels stop.
+        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): with `SENT` the walks the sentinels stop, of
+        // `SENT`-letter words.
         // Another matrix's extension takes its table walks (`extend_hit_two_hit_with`).
         let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
-            if !M::BLOSUM62 && !SENT {
+            if !M::BLOSUM62 && SENT == 0 {
                 extend_hit_two_hit_with(
                     h.sc,
                     query,
@@ -3281,7 +3293,7 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
                     x_dropoff,
                     false,
                 )
-            } else if !SENT {
+            } else if SENT == 0 {
                 extend_hit_two_hit(
                     query,
                     h.subject,
@@ -3294,10 +3306,10 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
             } else {
                 // SAFETY: `SENT` runs on the units `x_unit_sent` accepts (`scan_unit_cells`): the
                 // batch's contexts passed `x_tbx_sent_contexts` (XPairPar::sent), and `h.subject_sent`
-                // is the buffer of a frame `x_tbx_sent_subject` accepted; `XPairPar::sent` holds only
-                // for words of 3 letters.
+                // is the buffer of a frame `x_tbx_sent_subject` accepted; `SENT` is the search's
+                // word length (the dispatch `scan_unit_or_bf` chooses and checks it).
                 unsafe {
-                    h.sc.sent_two_hit_3(
+                    h.sc.sent_two_hit_of::<SENT>(
                         query_full,
                         h.subject_sent,
                         (last_hit + wordsize) as usize,
@@ -3309,6 +3321,7 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
             };
         probe.ext_end(
             mark,
+            h.sc,
             query,
             h.subject,
             (last_hit + wordsize) as usize,
@@ -3733,9 +3746,12 @@ mod tests {
     /// offset advanced after every frame (`Blast_ExtendWordExit`). Returns the sorted init-HSP list
     /// of every frame, how often each branch was taken, and how many hits met a cell whose flag 1
     /// was written by a right extension on another raw diagonal (the masked-aliasing case of
-    /// module doc item 3).
+    /// module doc item 3). The scores and the word length are those of `sc` (the extensions of
+    /// the reference loop without the sentinel walks: `extend_hit_two_hit` for BLOSUM62's
+    /// instance, `extend_hit_two_hit_with` for the other).
     #[allow(clippy::too_many_arguments)]
-    fn masked_reference(
+    fn masked_reference<M: TbxScore>(
+        sc: M,
         lookup: &BlastAaLookupTable,
         contexts: &[QueryContext],
         s_frames: &[QueryFrame],
@@ -3745,7 +3761,7 @@ mod tests {
         diag_array: &mut [DiagStruct],
         diag_offset: &mut i32,
     ) -> (Vec<Vec<InitHSP>>, Vec<XHit>, usize) {
-        let wordsize = 3;
+        let wordsize = sc.word() as i32;
         let mask = (diag_array.len() - 1) as u32;
         let mut per_frame = Vec::new();
         let mut outcomes = Vec::new();
@@ -3772,7 +3788,7 @@ mod tests {
                     s_frame: s_frame.frame,
                     s_idx: 0,
                     s_len: 999,
-                    sc: Blosum62Score,
+                    sc,
                 };
                 let seq_ranges = [(0, subject.len() as i32)];
                 let mut scan_range = [0, 0, subject.len() as i32 - wordsize];
@@ -3794,7 +3810,7 @@ mod tests {
                         {
                             aliased += 1;
                         }
-                        let outcome = x_hit::<_, _, _, false>(
+                        let outcome = x_hit::<_, _, _, 0>(
                             &mut diag_array[cell],
                             pair.q_off,
                             pair.s_off,
@@ -3819,7 +3835,7 @@ mod tests {
     }
 
     /// The unit path's sorted init-HSP list of every frame (one chunk per frame here).
-    fn unit_lists(pp: &XPairPar, inp: &XSubject<'_>) -> Vec<Vec<InitHSP>> {
+    fn unit_lists<M: TbxScore>(pp: &XPairPar<M>, inp: &XSubject<'_>) -> Vec<Vec<InitHSP>> {
         let mut out = Vec::new();
         let mut scratch = XScratch::new(false);
         for (f, s_frame) in inp.s_frames_preliminary.iter().enumerate() {
@@ -3829,7 +3845,8 @@ mod tests {
                 overlap: 0,
             };
             let mut init_hsps = Vec::new();
-            if chunk.length >= 3 {
+            // The reference finds no hits in a frame shorter than a word.
+            if chunk.length >= inp.wordsize as usize {
                 for (g, group) in pp.groups.iter().enumerate() {
                     if group.lookup.longest_chain > 0 {
                         let unit = XUnit { f, k: 0, chunk, g };
@@ -3871,6 +3888,7 @@ mod tests {
         if stale {
             // Leave the values of an earlier run of the same subject in the table.
             let _ = masked_reference(
+                Blosum62Score,
                 &lookup,
                 &contexts,
                 &case.s_frames,
@@ -3882,6 +3900,7 @@ mod tests {
             );
         }
         let (reference, outcomes, _) = masked_reference(
+            Blosum62Score,
             &lookup,
             &contexts,
             &case.s_frames,
@@ -4234,6 +4253,7 @@ mod tests {
             let mut diag_array = vec![DiagStruct::default(); size as usize];
             let mut diag_offset = window;
             let (reference, outcomes, aliased) = masked_reference(
+                Blosum62Score,
                 &lookup,
                 &contexts,
                 &s_frames,
@@ -4369,6 +4389,7 @@ mod tests {
             let mut diag_array = vec![DiagStruct::default(); size as usize];
             let mut diag_offset = window;
             let (reference, _, _) = masked_reference(
+                Blosum62Score,
                 &lookup,
                 &contexts,
                 &s_frames,
@@ -4454,7 +4475,7 @@ mod tests {
                 wide_groups +=
                     usize::from(group_starts(&contexts, X_MAX_GROUPS).len() < contexts.len());
                 let mut want: Vec<InitHSP> = Vec::new();
-                plain.scan_unit_hits::<_, XNoProbe, false, false, false>(
+                plain.scan_unit_hits::<_, XNoProbe, false, false, 0>(
                     &unit,
                     &inp,
                     &mut scratch,
@@ -4493,49 +4514,49 @@ mod tests {
                     }
                     let mut got: Vec<InitHSP> = Vec::new();
                     match name {
-                        "scan" => pp.scan_unit_hits::<_, XNoProbe, false, false, false>(
+                        "scan" => pp.scan_unit_hits::<_, XNoProbe, false, false, 0>(
                             &unit,
                             &inp,
                             &mut scratch,
                             &mut got,
                             &mut XNoProbe,
                         ),
-                        "scan pf" => pp.scan_unit_hits::<_, XNoProbe, true, false, false>(
+                        "scan pf" => pp.scan_unit_hits::<_, XNoProbe, true, false, 0>(
                             &unit,
                             &inp,
                             &mut scratch,
                             &mut got,
                             &mut XNoProbe,
                         ),
-                        "bf" => pp.scan_unit_hits::<_, XNoProbe, false, true, false>(
+                        "bf" => pp.scan_unit_hits::<_, XNoProbe, false, true, 0>(
                             &unit,
                             &inp,
                             &mut scratch,
                             &mut got,
                             &mut XNoProbe,
                         ),
-                        "bf pf" => pp.scan_unit_hits::<_, XNoProbe, true, true, false>(
+                        "bf pf" => pp.scan_unit_hits::<_, XNoProbe, true, true, 0>(
                             &unit,
                             &inp,
                             &mut scratch,
                             &mut got,
                             &mut XNoProbe,
                         ),
-                        "scan sent" => pp.scan_unit_hits::<_, XNoProbe, false, false, true>(
+                        "scan sent" => pp.scan_unit_hits::<_, XNoProbe, false, false, 3>(
                             &unit,
                             &inp,
                             &mut scratch,
                             &mut got,
                             &mut XNoProbe,
                         ),
-                        "bf sent" => pp.scan_unit_hits::<_, XNoProbe, false, true, true>(
+                        "bf sent" => pp.scan_unit_hits::<_, XNoProbe, false, true, 3>(
                             &unit,
                             &inp,
                             &mut scratch,
                             &mut got,
                             &mut XNoProbe,
                         ),
-                        _ => pp.scan_unit_hits::<_, XNoProbe, true, true, true>(
+                        _ => pp.scan_unit_hits::<_, XNoProbe, true, true, 3>(
                             &unit,
                             &inp,
                             &mut scratch,
@@ -4548,7 +4569,7 @@ mod tests {
                 }
                 for (name, len) in [("batched", x_tbx_extbatch::BATCH), ("batched 1", 1)] {
                     let mut got: Vec<InitHSP> = Vec::new();
-                    pp.scan_unit_batched_hits::<_, false, false, false>(
+                    pp.scan_unit_batched_hits::<_, false, false, 0>(
                         &unit,
                         &inp,
                         &mut scratch,
@@ -4557,7 +4578,7 @@ mod tests {
                     );
                     lists.push((name, got));
                     let mut got: Vec<InitHSP> = Vec::new();
-                    pp.scan_unit_batched_hits::<_, true, true, false>(
+                    pp.scan_unit_batched_hits::<_, true, true, 0>(
                         &unit,
                         &inp,
                         &mut scratch,
@@ -4567,7 +4588,7 @@ mod tests {
                     lists.push((name, got));
                     if sent {
                         let mut got: Vec<InitHSP> = Vec::new();
-                        pp.scan_unit_batched_hits::<_, true, true, true>(
+                        pp.scan_unit_batched_hits::<_, true, true, 3>(
                             &unit,
                             &inp,
                             &mut scratch,
@@ -4576,7 +4597,7 @@ mod tests {
                         );
                         lists.push((name, got));
                         let mut got: Vec<InitHSP> = Vec::new();
-                        pp.scan_unit_batched_hits::<_, false, false, true>(
+                        pp.scan_unit_batched_hits::<_, false, false, 3>(
                             &unit,
                             &inp,
                             &mut scratch,
@@ -4596,7 +4617,7 @@ mod tests {
                     == Some((mask as usize).div_ceil(2))
                 {
                     let mut got: Vec<InitHSP> = Vec::new();
-                    control.scan_unit_hits::<_, XNoProbe, false, false, false>(
+                    control.scan_unit_hits::<_, XNoProbe, false, false, 0>(
                         &unit,
                         &inp,
                         &mut scratch,
@@ -4692,7 +4713,7 @@ mod tests {
 
     /// The unit lists of `inp` with the batched extensions of LOSAT_X_TBXEXTBATCH (`unit_lists`
     /// with `run_unit_batched`).
-    fn unit_lists_batched(pp: &XPairPar, inp: &XSubject<'_>) -> Vec<Vec<InitHSP>> {
+    fn unit_lists_batched<M: TbxScore>(pp: &XPairPar<M>, inp: &XSubject<'_>) -> Vec<Vec<InitHSP>> {
         let mut out = Vec::new();
         let mut scratch = XScratch::new(false);
         for (f, s_frame) in inp.s_frames_preliminary.iter().enumerate() {
@@ -4702,7 +4723,8 @@ mod tests {
                 overlap: 0,
             };
             let mut init_hsps = Vec::new();
-            if chunk.length >= 3 {
+            // The reference finds no hits in a frame shorter than a word.
+            if chunk.length >= inp.wordsize as usize {
                 for (g, group) in pp.groups.iter().enumerate() {
                     if group.lookup.longest_chain > 0 {
                         let unit = XUnit { f, k: 0, chunk, g };
@@ -4762,10 +4784,33 @@ mod tests {
         threshold: i32,
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> (usize, usize) {
-        let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-        let (full, contexts) = build_ncbi_lookup(queries, threshold, &params, true);
+        lut_check_for(queries, threshold, pool, ScoringMatrix::Blosum62, 3)
+    }
+
+    /// `lut_check` with the scores of `matrix` and words of `word_length` letters (`-matrix`,
+    /// `-word_size`): the reference builder's table of `build_ncbi_lookup_for_profile`, the
+    /// direct groups from `XPairLutQuery::x_prepare_for`.
+    fn lut_check_for(
+        queries: &[Vec<QueryFrame>],
+        threshold: i32,
+        pool: &crate::utils::threading::SearchPool<'_>,
+        matrix: ScoringMatrix,
+        word_length: usize,
+    ) -> (usize, usize) {
+        let params = lookup_protein_params_ungapped(matrix);
+        let (full, contexts) = crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile(
+            queries,
+            threshold,
+            &params,
+            true,
+            matrix,
+            word_length,
+        );
+        assert_eq!(full.word_length, word_length as i32);
         let reference = build_groups(&full, &contexts, X_MAX_GROUPS);
-        let q = XPairLutQuery::x_prepare(queries, threshold, true).expect("direct builder applies");
+        let q = XPairLutQuery::x_prepare_for(queries, threshold, true, matrix, word_length)
+            .expect("direct builder applies");
+        assert_eq!(q.word_length(), word_length);
         // On the pool when the caller has one, else in order on this thread.
         let direct = lut_direct_groups(&q, X_MAX_GROUPS, pool, true)
             .expect("every location inside one group");
@@ -6239,5 +6284,396 @@ mod tests {
             })
             .expect("search pool");
         }
+    }
+
+    // No NCBI counterpart: `-word_size 2` (SC10b PR-2). The unit path of a search of 2-letter
+    // words (the other matrices' instance, `MatrixScore`, which BLOSUM62 takes at that word length
+    // too) against the reference statements on one masked table (`masked_reference`: the table
+    // walks of `extend_hit_two_hit_with`), in every instance a unit runs: the scan loop and the
+    // branch-free one, with and without the prefetch, the sentinel walks of 2-letter words
+    // (`SENT` = 2, `TbxScore::sent_two_hit_of::<2>`) and none, the batched extensions, and the
+    // masked tables of LOSAT_X_TBXUNITMASK; then the subject's merged list on 1, 4 and 8 threads.
+    // Query contexts with SEG masks, empty, or of one or two letters; subject frames now and then
+    // of 0 to 3 letters (shorter than a word, one word); X-drops above 127 (the walks refuse
+    // them).
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1108
+    // ```c
+    //     for (i = 0; i < word_size; i++) {
+    // ```
+    #[test]
+    fn units_of_2_letter_words_equal_the_masked_reference() {
+        use crate::algorithm::tblastx::scoring::{MatrixScore, MatrixScores};
+        let mut rng = Rng(0x2b17_5eed_0000_0002);
+        let alphabets = [
+            aa("AW"),
+            aa("ACW"),
+            aa("ACDEKW"),
+            aa("ACDEFGHIKLMNPQRSTVWY"),
+        ];
+        let tables: Vec<MatrixScores> = [
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Pam30,
+            ScoringMatrix::Blosum45,
+            ScoringMatrix::Identity,
+        ]
+        .into_iter()
+        .map(|matrix| MatrixScores::with_word(matrix, 2))
+        .collect();
+        // LOSAT_X_TBXUNGAPSENT is on (the batches' contexts have their sentinels).
+        let on = x_tbx_sent_contexts(std::iter::empty());
+        let (mut units, mut sent_units, mut masked_units) = (0usize, 0usize, 0usize);
+        let (mut saved, mut short_frames, mut merged) = (0usize, 0usize, 0usize);
+        let mut outcomes = [0usize; 7];
+        let serial = crate::utils::threading::SearchPool::x_serial();
+        for case_no in 0..300 {
+            let sc = tables[case_no % tables.len()].scorer();
+            assert_eq!(sc.word(), 2);
+            let alphabet = &alphabets[case_no % alphabets.len()];
+            // The batched extensions only where their rule allows them (`x_tbx_extbatch::active`:
+            // `window >= wordsize + BATCH`, here at its bound too); a window of 3 without them.
+            let window = [40, 2 + x_tbx_extbatch::BATCH as i32, 64, 3][case_no % 4];
+            let batched = window >= 2 + x_tbx_extbatch::BATCH as i32;
+            let threshold = [11, 13, 0, 8][case_no % 4];
+            let queries: Vec<Vec<QueryFrame>> = (0..1 + usize::from(case_no % 5 == 4))
+                .map(|_| {
+                    (0..1 + rng.below(6) as usize)
+                        .map(|c| random_masked_frame(&mut rng, FRAMES[c], 90, alphabet))
+                        .collect()
+                })
+                .collect();
+            let all: Vec<&QueryFrame> = queries.iter().flatten().collect();
+            let mut s_frames = Vec::new();
+            for &f in &FRAMES[..1 + rng.below(3) as usize] {
+                let s_len = if rng.below(6) == 0 {
+                    short_frames += 1;
+                    rng.below(4) as usize
+                } else {
+                    60 + rng.below(1200) as usize
+                };
+                let mut residues = Vec::with_capacity(s_len);
+                while residues.len() < s_len {
+                    let q = all[rng.below(all.len() as u64) as usize];
+                    if rng.below(3) != 0 && q.aa_len > 0 {
+                        let from = rng.below(q.aa_len as u64) as usize;
+                        let take = (q.aa_len - from).min(s_len - residues.len());
+                        residues.extend_from_slice(&q.aa_seq[1 + from..1 + from + take]);
+                    } else {
+                        let take = (2 + rng.below(30) as usize).min(s_len - residues.len());
+                        residues.extend(random_residues(&mut rng, take, alphabet));
+                    }
+                }
+                s_frames.push(frame(f, &residues));
+            }
+            let params = lookup_protein_params_ungapped(sc.matrix());
+            let (lookup, contexts) =
+                crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile(
+                    &queries,
+                    threshold,
+                    &params,
+                    true,
+                    sc.matrix(),
+                    2,
+                );
+            assert_eq!(lookup.word_length, 2);
+            let query_length = query_length_of(&contexts);
+            let size = diag_array_size_for(query_length, window);
+            let cutoff_scores: Vec<i32> = (0..contexts.len())
+                .map(|i| 8 + (i as i32 % 4) * 3)
+                .collect();
+            let x_dropoff_per_context: Vec<i32> = (0..contexts.len())
+                .map(|i| [7, 16, 30, 200][(i + case_no) % 4])
+                .collect();
+            let mut diag_array = vec![DiagStruct::default(); size as usize];
+            let mut diag_offset = window;
+            let (reference, reference_outcomes, _) = masked_reference(
+                sc,
+                &lookup,
+                &contexts,
+                &s_frames,
+                &cutoff_scores,
+                &x_dropoff_per_context,
+                window,
+                &mut diag_array,
+                &mut diag_offset,
+            );
+            for outcome in reference_outcomes {
+                outcomes[outcome as usize] += 1;
+            }
+            let inp = XSubject {
+                s_frames_preliminary: &s_frames,
+                s_frames: &s_frames,
+                contexts: &contexts,
+                cutoff_scores: &cutoff_scores,
+                x_dropoff_per_context: &x_dropoff_per_context,
+                window,
+                wordsize: 2,
+                s_idx: 0,
+                s_len: 999,
+            };
+            // Every other case on masked unit tables (ratio 1: every unit whose unmasked table is
+            // at least the masked one's size).
+            let masked = case_no % 2 == 1;
+            let pp = XPairPar {
+                groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
+                stub: false,
+                // As `prepare` decides it.
+                sent: matches!(sc.word(), 2 | 3)
+                    && sc.x_sent_walks()
+                    && x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc,
+                sliced: None,
+                mask_rule: masked.then_some(XMaskRule {
+                    max_cells: usize::MAX,
+                    ratio: 1,
+                    band_cells: None,
+                }),
+                extents: if masked {
+                    x_group_extents(&contexts, X_MAX_GROUPS)
+                } else {
+                    Vec::new()
+                },
+            };
+            assert_eq!(pp.sent, on, "case {case_no}");
+            assert_eq!(
+                unit_lists(&pp, &inp),
+                reference,
+                "case {case_no}: unit lists differ from the masked reference"
+            );
+            if batched {
+                assert_eq!(
+                    unit_lists_batched(&pp, &inp),
+                    reference,
+                    "case {case_no}: batched unit lists differ from the masked reference"
+                );
+            }
+            saved += reference.iter().map(Vec::len).sum::<usize>();
+            // Every instance of a unit, against the scan loop without the walks.
+            let mut scratch = XScratch::new(false);
+            for (f, s_frame) in s_frames.iter().enumerate() {
+                let chunk = SubjectChunk {
+                    offset: 0,
+                    length: s_frame.aa_len,
+                    overlap: 0,
+                };
+                for g in 0..pp.groups.len() {
+                    if pp.groups[g].lookup.longest_chain <= 0 {
+                        continue;
+                    }
+                    let unit = XUnit { f, k: 0, chunk, g };
+                    let sent = pp.x_unit_sent(&unit, &inp);
+                    assert_eq!(sent, pp.sent);
+                    units += 1;
+                    sent_units += usize::from(sent);
+                    masked_units += usize::from(pp.x_unit_mask(&unit, window).is_some());
+                    let mut want: Vec<InitHSP> = Vec::new();
+                    pp.scan_unit_hits::<_, XNoProbe, false, false, 0>(
+                        &unit,
+                        &inp,
+                        &mut scratch,
+                        &mut want,
+                        &mut XNoProbe,
+                    );
+                    let mut lists: Vec<(&str, Vec<InitHSP>)> = Vec::new();
+                    let mut run = |name, got: Vec<InitHSP>| lists.push((name, got));
+                    let mut got = Vec::new();
+                    pp.scan_unit_hits::<_, XNoProbe, true, true, 0>(
+                        &unit,
+                        &inp,
+                        &mut scratch,
+                        &mut got,
+                        &mut XNoProbe,
+                    );
+                    run("bf pf", got);
+                    if batched {
+                        let mut got = Vec::new();
+                        pp.scan_unit_batched_hits::<_, true, true, 0>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            x_tbx_extbatch::BATCH,
+                        );
+                        run("batched bf pf", got);
+                    }
+                    if sent {
+                        for (name, pf, bf) in [
+                            ("sent", false, false),
+                            ("bf sent", false, true),
+                            ("bf pf sent", true, true),
+                        ] {
+                            let mut got = Vec::new();
+                            match (pf, bf) {
+                                (false, false) => pp
+                                    .scan_unit_hits::<_, XNoProbe, false, false, 2>(
+                                        &unit,
+                                        &inp,
+                                        &mut scratch,
+                                        &mut got,
+                                        &mut XNoProbe,
+                                    ),
+                                (false, true) => pp.scan_unit_hits::<_, XNoProbe, false, true, 2>(
+                                    &unit,
+                                    &inp,
+                                    &mut scratch,
+                                    &mut got,
+                                    &mut XNoProbe,
+                                ),
+                                _ => pp.scan_unit_hits::<_, XNoProbe, true, true, 2>(
+                                    &unit,
+                                    &inp,
+                                    &mut scratch,
+                                    &mut got,
+                                    &mut XNoProbe,
+                                ),
+                            }
+                            run(name, got);
+                        }
+                        for len in [x_tbx_extbatch::BATCH, 1].into_iter().filter(|_| batched) {
+                            let mut got = Vec::new();
+                            pp.scan_unit_batched_hits::<_, true, true, 2>(
+                                &unit,
+                                &inp,
+                                &mut scratch,
+                                &mut got,
+                                len,
+                            );
+                            run("batched bf pf sent", got);
+                            let mut got = Vec::new();
+                            pp.scan_unit_batched_hits::<_, false, false, 2>(
+                                &unit,
+                                &inp,
+                                &mut scratch,
+                                &mut got,
+                                len,
+                            );
+                            run("batched sent", got);
+                        }
+                    }
+                    for (name, got) in &lists {
+                        assert_eq!(got, &want, "case {case_no} frame {f} group {g}: {name}");
+                    }
+                }
+            }
+            // The subject's merged list on 1, 4 and 8 threads (`run_subject_units`, whose units
+            // take `run_unit` or its batched form by the rules, and `merge_subject`).
+            let one =
+                XPairPar::<MatrixScore>::merge_subject(pp.run_subject_units(&inp, &serial), &inp);
+            merged += one.len();
+            for threads in [4usize, 8] {
+                crate::utils::threading::with_search_pool(threads, "tblastx", |pool| {
+                    let got = XPairPar::<MatrixScore>::merge_subject(
+                        pp.run_subject_units(&inp, pool),
+                        &inp,
+                    );
+                    assert_eq!(got.len(), one.len(), "case {case_no} threads {threads}");
+                    for (k, (a, b)) in got.iter().zip(&one).enumerate() {
+                        assert!(x_same_hit(a, b), "case {case_no} threads {threads} hit {k}");
+                    }
+                    Ok(())
+                })
+                .expect("search pool");
+            }
+        }
+        assert!(units > 1_000, "units {units}");
+        assert_eq!(sent_units, if on { units } else { 0 });
+        assert!(masked_units > 350, "masked units {masked_units}");
+        assert!(saved > 100_000, "saved {saved}");
+        assert!(merged > 100_000, "merged {merged}");
+        assert!(short_frames > 100, "short frames {short_frames}");
+        // The reference took every branch of the two-hit test.
+        for (outcome, n) in outcomes.iter().enumerate() {
+            assert!(*n > 0, "outcome {outcome} never taken");
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456,461-465
+    // ```c
+    //     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
+    //                                       lookup->charsize, lookup->word_length,
+    //                                       query, location);
+    // ...
+    //     for (i = 0; i < lookup->backbone_size; i++) {
+    //         if (exact_backbone[i] != NULL) {
+    //             s_AddWordHits(lookup, matrix, query->sequence,
+    //                           exact_backbone[i], query_bias, row_max);
+    // ```
+    // `-word_size 2` (SC10b PR-2): the direct groups of 2-letter words (10-bit backbone indices)
+    // are `build_groups` of the reference builder's table of that word length, for one query and
+    // several (groups of several contexts), SEG masks and contexts without words, thresholds 0
+    // (no neighbours), 8, 11, 13 and INT_MIN (every word), several matrices, and on a search pool
+    // (the memo of neighbour lists keyed by the word length). Words of 4 letters are not covered
+    // (20-bit indices): the unit path leaves them to the reference loop.
+    #[test]
+    fn direct_groups_of_2_letter_words_equal_build_groups() {
+        use crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers;
+        assert!(x_direct_covers(2) && x_direct_covers(3) && !x_direct_covers(4));
+        let mut rng = Rng(0x2b17_d1ec_0000_0002);
+        let alphabets = [aa("ACDEKW"), aa("AW"), aa("ACDEFGHIKLMNPQRSTVWY")];
+        let matrices = [
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Pam30,
+            ScoringMatrix::Blosum45,
+            ScoringMatrix::Pam250,
+        ];
+        let serial = crate::utils::threading::SearchPool::x_serial();
+        let (mut with_entries, mut empty_groups, mut six_groups) = (0usize, 0usize, 0usize);
+        for case_no in 0..48 {
+            let alphabet = &alphabets[case_no % alphabets.len()];
+            let matrix = matrices[case_no % matrices.len()];
+            let queries: Vec<Vec<QueryFrame>> = (0..if case_no % 3 == 2 { 3 } else { 1 })
+                .map(|_| {
+                    let n_ctx = 1 + rng.below(6) as usize;
+                    (0..n_ctx)
+                        .map(|c| random_masked_frame(&mut rng, FRAMES[c], 200, alphabet))
+                        .collect()
+                })
+                .collect();
+            for threshold in [0, 8, 11, 13] {
+                let (groups, filled) = lut_check_for(&queries, threshold, &serial, matrix, 2);
+                with_entries += filled;
+                empty_groups += groups - filled;
+                six_groups += usize::from(groups == X_MAX_GROUPS);
+            }
+        }
+        assert!(with_entries > 300, "groups with entries {with_entries}");
+        assert!(empty_groups > 50, "empty groups {empty_groups}");
+        assert!(six_groups > 10, "six groups {six_groups}");
+        // INT_MIN: every 2-letter word is a neighbour of every query word.
+        let alphabet = aa("ACDEFGHIKLMNPQRSTVWY");
+        let frames: Vec<QueryFrame> = FRAMES
+            .iter()
+            .map(|&f| random_masked_frame(&mut rng, f, 30, &alphabet))
+            .collect();
+        assert_eq!(
+            lut_check_for(
+                std::slice::from_ref(&frames),
+                i32::MIN,
+                &serial,
+                ScoringMatrix::Blosum62,
+                2
+            )
+            .0,
+            6
+        );
+        // On a search pool, twice (the second round reads the memoised lists), and with a build of
+        // 3-letter words between (another key of the memo).
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        crate::utils::threading::with_search_pool(4, "tblastx", |pool| {
+            for _round in 0..2 {
+                for word in [2, 3, 2] {
+                    let (groups, _) = lut_check_for(
+                        std::slice::from_ref(&frames),
+                        13,
+                        pool,
+                        ScoringMatrix::Pam30,
+                        word,
+                    );
+                    assert_eq!(groups, 6);
+                }
+            }
+            Ok(())
+        })
+        .expect("search pool");
     }
 }

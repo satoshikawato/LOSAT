@@ -2,7 +2,6 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
 
-use super::get_score;
 use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
 // The table walks of the two-hit extension (x_two_hit_fast.rs).
 use super::x_two_hit_fast;
@@ -692,11 +691,12 @@ pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
     )
 }
 
-// No NCBI counterpart (LOSAT_X_STATS): the cells one call of `extend_hit_two_hit` scores, for
-// the statistics of the unit path (tblastx/x_unit_probe.rs). It repeats the call's scalar loops
-// (the same sums and the same stops, aa_ungapped.c:846-866 and 886-921) and counts their steps;
-// the search never calls it. The test below checks that it returns what the call returns.
-/// What one call of `extend_hit_two_hit` scored, and its result.
+// No NCBI counterpart (LOSAT_X_STATS): the cells one call of `extend_hit_two_hit_reference` scores,
+// with the search's scores and word length, for the statistics of the unit path
+// (tblastx/x_unit_probe.rs). It repeats the call's scalar loops (the same sums and the same stops,
+// aa_ungapped.c:846-866 and 886-921) and counts their steps; the search never calls it. The test
+// below checks that it returns what the call returns.
+/// What one call of `extend_hit_two_hit_reference` scored, and its result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct XTwoHitCells {
     /// Cells of the left extension (from the word's best end towards the first hit).
@@ -707,12 +707,14 @@ pub(crate) struct XTwoHitCells {
     pub(crate) s_lo: usize,
     /// One past the last subject position scored.
     pub(crate) s_hi: usize,
-    /// The seven values `extend_hit_two_hit` returns for the same arguments.
+    /// The seven values `extend_hit_two_hit_reference` returns for the same arguments.
     pub(crate) result: (usize, usize, usize, usize, i32, bool, usize),
 }
 
-/// The cells of `extend_hit_two_hit(q_seq, s_seq, s_left_off, s_right_off, q_right_off, x_drop, false)`.
-pub(crate) fn x_two_hit_cells(
+/// The cells of `extend_hit_two_hit_reference(sc, q_seq, s_seq, s_left_off, s_right_off,
+/// q_right_off, x_drop, false)`: the scores of `sc` and its word length (`TbxScore::word`).
+pub(crate) fn x_two_hit_cells<S: TbxScore>(
+    sc: S,
     q_seq: &[u8],
     s_seq: &[u8],
     s_left_off: usize,
@@ -720,10 +722,10 @@ pub(crate) fn x_two_hit_cells(
     q_right_off: usize,
     x_drop: i32,
 ) -> XTwoHitCells {
-    let k_size = 3;
+    let k_size = sc.word();
     let (mut score, mut seed_score, mut right_d) = (0i32, 0i32, 0usize);
     for i in 0..k_size {
-        score += get_score(q_seq[q_right_off + i], s_seq[s_right_off + i]);
+        score += sc.score(q_seq[q_right_off + i], s_seq[s_right_off + i]);
         if score > seed_score {
             seed_score = score;
             right_d = i + 1;
@@ -734,7 +736,7 @@ pub(crate) fn x_two_hit_cells(
     let max_left = q_r.min(s_r);
     let (mut score, mut left_score, mut left_disp, mut left) = (0i32, 0i32, 0usize, 0usize);
     while left < max_left {
-        score += get_score(q_seq[q_r - 1 - left], s_seq[s_r - 1 - left]);
+        score += sc.score(q_seq[q_r - 1 - left], s_seq[s_r - 1 - left]);
         left += 1;
         if score > left_score {
             left_score = score;
@@ -750,7 +752,7 @@ pub(crate) fn x_two_hit_cells(
     if reached_first_hit {
         let (mut score, mut max_score, mut j) = (left_score, left_score, 0usize);
         while q_r + j < q_seq.len() && s_r + j < s_seq.len() {
-            score += get_score(q_seq[q_r + j], s_seq[s_r + j]);
+            score += sc.score(q_seq[q_r + j], s_seq[s_r + j]);
             right += 1;
             if score > max_score {
                 max_score = score;
@@ -787,7 +789,9 @@ mod x_cells_tests {
     use super::*;
 
     // No NCBI counterpart (a statistics helper). The counting copy returns what the extension
-    // returns, on random NCBIstdaa sequences, offsets and X-drops.
+    // returns, on random NCBIstdaa sequences, offsets and X-drops, with the scores and the word
+    // length of the search: BLOSUM62's instance (`extend_hit_two_hit`), and every matrix at
+    // words of 2, 3 and 4 letters (`extend_hit_two_hit_reference`).
     #[test]
     fn the_counting_copy_returns_what_the_extension_returns() {
         let mut state = 0x9e37_79b9_7f4a_7c15u64;
@@ -797,24 +801,47 @@ mod x_cells_tests {
             state ^= state << 17;
             state % n
         };
-        for _ in 0..20_000 {
+        let tables: Vec<crate::algorithm::tblastx::scoring::MatrixScores> = [2, 3, 4]
+            .into_iter()
+            .flat_map(|word| {
+                crate::config::ScoringMatrix::ALL
+                    .into_iter()
+                    .map(move |matrix| {
+                        crate::algorithm::tblastx::scoring::MatrixScores::with_word(matrix, word)
+                    })
+            })
+            .collect();
+        for round in 0..40_000 {
             let q_len = 4 + next(120) as usize;
             let s_len = 4 + next(120) as usize;
             // Mostly a few residues, so that runs of positive scores are common.
             let alphabet = 1 + next(24);
             let q: Vec<u8> = (0..q_len).map(|_| 1 + next(alphabet) as u8).collect();
             let s: Vec<u8> = (0..s_len).map(|_| 1 + next(alphabet) as u8).collect();
-            let q_right = next((q_len - 3) as u64 + 1) as usize;
-            let s_right = next((s_len - 3) as u64 + 1) as usize;
-            let s_left = s_right.saturating_sub(next(50) as usize);
             let x_drop = 1 + next(40) as i32;
-            let cells = x_two_hit_cells(&q, &s, s_left, s_right, q_right, x_drop);
-            let result = extend_hit_two_hit(&q, &s, s_left, s_right, q_right, x_drop, false);
-            assert_eq!(cells.result, result);
+            // Even rounds: BLOSUM62's instance; odd rounds: a matrix and a word length.
+            let sc = (round % 2 == 1).then(|| tables[next(tables.len() as u64) as usize].scorer());
+            let word = sc.map_or(3, |sc| sc.word());
+            let q_right = next((q_len - word) as u64 + 1) as usize;
+            let s_right = next((s_len - word) as u64 + 1) as usize;
+            let s_left = s_right.saturating_sub(next(50) as usize);
+            let (cells, result) = match sc {
+                None => (
+                    x_two_hit_cells(Blosum62Score, &q, &s, s_left, s_right, q_right, x_drop),
+                    extend_hit_two_hit(&q, &s, s_left, s_right, q_right, x_drop, false),
+                ),
+                Some(sc) => (
+                    x_two_hit_cells(sc, &q, &s, s_left, s_right, q_right, x_drop),
+                    extend_hit_two_hit_reference(
+                        sc, &q, &s, s_left, s_right, q_right, x_drop, false,
+                    ),
+                ),
+            };
+            assert_eq!(cells.result, result, "round {round} word {word}");
             if !result.5 {
                 assert_eq!(cells.right, 0);
             }
-            assert!(cells.s_lo <= s_right && cells.s_hi >= s_right + 3 && cells.s_hi <= s_len);
+            assert!(cells.s_lo <= s_right && cells.s_hi >= s_right + word && cells.s_hi <= s_len);
         }
     }
 }

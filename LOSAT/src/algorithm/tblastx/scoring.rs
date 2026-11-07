@@ -21,12 +21,14 @@
 //!
 //! The other instance also runs every search of a word length other than 3 (`-word_size` 2 or
 //! 4, NCBI's 2..=4; BLOSUM62 too): it holds the word length ([`TbxScore::word`]), which BLOSUM62's
-//! instance fixes at 3. Such a search takes the reference frame loop with NCBI's table of that
-//! word length (`build_ncbi_lookup_for_profile`); its two-hit extensions take the table walks and
-//! the sentinel walks with the word loop over that length (`two_hit_in2`, `two_hit_in4`,
-//! `two_hit_sent_in::<W>` for `W` in 2..=4, the matrix's byte table), and the reference two-hit
-//! extension, whose loop over the word reads the length, for the calls those do not cover. The
-//! unit path is for 3-letter words.
+//! instance fixes at 3. Its two-hit extensions take the table walks and the sentinel walks with
+//! the word loop over that length (`two_hit_in2`, `two_hit_in4`, `two_hit_sent_in::<W>` for `W`
+//! in 2..=4, the matrix's byte table), and the reference two-hit extension, whose loop over the
+//! word reads the length, for the calls those do not cover. The unit path takes the words whose
+//! group tables the 16-bit direct builder makes (`x_pair_lut::x_direct_covers`: 2 and 3
+//! letters), its units the walks of their word length ([`TbxScore::sent_two_hit_of`]); a search
+//! of 4-letter words takes the reference frame loop with NCBI's table of that word length
+//! (`build_ncbi_lookup_for_profile`).
 
 use super::extension::{
     extend_hit_two_hit_sent, extend_hit_two_hit_with, matrix_walk_table, two_hit_in, two_hit_in2,
@@ -97,14 +99,15 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
         )
     }
 
-    /// `sent_two_hit` for a search of 3-letter words, without the choice of the word length: the
-    /// unit path's extensions (`x_hit`, the batched `resolve`), whose units build 3-letter words
-    /// only (`XPairPar::sent` holds only for `word` 3).
+    /// `sent_two_hit` for a search of `W`-letter words, with the word length chosen by the caller
+    /// instead of at every call: the unit path's extensions (`x_hit`, the batched `resolve`), whose
+    /// units take the instance of the search's word length (the dispatches of x_tbx_hitbf.rs, such
+    /// as `scan_unit_or_bf`, once per unit). BLOSUM62's instance has 3-letter words only.
     ///
-    /// SAFETY: those of `sent_two_hit`, and `self.word() == 3`.
-    // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (`word_size` 3).
+    /// SAFETY: those of `sent_two_hit`, and `self.word() == W`.
+    // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (`word_size` W).
     #[inline(always)]
-    unsafe fn sent_two_hit_3(
+    unsafe fn sent_two_hit_of<const W: usize>(
         self,
         q_full: &[u8],
         s_full: &[u8],
@@ -113,6 +116,8 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
         q_right_off: usize,
         x_drop: i32,
     ) -> TwoHit {
+        // The units check it once per unit (`scan_unit_cells`).
+        debug_assert_eq!(W, self.word());
         // SAFETY: the caller's.
         unsafe { self.sent_two_hit(q_full, s_full, s_left_off, s_right_off, q_right_off, x_drop) }
     }
@@ -342,9 +347,11 @@ impl TbxScore for MatrixScore<'_> {
         }
     }
 
-    // The walks of 3-letter words (`two_hit_sent_in::<3>`) without the choice in `sent_two_hit`.
+    // The walks of `W`-letter words (`two_hit_sent_in::<W>`) without the choice in
+    // `sent_two_hit`; a `W` without walks (an instance the caller never runs) takes the reference
+    // (`x_matrix_sent_refused`).
     #[inline(always)]
-    unsafe fn sent_two_hit_3(
+    unsafe fn sent_two_hit_of<const W: usize>(
         self,
         q_full: &[u8],
         s_full: &[u8],
@@ -353,18 +360,40 @@ impl TbxScore for MatrixScore<'_> {
         q_right_off: usize,
         x_drop: i32,
     ) -> TwoHit {
-        debug_assert_eq!(self.word, 3);
+        debug_assert_eq!(self.word, W);
         // SAFETY: the caller's; `x_sent_walks` holds, so the table exists and stops at a sentinel.
         let walks = unsafe {
-            two_hit_sent_in::<3>(
-                self.walk.unwrap_unchecked(),
-                q_full,
-                s_full,
-                s_left_off,
-                s_right_off,
-                q_right_off,
-                x_drop,
-            )
+            let t = self.walk.unwrap_unchecked();
+            match W {
+                2 => two_hit_sent_in::<2>(
+                    t,
+                    q_full,
+                    s_full,
+                    s_left_off,
+                    s_right_off,
+                    q_right_off,
+                    x_drop,
+                ),
+                3 => two_hit_sent_in::<3>(
+                    t,
+                    q_full,
+                    s_full,
+                    s_left_off,
+                    s_right_off,
+                    q_right_off,
+                    x_drop,
+                ),
+                4 => two_hit_sent_in::<4>(
+                    t,
+                    q_full,
+                    s_full,
+                    s_left_off,
+                    s_right_off,
+                    q_right_off,
+                    x_drop,
+                ),
+                _ => None,
+            }
         };
         match walks {
             Some(r) => r,

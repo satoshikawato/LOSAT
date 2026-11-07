@@ -189,7 +189,7 @@ impl XPendBatch {
 /// SAFETY: `c.cell` is below the length of the table `diag_ptr` points into; with `SENT`, the unit
 /// is one `x_unit_sent` accepts.
 #[inline(always)]
-unsafe fn resolve<M: TbxScore, const SENT: bool>(
+unsafe fn resolve<M: TbxScore, const SENT: usize>(
     c: &mut XCand,
     diag_ptr: *mut DiagStruct,
     h: &XHitCtx<'_, M>,
@@ -199,7 +199,7 @@ unsafe fn resolve<M: TbxScore, const SENT: bool>(
     let query_full = &ctx.aa_seq;
     // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): as in `x_hit`; another matrix's extension as in `x_hit`.
     let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
-        if !M::BLOSUM62 && !SENT {
+        if !M::BLOSUM62 && SENT == 0 {
             extend_hit_two_hit_with(
                 h.sc,
                 &query_full[1..query_full.len() - 1],
@@ -210,7 +210,7 @@ unsafe fn resolve<M: TbxScore, const SENT: bool>(
                 c.x_drop,
                 false,
             )
-        } else if !SENT {
+        } else if SENT == 0 {
             extend_hit_two_hit(
                 &query_full[1..query_full.len() - 1],
                 h.subject,
@@ -223,7 +223,7 @@ unsafe fn resolve<M: TbxScore, const SENT: bool>(
         } else {
             // SAFETY: as in `x_hit` (the caller's).
             unsafe {
-                h.sc.sent_two_hit_3(
+                h.sc.sent_two_hit_of::<SENT>(
                     query_full,
                     h.subject_sent,
                     c.s_left as usize,
@@ -292,7 +292,7 @@ unsafe fn apply<M: TbxScore>(
 /// SAFETY: as `resolve`.
 #[cold]
 #[inline(never)]
-unsafe fn resolve_early<M: TbxScore, const SENT: bool>(
+unsafe fn resolve_early<M: TbxScore, const SENT: usize>(
     b: &mut XPendBatch,
     slot: usize,
     diag_ptr: *mut DiagStruct,
@@ -321,7 +321,7 @@ unsafe fn resolve_early<M: TbxScore, const SENT: bool>(
 ///
 /// SAFETY: every candidate's cell is below the length of the table `diag_ptr` points into.
 #[inline(never)]
-pub(super) unsafe fn flush<S: XInitSink, M: TbxScore, const SENT: bool>(
+pub(super) unsafe fn flush<S: XInitSink, M: TbxScore, const SENT: usize>(
     b: &mut XPendBatch,
     diag_ptr: *mut DiagStruct,
     h: &XHitCtx<'_, M>,
@@ -369,7 +369,7 @@ pub(super) unsafe fn flush<S: XInitSink, M: TbxScore, const SENT: bool>(
 /// SAFETY: `cell` and the cell of every candidate of `b` are below the length of the table
 /// `diag_ptr` points into.
 #[inline(always)]
-pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: bool>(
+pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: usize>(
     diag_ptr: *mut DiagStruct,
     cell: usize,
     query_offset: u32,
@@ -535,7 +535,7 @@ impl<M: TbxScore> XPairPar<M> {
         init_hsps: &mut S,
         len: usize,
     ) -> (u64, u64) {
-        self.scan_unit_batched_hits::<S, PF, false, false>(unit, inp, scratch, init_hsps, len)
+        self.scan_unit_batched_hits::<S, PF, false, 0>(unit, inp, scratch, init_hsps, len)
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
@@ -543,13 +543,14 @@ impl<M: TbxScore> XPairPar<M> {
     // others (a flag, which includes a pending mark, or a candidate) to `x_hit_batched`; without
     // it this is the loop before the switch. `BF` runs only where `x_tbx_hitbf::fits` holds.
     /// `scan_unit_batched`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF and with `SENT`
-    /// the extensions of `extend_hit_two_hit_sent` (LOSAT_X_TBXUNGAPSENT).
+    /// (a word length, 0: none) the extensions of `TbxScore::sent_two_hit_of`
+    /// (LOSAT_X_TBXUNGAPSENT).
     #[inline(always)]
     pub(super) fn scan_unit_batched_hits<
         S: XInitSink,
         const PF: bool,
         const BF: bool,
-        const SENT: bool,
+        const SENT: usize,
     >(
         &self,
         unit: &XUnit,
@@ -574,7 +575,7 @@ impl<M: TbxScore> XPairPar<M> {
     // `scan_unit_masked`.
     /// `scan_unit_batched_cells` with `XMasked`.
     #[inline(never)]
-    fn scan_unit_batched_masked<S: XInitSink, const PF: bool, const BF: bool, const SENT: bool>(
+    fn scan_unit_batched_masked<S: XInitSink, const PF: bool, const BF: bool, const SENT: usize>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -598,7 +599,7 @@ impl<M: TbxScore> XPairPar<M> {
         C: XCells,
         const PF: bool,
         const BF: bool,
-        const SENT: bool,
+        const SENT: usize,
     >(
         &self,
         unit: &XUnit,
@@ -610,7 +611,8 @@ impl<M: TbxScore> XPairPar<M> {
     ) -> (u64, u64) {
         debug_assert!((1..=BATCH).contains(&len));
         // LOSAT_X_TBXUNGAPSENT: as in `scan_unit_cells`.
-        assert!(!SENT || self.x_unit_sent(unit, inp));
+        let sent = SENT != 0;
+        assert!(!sent || self.x_unit_sent(unit, inp));
         let group = &self.groups[unit.g];
         let sub = &group.lookup;
         let wordsize = inp.wordsize;
@@ -662,7 +664,7 @@ impl<M: TbxScore> XPairPar<M> {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
-            subject_sent: if SENT { subject_full } else { &[] },
+            subject_sent: if sent { subject_full } else { &[] },
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -1119,12 +1121,12 @@ mod tests {
             for i in 0..n {
                 if rng.below(10) == 0 {
                     // SAFETY: the cell is below n = diag.len().
-                    unsafe { resolve::<_, false>(&mut b.c[i], diag.as_mut_ptr(), &h) };
+                    unsafe { resolve::<_, 0>(&mut b.c[i], diag.as_mut_ptr(), &h) };
                 }
             }
             let mut got: Vec<InitHSP> = Vec::new();
             // SAFETY: every candidate's cell is below n = diag.len().
-            unsafe { flush::<_, _, false>(&mut b, diag.as_mut_ptr(), &h, &mut got) };
+            unsafe { flush::<_, _, 0>(&mut b, diag.as_mut_ptr(), &h, &mut got) };
             assert_eq!(diag, expect_cells, "round {round}: cells");
             assert_eq!(got, expect_hsps, "round {round}: init HSPs");
             assert_eq!(b.n, 0);

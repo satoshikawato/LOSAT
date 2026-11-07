@@ -37,7 +37,7 @@ use super::report::SubjectLetters;
 use super::seqalign::{query_records_of, SeqalignSubjects};
 use super::subjects::SubjectSetNumbers;
 use super::TblastxArgs;
-use crate::algorithm::tblastn::archive::lowercase_runs;
+use crate::algorithm::common::masks::lowercase_runs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;

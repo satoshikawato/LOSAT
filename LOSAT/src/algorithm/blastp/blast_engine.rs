@@ -1765,7 +1765,7 @@ fn ncbi_compressed_lookup_tables(
         .map(|batch| batch.searched.clone())
         .filter(|searched| !searched.is_empty())
         .filter(|searched| {
-            crate::algorithm::common::protein_query_split::split_protein_batch(
+            crate::algorithm::blastp::protein_query_split::split_protein_batch(
                 &query_lengths[searched.clone()],
                 sizes,
             )
@@ -6032,7 +6032,7 @@ fn psiblast_stop_at_invalid_query(
             "a PSSM query whose letters give no Karlin-Altschul parameters (with which NCBI BLAST+'s psiblast crashes) is not supported by LOSAT's PSIBLAST"
         ),
         Ok(sizes)
-            if crate::algorithm::common::protein_query_split::split_protein_batch(
+            if crate::algorithm::blastp::protein_query_split::split_protein_batch(
                 &[query_length],
                 sizes,
             )
@@ -6987,7 +6987,7 @@ fn x_block_search_refuses_nothing(
     query_batches: &[seq_range::RangedBatch],
     lengths: &[usize],
 ) -> bool {
-    use crate::algorithm::common::protein_query_split::{
+    use crate::algorithm::blastp::protein_query_split::{
         protein_chunk_would_be_split, split_protein_batch,
     };
     // `blastp_concatenated_query_length`: each query and the sentinel after it, but the last.
@@ -7496,7 +7496,7 @@ fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool)
 // NCBI searches every query batch on its own (RP-4). A blastp query's preliminary hit list
 // does not depend on the other queries of its batch, so the batches that NCBI does not
 // split are the search of all queries above; the queries of a batch that NCBI splits
-// (`common/protein_query_split.rs`) take the merged hit lists of the batch's query chunks,
+// (`blastp/protein_query_split.rs`) take the merged hit lists of the batch's query chunks,
 // each searched as a query set of its parts. The preliminary stage uses no effective search
 // space (its cutoffs and E-values use Spouge's FSC with the part's length), so the batch's
 // search spaces that NCBI gives a chunk do not change it. A chunk whose contexts all fail
@@ -7516,7 +7516,7 @@ fn search_split_query_batches(
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     x_prolog: bool,
 ) -> Result<()> {
-    use crate::algorithm::common::protein_query_split::{
+    use crate::algorithm::blastp::protein_query_split::{
         protein_chunk_part_in_record, protein_chunk_would_be_split, split_protein_batch,
     };
     let sizes = crate::blastinput::app::protein_query_split_sizes(args.app.name(), 10000)?;

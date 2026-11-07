@@ -865,7 +865,7 @@ pub(crate) fn check_in_pssm_options(args: &ResolvedBlastpArgs, psi: &Arc<PsiSear
     // chunks of a split query are set up without the PSSM)
     // A PSSM query that NCBI splits is searched with BLOSUM62 in its preliminary stage.
     let sizes = crate::blastinput::app::protein_query_split_sizes(args.app.name(), 10000)?;
-    if crate::algorithm::common::protein_query_split::split_protein_batch(
+    if crate::algorithm::blastp::protein_query_split::split_protein_batch(
         &[psi.query.seq().len()],
         sizes,
     )

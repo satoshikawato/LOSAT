@@ -742,7 +742,7 @@ fn x_chunk_masks(whole: &FastaRecord, start: usize, end: usize) -> Vec<(i32, i32
             let from = (start + offset).saturating_sub(1);
             let to = (end + offset).min(uncut.len());
             let runs: Vec<MaskedInterval> =
-                crate::algorithm::tblastn::archive::lowercase_runs(&uncut[from..to])
+                crate::algorithm::common::masks::lowercase_runs(&uncut[from..to])
                     .into_iter()
                     .map(|(a, b)| MaskedInterval::new(from + a as usize, from + b as usize + 1))
                     .collect();
@@ -1264,7 +1264,7 @@ mod x_chunk_record_tests {
         for (offset, before) in [(0, 0), (1, 1), (2_500, 0), (2_500, 1), (2_500, 3)] {
             let cut = cut_whole(whole.clone(), offset, before);
             let letters = cut.source.as_deref().unwrap().uncut.as_deref().unwrap();
-            let runs: Vec<_> = crate::algorithm::tblastn::archive::lowercase_runs(letters)
+            let runs: Vec<_> = crate::algorithm::common::masks::lowercase_runs(letters)
                 .into_iter()
                 .map(|(a, b)| MaskedInterval::new(a as usize, b as usize + 1))
                 .collect();

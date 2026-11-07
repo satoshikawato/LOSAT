@@ -53,7 +53,7 @@
 use std::sync::OnceLock;
 
 use crate::algorithm::blastx::query_setup::{combine_masks, dna_to_protein_masks};
-use crate::algorithm::tblastn::archive::lowercase_runs;
+use crate::algorithm::common::masks::lowercase_runs;
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::utils::seg::SegMasker;

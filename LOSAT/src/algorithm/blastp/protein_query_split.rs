@@ -7,7 +7,7 @@
 use crate::algorithm::blastn::query_split::{
     calculate_num_chunks, ChunkQuery, SplitSizes, QUERY_CHUNK_OVERLAP,
 };
-use crate::algorithm::tblastn::archive::lowercase_runs;
+use crate::algorithm::common::masks::lowercase_runs;
 
 /// The query chunk size of blastp (10000) or tblastn (20000) when the environment variable
 /// `CHUNK_SIZE` is not set or blank, and the overlap (100) when `OVERLAP_CHUNK_SIZE` is not.

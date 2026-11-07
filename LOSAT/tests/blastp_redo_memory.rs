@@ -241,9 +241,11 @@ fn blastp_reports_do_not_depend_on_emptying_the_seg_store_after_each_window() {
 
 /// Default and `LOSAT_X_BPLKDROP=0` give the same report and messages for exact blastp and
 /// blastp-fast on `-subject` and `-db`: in one search of all queries at 1 and 2 threads, and in
-/// blocks at 2 threads. The table is dropped before the redo by every search except the blocks
-/// whose table's vectors a later block's build takes (all but the last two), and `=0` records
-/// nothing.
+/// blocks at 2 threads. The table is dropped before the redo by every search except exact blastp's
+/// blocks whose table's vectors a later block's build takes (all but the last two). In blocks,
+/// blastp-fast's table of every block but the last goes to the next block's build after the
+/// preliminary stage, before the switch (item SC2d), so only the last block records a side: the
+/// dropped one. `=0` records nothing.
 #[test]
 fn blastp_reports_do_not_depend_on_dropping_the_lookup_table_before_the_redo() {
     let inputs = Inputs::new();
@@ -276,7 +278,8 @@ fn blastp_reports_do_not_depend_on_dropping_the_lookup_table_before_the_redo() {
                 let on = blastp(&args, env);
                 assert_eq!(on.code, Some(0), "{case}: {}", on.stderr);
                 assert!(!on.stdout.is_empty(), "{case}: no hits");
-                assert_eq!(on.lk_drop, (true, blocks), "{case}: default's side");
+                let kept = blocks && task == "blastp";
+                assert_eq!(on.lk_drop, (true, kept), "{case}: default's side");
                 let off = blastp(&args, &[env, &[(LK_DROP, "0")]].concat());
                 assert_eq!(off.code, Some(0), "{case} off: {}", off.stderr);
                 assert!(off.stdout == on.stdout, "{case} off: report differs");

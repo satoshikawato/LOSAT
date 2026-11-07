@@ -17,6 +17,16 @@
 //! itself built ahead), as one task spawned in a `rayon::in_place_scope` around block i's search
 //! (`XLookupAhead::run_block`); block i + 1's search then takes the values instead of computing them.
 //!
+//! Item SC2d: blastp-fast's flat table is built ahead in two parts, so that one table is alive at a
+//! time: part 1 (`x_flat_ahead_appends`: the frames, the lookup query, NCBI's tables, the build's
+//! appends pass with the contexts' Karlin blocks as its extra tasks, `tblastx/lookup/x_clut_par.rs`)
+//! starts when block i's table is ready, beside block i's scan; part 2 (`x_flat_ahead_table`: the
+//! stripes pass, which writes the table) runs on the vectors of block i's table, which block i's
+//! thread gives to the second spare after block i's preliminary stage (`XAheadBlock::after_prelim`,
+//! `x_make_room_flat`), when nothing of block i reads its table any more. The two meet without a
+//! wait (`x_run_with_split_build_ahead`): the side that comes second starts part 2 (part 1's task
+//! goes on into it, or block i's thread spawns it as one more task of the scope).
+//!
 //! Why the reports do not change: block i + 1's frames, table and contexts are functions of block i +
 //! 1's query records and the search's arguments only. The task computes them by the calls the
 //! block's own search makes, with the same inputs: `blastp_query_frames` of the block's records,
@@ -35,7 +45,11 @@
 //! whose values no build reads (`x_clut_par.rs`; the exact build writes every entry it keeps), and
 //! the task uses its own (the second spare, `x_query_blocks::x_bp_lookup_spares`, or the exact
 //! table's `XAaSpares::x_make_room`), and the exact build's neighbour lists, which only one build
-//! uses at a time. No floating-point operation changes order: each context's Karlin block is the
+//! uses at a time. The flat build's part 2 writes the vectors of block i's table only after block
+//! i's thread has given them to the second spare, after block i's last read of the table (its
+//! preliminary stage); no entry of them is read before the stripes pass writes it (`x_clut_par.rs`).
+//! Its part 1's values are owned (`x_clut_par::XFlatAppends`): what part 1 computes does not depend
+//! on the thread or the time at which part 2 runs. No floating-point operation changes order: each context's Karlin block is the
 //! same call on the same letters. The search of block i + 1 checks that the values are those of its
 //! own records (address and count of the slice).
 //!
@@ -69,7 +83,9 @@
 //! No deadlock: the task waits for nothing but its own nested parallel passes (the one-latch passes
 //! of the flat table and its Karlin tasks; the exact build has none), which wait for nothing else,
 //! and block i's search waits for nothing of the task until the scope ends, after block i's search
-//! has returned. A thread that waits inside block i's nested parallel work may steal and run the
+//! has returned. The flat build's two parts meet in one slot (`XHandoff`) whose lock is held only
+//! around a move: neither block i's thread nor part 1's task waits for the other side; part 2 is
+//! a task of the same scope, like part 1. A thread that waits inside block i's nested parallel work may steal and run the
 //! task (or one of its passes) to the end, and a thread that waits inside the task's passes may run
 //! one of block i's jobs to the end; neither waits for the frame it interrupted, so both waits end
 //! (memory `rayon-waiting-helper-deadlock`: the hazard there was a spawned loop that waited for
@@ -77,19 +93,25 @@
 //! other thread took it. The locks the task takes (the spare's, the result's slot) are held only
 //! around a move.
 //!
-//! Memory: two tables are alive at once (block i's, which its search scans, and block i + 1's), so
-//! the peak holds one more table's `starts`, `hits` and PV array (at `LOSAT_X_BPQBLOCK=50000` about
-//! 3 MiB + up to 19 MiB; exact blastp: backbone 0.44 MiB, overflow about 7-8 MiB, PV 3.5 KiB), plus
-//! block i + 1's query frames and contexts. All of the table's vectors are allocated by the block
+//! Memory: for exact blastp two tables are alive at once (block i's, which its search scans, and
+//! block i + 1's), so the peak holds one more table's backbone (0.44 MiB), overflow (about 7-8 MiB
+//! at `LOSAT_X_BPQBLOCK=50000`) and PV array (3.5 KiB), plus block i + 1's query frames and
+//! contexts. For blastp-fast (item SC2d) block i + 1's table is written on block i's vectors after
+//! block i's preliminary stage: beside block i's table and scan there are only block i + 1's appends
+//! (as many as its table's hits) and the appends pass's scratch, and after the preliminary stage one
+//! table and the appends. Building the whole table during block i's scan (before SC2d) held two
+//! tables and the appends at the end of the build. All of the table's vectors are allocated by the block
 //! search's thread, never by the pool's task (a pool thread's allocations stay in its own glibc
-//! arena, which keeps them resident after they are freed): when block i's table is ready, that
-//! thread makes the second spare hold vectors with the room for the largest table so far plus a
-//! half (`XFlatSpare::x_make_room`: the second spare's own, else those block i - 1 gave back, else
-//! new ones of twice the largest table's hits; for exact blastp `XAaSpares::x_make_room`, the same
-//! rule for the overflow entries, and each block's table is given back at the end of its search),
-//! and the task's build takes them all (`XFlatArgs::x_ahead`, `XAaSpares::x_build_ahead`). A build
-//! whose `hits` (overflow) would not fit gives no values and the block builds its table itself, on
-//! its own thread. Untouched capacity is not resident. The exact build's neighbour lists (about
+//! arena, which keeps them resident after they are freed): that thread makes the second spare hold
+//! vectors with the room for the largest table so far plus a half (`x_room_of`): for blastp-fast
+//! after block i's preliminary stage, block i's table's vectors (`x_make_room_flat`,
+//! `XFlatSpare::x_make_room`: `hits` grown in place where short, to twice the largest table's hits;
+//! a PV array where the spare has none); for exact blastp when block i's table is ready
+//! (`XAaSpares::x_make_room`, the same rule for the overflow entries; each block's table is given
+//! back at the end of its search). The task's build takes them all (`XFlatArgs::x_ahead`,
+//! `XAaSpares::x_build_ahead`). A build whose `hits` (overflow) would not fit gives no values and the
+//! block builds its table itself, on its own thread (for blastp-fast on the vectors the second
+//! spare got, moved to the block spare: `XFlatSpare::x_give_to`). Untouched capacity is not resident. The exact build's neighbour lists (about
 //! 1.5-1.9 MiB) are the block search's thread's, moved to `XAaSpares` once and used by every build
 //! ahead, so no pool thread keeps a set of its own.
 //!
@@ -99,8 +121,8 @@
 //! when a counter is not zero (`blocks`: blocks searched where the switch acts; `prebuilt`: blocks
 //! that took values built ahead; `dropped`: builds ahead that gave no values). The unit test
 //! `values_built_ahead_are_the_values_the_block_builds_itself` builds a block's values ahead and
-//! inline, for blastp-fast and exact blastp, and compares the query frames, the table and the
-//! contexts (the Karlin blocks bit for bit).
+//! inline, for blastp-fast (its two parts in either order) and exact blastp, and compares the query
+//! frames, the table and the contexts (the Karlin blocks bit for bit).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
 //! ```c++
@@ -136,17 +158,33 @@ use std::sync::OnceLock;
 ))]
 use std::sync::{Mutex, PoisonError};
 
-use super::{
-    blastp_aa_lookup_ahead, blastp_compressed_lookup, blastp_query_frames, BlastpRuntimeLookup,
-};
+use super::{blastp_aa_lookup_ahead, blastp_query_frames, BlastpRuntimeLookup};
 use crate::algorithm::blastp::args::{BlastpLookupTableType, ResolvedBlastpArgs};
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+use crate::algorithm::blastp::x_query_blocks::XLookupFor;
 use crate::algorithm::blastp::x_query_blocks::{
-    x_bp_aa_block_spare, x_bp_aa_spares, x_bp_lkreuse, x_bp_lookup_spares, XLookupFor,
+    x_bp_aa_block_spare, x_bp_aa_spares, x_bp_lkreuse, x_bp_lookup_spares,
 };
-use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_on;
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
+    x_bp_flat_ahead_appends, x_bp_flat_ahead_table, XFlatAppends,
+};
+use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
+    x_bpclut_on, XFlatCompressedLookup,
+};
 use crate::algorithm::tblastx::lookup::{QueryContext, XAaSpares};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::blastinput::fasta_reader::FastaRecord;
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 use crate::blastinput::seq_range;
 use crate::utils::threading::SearchPool;
 
@@ -208,6 +246,10 @@ impl XAheadLookup {
 pub(super) struct XAheadBlock<'a> {
     prebuilt: Option<XAheadLookup>,
     start_next: Option<&'a dyn Fn(&BlastpRuntimeLookup)>,
+    /// Item SC2d: called once on the block's thread after the block's preliminary stage with the
+    /// block's flat table, whose vectors the second part of the next block's build takes
+    /// (`after_prelim`).
+    after_prelim_flat: Option<&'a dyn Fn(XFlatCompressedLookup)>,
     /// EXPERIMENT (LOSAT_X_BPLKDROP): whether a later block's build may take the vectors of this
     /// block's table from the block search's spares (`x_table_taken_later`).
     table_taken_later: bool,
@@ -220,6 +262,7 @@ impl XAheadBlock<'_> {
         Self {
             prebuilt: None,
             start_next: None,
+            after_prelim_flat: None,
             table_taken_later: true,
         }
     }
@@ -246,6 +289,21 @@ impl XAheadBlock<'_> {
     pub(super) fn lookup_ready(&self, lookup: &BlastpRuntimeLookup) {
         if let Some(start_next) = self.start_next {
             start_next(lookup);
+        }
+    }
+
+    // No NCBI counterpart: hands the vectors of a table that nothing reads any more to the next
+    // block's build (module header, item SC2d); it changes no value NCBI computes.
+    /// The block's preliminary stage has ended and nothing reads its lookup table `lookup` any more:
+    /// where the block loop gave the second part of the next block's flat table to start, a flat
+    /// table's vectors go to it (`None`: the table was taken); otherwise the table is given back.
+    pub(super) fn after_prelim(&self, lookup: BlastpRuntimeLookup) -> Option<BlastpRuntimeLookup> {
+        match (lookup, self.after_prelim_flat) {
+            (BlastpRuntimeLookup::CompressedFlat(table), Some(after_prelim_flat)) => {
+                after_prelim_flat(table);
+                None
+            }
+            (lookup, _) => Some(lookup),
         }
     }
 
@@ -314,6 +372,21 @@ fn x_take_built<V>(built: Option<XBuilt<V>>) -> Option<V> {
     }
 }
 
+// No NCBI counterpart: hands over the outcome of a build ahead (module header); it changes no value
+// NCBI computes.
+/// The outcome of a build ahead from its result under `catch_unwind`.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_built_of<V>(outcome: std::thread::Result<Option<V>>) -> XBuilt<V> {
+    match outcome {
+        Ok(Some(values)) => XBuilt::Values(values),
+        Ok(None) => XBuilt::Dropped,
+        Err(payload) => XBuilt::Panicked(payload),
+    }
+}
+
 // No NCBI counterpart: scheduling only (module header: why the scope cannot deadlock); it changes no
 // value NCBI computes.
 /// The scheduling of `XLookupAhead::run_block`: runs `run` on this thread inside a
@@ -336,12 +409,9 @@ fn x_run_with_build_ahead<V: Send, R>(
         let spawn = || {
             if let Some(build) = build.take() {
                 scope.spawn(move |_| {
-                    let outcome =
-                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(build)) {
-                            Ok(Some(values)) => XBuilt::Values(values),
-                            Ok(None) => XBuilt::Dropped,
-                            Err(payload) => XBuilt::Panicked(payload),
-                        };
+                    let outcome = x_built_of(std::panic::catch_unwind(
+                        std::panic::AssertUnwindSafe(build),
+                    ));
                     *built.lock().unwrap_or_else(PoisonError::into_inner) = Some(outcome);
                 });
             }
@@ -354,18 +424,157 @@ fn x_run_with_build_ahead<V: Send, R>(
     )
 }
 
+/// Item SC2d: where the two parts of a split build ahead meet (`x_run_with_split_build_ahead`).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+enum XHandoff<P> {
+    /// Neither part 1's values nor the vectors yet.
+    Empty,
+    /// Part 1's values, before the vectors.
+    Part(P),
+    /// The vectors, before part 1's values.
+    Vectors,
+    /// Part 2 has started, or part 1 gave no values: nothing more is handed over.
+    Closed,
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+impl<P> XHandoff<P> {
+    // No NCBI counterpart: scheduling only; it changes no value NCBI computes.
+    /// Part 1 gave `part`: `Some(part)` when the vectors came first (part 2 runs now, on the caller's
+    /// task), else `None` (kept until the vectors come). The lock is held only around the move.
+    fn part(slot: &Mutex<Self>, part: P) -> Option<P> {
+        let mut slot = slot.lock().unwrap_or_else(PoisonError::into_inner);
+        match std::mem::replace(&mut *slot, Self::Closed) {
+            Self::Vectors => Some(part),
+            Self::Empty => {
+                *slot = Self::Part(part);
+                None
+            }
+            Self::Part(_) | Self::Closed => unreachable!("part 1 runs once"),
+        }
+    }
+
+    // No NCBI counterpart: scheduling only; it changes no value NCBI computes.
+    /// The vectors are ready: part 1's values when they came first (part 2 starts now), else `None`
+    /// (part 2 starts when part 1 ends, or never: part 1 gave no values, or this is a second call).
+    fn vectors(slot: &Mutex<Self>) -> Option<P> {
+        let mut slot = slot.lock().unwrap_or_else(PoisonError::into_inner);
+        match std::mem::replace(&mut *slot, Self::Closed) {
+            Self::Part(part) => Some(part),
+            Self::Empty => {
+                *slot = Self::Vectors;
+                None
+            }
+            state @ (Self::Vectors | Self::Closed) => {
+                *slot = state;
+                None
+            }
+        }
+    }
+
+    // No NCBI counterpart: scheduling only; it changes no value NCBI computes.
+    /// Part 1 gave no values (or panicked): the vectors start nothing.
+    fn close(slot: &Mutex<Self>) {
+        *slot.lock().unwrap_or_else(PoisonError::into_inner) = Self::Closed;
+    }
+}
+
+// No NCBI counterpart: scheduling only (module header: why nothing waits); it changes no value NCBI
+// computes.
+/// Item SC2d: the scheduling of a build ahead in two parts (`XLookupAhead::run_block` for the flat
+/// table): runs `run` on this thread inside a `rayon::in_place_scope` of the current pool, giving it
+/// `start` and `vectors`, which `run` calls on this thread. The first call of `start` spawns `first`
+/// (part 1) as one task of the scope; `vectors` says that what part 2 takes is ready. Whichever of
+/// the two comes second starts `second` (part 2) with part 1's values: the task of part 1 goes on
+/// into it, or `vectors` spawns it as one more task of the scope. Neither side waits for the other.
+/// Returns `run`'s result and, once every task of the scope has ended, the build's outcome: part 2's
+/// values, none (part 1 or part 2 gave none, or part 1's values never got the vectors), or the
+/// panic of either part (caught); `None` if `start` was never called.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_run_with_split_build_ahead<P: Send, V: Send, R>(
+    first: impl FnOnce() -> Option<P> + Send,
+    second: impl Fn(P) -> Option<V> + Sync,
+    run: impl FnOnce(&dyn Fn(), &dyn Fn()) -> R,
+) -> (R, Option<XBuilt<V>>) {
+    let built: Mutex<Option<XBuilt<V>>> = Mutex::new(None);
+    let handoff: Mutex<XHandoff<P>> = Mutex::new(XHandoff::Empty);
+    let result = rayon::in_place_scope(|scope| {
+        let first = Cell::new(Some(first));
+        let (built, handoff, second) = (&built, &handoff, &second);
+        let keep = move |outcome: XBuilt<V>| {
+            *built.lock().unwrap_or_else(PoisonError::into_inner) = Some(outcome);
+        };
+        // Part 2, once.
+        let finish = move |part: P| {
+            keep(x_built_of(std::panic::catch_unwind(
+                std::panic::AssertUnwindSafe(|| second(part)),
+            )));
+        };
+        let start = || {
+            if let Some(first) = first.take() {
+                scope.spawn(move |_| {
+                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(first)) {
+                        Ok(Some(part)) => {
+                            if let Some(part) = XHandoff::part(handoff, part) {
+                                finish(part);
+                            }
+                        }
+                        outcome => {
+                            XHandoff::close(handoff);
+                            keep(x_built_of(outcome.map(|_| None)));
+                        }
+                    }
+                });
+            }
+        };
+        let vectors = || {
+            if let Some(part) = XHandoff::vectors(handoff) {
+                scope.spawn(move |_| finish(part));
+            }
+        };
+        run(&start, &vectors)
+    });
+    let built = match handoff.into_inner().unwrap_or_else(PoisonError::into_inner) {
+        // Part 1's values that never got the vectors.
+        XHandoff::Part(_) => Some(XBuilt::Dropped),
+        _ => built.into_inner().unwrap_or_else(PoisonError::into_inner),
+    };
+    (result, built)
+}
+
 // No NCBI counterpart: the floor of the room for the next table's hits (module header); untouched
 // capacity is not resident. It changes no value NCBI computes.
 /// The fewest hits (exact blastp: overflow entries) the second spare has room for: 2^18 (1 MiB).
 const X_MIN_HITS_ROOM: usize = 1 << 18;
 
+// No NCBI counterpart: the room for the next table's hits (module header); it changes no value NCBI
+// computes.
+/// The room for the next block's table, from a table of `hits` hits (exact blastp: overflow entries)
+/// and the most of a table so far (`largest_hits`, raised to `hits`): the room asked (the largest
+/// plus a half, at least `X_MIN_HITS_ROOM`) and the capacity a vector short of it is given (twice
+/// the largest, at least the room).
+fn x_room_of(largest_hits: &Cell<usize>, hits: usize) -> (usize, usize) {
+    let largest = largest_hits.get().max(hits);
+    largest_hits.set(largest);
+    let room = (largest + largest / 2).max(X_MIN_HITS_ROOM);
+    (room, (2 * largest).max(room))
+}
+
 // No NCBI counterpart: which thread allocates the next table's vectors (module header); it changes
 // no value NCBI computes.
-/// On the block's thread, when its table `lookup` is ready: makes the second spare (exact blastp:
-/// `XAaSpares`) hold vectors with the room for the next block's table (the largest table so far,
-/// `largest_hits` (exact blastp: overflow entries), plus a half; at least `X_MIN_HITS_ROOM`),
-/// allocating here what is short (twice the largest). `false` where the block's table is neither a
-/// flat one nor an exact one with its spares (no build ahead then).
+/// On the block's thread, when its exact table `lookup` is ready: makes `XAaSpares` hold vectors with
+/// the room for the next block's table (`x_room_of`), allocating here what is short. `false` where
+/// the block's table is not an exact one with its spares (no build ahead then; a flat table's room is
+/// made after the block's preliminary stage, `x_make_room_flat`).
 #[cfg_attr(
     not(all(
         feature = "parallel",
@@ -382,36 +591,14 @@ fn x_make_room(
     largest_hits: &Cell<usize>,
 ) -> bool {
     match lookup {
-        BlastpRuntimeLookup::CompressedFlat(table) => {
-            let Some((block, ahead)) = x_bp_lookup_spares(pool) else {
-                return false;
-            };
-            let largest = largest_hits.get().max(table.hits.len());
-            largest_hits.set(largest);
-            let room = (largest + largest / 2).max(X_MIN_HITS_ROOM);
-            ahead.x_make_room(
-                block,
-                table.starts.len().saturating_sub(1),
-                room,
-                (2 * largest).max(room),
-            );
-            true
-        }
-        // Exact blastp: the same rule for the overflow entries; the backbone and the pv array have
-        // the sizes of the block's own table (fixed by the word length and the alphabet).
+        // Exact blastp: the backbone and the pv array have the sizes of the block's own table (fixed
+        // by the word length and the alphabet).
         BlastpRuntimeLookup::Aa(table) => {
             let Some(spares) = x_bp_aa_spares(pool) else {
                 return false;
             };
-            let largest = largest_hits.get().max(table.overflow.len());
-            largest_hits.set(largest);
-            let room = (largest + largest / 2).max(X_MIN_HITS_ROOM);
-            spares.x_make_room(
-                table.backbone.len(),
-                table.pv.len(),
-                room,
-                (2 * largest).max(room),
-            );
+            let (room, grown) = x_room_of(largest_hits, table.overflow.len());
+            spares.x_make_room(table.backbone.len(), table.pv.len(), room, grown);
             true
         }
         // EXPERIMENT (LOSAT_X_BPLK16): the same for a table of 16-bit hits; the lengths of its
@@ -420,19 +607,43 @@ fn x_make_room(
             let Some(spares) = x_bp_aa_spares(pool) else {
                 return false;
             };
-            let largest = largest_hits.get().max(table.overflow.len());
-            largest_hits.set(largest);
-            let room = (largest + largest / 2).max(X_MIN_HITS_ROOM);
-            spares.x_make_room16(
-                table.backbone.len(),
-                table.pv.len(),
-                room,
-                (2 * largest).max(room),
-            );
+            let (room, grown) = x_room_of(largest_hits, table.overflow.len());
+            spares.x_make_room16(table.backbone.len(), table.pv.len(), room, grown);
             true
         }
-        BlastpRuntimeLookup::Compressed(_) => false,
+        BlastpRuntimeLookup::CompressedFlat(_) | BlastpRuntimeLookup::Compressed(_) => false,
     }
+}
+
+// No NCBI counterpart: which vectors the next table takes (module header, item SC2d); it changes no
+// value NCBI computes.
+/// On the block's thread, after its preliminary stage: the second spare takes the `starts` and
+/// `hits` of the block's flat table `table` (which nothing reads any more) and gets the room for the
+/// next block's table as `x_make_room` makes it (the hits grown in place where short). `false` where
+/// the block search has no spares (the table is dropped).
+#[cfg_attr(
+    not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )),
+    expect(
+        dead_code,
+        reason = "called only by run_block's build ahead (used only with `parallel` threads)"
+    )
+)]
+fn x_make_room_flat(
+    pool: &SearchPool<'_>,
+    table: XFlatCompressedLookup,
+    largest_hits: &Cell<usize>,
+) -> bool {
+    let Some((block, ahead)) = x_bp_lookup_spares(pool) else {
+        return false;
+    };
+    let backbone_size = table.starts.len().saturating_sub(1);
+    let (room, grown) = x_room_of(largest_hits, table.hits.len());
+    ahead.give(table);
+    ahead.x_make_room(block, backbone_size, room, grown);
+    true
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (module header)
@@ -442,10 +653,10 @@ fn x_make_room(
 //                                              sbp, lookup_segments_wrap,
 // ```
 /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the query frames, table and contexts of a block of
-/// `query_records`, as its search builds them (module header: the same calls with the same inputs;
-/// `batch_size` is the search's query batch size), its table on the second spare's vectors
-/// (`XLookupFor::Ahead`; exact blastp: `XAaSpares`). `None` where the build fails, refuses or makes
-/// no flat table (exact blastp: makes no table on the spare's vectors).
+/// `query_records` for exact blastp, as its search builds them (module header: the same calls with
+/// the same inputs), its table on the spare vectors of `XAaSpares`. `None` where the build fails,
+/// refuses or makes no table on the spare's vectors, and for blastp-fast, whose flat table is built
+/// ahead in two parts (`x_flat_ahead_appends`, `x_flat_ahead_table`; item SC2d).
 #[cfg_attr(
     not(all(
         feature = "parallel",
@@ -459,40 +670,137 @@ fn x_make_room(
 fn x_build_ahead(
     args: &ResolvedBlastpArgs,
     query_records: &[FastaRecord],
-    batch_size: u32,
     pool: &SearchPool<'_>,
 ) -> Option<XAheadLookup> {
+    if args.lookup_table_type != BlastpLookupTableType::AaLookupTable {
+        return None;
+    }
     let query_frames = blastp_query_frames(args, query_records);
-    let (table, contexts) = match args.lookup_table_type {
-        // Exact blastp: `blastp_aa_lookup`'s call on the block search's spare vectors.
-        BlastpLookupTableType::AaLookupTable => {
-            blastp_aa_lookup_ahead(args, &query_frames, x_bp_aa_spares(pool)?)?
-        }
-        BlastpLookupTableType::CompressedAaLookupTable => {
-            let query_lengths: Vec<usize> = query_records
-                .iter()
-                .map(|record| record.seq().len())
-                .collect();
-            let query_batches = seq_range::QueryInput::whole(query_records).batches(batch_size);
-            let (lookup, contexts) = blastp_compressed_lookup(
-                args,
-                &query_frames,
-                &query_batches,
-                &query_lengths,
-                pool,
-                XLookupFor::Ahead,
-            )
-            .ok()?;
-            if !matches!(lookup, BlastpRuntimeLookup::CompressedFlat(_)) {
-                return None;
-            }
-            (lookup, contexts)
-        }
-    };
+    // `blastp_aa_lookup`'s call on the block search's spare vectors.
+    let (table, contexts) = blastp_aa_lookup_ahead(args, &query_frames, x_bp_aa_spares(pool)?)?;
     Some(XAheadLookup {
         key: x_key(query_records),
         query_frames,
         table,
+        contexts,
+    })
+}
+
+/// Item SC2d: what part 1 of the build ahead of a block's flat table gives part 2
+/// (`x_flat_ahead_appends`).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+struct XFlatAheadPart {
+    key: (usize, usize),
+    query_frames: Vec<Vec<QueryFrame>>,
+    contexts: Vec<QueryContext>,
+    /// The lookup query and its segments, which part 2 reads only for a table's capacity test.
+    query: Vec<u8>,
+    locations: Vec<(i32, i32)>,
+    appends: XFlatAppends,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (module header)
+// ```c++
+//         LookupTableWrap* lut =
+//             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
+//                                              sbp, lookup_segments_wrap,
+// ```
+/// Item SC2d (LOSAT_X_BPLKPAHEAD): part 1 of the build ahead of a block of `query_records` for
+/// blastp-fast (BLOSUM62's flat table), on a pool task once the block before it has its table: the
+/// calls of `blastp_compressed_lookup` with the same inputs (`batch_size` is the search's query
+/// batch size; `XLookupFor::Ahead`) up to the flat build's appends pass (`x_bp_flat_ahead_appends`,
+/// with the contexts' Karlin blocks as its extra tasks), then the contexts' Karlin blocks set
+/// (`XLookupFlat::finish`). `None` where the search's build would fail or the build ends at its
+/// appends pass (module header).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_flat_ahead_appends(
+    args: &ResolvedBlastpArgs,
+    query_records: &[FastaRecord],
+    batch_size: u32,
+    pool: &SearchPool<'_>,
+) -> Option<XFlatAheadPart> {
+    if args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable
+        || args.scoring.matrix != crate::config::ScoringMatrix::Blosum62
+    {
+        return None;
+    }
+    let query_frames = blastp_query_frames(args, query_records);
+    let query_lengths: Vec<usize> = query_records
+        .iter()
+        .map(|record| record.seq().len())
+        .collect();
+    let query_batches = seq_range::QueryInput::whole(query_records).batches(batch_size);
+    let (x_flat, query, locations, mut contexts) =
+        crate::algorithm::blastp::x_query_blocks::XLookupFlat::lookup_query(
+            &query_frames,
+            args.word_size,
+            pool,
+            XLookupFor::Ahead,
+        );
+    let ncbi_tables = super::ncbi_compressed_lookup_tables(
+        &query_batches,
+        &query_lengths,
+        &contexts,
+        &locations,
+        false,
+    )
+    .ok()?;
+    let appends = x_bp_flat_ahead_appends(
+        args.word_size,
+        crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
+        &query,
+        &locations,
+        &ncbi_tables,
+        pool,
+        x_flat.build_args(),
+    )?;
+    x_flat.finish(&mut contexts);
+    Some(XFlatAheadPart {
+        key: x_key(query_records),
+        query_frames,
+        contexts,
+        query,
+        locations,
+        appends,
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (module header)
+// ```c++
+//         LookupTableWrap* lut =
+//             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
+// ```
+/// Item SC2d (LOSAT_X_BPLKPAHEAD): part 2 of the build ahead of a block's flat table, once part 1
+/// gave `part` and the block before it has given its table's vectors to the second spare after its
+/// preliminary stage (`x_make_room_flat`): the stripes pass on those vectors
+/// (`x_bp_flat_ahead_table`). `None` where they lack the room (the second spare keeps them) or a
+/// table refuses.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_flat_ahead_table(part: XFlatAheadPart, pool: &SearchPool<'_>) -> Option<XAheadLookup> {
+    let (_, spare) = x_bp_lookup_spares(pool)?;
+    let XFlatAheadPart {
+        key,
+        query_frames,
+        contexts,
+        query,
+        locations,
+        appends,
+    } = part;
+    let table = x_bp_flat_ahead_table(appends, &query, &locations, pool, spare)?;
+    crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", true);
+    Some(XAheadLookup {
+        key,
+        query_frames,
+        table: BlastpRuntimeLookup::CompressedFlat(table),
         contexts,
     })
 }
@@ -602,6 +910,7 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
             return run(XAheadBlock {
                 prebuilt,
                 start_next: None,
+                after_prelim_flat: None,
                 table_taken_later: later_blocks >= 1,
             });
         }
@@ -624,8 +933,46 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
         if let Some(next) = next {
             let (args, pool, batch_size, largest_hits) =
                 (self.args, self.pool, self.batch_size, &self.largest_hits);
+            // Item SC2d: blastp-fast's flat table in two parts (module header).
+            if args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable {
+                let (result, built) = x_run_with_split_build_ahead(
+                    move || x_flat_ahead_appends(args, next, batch_size, pool),
+                    |part| x_flat_ahead_table(part, pool),
+                    |start, vectors| {
+                        // On this thread, when the block's flat table is ready: part 1 (the appends
+                        // pass) is spawned.
+                        let start_next = |lookup: &BlastpRuntimeLookup| {
+                            if matches!(lookup, BlastpRuntimeLookup::CompressedFlat(_)) {
+                                start();
+                            }
+                        };
+                        // After the block's preliminary stage: its table's vectors go to part 2
+                        // (the stripes pass).
+                        let after_prelim_flat = |table: XFlatCompressedLookup| {
+                            if x_make_room_flat(pool, table, largest_hits) {
+                                vectors();
+                            }
+                        };
+                        run(XAheadBlock {
+                            prebuilt,
+                            start_next: Some(&start_next),
+                            after_prelim_flat: Some(&after_prelim_flat),
+                            table_taken_later: later_blocks >= 2,
+                        })
+                    },
+                );
+                // No table ahead: the next block builds its own, on the vectors the second spare
+                // got (the block spare's).
+                if !matches!(built, Some(XBuilt::Values(_))) {
+                    if let Some((block, ahead)) = x_bp_lookup_spares(pool) {
+                        ahead.x_give_to(block);
+                    }
+                }
+                self.next = built;
+                return result;
+            }
             let (result, built) = x_run_with_build_ahead(
-                move || x_build_ahead(args, next, batch_size, pool),
+                move || x_build_ahead(args, next, pool),
                 |spawn| {
                     // On this thread, when the block's table is ready: the next table's vectors are
                     // made ready here, then its build is spawned.
@@ -637,6 +984,7 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
                     run(XAheadBlock {
                         prebuilt,
                         start_next: Some(&start_next),
+                        after_prelim_flat: None,
                         table_taken_later: later_blocks >= 2,
                     })
                 },
@@ -648,6 +996,7 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
         run(XAheadBlock {
             prebuilt,
             start_next: None,
+            after_prelim_flat: None,
             table_taken_later: later_blocks >= 2,
         })
     }
@@ -778,11 +1127,46 @@ mod tests {
             .sum()
     }
 
+    /// How `fake_loop` builds a block's "table": inline, ahead in one task
+    /// (`x_run_with_build_ahead`), or ahead in two parts (`x_run_with_split_build_ahead`, item SC2d)
+    /// with the vectors given after the block's nested work (part 1 may end before or after), before
+    /// part 1 starts (the vectors come first), or once part 1 has ended (part 1 comes first, mostly).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum XFakeAhead {
+        Inline,
+        Whole,
+        Split,
+        SplitVectorsFirst,
+        SplitPartFirst,
+    }
+
+    /// Sets the flag when dropped (also on a panic).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    struct XSetOnDrop<'a>(&'a std::sync::atomic::AtomicBool);
+
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    impl Drop for XSetOnDrop<'_> {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
     /// A block loop with fake blocks, as `search` drives the blocks: block b's "table" is `build(b)`
     /// (an `Err` for a failing or refused build; it may panic), made by its search inline, or ahead,
-    /// during block b - 1, with `ahead`; the search then starts the next block's build, runs nested
-    /// parallel work, fails where `fails` says, and writes its row to `rows`. Returns the loop's
-    /// outcome (the first error ends it); a panic leaves the loop.
+    /// during block b - 1, as `ahead` says (in two parts: `build(b)` in part 1, nested work in part
+    /// 2); the search then starts the next block's build, runs nested parallel work (its "scan"),
+    /// gives the vectors to part 2 of a split build, fails where `fails` says, and writes its row to
+    /// `rows`. Returns the loop's outcome (the first error ends it); a panic leaves the loop.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -790,25 +1174,44 @@ mod tests {
     fn fake_loop(
         threads: usize,
         blocks: usize,
-        ahead: bool,
+        ahead: XFakeAhead,
         build: &(dyn Fn(usize) -> Result<u64, String> + Sync),
         fails: Option<usize>,
         rows: &Mutex<Vec<String>>,
     ) -> Result<(), String> {
+        use std::sync::atomic::AtomicBool;
         crate::utils::threading::with_search_pool(threads, "blastp", |_pool| {
             let mut next: Option<XBuilt<u64>> = None;
             for block in 0..blocks {
                 let prebuilt = x_take_built(next.take());
                 let took = prebuilt.is_some();
-                let search = |spawn: Option<&dyn Fn()>| -> Result<(), String> {
+                let part_ended = AtomicBool::new(false);
+                // `spawn`: the build's start, and for a split build the vectors' hand-over.
+                let search = |spawn: Option<(&dyn Fn(), Option<&dyn Fn()>)>| -> Result<(), String> {
                     let table = match prebuilt {
                         Some(table) => table,
                         None => build(block)?,
                     };
-                    if let Some(spawn) = spawn {
-                        spawn();
+                    let (start, vectors) = spawn.unzip();
+                    let vectors = vectors.flatten();
+                    if let (XFakeAhead::SplitVectorsFirst, Some(vectors)) = (ahead, vectors) {
+                        vectors();
+                    }
+                    if let Some(start) = start {
+                        start();
+                    }
+                    if ahead == XFakeAhead::SplitPartFirst && vectors.is_some() {
+                        while !part_ended.load(Ordering::Acquire) {
+                            if !matches!(rayon::yield_now(), Some(rayon::Yield::Executed)) {
+                                std::thread::yield_now();
+                            }
+                        }
                     }
                     let work = nested_work(block);
+                    if let (true, Some(vectors)) = (ahead != XFakeAhead::SplitVectorsFirst, vectors)
+                    {
+                        vectors();
+                    }
                     if fails == Some(block) {
                         return Err(format!("block {block} failed"));
                     }
@@ -817,18 +1220,39 @@ mod tests {
                         .push(format!("block {block} table {table} work {work}"));
                     Ok(())
                 };
-                let outcome = if ahead && block + 1 < blocks {
-                    let (outcome, built) = x_run_with_build_ahead(
-                        move || {
-                            nested_work(block + 1);
-                            build(block + 1).ok()
-                        },
-                        |spawn| search(Some(spawn)),
-                    );
-                    next = built;
-                    outcome
-                } else {
-                    search(None)
+                let outcome = match ahead {
+                    _ if block + 1 == blocks => search(None),
+                    XFakeAhead::Inline => search(None),
+                    XFakeAhead::Whole => {
+                        let (outcome, built) = x_run_with_build_ahead(
+                            move || {
+                                nested_work(block + 1);
+                                build(block + 1).ok()
+                            },
+                            |spawn| search(Some((spawn, None))),
+                        );
+                        next = built;
+                        outcome
+                    }
+                    XFakeAhead::Split
+                    | XFakeAhead::SplitVectorsFirst
+                    | XFakeAhead::SplitPartFirst => {
+                        let part_ended = &part_ended;
+                        let (outcome, built) = x_run_with_split_build_ahead(
+                            move || {
+                                let _ended = XSetOnDrop(part_ended);
+                                nested_work(block + 1);
+                                build(block + 1).ok()
+                            },
+                            |table| {
+                                nested_work(block + 2);
+                                Some(table)
+                            },
+                            |start, vectors| search(Some((start, Some(vectors)))),
+                        );
+                        next = built;
+                        outcome
+                    }
                 };
                 assert!(!took || block > 0, "the first block is never built ahead");
                 if let Err(error) = outcome {
@@ -840,8 +1264,8 @@ mod tests {
         .expect("pool")
     }
 
-    /// The loop of `fake_loop` without and with the build ahead: the rows written, the outcome, and
-    /// a panic's message (`None` without one); both runs must agree.
+    /// The loop of `fake_loop` without and with the builds ahead (whole and split, item SC2d): the
+    /// rows written, the outcome, and a panic's message (`None` without one); all runs must agree.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -852,7 +1276,7 @@ mod tests {
         build: &(dyn Fn(usize) -> Result<u64, String> + Sync),
         fails: Option<usize>,
     ) -> (Vec<String>, Result<(), String>, Option<String>) {
-        let run = |ahead: bool| {
+        let run = |ahead: XFakeAhead| {
             let rows = Mutex::new(Vec::new());
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 fake_loop(threads, blocks, ahead, build, fails, &rows)
@@ -870,12 +1294,19 @@ mod tests {
                 }
             }
         };
-        let off = run(false);
-        let on = run(true);
-        assert_eq!(
-            on, off,
-            "threads {threads}, {blocks} blocks, fails {fails:?}"
-        );
+        let off = run(XFakeAhead::Inline);
+        for ahead in [
+            XFakeAhead::Whole,
+            XFakeAhead::Split,
+            XFakeAhead::SplitVectorsFirst,
+            XFakeAhead::SplitPartFirst,
+        ] {
+            let on = run(ahead);
+            assert_eq!(
+                on, off,
+                "threads {threads}, {blocks} blocks, fails {fails:?}, {ahead:?}"
+            );
+        }
         off
     }
 
@@ -1009,6 +1440,125 @@ mod tests {
             assert!(built.is_none());
             let (_, built) = x_run_with_build_ahead(|| None::<u8>, |spawn| spawn());
             assert!(matches!(built, Some(XBuilt::Dropped)));
+            Ok(())
+        })
+        .expect("pool");
+    }
+
+    // Item SC2d: the hand-off of a split build ahead starts part 2 exactly once, on the side that
+    // comes second, in either order: part 1's values first (the vectors take them), or the vectors
+    // first (part 1's task goes on); a second call of the vectors, and the vectors after part 1 gave
+    // no values, start nothing.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn the_hand_off_starts_part_two_once_on_the_side_that_comes_second() {
+        let slot = Mutex::new(XHandoff::Empty);
+        assert_eq!(XHandoff::part(&slot, 7u8), None, "part 1 first: kept");
+        assert_eq!(
+            XHandoff::vectors(&slot),
+            Some(7),
+            "then the vectors start part 2"
+        );
+        assert_eq!(
+            XHandoff::vectors(&slot),
+            None,
+            "a second call starts nothing"
+        );
+        let slot = Mutex::new(XHandoff::Empty);
+        assert_eq!(XHandoff::vectors(&slot), None, "the vectors first: kept");
+        assert_eq!(XHandoff::vectors(&slot), None);
+        assert_eq!(
+            XHandoff::part(&slot, 9u8),
+            Some(9),
+            "then part 1's task starts part 2"
+        );
+        assert_eq!(XHandoff::vectors(&slot), None);
+        let slot = Mutex::new(XHandoff::<u8>::Empty);
+        XHandoff::close(&slot);
+        assert_eq!(XHandoff::vectors(&slot), None, "part 1 gave no values");
+        assert!(matches!(slot.into_inner().unwrap(), XHandoff::Closed));
+    }
+
+    // Item SC2d: `x_run_with_split_build_ahead` runs each part once, with part 1's values, in either
+    // order of the hand-over; gives no values where part 1 or part 2 gives none or the vectors never
+    // come (part 1's values dropped), keeps a panic of either part, and gives no outcome when part 1
+    // is not started.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn the_split_build_ahead_runs_each_part_once_and_keeps_its_outcome() {
+        use std::sync::atomic::AtomicUsize;
+        crate::utils::threading::with_search_pool(3, "blastp", |_pool| {
+            for vectors_first in [false, true] {
+                let (firsts, seconds) = (AtomicUsize::new(0), AtomicUsize::new(0));
+                let (result, built) = x_run_with_split_build_ahead(
+                    || Some(10 + firsts.fetch_add(1, Ordering::Relaxed)),
+                    |part| Some(part * 100 + seconds.fetch_add(1, Ordering::Relaxed)),
+                    |start, vectors| {
+                        if vectors_first {
+                            vectors();
+                        }
+                        start();
+                        start();
+                        nested_work(3);
+                        vectors();
+                        vectors();
+                        5
+                    },
+                );
+                assert_eq!(result, 5);
+                assert!(
+                    matches!(built, Some(XBuilt::Values(1000))),
+                    "{vectors_first}"
+                );
+                assert_eq!(firsts.load(Ordering::Relaxed), 1);
+                assert_eq!(seconds.load(Ordering::Relaxed), 1);
+            }
+            let both = |start: &dyn Fn(), vectors: &dyn Fn()| {
+                start();
+                vectors();
+            };
+            let (_, built) = x_run_with_split_build_ahead(|| None::<u8>, Some, both);
+            assert!(matches!(built, Some(XBuilt::Dropped)), "part 1 gives none");
+            let (_, built) = x_run_with_split_build_ahead(|| Some(1u8), |_| None::<u8>, both);
+            assert!(matches!(built, Some(XBuilt::Dropped)), "part 2 gives none");
+            let (_, built) = x_run_with_split_build_ahead(|| Some(1u8), Some, |start, _| start());
+            assert!(matches!(built, Some(XBuilt::Dropped)), "no vectors");
+            let (_, built) =
+                x_run_with_split_build_ahead(|| Some(1u8), Some, |_, vectors| vectors());
+            assert!(built.is_none(), "part 1 not started");
+            let panics = |built: Option<XBuilt<u8>>, what: &str| match built {
+                Some(XBuilt::Panicked(payload)) => {
+                    assert_eq!(payload.downcast_ref::<&str>(), Some(&what));
+                }
+                _ => panic!("{what}: no panic kept"),
+            };
+            let (_, built) = x_run_with_split_build_ahead(
+                || -> Option<u8> { panic!("part 1 panicked") },
+                Some,
+                both,
+            );
+            panics(built, "part 1 panicked");
+            for vectors_first in [false, true] {
+                let (_, built) = x_run_with_split_build_ahead(
+                    || Some(1u8),
+                    |_| -> Option<u8> { panic!("part 2 panicked") },
+                    |start, vectors| {
+                        if vectors_first {
+                            vectors();
+                        }
+                        start();
+                        nested_work(2);
+                        vectors();
+                    },
+                );
+                panics(built, "part 2 panicked");
+            }
             Ok(())
         })
         .expect("pool");
@@ -1170,17 +1720,27 @@ mod tests {
             BlastpLookupTableType::CompressedAaLookupTable => {
                 let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
                 let batches = seq_range::QueryInput::whole(records).batches(batch_size);
-                blastp_compressed_lookup(args, frames, &batches, &lengths, pool, XLookupFor::Search)
-                    .expect("the block's own build")
+                super::super::blastp_compressed_lookup(
+                    args,
+                    frames,
+                    &batches,
+                    &lengths,
+                    pool,
+                    XLookupFor::Search,
+                )
+                .expect("the block's own build")
             }
         }
     }
 
-    // A block's values built ahead (`x_build_ahead` as a task of the pool, on the second spare's
-    // vectors made ready as the block loop makes them, once the block before it has its table) are
-    // the values the block's own search builds: the query frames, the table and the contexts, with
-    // the Karlin blocks bit for bit, for blastp-fast (the flat table) and for exact blastp, on a
-    // pool of three threads, SEG masks included.
+    // A block's values built ahead (as tasks of the pool, on the second spare's vectors made ready
+    // as the block loop makes them) are the values the block's own search builds: the query frames,
+    // the table and the contexts, with the Karlin blocks bit for bit, on a pool of three threads, SEG
+    // masks included. Exact blastp: `x_build_ahead`, once the block before it has its table.
+    // blastp-fast (item SC2d): part 1 (`x_flat_ahead_appends`) and part 2 (`x_flat_ahead_table`) on
+    // the vectors of the first block's table, given to the second spare as after its preliminary
+    // stage (`x_make_room_flat`; the table holds its `starts` buffer): part 1 before the vectors,
+    // the vectors before part 1, and both through `x_run_with_split_build_ahead`.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1188,26 +1748,81 @@ mod tests {
     #[test]
     fn values_built_ahead_are_the_values_the_block_builds_itself() {
         let batch_size = 3000;
-        for task in ["blastp-fast", "blastp"] {
+        for (task, order) in [
+            ("blastp-fast", 0),
+            ("blastp-fast", 1),
+            ("blastp-fast", 2),
+            ("blastp", 0),
+        ] {
             let args = test_args(task);
             let first = protein_records(0x9e37_79b9_7f4a_7c15, 24);
             let next = protein_records(0xd1b5_4a32_d192_ed03, 30);
             crate::utils::threading::with_search_pool(3, "blastp", |pool| {
                 let subjects = XBlockSubjects::new(&[], Vec::new());
                 let pool = pool.x_with_ext(&subjects);
-                // The block loop: the first block's own table is ready, the vectors for the next
-                // block's table are made ready, and its build is spawned.
+                let no_spares = "no spares in the pool (LOSAT_X_BPCLUT or LOSAT_X_BPLKPFLAT is \
+                                 set to 0)";
+                // The block loop: the first block's own table is ready.
                 let first_frames = blastp_query_frames(&args, &first);
                 let (first_lookup, _) = own_build(&args, &first, &first_frames, batch_size, &pool);
-                assert!(
-                    x_make_room(&pool, &first_lookup, &Cell::new(0)),
-                    "{task}: no spares in the pool (LOSAT_X_BPCLUT or LOSAT_X_BPLKPFLAT is set \
-                     to 0)"
-                );
-                let (_, built) = x_run_with_build_ahead(
-                    || x_build_ahead(&args, &next, batch_size, &pool),
-                    |spawn| spawn(),
-                );
+                let mut first_starts = None;
+                let built = match first_lookup {
+                    BlastpRuntimeLookup::CompressedFlat(first_table) => {
+                        first_starts = Some(first_table.starts.as_ptr() as usize);
+                        let largest = Cell::new(0);
+                        let values = |built: Option<XAheadLookup>| {
+                            Some(built.map_or(XBuilt::Dropped, XBuilt::Values))
+                        };
+                        match order {
+                            // Part 1, then the first table's vectors, then part 2.
+                            0 => {
+                                let part = x_flat_ahead_appends(&args, &next, batch_size, &pool);
+                                assert!(
+                                    x_make_room_flat(&pool, first_table, &largest),
+                                    "{no_spares}"
+                                );
+                                values(part.and_then(|part| x_flat_ahead_table(part, &pool)))
+                            }
+                            // The vectors, then part 1 and part 2.
+                            1 => {
+                                assert!(
+                                    x_make_room_flat(&pool, first_table, &largest),
+                                    "{no_spares}"
+                                );
+                                let part = x_flat_ahead_appends(&args, &next, batch_size, &pool);
+                                values(part.and_then(|part| x_flat_ahead_table(part, &pool)))
+                            }
+                            _ => {
+                                x_run_with_split_build_ahead(
+                                    || x_flat_ahead_appends(&args, &next, batch_size, &pool),
+                                    |part| x_flat_ahead_table(part, &pool),
+                                    |start, vectors| {
+                                        start();
+                                        assert!(
+                                            x_make_room_flat(&pool, first_table, &largest),
+                                            "{no_spares}"
+                                        );
+                                        vectors();
+                                    },
+                                )
+                                .1
+                            }
+                        }
+                    }
+                    // Exact blastp: the vectors for the next block's table are made ready, and its
+                    // build is spawned.
+                    first_lookup => {
+                        assert!(
+                            x_make_room(&pool, &first_lookup, &Cell::new(0)),
+                            "{no_spares}"
+                        );
+                        x_run_with_build_ahead(
+                            || x_build_ahead(&args, &next, &pool),
+                            |spawn| spawn(),
+                        )
+                        .1
+                    }
+                };
                 let Some(XBuilt::Values(ahead)) = built else {
                     panic!(
                         "{task}: no values built ahead (LOSAT_X_BPLKPAHEAD is 0, LOSAT_X_BPQBLOCK \
@@ -1234,6 +1849,11 @@ mod tests {
                         BlastpRuntimeLookup::CompressedFlat(want),
                     ) => {
                         assert!(!want.hits.is_empty(), "{task}: the flat table has no hits");
+                        assert_eq!(
+                            Some(got.starts.as_ptr() as usize),
+                            first_starts,
+                            "{task}, order {order}: the table is not on the first table's vectors"
+                        );
                         if !x_same_flat_tables(got, want) {
                             x_assert_same_flat_tables_as("ahead:", got, want);
                             panic!("{task}: the tables differ");
@@ -1305,12 +1925,14 @@ mod tests {
         let mut block = XAheadBlock {
             prebuilt: Some(values(x_key(&records))),
             start_next: None,
+            after_prelim_flat: None,
             table_taken_later: true,
         };
         assert!(block.take_prebuilt(&records[..1]).is_none());
         let mut block = XAheadBlock {
             prebuilt: Some(values(x_key(&records))),
             start_next: None,
+            after_prelim_flat: None,
             table_taken_later: true,
         };
         assert!(block.take_prebuilt(&records).is_some());

@@ -6,9 +6,9 @@
 //! [`api::run_collect`]), with the command line's options and the command line's reports.
 //!
 //! Every other module is the command line or the engine: NCBI's algorithms, ported function by
-//! function. They are `pub` so that the command line, the web adapters and the tests reach them,
-//! but they are hidden from this documentation and outside the compatibility promise of the
-//! version number: their items change as the port advances.
+//! function. The modules that the command line, the web adapters or the tests name are `pub` but
+//! hidden from this documentation and outside the compatibility promise of the version number:
+//! their items change as the port advances. The others are `pub(crate)`.
 
 #[doc(hidden)]
 pub mod algorithm;

@@ -4,29 +4,62 @@
 // mouse or pen or reached with the keyboard, and a click keeps it open until the next click,
 // Escape or a click elsewhere (a touch screen has no hover: a tap opens, a tap closes). The
 // help floats under the control (styles.css .help-tip), shifted left when it would leave the
-// viewport, so the page does not move while the pointer passes over the "?".
+// viewport, so the page does not move while the pointer passes over the "?". As WCAG 1.4.13
+// asks (WA2-AX-07), the pointer can move from the "?" onto the help without closing it, and
+// Escape closes the help wherever the focus is, which stays where it is.
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 
 const props = defineProps<{ id: string; label: string; text: string }>();
 
 const pinned = ref(false);
+/** Pointed at with a mouse or pen: the "?", the help, or the way between them. */
 const pointed = ref(false);
-const shown = computed(() => pinned.value || pointed.value);
+/** Reached with the keyboard. */
+const keyed = ref(false);
+const shown = computed(() => pinned.value || pointed.value || keyed.value);
 const root = ref<HTMLElement | null>(null);
 const box = ref<HTMLElement | null>(null);
 /** Pixels the help is moved left so that it ends inside the viewport. */
 const shift = ref(0);
 
-const point = (event: PointerEvent, on: boolean) => {
-  if (event.pointerType !== 'touch') pointed.value = on;
+/**
+ * Whether a point is in the box around the "?" and the help, the way from one to the other: the
+ * help floats a few pixels under the control, not always under the "?".
+ */
+function around(x: number, y: number): boolean {
+  const rects = [root.value, box.value].flatMap((element) => (element === null ? [] : [element.getBoundingClientRect()]));
+  if (rects.length === 0) return false;
+  return (
+    x >= Math.min(...rects.map((r) => r.left)) &&
+    x <= Math.max(...rects.map((r) => r.right)) &&
+    y >= Math.min(...rects.map((r) => r.top)) &&
+    y <= Math.max(...rects.map((r) => r.bottom))
+  );
+}
+/** After the pointer left the "?" and the help on its way between them: closes once it leaves that way. */
+const follow = (event: PointerEvent) => {
+  if (around(event.clientX, event.clientY)) return;
+  pointed.value = false;
+  unfollow();
+};
+const unfollow = () => document.removeEventListener('pointermove', follow, true);
+const enter = (event: PointerEvent) => {
+  if (event.pointerType === 'touch') return;
+  unfollow();
+  pointed.value = true;
+};
+const leave = (event: PointerEvent) => {
+  if (event.pointerType === 'touch' || !pointed.value) return;
+  if (around(event.clientX, event.clientY)) document.addEventListener('pointermove', follow, true);
+  else pointed.value = false;
 };
 /** Keyboard focus shows the help; the focus a click or a tap gives the button does not. */
 const focused = (event: FocusEvent) => {
   const target = event.target as Element;
   try {
-    pointed.value = target.matches(':focus-visible');
+    keyed.value = target.matches(':focus-visible');
   } catch {
-    pointed.value = false;
+    keyed.value = false;
   }
 };
 /** A click pins the help; the next click closes it, although the pointer is still over the "?". */
@@ -37,9 +70,15 @@ const toggle = () => {
 const close = () => {
   pinned.value = false;
   pointed.value = false;
+  keyed.value = false;
+  unfollow();
 };
 const outside = (event: PointerEvent) => {
   if (root.value !== null && !root.value.contains(event.target as Node)) pinned.value = false;
+};
+/** Escape closes the shown help, wherever the focus is; the focus stays (WCAG 1.4.13: dismissible). */
+const escape = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') close();
 };
 
 watch(pinned, (on) => {
@@ -47,6 +86,8 @@ watch(pinned, (on) => {
   else document.removeEventListener('pointerdown', outside, true);
 });
 watch(shown, async (on) => {
+  if (on) document.addEventListener('keydown', escape);
+  else document.removeEventListener('keydown', escape);
   shift.value = 0;
   if (!on) return;
   await nextTick();
@@ -56,11 +97,16 @@ watch(shown, async (on) => {
     shift.value = Math.min(Math.max(0, over), Math.max(0, Math.floor(rect.left - 16)));
   }
 });
-onUnmounted(() => document.removeEventListener('pointerdown', outside, true));
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', outside, true);
+  document.removeEventListener('keydown', escape);
+  unfollow();
+});
 </script>
 
 <template>
-  <span ref="root" class="help-tip">
+  <!-- The pointer over the "?" or over the help (a child, although it floats elsewhere) shows it. -->
+  <span ref="root" class="help-tip" @pointerenter="enter" @pointerleave="leave">
     <button
       type="button"
       class="help-toggle"
@@ -70,11 +116,8 @@ onUnmounted(() => document.removeEventListener('pointerdown', outside, true));
       :aria-label="props.label"
       :data-testid="`${props.id}-help-toggle`"
       @click="toggle"
-      @pointerenter="point($event, true)"
-      @pointerleave="point($event, false)"
       @focus="focused"
-      @blur="pointed = false"
-      @keydown.escape="close"
+      @blur="keyed = false"
     >
       ?
     </button>

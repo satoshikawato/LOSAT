@@ -4,8 +4,9 @@
 // order and view filters. Each HSP that the filters show is a thin bar from the smaller to the
 // larger query coordinate of its record, coloured by NCBI's "Alignment Scores" bin of its record's
 // bit score; the HSPs of a subject are joined by a thin grey line. The bins only classify the
-// engine's number; hover and focus show the outfmt 6 strings. Click or Enter selects the HSP and
-// asks the results screen to show its alignment.
+// engine's number; hover and focus show the outfmt 6 strings in a popover, which Escape closes
+// (WCAG 1.4.13, WA2-AX-07). Click or Enter selects the HSP and asks the results screen to show its
+// alignment.
 //
 // One canvas holds the figure and draws only the rows in view, so that thousands of HSPs stay
 // smooth; with many subjects the rows scroll inside the figure under the query bar.
@@ -436,6 +437,23 @@ function reveal(r: number): void {
 
 /** The HSP that the popover shows: the hovered one, else the keyboard's. */
 const shown = computed(() => (hovered.value >= 0 ? hovered.value : keyboard.value ? cursor.value : -1));
+/**
+ * The HSP whose popover Escape closed, wherever the focus was: the popover stays closed until the
+ * pointer or the keyboard moves to another HSP. The keyboard's frame and what a screen reader was
+ * told stay; the focus stays where it is.
+ */
+const dismissed = ref(-1);
+const popoverShown = computed(() => shown.value >= 0 && shown.value !== dismissed.value);
+watch(shown, (k) => {
+  if (k !== dismissed.value) dismissed.value = -1;
+});
+function onEscape(event: KeyboardEvent): void {
+  if (event.key === 'Escape') dismissed.value = shown.value;
+}
+watch(popoverShown, (on) => {
+  if (on) document.addEventListener('keydown', onEscape);
+  else document.removeEventListener('keydown', onEscape);
+});
 const info = computed(() => {
   const k = shown.value;
   const l = layout.value;
@@ -488,6 +506,7 @@ onMounted(() => {
   schedule();
 });
 onUnmounted(() => {
+  document.removeEventListener('keydown', onEscape);
   observer?.disconnect();
   if (frame !== 0) cancelAnimationFrame(frame);
 });
@@ -566,7 +585,7 @@ const selectedText = computed(() => (selectedIndex.value < 0 ? '' : `${props.sta
         </div>
       </div>
       <div
-        v-if="info"
+        v-if="info && popoverShown"
         ref="popover"
         class="graphic-popover"
         aria-hidden="true"

@@ -6,7 +6,7 @@
 // output texts that scroll are Tab stops, also in WebKit. WA2-AX-13: the hidden file input is not
 // a second button.
 import { gzipSync } from 'node:zlib';
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from './support/test';
 import { exampleById } from '../../src/domain/examples';
 import { axeViolations } from './support/axe';
@@ -43,6 +43,18 @@ async function tabTo(page: Page, testid: string, most = 60): Promise<boolean> {
     if ((await focused(page)) === testid) return true;
   }
   return false;
+}
+
+/**
+ * Presses `key` until the focused `box` has scrolled, as a person presses again when the text did not move.
+ * In CI's Chromium (#904), an ArrowRight 17 ms after the Tab that focused the box, before the
+ * focus was drawn, left it unscrolled; the machines here scroll on the first press.
+ */
+async function pressUntilScrolled(page: Page, key: string, box: Locator, side: 'scrollTop' | 'scrollLeft'): Promise<void> {
+  await expect(async () => {
+    await page.keyboard.press(key);
+    expect(await box.evaluate((element, s) => element[s], side)).toBeGreaterThan(0);
+  }).toPass({ timeout: 10_000 });
 }
 
 test('a run is told as it goes and when it completes, without the elapsed time; the focus stays on Results', async ({ page }) => {
@@ -356,8 +368,8 @@ test('the output text of the Outputs view is a Tab stop and scrolls with the key
   await expect(output).toHaveAttribute('tabindex', '0');
   await page.getByTestId('format-7').focus();
   expect(await tabTo(page, 'result-output', 1)).toBe(true);
-  await page.keyboard.press('PageDown');
-  await expect.poll(() => output.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await pressUntilScrolled(page, 'PageDown', output, 'scrollTop');
+  expect(await focused(page)).toBe('result-output');
 });
 
 test.describe('on a phone', () => {
@@ -377,8 +389,8 @@ test.describe('on a phone', () => {
     await expect(section).toHaveAttribute('tabindex', '0');
     await page.getByTestId('results-heading').focus();
     expect(await tabTo(page, 'detail-section')).toBe(true);
-    await page.keyboard.press('ArrowRight');
-    await expect.poll(() => section.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+    await pressUntilScrolled(page, 'ArrowRight', section, 'scrollLeft');
+    expect(await focused(page)).toBe('detail-section');
   });
 });
 
@@ -403,8 +415,12 @@ test('"Show all" of the Graphic Summary moves the focus to the first subject tha
   await chooseRun(page, 1);
   const canvas = page.getByTestId('graphic-canvas');
   await expect(canvas).toHaveAttribute('data-rows', '100');
+  // The keyboard reaches the button, as a keyboard user's does. Firefox gives the plot :focus-visible
+  // (and so tells its subject) only when the button's focus came from a key, not from focus().
+  await canvas.focus();
+  await page.keyboard.press('Tab');
+  expect(await focused(page)).toBe('graphic-show-all');
   await forget(page);
-  await page.getByTestId('graphic-show-all').focus();
   await page.keyboard.press('Enter');
   await expect(canvas).toHaveAttribute('data-rows', '120');
   expect(await focused(page)).toBe('graphic-canvas');

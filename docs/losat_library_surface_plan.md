@@ -415,7 +415,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 - ノートブックの流れ（進捗つきの `batches`、`polars` と `pandas` と `pyarrow` への受け渡し、`queries()`、`spans`、pickle）を `python/tests` と手元の script で確認した。
 - `python/tests`：5 program で、報告（outfmt 6、7、0、10、列指定）のバイトと `diagnostics` が `losat` と一致し、表の値が列と一致する。Ctrl-C、GIL、2 スレッド同時、process pool、pickle、Arrow の 3 consumer。
 - `LOSAT/tests/library_api.rs`：`qaccver`、`saccver`、`pident` の列と全 HSP で一致（§10.3 の 13 検索と `-parse_deflines`）。
-- `.github/workflows/python.yml`：`python/` と `LOSAT/src/api` の変更で走る。必須の check にはしていない。
+- `.github/workflows/python.yml`：`python/` と `LOSAT/src` の変更で走る（`pylosat/_options.pyi` は command line 全体の表から作るので、`api` 以外の引数の変更でも検査が要る。2026-11-08）。必須の check にはしていない。
 
 ### 12.4 残ること
 

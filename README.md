@@ -44,10 +44,11 @@ On the pairwise profiles and fixtures of its [release test set](docs/release/v0.
 | **`tblastx`** | `tblastx` | `0`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `20` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
 | **`tblastn`** | `tblastn` (default), `tblastn-fast` | `0`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `20` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
 | **`psiblast`** | the rounds of FASTA queries (`-num_iterations N`, 0 until convergence); a PSSM query (`-in_pssm`, its rounds too) | `0`, `6`, `7`, `10`, `20` (`-in_pssm`: `0`, `6`, `7`) | Position-Specific Iterated BLAST: blastp's search in round 1, then the search of the PSSM made from each round's alignments, or the search of a PSSM (see [section 7](#7-psi-blast-psiblast)) |
+| **`rpsblast`** | without composition-based statistics (`-comp_based_stats 0`), one-volume profile databases | `0`, `6`, `7`, `10` | Reverse Position-Specific BLAST: protein queries against a database of profiles such as CDD (see [section 8](#8-reverse-psi-blast-rpsblast)) |
 
 > **Note**: Tabular output (`-outfmt 6`, `7`, `10` and `20`) writes the 12 standard BLAST fields by default:  
 > `qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore`.  
-> All five programs and `psiblast` also accept a custom field list (for example `-outfmt "6 qseqid sseqid evalue"`) and `delim=`.
+> All five programs, `psiblast` and `rpsblast` also accept a custom field list (for example `-outfmt "6 qseqid sseqid evalue"`) and `delim=`.
 >
 > LOSAT refuses an NCBI option or value it does not implement with an error; see [Scope & Differences](#scope--differences-from-ncbi-blast) for the list.
 
@@ -144,7 +145,7 @@ On macOS, an E value printed with full precision (`-outfmt 11`, `-outfmt 8`) can
 
 ## Quick Start
 
-Tools that look for `blastn` on `PATH` can use LOSAT without changes: `losat --install-shims [DIR]` links `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `makeblastdb` and `blastdbcmd` to `losat` in `DIR` (default: the directory of `losat`; Windows gets copies), and an executable called by one of these names runs that program. It stops without changing anything if a file of one of these names is already there, such as NCBI's own program.
+Tools that look for `blastn` on `PATH` can use LOSAT without changes: `losat --install-shims [DIR]` links `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `makeblastdb` and `blastdbcmd` to `losat` in `DIR` (default: the directory of `losat`; Windows gets copies), and an executable called by one of these names runs that program. It stops without changing anything if a file of one of these names is already there, such as NCBI's own program.
 
 LOSAT adopts the standard NCBI single-dash command-line syntax:
 
@@ -264,6 +265,17 @@ losat psiblast \
 ```
 
 With `-in_pssm FILE` (in place of `-query`; `-in_pssm -` reads the standard input) the query is a PSSM in NCBI's ASN.1 text form (`PssmWithParameters`, as psiblast's `-out_pssm` writes it): its scores replace the matrix in the lookup table, the extensions and the alignments, the report shows the PSSM's query, and the footer prints the PSSM's Karlin-Altschul parameters. A PSSM of frequency ratios only gets its scores from the ratios, as NCBI computes them. The composition-based statistics are NCBI's position-based ones: `-comp_based_stats 1`, and the default 2 and 3, which NCBI runs as 1 with a PSSM (with its warning), rescale the PSSM for each subject's composition and redo the alignments; `-comp_based_stats 0` keeps the PSSM's scores. With `-num_iterations N` the rounds run as a FASTA query's: round 1 searches the PSSM, each later round the PSSM made from the round before, with the PSSM's query (its Seq-id and title) in every report and every PSSM made. `-out_pssm` and `-out_ascii_pssm` get the input PSSM at the start of round 1 (with one round too), as NCBI writes it back: a PSSM of frequency ratios only with the scores computed from them, and the ASCII form `Last position-specific scoring matrix computed` with the scores and the PSSM's own Karlin-Altschul values (the long form when the PSSM holds its information content); then the PSSMs of the later rounds as for a FASTA query. After a first round without hits, `-save_pssm_after_last_round` writes the input PSSM again with the Karlin-Altschul values of its search, as NCBI does.
+
+### 8. Reverse PSI-BLAST (rpsblast)
+```bash
+losat rpsblast \
+  -query proteins.faa \
+  -db Cdd \
+  -comp_based_stats 0 \
+  -outfmt 6
+```
+
+`losat rpsblast` searches protein queries against a profile database written by NCBI's `makeprofiledb -dbtype rps` (for example NCBI's CDD), as NCBI BLAST+ 2.17.0 `rpsblast -num_threads 1` does, byte for byte, without composition-based statistics: `-comp_based_stats 0` (or `F`, `f`, `D`, `d`); a database without frequency ratios (no `.freq` file) gets NCBI's warning and the same search with every mode. It reads databases of one volume (format versions 4 and 5, the 28-column profiles of makeprofiledb 2.17 and the older 26-column ones, a whole scale such as CDD's 100) through read-only memory maps of their `.loo` and `.rps` files, writes outfmt 0, 6, 7 and 10 (custom fields too; `positive` and `ppos` count the identities, as NCBI's rpsblast does), and takes `-evalue`, `-max_target_seqs`, `-num_descriptions`, `-num_alignments`, `-max_hsps`, `-qcov_hsp_perc`, `-window_size`, `-query_loc`, `-parse_deflines`, `-show_gis`, `-num_threads` and `-mt_mode`; the queries are searched in parallel and the output is the same at every thread count. Composition-based statistics with the database's frequency ratios (the default `-comp_based_stats 1`, as for CDD) and databases of several volumes (CDD has 29) come with the next item; until then they are refused, as are the options listed under [Scope & Differences](#scope--differences-from-ncbi-blast).
 
 ---
 
@@ -462,12 +474,16 @@ LOSAT stops with an error for each option and value below; it does not run somet
 - Refused: `-in_msa`, `-msa_master_idx`, `-ignore_msa_master`, `-phi_pattern`, `-gap_trigger`, `-sum_stats`, `-culling_limit`, `-lcase_masking`, `-searchsp`, `-show_gis`, `-parse_deflines`, `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist`, `-no_taxid_expansion`, `-outfmt` other than 0, 6, 7, 10 and 20, and a `-subject` set whose sequences all have no letters (NCBI's psiblast crashes; blastp runs it).
 - It also refuses the `blastp` entries above that apply to it, every matrix and gap cost but BLOSUM62 with 11/1, and, without `-in_pssm`, `-word_size 2` and `4`.
 
+**rpsblast** runs without composition-based statistics on one-volume databases (section 8).
+- Refused until the next item: `-comp_based_stats` 1, 2, 3, `T` and `t` (and the default 1) on a database with frequency ratios (`.freq`), and a database of several volumes.
+- Refused: `-outfmt` other than 0, 6, 7 and 10 (17 gets NCBI's own error), `-seg` other than `no`, `-soft_masking true`, `-lcase_masking`, `-dbsize`, `-searchsp`, `-sum_stats`, `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final`, `-use_sw_tback`, `-line_length`, `-html`, `-sorthits`, `-sorthsps`, `-entrez_query`, `-remote`, the strategy files, a profile database whose matrix and gap costs are not BLOSUM62 11/1 or whose scale is not a whole number, makes a scaled gap cost, X-drop or score cutoff leave 32-bit integers (NCBI's products overflow) or is one at which NCBI's Lambda changes from one e-value to the next (such as 531: NCBI divides Lambda by the scale and multiplies it back), an empty or inconsistent `.rps`, `.loo` or `.aux` file (NCBI reads past its buffers or crashes), a query above 5,000,000 letters, and rpsblast in the library API and the Web engine. NCBI's errors for a missing `.aux`, `.loo` or `.rps` file or a wrong magic number come as in NCBI (exit status 3). `-subject` is not an rpsblast option: LOSAT's parser refuses it (exit status 2; NCBI prints its usage).
+
 **makeblastdb**
 - `-randomize`, `-mask_data`, `-mask_id`, `-mask_desc`, `-gi_mask`, `-gi_mask_name`, `-oid_masks`, `-metadata_output_prefix`.
 - `-input_type blastdb`, `asn1_txt` and `asn1_bin` (`fasta` works).
 
 **Programs LOSAT does not provide**
-- `rpsblast`, `rpstblastn`, `deltablast`, `makeprofiledb`, `blast_formatter`, `blastdb_aliastool`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`.
+- `rpstblastn`, `deltablast`, `makeprofiledb`, `blast_formatter`, `blastdb_aliastool`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`.
 
 **Out of scope** (they need NCBI's servers or its GI / IPG databases)
 - `-remote` and `-entrez_query`: all programs.

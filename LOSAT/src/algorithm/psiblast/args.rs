@@ -464,6 +464,7 @@ impl PsiblastArgs {
                 rounds,
                 in_pssm: self.in_pssm,
             }),
+            rps: None,
         })
     }
 

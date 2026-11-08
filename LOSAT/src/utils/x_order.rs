@@ -1,4 +1,5 @@
-//! No NCBI counterpart: a stable sort that moves no element into a scratch copy.
+//! No NCBI counterpart: a stable sort that moves no element into a scratch copy, and the in-place
+//! permutation it applies (also the one of TBLASTX's in-place linking, `tblastx/x_hsp_inplace.rs`).
 
 use std::cmp::Ordering;
 
@@ -6,11 +7,12 @@ use std::cmp::Ordering;
 /// (comparator-equal elements keep their input order) without a scratch copy of the elements.
 /// NCBI sorts arrays of pointers to its HSPs (`qsort(hsp_array, hspcnt, sizeof(BlastHSP*), ...)`,
 /// blast_hits.c:1379-1381), so its sorts move pointers. `slice::sort_by` on the elements
-/// themselves takes a scratch copy of the whole slice once the slice passes 4 KiB (Sakai x EDL933
-/// `-subject` blastn: 38,579 HSPs of 184 bytes, 6.8 MiB, at the end of the traceback, while the
-/// traceback's buffers are still held). Here the positions are sorted instead (ties broken by the
-/// position, which is the stable order and lets the in-place unstable sort run), and the sorted
-/// order is then applied by following its cycles with swaps: one `usize` per element.
+/// themselves allocates a scratch for 21 or more elements: a copy of the whole slice up to 8 MB
+/// (43,478 HSPs of 184 bytes), half of the slice above that (Sakai x EDL933 `-subject` blastn:
+/// 38,579 HSPs, 6.8 MiB, at the end of the traceback, while the traceback's buffers are still
+/// held). Here the positions are sorted instead (ties broken by the position, which is the stable
+/// order and lets the in-place unstable sort run), and the sorted order is then applied with
+/// `apply_permutation_in_place`: one `usize` per element.
 pub(crate) fn x_sort_stable_by_order<T, F>(v: &mut [T], mut compare: F)
 where
     F: FnMut(&T, &T) -> Ordering,
@@ -22,21 +24,33 @@ where
     // order[k]: the input position of the element that goes to position k
     let mut order: Vec<usize> = (0..n).collect();
     order.sort_unstable_by(|&a, &b| compare(&v[a], &v[b]).then(a.cmp(&b)));
-    for start in 0..n {
-        if order[start] == start {
-            continue;
-        }
-        // The element of `start` travels along its cycle; each swap puts one element in its
-        // place, and a placed position is marked with its own index.
-        let mut at = start;
+    apply_permutation_in_place(v, &mut order);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
+// ```c
+//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+//               ScoreCompareHSPs);
+// ```
+// NCBI's qsort moves the pointers inside the one array. `source[dst]` names the record that
+// belongs at `dst`; each cycle of that permutation is walked once with swaps
+// (`tblastx/x_hsp_inplace.rs`, module doc, item 1).
+/// Rearranges `items` so that `items[dst]` is the element that was at `source[dst]`. `source` must
+/// be a permutation of `0..items.len()`; it is left as the identity.
+pub(crate) fn apply_permutation_in_place<T>(items: &mut [T], source: &mut [usize]) {
+    assert_eq!(items.len(), source.len(), "permutation length");
+    for start in 0..source.len() {
+        let mut dst = start;
         loop {
-            let from = order[at];
-            order[at] = at;
-            if from == start {
+            let src = source[dst];
+            // `dst` is settled by the swap below (or needs none): mark it.
+            source[dst] = dst;
+            if src == start {
+                // The cycle is closed: the record that started at `start` has been carried here.
                 break;
             }
-            v.swap(at, from);
-            at = from;
+            items.swap(dst, src);
+            dst = src;
         }
     }
 }

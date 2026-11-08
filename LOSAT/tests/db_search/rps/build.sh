@@ -5,6 +5,10 @@
 #              psiblast rounds against tests/db_search/paja), Seq-ids gnl|CDD|101..103, scores at
 #              makeprofiledb's default scale 100 (as CDD's)
 #   rps_mini4  the same profiles, version 4
+#   rps_mini3v the same profiles as three volumes of one profile each (rps_mini3v.00 to .02, version 5,
+#              each made by makeprofiledb from one profile, and the alias file rps_mini3v.pal that
+#              lists them, written below: makeprofiledb -max_smp_vol never makes one profile per
+#              volume of three profiles)
 #   rps_mini26 version 4 with a 26-column .rps (magic 0x1e16 in .rps and .loo, rows cut to their
 #              first 26 columns), its .freq left at 28 columns: the layout of NCBI's own test
 #              database rpstest_le
@@ -67,6 +71,13 @@ PY
 done
 "$N/makeprofiledb" -in list.txt -out "$O/rps_mini" -title rps_mini -dbtype rps
 "$N/makeprofiledb" -in list.txt -out "$O/rps_mini4" -title rps_mini4 -dbtype rps -blastdb_version 4
+i=0
+for tag in 101 102 103; do
+  echo f$tag.smp > list3v.txt
+  "$N/makeprofiledb" -in list3v.txt -out "$O/rps_mini3v.0$i" -title rps_mini3v -dbtype rps
+  i=$((i + 1))
+done
+printf '#\n# Alias file created by build.sh\n#\nTITLE rps_mini3v\nDBLIST "rps_mini3v.00" "rps_mini3v.01" "rps_mini3v.02" \n' > "$O/rps_mini3v.pal"
 "$N/makeprofiledb" -in list.txt -out "$O/rps_mini26" -title rps_mini26 -dbtype rps -blastdb_version 4
 # rps_mini26: the .rps rows cut to 26 columns and the 26-letter magic in .rps and .loo.
 python3 - "$O/rps_mini26" <<'PY'

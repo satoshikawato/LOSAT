@@ -88,7 +88,7 @@ loader (`algo/blast/unit_tests/blastdb/bdbloader_unit_test.cpp`,
 | `partial` | a LOSAT test exercises the case but asserts less | a citation line, a `path::fn` test, or the evidence in `note` |
 | `e2e` | only fixtures, frozen hashes or oracle comparisons cover it | the fixture in `losat_test` or `note` |
 | `to-port` | LOSAT has ported the function, but no test checks this case | the LOSAT function in `note` |
-| `n-a` | LOSAT has no such feature (object manager, sequences fetched by id from GenBank or a BLAST database, PHI-BLAST, DELTA-BLAST, an option LOSAT refuses, ...) or NCBI compiles the case out | the reason in `note` (for a refused option, the `path:line` of the refusal) |
+| `n-a` | LOSAT has no such feature (object manager, sequences fetched by id from GenBank or a BLAST database, a program LOSAT lacks such as deltablast or rpstblastn, an option LOSAT refuses such as `-phi_pattern`, ...) or NCBI compiles the case out | the reason in `note` (for a refused option, the `path:line` of the refusal) |
 | `superseded` | another LOSAT test or fixture checks more than the NCBI case | the reason in `note` |
 
 ## Adding a row (porting a case)
@@ -186,7 +186,9 @@ preliminary search, the setup factory, uniform search and the version and refere
 graded against the NCBI case and the LOSAT code, and a second reader checked every row above
 `n-a`. The new rows: 55 `ported`, 80 `partial`, 13 `e2e`, 16 `to-port`, 15 `superseded` and
 226 `n-a` (the 62 compiled out; the others need GI or alias-file lists, the object manager,
-sequences fetched by id, an option or program LOSAT refuses such as `-in_msa`, deltablast or
-rpstblastn, or are C++ API plumbing with no LOSAT counterpart). Notes that cite LOSAT lines start
+sequences fetched by id, a program LOSAT lacks (deltablast, rpstblastn) or an option it refuses
+(`-in_msa`), or are C++ API plumbing with no LOSAT counterpart). Notes that cite LOSAT lines start
 with `evidence (a20ad436):`; the six rps rows were graded on `dev` c513a3046, which added rpsblast,
-and start with `evidence (c513a304):`.
+and start with `evidence (c513a304):`. On that commit four older rows that gave RPS-BLAST as
+missing were graded again: blastinput RpsBlastCBS became `partial`, blastsetup
+NumberOfContextsRPSBlast `to-port`, and two `n-a` notes now give today's reason.

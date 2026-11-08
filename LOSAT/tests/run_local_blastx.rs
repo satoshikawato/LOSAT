@@ -707,7 +707,8 @@ fn check_options_fails_as_a_run_does() {
         // NCBI's formatting handler: a custom delimiter that a field uses (W10).
         (&["6 delim=; qseqid staxids", "0"][..], &[][..]),
         (&["6"][..], &["-parse_deflines"][..]),
-        (&FORMATS[..], &["-matrix", "PAM30"][..]),
+        // NCBI's error of a matrix BLASTX does not take (IDENTITY, `std_matrix_only`).
+        (&FORMATS[..], &["-matrix", "IDENTITY"][..]),
         (&FORMATS[..], &["-evalue", "0"][..]),
         (&FORMATS[..], &["-ungapped"][..]),
         (&["6", "7"][..], &["-num_alignments", "0"][..]),
@@ -723,7 +724,7 @@ fn check_options_fails_as_a_run_does() {
         ),
         (
             &FORMATS[..],
-            &["-subject_loc", "2-1", "-matrix", "PAM30"][..],
+            &["-subject_loc", "2-1", "-matrix", "IDENTITY"][..],
         ),
         (&FORMATS[..], &["-query_loc", "2-1", "-evalue", "0"][..]),
         (

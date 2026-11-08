@@ -1290,7 +1290,10 @@ mod tests {
                 &["-evalue", "0"][..],
                 "BLAST query/options error: expect value",
             ),
-            (&["-matrix", "PAM30"], "unsupported BLASTX matrix"),
+            (
+                &["-matrix", "IDENTITY"],
+                "BLAST query/options error: IDENTITY is not a supported matrix",
+            ),
             (
                 &["-num_descriptions", "0", "-num_alignments", "0"],
                 "BLAST query/options error: No hits are being saved",
@@ -3255,7 +3258,7 @@ mod tests {
         for extra in [
             &["-subject_loc", "5-2", "-query_loc", "9-1"][..],
             &["-query_loc", "9-1", "-evalue", "0"],
-            &["-subject_loc", "5-2", "-matrix", "PAM30"],
+            &["-subject_loc", "5-2", "-matrix", "IDENTITY"],
         ] {
             let argv = [&words[..5], extra].concat();
             let error = run(&argv, &query, &subject).unwrap_err();
@@ -3265,9 +3268,12 @@ mod tests {
             validate(&[&words[..5], &["-subject_loc", "5-2", "-query_loc", "9-1"]].concat())
                 .unwrap_err();
         assert!(error.contains("subject location"), "{error}");
-        let error = validate(&[&words[..5], &["-subject_loc", "5-2", "-matrix", "PAM30"]].concat())
-            .unwrap_err();
-        assert!(error.starts_with("unsupported BLASTX matrix"), "{error}");
+        // The subject range comes before NCBI's errors of the options (IDENTITY, which BLASTX
+        // does not take).
+        let error =
+            validate(&[&words[..5], &["-subject_loc", "5-2", "-matrix", "IDENTITY"]].concat())
+                .unwrap_err();
+        assert!(error.contains("subject location"), "{error}");
         // A subject range that starts past the subject's end is an error of the records, which
         // validate does not see.
         let past = [&words[..5], &["-subject_loc", "70-80"]].concat();

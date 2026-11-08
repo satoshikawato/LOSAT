@@ -478,7 +478,9 @@ fn pssm_redo(
 }
 
 /// The warning line of a PSSM query (psiblast `-in_pssm`): its label is the PSSM's Seq-id (the
-/// record's local id, DECISIONS 12 of line PS), and its messages add those of
+/// record's local id, DECISIONS 12 of line PS) and the title of `CBlastQuerySourceBioseqSet`
+/// (`PsiSearch::warning_title`; a FASTA query's later rounds keep the record's title), and its
+/// messages add those of
 /// `PsiBlastSetupScoreBlock` (`PsiSearch::setup_messages`), which NCBI keeps with the query's
 /// others (sorted, `report::query_warnings::sorted_query_messages`).
 ///
@@ -499,10 +501,14 @@ pub(super) fn pssm_query_warning(
 ) -> Vec<u8> {
     let mut all = messages.to_vec();
     all.extend(psi.setup_messages.iter().cloned());
+    let title = match psi.warning_title.as_deref() {
+        Some(title) => std::borrow::Cow::Borrowed(title),
+        None => crate::blastinput::fasta_reader::InputRecord::title_bytes(record),
+    };
     crate::report::query_warnings::query_warning_with_seq_id(
         program,
         record.local_id.as_bytes(),
-        record,
+        &title,
         &all,
     )
 }

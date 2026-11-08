@@ -340,6 +340,11 @@ fn skipped_members_are_named_and_an_empty_descr_is_an_error() {
         "        seq-data ncbistdaa '0C'H\n      },\n      annot {\n        {\n          data ftable {\n          }\n        }\n      }\n",
     );
     assert_eq!(skips(&annot), ["annot"]);
+    let molinfo = SMALL_PSSM.replace(
+        "title \"a \"\"quoted\"\" title\"",
+        "molinfo {\n          biomol peptide\n        },\n        title \"a \"\"quoted\"\" title\"",
+    );
+    assert_eq!(skips(&molinfo), ["molinfo"]);
     let empty = SMALL_PSSM.replace("        title \"a \"\"quoted\"\" title\"\n", "");
     let error = read_pssm_with_parameters(empty.as_bytes()).unwrap_err();
     assert_eq!(error.message, "empty Seq-descr is not allowed");

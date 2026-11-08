@@ -196,7 +196,7 @@ fn run_queries(
         // The PSSM that the next round searches (`pssm`, made after the round before); before
         // round 1 of `-in_pssm` the input PSSM (`args.psi_search`), whose files are `input_files`.
         let mut pssm: Option<QueryPssm> = None;
-        let input_files = match &plan.input {
+        let mut input_files = match &plan.input {
             Some(input) => Some(input.files(&plan.request)?),
             None => None,
         };
@@ -205,7 +205,7 @@ fn run_queries(
         let mut searched_input = None;
         while state.go() {
             let round = state.number();
-            match (&pssm, &input_files) {
+            match (&pssm, input_files.as_mut()) {
                 (Some(current), _) => {
                     files.write(current.asn.as_deref(), current.ascii.as_deref())?
                 }
@@ -218,6 +218,9 @@ fn run_queries(
                         }
                         return Err(error);
                     }
+                    // Only the ASCII PSSM is written again (after a round 1 without alignments;
+                    // the ASN.1 text is then made with the write-back).
+                    *asn = None;
                 }
                 _ => {}
             }
@@ -232,6 +235,12 @@ fn run_queries(
                 };
                 let mut search =
                     PsiSearch::from_engine(&current.engine, records[0].clone(), Vec::new());
+                // The query source is fixed for the run: a PSSM query's warning label keeps its
+                // title rule in every round (`PsiSearch::warning_title`).
+                search.warning_title = args
+                    .psi_search
+                    .as_deref()
+                    .and_then(|psi| psi.warning_title.clone());
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
                     &search,
                     setup_mode,

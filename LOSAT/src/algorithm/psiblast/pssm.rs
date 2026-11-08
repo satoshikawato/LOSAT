@@ -1061,7 +1061,7 @@ pub(crate) fn ncbistdaa_letters(letters: &[u8]) -> Vec<u8> {
 //     19      /* V */
 // };
 // ```
-const RESIDUE_ORDER: [usize; 20] = [
+pub(super) const RESIDUE_ORDER: [usize; 20] = [
     1, 16, 13, 4, 3, 15, 5, 7, 8, 9, 11, 10, 12, 6, 14, 17, 18, 20, 22, 19,
 ];
 
@@ -1071,7 +1071,9 @@ const RESIDUE_ORDER: [usize; 20] = [
 // '-','A','B','C','D','E','F','G','H','I','K','L','M',
 // 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*','O','J'};
 // ```
-const NCBISTDAA_TO_AMINOACID: &[u8; BLASTAA_SIZE] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
+/// The letters of NCBIstdaa, the one table of the psiblast module (the ASCII PSSM, the query
+/// letters of a PSSM file, `in_pssm` and `in_pssm_files`).
+pub(super) const NCBISTDAA_TO_AMINOACID: &[u8; BLASTAA_SIZE] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
 
 /// A double as the C++ stream writes it with `fixed` and `setprecision(precision)` (the C
 /// library's `%.*f`: correctly rounded, as Rust's formatting; `inf` and `nan` as glibc spells

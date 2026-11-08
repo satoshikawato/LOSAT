@@ -78,8 +78,8 @@ pub fn read_pssm_with_parameters(text: &[u8]) -> Result<PssmWithParameters> {
 }
 
 /// `read_pssm_with_parameters`, with the names of the members that the reader skipped (in the
-/// order read, `"Seqdesc"` for a descriptor of the query other than a title), which NCBI's object
-/// keeps and writes back.
+/// order read; `"molinfo"` for a `molinfo` descriptor of the query, `"Seqdesc"` for another
+/// descriptor other than a title), which NCBI's object keeps and writes back.
 pub fn read_pssm_with_parameters_and_skips(
     text: &[u8],
 ) -> Result<(PssmWithParameters, Vec<&'static str>)> {
@@ -1014,7 +1014,13 @@ impl<'a> Reader<'a> {
         if variant == b"title" {
             return Ok(Some(self.string()?));
         }
-        self.skip_member("Seqdesc")?;
+        // A `molinfo` descriptor takes the title out of the query's warning label
+        // (`CBlastQuerySourceBioseqSet::GetTitle`, quoted at `algorithm::psiblast::in_pssm`).
+        self.skip_member(if variant == b"molinfo" {
+            "molinfo"
+        } else {
+            "Seqdesc"
+        })?;
         Ok(None)
     }
 

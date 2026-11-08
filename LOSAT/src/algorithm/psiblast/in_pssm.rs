@@ -50,9 +50,7 @@ use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::report::serial::pssm::{ObjectId, PssmSeqId, PssmWithParameters, SeqData};
 
 use super::in_pssm_files::InPssmFile;
-
-/// NCBISTDAA's letters (`NCBISTDAA_TO_AMINOACID`, blast_encoding.c:115-118).
-const NCBISTDAA_LETTERS: [u8; BLASTAA_SIZE] = *b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
+use super::pssm::NCBISTDAA_TO_AMINOACID as NCBISTDAA_LETTERS;
 
 /// `BLAST_SCORE_MAX` (`INT2_MAX`, blast_stat.h:122): the largest score of one letter pair.
 const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
@@ -290,9 +288,7 @@ pub(crate) fn read_in_pssm(path: &Path) -> Result<(PsiSearch, InPssmFile)> {
                 )))
             }
         };
-    let (search, mut file) = psi_search_and_object(pssm)?;
-    file.skipped = skipped;
-    Ok((search, file))
+    psi_search_and_object(pssm, skipped)
 }
 
 /// `CPsiBlastValidate::Pssm`'s error for `pssm`, which NCBI raises (`CBlastException`, "BLAST
@@ -379,13 +375,17 @@ fn visible(bytes: &[u8]) -> bool {
 /// The PSSM search of `pssm`: its query record, rows and values, or LOSAT's refusal.
 #[cfg(test)]
 pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
-    psi_search_and_object(pssm).map(|(search, _)| search)
+    psi_search_and_object(pssm, Vec::new()).map(|(search, _)| search)
 }
 
 /// The PSSM search of `pssm` and the PSSM as NCBI's `CPsiBlastImpl` leaves it before the first
 /// round: a PSSM of frequency ratios only gets the scores and gapped values that the PSSM engine
-/// computes for it (`in_pssm_files::with_computed_scores`).
-pub(crate) fn psi_search_and_object(pssm: PssmWithParameters) -> Result<(PsiSearch, InPssmFile)> {
+/// computes for it (`in_pssm_files::with_computed_scores`). `skipped` names the members the reader
+/// skipped (`blastinput::pssm_text::read_pssm_with_parameters_and_skips`).
+pub(crate) fn psi_search_and_object(
+    pssm: PssmWithParameters,
+    skipped: Vec<&'static str>,
+) -> Result<(PsiSearch, InPssmFile)> {
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-539
     // ```c++
     // 		_ASSERT(pssm->HasQuery());
@@ -504,6 +504,42 @@ pub(crate) fn psi_search_and_object(pssm: PssmWithParameters) -> Result<(PsiSear
             "a PSSM query whose title starts or ends with white space (NCBI's Query= line trims it, its tabular query id and warnings keep it)",
         ));
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/bioseq_extract_data_priv.cpp:345-372
+    // ```c++
+    // string
+    // CBlastQuerySourceBioseqSet::GetTitle(int index) const
+    // {
+    //     ...
+    //     ITERATE(CSeq_descr::Tdata, desc, descr) {
+    //         if ((*desc)->Which() == CSeqdesc::e_Title && title == kEmptyStr) {
+    //             title = (*desc)->GetTitle();
+    //         }
+    //         if ((*desc)->Which() == CSeqdesc::e_Molinfo) {
+    //             has_molinfo = true;
+    //         }
+    //     }
+    //     if (title != kEmptyStr && !has_molinfo) {
+    //         while (NStr::EndsWith(title, ".") || NStr::EndsWith(title, " ")) {
+    //             title.erase(title.end() - 1);
+    //         }
+    //         retval.assign(title);
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:115-118 (quoted at
+    // `CPsiBlastImpl::x_ExtractQueryFromPssm`: the PSSM's Bioseq goes through
+    // `CObjMgrFree_QueryFactory`, whose query source is `CBlastQuerySourceBioseqSet`)
+    // The warnings of a PSSM query (`blast_setup_cxx.cpp:533-543`, quoted at
+    // `report::query_warnings::warning_query_id`) take this title, in every round (the query
+    // factory is fixed for the run), while the reports take the Bioseq's title as it is.
+    let warning_title: Vec<u8> = if skipped.contains(&"molinfo") {
+        Vec::new()
+    } else {
+        let end = title
+            .iter()
+            .rposition(|&c| c != b'.' && c != b' ')
+            .map_or(0, |last| last + 1);
+        title[..end].to_vec()
+    };
     if query.inst.mol.1 != 3 || query.inst.repr.1 != 2 {
         return Err(refuse(format!(
             "a PSSM query whose Seq-inst is not a raw protein (repr {}, mol {})",
@@ -653,6 +689,7 @@ pub(crate) fn psi_search_and_object(pssm: PssmWithParameters) -> Result<(PsiSear
         query: FastaRecord::new(local_id, title, &letters),
         validation_error,
         setup_messages: Vec::new(),
+        warning_title: Some(warning_title),
     };
     let mut pssm = pssm;
     if let Some(gapped) = computed {
@@ -660,7 +697,7 @@ pub(crate) fn psi_search_and_object(pssm: PssmWithParameters) -> Result<(PsiSear
     }
     let file = InPssmFile {
         object: pssm,
-        skipped: Vec::new(),
+        skipped,
         computed: computed.is_some(),
         valid: search.validation_error.is_none(),
     };
@@ -1088,6 +1125,27 @@ mod tests {
             let error = with_titles(&[title]).unwrap_err().to_string();
             assert!(error.contains("starts or ends with white space"), "{error}");
         }
+    }
+
+    // The review of PS5b, B1: the warning label's title is `CBlastQuerySourceBioseqSet::GetTitle`'s
+    // (bioseq_extract_data_priv.cpp:345-372, quoted at `psi_search_and_object`): the title without
+    // its trailing `.` and spaces, none with a `molinfo` descriptor (NCBI 2.17.0 probes of
+    // `PS/tmp/rev5b`, `d.*` and `m.molinfo*`); the record keeps the title for the reports.
+    #[test]
+    fn the_warning_title_is_the_query_sources() {
+        let warning = |title: &[u8], skipped: Vec<&'static str>| {
+            let mut pssm = rnd();
+            pssm.pssm.query.as_mut().unwrap().titles = Some(vec![title.to_vec()]);
+            let (search, _) = psi_search_and_object(pssm, skipped).unwrap();
+            assert_eq!(search.query.title, title);
+            search.warning_title.unwrap()
+        };
+        assert_eq!(warning(b"rnd random", vec![]), b"rnd random");
+        assert_eq!(warning(b"rnd random.", vec![]), b"rnd random");
+        assert_eq!(warning(b"rnd. random.. . .", vec![]), b"rnd. random");
+        assert_eq!(warning(b".", vec![]), b"");
+        assert_eq!(warning(b"rnd random", vec!["Seqdesc"]), b"rnd random");
+        assert_eq!(warning(b"rnd random", vec!["Seqdesc", "molinfo"]), b"");
     }
 
     // The review of PS4a, S2 and N3: the record's local id is the Seq-id's `GetSeqIdString()`

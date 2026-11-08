@@ -46,6 +46,7 @@ pub mod isam_num;
 pub mod lmdb_read;
 pub mod lookup;
 pub mod mask;
+pub(crate) mod rps;
 pub mod seqidlist;
 pub mod tax_files;
 pub mod tax_sqlite;

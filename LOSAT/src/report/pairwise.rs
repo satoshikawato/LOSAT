@@ -6269,4 +6269,131 @@ mod tblastx_tests {
               Sequence with id Subject_1 no longer exists in database...alignment skipped\n"
         );
     }
+
+    /// A BLASTP pairwise report written a window of queries at a time (the rows of a caller that
+    /// makes them window by window) is the report written at once: the prolog with the first
+    /// window, the epilog with the last, the query indices global.
+    #[test]
+    fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
+        let karlin = KarlinParams {
+            lambda: 0.267,
+            k: 0.041,
+            h: 0.14,
+            ..KarlinParams::default()
+        };
+        let query = |length: usize| BlastpPairwiseQuery {
+            query_name: String::new(),
+            query_length: length,
+            ungapped_karlin: karlin,
+            effective_search_space: 1_000_000,
+            valid: true,
+            batch_skipped: false,
+        };
+        let queries = [query(30), query(40), query(50), query(60)];
+        let query_titles: Vec<Arc<[u8]>> = (0..4)
+            .map(|i| Arc::from(format!("Query_{i}").into_bytes().into_boxed_slice()))
+            .collect();
+        let subject_titles: Vec<Arc<[u8]>> = vec![Arc::from(&b"gnl|CDD|1 profile"[..])];
+        let parsed: Vec<Option<Arc<crate::report::db_subject::ParsedSubject>>> = vec![None];
+        let hit = |q_idx: u32| {
+            let mut pairwise = PairwiseHit::from(Hit {
+                identity: 100.0,
+                length: 10,
+                mismatch: 0,
+                gapopen: 0,
+                q_start: 1,
+                q_end: 10,
+                s_start: 1,
+                s_end: 10,
+                e_value: 1e-5,
+                bit_score: 25.0,
+                num_ident: 10,
+                query_frame: 0,
+                query_length: 30,
+                q_idx,
+                s_idx: 0,
+                raw_score: 50,
+                sort_query_offset: 0,
+                sort_query_end: 0,
+                sort_subject_offset: 0,
+                sort_subject_end: 0,
+                has_sort_offsets: false,
+                gap_info: None,
+                num_positives: 10,
+            });
+            pairwise.query_seq = Some("MKVLAAGIVG".to_string());
+            pairwise.subject_seq = Some("MKVLAAGIVG".to_string());
+            pairwise.subject_length = Some(180);
+            pairwise.subject_title = Some("profile".to_string());
+            pairwise
+        };
+        // Queries 0 and 2 have no hit.
+        let hits = [hit(1), hit(3)];
+        let report = BlastpPairwiseReport {
+            version: "BLASTP 2.17.0+".to_string(),
+            database_name: "db".to_string(),
+            database_num_sequences: 1,
+            database_total_letters: 180,
+            matrix_name: "BLOSUM62".to_string(),
+            gap_open: 11,
+            gap_extend: 1,
+            word_threshold: 0.0,
+            window_size: 40,
+            gapped_karlin: karlin,
+            gumbel: None,
+            num_descriptions: 500,
+            num_alignments: 250,
+        };
+        let config = PairwiseConfig {
+            line_length: 60,
+            show_gi: false,
+            show_frame: false,
+            program: "rpsblast".to_string(),
+            protein_matrix: ScoringMatrix::Blosum62,
+        };
+        let gapped_k = [0.041, 0.047, 0.041, 0.041];
+        let write = |range: std::ops::Range<usize>, rows: &[PairwiseHit], out: &mut Vec<u8>| {
+            write_blastp_pairwise_window(
+                rows,
+                range,
+                out,
+                &config,
+                &queries,
+                &query_titles,
+                &subject_titles,
+                &parsed,
+                &report,
+                Some(&gapped_k),
+                None,
+                None,
+                None,
+                true,
+                true,
+                None,
+            )
+            .unwrap();
+        };
+        let mut at_once = Vec::new();
+        write(0..4, &hits, &mut at_once);
+        assert!(String::from_utf8_lossy(&at_once).contains("Query_3"));
+        for windows in [
+            vec![0..1, 1..4],
+            vec![0..2, 2..3, 3..4],
+            vec![0..1, 1..2, 2..3, 3..4],
+        ] {
+            let mut windowed = Vec::new();
+            for window in windows {
+                let rows: Vec<PairwiseHit> = hits
+                    .iter()
+                    .filter(|hit| window.contains(&(hit.hit.q_idx as usize)))
+                    .cloned()
+                    .collect();
+                write(window, &rows, &mut windowed);
+            }
+            assert_eq!(
+                String::from_utf8_lossy(&windowed),
+                String::from_utf8_lossy(&at_once)
+            );
+        }
+    }
 }

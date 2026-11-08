@@ -12173,11 +12173,17 @@ fn run_resolved_in_pool(
     // (`x_pairwise_par::query_windows`, as BLASTN's and TBLASTX's), not for the whole run
     // first: the rendered rows of CDD's 165,000 HSPs held 150 MB at once.
     let rps_streamed_rows = args.rps_search.is_some()
-        && outputs.hits.is_none()
-        && outputs.observer.is_none()
-        && !args.lcase_masking
-        && reports.psi_round.is_none()
         && matches!(format_plans, [BlastpReport::Text(OutputFormat::Pairwise)]);
+    // What the streamed rows do not do (hit records and an observer come only from the library
+    // API and the Web build, which refuse rpsblast; the parser refuses `-lcase_masking`; rounds
+    // are psiblast's): a future relaxation of those refusals must not bypass them silently.
+    debug_assert!(
+        !rps_streamed_rows
+            || (outputs.hits.is_none()
+                && outputs.observer.is_none()
+                && !args.lcase_masking
+                && reports.psi_round.is_none())
+    );
     let mut pairwise_hits = if needs_pairwise_hits && !rps_streamed_rows {
         Some(build_pairwise_hits(
             collect_hits_and_methods_from_hit_lists(&hit_lists),

@@ -413,11 +413,12 @@ impl RpsRun<'_> {
                 &mut scratch.1,
             )?;
             if let Some(hit_list) = traced.hit_list.as_mut() {
-                filter_results(
+                finish_volume_list(
                     hit_list,
                     self.options.max_hsps_per_subject,
                     self.options.query_cov_hsp_perc,
                     query.first_query_length,
+                    self.hitlist_size,
                 );
             }
             Ok(traced)
@@ -500,6 +501,35 @@ pub(crate) fn batch_gapped_k(
     gapped_k
 }
 
+/// A volume's final hit list of a query: the filters (`-max_hsps`, `-qcov_hsp_perc`), then the
+/// list sorted by E-value and cut to the hit list size, before the volumes are merged.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1777
+/// ```c
+///     if(hit_params->options->query_cov_hsp_perc > 0 || ... max_hsps_per_subject > 0 ||
+///        ...) {
+///     	s_FilterBlastResults(results, hit_params->options, query_info, program_number);
+///     }
+///
+///     /* Re-sort the hit lists according to their best e-values, because they
+///        could have changed. Only do this for a database search. */
+///     if (BlastSeqSrcGetTotLen(seq_src) > 0) {
+///         Blast_HSPResultsSortByEvalue(results);
+///     }
+///     s_BlastPruneExtraHits(results, hit_params->options->hitlist_size);
+/// ```
+fn finish_volume_list(
+    hit_list: &mut crate::algorithm::blastp::hsp::BlastpHitList,
+    max_hsps: usize,
+    query_cov_hsp_perc: f64,
+    first_query_length: usize,
+    hitlist_size: usize,
+) {
+    filter_results(hit_list, max_hsps, query_cov_hsp_perc, first_query_length);
+    hit_list.sort_by_evalue();
+    hit_list.prune_by_size(hitlist_size);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,5 +553,83 @@ mod tests {
         assert_eq!(k[5], RPS_K_MULT * 0.02);
         let k = batch_gapped_k(&[0..3, 3..5, 5..6], &marks, &karlin_k, 0.041, false);
         assert_eq!(k[0], RPS_K_MULT * 0.06);
+    }
+
+    fn hsp(
+        oid: u32,
+        e_value: f64,
+        q_start: usize,
+        q_end: usize,
+    ) -> crate::algorithm::blastp::hsp::BlastpHsp {
+        let mut hsp = crate::algorithm::blastp::hsp::BlastpHsp::from_hit(crate::common::Hit {
+            identity: 0.0,
+            length: q_end - q_start + 1,
+            mismatch: 0,
+            gapopen: 0,
+            q_start,
+            q_end,
+            s_start: 1,
+            s_end: 10,
+            e_value,
+            bit_score: 10.0,
+            num_ident: 0,
+            query_frame: 0,
+            query_length: 100,
+            q_idx: 0,
+            s_idx: oid,
+            raw_score: 20,
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
+            gap_info: None,
+            num_positives: 0,
+        });
+        hsp.e_value = e_value;
+        hsp
+    }
+
+    #[test]
+    fn a_coverage_filter_that_removes_a_best_hsp_reorders_and_cuts_the_volumes_list() {
+        use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHspList};
+        let list = |oid: u32, hsps: Vec<_>, best: f64| BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps,
+            best_evalue: best,
+        };
+        let build = || {
+            let mut hit_list = BlastpHitList::new(10);
+            // Subject 1: its best HSP covers 10 % of the 100-letter query, its second 80 %.
+            hit_list.update(list(
+                1,
+                vec![hsp(1, 1e-10, 1, 10), hsp(1, 1e-3, 11, 90)],
+                1e-10,
+            ));
+            hit_list.update(list(2, vec![hsp(2, 1e-5, 1, 90)], 1e-5));
+            hit_list
+        };
+        let oids = |hit_list: &BlastpHitList| -> Vec<u32> {
+            hit_list.hsplist_array[..hit_list.hsplist_count]
+                .iter()
+                .map(|list| list.oid)
+                .collect()
+        };
+        let mut hit_list = build();
+        hit_list.sort_by_evalue();
+        assert_eq!(oids(&hit_list), vec![1, 2]);
+        // 50 % coverage drops subject 1's best HSP: its best E-value becomes 1e-3, after 2's.
+        let mut hit_list = build();
+        finish_volume_list(&mut hit_list, 0, 50.0, 100, 10);
+        assert_eq!(oids(&hit_list), vec![2, 1]);
+        // And the list is cut to the hit list size after the sort.
+        let mut hit_list = build();
+        finish_volume_list(&mut hit_list, 0, 50.0, 100, 1);
+        assert_eq!(oids(&hit_list), vec![2]);
+        // Without a filter the order is the list's own.
+        let mut hit_list = build();
+        finish_volume_list(&mut hit_list, 0, 0.0, 100, 10);
+        assert_eq!(oids(&hit_list), vec![1, 2]);
     }
 }

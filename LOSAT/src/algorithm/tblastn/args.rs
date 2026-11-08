@@ -420,9 +420,12 @@ impl TblastnArgs {
             formatting_handler_check, parse_comp_based_stats, parse_formatting_string,
             parse_seg_option,
         };
+        use crate::blastinput::protein_options_check::{
+            validate_protein_options, ProteinOptionsCheck,
+        };
         use crate::stats::protein_options::{
             protein_gap_existence_extend_params, suggested_threshold, suggested_window_size,
-            validate_protein_options, ProteinOptionsCheck, SuggestionProgram,
+            SuggestionProgram,
         };
         // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:436-447
         // ```c

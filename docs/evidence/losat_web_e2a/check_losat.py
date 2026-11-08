@@ -18,7 +18,8 @@ A psiblast row whose `files` column is `pssm` runs with `-out_ascii_pssm <tmp>/<
 and the PSSM files it writes must be those of `side_sha256` byte for byte (none when it is empty):
 the frozen ones, or in the kinds `pssm-asn` and `pssm-both` a file over 64 KB by its SHA-256 alone. With `--library` LOSAT is `examples/library_command_line`, the
 same search through the library API, which writes no PSSM file and takes no PSSM query (`-in_pssm`, a
-query cell `pssm-gz:` or `pssm:`): those rows are `library-skip`.
+query cell `pssm-gz:` or `pssm:`), nor psiblast's rounds (`-num_iterations` other than 1): those rows are
+`library-skip`.
 
 A row with the contract `approved_db_gencode_deviation` (AGENTS.md's approved TBLASTX
 exception: LOSAT's local search applies a non-default -db_gencode to the subject) is
@@ -97,7 +98,11 @@ def main() -> int:
         files = xinclude.wants_files(row)
         pssm = xinclude.wants_pssm(row)
         # The library API refuses the PSSM file options and `-in_pssm` (`api::search`).
-        if args.library and (pssm or row["query"].startswith(("pssm:", "pssm-gz:"))):
+        # The library API refuses psiblast's rounds too (`-num_iterations` other than 1: its results
+        # have one round, `api::search::parse`).
+        argv = search_argv(row)
+        rounds = any(word == "-num_iterations" and value != "1" for word, value in zip(argv, argv[1:]))
+        if args.library and (pssm or rounds or row["query"].startswith(("pssm:", "pssm-gz:"))):
             print(f"{row['fixture_id']}\tlibrary-skip\t")
             continue
         if files:

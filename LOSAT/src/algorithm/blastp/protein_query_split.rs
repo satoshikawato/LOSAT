@@ -8,6 +8,7 @@ use crate::algorithm::blastn::query_split::{
     calculate_num_chunks, ChunkQuery, SplitSizes, QUERY_CHUNK_OVERLAP,
 };
 use crate::algorithm::common::masks::lowercase_runs;
+use crate::blastinput::app::read_query_split_variable;
 
 /// The query chunk size of blastp (10000) or tblastn (20000) when the environment variable
 /// `CHUNK_SIZE` is not set or blank, and the overlap (100) when `OVERLAP_CHUNK_SIZE` is not.
@@ -342,6 +343,28 @@ pub fn protein_chunk_part_in_record(record: &[u8], offset: usize, part: &ChunkQu
         }
     }
     residues
+}
+
+/// NCBI's query chunk size and overlap of a blastp or tblastn search
+/// (`protein_split_sizes`), with the environment variables
+/// `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` read as NCBI reads them.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-58
+/// ```c
+///     m_ChunkSize = SplitQuery_GetChunkSize(m_Options->GetProgram());
+///     m_LocalQueryData = m_QueryFactory->MakeLocalQueryData(m_Options);
+///     m_TotalQueryLength = m_LocalQueryData->GetSumOfSequenceLengths();
+///     m_NumChunks = SplitQuery_CalculateNumChunks(m_Options->GetProgramType(),
+/// ```
+pub fn protein_query_split_sizes(
+    program: &str,
+    default_chunk_size: u32,
+) -> anyhow::Result<SplitSizes> {
+    Ok(protein_split_sizes(
+        default_chunk_size,
+        read_query_split_variable(program, "CHUNK_SIZE")?,
+        read_query_split_variable(program, "OVERLAP_CHUNK_SIZE")?,
+    ))
 }
 
 #[cfg(test)]

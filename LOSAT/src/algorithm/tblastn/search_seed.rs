@@ -1129,6 +1129,27 @@ pub(super) fn x_scan_unit(
         let mut end = right - lookup.word_length;
         if range_index == 0 && end < left {
             end = left;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1098-1101 and
+            // c++/src/algo/blast/core/blast_stat.c:1559-1575
+            // ```c
+            //       /* Increment offset by 1 extra byte for the sentinel NULLB
+            //          between frames. */
+            //       offset += length + 1;
+            // ...
+            //     /* Initialize with BLAST_SCORE_MIN */
+            // ...
+            //                 i == AMINOACID_TO_NCBISTDAA['-'] ||
+            // ```
+            // A raised first range on the last letter of a frame's last chunk (a soft-masked
+            // subject split into chunks) gives a word past `subject`, which ends at the frame's
+            // closing NULLB. NCBI's word there holds that NULLB and the next byte of its buffer of
+            // the six frames. NULLB is NCBIstdaa '-', whose scores are BLAST_SCORE_MIN, so no
+            // neighbor word holds it, and no query word does (NCBI's FASTA reader drops hyphens;
+            // TBLASTN takes no PSSM): NCBI's scan finds no hit, and the word is not scanned here
+            // (TBLASTX does the same, tblastx/blast_engine/run_impl.rs).
+            if left as usize + lookup.word_length as usize > subject.len() {
+                continue;
+            }
         }
         let mut scan_range = [0, left, end];
         while scan_range[1] <= scan_range[2] {
@@ -2993,6 +3014,109 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:496-501 and
+    // c++/src/algo/blast/core/blast_engine.c:305-308
+    // ```c
+    //     scan_range[2] = subject->seq_ranges[0].right - wordsize;
+    //
+    //     if (scan_range[2] < scan_range[1])
+    //         scan_range[2] = scan_range[1];
+    // ...
+    //     if (subject->seq_ranges[len-1].right > subject->length)
+    //         subject->seq_ranges[len-1].right = subject->length;
+    // ```
+    // The last chunk of a soft-masked frame of more than MAX_DBSEQ_LEN letters can have one range,
+    // its last letter (`-lcase_masking`, a subject lowercase but its last codon). The raised word
+    // there runs past the frame's closing NULLB, where `subject` ends: the unit does not scan it
+    // (before, a debug build stopped on the read past the slice, and release read the byte after
+    // it). A first range of the last two letters still scans its word, which ends at the NULLB,
+    // and the whole frame finds every exact word of the query.
+    #[test]
+    fn x_scan_unit_does_not_scan_a_raised_word_past_the_frame() {
+        let query = b"MKVLAAGIVGLLLAAGCSSHKEEAKSGGLW";
+        let codon = |letter: u8| -> &'static [u8] {
+            match letter {
+                b'A' => b"GCT",
+                b'C' => b"TGT",
+                b'E' => b"GAA",
+                b'G' => b"GGT",
+                b'H' => b"CAT",
+                b'I' => b"ATT",
+                b'K' => b"AAA",
+                b'L' => b"CTG",
+                b'M' => b"ATG",
+                b'S' => b"TCT",
+                b'V' => b"GTT",
+                b'W' => b"TGG",
+                other => panic!("no codon for {}", other as char),
+            }
+        };
+        // Frame +1 of the subject is the query.
+        let subject: Vec<u8> = query.iter().flat_map(|&l| codon(l).to_vec()).collect();
+        let mut plan = x_scan_plan(
+            &[query.as_slice()],
+            SubjectNt::Letters(&subject).into(),
+            1,
+            None,
+            11,
+            false,
+            ScoringMatrix::Blosum62,
+            3,
+            &std::sync::OnceLock::new(),
+            &XCompressedSide::default(),
+            None,
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            matches!(plan.lookup, XPlanLookup::Aa(_)),
+            "the standard table"
+        );
+        let frame = plan.subject.frames[0].clone();
+        assert_eq!((frame.frame, frame.aa_len), (1, query.len()));
+        let length = query.len() as i32;
+        let chunk = TranslatedChunk {
+            offset: 0,
+            length: query.len(),
+        };
+        plan.subject = std::sync::Arc::new(XSubjectPlan {
+            frames: vec![frame],
+            units: vec![
+                (0, chunk, vec![(length - 1, length)]),
+                (0, chunk, vec![(length - 2, length)]),
+                (0, chunk, vec![(0, length)]),
+            ],
+        });
+        // The frame from the chunk's first residue to its closing NULLB, as a unit reads it.
+        let residues = &plan.subject.frames[0].aa_seq[1..];
+        assert_eq!(residues.len(), query.len() + 1);
+        let mut pairs = Vec::new();
+        let calls: Vec<Vec<Vec<(u32, u32)>>> = (0..3)
+            .map(|unit| {
+                let mut calls = Vec::new();
+                x_scan_unit(&plan, unit, residues, &mut pairs, |filled| {
+                    calls.push(filled.iter().map(|p| (p.q_off, p.s_off)).collect());
+                });
+                calls
+            })
+            .collect();
+        assert!(
+            calls[0].is_empty(),
+            "the word past the NULLB: {:?}",
+            calls[0]
+        );
+        // The word of the last two letters and the NULLB is in no cell.
+        assert_eq!(calls[1], vec![Vec::new()]);
+        let whole = calls[2].concat();
+        for s_off in 0..=(length - 3) as u32 {
+            assert!(
+                whole.contains(&(s_off, s_off)),
+                "the exact word at {s_off}: {whole:?}"
+            );
         }
     }
 }

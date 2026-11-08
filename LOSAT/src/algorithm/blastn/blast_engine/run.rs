@@ -102,13 +102,13 @@ use super::super::x_subject_store::{
     x_blastna_into, x_blastna_into_pool, x_bnstore, x_read_subject_stores, SubjectLetters,
 };
 use crate::blastinput::fasta_reader::{
-    read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords, ReadError,
+    read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords,
     ReaderConfig,
 };
 use crate::blastinput::input_files::{
     check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings_by_length,
 };
-use crate::blastinput::query_batch::BatchSizeMixer;
+use crate::blastinput::query_batch::{BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
 use crate::blastinput::seq_range::{
     cut_queries, cut_subjects, next_ranged_batch, parse_optional_range, subjects_read, Placements,
     QueryInput, RangeRole, SequenceRange,
@@ -7376,13 +7376,17 @@ pub fn run(
     // NCBI writes an error archive after the archives of the batches before when the
     // application stops with one of its own errors, and when the run ends with messages that
     // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status:
-    // blastn_app.cpp:331-334).
+    // blastn_app.cpp:329-332).
     if let Some(handle) = &archive {
         match &result {
             Err(error) => {
                 if let Some(lines) = archive::error_lines(error, false) {
-                    let _ =
-                        crate::report::archive::write_error_archive(handle, &lines, &mut report);
+                    let _ = crate::report::archive::write_error_archive_after_post(
+                        handle,
+                        error,
+                        &lines,
+                        &mut report,
+                    );
                 }
             }
             Ok(()) => {
@@ -7443,7 +7447,12 @@ fn write_run_error_archive(
     };
     if let Ok(out_file) = open_out_file(args) {
         let mut report = cli_report_stream(out_file);
-        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut report);
+        let _ = crate::report::archive::write_error_archive_after_post(
+            handle,
+            error,
+            &lines,
+            &mut report,
+        );
         let _ = std::io::Write::flush(&mut report);
     }
 }
@@ -7886,32 +7895,6 @@ fn search_cli(
         outputs,
         output_formats,
     )
-}
-
-/// How the reading of the queries of a search ended, after its records.
-#[derive(Debug)]
-pub(crate) enum QueryReading {
-    /// The records of `run_local`: an input without records is NCBI's `Query is Empty!`
-    /// (the inputs of the ABI are read as regular files).
-    Records,
-    /// The CLI's reader reached the end of its input (`CBlastInput::End()`); without
-    /// records, no query batch is read.
-    End,
-    /// The CLI's reader found only blank and comment lines where it expected a record
-    /// (`eEOF`), which ends the batch being read.
-    BlankLines,
-    /// The CLI's reader failed on the record after the last one read (a reader error, or
-    /// LOSAT's explicit rejection of a line that NCBI would fetch as a Seq-id), after
-    /// writing `warnings`.
-    Error { error: ReadError, warnings: Vec<u8> },
-}
-
-impl QueryReading {
-    /// Whether NCBI's reader reads on after the last record (`End()` is false): an `eEOF`
-    /// or an error then comes in the batch being read.
-    pub(crate) fn reads_past_records(&self) -> bool {
-        matches!(self, QueryReading::BlankLines | QueryReading::Error { .. })
-    }
 }
 
 /// The query range, read by NCBI's query options handler: after the filtering handler
@@ -9893,19 +9876,24 @@ fn run_in_pool(
             // that LOSAT cannot read as NCBI does) or an error of the taxonomy database is
             // written as the titles' refusals above: with LOSAT_X_RPTSTREAM after the reports of
             // the batches before (`x_rpt_stream`).
+            // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning
+            // after those messages (`BlastnDatabase::batch_prefetch`), with or without
+            // `taxdb.bti`.
+            let taxdb_found = database.taxdb_found();
             if output_formats
                 .first()
                 .is_some_and(|format| format.prefetches_subjects())
-                && database.taxdb_found()
+                && (taxdb_found || database.parsed_seqids())
             {
                 // A custom tabular report with a plural name looks every taxid of its rows up,
                 // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
                 // the taxonomy database before a later batch's prefetch
                 // (`TaxdbRun::open_for_rows`).
-                let plural_names = matches!(
-                    output_formats.first(),
-                    Some(BlastnOutputFormat::CustomTabular(spec)) if spec.checks_taxdb()
-                );
+                let plural_names = taxdb_found
+                    && matches!(
+                        output_formats.first(),
+                        Some(BlastnOutputFormat::CustomTabular(spec)) if spec.checks_taxdb()
+                    );
                 let rows_open = |hit_lists: &[Option<BlastnHitList>]| -> Result<()> {
                     if plural_names
                         && hit_lists
@@ -9918,20 +9906,7 @@ fn run_in_pool(
                     Ok(())
                 };
                 let seq_aligns_of = |hit_lists: &[Option<BlastnHitList>]| -> usize {
-                    hit_lists
-                        .iter()
-                        .flatten()
-                        .flat_map(|hit_list| {
-                            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                            &hit_list.hsplist_array[..count]
-                        })
-                        .map(|hsp_list| {
-                            crate::algorithm::common::database::subject_seq_aligns(
-                                hsp_list.hsps.len(),
-                                !args.ungapped,
-                            )
-                        })
-                        .sum()
+                    database::seq_aligns_of(hit_lists, !args.ungapped)
                 };
                 let seq_aligns = seq_aligns_of(&batch_hit_lists);
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
@@ -9948,30 +9923,35 @@ fn run_in_pool(
                 // stream's other refusals of a batch's reported subjects; without it every
                 // report is written after the loop, so the refusal comes before any report.
                 let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    let fetches = match output_formats.first() {
-                        Some(BlastnOutputFormat::CustomTabular(spec)) => {
-                            spec.subject_fetch(crate::blastinput::app::Program::Blastn)
-                                != crate::report::tabular::SubjectFetch::Never
-                        }
-                        _ => true,
-                    };
-                    batch_hit_lists
-                        .iter()
-                        .map(|hit_list| {
-                            let shown = std::slice::from_ref(hit_list);
-                            let messages = if fetches && seq_aligns_of(shown) > 0 {
-                                database.prefetch_messages(&titles, shown)?
-                            } else {
+                    if !taxdb_found {
+                        // No prefetch, and the reports' fetches look nothing up.
+                        Ok(Vec::new())
+                    } else {
+                        let fetches = match output_formats.first() {
+                            Some(BlastnOutputFormat::CustomTabular(spec)) => {
+                                spec.subject_fetch(crate::blastinput::app::Program::Blastn)
+                                    != crate::report::tabular::SubjectFetch::Never
+                            }
+                            _ => true,
+                        };
+                        batch_hit_lists
+                            .iter()
+                            .map(|hit_list| {
+                                let shown = std::slice::from_ref(hit_list);
+                                let messages = if fetches && seq_aligns_of(shown) > 0 {
+                                    database.prefetch_messages(&titles, shown)?
+                                } else {
+                                    Vec::new()
+                                };
+                                rows_open(shown)?;
+                                Ok(messages)
+                            })
+                            .collect::<Result<Vec<_>>>()
+                            .map(|messages| {
+                                query_fetches = messages;
                                 Vec::new()
-                            };
-                            rows_open(shown)?;
-                            Ok(messages)
-                        })
-                        .collect::<Result<Vec<_>>>()
-                        .map(|messages| {
-                            query_fetches = messages;
-                            Vec::new()
-                        })
+                            })
+                    }
                 } else if seq_aligns == 0 {
                     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
                     // ```c++
@@ -9985,7 +9965,7 @@ fn run_in_pool(
                     rows_open(&batch_hit_lists).map(|()| Vec::new())
                 } else {
                     database
-                        .prefetch_messages(&titles, &batch_hit_lists)
+                        .batch_prefetch(&titles, &batch_hit_lists, !args.ungapped)
                         .and_then(|messages| {
                             rows_open(&batch_hit_lists)?;
                             Ok(messages)
@@ -10388,25 +10368,11 @@ struct BatchResults<'a> {
     context_karlin: &'a [Option<ContextKarlin>],
     query_eff_searchsp: &'a [i64],
     /// The searched queries of each query batch of the call, in order, for the reports of
-    /// every batch written at once (the BLAST archive writes one document per batch); empty
+    /// every batch written at once (the BLAST archive writes one document per batch, and each
+    /// batch's prefetch counts its own Seq-aligns, `common::database::BatchPrefetch`); empty
     /// when the call is one batch.
     batches: &'a [std::ops::Range<usize>],
 }
-
-/// NCBI's message for a query or subject without letters.
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup.hpp:190-198
-/// ```c
-///     TSeqPos size() const {
-///         TSeqPos retval = x_Size();
-///         if (retval == 0) {
-///             NCBI_THROW(CBlastException, eInvalidArgument,
-///                        "Sequence contains no data");
-///         }
-///         return retval;
-///     }
-/// ```
-pub(crate) const NO_DATA_MESSAGE: &str = "Sequence contains no data";
 
 /// Writes what NCBI has written when a query batch fails, before its error: the reports of
 /// the batches before (`before`, the queries searched so far; without the epilog), or, for
@@ -10597,12 +10563,21 @@ fn write_reports_untimed(
                     .iter()
                     .filter_map(|format| format.tabular_spec())
                     .any(|spec| spec.needs().rows);
+            // Whether each query's batch prefetches (`results.batches`: the batches of this
+            // call, or one), for the subjects that only the prefetch reads.
+            let prefetch = crate::algorithm::common::database::BatchPrefetch::of(
+                hit_lists.len(),
+                written.queries,
+                results.batches,
+                |span| database::seq_aligns_of(&hit_lists[span], !args.ungapped),
+            );
             Some(database::reported_subjects(
                 database,
                 subjects.titles,
                 &mut hit_lists,
                 letters,
                 database::parsed_shown(output_formats),
+                &prefetch,
                 written.queries,
                 x_pool,
             )?)

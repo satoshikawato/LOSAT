@@ -8,8 +8,8 @@
 //! 1089-1155 (`s_BlastAaExtendTwoHit`), which the seed loops reach through
 //! `extend_two_hit_blosum62` (and `x_ungapped_fast::two_hit`).
 //!
-//! Why the result is the reference's. The extension is `x_ungapped_sent::two_hit_in::<1>`, whose
-//! statements are blastp's; what differs is where the sentinels are.
+//! Why the result is the reference's. The extension is `x_ungapped_sent::two_hit_in::<1, u8>`,
+//! whose statements are blastp's; what differs is where the sentinels are.
 //! * The query is the batch's buffer (`PreparedQueryBatch::sequence_start`): the six frames of each
 //!   query, each between two sentinels (code 0), the reference's query being the buffer without its
 //!   first byte (it keeps the last sentinel). The subject is its residues between two sentinels,
@@ -30,8 +30,9 @@
 //!   line). A batch or a subject that fails a check runs the reference.
 
 use crate::algorithm::blastp::extension::{extend_two_hit_blosum62, BlastpTwoHitUngappedResult};
-use crate::algorithm::blastp::x_ungapped_fast::{build_table, Table};
-use crate::algorithm::blastp::x_ungapped_sent::{two_hit_in, XSentSubject};
+use crate::algorithm::blastp::x_ungapped_sent::{
+    blosum62_keys, two_hit_in, KeyTable, XSentSubject,
+};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
@@ -47,7 +48,8 @@ const MAX_QUERY_LEN: usize = (i32::MAX / 16) as usize;
 struct State {
     /// 0 = off, 1 = LOSAT_X_BXUNGAPSENT, 2 = LOSAT_X_BXUNGAPSENTSHADOW (both, compared).
     mode: u8,
-    table: Option<Box<Table>>,
+    /// BLOSUM62's keys for the walks (`x_ungapped_sent::KeyTable`).
+    keys: Option<Box<KeyTable>>,
 }
 
 fn state() -> &'static State {
@@ -64,7 +66,7 @@ fn state() -> &'static State {
         };
         State {
             mode,
-            table: if mode != 0 { build_table() } else { None },
+            keys: if mode != 0 { blosum62_keys() } else { None },
         }
     })
 }
@@ -119,7 +121,7 @@ pub(crate) struct XSent<'a> {
     query: &'a [u8],
     /// `[0, residues.., 0]`.
     subject: XSentSubject<'a>,
-    table: &'static Table,
+    keys: &'static KeyTable,
     shadow: bool,
 }
 
@@ -131,7 +133,7 @@ impl<'a> XSent<'a> {
     #[inline]
     pub(crate) fn new(query: &'a [u8], with_sentinels: &'a [u8]) -> Option<Self> {
         let state = state();
-        let table = state.table.as_deref()?;
+        let keys = state.keys.as_deref()?;
         let subject = XSentSubject::new(with_sentinels)?;
         if state.mode == 2 {
             SHADOW_SUBJECTS.fetch_add(1, Ordering::Relaxed);
@@ -139,7 +141,7 @@ impl<'a> XSent<'a> {
         Some(Self {
             query,
             subject,
-            table,
+            keys,
             shadow: state.mode == 2,
         })
     }
@@ -147,12 +149,12 @@ impl<'a> XSent<'a> {
     /// A pair for the tests of the seed loops, with or without the shadow's comparison.
     #[cfg(test)]
     pub(crate) fn for_test(query: &'a [u8], with_sentinels: &'a [u8], shadow: bool) -> Self {
-        static TABLE: OnceLock<Box<Table>> = OnceLock::new();
+        static KEYS: OnceLock<Box<KeyTable>> = OnceLock::new();
         assert!(query_on_path(query));
         Self {
             query,
             subject: XSentSubject::new(with_sentinels).expect("a subject on the path"),
-            table: TABLE.get_or_init(|| build_table().expect("BLOSUM62 fits a byte table")),
+            keys: KEYS.get_or_init(|| blosum62_keys().expect("BLOSUM62 fits a byte table")),
             shadow,
         }
     }
@@ -182,8 +184,8 @@ impl<'a> XSent<'a> {
         // SAFETY: the dropoff is in 1..=127 (above); the query buffer passed `query_fits` and
         // the subject buffer `XSentSubject::new` (sentinels at both ends, the lengths).
         let got = unsafe {
-            two_hit_in::<1>(
-                self.table,
+            two_hit_in::<1, u8>(
+                self.keys,
                 self.query,
                 self.subject.with_sentinels(),
                 s_left_off,

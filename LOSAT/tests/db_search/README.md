@@ -491,6 +491,36 @@ A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.
 `ids/ppunct_q.faa` hits both records. A table that prints no subject id (`6 qseqid evalue`) does not make it, so LOSAT
 writes NCBI's rows; `sseqid` is LOSAT's refusal.
 
+Each batch's prefetch counts its own Seq-aligns (line DBID pfbatch; rows `db.id.pfb.*`): `make_ids.py --pfbatch-only`
+writes `ids/nordtag_v5` (version 5, `-parse_seqids`) from `ids/nordtag.fna`, a sequence whose first id
+`gnl|BL_ORD_ID|0` makeblastdb stores with a text tag, so NCBI's lookup by that Seq-align id fails (as in `pshare_v5`),
+and another sequence. The queries `ids/nordtag_q.fna` and `ids/nordtag_q.faa` (qa, qb) hit one each; `ids/pfb_aba.faa`
+(qa, qb, qa2: with `BATCH_SIZE=101` the batches [qa, qb] and [qa2]) and `ids/pfb_aab.faa`, `ids/pfb_aab.fna` (qa, qa2,
+qb) put the sequence with the text tag in a batch of more Seq-aligns than the limit and in one within it, or only in the
+first; `ids/pfb_s.fna` holds two pieces of it (two HSPs gapped, one Seq-align with `-ungapped`). `ids/pfb_rc_nambig.fna`
+and `ids/pfb_rc_ids_q.fna`, the reverse complements of `ids/nambig.fna` and `ids/ids_q.fna`, align on the minus strand
+of the query with `lcl|777` of `ids/nrefuse_v5`, whose Bioseq NCBI's prefetch does not get. With a positive
+`PRE_FETCH_SEQS_LIMIT`, a batch whose Seq-aligns outnumber it reads nothing in its prefetch, so a table that reads
+nothing of the subject writes NCBI's rows (NCBI writes no warning); a batch within it reads the subject, and where its
+prefetch fails NCBI and LOSAT write `Error pre-fetching sequence data` (line DBID pfwarn).
+
+The warning of a batch whose prefetch fails (line DBID pfwarn; rows `db.id.pfw.*`): `make_ids.py --pfwarn-only` writes
+`ids/ntag_t5` (version 5) from `ids/nordtag.fna`, `ids/nlook_t4` (version 4) from `ids/nlook.fna` and `ids/pshare_t5`
+(version 5) from `ids/pshare.faa`, every sequence with taxid 99990, whose lookup in
+`tests/seqdb/taxdb/offset_last_past_end` writes the offset error. NCBI's prefetch writes the taxonomy database's texts of
+the subjects it loads, then `Warning: [<program>] Error pre-fetching sequence data`, once for the batch, before the
+batch's query warnings. A minus-strand Seq-align of `bbs|123` (no ISAM key in version 4, so no Bioseq) fails after every
+load (`ids/pfw_look_fw_rc.fna`, `ids/pfw_look_rc_fw.fna`: `fw70` on the plus strand of `gb|AF000070.1|`, `rc123` on the
+minus strand of `bbs|123`); the lookup of `gnl|BL_ORD_ID|0` with a text tag fails where the loads reach it, in the
+order of NCBI's Seq-id handles (the ids its mapper packs first), which LOSAT does not model, so a batch with it whose
+other subjects' loads write a text is LOSAT's refusal. In psiblast, where the report reads the sequences it shows
+(`pfw_weak_v5` with `pfw_q6.faa`, `-max_target_seqs 3`: the text tag ranks last, beyond the cut), the failed prefetch
+leaves `sp||NAMEY` unloaded and NCBI's formatter reads it one by one, matching `sp|P00042.1|NAMEY` weakly: LOSAT refuses
+there, and where the PSSM (`-out_ascii_pssm`) holds such a sequence (NCBI drops its letters). `pfw_bad/ntag_t5` fails the
+lookup of an accession on its file, which NCBI's prefetch rethrows (exit 2): LOSAT's refusal. With `-ungapped` BLASTN makes one Seq-align of a subject's HSPs, whose strand is its first
+HSP's: `ids/pfw_fwL_rcS.fna` aligns with `bbs|123` on the plus strand first (240 letters) and on the minus strand (60),
+`ids/pfw_fwS_rcL.fna` the other way round. `ids/pfw_ps_q21.faa` holds `pshare_q2.faa` and `pshare_q1.faa`.
+
 Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
 --join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and
 `ids/njoin_a`, `ids/njoin_b`, `ids/njoin_c` (version 5; r1 in all three, r3 with two definition lines and two

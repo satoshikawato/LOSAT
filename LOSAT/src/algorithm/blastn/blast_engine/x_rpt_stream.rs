@@ -76,9 +76,9 @@
 //!   reports refuse and two sequences that outfmt 0 would join (`check_reported_parsed`,
 //!   `refuse_joined_hits`), one that the batches' prefetch reads where no report reads it (the
 //!   Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, a table of fields that read nothing of the
-//!   subject) and cannot read as NCBI does (`check_prefetched_parsed`,
-//!   `check_prefetched_strands`), ambiguity data that the traceback cannot decode (`traceback_listed`),
-//!   a taxid or a lookup of the taxonomy database that the prefetch refuses, and what a custom
+//!   subject) and cannot read as NCBI does (`check_prefetched_parsed`), ambiguity data that the
+//!   traceback cannot decode (`traceback_listed`), a taxid or a lookup of the taxonomy database
+//!   that the prefetch refuses (`batch_prefetch`), and what a custom
 //!   tabular report reads (the taxonomy fields, the names of the taxonomy database, `sall*`); with
 //!   a subject set a report id (`tabular_subject_ids`; the ids are made once where LOSAT refuses
 //!   none, `SubjectCache`) and with `-parse_deflines` the parsed ids that a custom tabular report

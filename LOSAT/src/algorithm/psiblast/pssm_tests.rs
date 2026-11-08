@@ -29,6 +29,7 @@ fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPss
         out_ascii_pssm: ascii.map(str::to_string),
         pseudocount: 0,
         in_pssm: None,
+        rounds: None,
     }
 }
 
@@ -129,7 +130,7 @@ fn a_lower_case_matrix_name_has_frequency_ratios() {
         3
     );
     // BLOSUM62's ideal Lambda (`kbp_ideal`), as blastp's engine computes it.
-    let ideal = crate::core::blast_stat::compute_blosum62_ideal_karlin_params().unwrap();
+    let ideal = crate::stats::compute_blosum62_ideal_karlin_params().unwrap();
     assert_eq!(sbp.ideal_lambda, ideal.lambda);
 }
 
@@ -351,6 +352,12 @@ const ANCILLARY: PssmAncillary = PssmAncillary {
         h: 0.4,
     },
     gapped: BLOSUM62_11_1,
+    psi_ungapped: KarlinBlk {
+        lambda: 0.31998,
+        k: 0.13697,
+        h: 0.4,
+    },
+    psi_gapped: BLOSUM62_11_1,
 };
 
 const SCORING: PssmScoring<'static> = PssmScoring {

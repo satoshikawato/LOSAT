@@ -24,11 +24,11 @@
 //! instance fixes at 3. Its two-hit extensions take the table walks and the sentinel walks with
 //! the word loop over that length (`two_hit_in2`, `two_hit_in4`, `two_hit_sent_in::<W>` for `W`
 //! in 2..=4, the matrix's byte table), and the reference two-hit extension, whose loop over the
-//! word reads the length, for the calls those do not cover. The unit path takes the words whose
-//! group tables the 16-bit direct builder makes (`x_pair_lut::x_direct_covers`: 2 and 3
-//! letters), its units the walks of their word length ([`TbxScore::sent_two_hit_of`]); a search
-//! of 4-letter words takes the reference frame loop with NCBI's table of that word length
-//! (`build_ncbi_lookup_for_profile`).
+//! word reads the length, for the calls those do not cover. The unit path takes every word length:
+//! the group tables of 2- and 3-letter words come from the 16-bit direct builder
+//! (`x_pair_lut::x_direct_covers`), those of 4-letter words from the joint builder of 32-bit
+//! indices (`x_pair_lut_wide.rs`); its units take the sentinel walks of 2- and 3-letter words
+//! ([`TbxScore::sent_two_hit_of`]) and the table walks at 4 letters.
 
 use super::extension::{
     extend_hit_two_hit_sent, extend_hit_two_hit_with, matrix_walk_table, two_hit_in, two_hit_in2,

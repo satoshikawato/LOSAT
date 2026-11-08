@@ -71,8 +71,9 @@ use crate::blastinput::value_parsers::*;
 // ```
 // psiblast's arguments are blastp's without `-task` (its task is "psiblast"), `-ungapped`
 // (no `CGappedArgs`), the database masks and `-mt_mode`, with the PSI-BLAST, PSSM engine and
-// PHI-BLAST arguments. LOSAT runs psiblast's first round (`-num_iterations 1`), which is blastp's
-// search (`run`), and writes the ASN.1 and ASCII PSSMs after it (`pssm.rs`); with `-in_pssm` the
+// PHI-BLAST arguments. LOSAT runs psiblast's first round as blastp's search (`run`), its later
+// rounds (`-num_iterations`) with the PSSM made from each round (`rounds.rs`), and writes the
+// ASN.1 and ASCII PSSMs (`pssm.rs`); with `-in_pssm` the
 // query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`);
 // `-in_msa`, `-phi_pattern`, `-gap_trigger` and `-sum_stats` are refused by the parser
 // (`cli.rs` `is_unported_psiblast_arg`). The values are
@@ -230,7 +231,7 @@ pub struct PsiblastArgs {
         default_value = "1",
         value_name = "int_value",
         value_parser = nonnegative_ncbi_integer,
-        help = "Number of iterations to perform (0 means run until convergence); LOSAT runs 1"
+        help = "Number of iterations to perform (0 means run until convergence)"
     )]
     pub num_iterations: i32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1086-1090
@@ -351,8 +352,9 @@ pub struct PsiblastArgs {
 }
 
 impl PsiblastArgs {
-    /// blastp's arguments for psiblast's first round, after LOSAT's refusals of what it does not
-    /// run (more rounds, and the output formats of the later items of the series).
+    /// blastp's arguments for psiblast's search, after LOSAT's refusals of what it does not run
+    /// (the rounds of a PSSM query or of a range, and the output formats of the later items of the
+    /// series).
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1277-1281
         // ```c++
@@ -362,9 +364,35 @@ impl PsiblastArgs {
         //         		m_NumIterations = args[kArgPSINumIterations].AsInteger();
         //         }
         // ```
-        if self.num_iterations != 1 {
+        // The rounds of a query given as a PSSM (`-in_pssm`) are item PS5b's.
+        if self.num_iterations != 1 && self.in_pssm.is_some() {
             bail!(
-                "-num_iterations {} (rounds after the first, which search with a PSSM) is not supported by LOSAT's PSIBLAST",
+                "-num_iterations {} (rounds after the first, which search with a PSSM) with -in_pssm is not supported by LOSAT's PSIBLAST yet",
+                self.num_iterations
+            );
+        }
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:147-165
+        // ```c++
+        // s_GetQueryBioseq(CConstRef<CBlastQueryVector> query, CRef<CScope> scope,
+        //                  CRef<CPssmWithParameters> pssm)
+        // {
+        //     CConstRef<CBioseq> retval;
+        //
+        //     if (pssm) {
+        //         retval.Reset(&pssm->SetQuery().SetSeq());
+        //     } else {
+        //         _ASSERT(query.NotEmpty());
+        //         if (query->GetQuerySeqLoc(0)->GetId()) {
+        //             CBioseq_Handle bh =
+        //                 scope->GetBioseqHandle(*query->GetQuerySeqLoc(0)->GetId());
+        // ```
+        // The PSSM of the next round is made of the whole record's Bioseq while the search keeps
+        // the range: NCBI's later rounds align a PSSM of the record to the range (NCBI 2.17.0
+        // `-query_loc 20-300 -num_iterations 6`: 4.494 % identities in round 2), an output that
+        // LOSAT does not reproduce.
+        if self.num_iterations != 1 && self.query_loc.is_some() {
+            bail!(
+                "-query_loc with -num_iterations {} (NCBI BLAST+'s later rounds align the PSSM of the whole record to the range) is not supported by LOSAT's PSIBLAST",
                 self.num_iterations
             );
         }
@@ -430,6 +458,8 @@ impl PsiblastArgs {
                 out_ascii_pssm: self.out_ascii_pssm,
                 pseudocount: self.pseudocount,
                 in_pssm: self.in_pssm,
+                rounds: (self.num_iterations != 1)
+                    .then(|| u32::try_from(self.num_iterations).unwrap_or(0)),
             }),
         })
     }
@@ -525,19 +555,42 @@ mod tests {
         assert_eq!(resolved.inclusion_ethresh, 0.002);
     }
 
+    // psiblast_app.cpp:246-321 (`rounds.rs`): the rounds of a FASTA query run (0: until
+    // convergence); with `-in_pssm` (PS5b) and with `-query_loc` they are refused.
     #[test]
-    fn more_rounds_and_the_later_output_formats_are_refused() {
-        for rounds in ["0", "2"] {
-            let error = parse(&["-num_iterations", rounds])
+    fn rounds_run_and_the_later_output_formats_are_refused() {
+        for (rounds, plan) in [("0", Some(0)), ("2", Some(2)), ("1", None)] {
+            let blastp = parse(&["-num_iterations", rounds])
                 .unwrap()
                 .into_blastp_args()
-                .unwrap_err()
-                .to_string();
-            assert!(
-                error.contains(&format!("-num_iterations {rounds} (rounds after the first")),
-                "{error}"
+                .unwrap();
+            assert_eq!(blastp.psiblast_pssm.as_ref().unwrap().rounds, plan);
+            let resolved = blastp.resolve().unwrap();
+            assert_eq!(
+                resolved.psi_rounds.as_ref().map(|plan| plan.num_iterations),
+                plan
             );
         }
+        let error = parse(&["-num_iterations", "2", "-query_loc", "1-20"])
+            .unwrap()
+            .into_blastp_args()
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("-query_loc with -num_iterations 2"),
+            "{error}"
+        );
+        let error = parse(&["-num_iterations", "3", "-seg", "yes"])
+            .unwrap()
+            .into_blastp_args()
+            .unwrap()
+            .resolve()
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("-seg and -soft_masking true with -num_iterations 3"),
+            "{error}"
+        );
         for format in ["1", "3", "5", "8", "11", "13", "15", "16", "18"] {
             let error = parse(&["-outfmt", format])
                 .unwrap()

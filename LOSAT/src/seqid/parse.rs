@@ -6,7 +6,7 @@
 //! (`SeqIdError`, whose `what` is the text NCBI prints when it posts one).
 
 use super::accguide::{
-    self, acc_type, identify_accession, parse_flags::*, SeqIdWarning, SEQID_DDBJ, SEQID_EMBL,
+    acc_type, identify_accession, parse_flags::*, SeqIdWarning, SEQID_DDBJ, SEQID_EMBL,
     SEQID_GENBANK, SEQID_GENERAL, SEQID_GI, SEQID_GIBBMT, SEQID_GIBBSQ, SEQID_GIIM, SEQID_GPIPE,
     SEQID_LOCAL, SEQID_NAMED_ANNOT_TRACK, SEQID_NOT_SET, SEQID_OTHER, SEQID_PATENT, SEQID_PDB,
     SEQID_PIR, SEQID_PRF, SEQID_SWISSPROT, SEQID_TPD, SEQID_TPE, SEQID_TPG,
@@ -1738,9 +1738,6 @@ pub fn parse_ids(
     }
     Ok(ids)
 }
-
-/// The accession guide, for the callers that classify ids (`IdentifyAccession`).
-pub use accguide::identify_seq_id;
 
 #[cfg(test)]
 #[path = "parse_tests.rs"]

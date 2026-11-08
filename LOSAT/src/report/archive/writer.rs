@@ -29,9 +29,6 @@ use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::encoder::Encoder;
 use crate::report::serial::xml::XmlEncoder;
 
-/// The version NCBI writes as the request's `ident` (`CBlastVersion::Print`).
-pub const IDENT: &str = "2.17.0+";
-
 /// The bytes that an encoder holds before its buffer is handed to the sink.
 const FLUSH_BYTES: usize = 32 * 1024;
 
@@ -246,7 +243,8 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.member("request", 0);
     out.enc.begin_sequence("Blast4-request");
     out.enc.member("ident", 0);
-    out.enc.visible_str(IDENT.as_bytes());
+    // The request's `ident` is `CBlastVersion::Print()` (`crate::NCBI_BLAST_VERSION`).
+    out.enc.visible_str(crate::NCBI_BLAST_VERSION.as_bytes());
     out.enc.end_member();
     out.enc.member("body", 1);
     out.enc.variant("Blast4-request-body", "queue-search", 8);

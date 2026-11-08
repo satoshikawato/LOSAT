@@ -414,8 +414,10 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         Preparsed::Version => {
             let _ = write!(
                 out,
-                "blastdbcmd: 2.17.0+\n Package: LOSAT {}, output compatible with blast 2.17.0\n",
-                env!("CARGO_PKG_VERSION")
+                "blastdbcmd: {}\n Package: LOSAT {}, output compatible with blast {}\n",
+                crate::NCBI_BLAST_VERSION,
+                env!("CARGO_PKG_VERSION"),
+                crate::NCBI_BLAST_RELEASE
             );
             return 0;
         }
@@ -821,6 +823,16 @@ mod tests {
         assert_eq!(with_commas(999), "999");
         assert_eq!(with_commas(1_000), "1,000");
         assert_eq!(with_commas(186_063_409), "186,063,409");
+    }
+
+    // help.txt is NCBI's frozen `-help` text and is not edited or split: this keeps the version
+    // that it names and the version that LOSAT writes elsewhere from drifting apart.
+    #[test]
+    fn the_frozen_help_names_the_version_that_losat_writes() {
+        assert!(HELP.contains(&format!(
+            "   BLAST database client, version {}\n",
+            crate::NCBI_BLAST_VERSION
+        )));
     }
 
     #[test]

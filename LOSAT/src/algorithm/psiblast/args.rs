@@ -74,7 +74,8 @@ use crate::blastinput::value_parsers::*;
 // PHI-BLAST arguments. LOSAT runs psiblast's first round as blastp's search (`run`), its later
 // rounds (`-num_iterations`) with the PSSM made from each round (`rounds.rs`), and writes the
 // ASN.1 and ASCII PSSMs (`pssm.rs`); with `-in_pssm` the
-// query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`);
+// query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`), in
+// rounds and with the PSSM files too (`in_pssm_files.rs`);
 // `-in_msa`, `-phi_pattern`, `-gap_trigger` and `-sum_stats` are refused by the parser
 // (`cli.rs` `is_unported_psiblast_arg`). The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
@@ -353,8 +354,7 @@ pub struct PsiblastArgs {
 
 impl PsiblastArgs {
     /// blastp's arguments for psiblast's search, after LOSAT's refusals of what it does not run
-    /// (the rounds of a PSSM query or of a range, and the output formats of the later items of the
-    /// series).
+    /// (the rounds of a range, and the output formats of the later items of the series).
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1277-1281
         // ```c++
@@ -364,13 +364,8 @@ impl PsiblastArgs {
         //         		m_NumIterations = args[kArgPSINumIterations].AsInteger();
         //         }
         // ```
-        // The rounds of a query given as a PSSM (`-in_pssm`) are item PS5b's.
-        if self.num_iterations != 1 && self.in_pssm.is_some() {
-            bail!(
-                "-num_iterations {} (rounds after the first, which search with a PSSM) with -in_pssm is not supported by LOSAT's PSIBLAST yet",
-                self.num_iterations
-            );
-        }
+        // A query given as a PSSM (`-in_pssm`) runs its rounds as a FASTA query's, round 1 with the
+        // input PSSM (item PS5b).
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:147-165
         // ```c++
         // s_GetQueryBioseq(CConstRef<CBlastQueryVector> query, CRef<CScope> scope,
@@ -397,6 +392,15 @@ impl PsiblastArgs {
             );
         }
         Self::check_outfmt(&self.outfmt)?;
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (quoted at
+        // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM of
+        // `-in_pssm` in round 1)
+        // The round driver runs `-num_iterations` other than 1, and with `-in_pssm` one round too
+        // when a PSSM file is written (the input PSSM before the search).
+        let rounds = (self.num_iterations != 1
+            || (self.in_pssm.is_some()
+                && (self.out_pssm.is_some() || self.out_ascii_pssm.is_some())))
+        .then(|| u32::try_from(self.num_iterations).unwrap_or(0));
         Ok(BlastpArgs {
             query: self.query,
             subject: self.subject,
@@ -457,9 +461,8 @@ impl PsiblastArgs {
                 out_pssm: self.out_pssm,
                 out_ascii_pssm: self.out_ascii_pssm,
                 pseudocount: self.pseudocount,
+                rounds,
                 in_pssm: self.in_pssm,
-                rounds: (self.num_iterations != 1)
-                    .then(|| u32::try_from(self.num_iterations).unwrap_or(0)),
             }),
             rps: None,
         })
@@ -557,7 +560,8 @@ mod tests {
     }
 
     // psiblast_app.cpp:246-321 (`rounds.rs`): the rounds of a FASTA query run (0: until
-    // convergence); with `-in_pssm` (PS5b) and with `-query_loc` they are refused.
+    // convergence), and those of `-in_pssm` (PS5b, with one round too when a PSSM file is
+    // written); with `-query_loc` they are refused.
     #[test]
     fn rounds_run_and_the_later_output_formats_are_refused() {
         for (rounds, plan) in [("0", Some(0)), ("2", Some(2)), ("1", None)] {
@@ -572,6 +576,27 @@ mod tests {
                 plan
             );
         }
+        let in_pssm = |extra: &[&str]| {
+            let mut argv = vec![
+                "losat", "psiblast", "-in_pssm", "x.asn", "-subject", "s.faa",
+            ];
+            argv.extend_from_slice(extra);
+            let Ok(Cli {
+                command: Commands::Psiblast(args),
+            }) = crate::cli::try_parse_from::<Cli, _, _>(argv)
+            else {
+                panic!("psiblast -in_pssm {extra:?}");
+            };
+            args.into_blastp_args()
+                .unwrap()
+                .psiblast_pssm
+                .unwrap()
+                .rounds
+        };
+        assert_eq!(in_pssm(&["-num_iterations", "3"]), Some(3));
+        assert_eq!(in_pssm(&[]), None);
+        assert_eq!(in_pssm(&["-out_pssm", "f"]), Some(1));
+        assert_eq!(in_pssm(&["-out_ascii_pssm", "f"]), Some(1));
         let error = parse(&["-num_iterations", "2", "-query_loc", "1-20"])
             .unwrap()
             .into_blastp_args()

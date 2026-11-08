@@ -711,6 +711,10 @@ pub struct ResolvedBlastpArgs {
     /// `-searchsp`: the effective search space when above 0, and at any value no Gumbel block
     /// (blast_args.cpp:303-307, blast_stat.c:921-923).
     pub searchsp: Option<i64>,
+    /// No Gumbel block (finite-size correction): `-searchsp` at any value, or BLASTP with the
+    /// environment variable `OLD_FSC` (`app::old_fsc_environment`; PSIBLAST and RPSBLAST
+    /// refuse it, `app::check_old_fsc`).
+    pub old_fsc: bool,
     pub task: String,
     pub evalue: f64,
     pub threshold: f64,
@@ -1109,17 +1113,17 @@ impl BlastpArgs {
         //         _ASSERT(m_Pssm.Empty());
         // ```
         // psiblast's `-in_pssm` is read by the same handler, after the checks of its PSSM
-        // files (`algorithm::psiblast::in_pssm`).
+        // files (`algorithm::psiblast::in_pssm`); the file as read goes to the rounds' plan
+        // (`in_pssm_files`).
+        let mut in_pssm_file = None;
         let psi_search = match self
             .psiblast_pssm
             .as_ref()
             .and_then(|pssm| pssm.in_pssm.as_deref())
         {
             Some(path) => {
-                let mut search = crate::algorithm::psiblast::in_pssm::read_in_pssm(path)?;
-                if let Some(pssm) = &self.psiblast_pssm {
-                    crate::algorithm::psiblast::in_pssm::check_pssm_file_options(pssm)?;
-                }
+                let (mut search, file) = crate::algorithm::psiblast::in_pssm::read_in_pssm(path)?;
+                in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
                     &search,
                     mode,
@@ -1188,17 +1192,20 @@ impl BlastpArgs {
             .psiblast_pssm
             .as_ref()
             .and_then(crate::algorithm::psiblast::pssm::PsiblastPssmOptions::request);
-        let psi_rounds = self
-            .psiblast_pssm
-            .as_ref()
-            .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::of)
-            .map(std::sync::Arc::new);
+        let psi_rounds = match self.psiblast_pssm.as_ref() {
+            Some(options) => {
+                crate::algorithm::psiblast::rounds::PsiRoundPlan::of(options, in_pssm_file)?
+                    .map(std::sync::Arc::new)
+            }
+            None => None,
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:186-214 (quoted at
         // `blast_engine::pssm_hooks`: the query's SEG mask, then `PsiBlastSetupScoreBlock` and
         // the lookup table of the PSSM)
         // A later round's PSSM search takes no query mask in its lookup table (DESIGN_ps4 §1.6),
-        // which LOSAT's PSSM lookup table does not model, as for `-in_pssm`.
-        if let Some(plan) = &psi_rounds {
+        // which LOSAT's PSSM lookup table does not model, as for `-in_pssm` (whose own refusal
+        // comes with its others, `in_pssm::check_in_pssm_options`).
+        if let Some(plan) = psi_rounds.as_ref().filter(|_| psi_search.is_none()) {
             if options.seg.params().is_some() || soft_masking {
                 bail!(
                     "-seg and -soft_masking true with -num_iterations {} are not supported by LOSAT's PSIBLAST",
@@ -1236,6 +1243,14 @@ impl BlastpArgs {
             // (blast_prot_options.cpp:150-156, `SetDbLength(0)`).
             dbsize: self.dbsize.unwrap_or(0),
             searchsp: self.searchsp,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
+            // ```c
+            //     use_old_fsc = getenv("OLD_FSC");
+            //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+            // ```
+            // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307).
+            old_fsc: self.searchsp.is_some()
+                || (self.app == BlastpApp::Blastp && crate::blastinput::app::old_fsc_environment()),
             task: self.task.clone(),
             evalue: options.evalue,
             threshold: options.threshold,

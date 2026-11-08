@@ -247,8 +247,6 @@ impl BlastnOutputFormat {
     }
 }
 
-pub(crate) const NCBI_BLASTN_VERSION: &str = "2.17.0+";
-
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
 // ```c
 // x_PrintQueryAndDbNames(program_version, bioseq, dbname, rid, iteration,
@@ -271,7 +269,7 @@ fn write_blastn_outfmt7_header<W: Write>(
     subject_title: &str,
     num_hits: Option<usize>,
 ) -> io::Result<()> {
-    writeln!(writer, "# BLASTN {NCBI_BLASTN_VERSION}")?;
+    writeln!(writer, "# BLASTN {}", crate::NCBI_BLAST_VERSION)?;
     // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1305-1308
     // ```c
     //     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,
@@ -755,16 +753,10 @@ pub fn evalue_compare_hsps(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
 // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
 //       s_EvalueCompareHSPs);
 // ```
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478
-// ```c
-// qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
-// ```
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2504
-// ```c
-// qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
-// ```
 // Preserve NCBI's comparator and invocation timing while using one stable,
 // target-neutral Rust sort. Comparator-equal HSPs retain their incoming order.
+// NCBI sorts its array of HSP pointers; the HSPs are sorted through an order of
+// their positions (`x_sort_stable_by_order`), so no scratch copy of the HSPs is made.
 pub fn qsort_blastn_hsps_by(hsps: &mut [BlastnHsp], compare: BlastnHspCompare) {
     if hsps.len() <= 1 {
         return;
@@ -775,7 +767,7 @@ pub fn qsort_blastn_hsps_by(hsps: &mut [BlastnHsp], compare: BlastnHspCompare) {
     // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
     //       ScoreCompareHSPs);
     // ```
-    hsps.sort_by(compare);
+    crate::utils::x_order::x_sort_stable_by_order(hsps, compare);
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1382

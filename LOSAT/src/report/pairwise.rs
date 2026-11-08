@@ -4026,7 +4026,7 @@ pub fn write_pairwise<W: Write>(
     let writer = &mut buffered;
 
     // Write program header
-    let version = context.version.as_deref().unwrap_or("0.1.0");
+    let version = crate::NCBI_BLAST_VERSION;
     writeln!(writer, "{} {}", context.program.to_uppercase(), version)?;
     writeln!(writer)?;
 

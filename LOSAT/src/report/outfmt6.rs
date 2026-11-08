@@ -113,8 +113,6 @@ pub struct ReportContext {
     pub database_total_letters: Option<usize>,
     /// Program name (blastn, tblastx, etc.)
     pub program: String,
-    /// Version string
-    pub version: Option<String>,
 }
 
 impl Default for ReportContext {
@@ -127,7 +125,6 @@ impl Default for ReportContext {
             database_num_sequences: None,
             database_total_letters: None,
             program: "blast".to_string(),
-            version: None,
         }
     }
 }
@@ -802,7 +799,7 @@ pub fn write_outfmt7_header<W: Write>(
 ) -> io::Result<()> {
     // Program version line
     // NCBI: "# TBLASTX 2.17.0+"
-    let version_str = context.version.as_deref().unwrap_or("0.1.0");
+    let version_str = crate::NCBI_BLAST_VERSION;
     writeln!(
         writer,
         "# {} {}",
@@ -1003,9 +1000,7 @@ pub fn generate_summary(hits: &[Hit], context: &ReportContext) -> String {
         context.program.to_uppercase()
     ));
 
-    if let Some(ref version) = context.version {
-        summary.push_str(&format!("# Version: {}\n", version));
-    }
+    summary.push_str(&format!("# Version: {}\n", crate::NCBI_BLAST_VERSION));
 
     if let Some(ref query) = context.query_name {
         summary.push_str(&format!("# Query: {}\n", query));

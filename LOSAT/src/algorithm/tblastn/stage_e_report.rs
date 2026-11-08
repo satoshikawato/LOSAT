@@ -596,7 +596,7 @@ fn write_tabular(
             .map(|list| list.hsps.hsps.len())
             .sum();
         if comments {
-            writeln!(writer, "# TBLASTN 2.17.0+")?;
+            writeln!(writer, "# TBLASTN {}", crate::NCBI_BLAST_VERSION)?;
             // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1305-1308
             // ```c
             //     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,
@@ -1080,11 +1080,11 @@ fn write_pairwise(
     };
     // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`).
     let gumbel = subject_set.gumbel_block(&spec, total_nt as u64);
-    if gumbel.is_none() && subject_set.searchsp.is_none() {
+    if gumbel.is_none() && !subject_set.old_fsc {
         anyhow::bail!("TBLASTN pairwise Spouge parameters are unavailable");
     }
     let report = BlastpPairwiseReport {
-        version: "2.17.0+".into(),
+        version: crate::NCBI_BLAST_VERSION.into(),
         database_name: shown.name(),
         database_num_sequences: num_sequences,
         database_total_letters: total_nt,

@@ -5023,7 +5023,7 @@ fn search_query_batch<S: TbxScore>(
         let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ctx_params);
 
         // =======================================================================
-        // NCBI Parity: Use compute_eff_lengths_tblastx to get BOTH
+        // NCBI Parity: Use try_compute_eff_lengths_tblastx to get BOTH
         // length_adjustment and eff_searchsp from a single source of truth.
         // This mirrors BLAST_CalcEffLengths which computes and stores both values.
         // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847

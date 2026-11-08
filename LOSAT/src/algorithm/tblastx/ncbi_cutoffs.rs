@@ -139,19 +139,9 @@ pub struct EffLengthsResult {
 /// * `karlin_params` - Karlin-Altschul parameters
 ///
 /// # Returns
-/// `EffLengthsResult` containing both length_adjustment and eff_searchsp
-pub fn compute_eff_lengths_tblastx(
-    query_len_aa: i64,
-    subject_len_nucl: i64,
-    db_num_seqs: i64,
-    karlin_params: &KarlinParams,
-) -> EffLengthsResult {
-    try_compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, db_num_seqs, karlin_params)
-        .expect("TBLASTX effective search space within i64")
-}
-
-/// `compute_eff_lengths_tblastx`, or `None` when the effective search space overflows NCBI's
-/// `Int8` (a `-dbsize` near the `Int8` limit), where NCBI's arithmetic overflows.
+/// `EffLengthsResult` containing both length_adjustment and eff_searchsp, or `None` when the
+/// effective search space overflows NCBI's `Int8` (a `-dbsize` near the `Int8` limit), where
+/// NCBI's arithmetic overflows.
 pub fn try_compute_eff_lengths_tblastx(
     query_len_aa: i64,
     subject_len_nucl: i64,
@@ -188,48 +178,6 @@ pub fn try_compute_eff_lengths_tblastx(
         length_adjustment,
         eff_searchsp,
     })
-}
-
-/// Calculate effective search space for the complete local-subject database.
-///
-/// This is a convenience wrapper that returns only eff_searchsp.
-/// For cutoff and sum-stats that need length_adjustment too, use
-/// `compute_eff_lengths_tblastx()` instead.
-///
-/// NCBI reference (verbatim from blast_setup.c:734-846):
-/// ```c
-/// // For translated subjects:
-/// if (Blast_SubjectIsTranslated(program_number))
-///    db_length = db_length/3;
-///
-/// // Length adjustment calculation:
-/// BLAST_ComputeLengthAdjustment(kbp->K, kbp->logK,
-///                               alpha/kbp->Lambda, beta,
-///                               query_length, db_length,
-///                               db_num_seqs, &length_adjustment);
-///
-/// // Effective search space:
-/// Int8 effective_db_length = db_length - ((Int8)db_num_seqs * length_adjustment);
-/// if (effective_db_length <= 0)
-///     effective_db_length = 1;
-/// effective_search_space = effective_db_length * (query_length - length_adjustment);
-/// ```
-///
-/// # Arguments
-/// * `query_len_aa` - Query length in amino acids (for this context/frame)
-/// * `subject_len_nucl` - Subject length in nucleotides (will be divided by 3)
-/// * `gapped_params` - GAPPED Karlin-Altschul parameters (kbp_gap)
-///
-/// # Returns
-/// Effective search space (eff_searchsp)
-pub fn compute_eff_searchsp_tblastx(
-    query_len_aa: i64,
-    subject_len_nucl: i64,
-    db_num_seqs: i64,
-    gapped_params: &KarlinParams,
-) -> i64 {
-    compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, db_num_seqs, gapped_params)
-        .eff_searchsp
 }
 
 /// Calculate cutoff_score from E-value using BLAST_Cutoffs (dodecay=FALSE).
@@ -535,7 +483,7 @@ pub fn cutoff_score_for_update_tblastx(
 /// CRITICAL: For tblastx, uses UNGAPPED params (kbp) since kbp_gap is NULL
 ///
 /// # Arguments
-/// * `eff_searchsp` - Effective search space (from compute_eff_searchsp_tblastx)
+/// * `eff_searchsp` - Effective search space (from `try_compute_eff_lengths_tblastx`)
 /// * `evalue_threshold` - User's E-value threshold (typically 10.0)
 /// * `ungapped_params` - UNGAPPED Karlin-Altschul parameters (kbp for tblastx)
 ///
@@ -587,102 +535,31 @@ fn blast_cutoffs_from_one(es: i32) -> i32 {
     es.max(1)
 }
 
-/// Calculate final cutoff_score for word_params (ungapped extension threshold).
-///
-/// NCBI reference (verbatim from blast_parameters.c:348-374):
-/// ```c
-/// // For gapped calculation:
-/// if (!gapped_calculation || sbp->matrix_only_scoring) {
-///     // ... ungapped path ...
-/// } else {
-///     new_cutoff = gap_trigger;
-/// }
-/// new_cutoff *= (Int4)sbp->scale_factor;
-/// new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
-/// curr_cutoffs->cutoff_score = new_cutoff;
-/// ```
-///
-/// # Arguments
-/// * `gap_trigger` - Gap trigger raw score (from gap_trigger_raw_score)
-/// * `cutoff_score_max` - Maximum cutoff from hit_params (from cutoff_score_from_evalue)
-/// * `scale_factor` - Score scale factor (typically 1.0 for standard BLOSUM62)
-///
-/// # Returns
-/// Final cutoff_score for ungapped extension
-pub fn cutoff_score_word_params(gap_trigger: i32, cutoff_score_max: i32, scale_factor: f64) -> i32 {
-    // NCBI: new_cutoff = gap_trigger (gapped mode)
-    let mut new_cutoff = gap_trigger;
-
-    // NCBI: new_cutoff *= (Int4)sbp->scale_factor
-    new_cutoff = (new_cutoff as f64 * scale_factor) as i32;
-
-    // NCBI: new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max)
-    new_cutoff.min(cutoff_score_max)
-}
-
-/// High-level function to compute ungapped extension cutoff for tblastx.
-///
-/// This combines all the NCBI cutoff calculation steps for -subject mode tblastx:
-/// 1. Compute gap_trigger using UNGAPPED params
-/// 2. Compute eff_searchsp using UNGAPPED params (tblastx has no kbp_gap!)
-/// 3. Compute cutoff_score_max using UNGAPPED params (tblastx has no kbp_gap!)
-/// 4. Return MIN(gap_trigger, cutoff_score_max)
-///
-/// NCBI Reference (blast_parameters.c:860-866):
-/// ```c
-/// if (sbp->kbp_gap) {
-///     kbp_array = sbp->kbp_gap;
-/// } else if (sbp->kbp) {
-///     kbp_array = sbp->kbp;        // tblastx uses this path!
-///     gapped_calculation = FALSE;
-/// }
-/// ```
-/// For tblastx, kbp_gap is NULL because gapped alignment is not allowed,
-/// so kbp_array = sbp->kbp (ungapped params).
-///
-/// # Arguments
-/// * `query_len_aa` - Query length in amino acids (for this context/frame)
-/// * `subject_len_nucl` - Subject length in nucleotides
-/// * `evalue_threshold` - E-value threshold (typically 10.0)
-/// * `gap_trigger_bits` - Gap trigger in bits (typically 22.0)
-/// * `ungapped_params` - UNGAPPED Karlin-Altschul parameters (kbp_std / kbp)
-/// * `_gapped_params` - GAPPED Karlin-Altschul parameters (unused for tblastx)
-///
-/// # Returns
-/// Cutoff score for ungapped extension (raw score)
-pub fn compute_tblastx_cutoff_score(
-    query_len_aa: i64,
-    subject_len_nucl: i64,
-    db_num_seqs: i64,
-    evalue_threshold: f64,
-    gap_trigger_bits: f64,
-    ungapped_params: &KarlinParams,
-    _gapped_params: &KarlinParams, // Unused for tblastx - kept for API compatibility
-) -> i32 {
-    // Step 1: Compute gap_trigger using UNGAPPED params
-    let gap_trigger = gap_trigger_raw_score(gap_trigger_bits, ungapped_params);
-
-    // Step 2: Compute eff_searchsp using UNGAPPED params (tblastx has no kbp_gap!)
-    // NCBI uses kbp_array = sbp->kbp (ungapped) when kbp_gap is NULL (tblastx case)
-    let eff_searchsp = compute_eff_searchsp_tblastx(
-        query_len_aa,
-        subject_len_nucl,
-        db_num_seqs,
-        ungapped_params, // Use ungapped params, not gapped!
-    );
-
-    // Step 3: Compute cutoff_score_max using UNGAPPED params (tblastx has no kbp_gap!)
-    let cutoff_score_max =
-        cutoff_score_from_evalue(evalue_threshold, eff_searchsp, ungapped_params);
-
-    // Step 4: Return MIN(gap_trigger, cutoff_score_max)
-    // Note: scale_factor = 1.0 for standard BLOSUM62
-    cutoff_score_word_params(gap_trigger, cutoff_score_max, 1.0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The effective lengths of a subject set whose search space fits `Int8`.
+    fn compute_eff_lengths_tblastx(
+        query_len_aa: i64,
+        subject_len_nucl: i64,
+        db_num_seqs: i64,
+        karlin_params: &KarlinParams,
+    ) -> EffLengthsResult {
+        try_compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, db_num_seqs, karlin_params)
+            .expect("TBLASTX effective search space within i64")
+    }
+
+    /// Only the effective search space of `compute_eff_lengths_tblastx`.
+    fn compute_eff_searchsp_tblastx(
+        query_len_aa: i64,
+        subject_len_nucl: i64,
+        db_num_seqs: i64,
+        gapped_params: &KarlinParams,
+    ) -> i64 {
+        compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, db_num_seqs, gapped_params)
+            .eff_searchsp
+    }
 
     // NCBI reference: c++/src/algo/blast/core/blast_setup.c:734-847;
     // blast_stat.c:5042-5126: BLAST_ComputeLengthAdjustment(...).
@@ -766,64 +643,6 @@ mod tests {
         assert!(
             cutoff > 0,
             "cutoff should be positive for reasonable search space"
-        );
-    }
-
-    #[test]
-    fn test_cutoff_score_cap_effective() {
-        let ungapped = blosum62_ungapped();
-        let gapped = blosum62_gapped();
-
-        // For very small subject, cutoff_score_max should be less than gap_trigger (41)
-        // This tests that the MIN cap is effective
-        let query_len_aa = 100;
-        let subject_len_nucl = 300; // Small subject: 100 AA
-
-        let cutoff = compute_tblastx_cutoff_score(
-            query_len_aa,
-            subject_len_nucl,
-            1,
-            10.0, // evalue
-            22.0, // gap_trigger_bits
-            &ungapped,
-            &gapped,
-        );
-
-        let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);
-
-        // The cutoff should be <= gap_trigger
-        assert!(
-            cutoff <= gap_trigger,
-            "cutoff should be capped by gap_trigger or cutoff_score_max"
-        );
-    }
-
-    #[test]
-    fn test_cutoff_score_gap_trigger_wins() {
-        let ungapped = blosum62_ungapped();
-        let gapped = blosum62_gapped();
-
-        // For very large subject/query, cutoff_score_max should be > gap_trigger
-        // So the final cutoff should equal gap_trigger
-        let query_len_aa = 10000;
-        let subject_len_nucl = 30000; // Large subject: 10000 AA
-
-        let cutoff = compute_tblastx_cutoff_score(
-            query_len_aa,
-            subject_len_nucl,
-            1,
-            10.0, // evalue
-            22.0, // gap_trigger_bits
-            &ungapped,
-            &gapped,
-        );
-
-        let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);
-
-        // For large sequences, gap_trigger should be the limiting factor
-        assert_eq!(
-            cutoff, gap_trigger,
-            "for large sequences, cutoff should equal gap_trigger"
         );
     }
 
@@ -938,55 +757,6 @@ mod tests {
             cutoff_max, 30,
             "cutoff_score_max should be 30 for these parameters"
         );
-    }
-
-    #[test]
-    fn test_cutoff_update_vs_legacy() {
-        // Verify that the new cutoff_score_for_update_tblastx produces
-        // different (typically lower) cutoffs than the old compute_tblastx_cutoff_score
-        // because it uses CUTOFF_E_TBLASTX = 1e-300 instead of user's E-value
-
-        let ungapped = blosum62_ungapped();
-        let gapped = blosum62_gapped();
-
-        let query_len_aa = 500;
-        let subject_len_nucl = 3000;
-
-        // Old method (uses user E-value directly)
-        let old_cutoff = compute_tblastx_cutoff_score(
-            query_len_aa,
-            subject_len_nucl,
-            1,
-            10.0, // user E-value
-            22.0, // gap_trigger_bits
-            &ungapped,
-            &gapped,
-        );
-
-        // New method (uses CUTOFF_E_TBLASTX = 1e-300)
-        let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);
-        let eff_searchsp =
-            compute_eff_searchsp_tblastx(query_len_aa, subject_len_nucl, 1, &ungapped);
-        let cutoff_score_max = cutoff_score_max_for_tblastx(eff_searchsp, 10.0, &ungapped);
-        let new_cutoff = cutoff_score_for_update_tblastx(
-            query_len_aa,
-            subject_len_nucl,
-            gap_trigger,
-            cutoff_score_max,
-            BLAST_GAP_DECAY_RATE,
-            &ungapped,
-            1.0,
-        );
-
-        // Both should be positive
-        assert!(old_cutoff > 0, "old_cutoff should be positive");
-        assert!(new_cutoff > 0, "new_cutoff should be positive");
-
-        // New method may produce same or different result depending on caps
-        // The key difference is in the internal calculation path
-        // Both should be <= gap_trigger (41)
-        assert!(old_cutoff <= gap_trigger);
-        assert!(new_cutoff <= gap_trigger);
     }
 
     #[test]

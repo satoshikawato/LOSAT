@@ -39,6 +39,7 @@ pub const CHUNK_SIZE: usize = 10002;
 pub const OVERLAP_NT: usize = 297;
 
 /// The sizes when neither `CHUNK_SIZE` nor `OVERLAP_CHUNK_SIZE` is set.
+#[cfg(test)]
 pub const DEFAULT_SIZES: SplitSizes = SplitSizes {
     chunk_size: CHUNK_SIZE as u64,
     overlap: OVERLAP_NT as u64,

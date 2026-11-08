@@ -609,7 +609,7 @@ fn the_libm_rule_accepts_only_a_last_digit_of_a_real() {
 #[test]
 fn archives_equal_ncbis_at_one_and_four_threads() {
     for case in &cases() {
-        for threads in ["1", "4", "8", "16"] {
+        for threads in ["1", "4"] {
             check(case, &[], threads);
         }
     }

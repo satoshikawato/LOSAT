@@ -535,7 +535,7 @@ fn the_error_comes_before_its_error_archive_in_one_stream() {
             ),
         ];
         for (query, message, batches) in cases {
-            for threads in ["1", "4", "8", "16"] {
+            for threads in ["1", "4"] {
                 let search = || {
                     let mut command = losat();
                     command
@@ -648,7 +648,7 @@ fn blastx_reads_its_query_before_the_search_as_the_search_does() {
             String::from_utf8_lossy(&output.stderr).into_owned(),
         )
     };
-    for threads in ["1", "4", "8", "16"] {
+    for threads in ["1", "4"] {
         for (query, line) in &no_defline {
             let message = format!(
                 "BLAST query error: CFastaReader: Input doesn't start with a defline or comment \

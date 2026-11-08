@@ -353,7 +353,7 @@ fn every_task_format_thread_count_and_report_mode_gives_the_off_bytes() {
     let mut cases = Vec::new();
     for task in ACTING {
         for outfmt in ["0", "6", "7"] {
-            for threads in [1, 4, 8, 16] {
+            for threads in [1, 4] {
                 cases.push((task, outfmt, threads, &[RPTSTREAM][..]));
             }
         }

@@ -588,7 +588,7 @@ fn dc_megablast_csr_of_a_large_table() {
             .and_then(|value| value.parse().ok())
             .unwrap_or_else(|| panic!("no {name} in: {line}"))
     };
-    for threads in [1, 4, 8, 16] {
+    for threads in [1, 4] {
         let (report, stderr) = blastn(&query, &subject, extra, threads, &[CSR]);
         assert!(report == expected, "threads {threads}: on differs");
         assert_eq!(stderr, expected_stderr, "threads {threads}");

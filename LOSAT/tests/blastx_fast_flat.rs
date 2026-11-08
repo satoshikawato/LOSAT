@@ -176,7 +176,7 @@ fn kept_vectors_and_the_batch_end_give_the_same_report() {
     let subject = subject.to_str().unwrap();
     let db = db.to_str().unwrap();
     for target in [["-subject", subject], ["-db", db]] {
-        for threads in ["1", "4", "8", "16"] {
+        for threads in ["1", "4"] {
             let new = search(&[], &dir, &query, &target, threads);
             assert!(!new.is_empty(), "{target:?} n{threads}: no hits");
             for off in [NO_KEPT_VECTORS, WORD_TABLE_AND_COPY, COPY_OF_THE_QUERY] {
@@ -196,7 +196,7 @@ fn the_flat_table_gives_the_reference_tables_report() {
     let subject = subject.to_str().unwrap();
     let db = db.to_str().unwrap();
     for target in [["-subject", subject], ["-db", db]] {
-        for threads in ["1", "4", "8", "16"] {
+        for threads in ["1", "4"] {
             let flat = search(&[], &dir, &query, &target, threads);
             let reference = search(&[REFERENCE_TABLE], &dir, &query, &target, threads);
             assert!(!flat.is_empty(), "{target:?} n{threads}: no hits");

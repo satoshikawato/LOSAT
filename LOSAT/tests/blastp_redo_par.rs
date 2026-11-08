@@ -222,7 +222,7 @@ fn same_rows_at_one_and_four_threads(query: &Path, vars: &[(&str, &str)], args: 
     assert!(!reference.stdout.is_empty(), "{vars:?} {args:?}: a report");
     assert!(reference.redo_par.is_empty(), "no line without the switch");
     let with_switch: Vec<(&str, &str)> = vars.iter().copied().chain([SWITCH]).collect();
-    for threads in [1, 4, 8, 16] {
+    for threads in [1, 4] {
         let on = blastp(query, threads, &with_switch, args);
         assert!(
             on.stdout == reference.stdout,

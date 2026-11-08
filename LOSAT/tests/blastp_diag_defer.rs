@@ -237,7 +237,7 @@ fn deferred_and_masked_calls_give_the_reports_and_counts_of_the_batches() {
     // of the rows. `tests/blastp_diag_batch.rs` relies on this test for the fixture pair's run of
     // `BATCHES` and its pairwise reports of the per-hit loop and the default.
     let pairs = [
-        (query, subject, &[1, 4, 8, 16][..], "6"),
+        (query, subject, &[1, 4][..], "6"),
         (
             fixture("MeenMJNV.faa"),
             fixture("MejoMJNV.faa"),

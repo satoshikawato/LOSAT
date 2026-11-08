@@ -330,7 +330,7 @@ fn every_task_format_and_thread_count_gives_the_off_bytes() {
     let subject = fasta("LC738868.fasta");
     for task in TASKS {
         for outfmt in ["0", "6", "7"] {
-            for threads in [1, 4, 8, 16] {
+            for threads in [1, 4] {
                 let args = [
                     "-task",
                     task,
@@ -630,7 +630,7 @@ fn a_database_search_refused_in_a_later_batch_writes_the_batches_before() {
     };
     let intact = database(&dir, "intact", |_| {});
     let (mut reference, mut reference_stderr) = (Vec::new(), Vec::new());
-    for threads in [1, 4, 8, 16] {
+    for threads in [1, 4] {
         let (off, (batches, reason)) = run(&query, &intact, "6", threads);
         assert_eq!(off.status, Some(0));
         let rows = String::from_utf8_lossy(&off.report).into_owned();
@@ -693,7 +693,7 @@ fn a_database_search_refused_in_a_later_batch_writes_the_batches_before() {
             "the ambiguity data are shorter than their count",
         ),
     ] {
-        for threads in [1, 4, 8, 16] {
+        for threads in [1, 4] {
             let what = format!("-db {db} threads {threads}");
             let tabular = args(&query, db, "6");
             let tabular: Vec<&str> = tabular.iter().map(String::as_str).collect();

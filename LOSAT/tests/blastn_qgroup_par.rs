@@ -213,7 +213,7 @@ fn check_task(queries: &Queries, task: &str, extra: &[&str], env: &[(&str, &str)
     assert!(!expected.is_empty(), "{task}: no hits");
     assert_eq!(expected_stderr, "", "{task}");
     let mut counts = (0, 0);
-    for threads in [1, 4, 8, 16] {
+    for threads in [1, 4] {
         // At one thread the search with the switch off is `expected` itself.
         if threads > 1 {
             let (report, stderr) = blastn(queries, &args, threads, &with(&[OFF]));

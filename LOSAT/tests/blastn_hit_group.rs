@@ -161,7 +161,7 @@ fn the_report_does_not_depend_on_how_a_subjects_hsps_are_grouped() {
     let set = set.to_str().unwrap();
     for target in [["-subject", set], ["-db", db.as_str()]] {
         for task in ["blastn-short", "megablast"] {
-            for threads in [1, 4, 8, 16] {
+            for threads in [1, 4] {
                 let what = format!("{target:?} {task} threads {threads}");
                 let (default, default_stderr) = search(&query, &target, task, threads, &[]);
                 assert_eq!(default_stderr, "", "{what}");

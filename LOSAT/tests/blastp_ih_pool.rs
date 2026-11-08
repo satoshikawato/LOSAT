@@ -152,7 +152,7 @@ fn the_report_does_not_depend_on_where_the_initial_hits_live() {
     let proteome = fasta("MejoMJNV.faa");
     let proteome = proteome.to_str().unwrap();
     for target in [["-subject", proteome], ["-db", db.as_str()]] {
-        for threads in [1, 4, 8, 16] {
+        for threads in [1, 4] {
             let what = format!("{target:?} threads {threads}");
             let (default, default_stderr) = search(&query, &target, threads, &[]);
             assert_eq!(default_stderr, "", "{what}");

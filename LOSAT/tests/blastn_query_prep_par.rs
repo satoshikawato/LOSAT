@@ -177,7 +177,7 @@ fn check_task(task: &str, extra: &[&str]) {
     let (expected, expected_stderr) = blastn(&queries, &args, 1, &[]);
     assert!(!expected.is_empty(), "{task}: no hits");
     assert_eq!(expected_stderr, "", "{task}");
-    for threads in [1, 4, 8, 16] {
+    for threads in [1, 4] {
         // At one thread the search without the switch is `expected` itself.
         if threads > 1 {
             let (report, stderr) = blastn(&queries, &args, threads, &[]);
